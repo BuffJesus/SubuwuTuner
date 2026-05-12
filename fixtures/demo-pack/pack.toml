@@ -1,0 +1,17 @@
+[pack]
+schema_version = 1
+id             = "demo-va-wrx-mt"
+display_name   = "Demo VA WRX MT (synthetic)"
+platform       = "subaru.va.wrx"
+transmission   = "manual"
+years          = [2019, 2020, 2021]
+endianness     = "big"
+rom_size_bytes = 1024
+license        = "Apache-2.0"
+
+[[identification]]
+name        = "Demo CID AS80U"
+cid_address = 0x0008
+cid_length  = 8
+cid_match   = "AS80U   "
+ecu_part    = "22765-AS80U"

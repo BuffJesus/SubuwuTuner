@@ -19,12 +19,18 @@ vcpkg_installed/
 # IDEs
 .vs/
 .vscode/
-.idea/
 .claude/
 *.user
 *.suo
 *.sdf
 *.opensdf
+
+# JetBrains: ignore the per-user/per-machine bits of .idea/ but keep shared
+# run configurations and the inner .gitignore so collaborators inherit them.
+.idea/*
+!.idea/runConfigurations/
+!.idea/runConfigurations/**
+!.idea/.gitignore
 
 # OS noise
 .DS_Store

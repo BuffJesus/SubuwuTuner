@@ -29,6 +29,11 @@ SubuwuTuner/
 │   ├── ecu/                               (st::ecu::ssm — A8 read + B0 write; st::ecu::uds — RDBI/WDBI/SA/DSC/ECUReset/TP/Download/Transfer/Exit)
 │   └── cli/                               (subuwutuner-cli — rom-info, dump-axis, dump-table[--csv], rom-diff, table-edit, project-{new,info,edit,undo,redo}, pack-info, table-list)
 ├── tools/defgen/                          (Python: RomRaider XML -> our TOML; clean-room facts-only; handles <base> inheritance)
+├── fixtures/
+│   ├── demo-pack/                         (committed: multi-file demo TOML pack)
+│   └── demo.stune/                        (committed: synthetic project, 1024-byte ROM)
+├── scripts/gen-demo-fixture.py            (regenerates fixtures/demo.stune source.bin)
+├── .idea/runConfigurations/               (shared CLion/Rider launches: GUI demo, CLI variants, ctest)
 ├── tests/unit/{core,rom,defs,edit,project,transport,ecu}/   (172 C++ tests; 36 Python tests under tools/defgen/tests/)
 ├── .github/workflows/ci.yml             (Win MSVC / Mac Apple-Clang / Linux GCC / Linux Clang ASan)
 └── docs/                                (design — read first; 00–12)

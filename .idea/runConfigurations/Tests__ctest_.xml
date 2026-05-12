@@ -1,0 +1,18 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Tests (ctest)" type="CMakeTestRunConfiguration"
+                 factoryName="CTest" CTEST_REGEX="" PROGRAM_PARAMS="--output-on-failure"
+                 REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false"
+                 EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true"
+                 PROJECT_NAME="SubuwuTuner"
+                 TARGET_NAME="all_ctest"
+                 CONFIG_NAME="win-mingw"
+                 TEST_KIND="ALL"
+                 RUN_TARGET_PROJECT_NAME="SubuwuTuner"
+                 RUN_TARGET_NAME="all_ctest"
+                 WORKING_DIR="$PROJECT_DIR$">
+    <method v="2">
+      <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask"
+              enabled="true" />
+    </method>
+  </configuration>
+</component>

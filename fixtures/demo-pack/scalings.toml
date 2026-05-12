@@ -1,0 +1,32 @@
+[[scaling]]
+id        = "rpm_x1"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint16_be"
+unit      = "rpm"
+precision = 0
+
+[[scaling]]
+id        = "load_x001"
+formula   = "linear"
+factor    = 0.001
+data_type = "uint16_be"
+unit      = "g/rev"
+precision = 3
+
+[[scaling]]
+id        = "afr_x01"
+formula   = "linear"
+factor    = 0.1
+data_type = "uint8"
+unit      = "AFR"
+precision = 1
+
+[[scaling]]
+id        = "boost_kpa"
+formula   = "linear"
+factor    = 0.5
+offset    = -50.0
+data_type = "uint8"
+unit      = "kPa"
+precision = 1

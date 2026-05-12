@@ -1,0 +1,25 @@
+[[table]]
+id          = "boost_target_high_octane"
+name        = "Boost target — high octane map"
+category    = "boost"
+dimensions  = 2
+address     = 0x0200
+data_type   = "uint8"
+scaling     = "boost_kpa"
+axis_x      = "rpm_axis"
+axis_y      = "load_axis"
+emissions_relevant      = false
+engine_safety_critical  = true
+
+[[table]]
+id          = "egr_duty_cycle"
+name        = "EGR valve duty"
+category    = "emissions"
+dimensions  = 2
+address     = 0x0300
+data_type   = "uint8"
+scaling     = "afr_x01"
+axis_x      = "rpm_axis"
+axis_y      = "load_axis"
+emissions_relevant      = true
+engine_safety_critical  = false
