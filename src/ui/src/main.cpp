@@ -10,6 +10,7 @@
 // system-font probing.
 
 #include "st/core/version.hpp"
+#include "st/edit.hpp"
 #include "st/project.hpp"
 
 // ImGui + backends.
@@ -39,11 +40,59 @@ struct Fonts {
     ImFont *mono = nullptr; // Monospace for grids, hex, log output
 };
 
+// Anchor + cursor selection model. Click sets both; shift-click moves only
+// the cursor — the cell rect runs between anchor and cursor inclusively.
+// `enabled` distinguishes "nothing selected" from "single cell at (0,0)".
+struct Selection {
+    bool        enabled{false};
+    std::size_t r_anchor{0};
+    std::size_t c_anchor{0};
+    std::size_t r_cursor{0};
+    std::size_t c_cursor{0};
+
+    [[nodiscard]] bool contains(std::size_t r, std::size_t c) const noexcept {
+        if (!enabled) {
+            return false;
+        }
+        auto const rmin = std::min(r_anchor, r_cursor);
+        auto const rmax = std::max(r_anchor, r_cursor);
+        auto const cmin = std::min(c_anchor, c_cursor);
+        auto const cmax = std::max(c_anchor, c_cursor);
+        return r >= rmin && r <= rmax && c >= cmin && c <= cmax;
+    }
+
+    [[nodiscard]] std::size_t rows() const noexcept {
+        return enabled ? (std::max(r_anchor, r_cursor) - std::min(r_anchor, r_cursor) + 1) : 0;
+    }
+    [[nodiscard]] std::size_t cols() const noexcept {
+        return enabled ? (std::max(c_anchor, c_cursor) - std::min(c_anchor, c_cursor) + 1) : 0;
+    }
+
+    [[nodiscard]] st::edit::Rect as_rect() const noexcept {
+        return st::edit::Rect{std::min(r_anchor, r_cursor), std::max(r_anchor, r_cursor),
+                              std::min(c_anchor, c_cursor), std::max(c_anchor, c_cursor)};
+    }
+
+    void click(std::size_t r, std::size_t c, bool shift) noexcept {
+        if (shift && enabled) {
+            r_cursor = r;
+            c_cursor = c;
+        } else {
+            r_anchor = r_cursor = r;
+            c_anchor = c_cursor = c;
+            enabled  = true;
+        }
+    }
+
+    void reset() noexcept { enabled = false; }
+};
+
 struct AppState {
     std::optional<st::Project>               project;
     std::string                              status_msg;
     std::string                              selected_table_id;
     std::optional<st::Definition::TableData> current_table_data;
+    Selection                                selection;
     bool                                     show_imgui_demo{false};
 
     void try_open_project(std::filesystem::path const &path) {
@@ -53,17 +102,20 @@ struct AppState {
             project.reset();
             selected_table_id.clear();
             current_table_data.reset();
+            selection.reset();
             return;
         }
         project = std::move(*r);
         status_msg.clear();
         selected_table_id.clear();
         current_table_data.reset();
+        selection.reset();
     }
 
     void select_table(std::string const &id) {
         selected_table_id = id;
         current_table_data.reset();
+        selection.reset();
         if (!project.has_value()) {
             return;
         }
@@ -81,6 +133,7 @@ struct AppState {
         project.reset();
         selected_table_id.clear();
         current_table_data.reset();
+        selection.reset();
         status_msg.clear();
     }
 };
@@ -453,6 +506,7 @@ void render_table_grid(st::Definition::TableData const &td,
                        st::Table const *               tbl,
                        st::Scaling const *             scal,
                        GridStats const &               stats,
+                       Selection &                     selection,
                        Fonts const &                   fonts) {
     int const  precision = scal != nullptr ? scal->precision : 0;
     auto const cols      = static_cast<int>(td.axis_x.size()) + 1;
@@ -466,13 +520,28 @@ void render_table_grid(st::Definition::TableData const &td,
                      | ImGuiTableFlags_SizingFixedFit;
 
     // Grids are numerical — push monospace so column alignment is honest.
+    // Right-align Selectable text so cells read like a calculator pad.
+    // Selectable's selected background uses ImGuiCol_Header; override to
+    // the accent at ~55% alpha so it overlays the heatmap instead of
+    // hiding it.
     if (fonts.mono != nullptr) {
         ImGui::PushFont(fonts.mono);
     }
-    if (!ImGui::BeginTable("grid", cols, flags)) {
+    ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(1.0f, 0.5f));
+    ImGui::PushStyleColor(ImGuiCol_Header,        ImVec4(0.21f, 0.46f, 0.76f, 0.55f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.31f, 0.56f, 0.86f, 0.40f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive,  ImVec4(0.38f, 0.65f, 0.94f, 0.65f));
+
+    auto const pop_style = [&]() {
+        ImGui::PopStyleColor(3);
+        ImGui::PopStyleVar();
         if (fonts.mono != nullptr) {
             ImGui::PopFont();
         }
+    };
+
+    if (!ImGui::BeginTable("grid", cols, flags)) {
+        pop_style();
         return;
     }
 
@@ -487,36 +556,42 @@ void render_table_grid(st::Definition::TableData const &td,
 
     if (tbl != nullptr && tbl->dimensions == 3) {
         ImGui::EndTable();
-        if (fonts.mono != nullptr) {
-            ImGui::PopFont();
-        }
+        pop_style();
         ImGui::TextDisabled("(3D tables: TODO — slice selector + per-z grid)");
         return;
     }
 
-    char buf[32];
+    auto const grid_cols = td.values.empty() ? std::size_t{0} : td.values.front().size();
+    char       buf[32];
     for (std::size_t r = 0; r < td.values.size(); ++r) {
         ImGui::TableNextRow();
-        // Leftmost axis-Y label column: monospace, right-aligned, no heatmap.
+        // Leftmost axis-Y label column: right-aligned plain text, no
+        // heatmap, not clickable — it's metadata, not data.
         ImGui::TableNextColumn();
         if (!td.axis_y.empty() && r < td.axis_y.size()) {
             std::snprintf(buf, sizeof(buf), "%.*f", precision, td.axis_y[r]);
             text_right_aligned(buf);
         }
-        for (auto const v : td.values[r]) {
+        for (std::size_t c = 0; c < td.values[r].size(); ++c) {
+            double const v = td.values[r][c];
             ImGui::TableNextColumn();
             ImU32 const bg = heatmap_color(v, stats.min, stats.max);
             if (bg != 0u) {
                 ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, bg);
             }
             std::snprintf(buf, sizeof(buf), "%.*f", precision, v);
-            text_right_aligned(buf);
+
+            ImGui::PushID(static_cast<int>(r * grid_cols + c));
+            bool const is_sel = selection.contains(r, c);
+            if (ImGui::Selectable(buf, is_sel,
+                                  ImGuiSelectableFlags_AllowDoubleClick)) {
+                selection.click(r, c, ImGui::GetIO().KeyShift);
+            }
+            ImGui::PopID();
         }
     }
     ImGui::EndTable();
-    if (fonts.mono != nullptr) {
-        ImGui::PopFont();
-    }
+    pop_style();
 }
 
 void render_table_view(AppState &state, Fonts const &fonts) {
@@ -568,9 +643,23 @@ void render_table_view(AppState &state, Fonts const &fonts) {
                             precision, stats.mean,
                             stats.count);
     }
+    if (state.selection.enabled) {
+        auto const rect = state.selection.as_rect();
+        ImGui::TextDisabled("selection: rows %zu:%zu × cols %zu:%zu  (%zu cells)",
+                            rect.r_start, rect.r_end,
+                            rect.c_start, rect.c_end,
+                            state.selection.rows() * state.selection.cols());
+    }
     ImGui::Separator();
 
-    render_table_grid(*state.current_table_data, tbl, scal, stats, fonts);
+    render_table_grid(*state.current_table_data, tbl, scal, stats,
+                      state.selection, fonts);
+
+    // Escape clears the current selection when the Table panel has focus.
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
+        && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        state.selection.reset();
+    }
     ImGui::End();
 }
 
