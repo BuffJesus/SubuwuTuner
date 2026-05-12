@@ -24,6 +24,10 @@ add_executable(st_unit_tests
     unit/transport/test_mock.cpp
     unit/ecu/test_ssm.cpp
     unit/ecu/test_uds.cpp
+    unit/log/test_log.cpp
+    unit/can/test_can.cpp
+    unit/dbc/test_dbc.cpp
+    unit/discover/test_discover.cpp
 )
 
 target_link_libraries(st_unit_tests
@@ -35,6 +39,10 @@ target_link_libraries(st_unit_tests
         st::project
         st::transport
         st::ecu
+        st::log
+        st::can
+        st::dbc
+        st::discover
         st::warnings
         st::sanitizers
         st::platform
