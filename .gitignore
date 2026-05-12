@@ -40,6 +40,13 @@ desktop.ini
 # ImGui per-user window layout, regenerated at runtime
 imgui.ini
 
+# Bundled font TTFs: keep the assets/fonts/ directory tracked (via .gitkeep)
+# but ignore the binary font files themselves. Drop OFL-licensed Inter +
+# JetBrains Mono in here for the polished look; the font probe picks them up.
+assets/fonts/*.ttf
+assets/fonts/*.otf
+!assets/fonts/.gitkeep
+
 # Test artifacts
 Testing/
 *.gcda
