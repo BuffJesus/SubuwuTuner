@@ -291,24 +291,41 @@ int cmd_dump_table(int argc, char *argv[]) {
 
     auto const &xs = td->axis_x;
     auto const &ys = td->axis_y;
+    auto const &zs = td->axis_z;
+
+    auto const print_slice_csv = [&](std::vector<std::vector<double>> const &grid) {
+        for (auto const x : xs) std::printf(",%.*f", precision, x);
+        std::printf("\n");
+        for (std::size_t r = 0; r < grid.size(); ++r) {
+            if (!ys.empty()) std::printf("%.*f", precision, ys[r]);
+            for (auto const v : grid[r]) std::printf(",%.*f", precision, v);
+            std::printf("\n");
+        }
+    };
+
+    constexpr int kColWidth = 10;
+    auto const    print_slice_pretty =
+        [&](std::vector<std::vector<double>> const &grid) {
+        std::printf("%*s", kColWidth, "");
+        for (auto const x : xs) std::printf(" %*.*f", kColWidth - 1, precision, x);
+        std::printf("\n");
+        for (std::size_t r = 0; r < grid.size(); ++r) {
+            if (!ys.empty()) std::printf("%*.*f", kColWidth, precision, ys[r]);
+            else             std::printf("%*s", kColWidth, "");
+            for (auto const v : grid[r])
+                std::printf(" %*.*f", kColWidth - 1, precision, v);
+            std::printf("\n");
+        }
+    };
 
     if (csv) {
-        // CSV: first row is empty leading cell + X-axis labels (each loop
-        // iteration emits ",<x>" so the row is ",x0,x1,x2,..."). Data rows
-        // are Y-axis label (or empty for 1D) + cells. No "# comment"
-        // banner so the output is directly pandas/sheet ingestible.
-        for (auto const x : xs) {
-            std::printf(",%.*f", precision, x);
-        }
-        std::printf("\n");
-        for (std::size_t r = 0; r < td->values.size(); ++r) {
-            if (!ys.empty()) {
-                std::printf("%.*f", precision, ys[r]);
+        if (table->dimensions == 3) {
+            for (std::size_t z = 0; z < td->slices.size(); ++z) {
+                std::printf("# z=%.*f\n", precision, zs.empty() ? 0.0 : zs[z]);
+                print_slice_csv(td->slices[z]);
             }
-            for (auto const v : td->values[r]) {
-                std::printf(",%.*f", precision, v);
-            }
-            std::printf("\n");
+        } else {
+            print_slice_csv(td->values);
         }
         return 0;
     }
@@ -318,27 +335,15 @@ int cmd_dump_table(int argc, char *argv[]) {
     if (!unit.empty())        std::printf(", unit=%s", unit.c_str());
     std::printf(")\n");
 
-    constexpr int kColWidth = 10;
-
-    // Header row.
-    std::printf("%*s", kColWidth, "");
-    for (auto const x : xs) {
-        std::printf(" %*.*f", kColWidth - 1, precision, x);
-    }
-    std::printf("\n");
-
-    for (std::size_t r = 0; r < td->values.size(); ++r) {
-        if (!ys.empty()) {
-            std::printf("%*.*f", kColWidth, precision, ys[r]);
-        } else {
-            std::printf("%*s", kColWidth, "");
+    if (table->dimensions == 3) {
+        for (std::size_t z = 0; z < td->slices.size(); ++z) {
+            std::printf("\n--- z = %.*f ---\n",
+                        precision, zs.empty() ? 0.0 : zs[z]);
+            print_slice_pretty(td->slices[z]);
         }
-        for (auto const v : td->values[r]) {
-            std::printf(" %*.*f", kColWidth - 1, precision, v);
-        }
-        std::printf("\n");
+    } else {
+        print_slice_pretty(td->values);
     }
-
     return 0;
 }
 

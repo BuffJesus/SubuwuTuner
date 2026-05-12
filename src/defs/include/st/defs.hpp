@@ -196,13 +196,21 @@ class Definition {
                                                                Axis const &axis) const;
 
     // Materialized view of a calibration table: axis labels plus the value
-    // grid. For a 1D table, `axis_y` is empty and `values` is a single row.
-    // For a 2D table, `values[row][col]` is the value at (axis_y[row],
-    // axis_x[col]). Subaru convention: row-major storage, X varying fastest.
+    // grid. Storage shape depends on the table's dimensions:
+    //
+    //   1D: `axis_y` is empty; `values` is a single row of size axis_x.size().
+    //   2D: `values[row][col]` = value at (axis_y[row], axis_x[col]).
+    //   3D: `axis_z` carries the slice labels; `slices[z][y][x]` carries the
+    //        grid. For 1D and 2D, `axis_z` and `slices` are empty.
+    //
+    // Subaru convention: row-major outer-to-inner Z/Y/X. The bytes on disk
+    // are slice 0's whole y*x grid, then slice 1's, etc.
     struct TableData {
-        std::vector<double>              axis_x;
-        std::vector<double>              axis_y;
-        std::vector<std::vector<double>> values;
+        std::vector<double>                           axis_x;
+        std::vector<double>                           axis_y;
+        std::vector<double>                           axis_z;
+        std::vector<std::vector<double>>              values;
+        std::vector<std::vector<std::vector<double>>> slices;
     };
 
     [[nodiscard]] Result<TableData> read_table_values(Rom const &  rom,

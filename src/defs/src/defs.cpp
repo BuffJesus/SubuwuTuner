@@ -825,44 +825,71 @@ Result<Definition::TableData> Definition::read_table_values(Rom const &  rom,
                                                             Table const &table) const {
     TableData td;
 
-    // Resolve axes.
-    Axis const *ax = nullptr;
-    Axis const *ay = nullptr;
-    if (table.axis_x.has_value() && !table.axis_x->empty()) {
-        ax = find_axis(*table.axis_x);
-        if (ax == nullptr) {
+    // Resolve axes that this table actually uses.
+    auto const resolve_axis = [&](std::optional<std::string> const &name,
+                                  char ch) -> Result<std::vector<double>> {
+        if (!name.has_value() || name->empty()) return std::vector<double>{};
+        auto const *a = find_axis(*name);
+        if (a == nullptr) {
             return failure(ErrorCode::ParseError,
-                           "table '" + table.id + "' references unknown axis_x '"
-                               + *table.axis_x + "'");
+                           std::string{"table '"} + table.id + "' references unknown axis_"
+                               + ch + " '" + *name + "'");
         }
-        auto xs = read_axis_values(rom, *ax);
+        return read_axis_values(rom, *a);
+    };
+
+    if (table.dimensions >= 1) {
+        auto xs = resolve_axis(table.axis_x, 'x');
         if (!xs.has_value()) return failure(xs.error());
         td.axis_x = std::move(*xs);
     }
-    if (table.dimensions >= 2 && table.axis_y.has_value() && !table.axis_y->empty()) {
-        ay = find_axis(*table.axis_y);
-        if (ay == nullptr) {
-            return failure(ErrorCode::ParseError,
-                           "table '" + table.id + "' references unknown axis_y '"
-                               + *table.axis_y + "'");
-        }
-        auto ys = read_axis_values(rom, *ay);
+    if (table.dimensions >= 2) {
+        auto ys = resolve_axis(table.axis_y, 'y');
         if (!ys.has_value()) return failure(ys.error());
         td.axis_y = std::move(*ys);
     }
+    if (table.dimensions >= 3) {
+        auto zs = resolve_axis(table.axis_z, 'z');
+        if (!zs.has_value()) return failure(zs.error());
+        td.axis_z = std::move(*zs);
+    }
 
-    auto const cols  = td.axis_x.empty() ? std::size_t{1} : td.axis_x.size();
-    auto const rows  = td.axis_y.empty() ? std::size_t{1} : td.axis_y.size();
-    auto const step  = byte_size(table.data_type);
-    auto const scal  = find_scaling(table.scaling);
+    auto const cols = td.axis_x.empty() ? std::size_t{1} : td.axis_x.size();
+    auto const rows = td.axis_y.empty() ? std::size_t{1} : td.axis_y.size();
+    auto const step = byte_size(table.data_type);
+    auto const scal = find_scaling(table.scaling);
+
+    auto const read_cell = [&](std::size_t off, double &out) -> Status {
+        auto const raw = read_typed(rom, off, table.data_type);
+        if (!raw.has_value()) return failure(raw.error());
+        out = (scal != nullptr) ? apply_scaling(*raw, *scal) : *raw;
+        return ok();
+    };
+
+    if (table.dimensions == 3) {
+        auto const depth = td.axis_z.empty() ? std::size_t{1} : td.axis_z.size();
+        td.slices.assign(depth,
+                         std::vector<std::vector<double>>(rows, std::vector<double>(cols, 0.0)));
+        for (std::size_t z = 0; z < depth; ++z) {
+            for (std::size_t r = 0; r < rows; ++r) {
+                for (std::size_t c = 0; c < cols; ++c) {
+                    auto const off = table.address + ((z * rows + r) * cols + c) * step;
+                    if (auto s = read_cell(off, td.slices[z][r][c]); !s.has_value()) {
+                        return failure(s.error());
+                    }
+                }
+            }
+        }
+        return td;
+    }
 
     td.values.assign(rows, std::vector<double>(cols, 0.0));
     for (std::size_t r = 0; r < rows; ++r) {
         for (std::size_t c = 0; c < cols; ++c) {
             auto const off = table.address + (r * cols + c) * step;
-            auto const raw = read_typed(rom, off, table.data_type);
-            if (!raw.has_value()) return failure(raw.error());
-            td.values[r][c] = (scal != nullptr) ? apply_scaling(*raw, *scal) : *raw;
+            if (auto s = read_cell(off, td.values[r][c]); !s.has_value()) {
+                return failure(s.error());
+            }
         }
     }
     return td;
@@ -872,25 +899,79 @@ Status Definition::write_table_values(Rom &rom, Table const &table,
                                        TableData const &td) const {
     Axis const *ax = nullptr;
     Axis const *ay = nullptr;
-    if (table.axis_x.has_value() && !table.axis_x->empty()) {
-        ax = find_axis(*table.axis_x);
-        if (ax == nullptr) {
+    Axis const *az = nullptr;
+    auto const  resolve = [&](std::optional<std::string> const &name,
+                              char ch) -> Result<Axis const *> {
+        if (!name.has_value() || name->empty()) return static_cast<Axis const *>(nullptr);
+        auto const *a = find_axis(*name);
+        if (a == nullptr) {
             return failure(ErrorCode::ParseError,
-                           "table '" + table.id + "' references unknown axis_x '"
-                               + *table.axis_x + "'");
+                           std::string{"table '"} + table.id + "' references unknown axis_"
+                               + ch + " '" + *name + "'");
         }
+        return a;
+    };
+    if (table.dimensions >= 1) {
+        auto r = resolve(table.axis_x, 'x'); if (!r.has_value()) return failure(r.error()); ax = *r;
     }
-    if (table.dimensions >= 2 && table.axis_y.has_value() && !table.axis_y->empty()) {
-        ay = find_axis(*table.axis_y);
-        if (ay == nullptr) {
-            return failure(ErrorCode::ParseError,
-                           "table '" + table.id + "' references unknown axis_y '"
-                               + *table.axis_y + "'");
-        }
+    if (table.dimensions >= 2) {
+        auto r = resolve(table.axis_y, 'y'); if (!r.has_value()) return failure(r.error()); ay = *r;
+    }
+    if (table.dimensions >= 3) {
+        auto r = resolve(table.axis_z, 'z'); if (!r.has_value()) return failure(r.error()); az = *r;
     }
 
-    auto const cols = ax == nullptr ? std::size_t{1} : ax->length;
-    auto const rows = ay == nullptr ? std::size_t{1} : ay->length;
+    auto const cols  = ax == nullptr ? std::size_t{1} : ax->length;
+    auto const rows  = ay == nullptr ? std::size_t{1} : ay->length;
+    auto const depth = az == nullptr ? std::size_t{1} : az->length;
+
+    auto const  step = byte_size(table.data_type);
+    auto const *scal = find_scaling(table.scaling);
+
+    auto const write_cell = [&](std::size_t off, double eng) -> Status {
+        double raw = eng;
+        if (scal != nullptr) {
+            auto const inv = invert_scaling(eng, *scal);
+            if (!inv.has_value()) return failure(inv.error());
+            raw = *inv;
+        }
+        return write_typed(rom, off, table.data_type, raw);
+    };
+
+    if (table.dimensions == 3) {
+        if (td.slices.size() != depth) {
+            return failure(ErrorCode::InvalidArgument,
+                           "TableData has " + std::to_string(td.slices.size())
+                               + " slices but table expects " + std::to_string(depth));
+        }
+        for (std::size_t z = 0; z < depth; ++z) {
+            if (td.slices[z].size() != rows) {
+                return failure(ErrorCode::InvalidArgument,
+                               "TableData slice " + std::to_string(z) + " has "
+                                   + std::to_string(td.slices[z].size())
+                                   + " rows but table expects " + std::to_string(rows));
+            }
+            for (std::size_t r = 0; r < rows; ++r) {
+                if (td.slices[z][r].size() != cols) {
+                    return failure(ErrorCode::InvalidArgument,
+                                   "TableData slice " + std::to_string(z) + " row "
+                                       + std::to_string(r) + " has "
+                                       + std::to_string(td.slices[z][r].size())
+                                       + " cols but table expects "
+                                       + std::to_string(cols));
+                }
+                for (std::size_t c = 0; c < cols; ++c) {
+                    auto const off =
+                        table.address + ((z * rows + r) * cols + c) * step;
+                    if (auto s = write_cell(off, td.slices[z][r][c]); !s.has_value()) {
+                        return s;
+                    }
+                }
+            }
+        }
+        return ok();
+    }
+
     if (td.values.size() != rows) {
         return failure(ErrorCode::InvalidArgument,
                        "TableData has " + std::to_string(td.values.size())
@@ -903,22 +984,9 @@ Status Definition::write_table_values(Rom &rom, Table const &table,
                                + std::to_string(td.values[r].size())
                                + " cols but table expects " + std::to_string(cols));
         }
-    }
-
-    auto const  step = byte_size(table.data_type);
-    auto const *scal = find_scaling(table.scaling);
-
-    for (std::size_t r = 0; r < rows; ++r) {
         for (std::size_t c = 0; c < cols; ++c) {
-            double eng = td.values[r][c];
-            double raw = eng;
-            if (scal != nullptr) {
-                auto const inv = invert_scaling(eng, *scal);
-                if (!inv.has_value()) return failure(inv.error());
-                raw = *inv;
-            }
             auto const off = table.address + (r * cols + c) * step;
-            if (auto s = write_typed(rom, off, table.data_type, raw); !s.has_value()) {
+            if (auto s = write_cell(off, td.values[r][c]); !s.has_value()) {
                 return s;
             }
         }

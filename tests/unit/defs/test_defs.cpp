@@ -547,6 +547,134 @@ axis_y     = "y"
     REQUIRE(td->values[1] == std::vector<double>{21.0, 22.0, 23.0});
 }
 
+TEST_CASE("Definition::read_table_values reads a 3D table (z slices, row-major)",
+          "[defs][read_table_values][3d]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 512
+
+[[axis]]
+id        = "x"
+type      = "static"
+address   = 0
+length    = 2
+data_type = "uint8"
+
+[[axis]]
+id        = "y"
+type      = "static"
+address   = 4
+length    = 2
+data_type = "uint8"
+
+[[axis]]
+id        = "z"
+type      = "static"
+address   = 8
+length    = 2
+data_type = "uint8"
+
+[[table]]
+id         = "cube"
+dimensions = 3
+address    = 16
+data_type  = "uint8"
+axis_x     = "x"
+axis_y     = "y"
+axis_z     = "z"
+)toml");
+    REQUIRE(def_r.has_value());
+
+    // x = [1, 2]      at 0..1
+    // y = [10, 20]    at 4..5
+    // z = [100, 200]  at 8..9
+    // table at 16: z0 then z1, each is a 2-row x 2-col uint8 grid.
+    //   z0 (slice 0): 11, 12, 13, 14
+    //   z1 (slice 1): 21, 22, 23, 24
+    auto const rom = st::Rom::from_bytes({
+        1, 2, 0, 0,                               // x at 0..3
+        10, 20, 0, 0,                             // y at 4..7
+        100, 200, 0, 0, 0, 0, 0, 0,               // z at 8..15
+        11, 12, 13, 14, 21, 22, 23, 24,           // table at 16..23
+    });
+
+    auto const *t  = def_r->find_table("cube");
+    REQUIRE(t != nullptr);
+    auto const td = def_r->read_table_values(rom, *t);
+    REQUIRE(td.has_value());
+    REQUIRE(td->axis_x == std::vector<double>{1.0, 2.0});
+    REQUIRE(td->axis_y == std::vector<double>{10.0, 20.0});
+    REQUIRE(td->axis_z == std::vector<double>{100.0, 200.0});
+    REQUIRE(td->slices.size() == 2);
+    REQUIRE(td->slices[0] == std::vector<std::vector<double>>{{11, 12}, {13, 14}});
+    REQUIRE(td->slices[1] == std::vector<std::vector<double>>{{21, 22}, {23, 24}});
+    // For 3D, the 2D `values` field is left empty.
+    REQUIRE(td->values.empty());
+}
+
+TEST_CASE("Definition::write_table_values round-trips a 3D edit",
+          "[defs][write_table_values][3d]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 64
+
+[[axis]]
+id        = "x"
+type      = "static"
+address   = 0
+length    = 2
+data_type = "uint8"
+
+[[axis]]
+id        = "y"
+type      = "static"
+address   = 4
+length    = 2
+data_type = "uint8"
+
+[[axis]]
+id        = "z"
+type      = "static"
+address   = 8
+length    = 2
+data_type = "uint8"
+
+[[table]]
+id         = "cube"
+dimensions = 3
+address    = 16
+data_type  = "uint8"
+axis_x     = "x"
+axis_y     = "y"
+axis_z     = "z"
+)toml");
+    REQUIRE(def_r.has_value());
+
+    std::vector<std::uint8_t> bytes{
+        1, 2, 0, 0,  10, 20, 0, 0,  100, 200, 0, 0, 0, 0, 0, 0,
+        11, 12, 13, 14, 21, 22, 23, 24,
+        0,  0,  0,  0,  0,  0,  0,  0,
+        0,  0,  0,  0,  0,  0,  0,  0,
+        0,  0,  0,  0,  0,  0,  0,  0,
+    };
+    auto rom = st::Rom::from_bytes(std::move(bytes));
+
+    auto const *t   = def_r->find_table("cube");
+    auto       td   = *def_r->read_table_values(rom, *t);
+    td.slices[1][0][1] = 99.0; // bump one cell in z=1 slice
+
+    REQUIRE(def_r->write_table_values(rom, *t, td).has_value());
+
+    auto const re_read = def_r->read_table_values(rom, *t);
+    REQUIRE(re_read.has_value());
+    REQUIRE(re_read->slices[1][0][1] == 99.0);
+    REQUIRE(re_read->slices[0] == std::vector<std::vector<double>>{{11, 12}, {13, 14}});
+}
+
 TEST_CASE("Definition::read_table_values fails OutOfRange when grid spills past ROM",
           "[defs][read_table_values]") {
     auto const def_r = st::Definition::from_toml_string(R"toml(
