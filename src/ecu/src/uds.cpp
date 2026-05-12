@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <span>
 #include <string>
 #include <vector>
@@ -20,17 +21,24 @@ namespace {
 
 // Surface a negative-response frame (0x7F SID NRC) as EcuRejected. Returns
 // ok() when `resp` is not a negative response — caller continues parsing.
+// Hex-format a byte as "0xXX" for inclusion in error messages.
+// std::to_string is decimal; using "0x" + to_string(0x33) produces the
+// confusing "0x51" (51 decimal).
+std::string hex_byte(std::uint8_t b) {
+    char buf[8];
+    std::snprintf(buf, sizeof buf, "0x%02X", static_cast<unsigned>(b));
+    return std::string{buf};
+}
+
 [[nodiscard]] Status reject_if_negative(std::span<std::uint8_t const> resp,
                                          std::uint8_t                  expected_sid) {
     if (resp.size() >= 3 && resp[0] == kNegativeResponse) {
         if (resp[1] != expected_sid) {
             return failure(ErrorCode::ParseError,
-                           "UDS negative response for wrong SID: 0x"
-                               + std::to_string(static_cast<unsigned>(resp[1])));
+                           "UDS negative response for wrong SID: "
+                               + hex_byte(resp[1]));
         }
-        return failure(ErrorCode::EcuRejected,
-                       "UDS NRC=0x"
-                           + std::to_string(static_cast<unsigned>(resp[2])));
+        return failure(ErrorCode::EcuRejected, "UDS NRC=" + hex_byte(resp[2]));
     }
     return ok();
 }
@@ -67,8 +75,7 @@ Result<std::vector<std::uint8_t>> parse_rdbi_response(std::span<std::uint8_t con
     }
     if (resp[0] != kSidReadDataByIdentifier + kPositiveResponseOffset) {
         return failure(ErrorCode::EcuRejected,
-                       "UDS RDBI unexpected SID: 0x"
-                           + std::to_string(static_cast<unsigned>(resp[0])));
+                       "UDS RDBI unexpected SID: " + hex_byte(resp[0]));
     }
     auto const got_did = read_be16(resp[1], resp[2]);
     if (got_did != expected_did) {
@@ -104,8 +111,7 @@ Status parse_wdbi_response(std::span<std::uint8_t const> resp, std::uint16_t exp
     }
     if (resp[0] != kSidWriteDataByIdentifier + kPositiveResponseOffset) {
         return failure(ErrorCode::EcuRejected,
-                       "UDS WDBI unexpected SID: 0x"
-                           + std::to_string(static_cast<unsigned>(resp[0])));
+                       "UDS WDBI unexpected SID: " + hex_byte(resp[0]));
     }
     auto const got_did = read_be16(resp[1], resp[2]);
     if (got_did != expected_did) {

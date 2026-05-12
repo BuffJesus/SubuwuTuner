@@ -14,6 +14,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <ctime>
 #include <fstream>
 #include <ios>
@@ -22,6 +23,17 @@
 #include <vector>
 
 namespace st::flash {
+
+namespace {
+// Hex-format a 32-bit address for inclusion in error messages.
+// std::to_string is decimal, so "0x" + std::to_string(0x1234) used to
+// produce the very-confusing "0x4660".
+std::string hex_addr(std::uint32_t v) {
+    char buf[16];
+    std::snprintf(buf, sizeof buf, "0x%08X", v);
+    return std::string{buf};
+}
+} // namespace
 
 // ---------------------------------------------------------------------
 // Public-API helpers
@@ -72,13 +84,13 @@ Result<std::vector<std::uint8_t>> Flasher::read_full_rom(
                                                      per_chunk_timeout);
         if (!chunk.has_value()) {
             return failure(chunk.error().code(),
-                           "flash: read_full_rom failed at 0x"
-                           + std::to_string(cursor) + ": "
+                           "flash: read_full_rom failed at "
+                           + hex_addr(cursor) + ": "
                            + std::string{chunk.error().message()});
         }
         if (chunk->size() != this_chunk) {
             return failure(ErrorCode::UnexpectedEof,
-                           "flash: short read at 0x" + std::to_string(cursor)
+                           "flash: short read at " + hex_addr(cursor)
                            + " (expected " + std::to_string(this_chunk)
                            + ", got " + std::to_string(chunk->size()) + ")");
         }
@@ -252,8 +264,8 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
             if (!erase.has_value()) {
                 commit_outcome(outcome);
                 return bail(erase.error().code(),
-                            "flash: eraseMemory failed at 0x"
-                            + std::to_string(w.sector.address) + ": "
+                            "flash: eraseMemory failed at "
+                            + hex_addr(w.sector.address) + ": "
                             + std::string{erase.error().message()});
             }
             outcome.erased = true;
@@ -264,8 +276,8 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
             if (!rdl.has_value()) {
                 commit_outcome(outcome);
                 return bail(rdl.error().code(),
-                            "flash: request_download failed at 0x"
-                            + std::to_string(w.sector.address) + ": "
+                            "flash: request_download failed at "
+                            + hex_addr(w.sector.address) + ": "
                             + std::string{rdl.error().message()});
             }
             outcome.downloaded = true;
@@ -309,8 +321,8 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
             if (auto s = client_.request_transfer_exit(); !s.has_value()) {
                 commit_outcome(outcome);
                 return bail(s.error().code(),
-                            "flash: request_transfer_exit failed at 0x"
-                            + std::to_string(w.sector.address) + ": "
+                            "flash: request_transfer_exit failed at "
+                            + hex_addr(w.sector.address) + ": "
                             + std::string{s.error().message()});
             }
             outcome.exited = true;
@@ -323,8 +335,8 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
                 commit_outcome(outcome);
                 return bail(check.error().code(),
                             "flash: checkProgrammingDependencies "
-                            "failed at 0x"
-                            + std::to_string(w.sector.address) + ": "
+                            "failed at "
+                            + hex_addr(w.sector.address) + ": "
                             + std::string{check.error().message()});
             }
             outcome.check_deps_passed = true;
