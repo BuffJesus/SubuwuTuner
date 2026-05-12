@@ -14,12 +14,14 @@ set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_INSTALL        OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(glfw)
 
-# Dear ImGui doesn't ship a top-level CMakeLists, so we fetch the source and
-# build a static lib ourselves with the GLFW + OpenGL3 backends.
+# Dear ImGui — docking branch. Adds ImGuiConfigFlags_DockingEnable (multi-pane
+# layouts with split/tear-off panels) and ImGuiConfigFlags_ViewportsEnable
+# (panels can detach into OS-level windows on multi-monitor setups). The
+# docking branch is upstream-maintained and tracks master with periodic syncs.
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        v1.91.0
+    GIT_TAG        docking
     GIT_SHALLOW    TRUE
     SYSTEM
 )
@@ -41,6 +43,41 @@ target_include_directories(imgui_lib SYSTEM PUBLIC
 )
 target_link_libraries(imgui_lib PUBLIC glfw)
 
+# ImPlot — datalogger charts, scope plots, surface preview on the 3D map
+# editor. Same author + API style as Dear ImGui, no top-level CMakeLists.
+# Tracks master because the last tagged release (v0.16, Aug 2023) predates
+# the docking-branch ImGui API rename (IM_OFFSETOF, ImFont::FontSize, etc.).
+# Master has the fixes; pin to a commit hash when reproducibility matters.
+FetchContent_Declare(
+    implot
+    GIT_REPOSITORY https://github.com/epezent/implot.git
+    GIT_TAG        master
+    GIT_SHALLOW    TRUE
+    SYSTEM
+)
+FetchContent_MakeAvailable(implot)
+
+add_library(implot_lib STATIC
+    ${implot_SOURCE_DIR}/implot.cpp
+    ${implot_SOURCE_DIR}/implot_items.cpp
+    ${implot_SOURCE_DIR}/implot_demo.cpp
+)
+target_include_directories(implot_lib SYSTEM PUBLIC ${implot_SOURCE_DIR})
+target_link_libraries(implot_lib PUBLIC imgui_lib)
+
+# nativefiledialog-extended — OS-native Open/Save dialogs. ImGui's built-in
+# file picker is rudimentary; this gives us the platform-correct widget.
+FetchContent_Declare(
+    nfd
+    GIT_REPOSITORY https://github.com/btzy/nativefiledialog-extended.git
+    GIT_TAG        v1.2.1
+    GIT_SHALLOW    TRUE
+    SYSTEM
+)
+set(NFD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(NFD_INSTALL     OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(nfd)
+
 find_package(OpenGL REQUIRED)
 
 add_executable(subuwutuner-gui
@@ -55,6 +92,8 @@ target_link_libraries(subuwutuner-gui
         st::edit
         st::project
         imgui_lib
+        implot_lib
+        nfd
         OpenGL::GL
         st::warnings
         st::sanitizers

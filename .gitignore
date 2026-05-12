@@ -37,6 +37,9 @@ vcpkg_installed/
 Thumbs.db
 desktop.ini
 
+# ImGui per-user window layout, regenerated at runtime
+imgui.ini
+
 # Test artifacts
 Testing/
 *.gcda
