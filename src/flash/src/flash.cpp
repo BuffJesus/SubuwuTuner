@@ -3,6 +3,7 @@
 
 #include "st/flash.hpp"
 
+#include "st/core/crc32.hpp"
 #include "st/core/error.hpp"
 #include "st/core/result.hpp"
 
@@ -11,7 +12,9 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <chrono>
 #include <cstdint>
+#include <ctime>
 #include <fstream>
 #include <ios>
 #include <sstream>
@@ -581,6 +584,180 @@ Status write_plan(std::filesystem::path const &path, FlashPlan const &plan) {
     if (!out) {
         return failure(ErrorCode::IoFailure,
                        "flash plan: write failed: " + path.string());
+    }
+    return ok();
+}
+
+// ---------------------------------------------------------------------
+// Manifest
+// ---------------------------------------------------------------------
+
+namespace {
+
+std::string current_iso8601_utc() {
+    auto const  now      = std::chrono::system_clock::now();
+    std::time_t const t  = std::chrono::system_clock::to_time_t(now);
+    std::tm           tm{};
+#if defined(_WIN32)
+    ::gmtime_s(&tm, &t);
+#else
+    ::gmtime_r(&t, &tm);
+#endif
+    char buf[32];
+    std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", &tm);
+    return std::string{buf};
+}
+
+std::uint32_t crc32_of(std::string_view text) noexcept {
+    return st::crc32({reinterpret_cast<std::uint8_t const *>(text.data()),
+                      text.size()});
+}
+
+} // namespace
+
+Manifest build_manifest(FlashPlan const &plan, std::string_view plan_text,
+                        FlashReport const &report) {
+    Manifest m;
+    m.schema_version = kManifestSchemaVersion;
+    m.created_at     = current_iso8601_utc();
+    m.plan_crc32     = crc32_of(plan_text);
+
+    // Build per-sector entries by matching writes to outcomes positionally.
+    // Outcomes that don't have a matching write (or vice versa) shouldn't
+    // happen with the current orchestrator, but we tolerate the size mismatch
+    // and emit only what aligns.
+    auto const n =
+        plan.writes.size() < report.sectors.size() ? plan.writes.size()
+                                                    : report.sectors.size();
+    m.entries.reserve(n);
+
+    // Overall CRC is computed over the concatenation of every transferred
+    // sector's bytes, in plan order. If an entry was not transferred (dry
+    // run or a mid-flash failure), it contributes nothing to the overall
+    // hash — only its per-sector CRC is recorded.
+    Crc32 overall;
+    for (std::size_t i = 0; i < n; ++i) {
+        auto const &w  = plan.writes[i];
+        auto const &so = report.sectors[i];
+        ManifestEntry e;
+        e.sector       = w.sector;
+        e.data_crc32   = st::crc32(w.data);
+        e.transferred  = so.transferred;
+        e.verified     = so.verified;
+        if (e.transferred) {
+            overall.update(w.data);
+        }
+        m.entries.push_back(e);
+    }
+    m.overall_crc32 = overall.value();
+    return m;
+}
+
+Result<Manifest> parse_manifest(std::string_view text) {
+    toml::table root;
+    try {
+        root = toml::parse(text);
+    } catch (toml::parse_error const &e) {
+        return failure(ErrorCode::ParseError,
+                       std::string{"flash manifest: TOML parse: "}
+                       + e.description().data());
+    }
+
+    auto const *sv = root.get_as<int64_t>("schema_version");
+    int const   schema = (sv != nullptr) ? static_cast<int>(sv->get()) : 0;
+    if (schema != kManifestSchemaVersion) {
+        return failure(ErrorCode::UnsupportedVersion,
+                       "flash manifest: schema_version "
+                       + std::to_string(schema)
+                       + " not supported (expected "
+                       + std::to_string(kManifestSchemaVersion) + ")");
+    }
+
+    Manifest m;
+    m.schema_version = schema;
+
+    if (auto const *t = root.get_as<std::string>("created_at"); t != nullptr) {
+        m.created_at = t->get();
+    }
+    if (auto const *t = root.get_as<int64_t>("plan_crc32"); t != nullptr) {
+        m.plan_crc32 = static_cast<std::uint32_t>(t->get());
+    }
+    if (auto const *t = root.get_as<int64_t>("overall_crc32"); t != nullptr) {
+        m.overall_crc32 = static_cast<std::uint32_t>(t->get());
+    }
+
+    auto const *entries = root["entry"].as_array();
+    if (entries != nullptr) {
+        for (auto const &node : *entries) {
+            auto const *tbl = node.as_table();
+            if (tbl == nullptr) continue;
+            ManifestEntry e;
+            if (auto const *a = tbl->get_as<int64_t>("address"); a != nullptr) {
+                e.sector.address = static_cast<std::uint32_t>(a->get());
+            }
+            if (auto const *l = tbl->get_as<int64_t>("length"); l != nullptr) {
+                e.sector.length = static_cast<std::uint32_t>(l->get());
+            }
+            if (auto const *c = tbl->get_as<int64_t>("data_crc32"); c != nullptr) {
+                e.data_crc32 = static_cast<std::uint32_t>(c->get());
+            }
+            if (auto const *b = tbl->get_as<bool>("transferred"); b != nullptr) {
+                e.transferred = b->get();
+            }
+            if (auto const *b = tbl->get_as<bool>("verified"); b != nullptr) {
+                e.verified = b->get();
+            }
+            m.entries.push_back(e);
+        }
+    }
+    return m;
+}
+
+Result<Manifest> read_manifest(std::filesystem::path const &path) {
+    std::ifstream in{path, std::ios::binary};
+    if (!in) {
+        return failure(ErrorCode::FileNotFound,
+                       "flash manifest: cannot open " + path.string());
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return parse_manifest(ss.str());
+}
+
+std::string format_manifest(Manifest const &m) {
+    std::ostringstream out;
+    out << "# SubuwuTuner flash manifest\n";
+    out << "schema_version = " << kManifestSchemaVersion << "\n";
+    out << "created_at     = \"" << m.created_at << "\"\n";
+    out << "plan_crc32     = 0x"
+        << std::hex << m.plan_crc32 << std::dec << "\n";
+    out << "overall_crc32  = 0x"
+        << std::hex << m.overall_crc32 << std::dec << "\n";
+    for (auto const &e : m.entries) {
+        out << "\n[[entry]]\n";
+        out << "address     = 0x"
+            << std::hex << e.sector.address << std::dec << "\n";
+        out << "length      = " << e.sector.length << "\n";
+        out << "data_crc32  = 0x"
+            << std::hex << e.data_crc32 << std::dec << "\n";
+        out << "transferred = " << (e.transferred ? "true" : "false") << "\n";
+        out << "verified    = " << (e.verified ? "true" : "false") << "\n";
+    }
+    return out.str();
+}
+
+Status write_manifest(std::filesystem::path const &path, Manifest const &m) {
+    std::ofstream out{path, std::ios::binary};
+    if (!out) {
+        return failure(ErrorCode::IoFailure,
+                       "flash manifest: cannot open for write: "
+                       + path.string());
+    }
+    auto const text = format_manifest(m);
+    out.write(text.data(), static_cast<std::streamsize>(text.size()));
+    if (!out) {
+        return failure(ErrorCode::IoFailure,
+                       "flash manifest: write failed: " + path.string());
     }
     return ok();
 }

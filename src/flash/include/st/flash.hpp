@@ -205,6 +205,68 @@ inline constexpr int kPlanSchemaVersion = 1;
 [[nodiscard]] Status write_plan(std::filesystem::path const &path,
                                 FlashPlan const             &plan);
 
+// =====================================================================
+// Manifest — tamper-evident record of an executed flash
+// =====================================================================
+//
+// Per docs/05-improvements.md §4: every flash operation publishes a
+// manifest the user can keep. The manifest stores per-sector hashes of
+// the bytes that were (or would have been) transferred, an overall hash
+// of the concatenation, a hash of the source plan TOML, and an ISO-8601
+// timestamp. Useful for audit ("on this date, this plan was flashed
+// with these resulting sector hashes") and as the data foundation for
+// future resume-from-crash support.
+//
+// Current hash: 32-bit CRC (st::crc32, IEEE 802.3). This is detection
+// of accidental corruption, NOT cryptographic tamper-evidence. The
+// upgrade path is BLAKE3 once the bench rig lands and we have a real
+// signing flow — see docs/05 §4 for the full threat model.
+//
+// `build_manifest` is the canonical producer: given the executed plan,
+// the source plan TOML (for plan_crc32), and the resulting FlashReport
+// (for transferred / verified flags), it returns a complete Manifest.
+// Build it AFTER Flasher::execute returns — this slice does not yet
+// support incremental persistence during a flash.
+
+struct ManifestEntry {
+    Sector        sector{};
+    std::uint32_t data_crc32{0};
+    bool          transferred{false};
+    bool          verified{false};
+};
+
+struct Manifest {
+    int                        schema_version{1};
+    // Free-form ISO-8601 UTC timestamp ("2026-05-12T15:30:00Z"). Opaque
+    // to the parser; round-tripped as a string.
+    std::string                created_at;
+    // CRC32 of the source plan TOML text, end-to-end. Lets a later
+    // verifier confirm the manifest was produced from a specific plan
+    // without storing the whole plan.
+    std::uint32_t              plan_crc32{0};
+    // CRC32 of the concatenation of every entry's transferred bytes, in
+    // plan order. Independent of the per-entry hashes; both are stored
+    // so a tampered single-sector value is detectable two ways.
+    std::uint32_t              overall_crc32{0};
+    std::vector<ManifestEntry> entries;
+};
+
+inline constexpr int kManifestSchemaVersion = 1;
+
+// Construct a manifest after a successful (or partially-successful)
+// flash. `plan_text` should be the exact source TOML the plan was
+// loaded from — passing format_plan(plan) is fine for plans built in
+// memory but loses any user comments / whitespace.
+[[nodiscard]] Manifest build_manifest(FlashPlan        const &plan,
+                                      std::string_view        plan_text,
+                                      FlashReport      const &report);
+
+[[nodiscard]] Result<Manifest> parse_manifest(std::string_view text);
+[[nodiscard]] Result<Manifest> read_manifest(std::filesystem::path const &path);
+[[nodiscard]] std::string      format_manifest(Manifest const &m);
+[[nodiscard]] Status           write_manifest(std::filesystem::path const &path,
+                                              Manifest                    const &m);
+
 } // namespace st::flash
 
 #endif // ST_FLASH_HPP

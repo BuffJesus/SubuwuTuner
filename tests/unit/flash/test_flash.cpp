@@ -294,10 +294,6 @@ TEST_CASE("Flasher::execute surfaces an NRC on RequestDownload",
 }
 
 // ---------------------------------------------------------------------
-// execute — verify mismatch
-// ---------------------------------------------------------------------
-
-// ---------------------------------------------------------------------
 // Plan TOML I/O
 // ---------------------------------------------------------------------
 
@@ -411,6 +407,146 @@ TEST_CASE("read_plan + write_plan round-trip via the filesystem",
 TEST_CASE("read_plan errors clearly when the file does not exist",
           "[flash][plan][toml][file][error]") {
     auto const r = flash::read_plan("/no/such/path/should/not.exist.plan.toml");
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::FileNotFound);
+}
+
+// ---------------------------------------------------------------------
+// Manifest
+// ---------------------------------------------------------------------
+
+namespace {
+
+flash::FlashReport make_report_for(flash::SectorWrite const &w,
+                                    bool transferred = true,
+                                    bool verified    = true) {
+    flash::FlashReport r;
+    r.entered_session   = true;
+    r.silenced_bus      = true;
+    r.restored_bus      = true;
+    flash::SectorOutcome so{};
+    so.sector            = w.sector;
+    so.erased            = true;
+    so.downloaded        = true;
+    so.transferred       = transferred;
+    so.exited            = true;
+    so.check_deps_passed = true;
+    so.verified          = verified;
+    r.sectors.push_back(so);
+    r.bytes_transferred  = transferred ? w.sector.length : 0;
+    return r;
+}
+
+} // namespace
+
+TEST_CASE("build_manifest fills per-sector and overall CRC32s",
+          "[flash][manifest]") {
+    flash::FlashPlan plan;
+    plan.writes.push_back({{0x1000, 4}, {0xDE, 0xAD, 0xBE, 0xEF}});
+
+    std::string_view const plan_text = "[plan]\nschema_version = 1\n";
+
+    auto const report = make_report_for(plan.writes[0]);
+    auto const m      = flash::build_manifest(plan, plan_text, report);
+
+    REQUIRE(m.schema_version == flash::kManifestSchemaVersion);
+    REQUIRE_FALSE(m.created_at.empty());
+    REQUIRE(m.entries.size() == 1);
+    REQUIRE(m.entries[0].sector == plan.writes[0].sector);
+    REQUIRE(m.entries[0].transferred);
+    REQUIRE(m.entries[0].verified);
+    // overall_crc32 over a single transferred entry equals that entry's CRC.
+    REQUIRE(m.overall_crc32 == m.entries[0].data_crc32);
+    REQUIRE(m.plan_crc32 != 0);
+}
+
+TEST_CASE("build_manifest excludes non-transferred entries from overall_crc32",
+          "[flash][manifest]") {
+    flash::FlashPlan plan;
+    plan.writes.push_back({{0x1000, 4}, {0xAA, 0xAA, 0xAA, 0xAA}});
+    plan.writes.push_back({{0x2000, 4}, {0xBB, 0xBB, 0xBB, 0xBB}});
+
+    flash::FlashReport r;
+    r.sectors.push_back({plan.writes[0].sector,
+                          true, true, /*transferred=*/true, true, true, true});
+    r.sectors.push_back({plan.writes[1].sector,
+                          true, true, /*transferred=*/false, false, false, false});
+
+    auto const m = flash::build_manifest(plan, "", r);
+    REQUIRE(m.entries.size() == 2);
+    REQUIRE(m.entries[0].transferred);
+    REQUIRE_FALSE(m.entries[1].transferred);
+
+    // Same plan, but the second sector is also not transferred — overall
+    // CRC32 should match because only the first entry's bytes feed it.
+    flash::FlashReport r2;
+    r2.sectors.push_back(r.sectors[0]);
+    r2.sectors.push_back({plan.writes[1].sector});
+    auto const m2 = flash::build_manifest(plan, "", r2);
+    REQUIRE(m.overall_crc32 == m2.overall_crc32);
+}
+
+TEST_CASE("Manifest round-trips through format_manifest + parse_manifest",
+          "[flash][manifest][toml]") {
+    flash::Manifest m;
+    m.schema_version = flash::kManifestSchemaVersion;
+    m.created_at     = "2026-05-12T15:30:00Z";
+    m.plan_crc32     = 0xDEADBEEF;
+    m.overall_crc32  = 0xCAFEF00D;
+    m.entries.push_back({{0x1000, 4},   0x11223344, true, true});
+    m.entries.push_back({{0x2000, 0x100}, 0x55667788, true, false});
+
+    auto const text = flash::format_manifest(m);
+    auto const r    = flash::parse_manifest(text);
+    REQUIRE(r.has_value());
+    REQUIRE(r->schema_version == m.schema_version);
+    REQUIRE(r->created_at     == m.created_at);
+    REQUIRE(r->plan_crc32     == m.plan_crc32);
+    REQUIRE(r->overall_crc32  == m.overall_crc32);
+    REQUIRE(r->entries.size() == 2);
+    REQUIRE(r->entries[0].sector      == m.entries[0].sector);
+    REQUIRE(r->entries[0].data_crc32  == m.entries[0].data_crc32);
+    REQUIRE(r->entries[0].transferred == m.entries[0].transferred);
+    REQUIRE(r->entries[0].verified    == m.entries[0].verified);
+    REQUIRE(r->entries[1].sector      == m.entries[1].sector);
+    REQUIRE(r->entries[1].verified    == m.entries[1].verified);
+}
+
+TEST_CASE("parse_manifest rejects an unsupported schema_version",
+          "[flash][manifest][toml][error]") {
+    constexpr std::string_view text = "schema_version = 999\n";
+    auto const r = flash::parse_manifest(text);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::UnsupportedVersion);
+}
+
+TEST_CASE("read_manifest + write_manifest round-trip via the filesystem",
+          "[flash][manifest][toml][file]") {
+    auto const tmp = std::filesystem::temp_directory_path()
+                     / ("st_flash_manifest_"
+                        + std::to_string(std::random_device{}())
+                        + ".toml");
+
+    flash::Manifest m;
+    m.created_at    = "2026-05-12T00:00:00Z";
+    m.plan_crc32    = 0x12345678;
+    m.overall_crc32 = 0x87654321;
+    m.entries.push_back({{0xABCD, 16}, 0xABCDEF01, true, true});
+
+    REQUIRE(flash::write_manifest(tmp, m).has_value());
+    auto const r = flash::read_manifest(tmp);
+    REQUIRE(r.has_value());
+    REQUIRE(r->entries.size()        == 1);
+    REQUIRE(r->entries[0].data_crc32 == 0xABCDEF01);
+
+    std::error_code ec;
+    std::filesystem::remove(tmp, ec);
+}
+
+TEST_CASE("read_manifest errors clearly when the file does not exist",
+          "[flash][manifest][toml][file][error]") {
+    auto const r = flash::read_manifest(
+        "/no/such/path/should/not.exist.manifest.toml");
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::FileNotFound);
 }
