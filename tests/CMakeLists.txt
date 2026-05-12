@@ -23,6 +23,7 @@ add_executable(st_unit_tests
     unit/project/test_project.cpp
     unit/transport/test_mock.cpp
     unit/ecu/test_ssm.cpp
+    unit/ecu/test_uds.cpp
 )
 
 target_link_libraries(st_unit_tests
