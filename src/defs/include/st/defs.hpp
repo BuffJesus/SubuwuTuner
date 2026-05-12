@@ -100,6 +100,17 @@ struct Scaling {
 // Apply a scaling: raw -> engineering units.
 [[nodiscard]] double apply_scaling(double raw, Scaling const &s) noexcept;
 
+// Invert a scaling: engineering units -> raw. Returns InvalidArgument for a
+// degenerate scaling (e.g. linear with factor=0, or piecewise with a single
+// breakpoint), since the mapping has no unique inverse.
+[[nodiscard]] Result<double> invert_scaling(double engineering, Scaling const &s);
+
+// Write `value` (an integer or float, depending on `dt`) to `rom` at
+// `offset`. The value is first clamped to the representable range of the
+// target type, so callers don't have to. Returns OutOfRange if the write
+// would extend past the ROM.
+[[nodiscard]] Status write_typed(Rom &rom, std::size_t offset, DataType dt, double value);
+
 // Index axis for a table — values live in the ROM at a fixed offset.
 struct Axis {
     std::string id;
@@ -187,6 +198,15 @@ class Definition {
 
     [[nodiscard]] Result<TableData> read_table_values(Rom const &  rom,
                                                       Table const &table) const;
+
+    // Write `td.values` back to `rom` at `table.address`, inverting the
+    // table's scaling and using `table.data_type` for the per-cell byte
+    // layout. Axis bytes are NOT written — they are read-only metadata in
+    // most cases, and writing them would require re-resolving every table
+    // that shares the axis. The TableData's grid shape must match the
+    // axis lengths declared in the definition; otherwise InvalidArgument.
+    [[nodiscard]] Status write_table_values(Rom &rom, Table const &table,
+                                            TableData const &td) const;
 
     // Summary of a per-table diff between two ROMs of the same definition.
     struct TableDiff {

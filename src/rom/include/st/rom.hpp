@@ -39,6 +39,7 @@ class Rom {
     }
 
     [[nodiscard]] std::span<std::uint8_t const> data() const noexcept { return bytes_; }
+    [[nodiscard]] std::span<std::uint8_t>       data_mut() noexcept { return bytes_; }
     [[nodiscard]] std::size_t                   size() const noexcept { return bytes_.size(); }
     [[nodiscard]] bool                          empty() const noexcept { return bytes_.empty(); }
 
@@ -50,6 +51,12 @@ class Rom {
     [[nodiscard]] Result<std::uint32_t> read_u32_be(std::size_t offset) const noexcept;
     [[nodiscard]] Result<std::uint16_t> read_u16_le(std::size_t offset) const noexcept;
     [[nodiscard]] Result<std::uint32_t> read_u32_le(std::size_t offset) const noexcept;
+
+    [[nodiscard]] Status write_u8(std::size_t offset, std::uint8_t value) noexcept;
+    [[nodiscard]] Status write_u16_be(std::size_t offset, std::uint16_t value) noexcept;
+    [[nodiscard]] Status write_u16_le(std::size_t offset, std::uint16_t value) noexcept;
+    [[nodiscard]] Status write_u32_be(std::size_t offset, std::uint32_t value) noexcept;
+    [[nodiscard]] Status write_u32_le(std::size_t offset, std::uint32_t value) noexcept;
 
     // ASCII string read at a fixed offset. Stops at first NUL or `max_length`,
     // whichever comes first. Non-printable bytes (other than terminating NUL)

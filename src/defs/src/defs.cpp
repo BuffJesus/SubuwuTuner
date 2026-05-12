@@ -445,6 +445,118 @@ double apply_scaling(double raw, Scaling const &s) noexcept {
     return v.back();
 }
 
+Result<double> invert_scaling(double engineering, Scaling const &s) {
+    if (auto const *lin = std::get_if<LinearScaling>(&s.formula); lin != nullptr) {
+        if (lin->factor == 0.0) {
+            return failure(ErrorCode::InvalidArgument,
+                           "scaling '" + s.id + "' has factor=0; not invertible");
+        }
+        return (engineering - lin->offset) / lin->factor;
+    }
+    auto const *pw = std::get_if<PiecewiseScaling>(&s.formula);
+    if (pw == nullptr || pw->values.size() < 2) {
+        return failure(ErrorCode::InvalidArgument,
+                       "scaling '" + s.id + "' is degenerate; not invertible");
+    }
+    // Piecewise inverse: locate the value segment containing `engineering`
+    // and interpolate back to the breakpoint axis. Assumes a monotonic
+    // values[] (otherwise the inverse is not a function).
+    auto const &bp = pw->breakpoints;
+    auto const &v  = pw->values;
+    bool const  ascending = v.back() >= v.front();
+    if (ascending) {
+        if (engineering <= v.front()) return bp.front();
+        if (engineering >= v.back())  return bp.back();
+        for (std::size_t i = 1; i < v.size(); ++i) {
+            if (engineering <= v[i]) {
+                double const span = v[i] - v[i - 1];
+                if (span == 0.0) return bp[i - 1];
+                double const t = (engineering - v[i - 1]) / span;
+                return bp[i - 1] + t * (bp[i] - bp[i - 1]);
+            }
+        }
+        return bp.back();
+    }
+    // Descending: mirror the loop direction.
+    if (engineering >= v.front()) return bp.front();
+    if (engineering <= v.back())  return bp.back();
+    for (std::size_t i = 1; i < v.size(); ++i) {
+        if (engineering >= v[i]) {
+            double const span = v[i] - v[i - 1];
+            if (span == 0.0) return bp[i - 1];
+            double const t = (engineering - v[i - 1]) / span;
+            return bp[i - 1] + t * (bp[i] - bp[i - 1]);
+        }
+    }
+    return bp.back();
+}
+
+namespace {
+
+// Clamp `value` to the inclusive integer range [lo, hi] and round to nearest.
+template <typename T>
+T clamp_round(double value, double lo, double hi) noexcept {
+    if (value < lo) value = lo;
+    if (value > hi) value = hi;
+    // Round half away from zero, which matches what most calibrators expect.
+    double const rounded = value >= 0 ? value + 0.5 : value - 0.5;
+    return static_cast<T>(rounded);
+}
+
+} // namespace
+
+Status write_typed(Rom &rom, std::size_t offset, DataType dt, double value) {
+    switch (dt) {
+        case DataType::Uint8:
+            return rom.write_u8(offset, clamp_round<std::uint8_t>(value, 0.0, 255.0));
+        case DataType::Int8: {
+            auto const v = clamp_round<std::int8_t>(value, -128.0, 127.0);
+            return rom.write_u8(offset, static_cast<std::uint8_t>(v));
+        }
+        case DataType::Uint16Be:
+            return rom.write_u16_be(offset, clamp_round<std::uint16_t>(value, 0.0, 65535.0));
+        case DataType::Uint16Le:
+            return rom.write_u16_le(offset, clamp_round<std::uint16_t>(value, 0.0, 65535.0));
+        case DataType::Int16Be: {
+            auto const v = clamp_round<std::int16_t>(value, -32768.0, 32767.0);
+            return rom.write_u16_be(offset, static_cast<std::uint16_t>(v));
+        }
+        case DataType::Int16Le: {
+            auto const v = clamp_round<std::int16_t>(value, -32768.0, 32767.0);
+            return rom.write_u16_le(offset, static_cast<std::uint16_t>(v));
+        }
+        case DataType::Uint32Be:
+            return rom.write_u32_be(offset,
+                                    clamp_round<std::uint32_t>(value, 0.0, 4294967295.0));
+        case DataType::Uint32Le:
+            return rom.write_u32_le(offset,
+                                    clamp_round<std::uint32_t>(value, 0.0, 4294967295.0));
+        case DataType::Int32Be: {
+            auto const v =
+                clamp_round<std::int32_t>(value, -2147483648.0, 2147483647.0);
+            return rom.write_u32_be(offset, static_cast<std::uint32_t>(v));
+        }
+        case DataType::Int32Le: {
+            auto const v =
+                clamp_round<std::int32_t>(value, -2147483648.0, 2147483647.0);
+            return rom.write_u32_le(offset, static_cast<std::uint32_t>(v));
+        }
+        case DataType::Float32Be: {
+            std::uint32_t bits = 0;
+            float const   f    = static_cast<float>(value);
+            std::memcpy(&bits, &f, sizeof(bits));
+            return rom.write_u32_be(offset, bits);
+        }
+        case DataType::Float32Le: {
+            std::uint32_t bits = 0;
+            float const   f    = static_cast<float>(value);
+            std::memcpy(&bits, &f, sizeof(bits));
+            return rom.write_u32_le(offset, bits);
+        }
+    }
+    return failure(ErrorCode::InvalidArgument, "unknown DataType");
+}
+
 // ---- Definition ----------------------------------------------------------
 
 Result<Definition> Definition::from_toml_string(std::string_view toml) {
@@ -675,6 +787,64 @@ Result<Definition::TableData> Definition::read_table_values(Rom const &  rom,
         }
     }
     return td;
+}
+
+Status Definition::write_table_values(Rom &rom, Table const &table,
+                                       TableData const &td) const {
+    Axis const *ax = nullptr;
+    Axis const *ay = nullptr;
+    if (table.axis_x.has_value() && !table.axis_x->empty()) {
+        ax = find_axis(*table.axis_x);
+        if (ax == nullptr) {
+            return failure(ErrorCode::ParseError,
+                           "table '" + table.id + "' references unknown axis_x '"
+                               + *table.axis_x + "'");
+        }
+    }
+    if (table.dimensions >= 2 && table.axis_y.has_value() && !table.axis_y->empty()) {
+        ay = find_axis(*table.axis_y);
+        if (ay == nullptr) {
+            return failure(ErrorCode::ParseError,
+                           "table '" + table.id + "' references unknown axis_y '"
+                               + *table.axis_y + "'");
+        }
+    }
+
+    auto const cols = ax == nullptr ? std::size_t{1} : ax->length;
+    auto const rows = ay == nullptr ? std::size_t{1} : ay->length;
+    if (td.values.size() != rows) {
+        return failure(ErrorCode::InvalidArgument,
+                       "TableData has " + std::to_string(td.values.size())
+                           + " rows but table expects " + std::to_string(rows));
+    }
+    for (std::size_t r = 0; r < rows; ++r) {
+        if (td.values[r].size() != cols) {
+            return failure(ErrorCode::InvalidArgument,
+                           "TableData row " + std::to_string(r) + " has "
+                               + std::to_string(td.values[r].size())
+                               + " cols but table expects " + std::to_string(cols));
+        }
+    }
+
+    auto const  step = byte_size(table.data_type);
+    auto const *scal = find_scaling(table.scaling);
+
+    for (std::size_t r = 0; r < rows; ++r) {
+        for (std::size_t c = 0; c < cols; ++c) {
+            double eng = td.values[r][c];
+            double raw = eng;
+            if (scal != nullptr) {
+                auto const inv = invert_scaling(eng, *scal);
+                if (!inv.has_value()) return failure(inv.error());
+                raw = *inv;
+            }
+            auto const off = table.address + (r * cols + c) * step;
+            if (auto s = write_typed(rom, off, table.data_type, raw); !s.has_value()) {
+                return s;
+            }
+        }
+    }
+    return ok();
 }
 
 Result<Definition::TableDiff> Definition::diff_table(Rom const &  a,

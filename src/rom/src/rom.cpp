@@ -142,6 +142,54 @@ Result<std::string> Rom::read_ascii(std::size_t offset, std::size_t max_length) 
     return out;
 }
 
+Status Rom::write_u8(std::size_t offset, std::uint8_t value) noexcept {
+    if (offset >= bytes_.size()) {
+        return failure(ErrorCode::OutOfRange);
+    }
+    bytes_[offset] = value;
+    return ok();
+}
+
+Status Rom::write_u16_be(std::size_t offset, std::uint16_t value) noexcept {
+    if (offset > bytes_.size() || bytes_.size() - offset < 2) {
+        return failure(ErrorCode::OutOfRange);
+    }
+    bytes_[offset]     = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
+    bytes_[offset + 1] = static_cast<std::uint8_t>(value & 0xFFU);
+    return ok();
+}
+
+Status Rom::write_u16_le(std::size_t offset, std::uint16_t value) noexcept {
+    if (offset > bytes_.size() || bytes_.size() - offset < 2) {
+        return failure(ErrorCode::OutOfRange);
+    }
+    bytes_[offset]     = static_cast<std::uint8_t>(value & 0xFFU);
+    bytes_[offset + 1] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
+    return ok();
+}
+
+Status Rom::write_u32_be(std::size_t offset, std::uint32_t value) noexcept {
+    if (offset > bytes_.size() || bytes_.size() - offset < 4) {
+        return failure(ErrorCode::OutOfRange);
+    }
+    bytes_[offset]     = static_cast<std::uint8_t>((value >> 24U) & 0xFFU);
+    bytes_[offset + 1] = static_cast<std::uint8_t>((value >> 16U) & 0xFFU);
+    bytes_[offset + 2] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
+    bytes_[offset + 3] = static_cast<std::uint8_t>(value & 0xFFU);
+    return ok();
+}
+
+Status Rom::write_u32_le(std::size_t offset, std::uint32_t value) noexcept {
+    if (offset > bytes_.size() || bytes_.size() - offset < 4) {
+        return failure(ErrorCode::OutOfRange);
+    }
+    bytes_[offset]     = static_cast<std::uint8_t>(value & 0xFFU);
+    bytes_[offset + 1] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
+    bytes_[offset + 2] = static_cast<std::uint8_t>((value >> 16U) & 0xFFU);
+    bytes_[offset + 3] = static_cast<std::uint8_t>((value >> 24U) & 0xFFU);
+    return ok();
+}
+
 std::uint32_t Rom::crc32() const noexcept {
     return st::crc32(std::span<std::uint8_t const>{bytes_});
 }

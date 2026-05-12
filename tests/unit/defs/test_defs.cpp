@@ -573,6 +573,176 @@ axis_x     = "x"
     REQUIRE(td.error().code() == st::ErrorCode::OutOfRange);
 }
 
+TEST_CASE("invert_scaling reverses linear", "[defs][invert_scaling]") {
+    st::Scaling s;
+    s.formula = st::LinearScaling{.factor = 0.5, .offset = 10.0};
+    auto const r = st::invert_scaling(60.0, s);  // 60 = raw*0.5 + 10 -> raw = 100
+    REQUIRE(r.has_value());
+    REQUIRE(*r == 100.0);
+}
+
+TEST_CASE("invert_scaling refuses factor=0", "[defs][invert_scaling]") {
+    st::Scaling s;
+    s.formula = st::LinearScaling{.factor = 0.0, .offset = 0.0};
+    auto const r = st::invert_scaling(1.0, s);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("invert_scaling reverses ascending piecewise",
+          "[defs][invert_scaling]") {
+    st::Scaling s;
+    s.formula = st::PiecewiseScaling{
+        .breakpoints = {0.0, 100.0, 200.0},
+        .values      = {1.0, 2.0,   3.0},
+    };
+    REQUIRE(*st::invert_scaling(1.0, s) == 0.0);
+    REQUIRE(*st::invert_scaling(1.5, s) == 50.0);
+    REQUIRE(*st::invert_scaling(2.5, s) == 150.0);
+    REQUIRE(*st::invert_scaling(3.0, s) == 200.0);
+}
+
+TEST_CASE("write_typed clamps and rounds correctly", "[defs][write_typed]") {
+    std::vector<std::uint8_t> bytes(8, 0);
+    auto                      rom = st::Rom::from_bytes(std::move(bytes));
+
+    REQUIRE(st::write_typed(rom, 0, st::DataType::Uint8, 14.6).has_value());
+    REQUIRE(rom.data()[0] == 15); // rounded
+
+    REQUIRE(st::write_typed(rom, 1, st::DataType::Uint8, 999.0).has_value());
+    REQUIRE(rom.data()[1] == 255); // clamped
+
+    REQUIRE(st::write_typed(rom, 2, st::DataType::Uint8, -5.0).has_value());
+    REQUIRE(rom.data()[2] == 0); // clamped
+
+    REQUIRE(st::write_typed(rom, 4, st::DataType::Uint16Be, 0x1234).has_value());
+    REQUIRE(rom.data()[4] == 0x12);
+    REQUIRE(rom.data()[5] == 0x34);
+}
+
+TEST_CASE("write_typed round-trips Int16 negatives", "[defs][write_typed]") {
+    std::vector<std::uint8_t> bytes(4, 0);
+    auto                      rom = st::Rom::from_bytes(std::move(bytes));
+
+    REQUIRE(st::write_typed(rom, 0, st::DataType::Int16Be, -1.0).has_value());
+    auto const r = st::read_typed(rom, 0, st::DataType::Int16Be);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == -1.0);
+}
+
+TEST_CASE("write_typed round-trips Float32", "[defs][write_typed][float]") {
+    std::vector<std::uint8_t> bytes(8, 0);
+    auto                      rom = st::Rom::from_bytes(std::move(bytes));
+
+    REQUIRE(st::write_typed(rom, 0, st::DataType::Float32Be, 3.14159f).has_value());
+    auto const r = st::read_typed(rom, 0, st::DataType::Float32Be);
+    REQUIRE(r.has_value());
+    REQUIRE(static_cast<float>(*r) == 3.14159f);
+}
+
+TEST_CASE("Definition::write_table_values round-trips edits through ROM bytes",
+          "[defs][write_table_values][round_trip]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 64
+
+[[scaling]]
+id        = "x0_5"
+formula   = "linear"
+factor    = 0.5
+data_type = "uint8"
+
+[[axis]]
+id        = "rpm"
+type      = "static"
+address   = 0
+length    = 4
+data_type = "uint8"
+
+[[axis]]
+id        = "load"
+type      = "static"
+address   = 4
+length    = 2
+data_type = "uint8"
+
+[[table]]
+id         = "fuel"
+dimensions = 2
+address    = 8
+data_type  = "uint8"
+scaling    = "x0_5"
+axis_x     = "rpm"
+axis_y     = "load"
+)toml");
+    REQUIRE(def_r.has_value());
+
+    std::vector<std::uint8_t> bytes{
+        1, 2, 3, 4,                       // rpm axis (raw)
+        10, 20, 0, 0,                     // load axis (2 values then padding)
+        2, 4, 6, 8, 10, 12, 14, 16,       // 2x4 fuel table raw -> 1,2,3,4 / 5,6,7,8 scaled
+    };
+    auto                      rom   = st::Rom::from_bytes(std::move(bytes));
+    auto const *              fuel  = def_r->find_table("fuel");
+    auto const                read1 = def_r->read_table_values(rom, *fuel);
+    REQUIRE(read1.has_value());
+    REQUIRE(read1->values == std::vector<std::vector<double>>{{1.0, 2.0, 3.0, 4.0},
+                                                              {5.0, 6.0, 7.0, 8.0}});
+
+    // Edit: bump everything by 1 (engineering units).
+    auto td = *read1;
+    for (auto &row : td.values) {
+        for (auto &v : row) v += 1.0;
+    }
+
+    REQUIRE(def_r->write_table_values(rom, *fuel, td).has_value());
+
+    auto const read2 = def_r->read_table_values(rom, *fuel);
+    REQUIRE(read2.has_value());
+    REQUIRE(read2->values == std::vector<std::vector<double>>{{2.0, 3.0, 4.0, 5.0},
+                                                              {6.0, 7.0, 8.0, 9.0}});
+
+    // Underlying raw bytes should be the edited values * 2.
+    REQUIRE(rom.data()[8]  == 4);  // raw for 2.0
+    REQUIRE(rom.data()[15] == 18); // raw for 9.0
+}
+
+TEST_CASE("Definition::write_table_values rejects mismatched grid shapes",
+          "[defs][write_table_values]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 32
+
+[[axis]]
+id        = "x"
+type      = "static"
+address   = 0
+length    = 4
+data_type = "uint8"
+
+[[table]]
+id         = "t"
+dimensions = 1
+address    = 8
+data_type  = "uint8"
+axis_x     = "x"
+)toml");
+    REQUIRE(def_r.has_value());
+
+    std::vector<std::uint8_t> bytes(32, 0);
+    auto                      rom = st::Rom::from_bytes(std::move(bytes));
+
+    st::Definition::TableData wrong;
+    wrong.values = {{1, 2, 3}}; // 3 cols, expected 4
+    auto const r = def_r->write_table_values(rom, *def_r->find_table("t"), wrong);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
 TEST_CASE("Definition::diff_table reports zero changes when ROMs are identical",
           "[defs][diff_table]") {
     auto const def_r = st::Definition::from_toml_string(R"toml(
