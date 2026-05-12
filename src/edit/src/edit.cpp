@@ -205,4 +205,9 @@ void History::clear() noexcept {
     cursor_ = 0;
 }
 
+void History::load(std::vector<Edit> edits, std::size_t cursor) noexcept {
+    edits_  = std::move(edits);
+    cursor_ = cursor > edits_.size() ? edits_.size() : cursor;
+}
+
 } // namespace st::edit

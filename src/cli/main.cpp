@@ -571,6 +571,13 @@ int cmd_project_edit(int argc, char *argv[]) {
         return 2;
     }
 
+    // Capture before-snapshot (for the history record).
+    auto before = st::edit::snapshot(*td, rect);
+    if (!before.has_value()) {
+        std::fprintf(stderr, "project-edit: %s\n", before.error().to_string().c_str());
+        return 1;
+    }
+
     st::Status status = st::ok();
     if (*op == "set")              status = st::edit::set_cells(*td, rect, *value);
     else if (*op == "add")         status = st::edit::add_cells(*td, rect, *value);
@@ -587,11 +594,27 @@ int cmd_project_edit(int argc, char *argv[]) {
         return 1;
     }
 
+    auto after = st::edit::snapshot(*td, rect);
+    if (!after.has_value()) {
+        std::fprintf(stderr, "project-edit: %s\n", after.error().to_string().c_str());
+        return 1;
+    }
+
     auto wb = proj->definition().write_table_values(proj->working_rom(), *table, *td);
     if (!wb.has_value()) {
         std::fprintf(stderr, "project-edit: writeback: %s\n", wb.error().to_string().c_str());
         return 1;
     }
+
+    // Build a short human-readable description for the history record.
+    std::string desc{*op};
+    if (op_needs_value) {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), " %g", *value);
+        desc.append(buf);
+    }
+    proj->history().record({table->id, std::move(*before), std::move(*after),
+                            std::move(desc)});
 
     if (auto s = proj->save_working_rom(); !s.has_value()) {
         std::fprintf(stderr, "project-edit: save: %s\n", s.error().to_string().c_str());

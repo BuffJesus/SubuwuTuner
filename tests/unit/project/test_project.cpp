@@ -172,6 +172,81 @@ TEST_CASE("Project::open refuses a non-project directory",
     REQUIRE(p.error().code() == st::ErrorCode::FileNotFound);
 }
 
+TEST_CASE("Project history round-trips through edits.toml",
+          "[project][history]") {
+    TempDir td;
+    auto const  pack_dir = make_pack(td.path / "pack");
+    auto const  rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "h.stune";
+
+    {
+        auto p = st::Project::create(proj_dir, rom_path, pack_dir, "hist");
+        REQUIRE(p.has_value());
+
+        // Synthesize two edits by hand. (The CLI normally drives this; for
+        // a unit test we forge them so we know exactly what to expect on
+        // reload.)
+        st::edit::Snapshot before;
+        before.rect   = {0, 0, 0, 1};
+        before.values = {{1.0, 2.0}};
+        st::edit::Snapshot after;
+        after.rect   = {0, 0, 0, 1};
+        after.values = {{10.0, 20.0}};
+
+        p->history().record({"fuel_map", before, after, "set 10/20"});
+
+        st::edit::Snapshot before2;
+        before2.rect   = {1, 1, 0, 1};
+        before2.values = {{5.0, 6.0}};
+        st::edit::Snapshot after2;
+        after2.rect   = {1, 1, 0, 1};
+        after2.values = {{50.0, 60.0}};
+        p->history().record({"boost_map", before2, after2, "set 50/60"});
+
+        REQUIRE(p->save_working_rom().has_value());
+        REQUIRE(std::filesystem::exists(proj_dir / "edits.toml"));
+    }
+
+    // Reopen and confirm history was restored.
+    auto reopened = st::Project::open(proj_dir);
+    REQUIRE(reopened.has_value());
+    REQUIRE(reopened->history().size() == 2);
+    REQUIRE(reopened->history().cursor() == 2);
+
+    auto const &records = reopened->history().records();
+    REQUIRE(records[0].table_id == "fuel_map");
+    REQUIRE(records[0].description == "set 10/20");
+    REQUIRE(records[0].before.values == std::vector<std::vector<double>>{{1.0, 2.0}});
+    REQUIRE(records[0].after.values == std::vector<std::vector<double>>{{10.0, 20.0}});
+
+    REQUIRE(records[1].table_id == "boost_map");
+    REQUIRE(records[1].after.values == std::vector<std::vector<double>>{{50.0, 60.0}});
+    REQUIRE(records[1].after.rect.r_start == 1);
+    REQUIRE(records[1].after.rect.c_end == 1);
+
+    // can_undo / can_redo reflect the restored cursor.
+    REQUIRE(reopened->history().can_undo());
+    REQUIRE_FALSE(reopened->history().can_redo());
+}
+
+TEST_CASE("Project history empty on a fresh project until edits land",
+          "[project][history]") {
+    TempDir td;
+    auto const  pack_dir = make_pack(td.path / "pack");
+    auto const  rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+
+    auto const proj_dir = td.path / "fresh.stune";
+    auto       p        = st::Project::create(proj_dir, rom_path, pack_dir, "fresh");
+    REQUIRE(p.has_value());
+    REQUIRE(p->history().size() == 0);
+
+    REQUIRE(p->save_working_rom().has_value());
+    // No edits ever recorded -> no edits.toml on disk.
+    REQUIRE_FALSE(std::filesystem::exists(proj_dir / "edits.toml"));
+}
+
 TEST_CASE("Project::open refuses a future schema_version",
           "[project][open][schema]") {
     TempDir td;

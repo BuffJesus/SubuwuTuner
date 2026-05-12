@@ -114,6 +114,16 @@ class History {
     [[nodiscard]] std::size_t  size() const noexcept { return edits_.size(); }
     [[nodiscard]] std::size_t  cursor() const noexcept { return cursor_; }
 
+    // Read-only access to the underlying edit list. Useful for persistence
+    // layers that need to serialize the whole record without walking via
+    // undo/redo. Index order matches insertion order.
+    [[nodiscard]] std::vector<Edit> const &records() const noexcept { return edits_; }
+
+    // Restore a History from an already-known sequence of edits and a
+    // cursor position. Existing contents are discarded. Used by loaders
+    // (e.g. .stune project files).
+    void load(std::vector<Edit> edits, std::size_t cursor) noexcept;
+
   private:
     std::vector<Edit> edits_;
     std::size_t       cursor_{0};

@@ -6,6 +6,7 @@
 #include "st/core/error.hpp"
 #include "st/core/result.hpp"
 #include "st/defs.hpp"
+#include "st/edit.hpp"
 #include "st/rom.hpp"
 
 #include <toml++/toml.hpp>
@@ -61,6 +62,140 @@ Status copy_bytes(std::filesystem::path const &src, std::filesystem::path const 
                        "copy failed: " + src.string() + " -> " + dst.string());
     }
     return ok();
+}
+
+
+// ---- History serialization ---------------------------------------------
+// edits.toml schema:
+//
+//   schema_version = 1
+//   cursor         = N           # how many edits are "applied"
+//
+//   [[edit]]
+//   table_id    = "..."
+//   description = "..."
+//   [edit.before]
+//     r_start = ..  r_end = ..  c_start = ..  c_end = ..
+//     values  = [[...], [...]]   # 2D row-major
+//   [edit.after]
+//     r_start = ..  r_end = ..  c_start = ..  c_end = ..
+//     values  = [[...], [...]]
+
+void render_snapshot(std::ostringstream &ss, char const *name,
+                     edit::Snapshot const &s) {
+    ss << "  [edit." << name << "]\n";
+    ss << "  r_start = " << s.rect.r_start << "\n";
+    ss << "  r_end   = " << s.rect.r_end << "\n";
+    ss << "  c_start = " << s.rect.c_start << "\n";
+    ss << "  c_end   = " << s.rect.c_end << "\n";
+    ss << "  values = [\n";
+    for (auto const &row : s.values) {
+        ss << "    [";
+        for (std::size_t i = 0; i < row.size(); ++i) {
+            if (i > 0) ss << ", ";
+            ss << row[i];
+        }
+        ss << "],\n";
+    }
+    ss << "  ]\n";
+}
+
+std::string render_history_toml(edit::History const &h) {
+    std::ostringstream ss;
+    ss << "# Edit history for this SubuwuTuner project. Generated\n";
+    ss << "# automatically; hand-edits are discouraged but possible.\n";
+    ss << "schema_version = 1\n";
+    ss << "cursor = " << h.cursor() << "\n";
+    for (auto const &e : h.records()) {
+        ss << "\n[[edit]]\n";
+        ss << "  table_id    = \"" << e.table_id << "\"\n";
+        ss << "  description = \"" << e.description << "\"\n";
+        render_snapshot(ss, "before", e.before);
+        render_snapshot(ss, "after", e.after);
+    }
+    return std::move(ss).str();
+}
+
+Result<edit::Snapshot> parse_snapshot(toml::table const &t) {
+    edit::Snapshot s;
+    s.rect.r_start = static_cast<std::size_t>(t["r_start"].value_or<std::int64_t>(0));
+    s.rect.r_end   = static_cast<std::size_t>(t["r_end"].value_or<std::int64_t>(0));
+    s.rect.c_start = static_cast<std::size_t>(t["c_start"].value_or<std::int64_t>(0));
+    s.rect.c_end   = static_cast<std::size_t>(t["c_end"].value_or<std::int64_t>(0));
+
+    auto const *rows = t["values"].as_array();
+    if (rows == nullptr) {
+        return failure(ErrorCode::ParseError, "edit snapshot missing values array");
+    }
+    for (auto const &row_node : *rows) {
+        auto const *row_arr = row_node.as_array();
+        if (row_arr == nullptr) {
+            return failure(ErrorCode::ParseError, "edit snapshot row is not an array");
+        }
+        std::vector<double> row;
+        row.reserve(row_arr->size());
+        for (auto const &cell : *row_arr) {
+            if (auto v = cell.value<double>(); v.has_value()) {
+                row.push_back(*v);
+            } else if (auto i = cell.value<std::int64_t>(); i.has_value()) {
+                row.push_back(static_cast<double>(*i));
+            } else {
+                return failure(ErrorCode::ParseError,
+                               "edit snapshot cell is neither float nor int");
+            }
+        }
+        s.values.push_back(std::move(row));
+    }
+    return s;
+}
+
+Result<edit::History> parse_history_toml(std::string_view text) {
+    toml::table tbl;
+    try {
+        tbl = toml::parse(text);
+    } catch (toml::parse_error const &e) {
+        std::string msg{"edits.toml parse: "};
+        msg.append(e.description());
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    int const schema = static_cast<int>(tbl["schema_version"].value_or<std::int64_t>(0));
+    if (schema > 1) {
+        return failure(ErrorCode::UnsupportedVersion,
+                       "edits.toml schema_version " + std::to_string(schema) + " > 1");
+    }
+    auto const cursor =
+        static_cast<std::size_t>(tbl["cursor"].value_or<std::int64_t>(0));
+
+    std::vector<edit::Edit> edits;
+    if (auto const *arr = tbl["edit"].as_array(); arr != nullptr) {
+        for (auto const &el : *arr) {
+            auto const *et = el.as_table();
+            if (et == nullptr) {
+                return failure(ErrorCode::ParseError, "[[edit]] element is not a table");
+            }
+            edit::Edit e;
+            e.table_id    = (*et)["table_id"].value_or<std::string>("");
+            e.description = (*et)["description"].value_or<std::string>("");
+
+            auto const *before_t = (*et)["before"].as_table();
+            auto const *after_t  = (*et)["after"].as_table();
+            if (before_t == nullptr || after_t == nullptr) {
+                return failure(ErrorCode::ParseError,
+                               "[[edit]] missing [edit.before] or [edit.after]");
+            }
+            auto before_r = parse_snapshot(*before_t);
+            if (!before_r.has_value()) return failure(before_r.error());
+            auto after_r = parse_snapshot(*after_t);
+            if (!after_r.has_value()) return failure(after_r.error());
+            e.before = std::move(*before_r);
+            e.after  = std::move(*after_r);
+            edits.push_back(std::move(e));
+        }
+    }
+
+    edit::History h;
+    h.load(std::move(edits), cursor);
+    return h;
 }
 
 std::string render_project_toml(Project const &p, std::uint32_t source_crc32,
@@ -247,6 +382,18 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
     if (!def.has_value()) return failure(def.error());
     p.def_ = std::move(*def);
 
+    // edits.toml is optional. If present, restore the edit history so
+    // cross-session undo works.
+    auto const edits_path = project_dir / "edits.toml";
+    if (std::filesystem::exists(edits_path, ec) && !ec) {
+        std::ifstream      ein{edits_path};
+        std::ostringstream econtents;
+        econtents << ein.rdbuf();
+        auto hist = parse_history_toml(econtents.str());
+        if (!hist.has_value()) return failure(hist.error());
+        p.history_ = std::move(*hist);
+    }
+
     return p;
 }
 
@@ -260,6 +407,14 @@ Status Project::save_working_rom() {
               static_cast<std::streamsize>(working_.size()));
     if (!out) {
         return failure(ErrorCode::IoFailure, "write failed: " + path.string());
+    }
+
+    // Persist edit history alongside, if there's anything to save.
+    if (history_.size() > 0) {
+        auto const edits_text = render_history_toml(history_);
+        if (auto s = write_file(dir_ / "edits.toml", edits_text); !s.has_value()) {
+            return s;
+        }
     }
     return save_metadata();
 }

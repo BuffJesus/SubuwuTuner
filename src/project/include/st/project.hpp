@@ -6,6 +6,7 @@
 
 #include "st/core/result.hpp"
 #include "st/defs.hpp"
+#include "st/edit.hpp"
 #include "st/rom.hpp"
 
 #include <cstdint>
@@ -68,6 +69,9 @@ class Project {
     [[nodiscard]] Rom &             working_rom() noexcept { return working_; }
     [[nodiscard]] Definition const &definition() const noexcept { return def_; }
 
+    [[nodiscard]] edit::History const &history() const noexcept { return history_; }
+    [[nodiscard]] edit::History &      history() noexcept { return history_; }
+
     [[nodiscard]] std::uint32_t source_crc32_at_create() const noexcept {
         return source_crc32_;
     }
@@ -85,9 +89,10 @@ class Project {
     std::filesystem::path working_rel_{"working.bin"};
     std::filesystem::path def_rel_;
 
-    Rom        source_{Rom::from_bytes({})};
-    Rom        working_{Rom::from_bytes({})};
-    Definition def_;
+    Rom           source_{Rom::from_bytes({})};
+    Rom           working_{Rom::from_bytes({})};
+    Definition    def_;
+    edit::History history_;
 };
 
 } // namespace st
