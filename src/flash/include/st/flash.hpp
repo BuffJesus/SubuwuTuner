@@ -201,13 +201,30 @@ class Flasher {
 //   address = 0x00001234
 //   data    = "DE AD BE EF"
 //
-// Round-trip stable: `parse_plan(format_plan(p))` yields a plan whose
-// fields all match `p`. The schema_version field exists so future
-// schema changes can be detected and rejected cleanly.
+// Each `[[write]]` carries `data` (inline hex string) OR `data_file`
+// (path to a raw binary), never both. `data_file` is the right choice
+// for realistic flash payloads (64 KB sectors become 192 KB of hex
+// otherwise). Relative `data_file` paths resolve against `base_dir`
+// — `read_plan` passes the plan file's parent directory automatically;
+// callers of `parse_plan` who pass plan text from a string must supply
+// `base_dir` explicitly if their plans contain relative `data_file`
+// references.
+//
+// Round-trip: a plan loaded via `data_file` formats back as inline
+// `data`. The in-memory `FlashPlan` is authoritative; TOML is one
+// serialization. Users who want `data_file` persisted across a
+// load/save cycle hand-edit the result.
+//
+// Round-trip stable for plans without `data_file`:
+// `parse_plan(format_plan(p))` yields a plan whose fields all match
+// `p`. The schema_version field exists so future schema changes can
+// be detected and rejected cleanly.
 
 inline constexpr int kPlanSchemaVersion = 1;
 
-[[nodiscard]] Result<FlashPlan> parse_plan(std::string_view text);
+[[nodiscard]] Result<FlashPlan> parse_plan(
+    std::string_view             text,
+    std::filesystem::path const &base_dir = {});
 
 [[nodiscard]] Result<FlashPlan> read_plan(std::filesystem::path const &path);
 

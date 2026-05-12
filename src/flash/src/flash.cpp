@@ -430,7 +430,41 @@ std::string format_hex_bytes(std::span<std::uint8_t const> bytes) {
 
 } // namespace
 
-Result<FlashPlan> parse_plan(std::string_view text) {
+namespace {
+
+// Load a binary file into a byte vector. Used by parse_plan when a
+// [[write]] uses `data_file` instead of inline `data`.
+Result<std::vector<std::uint8_t>> read_binary_file(
+    std::filesystem::path const &path) {
+    std::ifstream in{path, std::ios::binary};
+    if (!in) {
+        return failure(ErrorCode::FileNotFound,
+                       "flash plan: cannot open data_file: " + path.string());
+    }
+    in.seekg(0, std::ios::end);
+    auto const size = in.tellg();
+    if (size < 0) {
+        return failure(ErrorCode::IoFailure,
+                       "flash plan: cannot size data_file: " + path.string());
+    }
+    in.seekg(0, std::ios::beg);
+    std::vector<std::uint8_t> out(static_cast<std::size_t>(size));
+    if (size > 0) {
+        in.read(reinterpret_cast<char *>(out.data()),
+                static_cast<std::streamsize>(size));
+        if (!in) {
+            return failure(ErrorCode::IoFailure,
+                           "flash plan: short read on data_file: "
+                           + path.string());
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+Result<FlashPlan> parse_plan(std::string_view             text,
+                             std::filesystem::path const &base_dir) {
     toml::table root;
     try {
         root = toml::parse(text);
@@ -517,25 +551,57 @@ Result<FlashPlan> parse_plan(std::string_view text) {
         }
         sw.sector.address = static_cast<std::uint32_t>(addr_val);
 
-        auto const *data_node = tbl->get_as<std::string>("data");
-        if (data_node == nullptr) {
+        auto const *data_node      = tbl->get_as<std::string>("data");
+        auto const *data_file_node = tbl->get_as<std::string>("data_file");
+        if (data_node != nullptr && data_file_node != nullptr) {
             return failure(ErrorCode::ParseError,
                            "flash plan: [[write]] " + std::to_string(idx)
-                           + ": missing 'data' (hex string)");
+                           + ": both 'data' and 'data_file' present "
+                           "— pick one");
         }
-        auto bytes = parse_hex_bytes(data_node->get());
-        if (!bytes.has_value()) {
-            return failure(bytes.error().code(),
-                           "flash plan: [[write]] " + std::to_string(idx)
-                           + ": " + std::string{bytes.error().message()});
-        }
-        if (bytes->empty()) {
+        std::vector<std::uint8_t> bytes_buf;
+        if (data_node != nullptr) {
+            auto parsed = parse_hex_bytes(data_node->get());
+            if (!parsed.has_value()) {
+                return failure(parsed.error().code(),
+                               "flash plan: [[write]] " + std::to_string(idx)
+                               + ": " + std::string{parsed.error().message()});
+            }
+            bytes_buf = std::move(*parsed);
+        } else if (data_file_node != nullptr) {
+            std::filesystem::path file_path{data_file_node->get()};
+            if (file_path.is_relative()) {
+                if (base_dir.empty()) {
+                    return failure(ErrorCode::InvalidArgument,
+                                   "flash plan: [[write]] "
+                                   + std::to_string(idx)
+                                   + ": relative data_file '"
+                                   + file_path.string()
+                                   + "' but no base_dir supplied to "
+                                     "parse_plan");
+                }
+                file_path = base_dir / file_path;
+            }
+            auto loaded = read_binary_file(file_path);
+            if (!loaded.has_value()) {
+                return failure(loaded.error().code(),
+                               "flash plan: [[write]] " + std::to_string(idx)
+                               + ": " + std::string{loaded.error().message()});
+            }
+            bytes_buf = std::move(*loaded);
+        } else {
             return failure(ErrorCode::ParseError,
                            "flash plan: [[write]] " + std::to_string(idx)
-                           + ": 'data' must contain at least one byte");
+                           + ": missing 'data' (hex string) or 'data_file' "
+                             "(path to raw binary)");
         }
-        sw.sector.length = static_cast<std::uint32_t>(bytes->size());
-        sw.data          = std::move(*bytes);
+        if (bytes_buf.empty()) {
+            return failure(ErrorCode::ParseError,
+                           "flash plan: [[write]] " + std::to_string(idx)
+                           + ": data must contain at least one byte");
+        }
+        sw.sector.length = static_cast<std::uint32_t>(bytes_buf.size());
+        sw.data          = std::move(bytes_buf);
 
         plan.writes.push_back(std::move(sw));
         ++idx;
@@ -555,7 +621,7 @@ Result<FlashPlan> read_plan(std::filesystem::path const &path) {
     }
     std::ostringstream ss;
     ss << in.rdbuf();
-    return parse_plan(ss.str());
+    return parse_plan(ss.str(), path.parent_path());
 }
 
 std::string format_plan(FlashPlan const &plan) {

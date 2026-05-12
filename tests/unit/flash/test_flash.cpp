@@ -11,7 +11,10 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <ios>
 #include <random>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <vector>
@@ -407,6 +410,118 @@ TEST_CASE("read_plan + write_plan round-trip via the filesystem",
 TEST_CASE("read_plan errors clearly when the file does not exist",
           "[flash][plan][toml][file][error]") {
     auto const r = flash::read_plan("/no/such/path/should/not.exist.plan.toml");
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::FileNotFound);
+}
+
+// ---------------------------------------------------------------------
+// Plan TOML — data_file
+// ---------------------------------------------------------------------
+
+namespace {
+
+// Build a temp directory and write a binary payload to it; returns the
+// path. Caller removes after use.
+std::filesystem::path write_temp_binary(std::vector<std::uint8_t> const &bytes,
+                                          char const *name) {
+    auto const p = std::filesystem::temp_directory_path()
+                   / ("st_flash_df_"
+                      + std::to_string(std::random_device{}()) + "_" + name);
+    std::ofstream out{p, std::ios::binary};
+    out.write(reinterpret_cast<char const *>(bytes.data()),
+              static_cast<std::streamsize>(bytes.size()));
+    return p;
+}
+
+} // namespace
+
+TEST_CASE("parse_plan loads bytes via data_file (absolute path)",
+          "[flash][plan][toml][data_file]") {
+    auto const bin = write_temp_binary({0xCA, 0xFE, 0xF0, 0x0D}, "abs.bin");
+    std::string text =
+        "[plan]\nschema_version = 1\n\n[[write]]\naddress = 0x4000\n"
+        "data_file = \"" + bin.generic_string() + "\"\n";
+    auto const r = flash::parse_plan(text);
+    REQUIRE(r.has_value());
+    REQUIRE(r->writes.size() == 1);
+    REQUIRE(r->writes[0].sector.length == 4);
+    REQUIRE(r->writes[0].data
+            == std::vector<std::uint8_t>{0xCA, 0xFE, 0xF0, 0x0D});
+    std::error_code ec;
+    std::filesystem::remove(bin, ec);
+}
+
+TEST_CASE("read_plan resolves a relative data_file against the plan dir",
+          "[flash][plan][toml][data_file]") {
+    // Make a temp dir, drop a binary AND a plan TOML referencing it
+    // relatively, then read_plan and check the bytes loaded.
+    auto const dir = std::filesystem::temp_directory_path()
+                     / ("st_flash_dfdir_"
+                        + std::to_string(std::random_device{}()));
+    std::filesystem::create_directories(dir);
+    auto const bin_name = "payload.bin";
+    auto const bin_path = dir / bin_name;
+    std::ofstream out{bin_path, std::ios::binary};
+    out.put(static_cast<char>(0x11));
+    out.put(static_cast<char>(0x22));
+    out.put(static_cast<char>(0x33));
+    out.close();
+    auto const plan_path = dir / "p.toml";
+    std::ofstream pout{plan_path};
+    pout << "[plan]\nschema_version = 1\n"
+            "[[write]]\naddress = 0x100\n"
+            "data_file = \"payload.bin\"\n";
+    pout.close();
+    auto const r = flash::read_plan(plan_path);
+    REQUIRE(r.has_value());
+    REQUIRE(r->writes.size() == 1);
+    REQUIRE(r->writes[0].data
+            == std::vector<std::uint8_t>{0x11, 0x22, 0x33});
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("parse_plan rejects relative data_file without base_dir",
+          "[flash][plan][toml][data_file][error]") {
+    constexpr std::string_view text =
+        "[plan]\nschema_version = 1\n"
+        "[[write]]\naddress = 0\ndata_file = \"payload.bin\"\n";
+    auto const r = flash::parse_plan(text);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("parse_plan rejects both data and data_file present",
+          "[flash][plan][toml][data_file][error]") {
+    constexpr std::string_view text =
+        "[plan]\nschema_version = 1\n"
+        "[[write]]\naddress = 0\ndata = \"AA\"\n"
+        "data_file = \"x.bin\"\n";
+    auto const r = flash::parse_plan(text);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("parse_plan rejects neither data nor data_file present",
+          "[flash][plan][toml][data_file][error]") {
+    constexpr std::string_view text =
+        "[plan]\nschema_version = 1\n[[write]]\naddress = 0\n";
+    auto const r = flash::parse_plan(text);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("parse_plan surfaces a missing data_file with FileNotFound",
+          "[flash][plan][toml][data_file][error]") {
+    // Use an explicit base_dir so the relative path is resolved
+    // (sidestepping the platform-specific "is /foo absolute?" question)
+    // and we exercise the actual file-not-found path on disk.
+    constexpr std::string_view text =
+        "[plan]\nschema_version = 1\n"
+        "[[write]]\naddress = 0\n"
+        "data_file = \"definitely-not-on-disk.bin\"\n";
+    auto const r = flash::parse_plan(
+        text, std::filesystem::temp_directory_path());
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::FileNotFound);
 }
