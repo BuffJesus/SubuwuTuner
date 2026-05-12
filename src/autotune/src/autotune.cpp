@@ -248,4 +248,125 @@ MafTuneResult smooth_proposals(MafTuneResult const &input,
     return out;
 }
 
+// ---------------------------------------------------------------------
+// Knock-based ignition pull
+// ---------------------------------------------------------------------
+
+bool knock_sample_passes_gates(KnockSample const     &s,
+                                KnockPullOptions const &opts) noexcept {
+    if (!std::isfinite(s.feedback_knock) || !std::isfinite(s.rpm)
+        || !std::isfinite(s.load)) {
+        return false;
+    }
+    if (s.rpm < 0.0 || s.load < 0.0) return false;
+    if (s.coolant_c < opts.min_coolant_c)                   return false;
+    if (s.iat_c < opts.min_iat_c || s.iat_c > opts.max_iat_c) return false;
+    if (opts.reject_limp_mode && s.limp_mode)               return false;
+    return true;
+}
+
+std::size_t nearest_cell_2d(double                  rpm,
+                             double                  load,
+                             std::span<double const> rpm_axis,
+                             std::span<double const> load_axis) noexcept {
+    if (rpm_axis.empty() || load_axis.empty()) return 0;
+    auto const col = nearest_cell(rpm, rpm_axis);
+    auto const row = nearest_cell(load, load_axis);
+    return row * rpm_axis.size() + col;
+}
+
+Result<KnockPullResult> tune_knock_pull(
+    std::span<double const>      rpm_axis,
+    std::span<double const>      load_axis,
+    std::span<double const>      current_timing,
+    std::span<KnockSample const> samples,
+    KnockPullOptions const      &opts) {
+    if (rpm_axis.empty()) {
+        return failure(ErrorCode::InvalidArgument,
+                       "autotune: RPM axis must be non-empty");
+    }
+    if (load_axis.empty()) {
+        return failure(ErrorCode::InvalidArgument,
+                       "autotune: load axis must be non-empty");
+    }
+    std::size_t const expected = rpm_axis.size() * load_axis.size();
+    if (current_timing.size() != expected) {
+        return failure(ErrorCode::InvalidArgument,
+                       "autotune: current_timing length ("
+                       + std::to_string(current_timing.size())
+                       + ") must equal rpm_axis.size() * load_axis.size() ("
+                       + std::to_string(expected) + ")");
+    }
+    if (opts.pull_step_degrees < 0.0
+        || !std::isfinite(opts.pull_step_degrees)) {
+        return failure(ErrorCode::InvalidArgument,
+                       "autotune: pull_step_degrees must be non-negative");
+    }
+    if (opts.trigger_degrees < 0.0
+        || !std::isfinite(opts.trigger_degrees)) {
+        return failure(ErrorCode::InvalidArgument,
+                       "autotune: trigger_degrees must be non-negative");
+    }
+    for (std::size_t i = 1; i < rpm_axis.size(); ++i) {
+        if (!(rpm_axis[i - 1] <= rpm_axis[i])) {
+            return failure(ErrorCode::InvalidArgument,
+                           "autotune: RPM axis must be sorted ascending");
+        }
+    }
+    for (std::size_t i = 1; i < load_axis.size(); ++i) {
+        if (!(load_axis[i - 1] <= load_axis[i])) {
+            return failure(ErrorCode::InvalidArgument,
+                           "autotune: load axis must be sorted ascending");
+        }
+    }
+
+    std::vector<std::vector<double>> per_cell(expected);
+    std::size_t                      kept = 0;
+    for (auto const &s : samples) {
+        if (!knock_sample_passes_gates(s, opts)) continue;
+        auto const idx = nearest_cell_2d(s.rpm, s.load, rpm_axis, load_axis);
+        per_cell[idx].push_back(s.feedback_knock);
+        ++kept;
+    }
+
+    KnockPullResult result;
+    result.rows                = load_axis.size();
+    result.cols                = rpm_axis.size();
+    result.total_samples       = samples.size();
+    result.samples_after_gates = kept;
+    result.cells.reserve(expected);
+
+    for (std::size_t i = 0; i < expected; ++i) {
+        KnockCellProposal kp;
+        kp.cell_index    = i;
+        kp.current_value = current_timing[i];
+        kp.samples_used  = per_cell[i].size();
+
+        if (per_cell[i].size() < opts.min_samples_per_cell) {
+            kp.proposed_value      = current_timing[i];
+            kp.mean_feedback_knock = 0.0;
+            kp.pulled              = false;
+            result.cells.push_back(kp);
+            continue;
+        }
+
+        double sum = 0.0;
+        for (auto v : per_cell[i]) sum += v;
+        double const mean =
+            sum / static_cast<double>(per_cell[i].size());
+        kp.mean_feedback_knock = mean;
+
+        if (mean < -opts.trigger_degrees) {
+            kp.proposed_value = current_timing[i] - opts.pull_step_degrees;
+            kp.pulled         = true;
+        } else {
+            kp.proposed_value = current_timing[i];
+            kp.pulled         = false;
+        }
+        result.cells.push_back(kp);
+    }
+
+    return result;
+}
+
 } // namespace st::autotune

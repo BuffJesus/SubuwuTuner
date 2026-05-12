@@ -401,3 +401,192 @@ TEST_CASE("smooth_proposals preserves carryover fields",
     REQUIRE(out.cells[0].mean_error    == 1.02);
     REQUIRE(out.cells[0].cell_index    == 0);
 }
+
+// ---------------------------------------------------------------------
+// Knock-based ignition pull
+// ---------------------------------------------------------------------
+
+namespace {
+
+at::KnockSample warm_knock_sample() {
+    at::KnockSample s;
+    s.rpm            = 4000.0;
+    s.load           = 2.0;
+    s.feedback_knock = 0.0;
+    s.coolant_c      = 90.0;
+    s.iat_c          = 25.0;
+    s.limp_mode      = false;
+    return s;
+}
+
+std::vector<at::KnockSample> uniform_knock_samples(std::size_t n,
+                                                     double rpm,
+                                                     double load,
+                                                     double fbk) {
+    auto const                   base = warm_knock_sample();
+    std::vector<at::KnockSample> out(n, base);
+    for (auto &s : out) {
+        s.rpm            = rpm;
+        s.load           = load;
+        s.feedback_knock = fbk;
+    }
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("tune_knock_pull subtracts pull_step when mean knock crosses trigger",
+          "[autotune][knock]") {
+    // 2x2 table: rpm=[2000,4000], load=[1.0,2.0]. Hot cell is (load=2,
+    // rpm=4000) -> flat index 1*2+1 = 3.
+    std::vector<double> rpm_axis{2000.0, 4000.0};
+    std::vector<double> load_axis{1.0, 2.0};
+    std::vector<double> current{20.0, 22.0, 18.0, 24.0};  // row-major
+    auto const samples = uniform_knock_samples(/*n=*/100, /*rpm=*/4000.0,
+                                                 /*load=*/2.0, /*fbk=*/-2.0);
+    at::KnockPullOptions opts;
+    opts.trigger_degrees      = 1.5;
+    opts.pull_step_degrees    = 0.75;
+    opts.min_samples_per_cell = 30;
+    auto const r = at::tune_knock_pull(rpm_axis, load_axis, current,
+                                        samples, opts);
+    REQUIRE(r.has_value());
+    REQUIRE(r->rows == 2);
+    REQUIRE(r->cols == 2);
+    REQUIRE(r->cells.size() == 4);
+    REQUIRE(r->samples_after_gates == 100);
+
+    auto const &hot = r->cells[3];
+    REQUIRE(hot.samples_used == 100);
+    REQUIRE(hot.pulled);
+    REQUIRE(hot.proposed_value == Catch::Approx(24.0 - 0.75));
+    REQUIRE(hot.mean_feedback_knock == Catch::Approx(-2.0));
+
+    // The other three cells got no samples and stay put.
+    for (std::size_t i = 0; i < 3; ++i) {
+        REQUIRE_FALSE(r->cells[i].pulled);
+        REQUIRE(r->cells[i].proposed_value == current[i]);
+        REQUIRE(r->cells[i].samples_used == 0);
+    }
+}
+
+TEST_CASE("tune_knock_pull leaves cells alone when knock doesn't cross trigger",
+          "[autotune][knock]") {
+    std::vector<double> rpm_axis{2000.0};
+    std::vector<double> load_axis{2.0};
+    std::vector<double> current{20.0};
+    // mean fbk = -1.0; trigger 1.5; threshold to fire is fbk < -1.5.
+    auto const          samples = uniform_knock_samples(100, 2000.0, 2.0, -1.0);
+    auto const          r       = at::tune_knock_pull(rpm_axis, load_axis,
+                                                       current, samples);
+    REQUIRE(r.has_value());
+    REQUIRE_FALSE(r->cells[0].pulled);
+    REQUIRE(r->cells[0].proposed_value == 20.0);
+}
+
+TEST_CASE("tune_knock_pull respects min_samples_per_cell",
+          "[autotune][knock]") {
+    std::vector<double> rpm_axis{2000.0};
+    std::vector<double> load_axis{2.0};
+    std::vector<double> current{20.0};
+    // 10 samples deep in knock; opts.min=30 → not pulled.
+    auto const          samples = uniform_knock_samples(10, 2000.0, 2.0, -3.0);
+    auto const          r       = at::tune_knock_pull(rpm_axis, load_axis,
+                                                       current, samples);
+    REQUIRE(r.has_value());
+    REQUIRE_FALSE(r->cells[0].pulled);
+    REQUIRE(r->cells[0].proposed_value == 20.0);
+    REQUIRE(r->cells[0].samples_used == 10);
+}
+
+TEST_CASE("tune_knock_pull rejects cold-coolant samples",
+          "[autotune][knock][gates]") {
+    std::vector<double> rpm_axis{2000.0};
+    std::vector<double> load_axis{2.0};
+    std::vector<double> current{20.0};
+    auto                samples = uniform_knock_samples(100, 2000.0, 2.0, -2.0);
+    for (auto &s : samples) s.coolant_c = 60.0;
+    auto const r = at::tune_knock_pull(rpm_axis, load_axis, current, samples);
+    REQUIRE(r.has_value());
+    REQUIRE(r->samples_after_gates == 0);
+    REQUIRE_FALSE(r->cells[0].pulled);
+}
+
+TEST_CASE("tune_knock_pull rejects limp-mode samples by default",
+          "[autotune][knock][gates]") {
+    std::vector<double> rpm_axis{2000.0};
+    std::vector<double> load_axis{2.0};
+    std::vector<double> current{20.0};
+    auto                samples = uniform_knock_samples(100, 2000.0, 2.0, -2.0);
+    for (auto &s : samples) s.limp_mode = true;
+    auto const r = at::tune_knock_pull(rpm_axis, load_axis, current, samples);
+    REQUIRE(r.has_value());
+    REQUIRE(r->samples_after_gates == 0);
+}
+
+TEST_CASE("tune_knock_pull isolates multi-cell decisions",
+          "[autotune][knock]") {
+    std::vector<double> rpm_axis{2000.0, 4000.0};
+    std::vector<double> load_axis{2.0};
+    std::vector<double> current{20.0, 22.0};
+    auto const          a = uniform_knock_samples(50, 2000.0, 2.0, /*fbk=*/-2.0);
+    auto const          b = uniform_knock_samples(50, 4000.0, 2.0, /*fbk=*/0.0);
+    std::vector<at::KnockSample> all;
+    all.insert(all.end(), a.begin(), a.end());
+    all.insert(all.end(), b.begin(), b.end());
+    auto const r = at::tune_knock_pull(rpm_axis, load_axis, current, all);
+    REQUIRE(r.has_value());
+    REQUIRE(r->cells[0].pulled);                  // 2000 RPM -> pulled
+    REQUIRE_FALSE(r->cells[1].pulled);             // 4000 RPM -> clean
+    REQUIRE(r->cells[0].proposed_value < 20.0);
+    REQUIRE(r->cells[1].proposed_value == 22.0);
+}
+
+TEST_CASE("tune_knock_pull only ever subtracts (monotonic invariant)",
+          "[autotune][knock]") {
+    // Synthetic 5x4 table with a mix of knocking and clean cells; verify
+    // that NO cell's proposed value exceeds its current value.
+    std::vector<double> rpm_axis{1000.0, 2000.0, 3000.0, 4000.0, 5000.0};
+    std::vector<double> load_axis{1.0, 2.0, 3.0, 4.0};
+    std::vector<double> current(20);
+    for (std::size_t i = 0; i < current.size(); ++i) {
+        current[i] = 15.0 + static_cast<double>(i) * 0.5;
+    }
+    std::vector<at::KnockSample> all;
+    // Knocking samples at every cell; with trigger 1.5 and fbk -3,
+    // every cell should fire.
+    for (auto load : load_axis) {
+        for (auto rpm : rpm_axis) {
+            auto chunk = uniform_knock_samples(50, rpm, load, -3.0);
+            all.insert(all.end(), chunk.begin(), chunk.end());
+        }
+    }
+    auto const r = at::tune_knock_pull(rpm_axis, load_axis, current, all);
+    REQUIRE(r.has_value());
+    for (auto const &c : r->cells) {
+        REQUIRE(c.pulled);
+        REQUIRE(c.proposed_value <= c.current_value);
+    }
+}
+
+TEST_CASE("tune_knock_pull rejects axis / current_timing length mismatch",
+          "[autotune][knock][error]") {
+    std::vector<double>          rpm_axis{2000.0, 4000.0};
+    std::vector<double>          load_axis{1.0, 2.0};
+    std::vector<double>          current{20.0, 22.0, 18.0};   // 3 vs 2*2=4
+    std::vector<at::KnockSample> samples;
+    auto const r = at::tune_knock_pull(rpm_axis, load_axis, current, samples);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("tune_knock_pull rejects empty axes",
+          "[autotune][knock][error]") {
+    std::vector<double>          empty;
+    std::vector<double>          load_axis{1.0};
+    std::vector<double>          current;
+    std::vector<at::KnockSample> samples;
+    auto const r = at::tune_knock_pull(empty, load_axis, current, samples);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
