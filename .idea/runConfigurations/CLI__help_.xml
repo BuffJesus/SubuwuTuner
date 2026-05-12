@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="CLI --help" type="ShConfigurationType">
-    <option name="SCRIPT_TEXT" value="cmake --build --preset win-mingw -j --target subuwutuner-cli &amp;&amp; ./build/win-mingw/bin/subuwutuner-cli.exe --help" />
+    <option name="SCRIPT_TEXT" value="cmake --build --preset win-mingw -j --target subuwutuner-cli ; if ($?) { ./build/win-mingw/bin/subuwutuner-cli.exe --help }" />
     <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
     <option name="SCRIPT_PATH" value="" />
     <option name="SCRIPT_OPTIONS" value="" />
