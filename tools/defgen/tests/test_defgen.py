@@ -266,5 +266,113 @@ class InheritanceCycleTest(unittest.TestCase):
             defgen.parse_rom_xml(xml)
 
 
+class NonLinearFormulaWarningTest(unittest.TestCase):
+    def test_non_linear_toexpr_records_warning(self):
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <scaling name="QuadThing" units="x" toexpr="x*x+1" fromexpr="x"
+                   format="0.00" endian="big" storagetype="uint16"/>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        self.assertEqual(len(packs), 1)
+        # Identity scaling: factor=1, offset=0.
+        s = next(s for s in packs[0].scalings if s.id == "quadthing")
+        self.assertEqual((s.factor, s.offset), (1.0, 0.0))
+        # And a warning was recorded for that record.
+        scaling_warnings = [w for w in packs[0].warnings if w[0] == "scaling"]
+        self.assertTrue(
+            any(w[1] == "quadthing" and "non-linear" in w[2]
+                for w in scaling_warnings),
+            f"expected non-linear warning for quadthing; got {scaling_warnings!r}",
+        )
+
+    def test_linear_toexpr_records_no_warning(self):
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <scaling name="Boring" units="" toexpr="x*0.5+10" fromexpr="x"
+                   format="0" endian="big" storagetype="uint16"/>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        self.assertEqual(packs[0].warnings, [])
+
+
+class ApplyToPackTest(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="defgen_apply_"))
+        # Seed an existing pack from the minimal fixture, then trim it.
+        text = (FIXTURE_DIR / "minimal_rom.xml").read_text(encoding="utf-8")
+        packs = defgen.parse_rom_xml(text)
+        self.full = packs[0]
+        # Build a "partial" pack that only knows about scaling "rpm" + the
+        # identification.
+        partial = defgen.Pack(
+            rom_id=self.full.rom_id,
+            display_name=self.full.display_name,
+            platform=self.full.platform,
+            transmission=self.full.transmission,
+            years=list(self.full.years),
+            rom_size_bytes=self.full.rom_size_bytes,
+            identifications=list(self.full.identifications),
+            scalings=[s for s in self.full.scalings if s.id == "rpm"],
+            axes=[],
+            tables=[],
+        )
+        self.pack_path = self.tmp / "base.toml"
+        self.pack_path.write_text(defgen.pack_to_toml(partial),
+                                  encoding="utf-8")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_collect_existing_ids(self):
+        ids = defgen._collect_existing_ids(self.pack_path)
+        self.assertEqual(ids.scalings, {"rpm"})
+        self.assertEqual(ids.axes, set())
+        self.assertEqual(ids.tables, set())
+        self.assertEqual(ids.identifications, {"SYN_VA_WRX_MT_2019"})
+
+    def test_filter_drops_existing_records(self):
+        ids = defgen._collect_existing_ids(self.pack_path)
+        filt = defgen._filter_pack_by_existing(self.full, ids)
+        self.assertNotIn("rpm", [s.id for s in filt.scalings])
+        self.assertIn("boost_kpa", [s.id for s in filt.scalings])
+        self.assertEqual(filt.identifications, [])
+
+    def test_merge_via_main_appends_missing_records(self):
+        rc = defgen.main([
+            str(FIXTURE_DIR / "minimal_rom.xml"),
+            "--apply-to-pack", str(self.pack_path),
+        ])
+        self.assertEqual(rc, 0)
+        import tomllib
+        raw = tomllib.loads(self.pack_path.read_text(encoding="utf-8"))
+        scaling_ids = {s["id"] for s in raw.get("scaling", [])}
+        # Original "rpm" still there; new scalings appended.
+        self.assertIn("rpm", scaling_ids)
+        self.assertIn("boost_kpa", scaling_ids)
+        # Only one copy of "rpm" — no duplicate.
+        self.assertEqual([s["id"] for s in raw["scaling"]].count("rpm"), 1)
+        # Axes and tables made it in.
+        self.assertTrue(raw.get("axis"))
+        self.assertTrue(raw.get("table"))
+
+    def test_second_merge_is_a_no_op(self):
+        defgen.main([
+            str(FIXTURE_DIR / "minimal_rom.xml"),
+            "--apply-to-pack", str(self.pack_path),
+        ])
+        size_after_first = self.pack_path.stat().st_size
+        rc = defgen.main([
+            str(FIXTURE_DIR / "minimal_rom.xml"),
+            "--apply-to-pack", str(self.pack_path),
+        ])
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.pack_path.stat().st_size, size_after_first)
+
+
 if __name__ == "__main__":
     unittest.main()

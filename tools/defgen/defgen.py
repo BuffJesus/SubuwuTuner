@@ -232,6 +232,12 @@ class Pack:
     scalings: list[ScalingRecord] = field(default_factory=list)
     axes: list[AxisRecord] = field(default_factory=list)
     tables: list[TableRecord] = field(default_factory=list)
+    # Per-pack diagnostics produced during parsing. Each entry is a
+    # (kind, record_id, detail) triple, e.g.
+    # ("scaling", "rpm_x100", "non-linear toexpr flattened to identity: ...").
+    # Surfaced to stderr by main(); apply-to-pack filters this list to
+    # only mention warnings tied to records that were actually added.
+    warnings: list[tuple[str, str, str]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -560,7 +566,7 @@ def _rom_to_pack(rom: ET.Element) -> Pack | None:
     # Top-level scalings (often outside any table)
     seen_scaling_ids: set[str] = set()
     for s_el in rom.findall("scaling"):
-        rec = _scaling_from_element(s_el)
+        rec = _scaling_from_element(s_el, pack)
         if rec is not None and rec.id not in seen_scaling_ids:
             pack.scalings.append(rec)
             seen_scaling_ids.add(rec.id)
@@ -576,7 +582,8 @@ def _rom_to_pack(rom: ET.Element) -> Pack | None:
     return pack
 
 
-def _scaling_from_element(el: ET.Element) -> ScalingRecord | None:
+def _scaling_from_element(el: ET.Element,
+                          pack: "Pack | None" = None) -> ScalingRecord | None:
     name = (el.get("name") or "").strip()
     if not name:
         return None
@@ -584,10 +591,16 @@ def _scaling_from_element(el: ET.Element) -> ScalingRecord | None:
     endian = el.get("endian")
     toexpr = el.get("toexpr") or "x"
     parsed = parse_toexpr(toexpr)
+    slug = _slugify(name)
     if parsed is None:
         # Non-linear toexpr; emit a linear identity and let the user replace
         # the formula by hand. Better than dropping the scaling entirely.
         factor, offset = (1.0, 0.0)
+        if pack is not None:
+            pack.warnings.append((
+                "scaling", slug,
+                f"non-linear toexpr flattened to identity: {toexpr.strip()!r}",
+            ))
     else:
         factor, offset = parsed
 
@@ -595,9 +608,16 @@ def _scaling_from_element(el: ET.Element) -> ScalingRecord | None:
         data_type = map_data_type(storagetype, endian)
     except ValueError:
         data_type = "uint16_be"
+        if pack is not None:
+            pack.warnings.append((
+                "scaling", slug,
+                f"unknown storage/endian "
+                f"(storagetype={storagetype!r} endian={endian!r}); "
+                f"defaulted to uint16_be",
+            ))
 
     return ScalingRecord(
-        id=_slugify(name),
+        id=slug,
         factor=factor,
         offset=offset,
         unit=(el.get("units") or "").strip(),
@@ -636,7 +656,7 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
     scaling_id = ""
     data_type = "uint16_be"
     if inline_scaling is not None:
-        rec = _scaling_from_element(inline_scaling)
+        rec = _scaling_from_element(inline_scaling, pack)
         if rec is not None:
             scaling_id = rec.id
             data_type = rec.data_type
@@ -659,7 +679,7 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
             # also capture the axis's inline scaling if present
             axis_scaling_el = child.find("scaling")
             if axis_scaling_el is not None:
-                rec = _scaling_from_element(axis_scaling_el)
+                rec = _scaling_from_element(axis_scaling_el, pack)
                 if rec is not None and rec.id not in seen_scaling_ids:
                     pack.scalings.append(rec)
                     seen_scaling_ids.add(rec.id)
@@ -720,6 +740,91 @@ def _is_factual_name(name: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Incremental merge into an existing pack
+# ---------------------------------------------------------------------------
+#
+# `--apply-to-pack` is an additive merge: we read an existing single-file
+# TOML pack to collect the ids already present, then append only the new
+# scalings / axes / tables / identifications from the XML. The existing
+# file is preserved byte-for-byte (no re-emit), so hand-edits, comments,
+# and whitespace survive. New records are appended at the end of the
+# file in a single block delimited by a banner comment so the user can
+# see what came from the merge run.
+
+@dataclass
+class _ExistingIds:
+    scalings: set[str] = field(default_factory=set)
+    axes: set[str] = field(default_factory=set)
+    tables: set[str] = field(default_factory=set)
+    identifications: set[str] = field(default_factory=set)
+
+
+def _collect_existing_ids(path: Path) -> _ExistingIds:
+    """Parse an existing TOML pack and return the set of record ids."""
+    import tomllib
+    raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    ids = _ExistingIds()
+    for s in raw.get("scaling", []) or []:
+        if isinstance(s, dict) and "id" in s:
+            ids.scalings.add(str(s["id"]))
+    for a in raw.get("axis", []) or []:
+        if isinstance(a, dict) and "id" in a:
+            ids.axes.add(str(a["id"]))
+    for t in raw.get("table", []) or []:
+        if isinstance(t, dict) and "id" in t:
+            ids.tables.add(str(t["id"]))
+    for ident in raw.get("identification", []) or []:
+        if isinstance(ident, dict) and "name" in ident:
+            ids.identifications.add(str(ident["name"]))
+    return ids
+
+
+def _filter_pack_by_existing(pack: Pack, existing: _ExistingIds) -> Pack:
+    """Return a copy of `pack` with records whose id matches existing
+    dropped. Warnings are filtered to mention only retained records."""
+    filtered = Pack(
+        rom_id=pack.rom_id,
+        display_name=pack.display_name,
+        platform=pack.platform,
+        transmission=pack.transmission,
+        years=list(pack.years),
+        rom_size_bytes=pack.rom_size_bytes,
+        identifications=[i for i in pack.identifications
+                         if i.name not in existing.identifications],
+        scalings=[s for s in pack.scalings if s.id not in existing.scalings],
+        axes=[a for a in pack.axes if a.id not in existing.axes],
+        tables=[t for t in pack.tables if t.id not in existing.tables],
+    )
+    kept_scalings = {s.id for s in filtered.scalings}
+    filtered.warnings = [
+        w for w in pack.warnings
+        if not (w[0] == "scaling" and w[1] not in kept_scalings)
+    ]
+    return filtered
+
+
+def _emit_appendix(pack: Pack) -> str:
+    """Emit just the new records (no [pack] header) for appending to an
+    existing pack file. Begins with a banner comment naming the run."""
+    out: list[str] = []
+    out.append("")
+    out.append("# --- defgen --apply-to-pack additions ---")
+    for ident in pack.identifications:
+        out.append(ident.to_toml())
+        out.append("")
+    for s in pack.scalings:
+        out.append(s.to_toml())
+        out.append("")
+    for a in pack.axes:
+        out.append(a.to_toml())
+        out.append("")
+    for t in pack.tables:
+        out.append(t.to_toml())
+        out.append("")
+    return "\n".join(out).rstrip() + "\n"
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -730,6 +835,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="Output TOML path (default: stdout)")
     parser.add_argument("--rom-id",
                         help="Only emit the rom matching this xmlid")
+    parser.add_argument("--apply-to-pack", type=Path, metavar="EXISTING.TOML",
+                        help="Additive merge: append only records whose id is "
+                             "not already present in EXISTING.TOML. Requires "
+                             "--rom-id when the XML has multiple roms.")
     args = parser.parse_args(argv)
 
     try:
@@ -747,6 +856,46 @@ def main(argv: list[str] | None = None) -> int:
     if not packs:
         print("defgen: no matching <rom> entries", file=sys.stderr)
         return 1
+
+    if args.apply_to_pack is not None:
+        if len(packs) > 1:
+            print("defgen: --apply-to-pack requires --rom-id when the XML has "
+                  f"multiple roms ({len(packs)} found)", file=sys.stderr)
+            return 1
+        target = args.apply_to_pack
+        if not target.is_file():
+            print(f"defgen: --apply-to-pack target is not a file: {target}",
+                  file=sys.stderr)
+            return 1
+        try:
+            existing = _collect_existing_ids(target)
+        except (OSError, ValueError) as e:
+            print(f"defgen: cannot parse existing pack {target}: {e}",
+                  file=sys.stderr)
+            return 1
+        filtered = _filter_pack_by_existing(packs[0], existing)
+        added = (len(filtered.identifications)
+                 + len(filtered.scalings)
+                 + len(filtered.axes)
+                 + len(filtered.tables))
+        if added == 0:
+            print(f"defgen: no new records to merge into {target}",
+                  file=sys.stderr)
+        else:
+            appendix = _emit_appendix(filtered)
+            with target.open("a", encoding="utf-8") as f:
+                f.write(appendix)
+            print(f"defgen: merged {len(filtered.scalings)} scaling(s), "
+                  f"{len(filtered.axes)} axis/axes, "
+                  f"{len(filtered.tables)} table(s), "
+                  f"{len(filtered.identifications)} identification(s) "
+                  f"into {target}", file=sys.stderr)
+        if filtered.warnings:
+            print(f"defgen: {filtered.rom_id}: "
+                  f"{len(filtered.warnings)} warning(s):", file=sys.stderr)
+            for kind, rec_id, detail in filtered.warnings:
+                print(f"  {kind}: {rec_id}: {detail}", file=sys.stderr)
+        return 0
 
     if len(packs) > 1 and args.output and args.output.is_file():
         print(f"defgen: {len(packs)} roms found; pass --rom-id to select one,"
@@ -766,6 +915,13 @@ def main(argv: list[str] | None = None) -> int:
             if i > 0:
                 print()
             sys.stdout.write(pack_to_toml(pack))
+
+    for pack in packs:
+        if pack.warnings:
+            print(f"defgen: {pack.rom_id}: {len(pack.warnings)} warning(s):",
+                  file=sys.stderr)
+            for kind, rec_id, detail in pack.warnings:
+                print(f"  {kind}: {rec_id}: {detail}", file=sys.stderr)
 
     return 0
 
