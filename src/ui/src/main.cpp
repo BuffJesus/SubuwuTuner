@@ -21,10 +21,12 @@
 #include <GLFW/glfw3.h>
 #include <nfd.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -372,12 +374,88 @@ void render_sidebar(AppState &state) {
     ImGui::End();
 }
 
+struct GridStats {
+    double      min{0.0};
+    double      max{0.0};
+    double      mean{0.0};
+    std::size_t count{0};
+};
+
+GridStats compute_stats(st::Definition::TableData const &td) {
+    GridStats   s;
+    double      lo  = std::numeric_limits<double>::infinity();
+    double      hi  = -std::numeric_limits<double>::infinity();
+    double      sum = 0.0;
+    std::size_t n   = 0;
+    for (auto const &row : td.values) {
+        for (auto const v : row) {
+            lo = std::min(lo, v);
+            hi = std::max(hi, v);
+            sum += v;
+            ++n;
+        }
+    }
+    if (n > 0) {
+        s.min   = lo;
+        s.max   = hi;
+        s.mean  = sum / static_cast<double>(n);
+        s.count = n;
+    }
+    return s;
+}
+
+// Heatmap overlay: blue (cool / low) → transparent (mid) → orange (high).
+// Tuned to be readable with bright text on the dark row backgrounds — alpha
+// caps at ~140/255 so cells tint rather than swamp the value underneath.
+ImU32 heatmap_color(double v, double min_v, double max_v) {
+    if (max_v <= min_v) {
+        return 0; // flat table: skip shading
+    }
+    double t = (v - min_v) / (max_v - min_v);
+    t        = std::clamp(t, 0.0, 1.0);
+
+    auto const lerp = [](double a, double b, double f) {
+        return a + (b - a) * f;
+    };
+    double r = 0.0;
+    double g = 0.0;
+    double b = 0.0;
+    double a = 0.0;
+    if (t < 0.5) {
+        double const s = t * 2.0;
+        r = lerp(45.0, 20.0, s);
+        g = lerp(80.0, 22.0, s);
+        b = lerp(140.0, 26.0, s);
+        a = lerp(140.0, 0.0, s);
+    } else {
+        double const s = (t - 0.5) * 2.0;
+        r = lerp(20.0, 180.0, s);
+        g = lerp(22.0, 90.0, s);
+        b = lerp(26.0, 50.0, s);
+        a = lerp(0.0, 140.0, s);
+    }
+    return IM_COL32(static_cast<int>(r), static_cast<int>(g),
+                    static_cast<int>(b), static_cast<int>(a));
+}
+
+// ImGui table cells default to left-aligned text. For numerical grids,
+// right-alignment so decimal points line up across rows is more legible.
+void text_right_aligned(char const *text) {
+    float const w     = ImGui::CalcTextSize(text).x;
+    float const avail = ImGui::GetContentRegionAvail().x;
+    if (w < avail) {
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + avail - w);
+    }
+    ImGui::TextUnformatted(text);
+}
+
 void render_table_grid(st::Definition::TableData const &td,
                        st::Table const *               tbl,
                        st::Scaling const *             scal,
+                       GridStats const &               stats,
                        Fonts const &                   fonts) {
-    int const precision = scal != nullptr ? scal->precision : 0;
-    auto const cols     = static_cast<int>(td.axis_x.size()) + 1;
+    int const  precision = scal != nullptr ? scal->precision : 0;
+    auto const cols      = static_cast<int>(td.axis_x.size()) + 1;
     if (cols < 2) {
         ImGui::TextDisabled("(table has no X axis)");
         return;
@@ -407,10 +485,6 @@ void render_table_grid(st::Definition::TableData const &td,
     }
     ImGui::TableHeadersRow();
 
-    auto const print_cell = [&](double v) {
-        ImGui::Text("%.*f", precision, v);
-    };
-
     if (tbl != nullptr && tbl->dimensions == 3) {
         ImGui::EndTable();
         if (fonts.mono != nullptr) {
@@ -420,15 +494,23 @@ void render_table_grid(st::Definition::TableData const &td,
         return;
     }
 
+    char buf[32];
     for (std::size_t r = 0; r < td.values.size(); ++r) {
         ImGui::TableNextRow();
+        // Leftmost axis-Y label column: monospace, right-aligned, no heatmap.
         ImGui::TableNextColumn();
         if (!td.axis_y.empty() && r < td.axis_y.size()) {
-            ImGui::Text("%.*f", precision, td.axis_y[r]);
+            std::snprintf(buf, sizeof(buf), "%.*f", precision, td.axis_y[r]);
+            text_right_aligned(buf);
         }
         for (auto const v : td.values[r]) {
             ImGui::TableNextColumn();
-            print_cell(v);
+            ImU32 const bg = heatmap_color(v, stats.min, stats.max);
+            if (bg != 0u) {
+                ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, bg);
+            }
+            std::snprintf(buf, sizeof(buf), "%.*f", precision, v);
+            text_right_aligned(buf);
         }
     }
     ImGui::EndTable();
@@ -456,6 +538,7 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     auto const *scal = tbl != nullptr
                            ? state.project->definition().find_scaling(tbl->scaling)
                            : nullptr;
+    int const   precision = scal != nullptr ? scal->precision : 0;
 
     ImGui::TextUnformatted(state.selected_table_id.c_str());
     if (tbl != nullptr && !tbl->name.empty()) {
@@ -476,9 +559,18 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         ImGui::SameLine();
         ImGui::TextDisabled("[%s]", scal->unit.c_str());
     }
+
+    GridStats const stats = compute_stats(*state.current_table_data);
+    if (stats.count > 0) {
+        ImGui::TextDisabled("min %.*f  ·  max %.*f  ·  mean %.*f  ·  %zu cells",
+                            precision, stats.min,
+                            precision, stats.max,
+                            precision, stats.mean,
+                            stats.count);
+    }
     ImGui::Separator();
 
-    render_table_grid(*state.current_table_data, tbl, scal, fonts);
+    render_table_grid(*state.current_table_data, tbl, scal, stats, fonts);
     ImGui::End();
 }
 
