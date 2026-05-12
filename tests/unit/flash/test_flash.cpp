@@ -696,6 +696,144 @@ TEST_CASE("Flasher::execute with no journal_path makes no journal file",
 }
 
 // ---------------------------------------------------------------------
+// plan_resume
+// ---------------------------------------------------------------------
+
+#include "st/core/crc32.hpp"
+
+namespace {
+
+flash::FlashPlan two_sector_plan() {
+    flash::FlashPlan p;
+    p.session            = 0x03;          // distinguish from defaults
+    p.verify_after_write = false;         // pin a non-default flag
+    p.writes.push_back({{0x1000, 4}, {0xAA, 0xAA, 0xAA, 0xAA}});
+    p.writes.push_back({{0x2000, 4}, {0xBB, 0xBB, 0xBB, 0xBB}});
+    return p;
+}
+
+flash::ManifestEntry done_entry(flash::SectorWrite const &w) {
+    flash::ManifestEntry e;
+    e.sector      = w.sector;
+    e.data_crc32  = st::crc32(w.data);
+    e.transferred = true;
+    e.verified    = true;
+    return e;
+}
+
+flash::ManifestEntry partial_entry(flash::SectorWrite const &w) {
+    flash::ManifestEntry e;
+    e.sector      = w.sector;
+    e.data_crc32  = st::crc32(w.data);
+    e.transferred = false;
+    e.verified    = false;
+    return e;
+}
+
+} // namespace
+
+TEST_CASE("plan_resume with all-done journal returns an empty plan",
+          "[flash][resume]") {
+    auto const original = two_sector_plan();
+    flash::Manifest journal;
+    journal.entries.push_back(done_entry(original.writes[0]));
+    journal.entries.push_back(done_entry(original.writes[1]));
+
+    auto const r = flash::plan_resume(original, journal);
+    REQUIRE(r.has_value());
+    REQUIRE(r->writes.empty());
+    // Options carry over.
+    REQUIRE(r->session            == original.session);
+    REQUIRE(r->verify_after_write == original.verify_after_write);
+}
+
+TEST_CASE("plan_resume includes sectors that didn't fully verify",
+          "[flash][resume]") {
+    auto const original = two_sector_plan();
+    flash::Manifest journal;
+    journal.entries.push_back(done_entry(original.writes[0]));
+    journal.entries.push_back(partial_entry(original.writes[1]));
+
+    auto const r = flash::plan_resume(original, journal);
+    REQUIRE(r.has_value());
+    REQUIRE(r->writes.size() == 1);
+    REQUIRE(r->writes[0].sector == original.writes[1].sector);
+    REQUIRE(r->writes[0].data   == original.writes[1].data);
+}
+
+TEST_CASE("plan_resume with empty journal returns the original plan",
+          "[flash][resume]") {
+    auto const      original = two_sector_plan();
+    flash::Manifest journal;   // no entries
+
+    auto const r = flash::plan_resume(original, journal);
+    REQUIRE(r.has_value());
+    REQUIRE(r->writes.size() == original.writes.size());
+    REQUIRE(r->writes[0].sector == original.writes[0].sector);
+    REQUIRE(r->writes[1].sector == original.writes[1].sector);
+}
+
+TEST_CASE("plan_resume covers sectors past the end of the journal",
+          "[flash][resume]") {
+    auto const original = two_sector_plan();
+    flash::Manifest journal;
+    // Only the first sector has a journal entry — the host crashed
+    // before sector 2 was even started.
+    journal.entries.push_back(done_entry(original.writes[0]));
+
+    auto const r = flash::plan_resume(original, journal);
+    REQUIRE(r.has_value());
+    REQUIRE(r->writes.size() == 1);
+    REQUIRE(r->writes[0].sector == original.writes[1].sector);
+}
+
+TEST_CASE("plan_resume rejects journal/plan CRC mismatch",
+          "[flash][resume][error]") {
+    auto       original = two_sector_plan();
+    flash::Manifest journal;
+    journal.entries.push_back(done_entry(original.writes[0]));
+    journal.entries.push_back(done_entry(original.writes[1]));
+
+    // Mutate the original plan AFTER building the journal: simulates a
+    // user editing the plan between flash attempts.
+    original.writes[0].data[0] = 0x55;
+
+    auto const r = flash::plan_resume(original, journal);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::BadChecksum);
+}
+
+TEST_CASE("plan_resume rejects sector address mismatch at the same index",
+          "[flash][resume][error]") {
+    auto const original = two_sector_plan();
+    flash::Manifest journal;
+    // Manufacture a journal entry whose address doesn't match the plan.
+    flash::ManifestEntry bogus = done_entry(original.writes[0]);
+    bogus.sector.address       = 0xDEAD;
+    journal.entries.push_back(bogus);
+
+    auto const r = flash::plan_resume(original, journal);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("plan_resume rejects an oversize journal",
+          "[flash][resume][error]") {
+    auto const original = two_sector_plan();
+    flash::Manifest journal;
+    journal.entries.push_back(done_entry(original.writes[0]));
+    journal.entries.push_back(done_entry(original.writes[1]));
+    // Extra entry — journal claims more sectors than the plan has.
+    flash::ManifestEntry extra;
+    extra.sector = {0x9999, 4};
+    journal.entries.push_back(extra);
+
+    auto const r = flash::plan_resume(original, journal);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+// ---------------------------------------------------------------------
 // execute — verify mismatch
 // ---------------------------------------------------------------------
 

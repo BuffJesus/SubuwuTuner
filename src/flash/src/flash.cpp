@@ -779,4 +779,57 @@ Status write_manifest(std::filesystem::path const &path, Manifest const &m) {
     return ok();
 }
 
+// ---------------------------------------------------------------------
+// plan_resume
+// ---------------------------------------------------------------------
+
+Result<FlashPlan> plan_resume(FlashPlan const &original,
+                              Manifest const &journal) {
+    if (journal.entries.size() > original.writes.size()) {
+        return failure(ErrorCode::ParseError,
+                       "flash resume: journal has "
+                       + std::to_string(journal.entries.size())
+                       + " entries but plan has only "
+                       + std::to_string(original.writes.size())
+                       + " writes; mismatched plan/journal pair");
+    }
+
+    FlashPlan resumed = original;
+    resumed.writes.clear();
+    resumed.writes.reserve(original.writes.size());
+
+    for (std::size_t i = 0; i < original.writes.size(); ++i) {
+        auto const &w     = original.writes[i];
+        bool        done  = false;
+        if (i < journal.entries.size()) {
+            auto const &e = journal.entries[i];
+            if (e.sector != w.sector) {
+                return failure(ErrorCode::ParseError,
+                               "flash resume: journal entry "
+                               + std::to_string(i)
+                               + " sector mismatch (plan address 0x"
+                               + std::to_string(w.sector.address)
+                               + ", journal address 0x"
+                               + std::to_string(e.sector.address) + ")");
+            }
+            if (e.transferred && e.verified) {
+                auto const expected_crc = st::crc32(w.data);
+                if (e.data_crc32 != expected_crc) {
+                    return failure(ErrorCode::BadChecksum,
+                                   "flash resume: journal entry "
+                                   + std::to_string(i)
+                                   + " claims success but data CRC32 "
+                                     "mismatches; plan was modified "
+                                     "between flashes");
+                }
+                done = true;
+            }
+        }
+        if (!done) {
+            resumed.writes.push_back(w);
+        }
+    }
+    return resumed;
+}
+
 } // namespace st::flash

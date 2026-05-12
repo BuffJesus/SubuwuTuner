@@ -278,6 +278,40 @@ inline constexpr int kManifestSchemaVersion = 1;
 [[nodiscard]] Status           write_manifest(std::filesystem::path const &path,
                                               Manifest                    const &m);
 
+// =====================================================================
+// Resume-from-journal
+// =====================================================================
+//
+// `plan_resume` closes the docs/05-improvements.md §4 resume-from-crash
+// loop: given an original `FlashPlan` and a `Manifest` produced by a
+// prior partial execution (the journal on disk), return a new plan
+// containing only the sectors that did NOT complete successfully. The
+// recovery flow's caller then executes that resumed plan as usual.
+//
+// A sector is considered "done" iff its journal entry has both
+// `transferred=true` AND `verified=true` AND the entry's `data_crc32`
+// matches the CRC32 of the original plan's bytes for that write.
+//
+// Errors:
+//   * `BadChecksum` — the journal claims a sector was transferred and
+//     verified, but the original plan's bytes hash to a different
+//     CRC32 than the journal records. The plan was modified between
+//     the first execution and the resume attempt — refusing here is
+//     the safe default (re-flashing with the new bytes risks
+//     overwriting a sector with mismatched data without re-verifying).
+//   * `ParseError` — the journal has more entries than the plan has
+//     writes, or at any matching index the sector (address, length)
+//     differs between plan and journal. Indicates the journal was
+//     produced from a different plan than the one passed in.
+//
+// The resumed plan inherits all options from the original (session,
+// data_format, dry_run, silence_bus, verify_after_write,
+// block_size_hint, verify_chunk_size, journal_path). Callers typically
+// set a fresh `journal_path` before executing the resumed plan so the
+// original journal stays intact for audit.
+[[nodiscard]] Result<FlashPlan> plan_resume(FlashPlan const &original,
+                                            Manifest  const &journal);
+
 } // namespace st::flash
 
 #endif // ST_FLASH_HPP
