@@ -61,7 +61,10 @@ constexpr std::string_view kUsage =
     "                            a .stune project.\n"
     "    project-edit --table <id> [--rows A:B] [--cols A:B] OP [VALUE] <dir>\n"
     "                            Apply an edit to a project's working ROM and\n"
-    "                            update project.toml. Same OPs as table-edit.\n";
+    "                            update project.toml. Same OPs as table-edit.\n"
+    "    pack-info <DEF>         Print metadata + counts for a definition pack.\n"
+    "    table-list <DEF> [--category C] [--emissions] [--safety-critical]\n"
+    "                            List tables in a pack with optional filters.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -311,6 +314,134 @@ int cmd_dump_table(int argc, char *argv[]) {
         std::printf("\n");
     }
 
+    return 0;
+}
+
+int cmd_pack_info(int argc, char *argv[]) {
+    if (argc < 1) {
+        std::fputs("pack-info: missing path\n", stderr);
+        std::fputs("Usage: subuwutuner-cli pack-info <DEF>\n", stderr);
+        return 2;
+    }
+    std::filesystem::path const path{argv[0]};
+    auto const                  def = st::Definition::from_file(path);
+    if (!def.has_value()) {
+        std::fprintf(stderr, "pack-info: %s\n", def.error().to_string().c_str());
+        return 1;
+    }
+    auto const &pack = def->pack();
+    std::printf("Path:           %s\n", path.string().c_str());
+    std::printf("Schema version: %d\n", pack.schema_version);
+    std::printf("Id:             %s\n", pack.id.c_str());
+    if (!pack.display_name.empty()) {
+        std::printf("Display name:   %s\n", pack.display_name.c_str());
+    }
+    if (!pack.platform.empty()) {
+        std::printf("Platform:       %s\n", pack.platform.c_str());
+    }
+    if (!pack.transmission.empty()) {
+        std::printf("Transmission:   %s\n", pack.transmission.c_str());
+    }
+    if (!pack.years.empty()) {
+        std::printf("Years:         ");
+        for (int y : pack.years) std::printf(" %d", y);
+        std::printf("\n");
+    }
+    std::printf("Endianness:     %s\n", pack.endianness.c_str());
+    if (pack.rom_size_bytes != 0) {
+        std::printf("Expected ROM:   %zu bytes (%.2f KiB)\n", pack.rom_size_bytes,
+                    static_cast<double>(pack.rom_size_bytes) / 1024.0);
+    }
+    if (!pack.license.empty()) {
+        std::printf("License:        %s\n", pack.license.c_str());
+    }
+    if (pack.extends.has_value()) {
+        std::printf("Extends:        %s\n", pack.extends->c_str());
+    }
+    std::printf("\n");
+    std::printf("Identifications: %zu\n", def->identifications().size());
+    for (auto const &id : def->identifications()) {
+        std::printf("  - %s  (CID '%s' @ 0x%08zX)\n", id.name.c_str(),
+                    id.cid_match.c_str(), id.cid_address);
+    }
+    std::printf("Axes:            %zu\n", def->axes().size());
+    std::printf("Scalings:        %zu\n", def->scalings().size());
+    std::printf("Tables:          %zu\n", def->tables().size());
+    std::printf("PIDs:            %zu\n", def->pids().size());
+
+    // Quick validate so users see issues without running rom-info.
+    auto const validity = def->validate();
+    if (!validity.has_value()) {
+        std::printf("\nValidation: ! %s\n", validity.error().message().data());
+        return 1;
+    }
+    std::printf("\nValidation: OK\n");
+    return 0;
+}
+
+int cmd_table_list(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::string>           category_filter;
+    bool                                 emissions_only       = false;
+    bool                                 safety_critical_only = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const             require = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "table-list: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--category") {
+            if (auto const *v = require("--category"); v) category_filter = std::string{v};
+            else return 2;
+        } else if (a == "--emissions") {
+            emissions_only = true;
+        } else if (a == "--safety-critical") {
+            safety_critical_only = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "table-list: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!def_path.has_value()) {
+            def_path = std::filesystem::path{a};
+        } else {
+            std::fprintf(stderr, "table-list: extra argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!def_path.has_value()) {
+        std::fputs("table-list: missing path\n", stderr);
+        std::fputs("Usage: subuwutuner-cli table-list <DEF> [--category C] "
+                   "[--emissions] [--safety-critical]\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const def = st::Definition::from_file(*def_path);
+    if (!def.has_value()) {
+        std::fprintf(stderr, "table-list: %s\n", def.error().to_string().c_str());
+        return 1;
+    }
+
+    std::size_t matched = 0;
+    std::printf("%-3s %-10s %-32s %-18s %s\n", "D", "address", "id", "category", "name");
+    for (auto const &t : def->tables()) {
+        if (category_filter.has_value() && t.category != *category_filter) continue;
+        if (emissions_only && !t.emissions_relevant) continue;
+        if (safety_critical_only && !t.engine_safety_critical) continue;
+        char flags[8];
+        std::snprintf(flags, sizeof(flags), "%s%s",
+                      t.emissions_relevant ? "E" : "-",
+                      t.engine_safety_critical ? "S" : "-");
+        (void) flags; // currently not printed; reserved for a future --flags column
+        std::printf("%dD  0x%08zX %-32s %-18s %s\n", t.dimensions, t.address,
+                    t.id.c_str(), t.category.c_str(), t.name.c_str());
+        ++matched;
+    }
+    std::printf("\n%zu tables shown (of %zu in pack).\n", matched, def->tables().size());
     return 0;
 }
 
@@ -950,6 +1081,12 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-edit") {
         return cmd_project_edit(argc - 2, argv + 2);
+    }
+    if (cmd == "pack-info") {
+        return cmd_pack_info(argc - 2, argv + 2);
+    }
+    if (cmd == "table-list") {
+        return cmd_table_list(argc - 2, argv + 2);
     }
 
     std::fprintf(stderr, "subuwutuner-cli: unknown argument: %s\n", argv[1]);
