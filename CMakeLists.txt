@@ -55,6 +55,7 @@ add_subdirectory(src/core)
 add_subdirectory(src/rom)
 add_subdirectory(src/defs)
 add_subdirectory(src/edit)
+add_subdirectory(src/project)
 
 if(ST_BUILD_CLI)
     add_subdirectory(src/cli)

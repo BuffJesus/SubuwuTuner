@@ -8,6 +8,7 @@ target_link_libraries(subuwutuner-cli
         st::rom
         st::defs
         st::edit
+        st::project
         st::warnings
         st::sanitizers
         st::platform

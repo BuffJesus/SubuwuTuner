@@ -4,6 +4,7 @@
 #include "st/core/version.hpp"
 #include "st/defs.hpp"
 #include "st/edit.hpp"
+#include "st/project.hpp"
 #include "st/rom.hpp"
 
 #include <charconv>
@@ -51,7 +52,13 @@ constexpr std::string_view kUsage =
     "                            Edit a table in <FILE> and write the result to\n"
     "                            <OUT>. OP is one of: set, add, multiply, percent,\n"
     "                            smooth, interpolate. VALUE is required for the\n"
-    "                            first four ops and ignored for smooth/interpolate.\n";
+    "                            first four ops and ignored for smooth/interpolate.\n"
+    "    project-new --source <rom> --def <pack> [--name <name>] <dir>\n"
+    "                            Create a new .stune project directory containing\n"
+    "                            a copy of the source ROM, an editable working\n"
+    "                            ROM, and a reference to the definition pack.\n"
+    "    project-info <dir>      Print metadata + current working-ROM CRC32 for\n"
+    "                            a .stune project.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -298,6 +305,108 @@ int cmd_dump_table(int argc, char *argv[]) {
         std::printf("\n");
     }
 
+    return 0;
+}
+
+int cmd_project_new(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> source_path;
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::filesystem::path> proj_path;
+    std::string                          display_name;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "project-new: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--source") {
+            if (auto const *v = require("--source"); v) source_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--def") {
+            if (auto const *v = require("--def"); v) def_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--name") {
+            if (auto const *v = require("--name"); v) display_name = std::string{v};
+            else return 2;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "project-new: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!proj_path.has_value()) {
+            proj_path = std::filesystem::path{a};
+        } else {
+            std::fprintf(stderr, "project-new: extra argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!source_path.has_value() || !def_path.has_value() || !proj_path.has_value()) {
+        std::fputs(
+            "project-new: missing required arguments\n"
+            "Usage: subuwutuner-cli project-new --source <rom> --def <pack> "
+            "[--name <name>] <dir>\n",
+            stderr);
+        return 2;
+    }
+    if (display_name.empty()) {
+        display_name = proj_path->filename().string();
+    }
+
+    auto p = st::Project::create(*proj_path, *source_path, *def_path, display_name);
+    if (!p.has_value()) {
+        std::fprintf(stderr, "project-new: %s\n", p.error().to_string().c_str());
+        return 1;
+    }
+
+    std::printf("Created project: %s\n", proj_path->string().c_str());
+    std::printf("  Name:       %s\n", p->display_name().c_str());
+    std::printf("  Source:     %s  (CRC32=0x%08X, %zu bytes)\n",
+                source_path->string().c_str(), p->source_rom().crc32(), p->source_rom().size());
+    std::printf("  Definition: %s  (pack id: %s)\n", def_path->string().c_str(),
+                p->definition().pack().id.c_str());
+    auto const cid = p->definition().matches(p->source_rom());
+    std::printf("  CID match:  %s\n", cid.has_value() ? cid->c_str() : "(no match)");
+    return 0;
+}
+
+int cmd_project_info(int argc, char *argv[]) {
+    if (argc < 1) {
+        std::fputs("project-info: missing project directory\n", stderr);
+        std::fputs("Usage: subuwutuner-cli project-info <dir>\n", stderr);
+        return 2;
+    }
+    std::filesystem::path const dir{argv[0]};
+
+    auto p = st::Project::open(dir);
+    if (!p.has_value()) {
+        std::fprintf(stderr, "project-info: %s\n", p.error().to_string().c_str());
+        return 1;
+    }
+
+    std::printf("Project:    %s\n", dir.string().c_str());
+    std::printf("Name:       %s\n", p->display_name().c_str());
+    if (!p->notes().empty()) {
+        std::printf("Notes:      %s\n", p->notes().c_str());
+    }
+    std::printf("Source ROM: %zu bytes, CRC32=0x%08X (recorded: 0x%08X)\n",
+                p->source_rom().size(), p->source_rom().crc32(),
+                p->source_crc32_at_create());
+    if (p->source_rom().crc32() != p->source_crc32_at_create()) {
+        std::printf("  ! source.bin has changed since project creation\n");
+    }
+    std::printf("Working ROM: %zu bytes, CRC32=0x%08X\n",
+                p->working_rom().size(), p->working_rom().crc32());
+    if (p->source_rom().crc32() == p->working_rom().crc32()) {
+        std::printf("  (working matches source — no edits yet)\n");
+    } else {
+        std::printf("  (working differs from source — edits applied)\n");
+    }
+    std::printf("Definition: pack id %s\n", p->definition().pack().id.c_str());
+    auto const cid = p->definition().matches(p->source_rom());
+    std::printf("CID match:  %s\n", cid.has_value() ? cid->c_str() : "(no match)");
     return 0;
 }
 
@@ -691,6 +800,12 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "table-edit") {
         return cmd_table_edit(argc - 2, argv + 2);
+    }
+    if (cmd == "project-new") {
+        return cmd_project_new(argc - 2, argv + 2);
+    }
+    if (cmd == "project-info") {
+        return cmd_project_info(argc - 2, argv + 2);
     }
 
     std::fprintf(stderr, "subuwutuner-cli: unknown argument: %s\n", argv[1]);

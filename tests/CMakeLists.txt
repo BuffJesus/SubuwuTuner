@@ -20,6 +20,7 @@ add_executable(st_unit_tests
     unit/rom/test_rom.cpp
     unit/defs/test_defs.cpp
     unit/edit/test_edit.cpp
+    unit/project/test_project.cpp
 )
 
 target_link_libraries(st_unit_tests
@@ -28,6 +29,7 @@ target_link_libraries(st_unit_tests
         st::rom
         st::defs
         st::edit
+        st::project
         st::warnings
         st::sanitizers
         st::platform
