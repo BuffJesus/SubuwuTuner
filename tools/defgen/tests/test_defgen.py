@@ -197,5 +197,74 @@ class ErrorPathTest(unittest.TestCase):
             defgen.parse_rom_xml("")
 
 
+class InheritanceTest(unittest.TestCase):
+    """Tests for RomRaider <base> inheritance flattening."""
+
+    def setUp(self):
+        text = (FIXTURE_DIR / "inherited_rom.xml").read_text(encoding="utf-8")
+        self.packs = defgen.parse_rom_xml(text)
+        self.by_id = {p.rom_id: p for p in self.packs}
+
+    def test_pure_base_is_dropped_from_output(self):
+        # BASE_VA_MT has no internalidstring -> not a real tunable rom.
+        self.assertNotIn("base_va_mt", self.by_id)
+
+    def test_two_concrete_roms_emitted(self):
+        self.assertEqual(len(self.packs), 2)
+        self.assertIn("as80u_2019", self.by_id)
+        self.assertIn("as80u_2020", self.by_id)
+
+    def test_child_inherits_base_axes_and_scalings(self):
+        # Both children should have the RPM scaling from the base.
+        for pid in ("as80u_2019", "as80u_2020"):
+            p = self.by_id[pid]
+            scaling_ids = {s.id for s in p.scalings}
+            self.assertIn("rpm", scaling_ids,
+                          f"{pid} missing inherited 'rpm' scaling")
+
+    def test_child_with_override_uses_its_own_address(self):
+        # 2019 overrides Boost Target with address 0x50100; 2020 inherits
+        # the base's 0x50000.
+        p2019 = self.by_id["as80u_2019"]
+        p2020 = self.by_id["as80u_2020"]
+
+        bt_2019 = next(t for t in p2019.tables if t.id == "boost_target")
+        bt_2020 = next(t for t in p2020.tables if t.id == "boost_target")
+        self.assertEqual(bt_2019.address, 0x50100)
+        self.assertEqual(bt_2020.address, 0x50000)
+
+    def test_child_inherits_non_overridden_tables(self):
+        # Boost Limit lives only in the base; both children should inherit it.
+        for pid in ("as80u_2019", "as80u_2020"):
+            p     = self.by_id[pid]
+            t_ids = {t.id for t in p.tables}
+            self.assertIn("boost_limit", t_ids,
+                          f"{pid} missing inherited 'boost_limit' table")
+
+    def test_child_inherits_romid_fields_from_base(self):
+        # The base declares transmission=MT; the children don't redeclare it
+        # and should inherit it.
+        for pid in ("as80u_2019", "as80u_2020"):
+            self.assertEqual(self.by_id[pid].transmission, "mt",
+                             f"{pid} did not inherit transmission")
+
+    def test_filter_can_select_a_pure_base(self):
+        # Even pure bases are emittable when explicitly requested.
+        text = (FIXTURE_DIR / "inherited_rom.xml").read_text(encoding="utf-8")
+        packs = defgen.parse_rom_xml(text, rom_id_filter="BASE_VA_MT")
+        self.assertEqual(len(packs), 1)
+        self.assertEqual(packs[0].rom_id, "base_va_mt")
+
+
+class InheritanceCycleTest(unittest.TestCase):
+    def test_cycle_raises(self):
+        xml = """<roms>
+          <rom><romid><xmlid>A</xmlid><base>B</base></romid></rom>
+          <rom><romid><xmlid>B</xmlid><base>A</base></romid></rom>
+        </roms>"""
+        with self.assertRaises(ValueError):
+            defgen.parse_rom_xml(xml)
+
+
 if __name__ == "__main__":
     unittest.main()

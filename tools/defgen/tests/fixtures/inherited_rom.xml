@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic RomRaider-shaped XML using base inheritance. Original content
+  authored for the SubuwuTuner project; no third-party material copied.
+
+  Structure:
+    BASE_VA_MT      — pure base, no CID; defines RPM/Load axes, RPM scaling,
+                      a Boost Target table.
+    AS80U_2019      — extends BASE_VA_MT, adds its own internalidstring and
+                      overrides the Boost Target table with a different
+                      address (its own calibration).
+    AS80U_2020      — extends BASE_VA_MT, only differs in CID. Inherits the
+                      base's Boost Target unchanged.
+-->
+<roms>
+  <rom>
+    <romid>
+      <xmlid>BASE_VA_MT</xmlid>
+      <make>Subaru</make>
+      <model>WRX</model>
+      <transmission>MT</transmission>
+      <filesize>1.5MB</filesize>
+    </romid>
+    <scaling name="RPM" units="rpm" toexpr="x" fromexpr="x" format="0"
+             min="0" max="9000" endian="big" storagetype="uint16"/>
+    <scaling name="Boost kPa" units="kPa" toexpr="x*0.1" fromexpr="x*10"
+             format="0.0" endian="big" storagetype="uint16"/>
+    <table name="Boost Target" address="0x50000" type="2D" category="Boost">
+      <table name="RPM Axis" address="0x40000" elements="16" type="X Axis">
+        <scaling name="RPM" units="rpm" toexpr="x" fromexpr="x"
+                 endian="big" storagetype="uint16"/>
+      </table>
+      <scaling name="Boost kPa" units="kPa" toexpr="x*0.1" fromexpr="x*10"
+               format="0.0" endian="big" storagetype="uint16"/>
+    </table>
+    <table name="Boost Limit" address="0x52000" type="2D" category="Boost">
+      <table name="RPM Axis" address="0x40000" elements="16" type="X Axis">
+        <scaling name="RPM" units="rpm" toexpr="x" fromexpr="x"
+                 endian="big" storagetype="uint16"/>
+      </table>
+      <scaling name="Boost kPa" units="kPa" toexpr="x*0.1" fromexpr="x*10"
+               format="0.0" endian="big" storagetype="uint16"/>
+    </table>
+  </rom>
+
+  <rom>
+    <romid>
+      <xmlid>AS80U_2019</xmlid>
+      <base>BASE_VA_MT</base>
+      <internalidaddress>0x2000</internalidaddress>
+      <internalidstring>AS80U   </internalidstring>
+      <ecuid>22765-AS80U</ecuid>
+      <year>2019</year>
+    </romid>
+    <!-- Override: this calibration's Boost Target lives at a different
+         address than the base. -->
+    <table name="Boost Target" address="0x50100" type="2D" category="Boost">
+      <table name="RPM Axis" address="0x40000" elements="16" type="X Axis">
+        <scaling name="RPM" units="rpm" toexpr="x" fromexpr="x"
+                 endian="big" storagetype="uint16"/>
+      </table>
+      <scaling name="Boost kPa" units="kPa" toexpr="x*0.1" fromexpr="x*10"
+               format="0.0" endian="big" storagetype="uint16"/>
+    </table>
+  </rom>
+
+  <rom>
+    <romid>
+      <xmlid>AS80U_2020</xmlid>
+      <base>BASE_VA_MT</base>
+      <internalidaddress>0x2000</internalidaddress>
+      <internalidstring>AS80V   </internalidstring>
+      <ecuid>22765-AS80V</ecuid>
+      <year>2020</year>
+    </romid>
+    <!-- No table overrides — inherits everything from the base. -->
+  </rom>
+</roms>

@@ -362,12 +362,118 @@ def _slugify(s: str) -> str:
     return s or "unnamed"
 
 
+def _rom_xmlid(rom: ET.Element) -> str:
+    romid = rom.find("romid")
+    if romid is None:
+        return ""
+    return (romid.findtext("xmlid") or "").strip()
+
+
+def _rom_base(rom: ET.Element) -> str:
+    """Return the parent xmlid this <rom> inherits from, or empty string.
+
+    RomRaider supports inheritance in two equivalent forms in the wild:
+        <rom base="PARENT_XMLID">              (attribute on <rom>)
+        <romid><base>PARENT_XMLID</base></romid>
+    We accept either.
+    """
+    if (b := rom.get("base")) is not None and b.strip():
+        return b.strip()
+    romid = rom.find("romid")
+    if romid is None:
+        return ""
+    # Either <base> child element or `base` attribute on <romid>.
+    if (b := romid.findtext("base")) is not None and b.strip():
+        return b.strip()
+    if (b := romid.get("base")) is not None and b.strip():
+        return b.strip()
+    return ""
+
+
+def _flatten_rom_inheritance(rom: ET.Element, by_xmlid: dict[str, ET.Element],
+                              visiting: set[str] | None = None) -> ET.Element:
+    """Return a virtual <rom> with this rom's parents merged in.
+
+    Inherits <table> and <scaling> elements by name from each ancestor;
+    closer-to-leaf elements override more distant ancestors. The original
+    XML tree is not mutated — we return a fresh `<rom>` element whose
+    children are references to the original elements (good enough for our
+    read-only parsing).
+    """
+    visiting = visiting if visiting is not None else set()
+    xmlid    = _rom_xmlid(rom)
+    if xmlid in visiting:
+        raise ValueError(f"inheritance cycle detected at <rom xmlid={xmlid!r}>")
+    visiting = visiting | {xmlid}
+
+    base_id = _rom_base(rom)
+    if not base_id:
+        return rom
+    parent_raw = by_xmlid.get(base_id)
+    if parent_raw is None:
+        # Missing parent — treat as standalone with a warning printed by
+        # caller. Returning self avoids a hard error so partial XML still
+        # produces something useful.
+        return rom
+
+    parent = _flatten_rom_inheritance(parent_raw, by_xmlid, visiting)
+
+    # Build a fresh <rom> element that combines both. Copy attributes from
+    # the child (the child wins on attributes too).
+    merged = ET.Element("rom", rom.attrib)
+
+    # romid: child wins wholesale; if the child's romid is sparse, fill in
+    # missing leaf fields from the parent's romid.
+    child_romid  = rom.find("romid")
+    parent_romid = parent.find("romid")
+    if child_romid is not None:
+        merged_romid = ET.SubElement(merged, "romid")
+        # Start from parent fields...
+        if parent_romid is not None:
+            for el in parent_romid:
+                ET.SubElement(merged_romid, el.tag).text = el.text
+        # ...then let child override.
+        for el in child_romid:
+            existing = merged_romid.find(el.tag)
+            if existing is not None:
+                existing.text = el.text
+            else:
+                ET.SubElement(merged_romid, el.tag).text = el.text
+
+    # Indexes from parent that the child can override by name.
+    parent_tables   = {(t.get("name") or ""): t for t in parent.findall("table")}
+    parent_scalings = {(s.get("name") or ""): s for s in parent.findall("scaling")}
+
+    child_table_names   = {(t.get("name") or "") for t in rom.findall("table")}
+    child_scaling_names = {(s.get("name") or "") for s in rom.findall("scaling")}
+
+    # Emit parent's items that the child didn't override.
+    for name, el in parent_tables.items():
+        if name not in child_table_names:
+            merged.append(el)
+    for name, el in parent_scalings.items():
+        if name not in child_scaling_names:
+            merged.append(el)
+    # Then child's own items.
+    for t in rom.findall("table"):
+        merged.append(t)
+    for s in rom.findall("scaling"):
+        merged.append(s)
+    return merged
+
+
 def parse_rom_xml(xml_text: str, rom_id_filter: str | None = None) -> list[Pack]:
     """Parse a RomRaider XML string into one or more Pack records.
 
     A single XML file may contain multiple <rom> entries (often one per CID
-    in a model year range). We emit one Pack per <rom> by default; pass
-    rom_id_filter to extract only the one matching that xmlid.
+    in a model year range, with shared definitions in a <base> rom). We
+    flatten <base> inheritance before emitting Packs.
+
+    rom_id_filter, when set, narrows the output to a single xmlid.
+
+    Pure-base entries (those whose xmlid is referenced by another rom but
+    don't define their own identification) are dropped from the output;
+    they exist only to provide inherited data.
     """
     root = ET.fromstring(xml_text)
     if root.tag == "roms":
@@ -377,15 +483,36 @@ def parse_rom_xml(xml_text: str, rom_id_filter: str | None = None) -> list[Pack]
     else:
         raise ValueError(f"unexpected root element: <{root.tag}>")
 
+    # Index for base resolution.
+    by_xmlid: dict[str, ET.Element] = {}
+    for rom in rom_elements:
+        xid = _rom_xmlid(rom)
+        if xid:
+            by_xmlid[xid] = rom
+
+    # Roms referenced as a base by some other rom — skip them in the output
+    # unless they themselves carry an internalidstring (a real CID).
+    referenced_as_base = {_rom_base(rom) for rom in rom_elements if _rom_base(rom)}
+
     packs: list[Pack] = []
     for rom in rom_elements:
-        romid = rom.find("romid")
-        if romid is None:
+        xmlid = _rom_xmlid(rom)
+        if not xmlid:
             continue
-        xmlid = (romid.findtext("xmlid") or "").strip()
         if rom_id_filter is not None and xmlid != rom_id_filter:
             continue
-        pack = _rom_to_pack(rom)
+
+        flat = _flatten_rom_inheritance(rom, by_xmlid)
+        # Drop pure bases: they're referenced but don't themselves declare a
+        # CID, so they're not a tunable rom. Allow them through when the
+        # caller explicitly asks for them via --rom-id.
+        if rom_id_filter is None and xmlid in referenced_as_base:
+            romid = flat.find("romid")
+            cid   = (romid.findtext("internalidstring") if romid is not None else "") or ""
+            if not cid.strip():
+                continue
+
+        pack = _rom_to_pack(flat)
         if pack is not None:
             packs.append(pack)
     return packs
