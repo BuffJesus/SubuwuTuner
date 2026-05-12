@@ -29,6 +29,7 @@ add_executable(st_unit_tests
     unit/dbc/test_dbc.cpp
     unit/discover/test_discover.cpp
     unit/flash/test_flash.cpp
+    unit/autotune/test_autotune.cpp
 )
 
 target_link_libraries(st_unit_tests
@@ -45,6 +46,7 @@ target_link_libraries(st_unit_tests
         st::dbc
         st::discover
         st::flash
+        st::autotune
         st::warnings
         st::sanitizers
         st::platform
