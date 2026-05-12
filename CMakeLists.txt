@@ -54,6 +54,7 @@ include(Sanitizers)
 add_subdirectory(src/core)
 add_subdirectory(src/rom)
 add_subdirectory(src/defs)
+add_subdirectory(src/edit)
 
 if(ST_BUILD_CLI)
     add_subdirectory(src/cli)

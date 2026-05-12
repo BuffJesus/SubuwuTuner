@@ -19,6 +19,7 @@ add_executable(st_unit_tests
     unit/core/test_crc32.cpp
     unit/rom/test_rom.cpp
     unit/defs/test_defs.cpp
+    unit/edit/test_edit.cpp
 )
 
 target_link_libraries(st_unit_tests
@@ -26,6 +27,7 @@ target_link_libraries(st_unit_tests
         st::core
         st::rom
         st::defs
+        st::edit
         st::warnings
         st::sanitizers
         st::platform
