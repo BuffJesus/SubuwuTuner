@@ -26,10 +26,10 @@ SubuwuTuner/
 │   ├── edit/                              (st::edit — Rect, set/add/multiply/percent/smooth/interpolate, Snapshot, History undo/redo)
 │   ├── project/                           (st::Project — .stune directory persistence: source + working + def reference)
 │   ├── transport/                         (st::transport — ITransport interface + MockTransport for hardware-free testing)
-│   ├── ecu/                               (st::ecu::ssm — A8 read + B0 write; st::ecu::uds — RDBI/WDBI/SecurityAccess)
+│   ├── ecu/                               (st::ecu::ssm — A8 read + B0 write; st::ecu::uds — RDBI/WDBI/SA/DSC/ECUReset/TP/Download/Transfer/Exit)
 │   └── cli/                               (subuwutuner-cli — rom-info, dump-axis, dump-table[--csv], rom-diff, table-edit, project-{new,info,edit,undo,redo}, pack-info, table-list)
 ├── tools/defgen/                          (Python: RomRaider XML -> our TOML; clean-room facts-only; handles <base> inheritance)
-├── tests/unit/{core,rom,defs,edit,project,transport,ecu}/   (155 C++ tests; 36 Python tests under tools/defgen/tests/)
+├── tests/unit/{core,rom,defs,edit,project,transport,ecu}/   (172 C++ tests; 36 Python tests under tools/defgen/tests/)
 ├── .github/workflows/ci.yml             (Win MSVC / Mac Apple-Clang / Linux GCC / Linux Clang ASan)
 └── docs/                                (design — read first; 00–12)
 ```
@@ -42,7 +42,7 @@ SubuwuTuner/
 - `st::Project` — `.stune` directory persistence: copies source ROM, tracks working ROM, references definition pack, schema-versioned, CRC32 tampering detection on reopen
 - `st::transport` — `ITransport` pure-virtual interface (open/close/send/send_recv/start_streaming/stop_streaming) + `MockTransport` for hardware-free SSM/UDS development. Real adapters wait on hardware.
 - `st::ecu::ssm` — Subaru Select Monitor read (0xA8) and write (0xB0) framing + `SsmClient`. Framing is per public documentation; needs validation against a real ECU when hardware lands.
-- `st::ecu::uds` — ISO 14229 Read/Write Data By Identifier (0x22/0x2E) + SecurityAccess (0x27) + `UdsClient`. Same caveat — validation pending real VB ECU.
+- `st::ecu::uds` — ISO 14229 catalog covering RDBI/WDBI (0x22/0x2E), SecurityAccess (0x27), DiagnosticSessionControl (0x10), ECUReset (0x11), TesterPresent (0x3E), and the three-step download flow (RequestDownload 0x34, TransferData 0x36, RequestTransferExit 0x37). Same framing-only caveat — validation pending real VB ECU. An end-to-end test exercises the whole flash flow through MockTransport.
 - `tools/defgen/` — Python tool that translates public RomRaider XML to our TOML schema; clean-room rules in `docs/01-reverse-engineering.md`. Handles `<base>` inheritance. Standard-library Python only.
 - CLI: `rom-info`, `dump-axis`, `dump-table [--csv]`, `rom-diff`, `table-edit`, `project-{new,info,edit,undo,redo}`, `pack-info`, `table-list`. 1D / 2D / 3D tables all dump correctly. Project edit history persists in `edits.toml` for cross-session undo.
 
@@ -115,7 +115,7 @@ This is where we *are* strict. The four core modules in `src/core`, `src/rom`, `
 
 ## Status
 
-As of 2026-05-11: Phase 0 done. Phase 1 CLI side done. Phase 2 MVP done (persistence + undo/redo end-to-end). Phase 3 protocol-side scaffolded (`st::transport` + `st::ecu::ssm` + `st::ecu::uds`). **155 C++ + 36 Python tests** green on MinGW g++ 15.2. Repo at `https://github.com/BuffJesus/SubuwuTuner`. Phase 1 hardware gate (real ROM, ≥20 maps from real definitions) waiting on user's OBDX Pro VX adapter.
+As of 2026-05-11: Phase 0 done. Phase 1 CLI side done. Phase 2 MVP done (persistence + undo/redo end-to-end). Phase 3 protocol-side substantially built out (SSM read+write, full UDS catalog including the flashing flow). **172 C++ + 36 Python tests** green on MinGW g++ 15.2. Repo at `https://github.com/BuffJesus/SubuwuTuner`. Phase 1 hardware gate (real ROM, ≥20 maps from real definitions) waiting on user's OBDX Pro VX adapter.
 
 Deps wired so far via FetchContent: Catch2 v3 (tests), `tl::expected` (fallback when libc++ lacks `<expected>`), tomlplusplus v3.4 (definition parser). vcpkg manifest mode still deferred — natural moment is when Qt joins the dep list for the UI.
 
