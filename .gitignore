@@ -61,3 +61,8 @@ atlas-public-main/
 # Generated docs
 site/
 docs-build/
+
+# Python caches (defgen tool)
+__pycache__/
+*.py[cod]
+.pytest_cache/

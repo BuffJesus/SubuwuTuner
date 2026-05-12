@@ -115,6 +115,26 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  defgen:
+    name: defgen (Python tools)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run defgen unit tests
+        run: python -m unittest discover -s tools/defgen -v
+
+      - name: Smoke-test the synthetic fixture conversion
+        run: |
+          python tools/defgen/defgen.py tools/defgen/tests/fixtures/minimal_rom.xml -o /tmp/syn.toml
+          # Re-parse with Python's tomllib to catch invalid TOML.
+          python -c "import tomllib; tomllib.loads(open('/tmp/syn.toml').read())"
+
   formatting:
     name: clang-format (advisory)
     runs-on: ubuntu-24.04

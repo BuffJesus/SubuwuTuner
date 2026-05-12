@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic RomRaider-shaped XML for defgen unit tests.
+
+  This file is original content authored for the SubuwuTuner project; it
+  imitates the structure of public RomRaider EcuFlash definitions but
+  contains no copied text or data from any third-party source. Addresses
+  and scalings here are placeholders chosen for test convenience.
+-->
+<roms>
+  <rom>
+    <romid>
+      <xmlid>SYN_VA_WRX_MT_2019</xmlid>
+      <internalidaddress>0x2000</internalidaddress>
+      <internalidstring>AS80U   </internalidstring>
+      <ecuid>22765-AS80U</ecuid>
+      <year>2019</year>
+      <market>USDM</market>
+      <make>Subaru</make>
+      <model>WRX</model>
+      <submodel>WRX</submodel>
+      <transmission>MT</transmission>
+      <memmodel>FA20DIT</memmodel>
+      <flashmethod>DENSOSH7058</flashmethod>
+      <filesize>1.5MB</filesize>
+    </romid>
+
+    <scaling name="RPM" units="rpm" toexpr="x" fromexpr="x" format="0"
+             min="0" max="9000" inc="100" endian="big" storagetype="uint16"/>
+
+    <scaling name="Engine Load" units="g/rev" toexpr="x*0.001" fromexpr="x/0.001"
+             format="0.000" min="0" max="4" inc="0.001" endian="big" storagetype="uint16"/>
+
+    <scaling name="Boost kPa" units="kPa" toexpr="(x-100)*0.5"
+             fromexpr="x/0.5+100" format="0.0" min="-50" max="350" inc="0.5"
+             endian="big" storagetype="uint16"/>
+
+    <table name="Boost Target High-Octane" address="0x50000" type="3D" category="Boost">
+      <table name="RPM Axis" address="0x40000" elements="16" type="X Axis">
+        <scaling name="RPM" units="rpm" toexpr="x" fromexpr="x" format="0"
+                 endian="big" storagetype="uint16"/>
+      </table>
+      <table name="Load Axis" address="0x40040" elements="16" type="Y Axis">
+        <scaling name="Engine Load" units="g/rev" toexpr="x*0.001"
+                 fromexpr="x/0.001" format="0.000" endian="big" storagetype="uint16"/>
+      </table>
+      <scaling name="Boost kPa" units="kPa" toexpr="(x-100)*0.5"
+               fromexpr="x/0.5+100" format="0.0" endian="big" storagetype="uint16"/>
+    </table>
+
+    <table name="Throttle Plate Angle" address="0x55000" type="2D" category="Throttle">
+      <table name="Pedal Position" address="0x40100" elements="20" type="X Axis">
+        <scaling name="Percent x1" units="%" toexpr="x" fromexpr="x" format="0"
+                 endian="big" storagetype="uint8"/>
+      </table>
+      <scaling name="Percent x1" units="%" toexpr="x" fromexpr="x" format="0"
+               endian="big" storagetype="uint8"/>
+    </table>
+  </rom>
+</roms>
