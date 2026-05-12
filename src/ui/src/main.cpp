@@ -18,6 +18,7 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 #include <imgui_internal.h> // DockBuilder*
+#include <implot.h>
 
 #include <GLFW/glfw3.h>
 #include <nfd.hpp>
@@ -87,12 +88,19 @@ struct Selection {
     void reset() noexcept { enabled = false; }
 };
 
+enum class TableViewMode {
+    Grid,
+    Heatmap,
+};
+
 struct AppState {
     std::optional<st::Project>               project;
     std::string                              status_msg;
     std::string                              selected_table_id;
     std::optional<st::Definition::TableData> current_table_data;
     Selection                                selection;
+    TableViewMode                            view_mode{TableViewMode::Grid};
+    std::size_t                              selected_z{0};
     bool                                     show_imgui_demo{false};
 
     void try_open_project(std::filesystem::path const &path) {
@@ -116,6 +124,7 @@ struct AppState {
         selected_table_id = id;
         current_table_data.reset();
         selection.reset();
+        selected_z = 0;
         if (!project.has_value()) {
             return;
         }
@@ -134,6 +143,7 @@ struct AppState {
         selected_table_id.clear();
         current_table_data.reset();
         selection.reset();
+        selected_z = 0;
         status_msg.clear();
     }
 };
@@ -532,11 +542,18 @@ void render_menubar(AppState &state, GLFWwindow *window) {
                         static_cast<int>(st::Version::string().size()),
                         st::Version::string().data());
             ImGui::Separator();
-            ImGui::TextWrapped("File → Open Project... (Ctrl+O) to open a .stune");
-            ImGui::TextWrapped("directory. You can also pass one on the command");
-            ImGui::TextWrapped("line: subuwutuner-gui my.stune");
+            ImGui::TextDisabled("Getting started");
+            ImGui::BulletText("File \xE2\x86\x92 Open Project\xE2\x80\xA6 (Ctrl+O) to pick a .stune directory.");
+            ImGui::BulletText("Or pass one on the command line: subuwutuner-gui my.stune");
             ImGui::Separator();
-            ImGui::TextWrapped("This UI is read-only. Editing lands soon.");
+            ImGui::TextDisabled("Editing");
+            ImGui::BulletText("Click cells to select; Shift-click to extend.");
+            ImGui::BulletText("Toolbar buttons (+5%%, -5%%, Smooth, Interpolate) act on the selection.");
+            ImGui::BulletText("Ctrl+Z / Ctrl+Shift+Z to undo / redo.  Ctrl+S to save.");
+            ImGui::Separator();
+            ImGui::TextDisabled("Viewing");
+            ImGui::BulletText("Switch View: Grid \xE2\x86\x94 Heatmap to inspect a map two ways.");
+            ImGui::BulletText("For 3D tables, pick a Z slice above the grid.");
             ImGui::EndMenu();
         }
         ImGui::EndMainMenuBar();
@@ -547,9 +564,22 @@ void render_sidebar(AppState &state) {
     ImGui::Begin("Tables");
 
     if (!state.project.has_value()) {
-        ImGui::TextDisabled("(no project open)");
+        // Quiet, welcoming empty state — the user shouldn't have to read the
+        // menu to understand how to start. Inline CTA mirrors the menu's
+        // File → Open Project so the obvious affordance is right here.
+        ImGui::Dummy(ImVec2(0.0f, 8.0f));
+        ImGui::TextWrapped("No project open yet.");
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        if (ImGui::Button("Open Project…", ImVec2(-1.0f, 0.0f))) {
+            open_project_dialog(state);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Pick a .stune project directory.  (Ctrl+O)");
+        }
         if (!state.status_msg.empty()) {
+            ImGui::Dummy(ImVec2(0.0f, 8.0f));
             ImGui::Separator();
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
             ImGui::TextWrapped("%s", state.status_msg.c_str());
         }
         ImGui::End();
@@ -563,13 +593,38 @@ void render_sidebar(AppState &state) {
 
     for (auto const &t : def.tables()) {
         bool const selected = state.selected_table_id == t.id;
-        if (ImGui::Selectable(t.id.c_str(), selected)) {
+        // Prefer the human-readable name as the primary label. Snake-case
+        // IDs are developer-facing — surface them in the tooltip instead.
+        char const *label = t.name.empty() ? t.id.c_str() : t.name.c_str();
+        ImGui::PushID(t.id.c_str());
+        if (ImGui::Selectable(label, selected)) {
             state.select_table(t.id);
         }
-        if (ImGui::IsItemHovered() && !t.name.empty()) {
-            ImGui::SetTooltip("%s\nDim: %dD\nAddress: 0x%08zX",
-                              t.name.c_str(), t.dimensions, t.address);
+        if (ImGui::IsItemHovered()) {
+            // Compose the tooltip so hover gives the full identity card:
+            // id, dimension, address, and any safety/emissions flags.
+            ImGui::BeginTooltip();
+            if (!t.name.empty()) {
+                ImGui::TextUnformatted(t.name.c_str());
+                ImGui::TextDisabled("%s", t.id.c_str());
+            } else {
+                ImGui::TextUnformatted(t.id.c_str());
+            }
+            ImGui::Separator();
+            ImGui::Text("%dD  \xC2\xB7  0x%08zX", t.dimensions, t.address);
+            if (!t.category.empty()) {
+                ImGui::TextDisabled("category: %s", t.category.c_str());
+            }
+            if (t.engine_safety_critical) {
+                ImGui::TextColored(ImVec4(1.00f, 0.86f, 0.55f, 1.0f),
+                                   "engine safety critical");
+            } else if (t.emissions_relevant) {
+                ImGui::TextColored(ImVec4(0.96f, 0.94f, 0.65f, 1.0f),
+                                   "emissions-relevant");
+            }
+            ImGui::EndTooltip();
         }
+        ImGui::PopID();
     }
     ImGui::End();
 }
@@ -649,8 +704,113 @@ void text_right_aligned(char const *text) {
     ImGui::TextUnformatted(text);
 }
 
+// Renders the table's `td.values` grid as a heatmap. For 3D tables the
+// caller is expected to pass a TableData whose `values` is the currently
+// selected slice (built upstream in render_table_view); this function does
+// not look at `td.slices`.
+void render_table_heatmap(st::Definition::TableData const &td,
+                          st::Table const *                tbl,
+                          st::Scaling const *              scal,
+                          GridStats const &                stats) {
+    if (td.values.empty() || td.values.front().empty()) {
+        ImGui::TextDisabled("(no values)");
+        return;
+    }
+
+    auto const rows = td.values.size();
+    auto const cols = td.values.front().size();
+
+    // Flatten row-major into a contiguous buffer; ImPlot's heatmap reads
+    // row-major and renders values[0] at the bottom-left by default — we
+    // invert the Y axis below so row 0 lines up with the grid view (top).
+    std::vector<double> flat;
+    flat.reserve(rows * cols);
+    for (auto const &row : td.values) {
+        flat.insert(flat.end(), row.begin(), row.end());
+    }
+
+    // Build tick storage at function scope — ImPlot keeps pointers, so the
+    // strings must outlive EndPlot.
+    auto const build_ticks = [](std::vector<double> const &axis_vals,
+                                std::vector<double>       &positions,
+                                std::vector<std::string>  &labels,
+                                std::vector<char const *> &label_ptrs) {
+        positions.reserve(axis_vals.size());
+        labels.reserve(axis_vals.size());
+        label_ptrs.reserve(axis_vals.size());
+        for (std::size_t i = 0; i < axis_vals.size(); ++i) {
+            positions.push_back(static_cast<double>(i) + 0.5);
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%g", axis_vals[i]);
+            labels.emplace_back(buf);
+        }
+        for (auto const &s : labels) {
+            label_ptrs.push_back(s.c_str());
+        }
+    };
+    std::vector<double>       x_pos, y_pos;
+    std::vector<std::string>  x_lbl, y_lbl;
+    std::vector<char const *> x_ptrs, y_ptrs;
+    build_ticks(td.axis_x, x_pos, x_lbl, x_ptrs);
+    build_ticks(td.axis_y, y_pos, y_lbl, y_ptrs);
+
+    double const   min_v  = stats.min;
+    double const   max_v  = (stats.max > stats.min) ? stats.max : stats.min + 1.0;
+    int const      n_cells = static_cast<int>(rows * cols);
+    char const    *fmt    = (n_cells <= 256) ? "%.1f" : nullptr;
+    int const      prec   = scal != nullptr ? scal->precision : 1;
+    char           fmt_buf[8];
+    if (fmt != nullptr) {
+        std::snprintf(fmt_buf, sizeof(fmt_buf), "%%.%df", std::clamp(prec, 0, 3));
+        fmt = fmt_buf;
+    }
+
+    // Plasma reads well on the dark theme and matches the "cool-low /
+    // warm-high" intuition of the in-grid cell shading without competing
+    // with it visually.
+    ImPlot::PushColormap(ImPlotColormap_Plasma);
+
+    // Reserve room on the right for the colormap scale.
+    constexpr float kScaleWidth = 64.0f;
+    ImVec2 const    avail       = ImGui::GetContentRegionAvail();
+    ImVec2 const    plot_size   = ImVec2(avail.x - kScaleWidth - 8.0f, avail.y);
+
+    if (ImPlot::BeginPlot("##table_heatmap", plot_size,
+                          ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText
+                              | ImPlotFlags_NoTitle)) {
+        auto const x_flags = ImPlotAxisFlags_NoGridLines;
+        auto const y_flags = ImPlotAxisFlags_NoGridLines | ImPlotAxisFlags_Invert;
+        ImPlot::SetupAxes(
+            (tbl != nullptr && tbl->axis_x.has_value()) ? tbl->axis_x->c_str() : nullptr,
+            (tbl != nullptr && tbl->axis_y.has_value()) ? tbl->axis_y->c_str() : nullptr,
+            x_flags, y_flags);
+
+        if (!x_pos.empty()) {
+            ImPlot::SetupAxisTicks(ImAxis_X1, x_pos.data(),
+                                   static_cast<int>(x_pos.size()), x_ptrs.data(),
+                                   false);
+        }
+        if (!y_pos.empty()) {
+            ImPlot::SetupAxisTicks(ImAxis_Y1, y_pos.data(),
+                                   static_cast<int>(y_pos.size()), y_ptrs.data(),
+                                   false);
+        }
+
+        ImPlot::PlotHeatmap("##h", flat.data(),
+                            static_cast<int>(rows), static_cast<int>(cols),
+                            min_v, max_v, fmt,
+                            ImPlotPoint(0, 0),
+                            ImPlotPoint(static_cast<double>(cols),
+                                        static_cast<double>(rows)));
+        ImPlot::EndPlot();
+    }
+
+    ImGui::SameLine();
+    ImPlot::ColormapScale("##scale", min_v, max_v, ImVec2(kScaleWidth, plot_size.y));
+    ImPlot::PopColormap();
+}
+
 void render_table_grid(st::Definition::TableData const &td,
-                       st::Table const *               tbl,
                        st::Scaling const *             scal,
                        GridStats const &               stats,
                        Selection &                     selection,
@@ -701,13 +861,6 @@ void render_table_grid(st::Definition::TableData const &td,
     }
     ImGui::TableHeadersRow();
 
-    if (tbl != nullptr && tbl->dimensions == 3) {
-        ImGui::EndTable();
-        pop_style();
-        ImGui::TextDisabled("(3D tables: TODO — slice selector + per-z grid)");
-        return;
-    }
-
     auto const grid_cols = td.values.empty() ? std::size_t{0} : td.values.front().size();
     char       buf[32];
     for (std::size_t r = 0; r < td.values.size(); ++r) {
@@ -741,11 +894,106 @@ void render_table_grid(st::Definition::TableData const &td,
     pop_style();
 }
 
+// Center the current cursor's X for a piece of content of width `w` within
+// the panel's current content region.
+void center_cursor_x(float w) {
+    float const avail = ImGui::GetContentRegionAvail().x;
+    if (w < avail) {
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (avail - w) * 0.5f);
+    }
+}
+
+// Centered single-line text. Scale > 1.0 temporarily enlarges the font.
+void text_centered(char const *text, float scale = 1.0f) {
+    if (scale != 1.0f) {
+        ImGui::SetWindowFontScale(scale);
+    }
+    center_cursor_x(ImGui::CalcTextSize(text).x);
+    ImGui::TextUnformatted(text);
+    if (scale != 1.0f) {
+        ImGui::SetWindowFontScale(1.0f);
+    }
+}
+
+void text_centered_disabled(char const *text) {
+    center_cursor_x(ImGui::CalcTextSize(text).x);
+    ImGui::TextDisabled("%s", text);
+}
+
+// Small framed "tag" used to highlight a per-table attribute (unit, safety
+// flag, …) without it competing with the title. Looks like a button but
+// stays purely visual: the return value is ignored and the hover/active
+// states match the resting state.
+void chip(char const *text, ImVec4 fg, ImVec4 bg) {
+    ImGui::PushStyleColor(ImGuiCol_Button,        bg);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, bg);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  bg);
+    ImGui::PushStyleColor(ImGuiCol_Text,          fg);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,  ImVec2(8.0f, 2.0f));
+    (void) ImGui::SmallButton(text);
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor(4);
+}
+
+// Common chip palettes — kept centrally so future flags pick from a small,
+// coherent set rather than each call site rolling its own RGB.
+inline ImVec4 chip_fg_accent()    { return ImVec4(0.79f, 0.88f, 1.00f, 1.0f); }
+inline ImVec4 chip_bg_accent()    { return ImVec4(0.16f, 0.28f, 0.48f, 0.55f); }
+inline ImVec4 chip_fg_warn()      { return ImVec4(1.00f, 0.86f, 0.55f, 1.0f); }
+inline ImVec4 chip_bg_warn()      { return ImVec4(0.42f, 0.30f, 0.08f, 0.60f); }
+inline ImVec4 chip_fg_caution()   { return ImVec4(0.96f, 0.94f, 0.65f, 1.0f); }
+inline ImVec4 chip_bg_caution()   { return ImVec4(0.34f, 0.32f, 0.08f, 0.55f); }
+inline ImVec4 chip_fg_muted()     { return ImVec4(0.78f, 0.80f, 0.82f, 1.0f); }
+inline ImVec4 chip_bg_muted()     { return ImVec4(0.22f, 0.24f, 0.28f, 0.55f); }
+
+// Cold-start panel — what the user sees before any project is loaded. The
+// goal is welcoming, not utilitarian: clean type hierarchy, one obvious
+// next action, no jargon above the fold.
+void render_welcome_panel(AppState &state) {
+    ImVec2 const avail = ImGui::GetContentRegionAvail();
+    // Pull content down to the upper third of the panel — visually centered
+    // without feeling adrift mid-window.
+    ImGui::Dummy(ImVec2(0.0f, avail.y * 0.22f));
+
+    text_centered("SubuwuTuner", 2.4f);
+    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    text_centered_disabled("Open a Subaru ECU calibration to read, edit, and save.");
+    ImGui::Dummy(ImVec2(0.0f, 28.0f));
+
+    constexpr float kBtnW = 240.0f;
+    constexpr float kBtnH = 38.0f;
+    center_cursor_x(kBtnW);
+    if (ImGui::Button("Open Project…", ImVec2(kBtnW, kBtnH))) {
+        open_project_dialog(state);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Pick a .stune project directory.  (Ctrl+O)");
+    }
+    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    text_centered_disabled("Ctrl+O");
+
+    if (!state.status_msg.empty()) {
+        ImGui::Dummy(ImVec2(0.0f, 32.0f));
+        text_centered_disabled(state.status_msg.c_str());
+    }
+}
+
 void render_table_view(AppState &state, Fonts const &fonts) {
     ImGui::Begin("Table");
 
-    if (state.selected_table_id.empty() || !state.project.has_value()) {
-        ImGui::TextDisabled("Select a table from the left panel.");
+    if (!state.project.has_value()) {
+        render_welcome_panel(state);
+        ImGui::End();
+        return;
+    }
+    if (state.selected_table_id.empty()) {
+        // Project is loaded but no table picked — soft nudge at the sidebar.
+        ImVec2 const avail = ImGui::GetContentRegionAvail();
+        ImGui::Dummy(ImVec2(0.0f, avail.y * 0.30f));
+        text_centered("Pick a table from the left panel to start.", 1.2f);
+        ImGui::Dummy(ImVec2(0.0f, 8.0f));
+        text_centered_disabled("Hover any table name for its details.");
         ImGui::End();
         return;
     }
@@ -762,27 +1010,124 @@ void render_table_view(AppState &state, Fonts const &fonts) {
                            : nullptr;
     int const   precision = scal != nullptr ? scal->precision : 0;
 
-    ImGui::TextUnformatted(state.selected_table_id.c_str());
-    if (tbl != nullptr && !tbl->name.empty()) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("— %s", tbl->name.c_str());
-    }
-    if (tbl != nullptr) {
-        ImGui::TextDisabled(
-            "%dD | address 0x%08zX | %s%s%s",
-            tbl->dimensions, tbl->address,
-            tbl->category.empty() ? "" : tbl->category.c_str(),
-            tbl->category.empty() ? "" : " | ",
-            tbl->engine_safety_critical ? "engine-safety-critical"
-                                         : (tbl->emissions_relevant ? "emissions-relevant"
-                                                                     : ""));
-    }
+    // Header: human-readable name as the title; id/dim/address/category
+    // tucked into a subtitle. Chips on the right of the title carry the
+    // unit and the safety/emissions flags so they catch the eye without
+    // shouting.
+    bool const have_name = (tbl != nullptr && !tbl->name.empty());
+    char const *title    = have_name ? tbl->name.c_str()
+                                     : state.selected_table_id.c_str();
+
+    ImGui::SetWindowFontScale(1.25f);
+    ImGui::TextUnformatted(title);
+    ImGui::SetWindowFontScale(1.0f);
+
     if (scal != nullptr && !scal->unit.empty()) {
         ImGui::SameLine();
-        ImGui::TextDisabled("[%s]", scal->unit.c_str());
+        chip(scal->unit.c_str(), chip_fg_accent(), chip_bg_accent());
+    }
+    if (tbl != nullptr && tbl->engine_safety_critical) {
+        ImGui::SameLine();
+        chip("Engine safety critical", chip_fg_warn(), chip_bg_warn());
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Cells in this table affect engine safety — wrong values can\n"
+                "damage the engine. Make small changes, verify, and keep a\n"
+                "stock backup of the working ROM before flashing.");
+        }
+    }
+    if (tbl != nullptr && tbl->emissions_relevant) {
+        ImGui::SameLine();
+        chip("Emissions-relevant", chip_fg_caution(), chip_bg_caution());
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Cells in this table influence the vehicle's emissions\n"
+                "behavior. Jurisdiction profile (see docs/06-legal-ethics)\n"
+                "governs warnings; engine-safety refusals still apply.");
+        }
     }
 
-    GridStats const stats = compute_stats(*state.current_table_data);
+    if (tbl != nullptr) {
+        // Subtitle: dev metadata (id, dim, address, category). Single line,
+        // disabled gray, separators chosen to read as a path.
+        if (have_name && !tbl->category.empty()) {
+            ImGui::TextDisabled("%s  \xC2\xB7  %dD  \xC2\xB7  0x%08zX  \xC2\xB7  %s",
+                                state.selected_table_id.c_str(),
+                                tbl->dimensions, tbl->address,
+                                tbl->category.c_str());
+        } else if (have_name) {
+            ImGui::TextDisabled("%s  \xC2\xB7  %dD  \xC2\xB7  0x%08zX",
+                                state.selected_table_id.c_str(),
+                                tbl->dimensions, tbl->address);
+        } else if (!tbl->category.empty()) {
+            ImGui::TextDisabled("%dD  \xC2\xB7  0x%08zX  \xC2\xB7  %s",
+                                tbl->dimensions, tbl->address,
+                                tbl->category.c_str());
+        } else {
+            ImGui::TextDisabled("%dD  \xC2\xB7  0x%08zX",
+                                tbl->dimensions, tbl->address);
+        }
+    }
+
+    // For 3D tables, project the chosen Z slice into a 2D view that the
+    // renderers and stats can consume uniformly. The edit infrastructure
+    // (Rect / Snapshot / History) is 2D-only, so editing is gated off for
+    // 3D below — slice-aware edits are a follow-up.
+    auto const &td_orig = *state.current_table_data;
+    bool const  is_3d   = (tbl != nullptr && tbl->dimensions == 3
+                          && !td_orig.slices.empty());
+    if (is_3d && state.selected_z >= td_orig.slices.size()) {
+        state.selected_z = 0;
+    }
+    st::Definition::TableData td_view;
+    if (is_3d) {
+        td_view.axis_x = td_orig.axis_x;
+        td_view.axis_y = td_orig.axis_y;
+        td_view.values = td_orig.slices[state.selected_z];
+    } else {
+        td_view = td_orig;
+    }
+
+    if (is_3d) {
+        char preview[64];
+        if (state.selected_z < td_orig.axis_z.size()) {
+            std::snprintf(preview, sizeof(preview), "z = %g",
+                          td_orig.axis_z[state.selected_z]);
+        } else {
+            std::snprintf(preview, sizeof(preview), "slice %zu",
+                          state.selected_z);
+        }
+        ImGui::TextUnformatted("Z slice:");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(180.0f);
+        if (ImGui::BeginCombo("##z_slice", preview)) {
+            for (std::size_t i = 0; i < td_orig.slices.size(); ++i) {
+                char label[64];
+                if (i < td_orig.axis_z.size()) {
+                    std::snprintf(label, sizeof(label), "z = %g",
+                                  td_orig.axis_z[i]);
+                } else {
+                    std::snprintf(label, sizeof(label), "slice %zu", i);
+                }
+                bool const sel = (state.selected_z == i);
+                if (ImGui::Selectable(label, sel)) {
+                    state.selected_z = i;
+                    // Refresh the slice view immediately so stats reflect
+                    // the new choice on this same frame.
+                    td_view.values = td_orig.slices[state.selected_z];
+                }
+                if (sel) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(%zu slices · 3D editing TBD)",
+                            td_orig.slices.size());
+    }
+
+    GridStats const stats = compute_stats(td_view);
     if (stats.count > 0) {
         ImGui::TextDisabled("min %.*f  ·  max %.*f  ·  mean %.*f  ·  %zu cells",
                             precision, stats.min,
@@ -801,9 +1146,23 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     // Edit toolbar — ops act on the current selection, undo/redo on the
     // project's history. Buttons are disabled when there's no selection /
     // nothing to undo, rather than hidden, so the affordances stay visible.
-    bool const can_edit = state.selection.enabled;
+    // 3D editing is gated off — the edit pipeline assumes a single 2D grid.
+    bool const can_edit = state.selection.enabled && !is_3d;
     bool const can_undo = state.project->history().can_undo();
     bool const can_redo = state.project->history().can_redo();
+
+    // Hover tooltips need to render even when the button is disabled — wrap
+    // BeginDisabled with ImGuiItemFlags_AllowWhenDisabled on hover.
+    auto const tip = [&](char const *body, char const *when_disabled = nullptr) {
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            if (!can_edit && when_disabled != nullptr) {
+                ImGui::SetTooltip("%s\n\n%s", body, when_disabled);
+            } else {
+                ImGui::SetTooltip("%s", body);
+            }
+        }
+    };
+    constexpr char const *kNoSelMsg = "Select cells in the grid to enable.";
 
     ImGui::BeginDisabled(!can_edit);
     if (ImGui::Button("+5%")) {
@@ -811,24 +1170,32 @@ void render_table_view(AppState &state, Fonts const &fonts) {
             return st::edit::percent_scale_cells(t, r, 5.0);
         });
     }
+    tip("Increase each selected cell by 5% of its current value.", kNoSelMsg);
     ImGui::SameLine();
     if (ImGui::Button("-5%")) {
         apply_op(state, "-5%", [](auto &t, auto r) {
             return st::edit::percent_scale_cells(t, r, -5.0);
         });
     }
+    tip("Decrease each selected cell by 5% of its current value.", kNoSelMsg);
     ImGui::SameLine();
     if (ImGui::Button("Smooth")) {
         apply_op(state, "smooth", [](auto &t, auto r) {
             return st::edit::smooth_cells(t, r, 1);
         });
     }
+    tip("Replace each selected cell with the average of its neighbors.\n"
+        "Stays inside the selection; useful for evening out spikes.",
+        kNoSelMsg);
     ImGui::SameLine();
     if (ImGui::Button("Interpolate")) {
         apply_op(state, "interpolate", [](auto &t, auto r) {
             return st::edit::interpolate_cells(t, r);
         });
     }
+    tip("Bilinear interpolation across the selection from its four corners.\n"
+        "Fades edits smoothly between known anchor cells.",
+        kNoSelMsg);
     ImGui::EndDisabled();
 
     ImGui::SameLine(0.0f, 24.0f);
@@ -837,18 +1204,48 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     if (ImGui::Button("Undo")) {
         do_undo(state);
     }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Undo the last edit.  (Ctrl+Z)");
+    }
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::BeginDisabled(!can_redo);
     if (ImGui::Button("Redo")) {
         do_redo(state);
     }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Redo the next edit.  (Ctrl+Shift+Z or Ctrl+Y)");
+    }
     ImGui::EndDisabled();
+
+    ImGui::SameLine(0.0f, 24.0f);
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    ImGui::TextUnformatted("View:");
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Grid", state.view_mode == TableViewMode::Grid)) {
+        state.view_mode = TableViewMode::Grid;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Numerical grid with heatmap shading.\n"
+                          "Click cells to select; Shift-click to extend.");
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Heatmap", state.view_mode == TableViewMode::Heatmap)) {
+        state.view_mode = TableViewMode::Heatmap;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Color-coded heatmap rendered against the real axis values.\n"
+                          "Reading-only view; switch back to Grid to edit.");
+    }
 
     ImGui::Separator();
 
-    render_table_grid(*state.current_table_data, tbl, scal, stats,
-                      state.selection, fonts);
+    if (state.view_mode == TableViewMode::Heatmap) {
+        render_table_heatmap(td_view, tbl, scal, stats);
+    } else {
+        render_table_grid(td_view, scal, stats, state.selection, fonts);
+    }
 
     // Escape clears the current selection when the Table panel has focus.
     if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
@@ -877,13 +1274,50 @@ void render_status_bar(AppState &state) {
     if (state.project.has_value()) {
         bool const dirty =
             state.project->working_rom().crc32() != state.project->source_crc32_at_create();
-        ImGui::Text("%s  |  source 0x%08X  |  working 0x%08X  %s  |  history: %zu / %zu",
-                    state.project->display_name().c_str(),
-                    state.project->source_crc32_at_create(),
-                    state.project->working_rom().crc32(),
-                    dirty ? "(edited)" : "(clean)",
-                    state.project->history().cursor(),
-                    state.project->history().size());
+
+        // Left cluster: project name → status chip → history position.
+        ImGui::TextUnformatted(state.project->display_name().c_str());
+
+        ImGui::SameLine();
+        if (dirty) {
+            chip("Unsaved edits", chip_fg_warn(), chip_bg_warn());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Working ROM differs from the source.\n"
+                                  "Ctrl+S to save the .stune project.");
+            }
+        } else {
+            chip("Clean", chip_fg_muted(), chip_bg_muted());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Working ROM matches the source — nothing to save.");
+            }
+        }
+
+        ImGui::SameLine();
+        ImGui::TextDisabled("edits %zu / %zu",
+                            state.project->history().cursor(),
+                            state.project->history().size());
+
+        // Right cluster: source / working CRCs, right-aligned. Compute the
+        // text width up front so we can place the cursor cleanly.
+        char crc_buf[80];
+        std::snprintf(crc_buf, sizeof(crc_buf),
+                      "source 0x%08X  \xC2\xB7  working 0x%08X",
+                      state.project->source_crc32_at_create(),
+                      state.project->working_rom().crc32());
+        float const crc_w = ImGui::CalcTextSize(crc_buf).x;
+        float const right_x =
+            ImGui::GetWindowContentRegionMax().x - crc_w
+            - ImGui::GetStyle().FramePadding.x;
+        if (right_x > ImGui::GetCursorPosX()) {
+            ImGui::SameLine();
+            ImGui::SetCursorPosX(right_x);
+            ImGui::TextDisabled("%s", crc_buf);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "CRC32 of the source ROM (immutable) and the current\n"
+                    "working ROM. Any change in working bytes shifts the CRC.");
+            }
+        }
     } else {
         ImGui::TextDisabled("No project loaded. %s",
                             state.status_msg.empty() ? "" : state.status_msg.c_str());
@@ -917,6 +1351,7 @@ int main(int argc, char *argv[]) {
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    ImPlot::CreateContext();
     auto &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
@@ -999,6 +1434,7 @@ int main(int argc, char *argv[]) {
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
+    ImPlot::DestroyContext();
     ImGui::DestroyContext();
     glfwDestroyWindow(window);
     glfwTerminate();
