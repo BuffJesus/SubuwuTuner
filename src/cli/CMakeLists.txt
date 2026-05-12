@@ -9,6 +9,12 @@ target_link_libraries(subuwutuner-cli
         st::defs
         st::edit
         st::project
+        st::transport
+        st::ecu
+        st::log
+        st::can
+        st::dbc
+        st::discover
         st::warnings
         st::sanitizers
         st::platform

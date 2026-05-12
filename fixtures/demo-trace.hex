@@ -1,0 +1,14 @@
+# Demo SSM A8 response trace for the demo-pack rpm + iat PIDs.
+# Frame format: 80 F0 10 LEN E8 [data bytes...] CSUM
+#   data = rpm_hi rpm_lo iat   (rpm is uint16_be at 0x000008, iat uint8 at 0x000012)
+#   CSUM = mod-256 sum of all preceding bytes in the frame.
+#
+# Replay with:
+#   subuwutuner-cli log --def fixtures/demo-pack --pid rpm,iat \
+#                       --trace fixtures/demo-trace.hex
+#
+80 F0 10 04 E8 1A 85 32 3D   # cycle 1: rpm=6789, iat=50 (raw) → 10 C with iat_c
+80 F0 10 04 E8 1A 86 33 3F   # cycle 2: rpm=6790, iat=51         → 11 C
+80 F0 10 04 E8 1A 87 34 41   # cycle 3: rpm=6791, iat=52         → 12 C
+80 F0 10 04 E8 1A 88 35 43   # cycle 4: rpm=6792, iat=53         → 13 C
+80 F0 10 04 E8 1A 89 36 45   # cycle 5: rpm=6793, iat=54         → 14 C
