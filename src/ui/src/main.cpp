@@ -19,6 +19,7 @@
 #include <imgui_internal.h> // DockBuilder*
 
 #include <GLFW/glfw3.h>
+#include <nfd.hpp>
 
 #include <array>
 #include <cstdio>
@@ -73,7 +74,26 @@ struct AppState {
             current_table_data = std::move(*td);
         }
     }
+
+    void close_project() {
+        project.reset();
+        selected_table_id.clear();
+        current_table_data.reset();
+        status_msg.clear();
+    }
 };
+
+// Native folder picker for a .stune project directory. nfd handles the OS
+// dialog; we only have to feed the result back through Project::open.
+void open_project_dialog(AppState &state) {
+    NFD::UniquePathU8 out_path;
+    nfdresult_t const r = NFD::PickFolder(out_path);
+    if (r == NFD_OKAY) {
+        state.try_open_project(std::filesystem::path(out_path.get()));
+    } else if (r == NFD_ERROR) {
+        state.status_msg = std::string{"Open dialog error: "} + NFD::GetError();
+    }
+}
 
 void glfw_error_callback(int err, char const *desc) {
     std::fprintf(stderr, "GLFW error %d: %s\n", err, desc);
@@ -288,6 +308,14 @@ void render_dockspace_host() {
 void render_menubar(AppState &state, GLFWwindow *window) {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("Open Project...", "Ctrl+O")) {
+                open_project_dialog(state);
+            }
+            if (ImGui::MenuItem("Close Project", nullptr, false,
+                                state.project.has_value())) {
+                state.close_project();
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
                 glfwSetWindowShouldClose(window, GLFW_TRUE);
             }
@@ -302,11 +330,11 @@ void render_menubar(AppState &state, GLFWwindow *window) {
                         static_cast<int>(st::Version::string().size()),
                         st::Version::string().data());
             ImGui::Separator();
-            ImGui::TextWrapped("Open a .stune project by passing its path on the");
-            ImGui::TextWrapped("command line:");
-            ImGui::TextWrapped("    subuwutuner-gui my.stune");
+            ImGui::TextWrapped("File → Open Project... (Ctrl+O) to open a .stune");
+            ImGui::TextWrapped("directory. You can also pass one on the command");
+            ImGui::TextWrapped("line: subuwutuner-gui my.stune");
             ImGui::Separator();
-            ImGui::TextWrapped("This first-cut UI is read-only. Editing lands soon.");
+            ImGui::TextWrapped("This UI is read-only. Editing lands soon.");
             ImGui::EndMenu();
         }
         ImGui::EndMainMenuBar();
@@ -524,11 +552,14 @@ int main(int argc, char *argv[]) {
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 130");
 
+    // RAII bracket for nfd's per-process state. Must outlive any dialog.
+    NFD::Guard nfd_guard;
+
     AppState state;
     if (argc >= 2) {
         state.try_open_project(argv[1]);
     } else {
-        state.status_msg = "Pass a .stune project path on the command line.";
+        state.status_msg = "Open a .stune project: File → Open (Ctrl+O).";
     }
 
     while (glfwWindowShouldClose(window) == 0) {
@@ -541,6 +572,10 @@ int main(int argc, char *argv[]) {
         // Ctrl+Q to quit (in addition to the menu).
         if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Q)) {
             glfwSetWindowShouldClose(window, GLFW_TRUE);
+        }
+        // Ctrl+O to open a project.
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_O)) {
+            open_project_dialog(state);
         }
 
         render_menubar(state, window);
