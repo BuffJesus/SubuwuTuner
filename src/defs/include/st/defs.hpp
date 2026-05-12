@@ -188,6 +188,22 @@ class Definition {
     [[nodiscard]] Result<TableData> read_table_values(Rom const &  rom,
                                                       Table const &table) const;
 
+    // Summary of a per-table diff between two ROMs of the same definition.
+    struct TableDiff {
+        std::size_t total_cells{0};
+        std::size_t cells_changed{0};
+        double      max_abs_delta{0.0};
+        double      mean_abs_delta{0.0};
+
+        [[nodiscard]] bool changed() const noexcept { return cells_changed > 0; }
+    };
+
+    // Compare a single table's scaled values between two ROMs. Both ROMs must
+    // contain enough bytes for the table; the call fails OutOfRange otherwise.
+    [[nodiscard]] Result<TableDiff> diff_table(Rom const &  a,
+                                               Rom const &  b,
+                                               Table const &table) const;
+
   private:
     Pack                        pack_;
     std::vector<Identification> ids_;

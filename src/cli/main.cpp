@@ -36,7 +36,11 @@ constexpr std::string_view kUsage =
     "                            print its scaled values, one per line.\n"
     "    dump-table --def <pack.toml> --table <id> <FILE>\n"
     "                            Read the named table from the ROM via the pack and\n"
-    "                            print it as a labeled grid.\n";
+    "                            print it as a labeled grid.\n"
+    "    rom-diff --def <pack.toml> <A.bin> <B.bin>\n"
+    "                            Compare two ROMs of the same definition table-by-\n"
+    "                            table. Reports which tables changed and by how\n"
+    "                            much (max delta, mean absolute delta).\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -286,6 +290,123 @@ int cmd_dump_table(int argc, char *argv[]) {
     return 0;
 }
 
+int cmd_rom_diff(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::filesystem::path> rom_a;
+    std::optional<std::filesystem::path> rom_b;
+    bool                                 verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--def") {
+            if (i + 1 >= argc) {
+                std::fputs("rom-diff: --def requires a path\n", stderr);
+                return 2;
+            }
+            def_path = std::filesystem::path{argv[++i]};
+        } else if (a == "--verbose" || a == "-v") {
+            verbose = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "rom-diff: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!rom_a.has_value()) {
+            rom_a = std::filesystem::path{argv[i]};
+        } else if (!rom_b.has_value()) {
+            rom_b = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "rom-diff: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!def_path.has_value() || !rom_a.has_value() || !rom_b.has_value()) {
+        std::fputs(
+            "rom-diff: missing required arguments\n"
+            "Usage: subuwutuner-cli rom-diff --def <pack.toml> <A.bin> <B.bin>\n",
+            stderr);
+        return 2;
+    }
+
+    auto const def = st::Definition::from_file(*def_path);
+    if (!def.has_value()) {
+        std::fprintf(stderr, "rom-diff: %s\n", def.error().to_string().c_str());
+        return 1;
+    }
+    auto const a = st::Rom::from_file(*rom_a);
+    if (!a.has_value()) {
+        std::fprintf(stderr, "rom-diff: a: %s\n", a.error().to_string().c_str());
+        return 1;
+    }
+    auto const b = st::Rom::from_file(*rom_b);
+    if (!b.has_value()) {
+        std::fprintf(stderr, "rom-diff: b: %s\n", b.error().to_string().c_str());
+        return 1;
+    }
+
+    std::printf("ROM A: %s  (CRC32=0x%08X, %zu bytes)\n", rom_a->string().c_str(),
+                a->crc32(), a->size());
+    std::printf("ROM B: %s  (CRC32=0x%08X, %zu bytes)\n", rom_b->string().c_str(),
+                b->crc32(), b->size());
+    std::printf("Pack:  %s\n", def->pack().id.c_str());
+
+    auto const id_a = def->matches(*a);
+    auto const id_b = def->matches(*b);
+    std::printf("Match A: %s\n", id_a.has_value() ? id_a->c_str() : "(no match)");
+    std::printf("Match B: %s\n", id_b.has_value() ? id_b->c_str() : "(no match)");
+
+    std::size_t                changed_count = 0;
+    std::size_t                skipped       = 0;
+    struct Row {
+        std::string id;
+        std::size_t total{};
+        std::size_t changed{};
+        double      max{};
+        double      mean{};
+        std::string unit;
+    };
+    std::vector<Row> rows;
+    rows.reserve(def->tables().size());
+
+    for (auto const &table : def->tables()) {
+        auto const d = def->diff_table(*a, *b, table);
+        if (!d.has_value()) {
+            ++skipped;
+            if (verbose) {
+                std::fprintf(stderr, "  skip %s: %s\n", table.id.c_str(),
+                             d.error().to_string().c_str());
+            }
+            continue;
+        }
+        if (!d->changed()) {
+            continue;
+        }
+        ++changed_count;
+        auto const *scal = def->find_scaling(table.scaling);
+        rows.push_back({table.id, d->total_cells, d->cells_changed, d->max_abs_delta,
+                        d->mean_abs_delta, scal != nullptr ? scal->unit : std::string{}});
+    }
+
+    std::printf("\nTables compared: %zu  changed: %zu  skipped: %zu\n",
+                def->tables().size(), changed_count, skipped);
+
+    if (rows.empty()) {
+        std::printf("\nNo tables differ.\n");
+        return 0;
+    }
+
+    std::printf("\n%-40s %10s %12s %12s\n", "table", "cells", "max |Δ|", "mean |Δ|");
+    for (auto const &r : rows) {
+        char cell_buf[32];
+        std::snprintf(cell_buf, sizeof(cell_buf), "%zu/%zu", r.changed, r.total);
+        std::printf("%-40s %10s %12.3f %12.3f", r.id.c_str(), cell_buf, r.max, r.mean);
+        if (!r.unit.empty()) {
+            std::printf(" %s", r.unit.c_str());
+        }
+        std::printf("\n");
+    }
+    return 0;
+}
+
 int cmd_rom_info(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
     std::optional<std::filesystem::path> rom_path;
@@ -367,6 +488,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "dump-table") {
         return cmd_dump_table(argc - 2, argv + 2);
+    }
+    if (cmd == "rom-diff") {
+        return cmd_rom_diff(argc - 2, argv + 2);
     }
 
     std::fprintf(stderr, "subuwutuner-cli: unknown argument: %s\n", argv[1]);

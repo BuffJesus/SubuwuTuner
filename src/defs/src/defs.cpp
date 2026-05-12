@@ -677,6 +677,43 @@ Result<Definition::TableData> Definition::read_table_values(Rom const &  rom,
     return td;
 }
 
+Result<Definition::TableDiff> Definition::diff_table(Rom const &  a,
+                                                     Rom const &  b,
+                                                     Table const &table) const {
+    auto ta = read_table_values(a, table);
+    if (!ta.has_value()) return failure(ta.error());
+    auto tb = read_table_values(b, table);
+    if (!tb.has_value()) return failure(tb.error());
+
+    if (ta->values.size() != tb->values.size()) {
+        return failure(ErrorCode::Unknown, "table '" + table.id + "': row count mismatch");
+    }
+
+    TableDiff diff;
+    double    abs_sum = 0.0;
+    for (std::size_t r = 0; r < ta->values.size(); ++r) {
+        if (ta->values[r].size() != tb->values[r].size()) {
+            return failure(ErrorCode::Unknown,
+                           "table '" + table.id + "': column count mismatch on row "
+                               + std::to_string(r));
+        }
+        for (std::size_t c = 0; c < ta->values[r].size(); ++c) {
+            ++diff.total_cells;
+            double const d = tb->values[r][c] - ta->values[r][c];
+            if (d != 0.0) {
+                ++diff.cells_changed;
+                double const ad = d < 0 ? -d : d;
+                abs_sum += ad;
+                if (ad > diff.max_abs_delta) diff.max_abs_delta = ad;
+            }
+        }
+    }
+    if (diff.cells_changed > 0) {
+        diff.mean_abs_delta = abs_sum / static_cast<double>(diff.cells_changed);
+    }
+    return diff;
+}
+
 std::optional<std::string> Definition::matches(Rom const &rom) const {
     for (auto const &id : ids_) {
         auto const slice = rom.slice(id.cid_address, id.cid_length);

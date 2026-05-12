@@ -573,6 +573,90 @@ axis_x     = "x"
     REQUIRE(td.error().code() == st::ErrorCode::OutOfRange);
 }
 
+TEST_CASE("Definition::diff_table reports zero changes when ROMs are identical",
+          "[defs][diff_table]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 32
+
+[[axis]]
+id        = "x"
+type      = "static"
+address   = 0
+length    = 4
+data_type = "uint8"
+
+[[table]]
+id         = "t"
+dimensions = 1
+address    = 8
+data_type  = "uint8"
+axis_x     = "x"
+)toml");
+    REQUIRE(def_r.has_value());
+    std::vector<std::uint8_t> bytes{1, 2, 3, 4, 0, 0, 0, 0, 10, 20, 30, 40};
+    auto const r = st::Rom::from_bytes(bytes);
+
+    auto const *t    = def_r->find_table("t");
+    auto const  diff = def_r->diff_table(r, r, *t);
+    REQUIRE(diff.has_value());
+    REQUIRE(diff->total_cells == 4);
+    REQUIRE(diff->cells_changed == 0);
+    REQUIRE_FALSE(diff->changed());
+}
+
+TEST_CASE("Definition::diff_table reports cell-level deltas in scaled units",
+          "[defs][diff_table]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 32
+
+[[scaling]]
+id        = "x0_5"
+formula   = "linear"
+factor    = 0.5
+data_type = "uint8"
+
+[[axis]]
+id        = "x"
+type      = "static"
+address   = 0
+length    = 4
+data_type = "uint8"
+
+[[table]]
+id         = "t"
+dimensions = 1
+address    = 8
+data_type  = "uint8"
+scaling    = "x0_5"
+axis_x     = "x"
+)toml");
+    REQUIRE(def_r.has_value());
+
+    // Stock: 10, 20, 30, 40 raw -> 5, 10, 15, 20 scaled
+    auto const a = st::Rom::from_bytes(
+        {1, 2, 3, 4, 0, 0, 0, 0, 10, 20, 30, 40});
+    // Tuned: 14, 22, 30, 38 raw -> 7, 11, 15, 19 scaled
+    auto const b = st::Rom::from_bytes(
+        {1, 2, 3, 4, 0, 0, 0, 0, 14, 22, 30, 38});
+
+    auto const *t    = def_r->find_table("t");
+    auto const  diff = def_r->diff_table(a, b, *t);
+    REQUIRE(diff.has_value());
+
+    // Deltas: |7-5|=2, |11-10|=1, |15-15|=0, |19-20|=1
+    REQUIRE(diff->total_cells == 4);
+    REQUIRE(diff->cells_changed == 3);
+    REQUIRE(diff->max_abs_delta == 2.0);
+    REQUIRE(diff->mean_abs_delta == (2.0 + 1.0 + 1.0) / 3.0);
+    REQUIRE(diff->changed());
+}
+
 TEST_CASE("parse_data_type round-trips known values", "[defs][types]") {
     REQUIRE(st::parse_data_type("uint8").has_value());
     REQUIRE(*st::parse_data_type("uint8") == st::DataType::Uint8);
