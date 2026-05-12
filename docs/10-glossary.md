@@ -29,7 +29,7 @@ A working vocabulary for anyone joining the project who has C++ experience but n
 | **Tactrix OpenPort 2.0** | The de-facto J2534 adapter for Subaru tuning |
 | **VA / VB** | Subaru chassis codes. VA = 2015–2021 WRX (FA20 engine). VB = 2022+ WRX (FA24 engine) |
 | **EJ / FA** | Subaru engine families. EJ is older (boxer 2.0/2.5 turbo, pre-2015 WRX/STi). FA20/FA24 are direct-injection turbos in VA/VB |
-| **MT** | Manual transmission. Atlas's definition files are MT-specific because the trans/torque maps differ |
+| **MT** | Manual transmission. v1.0 definition packs are MT-specific because the transmission/torque maps differ from AT variants |
 | **TGV** | Tumble Generator Valve — an emissions/intake control device |
 | **EGR** | Exhaust Gas Recirculation — emissions device |
 | **TWC** | Three-Way Catalyst — the catalytic converter |

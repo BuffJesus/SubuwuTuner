@@ -1,3 +1,19 @@
+include(FetchContent)
+
+# tl::expected is fetched unconditionally so the build is self-contained.
+# The header is included only when std::expected isn't available (see
+# `result.hpp`). When std::expected exists we still link the interface
+# target so the include path resolves, but the std header takes priority.
+FetchContent_Declare(
+    tl_expected
+    GIT_REPOSITORY https://github.com/TartanLlama/expected.git
+    GIT_TAG        v1.1.0
+    GIT_SHALLOW    TRUE
+    SYSTEM
+)
+set(EXPECTED_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(tl_expected)
+
 add_library(st_core STATIC
     src/error.cpp
     src/version.cpp
@@ -23,6 +39,8 @@ target_include_directories(st_core
 target_compile_features(st_core PUBLIC cxx_std_23)
 
 target_link_libraries(st_core
+    PUBLIC
+        tl::expected
     PRIVATE
         st::warnings
         st::sanitizers

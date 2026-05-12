@@ -7,7 +7,7 @@ Six phases. Each ends with a demoable artifact and a "ship gate" that must pass 
 - Repo skeleton, CMake presets, vcpkg manifest, CI on Win/Mac/Linux
 - `st::core` (`Result`, `Error`, units, `Span`)
 - Catch2 wired up, first 50 tests green
-- `subarutuner-cli` "hello" binary that prints version and exits
+- `subuwutuner-cli` "hello" binary that prints version and exits
 
 **Gate:** green CI on all three OSes; binary runs.
 
@@ -55,7 +55,7 @@ Six phases. Each ends with a demoable artifact and a "ship gate" that must pass 
 
 - Lua-based "custom feature" runtime
 - Visual node graph compiler that lowers to Lua → bytecode patches inserted into the ROM
-- Import/export of standalone feature packs ("STMods" — answer to Atlas Mods)
+- Import/export of standalone feature packs ("STMods")
 
 **Gate:** community can publish and import a feature pack; sample pack (e.g. flat-foot shifting, launch control) ships in-box.
 
@@ -85,5 +85,4 @@ The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0
 - VB Linux/M-series J2534 parity
 - ELM327 write path (only if we can prove it's safe — likely never)
 - Bench-tools mode for ECU benches (Tactrix Pro J)
-- Optional Atlas file import via key extraction (revisit after legal review)
 - `defgen` tool to convert RomRaider XML → our TOML schema, run on every supported platform

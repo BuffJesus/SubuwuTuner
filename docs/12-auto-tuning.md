@@ -1,6 +1,6 @@
 # 12 — Auto-Tuning
 
-Auto-tuning is one of the features where being a *headless, scriptable, modern-language* tool beats Atlas structurally rather than just nicely. The math involved is statistics, not machine learning; the bottleneck has historically been UI ergonomics and data-quality gating, not the algorithm.
+Auto-tuning is one of the features where being a *headless, scriptable, modern-language* tool pays off structurally rather than just nicely. The math involved is statistics, not machine learning; the bottleneck in existing tools has historically been UI ergonomics and data-quality gating, not the algorithm itself.
 
 This document captures the planned design. Auto-tune is **not** a v1.0 feature — it lands in v1.1 or v1.2 once Phase 3 datalogging is solid and we have a beta cycle of feedback on manual editing.
 
@@ -31,7 +31,7 @@ f : (LogStream, Definition, Tables, AutoTuneOptions)  →  ProposedTables
 
 It has no dependency on the GUI, on hardware, or on an ECU connection. That means:
 
-- It runs from `subarutuner-cli autotune ...` headless. Drop a log on disk, point at a project, get a proposal back.
+- It runs from `subuwutuner-cli autotune ...` headless. Drop a log on disk, point at a project, get a proposal back.
 - It is unit-testable end-to-end with synthetic logs.
 - It can run in CI on contributed log+ROM pairs (private fixtures) to detect regressions.
 - It can run server-side or in a batch pipeline (e.g. a dyno operator processing a day's runs).
@@ -98,7 +98,7 @@ These are user-configurable per profile but the defaults are conservative.
 Proposed tables are written to a **draft** in the project, never committed automatically. The CLI prints a diff summary:
 
 ```
-$ subarutuner-cli autotune ve --log run.csv --project mytune.stune
+$ subuwutuner-cli autotune ve --log run.csv --project mytune.stune
 Loaded 1,847,221 samples from run.csv
 After quality gates: 312,005 samples (16.9% retained)
 
@@ -109,8 +109,8 @@ MAF scaling proposal:
   Max delta:             +6.4% at MAF=2.31 V (n=4,219, σ=0.7%)
   Min delta:             -3.1% at MAF=0.87 V (n=189, σ=2.1%)
 
-Run 'subarutuner-cli project diff mytune.stune' to review.
-Run 'subarutuner-cli project commit mytune.stune --message "MAF v3"' to accept.
+Run 'subuwutuner-cli project diff mytune.stune' to review.
+Run 'subuwutuner-cli project commit mytune.stune --message "MAF v3"' to accept.
 ```
 
 The GUI shows the same information as a heatmap with confidence shading.
@@ -141,7 +141,7 @@ These checks are **always** on, regardless of jurisdiction profile (see `06-lega
 ## CLI surface
 
 ```
-subarutuner-cli autotune maf \
+subuwutuner-cli autotune maf \
     --log <run.csv|run.stlog>                 \
     --project <path.stune>                    \
     --gain 0.5                                \
@@ -151,7 +151,7 @@ subarutuner-cli autotune maf \
     [--output-draft <name>]                   \
     [--apply]                                  # write draft → working tree without manual review
 
-subarutuner-cli autotune knock-pull \
+subuwutuner-cli autotune knock-pull \
     --log <run.csv|run.stlog>      \
     --project <path.stune>         \
     --trigger -1.5                 \
@@ -161,11 +161,6 @@ subarutuner-cli autotune knock-pull \
 
 Same algorithms surfaced in the GUI as a "Review and Apply" pane with the diff summary above and a per-cell heatmap.
 
-## Why this is differentiated
+## Why this matters
 
-- **RomRaider** has a MAF auto-tuner but it is community-built, GUI-only, and dated.
-- **EcuFlash** does not have one at all.
-- **Atlas** does not have one as of writing.
-- **Commercial tools** (Cobb Accesstuner, EcuTek) have proprietary versions, paid, closed.
-
-A first-class, open, scriptable, jurisdiction-aware auto-tune is a feature pillar that the Subaru community does not currently have a great answer for.
+A first-class, open, scriptable, jurisdiction-aware auto-tune is a feature the Subaru community does not currently have a great answer for. Existing options are either dated community builds, GUI-only, paid-and-closed, or simply absent. SubuwuTuner ships this as a first-party feature with engine-safety linting on by default.

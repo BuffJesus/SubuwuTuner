@@ -3,7 +3,7 @@
 ## Repo layout
 
 ```
-SubaruTuner/
+SubuwuTuner/
 ├── CMakeLists.txt
 ├── CMakePresets.json
 ├── vcpkg.json

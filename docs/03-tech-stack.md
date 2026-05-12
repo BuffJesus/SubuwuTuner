@@ -11,8 +11,8 @@
 |---|---|---|
 | Windows x64 | MSVC 19.4x (VS 2022 17.10+) | Primary dev target; J2534 DLLs are Windows-native |
 | Windows x64 | Clang-cl | Secondary for sanitizer runs |
-| macOS arm64/x64 | Apple Clang 16+ | Atlas highlights M-series support; we match it |
-| Linux x64/arm64 | GCC 14+, Clang 18+ | SteamOS and Raspbian per Atlas precedent |
+| macOS arm64/x64 | Apple Clang 16+ | Apple Silicon supported from day one |
+| Linux x64/arm64 | GCC 14+, Clang 18+ | Mainstream distros plus SteamOS / Raspbian |
 
 ## Build system
 
@@ -26,15 +26,15 @@ Two finalists, decide at end of Phase 1:
 
 ### Option A — Qt 6 Widgets (+ QML for novel views)
 
-Pros: mature table editing, accessibility, native-feeling on Win/Mac/Linux, well-supported on M-series, dark-mode out of the box, the only realistic path to matching Atlas's polish.
+Pros: mature table editing, accessibility, native-feeling on Win/Mac/Linux, well-supported on M-series, dark-mode out of the box.
 Cons: LGPL dynamic linking complexity, ~80 MB installer footprint, slower iteration than immediate-mode.
 
 ### Option B — Dear ImGui + ImPlot + a custom node-editor
 
 Pros: tiny binary, instant iteration, trivial to embed in tools, MIT license.
-Cons: accessibility is poor, native look-and-feel is absent, professional tuners will compare us to Atlas and notice.
+Cons: accessibility is poor, native look-and-feel is absent, professional tuners will notice.
 
-**Working recommendation: Qt 6 Widgets** for the main app; Dear ImGui only for internal dev tools (definition editor, byte inspector). The professional-grade table editor is what Atlas screenshots show off, and that's where ImGui struggles.
+**Working recommendation: Qt 6 Widgets** for the main app; Dear ImGui only for internal dev tools (definition editor, byte inspector). A professional-grade 2D/3D table editor is the centerpiece of a tuning UI, and that's where ImGui struggles.
 
 ## Key third-party libraries (all OSS-friendly)
 
@@ -54,13 +54,13 @@ Cons: accessibility is poor, native look-and-feel is absent, professional tuners
 | Tests | Catch2 v3 + FakeIt | BSL/MIT | Unit + mocking |
 | Fuzzing | libFuzzer / AFL++ | MIT | ROM and protocol parsers |
 | CRC / hashing | `crc++`, BLAKE3 | MIT/CC0 | Flash verify, project integrity |
-| CLI | `CLI11` | BSD | `subarutuner` headless binary |
+| CLI | `CLI11` | BSD | `subuwutuner` headless binary |
 
 All libraries shortlisted are permissive enough to ship in a single binary without forcing source release. The only license to negotiate carefully is **Qt's LGPL** — we'll dynamically link Qt and ship the shared libraries alongside, which is the conventional way to stay LGPL-compliant.
 
 ## What we are explicitly NOT using
 
-- Java / JVM — point of the port
+- Java / JVM — defeats the native-startup and footprint goals
 - Electron / web tech — defeats the size/perf goals
 - Boost (anything we'd want from Boost is now in std or in a focused single-purpose library)
 - Conan — vcpkg already chosen

@@ -1,8 +1,8 @@
-add_executable(subarutuner-cli
+add_executable(subuwutuner-cli
     main.cpp
 )
 
-target_link_libraries(subarutuner-cli
+target_link_libraries(subuwutuner-cli
     PRIVATE
         st::core
         st::rom
@@ -11,6 +11,6 @@ target_link_libraries(subarutuner-cli
         st::platform
 )
 
-set_target_properties(subarutuner-cli PROPERTIES
-    OUTPUT_NAME "subarutuner-cli"
+set_target_properties(subuwutuner-cli PROPERTIES
+    OUTPUT_NAME "subuwutuner-cli"
 )

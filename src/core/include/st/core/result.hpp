@@ -1,40 +1,66 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The SubaruTuner Authors
+// Copyright 2026 The SubuwuTuner Authors
 
 #ifndef ST_CORE_RESULT_HPP
 #define ST_CORE_RESULT_HPP
 
 #include "st/core/error.hpp"
 
-#include <expected>
 #include <string>
 #include <utility>
 
+// Feature-detect std::expected. C++23 introduced it (P0323), but Apple Clang's
+// libc++ shipped it late, and some library configurations under -std=c++23
+// still don't expose it. When that's the case we fall back to TartanLlama's
+// tl::expected, which is C++11-compatible and behaviourally compatible enough
+// for our usage.
+#if defined(__has_include)
+#  if __has_include(<expected>)
+#    include <expected>
+#    if defined(__cpp_lib_expected) && __cpp_lib_expected >= 202202L
+#      define ST_USE_STD_EXPECTED 1
+#    endif
+#  endif
+#endif
+
+#ifndef ST_USE_STD_EXPECTED
+#  define ST_USE_STD_EXPECTED 0
+#  include <tl/expected.hpp>
+#endif
+
 namespace st {
 
-// Result<T> = std::expected<T, Error>. We re-export rather than alias so the
-// helper factories below live in `st::` and pick up the right Error type by
-// default.
+#if ST_USE_STD_EXPECTED
+template <typename T, typename E>
+using expected = std::expected<T, E>;
+
+template <typename E>
+using unexpected = std::unexpected<E>;
+#else
+template <typename T, typename E>
+using expected = tl::expected<T, E>;
+
+template <typename E>
+using unexpected = tl::unexpected<E>;
+#endif
+
 template <typename T>
-using Result = std::expected<T, Error>;
+using Result = expected<T, Error>;
 
 using Status = Result<void>;
 
-// `failure(...)` builds a std::unexpected<Error>. The two-arg form takes a
-// message; the one-arg form uses the default message for that code.
-[[nodiscard]] inline std::unexpected<Error> failure(ErrorCode code) {
-    return std::unexpected<Error>{Error{code}};
+[[nodiscard]] inline unexpected<Error> failure(ErrorCode code) {
+    return unexpected<Error>{Error{code}};
 }
 
-[[nodiscard]] inline std::unexpected<Error> failure(ErrorCode code, std::string message) {
-    return std::unexpected<Error>{Error{code, std::move(message)}};
+[[nodiscard]] inline unexpected<Error> failure(ErrorCode code, std::string message) {
+    return unexpected<Error>{Error{code, std::move(message)}};
 }
 
-[[nodiscard]] inline std::unexpected<Error> failure(Error err) {
-    return std::unexpected<Error>{std::move(err)};
+[[nodiscard]] inline unexpected<Error> failure(Error err) {
+    return unexpected<Error>{std::move(err)};
 }
 
-// `ok()` for Status. For Result<T> just return the value directly.
 [[nodiscard]] inline Status ok() noexcept { return Status{}; }
 
 } // namespace st
@@ -42,7 +68,7 @@ using Status = Result<void>;
 // ST_TRY: monadic-style unwrap. Evaluates `expr`; if it holds an Error,
 // returns it from the enclosing function (which must also be Result/Status).
 // Otherwise binds the value to `name`. Uses GCC/Clang statement expressions;
-// the MSVC path falls back to a verbose pattern caller must write by hand.
+// callers on MSVC fall back to manual has_value() / error() / value() checks.
 //
 // Usage:
 //   auto bytes = ST_TRY(read_file(path));

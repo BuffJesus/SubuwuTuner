@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The SubaruTuner Authors
+// Copyright 2026 The SubuwuTuner Authors
 
 #ifndef ST_CORE_VERSION_HPP
 #define ST_CORE_VERSION_HPP
@@ -14,7 +14,7 @@ struct Version {
     static constexpr int Patch = @PROJECT_VERSION_PATCH@;
 
     static constexpr std::string_view kString = "@PROJECT_VERSION@";
-    static constexpr std::string_view kName   = "SubaruTuner";
+    static constexpr std::string_view kName   = "SubuwuTuner";
 
     [[nodiscard]] static std::string_view string() noexcept { return kString; }
     [[nodiscard]] static std::string_view name() noexcept { return kName; }

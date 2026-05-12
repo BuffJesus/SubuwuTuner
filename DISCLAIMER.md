@@ -1,6 +1,6 @@
 # Disclaimer
 
-**SubaruTuner is provided "as is" with no warranty of any kind. Use at your own risk.**
+**SubuwuTuner is provided "as is" with no warranty of any kind. Use at your own risk.**
 
 ## What can go wrong
 
@@ -12,7 +12,7 @@ ECU tuning is the act of reading, modifying, and writing the embedded computer t
 4. **Regulatory exposure.** Depending on your jurisdiction and the changes you make, your vehicle may no longer be legal to operate on public roads.
 5. **Loss of insurance coverage.** Some insurers consider any ECU modification grounds to deny a claim.
 
-## What SubaruTuner does to reduce risk
+## What SubuwuTuner does to reduce risk
 
 - Installs a brick-protection recovery shim before the first user write
 - Verifies recovery shim by read-back before proceeding
@@ -23,7 +23,7 @@ ECU tuning is the act of reading, modifying, and writing the embedded computer t
 
 None of this changes the fact that **you are the one initiating the action**. You are responsible for understanding what you are doing.
 
-## What SubaruTuner does NOT do
+## What SubuwuTuner does NOT do
 
 - It does not verify that your calibration is safe for your specific engine, fuel, hardware, or environment.
 - It does not check whether the modifications you are making are legal where you operate the vehicle.

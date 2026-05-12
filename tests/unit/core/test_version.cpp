@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The SubaruTuner Authors
+// Copyright 2026 The SubuwuTuner Authors
 
 #include "st/core/version.hpp"
 
@@ -7,7 +7,7 @@
 
 TEST_CASE("Version reports project name and a non-empty version string",
           "[core][version]") {
-    REQUIRE(st::Version::name() == "SubaruTuner");
+    REQUIRE(st::Version::name() == "SubuwuTuner");
 
     auto const ver = st::Version::string();
     REQUIRE_FALSE(ver.empty());

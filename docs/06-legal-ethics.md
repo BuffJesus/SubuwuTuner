@@ -1,10 +1,10 @@
 # 06 — Legal & Ethical Considerations
 
-This is a port motivated by curiosity and software craft, but ECU tuning has real legal and safety implications. The rules vary wildly by jurisdiction. This document captures the project's posture; the **user** is the one responsible for knowing what's legal where they operate.
+ECU tuning has real legal and safety implications, and the rules vary wildly by jurisdiction. This document captures the project's posture; the **user** is the one responsible for knowing what's legal where they operate.
 
 ## Emissions — jurisdiction-aware, user-configurable
 
-Atlas takes a hard prohibition stance: it refuses outright to assist with emissions-equipment changes, period. That stance makes sense for a Delaware-incorporated entity selling globally, but it is more conservative than the law in many places where SubaruTuner will be used.
+Some tuning software takes a blanket-prohibition stance on emissions-equipment edits — refuse outright, regardless of where the user operates. That stance makes sense for some commercial vendors but it is more conservative than the law in many places SubuwuTuner will be used.
 
 The primary developer's jurisdiction is **Alberta, Canada**, where:
 
@@ -12,7 +12,7 @@ The primary developer's jurisdiction is **Alberta, Canada**, where:
 - The federal *Canadian Environmental Protection Act* (CEPA) and the *On-Road Vehicle and Engine Emission Regulations* technically prohibit modifying a "vehicle's emission control system" once in use, but enforcement against individual private owners modifying their own vehicles is in practice minimal.
 - Track-only, motorsport, and off-road use carry their own carve-outs that vary case by case.
 
-So instead of Atlas's blanket refusal, SubaruTuner takes the position that **the tool exposes what the ECU exposes, and trusts the user to know their local rules**. We are not in the business of being a regulator inside the user's own software.
+So SubuwuTuner takes the position that **the tool exposes what the ECU exposes, and trusts the user to know their local rules**. We are not in the business of being a regulator inside the user's own software.
 
 ### What that means concretely
 
@@ -32,9 +32,9 @@ So instead of Atlas's blanket refusal, SubaruTuner takes the position that **the
 - We will not strip or obscure emissions-related markers from a ROM (e.g., editing the calibration ID string to hide that it's been modified). Tuning is fine; lying about it is not.
 - We will not assist with evading inspection systems that *do* exist (e.g., faking readiness monitors during an active OBD-II inspection cycle). That's a different problem than calibration editing.
 
-### EmissionsLinter, redefined
+### EmissionsLinter, jurisdiction-driven
 
-`EmissionsLinter` still exists as a module but its default mode is **advisory** rather than blocking:
+`EmissionsLinter` is a module whose default mode is **advisory** rather than blocking:
 
 | Profile | Behavior on emissions-flagged edit |
 |---|---|
@@ -47,28 +47,22 @@ The user can override per-profile. The point is to give a knowledgeable user acc
 
 ## Intellectual property
 
-Atlas is closed-source and free-for-personal-use. We must not:
+To keep our Apache 2.0 license uncontaminated:
 
-- Decompile Atlas and translate its source
-- Embed Atlas's encrypted definition files in any redistributable
-- Copy Atlas's icon set, screenshots, or UI text verbatim
-- Use the name "Atlas" in our branding
+- **No decompilation of any third-party tuning tool.** We do not translate decompiled output into our codebase.
+- **No verbatim copying of icons, screenshots, UI text, or brand assets** from any other tool.
+- **No use of a third party's trademarks** in our branding.
+- **Public-domain or open-license technical references are fair game** as specifications: SAE/ISO standards, vendor-published APIs (J2534), open-source projects we study clean-room (RomRaider under GPL — see `01-reverse-engineering.md` for the boundary rules).
+- **Owner-supplied ROM dumps** and similar legally-obtained user data are usable as private test fixtures; we do not redistribute them.
 
-What we **can** do:
+## License of SubuwuTuner itself
 
-- Re-implement features we observe Atlas providing — features are not copyrightable, expression is
-- Use **RomRaider** (GPL) protocol code as a reference, provided we credit it and respect GPL; **easier path:** treat it as a spec, write our code clean-room, and ship under our own permissive license
-- Use public Subaru ECU documentation, SAE standards, ISO 14229 / 15765
-- Use the user's own legally-obtained ROM dumps and the user's own purchase of `.atlas` files as private test fixtures (not redistributed)
-
-## License of SubaruTuner itself
-
-Two real options:
+Two real options were considered:
 
 1. **MIT or Apache 2** — maximal community, hosts can build commercial spinoffs, we cannot easily prevent a competitor from forking.
 2. **AGPL** — keeps any hosted or modified fork open; deters commercial freeloading but reduces business-friendly adoption.
 
-**Recommendation:** Apache 2.0 with a `NOTICE` file. Aligns with most C++ ecosystem libraries, doesn't poison downstream, and the patent grant matters in an industry with real patents.
+**Chosen:** Apache 2.0 with a `NOTICE` file. Aligns with most C++ ecosystem libraries, doesn't poison downstream, and the patent grant matters in an industry with real patents.
 
 ## Warranty and safety
 
@@ -88,13 +82,3 @@ Reflashing an ECU can damage an engine if the calibration is wrong, and can bric
 ## Export controls
 
 Standard "no embargoed countries" clause. ECU tuning is not on US dual-use lists, but be mindful if we ever add encryption beyond standard TLS.
-
-## A note on this project's posture vs Atlas's
-
-Atlas's repo carries strong emissions-prohibition language. SubaruTuner takes a different view because:
-
-1. The relevant law is **the user's local law**, not the developer's preferred policy.
-2. Refusing to expose ECU functionality the ECU itself exposes is paternalism, not safety.
-3. The actual safety issue with tuning is **damaging the engine or bricking the ECU**, and we put significant engineering into preventing both (see `05-improvements.md` and `08-testing-strategy.md`). That's where our refusal-to-act lives.
-
-If a user is in California, they will pick the `california-us` profile and the tool will warn them appropriately. If a user is on a track car in Alberta, they will pick `motorsport-only` and the tool will get out of their way.

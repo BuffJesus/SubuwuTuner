@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(SubaruTuner
+project(SubuwuTuner
     VERSION 0.1.0
     DESCRIPTION "ECU calibration suite for Subaru WRX (VA/VB)"
     HOMEPAGE_URL "https://github.com/"
@@ -10,7 +10,7 @@ project(SubaruTuner
 # Project options
 # ---------------------------------------------------------------------------
 option(ST_BUILD_TESTS    "Build unit tests"                ON)
-option(ST_BUILD_CLI      "Build the subarutuner-cli tool"  ON)
+option(ST_BUILD_CLI      "Build the subuwutuner-cli tool"  ON)
 option(ST_WARNINGS_AS_ERRORS "Treat warnings as errors"    ON)
 set(ST_SANITIZE "" CACHE STRING
     "Semicolon-separated sanitizers to enable (e.g. address;undefined). Linux/Mac only.")
@@ -67,7 +67,7 @@ endif()
 # Summary
 # ---------------------------------------------------------------------------
 message(STATUS "")
-message(STATUS "SubaruTuner ${PROJECT_VERSION}")
+message(STATUS "SubuwuTuner ${PROJECT_VERSION}")
 message(STATUS "  C++ standard          : ${CMAKE_CXX_STANDARD}")
 message(STATUS "  Build type            : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Compiler              : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")

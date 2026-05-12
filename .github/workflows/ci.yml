@@ -93,14 +93,14 @@ jobs:
       - name: Smoke-test CLI (Windows)
         if: matrix.os == 'windows-2022'
         run: |
-          ./build/${{ matrix.preset }}/bin/subarutuner-cli.exe --version
-          ./build/${{ matrix.preset }}/bin/subarutuner-cli.exe --help
+          ./build/${{ matrix.preset }}/bin/subuwutuner-cli.exe --version
+          ./build/${{ matrix.preset }}/bin/subuwutuner-cli.exe --help
 
       - name: Smoke-test CLI (Unix)
         if: matrix.os != 'windows-2022'
         run: |
-          ./build/${{ matrix.preset }}/bin/subarutuner-cli --version
-          ./build/${{ matrix.preset }}/bin/subarutuner-cli --help
+          ./build/${{ matrix.preset }}/bin/subuwutuner-cli --version
+          ./build/${{ matrix.preset }}/bin/subuwutuner-cli --help
 
       - name: Upload test artifacts on failure
         if: failure()
@@ -116,8 +116,12 @@ jobs:
           if-no-files-found: ignore
 
   formatting:
-    name: clang-format
+    name: clang-format (advisory)
     runs-on: ubuntu-24.04
+    # Advisory in Phase 0/1: format diffs are reported as a warning, not a
+    # merge blocker. We'll flip this to required once a pre-commit hook is in
+    # place so contributors get formatting feedback before pushing.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -130,10 +134,10 @@ jobs:
       - name: Check formatting
         run: |
           shopt -s globstar nullglob
-          set -e
           files=(src/**/*.cpp src/**/*.hpp tests/**/*.cpp tests/**/*.hpp)
           if [ ${#files[@]} -eq 0 ]; then
             echo "No source files to check yet."
             exit 0
           fi
-          clang-format --dry-run --Werror "${files[@]}"
+          # Report diffs but don't fail the job.
+          clang-format --dry-run "${files[@]}" || true

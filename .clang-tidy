@@ -1,5 +1,5 @@
 ---
-# SubaruTuner clang-tidy
+# SubuwuTuner clang-tidy
 # Advisory in Phase 0, blocking from Phase 1 onward (see docs/07-build-and-tooling.md).
 Checks: >
   -*,

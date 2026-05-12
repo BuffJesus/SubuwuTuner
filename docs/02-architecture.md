@@ -8,7 +8,7 @@ The longer-term scope is **all Subaru platforms we can brick-test**, not just VA
 - **New ECU family / protocol variant** = new module under `st::ecu::<family>` and `st::flash::<family>`. Existing modules (`ssm`, `uds`, `denso_va`, etc.) are untouched.
 - **New transport** = new module under `st::transport::<adapter>` implementing the same `ITransport` interface.
 
-What this means in practice: every interface in the layering below takes a `Platform` or `Definition` argument; nothing is hard-coded to "WRX". v1.0 ships with one definition pack for VA-WRX-MT and one for VB-WRX-MT, but `subarutuner-cli rom-info` will work on any Subaru ROM the moment someone contributes a definition file.
+What this means in practice: every interface in the layering below takes a `Platform` or `Definition` argument; nothing is hard-coded to "WRX". v1.0 ships with one definition pack for VA-WRX-MT and one for VB-WRX-MT, but `subuwutuner-cli rom-info` will work on any Subaru ROM the moment someone contributes a definition file.
 
 See `04-roadmap.md` for the v1.x platform-expansion order.
 
@@ -50,7 +50,7 @@ Every layer depends only on layers below it. The domain model has no Qt or USB t
 | `st::flash` | Erase/program/verify, brick guard | `Flasher`, `FlashPlan` |
 | `st::log` | Datalogging | `LogStream`, `Pid`, `Sample` |
 | `st::script` | Embedded scripting (Lua) for custom maps | `ScriptHost` |
-| `st::nodegraph` | Visual logic compiler (Atlas equivalent) | `Graph`, `Node`, `CodeGen` |
+| `st::nodegraph` | Visual logic compiler for user-authored ECU features | `Graph`, `Node`, `CodeGen` |
 | `st::ui` | GUI shell (Qt or ImGui) | view models bound to domain |
 | `st::cli` | Headless tool | argparse + same domain |
 
@@ -70,7 +70,7 @@ Communication is via message passing (a typed `concurrent_queue<Cmd>` per worker
 
 ## Plugin / extension surface
 
-Atlas has "Atlas Mods" — importable tables and custom features. We expose two extension points:
+We expose two extension points for community contributions and power-user customization:
 
 1. **Definition packs** — TOML files dropped into a search path. Discovered at startup. Hot-reloadable in dev mode.
 2. **Lua scripts** — sandboxed (no `io`, no `os`, no FFI). Used by the node-graph compiler as an intermediate representation, and directly by power users for batch transformations on tables and logs.

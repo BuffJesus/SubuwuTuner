@@ -1,6 +1,6 @@
 # 11 — Definition Format
 
-The SubaruTuner definition pack tells the tool how to read and edit a ROM:
+The SubuwuTuner definition pack tells the tool how to read and edit a ROM:
 where the calibration ID lives, where each table sits, how to scale raw bytes
 into engineering units, and which maps are emissions-relevant.
 
@@ -55,7 +55,7 @@ transmission    = "manual"
 years           = [2015, 2016, 2017, 2018, 2019, 2020, 2021]
 endianness      = "big"           # Subaru ECUs are big-endian
 rom_size_bytes  = 1572864         # 1.5 MB typical
-authors         = ["The SubaruTuner Authors"]
+authors         = ["The SubuwuTuner Authors"]
 data_sources    = [
     "Derived from RomRaider XML via tools/defgen (facts only, no code copied — see docs/01-reverse-engineering.md)",
     "Manual research on owner-supplied stock dumps",
@@ -253,7 +253,7 @@ replaces the parent's version entirely. New `id`s are added.
 - `schema_version = 1` is the current version.
 - Additive changes (new optional fields) keep the same version.
 - Removing or repurposing a field bumps the version. The loader rejects packs
-  whose version it does not recognize, with a "please update SubaruTuner"
+  whose version it does not recognize, with a "please update SubuwuTuner"
   message — never silently misinterpret old data.
 
 ## Validation rules the loader enforces

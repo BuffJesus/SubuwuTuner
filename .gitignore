@@ -42,7 +42,7 @@ Definitions-*.atlas
 fixtures/roms/
 fixtures/private/
 
-# The Atlas public site is a separate upstream project, not ours
+# Unrelated third-party material that lives next to the workspace
 atlas-public-main/
 
 # Binaries / packages we don't track

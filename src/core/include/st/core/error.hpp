@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The SubaruTuner Authors
+// Copyright 2026 The SubuwuTuner Authors
 
 #ifndef ST_CORE_ERROR_HPP
 #define ST_CORE_ERROR_HPP

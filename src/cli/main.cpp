@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The SubaruTuner Authors
+// Copyright 2026 The SubuwuTuner Authors
 
 #include "st/core/version.hpp"
 #include "st/rom.hpp"
@@ -15,10 +15,10 @@
 namespace {
 
 constexpr std::string_view kUsage =
-    "subarutuner-cli — headless ECU calibration tool\n"
+    "subuwutuner-cli — headless ECU calibration tool\n"
     "\n"
     "USAGE:\n"
-    "    subarutuner-cli [OPTIONS] [COMMAND] [ARGS...]\n"
+    "    subuwutuner-cli [OPTIONS] [COMMAND] [ARGS...]\n"
     "\n"
     "OPTIONS:\n"
     "    -h, --help        Print this help and exit\n"
@@ -44,7 +44,7 @@ bool arg_matches(char const *arg, std::string_view short_form, std::string_view 
 int cmd_rom_info(int argc, char *argv[]) {
     if (argc < 1) {
         std::fputs("rom-info: missing ROM path\n", stderr);
-        std::fputs("Usage: subarutuner-cli rom-info <FILE>\n", stderr);
+        std::fputs("Usage: subuwutuner-cli rom-info <FILE>\n", stderr);
         return 2;
     }
 
@@ -103,7 +103,7 @@ int main(int argc, char *argv[]) {
         return cmd_rom_info(argc - 2, argv + 2);
     }
 
-    std::fprintf(stderr, "subarutuner-cli: unknown argument: %s\n", argv[1]);
-    std::fprintf(stderr, "Try 'subarutuner-cli --help'.\n");
+    std::fprintf(stderr, "subuwutuner-cli: unknown argument: %s\n", argv[1]);
+    std::fprintf(stderr, "Try 'subuwutuner-cli --help'.\n");
     return 2;
 }

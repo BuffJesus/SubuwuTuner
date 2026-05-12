@@ -1,4 +1,4 @@
-# SubaruTuner clang-format
+# SubuwuTuner clang-format
 # LLVM base, 4-space indent, 100-col, pointer-binds-right
 BasedOnStyle: LLVM
 Language: Cpp
