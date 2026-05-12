@@ -24,31 +24,36 @@ SubuwuTuner/
 │   ├── rom/                               (st::Rom — file I/O, BE/LE reads + writes, slice, scan_ascii, crc32)
 │   ├── defs/                              (st::Definition — TOML single-file + directory loader, typed reads + writes, scaling + inverse, axis/table values, diff, writeback)
 │   ├── edit/                              (st::edit — Rect, set/add/multiply/percent/smooth/interpolate, Snapshot, History undo/redo)
-│   └── cli/                               (subuwutuner-cli — rom-info, dump-axis, dump-table, rom-diff, table-edit)
+│   ├── project/                           (st::Project — .stune directory persistence: source + working + def reference)
+│   ├── transport/                         (st::transport — ITransport interface + MockTransport for hardware-free testing)
+│   └── cli/                               (subuwutuner-cli — rom-info, dump-axis, dump-table, rom-diff, table-edit, project-new, project-info, project-edit)
 ├── tools/defgen/                          (Python: RomRaider XML -> our TOML; clean-room facts-only)
-├── tests/unit/{core,rom,defs,edit}/       (95 C++ tests; 28 Python tests under tools/defgen/tests/)
+├── tests/unit/{core,rom,defs,edit,project,transport}/   (109 C++ tests; 28 Python tests under tools/defgen/tests/)
 ├── .github/workflows/ci.yml             (Win MSVC / Mac Apple-Clang / Linux GCC / Linux Clang ASan)
 └── docs/                                (design — read first; 00–12)
 ```
 
-**Phase 0 done. Phase 1 CLI side done. Phase 2 read→edit→save loop done.** What's shipped:
+**Phase 0 done. Phase 1 CLI side done. Phase 2 MVP done. Phase 3 designed + scaffolded.** What's shipped:
 
 - `st::Rom` — file I/O, big/little-endian typed reads + writes with overflow-safe bounds, slice, ASCII scanner, CRC32, mutable data span
 - `st::Definition` — TOML single-file + directory loader (tomlplusplus), cross-reference validation, CID matching, typed value reads + writes, linear + piecewise scaling (both directions), axis-value extraction, table-value extraction (1D + 2D), per-table diff, writeback
 - `st::edit` — Rect-scoped cell operations (set/add/multiply/percent/smooth/interpolate), Snapshot, History stack with branching-undo semantics
+- `st::Project` — `.stune` directory persistence: copies source ROM, tracks working ROM, references definition pack, schema-versioned, CRC32 tampering detection on reopen
+- `st::transport` — `ITransport` pure-virtual interface (open/close/send/send_recv/start_streaming/stop_streaming) + `MockTransport` for hardware-free SSM/UDS development. Real adapters wait on hardware.
 - `tools/defgen/` — Python tool that translates public RomRaider XML to our TOML schema; clean-room rules in `docs/01-reverse-engineering.md`. Standard-library Python only.
-- CLI: `rom-info`, `dump-axis`, `dump-table`, `rom-diff`, `table-edit` — all working with single-file or directory `.toml` packs.
+- CLI: `rom-info`, `dump-axis`, `dump-table`, `rom-diff`, `table-edit`, `project-new`, `project-info`, `project-edit` — all working with single-file or directory `.toml` packs.
 
-The read→edit→save loop is end-to-end exercisable without hardware:
+The end-to-end persistent edit workflow is exercisable without hardware:
 
 ```
-$ subuwutuner-cli table-edit --def pack.toml --table fuel_map \
-    --rows 0:0 --cols 2:3 set 12.5 stock.bin --output tuned.bin
-$ subuwutuner-cli rom-diff --def pack.toml stock.bin tuned.bin
-$ subuwutuner-cli dump-table --def pack.toml --table fuel_map tuned.bin
+$ subuwutuner-cli project-new --source stock.bin --def pack/ my.stune
+$ subuwutuner-cli project-edit --table fuel_map --rows 0:0 --cols 2:3 set 12.5 my.stune
+$ subuwutuner-cli project-info my.stune          # "edits applied", new CRC32
+$ subuwutuner-cli dump-table --def pack/ --table fuel_map my.stune/working.bin
+$ subuwutuner-cli rom-diff --def pack/ my.stune/source.bin my.stune/working.bin
 ```
 
-What remains for the full Phase 1 ship gate: a real RomRaider XML through `defgen`, verified against a real stock dump showing ≥ 20 factory maps with correct scaling. That's a hardware/data gate; user is waiting on the OBDX Pro VX adapter to land before they can dump their own car. **Until then, do not block work on it** — there's still Phase 2 work (project files, 3D table support, definition inheritance) and Phase 3 design that's hardware-free.
+What remains for the full Phase 1 ship gate: a real RomRaider XML through `defgen`, verified against a real stock dump showing ≥ 20 factory maps with correct scaling. That's a hardware/data gate; user is waiting on the OBDX Pro VX adapter to land before they can dump their own car. **Until then, do not block work on it.** Remaining hardware-free polish (3D tables, definition inheritance, defgen `<base>` handling) and Phase 3 implementation (SSM/UDS clients against MockTransport with canned traces) are all open.
 
 The working directory on disk is still `D:\Documents\JetBrains\SubaruTuner\` — only the project's internal identity is `SubuwuTuner`. Renaming the folder would break editor and shell sessions; defer it.
 
@@ -107,16 +112,16 @@ This is where we *are* strict. The four core modules in `src/core`, `src/rom`, `
 
 ## Status
 
-As of 2026-05-11: Phase 0 done. Phase 1 CLI side done. Phase 2 read→edit→save loop done. **95 C++ + 28 Python tests** green on MinGW g++ 15.2. Repo at `https://github.com/BuffJesus/SubuwuTuner`. Phase 1 hardware gate (real ROM, ≥20 maps from real definitions) waiting on user's OBDX Pro VX adapter.
+As of 2026-05-11: Phase 0 done. Phase 1 CLI side done. Phase 2 MVP done. Phase 3 designed + scaffolded (`docs/13-transport.md` + `st::transport`). **109 C++ + 28 Python tests** green on MinGW g++ 15.2. Repo at `https://github.com/BuffJesus/SubuwuTuner`. Phase 1 hardware gate (real ROM, ≥20 maps from real definitions) waiting on user's OBDX Pro VX adapter.
 
-Deps wired so far via FetchContent: Catch2 v3 (tests), `tl::expected` (fallback when libc++ lacks `<expected>`), tomlplusplus v3.4 (definition parser). vcpkg manifest mode still deferred — natural moment is when Qt joins the dep list for Phase 2's UI.
+Deps wired so far via FetchContent: Catch2 v3 (tests), `tl::expected` (fallback when libc++ lacks `<expected>`), tomlplusplus v3.4 (definition parser). vcpkg manifest mode still deferred — natural moment is when Qt joins the dep list for the UI.
 
 CI: clang-format job is advisory (non-blocking) since no pre-commit hook is set up yet. Once one is wired in, flip it back to required.
 
 **Hardware-free work still on the table** (any of these can be picked up next):
-- `.stune` project files — directory-based persistence wrapping source ROM + working ROM + def pack reference
-- 3D table support — extends TableData with axis_z and a vector of slices
-- Definition inheritance (`extends`) — cross-pack inheritance for shared bases
-- CLI convenience: `pack-info`, `table-list`, `--csv` mode on `dump-table`
-- defgen polish: handle RomRaider `<base>` inheritance, better non-linear formula reporting
-- Phase 3 design: J2534 transport abstraction shape (can be designed without hardware)
+- **SsmClient / UdsClient** against `MockTransport` — captured-trace TDD style. The interface for both is sketched in `docs/13-transport.md`.
+- **3D table support** — extend `TableData` with `axis_z` + a slice vector. Touches `read_table_values`, `write_table_values`, `dump-table`, edit ops.
+- **Definition inheritance (`extends`)** — let `va-wrx-mt-2020` extend `va-wrx-mt-2019`. Resolution at load time.
+- **CLI convenience** — `pack-info`, `table-list`, `--csv` mode on `dump-table`, persistent edit history inside `.stune` for cross-session undo.
+- **defgen polish** — handle RomRaider `<base>` inheritance, better non-linear formula reporting, optional `--apply-to-pack` mode that updates an existing TOML pack instead of writing from scratch.
+- **GUI / Phase 2 polish** — start the Qt bring-up if you want to begin the UI; the domain layer is stable enough now.
