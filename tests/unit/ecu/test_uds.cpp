@@ -205,3 +205,189 @@ TEST_CASE("UdsClient propagates transport errors",
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::TransportTimeout);
 }
+
+// ---- DiagnosticSessionControl ------------------------------------------
+
+TEST_CASE("DSC request + positive response", "[uds][dsc]") {
+    REQUIRE(uds::build_dsc_request(uds::kDscProgramming)
+            == std::vector<std::uint8_t>{0x10, 0x02});
+
+    // Real DSC responses include a 4-byte sessionParameterRecord (P2 timing).
+    std::vector<std::uint8_t> const resp{0x50, 0x02, 0x00, 0x32, 0x01, 0xF4};
+    REQUIRE(uds::parse_dsc_response(resp, uds::kDscProgramming).has_value());
+}
+
+TEST_CASE("DSC session mismatch is a ParseError", "[uds][dsc][error]") {
+    std::vector<std::uint8_t> const resp{0x50, 0x03};
+    auto const                       r = uds::parse_dsc_response(resp, uds::kDscProgramming);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("UdsClient::diagnostic_session_control through MockTransport",
+          "[uds][client][dsc]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    t.expect_send_recv({0x10, 0x02},
+                       {0x50, 0x02, 0x00, 0x32, 0x01, 0xF4});
+    uds::UdsClient client{t};
+    REQUIRE(client.diagnostic_session_control(uds::kDscProgramming).has_value());
+}
+
+// ---- ECUReset ----------------------------------------------------------
+
+TEST_CASE("ECUReset request + ack", "[uds][reset]") {
+    REQUIRE(uds::build_ecu_reset_request(uds::kEcuResetHard)
+            == std::vector<std::uint8_t>{0x11, 0x01});
+    std::vector<std::uint8_t> const resp{0x51, 0x01};
+    REQUIRE(uds::parse_ecu_reset_response(resp, uds::kEcuResetHard).has_value());
+}
+
+TEST_CASE("ECUReset NRC propagates", "[uds][reset][error]") {
+    std::vector<std::uint8_t> const resp{0x7F, 0x11, 0x22}; // conditionsNotCorrect
+    auto const                       r = uds::parse_ecu_reset_response(resp, uds::kEcuResetHard);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+}
+
+// ---- TesterPresent -----------------------------------------------------
+
+TEST_CASE("TesterPresent request defaults to ack-requested",
+          "[uds][tester_present]") {
+    REQUIRE(uds::build_tester_present_request()
+            == std::vector<std::uint8_t>{0x3E, 0x00});
+    REQUIRE(uds::build_tester_present_request(/*suppress=*/true)
+            == std::vector<std::uint8_t>{0x3E, 0x80});
+}
+
+TEST_CASE("TesterPresent ack parsed", "[uds][tester_present]") {
+    std::vector<std::uint8_t> const resp{0x7E, 0x00};
+    REQUIRE(uds::parse_tester_present_response(resp).has_value());
+}
+
+TEST_CASE("UdsClient::tester_present round-trip",
+          "[uds][client][tester_present]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    t.expect_send_recv({0x3E, 0x00}, {0x7E, 0x00});
+    uds::UdsClient client{t};
+    REQUIRE(client.tester_present().has_value());
+}
+
+// ---- RequestDownload ---------------------------------------------------
+
+TEST_CASE("RequestDownload encodes address + size in their minimum bytes",
+          "[uds][download]") {
+    // address 0x123456 -> 3 bytes; size 0x4000 -> 2 bytes
+    // Format byte = (size_bytes << 4) | addr_bytes = 0x23
+    auto const r = uds::build_request_download(0x00, 0x123456, 0x4000);
+    REQUIRE(r == std::vector<std::uint8_t>{
+                     0x34, 0x00, 0x23, 0x12, 0x34, 0x56, 0x40, 0x00});
+}
+
+TEST_CASE("RequestDownload response extracts maxNumberOfBlockLength",
+          "[uds][download]") {
+    // [0x74] [0x20] [0x01 0x00] — len-format-id high nibble=2 means 2 bytes
+    // follow; 0x0100 = 256-byte max block.
+    std::vector<std::uint8_t> const resp{0x74, 0x20, 0x01, 0x00};
+    auto const                       r = uds::parse_request_download_response(resp);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == 0x0100U);
+}
+
+TEST_CASE("RequestDownload response rejects garbage length-format",
+          "[uds][download][error]") {
+    std::vector<std::uint8_t> const resp{0x74, 0x00, 0x00};
+    auto const                       r = uds::parse_request_download_response(resp);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("UdsClient::request_download round-trip",
+          "[uds][client][download]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    t.expect_send_recv({0x34, 0x00, 0x23, 0x12, 0x34, 0x56, 0x40, 0x00},
+                       {0x74, 0x20, 0x01, 0x00});
+    uds::UdsClient client{t};
+    auto const     r = client.request_download(0x00, 0x123456, 0x4000);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == 256);
+}
+
+// ---- TransferData ------------------------------------------------------
+
+TEST_CASE("TransferData request packs the block", "[uds][transfer]") {
+    std::vector<std::uint8_t> const data{0xAA, 0xBB, 0xCC};
+    auto const                       r = uds::build_transfer_data(1, data);
+    REQUIRE(r == std::vector<std::uint8_t>{0x36, 0x01, 0xAA, 0xBB, 0xCC});
+}
+
+TEST_CASE("TransferData response counter mismatch surfaces as ParseError",
+          "[uds][transfer][error]") {
+    std::vector<std::uint8_t> const resp{0x76, 0x02};
+    auto const                       r = uds::parse_transfer_data_response(resp, 1);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("UdsClient::transfer_data through MockTransport",
+          "[uds][client][transfer]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    t.expect_send_recv({0x36, 0x01, 0xAA, 0xBB, 0xCC},
+                       {0x76, 0x01});
+    uds::UdsClient                  client{t};
+    std::vector<std::uint8_t> const data{0xAA, 0xBB, 0xCC};
+    REQUIRE(client.transfer_data(1, data).has_value());
+}
+
+// ---- RequestTransferExit ----------------------------------------------
+
+TEST_CASE("RequestTransferExit round-trip", "[uds][exit]") {
+    REQUIRE(uds::build_request_transfer_exit() == std::vector<std::uint8_t>{0x37});
+    std::vector<std::uint8_t> const resp{0x77};
+    REQUIRE(uds::parse_request_transfer_exit_response(resp).has_value());
+
+    // Variant: some ECUs append a CRC; we tolerate trailing bytes.
+    std::vector<std::uint8_t> const resp_with_crc{0x77, 0xDE, 0xAD};
+    REQUIRE(uds::parse_request_transfer_exit_response(resp_with_crc).has_value());
+}
+
+TEST_CASE("End-to-end flashing sequence through MockTransport",
+          "[uds][client][flash][end_to_end]") {
+    // Sketch of the seven-step flash flow:
+    //   1. enter programming session
+    //   2. (security access — covered elsewhere)
+    //   3. request download
+    //   4. transfer data block 1
+    //   5. transfer data block 2
+    //   6. request transfer exit
+    //   7. ecu reset
+
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    t.expect_send_recv({0x10, 0x02}, {0x50, 0x02, 0x00, 0x32, 0x01, 0xF4});
+    t.expect_send_recv({0x34, 0x00, 0x23, 0x12, 0x34, 0x56, 0x40, 0x00},
+                       {0x74, 0x20, 0x01, 0x00});
+    t.expect_send_recv({0x36, 0x01, 0xAA, 0xBB}, {0x76, 0x01});
+    t.expect_send_recv({0x36, 0x02, 0xCC, 0xDD}, {0x76, 0x02});
+    t.expect_send_recv({0x37},                  {0x77});
+    t.expect_send_recv({0x11, 0x01},            {0x51, 0x01});
+
+    uds::UdsClient client{t};
+    REQUIRE(client.diagnostic_session_control(uds::kDscProgramming).has_value());
+    auto const max_block = client.request_download(0x00, 0x123456, 0x4000);
+    REQUIRE(max_block.has_value());
+    REQUIRE(*max_block == 256);
+
+    std::vector<std::uint8_t> const block1{0xAA, 0xBB};
+    std::vector<std::uint8_t> const block2{0xCC, 0xDD};
+    REQUIRE(client.transfer_data(1, block1).has_value());
+    REQUIRE(client.transfer_data(2, block2).has_value());
+    REQUIRE(client.request_transfer_exit().has_value());
+    REQUIRE(client.ecu_reset(uds::kEcuResetHard).has_value());
+
+    REQUIRE(t.exhausted());
+}

@@ -79,6 +79,60 @@ inline constexpr std::uint8_t kNrcResponsePending              = 0x78;
 [[nodiscard]] Status parse_security_access_key_ack(
     std::span<std::uint8_t const> resp, std::uint8_t expected_sub_function);
 
+// DiagnosticSessionControl (0x10) — switch the ECU into a named session.
+// Common sub-functions:
+//   0x01 default            0x02 programming
+//   0x03 extendedDiagnostic 0x04 safetySystemDiagnostic
+inline constexpr std::uint8_t kDscDefault            = 0x01;
+inline constexpr std::uint8_t kDscProgramming        = 0x02;
+inline constexpr std::uint8_t kDscExtendedDiagnostic = 0x03;
+
+[[nodiscard]] std::vector<std::uint8_t> build_dsc_request(std::uint8_t session);
+[[nodiscard]] Status parse_dsc_response(std::span<std::uint8_t const> resp,
+                                         std::uint8_t                  expected_session);
+
+// ECUReset (0x11) — usually sub-function 0x01 (hardReset) or 0x03 (softReset).
+inline constexpr std::uint8_t kEcuResetHard = 0x01;
+inline constexpr std::uint8_t kEcuResetSoft = 0x03;
+
+[[nodiscard]] std::vector<std::uint8_t> build_ecu_reset_request(std::uint8_t reset_type);
+[[nodiscard]] Status parse_ecu_reset_response(std::span<std::uint8_t const> resp,
+                                               std::uint8_t expected_reset_type);
+
+// TesterPresent (0x3E) — heartbeat to keep a non-default session alive.
+// Sub-function 0x00 (zeroSubFunction) requests a response; 0x80 suppresses it
+// (use with `send` rather than `send_recv`).
+[[nodiscard]] std::vector<std::uint8_t> build_tester_present_request(
+    bool suppress_response = false);
+[[nodiscard]] Status parse_tester_present_response(std::span<std::uint8_t const> resp);
+
+// RequestDownload (0x34) — initiate a flash sequence.
+// data_format = high nibble: compression method, low nibble: encryption method.
+// address_and_length_format = high nibble: number of bytes encoding size,
+//                             low nibble: number of bytes encoding address.
+// The ECU's positive response carries a length-format-prefix byte and the
+// maxNumberOfBlockLength (the largest size the ECU will accept per
+// TransferData call). We return that max-block-length.
+[[nodiscard]] std::vector<std::uint8_t> build_request_download(
+    std::uint8_t                  data_format,
+    std::uint32_t                 memory_address,
+    std::uint32_t                 memory_size);
+[[nodiscard]] Result<std::uint32_t> parse_request_download_response(
+    std::span<std::uint8_t const> resp);
+
+// TransferData (0x36) — send one block. block_sequence_counter starts at 1 and
+// increments per block (wraps from 0xFF to 0x00).
+[[nodiscard]] std::vector<std::uint8_t> build_transfer_data(
+    std::uint8_t block_sequence_counter, std::span<std::uint8_t const> data);
+[[nodiscard]] Status parse_transfer_data_response(std::span<std::uint8_t const> resp,
+                                                   std::uint8_t expected_counter);
+
+// RequestTransferExit (0x37) — finalize. Some ECUs include a CRC in the response;
+// for portability we accept any positive response and ignore extra bytes.
+[[nodiscard]] std::vector<std::uint8_t> build_request_transfer_exit();
+[[nodiscard]] Status parse_request_transfer_exit_response(
+    std::span<std::uint8_t const> resp);
+
 // ---- High-level client --------------------------------------------------
 
 class UdsClient {
@@ -106,6 +160,34 @@ class UdsClient {
         std::uint8_t                  sub_function,
         std::span<std::uint8_t const> key,
         std::chrono::milliseconds     timeout = std::chrono::milliseconds{500});
+
+    [[nodiscard]] Status diagnostic_session_control(
+        std::uint8_t              session,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
+
+    [[nodiscard]] Status ecu_reset(
+        std::uint8_t              reset_type,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds{1000});
+
+    // Without suppress: round-trip an ack. With suppress_response=true the
+    // caller uses send() instead; this method always round-trips.
+    [[nodiscard]] Status tester_present(
+        std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
+
+    // Returns the ECU's reported maxNumberOfBlockLength on success.
+    [[nodiscard]] Result<std::uint32_t> request_download(
+        std::uint8_t              data_format,
+        std::uint32_t             memory_address,
+        std::uint32_t             memory_size,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds{2000});
+
+    [[nodiscard]] Status transfer_data(
+        std::uint8_t                  block_sequence_counter,
+        std::span<std::uint8_t const> data,
+        std::chrono::milliseconds     timeout = std::chrono::milliseconds{2000});
+
+    [[nodiscard]] Status request_transfer_exit(
+        std::chrono::milliseconds timeout = std::chrono::milliseconds{2000});
 
   private:
     transport::ITransport *transport_;
