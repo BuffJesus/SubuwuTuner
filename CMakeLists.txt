@@ -11,6 +11,7 @@ project(SubuwuTuner
 # ---------------------------------------------------------------------------
 option(ST_BUILD_TESTS    "Build unit tests"                ON)
 option(ST_BUILD_CLI      "Build the subuwutuner-cli tool"  ON)
+option(ST_BUILD_GUI      "Build the subuwutuner-gui tool"  ON)
 option(ST_WARNINGS_AS_ERRORS "Treat warnings as errors"    ON)
 set(ST_SANITIZE "" CACHE STRING
     "Semicolon-separated sanitizers to enable (e.g. address;undefined). Linux/Mac only.")
@@ -63,6 +64,10 @@ if(ST_BUILD_CLI)
     add_subdirectory(src/cli)
 endif()
 
+if(ST_BUILD_GUI)
+    add_subdirectory(src/ui)
+endif()
+
 if(ST_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
@@ -78,6 +83,7 @@ message(STATUS "  Build type            : ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Compiler              : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "  Tests                 : ${ST_BUILD_TESTS}")
 message(STATUS "  CLI                   : ${ST_BUILD_CLI}")
+message(STATUS "  GUI                   : ${ST_BUILD_GUI}")
 message(STATUS "  Warnings as errors    : ${ST_WARNINGS_AS_ERRORS}")
 message(STATUS "  Sanitizers            : ${ST_SANITIZE}")
 message(STATUS "")
