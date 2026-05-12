@@ -5,7 +5,6 @@
                  EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true"
                  PROJECT_NAME="SubuwuTuner"
                  TARGET_NAME="all_ctest"
-                 CONFIG_NAME="win-mingw"
                  TEST_KIND="ALL"
                  RUN_TARGET_PROJECT_NAME="SubuwuTuner"
                  RUN_TARGET_NAME="all_ctest"

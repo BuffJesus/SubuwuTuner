@@ -6,7 +6,6 @@
                  EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true"
                  PROJECT_NAME="SubuwuTuner"
                  TARGET_NAME="subuwutuner-gui"
-                 CONFIG_NAME="win-mingw"
                  RUN_TARGET_PROJECT_NAME="SubuwuTuner"
                  RUN_TARGET_NAME="subuwutuner-gui"
                  WORKING_DIR="$PROJECT_DIR$">
