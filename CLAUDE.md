@@ -26,10 +26,10 @@ SubuwuTuner/
 │   ├── edit/                              (st::edit — Rect, set/add/multiply/percent/smooth/interpolate, Snapshot, History undo/redo)
 │   ├── project/                           (st::Project — .stune directory persistence: source + working + def reference)
 │   ├── transport/                         (st::transport — ITransport interface + MockTransport for hardware-free testing)
-│   ├── ecu/                               (st::ecu::ssm — SSM read-by-address (A8) + write-by-address (B0) framing and SsmClient)
-│   └── cli/                               (subuwutuner-cli — rom-info, dump-axis, dump-table, rom-diff, table-edit, project-new/info/edit, pack-info, table-list)
+│   ├── ecu/                               (st::ecu::ssm — A8 read + B0 write; st::ecu::uds — RDBI/WDBI/SecurityAccess)
+│   └── cli/                               (subuwutuner-cli — rom-info, dump-axis, dump-table[--csv], rom-diff, table-edit, project-{new,info,edit,undo,redo}, pack-info, table-list)
 ├── tools/defgen/                          (Python: RomRaider XML -> our TOML; clean-room facts-only; handles <base> inheritance)
-├── tests/unit/{core,rom,defs,edit,project,transport,ecu}/   (132 C++ tests; 36 Python tests under tools/defgen/tests/)
+├── tests/unit/{core,rom,defs,edit,project,transport,ecu}/   (155 C++ tests; 36 Python tests under tools/defgen/tests/)
 ├── .github/workflows/ci.yml             (Win MSVC / Mac Apple-Clang / Linux GCC / Linux Clang ASan)
 └── docs/                                (design — read first; 00–12)
 ```
@@ -42,8 +42,9 @@ SubuwuTuner/
 - `st::Project` — `.stune` directory persistence: copies source ROM, tracks working ROM, references definition pack, schema-versioned, CRC32 tampering detection on reopen
 - `st::transport` — `ITransport` pure-virtual interface (open/close/send/send_recv/start_streaming/stop_streaming) + `MockTransport` for hardware-free SSM/UDS development. Real adapters wait on hardware.
 - `st::ecu::ssm` — Subaru Select Monitor read (0xA8) and write (0xB0) framing + `SsmClient`. Framing is per public documentation; needs validation against a real ECU when hardware lands.
+- `st::ecu::uds` — ISO 14229 Read/Write Data By Identifier (0x22/0x2E) + SecurityAccess (0x27) + `UdsClient`. Same caveat — validation pending real VB ECU.
 - `tools/defgen/` — Python tool that translates public RomRaider XML to our TOML schema; clean-room rules in `docs/01-reverse-engineering.md`. Handles `<base>` inheritance. Standard-library Python only.
-- CLI: `rom-info`, `dump-axis`, `dump-table`, `rom-diff`, `table-edit`, `project-new/info/edit`, `pack-info`, `table-list` — all working with single-file or directory `.toml` packs.
+- CLI: `rom-info`, `dump-axis`, `dump-table [--csv]`, `rom-diff`, `table-edit`, `project-{new,info,edit,undo,redo}`, `pack-info`, `table-list`. 1D / 2D / 3D tables all dump correctly. Project edit history persists in `edits.toml` for cross-session undo.
 
 The end-to-end persistent edit workflow is exercisable without hardware:
 
@@ -114,16 +115,16 @@ This is where we *are* strict. The four core modules in `src/core`, `src/rom`, `
 
 ## Status
 
-As of 2026-05-11: Phase 0 done. Phase 1 CLI side done. Phase 2 MVP done. Phase 3 protocol-side started (`st::transport` + `st::ecu::ssm` read+write framing). **132 C++ + 36 Python tests** green on MinGW g++ 15.2. Repo at `https://github.com/BuffJesus/SubuwuTuner`. Phase 1 hardware gate (real ROM, ≥20 maps from real definitions) waiting on user's OBDX Pro VX adapter.
+As of 2026-05-11: Phase 0 done. Phase 1 CLI side done. Phase 2 MVP done (persistence + undo/redo end-to-end). Phase 3 protocol-side scaffolded (`st::transport` + `st::ecu::ssm` + `st::ecu::uds`). **155 C++ + 36 Python tests** green on MinGW g++ 15.2. Repo at `https://github.com/BuffJesus/SubuwuTuner`. Phase 1 hardware gate (real ROM, ≥20 maps from real definitions) waiting on user's OBDX Pro VX adapter.
 
 Deps wired so far via FetchContent: Catch2 v3 (tests), `tl::expected` (fallback when libc++ lacks `<expected>`), tomlplusplus v3.4 (definition parser). vcpkg manifest mode still deferred — natural moment is when Qt joins the dep list for the UI.
 
 CI: clang-format job is advisory (non-blocking) since no pre-commit hook is set up yet. Once one is wired in, flip it back to required.
 
 **Hardware-free work still on the table** (any of these can be picked up next):
-- **`UdsClient`** — ISO 14229 RDBI / WDBI / SecurityAccess / RequestDownload + TransferData against `MockTransport`. Mirrors what `SsmClient` does for VA, but for VB. Same captured-trace pattern.
-- **SSM block write / flash-routine framing** — current SSM write is single-byte RAM write. Block / flash opcodes are per-ECU-family; design lives in `docs/13`. Implement when bench ECU is available.
-- **3D table support** — extend `TableData` with `axis_z` + a slice vector. Touches `read_table_values`, `write_table_values`, `dump-table`, edit ops.
-- **Definition inheritance (`extends`) in the C++ loader** — defgen already flattens at conversion time, but our TOML format documents `extends` for hand-authored multi-pack hierarchies. Add load-time resolution.
-- **`--csv` on dump-table**, persistent edit history inside `.stune` for cross-session undo, defgen `--apply-to-pack` (update an existing TOML pack instead of overwriting).
-- **GUI / Phase 2 polish** — start the Qt bring-up if you want to begin the UI; the domain layer is stable.
+- **C++ side `extends` in the TOML loader** — defgen already flattens at conversion time, but our format documents `extends` for hand-authored multi-pack hierarchies. Add load-time resolution.
+- **UDS extras** — RequestDownload + TransferData + RoutineControl, DiagnosticSessionControl, TesterPresent (keeps the session alive). Mostly framing-only without hardware.
+- **SSM block-write opcodes** — current SSM write is single-byte RAM write. Block / flash opcodes are per-ECU-family; framing design lives in `docs/13`.
+- **defgen polish** — `--apply-to-pack` mode that updates an existing TOML pack instead of overwriting; better reporting on non-linear formulas it had to flatten.
+- **Qt UI bring-up** — biggest remaining single lift. The domain layer is stable enough that the UI just needs view models on top.
+- **Logger / datalogging design + Phase 3 implementation skeleton** — `st::log::LogStream` and the lock-free ring buffer per `docs/13`. Can be designed and unit-tested via `MockTransport`.
