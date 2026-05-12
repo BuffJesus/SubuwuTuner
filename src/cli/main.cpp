@@ -40,9 +40,9 @@ constexpr std::string_view kUsage =
     "    dump-axis --def <pack.toml> --axis <id> <FILE>\n"
     "                            Read the named axis from the ROM via the pack and\n"
     "                            print its scaled values, one per line.\n"
-    "    dump-table --def <pack.toml> --table <id> <FILE>\n"
+    "    dump-table --def <pack.toml> --table <id> [--csv] <FILE>\n"
     "                            Read the named table from the ROM via the pack and\n"
-    "                            print it as a labeled grid.\n"
+    "                            print it as a labeled grid (or CSV with --csv).\n"
     "    rom-diff --def <pack.toml> <A.bin> <B.bin>\n"
     "                            Compare two ROMs of the same definition table-by-\n"
     "                            table. Reports which tables changed and by how\n"
@@ -221,6 +221,7 @@ int cmd_dump_table(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
     std::optional<std::string>           table_id;
     std::optional<std::filesystem::path> rom_path;
+    bool                                 csv = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -236,6 +237,8 @@ int cmd_dump_table(int argc, char *argv[]) {
                 return 2;
             }
             table_id = std::string{argv[++i]};
+        } else if (a == "--csv") {
+            csv = true;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "dump-table: unknown option: %s\n", argv[i]);
             return 2;
@@ -286,14 +289,36 @@ int cmd_dump_table(int argc, char *argv[]) {
     auto const  precision = scal != nullptr ? scal->precision : 0;
     auto const  unit      = scal != nullptr ? scal->unit : std::string{};
 
+    auto const &xs = td->axis_x;
+    auto const &ys = td->axis_y;
+
+    if (csv) {
+        // CSV: first row is empty leading cell + X-axis labels (each loop
+        // iteration emits ",<x>" so the row is ",x0,x1,x2,..."). Data rows
+        // are Y-axis label (or empty for 1D) + cells. No "# comment"
+        // banner so the output is directly pandas/sheet ingestible.
+        for (auto const x : xs) {
+            std::printf(",%.*f", precision, x);
+        }
+        std::printf("\n");
+        for (std::size_t r = 0; r < td->values.size(); ++r) {
+            if (!ys.empty()) {
+                std::printf("%.*f", precision, ys[r]);
+            }
+            for (auto const v : td->values[r]) {
+                std::printf(",%.*f", precision, v);
+            }
+            std::printf("\n");
+        }
+        return 0;
+    }
+
     std::printf("# %s  (%dD", table->id.c_str(), table->dimensions);
     if (!table->name.empty()) std::printf(", %s", table->name.c_str());
     if (!unit.empty())        std::printf(", unit=%s", unit.c_str());
     std::printf(")\n");
 
     constexpr int kColWidth = 10;
-    auto const &  xs        = td->axis_x;
-    auto const &  ys        = td->axis_y;
 
     // Header row.
     std::printf("%*s", kColWidth, "");
