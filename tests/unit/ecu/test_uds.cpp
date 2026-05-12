@@ -354,6 +354,256 @@ TEST_CASE("RequestTransferExit round-trip", "[uds][exit]") {
     REQUIRE(uds::parse_request_transfer_exit_response(resp_with_crc).has_value());
 }
 
+// ---- ReadMemoryByAddress -----------------------------------------------
+
+TEST_CASE("build_read_memory_by_address encodes address+size minimally",
+          "[uds][framing][rmba]") {
+    // addr 0x12 fits in 1 byte, size 0x4000 fits in 2 bytes → aLFI = 0x21.
+    auto const r = uds::build_read_memory_by_address(0x12, 0x4000);
+    REQUIRE(r == std::vector<std::uint8_t>{0x23, 0x21, 0x12, 0x40, 0x00});
+}
+
+TEST_CASE("build_read_memory_by_address widens addr+size when needed",
+          "[uds][framing][rmba]") {
+    // addr 0x123456 fits in 3 bytes, size 0xFF fits in 1 byte → aLFI = 0x13.
+    auto const r = uds::build_read_memory_by_address(0x123456, 0xFF);
+    REQUIRE(r == std::vector<std::uint8_t>{0x23, 0x13, 0x12, 0x34, 0x56, 0xFF});
+}
+
+TEST_CASE("parse_read_memory_by_address_response returns the data",
+          "[uds][framing][rmba]") {
+    std::vector<std::uint8_t> const resp{0x63, 0xAA, 0xBB, 0xCC, 0xDD};
+    auto const r = uds::parse_read_memory_by_address_response(resp);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == std::vector<std::uint8_t>{0xAA, 0xBB, 0xCC, 0xDD});
+}
+
+TEST_CASE("parse_read_memory_by_address_response surfaces NRC",
+          "[uds][framing][rmba][error]") {
+    std::vector<std::uint8_t> const resp{0x7F, 0x23,
+                                         uds::kNrcSecurityAccessDenied};
+    auto const r = uds::parse_read_memory_by_address_response(resp);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+}
+
+TEST_CASE("UdsClient::read_memory_by_address round-trip",
+          "[uds][client][rmba]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    t.expect_send_recv({0x23, 0x21, 0x12, 0x40, 0x00},
+                       {0x63, 0xDE, 0xAD, 0xBE, 0xEF});
+
+    uds::UdsClient client{t};
+    auto const r = client.read_memory_by_address(0x12, 0x4000);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == std::vector<std::uint8_t>{0xDE, 0xAD, 0xBE, 0xEF});
+    REQUIRE(t.exhausted());
+}
+
+// ---- WriteMemoryByAddress ----------------------------------------------
+
+TEST_CASE("build_write_memory_by_address packs [3D aLFI addr... size... data...]",
+          "[uds][framing][wmba]") {
+    std::vector<std::uint8_t> const data{0xAA, 0xBB, 0xCC};
+    auto const r = uds::build_write_memory_by_address(0xABCD, data);
+    REQUIRE(r == std::vector<std::uint8_t>{0x3D, 0x12, 0xAB, 0xCD, 0x03,
+                                            0xAA, 0xBB, 0xCC});
+}
+
+TEST_CASE("parse_write_memory_by_address_response accepts a matching echo",
+          "[uds][framing][wmba]") {
+    std::vector<std::uint8_t> const resp{0x7D, 0x12, 0xAB, 0xCD, 0x03};
+    REQUIRE(uds::parse_write_memory_by_address_response(resp, 0xABCD, 0x03)
+                .has_value());
+}
+
+TEST_CASE("parse_write_memory_by_address_response flags an address mismatch",
+          "[uds][framing][wmba][error]") {
+    std::vector<std::uint8_t> const resp{0x7D, 0x12, 0xAB, 0xCE, 0x03};
+    auto const r = uds::parse_write_memory_by_address_response(resp, 0xABCD,
+                                                                0x03);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+    REQUIRE(r.error().message().find("address") != std::string::npos);
+}
+
+TEST_CASE("parse_write_memory_by_address_response flags a size mismatch",
+          "[uds][framing][wmba][error]") {
+    std::vector<std::uint8_t> const resp{0x7D, 0x12, 0xAB, 0xCD, 0x04};
+    auto const r = uds::parse_write_memory_by_address_response(resp, 0xABCD,
+                                                                0x03);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+    REQUIRE(r.error().message().find("size") != std::string::npos);
+}
+
+TEST_CASE("UdsClient::write_memory_by_address round-trip",
+          "[uds][client][wmba]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    std::vector<std::uint8_t> const data{0xAA, 0xBB, 0xCC};
+    t.expect_send_recv({0x3D, 0x12, 0xAB, 0xCD, 0x03, 0xAA, 0xBB, 0xCC},
+                       {0x7D, 0x12, 0xAB, 0xCD, 0x03});
+
+    uds::UdsClient client{t};
+    REQUIRE(client.write_memory_by_address(0xABCD, data).has_value());
+    REQUIRE(t.exhausted());
+}
+
+// ---- CommunicationControl ----------------------------------------------
+
+TEST_CASE("build_communication_control packs [28 controlType commType]",
+          "[uds][framing][commctl]") {
+    auto const r = uds::build_communication_control(
+        uds::kCcDisableRxAndTx, uds::kCtNormalAndNetworkManagement);
+    REQUIRE(r == std::vector<std::uint8_t>{0x28, 0x03, 0x03});
+}
+
+TEST_CASE("parse_communication_control_response accepts a matching ack",
+          "[uds][framing][commctl]") {
+    std::vector<std::uint8_t> const resp{0x68, 0x03};
+    REQUIRE(uds::parse_communication_control_response(resp, 0x03).has_value());
+}
+
+TEST_CASE("parse_communication_control_response flags controlType mismatch",
+          "[uds][framing][commctl][error]") {
+    std::vector<std::uint8_t> const resp{0x68, 0x00};
+    auto const r = uds::parse_communication_control_response(resp, 0x03);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("parse_communication_control_response surfaces subFunctionNotSupported",
+          "[uds][framing][commctl][error]") {
+    std::vector<std::uint8_t> const resp{0x7F, 0x28,
+                                         uds::kNrcSubFunctionNotSupported};
+    auto const r = uds::parse_communication_control_response(resp, 0x03);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+}
+
+TEST_CASE("UdsClient::communication_control round-trip",
+          "[uds][client][commctl]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    t.expect_send_recv({0x28, 0x03, 0x03}, {0x68, 0x03});
+
+    uds::UdsClient client{t};
+    REQUIRE(client.communication_control(uds::kCcDisableRxAndTx,
+                                          uds::kCtNormalAndNetworkManagement)
+                .has_value());
+    REQUIRE(t.exhausted());
+}
+
+// ---- RoutineControl ----------------------------------------------------
+
+TEST_CASE("build_routine_control packs [31 sub rid_hi rid_lo opts...]",
+          "[uds][framing][routine]") {
+    auto const empty = uds::build_routine_control(uds::kRcStart,
+                                                  uds::kRidEraseMemory);
+    REQUIRE(empty == std::vector<std::uint8_t>{0x31, 0x01, 0xFF, 0x00});
+
+    std::vector<std::uint8_t> const opts{0x12, 0x34, 0x56};
+    auto const with_opts = uds::build_routine_control(uds::kRcStart, 0xABCD, opts);
+    REQUIRE(with_opts
+            == std::vector<std::uint8_t>{0x31, 0x01, 0xAB, 0xCD, 0x12, 0x34, 0x56});
+}
+
+TEST_CASE("parse_routine_control_response returns the status record",
+          "[uds][framing][routine]") {
+    // Positive response: [71 01 FF 00] [status 0xAA 0x55]
+    std::vector<std::uint8_t> const resp{0x71, 0x01, 0xFF, 0x00, 0xAA, 0x55};
+    auto const r = uds::parse_routine_control_response(resp, uds::kRcStart,
+                                                       uds::kRidEraseMemory);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == std::vector<std::uint8_t>{0xAA, 0x55});
+}
+
+TEST_CASE("parse_routine_control_response handles an empty status record",
+          "[uds][framing][routine]") {
+    std::vector<std::uint8_t> const resp{0x71, 0x01, 0xFF, 0x00};
+    auto const r = uds::parse_routine_control_response(resp, uds::kRcStart,
+                                                       uds::kRidEraseMemory);
+    REQUIRE(r.has_value());
+    REQUIRE(r->empty());
+}
+
+TEST_CASE("parse_routine_control_response flags sub-function mismatch",
+          "[uds][framing][routine][error]") {
+    // ECU echoed stopRoutine (0x02) when we asked for startRoutine (0x01).
+    std::vector<std::uint8_t> const resp{0x71, 0x02, 0xFF, 0x00};
+    auto const r = uds::parse_routine_control_response(resp, uds::kRcStart,
+                                                       uds::kRidEraseMemory);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+    REQUIRE(r.error().message().find("sub-function") != std::string::npos);
+}
+
+TEST_CASE("parse_routine_control_response flags RID mismatch",
+          "[uds][framing][routine][error]") {
+    std::vector<std::uint8_t> const resp{0x71, 0x01, 0xFF, 0x01};
+    auto const r = uds::parse_routine_control_response(resp, uds::kRcStart,
+                                                       uds::kRidEraseMemory);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+    REQUIRE(r.error().message().find("RID") != std::string::npos);
+}
+
+TEST_CASE("parse_routine_control_response surfaces conditionsNotCorrect NRC",
+          "[uds][framing][routine][error]") {
+    // Negative response: 7F 31 22 — conditionsNotCorrect (erase before session)
+    std::vector<std::uint8_t> const resp{0x7F, 0x31, 0x22};
+    auto const r = uds::parse_routine_control_response(resp, uds::kRcStart,
+                                                       uds::kRidEraseMemory);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+}
+
+TEST_CASE("parse_routine_control_response flags a truncated response",
+          "[uds][framing][routine][error]") {
+    std::vector<std::uint8_t> const resp{0x71, 0x01, 0xFF};
+    auto const r = uds::parse_routine_control_response(resp, uds::kRcStart,
+                                                       uds::kRidEraseMemory);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("UdsClient::routine_control round-trip through MockTransport",
+          "[uds][client][routine]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // Tester asks for eraseMemory with a 4-byte address range; ECU returns
+    // routineInfo = 0x00 (success).
+    std::vector<std::uint8_t> const opts{0x00, 0x10, 0x00, 0x00};
+    t.expect_send_recv({0x31, 0x01, 0xFF, 0x00, 0x00, 0x10, 0x00, 0x00},
+                       {0x71, 0x01, 0xFF, 0x00, 0x00});
+
+    uds::UdsClient client{t};
+    auto const r = client.routine_control(uds::kRcStart, uds::kRidEraseMemory, opts);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == std::vector<std::uint8_t>{0x00});
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("UdsClient::routine_control surfaces an NRC as EcuRejected",
+          "[uds][client][routine][error]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    t.expect_send_recv({0x31, 0x01, 0xFF, 0x00},
+                       {0x7F, 0x31, uds::kNrcConditionsNotCorrect});
+
+    uds::UdsClient client{t};
+    auto const r = client.routine_control(uds::kRcStart, uds::kRidEraseMemory);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+}
+
 TEST_CASE("End-to-end flashing sequence through MockTransport",
           "[uds][client][flash][end_to_end]") {
     // Sketch of the seven-step flash flow:
@@ -389,5 +639,65 @@ TEST_CASE("End-to-end flashing sequence through MockTransport",
     REQUIRE(client.request_transfer_exit().has_value());
     REQUIRE(client.ecu_reset(uds::kEcuResetHard).has_value());
 
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("Realistic flash flow with erase + check-deps via RoutineControl",
+          "[uds][client][flash][end_to_end][routine]") {
+    // Compared to the minimal flash sketch above this one inserts the two
+    // RoutineControl steps every Subaru flash exercises:
+    //   eraseMemory before RequestDownload, and
+    //   checkProgrammingDependencies after RequestTransferExit.
+    // Security access is still covered in its own test.
+
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // 1. enter programming session
+    t.expect_send_recv({0x10, 0x02}, {0x50, 0x02, 0x00, 0x32, 0x01, 0xF4});
+    // 2. eraseMemory(addr=0x00123456, len=0x4000)
+    t.expect_send_recv({0x31, 0x01, 0xFF, 0x00,
+                        0x00, 0x12, 0x34, 0x56,
+                        0x00, 0x00, 0x40, 0x00},
+                       {0x71, 0x01, 0xFF, 0x00, 0x00});
+    // 3. requestDownload
+    t.expect_send_recv({0x34, 0x00, 0x23, 0x12, 0x34, 0x56, 0x40, 0x00},
+                       {0x74, 0x20, 0x01, 0x00});
+    // 4-5. transferData x2
+    t.expect_send_recv({0x36, 0x01, 0xAA, 0xBB}, {0x76, 0x01});
+    t.expect_send_recv({0x36, 0x02, 0xCC, 0xDD}, {0x76, 0x02});
+    // 6. requestTransferExit
+    t.expect_send_recv({0x37}, {0x77});
+    // 7. checkProgrammingDependencies — ECU returns a CRC status byte
+    t.expect_send_recv({0x31, 0x01, 0xFF, 0x01},
+                       {0x71, 0x01, 0xFF, 0x01, 0x00});
+    // 8. ecu reset
+    t.expect_send_recv({0x11, 0x01}, {0x51, 0x01});
+
+    uds::UdsClient client{t};
+
+    REQUIRE(client.diagnostic_session_control(uds::kDscProgramming).has_value());
+
+    std::vector<std::uint8_t> const erase_opts{0x00, 0x12, 0x34, 0x56,
+                                               0x00, 0x00, 0x40, 0x00};
+    auto const erase = client.routine_control(uds::kRcStart, uds::kRidEraseMemory,
+                                              erase_opts);
+    REQUIRE(erase.has_value());
+    REQUIRE(*erase == std::vector<std::uint8_t>{0x00});
+
+    auto const max_block = client.request_download(0x00, 0x123456, 0x4000);
+    REQUIRE(max_block.has_value());
+    REQUIRE(*max_block == 256);
+
+    REQUIRE(client.transfer_data(1, std::vector<std::uint8_t>{0xAA, 0xBB}).has_value());
+    REQUIRE(client.transfer_data(2, std::vector<std::uint8_t>{0xCC, 0xDD}).has_value());
+    REQUIRE(client.request_transfer_exit().has_value());
+
+    auto const check = client.routine_control(uds::kRcStart,
+                                              uds::kRidCheckProgrammingDependencies);
+    REQUIRE(check.has_value());
+    REQUIRE(*check == std::vector<std::uint8_t>{0x00});
+
+    REQUIRE(client.ecu_reset(uds::kEcuResetHard).has_value());
     REQUIRE(t.exhausted());
 }

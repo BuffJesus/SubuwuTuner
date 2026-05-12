@@ -133,6 +133,69 @@ inline constexpr std::uint8_t kEcuResetSoft = 0x03;
 [[nodiscard]] Status parse_request_transfer_exit_response(
     std::span<std::uint8_t const> resp);
 
+// ReadMemoryByAddress (0x23) — read `memory_size` bytes from the ECU at
+// `memory_address`. The wire format uses the same addressAndLengthFormat
+// nibble encoding as RequestDownload (high nibble: bytes encoding size,
+// low nibble: bytes encoding address). Positive response: [0x63] [data...].
+[[nodiscard]] std::vector<std::uint8_t> build_read_memory_by_address(
+    std::uint32_t memory_address, std::uint32_t memory_size);
+[[nodiscard]] Result<std::vector<std::uint8_t>> parse_read_memory_by_address_response(
+    std::span<std::uint8_t const> resp);
+
+// WriteMemoryByAddress (0x3D) — write `data.size()` bytes from `data` to
+// `memory_address`. Same address/size nibble encoding. Positive response
+// echoes the address+size header: [0x7D] [aLFI] [addr...] [size...].
+[[nodiscard]] std::vector<std::uint8_t> build_write_memory_by_address(
+    std::uint32_t memory_address, std::span<std::uint8_t const> data);
+[[nodiscard]] Status parse_write_memory_by_address_response(
+    std::span<std::uint8_t const> resp,
+    std::uint32_t                 expected_address,
+    std::uint32_t                 expected_size);
+
+// CommunicationControl (0x28) — gate which message classes the ECU sends or
+// receives. Used during flashing to silence non-diagnostic traffic on the
+// bus. Positive response: [0x68] [controlType].
+inline constexpr std::uint8_t kCcEnableRxAndTx                = 0x00;
+inline constexpr std::uint8_t kCcEnableRxAndDisableTx         = 0x01;
+inline constexpr std::uint8_t kCcDisableRxAndEnableTx         = 0x02;
+inline constexpr std::uint8_t kCcDisableRxAndTx               = 0x03;
+
+// communicationType low-nibble bits — combine to gate multiple classes.
+inline constexpr std::uint8_t kCtNormalCommunication          = 0x01;
+inline constexpr std::uint8_t kCtNetworkManagement            = 0x02;
+inline constexpr std::uint8_t kCtNormalAndNetworkManagement   = 0x03;
+
+[[nodiscard]] std::vector<std::uint8_t> build_communication_control(
+    std::uint8_t control_type, std::uint8_t communication_type);
+[[nodiscard]] Status parse_communication_control_response(
+    std::span<std::uint8_t const> resp, std::uint8_t expected_control_type);
+
+// RoutineControl (0x31) — start, stop, or query an ECU-defined routine.
+// The flash flow exercises this twice: eraseMemory before RequestDownload,
+// checkProgrammingDependencies after RequestTransferExit. Other routine
+// identifiers are vendor-defined.
+//
+// Positive response: [0x71] [sub_function] [RID_hi] [RID_lo] [status_record...]
+// `parse_routine_control_response` returns the optional status record.
+inline constexpr std::uint8_t  kRcStart           = 0x01;
+inline constexpr std::uint8_t  kRcStop            = 0x02;
+inline constexpr std::uint8_t  kRcRequestResults  = 0x03;
+
+// Well-known routine identifiers from ISO 14229-1 Annex F.
+inline constexpr std::uint16_t kRidEraseMemory                  = 0xFF00;
+inline constexpr std::uint16_t kRidCheckProgrammingDependencies = 0xFF01;
+inline constexpr std::uint16_t kRidEraseMirrorMemory            = 0xFF02;
+
+[[nodiscard]] std::vector<std::uint8_t> build_routine_control(
+    std::uint8_t                  sub_function,
+    std::uint16_t                 routine_id,
+    std::span<std::uint8_t const> option_record = {});
+
+[[nodiscard]] Result<std::vector<std::uint8_t>> parse_routine_control_response(
+    std::span<std::uint8_t const> resp,
+    std::uint8_t                  expected_sub_function,
+    std::uint16_t                 expected_routine_id);
+
 // ---- High-level client --------------------------------------------------
 
 class UdsClient {
@@ -188,6 +251,30 @@ class UdsClient {
 
     [[nodiscard]] Status request_transfer_exit(
         std::chrono::milliseconds timeout = std::chrono::milliseconds{2000});
+
+    // Erase/check-deps routines can run several seconds on real ECUs while
+    // they walk the flash bank, so the default timeout is longer than the
+    // other UDS services. Returns the routine status record (often empty).
+    [[nodiscard]] Result<std::vector<std::uint8_t>> routine_control(
+        std::uint8_t                  sub_function,
+        std::uint16_t                 routine_id,
+        std::span<std::uint8_t const> option_record = {},
+        std::chrono::milliseconds     timeout = std::chrono::milliseconds{5000});
+
+    [[nodiscard]] Result<std::vector<std::uint8_t>> read_memory_by_address(
+        std::uint32_t             memory_address,
+        std::uint32_t             memory_size,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds{1000});
+
+    [[nodiscard]] Status write_memory_by_address(
+        std::uint32_t                 memory_address,
+        std::span<std::uint8_t const> data,
+        std::chrono::milliseconds     timeout = std::chrono::milliseconds{2000});
+
+    [[nodiscard]] Status communication_control(
+        std::uint8_t              control_type,
+        std::uint8_t              communication_type,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
 
   private:
     transport::ITransport *transport_;

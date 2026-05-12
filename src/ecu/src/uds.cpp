@@ -255,6 +255,21 @@ void append_big_endian(std::vector<std::uint8_t> &out, std::uint32_t v, std::uin
     }
 }
 
+std::uint32_t read_big_endian(std::span<std::uint8_t const> src,
+                              std::size_t                    offset,
+                              std::size_t                    bytes) noexcept {
+    std::uint32_t v = 0;
+    for (std::size_t i = 0; i < bytes; ++i) {
+        v = (v << 8U) | src[offset + i];
+    }
+    return v;
+}
+
+std::uint8_t encode_alfi(std::uint8_t size_bytes, std::uint8_t addr_bytes) noexcept {
+    return static_cast<std::uint8_t>(((size_bytes & 0x0FU) << 4U)
+                                      | (addr_bytes & 0x0FU));
+}
+
 } // namespace
 
 std::vector<std::uint8_t> build_request_download(std::uint8_t                  data_format,
@@ -352,6 +367,165 @@ Status parse_request_transfer_exit_response(std::span<std::uint8_t const> resp) 
     return ok();
 }
 
+// ---- RoutineControl ----------------------------------------------------
+
+std::vector<std::uint8_t> build_routine_control(
+    std::uint8_t                  sub_function,
+    std::uint16_t                 routine_id,
+    std::span<std::uint8_t const> option_record) {
+    std::vector<std::uint8_t> out(4 + option_record.size());
+    out[0] = kSidRoutineControl;
+    out[1] = sub_function;
+    out[2] = static_cast<std::uint8_t>((routine_id >> 8) & 0xFFU);
+    out[3] = static_cast<std::uint8_t>(routine_id & 0xFFU);
+    std::copy(option_record.begin(), option_record.end(), out.begin() + 4);
+    return out;
+}
+
+Result<std::vector<std::uint8_t>> parse_routine_control_response(
+    std::span<std::uint8_t const> resp,
+    std::uint8_t                  expected_sub_function,
+    std::uint16_t                 expected_routine_id) {
+    if (auto r = reject_if_negative(resp, kSidRoutineControl); !r.has_value()) {
+        return failure(r.error());
+    }
+    // Positive response: [0x71] [sub_function] [RID_hi] [RID_lo] [status_record...]
+    if (resp.size() < 4) {
+        return failure(ErrorCode::ParseError,
+                       "UDS RoutineControl response too short");
+    }
+    if (resp[0] != kSidRoutineControl + kPositiveResponseOffset) {
+        return failure(ErrorCode::EcuRejected,
+                       "UDS RoutineControl unexpected SID");
+    }
+    if (resp[1] != expected_sub_function) {
+        return failure(ErrorCode::ParseError,
+                       "UDS RoutineControl sub-function mismatch");
+    }
+    auto const got_rid = read_be16(resp[2], resp[3]);
+    if (got_rid != expected_routine_id) {
+        return failure(ErrorCode::ParseError,
+                       "UDS RoutineControl RID mismatch");
+    }
+    return std::vector<std::uint8_t>(resp.begin() + 4, resp.end());
+}
+
+// ---- ReadMemoryByAddress -----------------------------------------------
+
+std::vector<std::uint8_t> build_read_memory_by_address(std::uint32_t memory_address,
+                                                       std::uint32_t memory_size) {
+    auto const addr_bytes = bytes_to_encode(memory_address);
+    auto const size_bytes = bytes_to_encode(memory_size);
+
+    std::vector<std::uint8_t> out;
+    out.reserve(std::size_t{2} + addr_bytes + size_bytes);
+    out.push_back(kSidReadMemoryByAddress);
+    out.push_back(encode_alfi(size_bytes, addr_bytes));
+    append_big_endian(out, memory_address, addr_bytes);
+    append_big_endian(out, memory_size, size_bytes);
+    return out;
+}
+
+Result<std::vector<std::uint8_t>> parse_read_memory_by_address_response(
+    std::span<std::uint8_t const> resp) {
+    if (auto r = reject_if_negative(resp, kSidReadMemoryByAddress); !r.has_value()) {
+        return failure(r.error());
+    }
+    if (resp.empty()) {
+        return failure(ErrorCode::ParseError,
+                       "UDS ReadMemoryByAddress response empty");
+    }
+    if (resp[0] != kSidReadMemoryByAddress + kPositiveResponseOffset) {
+        return failure(ErrorCode::EcuRejected,
+                       "UDS ReadMemoryByAddress unexpected SID");
+    }
+    return std::vector<std::uint8_t>(resp.begin() + 1, resp.end());
+}
+
+// ---- WriteMemoryByAddress ----------------------------------------------
+
+std::vector<std::uint8_t> build_write_memory_by_address(
+    std::uint32_t memory_address, std::span<std::uint8_t const> data) {
+    auto const memory_size = static_cast<std::uint32_t>(data.size());
+    auto const addr_bytes  = bytes_to_encode(memory_address);
+    auto const size_bytes  = bytes_to_encode(memory_size);
+
+    std::vector<std::uint8_t> out;
+    out.reserve(std::size_t{2} + addr_bytes + size_bytes + data.size());
+    out.push_back(kSidWriteMemoryByAddress);
+    out.push_back(encode_alfi(size_bytes, addr_bytes));
+    append_big_endian(out, memory_address, addr_bytes);
+    append_big_endian(out, memory_size, size_bytes);
+    out.insert(out.end(), data.begin(), data.end());
+    return out;
+}
+
+Status parse_write_memory_by_address_response(std::span<std::uint8_t const> resp,
+                                               std::uint32_t expected_address,
+                                               std::uint32_t expected_size) {
+    if (auto r = reject_if_negative(resp, kSidWriteMemoryByAddress); !r.has_value()) {
+        return failure(r.error());
+    }
+    // Positive response: [0x7D] [aLFI] [addr...] [size...]
+    if (resp.size() < 2) {
+        return failure(ErrorCode::ParseError,
+                       "UDS WriteMemoryByAddress response too short");
+    }
+    if (resp[0] != kSidWriteMemoryByAddress + kPositiveResponseOffset) {
+        return failure(ErrorCode::EcuRejected,
+                       "UDS WriteMemoryByAddress unexpected SID");
+    }
+    auto const size_bytes = static_cast<std::size_t>((resp[1] >> 4U) & 0x0FU);
+    auto const addr_bytes = static_cast<std::size_t>(resp[1] & 0x0FU);
+    if (size_bytes == 0 || size_bytes > 4 || addr_bytes == 0 || addr_bytes > 4) {
+        return failure(ErrorCode::ParseError,
+                       "UDS WriteMemoryByAddress bad addressAndLengthFormat");
+    }
+    if (resp.size() < 2 + addr_bytes + size_bytes) {
+        return failure(ErrorCode::ParseError,
+                       "UDS WriteMemoryByAddress response truncated");
+    }
+    auto const got_addr = read_big_endian(resp, 2, addr_bytes);
+    auto const got_size = read_big_endian(resp, 2 + addr_bytes, size_bytes);
+    if (got_addr != expected_address) {
+        return failure(ErrorCode::ParseError,
+                       "UDS WriteMemoryByAddress address echo mismatch");
+    }
+    if (got_size != expected_size) {
+        return failure(ErrorCode::ParseError,
+                       "UDS WriteMemoryByAddress size echo mismatch");
+    }
+    return ok();
+}
+
+// ---- CommunicationControl ----------------------------------------------
+
+std::vector<std::uint8_t> build_communication_control(std::uint8_t control_type,
+                                                       std::uint8_t communication_type) {
+    return std::vector<std::uint8_t>{kSidCommunicationControl, control_type,
+                                     communication_type};
+}
+
+Status parse_communication_control_response(std::span<std::uint8_t const> resp,
+                                             std::uint8_t expected_control_type) {
+    if (auto r = reject_if_negative(resp, kSidCommunicationControl); !r.has_value()) {
+        return failure(r.error());
+    }
+    if (resp.size() < 2) {
+        return failure(ErrorCode::ParseError,
+                       "UDS CommunicationControl response too short");
+    }
+    if (resp[0] != kSidCommunicationControl + kPositiveResponseOffset) {
+        return failure(ErrorCode::EcuRejected,
+                       "UDS CommunicationControl unexpected SID");
+    }
+    if (resp[1] != expected_control_type) {
+        return failure(ErrorCode::ParseError,
+                       "UDS CommunicationControl controlType mismatch");
+    }
+    return ok();
+}
+
 // ---- UdsClient ----------------------------------------------------------
 
 Result<std::vector<std::uint8_t>> UdsClient::read_data_by_identifier(
@@ -433,6 +607,46 @@ Status UdsClient::request_transfer_exit(std::chrono::milliseconds timeout) {
     auto const resp = transport_->send_recv(req, timeout);
     if (!resp.has_value()) return failure(resp.error());
     return parse_request_transfer_exit_response(resp->data);
+}
+
+Result<std::vector<std::uint8_t>> UdsClient::routine_control(
+    std::uint8_t                  sub_function,
+    std::uint16_t                 routine_id,
+    std::span<std::uint8_t const> option_record,
+    std::chrono::milliseconds     timeout) {
+    auto const req  = build_routine_control(sub_function, routine_id, option_record);
+    auto const resp = transport_->send_recv(req, timeout);
+    if (!resp.has_value()) return failure(resp.error());
+    return parse_routine_control_response(resp->data, sub_function, routine_id);
+}
+
+Result<std::vector<std::uint8_t>> UdsClient::read_memory_by_address(
+    std::uint32_t             memory_address,
+    std::uint32_t             memory_size,
+    std::chrono::milliseconds timeout) {
+    auto const req  = build_read_memory_by_address(memory_address, memory_size);
+    auto const resp = transport_->send_recv(req, timeout);
+    if (!resp.has_value()) return failure(resp.error());
+    return parse_read_memory_by_address_response(resp->data);
+}
+
+Status UdsClient::write_memory_by_address(std::uint32_t                 memory_address,
+                                           std::span<std::uint8_t const> data,
+                                           std::chrono::milliseconds     timeout) {
+    auto const req  = build_write_memory_by_address(memory_address, data);
+    auto const resp = transport_->send_recv(req, timeout);
+    if (!resp.has_value()) return failure(resp.error());
+    return parse_write_memory_by_address_response(
+        resp->data, memory_address, static_cast<std::uint32_t>(data.size()));
+}
+
+Status UdsClient::communication_control(std::uint8_t              control_type,
+                                         std::uint8_t              communication_type,
+                                         std::chrono::milliseconds timeout) {
+    auto const req  = build_communication_control(control_type, communication_type);
+    auto const resp = transport_->send_recv(req, timeout);
+    if (!resp.has_value()) return failure(resp.error());
+    return parse_communication_control_response(resp->data, control_type);
 }
 
 } // namespace st::ecu::uds

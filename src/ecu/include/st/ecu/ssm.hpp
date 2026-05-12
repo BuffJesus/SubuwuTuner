@@ -55,8 +55,14 @@ inline constexpr std::uint8_t kCmdReadByAddress   = 0xA8;
 inline constexpr std::uint8_t kRespReadByAddress  = 0xE8;
 inline constexpr std::uint8_t kCmdWriteByAddress  = 0xB0;
 inline constexpr std::uint8_t kRespWriteByAddress = 0xF0;
+inline constexpr std::uint8_t kCmdBlockWrite      = 0xB8;
+inline constexpr std::uint8_t kRespBlockWrite     = 0xF8;
 inline constexpr std::uint8_t kNegativeResponse   = 0x7F;
 inline constexpr std::uint8_t kPadByte            = 0x00;
+
+// Maximum number of data bytes in a single block-write frame, bounded by
+// the 8-bit LEN field. LEN = 1 (CMD) + 3 (addr) + N, so N <= 251.
+inline constexpr std::size_t  kMaxBlockWriteBytes = 251;
 
 // Maximum addressable address. SSM uses 24-bit memory addresses.
 inline constexpr std::uint32_t kMaxAddress = 0x00FFFFFFU;
@@ -80,9 +86,8 @@ inline constexpr std::uint32_t kMaxAddress = 0x00FFFFFFU;
 // Frame: 80 10 F0 [LEN] B0 [addr_hi addr_med addr_low] [data] [CSUM]
 // LEN = 5 (CMD + 3*addr + 1*data). Returns InvalidArgument on addr > 24-bit.
 //
-// Block writes (multiple consecutive bytes in one frame) are per-ECU-family
-// and use a different opcode on most modern Subaru ECUs; that lives in a
-// future write_block helper once a real ECU is on the bench.
+// For multi-byte writes at consecutive addresses, use build_b8_request
+// instead.
 [[nodiscard]] Result<std::vector<std::uint8_t>> build_b0_request(
     std::uint32_t address, std::uint8_t data);
 
@@ -90,6 +95,30 @@ inline constexpr std::uint32_t kMaxAddress = 0x00FFFFFFU;
 // we surface to the caller so they can confirm the write took. Negative
 // responses (NRC) become EcuRejected like for A8.
 [[nodiscard]] Result<std::uint8_t> parse_b0_response(std::span<std::uint8_t const> resp);
+
+// Build the wire bytes for a block-write request — N consecutive bytes
+// written at `address`, `address+1`, …, `address+N-1`.
+//
+// Frame: 80 10 F0 [LEN] B8 [addr_hi addr_med addr_low] [d0 … d_{N-1}] [CSUM]
+// LEN = 4 + N (CMD + 3*addr + N*data).
+//
+// Returns InvalidArgument if:
+//   - data is empty,
+//   - address > 24-bit, or address + N - 1 > 24-bit,
+//   - N > kMaxBlockWriteBytes (single-frame LEN limit).
+//
+// Same RAM-write semantics as build_b0_request — this is NOT a flash-write
+// path. Block opcodes are not fully consistent across all Subaru ECU
+// families; this framing matches publicly-documented modern (CAN-era)
+// implementations and needs validation against a real ECU.
+[[nodiscard]] Result<std::vector<std::uint8_t>> build_b8_request(
+    std::uint32_t address, std::span<std::uint8_t const> data);
+
+// Parse a block-write response. The ECU echoes all N written bytes; we
+// surface them so the caller can verify each one against what it sent.
+// Negative responses (NRC) become EcuRejected like for A8 / B0.
+[[nodiscard]] Result<std::vector<std::uint8_t>> parse_b8_response(
+    std::span<std::uint8_t const> resp, std::size_t expected_n);
 
 // High-level client that wraps the framing and talks to a transport.
 class SsmClient {
@@ -115,6 +144,16 @@ class SsmClient {
     [[nodiscard]] Result<std::uint8_t> write(
         std::uint32_t address, std::uint8_t data,
         std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
+
+    // Write `data.size()` consecutive bytes starting at `address`. The ECU
+    // echoes every written byte; the returned vector is that echo so the
+    // caller can verify the write took byte-by-byte. Same RAM-only
+    // semantics as write(). For payloads larger than kMaxBlockWriteBytes,
+    // the caller should chunk and call write_block() multiple times.
+    [[nodiscard]] Result<std::vector<std::uint8_t>> write_block(
+        std::uint32_t                 address,
+        std::span<std::uint8_t const> data,
+        std::chrono::milliseconds     timeout = std::chrono::milliseconds{1000});
 
   private:
     transport::ITransport *transport_;
