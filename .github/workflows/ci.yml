@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same branch.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows / MSVC
+            os: windows-2022
+            preset: win-msvc
+            shell: pwsh
+
+          - name: macOS / Apple Clang
+            os: macos-14
+            preset: mac-clang
+            shell: bash
+
+          - name: Linux / GCC
+            os: ubuntu-24.04
+            preset: linux-gcc
+            shell: bash
+
+          - name: Linux / Clang + ASan/UBSan
+            os: ubuntu-24.04
+            preset: linux-asan
+            shell: bash
+
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Ninja is preinstalled on GitHub-hosted runners (Windows/macOS/Linux).
+      - name: Verify Ninja is available
+        run: ninja --version
+
+      - name: Set up MSVC (Windows only)
+        if: matrix.os == 'windows-2022'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Clang 18 (linux-asan)
+        if: matrix.preset == 'linux-asan'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 llvm-18
+          echo "CC=clang-18" >> "$GITHUB_ENV"
+          echo "CXX=clang++-18" >> "$GITHUB_ENV"
+
+      - name: Cache CMake build
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/${{ matrix.preset }}/_deps
+          key: ${{ matrix.preset }}-cmake-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ matrix.preset }}-cmake-
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} -j
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+      - name: Smoke-test CLI (Windows)
+        if: matrix.os == 'windows-2022'
+        run: |
+          ./build/${{ matrix.preset }}/bin/subarutuner-cli.exe --version
+          ./build/${{ matrix.preset }}/bin/subarutuner-cli.exe --help
+
+      - name: Smoke-test CLI (Unix)
+        if: matrix.os != 'windows-2022'
+        run: |
+          ./build/${{ matrix.preset }}/bin/subarutuner-cli --version
+          ./build/${{ matrix.preset }}/bin/subarutuner-cli --help
+
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ matrix.preset }}
+          path: |
+            build/${{ matrix.preset }}/Testing/
+            build/${{ matrix.preset }}/CMakeCache.txt
+            build/${{ matrix.preset }}/CMakeFiles/CMakeOutput.log
+            build/${{ matrix.preset }}/CMakeFiles/CMakeError.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+  formatting:
+    name: clang-format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format 18
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-18
+          sudo ln -sf /usr/bin/clang-format-18 /usr/local/bin/clang-format
+
+      - name: Check formatting
+        run: |
+          shopt -s globstar nullglob
+          set -e
+          files=(src/**/*.cpp src/**/*.hpp tests/**/*.cpp tests/**/*.hpp)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No source files to check yet."
+            exit 0
+          fi
+          clang-format --dry-run --Werror "${files[@]}"

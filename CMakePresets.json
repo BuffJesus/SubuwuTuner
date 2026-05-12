@@ -1,0 +1,106 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "win-msvc",
+      "inherits": "base",
+      "displayName": "Windows / MSVC (Release)",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      }
+    },
+    {
+      "name": "win-mingw",
+      "inherits": "base",
+      "displayName": "Windows / MinGW-w64 g++ (Release)",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++"
+      }
+    },
+    {
+      "name": "win-clang",
+      "inherits": "base",
+      "displayName": "Windows / clang-cl (Release)",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang-cl",
+        "CMAKE_CXX_COMPILER": "clang-cl"
+      }
+    },
+    {
+      "name": "mac-clang",
+      "inherits": "base",
+      "displayName": "macOS / Apple Clang (Release)",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" }
+    },
+    {
+      "name": "linux-gcc",
+      "inherits": "base",
+      "displayName": "Linux / GCC (Release)",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++"
+      }
+    },
+    {
+      "name": "linux-clang",
+      "inherits": "base",
+      "displayName": "Linux / Clang (Release)",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
+      "name": "linux-asan",
+      "inherits": "linux-clang",
+      "displayName": "Linux / Clang + ASan/UBSan (Debug)",
+      "binaryDir": "${sourceDir}/build/linux-asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ST_SANITIZE": "address;undefined"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "win-msvc",    "configurePreset": "win-msvc" },
+    { "name": "win-mingw",   "configurePreset": "win-mingw" },
+    { "name": "win-clang",   "configurePreset": "win-clang" },
+    { "name": "mac-clang",   "configurePreset": "mac-clang" },
+    { "name": "linux-gcc",   "configurePreset": "linux-gcc" },
+    { "name": "linux-clang", "configurePreset": "linux-clang" },
+    { "name": "linux-asan",  "configurePreset": "linux-asan" }
+  ],
+  "testPresets": [
+    {
+      "name": "default",
+      "hidden": true,
+      "output": { "outputOnFailure": true, "verbosity": "default" },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    },
+    { "name": "win-msvc",    "inherits": "default", "configurePreset": "win-msvc" },
+    { "name": "win-mingw",   "inherits": "default", "configurePreset": "win-mingw" },
+    { "name": "win-clang",   "inherits": "default", "configurePreset": "win-clang" },
+    { "name": "mac-clang",   "inherits": "default", "configurePreset": "mac-clang" },
+    { "name": "linux-gcc",   "inherits": "default", "configurePreset": "linux-gcc" },
+    { "name": "linux-clang", "inherits": "default", "configurePreset": "linux-clang" },
+    { "name": "linux-asan",  "inherits": "default", "configurePreset": "linux-asan" }
+  ]
+}

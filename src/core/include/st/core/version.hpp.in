@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The SubaruTuner Authors
+
+#ifndef ST_CORE_VERSION_HPP
+#define ST_CORE_VERSION_HPP
+
+#include <string_view>
+
+namespace st {
+
+struct Version {
+    static constexpr int Major = @PROJECT_VERSION_MAJOR@;
+    static constexpr int Minor = @PROJECT_VERSION_MINOR@;
+    static constexpr int Patch = @PROJECT_VERSION_PATCH@;
+
+    static constexpr std::string_view kString = "@PROJECT_VERSION@";
+    static constexpr std::string_view kName   = "SubaruTuner";
+
+    [[nodiscard]] static std::string_view string() noexcept { return kString; }
+    [[nodiscard]] static std::string_view name() noexcept { return kName; }
+};
+
+} // namespace st
+
+#endif // ST_CORE_VERSION_HPP

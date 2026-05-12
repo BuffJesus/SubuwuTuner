@@ -1,0 +1,63 @@
+# Build outputs
+build/
+out/
+cmake-build-*/
+_deps/
+
+# CMake cache
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+CTestTestfile.cmake
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+
+# vcpkg (we'll add manifest mode later)
+vcpkg_installed/
+
+# IDEs
+.vs/
+.vscode/
+.idea/
+.claude/
+*.user
+*.suo
+*.sdf
+*.opensdf
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test artifacts
+Testing/
+*.gcda
+*.gcno
+coverage/
+
+# User-private fixtures (never commit these)
+Definitions-*.atlas
+fixtures/roms/
+fixtures/private/
+
+# The Atlas public site is a separate upstream project, not ours
+atlas-public-main/
+
+# Binaries / packages we don't track
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.o
+*.obj
+*.pdb
+*.exp
+*.ilk
+
+# Generated docs
+site/
+docs-build/
