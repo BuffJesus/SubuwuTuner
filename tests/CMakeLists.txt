@@ -22,6 +22,7 @@ add_executable(st_unit_tests
     unit/edit/test_edit.cpp
     unit/project/test_project.cpp
     unit/transport/test_mock.cpp
+    unit/ecu/test_ssm.cpp
 )
 
 target_link_libraries(st_unit_tests
@@ -32,6 +33,7 @@ target_link_libraries(st_unit_tests
         st::edit
         st::project
         st::transport
+        st::ecu
         st::warnings
         st::sanitizers
         st::platform

@@ -57,6 +57,7 @@ add_subdirectory(src/defs)
 add_subdirectory(src/edit)
 add_subdirectory(src/project)
 add_subdirectory(src/transport)
+add_subdirectory(src/ecu)
 
 if(ST_BUILD_CLI)
     add_subdirectory(src/cli)
