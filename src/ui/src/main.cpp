@@ -25,14 +25,20 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
+#include <fstream>
+#include <ios>
 #include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -40,6 +46,125 @@ struct Fonts {
     ImFont *ui   = nullptr; // Sans for UI chrome (menus, labels, panels)
     ImFont *mono = nullptr; // Monospace for grids, hex, log output
 };
+
+// ---------------------------------------------------------------------
+// Recents — one-line-per-entry config persisted between cold starts.
+// Lives next to other user-config in the OS-conventional location:
+//   Windows: %LOCALAPPDATA%\SubuwuTuner\recents.txt
+//   Mac:     ~/Library/Application Support/SubuwuTuner/recents.txt
+//   Linux:   $XDG_CONFIG_HOME/subuwutuner/recents.txt
+//            (fallback: $HOME/.config/subuwutuner/recents.txt)
+//
+// Format: one entry per line, "<ISO-8601 UTC>\t<absolute path>".
+// Cap at 8 entries; most recent first. A malformed line is silently
+// skipped — recents are a convenience, not a source of truth.
+// ---------------------------------------------------------------------
+
+struct RecentEntry {
+    std::string opened_at;   // ISO 8601 UTC, e.g. "2026-05-12T15:30:00Z"
+    std::filesystem::path path;
+};
+
+constexpr std::size_t kRecentsCap = 8;
+
+std::filesystem::path recents_config_path() {
+    auto const env = [](char const *name) -> std::filesystem::path {
+        auto const *v = std::getenv(name);
+        return v != nullptr ? std::filesystem::path{v}
+                            : std::filesystem::path{};
+    };
+#if defined(_WIN32)
+    auto base = env("LOCALAPPDATA");
+    if (base.empty()) base = env("USERPROFILE");
+    if (base.empty()) base = std::filesystem::current_path();
+    return base / "SubuwuTuner" / "recents.txt";
+#elif defined(__APPLE__)
+    auto base = env("HOME");
+    if (base.empty()) base = std::filesystem::current_path();
+    return base / "Library" / "Application Support" / "SubuwuTuner"
+           / "recents.txt";
+#else
+    auto base = env("XDG_CONFIG_HOME");
+    if (base.empty()) {
+        auto home = env("HOME");
+        if (home.empty()) home = std::filesystem::current_path();
+        base = home / ".config";
+    }
+    return base / "subuwutuner" / "recents.txt";
+#endif
+}
+
+std::string iso8601_utc_now() {
+    auto const  now = std::chrono::system_clock::now();
+    auto const  t   = std::chrono::system_clock::to_time_t(now);
+    std::tm     tm{};
+#if defined(_WIN32)
+    ::gmtime_s(&tm, &t);
+#else
+    ::gmtime_r(&t, &tm);
+#endif
+    char buf[32];
+    std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", &tm);
+    return std::string{buf};
+}
+
+std::vector<RecentEntry> load_recents() {
+    std::vector<RecentEntry> out;
+    std::ifstream            in{recents_config_path()};
+    if (!in) return out;
+    std::string line;
+    while (std::getline(in, line) && out.size() < kRecentsCap) {
+        auto const tab = line.find('\t');
+        if (tab == std::string::npos || tab == 0 || tab + 1 == line.size()) {
+            continue;
+        }
+        RecentEntry e;
+        e.opened_at = line.substr(0, tab);
+        e.path      = std::filesystem::path{line.substr(tab + 1)};
+        out.push_back(std::move(e));
+    }
+    return out;
+}
+
+void save_recents(std::vector<RecentEntry> const &recents) {
+    auto const  path = recents_config_path();
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    // Failure to create the directory is non-fatal — recents is best-
+    // effort. The next save attempt will retry.
+    std::ofstream out{path, std::ios::trunc};
+    if (!out) return;
+    for (auto const &e : recents) {
+        out << e.opened_at << '\t' << e.path.generic_string() << '\n';
+    }
+}
+
+// Move `path` to the front of `recents`, deduplicating by canonical
+// path comparison and capping the list at `kRecentsCap`. Idempotent.
+void push_recent(std::vector<RecentEntry>     &recents,
+                 std::filesystem::path const &path) {
+    std::error_code ec;
+    auto const      canon =
+        std::filesystem::weakly_canonical(path, ec);
+    auto const compare_to = canon.empty() ? path : canon;
+    // Remove any existing entry pointing at the same canonical path.
+    recents.erase(std::remove_if(recents.begin(), recents.end(),
+                                 [&](RecentEntry const &e) {
+                                     std::error_code ec2;
+                                     auto const ec_path =
+                                         std::filesystem::weakly_canonical(
+                                             e.path, ec2);
+                                     return (ec_path.empty() ? e.path : ec_path)
+                                            == compare_to;
+                                 }),
+                  recents.end());
+    // Insert at the front.
+    RecentEntry e;
+    e.opened_at = iso8601_utc_now();
+    e.path      = compare_to;
+    recents.insert(recents.begin(), std::move(e));
+    if (recents.size() > kRecentsCap) recents.resize(kRecentsCap);
+}
 
 // Anchor + cursor selection model. Click sets both; shift-click moves only
 // the cursor — the cell rect runs between anchor and cursor inclusively.
@@ -102,6 +227,9 @@ struct AppState {
     TableViewMode                            view_mode{TableViewMode::Grid};
     std::size_t                              selected_z{0};
     bool                                     show_imgui_demo{false};
+    // Loaded once at startup, persisted on every successful open. See
+    // recents_config_path() for the on-disk location.
+    std::vector<RecentEntry>                 recents;
 
     void try_open_project(std::filesystem::path const &path) {
         auto r = st::Project::open(path);
@@ -118,6 +246,10 @@ struct AppState {
         selected_table_id.clear();
         current_table_data.reset();
         selection.reset();
+        // Successful open → bump in recents so the welcome panel shows
+        // this project at the top next cold start.
+        push_recent(recents, path);
+        save_recents(recents);
     }
 
     void select_table(std::string const &id) {
@@ -952,9 +1084,12 @@ inline ImVec4 chip_bg_muted()     { return ImVec4(0.22f, 0.24f, 0.28f, 0.55f); }
 // next action, no jargon above the fold.
 void render_welcome_panel(AppState &state) {
     ImVec2 const avail = ImGui::GetContentRegionAvail();
-    // Pull content down to the upper third of the panel — visually centered
-    // without feeling adrift mid-window.
-    ImGui::Dummy(ImVec2(0.0f, avail.y * 0.22f));
+    // Push content down to the upper third when there are no recents
+    // (the original "first-run" feel). When recents exist, sit higher
+    // so the list has room to breathe without the panel scrolling.
+    bool const has_recents = !state.recents.empty();
+    float const top_pad = has_recents ? (avail.y * 0.10f) : (avail.y * 0.22f);
+    ImGui::Dummy(ImVec2(0.0f, top_pad));
 
     text_centered("SubuwuTuner", 2.4f);
     ImGui::Dummy(ImVec2(0.0f, 10.0f));
@@ -973,8 +1108,80 @@ void render_welcome_panel(AppState &state) {
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
     text_centered_disabled("Ctrl+O");
 
+    // Recents block. Empty list → render nothing here; first-run users
+    // see the original clean welcome.
+    if (has_recents) {
+        ImGui::Dummy(ImVec2(0.0f, 28.0f));
+        // Centered "Recent projects" rule. We draw it inside a fixed-
+        // width region so multiple windows / wide screens don't make
+        // the list stretch oddly across the viewport.
+        constexpr float kRowW = 480.0f;
+        center_cursor_x(kRowW);
+        ImGui::BeginGroup();
+        ImGui::SetNextItemWidth(kRowW);
+        ImGui::TextDisabled("Recent projects");
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+
+        // Snapshot indices to act on — modifying recents inside the
+        // iteration (via try_open_project) would invalidate iterators.
+        std::optional<std::size_t> clicked_idx;
+        for (std::size_t i = 0; i < state.recents.size(); ++i) {
+            auto const     &e         = state.recents[i];
+            auto const      basename  = e.path.filename().empty()
+                                            ? e.path.string()
+                                            : e.path.filename().string();
+            std::error_code ec;
+            bool const      exists =
+                std::filesystem::exists(e.path, ec);
+
+            ImGui::PushID(static_cast<int>(i));
+            // Each row is a button with two-line content (basename on
+            // top, dimmed full path beneath). Dead entries are
+            // disabled — visible so the user knows the project moved
+            // rather than silently dropped.
+            ImGui::BeginDisabled(!exists);
+            if (ImGui::Button(basename.c_str(), ImVec2(kRowW, 0.0f))) {
+                clicked_idx = i;
+            }
+            ImGui::EndDisabled();
+
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                if (exists) {
+                    ImGui::SetTooltip("%s\nOpened %s",
+                                      e.path.string().c_str(),
+                                      e.opened_at.c_str());
+                } else {
+                    ImGui::SetTooltip(
+                        "%s\n\nPath no longer exists — the project may "
+                        "have moved.\nOpen Project… to locate it manually.",
+                        e.path.string().c_str());
+                }
+            }
+            // Subtitle: dimmed full path, smaller and aligned under the
+            // row. The two-line shape comes from Button + this label
+            // pair rather than a multi-line button (which ImGui doesn't
+            // do well with text alignment).
+            center_cursor_x(kRowW);
+            if (exists) {
+                ImGui::TextDisabled("%s", e.path.string().c_str());
+            } else {
+                ImGui::TextDisabled("%s  (missing)", e.path.string().c_str());
+            }
+            ImGui::Dummy(ImVec2(0.0f, 6.0f));
+            ImGui::PopID();
+        }
+        ImGui::EndGroup();
+
+        if (clicked_idx.has_value()) {
+            // Capture by value: try_open_project mutates recents.
+            auto const path = state.recents[*clicked_idx].path;
+            state.try_open_project(path);
+        }
+    }
+
     if (!state.status_msg.empty()) {
-        ImGui::Dummy(ImVec2(0.0f, 32.0f));
+        ImGui::Dummy(ImVec2(0.0f, has_recents ? 16.0f : 32.0f));
         text_centered_disabled(state.status_msg.c_str());
     }
 }
@@ -1367,6 +1574,7 @@ int main(int argc, char *argv[]) {
     NFD::Guard nfd_guard;
 
     AppState state;
+    state.recents = load_recents();
     if (argc >= 2) {
         state.try_open_project(argv[1]);
     } else {
