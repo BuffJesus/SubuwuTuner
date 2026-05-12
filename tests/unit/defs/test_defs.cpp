@@ -1102,6 +1102,234 @@ endianness = "big"
     REQUIRE(d->pack().id == "auto-dispatch");
 }
 
+// ----- extends / inheritance ---------------------------------------------
+
+TEST_CASE("from_directory resolves a single 'extends' chain",
+          "[defs][extends]") {
+    TempDir td;
+
+    write_text(td.path / "va-wrx-mt-2019" / "pack.toml", R"toml(
+[pack]
+id             = "va-wrx-mt-2019"
+endianness     = "big"
+rom_size_bytes = 65536
+
+[[scaling]]
+id        = "rpm_x1"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint16_be"
+unit      = "rpm"
+
+[[scaling]]
+id        = "load_x001"
+formula   = "linear"
+factor    = 0.001
+data_type = "uint16_be"
+unit      = "g/rev"
+
+[[axis]]
+id        = "rpm_axis"
+data_type = "uint16_be"
+address   = 0
+length    = 16
+scaling   = "rpm_x1"
+
+[[table]]
+id         = "fuel_2019"
+dimensions = 1
+data_type  = "uint8"
+address    = 256
+scaling    = "rpm_x1"
+axis_x     = "rpm_axis"
+)toml");
+
+    write_text(td.path / "va-wrx-mt-2020" / "pack.toml", R"toml(
+[pack]
+id             = "va-wrx-mt-2020"
+endianness     = "big"
+rom_size_bytes = 65536
+extends        = "va-wrx-mt-2019"
+
+# Override an inherited scaling.
+[[scaling]]
+id        = "rpm_x1"
+formula   = "linear"
+factor    = 2.0
+data_type = "uint16_be"
+unit      = "rpm"
+
+# Pure addition.
+[[table]]
+id         = "boost_2020"
+dimensions = 1
+data_type  = "uint16_be"
+address    = 1024
+scaling    = "load_x001"
+axis_x     = "rpm_axis"
+)toml");
+
+    auto const d = st::Definition::from_directory(td.path / "va-wrx-mt-2020");
+    REQUIRE(d.has_value());
+
+    // Pack header is the child's; 'extends' is consumed.
+    REQUIRE(d->pack().id == "va-wrx-mt-2020");
+    REQUIRE_FALSE(d->pack().extends.has_value());
+
+    // Two scalings (inherited + overridden), not three.
+    REQUIRE(d->scalings().size() == 2);
+    auto const *rpm = d->find_scaling("rpm_x1");
+    REQUIRE(rpm != nullptr);
+    REQUIRE(std::get<st::LinearScaling>(rpm->formula).factor == 2.0);
+    REQUIRE(d->find_scaling("load_x001") != nullptr);
+
+    // Inherited axis still present.
+    REQUIRE(d->find_axis("rpm_axis") != nullptr);
+
+    // Both parent's table and child's addition resolve.
+    REQUIRE(d->find_table("fuel_2019") != nullptr);
+    REQUIRE(d->find_table("boost_2020") != nullptr);
+}
+
+TEST_CASE("from_directory appends identifications across inheritance",
+          "[defs][extends]") {
+    TempDir td;
+
+    write_text(td.path / "parent" / "pack.toml", R"toml(
+[pack]
+id         = "parent-pack"
+endianness = "big"
+
+[[identification]]
+name        = "Parent CID"
+cid_address = 0x100
+cid_length  = 8
+cid_match   = "PARENT  "
+)toml");
+
+    write_text(td.path / "child" / "pack.toml", R"toml(
+[pack]
+id         = "child-pack"
+endianness = "big"
+extends    = "parent-pack"
+
+[[identification]]
+name        = "Child CID"
+cid_address = 0x200
+cid_length  = 8
+cid_match   = "CHILD   "
+)toml");
+
+    auto const d = st::Definition::from_directory(td.path / "child");
+    REQUIRE(d.has_value());
+    REQUIRE(d->identifications().size() == 2);
+    REQUIRE(d->identifications()[0].cid_match == "PARENT  ");
+    REQUIRE(d->identifications()[1].cid_match == "CHILD   ");
+}
+
+TEST_CASE("from_directory follows multi-level extends chains",
+          "[defs][extends]") {
+    TempDir td;
+
+    write_text(td.path / "grandparent" / "pack.toml", R"toml(
+[pack]
+id         = "gp"
+endianness = "big"
+
+[[scaling]]
+id        = "from_gp"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint8"
+)toml");
+
+    write_text(td.path / "parent" / "pack.toml", R"toml(
+[pack]
+id         = "parent"
+endianness = "big"
+extends    = "gp"
+
+[[scaling]]
+id        = "from_parent"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint8"
+)toml");
+
+    write_text(td.path / "child" / "pack.toml", R"toml(
+[pack]
+id         = "child"
+endianness = "big"
+extends    = "parent"
+
+[[scaling]]
+id        = "from_child"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint8"
+)toml");
+
+    auto const d = st::Definition::from_directory(td.path / "child");
+    REQUIRE(d.has_value());
+    REQUIRE(d->pack().id == "child");
+    REQUIRE(d->scalings().size() == 3);
+    REQUIRE(d->find_scaling("from_gp") != nullptr);
+    REQUIRE(d->find_scaling("from_parent") != nullptr);
+    REQUIRE(d->find_scaling("from_child") != nullptr);
+}
+
+TEST_CASE("from_directory errors on missing parent pack",
+          "[defs][extends]") {
+    TempDir td;
+    write_text(td.path / "orphan" / "pack.toml", R"toml(
+[pack]
+id         = "orphan"
+endianness = "big"
+extends    = "does-not-exist"
+)toml");
+
+    auto const d = st::Definition::from_directory(td.path / "orphan");
+    REQUIRE_FALSE(d.has_value());
+    REQUIRE(d.error().code() == st::ErrorCode::FileNotFound);
+    REQUIRE(d.error().message().find("does-not-exist") != std::string::npos);
+}
+
+TEST_CASE("from_directory detects an extends cycle",
+          "[defs][extends]") {
+    TempDir td;
+    write_text(td.path / "a" / "pack.toml", R"toml(
+[pack]
+id         = "a"
+endianness = "big"
+extends    = "b"
+)toml");
+    write_text(td.path / "b" / "pack.toml", R"toml(
+[pack]
+id         = "b"
+endianness = "big"
+extends    = "a"
+)toml");
+
+    auto const d = st::Definition::from_directory(td.path / "a");
+    REQUIRE_FALSE(d.has_value());
+    REQUIRE(d.error().code() == st::ErrorCode::ParseError);
+    REQUIRE(d.error().message().find("cycle") != std::string::npos);
+}
+
+TEST_CASE("from_toml_string silently ignores 'extends' (no filesystem context)",
+          "[defs][extends]") {
+    auto const d = st::Definition::from_toml_string(R"(
+[pack]
+id      = "x"
+extends = "ignored-without-filesystem"
+)");
+    REQUIRE(d.has_value());
+    // The field is still surfaced on the Pack struct so callers can detect
+    // it; it just isn't resolved.
+    REQUIRE(d->pack().extends.has_value());
+    REQUIRE(*d->pack().extends == "ignored-without-filesystem");
+}
+
 TEST_CASE("parse_data_type round-trips known values", "[defs][types]") {
     REQUIRE(st::parse_data_type("uint8").has_value());
     REQUIRE(*st::parse_data_type("uint8") == st::DataType::Uint8);

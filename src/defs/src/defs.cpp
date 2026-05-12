@@ -84,6 +84,16 @@ std::vector<int> int_array(toml::table const &t, std::string_view key) {
     return out;
 }
 
+Result<toml::table> parse_toml(std::string_view text) {
+    try {
+        return toml::parse(text);
+    } catch (toml::parse_error const &e) {
+        std::string msg{"TOML parse error: "};
+        msg.append(e.description());
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+}
+
 std::vector<double> double_array(toml::table const &t, std::string_view key) {
     std::vector<double> out;
     if (auto const *arr = t[key].as_array(); arr != nullptr) {
@@ -610,21 +620,162 @@ class DefinitionBuilder {
         }
         return ok();
     }
-};
 
-namespace {
+    // Apply `child` on top of `parent` per the inheritance rules in
+    // docs/11-definition-format.md: child's [pack] header wins entirely;
+    // axes / scalings / tables / pids merge by `id` (child overrides
+    // same-id parent entries; new ids are appended); identifications
+    // append (no merge by name).
+    static Definition merge_over(Definition parent, Definition &&child) {
+        parent.pack_ = std::move(child.pack_);
+        parent.pack_.extends.reset();
 
-Result<toml::table> parse_toml(std::string_view text) {
-    try {
-        return toml::parse(text);
-    } catch (toml::parse_error const &e) {
-        std::string msg{"TOML parse error: "};
-        msg.append(e.description());
-        return failure(ErrorCode::ParseError, std::move(msg));
+        for (auto &id : child.ids_) {
+            parent.ids_.push_back(std::move(id));
+        }
+
+        auto const upsert = [](auto &dst, auto &src) {
+            for (auto &el : src) {
+                auto it = std::find_if(dst.begin(), dst.end(),
+                                       [&](auto const &x) { return x.id == el.id; });
+                if (it == dst.end()) {
+                    dst.push_back(std::move(el));
+                } else {
+                    *it = std::move(el);
+                }
+            }
+        };
+        upsert(parent.axes_,     child.axes_);
+        upsert(parent.scalings_, child.scalings_);
+        upsert(parent.tables_,   child.tables_);
+        upsert(parent.pids_,     child.pids_);
+        return parent;
     }
-}
 
-} // namespace
+    // Scan sibling directories of `child_dir` for one whose pack.toml
+    // declares `[pack].id == target_id`. Returns its path or an error.
+    static Result<std::filesystem::path>
+    find_sibling_pack_dir(std::filesystem::path const &child_dir,
+                          std::string_view              target_id) {
+        auto const parent = child_dir.parent_path();
+        if (parent.empty()) {
+            return failure(ErrorCode::FileNotFound,
+                           "cannot resolve 'extends = " + std::string{target_id}
+                               + "': no parent directory of "
+                               + child_dir.string());
+        }
+        std::error_code ec;
+        if (!std::filesystem::is_directory(parent, ec) || ec) {
+            return failure(ErrorCode::FileNotFound,
+                           "cannot resolve 'extends = " + std::string{target_id}
+                               + "': search root is not a directory: "
+                               + parent.string());
+        }
+
+        for (auto const &entry :
+             std::filesystem::directory_iterator{parent, ec}) {
+            if (ec) break;
+            if (!entry.is_directory(ec) || ec) continue;
+            auto const candidate_manifest = entry.path() / "pack.toml";
+            if (!std::filesystem::exists(candidate_manifest, ec) || ec) continue;
+
+            std::error_code   read_ec;
+            std::string const contents = read_file(candidate_manifest, read_ec);
+            if (read_ec) continue;
+
+            auto tbl = parse_toml(contents);
+            if (!tbl.has_value()) continue;
+            auto const id_node = (*tbl)["pack"]["id"].value<std::string>();
+            if (id_node.has_value() && *id_node == target_id) {
+                return entry.path();
+            }
+        }
+        return failure(ErrorCode::FileNotFound,
+                       "cannot resolve 'extends = " + std::string{target_id}
+                           + "': no sibling pack with that id");
+    }
+
+    // Load a definition directory with cycle-protected `extends` resolution.
+    // `visited` tracks pack ids reached so far in the inheritance chain.
+    static Result<Definition>
+    load_chain(std::filesystem::path const &path,
+               std::vector<std::string>    &visited) {
+        std::error_code ec;
+        if (!std::filesystem::is_directory(path, ec) || ec) {
+            return failure(ErrorCode::InvalidArgument,
+                           "not a directory: " + path.string());
+        }
+
+        auto const manifest = path / "pack.toml";
+        if (!std::filesystem::exists(manifest, ec) || ec) {
+            return failure(ErrorCode::FileNotFound,
+                           "pack.toml missing in: " + path.string());
+        }
+
+        Definition def;
+
+        auto const ingest = [&](std::filesystem::path const &p,
+                                bool accept_pack, bool require_pack) -> Status {
+            std::error_code   read_ec;
+            std::string const contents = read_file(p, read_ec);
+            if (read_ec) {
+                return failure(ErrorCode::IoFailure,
+                               "cannot read " + p.string());
+            }
+            auto tbl = parse_toml(contents);
+            if (!tbl.has_value()) return failure(tbl.error());
+            return merge(*tbl, def, accept_pack, require_pack);
+        };
+
+        if (auto r = ingest(manifest, /*accept_pack=*/true, /*require_pack=*/true);
+            !r.has_value()) {
+            return failure(r.error());
+        }
+
+        std::vector<std::filesystem::path> others;
+        for (auto const &entry :
+             std::filesystem::recursive_directory_iterator{path, ec}) {
+            if (ec) {
+                return failure(ErrorCode::IoFailure,
+                               "walk failed in: " + path.string());
+            }
+            if (!entry.is_regular_file(ec) || ec) continue;
+            auto const ep = entry.path();
+            if (ep.extension() != ".toml") continue;
+            if (std::filesystem::equivalent(ep, manifest, ec)) continue;
+            others.push_back(ep);
+        }
+        std::sort(others.begin(), others.end());
+        for (auto const &p : others) {
+            if (auto r = ingest(p, /*accept_pack=*/false, /*require_pack=*/false);
+                !r.has_value()) {
+                return failure(r.error());
+            }
+        }
+
+        if (!def.pack_.extends.has_value()) {
+            return def;
+        }
+
+        auto const &parent_id = *def.pack_.extends;
+        if (std::find(visited.begin(), visited.end(), parent_id)
+            != visited.end()) {
+            return failure(ErrorCode::ParseError,
+                           "'extends' cycle detected: pack '" + def.pack_.id
+                               + "' extends already-visited '" + parent_id
+                               + "'");
+        }
+        auto parent_path = find_sibling_pack_dir(path, parent_id);
+        if (!parent_path.has_value()) return failure(parent_path.error());
+
+        visited.push_back(def.pack_.id);
+        auto parent_def = load_chain(*parent_path, visited);
+        visited.pop_back();
+        if (!parent_def.has_value()) return failure(parent_def.error());
+
+        return merge_over(std::move(*parent_def), std::move(def));
+    }
+};
 
 Result<Definition> Definition::from_toml_string(std::string_view toml) {
     auto tbl = parse_toml(toml);
@@ -652,60 +803,8 @@ Result<Definition> Definition::from_file(std::filesystem::path const &path) {
 }
 
 Result<Definition> Definition::from_directory(std::filesystem::path const &path) {
-    std::error_code ec;
-    if (!std::filesystem::is_directory(path, ec) || ec) {
-        return failure(ErrorCode::InvalidArgument,
-                       "not a directory: " + path.string());
-    }
-
-    auto const manifest = path / "pack.toml";
-    if (!std::filesystem::exists(manifest, ec) || ec) {
-        return failure(ErrorCode::FileNotFound,
-                       "pack.toml missing in: " + path.string());
-    }
-
-    Definition def;
-
-    auto const ingest = [&](std::filesystem::path const &p, bool accept_pack,
-                            bool require_pack) -> Status {
-        std::error_code   read_ec;
-        std::string const contents = read_file(p, read_ec);
-        if (read_ec) {
-            return failure(ErrorCode::IoFailure, "cannot read " + p.string());
-        }
-        auto tbl = parse_toml(contents);
-        if (!tbl.has_value()) return failure(tbl.error());
-        return DefinitionBuilder::merge(*tbl, def, accept_pack, require_pack);
-    };
-
-    if (auto r = ingest(manifest, /*accept_pack=*/true, /*require_pack=*/true);
-        !r.has_value()) {
-        return failure(r.error());
-    }
-
-    // Walk the rest of the directory and merge every other *.toml.
-    std::vector<std::filesystem::path> others;
-    for (auto const &entry :
-         std::filesystem::recursive_directory_iterator{path, ec}) {
-        if (ec) {
-            return failure(ErrorCode::IoFailure,
-                           "walk failed in: " + path.string());
-        }
-        if (!entry.is_regular_file(ec) || ec) continue;
-        auto const ep = entry.path();
-        if (ep.extension() != ".toml") continue;
-        if (std::filesystem::equivalent(ep, manifest, ec)) continue;
-        others.push_back(ep);
-    }
-    // Sort for deterministic ordering across platforms.
-    std::sort(others.begin(), others.end());
-    for (auto const &p : others) {
-        if (auto r = ingest(p, /*accept_pack=*/false, /*require_pack=*/false);
-            !r.has_value()) {
-            return failure(r.error());
-        }
-    }
-    return def;
+    std::vector<std::string> visited;
+    return DefinitionBuilder::load_chain(path, visited);
 }
 
 Status Definition::validate() const {
