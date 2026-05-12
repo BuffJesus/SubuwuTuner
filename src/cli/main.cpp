@@ -33,7 +33,10 @@ constexpr std::string_view kUsage =
     "                            and summarize its tables.\n"
     "    dump-axis --def <pack.toml> --axis <id> <FILE>\n"
     "                            Read the named axis from the ROM via the pack and\n"
-    "                            print its scaled values, one per line.\n";
+    "                            print its scaled values, one per line.\n"
+    "    dump-table --def <pack.toml> --table <id> <FILE>\n"
+    "                            Read the named table from the ROM via the pack and\n"
+    "                            print it as a labeled grid.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -183,6 +186,106 @@ int cmd_dump_axis(int argc, char *argv[]) {
     return 0;
 }
 
+int cmd_dump_table(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::string>           table_id;
+    std::optional<std::filesystem::path> rom_path;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--def") {
+            if (i + 1 >= argc) {
+                std::fputs("dump-table: --def requires a path\n", stderr);
+                return 2;
+            }
+            def_path = std::filesystem::path{argv[++i]};
+        } else if (a == "--table") {
+            if (i + 1 >= argc) {
+                std::fputs("dump-table: --table requires an id\n", stderr);
+                return 2;
+            }
+            table_id = std::string{argv[++i]};
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "dump-table: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!rom_path.has_value()) {
+            rom_path = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "dump-table: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!def_path.has_value() || !table_id.has_value() || !rom_path.has_value()) {
+        std::fputs(
+            "dump-table: missing required arguments\n"
+            "Usage: subuwutuner-cli dump-table --def <pack.toml> --table <id> <FILE>\n",
+            stderr);
+        return 2;
+    }
+
+    auto const def = st::Definition::from_file(*def_path);
+    if (!def.has_value()) {
+        std::fprintf(stderr, "dump-table: %s\n", def.error().to_string().c_str());
+        return 1;
+    }
+    auto const rom = st::Rom::from_file(*rom_path);
+    if (!rom.has_value()) {
+        std::fprintf(stderr, "dump-table: %s\n", rom.error().to_string().c_str());
+        return 1;
+    }
+
+    auto const *table = def->find_table(*table_id);
+    if (table == nullptr) {
+        std::fprintf(stderr, "dump-table: table '%s' not found in pack\n", table_id->c_str());
+        std::fputs("Available tables:\n", stderr);
+        for (auto const &t : def->tables()) {
+            std::fprintf(stderr, "  %s\n", t.id.c_str());
+        }
+        return 1;
+    }
+
+    auto const td = def->read_table_values(*rom, *table);
+    if (!td.has_value()) {
+        std::fprintf(stderr, "dump-table: %s\n", td.error().to_string().c_str());
+        return 1;
+    }
+
+    auto const *scal      = def->find_scaling(table->scaling);
+    auto const  precision = scal != nullptr ? scal->precision : 0;
+    auto const  unit      = scal != nullptr ? scal->unit : std::string{};
+
+    std::printf("# %s  (%dD", table->id.c_str(), table->dimensions);
+    if (!table->name.empty()) std::printf(", %s", table->name.c_str());
+    if (!unit.empty())        std::printf(", unit=%s", unit.c_str());
+    std::printf(")\n");
+
+    constexpr int kColWidth = 10;
+    auto const &  xs        = td->axis_x;
+    auto const &  ys        = td->axis_y;
+
+    // Header row.
+    std::printf("%*s", kColWidth, "");
+    for (auto const x : xs) {
+        std::printf(" %*.*f", kColWidth - 1, precision, x);
+    }
+    std::printf("\n");
+
+    for (std::size_t r = 0; r < td->values.size(); ++r) {
+        if (!ys.empty()) {
+            std::printf("%*.*f", kColWidth, precision, ys[r]);
+        } else {
+            std::printf("%*s", kColWidth, "");
+        }
+        for (auto const v : td->values[r]) {
+            std::printf(" %*.*f", kColWidth - 1, precision, v);
+        }
+        std::printf("\n");
+    }
+
+    return 0;
+}
+
 int cmd_rom_info(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
     std::optional<std::filesystem::path> rom_path;
@@ -261,6 +364,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "dump-axis") {
         return cmd_dump_axis(argc - 2, argv + 2);
+    }
+    if (cmd == "dump-table") {
+        return cmd_dump_table(argc - 2, argv + 2);
     }
 
     std::fprintf(stderr, "subuwutuner-cli: unknown argument: %s\n", argv[1]);

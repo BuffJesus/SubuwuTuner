@@ -175,6 +175,19 @@ class Definition {
     [[nodiscard]] Result<std::vector<double>> read_axis_values(Rom const &rom,
                                                                Axis const &axis) const;
 
+    // Materialized view of a calibration table: axis labels plus the value
+    // grid. For a 1D table, `axis_y` is empty and `values` is a single row.
+    // For a 2D table, `values[row][col]` is the value at (axis_y[row],
+    // axis_x[col]). Subaru convention: row-major storage, X varying fastest.
+    struct TableData {
+        std::vector<double>              axis_x;
+        std::vector<double>              axis_y;
+        std::vector<std::vector<double>> values;
+    };
+
+    [[nodiscard]] Result<TableData> read_table_values(Rom const &  rom,
+                                                      Table const &table) const;
+
   private:
     Pack                        pack_;
     std::vector<Identification> ids_;

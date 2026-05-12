@@ -441,6 +441,138 @@ data_type = "uint16_be"
     REQUIRE(vals.error().code() == st::ErrorCode::OutOfRange);
 }
 
+TEST_CASE("Definition::read_table_values reads a 1D table", "[defs][read_table_values]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 64
+
+[[scaling]]
+id        = "afr_x0_125"
+formula   = "linear"
+factor    = 0.125
+data_type = "uint8"
+
+[[axis]]
+id        = "rpm_axis"
+type      = "static"
+address   = 0
+length    = 4
+data_type = "uint16_be"
+
+[[table]]
+id         = "tip_in_enrichment"
+dimensions = 1
+address    = 16
+data_type  = "uint8"
+scaling    = "afr_x0_125"
+axis_x     = "rpm_axis"
+)toml");
+    REQUIRE(def_r.has_value());
+    auto const &def = *def_r;
+
+    // 8 bytes of axis data (4 uint16_be) then 4 raw bytes for the table.
+    // Raw values 80, 88, 96, 104; scaled (x0.125): 10.0, 11.0, 12.0, 13.0.
+    auto const rom = st::Rom::from_bytes({
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x03,  // axis
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        80, 88, 96, 104,                                  // table
+        0x00, 0x00, 0x00, 0x00,
+    });
+
+    auto const *table = def.find_table("tip_in_enrichment");
+    REQUIRE(table != nullptr);
+
+    auto const td = def.read_table_values(rom, *table);
+    REQUIRE(td.has_value());
+    REQUIRE(td->axis_x.size() == 4);
+    REQUIRE(td->axis_y.empty());
+    REQUIRE(td->values.size() == 1);
+    REQUIRE(td->values[0].size() == 4);
+    REQUIRE(td->values[0][0] == 10.0);
+    REQUIRE(td->values[0][3] == 13.0);
+}
+
+TEST_CASE("Definition::read_table_values reads a 2D table (row-major, X-innermost)",
+          "[defs][read_table_values]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 256
+
+[[axis]]
+id        = "x"
+type      = "static"
+address   = 0
+length    = 3
+data_type = "uint8"
+
+[[axis]]
+id        = "y"
+type      = "static"
+address   = 4
+length    = 2
+data_type = "uint8"
+
+[[table]]
+id         = "grid"
+dimensions = 2
+address    = 16
+data_type  = "uint8"
+axis_x     = "x"
+axis_y     = "y"
+)toml");
+    REQUIRE(def_r.has_value());
+
+    auto const rom = st::Rom::from_bytes({
+        1, 2, 3, 0,                              // axis x
+        10, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,    // axis y at offset 4
+        // Table at offset 16: row 0 (y=10): 11, 12, 13
+        //                     row 1 (y=20): 21, 22, 23
+        11, 12, 13, 21, 22, 23, 0, 0,
+    });
+
+    auto const *t  = def_r->find_table("grid");
+    auto const  td = def_r->read_table_values(rom, *t);
+    REQUIRE(td.has_value());
+    REQUIRE(td->axis_x == std::vector<double>{1.0, 2.0, 3.0});
+    REQUIRE(td->axis_y == std::vector<double>{10.0, 20.0});
+    REQUIRE(td->values.size() == 2);
+    REQUIRE(td->values[0] == std::vector<double>{11.0, 12.0, 13.0});
+    REQUIRE(td->values[1] == std::vector<double>{21.0, 22.0, 23.0});
+}
+
+TEST_CASE("Definition::read_table_values fails OutOfRange when grid spills past ROM",
+          "[defs][read_table_values]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+
+[[axis]]
+id        = "x"
+type      = "static"
+address   = 0
+length    = 4
+data_type = "uint8"
+
+[[table]]
+id         = "out_of_range"
+dimensions = 1
+address    = 16
+data_type  = "uint16_be"
+axis_x     = "x"
+)toml");
+    REQUIRE(def_r.has_value());
+    auto const rom = st::Rom::from_bytes(std::vector<std::uint8_t>(20, 0));
+    auto const t   = def_r->find_table("out_of_range");
+    auto const td  = def_r->read_table_values(rom, *t);
+    REQUIRE_FALSE(td.has_value());
+    REQUIRE(td.error().code() == st::ErrorCode::OutOfRange);
+}
+
 TEST_CASE("parse_data_type round-trips known values", "[defs][types]") {
     REQUIRE(st::parse_data_type("uint8").has_value());
     REQUIRE(*st::parse_data_type("uint8") == st::DataType::Uint8);

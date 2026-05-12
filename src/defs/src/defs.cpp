@@ -630,6 +630,53 @@ Result<std::vector<double>> Definition::read_axis_values(Rom const &rom,
     return out;
 }
 
+Result<Definition::TableData> Definition::read_table_values(Rom const &  rom,
+                                                            Table const &table) const {
+    TableData td;
+
+    // Resolve axes.
+    Axis const *ax = nullptr;
+    Axis const *ay = nullptr;
+    if (table.axis_x.has_value() && !table.axis_x->empty()) {
+        ax = find_axis(*table.axis_x);
+        if (ax == nullptr) {
+            return failure(ErrorCode::ParseError,
+                           "table '" + table.id + "' references unknown axis_x '"
+                               + *table.axis_x + "'");
+        }
+        auto xs = read_axis_values(rom, *ax);
+        if (!xs.has_value()) return failure(xs.error());
+        td.axis_x = std::move(*xs);
+    }
+    if (table.dimensions >= 2 && table.axis_y.has_value() && !table.axis_y->empty()) {
+        ay = find_axis(*table.axis_y);
+        if (ay == nullptr) {
+            return failure(ErrorCode::ParseError,
+                           "table '" + table.id + "' references unknown axis_y '"
+                               + *table.axis_y + "'");
+        }
+        auto ys = read_axis_values(rom, *ay);
+        if (!ys.has_value()) return failure(ys.error());
+        td.axis_y = std::move(*ys);
+    }
+
+    auto const cols  = td.axis_x.empty() ? std::size_t{1} : td.axis_x.size();
+    auto const rows  = td.axis_y.empty() ? std::size_t{1} : td.axis_y.size();
+    auto const step  = byte_size(table.data_type);
+    auto const scal  = find_scaling(table.scaling);
+
+    td.values.assign(rows, std::vector<double>(cols, 0.0));
+    for (std::size_t r = 0; r < rows; ++r) {
+        for (std::size_t c = 0; c < cols; ++c) {
+            auto const off = table.address + (r * cols + c) * step;
+            auto const raw = read_typed(rom, off, table.data_type);
+            if (!raw.has_value()) return failure(raw.error());
+            td.values[r][c] = (scal != nullptr) ? apply_scaling(*raw, *scal) : *raw;
+        }
+    }
+    return td;
+}
+
 std::optional<std::string> Definition::matches(Rom const &rom) const {
     for (auto const &id : ids_) {
         auto const slice = rom.slice(id.cid_address, id.cid_length);
