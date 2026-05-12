@@ -21,23 +21,34 @@ SubuwuTuner/
 │   └── Sanitizers.cmake                   (st::sanitizers; driven by ST_SANITIZE list)
 ├── src/
 │   ├── core/                              (st::core — Result, Error, Version, Crc32)
-│   ├── rom/                               (st::Rom — file I/O, BE/LE reads, slice, scan_ascii, crc32)
-│   ├── defs/                              (st::Definition — TOML loader, typed reads, scaling, axis/table values, diff)
-│   └── cli/                               (subuwutuner-cli — rom-info, dump-axis, dump-table, rom-diff)
+│   ├── rom/                               (st::Rom — file I/O, BE/LE reads + writes, slice, scan_ascii, crc32)
+│   ├── defs/                              (st::Definition — TOML single-file + directory loader, typed reads + writes, scaling + inverse, axis/table values, diff, writeback)
+│   ├── edit/                              (st::edit — Rect, set/add/multiply/percent/smooth/interpolate, Snapshot, History undo/redo)
+│   └── cli/                               (subuwutuner-cli — rom-info, dump-axis, dump-table, rom-diff, table-edit)
 ├── tools/defgen/                          (Python: RomRaider XML -> our TOML; clean-room facts-only)
-├── tests/unit/{core,rom,defs}/            (65 C++ tests; 28 Python tests under tools/defgen/tests/)
+├── tests/unit/{core,rom,defs,edit}/       (95 C++ tests; 28 Python tests under tools/defgen/tests/)
 ├── .github/workflows/ci.yml             (Win MSVC / Mac Apple-Clang / Linux GCC / Linux Clang ASan)
 └── docs/                                (design — read first; 00–12)
 ```
 
-**Phase 0 done. Phase 1 CLI side done.** What's shipped:
+**Phase 0 done. Phase 1 CLI side done. Phase 2 read→edit→save loop done.** What's shipped:
 
-- `st::Rom` — file I/O, big/little-endian typed reads with overflow-safe bounds, slice, ASCII scanner, CRC32
-- `st::Definition` — TOML loader (tomlplusplus), cross-reference validation, CID matching, typed value reads, linear + piecewise scaling, axis-value extraction, table-value extraction (1D + 2D), per-table diff
+- `st::Rom` — file I/O, big/little-endian typed reads + writes with overflow-safe bounds, slice, ASCII scanner, CRC32, mutable data span
+- `st::Definition` — TOML single-file + directory loader (tomlplusplus), cross-reference validation, CID matching, typed value reads + writes, linear + piecewise scaling (both directions), axis-value extraction, table-value extraction (1D + 2D), per-table diff, writeback
+- `st::edit` — Rect-scoped cell operations (set/add/multiply/percent/smooth/interpolate), Snapshot, History stack with branching-undo semantics
 - `tools/defgen/` — Python tool that translates public RomRaider XML to our TOML schema; clean-room rules in `docs/01-reverse-engineering.md`. Standard-library Python only.
-- CLI commands: `rom-info`, `dump-axis`, `dump-table`, `rom-diff`. All operate against our `.toml` definition packs.
+- CLI: `rom-info`, `dump-axis`, `dump-table`, `rom-diff`, `table-edit` — all working with single-file or directory `.toml` packs.
 
-What remains for the full Phase 1 ship gate: a real RomRaider XML through `defgen`, verified against a real stock dump showing ≥ 20 factory maps with correct scaling. That's a hardware/data gate; user is waiting on the OBDX Pro VX adapter to land before they can dump their own car. **Until then, do not block work on it** — there's plenty of Phase 2 work (project files, editing operations, undo/redo) that's hardware-free.
+The read→edit→save loop is end-to-end exercisable without hardware:
+
+```
+$ subuwutuner-cli table-edit --def pack.toml --table fuel_map \
+    --rows 0:0 --cols 2:3 set 12.5 stock.bin --output tuned.bin
+$ subuwutuner-cli rom-diff --def pack.toml stock.bin tuned.bin
+$ subuwutuner-cli dump-table --def pack.toml --table fuel_map tuned.bin
+```
+
+What remains for the full Phase 1 ship gate: a real RomRaider XML through `defgen`, verified against a real stock dump showing ≥ 20 factory maps with correct scaling. That's a hardware/data gate; user is waiting on the OBDX Pro VX adapter to land before they can dump their own car. **Until then, do not block work on it** — there's still Phase 2 work (project files, 3D table support, definition inheritance) and Phase 3 design that's hardware-free.
 
 The working directory on disk is still `D:\Documents\JetBrains\SubaruTuner\` — only the project's internal identity is `SubuwuTuner`. Renaming the folder would break editor and shell sessions; defer it.
 
@@ -96,8 +107,16 @@ This is where we *are* strict. The four core modules in `src/core`, `src/rom`, `
 
 ## Status
 
-As of 2026-05-11: Phase 0 done. Phase 1 CLI side done (rom-info / dump-axis / dump-table / rom-diff working end-to-end against synthetic ROMs + synthetic TOML packs + defgen-converted RomRaider-shaped fixtures). 65 C++ + 28 Python tests green on MinGW g++ 15.2. Repo at `https://github.com/BuffJesus/SubuwuTuner`. Phase 1 hardware gate (real ROM, ≥20 maps from real definitions) waiting on user's OBDX Pro VX adapter.
+As of 2026-05-11: Phase 0 done. Phase 1 CLI side done. Phase 2 read→edit→save loop done. **95 C++ + 28 Python tests** green on MinGW g++ 15.2. Repo at `https://github.com/BuffJesus/SubuwuTuner`. Phase 1 hardware gate (real ROM, ≥20 maps from real definitions) waiting on user's OBDX Pro VX adapter.
 
 Deps wired so far via FetchContent: Catch2 v3 (tests), `tl::expected` (fallback when libc++ lacks `<expected>`), tomlplusplus v3.4 (definition parser). vcpkg manifest mode still deferred — natural moment is when Qt joins the dep list for Phase 2's UI.
 
 CI: clang-format job is advisory (non-blocking) since no pre-commit hook is set up yet. Once one is wired in, flip it back to required.
+
+**Hardware-free work still on the table** (any of these can be picked up next):
+- `.stune` project files — directory-based persistence wrapping source ROM + working ROM + def pack reference
+- 3D table support — extends TableData with axis_z and a vector of slices
+- Definition inheritance (`extends`) — cross-pack inheritance for shared bases
+- CLI convenience: `pack-info`, `table-list`, `--csv` mode on `dump-table`
+- defgen polish: handle RomRaider `<base>` inheritance, better non-linear formula reporting
+- Phase 3 design: J2534 transport abstraction shape (can be designed without hardware)
