@@ -64,7 +64,9 @@ constexpr std::string_view kUsage =
     "                            update project.toml. Same OPs as table-edit.\n"
     "    pack-info <DEF>         Print metadata + counts for a definition pack.\n"
     "    table-list <DEF> [--category C] [--emissions] [--safety-critical]\n"
-    "                            List tables in a pack with optional filters.\n";
+    "                            List tables in a pack with optional filters.\n"
+    "    project-undo <dir>      Walk back one edit in the project's history.\n"
+    "    project-redo <dir>      Walk forward one edit in the project's history.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -344,6 +346,72 @@ int cmd_dump_table(int argc, char *argv[]) {
     } else {
         print_slice_pretty(td->values);
     }
+    return 0;
+}
+
+int cmd_project_step(int argc, char *argv[], bool forward) {
+    char const *cmd_name = forward ? "project-redo" : "project-undo";
+    if (argc < 1) {
+        std::fprintf(stderr, "%s: missing project directory\n", cmd_name);
+        std::fprintf(stderr, "Usage: subuwutuner-cli %s <dir>\n", cmd_name);
+        return 2;
+    }
+    std::filesystem::path const dir{argv[0]};
+
+    auto proj = st::Project::open(dir);
+    if (!proj.has_value()) {
+        std::fprintf(stderr, "%s: %s\n", cmd_name, proj.error().to_string().c_str());
+        return 1;
+    }
+
+    st::edit::Edit const *edit_record =
+        forward ? proj->history().redo() : proj->history().undo();
+    if (edit_record == nullptr) {
+        std::fprintf(stderr, "%s: no edit to %s\n", cmd_name,
+                     forward ? "redo" : "undo");
+        return 1;
+    }
+
+    auto const *table = proj->definition().find_table(edit_record->table_id);
+    if (table == nullptr) {
+        std::fprintf(stderr,
+                     "%s: edit references table '%s' which is not in the current pack\n",
+                     cmd_name, edit_record->table_id.c_str());
+        return 1;
+    }
+
+    auto td = proj->definition().read_table_values(proj->working_rom(), *table);
+    if (!td.has_value()) {
+        std::fprintf(stderr, "%s: %s\n", cmd_name, td.error().to_string().c_str());
+        return 1;
+    }
+
+    // Undo restores `before`; redo restores `after`.
+    auto const &snap = forward ? edit_record->after : edit_record->before;
+    if (auto s = st::edit::restore(*td, snap); !s.has_value()) {
+        std::fprintf(stderr, "%s: %s\n", cmd_name, s.error().to_string().c_str());
+        return 1;
+    }
+
+    auto wb = proj->definition().write_table_values(proj->working_rom(), *table, *td);
+    if (!wb.has_value()) {
+        std::fprintf(stderr, "%s: writeback: %s\n", cmd_name,
+                     wb.error().to_string().c_str());
+        return 1;
+    }
+
+    if (auto s = proj->save_working_rom(); !s.has_value()) {
+        std::fprintf(stderr, "%s: save: %s\n", cmd_name, s.error().to_string().c_str());
+        return 1;
+    }
+
+    std::printf("%s applied edit: %s on %s\n",
+                forward ? "Redo" : "Undo",
+                edit_record->description.c_str(),
+                edit_record->table_id.c_str());
+    std::printf("Working CRC32: 0x%08X\n", proj->working_rom().crc32());
+    std::printf("History cursor: %zu / %zu\n", proj->history().cursor(),
+                proj->history().size());
     return 0;
 }
 
@@ -1140,6 +1208,12 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "table-list") {
         return cmd_table_list(argc - 2, argv + 2);
+    }
+    if (cmd == "project-undo") {
+        return cmd_project_step(argc - 2, argv + 2, /*forward=*/false);
+    }
+    if (cmd == "project-redo") {
+        return cmd_project_step(argc - 2, argv + 2, /*forward=*/true);
     }
 
     std::fprintf(stderr, "subuwutuner-cli: unknown argument: %s\n", argv[1]);
