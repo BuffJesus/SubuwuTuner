@@ -28,6 +28,7 @@ add_executable(st_unit_tests
     unit/can/test_can.cpp
     unit/dbc/test_dbc.cpp
     unit/discover/test_discover.cpp
+    unit/flash/test_flash.cpp
 )
 
 target_link_libraries(st_unit_tests
@@ -43,6 +44,7 @@ target_link_libraries(st_unit_tests
         st::can
         st::dbc
         st::discover
+        st::flash
         st::warnings
         st::sanitizers
         st::platform

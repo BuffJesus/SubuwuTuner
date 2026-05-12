@@ -63,6 +63,7 @@ add_subdirectory(src/log)
 add_subdirectory(src/can)
 add_subdirectory(src/dbc)
 add_subdirectory(src/discover)
+add_subdirectory(src/flash)
 
 if(ST_BUILD_CLI)
     add_subdirectory(src/cli)
