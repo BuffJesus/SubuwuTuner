@@ -192,4 +192,60 @@ Result<MafTuneResult> tune_maf(std::span<double const>    axis,
     return result;
 }
 
+// ---------------------------------------------------------------------
+// smooth_proposals
+// ---------------------------------------------------------------------
+
+MafTuneResult smooth_proposals(MafTuneResult const &input,
+                                double               max_delta_pct,
+                                double               neighbor_weight) {
+    MafTuneResult out;
+    out.total_samples       = input.total_samples;
+    out.samples_after_gates = input.samples_after_gates;
+    out.cells               = input.cells;
+    if (input.cells.size() <= 1) return out;
+    if (max_delta_pct < 0.0)     max_delta_pct = 0.0;
+    if (neighbor_weight < 0.0)   neighbor_weight = 0.0;
+
+    auto const &in = input.cells;
+    std::size_t const n = in.size();
+
+    for (std::size_t i = 0; i < n; ++i) {
+        double const self_w   = in[i].confidence;
+        double       num      = self_w * in[i].proposed_value;
+        double       den      = self_w;
+
+        if (i > 0) {
+            double const w = neighbor_weight * in[i - 1].confidence;
+            num += w * in[i - 1].proposed_value;
+            den += w;
+        }
+        if (i + 1 < n) {
+            double const w = neighbor_weight * in[i + 1].confidence;
+            num += w * in[i + 1].proposed_value;
+            den += w;
+        }
+
+        double smoothed;
+        if (den <= 0.0) {
+            // No information here or in neighbors — leave unchanged.
+            smoothed = in[i].proposed_value;
+        } else {
+            smoothed = num / den;
+        }
+
+        // Re-clamp to ±max_delta_pct of current_value so neighbor pull
+        // can't break the per-pass safety bound the first pass enforced.
+        double const cur     = in[i].current_value;
+        double const lo      = cur * (1.0 - max_delta_pct);
+        double const hi      = cur * (1.0 + max_delta_pct);
+        if (smoothed < lo) smoothed = lo;
+        if (smoothed > hi) smoothed = hi;
+
+        out.cells[i].proposed_value = smoothed;
+    }
+
+    return out;
+}
+
 } // namespace st::autotune

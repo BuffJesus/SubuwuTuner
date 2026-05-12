@@ -273,3 +273,131 @@ TEST_CASE("tune_maf rejects an unsorted axis",
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
+
+// ---------------------------------------------------------------------
+// smooth_proposals
+// ---------------------------------------------------------------------
+
+namespace {
+
+// Hand-construct a MafTuneResult so the smoothing tests don't depend
+// on tune_maf's full pipeline.
+at::CellProposal make_cell(std::size_t idx, double current, double proposed,
+                            double confidence,
+                            std::size_t samples = 100,
+                            double mean_error = 1.0) {
+    at::CellProposal c;
+    c.cell_index     = idx;
+    c.current_value  = current;
+    c.proposed_value = proposed;
+    c.mean_error     = mean_error;
+    c.samples_used   = samples;
+    c.confidence     = confidence;
+    return c;
+}
+
+} // namespace
+
+TEST_CASE("smooth_proposals pulls a low-confidence cell toward a "
+          "high-confidence neighbor",
+          "[autotune][smooth]") {
+    at::MafTuneResult in;
+    in.cells.push_back(make_cell(0, /*cur=*/1.0, /*prop=*/1.05,
+                                  /*conf=*/1.0));   // strong "lean"
+    in.cells.push_back(make_cell(1, /*cur=*/1.0, /*prop=*/1.00,
+                                  /*conf=*/0.0));   // no data
+    // With self_w = 0 and neighbor confidence = 1.0,
+    // smoothed[1] = (0.25 * 1.05) / (0.25) = 1.05.
+    auto const out =
+        at::smooth_proposals(in, /*max_delta_pct=*/0.10,
+                              /*neighbor_weight=*/0.25);
+    REQUIRE(out.cells[1].proposed_value == Catch::Approx(1.05));
+    // The high-confidence cell stays put.
+    REQUIRE(out.cells[0].proposed_value == Catch::Approx(1.05));
+    // Confidence is preserved across smoothing.
+    REQUIRE(out.cells[1].confidence == 0.0);
+}
+
+TEST_CASE("smooth_proposals re-clamps to max_delta_pct after blending",
+          "[autotune][smooth][clamp]") {
+    // Neighbor pull would push this cell's proposed_value to 1.10, but
+    // max_delta_pct=0.05 caps the change to ±5% from current=1.0.
+    at::MafTuneResult in;
+    in.cells.push_back(make_cell(0, 1.0, 1.10, 1.0));
+    in.cells.push_back(make_cell(1, 1.0, 1.00, 0.0));
+    auto const out =
+        at::smooth_proposals(in, /*max_delta_pct=*/0.05, 0.25);
+    REQUIRE(out.cells[1].proposed_value <= 1.05);
+    REQUIRE(out.cells[1].proposed_value >= 0.95);
+}
+
+TEST_CASE("smooth_proposals keeps a high-confidence cell near its own value",
+          "[autotune][smooth]") {
+    at::MafTuneResult in;
+    in.cells.push_back(make_cell(0, 1.0, 1.00, 1.0));
+    in.cells.push_back(make_cell(1, 1.0, 1.05, 1.0));  // middle, lean
+    in.cells.push_back(make_cell(2, 1.0, 1.00, 1.0));
+    auto const out = at::smooth_proposals(in, 0.10, 0.25);
+    // num = 1.0*1.05 + 0.25*1.00 + 0.25*1.00 = 1.55
+    // den = 1.0 + 0.25 + 0.25                = 1.50
+    // smoothed = 1.55 / 1.50                 ≈ 1.0333
+    // The cell loses about 0.017 to neighbor pull but stays well
+    // above 1.00 because its own confidence dominated the weighted sum.
+    REQUIRE(out.cells[1].proposed_value > 1.0);
+    REQUIRE(out.cells[1].proposed_value < 1.05);
+    REQUIRE(out.cells[1].proposed_value == Catch::Approx(1.55 / 1.50));
+}
+
+TEST_CASE("smooth_proposals handles edge cells (only one neighbor)",
+          "[autotune][smooth][edge]") {
+    at::MafTuneResult in;
+    in.cells.push_back(make_cell(0, 1.0, 1.00, 0.0));   // edge, no data
+    in.cells.push_back(make_cell(1, 1.0, 1.05, 1.0));   // confident
+    auto const out = at::smooth_proposals(in, 0.10, 0.25);
+    // Cell 0: self_w=0, right neighbor weight = 0.25, neighbor proposed=1.05.
+    // smoothed[0] = 0.25*1.05 / 0.25 = 1.05.
+    REQUIRE(out.cells[0].proposed_value == Catch::Approx(1.05));
+}
+
+TEST_CASE("smooth_proposals leaves all-zero-confidence cells unchanged",
+          "[autotune][smooth]") {
+    at::MafTuneResult in;
+    in.cells.push_back(make_cell(0, 1.0, 1.00, 0.0));
+    in.cells.push_back(make_cell(1, 1.0, 1.00, 0.0));
+    in.cells.push_back(make_cell(2, 1.0, 1.00, 0.0));
+    auto const out = at::smooth_proposals(in, 0.10, 0.25);
+    REQUIRE(out.cells[0].proposed_value == 1.00);
+    REQUIRE(out.cells[1].proposed_value == 1.00);
+    REQUIRE(out.cells[2].proposed_value == 1.00);
+}
+
+TEST_CASE("smooth_proposals on a 1-cell input returns it unchanged",
+          "[autotune][smooth][edge]") {
+    at::MafTuneResult in;
+    in.cells.push_back(make_cell(0, 1.0, 1.07, 1.0));
+    auto const out = at::smooth_proposals(in, 0.10, 0.25);
+    REQUIRE(out.cells.size() == 1);
+    REQUIRE(out.cells[0].proposed_value == 1.07);
+}
+
+TEST_CASE("smooth_proposals preserves carryover fields",
+          "[autotune][smooth]") {
+    at::MafTuneResult in;
+    in.total_samples       = 12345;
+    in.samples_after_gates = 4321;
+    in.cells.push_back(make_cell(0, /*cur=*/2.5, /*prop=*/2.55,
+                                  /*conf=*/0.5,
+                                  /*samples=*/77,
+                                  /*mean_error=*/1.02));
+    in.cells.push_back(make_cell(1, 3.0, 3.0, 0.0, 0, 1.0));
+    auto const out = at::smooth_proposals(in, 0.10, 0.25);
+
+    REQUIRE(out.total_samples       == 12345);
+    REQUIRE(out.samples_after_gates == 4321);
+    REQUIRE(out.cells.size()        == 2);
+    REQUIRE(out.cells[0].current_value == 2.5);
+    REQUIRE(out.cells[0].samples_used  == 77);
+    REQUIRE(out.cells[0].confidence    == 0.5);
+    REQUIRE(out.cells[0].mean_error    == 1.02);
+    REQUIRE(out.cells[0].cell_index    == 0);
+}

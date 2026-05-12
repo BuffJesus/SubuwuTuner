@@ -129,6 +129,31 @@ struct MafTuneResult {
     std::span<MafSample const> samples,
     MafTuneOptions const      &opts = {});
 
+// Confidence-weighted neighbor smoothing pass per docs/12 §"MAF
+// auto-tune". Each cell's smoothed proposal is the weighted average of
+// (own proposal × own confidence) and (each neighbor's proposal ×
+// neighbor's confidence × `neighbor_weight`). High-confidence cells
+// pull low-confidence neighbors toward themselves rather than toward
+// the original `current_value`. Edge cells have only one neighbor.
+//
+// After smoothing, every cell's proposal is re-clamped to within
+// `±max_delta_pct` of its own `current_value` so the per-pass safety
+// bound from `tune_maf` is preserved across the second pass.
+//
+// If all neighbors and the cell itself have confidence 0, the cell is
+// left unchanged. `neighbor_weight` defaults to 0.25 — high-confidence
+// cells get the dominant say at their own positions but neighbors
+// still tug.
+//
+// Pure: returns a new `MafTuneResult`. `current_value`, `samples_used`,
+// `mean_error`, `cell_index`, and `confidence` are carried over from
+// the input; only `proposed_value` changes. Total-samples and
+// samples-after-gates fields pass through unchanged.
+[[nodiscard]] MafTuneResult smooth_proposals(
+    MafTuneResult const &input,
+    double               max_delta_pct,
+    double               neighbor_weight = 0.25);
+
 } // namespace st::autotune
 
 #endif // ST_AUTOTUNE_HPP
