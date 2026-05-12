@@ -22,14 +22,22 @@ SubuwuTuner/
 ├── src/
 │   ├── core/                              (st::core — Result, Error, Version, Crc32)
 │   ├── rom/                               (st::Rom — file I/O, BE/LE reads, slice, scan_ascii, crc32)
-│   └── cli/                               (subuwutuner-cli — rom-info command lives here)
-├── tests/unit/core/                       (Catch2 v3 via FetchContent)
-├── tests/unit/rom/                        (40 tests total across core + rom)
+│   ├── defs/                              (st::Definition — TOML loader, typed reads, scaling, axis/table values, diff)
+│   └── cli/                               (subuwutuner-cli — rom-info, dump-axis, dump-table, rom-diff)
+├── tools/defgen/                          (Python: RomRaider XML -> our TOML; clean-room facts-only)
+├── tests/unit/{core,rom,defs}/            (65 C++ tests; 28 Python tests under tools/defgen/tests/)
 ├── .github/workflows/ci.yml             (Win MSVC / Mac Apple-Clang / Linux GCC / Linux Clang ASan)
 └── docs/                                (design — read first; 00–12)
 ```
 
-**Phase 0 of `docs/04-roadmap.md` is done. Phase 1 has started**: `st::Rom` lands the ROM-side foundation (load, slice, BE/LE reads, CRC32, ASCII string scanner) plus a `subuwutuner-cli rom-info <file>` command. Next within Phase 1: `st::defs` (TOML definition loader, schema in `docs/11-definition-format.md`), and the `tools/defgen/` RomRaider→TOML converter.
+**Phase 0 done. Phase 1 CLI side done.** What's shipped:
+
+- `st::Rom` — file I/O, big/little-endian typed reads with overflow-safe bounds, slice, ASCII scanner, CRC32
+- `st::Definition` — TOML loader (tomlplusplus), cross-reference validation, CID matching, typed value reads, linear + piecewise scaling, axis-value extraction, table-value extraction (1D + 2D), per-table diff
+- `tools/defgen/` — Python tool that translates public RomRaider XML to our TOML schema; clean-room rules in `docs/01-reverse-engineering.md`. Standard-library Python only.
+- CLI commands: `rom-info`, `dump-axis`, `dump-table`, `rom-diff`. All operate against our `.toml` definition packs.
+
+What remains for the full Phase 1 ship gate: a real RomRaider XML through `defgen`, verified against a real stock dump showing ≥ 20 factory maps with correct scaling. That's a hardware/data gate; user is waiting on the OBDX Pro VX adapter to land before they can dump their own car. **Until then, do not block work on it** — there's plenty of Phase 2 work (project files, editing operations, undo/redo) that's hardware-free.
 
 The working directory on disk is still `D:\Documents\JetBrains\SubaruTuner\` — only the project's internal identity is `SubuwuTuner`. Renaming the folder would break editor and shell sessions; defer it.
 
@@ -88,6 +96,8 @@ This is where we *are* strict. The four core modules in `src/core`, `src/rom`, `
 
 ## Status
 
-Phase 0 complete as of 2026-05-11. Phase 1 underway — `st::rom` + `rom-info` CLI command landed locally. Repo pushed to `https://github.com/BuffJesus/SubuwuTuner`. First CI run hit two issues (`std::expected` missing on Apple Clang's libc++, clang-format violations in tests) which the current branch addresses.
+As of 2026-05-11: Phase 0 done. Phase 1 CLI side done (rom-info / dump-axis / dump-table / rom-diff working end-to-end against synthetic ROMs + synthetic TOML packs + defgen-converted RomRaider-shaped fixtures). 65 C++ + 28 Python tests green on MinGW g++ 15.2. Repo at `https://github.com/BuffJesus/SubuwuTuner`. Phase 1 hardware gate (real ROM, ≥20 maps from real definitions) waiting on user's OBDX Pro VX adapter.
 
-vcpkg is **not yet wired up** — deferred until we need a second persistent dependency. Phase 0 uses Catch2 via FetchContent; Phase 1 will add `tomlplusplus` and likely `tl::expected` the same way. The right time to switch to vcpkg manifest mode is when Qt joins the dep list.
+Deps wired so far via FetchContent: Catch2 v3 (tests), `tl::expected` (fallback when libc++ lacks `<expected>`), tomlplusplus v3.4 (definition parser). vcpkg manifest mode still deferred — natural moment is when Qt joins the dep list for Phase 2's UI.
+
+CI: clang-format job is advisory (non-blocking) since no pre-commit hook is set up yet. Once one is wired in, flip it back to required.
