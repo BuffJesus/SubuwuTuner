@@ -17,6 +17,7 @@ This folder contains the design and planning documents for **SubuwuTuner**, a co
 11. [10-glossary.md](10-glossary.md) — ECU/tuning vocabulary cheat sheet
 12. [11-definition-format.md](11-definition-format.md) — TOML schema for definition packs
 13. [12-auto-tuning.md](12-auto-tuning.md) — MAF/knock/closed-loop auto-tune design (v1.1+)
+14. [13-transport.md](13-transport.md) — Phase 3 transport-layer + ECU protocol design
 
 ## Status
 
