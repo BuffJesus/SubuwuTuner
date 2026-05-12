@@ -129,7 +129,16 @@ constexpr std::string_view kUsage =
     "                            manifest journal it left behind, emit a plan covering\n"
     "                            only the sectors that didn't complete. Refuses if the\n"
     "                            plan was modified between attempts (data CRC32 of any\n"
-    "                            done sector differs).\n";
+    "                            done sector differs).\n"
+    "    flash-apply --plan <FILE.toml> --trace <FILE.uds>\n"
+    "                [--journal <FILE.toml>] [--manifest <FILE.toml>]\n"
+    "                            Run a flash plan against a MockTransport-replayed UDS\n"
+    "                            trace. The trace is text with one '> req hex' /\n"
+    "                            '< resp hex' pair per exchange; '#' starts a comment.\n"
+    "                            Hardware-free smoke for the Flasher orchestrator;\n"
+    "                            prints the FlashReport summary; if --manifest is set,\n"
+    "                            writes a Manifest of the run; if --journal is set,\n"
+    "                            sets FlashPlan.journal_path for incremental writes.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -2412,6 +2421,258 @@ int cmd_flash_resume(int argc, char *argv[]) {
     return 0;
 }
 
+// Parse a UDS trace file into {request, response} pairs. Format:
+//   > hh hh ...    a tester request (hex bytes, whitespace tolerant,
+//                  optional "0x" prefix per byte)
+//   < hh hh ...    the matching ECU response
+//   # ...          comment to end of line
+//   <blank>        ignored
+//
+// Strict alternation: each '>' line is immediately followed by one '<'
+// line. Anything else is a parse error.
+struct UdsTracePair {
+    std::vector<std::uint8_t> request;
+    std::vector<std::uint8_t> response;
+};
+
+bool parse_uds_trace(std::filesystem::path const &path,
+                     std::vector<UdsTracePair>   &out_pairs,
+                     std::string                 &err) {
+    std::ifstream in{path};
+    if (!in) {
+        err = "flash-apply: cannot open trace file: " + path.string();
+        return false;
+    }
+    auto const parse_hex_line = [&](std::string_view body,
+                                     std::vector<std::uint8_t> &dst,
+                                     int line_no) -> bool {
+        std::istringstream iss{std::string{body}};
+        std::string        tok;
+        while (iss >> tok) {
+            std::string_view sv{tok};
+            if (sv.starts_with("0x") || sv.starts_with("0X")) {
+                sv.remove_prefix(2);
+            }
+            if (sv.size() != 2) {
+                err = "flash-apply: bad hex byte '" + tok + "' on line "
+                      + std::to_string(line_no);
+                return false;
+            }
+            unsigned   value = 0;
+            auto const res   = std::from_chars(sv.data(),
+                                                sv.data() + sv.size(),
+                                                value, 16);
+            if (res.ec != std::errc{}
+                || res.ptr != sv.data() + sv.size()
+                || value > 0xFFU) {
+                err = "flash-apply: bad hex byte '" + tok + "' on line "
+                      + std::to_string(line_no);
+                return false;
+            }
+            dst.push_back(static_cast<std::uint8_t>(value));
+        }
+        return true;
+    };
+
+    std::string line;
+    int         line_no  = 0;
+    bool        expect_request = true;
+    UdsTracePair pending;
+    while (std::getline(in, line)) {
+        ++line_no;
+        if (auto const hash = line.find('#'); hash != std::string::npos) {
+            line.erase(hash);
+        }
+        // Trim leading whitespace.
+        std::size_t i = 0;
+        while (i < line.size()
+               && std::isspace(static_cast<unsigned char>(line[i]))) {
+            ++i;
+        }
+        if (i >= line.size()) continue;  // blank
+        char const dir = line[i];
+        if (dir != '>' && dir != '<') {
+            err = "flash-apply: line " + std::to_string(line_no)
+                  + " must start with '>' or '<' after any whitespace";
+            return false;
+        }
+        std::string_view const body{line.data() + i + 1, line.size() - i - 1};
+        if (dir == '>') {
+            if (!expect_request) {
+                err = "flash-apply: line " + std::to_string(line_no)
+                      + ": two requests in a row (expected '<')";
+                return false;
+            }
+            pending = UdsTracePair{};
+            if (!parse_hex_line(body, pending.request, line_no)) return false;
+            if (pending.request.empty()) {
+                err = "flash-apply: line " + std::to_string(line_no)
+                      + ": request must have at least one byte";
+                return false;
+            }
+            expect_request = false;
+        } else {
+            if (expect_request) {
+                err = "flash-apply: line " + std::to_string(line_no)
+                      + ": response with no preceding request";
+                return false;
+            }
+            if (!parse_hex_line(body, pending.response, line_no)) return false;
+            if (pending.response.empty()) {
+                err = "flash-apply: line " + std::to_string(line_no)
+                      + ": response must have at least one byte";
+                return false;
+            }
+            out_pairs.push_back(std::move(pending));
+            expect_request = true;
+        }
+    }
+    if (!expect_request) {
+        err = "flash-apply: trace ends with an unmatched request "
+              "(missing '<' response)";
+        return false;
+    }
+    if (out_pairs.empty()) {
+        err = "flash-apply: trace file contains no exchanges: "
+              + path.string();
+        return false;
+    }
+    return true;
+}
+
+int cmd_flash_apply(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> plan_path;
+    std::optional<std::filesystem::path> trace_path;
+    std::optional<std::filesystem::path> manifest_path;
+    std::optional<std::filesystem::path> journal_path;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const             require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "flash-apply: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--plan") {
+            if (auto const *v = require_arg("--plan"); v) plan_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--trace") {
+            if (auto const *v = require_arg("--trace"); v) trace_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--manifest") {
+            if (auto const *v = require_arg("--manifest"); v) manifest_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--journal") {
+            if (auto const *v = require_arg("--journal"); v) journal_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "flash-apply: unknown option: %s\n", argv[i]);
+            return 2;
+        } else {
+            std::fprintf(stderr, "flash-apply: extra positional argument: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+    if (!plan_path.has_value() || !trace_path.has_value()) {
+        std::fputs("flash-apply: missing required arguments\n"
+                   "Usage: subuwutuner-cli flash-apply --plan <FILE.toml> "
+                   "--trace <FILE.uds>\n"
+                   "       [--journal <FILE.toml>] [--manifest <FILE.toml>]\n",
+                   stderr);
+        return 2;
+    }
+
+    auto plan = st::flash::read_plan(*plan_path);
+    if (!plan.has_value()) {
+        std::fprintf(stderr, "flash-apply: %s\n",
+                     plan.error().to_string().c_str());
+        return 1;
+    }
+    if (journal_path.has_value()) {
+        plan->journal_path = *journal_path;
+    }
+
+    std::vector<UdsTracePair> pairs;
+    std::string               err;
+    if (!parse_uds_trace(*trace_path, pairs, err)) {
+        std::fputs(err.c_str(), stderr);
+        std::fputc('\n', stderr);
+        return 1;
+    }
+
+    st::transport::MockTransport mock;
+    if (auto s = mock.open({}); !s.has_value()) {
+        std::fprintf(stderr, "flash-apply: mock open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+    for (auto &p : pairs) {
+        mock.expect_send_recv(std::move(p.request), std::move(p.response));
+    }
+
+    st::flash::Flasher flasher{mock};
+    auto const         outcome = flasher.execute(*plan);
+
+    // Always print a summary, regardless of success/failure, since the
+    // ExecuteOutcome's report is always populated.
+    auto const &report = outcome.report;
+    std::printf("flash-apply: %s\n",
+                outcome.ok() ? "SUCCESS" : "FAILED");
+    std::printf("  entered_session    = %s\n",
+                report.entered_session ? "true" : "false");
+    std::printf("  silenced_bus       = %s\n",
+                report.silenced_bus ? "true" : "false");
+    std::printf("  restored_bus       = %s\n",
+                report.restored_bus ? "true" : "false");
+    std::printf("  bytes_transferred  = %zu\n", report.bytes_transferred);
+    std::printf("  sectors            = %zu\n", report.sectors.size());
+    for (std::size_t i = 0; i < report.sectors.size(); ++i) {
+        auto const &so = report.sectors[i];
+        std::printf("    [%zu] 0x%08X .. 0x%08X  erased=%d downloaded=%d "
+                    "transferred=%d exited=%d check_deps=%d verified=%d\n",
+                    i, so.sector.address,
+                    so.sector.address + so.sector.length,
+                    static_cast<int>(so.erased),
+                    static_cast<int>(so.downloaded),
+                    static_cast<int>(so.transferred),
+                    static_cast<int>(so.exited),
+                    static_cast<int>(so.check_deps_passed),
+                    static_cast<int>(so.verified));
+    }
+    if (!outcome.ok()) {
+        std::fprintf(stderr, "flash-apply: %s\n",
+                     outcome.error->to_string().c_str());
+    }
+    if (!mock.exhausted()) {
+        std::fprintf(stderr,
+                     "flash-apply: warning: %zu trace entries unused\n",
+                     mock.remaining());
+    }
+
+    // Build a manifest of the run if requested. plan_text is the source
+    // TOML text so plan_crc32 is meaningful.
+    if (manifest_path.has_value()) {
+        std::ifstream pin{*plan_path, std::ios::binary};
+        std::ostringstream pss;
+        pss << pin.rdbuf();
+        auto const manifest =
+            st::flash::build_manifest(*plan, pss.str(), report);
+        if (auto s = st::flash::write_manifest(*manifest_path, manifest);
+            !s.has_value()) {
+            std::fprintf(stderr, "flash-apply: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        std::fprintf(stderr, "flash-apply: wrote manifest %s\n",
+                     manifest_path->string().c_str());
+    }
+
+    return outcome.ok() ? 0 : 1;
+}
+
 int main(int argc, char *argv[]) {
     if (argc <= 1) {
         print_usage();
@@ -2490,6 +2751,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "flash-resume") {
         return cmd_flash_resume(argc - 2, argv + 2);
+    }
+    if (cmd == "flash-apply") {
+        return cmd_flash_apply(argc - 2, argv + 2);
     }
 
     std::fprintf(stderr, "subuwutuner-cli: unknown argument: %s\n", argv[1]);
