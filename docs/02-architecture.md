@@ -16,7 +16,7 @@ See `04-roadmap.md` for the v1.x platform-expansion order.
 
 ```
 ┌────────────────────────────────────────────────────┐
-│  UI layer    (Qt 6 widgets/QML, or Dear ImGui)     │
+│  UI layer    (Dear ImGui + GLFW + ImPlot)          │
 ├────────────────────────────────────────────────────┤
 │  Application services  (project mgr, undo/redo,    │
 │                         scripting host, plugins)   │
@@ -31,7 +31,17 @@ See `04-roadmap.md` for the v1.x platform-expansion order.
 └────────────────────────────────────────────────────┘
 ```
 
-Every layer depends only on layers below it. The domain model has no Qt or USB types in its public headers — that is what lets us unit-test it and reuse it from a CLI.
+Every layer depends only on layers below it. The domain model has no ImGui or USB types in its public headers — that is what lets us unit-test it and reuse it from a CLI. The UI layer reads domain types directly (no `MVC`/`MVVM` ceremony) but writes back through application-services entry points so undo/redo and project-state invariants are enforced in one place.
+
+## Polish layer (UI)
+
+"Looks great + functions great" decomposes into concrete deliverables on top of the base Dear ImGui shell:
+
+- **Theme** — tuned dark palette (high contrast for numerical work, low chroma for long sessions), Inter as UI font, JetBrains Mono in grids and chart axes, padding/rounding/border tuned away from ImGui defaults.
+- **Docking** — ImGui docking branch with viewports so panels can tear off into OS-level windows on multi-monitor setups.
+- **Charts** — ImPlot for every live-data view (datalogger, AFR/timing trace, fuel-trim heatmap).
+- **Dialogs** — nativefiledialog-extended (nfd) for Open/Save; ImGui modal popups for confirmations.
+- **Map editor** — first-party 2D/3D table widget with axis headers, color-coded heatmap overlay, paste-from-spreadsheet, keyboard navigation, undo/redo bound to `st::edit::History`.
 
 ## Module map
 
@@ -51,14 +61,14 @@ Every layer depends only on layers below it. The domain model has no Qt or USB t
 | `st::log` | Datalogging | `LogStream`, `Pid`, `Sample` |
 | `st::script` | Embedded scripting (Lua) for custom maps | `ScriptHost` |
 | `st::nodegraph` | Visual logic compiler for user-authored ECU features | `Graph`, `Node`, `CodeGen` |
-| `st::ui` | GUI shell (Qt or ImGui) | view models bound to domain |
+| `st::ui` | GUI shell (Dear ImGui + GLFW + ImPlot) | windows, panels, theme, view code bound to domain |
 | `st::cli` | Headless tool | argparse + same domain |
 
 ## Concurrency model
 
 Three thread categories:
 
-- **UI thread** — the only one allowed to touch UI widgets.
+- **UI thread** — the only one allowed to touch ImGui state or call `ImGui_ImplOpenGL3_*` / `glfwPoll*`.
 - **Worker pool** — `std::jthread` workers driven by a lightweight task system for CPU-bound work (compression, CRC, codegen).
 - **I/O reactor** — one dedicated thread per transport device. ECU comms are inherently serial; multiplexing them onto a reactor avoids leaking USB/serial handles across threads.
 
@@ -66,7 +76,7 @@ Communication is via message passing (a typed `concurrent_queue<Cmd>` per worker
 
 ## Error handling
 
-`std::expected<T, st::Error>` everywhere in domain/transport code. Exceptions only at the UI boundary, and only to interrupt long-running operations through `std::stop_token`. Cancellation must propagate to in-flight flash operations safely — see `05-improvements.md` for the brick-protection design.
+`std::expected<T, st::Error>` everywhere in domain/transport code. Exceptions only at the UI boundary, and only to interrupt long-running operations through `std::stop_token`. Cancellation must propagate to in-flight flash operations safely — see `05-improvements.md` for the brick-protection design. ImGui's immediate-mode loop never throws across frames; any exception caught at the UI surface gets logged + surfaced via a modal popup.
 
 ## Plugin / extension surface
 

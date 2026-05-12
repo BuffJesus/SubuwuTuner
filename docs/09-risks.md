@@ -43,13 +43,15 @@ Ordered by expected impact × probability.
   - Ship Phase 1–3 features (read-only viewer, editor, ELM datalogging) without VB write support if needed
   - Recruit a community contributor with a VB and a J2534 device early
 
-## R5 — Qt licensing/cost surprise
+## R5 — ImGui polish + accessibility gap
 
-- **Impact:** medium — would force a UI rewrite
-- **Probability:** low with LGPL dynamic linking
+- **Impact:** medium — pros judging the tool on first impression may dismiss it as "engineery"; screen-reader users are locked out
+- **Probability:** moderate — ImGui defaults are utilitarian, and accessibility is genuinely poor without significant custom work
 - **Mitigations:**
-  - Confirm LGPL compliance plan with a lawyer before public release
-  - Keep `st::ui` thin and porting-friendly so an ImGui fallback is feasible
+  - Treat the polish layer (theme, fonts, padding, custom map widget) as a continuous workstream rather than a one-off Phase-6 task
+  - Lean on ImPlot for charts so we never ship a hand-rolled plot widget
+  - Accessibility (screen reader hooks, system contrast modes) tracked as a post-v1 deliverable; not a v1 gate
+  - Keep the domain layer free of ImGui types so the UI is replaceable if accessibility ever becomes a hard requirement
 
 ## R6 — Maintainer burnout / bus factor of one
 

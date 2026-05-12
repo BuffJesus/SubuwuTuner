@@ -52,7 +52,7 @@ The user picks a configurable **jurisdiction profile** on first run (Alberta-CA,
 
 ## 7. Better gauges, fewer dependencies
 
-A first-party 2D gauge widget set built on QPainter, plus a QtCharts/QCustomPlot pipeline for log plotting. Goal: 60 fps on integrated graphics. No WebGL, no embedded browsers.
+A first-party 2D gauge widget set built on ImGui's `DrawList` (direct triangles + lines, no widget overhead), plus **ImPlot** for log plotting and live datalog charts — same author as ImGui, 100k-point real-time series without dropping frames. Goal: 60 fps on integrated graphics. No WebGL, no embedded browsers.
 
 ## 8. Cross-platform on day one
 

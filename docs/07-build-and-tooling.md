@@ -20,7 +20,7 @@ SubuwuTuner/
 │   ├── log/
 │   ├── script/
 │   ├── nodegraph/
-│   ├── ui/                     (Qt app)
+│   ├── ui/                     (Dear ImGui + GLFW app)
 │   └── cli/                    (headless tool)
 ├── tests/
 │   ├── unit/

@@ -110,7 +110,7 @@ This is where we *are* strict. The four core modules in `src/core`, `src/rom`, `
 - `clang-tidy` and `-Wall -Wextra -Wpedantic -Werror` clean
 - Catch2 v3 for tests; tests live next to code in `tests/unit/<module>/`
 - No global state; dependency-inject services into the application layer
-- See `docs/02-architecture.md` for module boundaries — domain has no Qt or USB types in its public headers
+- See `docs/02-architecture.md` for module boundaries — domain has no ImGui or USB types in its public headers
 
 ## Working with this user
 
@@ -122,7 +122,7 @@ This is where we *are* strict. The four core modules in `src/core`, `src/rom`, `
 
 As of 2026-05-11: Phase 0 done. Phase 1 CLI side done. Phase 2 MVP done (persistence + undo/redo end-to-end). Phase 3 protocol-side substantially built out (SSM read+write, full UDS catalog including the flashing flow). **172 C++ + 36 Python tests** green on MinGW g++ 15.2. Repo at `https://github.com/BuffJesus/SubuwuTuner`. Phase 1 hardware gate (real ROM, ≥20 maps from real definitions) waiting on user's OBDX Pro VX adapter.
 
-Deps wired so far via FetchContent: Catch2 v3 (tests), `tl::expected` (fallback when libc++ lacks `<expected>`), tomlplusplus v3.4 (definition parser). vcpkg manifest mode still deferred — natural moment is when Qt joins the dep list for the UI.
+Deps wired so far via FetchContent: Catch2 v3 (tests), `tl::expected` (fallback when libc++ lacks `<expected>`), tomlplusplus v3.4 (definition parser), GLFW 3.4 + Dear ImGui v1.91 + ImPlot + nativefiledialog-extended (UI). vcpkg manifest mode still deferred — would only be needed for a system-package dep like OpenSSL when the signed-update channel lands.
 
 CI: clang-format job is advisory (non-blocking) since no pre-commit hook is set up yet. Once one is wired in, flip it back to required.
 
@@ -131,6 +131,6 @@ CI: clang-format job is advisory (non-blocking) since no pre-commit hook is set 
 - **UDS extras** — RequestDownload + TransferData + RoutineControl, DiagnosticSessionControl, TesterPresent (keeps the session alive). Mostly framing-only without hardware.
 - **SSM block-write opcodes** — current SSM write is single-byte RAM write. Block / flash opcodes are per-ECU-family; framing design lives in `docs/13`.
 - **defgen polish** — `--apply-to-pack` mode that updates an existing TOML pack instead of overwriting; better reporting on non-linear formulas it had to flatten.
-- **Qt UI bring-up** — biggest remaining single lift. The domain layer is stable enough that the UI just needs view models on top.
+- **GUI polish stack on top of the ImGui MVP** — ImGui docking branch, ImPlot for charts, nfd for native Open/Save dialogs, a tuned dark theme + Inter/JetBrains Mono fonts, and a first-party 2D/3D map editor widget bound to `st::edit::History`. The domain layer is stable; the UI just needs binding work.
 - **Logger / datalogging design + Phase 3 implementation skeleton** — `st::log::LogStream` and the lock-free ring buffer per `docs/13`. Can be designed and unit-tested via `MockTransport`.
 - **CAN reverse-engineering toolkit** — programmatic discovery loop for swap/cluster work, fully designed in `docs/14`. Replay-mode pieces (`st::can::Frame`, `.asc` reader, DBC parser, `BaselineModel`/`ChangeDetector`) all unit-testable without hardware.
