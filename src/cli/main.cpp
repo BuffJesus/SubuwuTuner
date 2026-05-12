@@ -122,7 +122,14 @@ constexpr std::string_view kUsage =
     "                            Diff two ROMs of equal size; for every sector-aligned\n"
     "                            region that differs, emit a flash plan whose [[write]]\n"
     "                            entries cover those sectors with TARGET's bytes. The\n"
-    "                            plan is hand-editable before execution.\n";
+    "                            plan is hand-editable before execution.\n"
+    "    flash-resume <ORIGINAL.plan.toml> <JOURNAL.manifest.toml>\n"
+    "                [--output <resumed.plan.toml>]\n"
+    "                            Given the plan from a partial-flash attempt and the\n"
+    "                            manifest journal it left behind, emit a plan covering\n"
+    "                            only the sectors that didn't complete. Refuses if the\n"
+    "                            plan was modified between attempts (data CRC32 of any\n"
+    "                            done sector differs).\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -2312,6 +2319,99 @@ int cmd_flash_delta(int argc, char *argv[]) {
     return 0;
 }
 
+int cmd_flash_resume(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> plan_path;
+    std::optional<std::filesystem::path> journal_path;
+    std::optional<std::filesystem::path> output_path;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--output" || a == "-o") {
+            if (i + 1 >= argc) {
+                std::fputs("flash-resume: --output requires a path\n", stderr);
+                return 2;
+            }
+            output_path = std::filesystem::path{argv[++i]};
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "flash-resume: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!plan_path.has_value()) {
+            plan_path = std::filesystem::path{argv[i]};
+        } else if (!journal_path.has_value()) {
+            journal_path = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "flash-resume: extra positional argument: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+    if (!plan_path.has_value() || !journal_path.has_value()) {
+        std::fputs("flash-resume: missing required arguments\n"
+                   "Usage: subuwutuner-cli flash-resume <ORIGINAL.plan.toml> "
+                   "<JOURNAL.manifest.toml> [--output <resumed.plan.toml>]\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const original = st::flash::read_plan(*plan_path);
+    if (!original.has_value()) {
+        std::fprintf(stderr, "flash-resume: %s\n",
+                     original.error().to_string().c_str());
+        return 1;
+    }
+    auto const journal = st::flash::read_manifest(*journal_path);
+    if (!journal.has_value()) {
+        std::fprintf(stderr, "flash-resume: %s\n",
+                     journal.error().to_string().c_str());
+        return 1;
+    }
+
+    auto resumed = st::flash::plan_resume(*original, *journal);
+    if (!resumed.has_value()) {
+        std::fprintf(stderr, "flash-resume: %s\n",
+                     resumed.error().to_string().c_str());
+        return 1;
+    }
+
+    if (resumed->writes.empty()) {
+        std::fputs("flash-resume: every sector in the original plan is already "
+                   "transferred and verified; no resume needed\n", stderr);
+        return 0;
+    }
+
+    // Clear journal_path so the resumed plan doesn't accidentally
+    // overwrite the original journal on the next execute(). The user can
+    // set a fresh path explicitly via the resumed plan TOML if they want
+    // continued journaling.
+    resumed->journal_path.clear();
+
+    std::size_t const bytes =
+        std::accumulate(resumed->writes.begin(), resumed->writes.end(),
+                        std::size_t{0},
+                        [](std::size_t acc, auto const &w) {
+                            return acc + w.sector.length;
+                        });
+
+    if (output_path.has_value()) {
+        if (auto s = st::flash::write_plan(*output_path, *resumed);
+            !s.has_value()) {
+            std::fprintf(stderr, "flash-resume: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        std::fprintf(stderr,
+                     "flash-resume: %zu sector(s), %zu bytes, wrote %s\n",
+                     resumed->writes.size(), bytes,
+                     output_path->string().c_str());
+    } else {
+        std::fputs(st::flash::format_plan(*resumed).c_str(), stdout);
+        std::fprintf(stderr,
+                     "flash-resume: %zu sector(s), %zu bytes\n",
+                     resumed->writes.size(), bytes);
+    }
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     if (argc <= 1) {
         print_usage();
@@ -2387,6 +2487,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "flash-delta") {
         return cmd_flash_delta(argc - 2, argv + 2);
+    }
+    if (cmd == "flash-resume") {
+        return cmd_flash_resume(argc - 2, argv + 2);
     }
 
     std::fprintf(stderr, "subuwutuner-cli: unknown argument: %s\n", argv[1]);
