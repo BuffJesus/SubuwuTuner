@@ -241,6 +241,13 @@ struct AppState {
     // recents_config_path() for the on-disk location.
     std::vector<RecentEntry>                 recents;
 
+    // Sidebar filter. Substring-matched (case-insensitive) against table
+    // name + id. 128 chars is generous — table identifiers in real packs
+    // top out around 40. `focus_table_filter` is the Ctrl+F handoff: set
+    // by the main-loop shortcut, consumed by the sidebar's next render.
+    char                                     table_filter[128]{};
+    bool                                     focus_table_filter{false};
+
     // Unsaved-changes tracking. `dirty` is conservative: any edit flips
     // it true, save flips it false. An undo-back-to-clean leaves dirty
     // true, which is harmless because the resulting save is a no-op
@@ -557,6 +564,30 @@ void glfw_error_callback(int err, char const *desc) {
     std::fprintf(stderr, "GLFW error %d: %s\n", err, desc);
 }
 
+// Case-insensitive substring search. Used by the sidebar table filter
+// to match against both human-readable name and the snake_case id.
+// Empty needle matches everything (so an empty filter shows the full
+// list). ASCII-only — calibration table names use ASCII identifiers.
+bool icontains(std::string_view hay, std::string_view needle) noexcept {
+    if (needle.empty()) return true;
+    if (hay.size() < needle.size()) return false;
+    auto const eq = [](unsigned char a, unsigned char b) {
+        return std::tolower(a) == std::tolower(b);
+    };
+    for (std::size_t i = 0; i + needle.size() <= hay.size(); ++i) {
+        bool match = true;
+        for (std::size_t j = 0; j < needle.size(); ++j) {
+            if (!eq(static_cast<unsigned char>(hay[i + j]),
+                    static_cast<unsigned char>(needle[j]))) {
+                match = false;
+                break;
+            }
+        }
+        if (match) return true;
+    }
+    return false;
+}
+
 // Probe a few candidate paths and load the first one that exists. Returns
 // nullptr if none was loadable, in which case ImGui's default font is used.
 ImFont *load_first_existing(std::initializer_list<char const *> candidates,
@@ -812,6 +843,10 @@ void render_menubar(AppState &state) {
             ImGui::BulletText("Toolbar buttons (+5%%, -5%%, Smooth, Interpolate) act on the selection.");
             ImGui::BulletText("Ctrl+Z / Ctrl+Shift+Z to undo / redo.  Ctrl+S to save.");
             ImGui::Separator();
+            ImGui::TextDisabled("Navigation");
+            ImGui::BulletText("Ctrl+F focuses the table-filter box.  Esc clears it.");
+            ImGui::BulletText("Filter matches both the table's name and its snake_case id.");
+            ImGui::Separator();
             ImGui::TextDisabled("Viewing");
             ImGui::BulletText("Switch View: Grid \xE2\x86\x94 Heatmap to inspect a map two ways.");
             ImGui::BulletText("For 3D tables, pick a Z slice above the grid.");
@@ -849,10 +884,53 @@ void render_sidebar(AppState &state) {
 
     auto const &def = state.project->definition();
     ImGui::TextDisabled("Pack: %s", def.pack().id.c_str());
-    ImGui::TextDisabled("%zu tables", def.tables().size());
+
+    // Filter input. Ctrl+F (handled in main loop) hands keyboard focus
+    // here for the next frame; Esc clears the buffer and unfocuses by
+    // virtue of EscapeClearsAll. Width matches the full panel so the
+    // affordance is unambiguous.
+    if (state.focus_table_filter) {
+        ImGui::SetKeyboardFocusHere();
+        state.focus_table_filter = false;
+    }
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputTextWithHint("##table_filter", "Filter tables…  (Ctrl+F)",
+                              state.table_filter, sizeof state.table_filter,
+                              ImGuiInputTextFlags_EscapeClearsAll);
+
+    std::string_view const filter{state.table_filter};
+    // Count matches once so the header line can report "N of M".
+    std::size_t matched = 0;
+    for (auto const &t : def.tables()) {
+        if (filter.empty()
+            || icontains(t.name, filter) || icontains(t.id, filter)) {
+            ++matched;
+        }
+    }
+    if (filter.empty()) {
+        ImGui::TextDisabled("%zu tables", def.tables().size());
+    } else {
+        ImGui::TextDisabled("%zu of %zu tables", matched,
+                             def.tables().size());
+    }
     ImGui::Separator();
 
+    if (!filter.empty() && matched == 0) {
+        ImGui::Dummy(ImVec2(0.0f, 8.0f));
+        ImGui::TextWrapped("No tables match \"%s\".",
+                            state.table_filter);
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::TextDisabled("Try a shorter prefix, or clear the filter "
+                             "(Esc).");
+        ImGui::End();
+        return;
+    }
+
     for (auto const &t : def.tables()) {
+        if (!filter.empty()
+            && !icontains(t.name, filter) && !icontains(t.id, filter)) {
+            continue;
+        }
         bool const selected = state.selected_table_id == t.id;
         // Prefer the human-readable name as the primary label. Snake-case
         // IDs are developer-facing — surface them in the tooltip instead.
@@ -1738,6 +1816,13 @@ int main(int argc, char *argv[]) {
         }
         if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
             save_project(state);
+        }
+        // Ctrl+F focuses the sidebar's table filter. Only meaningful
+        // when a project is open; harmless otherwise (the next
+        // render_sidebar call will reset the flag without acting on
+        // it).
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_F)) {
+            state.focus_table_filter = true;
         }
         if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z)) {
             do_redo(state);
