@@ -58,7 +58,10 @@ constexpr std::string_view kUsage =
     "                            a copy of the source ROM, an editable working\n"
     "                            ROM, and a reference to the definition pack.\n"
     "    project-info <dir>      Print metadata + current working-ROM CRC32 for\n"
-    "                            a .stune project.\n";
+    "                            a .stune project.\n"
+    "    project-edit --table <id> [--rows A:B] [--cols A:B] OP [VALUE] <dir>\n"
+    "                            Apply an edit to a project's working ROM and\n"
+    "                            update project.toml. Same OPs as table-edit.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -72,6 +75,9 @@ bool arg_matches(char const *arg, std::string_view short_form, std::string_view 
     std::string_view const sv{arg};
     return sv == short_form || sv == long_form;
 }
+
+// Forward-declared so commands defined ahead of parse_range's body can use it.
+bool parse_range(std::string_view s, std::size_t &lo, std::size_t &hi);
 
 void print_rom_summary(std::filesystem::path const &path, st::Rom const &rom) {
     std::printf("File:           %s\n", path.string().c_str());
@@ -305,6 +311,141 @@ int cmd_dump_table(int argc, char *argv[]) {
         std::printf("\n");
     }
 
+    return 0;
+}
+
+int cmd_project_edit(int argc, char *argv[]) {
+    std::optional<std::string>           table_id;
+    std::optional<std::string>           rows_arg;
+    std::optional<std::string>           cols_arg;
+    std::optional<std::string>           op;
+    std::optional<double>                value;
+    std::optional<std::filesystem::path> proj_path;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const             require = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "project-edit: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--table") {
+            if (auto const *v = require("--table"); v) table_id = std::string{v};
+            else return 2;
+        } else if (a == "--rows") {
+            if (auto const *v = require("--rows"); v) rows_arg = std::string{v};
+            else return 2;
+        } else if (a == "--cols") {
+            if (auto const *v = require("--cols"); v) cols_arg = std::string{v};
+            else return 2;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "project-edit: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!op.has_value()) {
+            op = std::string{a};
+        } else if (!value.has_value() && op != "smooth" && op != "interpolate") {
+            double     d   = 0.0;
+            auto const res = std::from_chars(a.data(), a.data() + a.size(), d);
+            if (res.ec == std::errc{} && res.ptr == a.data() + a.size()) {
+                value = d;
+            } else if (!proj_path.has_value()) {
+                proj_path = std::filesystem::path{a};
+            } else {
+                std::fprintf(stderr, "project-edit: extra argument: %s\n", argv[i]);
+                return 2;
+            }
+        } else if (!proj_path.has_value()) {
+            proj_path = std::filesystem::path{a};
+        } else {
+            std::fprintf(stderr, "project-edit: extra argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!table_id.has_value() || !op.has_value() || !proj_path.has_value()) {
+        std::fputs(
+            "project-edit: missing required arguments\n"
+            "Usage: subuwutuner-cli project-edit --table <id> [--rows A:B] "
+            "[--cols A:B] OP [VALUE] <dir>\n",
+            stderr);
+        return 2;
+    }
+
+    bool const op_needs_value =
+        *op == "set" || *op == "add" || *op == "multiply" || *op == "percent";
+    if (op_needs_value && !value.has_value()) {
+        std::fprintf(stderr, "project-edit: op '%s' requires a numeric value\n",
+                     op->c_str());
+        return 2;
+    }
+
+    auto proj = st::Project::open(*proj_path);
+    if (!proj.has_value()) {
+        std::fprintf(stderr, "project-edit: %s\n", proj.error().to_string().c_str());
+        return 1;
+    }
+
+    auto const *table = proj->definition().find_table(*table_id);
+    if (table == nullptr) {
+        std::fprintf(stderr, "project-edit: table '%s' not found in pack\n",
+                     table_id->c_str());
+        return 1;
+    }
+
+    auto td = proj->definition().read_table_values(proj->working_rom(), *table);
+    if (!td.has_value()) {
+        std::fprintf(stderr, "project-edit: %s\n", td.error().to_string().c_str());
+        return 1;
+    }
+
+    st::edit::Rect rect = st::edit::whole_table(*td);
+    if (rows_arg.has_value() && !parse_range(*rows_arg, rect.r_start, rect.r_end)) {
+        std::fprintf(stderr, "project-edit: bad --rows: %s\n", rows_arg->c_str());
+        return 2;
+    }
+    if (cols_arg.has_value() && !parse_range(*cols_arg, rect.c_start, rect.c_end)) {
+        std::fprintf(stderr, "project-edit: bad --cols: %s\n", cols_arg->c_str());
+        return 2;
+    }
+
+    st::Status status = st::ok();
+    if (*op == "set")              status = st::edit::set_cells(*td, rect, *value);
+    else if (*op == "add")         status = st::edit::add_cells(*td, rect, *value);
+    else if (*op == "multiply")    status = st::edit::multiply_cells(*td, rect, *value);
+    else if (*op == "percent")     status = st::edit::percent_scale_cells(*td, rect, *value);
+    else if (*op == "smooth")      status = st::edit::smooth_cells(*td, rect, 1);
+    else if (*op == "interpolate") status = st::edit::interpolate_cells(*td, rect);
+    else {
+        std::fprintf(stderr, "project-edit: unknown op '%s'\n", op->c_str());
+        return 2;
+    }
+    if (!status.has_value()) {
+        std::fprintf(stderr, "project-edit: %s\n", status.error().to_string().c_str());
+        return 1;
+    }
+
+    auto wb = proj->definition().write_table_values(proj->working_rom(), *table, *td);
+    if (!wb.has_value()) {
+        std::fprintf(stderr, "project-edit: writeback: %s\n", wb.error().to_string().c_str());
+        return 1;
+    }
+
+    if (auto s = proj->save_working_rom(); !s.has_value()) {
+        std::fprintf(stderr, "project-edit: save: %s\n", s.error().to_string().c_str());
+        return 1;
+    }
+
+    std::printf("Table:      %s\n", table->id.c_str());
+    std::printf("Op:         %s", op->c_str());
+    if (op_needs_value) std::printf(" %g", *value);
+    std::printf("\n");
+    std::printf("Selection:  rows %zu..%zu, cols %zu..%zu (%zu cells)\n",
+                rect.r_start, rect.r_end, rect.c_start, rect.c_end,
+                rect.rows() * rect.cols());
+    std::printf("Saved to:   %s\n", proj_path->string().c_str());
+    std::printf("New CRC32:  0x%08X\n", proj->working_rom().crc32());
     return 0;
 }
 
@@ -806,6 +947,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-info") {
         return cmd_project_info(argc - 2, argv + 2);
+    }
+    if (cmd == "project-edit") {
+        return cmd_project_edit(argc - 2, argv + 2);
     }
 
     std::fprintf(stderr, "subuwutuner-cli: unknown argument: %s\n", argv[1]);
