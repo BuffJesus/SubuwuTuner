@@ -119,6 +119,65 @@ Result<std::vector<std::uint8_t>> parse_a8_response(std::span<std::uint8_t const
     return data;
 }
 
+Result<std::vector<std::uint8_t>> build_b0_request(std::uint32_t address,
+                                                    std::uint8_t  data) {
+    if (address > kMaxAddress) {
+        return failure(ErrorCode::InvalidArgument,
+                       "SSM write address exceeds 24-bit range");
+    }
+    // LEN = CMD(1) + 3*addr + 1*data = 5
+    std::vector<std::uint8_t> out;
+    out.reserve(9 + 1);
+    out.push_back(kHeader);
+    out.push_back(kDestEcu);
+    out.push_back(kSrcTool);
+    out.push_back(5);
+    out.push_back(kCmdWriteByAddress);
+    out.push_back(static_cast<std::uint8_t>((address >> 16) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((address >> 8) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>(address & 0xFFU));
+    out.push_back(data);
+    out.push_back(ssm_checksum(out));
+    return out;
+}
+
+Result<std::uint8_t> parse_b0_response(std::span<std::uint8_t const> resp) {
+    // Minimum response is 80 F0 10 LEN F0 [byte] CSUM = 7 bytes.
+    if (resp.size() < 7) {
+        return failure(ErrorCode::ParseError, "SSM write response too short");
+    }
+    if (resp[0] != kHeader || resp[1] != kSrcTool || resp[2] != kDestEcu) {
+        return failure(ErrorCode::ParseError, "SSM write response: bad addressing");
+    }
+    std::size_t const declared_len   = resp[3];
+    std::size_t const expected_frame = 4 + declared_len + 1;
+    if (resp.size() != expected_frame) {
+        return failure(ErrorCode::ParseError, "SSM write response: LEN mismatch");
+    }
+    auto const csum_computed = ssm_checksum(resp.subspan(0, resp.size() - 1));
+    if (csum_computed != resp.back()) {
+        return failure(ErrorCode::BadChecksum, "SSM write response: bad checksum");
+    }
+    auto const rsp_byte = resp[4];
+    if (rsp_byte == kNegativeResponse) {
+        std::uint8_t const nrc = declared_len >= 2 ? resp[5] : 0xFFU;
+        return failure(ErrorCode::EcuRejected,
+                       "SSM write negative response, NRC=0x"
+                           + std::to_string(static_cast<unsigned>(nrc)));
+    }
+    if (rsp_byte != kRespWriteByAddress) {
+        return failure(ErrorCode::EcuRejected,
+                       "SSM write unexpected response byte: 0x"
+                           + std::to_string(static_cast<unsigned>(rsp_byte)));
+    }
+    // Echoed data byte sits at index 5; LEN must be at least 2 (RSP + data).
+    if (declared_len < 2) {
+        return failure(ErrorCode::ParseError,
+                       "SSM write response missing echoed data byte");
+    }
+    return resp[5];
+}
+
 Result<std::vector<std::uint8_t>> SsmClient::read(std::span<std::uint32_t const> addresses,
                                                   std::chrono::milliseconds       timeout) {
     auto req = build_a8_request(addresses);
@@ -128,6 +187,15 @@ Result<std::vector<std::uint8_t>> SsmClient::read(std::span<std::uint32_t const>
     if (!resp.has_value()) return failure(resp.error());
 
     return parse_a8_response(resp->data, addresses.size());
+}
+
+Result<std::uint8_t> SsmClient::write(std::uint32_t address, std::uint8_t data,
+                                       std::chrono::milliseconds timeout) {
+    auto req = build_b0_request(address, data);
+    if (!req.has_value()) return failure(req.error());
+    auto resp = transport_->send_recv(*req, timeout);
+    if (!resp.has_value()) return failure(resp.error());
+    return parse_b0_response(resp->data);
 }
 
 Result<std::vector<std::uint8_t>> SsmClient::read_block(std::uint32_t base_address,

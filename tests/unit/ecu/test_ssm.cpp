@@ -194,3 +194,95 @@ TEST_CASE("SsmClient::read_block with length=0 returns empty",
     // Nothing should have been sent to the transport.
     REQUIRE(t.send_log().empty());
 }
+
+// ---- Write tests --------------------------------------------------------
+
+TEST_CASE("build_b0_request constructs the canonical write frame",
+          "[ssm][framing][write]") {
+    auto const r = ssm::build_b0_request(0x012345, 0x42);
+    REQUIRE(r.has_value());
+
+    // 80 10 F0 05 B0 01 23 45 42 [csum]
+    std::vector<std::uint8_t> const expect_no_csum{
+        0x80, 0x10, 0xF0, 0x05, 0xB0, 0x01, 0x23, 0x45, 0x42};
+    REQUIRE(std::vector<std::uint8_t>(r->begin(), r->end() - 1) == expect_no_csum);
+    REQUIRE(r->back() == ssm::ssm_checksum(expect_no_csum));
+}
+
+TEST_CASE("build_b0_request rejects addresses past 24-bit",
+          "[ssm][framing][write][error]") {
+    auto const r = ssm::build_b0_request(0x01000000, 0x00);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("parse_b0_response returns the echoed byte",
+          "[ssm][framing][write]") {
+    // 80 F0 10 02 F0 42 [csum]   LEN = 1(RSP) + 1(echoed)
+    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x02, 0xF0, 0x42};
+    resp.push_back(ssm::ssm_checksum(resp));
+
+    auto const r = ssm::parse_b0_response(resp);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == 0x42);
+}
+
+TEST_CASE("parse_b0_response surfaces a write negative response",
+          "[ssm][framing][write][error]") {
+    // 80 F0 10 02 7F 35 [csum]   NRC 0x35 = invalid key (example)
+    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x02, 0x7F, 0x35};
+    resp.push_back(ssm::ssm_checksum(resp));
+    auto const r = ssm::parse_b0_response(resp);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+}
+
+TEST_CASE("parse_b0_response flags a bad checksum",
+          "[ssm][framing][write][error]") {
+    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x02, 0xF0, 0x42, 0x00};
+    auto const                r = ssm::parse_b0_response(resp);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::BadChecksum);
+}
+
+TEST_CASE("SsmClient::write end-to-end through MockTransport",
+          "[ssm][client][write]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    auto const req = ssm::build_b0_request(0x001234, 0x7E);
+    REQUIRE(req.has_value());
+
+    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x02, 0xF0, 0x7E};
+    resp.push_back(ssm::ssm_checksum(resp));
+
+    t.expect_send_recv(*req, resp);
+
+    ssm::SsmClient client{t};
+    auto const     r = client.write(0x001234, 0x7E);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == 0x7E);
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("SsmClient::write detects an ECU that echoed the wrong byte",
+          "[ssm][client][write]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    auto const req = ssm::build_b0_request(0x001234, 0xAB);
+    REQUIRE(req.has_value());
+
+    // ECU echoes 0xCD instead of 0xAB — the caller is responsible for
+    // comparing, but our client returns whatever was echoed.
+    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x02, 0xF0, 0xCD};
+    resp.push_back(ssm::ssm_checksum(resp));
+
+    t.expect_send_recv(*req, resp);
+
+    ssm::SsmClient client{t};
+    auto const     r = client.write(0x001234, 0xAB);
+    REQUIRE(r.has_value());
+    REQUIRE(*r != 0xAB);
+    REQUIRE(*r == 0xCD);
+}

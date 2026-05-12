@@ -48,13 +48,15 @@ namespace st::ecu::ssm {
 // Negative responses use RSP = 0x7F with a one-byte NRC; SsmClient maps
 // these to ErrorCode::EcuRejected with the NRC in the message.
 
-inline constexpr std::uint8_t kHeader            = 0x80;
-inline constexpr std::uint8_t kDestEcu           = 0x10;
-inline constexpr std::uint8_t kSrcTool           = 0xF0;
-inline constexpr std::uint8_t kCmdReadByAddress  = 0xA8;
-inline constexpr std::uint8_t kRespReadByAddress = 0xE8;
-inline constexpr std::uint8_t kNegativeResponse  = 0x7F;
-inline constexpr std::uint8_t kPadByte           = 0x00;
+inline constexpr std::uint8_t kHeader             = 0x80;
+inline constexpr std::uint8_t kDestEcu            = 0x10;
+inline constexpr std::uint8_t kSrcTool            = 0xF0;
+inline constexpr std::uint8_t kCmdReadByAddress   = 0xA8;
+inline constexpr std::uint8_t kRespReadByAddress  = 0xE8;
+inline constexpr std::uint8_t kCmdWriteByAddress  = 0xB0;
+inline constexpr std::uint8_t kRespWriteByAddress = 0xF0;
+inline constexpr std::uint8_t kNegativeResponse   = 0x7F;
+inline constexpr std::uint8_t kPadByte            = 0x00;
 
 // Maximum addressable address. SSM uses 24-bit memory addresses.
 inline constexpr std::uint32_t kMaxAddress = 0x00FFFFFFU;
@@ -74,6 +76,21 @@ inline constexpr std::uint32_t kMaxAddress = 0x00FFFFFFU;
 [[nodiscard]] Result<std::vector<std::uint8_t>> parse_a8_response(
     std::span<std::uint8_t const> resp, std::size_t expected_n);
 
+// Build the wire bytes for a single-byte write-by-address request.
+// Frame: 80 10 F0 [LEN] B0 [addr_hi addr_med addr_low] [data] [CSUM]
+// LEN = 5 (CMD + 3*addr + 1*data). Returns InvalidArgument on addr > 24-bit.
+//
+// Block writes (multiple consecutive bytes in one frame) are per-ECU-family
+// and use a different opcode on most modern Subaru ECUs; that lives in a
+// future write_block helper once a real ECU is on the bench.
+[[nodiscard]] Result<std::vector<std::uint8_t>> build_b0_request(
+    std::uint32_t address, std::uint8_t data);
+
+// Parse a write response. The ECU typically echoes the written byte, which
+// we surface to the caller so they can confirm the write took. Negative
+// responses (NRC) become EcuRejected like for A8.
+[[nodiscard]] Result<std::uint8_t> parse_b0_response(std::span<std::uint8_t const> resp);
+
 // High-level client that wraps the framing and talks to a transport.
 class SsmClient {
   public:
@@ -87,6 +104,16 @@ class SsmClient {
     // Read N contiguous bytes starting at base_address. Convenience over read().
     [[nodiscard]] Result<std::vector<std::uint8_t>> read_block(
         std::uint32_t base_address, std::size_t length,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
+
+    // Write a single byte to the given ECU address. Returns the byte the ECU
+    // echoed back; callers should verify it matches what they sent.
+    //
+    // Important: this is RAM/scratchpad write semantics. Flashing the ECU's
+    // program memory is a separate Phase 4 routine with brick-protection and
+    // sector-erase steps; do NOT use write() for that.
+    [[nodiscard]] Result<std::uint8_t> write(
+        std::uint32_t address, std::uint8_t data,
         std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
 
   private:
