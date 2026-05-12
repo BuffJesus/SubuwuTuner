@@ -1,8 +1,0 @@
-<component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="GUI (demo, +sample edits)" type="CompoundRunConfigurationType"
-                 factoryName="Compound">
-    <toRun name="CLI rom-info (demo)" type="CMakeRunConfiguration" />
-    <toRun name="GUI (demo)" type="CMakeRunConfiguration" />
-    <method v="2" />
-  </configuration>
-</component>
