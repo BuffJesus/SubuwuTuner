@@ -150,6 +150,138 @@ void open_project_dialog(AppState &state) {
     }
 }
 
+void save_project(AppState &state) {
+    if (!state.project.has_value()) {
+        return;
+    }
+    if (auto s = state.project->save_working_rom(); !s.has_value()) {
+        state.status_msg = "Save failed: " + s.error().to_string();
+        return;
+    }
+    state.status_msg = "Saved.";
+}
+
+// Snapshot, mutate, snapshot, writeback, record. If the writeback fails we
+// restore the in-memory TableData so the rendered grid stays consistent with
+// the ROM bytes — better than silently diverging.
+template <typename Op>
+void apply_op(AppState &state, std::string label, Op &&op) {
+    if (!state.project.has_value() || !state.current_table_data.has_value()
+        || !state.selection.enabled) {
+        return;
+    }
+    auto &td = *state.current_table_data;
+    auto const rect = state.selection.as_rect();
+
+    auto before = st::edit::snapshot(td, rect);
+    if (!before.has_value()) {
+        state.status_msg = label + ": snapshot: " + before.error().to_string();
+        return;
+    }
+
+    if (auto s = op(td, rect); !s.has_value()) {
+        state.status_msg = label + ": " + s.error().to_string();
+        return;
+    }
+
+    auto after = st::edit::snapshot(td, rect);
+    if (!after.has_value()) {
+        // op succeeded but post-snapshot failed — try to roll back td so the
+        // view matches what's still on disk.
+        (void) st::edit::restore(td, *before);
+        state.status_msg = label + ": snapshot: " + after.error().to_string();
+        return;
+    }
+
+    auto const *tbl = state.project->definition().find_table(state.selected_table_id);
+    if (tbl == nullptr) {
+        (void) st::edit::restore(td, *before);
+        state.status_msg = label + ": table missing from pack";
+        return;
+    }
+
+    auto wb = state.project->definition().write_table_values(
+        state.project->working_rom(), *tbl, td);
+    if (!wb.has_value()) {
+        (void) st::edit::restore(td, *before);
+        state.status_msg = label + ": writeback: " + wb.error().to_string();
+        return;
+    }
+
+    state.project->history().record(st::edit::Edit{state.selected_table_id,
+                                                   std::move(*before),
+                                                   std::move(*after),
+                                                   std::move(label)});
+    state.status_msg.clear();
+}
+
+// Undo/redo share the same restore-and-writeback shape; only the snapshot
+// side and the rollback direction differ. `forward = false` for undo,
+// `forward = true` for redo.
+void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forward) {
+    auto const *tbl = state.project->definition().find_table(edit.table_id);
+    auto const  rollback_cursor = [&] {
+        if (forward) {
+            (void) state.project->history().undo();
+        } else {
+            (void) state.project->history().redo();
+        }
+    };
+    if (tbl == nullptr) {
+        state.status_msg = "history: table not in pack: " + edit.table_id;
+        rollback_cursor();
+        return;
+    }
+
+    auto td = state.project->definition().read_table_values(
+        state.project->working_rom(), *tbl);
+    if (!td.has_value()) {
+        state.status_msg = "history re-read: " + td.error().to_string();
+        rollback_cursor();
+        return;
+    }
+
+    auto const &snap = forward ? edit.after : edit.before;
+    if (auto s = st::edit::restore(*td, snap); !s.has_value()) {
+        state.status_msg = "history restore: " + s.error().to_string();
+        rollback_cursor();
+        return;
+    }
+
+    auto wb = state.project->definition().write_table_values(
+        state.project->working_rom(), *tbl, *td);
+    if (!wb.has_value()) {
+        state.status_msg = "history writeback: " + wb.error().to_string();
+        rollback_cursor();
+        return;
+    }
+
+    if (edit.table_id == state.selected_table_id) {
+        state.current_table_data = std::move(*td);
+    }
+    state.status_msg.clear();
+}
+
+void do_undo(AppState &state) {
+    if (!state.project.has_value()) {
+        return;
+    }
+    auto const *e = state.project->history().undo();
+    if (e != nullptr) {
+        apply_history_step(state, *e, /*forward=*/false);
+    }
+}
+
+void do_redo(AppState &state) {
+    if (!state.project.has_value()) {
+        return;
+    }
+    auto const *e = state.project->history().redo();
+    if (e != nullptr) {
+        apply_history_step(state, *e, /*forward=*/true);
+    }
+}
+
 void glfw_error_callback(int err, char const *desc) {
     std::fprintf(stderr, "GLFW error %d: %s\n", err, desc);
 }
@@ -361,18 +493,33 @@ void render_dockspace_host() {
 }
 
 void render_menubar(AppState &state, GLFWwindow *window) {
+    bool const has_project = state.project.has_value();
+    bool const can_undo    = has_project && state.project->history().can_undo();
+    bool const can_redo    = has_project && state.project->history().can_redo();
+
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Open Project...", "Ctrl+O")) {
                 open_project_dialog(state);
             }
-            if (ImGui::MenuItem("Close Project", nullptr, false,
-                                state.project.has_value())) {
+            if (ImGui::MenuItem("Save Project", "Ctrl+S", false, has_project)) {
+                save_project(state);
+            }
+            if (ImGui::MenuItem("Close Project", nullptr, false, has_project)) {
                 state.close_project();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
                 glfwSetWindowShouldClose(window, GLFW_TRUE);
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Edit", has_project)) {
+            if (ImGui::MenuItem("Undo", "Ctrl+Z", false, can_undo)) {
+                do_undo(state);
+            }
+            if (ImGui::MenuItem("Redo", "Ctrl+Shift+Z", false, can_redo)) {
+                do_redo(state);
             }
             ImGui::EndMenu();
         }
@@ -650,6 +797,54 @@ void render_table_view(AppState &state, Fonts const &fonts) {
                             rect.c_start, rect.c_end,
                             state.selection.rows() * state.selection.cols());
     }
+
+    // Edit toolbar — ops act on the current selection, undo/redo on the
+    // project's history. Buttons are disabled when there's no selection /
+    // nothing to undo, rather than hidden, so the affordances stay visible.
+    bool const can_edit = state.selection.enabled;
+    bool const can_undo = state.project->history().can_undo();
+    bool const can_redo = state.project->history().can_redo();
+
+    ImGui::BeginDisabled(!can_edit);
+    if (ImGui::Button("+5%")) {
+        apply_op(state, "+5%", [](auto &t, auto r) {
+            return st::edit::percent_scale_cells(t, r, 5.0);
+        });
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("-5%")) {
+        apply_op(state, "-5%", [](auto &t, auto r) {
+            return st::edit::percent_scale_cells(t, r, -5.0);
+        });
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Smooth")) {
+        apply_op(state, "smooth", [](auto &t, auto r) {
+            return st::edit::smooth_cells(t, r, 1);
+        });
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Interpolate")) {
+        apply_op(state, "interpolate", [](auto &t, auto r) {
+            return st::edit::interpolate_cells(t, r);
+        });
+    }
+    ImGui::EndDisabled();
+
+    ImGui::SameLine(0.0f, 24.0f);
+
+    ImGui::BeginDisabled(!can_undo);
+    if (ImGui::Button("Undo")) {
+        do_undo(state);
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!can_redo);
+    if (ImGui::Button("Redo")) {
+        do_redo(state);
+    }
+    ImGui::EndDisabled();
+
     ImGui::Separator();
 
     render_table_grid(*state.current_table_data, tbl, scal, stats,
@@ -750,13 +945,24 @@ int main(int argc, char *argv[]) {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // Ctrl+Q to quit (in addition to the menu).
+        // Global keyboard shortcuts. IsKeyChordPressed is mod-aware, so
+        // Ctrl+Shift+Z and Ctrl+Z don't collide.
         if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Q)) {
             glfwSetWindowShouldClose(window, GLFW_TRUE);
         }
-        // Ctrl+O to open a project.
         if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_O)) {
             open_project_dialog(state);
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
+            save_project(state);
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z)) {
+            do_redo(state);
+        } else if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Z)) {
+            do_undo(state);
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Y)) {
+            do_redo(state);
         }
 
         render_menubar(state, window);
