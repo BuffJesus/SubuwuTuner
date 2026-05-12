@@ -292,8 +292,22 @@ extends        = "va-wrx-mt-2019"      # inherit everything
 # overrides should be rare.
 ```
 
-The loader merges by `id`: a table or scaling with the same `id` in the child
-replaces the parent's version entirely. New `id`s are added.
+The loader merges by `id`: a table, scaling, axis, or pid with the same `id`
+in the child replaces the parent's version entirely. New `id`s are added.
+`[[identification]]` entries have no `id` field — child's are appended to the
+parent's so a packaged child can match additional CIDs without obsoleting the
+parent's matches. The child's `[pack]` header wins entirely; `extends` is
+consumed and does not propagate.
+
+Resolution: `extends = "va-wrx-mt-2019"` is resolved by scanning sibling
+directories of the child pack for one whose `pack.toml` declares
+`[pack].id = "va-wrx-mt-2019"`. The convention is therefore one pack per
+directory under a common root. Chains of any depth are supported; cycles
+are detected at load time and rejected.
+
+Only directory-loaded packs resolve inheritance. `Definition::from_toml_string`
+and single-file `Definition::from_file` leave `extends` on the `Pack` struct
+unresolved — there is no filesystem context to search.
 
 ## Schema version policy
 

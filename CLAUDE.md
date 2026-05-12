@@ -6,7 +6,7 @@
 
 **SubuwuTuner is a comprehensive, free, open-source Subaru ECU tuning suite written in modern C++23.** It reads, edits, datalogs, and reflashes the calibration on supported Subaru ECUs. v1.0 targets the WRX (VA 2015–2021 and VB 2022+, manual transmission); v1.x expands to STI, AT variants, older EJ-powered cars, BRZ/86, and the rest of the Subaru lineup.
 
-This is original work, not a port. Public references like RomRaider (GPL) are studied **clean-room** as protocol specifications — see `docs/01-reverse-engineering.md` for the boundary rules.
+This is original work, not a port. Public references like RomRaider (GPL) and source-available competitors like Atlas (All Rights Reserved) are studied **clean-room** — concepts and protocol facts only, never expression. See `docs/01-reverse-engineering.md` for the day-to-day boundary rules and `docs/15-clean-room-engineering.md` for the full methodology.
 
 ## What is already in the workspace
 
@@ -26,15 +26,21 @@ SubuwuTuner/
 │   ├── edit/                              (st::edit — Rect, set/add/multiply/percent/smooth/interpolate, Snapshot, History undo/redo)
 │   ├── project/                           (st::Project — .stune directory persistence: source + working + def reference)
 │   ├── transport/                         (st::transport — ITransport interface + MockTransport for hardware-free testing)
-│   ├── ecu/                               (st::ecu::ssm — A8 read + B0 write; st::ecu::uds — RDBI/WDBI/SA/DSC/ECUReset/TP/Download/Transfer/Exit)
-│   └── cli/                               (subuwutuner-cli — rom-info, dump-axis, dump-table[--csv], rom-diff, table-edit, project-{new,info,edit,undo,redo}, pack-info, table-list)
+│   ├── ecu/                               (st::ecu::ssm — A8 read + B0/B8 write; st::ecu::uds — full ISO 14229 catalog)
+│   ├── log/                               (st::log — LogStream SPSC ring + LogSession SSM I/O loop; Phase 3 datalogging)
+│   ├── can/                               (st::can — Frame type + .asc reader/writer; foundation for the docs/14 CAN toolkit)
+│   ├── dbc/                               (st::dbc — DBC parser + emitter; BO_/SG_ message + signal definitions)
+│   ├── discover/                          (st::discover — BaselineModel + ChangeDetector for CAN reverse engineering)
+│   ├── ui/                                (subuwutuner-gui — Dear ImGui front-end on top of the domain libs)
+│   └── cli/                               (subuwutuner-cli — rom-info, dump-axis, dump-table[--csv], rom-diff, table-edit, project-{new,info,edit,undo,redo}, pack-info, table-list, log, can-{replay,diff,discover,export-dbc,decode})
 ├── tools/defgen/                          (Python: RomRaider XML -> our TOML; clean-room facts-only; handles <base> inheritance)
 ├── fixtures/
-│   ├── demo-pack/                         (committed: multi-file demo TOML pack)
-│   └── demo.stune/                        (committed: synthetic project, 1024-byte ROM)
+│   ├── demo-pack/                         (committed: multi-file demo TOML pack — axes, scalings, tables, pids)
+│   ├── demo.stune/                        (committed: synthetic project, 1024-byte ROM)
+│   └── demo-trace.hex                     (committed: SSM-response trace for `log` subcommand demo)
 ├── scripts/gen-demo-fixture.py            (regenerates fixtures/demo.stune source.bin)
 ├── .idea/runConfigurations/               (shared CLion/Rider launches: GUI demo, CLI variants, ctest)
-├── tests/unit/{core,rom,defs,edit,project,transport,ecu}/   (172 C++ tests; 36 Python tests under tools/defgen/tests/)
+├── tests/unit/{core,rom,defs,edit,project,transport,ecu,log,can,dbc,discover}/   (267 C++ tests; 36 Python tests under tools/defgen/tests/)
 ├── .github/workflows/ci.yml             (Win MSVC / Mac Apple-Clang / Linux GCC / Linux Clang ASan)
 └── docs/                                (design — read first; 00–12)
 ```
@@ -46,10 +52,14 @@ SubuwuTuner/
 - `st::edit` — Rect-scoped cell operations (set/add/multiply/percent/smooth/interpolate), Snapshot, History stack with branching-undo semantics
 - `st::Project` — `.stune` directory persistence: copies source ROM, tracks working ROM, references definition pack, schema-versioned, CRC32 tampering detection on reopen
 - `st::transport` — `ITransport` pure-virtual interface (open/close/send/send_recv/start_streaming/stop_streaming) + `MockTransport` for hardware-free SSM/UDS development. Real adapters wait on hardware.
-- `st::ecu::ssm` — Subaru Select Monitor read (0xA8) and write (0xB0) framing + `SsmClient`. Framing is per public documentation; needs validation against a real ECU when hardware lands.
-- `st::ecu::uds` — ISO 14229 catalog covering RDBI/WDBI (0x22/0x2E), SecurityAccess (0x27), DiagnosticSessionControl (0x10), ECUReset (0x11), TesterPresent (0x3E), and the three-step download flow (RequestDownload 0x34, TransferData 0x36, RequestTransferExit 0x37). Same framing-only caveat — validation pending real VB ECU. An end-to-end test exercises the whole flash flow through MockTransport.
-- `tools/defgen/` — Python tool that translates public RomRaider XML to our TOML schema; clean-room rules in `docs/01-reverse-engineering.md`. Handles `<base>` inheritance. Standard-library Python only.
-- CLI: `rom-info`, `dump-axis`, `dump-table [--csv]`, `rom-diff`, `table-edit`, `project-{new,info,edit,undo,redo}`, `pack-info`, `table-list`. 1D / 2D / 3D tables all dump correctly. Project edit history persists in `edits.toml` for cross-session undo.
+- `st::ecu::ssm` — Subaru Select Monitor: address read (0xA8), single-byte address write (0xB0), and block write (0xB8) framing + `SsmClient`. Framing is per public documentation; needs validation against a real ECU when hardware lands.
+- `st::ecu::uds` — ISO 14229 catalog complete: RDBI/WDBI (0x22/0x2E), ReadMemoryByAddress (0x23), WriteMemoryByAddress (0x3D), SecurityAccess (0x27), CommunicationControl (0x28), DiagnosticSessionControl (0x10), ECUReset (0x11), TesterPresent (0x3E), the three-step download flow (RequestDownload 0x34, TransferData 0x36, RequestTransferExit 0x37), and RoutineControl (0x31 with well-known RIDs eraseMemory / checkProgrammingDependencies / eraseMirrorMemory). Same framing-only caveat — validation pending real VB ECU. Two end-to-end tests exercise the flash flow through MockTransport: a minimal sketch and a realistic flow with erase + post-flash check-deps bracketing the download.
+- `st::log` — `LogStream` (SPSC lock-free ring; stress-tested at 50k samples), `LogSession` (I/O-thread orchestrator: batched SSM A8 reads, per-channel scaling, timestamped sample push, cooperative shutdown), and `CsvSink` (header with per-channel `id [unit]`, ms-resolution timestamps, per-channel precision from scaling). End-to-end exercised by the `log` CLI subcommand.
+- `st::can` — `Frame` type (classic CAN, 8-byte payload, standard or extended ID, BusId for multi-bus captures) and Vector `.asc` reader/writer (the lingua-franca log format used by SavvyCAN, cantools, CANalyzer, Wireshark). Header lines tolerated; CRLF tolerated; zero-DLC frames supported; round-trip stable.
+- `st::dbc` — DBC (CAN database) parser + emitter + signal decoder. Parses `VERSION`, `BU_`, and `BO_`/`SG_` rows; preserves message id (with extended-ID flag via the high bit), length, sender, and per-signal name / start_bit / length / byte-order (Intel ↔ Motorola) / sign / factor / offset / min / max / unit / receivers. Unknown sections (NS_, BS_, CM_, BA_, VAL_, etc.) skip silently so any DBC tool's output round-trips through us. Round-trip stable; `find_message`/`find_signal` lookups. `extract_raw_bits` + `decode_signal` walk the Vector bit-numbering scheme (bit 0 = LSB of byte 0, bit 7 = MSB of byte 0) for both Intel and Motorola, sign-extend signed fields, and apply factor/offset.
+- `st::discover` — the CAN reverse-engineering algorithm. `BaselineModel::observe`/`finalize` classifies each byte position of each observed CAN ID as Stable, Cyclic (modal-non-zero-delta detector — catches both strict and mod-N counters), or Noisy; records per-byte stable value sets, modes, and per-id frequency in Hz. `ChangeDetector::observe` runs the watch phase frame-by-frame, surfaces `DiscoveryEvent`s for new IDs and for stable-byte deviations (cyclic ignored, noisy off by default), coalesces multi-byte changes in one frame, and debounces (500 ms default). `.cdb` (CAN Discovery Bundle) TOML format round-trips baseline + events. `can-replay`, `can-diff`, `can-discover`, and `can-export-dbc` CLI subcommands all wired against the replay path; `can-record` and live-mode `can-discover --live` wait on hardware. Same algorithm reused once live mode lands.
+- `tools/defgen/` — Python tool that translates public RomRaider XML to our TOML schema; clean-room rules in `docs/01-reverse-engineering.md`. Handles `<base>` inheritance. `--apply-to-pack <existing.toml>` appends only records (by id) not already present, preserving hand-edits and comments byte-for-byte. Per-pack `warnings` list flags non-linear `toexpr` that got flattened to identity and unknown storage/endian combinations defaulted to `uint16_be`; surfaced on stderr. Standard-library Python only (tomllib for parsing the merge target).
+- CLI: `rom-info`, `dump-axis`, `dump-table [--csv]`, `rom-diff`, `table-edit`, `project-{new,info,edit,undo,redo}`, `pack-info`, `table-list`, `log` (replays an SSM-response trace file through MockTransport and writes CSV), `can-replay` (per-id stats on a .asc file), `can-diff` (A-only / B-only / shared-with-delta across two .asc captures), `can-discover --from <FILE.asc> [--baseline <secs>] [--bus <0..3>] [--output <session.cdb>]` (drives BaselineModel + ChangeDetector offline, emits a .cdb Bundle), `can-export-dbc <session.cdb> [--output <draft.dbc>]` (one BO_ per baseline id, one SG_ per labeled Change event at identity scaling, Motorola/unsigned per docs/14), `can-decode --dbc <FILE.dbc> <FILE.asc> [--output <csv>]` (long-format CSV: one row per (frame, signal); skips frames whose id is not in the DBC). 1D / 2D / 3D tables all dump correctly. Project edit history persists in `edits.toml` for cross-session undo.
 
 The end-to-end persistent edit workflow is exercisable without hardware:
 
@@ -76,7 +86,9 @@ The working directory on disk is still `D:\Documents\JetBrains\SubaruTuner\` —
 | Plan a phase or milestone | `docs/04-roadmap.md` |
 | Reason about brick-protection or flash safety | `docs/05-improvements.md` §4, `docs/08-testing-strategy.md` Tier 4 |
 | Reason about emissions / jurisdiction policy | `docs/06-legal-ethics.md` |
+| Reason about clean-room IP boundaries | `docs/15-clean-room-engineering.md` |
 | Reason about auto-tune | `docs/12-auto-tuning.md` |
+| Reason about custom features / node-graph designer | `docs/16-custom-features.md` |
 | Look up a tuning term you don't recognize | `docs/10-glossary.md` |
 
 ## Stance on emissions / jurisdiction
@@ -95,11 +107,47 @@ This is where we *are* strict. The four core modules in `src/core`, `src/rom`, `
 
 ## Stance on third-party IP
 
+Two layers: what the developer does, and what *you, Claude,* do with your tools.
+
+### General rules (developer and assistant)
+
 - Do **not** decompile any commercial or closed-source tuning tool.
 - Do **not** lift icons, screenshots, distinctive UI text, or trademarks from any other tool.
 - **RomRaider (GPL)** is the legitimate technical reference for ECU protocol facts. Use it clean-room: study, document the protocol in plain English, write fresh C++.
+- **Atlas (`motorsportsresearch/atlas-public`, All Rights Reserved)** is *source-available, not open source*. The repo's own LICENSE file explicitly prohibits reproduction. Atlas is treated like any other proprietary competitor: concepts are fair game, source is off-limits. The fact that the source is visible on GitHub does not change this.
 - The `defgen` tool extracts *factual data* (addresses, scalings) from public XML — facts aren't copyrightable; expression (description text) is and gets stripped.
-- See `docs/01-reverse-engineering.md` for the full boundary rules.
+- The line is **idea / expression**. A "node-graph custom feature designer" is an idea — build one freely. A specific node class hierarchy, file format, or compiler implementation copied from Atlas is expression — don't.
+- See `docs/01-reverse-engineering.md` for day-to-day boundaries and `docs/15-clean-room-engineering.md` for the full methodology, including the analyst/implementer wall and the solo-developer adaptations.
+
+### Rules specific to you, Claude
+
+You have tools (`web_fetch`, `view`, `bash_tool`, `conversation_search`) that can pull protected source into this session and from there into the SubuwuTuner codebase. Treat the following as off-limits for any task that will produce code, specs, or documentation destined for the repo:
+
+- **Do not `web_fetch`** any file under `github.com/motorsportsresearch/atlas-public/` other than the `README.md` and `LICENSE`. The README and LICENSE are fine — they're how you orient. Any `.java`, `.kt`, `.xml`, definition file, or screenshot of the Atlas editor is not.
+- **Do not `web_fetch`** RomRaider source files. RomRaider's public *protocol documentation* and its public ECU definition XML (factual data only) are acceptable; its Java source is not, because the result would be GPL contamination of an Apache 2.0 codebase.
+- **Do not paste or paraphrase** code, comments, identifier names, or string literals from any commercial tuning tool (COBB, EcuTek, HP Tuners, etc.), OEM tuning software (Subaru SSM, dealer tools), or OEM ECU firmware.
+- **If the user pastes** code or excerpts from any of the above into the chat, **stop and flag it** before incorporating it. Don't silently launder it into a SubuwuTuner contribution.
+- **Training-data knowledge is also a channel.** If you would have written a function a certain way "because that's how Atlas does it" or "because RomRaider does it like this," that origin disqualifies the implementation. Write from first principles or from the spec in `SubuwuTuner-specs/`.
+
+What you *should* do when you need to understand a competitor:
+
+- Read public README, marketing, and user-facing documentation (`motorsportsresearch.org`, `romraider.com`, etc.).
+- Read the Atlas Confluence wiki (`motorsportsresearch.atlassian.net`) — that's user-facing documentation, not source.
+- Read public posts, videos, and forum discussion that describe behavior at the user level.
+- Discuss concepts and architecture at the whiteboard level with the developer.
+- Propose SubuwuTuner designs derived from the standards (ISO 14229, ISO 15765, SAE J2534/J1979/J2012) and from public engine-management literature.
+
+### Red flags — if you see any of these, stop
+
+If a task would have you do any of the following, pause and check with the developer before continuing:
+
+- Fetching, viewing, or summarising specific source files from a closed-source or restrictively-licensed competitor.
+- Producing C++ that "matches" a competitor's class layout, API shape, or file format.
+- Naming SubuwuTuner types after Atlas's types, RomRaider's types, or any OEM internal identifiers.
+- Re-emitting a definition file's prose descriptions (factual scaling values are fine; OEM-authored prose is not).
+- Writing a flash routine or brick-recovery sequence "modeled on" Atlas's specifically.
+
+None of these are necessarily fatal — sometimes the user is doing an explicit analyst-side task and wants to extract facts. But you should not assume that; stop, ask, and route through the methodology in `docs/15-clean-room-engineering.md`.
 
 ## House style for the C++ code
 
@@ -120,17 +168,14 @@ This is where we *are* strict. The four core modules in `src/core`, `src/rom`, `
 
 ## Status
 
-As of 2026-05-11: Phase 0 done. Phase 1 CLI side done. Phase 2 MVP done (persistence + undo/redo end-to-end). Phase 3 protocol-side substantially built out (SSM read+write, full UDS catalog including the flashing flow). **172 C++ + 36 Python tests** green on MinGW g++ 15.2. Repo at `https://github.com/BuffJesus/SubuwuTuner`. Phase 1 hardware gate (real ROM, ≥20 maps from real definitions) waiting on user's OBDX Pro VX adapter.
+As of 2026-05-12: Phase 0 done. Phase 1 CLI side done. Phase 2 MVP done (persistence + undo/redo end-to-end). Phase 3 protocol framing complete (SSM read+single-byte-write+block-write, complete UDS catalog including the flashing flow, memory-by-address reads/writes, and bus gating). Phase 3 datalogger pipeline end-to-end hardware-free. CAN reverse-engineering toolkit replay path complete end-to-end: `st::can::Frame` + `.asc` I/O, `st::dbc::Database` parser/emitter + `decode_signal`, `st::discover::BaselineModel` + `ChangeDetector` + `.cdb` Bundle I/O, and all five replay CLI subcommands (`can-replay`, `can-diff`, `can-discover`, `can-export-dbc`, `can-decode`). C++ TOML loader resolves `extends` chains. GUI has docking, ImPlot heatmap view, 3D slice picker, welcome panel, chip-based table-header + status-bar. **280 C++ + 42 Python tests** green on MinGW g++ 15.2. Repo at `https://github.com/BuffJesus/SubuwuTuner`. Phase 1 hardware gate (real ROM, ≥20 maps from real definitions) and protocol validation waiting on user's OBDX Pro VX adapter.
 
 Deps wired so far via FetchContent: Catch2 v3 (tests), `tl::expected` (fallback when libc++ lacks `<expected>`), tomlplusplus v3.4 (definition parser), GLFW 3.4 + Dear ImGui v1.91 + ImPlot + nativefiledialog-extended (UI). vcpkg manifest mode still deferred — would only be needed for a system-package dep like OpenSSL when the signed-update channel lands.
 
 CI: clang-format job is advisory (non-blocking) since no pre-commit hook is set up yet. Once one is wired in, flip it back to required.
 
 **Hardware-free work still on the table** (any of these can be picked up next):
-- **C++ side `extends` in the TOML loader** — defgen already flattens at conversion time, but our format documents `extends` for hand-authored multi-pack hierarchies. Add load-time resolution.
-- **UDS extras** — RequestDownload + TransferData + RoutineControl, DiagnosticSessionControl, TesterPresent (keeps the session alive). Mostly framing-only without hardware.
-- **SSM block-write opcodes** — current SSM write is single-byte RAM write. Block / flash opcodes are per-ECU-family; framing design lives in `docs/13`.
-- **defgen polish** — `--apply-to-pack` mode that updates an existing TOML pack instead of overwriting; better reporting on non-linear formulas it had to flatten.
+- **defgen polish** — ✅ `--apply-to-pack` shipped (additive merge, idempotent on a second run); ✅ non-linear `toexpr` flattening + unknown storage/endian fallbacks now surface as per-pack warnings on stderr. Remaining: actually try the tool end-to-end against a real RomRaider XML.
 - **GUI polish stack on top of the ImGui MVP** — ImGui docking branch, ImPlot for charts, nfd for native Open/Save dialogs, a tuned dark theme + Inter/JetBrains Mono fonts, and a first-party 2D/3D map editor widget bound to `st::edit::History`. The domain layer is stable; the UI just needs binding work.
 - **Logger / datalogging design + Phase 3 implementation skeleton** — `st::log::LogStream` and the lock-free ring buffer per `docs/13`. Can be designed and unit-tested via `MockTransport`.
-- **CAN reverse-engineering toolkit** — programmatic discovery loop for swap/cluster work, fully designed in `docs/14`. Replay-mode pieces (`st::can::Frame`, `.asc` reader, DBC parser, `BaselineModel`/`ChangeDetector`) all unit-testable without hardware.
+- **CAN reverse-engineering toolkit** — programmatic discovery loop for swap/cluster work, fully designed in `docs/14`. All replay-mode pieces shipped: `st::can::Frame` + `.asc` I/O, DBC parser/emitter + decoder, `BaselineModel`/`ChangeDetector`, `.cdb` bundle, and the `can-{replay,diff,discover,export-dbc,decode}` CLI commands. Live-mode `can-discover --live` and `can-record` wait on hardware.

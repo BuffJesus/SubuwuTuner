@@ -53,11 +53,16 @@ Six phases. Each ends with a demoable artifact and a "ship gate" that must pass 
 
 ## Phase 5 — Custom features (4–6 weeks)
 
-- Lua-based "custom feature" runtime
-- Visual node graph compiler that lowers to Lua → bytecode patches inserted into the ROM
-- Import/export of standalone feature packs ("STMods")
+- Visual node-graph editor: typed pins, dataflow + control-flow nodes, copy-paste, undo/redo bound to `st::edit::History`
+- Graph → SubuwuTuner IR → ECU machine code (SH-2A for VA, RH850 for VB) → ROM patch
+- Per-pack hook table — `[[hook]]` entries in the definition pack declare where it's safe to splice custom logic and how much scratch RAM is available
+- Linter: type-checks, real-time-budget analyzer, RAM allocator, safety/jurisdiction gates
+- `.stmod` portable feature-pack format (graph + compiled patch + target metadata)
+- Sample packs ship in-box: flat-foot shifting, rolling launch control
 
-**Gate:** community can publish and import a feature pack; sample pack (e.g. flat-foot shifting, launch control) ships in-box.
+Full design + scope tradeoffs (including why we drop the Phase 5 line's earlier "Lua runtime" notion in favor of direct codegen) live in `docs/16-custom-features.md`.
+
+**Gate:** community can publish and import a feature pack; sample pack ships in-box; brick-protection (`docs/05-improvements.md` §4) is verified on the Phase-4 bench rig under stress.
 
 ## Phase 6 — Polish & 1.0 (ongoing)
 
@@ -98,13 +103,14 @@ The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0
 
 For users doing engine swaps, cluster integration, or general "what does this byte mean?" reverse-engineering work on a vehicle's CAN bus, SubuwuTuner grows a programmatic discovery loop: tool watches the bus, builds a baseline statistical model, prompts the user when a stable byte changes, records labeled events, exports to a draft DBC. Full design in `docs/14-can-reverse-engineering.md`. Reuses `st::transport::ITransport::start_streaming` so the live mode plugs into existing adapters; replay mode lets the discovery algorithm run unit-tested without any hardware. Optional LLM-assisted bit-field refinement step on the resulting `.cdb` file.
 
-CLI shape (planned):
+CLI shape (✅ = shipped, replay-only path):
 
 ```
-can-record    --bus hs --duration 60s out.asc
-can-discover  --baseline 10s [--from out.asc | --live] session.cdb
-can-replay    out.asc
-can-decode    --dbc subaru.dbc out.asc > signals.csv
-can-diff      a.asc b.asc
-can-export-dbc session.cdb > draft.dbc
+can-record    --bus hs --duration 60s out.asc                       # hardware-only
+can-discover  --baseline 10s --from out.asc --output session.cdb    # ✅ replay
+can-discover  --live ...                                            # hardware-only
+can-replay    out.asc                                               # ✅
+can-decode    --dbc subaru.dbc out.asc > signals.csv                # ✅
+can-diff      a.asc b.asc                                           # ✅
+can-export-dbc session.cdb > draft.dbc                              # ✅
 ```

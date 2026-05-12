@@ -30,3 +30,12 @@ offset    = -50.0
 data_type = "uint8"
 unit      = "kPa"
 precision = 1
+
+[[scaling]]
+id        = "iat_c"
+formula   = "linear"
+factor    = 1.0
+offset    = -40.0
+data_type = "uint8"
+unit      = "C"
+precision = 0

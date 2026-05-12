@@ -1,0 +1,19 @@
+[[pid]]
+id          = "rpm"
+name        = "Engine speed"
+ssm_address = 0x000008
+length      = 2
+data_type   = "uint16_be"
+scaling     = "rpm_x1"
+unit        = "rpm"
+default_log = true
+
+[[pid]]
+id          = "iat"
+name        = "Intake air temperature"
+ssm_address = 0x000012
+length      = 1
+data_type   = "uint8"
+scaling     = "iat_c"
+unit        = "C"
+default_log = true
