@@ -6,6 +6,7 @@ target_link_libraries(subuwutuner-cli
     PRIVATE
         st::core
         st::rom
+        st::defs
         st::warnings
         st::sanitizers
         st::platform

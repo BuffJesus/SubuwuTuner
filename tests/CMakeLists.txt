@@ -18,12 +18,14 @@ add_executable(st_unit_tests
     unit/core/test_version.cpp
     unit/core/test_crc32.cpp
     unit/rom/test_rom.cpp
+    unit/defs/test_defs.cpp
 )
 
 target_link_libraries(st_unit_tests
     PRIVATE
         st::core
         st::rom
+        st::defs
         st::warnings
         st::sanitizers
         st::platform
