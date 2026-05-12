@@ -8,6 +8,8 @@
 #include "st/defs.hpp"
 
 #include <cstddef>
+#include <string>
+#include <vector>
 
 namespace st::edit {
 
@@ -61,6 +63,61 @@ struct Rect {
 // between the two endpoint columns; same when cols() == 1. For a single cell
 // (rows() == cols() == 1), this is a no-op.
 [[nodiscard]] Status interpolate_cells(Definition::TableData &td, Rect r);
+
+// ---- Snapshots & undo/redo ----------------------------------------------
+//
+// A Snapshot captures the values of a rectangular region of a TableData. It
+// is the unit of "what was here before the edit" and "what is here after the
+// edit." snapshot() + restore() are the only knobs the undo/redo stack
+// needs.
+
+struct Snapshot {
+    Rect                             rect{};
+    std::vector<std::vector<double>> values;
+};
+
+[[nodiscard]] Result<Snapshot> snapshot(Definition::TableData const &td, Rect r);
+[[nodiscard]] Status           restore(Definition::TableData &td, Snapshot const &s);
+
+// An Edit records one logical change to one table. The History owns a
+// sequence of these and lets the caller walk backwards (undo) or forwards
+// (redo) without knowing how the edit was originally produced. The caller
+// holds the TableData(s) and is responsible for calling restore() on the
+// right one — History is a record-keeper, not a model.
+
+struct Edit {
+    std::string table_id;      // logical table id, for callers managing many
+    Snapshot    before;
+    Snapshot    after;
+    std::string description;   // short human label like "set 14.7" or "smooth x2"
+};
+
+class History {
+  public:
+    // Push a new edit. Drops any forward (redo) entries past the current
+    // cursor — branching the history.
+    void record(Edit e);
+
+    [[nodiscard]] bool can_undo() const noexcept { return cursor_ > 0; }
+    [[nodiscard]] bool can_redo() const noexcept { return cursor_ < edits_.size(); }
+
+    // Step the cursor back by one. Returns a pointer to the Edit that the
+    // caller should restore from .before, or nullptr if there's nothing to
+    // undo. The pointer is valid until the next record()/clear() call.
+    [[nodiscard]] Edit const *undo() noexcept;
+
+    // Step the cursor forward by one. Returns a pointer to the Edit to
+    // restore from .after, or nullptr.
+    [[nodiscard]] Edit const *redo() noexcept;
+
+    void                       clear() noexcept;
+    [[nodiscard]] std::size_t  size() const noexcept { return edits_.size(); }
+    [[nodiscard]] std::size_t  cursor() const noexcept { return cursor_; }
+
+  private:
+    std::vector<Edit> edits_;
+    std::size_t       cursor_{0};
+};
 
 } // namespace st::edit
 

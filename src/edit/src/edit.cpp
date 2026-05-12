@@ -144,4 +144,65 @@ Status interpolate_cells(Definition::TableData &td, Rect r) {
     return ok();
 }
 
+// ---- Snapshots & undo/redo ----------------------------------------------
+
+Result<Snapshot> snapshot(Definition::TableData const &td, Rect r) {
+    if (auto vr = validate_rect(td, r); !vr.has_value()) return failure(vr.error());
+
+    Snapshot s;
+    s.rect = r;
+    s.values.assign(r.rows(), std::vector<double>(r.cols(), 0.0));
+    for (std::size_t i = 0; i < r.rows(); ++i) {
+        for (std::size_t j = 0; j < r.cols(); ++j) {
+            s.values[i][j] = td.values[r.r_start + i][r.c_start + j];
+        }
+    }
+    return s;
+}
+
+Status restore(Definition::TableData &td, Snapshot const &s) {
+    if (auto vr = validate_rect(td, s.rect); !vr.has_value()) return vr;
+    if (s.values.size() != s.rect.rows()) {
+        return failure(ErrorCode::InvalidArgument,
+                       "snapshot row count does not match its rect");
+    }
+    for (std::size_t i = 0; i < s.rect.rows(); ++i) {
+        if (s.values[i].size() != s.rect.cols()) {
+            return failure(ErrorCode::InvalidArgument,
+                           "snapshot column count does not match its rect");
+        }
+        for (std::size_t j = 0; j < s.rect.cols(); ++j) {
+            td.values[s.rect.r_start + i][s.rect.c_start + j] = s.values[i][j];
+        }
+    }
+    return ok();
+}
+
+void History::record(Edit e) {
+    // Branch: drop everything past the cursor before appending.
+    if (cursor_ < edits_.size()) {
+        edits_.erase(edits_.begin() + static_cast<std::ptrdiff_t>(cursor_), edits_.end());
+    }
+    edits_.push_back(std::move(e));
+    cursor_ = edits_.size();
+}
+
+Edit const *History::undo() noexcept {
+    if (!can_undo()) return nullptr;
+    --cursor_;
+    return &edits_[cursor_];
+}
+
+Edit const *History::redo() noexcept {
+    if (!can_redo()) return nullptr;
+    auto const *e = &edits_[cursor_];
+    ++cursor_;
+    return e;
+}
+
+void History::clear() noexcept {
+    edits_.clear();
+    cursor_ = 0;
+}
+
 } // namespace st::edit

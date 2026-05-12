@@ -177,3 +177,115 @@ TEST_CASE("interpolate_cells is a no-op on a single-cell rect",
     REQUIRE(s.has_value());
     REQUIRE(td.values == orig);
 }
+
+TEST_CASE("snapshot captures the rect's current values", "[edit][snapshot]") {
+    auto const td = make_grid({{1, 2, 3}, {4, 5, 6}, {7, 8, 9}});
+
+    auto const s = st::edit::snapshot(td, {0, 1, 1, 2});
+    REQUIRE(s.has_value());
+    REQUIRE(s->rect.r_start == 0);
+    REQUIRE(s->rect.r_end == 1);
+    REQUIRE(s->values == std::vector<std::vector<double>>{{2, 3}, {5, 6}});
+}
+
+TEST_CASE("snapshot rejects an out-of-bounds rect", "[edit][snapshot]") {
+    auto const td = make_grid({{1, 2}, {3, 4}});
+    auto const s  = st::edit::snapshot(td, {0, 5, 0, 0});
+    REQUIRE_FALSE(s.has_value());
+}
+
+TEST_CASE("restore returns the values to what they were", "[edit][restore]") {
+    auto td = make_grid({{1, 2, 3}, {4, 5, 6}});
+
+    auto const before = st::edit::snapshot(td, {0, 1, 0, 2});
+    REQUIRE(before.has_value());
+
+    auto const s = st::edit::set_cells(td, {0, 1, 0, 2}, 99.0);
+    REQUIRE(s.has_value());
+    REQUIRE(td.values[0][0] == 99.0);
+
+    auto const r = st::edit::restore(td, *before);
+    REQUIRE(r.has_value());
+    REQUIRE(td.values == std::vector<std::vector<double>>{{1, 2, 3}, {4, 5, 6}});
+}
+
+TEST_CASE("History::record + undo + redo walks a single edit",
+          "[edit][history]") {
+    auto td = make_grid({{1, 2}, {3, 4}});
+
+    st::edit::Rect const rect{0, 1, 0, 1};
+    auto const           before = *st::edit::snapshot(td, rect);
+    REQUIRE(st::edit::set_cells(td, rect, 9.0).has_value());
+    auto const after = *st::edit::snapshot(td, rect);
+
+    st::edit::History h;
+    REQUIRE_FALSE(h.can_undo());
+    REQUIRE_FALSE(h.can_redo());
+
+    h.record({.table_id = "t", .before = before, .after = after, .description = "set 9"});
+    REQUIRE(h.size() == 1);
+    REQUIRE(h.can_undo());
+    REQUIRE_FALSE(h.can_redo());
+
+    auto const *u = h.undo();
+    REQUIRE(u != nullptr);
+    REQUIRE(u->description == "set 9");
+    REQUIRE(st::edit::restore(td, u->before).has_value());
+    REQUIRE(td.values[0][0] == 1.0);
+    REQUIRE_FALSE(h.can_undo());
+    REQUIRE(h.can_redo());
+
+    auto const *r = h.redo();
+    REQUIRE(r != nullptr);
+    REQUIRE(st::edit::restore(td, r->after).has_value());
+    REQUIRE(td.values[0][0] == 9.0);
+    REQUIRE(h.can_undo());
+    REQUIRE_FALSE(h.can_redo());
+}
+
+TEST_CASE("History::record after partial undo branches the history",
+          "[edit][history]") {
+    // Apply A, then B. Undo B (cursor moves back). Then record C — this
+    // should drop B and leave the timeline as A → C.
+    st::edit::History h;
+
+    st::edit::Edit a;
+    a.description = "A";
+    h.record(a);
+
+    st::edit::Edit b;
+    b.description = "B";
+    h.record(b);
+    REQUIRE(h.size() == 2);
+
+    REQUIRE(h.undo() != nullptr);
+    REQUIRE(h.cursor() == 1);
+    REQUIRE(h.can_redo());
+
+    st::edit::Edit c;
+    c.description = "C";
+    h.record(c);
+
+    REQUIRE(h.size() == 2);
+    REQUIRE_FALSE(h.can_redo());
+
+    // Undo from current position should return C, then A.
+    auto const *u1 = h.undo();
+    REQUIRE(u1 != nullptr);
+    REQUIRE(u1->description == "C");
+    auto const *u2 = h.undo();
+    REQUIRE(u2 != nullptr);
+    REQUIRE(u2->description == "A");
+    REQUIRE(h.undo() == nullptr);
+}
+
+TEST_CASE("History::clear empties the stack", "[edit][history]") {
+    st::edit::History h;
+    h.record({});
+    h.record({});
+    REQUIRE(h.size() == 2);
+    h.clear();
+    REQUIRE(h.size() == 0);
+    REQUIRE_FALSE(h.can_undo());
+    REQUIRE_FALSE(h.can_redo());
+}
