@@ -138,7 +138,13 @@ constexpr std::string_view kUsage =
     "                            Hardware-free smoke for the Flasher orchestrator;\n"
     "                            prints the FlashReport summary; if --manifest is set,\n"
     "                            writes a Manifest of the run; if --journal is set,\n"
-    "                            sets FlashPlan.journal_path for incremental writes.\n";
+    "                            sets FlashPlan.journal_path for incremental writes.\n"
+    "    rom-pull --addr <hex> --size <hex> --trace <FILE.uds> --output <FILE.bin>\n"
+    "             [--max-chunk <hex>]\n"
+    "                            Read N bytes of ECU memory via Flasher::read_full_rom\n"
+    "                            against a MockTransport-replayed UDS trace, written\n"
+    "                            as a raw binary file. Trace format matches flash-apply\n"
+    "                            ('> req' / '< resp' pairs). Default --max-chunk=0x100.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -2673,6 +2679,147 @@ int cmd_flash_apply(int argc, char *argv[]) {
     return outcome.ok() ? 0 : 1;
 }
 
+namespace {
+
+// Parse a TOML-style hex-or-decimal integer ("0x100" -> 256, "256" -> 256).
+// Returns true on success.
+bool parse_uint32_arg(std::string_view sv, std::uint32_t &out) {
+    int base = 10;
+    if (sv.starts_with("0x") || sv.starts_with("0X")) {
+        sv.remove_prefix(2);
+        base = 16;
+    }
+    auto const res = std::from_chars(sv.data(), sv.data() + sv.size(),
+                                      out, base);
+    return res.ec == std::errc{} && res.ptr == sv.data() + sv.size();
+}
+
+} // namespace
+
+int cmd_rom_pull(int argc, char *argv[]) {
+    std::optional<std::uint32_t>         addr;
+    std::optional<std::uint32_t>         size;
+    std::uint32_t                        max_chunk = 0x100;
+    std::optional<std::filesystem::path> trace_path;
+    std::optional<std::filesystem::path> output_path;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const             require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "rom-pull: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--addr") {
+            auto const *v = require_arg("--addr");
+            if (v == nullptr) return 2;
+            std::uint32_t val = 0;
+            if (!parse_uint32_arg(v, val)) {
+                std::fprintf(stderr, "rom-pull: --addr must be a hex or decimal "
+                             "integer\n");
+                return 2;
+            }
+            addr = val;
+        } else if (a == "--size") {
+            auto const *v = require_arg("--size");
+            if (v == nullptr) return 2;
+            std::uint32_t val = 0;
+            if (!parse_uint32_arg(v, val) || val == 0) {
+                std::fprintf(stderr, "rom-pull: --size must be a positive "
+                             "hex or decimal integer\n");
+                return 2;
+            }
+            size = val;
+        } else if (a == "--max-chunk") {
+            auto const *v = require_arg("--max-chunk");
+            if (v == nullptr) return 2;
+            std::uint32_t val = 0;
+            if (!parse_uint32_arg(v, val) || val == 0) {
+                std::fprintf(stderr, "rom-pull: --max-chunk must be a positive "
+                             "hex or decimal integer\n");
+                return 2;
+            }
+            max_chunk = val;
+        } else if (a == "--trace") {
+            if (auto const *v = require_arg("--trace"); v) trace_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--output" || a == "-o") {
+            if (auto const *v = require_arg("--output"); v) output_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "rom-pull: unknown option: %s\n", argv[i]);
+            return 2;
+        } else {
+            std::fprintf(stderr, "rom-pull: extra positional argument: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+    if (!addr.has_value() || !size.has_value() || !trace_path.has_value()
+        || !output_path.has_value()) {
+        std::fputs("rom-pull: missing required arguments\n"
+                   "Usage: subuwutuner-cli rom-pull --addr <hex> --size <hex> "
+                   "--trace <FILE.uds> --output <FILE.bin>\n"
+                   "       [--max-chunk <hex>]\n",
+                   stderr);
+        return 2;
+    }
+
+    std::vector<UdsTracePair> pairs;
+    std::string               err;
+    if (!parse_uds_trace(*trace_path, pairs, err)) {
+        std::fputs(err.c_str(), stderr);
+        std::fputc('\n', stderr);
+        return 1;
+    }
+
+    st::transport::MockTransport mock;
+    if (auto s = mock.open({}); !s.has_value()) {
+        std::fprintf(stderr, "rom-pull: mock open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+    for (auto &p : pairs) {
+        mock.expect_send_recv(std::move(p.request), std::move(p.response));
+    }
+
+    st::flash::Flasher flasher{mock};
+    auto const         r = flasher.read_full_rom(*addr, *size, max_chunk);
+    if (!r.has_value()) {
+        std::fprintf(stderr, "rom-pull: %s\n", r.error().to_string().c_str());
+        return 1;
+    }
+
+    std::ofstream out{*output_path, std::ios::binary};
+    if (!out) {
+        std::fprintf(stderr, "rom-pull: cannot open output: %s\n",
+                     output_path->string().c_str());
+        return 1;
+    }
+    out.write(reinterpret_cast<char const *>(r->data()),
+              static_cast<std::streamsize>(r->size()));
+    if (!out) {
+        std::fprintf(stderr, "rom-pull: write failed: %s\n",
+                     output_path->string().c_str());
+        return 1;
+    }
+
+    if (!mock.exhausted()) {
+        std::fprintf(stderr,
+                     "rom-pull: warning: %zu trace entries unused\n",
+                     mock.remaining());
+    }
+    std::fprintf(stderr,
+                 "rom-pull: read %u bytes from 0x%08X in chunks of %u; "
+                 "wrote %s\n",
+                 static_cast<unsigned>(*size), *addr,
+                 static_cast<unsigned>(max_chunk),
+                 output_path->string().c_str());
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     if (argc <= 1) {
         print_usage();
@@ -2754,6 +2901,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "flash-apply") {
         return cmd_flash_apply(argc - 2, argv + 2);
+    }
+    if (cmd == "rom-pull") {
+        return cmd_rom_pull(argc - 2, argv + 2);
     }
 
     std::fprintf(stderr, "subuwutuner-cli: unknown argument: %s\n", argv[1]);
