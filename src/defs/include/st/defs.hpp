@@ -156,7 +156,16 @@ struct Pid {
 class Definition {
   public:
     [[nodiscard]] static Result<Definition> from_toml_string(std::string_view toml);
+
+    // Load from a single TOML file (legacy "everything in one file") or from
+    // a directory laid out per docs/11-definition-format.md (pack.toml plus
+    // any number of additional *.toml files in subdirectories whose
+    // top-level arrays merge into one pack). Auto-dispatches on the path.
     [[nodiscard]] static Result<Definition> from_file(std::filesystem::path const &path);
+
+    // Explicit directory loader for callers that want to require a directory
+    // layout. `path` must point at a directory containing at least pack.toml.
+    [[nodiscard]] static Result<Definition> from_directory(std::filesystem::path const &path);
 
     // Cross-reference + bounds validation. Returns Ok or a ParseError naming
     // every violation found (one Error, multi-line message).

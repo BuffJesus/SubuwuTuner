@@ -342,15 +342,9 @@ std::size_t byte_size(DataType dt) noexcept {
 
 namespace {
 
-// Swap bytes of a 32-bit value.
-constexpr std::uint32_t byteswap32(std::uint32_t v) noexcept {
-    return ((v >> 24) & 0x000000FFU) | ((v >> 8) & 0x0000FF00U)
-         | ((v << 8) & 0x00FF0000U)  | ((v << 24) & 0xFF000000U);
-}
-
 // IEEE 754 float32 bit-pattern -> float, host-endianness-agnostic.
 float bits_to_float(std::uint32_t bits) noexcept {
-    float    f;
+    float f;
     std::memcpy(&f, &bits, sizeof(f));
     return f;
 }
@@ -559,74 +553,159 @@ Status write_typed(Rom &rom, std::size_t offset, DataType dt, double value) {
 
 // ---- Definition ----------------------------------------------------------
 
-Result<Definition> Definition::from_toml_string(std::string_view toml) {
-    toml::table tbl;
+// DefinitionBuilder is the friend that bridges free-function parse helpers
+// in this TU and Definition's private state. Members are static so callers
+// don't have to thread instances around.
+class DefinitionBuilder {
+  public:
+    // Parse a single TOML table and merge its arrays into `def`. If
+    // accept_pack is true, also reads a top-level [pack] section; otherwise
+    // [pack] in the table is silently ignored (so secondary files in a
+    // directory pack can include one without effect).
+    static Status merge(toml::table const &tbl, Definition &def, bool accept_pack,
+                        bool require_pack) {
+        auto const *pack_node = tbl.get("pack");
+        if (pack_node != nullptr && accept_pack) {
+            auto pack_r = parse_pack(*pack_node);
+            if (!pack_r.has_value()) return failure(pack_r.error());
+            def.pack_ = std::move(*pack_r);
+        } else if (accept_pack && require_pack && pack_node == nullptr) {
+            return failure(ErrorCode::ParseError, "missing [pack] section");
+        }
+
+        auto const visit_array = [&](std::string_view key, auto parse_one,
+                                     auto &dst) -> Status {
+            auto const *arr = tbl[key].as_array();
+            if (arr == nullptr) return ok();
+            for (auto const &el : *arr) {
+                auto const *t = el.as_table();
+                if (t == nullptr) {
+                    return failure(ErrorCode::ParseError,
+                                   "element of " + std::string{key}
+                                       + " is not a table");
+                }
+                auto r = parse_one(*t);
+                if (!r.has_value()) return failure(r.error());
+                dst.push_back(std::move(*r));
+            }
+            return ok();
+        };
+
+        if (auto r = visit_array("identification", parse_identification, def.ids_);
+            !r.has_value()) {
+            return failure(r.error());
+        }
+        if (auto r = visit_array("axis", parse_axis, def.axes_); !r.has_value()) {
+            return failure(r.error());
+        }
+        if (auto r = visit_array("scaling", parse_scaling, def.scalings_);
+            !r.has_value()) {
+            return failure(r.error());
+        }
+        if (auto r = visit_array("table", parse_table, def.tables_); !r.has_value()) {
+            return failure(r.error());
+        }
+        if (auto r = visit_array("pid", parse_pid, def.pids_); !r.has_value()) {
+            return failure(r.error());
+        }
+        return ok();
+    }
+};
+
+namespace {
+
+Result<toml::table> parse_toml(std::string_view text) {
     try {
-        tbl = toml::parse(toml);
+        return toml::parse(text);
     } catch (toml::parse_error const &e) {
         std::string msg{"TOML parse error: "};
         msg.append(e.description());
         return failure(ErrorCode::ParseError, std::move(msg));
     }
+}
+
+} // namespace
+
+Result<Definition> Definition::from_toml_string(std::string_view toml) {
+    auto tbl = parse_toml(toml);
+    if (!tbl.has_value()) return failure(tbl.error());
 
     Definition def;
-
-    auto const *pack_node = tbl.get("pack");
-    if (pack_node == nullptr) {
-        return failure(ErrorCode::ParseError, "missing [pack] section");
-    }
-    auto pack_r = parse_pack(*pack_node);
-    if (!pack_r.has_value()) {
-        return failure(pack_r.error());
-    }
-    def.pack_ = std::move(*pack_r);
-
-    auto const parse_array = [&](std::string_view key, auto parse_one, auto &dst) -> Status {
-        auto const *arr = tbl[key].as_array();
-        if (arr == nullptr) {
-            return ok();
-        }
-        for (auto const &el : *arr) {
-            auto const *t = el.as_table();
-            if (t == nullptr) {
-                return failure(ErrorCode::ParseError,
-                               "element of " + std::string{key} + " is not a table");
-            }
-            auto r = parse_one(*t);
-            if (!r.has_value()) {
-                return failure(r.error());
-            }
-            dst.push_back(std::move(*r));
-        }
-        return ok();
-    };
-
-    if (auto r = parse_array("identification", parse_identification, def.ids_); !r.has_value()) {
+    if (auto r = DefinitionBuilder::merge(*tbl, def, /*accept_pack=*/true,
+                                          /*require_pack=*/true);
+        !r.has_value()) {
         return failure(r.error());
     }
-    if (auto r = parse_array("axis", parse_axis, def.axes_); !r.has_value()) {
-        return failure(r.error());
-    }
-    if (auto r = parse_array("scaling", parse_scaling, def.scalings_); !r.has_value()) {
-        return failure(r.error());
-    }
-    if (auto r = parse_array("table", parse_table, def.tables_); !r.has_value()) {
-        return failure(r.error());
-    }
-    if (auto r = parse_array("pid", parse_pid, def.pids_); !r.has_value()) {
-        return failure(r.error());
-    }
-
     return def;
 }
 
 Result<Definition> Definition::from_file(std::filesystem::path const &path) {
-    std::error_code   ec;
+    std::error_code ec;
+    if (std::filesystem::is_directory(path, ec) && !ec) {
+        return from_directory(path);
+    }
     std::string const contents = read_file(path, ec);
     if (ec) {
         return failure(ErrorCode::FileNotFound, path.string());
     }
     return from_toml_string(contents);
+}
+
+Result<Definition> Definition::from_directory(std::filesystem::path const &path) {
+    std::error_code ec;
+    if (!std::filesystem::is_directory(path, ec) || ec) {
+        return failure(ErrorCode::InvalidArgument,
+                       "not a directory: " + path.string());
+    }
+
+    auto const manifest = path / "pack.toml";
+    if (!std::filesystem::exists(manifest, ec) || ec) {
+        return failure(ErrorCode::FileNotFound,
+                       "pack.toml missing in: " + path.string());
+    }
+
+    Definition def;
+
+    auto const ingest = [&](std::filesystem::path const &p, bool accept_pack,
+                            bool require_pack) -> Status {
+        std::error_code   read_ec;
+        std::string const contents = read_file(p, read_ec);
+        if (read_ec) {
+            return failure(ErrorCode::IoFailure, "cannot read " + p.string());
+        }
+        auto tbl = parse_toml(contents);
+        if (!tbl.has_value()) return failure(tbl.error());
+        return DefinitionBuilder::merge(*tbl, def, accept_pack, require_pack);
+    };
+
+    if (auto r = ingest(manifest, /*accept_pack=*/true, /*require_pack=*/true);
+        !r.has_value()) {
+        return failure(r.error());
+    }
+
+    // Walk the rest of the directory and merge every other *.toml.
+    std::vector<std::filesystem::path> others;
+    for (auto const &entry :
+         std::filesystem::recursive_directory_iterator{path, ec}) {
+        if (ec) {
+            return failure(ErrorCode::IoFailure,
+                           "walk failed in: " + path.string());
+        }
+        if (!entry.is_regular_file(ec) || ec) continue;
+        auto const ep = entry.path();
+        if (ep.extension() != ".toml") continue;
+        if (std::filesystem::equivalent(ep, manifest, ec)) continue;
+        others.push_back(ep);
+    }
+    // Sort for deterministic ordering across platforms.
+    std::sort(others.begin(), others.end());
+    for (auto const &p : others) {
+        if (auto r = ingest(p, /*accept_pack=*/false, /*require_pack=*/false);
+            !r.has_value()) {
+            return failure(r.error());
+        }
+    }
+    return def;
 }
 
 Status Definition::validate() const {

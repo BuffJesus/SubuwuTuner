@@ -8,6 +8,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <random>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -825,6 +828,150 @@ axis_x     = "x"
     REQUIRE(diff->max_abs_delta == 2.0);
     REQUIRE(diff->mean_abs_delta == (2.0 + 1.0 + 1.0) / 3.0);
     REQUIRE(diff->changed());
+}
+
+// ----- Definition::from_directory ----------------------------------------
+
+namespace {
+
+// RAII helper for a unique temp directory.
+struct TempDir {
+    std::filesystem::path path;
+    TempDir() {
+        path = std::filesystem::temp_directory_path()
+             / ("st_defs_test_" + std::to_string(std::random_device{}()));
+        std::filesystem::create_directories(path);
+    }
+    ~TempDir() {
+        std::error_code ec;
+        std::filesystem::remove_all(path, ec);
+    }
+    TempDir(TempDir const &)            = delete;
+    TempDir &operator=(TempDir const &) = delete;
+};
+
+void write_text(std::filesystem::path const &p, std::string_view contents) {
+    std::filesystem::create_directories(p.parent_path());
+    std::ofstream out{p};
+    out << contents;
+}
+
+} // namespace
+
+TEST_CASE("Definition::from_directory merges pack.toml + sibling TOMLs",
+          "[defs][from_directory]") {
+    TempDir td;
+
+    write_text(td.path / "pack.toml", R"toml(
+[pack]
+schema_version = 1
+id             = "split-pack"
+endianness     = "big"
+rom_size_bytes = 65536
+license        = "Apache-2.0"
+)toml");
+
+    write_text(td.path / "axes.toml", R"toml(
+[[axis]]
+id        = "rpm_axis"
+type      = "static"
+address   = 0
+length    = 16
+data_type = "uint16_be"
+)toml");
+
+    write_text(td.path / "scalings.toml", R"toml(
+[[scaling]]
+id        = "rpm_x1"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint16_be"
+unit      = "rpm"
+
+[[scaling]]
+id        = "afr_x0_1"
+formula   = "linear"
+factor    = 0.1
+data_type = "uint8"
+unit      = "AFR"
+)toml");
+
+    write_text(td.path / "tables" / "fuel.toml", R"toml(
+[[table]]
+id         = "primary_fuel"
+dimensions = 1
+address    = 1024
+data_type  = "uint8"
+scaling    = "afr_x0_1"
+axis_x     = "rpm_axis"
+)toml");
+
+    write_text(td.path / "tables" / "boost.toml", R"toml(
+[[table]]
+id         = "boost_target"
+dimensions = 1
+address    = 2048
+data_type  = "uint16_be"
+scaling    = "rpm_x1"
+axis_x     = "rpm_axis"
+)toml");
+
+    auto const d = st::Definition::from_directory(td.path);
+    REQUIRE(d.has_value());
+    REQUIRE(d->pack().id == "split-pack");
+    REQUIRE(d->axes().size() == 1);
+    REQUIRE(d->scalings().size() == 2);
+    REQUIRE(d->tables().size() == 2);
+    REQUIRE(d->find_table("primary_fuel") != nullptr);
+    REQUIRE(d->find_table("boost_target") != nullptr);
+}
+
+TEST_CASE("Definition::from_directory fails without pack.toml",
+          "[defs][from_directory]") {
+    TempDir td;
+    write_text(td.path / "axes.toml", "[[axis]]\nid = \"rpm\"\ndata_type = \"uint8\"\n");
+    auto const d = st::Definition::from_directory(td.path);
+    REQUIRE_FALSE(d.has_value());
+    REQUIRE(d.error().code() == st::ErrorCode::FileNotFound);
+}
+
+TEST_CASE("Definition::from_directory ignores [pack] in non-manifest files",
+          "[defs][from_directory]") {
+    TempDir td;
+    write_text(td.path / "pack.toml", R"toml(
+[pack]
+id         = "real-id"
+endianness = "big"
+)toml");
+    // This [pack] should be silently ignored — id stays "real-id".
+    write_text(td.path / "stray.toml", R"toml(
+[pack]
+id = "WRONG"
+
+[[scaling]]
+id        = "x"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint8"
+)toml");
+
+    auto const d = st::Definition::from_directory(td.path);
+    REQUIRE(d.has_value());
+    REQUIRE(d->pack().id == "real-id");
+    REQUIRE(d->scalings().size() == 1);
+}
+
+TEST_CASE("Definition::from_file dispatches to from_directory when given a directory",
+          "[defs][from_file][from_directory]") {
+    TempDir td;
+    write_text(td.path / "pack.toml", R"toml(
+[pack]
+id         = "auto-dispatch"
+endianness = "big"
+)toml");
+    auto const d = st::Definition::from_file(td.path);
+    REQUIRE(d.has_value());
+    REQUIRE(d->pack().id == "auto-dispatch");
 }
 
 TEST_CASE("parse_data_type round-trips known values", "[defs][types]") {
