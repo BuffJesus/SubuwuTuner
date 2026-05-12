@@ -3,16 +3,21 @@
 
 #include "st/core/version.hpp"
 #include "st/defs.hpp"
+#include "st/edit.hpp"
 #include "st/rom.hpp"
 
+#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <ios>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace {
 
@@ -40,7 +45,13 @@ constexpr std::string_view kUsage =
     "    rom-diff --def <pack.toml> <A.bin> <B.bin>\n"
     "                            Compare two ROMs of the same definition table-by-\n"
     "                            table. Reports which tables changed and by how\n"
-    "                            much (max delta, mean absolute delta).\n";
+    "                            much (max delta, mean absolute delta).\n"
+    "    table-edit --def <pack.toml> --table <id> [--rows A:B] [--cols A:B]\n"
+    "               OP [VALUE] <FILE> --output <OUT>\n"
+    "                            Edit a table in <FILE> and write the result to\n"
+    "                            <OUT>. OP is one of: set, add, multiply, percent,\n"
+    "                            smooth, interpolate. VALUE is required for the\n"
+    "                            first four ops and ignored for smooth/interpolate.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -290,6 +301,192 @@ int cmd_dump_table(int argc, char *argv[]) {
     return 0;
 }
 
+// Parse "A:B" or "A" into [lo, hi]. Returns false on malformed input.
+bool parse_range(std::string_view s, std::size_t &lo, std::size_t &hi) {
+    auto const colon = s.find(':');
+    auto       parse = [](std::string_view sv, std::size_t &out) {
+        std::size_t value = 0;
+        auto const  res   = std::from_chars(sv.data(), sv.data() + sv.size(), value);
+        if (res.ec != std::errc{} || res.ptr != sv.data() + sv.size()) {
+            return false;
+        }
+        out = value;
+        return true;
+    };
+    if (colon == std::string_view::npos) {
+        std::size_t v = 0;
+        if (!parse(s, v)) return false;
+        lo = hi = v;
+        return true;
+    }
+    return parse(s.substr(0, colon), lo) && parse(s.substr(colon + 1), hi);
+}
+
+int cmd_table_edit(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::string>           table_id;
+    std::optional<std::string>           rows_arg;
+    std::optional<std::string>           cols_arg;
+    std::optional<std::string>           op;
+    std::optional<double>                value;
+    std::optional<std::filesystem::path> rom_path;
+    std::optional<std::filesystem::path> output_path;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const             require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "table-edit: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+
+        if (a == "--def") {
+            if (auto const *v = require_arg("--def"); v) def_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--table") {
+            if (auto const *v = require_arg("--table"); v) table_id = std::string{v};
+            else return 2;
+        } else if (a == "--rows") {
+            if (auto const *v = require_arg("--rows"); v) rows_arg = std::string{v};
+            else return 2;
+        } else if (a == "--cols") {
+            if (auto const *v = require_arg("--cols"); v) cols_arg = std::string{v};
+            else return 2;
+        } else if (a == "--output" || a == "-o") {
+            if (auto const *v = require_arg("--output"); v) output_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "table-edit: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!op.has_value()) {
+            op = std::string{a};
+        } else if (!value.has_value() && op != "smooth" && op != "interpolate") {
+            // Try parsing as a double; if it doesn't parse, treat as the ROM path.
+            double      d = 0.0;
+            auto const  res = std::from_chars(a.data(), a.data() + a.size(), d);
+            if (res.ec == std::errc{} && res.ptr == a.data() + a.size()) {
+                value = d;
+            } else if (!rom_path.has_value()) {
+                rom_path = std::filesystem::path{a};
+            } else {
+                std::fprintf(stderr, "table-edit: extra argument: %s\n", argv[i]);
+                return 2;
+            }
+        } else if (!rom_path.has_value()) {
+            rom_path = std::filesystem::path{a};
+        } else {
+            std::fprintf(stderr, "table-edit: extra argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!def_path.has_value() || !table_id.has_value() || !op.has_value()
+        || !rom_path.has_value() || !output_path.has_value()) {
+        std::fputs("table-edit: missing required arguments\n", stderr);
+        std::fputs("Usage: subuwutuner-cli table-edit --def <pack.toml> --table <id>\n"
+                   "       [--rows A:B] [--cols A:B] OP [VALUE] <FILE> --output <OUT>\n",
+                   stderr);
+        return 2;
+    }
+
+    bool const op_needs_value =
+        *op == "set" || *op == "add" || *op == "multiply" || *op == "percent";
+    if (op_needs_value && !value.has_value()) {
+        std::fprintf(stderr, "table-edit: op '%s' requires a numeric value\n", op->c_str());
+        return 2;
+    }
+
+    auto const def = st::Definition::from_file(*def_path);
+    if (!def.has_value()) {
+        std::fprintf(stderr, "table-edit: %s\n", def.error().to_string().c_str());
+        return 1;
+    }
+    auto rom = st::Rom::from_file(*rom_path);
+    if (!rom.has_value()) {
+        std::fprintf(stderr, "table-edit: %s\n", rom.error().to_string().c_str());
+        return 1;
+    }
+
+    auto const *table = def->find_table(*table_id);
+    if (table == nullptr) {
+        std::fprintf(stderr, "table-edit: table '%s' not found in pack\n", table_id->c_str());
+        return 1;
+    }
+
+    auto td = def->read_table_values(*rom, *table);
+    if (!td.has_value()) {
+        std::fprintf(stderr, "table-edit: %s\n", td.error().to_string().c_str());
+        return 1;
+    }
+
+    st::edit::Rect rect = st::edit::whole_table(*td);
+    if (rows_arg.has_value()) {
+        if (!parse_range(*rows_arg, rect.r_start, rect.r_end)) {
+            std::fprintf(stderr, "table-edit: bad --rows: %s\n", rows_arg->c_str());
+            return 2;
+        }
+    }
+    if (cols_arg.has_value()) {
+        if (!parse_range(*cols_arg, rect.c_start, rect.c_end)) {
+            std::fprintf(stderr, "table-edit: bad --cols: %s\n", cols_arg->c_str());
+            return 2;
+        }
+    }
+
+    st::Status edit_status = st::ok();
+    if (*op == "set") {
+        edit_status = st::edit::set_cells(*td, rect, *value);
+    } else if (*op == "add") {
+        edit_status = st::edit::add_cells(*td, rect, *value);
+    } else if (*op == "multiply") {
+        edit_status = st::edit::multiply_cells(*td, rect, *value);
+    } else if (*op == "percent") {
+        edit_status = st::edit::percent_scale_cells(*td, rect, *value);
+    } else if (*op == "smooth") {
+        edit_status = st::edit::smooth_cells(*td, rect, /*iterations=*/1);
+    } else if (*op == "interpolate") {
+        edit_status = st::edit::interpolate_cells(*td, rect);
+    } else {
+        std::fprintf(stderr, "table-edit: unknown op '%s'\n", op->c_str());
+        return 2;
+    }
+    if (!edit_status.has_value()) {
+        std::fprintf(stderr, "table-edit: %s\n", edit_status.error().to_string().c_str());
+        return 1;
+    }
+
+    auto wb = def->write_table_values(*rom, *table, *td);
+    if (!wb.has_value()) {
+        std::fprintf(stderr, "table-edit: writeback: %s\n", wb.error().to_string().c_str());
+        return 1;
+    }
+
+    std::ofstream out{*output_path, std::ios::binary};
+    if (!out) {
+        std::fprintf(stderr, "table-edit: cannot open output: %s\n",
+                     output_path->string().c_str());
+        return 1;
+    }
+    out.write(reinterpret_cast<char const *>(rom->data().data()),
+              static_cast<std::streamsize>(rom->size()));
+    if (!out) {
+        std::fprintf(stderr, "table-edit: write failed\n");
+        return 1;
+    }
+
+    std::printf("Table:     %s\n", table->id.c_str());
+    std::printf("Op:        %s", op->c_str());
+    if (op_needs_value) std::printf(" %g", *value);
+    std::printf("\n");
+    std::printf("Selection: rows %zu..%zu, cols %zu..%zu (%zu cells)\n",
+                rect.r_start, rect.r_end, rect.c_start, rect.c_end,
+                rect.rows() * rect.cols());
+    std::printf("Output:    %s\n", output_path->string().c_str());
+    return 0;
+}
+
 int cmd_rom_diff(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
     std::optional<std::filesystem::path> rom_a;
@@ -491,6 +688,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "rom-diff") {
         return cmd_rom_diff(argc - 2, argv + 2);
+    }
+    if (cmd == "table-edit") {
+        return cmd_table_edit(argc - 2, argv + 2);
     }
 
     std::fprintf(stderr, "subuwutuner-cli: unknown argument: %s\n", argv[1]);
