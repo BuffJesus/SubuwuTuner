@@ -128,3 +128,4 @@ CI: clang-format job is advisory (non-blocking) since no pre-commit hook is set 
 - **defgen polish** — `--apply-to-pack` mode that updates an existing TOML pack instead of overwriting; better reporting on non-linear formulas it had to flatten.
 - **Qt UI bring-up** — biggest remaining single lift. The domain layer is stable enough that the UI just needs view models on top.
 - **Logger / datalogging design + Phase 3 implementation skeleton** — `st::log::LogStream` and the lock-free ring buffer per `docs/13`. Can be designed and unit-tested via `MockTransport`.
+- **CAN reverse-engineering toolkit** — programmatic discovery loop for swap/cluster work, fully designed in `docs/14`. Replay-mode pieces (`st::can::Frame`, `.asc` reader, DBC parser, `BaselineModel`/`ChangeDetector`) all unit-testable without hardware.

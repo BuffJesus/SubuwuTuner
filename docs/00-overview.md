@@ -28,6 +28,14 @@ v1.0 ships narrow on purpose — VA (2015–2021) and VB (2022+) WRX manual tran
 - **Real brick protection.** First-class subsystem with bench-tested recovery shim, not a marketing bullet. See `05-improvements.md` and `08-testing-strategy.md`.
 - **Cross-platform on day one.** Windows, macOS (Intel + Apple Silicon), Linux (x64 + arm64), all from the same CI matrix.
 
+## Beyond v1.0
+
+Subsequent versions expand both platform coverage and feature scope. Highlights:
+
+- **Auto-tune** (MAF, knock-based ignition pull, closed-loop trim integration) — `docs/12-auto-tuning.md`
+- **STI / older EJ-powered cars / BRZ / FB-powered SUVs** — `docs/04-roadmap.md`
+- **Programmatic CAN reverse-engineering toolkit** — for engine swaps and cluster integration. Watch-and-label discovery loop, draft-DBC export. `docs/14-can-reverse-engineering.md`
+
 ## Non-goals
 
 - Supporting non-Subaru platforms — different OEM = different project
@@ -35,6 +43,7 @@ v1.0 ships narrow on purpose — VA (2015–2021) and VB (2022+) WRX manual tran
 - Cloud sync, telemetry servers, or any always-online dependency
 - Hiding what the tool is doing from the user — the user is in charge of what's legal where they live (see `06-legal-ethics.md`)
 - Pre-built defeat-preset calibrations as first-party content
+- Full SavvyCAN/CANalyzer replacement — the CAN toolkit (`docs/14`) is focused on the scriptable discovery loop, not visual signal-graphing
 
 ## Success criteria for v1.0
 

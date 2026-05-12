@@ -86,3 +86,18 @@ The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0
 - ELM327 write path (only if we can prove it's safe — likely never)
 - Bench-tools mode for ECU benches (Tactrix Pro J)
 - `defgen` tool to convert RomRaider XML → our TOML schema, run on every supported platform
+
+## v1.5+ — CAN reverse-engineering toolkit
+
+For users doing engine swaps, cluster integration, or general "what does this byte mean?" reverse-engineering work on a vehicle's CAN bus, SubuwuTuner grows a programmatic discovery loop: tool watches the bus, builds a baseline statistical model, prompts the user when a stable byte changes, records labeled events, exports to a draft DBC. Full design in `docs/14-can-reverse-engineering.md`. Reuses `st::transport::ITransport::start_streaming` so the live mode plugs into existing adapters; replay mode lets the discovery algorithm run unit-tested without any hardware. Optional LLM-assisted bit-field refinement step on the resulting `.cdb` file.
+
+CLI shape (planned):
+
+```
+can-record    --bus hs --duration 60s out.asc
+can-discover  --baseline 10s [--from out.asc | --live] session.cdb
+can-replay    out.asc
+can-decode    --dbc subaru.dbc out.asc > signals.csv
+can-diff      a.asc b.asc
+can-export-dbc session.cdb > draft.dbc
+```
