@@ -10,6 +10,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <filesystem>
+#include <random>
+#include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace flash = st::flash;
@@ -287,6 +291,128 @@ TEST_CASE("Flasher::execute surfaces an NRC on RequestDownload",
     auto const     r = f.execute(plan);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+}
+
+// ---------------------------------------------------------------------
+// execute — verify mismatch
+// ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// Plan TOML I/O
+// ---------------------------------------------------------------------
+
+TEST_CASE("FlashPlan round-trips through format_plan + parse_plan",
+          "[flash][plan][toml]") {
+    flash::FlashPlan p;
+    p.session            = 0x03;
+    p.data_format        = 0x10;
+    p.silence_bus        = false;
+    p.verify_after_write = false;
+    p.dry_run            = true;
+    p.block_size_hint    = 0x80;
+    p.verify_chunk_size  = 0x200;
+    p.writes.push_back({{0x00001234, 4}, {0xDE, 0xAD, 0xBE, 0xEF}});
+    p.writes.push_back({{0x00010000, 2}, {0xAA, 0x55}});
+
+    auto const text  = flash::format_plan(p);
+    auto const r     = flash::parse_plan(text);
+    REQUIRE(r.has_value());
+
+    REQUIRE(r->session            == p.session);
+    REQUIRE(r->data_format        == p.data_format);
+    REQUIRE(r->silence_bus        == p.silence_bus);
+    REQUIRE(r->verify_after_write == p.verify_after_write);
+    REQUIRE(r->dry_run            == p.dry_run);
+    REQUIRE(r->block_size_hint    == p.block_size_hint);
+    REQUIRE(r->verify_chunk_size  == p.verify_chunk_size);
+    REQUIRE(r->writes.size() == 2);
+    REQUIRE(r->writes[0].sector == p.writes[0].sector);
+    REQUIRE(r->writes[0].data   == p.writes[0].data);
+    REQUIRE(r->writes[1].sector == p.writes[1].sector);
+    REQUIRE(r->writes[1].data   == p.writes[1].data);
+}
+
+TEST_CASE("parse_plan accepts whitespace and 0x prefixes in data",
+          "[flash][plan][toml]") {
+    // Basic TOML strings can't span lines; we wrap the multi-line hex
+    // payload in a triple-quoted literal so the parser receives the raw
+    // (embedded-newline-allowed) text and parse_hex_bytes ignores the
+    // whitespace inside.
+    constexpr std::string_view text =
+        "[plan]\n"
+        "schema_version = 1\n"
+        "[[write]]\n"
+        "address = 0x100\n"
+        "data    = \"\"\"  0xDE 0xAD\n0xBE 0xEF  \"\"\"\n";
+    auto const r = flash::parse_plan(text);
+    REQUIRE(r.has_value());
+    REQUIRE(r->writes.size() == 1);
+    REQUIRE(r->writes[0].sector.length == 4);
+    REQUIRE(r->writes[0].data
+            == std::vector<std::uint8_t>{0xDE, 0xAD, 0xBE, 0xEF});
+}
+
+TEST_CASE("parse_plan rejects missing [plan]", "[flash][plan][toml][error]") {
+    constexpr std::string_view text = "[[write]]\naddress=0\ndata=\"00\"\n";
+    auto const r = flash::parse_plan(text);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("parse_plan rejects an unsupported schema_version",
+          "[flash][plan][toml][error]") {
+    constexpr std::string_view text =
+        "[plan]\nschema_version = 999\n[[write]]\naddress=0\ndata=\"00\"\n";
+    auto const r = flash::parse_plan(text);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::UnsupportedVersion);
+}
+
+TEST_CASE("parse_plan rejects a plan with no writes",
+          "[flash][plan][toml][error]") {
+    constexpr std::string_view text = "[plan]\nschema_version = 1\n";
+    auto const r = flash::parse_plan(text);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("parse_plan rejects malformed hex in data",
+          "[flash][plan][toml][error]") {
+    constexpr std::string_view text =
+        "[plan]\nschema_version = 1\n"
+        "[[write]]\naddress=0\ndata=\"XX YY\"\n";
+    auto const r = flash::parse_plan(text);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("read_plan + write_plan round-trip via the filesystem",
+          "[flash][plan][toml][file]") {
+    auto const tmp = std::filesystem::temp_directory_path()
+                     / ("st_flash_plan_"
+                        + std::to_string(std::random_device{}())
+                        + ".toml");
+
+    flash::FlashPlan p;
+    p.session = 0x02;
+    p.writes.push_back({{0xABCD, 3}, {0x01, 0x02, 0x03}});
+
+    REQUIRE(flash::write_plan(tmp, p).has_value());
+    auto const r = flash::read_plan(tmp);
+    REQUIRE(r.has_value());
+    REQUIRE(r->writes.size() == 1);
+    REQUIRE(r->writes[0].sector.address == 0xABCD);
+    REQUIRE(r->writes[0].data == std::vector<std::uint8_t>{0x01, 0x02, 0x03});
+
+    std::error_code ec;
+    std::filesystem::remove(tmp, ec);
+}
+
+TEST_CASE("read_plan errors clearly when the file does not exist",
+          "[flash][plan][toml][file][error]") {
+    auto const r = flash::read_plan("/no/such/path/should/not.exist.plan.toml");
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::FileNotFound);
 }
 
 // ---------------------------------------------------------------------

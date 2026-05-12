@@ -11,7 +11,10 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 // =====================================================================
@@ -160,6 +163,47 @@ class Flasher {
   private:
     ecu::uds::UdsClient client_;
 };
+
+// =====================================================================
+// FlashPlan TOML persistence
+// =====================================================================
+//
+// A plan TOML carries one `[plan]` table with the session/options flags
+// plus one `[[write]]` entry per sector. Sector data is stored as a hex
+// string of whitespace-separated byte pairs (optionally with a leading
+// "0x" prefix per byte). `address` and the per-byte values are TOML
+// integers, so `0x` literals are accepted natively by the parser.
+//
+// Example:
+//
+//   [plan]
+//   schema_version     = 1
+//   session            = 0x02
+//   data_format        = 0x00
+//   silence_bus        = true
+//   verify_after_write = true
+//   block_size_hint    = 0
+//   verify_chunk_size  = 0x100
+//   dry_run            = false
+//
+//   [[write]]
+//   address = 0x00001234
+//   data    = "DE AD BE EF"
+//
+// Round-trip stable: `parse_plan(format_plan(p))` yields a plan whose
+// fields all match `p`. The schema_version field exists so future
+// schema changes can be detected and rejected cleanly.
+
+inline constexpr int kPlanSchemaVersion = 1;
+
+[[nodiscard]] Result<FlashPlan> parse_plan(std::string_view text);
+
+[[nodiscard]] Result<FlashPlan> read_plan(std::filesystem::path const &path);
+
+[[nodiscard]] std::string format_plan(FlashPlan const &plan);
+
+[[nodiscard]] Status write_plan(std::filesystem::path const &path,
+                                FlashPlan const             &plan);
 
 } // namespace st::flash
 

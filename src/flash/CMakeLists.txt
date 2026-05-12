@@ -16,6 +16,7 @@ target_link_libraries(st_flash
         st::transport
         st::ecu
     PRIVATE
+        tomlplusplus::tomlplusplus
         st::warnings
         st::sanitizers
 )

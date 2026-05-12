@@ -15,6 +15,7 @@ target_link_libraries(subuwutuner-cli
         st::can
         st::dbc
         st::discover
+        st::flash
         st::warnings
         st::sanitizers
         st::platform

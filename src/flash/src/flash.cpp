@@ -6,8 +6,15 @@
 #include "st/core/error.hpp"
 #include "st/core/result.hpp"
 
+#include <toml++/toml.hpp>
+
 #include <algorithm>
+#include <cctype>
+#include <charconv>
 #include <cstdint>
+#include <fstream>
+#include <ios>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -325,6 +332,257 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
     }
 
     return report;
+}
+
+// ---------------------------------------------------------------------
+// FlashPlan TOML persistence
+// ---------------------------------------------------------------------
+
+namespace {
+
+// Parse a hex string ("DE AD BE EF" or "DEADBEEF" or "0xDE 0xAD ...") into
+// raw bytes. Whitespace and optional per-byte "0x" prefix are tolerated.
+// Returns nullopt on any unparseable character.
+Result<std::vector<std::uint8_t>> parse_hex_bytes(std::string_view s) {
+    std::vector<std::uint8_t> out;
+    std::size_t               i = 0;
+    while (i < s.size()) {
+        // Skip whitespace.
+        while (i < s.size()
+               && std::isspace(static_cast<unsigned char>(s[i]))) {
+            ++i;
+        }
+        if (i >= s.size()) break;
+        // Optional "0x" / "0X" prefix per byte.
+        if (i + 1 < s.size() && s[i] == '0'
+            && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
+            i += 2;
+        }
+        if (i + 1 >= s.size()) {
+            return failure(ErrorCode::ParseError,
+                           "flash plan: odd hex digit at position "
+                           + std::to_string(i));
+        }
+        unsigned const   first  = static_cast<unsigned char>(s[i]);
+        unsigned const   second = static_cast<unsigned char>(s[i + 1]);
+        auto const       is_hex = [](unsigned c) {
+            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
+                   || (c >= 'A' && c <= 'F');
+        };
+        if (!is_hex(first) || !is_hex(second)) {
+            return failure(ErrorCode::ParseError,
+                           "flash plan: bad hex byte near position "
+                           + std::to_string(i));
+        }
+        unsigned    value = 0;
+        char const  pair[2]{static_cast<char>(first),
+                             static_cast<char>(second)};
+        auto const  res =
+            std::from_chars(pair, pair + 2, value, 16);
+        if (res.ec != std::errc{} || res.ptr != pair + 2) {
+            return failure(ErrorCode::ParseError,
+                           "flash plan: bad hex byte near position "
+                           + std::to_string(i));
+        }
+        out.push_back(static_cast<std::uint8_t>(value));
+        i += 2;
+    }
+    return out;
+}
+
+// Emit bytes as "DE AD BE EF" — uppercase, space-separated, no prefix,
+// chunked into 32 bytes per line for readability on long payloads.
+std::string format_hex_bytes(std::span<std::uint8_t const> bytes) {
+    if (bytes.empty()) return std::string{};
+    constexpr char const *digits = "0123456789ABCDEF";
+    constexpr std::size_t per_line = 32;
+    std::string           out;
+    out.reserve(bytes.size() * 3);
+    for (std::size_t i = 0; i < bytes.size(); ++i) {
+        if (i > 0) {
+            out.push_back((i % per_line == 0) ? '\n' : ' ');
+        }
+        out.push_back(digits[(bytes[i] >> 4) & 0xFU]);
+        out.push_back(digits[bytes[i] & 0xFU]);
+    }
+    return out;
+}
+
+} // namespace
+
+Result<FlashPlan> parse_plan(std::string_view text) {
+    toml::table root;
+    try {
+        root = toml::parse(text);
+    } catch (toml::parse_error const &e) {
+        return failure(ErrorCode::ParseError,
+                       std::string{"flash plan: TOML parse: "}
+                       + e.description().data());
+    }
+
+    auto const *plan_tbl = root["plan"].as_table();
+    if (plan_tbl == nullptr) {
+        return failure(ErrorCode::ParseError,
+                       "flash plan: missing [plan] table");
+    }
+
+    int const schema = plan_tbl->get_as<int64_t>("schema_version")
+                           ? static_cast<int>(plan_tbl->get_as<int64_t>("schema_version")->get())
+                           : 0;
+    if (schema != kPlanSchemaVersion) {
+        return failure(ErrorCode::UnsupportedVersion,
+                       "flash plan: schema_version "
+                       + std::to_string(schema)
+                       + " not supported (expected "
+                       + std::to_string(kPlanSchemaVersion) + ")");
+    }
+
+    FlashPlan plan;
+
+    auto opt_u8 = [&](char const *key, std::uint8_t fallback) {
+        auto const *v = plan_tbl->get_as<int64_t>(key);
+        if (v == nullptr) return fallback;
+        auto const raw = v->get();
+        if (raw < 0 || raw > 0xFF) return fallback;
+        return static_cast<std::uint8_t>(raw);
+    };
+    auto opt_u32 = [&](char const *key, std::uint32_t fallback) {
+        auto const *v = plan_tbl->get_as<int64_t>(key);
+        if (v == nullptr) return fallback;
+        auto const raw = v->get();
+        if (raw < 0) return fallback;
+        return static_cast<std::uint32_t>(raw);
+    };
+    auto opt_bool = [&](char const *key, bool fallback) {
+        auto const *v = plan_tbl->get_as<bool>(key);
+        return v == nullptr ? fallback : v->get();
+    };
+
+    plan.session            = opt_u8("session", plan.session);
+    plan.data_format        = opt_u8("data_format", plan.data_format);
+    plan.silence_bus        = opt_bool("silence_bus", plan.silence_bus);
+    plan.verify_after_write = opt_bool("verify_after_write",
+                                       plan.verify_after_write);
+    plan.dry_run            = opt_bool("dry_run", plan.dry_run);
+    plan.block_size_hint    = opt_u32("block_size_hint", plan.block_size_hint);
+    plan.verify_chunk_size  = opt_u32("verify_chunk_size",
+                                       plan.verify_chunk_size);
+
+    auto const *writes = root["write"].as_array();
+    if (writes == nullptr) {
+        return failure(ErrorCode::ParseError,
+                       "flash plan: at least one [[write]] entry is required");
+    }
+    plan.writes.reserve(writes->size());
+    std::size_t idx = 0;
+    for (auto const &node : *writes) {
+        auto const *tbl = node.as_table();
+        if (tbl == nullptr) {
+            return failure(ErrorCode::ParseError,
+                           "flash plan: [[write]] entry " + std::to_string(idx)
+                           + " is not a table");
+        }
+        SectorWrite sw;
+        auto const *addr_node = tbl->get_as<int64_t>("address");
+        if (addr_node == nullptr) {
+            return failure(ErrorCode::ParseError,
+                           "flash plan: [[write]] " + std::to_string(idx)
+                           + ": missing 'address'");
+        }
+        auto const addr_val = addr_node->get();
+        if (addr_val < 0 || addr_val > 0xFFFFFFFFLL) {
+            return failure(ErrorCode::ParseError,
+                           "flash plan: [[write]] " + std::to_string(idx)
+                           + ": address out of 32-bit range");
+        }
+        sw.sector.address = static_cast<std::uint32_t>(addr_val);
+
+        auto const *data_node = tbl->get_as<std::string>("data");
+        if (data_node == nullptr) {
+            return failure(ErrorCode::ParseError,
+                           "flash plan: [[write]] " + std::to_string(idx)
+                           + ": missing 'data' (hex string)");
+        }
+        auto bytes = parse_hex_bytes(data_node->get());
+        if (!bytes.has_value()) {
+            return failure(bytes.error().code(),
+                           "flash plan: [[write]] " + std::to_string(idx)
+                           + ": " + std::string{bytes.error().message()});
+        }
+        if (bytes->empty()) {
+            return failure(ErrorCode::ParseError,
+                           "flash plan: [[write]] " + std::to_string(idx)
+                           + ": 'data' must contain at least one byte");
+        }
+        sw.sector.length = static_cast<std::uint32_t>(bytes->size());
+        sw.data          = std::move(*bytes);
+
+        plan.writes.push_back(std::move(sw));
+        ++idx;
+    }
+    if (plan.writes.empty()) {
+        return failure(ErrorCode::ParseError,
+                       "flash plan: at least one [[write]] entry is required");
+    }
+    return plan;
+}
+
+Result<FlashPlan> read_plan(std::filesystem::path const &path) {
+    std::ifstream in{path, std::ios::binary};
+    if (!in) {
+        return failure(ErrorCode::FileNotFound,
+                       "flash plan: cannot open " + path.string());
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return parse_plan(ss.str());
+}
+
+std::string format_plan(FlashPlan const &plan) {
+    std::ostringstream out;
+    out << "# SubuwuTuner flash plan\n";
+    out << "[plan]\n";
+    out << "schema_version     = " << kPlanSchemaVersion << "\n";
+    out << "session            = 0x"
+        << std::hex << static_cast<unsigned>(plan.session) << std::dec << "\n";
+    out << "data_format        = 0x"
+        << std::hex << static_cast<unsigned>(plan.data_format) << std::dec
+        << "\n";
+    out << "silence_bus        = " << (plan.silence_bus ? "true" : "false")
+        << "\n";
+    out << "verify_after_write = "
+        << (plan.verify_after_write ? "true" : "false") << "\n";
+    out << "dry_run            = " << (plan.dry_run ? "true" : "false")
+        << "\n";
+    out << "block_size_hint    = " << plan.block_size_hint << "\n";
+    out << "verify_chunk_size  = 0x"
+        << std::hex << plan.verify_chunk_size << std::dec << "\n";
+
+    for (auto const &w : plan.writes) {
+        out << "\n[[write]]\n";
+        out << "address = 0x"
+            << std::hex << w.sector.address << std::dec << "\n";
+        // Multi-line basic string (triple-quoted) so the line-wrapped hex
+        // output round-trips through TOML. Basic single-line strings
+        // can't contain raw newlines.
+        out << "data    = \"\"\"\n" << format_hex_bytes(w.data) << "\n\"\"\"\n";
+    }
+    return out.str();
+}
+
+Status write_plan(std::filesystem::path const &path, FlashPlan const &plan) {
+    std::ofstream out{path, std::ios::binary};
+    if (!out) {
+        return failure(ErrorCode::IoFailure,
+                       "flash plan: cannot open for write: " + path.string());
+    }
+    auto const text = format_plan(plan);
+    out.write(text.data(), static_cast<std::streamsize>(text.size()));
+    if (!out) {
+        return failure(ErrorCode::IoFailure,
+                       "flash plan: write failed: " + path.string());
+    }
+    return ok();
 }
 
 } // namespace st::flash

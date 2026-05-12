@@ -8,6 +8,7 @@
 #include "st/discover.hpp"
 #include "st/ecu/ssm.hpp"
 #include "st/edit.hpp"
+#include "st/flash.hpp"
 #include "st/log.hpp"
 #include "st/project.hpp"
 #include "st/rom.hpp"
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <numeric>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -110,7 +112,17 @@ constexpr std::string_view kUsage =
     "                            Decode a .asc capture against a DBC. Writes long-\n"
     "                            format CSV (timestamp_ns,bus,can_id,signal,value,\n"
     "                            unit) — one row per (frame, signal) pair. Frames\n"
-    "                            whose id is not in the DBC are skipped.\n";
+    "                            whose id is not in the DBC are skipped.\n"
+    "    flash-plan-info <FILE.toml>\n"
+    "                            Load a flash plan TOML and print its summary —\n"
+    "                            session, options, and the address/length of each\n"
+    "                            sector write. Hardware-free; touches no transport.\n"
+    "    flash-delta <SOURCE.bin> <TARGET.bin> [--sector-size <N>]\n"
+    "                [--base-address <addr>] [--output <plan.toml>]\n"
+    "                            Diff two ROMs of equal size; for every sector-aligned\n"
+    "                            region that differs, emit a flash plan whose [[write]]\n"
+    "                            entries cover those sectors with TARGET's bytes. The\n"
+    "                            plan is hand-editable before execution.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -2103,6 +2115,203 @@ int cmd_can_decode(int argc, char *argv[]) {
     return 0;
 }
 
+int cmd_flash_plan_info(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> plan_path;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a.starts_with("--")) {
+            std::fprintf(stderr, "flash-plan-info: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!plan_path.has_value()) {
+            plan_path = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "flash-plan-info: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!plan_path.has_value()) {
+        std::fputs("flash-plan-info: missing required argument\n"
+                   "Usage: subuwutuner-cli flash-plan-info <FILE.toml>\n",
+                   stderr);
+        return 2;
+    }
+    auto const r = st::flash::read_plan(*plan_path);
+    if (!r.has_value()) {
+        std::fprintf(stderr, "flash-plan-info: %s\n",
+                     r.error().to_string().c_str());
+        return 1;
+    }
+    auto const &p = *r;
+    std::printf("Plan: %s\n", plan_path->string().c_str());
+    std::printf("  session            = 0x%02X\n",
+                static_cast<unsigned>(p.session));
+    std::printf("  data_format        = 0x%02X\n",
+                static_cast<unsigned>(p.data_format));
+    std::printf("  silence_bus        = %s\n",
+                p.silence_bus ? "true" : "false");
+    std::printf("  verify_after_write = %s\n",
+                p.verify_after_write ? "true" : "false");
+    std::printf("  dry_run            = %s\n",
+                p.dry_run ? "true" : "false");
+    std::printf("  block_size_hint    = %u\n",
+                static_cast<unsigned>(p.block_size_hint));
+    std::printf("  verify_chunk_size  = 0x%X\n",
+                static_cast<unsigned>(p.verify_chunk_size));
+    std::size_t total_bytes = 0;
+    std::printf("\nSector writes (%zu):\n", p.writes.size());
+    for (std::size_t i = 0; i < p.writes.size(); ++i) {
+        auto const &w = p.writes[i];
+        std::printf("  [%zu] 0x%08X .. 0x%08X  (%u bytes)\n",
+                    i, w.sector.address,
+                    w.sector.address + w.sector.length,
+                    static_cast<unsigned>(w.sector.length));
+        total_bytes += w.sector.length;
+    }
+    std::printf("  total              = %zu bytes\n", total_bytes);
+    return 0;
+}
+
+int cmd_flash_delta(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> source_path;
+    std::optional<std::filesystem::path> target_path;
+    std::optional<std::filesystem::path> output_path;
+    std::uint32_t                        sector_size  = 0x1000;
+    std::uint32_t                        base_address = 0;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const             require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "flash-delta: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--sector-size") {
+            auto const *v = require_arg("--sector-size");
+            if (v == nullptr) return 2;
+            std::uint32_t val = 0;
+            std::string_view sv{v};
+            int base = 10;
+            if (sv.starts_with("0x") || sv.starts_with("0X")) {
+                sv.remove_prefix(2);
+                base = 16;
+            }
+            auto const res = std::from_chars(sv.data(), sv.data() + sv.size(),
+                                              val, base);
+            if (res.ec != std::errc{} || val == 0) {
+                std::fprintf(stderr, "flash-delta: --sector-size must be a positive integer\n");
+                return 2;
+            }
+            sector_size = val;
+        } else if (a == "--base-address") {
+            auto const *v = require_arg("--base-address");
+            if (v == nullptr) return 2;
+            std::uint32_t val = 0;
+            std::string_view sv{v};
+            int base = 10;
+            if (sv.starts_with("0x") || sv.starts_with("0X")) {
+                sv.remove_prefix(2);
+                base = 16;
+            }
+            auto const res = std::from_chars(sv.data(), sv.data() + sv.size(),
+                                              val, base);
+            if (res.ec != std::errc{}) {
+                std::fprintf(stderr, "flash-delta: --base-address must be an integer\n");
+                return 2;
+            }
+            base_address = val;
+        } else if (a == "--output" || a == "-o") {
+            if (auto const *v = require_arg("--output"); v) {
+                output_path = std::filesystem::path{v};
+            } else {
+                return 2;
+            }
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "flash-delta: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!source_path.has_value()) {
+            source_path = std::filesystem::path{argv[i]};
+        } else if (!target_path.has_value()) {
+            target_path = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "flash-delta: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!source_path.has_value() || !target_path.has_value()) {
+        std::fputs("flash-delta: missing required arguments\n"
+                   "Usage: subuwutuner-cli flash-delta <SOURCE.bin> <TARGET.bin>\n"
+                   "       [--sector-size <N>] [--base-address <addr>] [--output <plan.toml>]\n",
+                   stderr);
+        return 2;
+    }
+    auto const src = st::Rom::from_file(*source_path);
+    if (!src.has_value()) {
+        std::fprintf(stderr, "flash-delta: %s\n", src.error().to_string().c_str());
+        return 1;
+    }
+    auto const tgt = st::Rom::from_file(*target_path);
+    if (!tgt.has_value()) {
+        std::fprintf(stderr, "flash-delta: %s\n", tgt.error().to_string().c_str());
+        return 1;
+    }
+    if (src->size() != tgt->size()) {
+        std::fprintf(stderr,
+                     "flash-delta: source size (%zu) != target size (%zu)\n",
+                     src->size(), tgt->size());
+        return 1;
+    }
+    auto const sectors = st::flash::Flasher::compute_delta(
+        src->data(), tgt->data(), sector_size, base_address);
+
+    st::flash::FlashPlan plan;
+    plan.writes.reserve(sectors.size());
+    for (auto const &s : sectors) {
+        st::flash::SectorWrite sw;
+        sw.sector = s;
+        std::size_t const off =
+            static_cast<std::size_t>(s.address - base_address);
+        sw.data.assign(tgt->data().begin() + static_cast<std::ptrdiff_t>(off),
+                       tgt->data().begin()
+                           + static_cast<std::ptrdiff_t>(off + s.length));
+        plan.writes.push_back(std::move(sw));
+    }
+
+    if (output_path.has_value()) {
+        if (plan.writes.empty()) {
+            std::fputs("flash-delta: source and target are identical; "
+                       "no plan written\n", stderr);
+            return 0;
+        }
+        if (auto s = st::flash::write_plan(*output_path, plan); !s.has_value()) {
+            std::fprintf(stderr, "flash-delta: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        std::fprintf(stderr,
+                     "flash-delta: %zu sector(s), %zu bytes, wrote %s\n",
+                     plan.writes.size(),
+                     std::accumulate(plan.writes.begin(), plan.writes.end(),
+                                     std::size_t{0},
+                                     [](std::size_t acc, auto const &w) {
+                                         return acc + w.sector.length;
+                                     }),
+                     output_path->string().c_str());
+    } else {
+        std::fputs(st::flash::format_plan(plan).c_str(), stdout);
+        std::fprintf(stderr,
+                     "flash-delta: %zu sector(s), %zu bytes\n",
+                     plan.writes.size(),
+                     std::accumulate(plan.writes.begin(), plan.writes.end(),
+                                     std::size_t{0},
+                                     [](std::size_t acc, auto const &w) {
+                                         return acc + w.sector.length;
+                                     }));
+    }
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     if (argc <= 1) {
         print_usage();
@@ -2172,6 +2381,12 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "can-decode") {
         return cmd_can_decode(argc - 2, argv + 2);
+    }
+    if (cmd == "flash-plan-info") {
+        return cmd_flash_plan_info(argc - 2, argv + 2);
+    }
+    if (cmd == "flash-delta") {
+        return cmd_flash_delta(argc - 2, argv + 2);
     }
 
     std::fprintf(stderr, "subuwutuner-cli: unknown argument: %s\n", argv[1]);
