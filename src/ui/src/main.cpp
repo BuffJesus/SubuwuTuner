@@ -218,6 +218,16 @@ enum class TableViewMode {
     Heatmap,
 };
 
+// What the user was trying to do when the unsaved-changes modal fired.
+// Captured so the modal's Save/Discard handlers know what to do next.
+enum class ConfirmAction {
+    None,
+    OpenDialog,
+    OpenRecent,
+    Close,
+    Quit,
+};
+
 struct AppState {
     std::optional<st::Project>               project;
     std::string                              status_msg;
@@ -230,6 +240,20 @@ struct AppState {
     // Loaded once at startup, persisted on every successful open. See
     // recents_config_path() for the on-disk location.
     std::vector<RecentEntry>                 recents;
+
+    // Unsaved-changes tracking. `dirty` is conservative: any edit flips
+    // it true, save flips it false. An undo-back-to-clean leaves dirty
+    // true, which is harmless because the resulting save is a no-op
+    // against an already-correct file. Switching projects via the
+    // modal's Discard option also clears dirty.
+    bool                                     dirty{false};
+    ConfirmAction                            next_action{ConfirmAction::None};
+    std::filesystem::path                    next_recent{};
+    bool                                     show_unsaved_modal{false};
+    // Set when the user has confirmed (or there was nothing to confirm)
+    // that they want to quit. Main loop reads this AFTER rendering each
+    // frame and breaks when true.
+    bool                                     user_confirmed_quit{false};
 
     void try_open_project(std::filesystem::path const &path) {
         auto r = st::Project::open(path);
@@ -246,6 +270,8 @@ struct AppState {
         selected_table_id.clear();
         current_table_data.reset();
         selection.reset();
+        // New project = clean state.
+        dirty = false;
         // Successful open → bump in recents so the welcome panel shows
         // this project at the top next cold start.
         push_recent(recents, path);
@@ -277,6 +303,7 @@ struct AppState {
         selection.reset();
         selected_z = 0;
         status_msg.clear();
+        dirty = false;
     }
 };
 
@@ -301,6 +328,7 @@ void save_project(AppState &state) {
         return;
     }
     state.status_msg = "Saved.";
+    state.dirty      = false;
 }
 
 // Snapshot, mutate, snapshot, writeback, record. If the writeback fails we
@@ -355,6 +383,7 @@ void apply_op(AppState &state, std::string label, Op &&op) {
                                                    std::move(*after),
                                                    std::move(label)});
     state.status_msg.clear();
+    state.dirty = true;
 }
 
 // Undo/redo share the same restore-and-writeback shape; only the snapshot
@@ -402,6 +431,9 @@ void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forwar
         state.current_table_data = std::move(*td);
     }
     state.status_msg.clear();
+    // Undo / redo modifies the working ROM in memory; flag dirty so the
+    // unsaved-changes guard catches an undo-then-quit-without-save.
+    state.dirty = true;
 }
 
 void do_undo(AppState &state) {
@@ -421,6 +453,103 @@ void do_redo(AppState &state) {
     auto const *e = state.project->history().redo();
     if (e != nullptr) {
         apply_history_step(state, *e, /*forward=*/true);
+    }
+}
+
+// ---------------------------------------------------------------------
+// Unsaved-changes guard.
+//
+// `request_action` is the single entry point for any user gesture that
+// would lose in-memory edits if executed directly: Open Project (which
+// replaces the current project), Open a recent (same), Close Project,
+// and Quit (Ctrl+Q / menu / window-X click). When the project has
+// pending edits, the modal opens and the action is queued; otherwise
+// the action runs immediately. `execute_action` performs the action.
+// ---------------------------------------------------------------------
+
+void execute_action(AppState &state, ConfirmAction action,
+                    std::filesystem::path const &path) {
+    switch (action) {
+        case ConfirmAction::None:
+            break;
+        case ConfirmAction::OpenDialog:
+            open_project_dialog(state);
+            break;
+        case ConfirmAction::OpenRecent:
+            state.try_open_project(path);
+            break;
+        case ConfirmAction::Close:
+            state.close_project();
+            break;
+        case ConfirmAction::Quit:
+            state.user_confirmed_quit = true;
+            break;
+    }
+}
+
+void request_action(AppState &state, ConfirmAction action,
+                    std::filesystem::path path = {}) {
+    if (action == ConfirmAction::None) return;
+    bool const need_confirm = state.dirty && state.project.has_value();
+    if (need_confirm) {
+        state.next_action       = action;
+        state.next_recent       = std::move(path);
+        state.show_unsaved_modal = true;
+    } else {
+        execute_action(state, action, path);
+    }
+}
+
+void render_unsaved_modal(AppState &state) {
+    if (state.show_unsaved_modal) {
+        ImGui::OpenPopup("Unsaved changes##unsaved");
+        state.show_unsaved_modal = false;
+    }
+    ImVec2 const center =
+        ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing,
+                             ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Unsaved changes##unsaved", nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("You have unsaved edits in this project.");
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::TextDisabled("Continuing without saving will discard them.");
+        ImGui::Dummy(ImVec2(0.0f, 16.0f));
+
+        constexpr float kBtnW = 160.0f;
+        if (ImGui::Button("Save and continue", ImVec2(kBtnW, 0.0f))) {
+            save_project(state);
+            execute_action(state, state.next_action, state.next_recent);
+            state.next_action = ConfirmAction::None;
+            state.next_recent.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Write the working ROM + edits to disk, "
+                              "then proceed.");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Discard changes", ImVec2(kBtnW, 0.0f))) {
+            state.dirty       = false;
+            execute_action(state, state.next_action, state.next_recent);
+            state.next_action = ConfirmAction::None;
+            state.next_recent.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Throw away every edit since the last save "
+                              "and proceed.");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(kBtnW * 0.7f, 0.0f))) {
+            state.next_action = ConfirmAction::None;
+            state.next_recent.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Stay here. Don't open, close, or quit.");
+        }
+        ImGui::EndPopup();
     }
 }
 
@@ -634,7 +763,7 @@ void render_dockspace_host() {
     ImGui::End();
 }
 
-void render_menubar(AppState &state, GLFWwindow *window) {
+void render_menubar(AppState &state) {
     bool const has_project = state.project.has_value();
     bool const can_undo    = has_project && state.project->history().can_undo();
     bool const can_redo    = has_project && state.project->history().can_redo();
@@ -642,17 +771,17 @@ void render_menubar(AppState &state, GLFWwindow *window) {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Open Project...", "Ctrl+O")) {
-                open_project_dialog(state);
+                request_action(state, ConfirmAction::OpenDialog);
             }
             if (ImGui::MenuItem("Save Project", "Ctrl+S", false, has_project)) {
                 save_project(state);
             }
             if (ImGui::MenuItem("Close Project", nullptr, false, has_project)) {
-                state.close_project();
+                request_action(state, ConfirmAction::Close);
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
-                glfwSetWindowShouldClose(window, GLFW_TRUE);
+                request_action(state, ConfirmAction::Quit);
             }
             ImGui::EndMenu();
         }
@@ -703,7 +832,7 @@ void render_sidebar(AppState &state) {
         ImGui::TextWrapped("No project open yet.");
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
         if (ImGui::Button("Open Project…", ImVec2(-1.0f, 0.0f))) {
-            open_project_dialog(state);
+            request_action(state, ConfirmAction::OpenDialog);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Pick a .stune project directory.  (Ctrl+O)");
@@ -1100,7 +1229,7 @@ void render_welcome_panel(AppState &state) {
     constexpr float kBtnH = 38.0f;
     center_cursor_x(kBtnW);
     if (ImGui::Button("Open Project…", ImVec2(kBtnW, kBtnH))) {
-        open_project_dialog(state);
+        request_action(state, ConfirmAction::OpenDialog);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Pick a .stune project directory.  (Ctrl+O)");
@@ -1176,7 +1305,7 @@ void render_welcome_panel(AppState &state) {
         if (clicked_idx.has_value()) {
             // Capture by value: try_open_project mutates recents.
             auto const path = state.recents[*clicked_idx].path;
-            state.try_open_project(path);
+            request_action(state, ConfirmAction::OpenRecent, path);
         }
     }
 
@@ -1581,8 +1710,19 @@ int main(int argc, char *argv[]) {
         state.status_msg = "Open a .stune project: File → Open (Ctrl+O).";
     }
 
-    while (glfwWindowShouldClose(window) == 0) {
+    while (!state.user_confirmed_quit) {
         glfwPollEvents();
+
+        // The user clicked the window's close button (or any other
+        // path that toggled GLFW's close flag). Route it through the
+        // same confirm-action machinery as Ctrl+Q / File → Quit so an
+        // accidental click on the X doesn't lose unsaved edits. The
+        // GLFW flag is reset so request_action's confirm path can
+        // decide whether to actually quit.
+        if (glfwWindowShouldClose(window) != 0) {
+            glfwSetWindowShouldClose(window, GLFW_FALSE);
+            request_action(state, ConfirmAction::Quit);
+        }
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -1591,10 +1731,10 @@ int main(int argc, char *argv[]) {
         // Global keyboard shortcuts. IsKeyChordPressed is mod-aware, so
         // Ctrl+Shift+Z and Ctrl+Z don't collide.
         if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Q)) {
-            glfwSetWindowShouldClose(window, GLFW_TRUE);
+            request_action(state, ConfirmAction::Quit);
         }
         if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_O)) {
-            open_project_dialog(state);
+            request_action(state, ConfirmAction::OpenDialog);
         }
         if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
             save_project(state);
@@ -1608,11 +1748,12 @@ int main(int argc, char *argv[]) {
             do_redo(state);
         }
 
-        render_menubar(state, window);
+        render_menubar(state);
         render_dockspace_host();
         render_sidebar(state);
         render_table_view(state, fonts);
         render_status_bar(state);
+        render_unsaved_modal(state);
 
         if (state.show_imgui_demo) {
             ImGui::ShowDemoWindow(&state.show_imgui_demo);
