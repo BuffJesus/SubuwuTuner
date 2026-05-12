@@ -552,6 +552,150 @@ TEST_CASE("read_manifest errors clearly when the file does not exist",
 }
 
 // ---------------------------------------------------------------------
+// execute — incremental journal
+// ---------------------------------------------------------------------
+
+TEST_CASE("Flasher::execute writes a journal manifest on every sector",
+          "[flash][execute][journal]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    constexpr std::uint32_t addr = 0x00001234;
+    constexpr std::uint32_t size = 4;
+    std::vector<std::uint8_t> const data{0xDE, 0xAD, 0xBE, 0xEF};
+
+    // Full happy-path expected exchanges (mirrors the happy-path test).
+    expect(t, {0x10, 0x02}, {0x50, 0x02});
+    expect(t, {0x28, 0x03, 0x03}, {0x68, 0x03});
+    expect(t, uds::build_routine_control(uds::kRcStart,
+                                         uds::kRidEraseMemory,
+                                         erase_opt(addr, size)),
+              {0x71, 0x01, 0xFF, 0x00});
+    expect(t, uds::build_request_download(0x00, addr, size),
+              {0x74, 0x20, 0x00, 0x06});
+    expect(t, uds::build_transfer_data(1, data), {0x76, 0x01});
+    expect(t, uds::build_request_transfer_exit(), {0x77});
+    expect(t, uds::build_routine_control(uds::kRcStart,
+                                         uds::kRidCheckProgrammingDependencies),
+              {0x71, 0x01, 0xFF, 0x01});
+    expect(t, uds::build_read_memory_by_address(addr, size),
+              {0x63, 0xDE, 0xAD, 0xBE, 0xEF});
+    expect(t, {0x28, 0x00, 0x03}, {0x68, 0x00});
+
+    auto const journal = std::filesystem::temp_directory_path()
+                         / ("st_flash_journal_"
+                            + std::to_string(std::random_device{}())
+                            + ".toml");
+
+    flash::FlashPlan plan;
+    plan.writes.push_back({{addr, size}, data});
+    plan.journal_path = journal;
+
+    flash::Flasher f{t};
+    auto const     r = f.execute(plan);
+    REQUIRE(r.has_value());
+
+    // After execute returns, the journal file exists and reflects the
+    // final state.
+    REQUIRE(std::filesystem::exists(journal));
+    auto const loaded = flash::read_manifest(journal);
+    REQUIRE(loaded.has_value());
+    REQUIRE(loaded->entries.size() == 1);
+    REQUIRE(loaded->entries[0].sector.address == addr);
+    REQUIRE(loaded->entries[0].transferred);
+    REQUIRE(loaded->entries[0].verified);
+
+    std::error_code ec;
+    std::filesystem::remove(journal, ec);
+}
+
+TEST_CASE("Flasher::execute journal captures partial mid-flash failure",
+          "[flash][execute][journal]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    constexpr std::uint32_t addr1 = 0x00001234;
+    constexpr std::uint32_t addr2 = 0x00005678;
+    constexpr std::uint32_t size  = 4;
+    std::vector<std::uint8_t> const data1{0xAA, 0xAA, 0xAA, 0xAA};
+    std::vector<std::uint8_t> const data2{0xBB, 0xBB, 0xBB, 0xBB};
+
+    // Sector 1: happy path through verify.
+    expect(t, {0x10, 0x02}, {0x50, 0x02});
+    expect(t, {0x28, 0x03, 0x03}, {0x68, 0x03});
+    expect(t, uds::build_routine_control(uds::kRcStart,
+                                         uds::kRidEraseMemory,
+                                         erase_opt(addr1, size)),
+              {0x71, 0x01, 0xFF, 0x00});
+    expect(t, uds::build_request_download(0x00, addr1, size),
+              {0x74, 0x20, 0x00, 0x06});
+    expect(t, uds::build_transfer_data(1, data1), {0x76, 0x01});
+    expect(t, uds::build_request_transfer_exit(), {0x77});
+    expect(t, uds::build_routine_control(uds::kRcStart,
+                                         uds::kRidCheckProgrammingDependencies),
+              {0x71, 0x01, 0xFF, 0x01});
+    expect(t, uds::build_read_memory_by_address(addr1, size),
+              {0x63, 0xAA, 0xAA, 0xAA, 0xAA});
+
+    // Sector 2: eraseMemory fails (conditions not correct = 0x22).
+    expect(t, uds::build_routine_control(uds::kRcStart,
+                                         uds::kRidEraseMemory,
+                                         erase_opt(addr2, size)),
+              {0x7F, 0x31, 0x22});
+
+    auto const journal = std::filesystem::temp_directory_path()
+                         / ("st_flash_journal_fail_"
+                            + std::to_string(std::random_device{}())
+                            + ".toml");
+
+    flash::FlashPlan plan;
+    plan.writes.push_back({{addr1, size}, data1});
+    plan.writes.push_back({{addr2, size}, data2});
+    plan.journal_path = journal;
+    // No CC-restore exchange queued because execute returns before CC.
+
+    flash::Flasher f{t};
+    auto const     r = f.execute(plan);
+    REQUIRE_FALSE(r.has_value());
+
+    // The journal on disk reflects: sector 1 fully transferred, sector
+    // 2 with transferred=false (erase failed before any data moved).
+    REQUIRE(std::filesystem::exists(journal));
+    auto const loaded = flash::read_manifest(journal);
+    REQUIRE(loaded.has_value());
+    REQUIRE(loaded->entries.size() == 2);
+    REQUIRE(loaded->entries[0].sector.address == addr1);
+    REQUIRE(loaded->entries[0].transferred);
+    REQUIRE(loaded->entries[1].sector.address == addr2);
+    REQUIRE_FALSE(loaded->entries[1].transferred);
+
+    std::error_code ec;
+    std::filesystem::remove(journal, ec);
+}
+
+TEST_CASE("Flasher::execute with no journal_path makes no journal file",
+          "[flash][execute][journal]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    expect(t, {0x10, 0x02}, {0x50, 0x02});
+    expect(t, {0x28, 0x03, 0x03}, {0x68, 0x03});
+    expect(t, {0x28, 0x00, 0x03}, {0x68, 0x00});
+
+    flash::FlashPlan plan;
+    plan.dry_run = true;
+    plan.writes.push_back({{0x100, 4}, {0, 0, 0, 0}});
+
+    flash::Flasher f{t};
+    auto const     r = f.execute(plan);
+    REQUIRE(r.has_value());
+    // journal_path is empty by default; nothing written. Nothing to assert
+    // about the filesystem here, but the test confirms execute() works
+    // through dry-run without trying to open an empty path.
+    REQUIRE(t.exhausted());
+}
+
+// ---------------------------------------------------------------------
 // execute — verify mismatch
 // ---------------------------------------------------------------------
 

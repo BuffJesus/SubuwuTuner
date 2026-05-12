@@ -190,6 +190,23 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
     }
     report.entered_session = true;
 
+    // After every per-sector outcome update, rewrite a Manifest snapshot
+    // at plan.journal_path. Best-effort: a write failure here does NOT
+    // abort the flash. The point of the journal is to give the recovery
+    // flow somewhere to look after a host crash; a disk failure that
+    // also disabled the journal is a real possibility, but the flash
+    // itself proceeding is the safer default than aborting in the
+    // middle of a sector write. plan_text is empty here — the caller
+    // can rebuild a complete manifest with the source plan TOML after
+    // execute returns and overwrite the journal one last time.
+    auto const commit_outcome = [&](SectorOutcome const &so) {
+        report.sectors.push_back(so);
+        if (!plan.journal_path.empty()) {
+            auto const snapshot = build_manifest(plan, std::string_view{}, report);
+            (void) write_manifest(plan.journal_path, snapshot);
+        }
+    };
+
     // 2. Optionally silence non-diagnostic traffic.
     if (plan.silence_bus) {
         if (auto s = client_.communication_control(
@@ -208,7 +225,7 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
     // what would have been done.
     if (plan.dry_run) {
         for (auto const &w : plan.writes) {
-            report.sectors.push_back(SectorOutcome{w.sector});
+            commit_outcome(SectorOutcome{w.sector});
         }
     } else {
         // 3'. Full execution: erase + download + transfer + exit +
@@ -222,7 +239,7 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
                 ecu::uds::kRcStart, ecu::uds::kRidEraseMemory,
                 build_erase_option_record(w.sector.address, w.sector.length));
             if (!erase.has_value()) {
-                report.sectors.push_back(outcome);
+                commit_outcome(outcome);
                 return failure(erase.error().code(),
                                "flash: eraseMemory failed at 0x"
                                + std::to_string(w.sector.address) + ": "
@@ -234,7 +251,7 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
             auto rdl = client_.request_download(
                 plan.data_format, w.sector.address, w.sector.length);
             if (!rdl.has_value()) {
-                report.sectors.push_back(outcome);
+                commit_outcome(outcome);
                 return failure(rdl.error().code(),
                                "flash: request_download failed at 0x"
                                + std::to_string(w.sector.address) + ": "
@@ -244,7 +261,7 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
             std::uint32_t const block_payload =
                 choose_block_payload(*rdl, plan.block_size_hint);
             if (block_payload == 0) {
-                report.sectors.push_back(outcome);
+                commit_outcome(outcome);
                 return failure(ErrorCode::EcuRejected,
                                "flash: ECU reported unusable "
                                "maxNumberOfBlockLength="
@@ -263,7 +280,7 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
                 if (auto s = client_.transfer_data(counter, chunk);
                     !s.has_value()) {
                     report.bytes_transferred += offset;
-                    report.sectors.push_back(outcome);
+                    commit_outcome(outcome);
                     return failure(s.error().code(),
                                    "flash: transfer_data counter="
                                    + std::to_string(counter)
@@ -279,7 +296,7 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
 
             // 3d. RequestTransferExit.
             if (auto s = client_.request_transfer_exit(); !s.has_value()) {
-                report.sectors.push_back(outcome);
+                commit_outcome(outcome);
                 return failure(s.error().code(),
                                "flash: request_transfer_exit failed at 0x"
                                + std::to_string(w.sector.address) + ": "
@@ -292,7 +309,7 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
                 ecu::uds::kRcStart,
                 ecu::uds::kRidCheckProgrammingDependencies);
             if (!check.has_value()) {
-                report.sectors.push_back(outcome);
+                commit_outcome(outcome);
                 return failure(check.error().code(),
                                "flash: checkProgrammingDependencies "
                                "failed at 0x"
@@ -308,7 +325,7 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
                                               plan.verify_chunk_size);
                 if (!readback.has_value()) {
                     outcome.verified = false;
-                    report.sectors.push_back(outcome);
+                    commit_outcome(outcome);
                     return failure(readback.error().code(),
                                    "flash: verify read-back failed: "
                                    + std::string{readback.error().message()});
@@ -319,7 +336,7 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
                                                   w.data.begin()));
             }
 
-            report.sectors.push_back(outcome);
+            commit_outcome(outcome);
         }
     }
 

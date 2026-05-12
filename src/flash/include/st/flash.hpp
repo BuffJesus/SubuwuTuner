@@ -99,6 +99,17 @@ struct FlashPlan {
     // Per-chunk size for the verify-pass ReadMemoryByAddress loop.
     std::uint32_t verify_chunk_size{0x100};
 
+    // When non-empty, `Flasher::execute` rewrites a Manifest at this
+    // path after every per-sector outcome update. This is the
+    // resume-from-crash foundation per docs/05-improvements.md §4: if
+    // the host process dies mid-flash, the journal on disk reflects the
+    // last successfully-completed sector. Write failure on the journal
+    // is best-effort — the flash itself proceeds regardless, so a full
+    // disk does not turn into a brick. The path is environment-specific
+    // and is deliberately NOT round-tripped through plan TOML; set it
+    // programmatically or via a CLI flag.
+    std::filesystem::path journal_path{};
+
     std::vector<SectorWrite> writes;
 };
 
