@@ -30,7 +30,10 @@ constexpr std::string_view kUsage =
     "    rom-info [--def <pack.toml>] <FILE>\n"
     "                            Print size, CRC32, embedded ASCII strings of a ROM.\n"
     "                            With --def, also identify the ROM against the pack\n"
-    "                            and summarize its tables.\n";
+    "                            and summarize its tables.\n"
+    "    dump-axis --def <pack.toml> --axis <id> <FILE>\n"
+    "                            Read the named axis from the ROM via the pack and\n"
+    "                            print its scaled values, one per line.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -100,6 +103,84 @@ void print_def_summary(st::Definition const &def, st::Rom const &rom) {
         std::printf("  ... %zu more not shown\n", def.tables().size() - kMaxTables);
     }
     std::printf("PIDs defined:   %zu\n", def.pids().size());
+}
+
+int cmd_dump_axis(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::string>           axis_id;
+    std::optional<std::filesystem::path> rom_path;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--def") {
+            if (i + 1 >= argc) {
+                std::fputs("dump-axis: --def requires a path\n", stderr);
+                return 2;
+            }
+            def_path = std::filesystem::path{argv[++i]};
+        } else if (a == "--axis") {
+            if (i + 1 >= argc) {
+                std::fputs("dump-axis: --axis requires an id\n", stderr);
+                return 2;
+            }
+            axis_id = std::string{argv[++i]};
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "dump-axis: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!rom_path.has_value()) {
+            rom_path = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "dump-axis: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!def_path.has_value() || !axis_id.has_value() || !rom_path.has_value()) {
+        std::fputs(
+            "dump-axis: missing required arguments\n"
+            "Usage: subuwutuner-cli dump-axis --def <pack.toml> --axis <id> <FILE>\n",
+            stderr);
+        return 2;
+    }
+
+    auto const def = st::Definition::from_file(*def_path);
+    if (!def.has_value()) {
+        std::fprintf(stderr, "dump-axis: %s\n", def.error().to_string().c_str());
+        return 1;
+    }
+    auto const rom = st::Rom::from_file(*rom_path);
+    if (!rom.has_value()) {
+        std::fprintf(stderr, "dump-axis: %s\n", rom.error().to_string().c_str());
+        return 1;
+    }
+
+    auto const axis = def->find_axis(*axis_id);
+    if (axis == nullptr) {
+        std::fprintf(stderr, "dump-axis: axis '%s' not found in pack\n", axis_id->c_str());
+        std::fputs("Available axes:\n", stderr);
+        for (auto const &a : def->axes()) {
+            std::fprintf(stderr, "  %s\n", a.id.c_str());
+        }
+        return 1;
+    }
+
+    auto const values = def->read_axis_values(*rom, *axis);
+    if (!values.has_value()) {
+        std::fprintf(stderr, "dump-axis: %s\n", values.error().to_string().c_str());
+        return 1;
+    }
+
+    auto const *scaling = def->find_scaling(axis->scaling);
+    auto const  unit    = (scaling != nullptr ? scaling->unit : axis->unit);
+    auto const  precision =
+        scaling != nullptr ? scaling->precision : 0;
+
+    std::printf("# %s  (%zu values%s%s)\n", axis->id.c_str(), values->size(),
+                unit.empty() ? "" : ", unit=", unit.c_str());
+    for (auto const v : *values) {
+        std::printf("%.*f\n", precision, v);
+    }
+    return 0;
 }
 
 int cmd_rom_info(int argc, char *argv[]) {
@@ -177,6 +258,9 @@ int main(int argc, char *argv[]) {
     std::string_view const cmd{argv[1]};
     if (cmd == "rom-info") {
         return cmd_rom_info(argc - 2, argv + 2);
+    }
+    if (cmd == "dump-axis") {
+        return cmd_dump_axis(argc - 2, argv + 2);
     }
 
     std::fprintf(stderr, "subuwutuner-cli: unknown argument: %s\n", argv[1]);

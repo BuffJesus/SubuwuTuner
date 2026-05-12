@@ -295,6 +295,152 @@ TEST_CASE("Definition::matches returns nullopt on no match", "[defs][matches]") 
     REQUIRE_FALSE(result.has_value());
 }
 
+TEST_CASE("read_typed handles every supported DataType", "[defs][read_typed]") {
+    // Bytes laid out big-endian: 0x12, 0x34, 0x56, 0x78
+    auto const rom = st::Rom::from_bytes({0x12, 0x34, 0x56, 0x78});
+
+    REQUIRE(*st::read_typed(rom, 0, st::DataType::Uint8) == 0x12);
+
+    auto const int8 = st::read_typed(rom, 0, st::DataType::Int8);
+    REQUIRE(int8.has_value());
+    REQUIRE(*int8 == 0x12);
+
+    auto const u16be = st::read_typed(rom, 0, st::DataType::Uint16Be);
+    REQUIRE(u16be.has_value());
+    REQUIRE(*u16be == 0x1234);
+
+    auto const u16le = st::read_typed(rom, 0, st::DataType::Uint16Le);
+    REQUIRE(u16le.has_value());
+    REQUIRE(*u16le == 0x3412);
+
+    auto const u32be = st::read_typed(rom, 0, st::DataType::Uint32Be);
+    REQUIRE(u32be.has_value());
+    REQUIRE(*u32be == static_cast<double>(0x12345678U));
+
+    auto const u32le = st::read_typed(rom, 0, st::DataType::Uint32Le);
+    REQUIRE(u32le.has_value());
+    REQUIRE(*u32le == static_cast<double>(0x78563412U));
+}
+
+TEST_CASE("read_typed interprets signed bytes correctly", "[defs][read_typed]") {
+    // 0xFF reads as -1 when typed as Int8, 255 as Uint8.
+    auto const rom = st::Rom::from_bytes({0xFF, 0xFE});
+
+    REQUIRE(*st::read_typed(rom, 0, st::DataType::Uint8) == 255.0);
+    REQUIRE(*st::read_typed(rom, 0, st::DataType::Int8) == -1.0);
+
+    REQUIRE(*st::read_typed(rom, 0, st::DataType::Uint16Be) == 65534.0);
+    REQUIRE(*st::read_typed(rom, 0, st::DataType::Int16Be) == -2.0);
+}
+
+TEST_CASE("read_typed reports OutOfRange on a short ROM", "[defs][read_typed]") {
+    auto const rom = st::Rom::from_bytes({0x12});
+    auto const r   = st::read_typed(rom, 0, st::DataType::Uint16Be);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::OutOfRange);
+}
+
+TEST_CASE("read_typed decodes IEEE 754 float32 (big-endian)",
+          "[defs][read_typed][float]") {
+    // 1.0f in IEEE 754 = 0x3F800000 (big-endian bytes: 3F 80 00 00).
+    auto const rom = st::Rom::from_bytes({0x3F, 0x80, 0x00, 0x00});
+    auto const r   = st::read_typed(rom, 0, st::DataType::Float32Be);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == 1.0);
+}
+
+TEST_CASE("apply_scaling: linear factor and offset", "[defs][apply_scaling]") {
+    st::Scaling s;
+    s.formula = st::LinearScaling{.factor = 0.5, .offset = 10.0};
+    REQUIRE(st::apply_scaling(100.0, s) == 60.0);
+    REQUIRE(st::apply_scaling(0.0,   s) == 10.0);
+    REQUIRE(st::apply_scaling(-20.0, s) == 0.0);
+}
+
+TEST_CASE("apply_scaling: piecewise interpolates between breakpoints",
+          "[defs][apply_scaling]") {
+    st::Scaling s;
+    s.formula = st::PiecewiseScaling{
+        .breakpoints = {0.0, 100.0, 200.0},
+        .values      = {1.0, 2.0,   3.0},
+    };
+    REQUIRE(st::apply_scaling(0.0,   s) == 1.0);
+    REQUIRE(st::apply_scaling(50.0,  s) == 1.5);
+    REQUIRE(st::apply_scaling(150.0, s) == 2.5);
+    REQUIRE(st::apply_scaling(200.0, s) == 3.0);
+
+    // Below first breakpoint clamps to first value; above last clamps to last.
+    REQUIRE(st::apply_scaling(-10.0, s) == 1.0);
+    REQUIRE(st::apply_scaling(500.0, s) == 3.0);
+}
+
+TEST_CASE("Definition::read_axis_values reads and scales axis bytes",
+          "[defs][read_axis_values]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 32
+
+[[scaling]]
+id        = "rpm_x100"
+formula   = "linear"
+factor    = 100.0
+data_type = "uint16_be"
+
+[[axis]]
+id        = "rpm_axis"
+type      = "static"
+address   = 0
+length    = 4
+data_type = "uint16_be"
+scaling   = "rpm_x100"
+)toml");
+    REQUIRE(def_r.has_value());
+    auto const &def = *def_r;
+
+    // ROM contains 4 big-endian uint16s: 8, 20, 40, 60. After x100 scaling:
+    // 800, 2000, 4000, 6000.
+    auto const rom = st::Rom::from_bytes(
+        {0x00, 0x08, 0x00, 0x14, 0x00, 0x28, 0x00, 0x3C, 0x00, 0x00});
+
+    auto const axis = def.find_axis("rpm_axis");
+    REQUIRE(axis != nullptr);
+
+    auto const vals = def.read_axis_values(rom, *axis);
+    REQUIRE(vals.has_value());
+    REQUIRE(vals->size() == 4);
+    REQUIRE((*vals)[0] == 800.0);
+    REQUIRE((*vals)[1] == 2000.0);
+    REQUIRE((*vals)[2] == 4000.0);
+    REQUIRE((*vals)[3] == 6000.0);
+}
+
+TEST_CASE("Definition::read_axis_values fails OutOfRange when axis extends past ROM",
+          "[defs][read_axis_values]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "x"
+endianness = "big"
+
+[[axis]]
+id        = "huge"
+type      = "static"
+address   = 100
+length    = 8
+data_type = "uint16_be"
+)toml");
+    REQUIRE(def_r.has_value());
+
+    auto const rom  = st::Rom::from_bytes({0x00, 0x00, 0x00, 0x00});
+    auto const axis = def_r->find_axis("huge");
+    REQUIRE(axis != nullptr);
+
+    auto const vals = def_r->read_axis_values(rom, *axis);
+    REQUIRE_FALSE(vals.has_value());
+    REQUIRE(vals.error().code() == st::ErrorCode::OutOfRange);
+}
+
 TEST_CASE("parse_data_type round-trips known values", "[defs][types]") {
     REQUIRE(st::parse_data_type("uint8").has_value());
     REQUIRE(*st::parse_data_type("uint8") == st::DataType::Uint8);

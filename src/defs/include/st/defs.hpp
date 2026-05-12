@@ -40,6 +40,12 @@ enum class DataType {
 [[nodiscard]] std::string_view  to_string(DataType dt) noexcept;
 [[nodiscard]] std::size_t       byte_size(DataType dt) noexcept;
 
+// Read `byte_size(dt)` bytes from `rom` at `offset`, interpret per `dt`, and
+// return the value as a double. The double carries integer values exactly up
+// to 2^53; for float32_* the conversion is lossless. Returns OutOfRange if
+// the read would extend past the ROM.
+[[nodiscard]] Result<double> read_typed(Rom const &rom, std::size_t offset, DataType dt);
+
 // How to find the calibration ID inside a ROM and which CID strings this pack
 // claims to match.
 struct Identification {
@@ -90,6 +96,9 @@ struct Scaling {
     int            precision{0};
     DataType       data_type{DataType::Uint8};
 };
+
+// Apply a scaling: raw -> engineering units.
+[[nodiscard]] double apply_scaling(double raw, Scaling const &s) noexcept;
 
 // Index axis for a table — values live in the ROM at a fixed offset.
 struct Axis {
@@ -159,6 +168,12 @@ class Definition {
     // If `rom` matches one of the [[identification]] entries, return the
     // entry's `name`. Otherwise nullopt.
     [[nodiscard]] std::optional<std::string> matches(Rom const &rom) const;
+
+    // Read `axis.length` values from the ROM, applying `axis.scaling` if it
+    // resolves to a known scaling. If the axis has no scaling, raw values
+    // are returned as-is.
+    [[nodiscard]] Result<std::vector<double>> read_axis_values(Rom const &rom,
+                                                               Axis const &axis) const;
 
   private:
     Pack                        pack_;

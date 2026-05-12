@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <ios>
@@ -339,6 +340,111 @@ std::size_t byte_size(DataType dt) noexcept {
     return 0;
 }
 
+namespace {
+
+// Swap bytes of a 32-bit value.
+constexpr std::uint32_t byteswap32(std::uint32_t v) noexcept {
+    return ((v >> 24) & 0x000000FFU) | ((v >> 8) & 0x0000FF00U)
+         | ((v << 8) & 0x00FF0000U)  | ((v << 24) & 0xFF000000U);
+}
+
+// IEEE 754 float32 bit-pattern -> float, host-endianness-agnostic.
+float bits_to_float(std::uint32_t bits) noexcept {
+    float    f;
+    std::memcpy(&f, &bits, sizeof(f));
+    return f;
+}
+
+} // namespace
+
+Result<double> read_typed(Rom const &rom, std::size_t offset, DataType dt) {
+    switch (dt) {
+        case DataType::Uint8: {
+            auto const r = rom.read_u8(offset);
+            if (!r.has_value()) return failure(r.error());
+            return static_cast<double>(*r);
+        }
+        case DataType::Int8: {
+            auto const r = rom.read_u8(offset);
+            if (!r.has_value()) return failure(r.error());
+            return static_cast<double>(static_cast<std::int8_t>(*r));
+        }
+        case DataType::Uint16Be: {
+            auto const r = rom.read_u16_be(offset);
+            if (!r.has_value()) return failure(r.error());
+            return static_cast<double>(*r);
+        }
+        case DataType::Uint16Le: {
+            auto const r = rom.read_u16_le(offset);
+            if (!r.has_value()) return failure(r.error());
+            return static_cast<double>(*r);
+        }
+        case DataType::Int16Be: {
+            auto const r = rom.read_u16_be(offset);
+            if (!r.has_value()) return failure(r.error());
+            return static_cast<double>(static_cast<std::int16_t>(*r));
+        }
+        case DataType::Int16Le: {
+            auto const r = rom.read_u16_le(offset);
+            if (!r.has_value()) return failure(r.error());
+            return static_cast<double>(static_cast<std::int16_t>(*r));
+        }
+        case DataType::Uint32Be: {
+            auto const r = rom.read_u32_be(offset);
+            if (!r.has_value()) return failure(r.error());
+            return static_cast<double>(*r);
+        }
+        case DataType::Uint32Le: {
+            auto const r = rom.read_u32_le(offset);
+            if (!r.has_value()) return failure(r.error());
+            return static_cast<double>(*r);
+        }
+        case DataType::Int32Be: {
+            auto const r = rom.read_u32_be(offset);
+            if (!r.has_value()) return failure(r.error());
+            return static_cast<double>(static_cast<std::int32_t>(*r));
+        }
+        case DataType::Int32Le: {
+            auto const r = rom.read_u32_le(offset);
+            if (!r.has_value()) return failure(r.error());
+            return static_cast<double>(static_cast<std::int32_t>(*r));
+        }
+        case DataType::Float32Be: {
+            auto const r = rom.read_u32_be(offset);
+            if (!r.has_value()) return failure(r.error());
+            return static_cast<double>(bits_to_float(*r));
+        }
+        case DataType::Float32Le: {
+            auto const r = rom.read_u32_le(offset);
+            if (!r.has_value()) return failure(r.error());
+            return static_cast<double>(bits_to_float(*r));
+        }
+    }
+    return failure(ErrorCode::InvalidArgument, "unknown DataType");
+}
+
+double apply_scaling(double raw, Scaling const &s) noexcept {
+    if (auto const *lin = std::get_if<LinearScaling>(&s.formula); lin != nullptr) {
+        return raw * lin->factor + lin->offset;
+    }
+    auto const *pw = std::get_if<PiecewiseScaling>(&s.formula);
+    if (pw == nullptr || pw->breakpoints.empty()) {
+        return raw;
+    }
+    // Linear interpolation between the (breakpoints[i], values[i]) pairs.
+    auto const &bp = pw->breakpoints;
+    auto const &v  = pw->values;
+    if (raw <= bp.front()) return v.front();
+    if (raw >= bp.back())  return v.back();
+    for (std::size_t i = 1; i < bp.size(); ++i) {
+        if (raw <= bp[i]) {
+            double const t = (raw - bp[i - 1]) / (bp[i] - bp[i - 1]);
+            return v[i - 1] + t * (v[i] - v[i - 1]);
+        }
+    }
+    return v.back();
+}
+
 // ---- Definition ----------------------------------------------------------
 
 Result<Definition> Definition::from_toml_string(std::string_view toml) {
@@ -504,6 +610,24 @@ Pid const *Definition::find_pid(std::string_view id) const noexcept {
     auto it = std::find_if(pids_.begin(), pids_.end(),
                            [&](Pid const &p) { return p.id == id; });
     return it == pids_.end() ? nullptr : &*it;
+}
+
+Result<std::vector<double>> Definition::read_axis_values(Rom const &rom,
+                                                          Axis const &axis) const {
+    std::vector<double> out;
+    out.reserve(axis.length);
+
+    auto const step    = byte_size(axis.data_type);
+    auto const scaling = find_scaling(axis.scaling);
+
+    for (std::size_t i = 0; i < axis.length; ++i) {
+        auto const raw = read_typed(rom, axis.address + i * step, axis.data_type);
+        if (!raw.has_value()) {
+            return failure(raw.error());
+        }
+        out.push_back(scaling != nullptr ? apply_scaling(*raw, *scaling) : *raw);
+    }
+    return out;
 }
 
 std::optional<std::string> Definition::matches(Rom const &rom) const {
