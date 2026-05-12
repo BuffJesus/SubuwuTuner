@@ -149,10 +149,12 @@ TEST_CASE("Flasher::execute rejects a write whose data.size() != length",
     plan.writes.push_back({{0x00001000, 4}, {0xDE, 0xAD, 0xBE}});  // 3 != 4
     flash::Flasher f{t};
     auto const     r = f.execute(plan);
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+    REQUIRE_FALSE(r.ok());
+    REQUIRE(r.error->code() == st::ErrorCode::InvalidArgument);
     // No I/O attempted.
     REQUIRE(t.send_log().empty());
+    // Even on validation failure, the report comes back populated.
+    REQUIRE_FALSE(r.report.entered_session);
 }
 
 // ---------------------------------------------------------------------
@@ -178,15 +180,15 @@ TEST_CASE("Flasher::execute dry_run exercises session + CC only",
 
     flash::Flasher f{t};
     auto const     r = f.execute(plan);
-    REQUIRE(r.has_value());
-    REQUIRE(r->entered_session);
-    REQUIRE(r->silenced_bus);
-    REQUIRE(r->restored_bus);
-    REQUIRE(r->bytes_transferred == 0);
-    REQUIRE(r->sectors.size() == 1);
+    REQUIRE(r.ok());
+    REQUIRE(r.report.entered_session);
+    REQUIRE(r.report.silenced_bus);
+    REQUIRE(r.report.restored_bus);
+    REQUIRE(r.report.bytes_transferred == 0);
+    REQUIRE(r.report.sectors.size() == 1);
     // Every per-sector step is false because we skipped them.
-    REQUIRE_FALSE(r->sectors[0].erased);
-    REQUIRE_FALSE(r->sectors[0].transferred);
+    REQUIRE_FALSE(r.report.sectors[0].erased);
+    REQUIRE_FALSE(r.report.sectors[0].transferred);
     REQUIRE(t.exhausted());
 }
 
@@ -246,21 +248,21 @@ TEST_CASE("Flasher::execute full single-sector flash with verify",
 
     flash::Flasher f{t};
     auto const     r = f.execute(plan);
-    REQUIRE(r.has_value());
-    REQUIRE(r->entered_session);
-    REQUIRE(r->silenced_bus);
-    REQUIRE(r->restored_bus);
-    REQUIRE(r->sectors.size() == 1);
-    auto const &so = r->sectors[0];
+    REQUIRE(r.ok());
+    REQUIRE(r.report.entered_session);
+    REQUIRE(r.report.silenced_bus);
+    REQUIRE(r.report.restored_bus);
+    REQUIRE(r.report.sectors.size() == 1);
+    auto const &so = r.report.sectors[0];
     REQUIRE(so.erased);
     REQUIRE(so.downloaded);
     REQUIRE(so.transferred);
     REQUIRE(so.exited);
     REQUIRE(so.check_deps_passed);
     REQUIRE(so.verified);
-    REQUIRE(r->bytes_transferred == size);
-    REQUIRE(r->all_sectors_completed());
-    REQUIRE(r->all_sectors_verified());
+    REQUIRE(r.report.bytes_transferred == size);
+    REQUIRE(r.report.all_sectors_completed());
+    REQUIRE(r.report.all_sectors_verified());
     REQUIRE(t.exhausted());
 }
 
@@ -292,8 +294,14 @@ TEST_CASE("Flasher::execute surfaces an NRC on RequestDownload",
 
     flash::Flasher f{t};
     auto const     r = f.execute(plan);
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+    REQUIRE_FALSE(r.ok());
+    REQUIRE(r.error->code() == st::ErrorCode::EcuRejected);
+    // Partial-failure report visibility: erase succeeded for this sector
+    // even though the download was denied. That's exactly the case the
+    // new ExecuteOutcome shape was meant to expose.
+    REQUIRE(r.report.sectors.size() == 1);
+    REQUIRE(r.report.sectors[0].erased);
+    REQUIRE_FALSE(r.report.sectors[0].downloaded);
 }
 
 // ---------------------------------------------------------------------
@@ -708,7 +716,7 @@ TEST_CASE("Flasher::execute writes a journal manifest on every sector",
 
     flash::Flasher f{t};
     auto const     r = f.execute(plan);
-    REQUIRE(r.has_value());
+    REQUIRE(r.ok());
 
     // After execute returns, the journal file exists and reflects the
     // final state.
@@ -771,7 +779,11 @@ TEST_CASE("Flasher::execute journal captures partial mid-flash failure",
 
     flash::Flasher f{t};
     auto const     r = f.execute(plan);
-    REQUIRE_FALSE(r.has_value());
+    REQUIRE_FALSE(r.ok());
+    // In-memory partial-state visibility matches the on-disk journal.
+    REQUIRE(r.report.sectors.size() == 2);
+    REQUIRE(r.report.sectors[0].transferred);
+    REQUIRE_FALSE(r.report.sectors[1].transferred);
 
     // The journal on disk reflects: sector 1 fully transferred, sector
     // 2 with transferred=false (erase failed before any data moved).
@@ -803,7 +815,7 @@ TEST_CASE("Flasher::execute with no journal_path makes no journal file",
 
     flash::Flasher f{t};
     auto const     r = f.execute(plan);
-    REQUIRE(r.has_value());
+    REQUIRE(r.ok());
     // journal_path is empty by default; nothing written. Nothing to assert
     // about the filesystem here, but the test confirms execute() works
     // through dry-run without trying to open an empty path.
@@ -984,11 +996,11 @@ TEST_CASE("Flasher::execute reports verify_after_write mismatch",
 
     flash::Flasher f{t};
     auto const     r = f.execute(plan);
-    REQUIRE(r.has_value());
-    REQUIRE(r->sectors.size() == 1);
-    REQUIRE(r->sectors[0].transferred);
-    REQUIRE(r->sectors[0].check_deps_passed);
-    REQUIRE_FALSE(r->sectors[0].verified);
-    REQUIRE_FALSE(r->all_sectors_verified());
+    REQUIRE(r.ok());
+    REQUIRE(r.report.sectors.size() == 1);
+    REQUIRE(r.report.sectors[0].transferred);
+    REQUIRE(r.report.sectors[0].check_deps_passed);
+    REQUIRE_FALSE(r.report.sectors[0].verified);
+    REQUIRE_FALSE(r.report.all_sectors_verified());
     REQUIRE(t.exhausted());
 }

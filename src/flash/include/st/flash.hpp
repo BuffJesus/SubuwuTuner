@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -140,6 +141,26 @@ struct FlashReport {
     [[nodiscard]] bool all_sectors_verified() const noexcept;
 };
 
+// What `Flasher::execute` returns. The report is ALWAYS populated, even
+// on failure — which lets callers diagnose where in the flash sequence
+// the error happened (entered_session false ↔ DSC failed; sectors[i]
+// with erased=true, downloaded=false ↔ RequestDownload failed on
+// sector i, etc.). When `error` is nullopt the flash succeeded; when
+// set, its `code()` and `message()` describe what went wrong.
+//
+// Previously `execute` returned `Result<FlashReport>` and the failure
+// path discarded the report entirely. The journal mechanism captured
+// partial state on disk per-sector, but session-level failures (DSC,
+// initial CommunicationControl) left no trace at all. ExecuteOutcome
+// fixes that by guaranteeing in-memory visibility into partial state
+// regardless of where in the sequence the failure occurred.
+struct ExecuteOutcome {
+    FlashReport          report;
+    std::optional<Error> error;
+
+    [[nodiscard]] bool ok() const noexcept { return !error.has_value(); }
+};
+
 class Flasher {
   public:
     explicit Flasher(transport::ITransport &t) noexcept : client_{t} {}
@@ -166,10 +187,10 @@ class Flasher {
         std::uint32_t                 sector_size = 0x1000,
         std::uint32_t                 base_address = 0);
 
-    // Execute a plan. Always returns the in-progress `FlashReport` even
-    // when the wrapped error is non-empty, so the caller can inspect
-    // partial-failure state.
-    [[nodiscard]] Result<FlashReport> execute(FlashPlan const &plan);
+    // Execute a plan. Always returns an `ExecuteOutcome` whose `report`
+    // reflects in-progress state up to wherever the sequence stopped;
+    // `error` is set iff the flash did not complete successfully.
+    [[nodiscard]] ExecuteOutcome execute(FlashPlan const &plan);
 
   private:
     ecu::uds::UdsClient client_;

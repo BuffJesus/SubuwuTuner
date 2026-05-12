@@ -162,31 +162,42 @@ std::uint32_t choose_block_payload(std::uint32_t reported_max,
 
 } // namespace
 
-Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
+ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
     FlashReport report{};
     report.sectors.reserve(plan.writes.size());
+
+    // Failure-path helper: package the in-progress report + an Error
+    // into an ExecuteOutcome and return. Keeps the original failure
+    // sites readable while guaranteeing the partial report is never
+    // discarded.
+    auto bail = [&](ErrorCode code, std::string message) {
+        ExecuteOutcome out;
+        out.report = std::move(report);
+        out.error  = Error{code, std::move(message)};
+        return out;
+    };
 
     // Validate the plan before touching the bus.
     for (auto const &w : plan.writes) {
         if (w.data.size() != w.sector.length) {
-            return failure(ErrorCode::InvalidArgument,
-                           "flash: SectorWrite.data.size() ("
-                           + std::to_string(w.data.size())
-                           + ") != sector.length ("
-                           + std::to_string(w.sector.length) + ")");
+            return bail(ErrorCode::InvalidArgument,
+                        "flash: SectorWrite.data.size() ("
+                        + std::to_string(w.data.size())
+                        + ") != sector.length ("
+                        + std::to_string(w.sector.length) + ")");
         }
         if (w.sector.length == 0) {
-            return failure(ErrorCode::InvalidArgument,
-                           "flash: SectorWrite.sector.length must be > 0");
+            return bail(ErrorCode::InvalidArgument,
+                        "flash: SectorWrite.sector.length must be > 0");
         }
     }
 
     // 1. Enter programming session.
     if (auto s = client_.diagnostic_session_control(plan.session);
         !s.has_value()) {
-        return failure(s.error().code(),
-                       "flash: diagnostic_session_control failed: "
-                       + std::string{s.error().message()});
+        return bail(s.error().code(),
+                    "flash: diagnostic_session_control failed: "
+                    + std::string{s.error().message()});
     }
     report.entered_session = true;
 
@@ -213,9 +224,9 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
                 ecu::uds::kCcDisableRxAndTx,
                 ecu::uds::kCtNormalAndNetworkManagement);
             !s.has_value()) {
-            return failure(s.error().code(),
-                           "flash: communication_control(off) failed: "
-                           + std::string{s.error().message()});
+            return bail(s.error().code(),
+                        "flash: communication_control(off) failed: "
+                        + std::string{s.error().message()});
         }
         report.silenced_bus = true;
     }
@@ -240,10 +251,10 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
                 build_erase_option_record(w.sector.address, w.sector.length));
             if (!erase.has_value()) {
                 commit_outcome(outcome);
-                return failure(erase.error().code(),
-                               "flash: eraseMemory failed at 0x"
-                               + std::to_string(w.sector.address) + ": "
-                               + std::string{erase.error().message()});
+                return bail(erase.error().code(),
+                            "flash: eraseMemory failed at 0x"
+                            + std::to_string(w.sector.address) + ": "
+                            + std::string{erase.error().message()});
             }
             outcome.erased = true;
 
@@ -252,20 +263,20 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
                 plan.data_format, w.sector.address, w.sector.length);
             if (!rdl.has_value()) {
                 commit_outcome(outcome);
-                return failure(rdl.error().code(),
-                               "flash: request_download failed at 0x"
-                               + std::to_string(w.sector.address) + ": "
-                               + std::string{rdl.error().message()});
+                return bail(rdl.error().code(),
+                            "flash: request_download failed at 0x"
+                            + std::to_string(w.sector.address) + ": "
+                            + std::string{rdl.error().message()});
             }
             outcome.downloaded = true;
             std::uint32_t const block_payload =
                 choose_block_payload(*rdl, plan.block_size_hint);
             if (block_payload == 0) {
                 commit_outcome(outcome);
-                return failure(ErrorCode::EcuRejected,
-                               "flash: ECU reported unusable "
-                               "maxNumberOfBlockLength="
-                               + std::to_string(*rdl));
+                return bail(ErrorCode::EcuRejected,
+                            "flash: ECU reported unusable "
+                            "maxNumberOfBlockLength="
+                            + std::to_string(*rdl));
             }
 
             // 3c. TransferData blocks.
@@ -281,11 +292,11 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
                     !s.has_value()) {
                     report.bytes_transferred += offset;
                     commit_outcome(outcome);
-                    return failure(s.error().code(),
-                                   "flash: transfer_data counter="
-                                   + std::to_string(counter)
-                                   + " failed: "
-                                   + std::string{s.error().message()});
+                    return bail(s.error().code(),
+                                "flash: transfer_data counter="
+                                + std::to_string(counter)
+                                + " failed: "
+                                + std::string{s.error().message()});
                 }
                 offset  += this_block;
                 counter  = static_cast<std::uint8_t>(counter + 1U);
@@ -297,10 +308,10 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
             // 3d. RequestTransferExit.
             if (auto s = client_.request_transfer_exit(); !s.has_value()) {
                 commit_outcome(outcome);
-                return failure(s.error().code(),
-                               "flash: request_transfer_exit failed at 0x"
-                               + std::to_string(w.sector.address) + ": "
-                               + std::string{s.error().message()});
+                return bail(s.error().code(),
+                            "flash: request_transfer_exit failed at 0x"
+                            + std::to_string(w.sector.address) + ": "
+                            + std::string{s.error().message()});
             }
             outcome.exited = true;
 
@@ -310,11 +321,11 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
                 ecu::uds::kRidCheckProgrammingDependencies);
             if (!check.has_value()) {
                 commit_outcome(outcome);
-                return failure(check.error().code(),
-                               "flash: checkProgrammingDependencies "
-                               "failed at 0x"
-                               + std::to_string(w.sector.address) + ": "
-                               + std::string{check.error().message()});
+                return bail(check.error().code(),
+                            "flash: checkProgrammingDependencies "
+                            "failed at 0x"
+                            + std::to_string(w.sector.address) + ": "
+                            + std::string{check.error().message()});
             }
             outcome.check_deps_passed = true;
 
@@ -326,9 +337,9 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
                 if (!readback.has_value()) {
                     outcome.verified = false;
                     commit_outcome(outcome);
-                    return failure(readback.error().code(),
-                                   "flash: verify read-back failed: "
-                                   + std::string{readback.error().message()});
+                    return bail(readback.error().code(),
+                                "flash: verify read-back failed: "
+                                + std::string{readback.error().message()});
                 }
                 outcome.verified = (readback->size() == w.data.size()
                                     && std::equal(readback->begin(),
@@ -351,7 +362,9 @@ Result<FlashReport> Flasher::execute(FlashPlan const &plan) {
         }
     }
 
-    return report;
+    ExecuteOutcome out;
+    out.report = std::move(report);
+    return out;
 }
 
 // ---------------------------------------------------------------------
