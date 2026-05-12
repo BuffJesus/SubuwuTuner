@@ -208,6 +208,53 @@ Notes on the schema choices:
 - `emissions_relevant` drives the `EmissionsLinter` jurisdiction-profile UI (see `06-legal-ethics.md`). Default `false`.
 - `engine_safety_critical` is **always** consulted regardless of jurisdiction profile. Editing one of these maps triggers the dangerous-tune linter.
 
+## `dtcs.toml` — diagnostic-code enable bitmaps
+
+Most modern ECUs gate each DTC behind a bit in an enable bitmap somewhere in
+the calibration. Zeroing the bit disables the code: the ECU's monitoring
+logic still runs (and may still set internal flags), but the cluster's MIL
+stays off and the code doesn't surface to a scanner.
+
+This pairs with EGR/TGV/cat-equipment edits — see `06-legal-ethics.md` for
+the jurisdiction posture and how the linter treats `emissions_relevant`
+DTCs.
+
+```toml
+[[dtc_bitmap]]
+# Where the bitmap lives in the ROM and how big it is. Real ECUs may have
+# multiple bitmaps (primary / pending / permanent storage); each gets its
+# own entry.
+id           = "primary_dtc_enable"
+name         = "Primary DTC enable bitmap"
+address      = 0x00100000
+length_bytes = 32
+endianness   = "big"   # bit ordering within a byte; "big" = MSB-first
+
+[[dtc]]
+code        = "P0401"
+name        = "Insufficient EGR Flow Detected"
+bitmap_id   = "primary_dtc_enable"
+byte_offset = 12        # byte within the bitmap
+bit         = 3         # bit within that byte (0 = LSB, 7 = MSB)
+emissions_relevant = true
+
+[[dtc]]
+code        = "P0420"
+name        = "Catalyst System Efficiency Below Threshold (Bank 1)"
+bitmap_id   = "primary_dtc_enable"
+byte_offset = 14
+bit         = 0
+emissions_relevant = true
+```
+
+The loader validates that every `[[dtc]]`'s `(byte_offset, bit)` falls within
+its bitmap's declared `length_bytes`. The `emissions_relevant` flag drives
+the jurisdiction-profile linter exactly like it does on tables.
+
+The companion CLI is `project-disable-dtc` / `project-enable-dtc`, which
+read the bitmap, flip the named bit, and write back through the same
+infrastructure tables use. See `04-roadmap.md`.
+
 ## `pids.toml` — datalogger parameters
 
 ```toml

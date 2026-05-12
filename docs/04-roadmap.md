@@ -86,6 +86,13 @@ The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0
 - ELM327 write path (only if we can prove it's safe — likely never)
 - Bench-tools mode for ECU benches (Tactrix Pro J)
 - `defgen` tool to convert RomRaider XML → our TOML schema, run on every supported platform
+- **DTC enable/disable** via `[[dtc_bitmap]]` schema in definition packs (see `11-definition-format.md`). CLI:
+  ```
+  pack-dtcs <DEF>                       # list known codes + emissions flag
+  project-disable-dtc --code P0401[,...] <dir>
+  project-enable-dtc  --code P0401[,...] <dir>
+  ```
+  Same jurisdiction-profile linter applies as for emissions-flagged table edits.
 
 ## v1.5+ — CAN reverse-engineering toolkit
 
