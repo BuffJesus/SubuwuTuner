@@ -153,7 +153,8 @@ constexpr std::string_view kUsage =
     "                            pairing every request with a canned positive response.\n"
     "                            Useful as a regression fixture or as input to\n"
     "                            'flash-apply --trace ...' for hardware-free validation.\n"
-    "    autotune maf --log <CSV> --axis <v,v,…> --current <gs,gs,…>\n"
+    "    autotune maf --log <CSV> (--axis <v,v,…> | --axis-file <path>)\n"
+    "                 (--current <gs,gs,…> | --current-file <path>)\n"
     "                 [--gain 0.5] [--max-delta 8%] [--min-samples-per-cell 50]\n"
     "                 [--require-open-loop] [--no-smooth] [--strict-lint]\n"
     "                            Propose a MAF-scaling correction per docs/12. Reads a\n"
@@ -165,8 +166,10 @@ constexpr std::string_view kUsage =
     "                            engine-safety lint (non-monotonic + step discontinuity),\n"
     "                            and prints the per-cell diff. --strict-lint exits 3 on\n"
     "                            any violation. Hardware-free; no flashing.\n"
-    "    autotune knock-pull --log <CSV> --rpm-axis <r,r,…> --load-axis <l,l,…>\n"
-    "                        --current-timing <d,d,…>\n"
+    "    autotune knock-pull --log <CSV>\n"
+    "                        (--rpm-axis <r,r,…>  | --rpm-axis-file <path>)\n"
+    "                        (--load-axis <l,l,…> | --load-axis-file <path>)\n"
+    "                        (--current-timing <d,d,…> | --current-timing-file <path>)\n"
     "                        [--trigger-degrees 1.5] [--pull-step-degrees 0.75]\n"
     "                        [--min-samples-per-cell 30]\n"
     "                        [--max-neighbor-step-degrees 3.0] [--strict-lint]\n"
@@ -1590,6 +1593,61 @@ std::optional<double> parse_decimal(std::string_view raw) {
     return v;
 }
 
+// Read a flat list of decimals from a text file. Tokens may be
+// separated by commas, whitespace (including newlines), or any mix —
+// the reader walks character-by-character and parses any contiguous
+// numeric token. Lines starting with '#' are skipped (after leading
+// whitespace). Empty file → empty vector. Used for `--axis-file`,
+// `--current-file`, etc. so real-world tables (a 32-breakpoint MAF
+// axis isn't fun to inline on the command line) can live in a file.
+std::optional<std::vector<double>> read_decimal_list_file(
+    std::filesystem::path const &path) {
+    std::ifstream in{path, std::ios::binary};
+    if (!in) {
+        return std::nullopt;
+    }
+    std::ostringstream buf;
+    buf << in.rdbuf();
+    std::string const  text = buf.str();
+    std::vector<double> out;
+
+    std::size_t i = 0;
+    while (i < text.size()) {
+        // Skip whitespace and commas.
+        while (i < text.size()
+               && (std::isspace(static_cast<unsigned char>(text[i]))
+                   || text[i] == ',')) {
+            ++i;
+        }
+        if (i >= text.size()) {
+            break;
+        }
+        if (text[i] == '#') {
+            // Comment to end of line.
+            while (i < text.size() && text[i] != '\n') {
+                ++i;
+            }
+            continue;
+        }
+        // Parse a numeric token: read up to the next separator.
+        std::size_t const start = i;
+        while (i < text.size()
+               && !std::isspace(static_cast<unsigned char>(text[i]))
+               && text[i] != ',' && text[i] != '#') {
+            ++i;
+        }
+        std::string const token{text.data() + start, i - start};
+        char             *end = nullptr;
+        double const      v   = std::strtod(token.c_str(), &end);
+        if (end == token.c_str() || end == nullptr || *end != '\0'
+            || !std::isfinite(v)) {
+            return std::nullopt;
+        }
+        out.push_back(v);
+    }
+    return out;
+}
+
 // Parse a comma-separated list of doubles into a flat vector. Returns
 // nullopt if any field fails to parse; an empty input gives an empty
 // vector (the caller decides if that's an error).
@@ -1612,7 +1670,9 @@ std::optional<std::vector<double>> parse_double_list(std::string_view s) {
 int cmd_autotune_maf(int argc, char *argv[]) {
     std::optional<std::filesystem::path> log_path;
     std::optional<std::string>           axis_arg;
+    std::optional<std::filesystem::path> axis_file;
     std::optional<std::string>           current_arg;
+    std::optional<std::filesystem::path> current_file;
     std::optional<double>                gain;
     std::optional<double>                max_delta_pct;
     std::optional<std::size_t>           min_samples;
@@ -1642,9 +1702,21 @@ int cmd_autotune_maf(int argc, char *argv[]) {
             } else {
                 return 2;
             }
+        } else if (a == "--axis-file") {
+            if (auto const *v = require_arg("--axis-file"); v) {
+                axis_file = std::filesystem::path{v};
+            } else {
+                return 2;
+            }
         } else if (a == "--current") {
             if (auto const *v = require_arg("--current"); v) {
                 current_arg = std::string{v};
+            } else {
+                return 2;
+            }
+        } else if (a == "--current-file") {
+            if (auto const *v = require_arg("--current-file"); v) {
+                current_file = std::filesystem::path{v};
             } else {
                 return 2;
             }
@@ -1701,11 +1773,13 @@ int cmd_autotune_maf(int argc, char *argv[]) {
         }
     }
 
-    if (!log_path.has_value() || !axis_arg.has_value()
-        || !current_arg.has_value()) {
+    bool const axis_given    = axis_arg.has_value()    || axis_file.has_value();
+    bool const current_given = current_arg.has_value() || current_file.has_value();
+    if (!log_path.has_value() || !axis_given || !current_given) {
         std::fputs("autotune maf: missing required arguments\n", stderr);
         std::fputs("Usage: subuwutuner-cli autotune maf "
-                   "--log <csv> --axis <v,v,…> --current <gs,gs,…>\n"
+                   "--log <csv> (--axis <v,v,…> | --axis-file <path>)\n"
+                   "       (--current <gs,gs,…> | --current-file <path>)\n"
                    "       [--gain 0.5] [--max-delta 8%] "
                    "[--min-samples-per-cell 50]\n"
                    "       [--require-open-loop] [--no-smooth] "
@@ -1713,22 +1787,59 @@ int cmd_autotune_maf(int argc, char *argv[]) {
                    stderr);
         return 2;
     }
+    if (axis_arg.has_value() && axis_file.has_value()) {
+        std::fputs("autotune maf: --axis and --axis-file are mutually exclusive\n",
+                   stderr);
+        return 2;
+    }
+    if (current_arg.has_value() && current_file.has_value()) {
+        std::fputs("autotune maf: --current and --current-file are mutually "
+                   "exclusive\n",
+                   stderr);
+        return 2;
+    }
 
-    auto const axis = parse_double_list(*axis_arg);
+    std::optional<std::vector<double>> axis;
+    if (axis_file.has_value()) {
+        axis = read_decimal_list_file(*axis_file);
+        if (!axis.has_value()) {
+            std::fprintf(stderr,
+                         "autotune maf: cannot read --axis-file '%s' "
+                         "(missing, unreadable, or contains a non-numeric "
+                         "token)\n",
+                         axis_file->string().c_str());
+            return 1;
+        }
+    } else {
+        axis = parse_double_list(*axis_arg);
+    }
     if (!axis.has_value() || axis->empty()) {
-        std::fputs("autotune maf: --axis must be a non-empty comma-separated "
+        std::fputs("autotune maf: --axis / --axis-file must yield a non-empty "
                    "list of numbers\n", stderr);
         return 2;
     }
-    auto const current = parse_double_list(*current_arg);
+    std::optional<std::vector<double>> current;
+    if (current_file.has_value()) {
+        current = read_decimal_list_file(*current_file);
+        if (!current.has_value()) {
+            std::fprintf(stderr,
+                         "autotune maf: cannot read --current-file '%s' "
+                         "(missing, unreadable, or contains a non-numeric "
+                         "token)\n",
+                         current_file->string().c_str());
+            return 1;
+        }
+    } else {
+        current = parse_double_list(*current_arg);
+    }
     if (!current.has_value() || current->empty()) {
-        std::fputs("autotune maf: --current must be a non-empty comma-separated "
-                   "list of numbers\n", stderr);
+        std::fputs("autotune maf: --current / --current-file must yield a "
+                   "non-empty list of numbers\n", stderr);
         return 2;
     }
     if (axis->size() != current->size()) {
         std::fprintf(stderr,
-                     "autotune maf: --axis (%zu) and --current (%zu) must have "
+                     "autotune maf: axis (%zu) and current (%zu) must have "
                      "the same length\n",
                      axis->size(), current->size());
         return 2;
@@ -1875,8 +1986,11 @@ int cmd_autotune_maf(int argc, char *argv[]) {
 int cmd_autotune_knock_pull(int argc, char *argv[]) {
     std::optional<std::filesystem::path> log_path;
     std::optional<std::string>           rpm_axis_arg;
+    std::optional<std::filesystem::path> rpm_axis_file;
     std::optional<std::string>           load_axis_arg;
+    std::optional<std::filesystem::path> load_axis_file;
     std::optional<std::string>           current_arg;
+    std::optional<std::filesystem::path> current_file;
     std::optional<double>                trigger_deg;
     std::optional<double>                pull_step_deg;
     std::optional<std::size_t>           min_samples;
@@ -1907,13 +2021,26 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
             if (auto const *v = require_arg("--rpm-axis"); v) {
                 rpm_axis_arg = std::string{v};
             } else { return 2; }
+        } else if (a == "--rpm-axis-file") {
+            if (auto const *v = require_arg("--rpm-axis-file"); v) {
+                rpm_axis_file = std::filesystem::path{v};
+            } else { return 2; }
         } else if (a == "--load-axis") {
             if (auto const *v = require_arg("--load-axis"); v) {
                 load_axis_arg = std::string{v};
             } else { return 2; }
+        } else if (a == "--load-axis-file") {
+            if (auto const *v = require_arg("--load-axis-file"); v) {
+                load_axis_file = std::filesystem::path{v};
+            } else { return 2; }
         } else if (a == "--current-timing" || a == "--current") {
             if (auto const *v = require_arg("--current-timing"); v) {
                 current_arg = std::string{v};
+            } else { return 2; }
+        } else if (a == "--current-timing-file"
+                   || a == "--current-file") {
+            if (auto const *v = require_arg("--current-timing-file"); v) {
+                current_file = std::filesystem::path{v};
             } else { return 2; }
         } else if (a == "--trigger-degrees" || a == "--trigger") {
             if (auto const *v = require_arg("--trigger-degrees"); v) {
@@ -2018,15 +2145,18 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
         }
     }
 
-    if (!log_path.has_value() || !rpm_axis_arg.has_value()
-        || !load_axis_arg.has_value() || !current_arg.has_value()) {
+    bool const rpm_given     = rpm_axis_arg.has_value()  || rpm_axis_file.has_value();
+    bool const load_given    = load_axis_arg.has_value() || load_axis_file.has_value();
+    bool const current_given = current_arg.has_value()   || current_file.has_value();
+    if (!log_path.has_value() || !rpm_given || !load_given || !current_given) {
         std::fputs("autotune knock-pull: missing required arguments\n",
                    stderr);
         std::fputs("Usage: subuwutuner-cli autotune knock-pull "
                    "--log <csv>\n"
-                   "       --rpm-axis <r,r,…> --load-axis <l,l,…>\n"
-                   "       --current-timing <d,d,…>   "
-                   "(flat row-major, rows × cols = load × rpm)\n"
+                   "       (--rpm-axis <r,r,…> | --rpm-axis-file <path>)\n"
+                   "       (--load-axis <l,l,…> | --load-axis-file <path>)\n"
+                   "       (--current-timing <d,d,…> | --current-timing-file <path>)"
+                   "   (flat row-major, rows × cols = load × rpm)\n"
                    "       [--trigger-degrees 1.5] [--pull-step-degrees 0.75]\n"
                    "       [--min-samples-per-cell 30] "
                    "[--max-neighbor-step-degrees 3.0]\n"
@@ -2034,31 +2164,92 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
                    stderr);
         return 2;
     }
+    auto inline_and_file_exclusive = [](char const *flag_inline,
+                                         char const *flag_file,
+                                         bool        has_inline,
+                                         bool        has_file) {
+        if (has_inline && has_file) {
+            std::fprintf(stderr,
+                         "autotune knock-pull: %s and %s are mutually exclusive\n",
+                         flag_inline, flag_file);
+            return true;
+        }
+        return false;
+    };
+    if (inline_and_file_exclusive("--rpm-axis", "--rpm-axis-file",
+                                   rpm_axis_arg.has_value(),
+                                   rpm_axis_file.has_value())) {
+        return 2;
+    }
+    if (inline_and_file_exclusive("--load-axis", "--load-axis-file",
+                                   load_axis_arg.has_value(),
+                                   load_axis_file.has_value())) {
+        return 2;
+    }
+    if (inline_and_file_exclusive("--current-timing", "--current-timing-file",
+                                   current_arg.has_value(),
+                                   current_file.has_value())) {
+        return 2;
+    }
 
-    auto const rpm_axis = parse_double_list(*rpm_axis_arg);
-    if (!rpm_axis.has_value() || rpm_axis->empty()) {
-        std::fputs("autotune knock-pull: --rpm-axis must be a non-empty "
-                   "comma-separated list of numbers\n", stderr);
-        return 2;
+    // Returns 0 on success and fills `out`; returns 1 if the file
+    // path was given but couldn't be read (already printed by us — rc=1
+    // mirrors MAF's "I/O failed" exit code); returns 2 if the list was
+    // empty or the inline parser rejected the input (rc=2 mirrors MAF's
+    // "argument was malformed" exit code).
+    auto load_list = [](char const                                 *flag_file,
+                         char const                                 *list_label,
+                         std::optional<std::string> const           &inline_arg,
+                         std::optional<std::filesystem::path> const &file_arg,
+                         std::vector<double>                        &out) -> int {
+        std::optional<std::vector<double>> v;
+        if (file_arg.has_value()) {
+            v = read_decimal_list_file(*file_arg);
+            if (!v.has_value()) {
+                std::fprintf(stderr,
+                             "autotune knock-pull: cannot read %s '%s' "
+                             "(missing, unreadable, or contains a non-numeric "
+                             "token)\n",
+                             flag_file, file_arg->string().c_str());
+                return 1;
+            }
+        } else {
+            v = parse_double_list(*inline_arg);
+        }
+        if (!v.has_value() || v->empty()) {
+            std::fprintf(stderr,
+                         "autotune knock-pull: %s must yield a non-empty "
+                         "list of numbers\n", list_label);
+            return 2;
+        }
+        out = std::move(*v);
+        return 0;
+    };
+
+    std::vector<double> rpm_axis;
+    if (int const rc = load_list("--rpm-axis-file", "rpm-axis",
+                                 rpm_axis_arg, rpm_axis_file, rpm_axis);
+        rc != 0) {
+        return rc;
     }
-    auto const load_axis = parse_double_list(*load_axis_arg);
-    if (!load_axis.has_value() || load_axis->empty()) {
-        std::fputs("autotune knock-pull: --load-axis must be a non-empty "
-                   "comma-separated list of numbers\n", stderr);
-        return 2;
+    std::vector<double> load_axis;
+    if (int const rc = load_list("--load-axis-file", "load-axis",
+                                 load_axis_arg, load_axis_file, load_axis);
+        rc != 0) {
+        return rc;
     }
-    auto const current = parse_double_list(*current_arg);
-    if (!current.has_value()) {
-        std::fputs("autotune knock-pull: --current-timing must be a "
-                   "comma-separated list of numbers\n", stderr);
-        return 2;
+    std::vector<double> current;
+    if (int const rc = load_list("--current-timing-file", "current-timing",
+                                 current_arg, current_file, current);
+        rc != 0) {
+        return rc;
     }
-    if (current->size() != rpm_axis->size() * load_axis->size()) {
+    if (current.size() != rpm_axis.size() * load_axis.size()) {
         std::fprintf(stderr,
                      "autotune knock-pull: --current-timing length (%zu) must "
                      "equal --rpm-axis (%zu) × --load-axis (%zu) = %zu\n",
-                     current->size(), rpm_axis->size(), load_axis->size(),
-                     rpm_axis->size() * load_axis->size());
+                     current.size(), rpm_axis.size(), load_axis.size(),
+                     rpm_axis.size() * load_axis.size());
         return 2;
     }
 
@@ -2083,7 +2274,7 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
     if (min_samples.has_value())   { opts.min_samples_per_cell = *min_samples; }
 
     auto const pull_result = st::autotune::tune_knock_pull(
-        *rpm_axis, *load_axis, *current, *samples, opts);
+        rpm_axis, load_axis, current, *samples, opts);
     if (!pull_result.has_value()) {
         std::fprintf(stderr, "autotune knock-pull: %s\n",
                      pull_result.error().to_string().c_str());
@@ -2156,21 +2347,21 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
                 "(over ≥ %zu samples)\n",
                 opts.trigger_degrees, opts.min_samples_per_cell);
     if (pulled > 0) {
-        std::size_t const row = max_pull_cell / rpm_axis->size();
-        std::size_t const col = max_pull_cell % rpm_axis->size();
+        std::size_t const row = max_pull_cell / rpm_axis.size();
+        std::size_t const col = max_pull_cell % rpm_axis.size();
         std::printf("  Worst cell:            load=%.2f rpm=%.0f "
                     "pulled %.2f°\n",
-                    (*load_axis)[row], (*rpm_axis)[col], max_pull_deg);
+                    load_axis[row], rpm_axis[col], max_pull_deg);
     }
     if (enable_add_back) {
         std::printf("  Cells added back:      %zu (clean cells, +%.2f°)\n",
                     added_back, add_opts.add_step_degrees);
         if (added_back > 0) {
-            std::size_t const row = max_add_cell / rpm_axis->size();
-            std::size_t const col = max_add_cell % rpm_axis->size();
+            std::size_t const row = max_add_cell / rpm_axis.size();
+            std::size_t const col = max_add_cell % rpm_axis.size();
             std::printf("  Largest add-back:      load=%.2f rpm=%.0f "
                         "+%.2f°\n",
-                        (*load_axis)[row], (*rpm_axis)[col], max_add_deg);
+                        load_axis[row], rpm_axis[col], max_add_deg);
         }
     }
     std::printf("\n");
@@ -2181,18 +2372,18 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
     // same signed-degree format as pulled cells — a leading '+' makes
     // it obvious which direction the cell moved.
     std::printf("  load \\ rpm");
-    for (std::size_t c = 0; c < rpm_axis->size(); ++c) {
-        std::printf(" | %7.0f", (*rpm_axis)[c]);
+    for (std::size_t c = 0; c < rpm_axis.size(); ++c) {
+        std::printf(" | %7.0f", rpm_axis[c]);
     }
     std::printf("\n  -----------");
-    for (std::size_t c = 0; c < rpm_axis->size(); ++c) {
+    for (std::size_t c = 0; c < rpm_axis.size(); ++c) {
         std::printf("-+--------");
     }
     std::printf("\n");
-    for (std::size_t r = 0; r < load_axis->size(); ++r) {
-        std::printf("  %9.2f ", (*load_axis)[r]);
-        for (std::size_t c = 0; c < rpm_axis->size(); ++c) {
-            auto const &cell = result.cells[r * rpm_axis->size() + c];
+    for (std::size_t r = 0; r < load_axis.size(); ++r) {
+        std::printf("  %9.2f ", load_axis[r]);
+        for (std::size_t c = 0; c < rpm_axis.size(); ++c) {
+            auto const &cell = result.cells[r * rpm_axis.size() + c];
             double const delta = cell.proposed_value - cell.current_value;
             if (cell.pulled || delta != 0.0) {
                 std::printf("|  %+5.2f ", delta);
@@ -2211,7 +2402,7 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
         lint_opts.max_neighbor_step_degrees = *max_neighbor_step;
     }
     auto const violations = st::autotune::lint_knock_proposal(
-        *rpm_axis, *load_axis, result, lint_opts);
+        rpm_axis, load_axis, result, lint_opts);
     return print_lint_section(violations, strict_lint);
 }
 
