@@ -1218,6 +1218,58 @@ void render_table_grid(st::Definition::TableData const &td,
         return;
     }
 
+    auto const grid_rows = td.values.size();
+    auto const grid_cols_count = grid_rows == 0 ? std::size_t{0}
+                                                 : td.values.front().size();
+
+    // ---- Keyboard navigation ----
+    // Arrow keys move the cursor (collapsing the selection to a single
+    // cell); Shift+arrows extend by moving the cursor but leaving the
+    // anchor. Movement is clamped at edges (no wrap). The "Table"
+    // window must be the current focused window — gating prevents
+    // arrows from competing with the sidebar's filter input or any
+    // other input that has keyboard focus.
+    bool scroll_to_cursor = false;
+    if (selection.enabled && grid_rows > 0 && grid_cols_count > 0
+        && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
+        bool const shift = ImGui::GetIO().KeyShift;
+        bool       moved = false;
+        if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+            if (selection.r_cursor > 0) {
+                --selection.r_cursor;
+                moved = true;
+            }
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+            if (selection.r_cursor + 1 < grid_rows) {
+                ++selection.r_cursor;
+                moved = true;
+            }
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) {
+            if (selection.c_cursor > 0) {
+                --selection.c_cursor;
+                moved = true;
+            }
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) {
+            if (selection.c_cursor + 1 < grid_cols_count) {
+                ++selection.c_cursor;
+                moved = true;
+            }
+        }
+        if (moved) {
+            if (!shift) {
+                // Collapse to single cell so subsequent arrow taps
+                // move the whole selection rather than re-extending
+                // from the stale anchor.
+                selection.r_anchor = selection.r_cursor;
+                selection.c_anchor = selection.c_cursor;
+            }
+            scroll_to_cursor = true;
+        }
+    }
+
     auto const flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
                      | ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY
                      | ImGuiTableFlags_SizingFixedFit;
@@ -1282,6 +1334,14 @@ void render_table_grid(st::Definition::TableData const &td,
             if (ImGui::Selectable(buf, is_sel,
                                   ImGuiSelectableFlags_AllowDoubleClick)) {
                 selection.click(r, c, ImGui::GetIO().KeyShift);
+            }
+            // After arrow-key movement, scroll the cursor cell into
+            // the visible viewport so it never leaves the screen when
+            // the user navigates with the keyboard.
+            if (scroll_to_cursor && selection.enabled
+                && r == selection.r_cursor && c == selection.c_cursor) {
+                ImGui::SetScrollHereY(0.5f);
+                ImGui::SetScrollHereX(0.5f);
             }
             ImGui::PopID();
         }
@@ -1824,7 +1884,15 @@ int main(int argc, char *argv[]) {
     ImGui::CreateContext();
     ImPlot::CreateContext();
     auto &io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    // Deliberately NOT setting ImGuiConfigFlags_NavEnableKeyboard. With
+    // it on, ImGui auto-focuses the first focusable widget in each
+    // window and draws a permanent nav-focus rectangle around it —
+    // which reads as "one cell is highlighted and never unhighlights"
+    // in the data grid. Tab-cycling through hundreds of cells is not
+    // a workflow this app targets, and every actual keyboard nav we
+    // care about (arrow keys in the grid, Ctrl+F focus on the filter,
+    // Enter/Esc in modals, Ctrl+{O,S,Z,Y,Q}) is handled explicitly via
+    // IsKeyPressed and works without the nav system being on.
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
