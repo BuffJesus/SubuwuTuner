@@ -190,3 +190,143 @@ TEST_CASE("lint_maf_proposal: flat original region flags non-trivial "
     REQUIRE_FALSE(v.empty());
     CHECK(v.front().kind == at::LintViolationKind::StepDiscontinuity);
 }
+
+TEST_CASE("lint_kind_name: stable labels for each kind",
+          "[autotune][lint]") {
+    CHECK(std::string{at::lint_kind_name(
+              at::LintViolationKind::NonMonotonic)} == "non-monotonic");
+    CHECK(std::string{at::lint_kind_name(
+              at::LintViolationKind::StepDiscontinuity)}
+          == "step discontinuity");
+}
+
+// ---------------------------------------------------------------------
+// lint_knock_proposal
+// ---------------------------------------------------------------------
+
+namespace {
+
+// Build a KnockPullResult from a flat row-major proposed-timing
+// vector. Per-cell `current_value` defaults to `proposed_value + 1.0`
+// so the helper trivially registers as "pulled by 1.0" — the lint
+// doesn't care about pulled/not, only the proposed surface shape.
+at::KnockPullResult build_knock_result(std::size_t                rows,
+                                        std::size_t                cols,
+                                        std::vector<double> const &proposed) {
+    at::KnockPullResult r;
+    r.rows = rows;
+    r.cols = cols;
+    r.cells.reserve(proposed.size());
+    for (std::size_t i = 0; i < proposed.size(); ++i) {
+        at::KnockCellProposal c;
+        c.cell_index     = i;
+        c.current_value  = proposed[i] + 1.0;
+        c.proposed_value = proposed[i];
+        c.samples_used   = 50;
+        c.pulled         = true;
+        r.cells.push_back(c);
+    }
+    return r;
+}
+
+}  // namespace
+
+TEST_CASE("lint_knock_proposal: smooth surface → no violations",
+          "[autotune][lint][knock]") {
+    std::vector<double> rpm_axis {2000.0, 3000.0, 4000.0};
+    std::vector<double> load_axis{1.5, 2.5};
+    // 2 rows (load) × 3 cols (rpm). Gentle gradient: 1° step.
+    std::vector<double> timing {
+        22.0, 21.0, 20.0,
+        20.0, 19.0, 18.0,
+    };
+
+    auto const r = build_knock_result(2, 3, timing);
+    auto const v = at::lint_knock_proposal(rpm_axis, load_axis, r);
+    CHECK(v.empty());
+}
+
+TEST_CASE("lint_knock_proposal: RPM-axis discontinuity flagged",
+          "[autotune][lint][knock]") {
+    std::vector<double> rpm_axis {2000.0, 3000.0, 4000.0};
+    std::vector<double> load_axis{2.5};
+    // Single load row. Cell at rpm=3000 dropped by 5° vs neighbors —
+    // bigger than the default 3° threshold.
+    std::vector<double> timing {20.0, 15.0, 20.0};
+
+    auto const r = build_knock_result(1, 3, timing);
+    auto const v = at::lint_knock_proposal(rpm_axis, load_axis, r);
+    REQUIRE(v.size() == 2);   // (0→1) and (1→2)
+    for (auto const &x : v) {
+        CHECK(x.kind == at::LintViolationKind::StepDiscontinuity);
+        CHECK(x.message.find("RPM") != std::string::npos);
+    }
+}
+
+TEST_CASE("lint_knock_proposal: load-axis discontinuity flagged",
+          "[autotune][lint][knock]") {
+    std::vector<double> rpm_axis {3000.0};
+    std::vector<double> load_axis{1.0, 2.0, 3.0};
+    // Single RPM column. Cell at load=2.0 dropped by 5° — flags both
+    // (load 1→2) and (load 2→3).
+    std::vector<double> timing {20.0, 15.0, 20.0};
+
+    auto const r = build_knock_result(3, 1, timing);
+    auto const v = at::lint_knock_proposal(rpm_axis, load_axis, r);
+    REQUIRE(v.size() == 2);
+    for (auto const &x : v) {
+        CHECK(x.kind == at::LintViolationKind::StepDiscontinuity);
+        CHECK(x.message.find("load") != std::string::npos);
+    }
+}
+
+TEST_CASE("lint_knock_proposal: enforce flag disables the check",
+          "[autotune][lint][knock]") {
+    std::vector<double> rpm_axis {2000.0, 3000.0};
+    std::vector<double> load_axis{2.5};
+    std::vector<double> timing {20.0, 10.0};   // 10° step
+
+    auto const r = build_knock_result(1, 2, timing);
+    at::KnockLintOptions opts;
+    opts.enforce_neighbor_smoothness = false;
+    CHECK(at::lint_knock_proposal(rpm_axis, load_axis, r, opts).empty());
+}
+
+TEST_CASE("lint_knock_proposal: threshold is configurable",
+          "[autotune][lint][knock]") {
+    std::vector<double> rpm_axis {2000.0, 3000.0};
+    std::vector<double> load_axis{2.5};
+    std::vector<double> timing {20.0, 16.0};   // 4° step
+
+    auto const r = build_knock_result(1, 2, timing);
+    at::KnockLintOptions opts;
+    // Default 3° → flagged.
+    CHECK_FALSE(at::lint_knock_proposal(rpm_axis, load_axis, r, opts).empty());
+    // Raised to 5° → clean.
+    opts.max_neighbor_step_degrees = 5.0;
+    CHECK(at::lint_knock_proposal(rpm_axis, load_axis, r, opts).empty());
+}
+
+TEST_CASE("lint_knock_proposal: empty result is clean",
+          "[autotune][lint][knock]") {
+    std::vector<double> empty;
+    at::KnockPullResult r0;
+    r0.rows = 0;
+    r0.cols = 0;
+    CHECK(at::lint_knock_proposal(empty, empty, r0).empty());
+}
+
+TEST_CASE("lint_knock_proposal: mismatched cells.size() emits a "
+          "synthetic violation",
+          "[autotune][lint][knock]") {
+    std::vector<double> empty;
+    at::KnockPullResult r;
+    r.rows = 2;
+    r.cols = 2;
+    r.cells.resize(3);   // expected 4 — kernel bug or hand-crafted input
+
+    auto const v = at::lint_knock_proposal(empty, empty, r);
+    REQUIRE(v.size() == 1);
+    CHECK(v.front().kind == at::LintViolationKind::StepDiscontinuity);
+    CHECK(v.front().message.find("malformed") != std::string::npos);
+}

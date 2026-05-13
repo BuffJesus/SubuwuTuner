@@ -835,6 +835,19 @@ char const *lint_kind_name(LintViolationKind kind) noexcept {
     return "unknown violation";
 }
 
+namespace {
+
+// Single source of truth for the numeric formatting used in lint
+// violation messages. Both linters share this so a tuner sees
+// consistent value rendering across check kinds.
+std::string format_lint_value(double v) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%.4g", v);
+    return std::string{buf};
+}
+
+} // namespace
+
 std::vector<LintViolation> lint_maf_proposal(
     std::span<double const> axis,
     std::span<double const> current_scaling,
@@ -853,12 +866,6 @@ std::vector<LintViolation> lint_maf_proposal(
     constexpr double kMonoEps      = 1e-9;
     constexpr double kRelDenomEps  = 1e-9;
 
-    auto fmt_value = [](double v) {
-        char buf[32];
-        std::snprintf(buf, sizeof buf, "%.4g", v);
-        return std::string{buf};
-    };
-
     for (std::size_t i = 0; i + 1 < n; ++i) {
         double const prev_v = result.cells[i].proposed_value;
         double const next_v = result.cells[i + 1].proposed_value;
@@ -866,15 +873,16 @@ std::vector<LintViolation> lint_maf_proposal(
         if (opts.enforce_monotonic && next_v + kMonoEps < prev_v) {
             std::string axis_clause;
             if (i + 1 < axis.size()) {
-                axis_clause = " (v=" + fmt_value(axis[i]) + " → v="
-                              + fmt_value(axis[i + 1]) + ")";
+                axis_clause = " (v=" + format_lint_value(axis[i]) + " → v="
+                              + format_lint_value(axis[i + 1]) + ")";
             }
             violations.push_back(LintViolation{
                 LintViolationKind::NonMonotonic,
                 i,
                 "MAF proposed value falls between cells " + std::to_string(i)
                     + " and " + std::to_string(i + 1) + axis_clause
-                    + ": " + fmt_value(prev_v) + " → " + fmt_value(next_v),
+                    + ": " + format_lint_value(prev_v) + " → "
+                    + format_lint_value(next_v),
             });
         }
 
@@ -905,11 +913,97 @@ std::vector<LintViolation> lint_maf_proposal(
                     i,
                     "MAF step between cells " + std::to_string(i) + " and "
                         + std::to_string(i + 1)
-                        + " deviates by " + fmt_value(100.0 * ratio)
+                        + " deviates by " + format_lint_value(100.0 * ratio)
                         + "% from the original (step was "
-                        + fmt_value(orig_step) + ", proposed "
-                        + fmt_value(prop_step) + ")",
+                        + format_lint_value(orig_step) + ", proposed "
+                        + format_lint_value(prop_step) + ")",
                 });
+            }
+        }
+    }
+
+    return violations;
+}
+
+std::vector<LintViolation> lint_knock_proposal(
+    std::span<double const>    rpm_axis,
+    std::span<double const>    load_axis,
+    KnockPullResult const     &result,
+    KnockLintOptions const    &opts) {
+    std::vector<LintViolation> violations;
+
+    if (!opts.enforce_neighbor_smoothness) {
+        return violations;
+    }
+    auto const rows = result.rows;
+    auto const cols = result.cols;
+    if (rows == 0 || cols == 0) {
+        return violations;
+    }
+    if (result.cells.size() != rows * cols) {
+        // Surface the malformed shape as its own violation rather than
+        // silently passing — a buggy kernel or hand-built result should
+        // be visible to the user, not papered over.
+        violations.push_back(LintViolation{
+            LintViolationKind::StepDiscontinuity,
+            0,
+            "Knock proposal malformed: cells="
+                + std::to_string(result.cells.size())
+                + ", rows×cols=" + std::to_string(rows * cols),
+        });
+        return violations;
+    }
+
+    auto axis_label = [&](std::span<double const> axis,
+                          std::size_t              idx) -> std::string {
+        if (idx < axis.size()) {
+            return format_lint_value(axis[idx]);
+        }
+        return std::to_string(idx);
+    };
+
+    auto record = [&](char const  *direction,
+                      std::size_t  flat_idx,
+                      std::size_t  a_row, std::size_t a_col,
+                      std::size_t  b_row, std::size_t b_col,
+                      double       diff) {
+        violations.push_back(LintViolation{
+            LintViolationKind::StepDiscontinuity,
+            flat_idx,
+            std::string{"Knock timing step in "} + direction
+                + " direction between (load=" + axis_label(load_axis, a_row)
+                + ", rpm=" + axis_label(rpm_axis, a_col)
+                + ") and (load=" + axis_label(load_axis, b_row)
+                + ", rpm=" + axis_label(rpm_axis, b_col)
+                + ") is " + format_lint_value(diff) + "° (> "
+                + format_lint_value(opts.max_neighbor_step_degrees)
+                + "° threshold)",
+        });
+    };
+
+    // RPM-axis (row-neighbor) discontinuities.
+    for (std::size_t r = 0; r < rows; ++r) {
+        for (std::size_t c = 0; c + 1 < cols; ++c) {
+            std::size_t const idx_a = r * cols + c;
+            std::size_t const idx_b = idx_a + 1;
+            double const      diff  = std::abs(
+                result.cells[idx_a].proposed_value
+                - result.cells[idx_b].proposed_value);
+            if (diff > opts.max_neighbor_step_degrees) {
+                record("RPM", idx_a, r, c, r, c + 1, diff);
+            }
+        }
+    }
+    // Load-axis (column-neighbor) discontinuities.
+    for (std::size_t r = 0; r + 1 < rows; ++r) {
+        for (std::size_t c = 0; c < cols; ++c) {
+            std::size_t const idx_a = r * cols + c;
+            std::size_t const idx_b = idx_a + cols;
+            double const      diff  = std::abs(
+                result.cells[idx_a].proposed_value
+                - result.cells[idx_b].proposed_value);
+            if (diff > opts.max_neighbor_step_degrees) {
+                record("load", idx_a, r, c, r + 1, c, diff);
             }
         }
     }

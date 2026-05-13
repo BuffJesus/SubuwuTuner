@@ -169,12 +169,15 @@ constexpr std::string_view kUsage =
     "                        --current-timing <d,d,…>\n"
     "                        [--trigger-degrees 1.5] [--pull-step-degrees 0.75]\n"
     "                        [--min-samples-per-cell 30]\n"
+    "                        [--max-neighbor-step-degrees 3.0] [--strict-lint]\n"
     "                            Propose ignition-timing pull on cells with sustained\n"
     "                            knock per docs/12 §\"Knock-based ignition pull\". CSV\n"
     "                            cols: rpm, load, feedback_knock, coolant_c, iat_c;\n"
     "                            optional: limp_mode. --current-timing is flat row-major\n"
     "                            (rows × cols = load × rpm). Monotonic-subtract: cells\n"
-    "                            never gain timing. Hardware-free.\n";
+    "                            never gain timing. Runs the docs/12 neighbor-smoothness\n"
+    "                            lint on the proposed surface; --strict-lint exits 3 on\n"
+    "                            any violation. Hardware-free.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -1531,6 +1534,29 @@ std::optional<double> parse_fraction_or_percent(std::string_view raw) {
     return percent ? v / 100.0 : v;
 }
 
+// Print the canonical "Lint:" section used by every `autotune *`
+// subcommand. Returns 3 when `strict` is true AND any violation is
+// present so the caller can use it as its exit code; returns 0
+// otherwise. Centralising this keeps the cosmetic formatting and the
+// strict-lint exit code in one place as more autotune commands land.
+int print_lint_section(std::span<st::autotune::LintViolation const> violations,
+                       bool strict) {
+    std::printf("\nLint:\n");
+    if (violations.empty()) {
+        std::printf("  No violations.\n");
+        return 0;
+    }
+    std::printf("  %zu violation%s:\n",
+                violations.size(),
+                violations.size() == 1 ? "" : "s");
+    for (auto const &v : violations) {
+        std::printf("  - [%s] %s\n",
+                    st::autotune::lint_kind_name(v.kind),
+                    v.message.c_str());
+    }
+    return strict ? 3 : 0;
+}
+
 // Parse a plain decimal: strict strtod with no '%' acceptance. Used
 // for arguments that name a physical unit (e.g. degrees) where a
 // trailing '%' would be a user error to silently divide-by-100.
@@ -1836,24 +1862,7 @@ int cmd_autotune_maf(int argc, char *argv[]) {
     // --apply (when that lands in the project-integration slice).
     auto const violations =
         st::autotune::lint_maf_proposal(*axis, *current, final_result);
-    std::printf("\nLint:\n");
-    if (violations.empty()) {
-        std::printf("  No violations.\n");
-    } else {
-        std::printf("  %zu violation%s:\n",
-                    violations.size(),
-                    violations.size() == 1 ? "" : "s");
-        for (auto const &v : violations) {
-            std::printf("  - [%s] %s\n",
-                        st::autotune::lint_kind_name(v.kind),
-                        v.message.c_str());
-        }
-        if (strict_lint) {
-            return 3;
-        }
-    }
-
-    return 0;
+    return print_lint_section(violations, strict_lint);
 }
 
 int cmd_autotune_knock_pull(int argc, char *argv[]) {
@@ -1864,6 +1873,8 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
     std::optional<double>                trigger_deg;
     std::optional<double>                pull_step_deg;
     std::optional<std::size_t>           min_samples;
+    std::optional<double>                max_neighbor_step;
+    bool                                 strict_lint = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -1930,6 +1941,21 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
                 }
                 min_samples = static_cast<std::size_t>(n);
             } else { return 2; }
+        } else if (a == "--max-neighbor-step-degrees"
+                   || a == "--max-neighbor-step") {
+            if (auto const *v = require_arg("--max-neighbor-step-degrees"); v) {
+                auto const parsed = parse_decimal(v);
+                if (!parsed.has_value() || *parsed < 0.0) {
+                    std::fprintf(stderr,
+                                 "autotune knock-pull: "
+                                 "--max-neighbor-step-degrees must be a "
+                                 "non-negative decimal (got '%s')\n", v);
+                    return 2;
+                }
+                max_neighbor_step = *parsed;
+            } else { return 2; }
+        } else if (a == "--strict-lint") {
+            strict_lint = true;
         } else {
             std::fprintf(stderr,
                          "autotune knock-pull: unknown argument: %s\n",
@@ -1948,7 +1974,9 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
                    "       --current-timing <d,d,…>   "
                    "(flat row-major, rows × cols = load × rpm)\n"
                    "       [--trigger-degrees 1.5] [--pull-step-degrees 0.75]\n"
-                   "       [--min-samples-per-cell 30]\n",
+                   "       [--min-samples-per-cell 30] "
+                   "[--max-neighbor-step-degrees 3.0]\n"
+                   "       [--strict-lint]\n",
                    stderr);
         return 2;
     }
@@ -2076,7 +2104,16 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
         std::printf("\n");
     }
 
-    return 0;
+    // Engine-safety lint per docs/12 §"Engine-safety linting" for the
+    // 2D timing surface. Always runs; --strict-lint exits 3 on any
+    // violation. Same exit-code convention as `autotune maf`.
+    st::autotune::KnockLintOptions lint_opts;
+    if (max_neighbor_step.has_value()) {
+        lint_opts.max_neighbor_step_degrees = *max_neighbor_step;
+    }
+    auto const violations = st::autotune::lint_knock_proposal(
+        *rpm_axis, *load_axis, *result, lint_opts);
+    return print_lint_section(violations, strict_lint);
 }
 
 // Helper for `can-*`: emit one column-aligned line for a (bus, id) summary.

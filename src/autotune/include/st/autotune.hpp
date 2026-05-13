@@ -376,6 +376,39 @@ struct LintOptions {
     MafTuneResult const    &result,
     LintOptions const      &opts = {});
 
+// Knock-pull lint options. The check looks for cell-to-cell jumps in
+// the proposed 2D timing surface that exceed an absolute degree
+// threshold — the kernel is monotonic-subtract so the relevant safety
+// concern is a cluster of pulls compounding into a "valley" deeper
+// than physically reasonable, not the per-cell pull itself.
+struct KnockLintOptions {
+    bool   enforce_neighbor_smoothness = true;
+    // Maximum absolute degree difference between adjacent cells in
+    // either the RPM (row-major) or load direction. The default 3.0°
+    // accommodates normal timing-map gradients while flagging stacked
+    // pulls that put the proposed map well outside the original's
+    // smoothness envelope.
+    double max_neighbor_step_degrees   = 3.0;
+};
+
+// Lint a knock-pull proposal. Returns `StepDiscontinuity` violations
+// for any adjacent cell pair (RPM neighbors and load neighbors) whose
+// proposed values differ by more than
+// `opts.max_neighbor_step_degrees`. `rpm_axis` / `load_axis` are only
+// used to make the violation messages readable; cell ordering comes
+// from `result.rows` × `result.cols` (flat row-major: load on rows,
+// RPM on cols).
+//
+// Invariant: `result.cells.size() == result.rows * result.cols`. A
+// mismatched result emits a single synthetic `StepDiscontinuity`
+// violation flagging the shape rather than silently passing — a
+// buggy kernel shouldn't disappear into a "no violations" report.
+[[nodiscard]] std::vector<LintViolation> lint_knock_proposal(
+    std::span<double const>     rpm_axis,
+    std::span<double const>     load_axis,
+    KnockPullResult const      &result,
+    KnockLintOptions const     &opts = {});
+
 } // namespace st::autotune
 
 #endif // ST_AUTOTUNE_HPP
