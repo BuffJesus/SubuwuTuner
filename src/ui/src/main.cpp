@@ -462,6 +462,68 @@ void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forwar
     state.dirty = true;
 }
 
+// Forward decl — parse_tsv lives further down in the anon namespace
+// near the other clipboard helpers. paste_clipboard_at_cursor uses it.
+std::vector<std::vector<double>> parse_tsv(std::string_view text);
+
+// Reads the system clipboard, parses it as TSV, and pastes the values
+// starting at the cursor cell. The selection rect is set to the paste
+// destination first (clipped to table bounds) so apply_op's single
+// history record covers exactly the cells that changed.
+void paste_clipboard_at_cursor(AppState &state) {
+    if (!state.project.has_value() || !state.current_table_data.has_value()
+        || !state.selection.enabled) {
+        return;
+    }
+    char const *clip = ImGui::GetClipboardText();
+    if (clip == nullptr || *clip == '\0') return;
+    auto grid = parse_tsv(std::string_view{clip});
+    if (grid.empty() || grid.front().empty()) return;
+
+    auto &td = *state.current_table_data;
+    std::size_t const cur_r = state.selection.r_cursor;
+    std::size_t const cur_c = state.selection.c_cursor;
+    if (cur_r >= td.values.size() || td.values[cur_r].empty()) return;
+
+    // Clip the paste rect to actual table bounds (Excel-style truncate,
+    // not wrap).
+    std::size_t const grid_rows = grid.size();
+    std::size_t       grid_cols = 0;
+    for (auto const &row : grid) {
+        if (row.size() > grid_cols) grid_cols = row.size();
+    }
+    std::size_t const r1 =
+        std::min<std::size_t>(cur_r + grid_rows - 1, td.values.size() - 1);
+    std::size_t const c1 =
+        std::min<std::size_t>(cur_c + grid_cols - 1,
+                               td.values[cur_r].size() - 1);
+
+    // Snap selection to the paste destination so apply_op picks the
+    // right rect.
+    state.selection.r_anchor = cur_r;
+    state.selection.r_cursor = r1;
+    state.selection.c_anchor = cur_c;
+    state.selection.c_cursor = c1;
+
+    apply_op(state, "paste",
+             [&grid, cur_r, cur_c](auto &t, auto rect) -> st::Status {
+                 for (std::size_t dr = 0;
+                      dr < grid.size()
+                      && cur_r + dr < t.values.size()
+                      && cur_r + dr <= rect.r_end; ++dr) {
+                     auto       &tt_row = t.values[cur_r + dr];
+                     auto const &g_row  = grid[dr];
+                     for (std::size_t dc = 0;
+                          dc < g_row.size()
+                          && cur_c + dc < tt_row.size()
+                          && cur_c + dc <= rect.c_end; ++dc) {
+                         tt_row[cur_c + dc] = g_row[dc];
+                     }
+                 }
+                 return st::ok();
+             });
+}
+
 void do_undo(AppState &state) {
     if (!state.project.has_value()) {
         return;
@@ -638,6 +700,86 @@ void render_unsaved_modal(AppState &state) {
 
 void glfw_error_callback(int err, char const *desc) {
     std::fprintf(stderr, "GLFW error %d: %s\n", err, desc);
+}
+
+// Format the rect of `td` as TSV (rows on lines, cells tab-separated)
+// and put it on the system clipboard via ImGui's clipboard helper.
+// Format matches Excel/Sheets clipboard convention so pasted values
+// round-trip cleanly to a spreadsheet for batch analysis.
+void copy_rect_to_clipboard(st::Definition::TableData const &td,
+                             st::edit::Rect const             &rect,
+                             int                              precision) {
+    std::string out;
+    char        buf[32];
+    for (std::size_t r = rect.r_start;
+         r <= rect.r_end && r < td.values.size(); ++r) {
+        bool first = true;
+        for (std::size_t c = rect.c_start;
+             c <= rect.c_end && c < td.values[r].size(); ++c) {
+            if (!first) out.push_back('\t');
+            first = false;
+            std::snprintf(buf, sizeof buf, "%.*f", precision, td.values[r][c]);
+            out += buf;
+        }
+        out.push_back('\n');
+    }
+    ImGui::SetClipboardText(out.c_str());
+}
+
+// Parse a TSV-ish payload (Excel/Sheets clipboard format) into a 2D
+// grid of doubles. Tolerant of trailing newlines, mixed CRLF/LF, and
+// non-numeric cells (those become 0.0). Empty input returns an empty
+// grid.
+std::vector<std::vector<double>> parse_tsv(std::string_view text) {
+    std::vector<std::vector<double>> grid;
+    std::size_t i = 0;
+    while (i < text.size()) {
+        std::size_t line_end = i;
+        while (line_end < text.size()
+               && text[line_end] != '\n' && text[line_end] != '\r') {
+            ++line_end;
+        }
+        std::string_view line{text.data() + i, line_end - i};
+        std::vector<double> row;
+        std::size_t cs = 0;
+        while (cs <= line.size()) {
+            std::size_t ce = cs;
+            while (ce < line.size() && line[ce] != '\t') ++ce;
+            std::string_view cell{line.data() + cs, ce - cs};
+            // Trim whitespace at both ends.
+            while (!cell.empty()
+                   && std::isspace(static_cast<unsigned char>(cell.front()))) {
+                cell.remove_prefix(1);
+            }
+            while (!cell.empty()
+                   && std::isspace(static_cast<unsigned char>(cell.back()))) {
+                cell.remove_suffix(1);
+            }
+            double v = 0.0;
+            if (!cell.empty()) {
+                std::string tmp{cell};
+                (void) std::sscanf(tmp.c_str(), "%lf", &v);
+                // sscanf failure leaves v at 0; tolerate so a stray
+                // empty cell doesn't fail the whole paste.
+            }
+            row.push_back(v);
+            if (ce >= line.size()) break;
+            cs = ce + 1;
+        }
+        if (!row.empty()) grid.push_back(std::move(row));
+        // Advance past the newline (handle both CRLF and LF).
+        if (line_end < text.size()) {
+            if (text[line_end] == '\r'
+                && line_end + 1 < text.size()
+                && text[line_end + 1] == '\n') {
+                line_end += 2;
+            } else {
+                line_end += 1;
+            }
+        }
+        i = line_end;
+    }
+    return grid;
 }
 
 // Case-insensitive substring search. Used by the sidebar table filter
@@ -956,6 +1098,8 @@ void render_menubar(AppState &state) {
             ImGui::BulletText("Arrow keys move the cursor; Shift+arrows extend.");
             ImGui::BulletText("F2 or double-click a cell to type a new value.  Enter commits, Esc cancels.");
             ImGui::BulletText("Ctrl+Enter while editing fills every selected cell with the typed value.");
+            ImGui::BulletText("Ctrl+C / Ctrl+V copy and paste the selection as tab-separated values.");
+            ImGui::BulletText("Right-click any cell for Copy / Paste in a context menu.");
             ImGui::BulletText("Toolbar buttons (+5%%, -5%%, Smooth, Interpolate) act on the selection.");
             ImGui::BulletText("Ctrl+Z / Ctrl+Shift+Z to undo / redo.  Ctrl+S to save.");
             ImGui::Separator();
@@ -1412,6 +1556,16 @@ void render_table_grid(st::Definition::TableData const &td,
             state.editing_cell       = true;
             state.editor_just_opened = true;
         }
+        // Ctrl+C / Ctrl+V — TSV clipboard interop. Same gating as
+        // arrow nav (Table window focused, not currently editing a
+        // cell) so the cell editor's InputText sees Ctrl+C/V as text
+        // operations when it's active.
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_C)) {
+            copy_rect_to_clipboard(td, selection.as_rect(), precision);
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_V)) {
+            paste_clipboard_at_cursor(state);
+        }
     }
 
     auto const flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
@@ -1555,6 +1709,27 @@ void render_table_grid(st::Definition::TableData const &td,
                         state.editing_cell       = true;
                         state.editor_just_opened = true;
                     }
+                }
+                // Right-click selects the cell (if not already in the
+                // selection) and opens a Copy/Paste context menu. The
+                // implicit re-select matches Excel — right-clicking a
+                // cell outside the current selection makes that cell
+                // the new scope of the operation, rather than
+                // silently using the previous selection.
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right)
+                    && !selection.contains(r, c)) {
+                    selection.click(r, c, /*shift=*/false);
+                }
+                if (ImGui::BeginPopupContextItem("##cell_ctx")) {
+                    bool const has_sel = selection.enabled;
+                    if (ImGui::MenuItem("Copy", "Ctrl+C", false, has_sel)) {
+                        copy_rect_to_clipboard(td, selection.as_rect(),
+                                                precision);
+                    }
+                    if (ImGui::MenuItem("Paste", "Ctrl+V", false, has_sel)) {
+                        paste_clipboard_at_cursor(state);
+                    }
+                    ImGui::EndPopup();
                 }
             }
 
