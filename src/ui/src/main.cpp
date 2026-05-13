@@ -2350,6 +2350,13 @@ void render_status_bar(AppState &state) {
 
         // Left cluster: project name → status chip → history position.
         ImGui::TextUnformatted(state.project->display_name().c_str());
+        // Hover the name to see the on-disk path. Two projects with
+        // the same id (different copies, different forks) read the
+        // same in the name line; the path is the unambiguous handle.
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s",
+                              state.project->dir().string().c_str());
+        }
 
         ImGui::SameLine();
         if (dirty) {
@@ -2369,6 +2376,15 @@ void render_status_bar(AppState &state) {
         ImGui::TextDisabled("edits %zu / %zu",
                             state.project->history().cursor(),
                             state.project->history().size());
+
+        // Middle cluster: transient status message. save_project sets
+        // this to "Saved."; edit-op errors land here too. Previously
+        // the with-project branch never showed it, so Ctrl+S
+        // succeeded silently — now it gives the user feedback.
+        if (!state.status_msg.empty()) {
+            ImGui::SameLine(0.0f, 24.0f);
+            ImGui::TextDisabled("\xE2\x80\x94 %s", state.status_msg.c_str());
+        }
 
         // Right cluster: source / working CRCs, right-aligned. Compute the
         // text width up front so we can place the cursor cleanly.
