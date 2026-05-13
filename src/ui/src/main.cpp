@@ -1369,8 +1369,15 @@ GridStats compute_stats(st::Definition::TableData const &td) {
 }
 
 // Heatmap overlay: blue (cool / low) → transparent (mid) → orange (high).
-// Tuned to be readable with bright text on the dark row backgrounds — alpha
-// caps at ~140/255 so cells tint rather than swamp the value underneath.
+// Tuned to be readable with bright text on the dark row backgrounds.
+//
+// Asymmetric alpha caps: orange-end at ~140/255 (warm, reads as
+// shading), blue-end at ~70/255 (half that). The cold-end alpha was
+// halved after user feedback that a lone min-value cell read as a
+// selection highlight rather than as a heat-coded extreme — the
+// selection color is also blue at ~55% alpha, so saturated blue on a
+// single cell was confusable with "this cell is selected." Quieter
+// blue keeps the min-end informative without the lookalike.
 ImU32 heatmap_color(double v, double min_v, double max_v) {
     if (max_v <= min_v) {
         return 0; // flat table: skip shading
@@ -1390,13 +1397,13 @@ ImU32 heatmap_color(double v, double min_v, double max_v) {
         r = lerp(45.0, 20.0, s);
         g = lerp(80.0, 22.0, s);
         b = lerp(140.0, 26.0, s);
-        a = lerp(140.0, 0.0, s);
+        a = lerp(70.0, 0.0, s);  // cold end max ~28%, halved from prior 55%
     } else {
         double const s = (t - 0.5) * 2.0;
         r = lerp(20.0, 180.0, s);
         g = lerp(22.0, 90.0, s);
         b = lerp(26.0, 50.0, s);
-        a = lerp(0.0, 140.0, s);
+        a = lerp(0.0, 140.0, s);  // warm end unchanged
     }
     return IM_COL32(static_cast<int>(r), static_cast<int>(g),
                     static_cast<int>(b), static_cast<int>(a));
