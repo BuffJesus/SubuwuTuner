@@ -1887,6 +1887,59 @@ void render_table_view(AppState &state, Fonts const &fonts) {
                             precision, stats.max,
                             precision, stats.mean,
                             stats.count);
+        // Heatmap legend — only meaningful in Grid view (Heatmap view
+        // already has a vertical ColormapScale on the right via ImPlot).
+        // Sampled from heatmap_color so the strip's gradient matches
+        // what cells actually paint. A solid backing rect underneath
+        // gives the mid-range alpha-zero region somewhere to sit —
+        // otherwise the legend's middle is invisible against the
+        // panel background, defeating the purpose.
+        if (state.view_mode == TableViewMode::Grid
+            && stats.max > stats.min) {
+            constexpr float kBarW = 220.0f;
+            constexpr float kBarH = 12.0f;
+            constexpr int   kSegs = 64;
+            ImGui::SameLine(0.0f, 24.0f);
+            ImGui::TextDisabled("scale:");
+            ImGui::SameLine();
+            char buf[32];
+            std::snprintf(buf, sizeof buf, "%.*f", precision, stats.min);
+            ImGui::TextDisabled("%s", buf);
+            ImGui::SameLine();
+            ImVec2 const p0 = ImGui::GetCursorScreenPos();
+            ImVec2 const p1 = ImVec2(p0.x + kBarW, p0.y + kBarH);
+            auto * const dl = ImGui::GetWindowDrawList();
+            // Backing rect: subtle dark base so the transparent middle
+            // of the heatmap ramp has something to be transparent
+            // against. ~10% white over the table row bg matches the
+            // visual weight of a cell with no heatmap shading.
+            dl->AddRectFilled(p0, p1, IM_COL32(40, 42, 48, 255));
+            // N small filled rects sample the ramp evenly. 64 segments
+            // is more than enough to look smooth at 220 px wide.
+            for (int i = 0; i < kSegs; ++i) {
+                double const t0 = static_cast<double>(i)
+                                  / static_cast<double>(kSegs);
+                double const t1 = static_cast<double>(i + 1)
+                                  / static_cast<double>(kSegs);
+                double const v_mid = stats.min
+                                     + 0.5 * (t0 + t1)
+                                       * (stats.max - stats.min);
+                ImU32 const  col   =
+                    heatmap_color(v_mid, stats.min, stats.max);
+                if (col != 0u) {
+                    float const x0 = p0.x + kBarW * static_cast<float>(t0);
+                    float const x1 = p0.x + kBarW * static_cast<float>(t1);
+                    dl->AddRectFilled(ImVec2(x0, p0.y),
+                                       ImVec2(x1, p1.y), col);
+                }
+            }
+            // Reserve the layout space the draw-list calls consumed so
+            // the next widget after this lays out below correctly.
+            ImGui::Dummy(ImVec2(kBarW, kBarH));
+            ImGui::SameLine();
+            std::snprintf(buf, sizeof buf, "%.*f", precision, stats.max);
+            ImGui::TextDisabled("%s", buf);
+        }
     }
     if (state.selection.enabled) {
         auto const rect = state.selection.as_rect();
