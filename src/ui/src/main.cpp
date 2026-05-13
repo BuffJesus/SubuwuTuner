@@ -293,6 +293,15 @@ struct AppState {
         // this project at the top next cold start.
         push_recent(recents, path);
         save_recents(recents);
+        // Auto-select the first table so the user lands on data
+        // instead of the "Pick a table from the left panel" empty
+        // state. Predictable: always the first in pack order — pack
+        // authors get to control the landing experience by ordering
+        // their `[[table]]` entries.
+        auto const &tables = project->definition().tables();
+        if (!tables.empty()) {
+            select_table(tables.front().id);
+        }
     }
 
     void select_table(std::string const &id) {
@@ -946,6 +955,7 @@ void render_menubar(AppState &state) {
             ImGui::BulletText("Click cells to select; Shift-click to extend.");
             ImGui::BulletText("Arrow keys move the cursor; Shift+arrows extend.");
             ImGui::BulletText("F2 or double-click a cell to type a new value.  Enter commits, Esc cancels.");
+            ImGui::BulletText("Ctrl+Enter while editing fills every selected cell with the typed value.");
             ImGui::BulletText("Toolbar buttons (+5%%, -5%%, Smooth, Interpolate) act on the selection.");
             ImGui::BulletText("Ctrl+Z / Ctrl+Shift+Z to undo / redo.  Ctrl+S to save.");
             ImGui::Separator();
@@ -1494,16 +1504,21 @@ void render_table_grid(st::Definition::TableData const &td,
                     state.editing_cell       = false;
                     state.editor_just_opened = false;
                 };
-                auto const commit = [&] {
+                // `whole_selection = true` writes the value to every
+                // selected cell (Excel's Ctrl+Enter convention). False
+                // collapses to the cursor cell. Failure to parse
+                // silently cancels — better than discarding a
+                // half-typed number with no feedback.
+                auto const commit = [&](bool whole_selection) {
                     double parsed = 0.0;
                     if (std::sscanf(state.edit_buf, "%lf", &parsed) == 1) {
-                        // Collapse selection to this cell so apply_op's
-                        // rect is single-cell — the edit affects only
-                        // the cursor, regardless of any prior range
-                        // selection.
-                        selection.r_anchor = selection.r_cursor;
-                        selection.c_anchor = selection.c_cursor;
-                        apply_op(state, "set",
+                        if (!whole_selection) {
+                            // Collapse selection to this cell so
+                            // apply_op's rect is single-cell.
+                            selection.r_anchor = selection.r_cursor;
+                            selection.c_anchor = selection.c_cursor;
+                        }
+                        apply_op(state, whole_selection ? "fill" : "set",
                                  [parsed](auto &t, auto rect) {
                                      return st::edit::set_cells(t, rect, parsed);
                                  });
@@ -1515,13 +1530,15 @@ void render_table_grid(st::Definition::TableData const &td,
                     // Esc cancels — don't commit; restore-by-not-applying.
                     exit_edit();
                 } else if (enter) {
-                    commit();
+                    // Ctrl+Enter writes to every selected cell; plain
+                    // Enter writes only to the cursor cell. KeyCtrl is
+                    // the state at the moment InputText returned true.
+                    commit(/*whole_selection=*/ImGui::GetIO().KeyCtrl);
                 } else if (deactivated) {
-                    // Lost focus by other means (clicked elsewhere,
-                    // window deactivated). Commit if the buffer parses;
-                    // otherwise silently cancel rather than discarding
-                    // a half-typed number with no feedback.
-                    commit();
+                    // Lose-focus path: treat as plain Enter (single
+                    // cell). Ctrl+Enter is an explicit gesture; we
+                    // don't infer it from a stray click.
+                    commit(/*whole_selection=*/false);
                 }
             } else {
                 if (ImGui::Selectable(buf, is_sel,
