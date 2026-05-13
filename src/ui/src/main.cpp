@@ -1867,11 +1867,21 @@ inline ImVec4 chip_bg_muted()     { return ImVec4(0.22f, 0.24f, 0.28f, 0.55f); }
 // next action, no jargon above the fold.
 void render_welcome_panel(AppState &state) {
     ImVec2 const avail = ImGui::GetContentRegionAvail();
-    // Push content down to the upper third when there are no recents
-    // (the original "first-run" feel). When recents exist, sit higher
-    // so the list has room to breathe without the panel scrolling.
-    bool const has_recents = !state.recents.empty();
-    float const top_pad = has_recents ? (avail.y * 0.10f) : (avail.y * 0.22f);
+    // Balance content vertically. On short panels (default window) the
+    // welcome cluster sits in the upper third — first-run feel,
+    // recents have room without scrolling. On tall panels (maximized,
+    // multi-monitor) the cluster shifts toward vertical-center so it
+    // doesn't float in a huge empty space.
+    //
+    // Heuristic: take whichever is larger between a 10%-of-panel
+    // anchor and a "would-be centered if content is ~320px tall"
+    // calculation scaled at 40% of the remainder. This keeps the
+    // default-window layout unchanged but pushes content meaningfully
+    // lower on a 1300+px panel.
+    bool const  has_recents = !state.recents.empty();
+    float const min_pad     = avail.y * (has_recents ? 0.10f : 0.22f);
+    float const center_bias = (avail.y - 320.0f) * 0.40f;
+    float const top_pad     = std::max(min_pad, center_bias);
     ImGui::Dummy(ImVec2(0.0f, top_pad));
 
     text_centered("SubuwuTuner", 2.4f);
@@ -1901,9 +1911,20 @@ void render_welcome_panel(AppState &state) {
         constexpr float kRowW = 480.0f;
         center_cursor_x(kRowW);
         ImGui::BeginGroup();
-        ImGui::SetNextItemWidth(kRowW);
-        ImGui::TextDisabled("Recent projects");
-        ImGui::Separator();
+        // Heading: regular (not TextDisabled) so it reads as a
+        // section break against the dimmed path text beneath each
+        // row. The hand-drawn separator below is bounded to kRowW —
+        // ImGui::Separator() ignores group width and would span the
+        // whole panel, which looked broken on a maximized window.
+        ImGui::TextUnformatted("Recent projects");
+        {
+            ImVec2 const p   = ImGui::GetCursorScreenPos();
+            auto * const dl  = ImGui::GetWindowDrawList();
+            ImU32 const  col = ImGui::GetColorU32(ImGuiCol_Separator);
+            dl->AddLine(ImVec2(p.x, p.y + 2.0f),
+                        ImVec2(p.x + kRowW, p.y + 2.0f), col);
+            ImGui::Dummy(ImVec2(kRowW, 4.0f));
+        }
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
 
         // Snapshot indices to act on — modifying recents inside the
