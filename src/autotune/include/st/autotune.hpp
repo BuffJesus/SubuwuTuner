@@ -285,6 +285,29 @@ struct KnockPullResult {
 [[nodiscard]] Result<std::vector<MafSample>> read_maf_samples_csv(
     std::string_view text);
 
+// =====================================================================
+// CSV → KnockSample reader
+// =====================================================================
+//
+// Mirror of `read_maf_samples_csv` for the knock-pull algorithm.
+//
+// Required columns:
+//   rpm, load, feedback_knock, coolant_c, iat_c
+//
+// Optional columns:
+//   limp_mode — boolean (0/1, true/false, yes/no, on/off). Empty cells
+//               parse as false; explicit non-boolean tokens error.
+//
+// `feedback_knock` is signed degrees — negative means the ECU is
+// pulling timing — and the algorithm's trigger checks for mean <
+// `-opts.trigger_degrees`. Unlike the MAF reader, no time-derived
+// fields are computed (the pull is steady-state per cell per
+// docs/12, not rate-of-change driven); a `time_ms` column, if
+// present, is silently ignored. Blank lines and '#' comments
+// tolerated.
+[[nodiscard]] Result<std::vector<KnockSample>> read_knock_samples_csv(
+    std::string_view text);
+
 } // namespace st::autotune
 
 #endif // ST_AUTOTUNE_HPP

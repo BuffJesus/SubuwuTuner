@@ -325,3 +325,115 @@ TEST_CASE("read_maf_samples_csv: integrates with tune_maf end-to-end",
     CHECK(result->cells[1].mean_error == Approx(1.0));
     CHECK(result->cells[1].proposed_value == Approx(1.0));
 }
+
+// ---------------------------------------------------------------------
+// read_knock_samples_csv
+// ---------------------------------------------------------------------
+
+namespace {
+
+constexpr std::string_view kKnockHeader =
+    "rpm,load,feedback_knock,coolant_c,iat_c\n";
+
+}  // namespace
+
+TEST_CASE("read_knock_samples_csv: empty input → empty vector",
+          "[autotune][csv][knock]") {
+    auto const r = at::read_knock_samples_csv("");
+    REQUIRE(r.has_value());
+    CHECK(r->empty());
+}
+
+TEST_CASE("read_knock_samples_csv: required columns populate fields",
+          "[autotune][csv][knock]") {
+    std::string text(kKnockHeader);
+    text += "3000,2.5,-1.75,90,30\n";
+
+    auto const r = at::read_knock_samples_csv(text);
+    REQUIRE(r.has_value());
+    REQUIRE(r->size() == 1);
+    auto const &s = (*r)[0];
+    CHECK(s.rpm            == Approx(3000.0));
+    CHECK(s.load           == Approx(2.5));
+    CHECK(s.feedback_knock == Approx(-1.75));
+    CHECK(s.coolant_c      == Approx(90.0));
+    CHECK(s.iat_c          == Approx(30.0));
+    CHECK(s.limp_mode      == false);
+}
+
+TEST_CASE("read_knock_samples_csv: missing required column → error",
+          "[autotune][csv][knock]") {
+    // Drop feedback_knock.
+    std::string text = "rpm,load,coolant_c,iat_c\n3000,2.5,90,30\n";
+
+    auto const r = at::read_knock_samples_csv(text);
+    REQUIRE_FALSE(r.has_value());
+    CHECK(r.error().code() == st::ErrorCode::InvalidArgument);
+    CHECK(r.error().to_string().find("feedback_knock") != std::string::npos);
+}
+
+TEST_CASE("read_knock_samples_csv: optional limp_mode",
+          "[autotune][csv][knock]") {
+    std::string text =
+        "rpm,load,feedback_knock,coolant_c,iat_c,limp_mode\n"
+        "3000,2.5,-1.75,90,30,1\n"
+        "3000,2.5,-1.75,90,30,false\n"
+        "3000,2.5,-1.75,90,30,\n";   // empty cell → false
+
+    auto const r = at::read_knock_samples_csv(text);
+    REQUIRE(r.has_value());
+    REQUIRE(r->size() == 3);
+    CHECK((*r)[0].limp_mode == true);
+    CHECK((*r)[1].limp_mode == false);
+    CHECK((*r)[2].limp_mode == false);
+}
+
+TEST_CASE("read_knock_samples_csv: non-numeric feedback_knock → error",
+          "[autotune][csv][knock]") {
+    std::string text(kKnockHeader);
+    text += "3000,2.5,nope,90,30\n";
+
+    auto const r = at::read_knock_samples_csv(text);
+    REQUIRE_FALSE(r.has_value());
+    auto const msg = r.error().to_string();
+    CHECK(msg.find("feedback_knock") != std::string::npos);
+    CHECK(msg.find("nope")           != std::string::npos);
+}
+
+TEST_CASE("read_knock_samples_csv: integrates with tune_knock_pull "
+          "end-to-end",
+          "[autotune][csv][knock]") {
+    // Two cells. Cell (load=2, rpm=4000) sees sustained -2.0° feedback
+    // knock; cell (load=2, rpm=3000) stays at 0. With trigger_degrees
+    // default 1.5° and pull_step 0.75°, only the knock-heavy cell pulls.
+    std::string text(kKnockHeader);
+    auto add_row = [&](double rpm, double fk) {
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "%.0f,2.0,%.2f,90,30\n", rpm, fk);
+        text += buf;
+    };
+    for (int i = 0; i < 50; ++i) {
+        add_row(3000, 0.0);
+    }
+    for (int i = 0; i < 50; ++i) {
+        add_row(4000, -2.0);
+    }
+
+    auto const samples = at::read_knock_samples_csv(text);
+    REQUIRE(samples.has_value());
+    REQUIRE(samples->size() == 100);
+
+    std::vector<double> rpm_axis{3000.0, 4000.0};
+    std::vector<double> load_axis{2.0};
+    std::vector<double> current_timing{20.0, 20.0};  // 1×2 (load × rpm)
+    auto const          result = at::tune_knock_pull(
+        rpm_axis, load_axis, current_timing, *samples);
+    REQUIRE(result.has_value());
+    REQUIRE(result->cells.size() == 2);
+    // Cell 0 (rpm=3000): no knock → unchanged.
+    CHECK_FALSE(result->cells[0].pulled);
+    CHECK(result->cells[0].proposed_value == Approx(20.0));
+    // Cell 1 (rpm=4000): sustained -2.0 < -1.5 trigger → pulled by 0.75.
+    CHECK(result->cells[1].pulled);
+    CHECK(result->cells[1].proposed_value == Approx(19.25));
+}

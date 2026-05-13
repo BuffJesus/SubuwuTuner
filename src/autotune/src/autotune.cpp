@@ -446,30 +446,32 @@ std::optional<bool> parse_bool_field(std::string_view s) {
     return std::nullopt;
 }
 
+// Slice text into trimmed non-blank, non-comment lines. Shared by
+// every CSV reader in this file.
+std::vector<std::string_view> non_blank_lines(std::string_view text) {
+    std::vector<std::string_view> out;
+    std::size_t                   i = 0;
+    while (i < text.size()) {
+        std::size_t e = i;
+        while (e < text.size() && text[e] != '\n' && text[e] != '\r') {
+            ++e;
+        }
+        auto const line = trim_view(text.substr(i, e - i));
+        if (!line.empty() && line.front() != '#') {
+            out.push_back(line);
+        }
+        i = e;
+        while (i < text.size() && (text[i] == '\n' || text[i] == '\r')) {
+            ++i;
+        }
+    }
+    return out;
+}
+
 } // namespace
 
 Result<std::vector<MafSample>> read_maf_samples_csv(std::string_view text) {
-    // Slice the input into trimmed non-blank, non-comment lines.
-    std::vector<std::string_view> lines;
-    {
-        std::size_t i = 0;
-        while (i < text.size()) {
-            std::size_t e = i;
-            while (e < text.size() && text[e] != '\n' && text[e] != '\r') {
-                ++e;
-            }
-            auto const line = trim_view(text.substr(i, e - i));
-            if (!line.empty() && line.front() != '#') {
-                lines.push_back(line);
-            }
-            i = e;
-            while (i < text.size()
-                   && (text[i] == '\n' || text[i] == '\r')) {
-                ++i;
-            }
-        }
-    }
-
+    auto const lines = non_blank_lines(text);
     if (lines.empty()) {
         return std::vector<MafSample>{};
     }
@@ -684,6 +686,135 @@ Result<std::vector<MafSample>> read_maf_samples_csv(std::string_view text) {
             ++lo;
         }
         samples[i].knock_in_window = (knocks_in_window > 0);
+    }
+
+    return samples;
+}
+
+// ---------------------------------------------------------------------
+// CSV → KnockSample reader
+// ---------------------------------------------------------------------
+
+Result<std::vector<KnockSample>> read_knock_samples_csv(
+    std::string_view text) {
+    auto const lines = non_blank_lines(text);
+    if (lines.empty()) {
+        return std::vector<KnockSample>{};
+    }
+
+    auto const                         header = split_csv_fields(lines[0]);
+    std::map<std::string, std::size_t> col_idx;
+    for (std::size_t i = 0; i < header.size(); ++i) {
+        col_idx.emplace(to_lower_str(trim_view(header[i])), i);
+    }
+
+    auto require_col = [&](char const *name) -> Result<std::size_t> {
+        auto it = col_idx.find(name);
+        if (it == col_idx.end()) {
+            return failure(ErrorCode::InvalidArgument,
+                           std::string{"autotune: CSV missing required column '"}
+                               + name + "'");
+        }
+        return it->second;
+    };
+    auto find_opt_col = [&](char const *name) -> std::optional<std::size_t> {
+        auto it = col_idx.find(name);
+        return (it == col_idx.end())
+                   ? std::optional<std::size_t>{}
+                   : std::optional<std::size_t>{it->second};
+    };
+
+    auto const idx_rpm = require_col("rpm");
+    if (!idx_rpm.has_value()) {
+        return failure(std::move(idx_rpm).error());
+    }
+    auto const idx_load = require_col("load");
+    if (!idx_load.has_value()) {
+        return failure(std::move(idx_load).error());
+    }
+    auto const idx_fk = require_col("feedback_knock");
+    if (!idx_fk.has_value()) {
+        return failure(std::move(idx_fk).error());
+    }
+    auto const idx_clt = require_col("coolant_c");
+    if (!idx_clt.has_value()) {
+        return failure(std::move(idx_clt).error());
+    }
+    auto const idx_iat = require_col("iat_c");
+    if (!idx_iat.has_value()) {
+        return failure(std::move(idx_iat).error());
+    }
+    auto const idx_lm = find_opt_col("limp_mode");
+
+    std::vector<KnockSample> samples;
+    if (lines.size() > 1) {
+        samples.reserve(lines.size() - 1);
+    }
+
+    auto row_error = [](std::size_t row, char const *col,
+                         char const *what, std::string_view raw) {
+        return failure(
+            ErrorCode::InvalidArgument,
+            std::string{"autotune: CSV row "} + std::to_string(row + 1)
+                + " column '" + col + "' has " + what + " value '"
+                + std::string{trim_view(raw)} + "'");
+    };
+
+    for (std::size_t row = 1; row < lines.size(); ++row) {
+        auto const fields = split_csv_fields(lines[row]);
+
+        auto get_double = [&](std::size_t i,
+                              char const *col) -> Result<double> {
+            if (i >= fields.size()) {
+                return failure(
+                    ErrorCode::InvalidArgument,
+                    std::string{"autotune: CSV row "} + std::to_string(row + 1)
+                        + " is missing field for column '" + col + "'");
+            }
+            auto v = parse_double_field(fields[i]);
+            if (!v.has_value()) {
+                return row_error(row, col, "non-numeric", fields[i]);
+            }
+            return *v;
+        };
+
+        KnockSample s;
+        if (auto r = get_double(*idx_rpm, "rpm"); r.has_value()) {
+            s.rpm = *r;
+        } else {
+            return failure(std::move(r).error());
+        }
+        if (auto r = get_double(*idx_load, "load"); r.has_value()) {
+            s.load = *r;
+        } else {
+            return failure(std::move(r).error());
+        }
+        if (auto r = get_double(*idx_fk, "feedback_knock"); r.has_value()) {
+            s.feedback_knock = *r;
+        } else {
+            return failure(std::move(r).error());
+        }
+        if (auto r = get_double(*idx_clt, "coolant_c"); r.has_value()) {
+            s.coolant_c = *r;
+        } else {
+            return failure(std::move(r).error());
+        }
+        if (auto r = get_double(*idx_iat, "iat_c"); r.has_value()) {
+            s.iat_c = *r;
+        } else {
+            return failure(std::move(r).error());
+        }
+
+        if (idx_lm.has_value() && *idx_lm < fields.size()) {
+            auto b = parse_bool_field(fields[*idx_lm]);
+            if (!b.has_value()) {
+                return row_error(row, "limp_mode", "non-boolean",
+                                  fields[*idx_lm]);
+            }
+            s.limp_mode = *b;
+        }
+
+        samples.push_back(s);
     }
 
     return samples;

@@ -162,7 +162,17 @@ constexpr std::string_view kUsage =
     "                            iat_c; optional: time_ms, closed_loop, knock, limp_mode),\n"
     "                            applies the configured data-quality gates, buckets each\n"
     "                            sample to the nearest axis cell, and prints the per-cell\n"
-    "                            diff. Hardware-free; no flashing.\n";
+    "                            diff. Hardware-free; no flashing.\n"
+    "    autotune knock-pull --log <CSV> --rpm-axis <r,r,…> --load-axis <l,l,…>\n"
+    "                        --current-timing <d,d,…>\n"
+    "                        [--trigger-degrees 1.5] [--pull-step-degrees 0.75]\n"
+    "                        [--min-samples-per-cell 30]\n"
+    "                            Propose ignition-timing pull on cells with sustained\n"
+    "                            knock per docs/12 §\"Knock-based ignition pull\". CSV\n"
+    "                            cols: rpm, load, feedback_knock, coolant_c, iat_c;\n"
+    "                            optional: limp_mode. --current-timing is flat row-major\n"
+    "                            (rows × cols = load × rpm). Monotonic-subtract: cells\n"
+    "                            never gain timing. Hardware-free.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -1519,6 +1529,32 @@ std::optional<double> parse_fraction_or_percent(std::string_view raw) {
     return percent ? v / 100.0 : v;
 }
 
+// Parse a plain decimal: strict strtod with no '%' acceptance. Used
+// for arguments that name a physical unit (e.g. degrees) where a
+// trailing '%' would be a user error to silently divide-by-100.
+std::optional<double> parse_decimal(std::string_view raw) {
+    std::string s{raw};
+    auto trim = [](std::string &t) {
+        while (!t.empty() && std::isspace(static_cast<unsigned char>(t.front()))) {
+            t.erase(t.begin());
+        }
+        while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back()))) {
+            t.pop_back();
+        }
+    };
+    trim(s);
+    if (s.empty()) {
+        return std::nullopt;
+    }
+    char        *end = nullptr;
+    double const v   = std::strtod(s.c_str(), &end);
+    if (end == s.c_str() || end == nullptr || *end != '\0'
+        || !std::isfinite(v)) {
+        return std::nullopt;
+    }
+    return v;
+}
+
 // Parse a comma-separated list of doubles into a flat vector. Returns
 // nullopt if any field fails to parse; an empty input gives an empty
 // vector (the caller decides if that's an error).
@@ -1785,6 +1821,229 @@ int cmd_autotune_maf(int argc, char *argv[]) {
                     100.0 * delta_pct,
                     c.samples_used,
                     c.confidence);
+    }
+
+    return 0;
+}
+
+int cmd_autotune_knock_pull(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> log_path;
+    std::optional<std::string>           rpm_axis_arg;
+    std::optional<std::string>           load_axis_arg;
+    std::optional<std::string>           current_arg;
+    std::optional<double>                trigger_deg;
+    std::optional<double>                pull_step_deg;
+    std::optional<std::size_t>           min_samples;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const             require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "autotune knock-pull: %s requires a value\n",
+                             name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+
+        if (a == "--log") {
+            if (auto const *v = require_arg("--log"); v) {
+                log_path = std::filesystem::path{v};
+            } else { return 2; }
+        } else if (a == "--rpm-axis") {
+            if (auto const *v = require_arg("--rpm-axis"); v) {
+                rpm_axis_arg = std::string{v};
+            } else { return 2; }
+        } else if (a == "--load-axis") {
+            if (auto const *v = require_arg("--load-axis"); v) {
+                load_axis_arg = std::string{v};
+            } else { return 2; }
+        } else if (a == "--current-timing" || a == "--current") {
+            if (auto const *v = require_arg("--current-timing"); v) {
+                current_arg = std::string{v};
+            } else { return 2; }
+        } else if (a == "--trigger-degrees" || a == "--trigger") {
+            if (auto const *v = require_arg("--trigger-degrees"); v) {
+                auto const parsed = parse_decimal(v);
+                if (!parsed.has_value()) {
+                    std::fprintf(stderr,
+                                 "autotune knock-pull: --trigger-degrees must "
+                                 "be a decimal number in degrees (got '%s')\n",
+                                 v);
+                    return 2;
+                }
+                trigger_deg = *parsed;
+            } else { return 2; }
+        } else if (a == "--pull-step-degrees" || a == "--pull-step") {
+            if (auto const *v = require_arg("--pull-step-degrees"); v) {
+                auto const parsed = parse_decimal(v);
+                if (!parsed.has_value()) {
+                    std::fprintf(stderr,
+                                 "autotune knock-pull: --pull-step-degrees "
+                                 "must be a decimal number in degrees "
+                                 "(got '%s')\n", v);
+                    return 2;
+                }
+                pull_step_deg = *parsed;
+            } else { return 2; }
+        } else if (a == "--min-samples-per-cell" || a == "--min-samples") {
+            if (auto const *v = require_arg("--min-samples-per-cell"); v) {
+                char       *end  = nullptr;
+                long long const n = std::strtoll(v, &end, 10);
+                if (end == v || end == nullptr || *end != '\0' || n < 0) {
+                    std::fprintf(stderr,
+                                 "autotune knock-pull: --min-samples-per-cell "
+                                 "must be a non-negative integer (got '%s')\n",
+                                 v);
+                    return 2;
+                }
+                min_samples = static_cast<std::size_t>(n);
+            } else { return 2; }
+        } else {
+            std::fprintf(stderr,
+                         "autotune knock-pull: unknown argument: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!log_path.has_value() || !rpm_axis_arg.has_value()
+        || !load_axis_arg.has_value() || !current_arg.has_value()) {
+        std::fputs("autotune knock-pull: missing required arguments\n",
+                   stderr);
+        std::fputs("Usage: subuwutuner-cli autotune knock-pull "
+                   "--log <csv>\n"
+                   "       --rpm-axis <r,r,…> --load-axis <l,l,…>\n"
+                   "       --current-timing <d,d,…>   "
+                   "(flat row-major, rows × cols = load × rpm)\n"
+                   "       [--trigger-degrees 1.5] [--pull-step-degrees 0.75]\n"
+                   "       [--min-samples-per-cell 30]\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const rpm_axis = parse_double_list(*rpm_axis_arg);
+    if (!rpm_axis.has_value() || rpm_axis->empty()) {
+        std::fputs("autotune knock-pull: --rpm-axis must be a non-empty "
+                   "comma-separated list of numbers\n", stderr);
+        return 2;
+    }
+    auto const load_axis = parse_double_list(*load_axis_arg);
+    if (!load_axis.has_value() || load_axis->empty()) {
+        std::fputs("autotune knock-pull: --load-axis must be a non-empty "
+                   "comma-separated list of numbers\n", stderr);
+        return 2;
+    }
+    auto const current = parse_double_list(*current_arg);
+    if (!current.has_value()) {
+        std::fputs("autotune knock-pull: --current-timing must be a "
+                   "comma-separated list of numbers\n", stderr);
+        return 2;
+    }
+    if (current->size() != rpm_axis->size() * load_axis->size()) {
+        std::fprintf(stderr,
+                     "autotune knock-pull: --current-timing length (%zu) must "
+                     "equal --rpm-axis (%zu) × --load-axis (%zu) = %zu\n",
+                     current->size(), rpm_axis->size(), load_axis->size(),
+                     rpm_axis->size() * load_axis->size());
+        return 2;
+    }
+
+    std::ifstream in{*log_path, std::ios::binary};
+    if (!in) {
+        std::fprintf(stderr, "autotune knock-pull: cannot open --log '%s'\n",
+                     log_path->string().c_str());
+        return 1;
+    }
+    std::ostringstream buf;
+    buf << in.rdbuf();
+    auto const samples = st::autotune::read_knock_samples_csv(buf.str());
+    if (!samples.has_value()) {
+        std::fprintf(stderr, "autotune knock-pull: %s\n",
+                     samples.error().to_string().c_str());
+        return 1;
+    }
+
+    st::autotune::KnockPullOptions opts;
+    if (trigger_deg.has_value())   { opts.trigger_degrees      = *trigger_deg; }
+    if (pull_step_deg.has_value()) { opts.pull_step_degrees    = *pull_step_deg; }
+    if (min_samples.has_value())   { opts.min_samples_per_cell = *min_samples; }
+
+    auto const result = st::autotune::tune_knock_pull(
+        *rpm_axis, *load_axis, *current, *samples, opts);
+    if (!result.has_value()) {
+        std::fprintf(stderr, "autotune knock-pull: %s\n",
+                     result.error().to_string().c_str());
+        return 1;
+    }
+
+    std::printf("Loaded %zu samples from %s\n",
+                result->total_samples,
+                log_path->string().c_str());
+    double const retained_pct =
+        result->total_samples == 0
+            ? 0.0
+            : 100.0
+                  * static_cast<double>(result->samples_after_gates)
+                  / static_cast<double>(result->total_samples);
+    std::printf("After quality gates: %zu samples (%.1f%% retained)\n\n",
+                result->samples_after_gates, retained_pct);
+
+    // Count and summarise pulled cells.
+    std::size_t pulled = 0;
+    double      max_pull_deg = 0.0;
+    std::size_t max_pull_cell = 0;
+    for (auto const &c : result->cells) {
+        if (c.pulled) {
+            ++pulled;
+            double const drop = c.current_value - c.proposed_value;
+            if (drop > max_pull_deg) {
+                max_pull_deg  = drop;
+                max_pull_cell = c.cell_index;
+            }
+        }
+    }
+    std::printf("Knock pull proposal:\n");
+    std::printf("  Cells pulled:          %zu / %zu\n",
+                pulled, result->cells.size());
+    std::printf("  Pull step:             %.2f°\n", opts.pull_step_degrees);
+    std::printf("  Trigger threshold:     mean feedback knock < -%.2f° "
+                "(over ≥ %zu samples)\n",
+                opts.trigger_degrees, opts.min_samples_per_cell);
+    if (pulled > 0) {
+        std::size_t const row = max_pull_cell / rpm_axis->size();
+        std::size_t const col = max_pull_cell % rpm_axis->size();
+        std::printf("  Worst cell:            load=%.2f rpm=%.0f "
+                    "pulled %.2f°\n",
+                    (*load_axis)[row], (*rpm_axis)[col], max_pull_deg);
+    }
+    std::printf("\n");
+
+    // 2D ledger: one row per load × one cell-pair per RPM. Compact when
+    // the table is small (the docs/12 timing maps are typically 8×8 to
+    // 16×16, which fits on a terminal line).
+    std::printf("  load \\ rpm");
+    for (std::size_t c = 0; c < rpm_axis->size(); ++c) {
+        std::printf(" | %7.0f", (*rpm_axis)[c]);
+    }
+    std::printf("\n  -----------");
+    for (std::size_t c = 0; c < rpm_axis->size(); ++c) {
+        std::printf("-+--------");
+    }
+    std::printf("\n");
+    for (std::size_t r = 0; r < load_axis->size(); ++r) {
+        std::printf("  %9.2f ", (*load_axis)[r]);
+        for (std::size_t c = 0; c < rpm_axis->size(); ++c) {
+            auto const &cell = result->cells[r * rpm_axis->size() + c];
+            if (cell.pulled) {
+                std::printf("|  %+5.2f ",
+                            cell.proposed_value - cell.current_value);
+            } else {
+                std::printf("|    .   ");
+            }
+        }
+        std::printf("\n");
     }
 
     return 0;
@@ -3439,6 +3698,9 @@ int main(int argc, char *argv[]) {
         std::string_view const sub{argv[2]};
         if (sub == "maf") {
             return cmd_autotune_maf(argc - 3, argv + 3);
+        }
+        if (sub == "knock-pull") {
+            return cmd_autotune_knock_pull(argc - 3, argv + 3);
         }
         std::fprintf(stderr, "autotune: unknown subcommand: %s\n", argv[2]);
         return 2;
