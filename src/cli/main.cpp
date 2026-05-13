@@ -155,14 +155,16 @@ constexpr std::string_view kUsage =
     "                            'flash-apply --trace ...' for hardware-free validation.\n"
     "    autotune maf --log <CSV> --axis <v,v,…> --current <gs,gs,…>\n"
     "                 [--gain 0.5] [--max-delta 8%] [--min-samples-per-cell 50]\n"
-    "                 [--require-open-loop] [--no-smooth]\n"
+    "                 [--require-open-loop] [--no-smooth] [--strict-lint]\n"
     "                            Propose a MAF-scaling correction per docs/12. Reads a\n"
     "                            column-headered CSV log (required cols: maf_voltage,\n"
     "                            actual_afr, commanded_afr, rpm, throttle_pct, coolant_c,\n"
     "                            iat_c; optional: time_ms, closed_loop, knock, limp_mode),\n"
     "                            applies the configured data-quality gates, buckets each\n"
-    "                            sample to the nearest axis cell, and prints the per-cell\n"
-    "                            diff. Hardware-free; no flashing.\n"
+    "                            sample to the nearest axis cell, runs the docs/12\n"
+    "                            engine-safety lint (non-monotonic + step discontinuity),\n"
+    "                            and prints the per-cell diff. --strict-lint exits 3 on\n"
+    "                            any violation. Hardware-free; no flashing.\n"
     "    autotune knock-pull --log <CSV> --rpm-axis <r,r,…> --load-axis <l,l,…>\n"
     "                        --current-timing <d,d,…>\n"
     "                        [--trigger-degrees 1.5] [--pull-step-degrees 0.75]\n"
@@ -1583,6 +1585,7 @@ int cmd_autotune_maf(int argc, char *argv[]) {
     std::optional<std::size_t>           min_samples;
     bool                                 require_open_loop = false;
     bool                                 skip_smooth       = false;
+    bool                                 strict_lint       = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -1657,6 +1660,8 @@ int cmd_autotune_maf(int argc, char *argv[]) {
             require_open_loop = true;
         } else if (a == "--no-smooth") {
             skip_smooth = true;
+        } else if (a == "--strict-lint") {
+            strict_lint = true;
         } else {
             std::fprintf(stderr, "autotune maf: unknown argument: %s\n", argv[i]);
             return 2;
@@ -1670,7 +1675,8 @@ int cmd_autotune_maf(int argc, char *argv[]) {
                    "--log <csv> --axis <v,v,…> --current <gs,gs,…>\n"
                    "       [--gain 0.5] [--max-delta 8%] "
                    "[--min-samples-per-cell 50]\n"
-                   "       [--require-open-loop] [--no-smooth]\n",
+                   "       [--require-open-loop] [--no-smooth] "
+                   "[--strict-lint]\n",
                    stderr);
         return 2;
     }
@@ -1821,6 +1827,30 @@ int cmd_autotune_maf(int argc, char *argv[]) {
                     100.0 * delta_pct,
                     c.samples_used,
                     c.confidence);
+    }
+
+    // Engine-safety lint per docs/12 §"Engine-safety linting". Always
+    // runs — the proposal isn't auto-applied, so the user reviews the
+    // findings and decides. With --strict-lint, exit non-zero when any
+    // violation is present so this command can gate a downstream
+    // --apply (when that lands in the project-integration slice).
+    auto const violations =
+        st::autotune::lint_maf_proposal(*axis, *current, final_result);
+    std::printf("\nLint:\n");
+    if (violations.empty()) {
+        std::printf("  No violations.\n");
+    } else {
+        std::printf("  %zu violation%s:\n",
+                    violations.size(),
+                    violations.size() == 1 ? "" : "s");
+        for (auto const &v : violations) {
+            std::printf("  - [%s] %s\n",
+                        st::autotune::lint_kind_name(v.kind),
+                        v.message.c_str());
+        }
+        if (strict_lint) {
+            return 3;
+        }
     }
 
     return 0;

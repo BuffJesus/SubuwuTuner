@@ -820,4 +820,101 @@ Result<std::vector<KnockSample>> read_knock_samples_csv(
     return samples;
 }
 
+// ---------------------------------------------------------------------
+// Engine-safety lint
+// ---------------------------------------------------------------------
+
+char const *lint_kind_name(LintViolationKind kind) noexcept {
+    switch (kind) {
+        case LintViolationKind::NonMonotonic:      return "non-monotonic";
+        case LintViolationKind::StepDiscontinuity: return "step discontinuity";
+    }
+    // Unreachable when every enumerator is handled, but `-Werror` +
+    // `-Wreturn-type` flags a missing return on some compilers if we
+    // rely solely on the switch.
+    return "unknown violation";
+}
+
+std::vector<LintViolation> lint_maf_proposal(
+    std::span<double const> axis,
+    std::span<double const> current_scaling,
+    MafTuneResult const    &result,
+    LintOptions const      &opts) {
+    std::vector<LintViolation> violations;
+
+    auto const n = result.cells.size();
+    if (n < 2) {
+        return violations;
+    }
+
+    // Floating-point tolerance for "strictly equal" comparisons on the
+    // monotonic check — proposals that round-trip through smoothing can
+    // pick up sub-bit noise.
+    constexpr double kMonoEps      = 1e-9;
+    constexpr double kRelDenomEps  = 1e-9;
+
+    auto fmt_value = [](double v) {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%.4g", v);
+        return std::string{buf};
+    };
+
+    for (std::size_t i = 0; i + 1 < n; ++i) {
+        double const prev_v = result.cells[i].proposed_value;
+        double const next_v = result.cells[i + 1].proposed_value;
+
+        if (opts.enforce_monotonic && next_v + kMonoEps < prev_v) {
+            std::string axis_clause;
+            if (i + 1 < axis.size()) {
+                axis_clause = " (v=" + fmt_value(axis[i]) + " → v="
+                              + fmt_value(axis[i + 1]) + ")";
+            }
+            violations.push_back(LintViolation{
+                LintViolationKind::NonMonotonic,
+                i,
+                "MAF proposed value falls between cells " + std::to_string(i)
+                    + " and " + std::to_string(i + 1) + axis_clause
+                    + ": " + fmt_value(prev_v) + " → " + fmt_value(next_v),
+            });
+        }
+
+        if (opts.enforce_smoothness
+            && i + 1 < current_scaling.size()) {
+            double const orig_step =
+                current_scaling[i + 1] - current_scaling[i];
+            double const prop_step = next_v - prev_v;
+            // Noise floor scaled to the cell's magnitude: a flat
+            // region with a sub-1%-of-cell-value movement is not a
+            // discontinuity. Otherwise tiny proposed steps in flat
+            // regions get amplified by the relative ratio and flag.
+            double const ref_magnitude = std::max(
+                std::abs(current_scaling[i]),
+                std::abs(current_scaling[i + 1]));
+            double const abs_floor = 0.01 * ref_magnitude;
+            if (std::abs(orig_step) < abs_floor
+                && std::abs(prop_step) < abs_floor) {
+                continue;
+            }
+            double const denom = std::max(
+                {std::abs(orig_step), std::abs(prop_step),
+                 abs_floor, kRelDenomEps});
+            double const ratio = std::abs(prop_step - orig_step) / denom;
+            if (ratio > opts.max_step_change_ratio) {
+                violations.push_back(LintViolation{
+                    LintViolationKind::StepDiscontinuity,
+                    i,
+                    "MAF step between cells " + std::to_string(i) + " and "
+                        + std::to_string(i + 1)
+                        + " deviates by " + fmt_value(100.0 * ratio)
+                        + "% from the original (step was "
+                        + fmt_value(orig_step) + ", proposed "
+                        + fmt_value(prop_step) + ")",
+                });
+            }
+        }
+    }
+
+    return violations;
+}
+
 } // namespace st::autotune

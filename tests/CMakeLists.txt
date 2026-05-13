@@ -31,6 +31,7 @@ add_executable(st_unit_tests
     unit/flash/test_flash.cpp
     unit/autotune/test_autotune.cpp
     unit/autotune/test_autotune_csv.cpp
+    unit/autotune/test_autotune_lint.cpp
 )
 
 target_link_libraries(st_unit_tests

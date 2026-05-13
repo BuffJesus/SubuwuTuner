@@ -308,6 +308,74 @@ struct KnockPullResult {
 [[nodiscard]] Result<std::vector<KnockSample>> read_knock_samples_csv(
     std::string_view text);
 
+// =====================================================================
+// Engine-safety lint (docs/12 §"Engine-safety linting")
+// =====================================================================
+//
+// Layered on top of the proposal-producing functions above. The lint
+// does NOT mutate the proposal; it returns a list of violations the
+// caller can show to the user (and use to refuse a downstream
+// --apply step). Per docs/12 these checks are always on regardless of
+// jurisdiction profile.
+//
+// v1.1 scope: MAF scaling specifically. The AFR-bounds and ignition-
+// ceiling checks from docs/12 apply to AFR/timing tables and land
+// alongside the auto-tune algorithms that emit those (closed-loop
+// trim integration in v1.2). Knock-pull lint follows in its own
+// slice — by construction the kernel only subtracts, so the most
+// useful check there is cell-to-cell smoothness which deserves its
+// own tuning.
+
+enum class LintViolationKind {
+    NonMonotonic,        // proposed[i+1] < proposed[i] in voltage order
+    StepDiscontinuity,   // proposed step deviates wildly from original
+};
+
+struct LintViolation {
+    LintViolationKind kind;
+    // First of the two adjacent cells the violation spans. For
+    // NonMonotonic and StepDiscontinuity the relevant pair is
+    // (cell_index, cell_index + 1).
+    std::size_t       cell_index{0};
+    std::string       message;
+};
+
+struct LintOptions {
+    bool   enforce_monotonic     = true;
+    bool   enforce_smoothness    = true;
+    // Relative threshold on the per-step change between proposed and
+    // original. The check compares
+    //     |prop_step - orig_step| / max(|orig_step|, |prop_step|, eps)
+    // against this value, so a flat-region (orig_step≈0) with a
+    // similarly tiny prop_step doesn't trip, and a flat-region with a
+    // non-trivial prop_step does.
+    double max_step_change_ratio = 0.50;
+};
+
+// Stable short label for a violation kind, suitable for CLI / log
+// output. Owning the mapping here (rather than in each caller) means
+// a new `LintViolationKind` forces a compile-time switch update
+// instead of silently mislabeling new violation types.
+[[nodiscard]] char const *lint_kind_name(LintViolationKind kind) noexcept;
+
+// Lint a MAF-scaling proposal. `axis` and `current_scaling` describe
+// the original 1D table; both spans must align with `result.cells`
+// in length and ordering. When `current_scaling` is shorter than
+// `result.cells`, the smoothness check is silently skipped past the
+// shorter end (monotonicity still runs across the full proposal).
+// The axis is only used to make violation messages readable.
+//
+// `LintOptions::max_step_change_ratio` is applied with a noise floor
+// scaled to each cell's magnitude (1% of the larger neighbor's
+// absolute value): a flat region with sub-floor proposed movement
+// does not fire the smoothness check. Returns an empty vector when
+// the proposal is clean.
+[[nodiscard]] std::vector<LintViolation> lint_maf_proposal(
+    std::span<double const> axis,
+    std::span<double const> current_scaling,
+    MafTuneResult const    &result,
+    LintOptions const      &opts = {});
+
 } // namespace st::autotune
 
 #endif // ST_AUTOTUNE_HPP
