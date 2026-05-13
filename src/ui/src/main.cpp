@@ -789,7 +789,15 @@ void apply_theme() {
     c[ImGuiCol_TableRowBg]            = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     c[ImGuiCol_TableRowBgAlt]         = ImVec4(1.00f, 1.00f, 1.00f, 0.03f);
 
-    c[ImGuiCol_NavCursor]             = accent;
+    // NavCursor was previously `accent`, which made it render as a
+    // bright outline around whichever widget last received focus.
+    // Combined with viewports/docking, this manifested as "one cell
+    // is highlighted and never unhighlights" in the data grid — even
+    // after disabling NavEnableKeyboard, the cursor color was still
+    // being applied wherever the nav system happened to land. We
+    // don't ship any explicit nav-focus indicator, so making this
+    // fully transparent is harmless and removes the offending visual.
+    c[ImGuiCol_NavCursor]             = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
     c[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
     c[ImGuiCol_NavWindowingDimBg]     = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
     c[ImGuiCol_ModalWindowDimBg]      = ImVec4(0.80f, 0.80f, 0.80f, 0.35f);
@@ -856,6 +864,16 @@ void render_menubar(AppState &state) {
     bool const can_undo    = has_project && state.project->history().can_undo();
     bool const can_redo    = has_project && state.project->history().can_redo();
 
+    // Tooltip on a menu item even when it's disabled — so the user
+    // understands WHY it's grayed out rather than just seeing the
+    // affordance and wondering. AllowWhenDisabled is the hover flag
+    // that makes IsItemHovered fire on a disabled item.
+    auto const disabled_tip = [](char const *body) {
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("%s", body);
+        }
+    };
+
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Open Project...", "Ctrl+O")) {
@@ -864,8 +882,15 @@ void render_menubar(AppState &state) {
             if (ImGui::MenuItem("Save Project", "Ctrl+S", false, has_project)) {
                 save_project(state);
             }
+            if (!has_project) {
+                disabled_tip("No project open — there's nothing to save.\n"
+                             "Open a project first (Ctrl+O).");
+            }
             if (ImGui::MenuItem("Close Project", nullptr, false, has_project)) {
                 request_action(state, ConfirmAction::Close);
+            }
+            if (!has_project) {
+                disabled_tip("No project open.");
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
@@ -877,10 +902,22 @@ void render_menubar(AppState &state) {
             if (ImGui::MenuItem("Undo", "Ctrl+Z", false, can_undo)) {
                 do_undo(state);
             }
+            if (has_project && !can_undo) {
+                disabled_tip("Nothing to undo — no edits have been made.");
+            }
             if (ImGui::MenuItem("Redo", "Ctrl+Shift+Z", false, can_redo)) {
                 do_redo(state);
             }
+            if (has_project && !can_redo) {
+                disabled_tip("Nothing to redo.\n"
+                             "Use Undo first, then Redo to step forward.");
+            }
             ImGui::EndMenu();
+        }
+        if (!has_project
+            && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            // Edit menu itself is disabled (BeginMenu second arg = false).
+            ImGui::SetTooltip("No project open — open one to enable editing.");
         }
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("ImGui demo window", nullptr, &state.show_imgui_demo);
