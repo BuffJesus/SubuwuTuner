@@ -1668,10 +1668,47 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     }
     if (state.selection.enabled) {
         auto const rect = state.selection.as_rect();
-        ImGui::TextDisabled("selection: rows %zu:%zu × cols %zu:%zu  (%zu cells)",
-                            rect.r_start, rect.r_end,
-                            rect.c_start, rect.c_end,
-                            state.selection.rows() * state.selection.cols());
+        // Selection-scoped stats. Lets the user see what they're about
+        // to apply +5% / Smooth / Interpolate to before they click.
+        // Parallels the table-wide stats line above so the eye can
+        // compare scope-to-scope at a glance.
+        double      smin = std::numeric_limits<double>::infinity();
+        double      smax = -std::numeric_limits<double>::infinity();
+        double      ssum = 0.0;
+        std::size_t scount = 0;
+        for (std::size_t r = rect.r_start;
+             r <= rect.r_end && r < td_view.values.size(); ++r) {
+            auto const &row = td_view.values[r];
+            for (std::size_t c = rect.c_start;
+                 c <= rect.c_end && c < row.size(); ++c) {
+                double const v = row[c];
+                if (v < smin) smin = v;
+                if (v > smax) smax = v;
+                ssum += v;
+                ++scount;
+            }
+        }
+        if (scount > 0) {
+            double const smean = ssum / static_cast<double>(scount);
+            ImGui::TextDisabled(
+                "selection: rows %zu:%zu × cols %zu:%zu  ·  "
+                "min %.*f  ·  max %.*f  ·  mean %.*f  ·  %zu cells",
+                rect.r_start, rect.r_end,
+                rect.c_start, rect.c_end,
+                precision, smin,
+                precision, smax,
+                precision, smean,
+                scount);
+        } else {
+            // Selection rect lies outside the visible data (e.g.,
+            // mid-3D-slice change with a stale selection). Fall back
+            // to the previous shape so the user still sees the rect.
+            ImGui::TextDisabled(
+                "selection: rows %zu:%zu × cols %zu:%zu  (%zu cells)",
+                rect.r_start, rect.r_end,
+                rect.c_start, rect.c_end,
+                state.selection.rows() * state.selection.cols());
+        }
     }
 
     // Edit toolbar — ops act on the current selection, undo/redo on the
