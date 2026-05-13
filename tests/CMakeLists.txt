@@ -30,6 +30,7 @@ add_executable(st_unit_tests
     unit/discover/test_discover.cpp
     unit/flash/test_flash.cpp
     unit/autotune/test_autotune.cpp
+    unit/autotune/test_autotune_csv.cpp
 )
 
 target_link_libraries(st_unit_tests

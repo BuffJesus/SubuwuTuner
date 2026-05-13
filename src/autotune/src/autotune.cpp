@@ -7,9 +7,14 @@
 #include "st/core/result.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
+#include <map>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace st::autotune {
@@ -367,6 +372,321 @@ Result<KnockPullResult> tune_knock_pull(
     }
 
     return result;
+}
+
+// ---------------------------------------------------------------------
+// CSV → MafSample reader
+// ---------------------------------------------------------------------
+
+namespace {
+
+std::string_view trim_view(std::string_view s) noexcept {
+    while (!s.empty()
+           && std::isspace(static_cast<unsigned char>(s.front()))) {
+        s.remove_prefix(1);
+    }
+    while (!s.empty()
+           && std::isspace(static_cast<unsigned char>(s.back()))) {
+        s.remove_suffix(1);
+    }
+    return s;
+}
+
+std::string to_lower_str(std::string_view s) {
+    std::string out(s);
+    for (auto &c : out) {
+        c = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(c)));
+    }
+    return out;
+}
+
+std::vector<std::string_view> split_csv_fields(std::string_view line) {
+    std::vector<std::string_view> out;
+    std::size_t                   start = 0;
+    for (std::size_t i = 0; i <= line.size(); ++i) {
+        if (i == line.size() || line[i] == ',') {
+            out.push_back(line.substr(start, i - start));
+            start = i + 1;
+        }
+    }
+    return out;
+}
+
+std::optional<double> parse_double_field(std::string_view s) {
+    auto const t = trim_view(s);
+    if (t.empty()) {
+        return std::nullopt;
+    }
+    std::string copy(t);
+    char       *end = nullptr;
+    double const v  = std::strtod(copy.c_str(), &end);
+    if (end == copy.c_str() || end == nullptr || *end != '\0') {
+        return std::nullopt;
+    }
+    if (!std::isfinite(v)) {
+        return std::nullopt;
+    }
+    return v;
+}
+
+std::optional<bool> parse_bool_field(std::string_view s) {
+    auto const lower = to_lower_str(trim_view(s));
+    if (lower.empty()) {
+        return false;
+    }
+    if (lower == "1" || lower == "true" || lower == "yes"
+        || lower == "on") {
+        return true;
+    }
+    if (lower == "0" || lower == "false" || lower == "no"
+        || lower == "off") {
+        return false;
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+Result<std::vector<MafSample>> read_maf_samples_csv(std::string_view text) {
+    // Slice the input into trimmed non-blank, non-comment lines.
+    std::vector<std::string_view> lines;
+    {
+        std::size_t i = 0;
+        while (i < text.size()) {
+            std::size_t e = i;
+            while (e < text.size() && text[e] != '\n' && text[e] != '\r') {
+                ++e;
+            }
+            auto const line = trim_view(text.substr(i, e - i));
+            if (!line.empty() && line.front() != '#') {
+                lines.push_back(line);
+            }
+            i = e;
+            while (i < text.size()
+                   && (text[i] == '\n' || text[i] == '\r')) {
+                ++i;
+            }
+        }
+    }
+
+    if (lines.empty()) {
+        return std::vector<MafSample>{};
+    }
+
+    // Build column-name → index map from the header row.
+    auto const                         header = split_csv_fields(lines[0]);
+    std::map<std::string, std::size_t> col_idx;
+    for (std::size_t i = 0; i < header.size(); ++i) {
+        col_idx.emplace(to_lower_str(trim_view(header[i])), i);
+    }
+
+    auto require_col = [&](char const *name) -> Result<std::size_t> {
+        auto it = col_idx.find(name);
+        if (it == col_idx.end()) {
+            return failure(ErrorCode::InvalidArgument,
+                           std::string{"autotune: CSV missing required column '"}
+                               + name + "'");
+        }
+        return it->second;
+    };
+    auto find_opt_col = [&](char const *name) -> std::optional<std::size_t> {
+        auto it = col_idx.find(name);
+        return (it == col_idx.end())
+                   ? std::optional<std::size_t>{}
+                   : std::optional<std::size_t>{it->second};
+    };
+
+    auto const idx_maf = require_col("maf_voltage");
+    if (!idx_maf.has_value()) {
+        return failure(std::move(idx_maf).error());
+    }
+    auto const idx_act = require_col("actual_afr");
+    if (!idx_act.has_value()) {
+        return failure(std::move(idx_act).error());
+    }
+    auto const idx_cmd = require_col("commanded_afr");
+    if (!idx_cmd.has_value()) {
+        return failure(std::move(idx_cmd).error());
+    }
+    auto const idx_rpm = require_col("rpm");
+    if (!idx_rpm.has_value()) {
+        return failure(std::move(idx_rpm).error());
+    }
+    auto const idx_tps = require_col("throttle_pct");
+    if (!idx_tps.has_value()) {
+        return failure(std::move(idx_tps).error());
+    }
+    auto const idx_clt = require_col("coolant_c");
+    if (!idx_clt.has_value()) {
+        return failure(std::move(idx_clt).error());
+    }
+    auto const idx_iat = require_col("iat_c");
+    if (!idx_iat.has_value()) {
+        return failure(std::move(idx_iat).error());
+    }
+
+    auto const idx_time = find_opt_col("time_ms");
+    auto const idx_cl   = find_opt_col("closed_loop");
+    auto const idx_kn   = find_opt_col("knock");
+    auto const idx_lm   = find_opt_col("limp_mode");
+
+    constexpr double kDefaultPeriodMs  = 50.0;
+    constexpr double kKnockWindowMs    = 250.0;
+
+    std::vector<MafSample> samples;
+    std::vector<double>    time_ms;
+    std::vector<bool>      knock_flag;
+    if (lines.size() > 1) {
+        samples.reserve(lines.size() - 1);
+        time_ms.reserve(lines.size() - 1);
+        knock_flag.reserve(lines.size() - 1);
+    }
+
+    auto row_error = [](std::size_t row, char const *col,
+                         char const *what, std::string_view raw) {
+        return failure(
+            ErrorCode::InvalidArgument,
+            std::string{"autotune: CSV row "} + std::to_string(row + 1)
+                + " column '" + col + "' has " + what + " value '"
+                + std::string{trim_view(raw)} + "'");
+    };
+
+    for (std::size_t row = 1; row < lines.size(); ++row) {
+        auto const fields = split_csv_fields(lines[row]);
+
+        auto get_double = [&](std::size_t i,
+                              char const *col) -> Result<double> {
+            if (i >= fields.size()) {
+                return failure(
+                    ErrorCode::InvalidArgument,
+                    std::string{"autotune: CSV row "} + std::to_string(row + 1)
+                        + " is missing field for column '" + col + "'");
+            }
+            auto v = parse_double_field(fields[i]);
+            if (!v.has_value()) {
+                return row_error(row, col, "non-numeric", fields[i]);
+            }
+            return *v;
+        };
+
+        MafSample s;
+        if (auto r = get_double(*idx_maf, "maf_voltage"); r.has_value()) {
+            s.maf_voltage = *r;
+        } else {
+            return failure(std::move(r).error());
+        }
+        if (auto r = get_double(*idx_act, "actual_afr"); r.has_value()) {
+            s.actual_afr = *r;
+        } else {
+            return failure(std::move(r).error());
+        }
+        if (auto r = get_double(*idx_cmd, "commanded_afr"); r.has_value()) {
+            s.commanded_afr = *r;
+        } else {
+            return failure(std::move(r).error());
+        }
+        if (auto r = get_double(*idx_rpm, "rpm"); r.has_value()) {
+            s.rpm = *r;
+        } else {
+            return failure(std::move(r).error());
+        }
+        if (auto r = get_double(*idx_tps, "throttle_pct"); r.has_value()) {
+            s.throttle_pct = *r;
+        } else {
+            return failure(std::move(r).error());
+        }
+        if (auto r = get_double(*idx_clt, "coolant_c"); r.has_value()) {
+            s.coolant_c = *r;
+        } else {
+            return failure(std::move(r).error());
+        }
+        if (auto r = get_double(*idx_iat, "iat_c"); r.has_value()) {
+            s.iat_c = *r;
+        } else {
+            return failure(std::move(r).error());
+        }
+
+        double t_ms = static_cast<double>(samples.size()) * kDefaultPeriodMs;
+        if (idx_time.has_value()) {
+            if (auto r = get_double(*idx_time, "time_ms"); r.has_value()) {
+                t_ms = *r;
+            } else {
+                return failure(std::move(r).error());
+            }
+        }
+        time_ms.push_back(t_ms);
+
+        bool kf = false;
+        if (idx_kn.has_value() && *idx_kn < fields.size()) {
+            auto b = parse_bool_field(fields[*idx_kn]);
+            if (!b.has_value()) {
+                return row_error(row, "knock", "non-boolean",
+                                  fields[*idx_kn]);
+            }
+            kf = *b;
+        }
+        knock_flag.push_back(kf);
+
+        if (idx_cl.has_value() && *idx_cl < fields.size()) {
+            auto b = parse_bool_field(fields[*idx_cl]);
+            if (!b.has_value()) {
+                return row_error(row, "closed_loop", "non-boolean",
+                                  fields[*idx_cl]);
+            }
+            s.closed_loop = *b;
+        }
+        if (idx_lm.has_value() && *idx_lm < fields.size()) {
+            auto b = parse_bool_field(fields[*idx_lm]);
+            if (!b.has_value()) {
+                return row_error(row, "limp_mode", "non-boolean",
+                                  fields[*idx_lm]);
+            }
+            s.limp_mode = *b;
+        }
+
+        samples.push_back(s);
+    }
+
+    // Derive rpm_rate / throttle_rate using forward differences over
+    // the row-to-row time delta. Negative or zero dt (out-of-order or
+    // duplicate timestamps) collapses to zero rate — better than
+    // propagating a meaningless spike to the gate.
+    for (std::size_t i = 1; i < samples.size(); ++i) {
+        double const dt_s = (time_ms[i] - time_ms[i - 1]) / 1000.0;
+        if (dt_s <= 0.0 || !std::isfinite(dt_s)) {
+            samples[i].rpm_rate      = 0.0;
+            samples[i].throttle_rate = 0.0;
+            continue;
+        }
+        samples[i].rpm_rate =
+            (samples[i].rpm - samples[i - 1].rpm) / dt_s;
+        samples[i].throttle_rate =
+            (samples[i].throttle_pct - samples[i - 1].throttle_pct) / dt_s;
+    }
+
+    // Derive knock_in_window from the row-level `knock` flag using a
+    // backward 250 ms window inclusive of the current sample. Maintains
+    // a running count of knock-flagged samples inside the window — the
+    // outer iterator advances right, the inner `lo` advances right when
+    // entries fall off the back, so each sample is touched twice and
+    // the whole pass is genuinely O(n) regardless of window depth.
+    std::size_t lo               = 0;
+    std::size_t knocks_in_window = 0;
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+        if (knock_flag[i]) {
+            ++knocks_in_window;
+        }
+        while (lo < i && time_ms[i] - time_ms[lo] > kKnockWindowMs) {
+            if (knock_flag[lo]) {
+                --knocks_in_window;
+            }
+            ++lo;
+        }
+        samples[i].knock_in_window = (knocks_in_window > 0);
+    }
+
+    return samples;
 }
 
 } // namespace st::autotune

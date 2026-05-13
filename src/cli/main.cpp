@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The SubuwuTuner Authors
 
+#include "st/autotune.hpp"
 #include "st/can.hpp"
 #include "st/core/version.hpp"
 #include "st/dbc.hpp"
@@ -19,6 +20,7 @@
 #include <charconv>
 #include <numeric>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -150,7 +152,17 @@ constexpr std::string_view kUsage =
     "                            walking the same sequence Flasher::execute would and\n"
     "                            pairing every request with a canned positive response.\n"
     "                            Useful as a regression fixture or as input to\n"
-    "                            'flash-apply --trace ...' for hardware-free validation.\n";
+    "                            'flash-apply --trace ...' for hardware-free validation.\n"
+    "    autotune maf --log <CSV> --axis <v,v,…> --current <gs,gs,…>\n"
+    "                 [--gain 0.5] [--max-delta 8%] [--min-samples-per-cell 50]\n"
+    "                 [--require-open-loop] [--no-smooth]\n"
+    "                            Propose a MAF-scaling correction per docs/12. Reads a\n"
+    "                            column-headered CSV log (required cols: maf_voltage,\n"
+    "                            actual_afr, commanded_afr, rpm, throttle_pct, coolant_c,\n"
+    "                            iat_c; optional: time_ms, closed_loop, knock, limp_mode),\n"
+    "                            applies the configured data-quality gates, buckets each\n"
+    "                            sample to the nearest axis cell, and prints the per-cell\n"
+    "                            diff. Hardware-free; no flashing.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -1473,6 +1485,308 @@ int cmd_log(int argc, char *argv[]) {
                  session.stream().dropped_count(),
                  session.io_errors(),
                  channels.size());
+    return 0;
+}
+
+// Parse a fraction-or-percent string: "8%" → 0.08, "0.08" → 0.08. The
+// trailing '%' is optional; whitespace around the value is tolerated.
+// Returns nullopt on malformed input or non-finite results.
+std::optional<double> parse_fraction_or_percent(std::string_view raw) {
+    std::string s{raw};
+    auto trim = [](std::string &t) {
+        while (!t.empty() && std::isspace(static_cast<unsigned char>(t.front()))) {
+            t.erase(t.begin());
+        }
+        while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back()))) {
+            t.pop_back();
+        }
+    };
+    trim(s);
+    if (s.empty()) {
+        return std::nullopt;
+    }
+    bool const percent = (s.back() == '%');
+    if (percent) {
+        s.pop_back();
+        trim(s);
+    }
+    char        *end = nullptr;
+    double const v   = std::strtod(s.c_str(), &end);
+    if (end == s.c_str() || end == nullptr || *end != '\0'
+        || !std::isfinite(v)) {
+        return std::nullopt;
+    }
+    return percent ? v / 100.0 : v;
+}
+
+// Parse a comma-separated list of doubles into a flat vector. Returns
+// nullopt if any field fails to parse; an empty input gives an empty
+// vector (the caller decides if that's an error).
+std::optional<std::vector<double>> parse_double_list(std::string_view s) {
+    std::vector<double> out;
+    auto const          fields = split_csv_list(s);
+    out.reserve(fields.size());
+    for (auto const &f : fields) {
+        char        *end = nullptr;
+        double const v   = std::strtod(f.c_str(), &end);
+        if (end == f.c_str() || end == nullptr || *end != '\0'
+            || !std::isfinite(v)) {
+            return std::nullopt;
+        }
+        out.push_back(v);
+    }
+    return out;
+}
+
+int cmd_autotune_maf(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> log_path;
+    std::optional<std::string>           axis_arg;
+    std::optional<std::string>           current_arg;
+    std::optional<double>                gain;
+    std::optional<double>                max_delta_pct;
+    std::optional<std::size_t>           min_samples;
+    bool                                 require_open_loop = false;
+    bool                                 skip_smooth       = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const             require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "autotune maf: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+
+        if (a == "--log") {
+            if (auto const *v = require_arg("--log"); v) {
+                log_path = std::filesystem::path{v};
+            } else {
+                return 2;
+            }
+        } else if (a == "--axis") {
+            if (auto const *v = require_arg("--axis"); v) {
+                axis_arg = std::string{v};
+            } else {
+                return 2;
+            }
+        } else if (a == "--current") {
+            if (auto const *v = require_arg("--current"); v) {
+                current_arg = std::string{v};
+            } else {
+                return 2;
+            }
+        } else if (a == "--gain") {
+            if (auto const *v = require_arg("--gain"); v) {
+                auto const parsed = parse_fraction_or_percent(v);
+                if (!parsed.has_value()) {
+                    std::fprintf(stderr,
+                                 "autotune maf: --gain must be a number "
+                                 "(got '%s')\n", v);
+                    return 2;
+                }
+                gain = *parsed;
+            } else {
+                return 2;
+            }
+        } else if (a == "--max-delta" || a == "--max-delta-pct") {
+            if (auto const *v = require_arg("--max-delta"); v) {
+                auto const parsed = parse_fraction_or_percent(v);
+                if (!parsed.has_value()) {
+                    std::fprintf(stderr,
+                                 "autotune maf: --max-delta must be a "
+                                 "number (got '%s')\n", v);
+                    return 2;
+                }
+                max_delta_pct = *parsed;
+            } else {
+                return 2;
+            }
+        } else if (a == "--min-samples-per-cell" || a == "--min-samples") {
+            if (auto const *v = require_arg("--min-samples-per-cell"); v) {
+                char       *end  = nullptr;
+                long long const n = std::strtoll(v, &end, 10);
+                if (end == v || end == nullptr || *end != '\0' || n < 0) {
+                    std::fprintf(stderr,
+                                 "autotune maf: --min-samples-per-cell "
+                                 "must be a non-negative integer (got '%s')\n",
+                                 v);
+                    return 2;
+                }
+                min_samples = static_cast<std::size_t>(n);
+            } else {
+                return 2;
+            }
+        } else if (a == "--require-open-loop") {
+            require_open_loop = true;
+        } else if (a == "--no-smooth") {
+            skip_smooth = true;
+        } else {
+            std::fprintf(stderr, "autotune maf: unknown argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!log_path.has_value() || !axis_arg.has_value()
+        || !current_arg.has_value()) {
+        std::fputs("autotune maf: missing required arguments\n", stderr);
+        std::fputs("Usage: subuwutuner-cli autotune maf "
+                   "--log <csv> --axis <v,v,…> --current <gs,gs,…>\n"
+                   "       [--gain 0.5] [--max-delta 8%] "
+                   "[--min-samples-per-cell 50]\n"
+                   "       [--require-open-loop] [--no-smooth]\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const axis = parse_double_list(*axis_arg);
+    if (!axis.has_value() || axis->empty()) {
+        std::fputs("autotune maf: --axis must be a non-empty comma-separated "
+                   "list of numbers\n", stderr);
+        return 2;
+    }
+    auto const current = parse_double_list(*current_arg);
+    if (!current.has_value() || current->empty()) {
+        std::fputs("autotune maf: --current must be a non-empty comma-separated "
+                   "list of numbers\n", stderr);
+        return 2;
+    }
+    if (axis->size() != current->size()) {
+        std::fprintf(stderr,
+                     "autotune maf: --axis (%zu) and --current (%zu) must have "
+                     "the same length\n",
+                     axis->size(), current->size());
+        return 2;
+    }
+
+    std::ifstream in{*log_path, std::ios::binary};
+    if (!in) {
+        std::fprintf(stderr, "autotune maf: cannot open --log '%s'\n",
+                     log_path->string().c_str());
+        return 1;
+    }
+    std::ostringstream buf;
+    buf << in.rdbuf();
+    auto const samples = st::autotune::read_maf_samples_csv(buf.str());
+    if (!samples.has_value()) {
+        std::fprintf(stderr, "autotune maf: %s\n",
+                     samples.error().to_string().c_str());
+        return 1;
+    }
+
+    st::autotune::MafTuneOptions opts;
+    if (gain.has_value())          { opts.gain                 = *gain; }
+    if (max_delta_pct.has_value()) { opts.max_delta_pct        = *max_delta_pct; }
+    if (min_samples.has_value())   { opts.min_samples_per_cell = *min_samples; }
+    opts.require_open_loop = require_open_loop;
+
+    auto const result =
+        st::autotune::tune_maf(*axis, *current, *samples, opts);
+    if (!result.has_value()) {
+        std::fprintf(stderr, "autotune maf: %s\n",
+                     result.error().to_string().c_str());
+        return 1;
+    }
+
+    auto const &final_result =
+        skip_smooth
+            ? *result
+            : st::autotune::smooth_proposals(*result, opts.max_delta_pct);
+
+    // Summary header — mirrors docs/12 §"Output".
+    std::printf("Loaded %zu samples from %s\n",
+                final_result.total_samples,
+                log_path->string().c_str());
+    double const retained_pct =
+        final_result.total_samples == 0
+            ? 0.0
+            : 100.0
+                  * static_cast<double>(final_result.samples_after_gates)
+                  / static_cast<double>(final_result.total_samples);
+    std::printf("After quality gates: %zu samples (%.1f%% retained)\n\n",
+                final_result.samples_after_gates,
+                retained_pct);
+
+    // Aggregate stats. After smoothing, a cell can have a non-zero
+    // post-smooth delta from neighbor pull even when its own
+    // samples_used < min_samples_per_cell — so `modified` counts every
+    // cell that moved (regardless of why), and `underpowered` reports
+    // separately how many cells lacked direct data of their own.
+    constexpr double kModifiedEpsilon = 1e-9;
+    std::size_t modified         = 0;
+    std::size_t underpowered     = 0;
+    double      sum_delta_pct    = 0.0;
+    double      max_delta_signed = 0.0;
+    double      min_delta_signed = 0.0;
+    std::size_t max_cell_idx     = 0;
+    std::size_t min_cell_idx     = 0;
+    for (auto const &c : final_result.cells) {
+        if (c.samples_used < opts.min_samples_per_cell) {
+            ++underpowered;
+        }
+        double const delta_pct = c.current_value == 0.0
+                                     ? 0.0
+                                     : (c.proposed_value / c.current_value)
+                                         - 1.0;
+        if (std::abs(delta_pct) > kModifiedEpsilon) {
+            ++modified;
+            sum_delta_pct += delta_pct;
+        }
+        if (delta_pct > max_delta_signed) {
+            max_delta_signed = delta_pct;
+            max_cell_idx     = c.cell_index;
+        }
+        if (delta_pct < min_delta_signed) {
+            min_delta_signed = delta_pct;
+            min_cell_idx     = c.cell_index;
+        }
+    }
+
+    std::printf("MAF scaling proposal:\n");
+    std::printf("  Cells modified:        %zu / %zu\n",
+                modified, final_result.cells.size());
+    std::printf("  Underpowered cells:    %zu (<%zu direct samples; any "
+                "delta is from neighbor smoothing)\n",
+                underpowered, opts.min_samples_per_cell);
+    if (modified > 0) {
+        std::printf("  Mean delta:            %+.2f%%\n",
+                    100.0 * sum_delta_pct / static_cast<double>(modified));
+    }
+    if (max_delta_signed > 0.0) {
+        auto const &c = final_result.cells[max_cell_idx];
+        std::printf("  Max delta:             %+.2f%% at v=%.2f (n=%zu)\n",
+                    100.0 * max_delta_signed,
+                    (*axis)[max_cell_idx],
+                    c.samples_used);
+    }
+    if (min_delta_signed < 0.0) {
+        auto const &c = final_result.cells[min_cell_idx];
+        std::printf("  Min delta:             %+.2f%% at v=%.2f (n=%zu)\n",
+                    100.0 * min_delta_signed,
+                    (*axis)[min_cell_idx],
+                    c.samples_used);
+    }
+    std::printf("\n");
+
+    // Per-cell ledger — small N (the MAF axis has a couple of dozen
+    // breakpoints) so we can afford one row per cell.
+    std::printf("  v (V) |  current  | proposed  |   delta   |   n   | confidence\n");
+    std::printf("  ------+-----------+-----------+-----------+-------+-----------\n");
+    for (std::size_t i = 0; i < final_result.cells.size(); ++i) {
+        auto const &c = final_result.cells[i];
+        double const delta_pct = c.current_value == 0.0
+                                     ? 0.0
+                                     : (c.proposed_value / c.current_value)
+                                         - 1.0;
+        std::printf("  %5.2f | %9.4f | %9.4f | %+8.2f%% | %5zu | %6.2f\n",
+                    (*axis)[i],
+                    c.current_value,
+                    c.proposed_value,
+                    100.0 * delta_pct,
+                    c.samples_used,
+                    c.confidence);
+    }
+
     return 0;
 }
 
@@ -3115,6 +3429,19 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "flash-trace") {
         return cmd_flash_trace(argc - 2, argv + 2);
+    }
+    if (cmd == "autotune") {
+        if (argc < 3) {
+            std::fputs("autotune: missing subcommand. Try 'autotune maf'.\n",
+                       stderr);
+            return 2;
+        }
+        std::string_view const sub{argv[2]};
+        if (sub == "maf") {
+            return cmd_autotune_maf(argc - 3, argv + 3);
+        }
+        std::fprintf(stderr, "autotune: unknown subcommand: %s\n", argv[2]);
+        return 2;
     }
 
     std::fprintf(stderr, "subuwutuner-cli: unknown argument: %s\n", argv[1]);

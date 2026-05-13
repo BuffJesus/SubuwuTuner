@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <span>
+#include <string_view>
 #include <vector>
 
 // =====================================================================
@@ -243,6 +244,46 @@ struct KnockPullResult {
     std::span<double const>      current_timing,
     std::span<KnockSample const> samples,
     KnockPullOptions const      &opts = {});
+
+// =====================================================================
+// CSV → MafSample reader
+// =====================================================================
+//
+// Parses a column-headered CSV log into MafSample records. The header
+// row identifies columns by name (case-insensitive); columns may
+// appear in any order; unknown columns are ignored.
+//
+// Required columns:
+//   maf_voltage, actual_afr, commanded_afr, rpm, throttle_pct,
+//   coolant_c, iat_c
+//
+// Optional columns:
+//   time_ms       — milliseconds since the log start. When missing,
+//                   rows are assumed at 50 ms apart (20 Hz).
+//   closed_loop   — boolean (0/1, true/false, yes/no, on/off). An empty
+//                   cell parses as false; explicit non-boolean tokens
+//                   error with row + column flagged.
+//   knock         — boolean knock-event flag for this sample. Used to
+//                   derive `knock_in_window`, which is set true on any
+//                   sample that has another sample with knock=1 within
+//                   the prior 250 ms (per docs/12 §"Data-quality gates").
+//                   Empty cells parse as false; same error semantics as
+//                   `closed_loop` for non-boolean text.
+//   limp_mode     — boolean. Empty-cell and error semantics match
+//                   `closed_loop`.
+//
+// Derived per-sample fields:
+//   rpm_rate, throttle_rate — forward differences over the time delta
+//     between successive rows; the first row's rates are 0.
+//   knock_in_window — see above.
+//
+// Lines beginning with '#' and blank lines are skipped. CRLF tolerated.
+// Empty input returns an empty vector (not an error). Missing required
+// column → InvalidArgument. Non-numeric value in a numeric column or
+// non-boolean value in a boolean column → InvalidArgument with the
+// row/column flagged.
+[[nodiscard]] Result<std::vector<MafSample>> read_maf_samples_csv(
+    std::string_view text);
 
 } // namespace st::autotune
 
