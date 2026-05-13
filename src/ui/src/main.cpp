@@ -1020,22 +1020,47 @@ void render_sidebar(AppState &state) {
         return;
     }
 
-    for (auto const &t : def.tables()) {
-        if (!filter.empty()
-            && !icontains(t.name, filter) && !icontains(t.id, filter)) {
-            continue;
+    // Group tables by category, preserving first-occurrence order so
+    // pack authors get to control the group ordering. Tables without a
+    // category fall into "Other"; that group lands wherever the first
+    // uncategorized table appears (predictable, not magic-sorted).
+    struct Group {
+        std::string_view name;
+        std::vector<std::size_t> indices;  // into def.tables()
+    };
+    std::vector<Group> groups;
+    groups.reserve(8);
+    auto const find_or_make = [&](std::string_view cat) -> Group & {
+        for (auto &g : groups) {
+            if (g.name == cat) return g;
         }
+        groups.push_back({cat, {}});
+        return groups.back();
+    };
+    for (std::size_t i = 0; i < def.tables().size(); ++i) {
+        auto const &t = def.tables()[i];
+        std::string_view const cat =
+            t.category.empty() ? std::string_view{"Other"}
+                                : std::string_view{t.category};
+        find_or_make(cat).indices.push_back(i);
+    }
+
+    auto const table_matches = [&](st::Table const &t) {
+        return filter.empty()
+               || icontains(t.name, filter) || icontains(t.id, filter);
+    };
+
+    auto const render_table_row = [&](st::Table const &t) {
         bool const selected = state.selected_table_id == t.id;
-        // Prefer the human-readable name as the primary label. Snake-case
-        // IDs are developer-facing — surface them in the tooltip instead.
+        // Prefer the human-readable name as the primary label.
+        // Snake-case IDs are developer-facing — surface them in the
+        // tooltip instead.
         char const *label = t.name.empty() ? t.id.c_str() : t.name.c_str();
         ImGui::PushID(t.id.c_str());
         if (ImGui::Selectable(label, selected)) {
             state.select_table(t.id);
         }
         if (ImGui::IsItemHovered()) {
-            // Compose the tooltip so hover gives the full identity card:
-            // id, dimension, address, and any safety/emissions flags.
             ImGui::BeginTooltip();
             if (!t.name.empty()) {
                 ImGui::TextUnformatted(t.name.c_str());
@@ -1058,6 +1083,48 @@ void render_sidebar(AppState &state) {
             ImGui::EndTooltip();
         }
         ImGui::PopID();
+    };
+
+    for (auto const &g : groups) {
+        // Count matches in this group up-front so the header line can
+        // report it AND so we can skip an entirely-filtered-out group
+        // (don't render an empty TreeNode that just clutters the panel).
+        std::size_t group_matched = 0;
+        for (auto idx : g.indices) {
+            if (table_matches(def.tables()[idx])) {
+                ++group_matched;
+            }
+        }
+        if (group_matched == 0) continue;
+
+        char header[96];
+        if (filter.empty()) {
+            std::snprintf(header, sizeof header, "%.*s (%zu)",
+                          static_cast<int>(g.name.size()), g.name.data(),
+                          g.indices.size());
+        } else {
+            std::snprintf(header, sizeof header, "%.*s (%zu of %zu)",
+                          static_cast<int>(g.name.size()), g.name.data(),
+                          group_matched, g.indices.size());
+        }
+
+        // When filtering, force the group open so matches are always
+        // visible. Otherwise default-open on first run; the user can
+        // collapse manually and that state persists via imgui.ini.
+        if (!filter.empty()) {
+            ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+        }
+        ImGuiTreeNodeFlags const tn_flags =
+            ImGuiTreeNodeFlags_DefaultOpen
+            | ImGuiTreeNodeFlags_SpanAvailWidth;
+        if (ImGui::TreeNodeEx(header, tn_flags)) {
+            for (auto idx : g.indices) {
+                auto const &t = def.tables()[idx];
+                if (!table_matches(t)) continue;
+                render_table_row(t);
+            }
+            ImGui::TreePop();
+        }
     }
     ImGui::End();
 }
