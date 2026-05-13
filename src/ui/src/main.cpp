@@ -507,6 +507,46 @@ void request_action(AppState &state, ConfirmAction action,
     }
 }
 
+// Action-specific labels for the unsaved-changes modal. Keeping these
+// pure verbs scoped to the modal so they don't accidentally read like
+// general "open / close / quit" handlers elsewhere.
+char const *modal_save_label(ConfirmAction a) noexcept {
+    switch (a) {
+        case ConfirmAction::OpenDialog:
+        case ConfirmAction::OpenRecent: return "Save and open";
+        case ConfirmAction::Close:      return "Save and close";
+        case ConfirmAction::Quit:       return "Save and quit";
+        case ConfirmAction::None:       break;
+    }
+    return "Save and continue";
+}
+
+char const *modal_discard_label(ConfirmAction a) noexcept {
+    switch (a) {
+        case ConfirmAction::OpenDialog:
+        case ConfirmAction::OpenRecent: return "Discard and open";
+        case ConfirmAction::Close:      return "Discard and close";
+        case ConfirmAction::Quit:       return "Discard and quit";
+        case ConfirmAction::None:       break;
+    }
+    return "Discard changes";
+}
+
+char const *modal_subtitle(ConfirmAction a) noexcept {
+    switch (a) {
+        case ConfirmAction::OpenDialog:
+        case ConfirmAction::OpenRecent:
+            return "Opening another project will replace this one.";
+        case ConfirmAction::Close:
+            return "Closing this project will reset the editor.";
+        case ConfirmAction::Quit:
+            return "Quitting will exit SubuwuTuner.";
+        case ConfirmAction::None:
+            break;
+    }
+    return "Continuing without saving will discard them.";
+}
+
 void render_unsaved_modal(AppState &state) {
     if (state.show_unsaved_modal) {
         ImGui::OpenPopup("Unsaved changes##unsaved");
@@ -518,43 +558,60 @@ void render_unsaved_modal(AppState &state) {
                              ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopupModal("Unsaved changes##unsaved", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
+        ConfirmAction const what = state.next_action;
+
         ImGui::TextUnformatted("You have unsaved edits in this project.");
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
-        ImGui::TextDisabled("Continuing without saving will discard them.");
+        ImGui::TextDisabled("%s", modal_subtitle(what));
         ImGui::Dummy(ImVec2(0.0f, 16.0f));
 
-        constexpr float kBtnW = 160.0f;
-        if (ImGui::Button("Save and continue", ImVec2(kBtnW, 0.0f))) {
-            save_project(state);
-            execute_action(state, state.next_action, state.next_recent);
-            state.next_action = ConfirmAction::None;
-            state.next_recent.clear();
-            ImGui::CloseCurrentPopup();
-        }
+        // Keyboard shortcuts: Enter = the safe default (Save).
+        // Esc = the safe undo (Cancel). Destructive Discard
+        // requires an explicit click — no accelerator on purpose.
+        bool const want_save =
+            ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false)
+            || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, /*repeat=*/false);
+        bool const want_cancel =
+            ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+
+        constexpr float kBtnW = 180.0f;
+        bool const save_clicked =
+            ImGui::Button(modal_save_label(what), ImVec2(kBtnW, 0.0f));
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Write the working ROM + edits to disk, "
-                              "then proceed.");
+                              "then proceed.  (Enter)");
         }
         ImGui::SameLine();
-        if (ImGui::Button("Discard changes", ImVec2(kBtnW, 0.0f))) {
-            state.dirty       = false;
-            execute_action(state, state.next_action, state.next_recent);
-            state.next_action = ConfirmAction::None;
-            state.next_recent.clear();
-            ImGui::CloseCurrentPopup();
-        }
+        bool const discard_clicked =
+            ImGui::Button(modal_discard_label(what), ImVec2(kBtnW, 0.0f));
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Throw away every edit since the last save "
                               "and proceed.");
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(kBtnW * 0.7f, 0.0f))) {
+        bool const cancel_clicked =
+            ImGui::Button("Cancel", ImVec2(kBtnW * 0.7f, 0.0f));
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Stay here. Don't open, close, or quit.  "
+                              "(Esc)");
+        }
+
+        if (save_clicked || want_save) {
+            save_project(state);
+            execute_action(state, state.next_action, state.next_recent);
             state.next_action = ConfirmAction::None;
             state.next_recent.clear();
             ImGui::CloseCurrentPopup();
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Stay here. Don't open, close, or quit.");
+        } else if (discard_clicked) {
+            state.dirty       = false;
+            execute_action(state, state.next_action, state.next_recent);
+            state.next_action = ConfirmAction::None;
+            state.next_recent.clear();
+            ImGui::CloseCurrentPopup();
+        } else if (cancel_clicked || want_cancel) {
+            state.next_action = ConfirmAction::None;
+            state.next_recent.clear();
+            ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
     }
