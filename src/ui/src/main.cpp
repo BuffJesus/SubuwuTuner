@@ -524,6 +524,49 @@ void paste_clipboard_at_cursor(AppState &state) {
              });
 }
 
+// Read the source ROM's values for the selection and copy them onto
+// the working ROM via apply_op. One history entry per call so a single
+// Ctrl+Z restores the user's edits in that region. Useful workflow:
+// "I edited a corner of this map and don't like it — revert just
+// those cells, not the whole table."
+void reset_selection_to_source(AppState &state) {
+    if (!state.project.has_value() || !state.current_table_data.has_value()
+        || !state.selection.enabled) {
+        return;
+    }
+    auto const *tbl = state.project->definition().find_table(
+        state.selected_table_id);
+    if (tbl == nullptr) {
+        state.status_msg = "Reset: table missing from pack";
+        return;
+    }
+    // Read the source ROM through the same scaling pipeline as the
+    // working ROM — so what we copy back is the exact value a fresh
+    // open of the source would show, not raw bytes.
+    auto src_td = state.project->definition().read_table_values(
+        state.project->source_rom(), *tbl);
+    if (!src_td.has_value()) {
+        state.status_msg =
+            "Reset: read source: " + src_td.error().to_string();
+        return;
+    }
+    auto const rect = state.selection.as_rect();
+    apply_op(state, "reset to source",
+             [&src = *src_td, rect](auto &t, auto r) -> st::Status {
+                 for (std::size_t row = r.r_start;
+                      row <= r.r_end && row < t.values.size()
+                      && row < src.values.size(); ++row) {
+                     for (std::size_t col = r.c_start;
+                          col <= r.c_end && col < t.values[row].size()
+                          && col < src.values[row].size(); ++col) {
+                         t.values[row][col] = src.values[row][col];
+                     }
+                 }
+                 (void) rect;  // rect == r when apply_op fires
+                 return st::ok();
+             });
+}
+
 void do_undo(AppState &state) {
     if (!state.project.has_value()) {
         return;
@@ -1099,7 +1142,7 @@ void render_menubar(AppState &state) {
             ImGui::BulletText("F2 or double-click a cell to type a new value.  Enter commits, Esc cancels.");
             ImGui::BulletText("Ctrl+Enter while editing fills every selected cell with the typed value.");
             ImGui::BulletText("Ctrl+C / Ctrl+V copy and paste the selection as tab-separated values.");
-            ImGui::BulletText("Right-click any cell for Copy / Paste in a context menu.");
+            ImGui::BulletText("Right-click any cell for Copy / Paste / Reset to source.");
             ImGui::BulletText("Toolbar buttons (+5%%, -5%%, Smooth, Interpolate) act on the selection.");
             ImGui::BulletText("Ctrl+Z / Ctrl+Shift+Z to undo / redo.  Ctrl+S to save.");
             ImGui::Separator();
@@ -1728,6 +1771,18 @@ void render_table_grid(st::Definition::TableData const &td,
                     }
                     if (ImGui::MenuItem("Paste", "Ctrl+V", false, has_sel)) {
                         paste_clipboard_at_cursor(state);
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Reset to source", nullptr,
+                                         false, has_sel)) {
+                        reset_selection_to_source(state);
+                    }
+                    if (ImGui::IsItemHovered(
+                            ImGuiHoveredFlags_AllowWhenDisabled)) {
+                        ImGui::SetTooltip(
+                            "Set the selected cells back to the values "
+                            "in the source ROM\n(undoable; safer than "
+                            "Close → reopen).");
                     }
                     ImGui::EndPopup();
                 }
