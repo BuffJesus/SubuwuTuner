@@ -170,14 +170,21 @@ constexpr std::string_view kUsage =
     "                        [--trigger-degrees 1.5] [--pull-step-degrees 0.75]\n"
     "                        [--min-samples-per-cell 30]\n"
     "                        [--max-neighbor-step-degrees 3.0] [--strict-lint]\n"
+    "                        [--enable-add-back] [--add-back-step-degrees 0.5]\n"
+    "                        [--add-back-min-clean-samples 50]\n"
+    "                        [--add-back-clean-threshold-degrees 0.05]\n"
     "                            Propose ignition-timing pull on cells with sustained\n"
     "                            knock per docs/12 §\"Knock-based ignition pull\". CSV\n"
     "                            cols: rpm, load, feedback_knock, coolant_c, iat_c;\n"
     "                            optional: limp_mode. --current-timing is flat row-major\n"
     "                            (rows × cols = load × rpm). Monotonic-subtract: cells\n"
-    "                            never gain timing. Runs the docs/12 neighbor-smoothness\n"
-    "                            lint on the proposed surface; --strict-lint exits 3 on\n"
-    "                            any violation. Hardware-free.\n";
+    "                            never gain timing in the pull pass. --enable-add-back\n"
+    "                            opts into the docs/12 follow-up pass that adds a small\n"
+    "                            amount of timing BACK in cells whose mean feedback\n"
+    "                            knock was clean over enough samples; default off per\n"
+    "                            spec. Runs the docs/12 neighbor-smoothness lint on the\n"
+    "                            final proposed surface; --strict-lint exits 3 on any\n"
+    "                            violation. Hardware-free.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -1874,7 +1881,11 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
     std::optional<double>                pull_step_deg;
     std::optional<std::size_t>           min_samples;
     std::optional<double>                max_neighbor_step;
-    bool                                 strict_lint = false;
+    bool                                 strict_lint        = false;
+    bool                                 enable_add_back    = false;
+    std::optional<double>                add_back_step;
+    std::optional<std::size_t>           add_back_min_clean;
+    std::optional<double>                add_back_threshold;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -1956,6 +1967,49 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
             } else { return 2; }
         } else if (a == "--strict-lint") {
             strict_lint = true;
+        } else if (a == "--enable-add-back") {
+            enable_add_back = true;
+        } else if (a == "--add-back-step-degrees"
+                   || a == "--add-back-step") {
+            if (auto const *v = require_arg("--add-back-step-degrees"); v) {
+                auto const parsed = parse_decimal(v);
+                if (!parsed.has_value() || *parsed < 0.0) {
+                    std::fprintf(stderr,
+                                 "autotune knock-pull: "
+                                 "--add-back-step-degrees must be a "
+                                 "non-negative decimal (got '%s')\n", v);
+                    return 2;
+                }
+                add_back_step = *parsed;
+            } else { return 2; }
+        } else if (a == "--add-back-min-clean-samples"
+                   || a == "--add-back-min-samples") {
+            if (auto const *v = require_arg("--add-back-min-clean-samples"); v) {
+                char       *end  = nullptr;
+                long long const n = std::strtoll(v, &end, 10);
+                if (end == v || end == nullptr || *end != '\0' || n < 0) {
+                    std::fprintf(stderr,
+                                 "autotune knock-pull: "
+                                 "--add-back-min-clean-samples must be a "
+                                 "non-negative integer (got '%s')\n", v);
+                    return 2;
+                }
+                add_back_min_clean = static_cast<std::size_t>(n);
+            } else { return 2; }
+        } else if (a == "--add-back-clean-threshold-degrees"
+                   || a == "--add-back-threshold") {
+            if (auto const *v =
+                    require_arg("--add-back-clean-threshold-degrees"); v) {
+                auto const parsed = parse_decimal(v);
+                if (!parsed.has_value() || *parsed < 0.0) {
+                    std::fprintf(stderr,
+                                 "autotune knock-pull: "
+                                 "--add-back-clean-threshold-degrees must "
+                                 "be a non-negative decimal (got '%s')\n", v);
+                    return 2;
+                }
+                add_back_threshold = *parsed;
+            } else { return 2; }
         } else {
             std::fprintf(stderr,
                          "autotune knock-pull: unknown argument: %s\n",
@@ -2028,31 +2082,56 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
     if (pull_step_deg.has_value()) { opts.pull_step_degrees    = *pull_step_deg; }
     if (min_samples.has_value())   { opts.min_samples_per_cell = *min_samples; }
 
-    auto const result = st::autotune::tune_knock_pull(
+    auto const pull_result = st::autotune::tune_knock_pull(
         *rpm_axis, *load_axis, *current, *samples, opts);
-    if (!result.has_value()) {
+    if (!pull_result.has_value()) {
         std::fprintf(stderr, "autotune knock-pull: %s\n",
-                     result.error().to_string().c_str());
+                     pull_result.error().to_string().c_str());
         return 1;
     }
 
+    // Opt-in add-back pass per docs/12. The pull pass is always run;
+    // the add-back pass only runs when --enable-add-back is set,
+    // matching the docs default-off posture for the dangerous direction
+    // (adding timing). `apply_knock_add_back` is a no-op when
+    // `opts.enabled` is false, so always calling it keeps the gate in
+    // one place (the kernel) rather than splitting it across CLI + lib.
+    st::autotune::KnockAddBackOptions add_opts;
+    add_opts.enabled = enable_add_back;
+    if (add_back_step.has_value()) {
+        add_opts.add_step_degrees = *add_back_step;
+    }
+    if (add_back_min_clean.has_value()) {
+        add_opts.min_clean_samples_per_cell = *add_back_min_clean;
+    }
+    if (add_back_threshold.has_value()) {
+        add_opts.clean_threshold_degrees = *add_back_threshold;
+    }
+    auto const result =
+        st::autotune::apply_knock_add_back(*pull_result, add_opts);
+
     std::printf("Loaded %zu samples from %s\n",
-                result->total_samples,
+                result.total_samples,
                 log_path->string().c_str());
     double const retained_pct =
-        result->total_samples == 0
+        result.total_samples == 0
             ? 0.0
             : 100.0
-                  * static_cast<double>(result->samples_after_gates)
-                  / static_cast<double>(result->total_samples);
+                  * static_cast<double>(result.samples_after_gates)
+                  / static_cast<double>(result.total_samples);
     std::printf("After quality gates: %zu samples (%.1f%% retained)\n\n",
-                result->samples_after_gates, retained_pct);
+                result.samples_after_gates, retained_pct);
 
-    // Count and summarise pulled cells.
-    std::size_t pulled = 0;
+    // Count pulled vs added-back cells. A cell is "added back" when it
+    // wasn't pulled but its proposed_value differs from current_value
+    // — that's the post-pass marker apply_knock_add_back leaves.
+    std::size_t pulled       = 0;
+    std::size_t added_back   = 0;
     double      max_pull_deg = 0.0;
     std::size_t max_pull_cell = 0;
-    for (auto const &c : result->cells) {
+    double      max_add_deg  = 0.0;
+    std::size_t max_add_cell = 0;
+    for (auto const &c : result.cells) {
         if (c.pulled) {
             ++pulled;
             double const drop = c.current_value - c.proposed_value;
@@ -2060,11 +2139,18 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
                 max_pull_deg  = drop;
                 max_pull_cell = c.cell_index;
             }
+        } else if (c.proposed_value > c.current_value) {
+            ++added_back;
+            double const gain = c.proposed_value - c.current_value;
+            if (gain > max_add_deg) {
+                max_add_deg  = gain;
+                max_add_cell = c.cell_index;
+            }
         }
     }
     std::printf("Knock pull proposal:\n");
     std::printf("  Cells pulled:          %zu / %zu\n",
-                pulled, result->cells.size());
+                pulled, result.cells.size());
     std::printf("  Pull step:             %.2f°\n", opts.pull_step_degrees);
     std::printf("  Trigger threshold:     mean feedback knock < -%.2f° "
                 "(over ≥ %zu samples)\n",
@@ -2076,11 +2162,24 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
                     "pulled %.2f°\n",
                     (*load_axis)[row], (*rpm_axis)[col], max_pull_deg);
     }
+    if (enable_add_back) {
+        std::printf("  Cells added back:      %zu (clean cells, +%.2f°)\n",
+                    added_back, add_opts.add_step_degrees);
+        if (added_back > 0) {
+            std::size_t const row = max_add_cell / rpm_axis->size();
+            std::size_t const col = max_add_cell % rpm_axis->size();
+            std::printf("  Largest add-back:      load=%.2f rpm=%.0f "
+                        "+%.2f°\n",
+                        (*load_axis)[row], (*rpm_axis)[col], max_add_deg);
+        }
+    }
     std::printf("\n");
 
     // 2D ledger: one row per load × one cell-pair per RPM. Compact when
     // the table is small (the docs/12 timing maps are typically 8×8 to
-    // 16×16, which fits on a terminal line).
+    // 16×16, which fits on a terminal line). Added-back cells use the
+    // same signed-degree format as pulled cells — a leading '+' makes
+    // it obvious which direction the cell moved.
     std::printf("  load \\ rpm");
     for (std::size_t c = 0; c < rpm_axis->size(); ++c) {
         std::printf(" | %7.0f", (*rpm_axis)[c]);
@@ -2093,10 +2192,10 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
     for (std::size_t r = 0; r < load_axis->size(); ++r) {
         std::printf("  %9.2f ", (*load_axis)[r]);
         for (std::size_t c = 0; c < rpm_axis->size(); ++c) {
-            auto const &cell = result->cells[r * rpm_axis->size() + c];
-            if (cell.pulled) {
-                std::printf("|  %+5.2f ",
-                            cell.proposed_value - cell.current_value);
+            auto const &cell = result.cells[r * rpm_axis->size() + c];
+            double const delta = cell.proposed_value - cell.current_value;
+            if (cell.pulled || delta != 0.0) {
+                std::printf("|  %+5.2f ", delta);
             } else {
                 std::printf("|    .   ");
             }
@@ -2112,7 +2211,7 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
         lint_opts.max_neighbor_step_degrees = *max_neighbor_step;
     }
     auto const violations = st::autotune::lint_knock_proposal(
-        *rpm_axis, *load_axis, *result, lint_opts);
+        *rpm_axis, *load_axis, result, lint_opts);
     return print_lint_section(violations, strict_lint);
 }
 

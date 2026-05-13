@@ -691,6 +691,32 @@ Result<std::vector<MafSample>> read_maf_samples_csv(std::string_view text) {
     return samples;
 }
 
+KnockPullResult apply_knock_add_back(KnockPullResult const     &pull_result,
+                                      KnockAddBackOptions const &opts) {
+    if (!opts.enabled) {
+        return pull_result;
+    }
+    KnockPullResult out = pull_result;
+    for (auto &c : out.cells) {
+        // Skip cells the pull pass already modified — add-back is
+        // strictly for cells the kernel did not touch.
+        if (c.pulled) {
+            continue;
+        }
+        if (c.samples_used < opts.min_clean_samples_per_cell) {
+            continue;
+        }
+        // Clean criterion: ECU's per-cell Feedback Knock Correction
+        // averages at or above zero within tolerance. A cell that was
+        // routinely getting pulled by the ECU itself stays put.
+        if (c.mean_feedback_knock < -opts.clean_threshold_degrees) {
+            continue;
+        }
+        c.proposed_value = c.current_value + opts.add_step_degrees;
+    }
+    return out;
+}
+
 // ---------------------------------------------------------------------
 // CSV → KnockSample reader
 // ---------------------------------------------------------------------

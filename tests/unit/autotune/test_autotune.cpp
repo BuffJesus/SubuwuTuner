@@ -590,3 +590,112 @@ TEST_CASE("tune_knock_pull rejects empty axes",
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
+
+// ---------------------------------------------------------------------
+// apply_knock_add_back
+// ---------------------------------------------------------------------
+
+namespace {
+
+// Build a 3-cell-wide single-row KnockPullResult with the given per-
+// cell (current, proposed, mean_knock, samples_used, pulled) tuples.
+// Convenient for exercising add-back in isolation.
+struct AddBackCell {
+    double      current{0.0};
+    double      proposed{0.0};
+    double      mean_knock{0.0};
+    std::size_t samples_used{0};
+    bool        pulled{false};
+};
+
+at::KnockPullResult build_pull_result(std::vector<AddBackCell> const &cells) {
+    at::KnockPullResult r;
+    r.rows = 1;
+    r.cols = cells.size();
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        at::KnockCellProposal c;
+        c.cell_index          = i;
+        c.current_value       = cells[i].current;
+        c.proposed_value      = cells[i].proposed;
+        c.mean_feedback_knock = cells[i].mean_knock;
+        c.samples_used        = cells[i].samples_used;
+        c.pulled              = cells[i].pulled;
+        r.cells.push_back(c);
+    }
+    return r;
+}
+
+} // namespace
+
+TEST_CASE("apply_knock_add_back: disabled → passthrough",
+          "[autotune][knock][addback]") {
+    auto const in = build_pull_result({
+        {20.0, 20.0, 0.0, 100, false},
+        {22.0, 21.25, -2.0, 80, true},
+    });
+    at::KnockAddBackOptions opts;     // enabled = false by default
+    auto const out = at::apply_knock_add_back(in, opts);
+    REQUIRE(out.cells.size() == 2);
+    CHECK(out.cells[0].proposed_value == in.cells[0].proposed_value);
+    CHECK(out.cells[1].proposed_value == in.cells[1].proposed_value);
+}
+
+TEST_CASE("apply_knock_add_back: adds to clean unpulled cells",
+          "[autotune][knock][addback]") {
+    auto const in = build_pull_result({
+        {20.0, 20.0, 0.0,  100, false},   // clean, eligible
+        {22.0, 21.25, -2.0, 80, true},     // pulled — skip
+        {18.0, 18.0,  0.02, 100, false},   // clean within tolerance
+    });
+    at::KnockAddBackOptions opts;
+    opts.enabled = true;
+    auto const out = at::apply_knock_add_back(in, opts);
+    REQUIRE(out.cells.size() == 3);
+    CHECK(out.cells[0].proposed_value == 20.0 + opts.add_step_degrees);
+    CHECK_FALSE(out.cells[0].pulled);
+    CHECK(out.cells[1].proposed_value == 21.25);
+    CHECK(out.cells[1].pulled);
+    CHECK(out.cells[2].proposed_value == 18.0 + opts.add_step_degrees);
+}
+
+TEST_CASE("apply_knock_add_back: under-sampled cells are skipped",
+          "[autotune][knock][addback]") {
+    auto const in = build_pull_result({
+        {20.0, 20.0, 0.0, 10, false},   // clean but underpowered
+    });
+    at::KnockAddBackOptions opts;
+    opts.enabled = true;
+    opts.min_clean_samples_per_cell = 50;
+    auto const out = at::apply_knock_add_back(in, opts);
+    CHECK(out.cells[0].proposed_value == 20.0);
+}
+
+TEST_CASE("apply_knock_add_back: cells with sustained knock are skipped",
+          "[autotune][knock][addback]") {
+    auto const in = build_pull_result({
+        {20.0, 20.0, -0.5, 100, false},   // ECU was pulling, even if
+                                          // the algorithm didn't reach
+                                          // its own trigger
+    });
+    at::KnockAddBackOptions opts;
+    opts.enabled = true;
+    auto const out = at::apply_knock_add_back(in, opts);
+    CHECK(out.cells[0].proposed_value == 20.0);
+}
+
+TEST_CASE("apply_knock_add_back: threshold and step are configurable",
+          "[autotune][knock][addback]") {
+    auto const in = build_pull_result({
+        {20.0, 20.0, -0.10, 100, false},
+    });
+    at::KnockAddBackOptions opts;
+    opts.enabled = true;
+    opts.clean_threshold_degrees = 0.05;
+    auto const out_strict = at::apply_knock_add_back(in, opts);
+    CHECK(out_strict.cells[0].proposed_value == 20.0);
+
+    opts.clean_threshold_degrees = 0.20;
+    opts.add_step_degrees         = 0.25;
+    auto const out_lenient = at::apply_knock_add_back(in, opts);
+    CHECK(out_lenient.cells[0].proposed_value == 20.25);
+}

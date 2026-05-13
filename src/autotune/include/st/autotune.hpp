@@ -245,6 +245,46 @@ struct KnockPullResult {
     std::span<KnockSample const> samples,
     KnockPullOptions const      &opts = {});
 
+// Opt-in add-back pass per docs/12 §"Knock-based ignition pull". After
+// `tune_knock_pull` has subtracted timing from cells with sustained
+// knock, this pass adds a small amount of timing BACK to cells whose
+// per-cell Feedback Knock Correction averaged at or above zero (i.e.
+// the ECU never had to pull there) over enough samples. Strictly
+// additive within the pass: never increases pulled cells, never adds
+// more than `add_step_degrees` per pass, only touches cells where
+// `KnockCellProposal::pulled` is false. The user opts in explicitly —
+// the docs spec defaults this off because adding timing is the more
+// dangerous direction.
+struct KnockAddBackOptions {
+    // Master switch. Default off so callers must explicitly opt in.
+    bool        enabled                     = false;
+    // Degrees added per cell when the criterion fires.
+    double      add_step_degrees            = 0.5;
+    // Cells with fewer than this many retained samples don't get
+    // added — we want real evidence of cleanness, not absence of data.
+    std::size_t min_clean_samples_per_cell  = 50;
+    // A cell counts as "clean" when its mean Feedback Knock Correction
+    // is greater than `-clean_threshold_degrees` (i.e. effectively
+    // zero or positive — the ECU did not need to pull). Default
+    // tolerates sub-bit FP noise on a value the ECU reports at coarse
+    // resolution.
+    double      clean_threshold_degrees     = 0.05;
+};
+
+// Apply the add-back pass to an existing `tune_knock_pull` result.
+// Returns a new `KnockPullResult` with the same shape; cells that
+// already had `pulled = true` are returned unchanged. Cells whose
+// (`samples_used`, `mean_feedback_knock`) meet the criteria get
+// `proposed_value` raised by `add_step_degrees`. `pulled` stays false
+// so a downstream consumer can still distinguish "this cell was pulled
+// by knock" from "this cell got an add-back": pulled-cells were
+// modified in the prior pass and remain modified; clean cells with
+// proposed != current are add-back targets. With `opts.enabled` false
+// the input is returned unchanged.
+[[nodiscard]] KnockPullResult apply_knock_add_back(
+    KnockPullResult const     &pull_result,
+    KnockAddBackOptions const &opts);
+
 // =====================================================================
 // CSV → MafSample reader
 // =====================================================================
