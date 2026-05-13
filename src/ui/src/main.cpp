@@ -248,6 +248,16 @@ struct AppState {
     char                                     table_filter[128]{};
     bool                                     focus_table_filter{false};
 
+    // Inline cell-value editor state. Active iff `editing_cell` is true;
+    // the cell being edited is identified by selection.r_cursor /
+    // selection.c_cursor (these don't change while editing — the
+    // arrow-key nav block reads `editing_cell` and skips its movement
+    // logic). `editor_just_opened` is a one-frame handoff so the new
+    // InputText gets SetKeyboardFocusHere on its first render.
+    bool                                     editing_cell{false};
+    bool                                     editor_just_opened{false};
+    char                                     edit_buf[64]{};
+
     // Unsaved-changes tracking. `dirty` is conservative: any edit flips
     // it true, save flips it false. An undo-back-to-clean leaves dirty
     // true, which is harmless because the resulting save is a no-op
@@ -934,6 +944,8 @@ void render_menubar(AppState &state) {
             ImGui::Separator();
             ImGui::TextDisabled("Editing");
             ImGui::BulletText("Click cells to select; Shift-click to extend.");
+            ImGui::BulletText("Arrow keys move the cursor; Shift+arrows extend.");
+            ImGui::BulletText("F2 or double-click a cell to type a new value.  Enter commits, Esc cancels.");
             ImGui::BulletText("Toolbar buttons (+5%%, -5%%, Smooth, Interpolate) act on the selection.");
             ImGui::BulletText("Ctrl+Z / Ctrl+Shift+Z to undo / redo.  Ctrl+S to save.");
             ImGui::Separator();
@@ -1314,7 +1326,8 @@ void render_table_grid(st::Definition::TableData const &td,
                        st::Scaling const *             scal,
                        GridStats const &               stats,
                        Selection &                     selection,
-                       Fonts const &                   fonts) {
+                       Fonts const &                   fonts,
+                       AppState &                      state) {
     int const  precision = scal != nullptr ? scal->precision : 0;
     auto const cols      = static_cast<int>(td.axis_x.size()) + 1;
     if (cols < 2) {
@@ -1334,7 +1347,12 @@ void render_table_grid(st::Definition::TableData const &td,
     // arrows from competing with the sidebar's filter input or any
     // other input that has keyboard focus.
     bool scroll_to_cursor = false;
-    if (selection.enabled && grid_rows > 0 && grid_cols_count > 0
+    // Arrow keys + F2 are app-level, not InputText keystrokes — gate on
+    // not-editing AND Table-window-focused. While the cell editor is
+    // active, InputText absorbs arrows for text cursor motion and F2
+    // would re-trigger edit mode mid-edit.
+    if (!state.editing_cell && selection.enabled
+        && grid_rows > 0 && grid_cols_count > 0
         && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
         bool const shift = ImGui::GetIO().KeyShift;
         bool       moved = false;
@@ -1371,6 +1389,18 @@ void render_table_grid(st::Definition::TableData const &td,
                 selection.c_anchor = selection.c_cursor;
             }
             scroll_to_cursor = true;
+        }
+        // F2 enters cell edit mode on the cursor cell. Excel's
+        // canonical "edit this cell" shortcut.
+        if (ImGui::IsKeyPressed(ImGuiKey_F2, /*repeat=*/false)) {
+            std::snprintf(state.edit_buf, sizeof state.edit_buf, "%.*f",
+                          precision,
+                          (selection.r_cursor < td.values.size()
+                           && selection.c_cursor < td.values[selection.r_cursor].size())
+                              ? td.values[selection.r_cursor][selection.c_cursor]
+                              : 0.0);
+            state.editing_cell       = true;
+            state.editor_just_opened = true;
         }
     }
 
@@ -1434,16 +1464,87 @@ void render_table_grid(st::Definition::TableData const &td,
             std::snprintf(buf, sizeof(buf), "%.*f", precision, v);
 
             ImGui::PushID(static_cast<int>(r * grid_cols + c));
-            bool const is_sel = selection.contains(r, c);
-            if (ImGui::Selectable(buf, is_sel,
-                                  ImGuiSelectableFlags_AllowDoubleClick)) {
-                selection.click(r, c, ImGui::GetIO().KeyShift);
+            bool const is_sel    = selection.contains(r, c);
+            bool const is_cursor = selection.enabled
+                                   && r == selection.r_cursor
+                                   && c == selection.c_cursor;
+
+            if (state.editing_cell && is_cursor) {
+                // Render the InputText in place of the Selectable for
+                // the cell being edited. Fill the cell width so the
+                // visual swap feels in-place. AutoSelectAll makes "F2,
+                // type 14.7, Enter" replace the value cleanly; the
+                // user doesn't have to clear the buffer first.
+                if (state.editor_just_opened) {
+                    ImGui::SetKeyboardFocusHere();
+                    state.editor_just_opened = false;
+                }
+                ImGui::SetNextItemWidth(-1.0f);
+                bool const enter = ImGui::InputText(
+                    "##cell_editor", state.edit_buf,
+                    sizeof state.edit_buf,
+                    ImGuiInputTextFlags_EnterReturnsTrue
+                    | ImGuiInputTextFlags_AutoSelectAll
+                    | ImGuiInputTextFlags_CharsScientific);
+                bool const deactivated = ImGui::IsItemDeactivated();
+                bool const escaped =
+                    ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+
+                auto const exit_edit = [&] {
+                    state.editing_cell       = false;
+                    state.editor_just_opened = false;
+                };
+                auto const commit = [&] {
+                    double parsed = 0.0;
+                    if (std::sscanf(state.edit_buf, "%lf", &parsed) == 1) {
+                        // Collapse selection to this cell so apply_op's
+                        // rect is single-cell — the edit affects only
+                        // the cursor, regardless of any prior range
+                        // selection.
+                        selection.r_anchor = selection.r_cursor;
+                        selection.c_anchor = selection.c_cursor;
+                        apply_op(state, "set",
+                                 [parsed](auto &t, auto rect) {
+                                     return st::edit::set_cells(t, rect, parsed);
+                                 });
+                    }
+                    exit_edit();
+                };
+
+                if (escaped) {
+                    // Esc cancels — don't commit; restore-by-not-applying.
+                    exit_edit();
+                } else if (enter) {
+                    commit();
+                } else if (deactivated) {
+                    // Lost focus by other means (clicked elsewhere,
+                    // window deactivated). Commit if the buffer parses;
+                    // otherwise silently cancel rather than discarding
+                    // a half-typed number with no feedback.
+                    commit();
+                }
+            } else {
+                if (ImGui::Selectable(buf, is_sel,
+                                      ImGuiSelectableFlags_AllowDoubleClick)) {
+                    selection.click(r, c, ImGui::GetIO().KeyShift);
+                    // Double-click promotes the click into edit mode,
+                    // mirroring Excel/Sheets. AllowDoubleClick on the
+                    // Selectable above is what lets us see the second
+                    // click here.
+                    if (ImGui::IsMouseDoubleClicked(0)) {
+                        std::snprintf(state.edit_buf,
+                                      sizeof state.edit_buf,
+                                      "%.*f", precision, v);
+                        state.editing_cell       = true;
+                        state.editor_just_opened = true;
+                    }
+                }
             }
+
             // After arrow-key movement, scroll the cursor cell into
             // the visible viewport so it never leaves the screen when
             // the user navigates with the keyboard.
-            if (scroll_to_cursor && selection.enabled
-                && r == selection.r_cursor && c == selection.c_cursor) {
+            if (scroll_to_cursor && is_cursor) {
                 ImGui::SetScrollHereY(0.5f);
                 ImGui::SetScrollHereX(0.5f);
             }
@@ -1916,7 +2017,7 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     if (state.view_mode == TableViewMode::Heatmap) {
         render_table_heatmap(td_view, tbl, scal, stats);
     } else {
-        render_table_grid(td_view, scal, stats, state.selection, fonts);
+        render_table_grid(td_view, scal, stats, state.selection, fonts, state);
     }
 
     // Escape clears the current selection when the Table panel has focus.
