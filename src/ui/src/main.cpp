@@ -31,6 +31,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <ios>
 #include <limits>
 #include <optional>
@@ -106,6 +107,65 @@ std::string iso8601_utc_now() {
     char buf[32];
     std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", &tm);
     return std::string{buf};
+}
+
+// Render an ISO-8601-UTC timestamp as a human relative phrase ("2 hours
+// ago", "Yesterday", "3 weeks ago"). Empty string on parse failure or
+// future timestamps (clock skew or hand-edited recents file).
+std::string format_relative_time(std::string const &iso) {
+    int Y = 0;
+    int M = 0;
+    int D = 0;
+    int h = 0;
+    int m = 0;
+    int s = 0;
+    if (std::sscanf(iso.c_str(), "%4d-%2d-%2dT%2d:%2d:%2dZ",
+                    &Y, &M, &D, &h, &m, &s) != 6) {
+        return {};
+    }
+    std::tm tm{};
+    tm.tm_year = Y - 1900;
+    tm.tm_mon  = M - 1;
+    tm.tm_mday = D;
+    tm.tm_hour = h;
+    tm.tm_min  = m;
+    tm.tm_sec  = s;
+#if defined(_WIN32)
+    std::time_t const then = ::_mkgmtime(&tm);
+#else
+    std::time_t const then = ::timegm(&tm);
+#endif
+    if (then == static_cast<std::time_t>(-1)) {
+        return {};
+    }
+    auto const now = std::chrono::system_clock::to_time_t(
+        std::chrono::system_clock::now());
+    auto const diff = static_cast<long long>(std::difftime(now, then));
+    if (diff < 60) {
+        return "just now";
+    }
+    auto const plural = [](long long n, char const *one, char const *many) {
+        return std::to_string(n) + " " + (n == 1 ? one : many) + " ago";
+    };
+    if (diff < 3600) {
+        return plural(diff / 60, "minute", "minutes");
+    }
+    if (diff < 86400) {
+        return plural(diff / 3600, "hour", "hours");
+    }
+    if (diff < 86400 * 2) {
+        return "yesterday";
+    }
+    if (diff < 86400 * 7) {
+        return plural(diff / 86400, "day", "days");
+    }
+    if (diff < 86400 * 30) {
+        return plural(diff / (86400 * 7), "week", "weeks");
+    }
+    if (diff < 86400 * 365) {
+        return plural(diff / (86400 * 30), "month", "months");
+    }
+    return plural(diff / (86400 * 365), "year", "years");
 }
 
 std::vector<RecentEntry> load_recents() {
@@ -699,8 +759,14 @@ void render_unsaved_modal(AppState &state) {
             ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
 
         constexpr float kBtnW = 180.0f;
+        // Save is the default action (Enter) and the safe path — give it
+        // accent fill so the eye lands on it first.
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.21f, 0.46f, 0.76f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.31f, 0.56f, 0.86f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.38f, 0.65f, 0.94f, 1.00f));
         bool const save_clicked =
             ImGui::Button(modal_save_label(what), ImVec2(kBtnW, 0.0f));
+        ImGui::PopStyleColor(3);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Write the working ROM + edits to disk, "
                               "then proceed.  (Enter)");
@@ -767,6 +833,29 @@ void copy_rect_to_clipboard(st::Definition::TableData const &td,
         out.push_back('\n');
     }
     ImGui::SetClipboardText(out.c_str());
+}
+
+// Menubar wrapper around copy_rect_to_clipboard. Pulls scaling precision
+// off the current selected table so the clipboard formatting matches the
+// grid. Edit menu and Ctrl+C both route through here.
+void do_copy_selection(AppState &state) {
+    if (!state.project.has_value() || !state.current_table_data.has_value()
+        || !state.selection.enabled) {
+        return;
+    }
+    int         precision = 0;
+    auto const *tbl       = state.project->definition().find_table(
+        state.selected_table_id);
+    if (tbl != nullptr) {
+        auto const *scal =
+            state.project->definition().find_scaling(tbl->scaling);
+        if (scal != nullptr) {
+            precision = scal->precision;
+        }
+    }
+    copy_rect_to_clipboard(*state.current_table_data,
+                           state.selection.as_rect(),
+                           precision);
 }
 
 // Parse a TSV-ish payload (Excel/Sheets clipboard format) into a 2D
@@ -987,7 +1076,7 @@ void apply_theme() {
     c[ImGuiCol_PlotHistogram]         = accent;
     c[ImGuiCol_PlotHistogramHovered]  = accent_hover;
 
-    c[ImGuiCol_TableHeaderBg]         = ImVec4(0.15f, 0.16f, 0.19f, 1.00f);
+    c[ImGuiCol_TableHeaderBg]         = ImVec4(0.20f, 0.22f, 0.28f, 1.00f);
     c[ImGuiCol_TableBorderStrong]     = ImVec4(0.23f, 0.25f, 0.29f, 1.00f);
     c[ImGuiCol_TableBorderLight]      = ImVec4(0.17f, 0.18f, 0.21f, 1.00f);
     c[ImGuiCol_TableRowBg]            = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
@@ -1116,6 +1205,30 @@ void render_menubar(AppState &state) {
                 disabled_tip("Nothing to redo.\n"
                              "Use Undo first, then Redo to step forward.");
             }
+            ImGui::Separator();
+            bool const has_selection = state.selection.enabled;
+            if (ImGui::MenuItem("Copy", "Ctrl+C", false, has_selection)) {
+                do_copy_selection(state);
+            }
+            if (has_project && !has_selection) {
+                disabled_tip("Select cells in the grid first.");
+            }
+            if (ImGui::MenuItem("Paste", "Ctrl+V", false, has_selection)) {
+                paste_clipboard_at_cursor(state);
+            }
+            if (has_project && !has_selection) {
+                disabled_tip("Select a target cell, then paste TSV from the\n"
+                             "clipboard at the cursor.");
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Reset to source", nullptr, false,
+                                 has_selection)) {
+                reset_selection_to_source(state);
+            }
+            if (has_project && !has_selection) {
+                disabled_tip("Reverts the selected cells to their source-ROM\n"
+                             "values (undoable).");
+            }
             ImGui::EndMenu();
         }
         if (!has_project
@@ -1124,7 +1237,22 @@ void render_menubar(AppState &state) {
             ImGui::SetTooltip("No project open — open one to enable editing.");
         }
         if (ImGui::BeginMenu("View")) {
-            ImGui::MenuItem("ImGui demo window", nullptr, &state.show_imgui_demo);
+            bool const is_grid = state.view_mode == TableViewMode::Grid;
+            bool const is_heat = state.view_mode == TableViewMode::Heatmap;
+            if (ImGui::MenuItem("Grid", nullptr, is_grid, has_project)) {
+                state.view_mode = TableViewMode::Grid;
+            }
+            if (ImGui::MenuItem("Heatmap", nullptr, is_heat, has_project)) {
+                state.view_mode = TableViewMode::Heatmap;
+            }
+            ImGui::Separator();
+            // Dev-only escape hatch. Tucked one level deeper so the
+            // ImGui example isn't a peer of the user-facing view modes.
+            if (ImGui::BeginMenu("Debug")) {
+                ImGui::MenuItem("ImGui demo window", nullptr,
+                                 &state.show_imgui_demo);
+                ImGui::EndMenu();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {
@@ -1153,6 +1281,11 @@ void render_menubar(AppState &state) {
             ImGui::TextDisabled("Viewing");
             ImGui::BulletText("Switch View: Grid \xE2\x86\x94 Heatmap to inspect a map two ways.");
             ImGui::BulletText("For 3D tables, pick a Z slice above the grid.");
+            ImGui::Separator();
+            ImGui::TextDisabled("Documentation");
+            ImGui::BulletText("Repo:    https://github.com/BuffJesus/SubuwuTuner");
+            ImGui::BulletText("Design:  docs/00-overview.md \xE2\x80\xA6 docs/16-custom-features.md");
+            ImGui::BulletText("License: Apache 2.0 (see LICENSE in the repo root)");
             ImGui::EndMenu();
         }
         ImGui::EndMainMenuBar();
@@ -1163,30 +1296,16 @@ void render_sidebar(AppState &state) {
     ImGui::Begin("Tables");
 
     if (!state.project.has_value()) {
-        // Quiet, welcoming empty state — the user shouldn't have to read the
-        // menu to understand how to start. Inline CTA mirrors the menu's
-        // File → Open Project so the obvious affordance is right here.
+        // Quiet empty state. The welcome panel on the right owns the
+        // primary Open Project CTA; the sidebar just acknowledges that
+        // tables will appear here once a project is loaded.
         ImGui::Dummy(ImVec2(0.0f, 8.0f));
-        ImGui::TextWrapped("No project open yet.");
-        ImGui::Dummy(ImVec2(0.0f, 6.0f));
-        if (ImGui::Button("Open Project…", ImVec2(-1.0f, 0.0f))) {
-            request_action(state, ConfirmAction::OpenDialog);
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Pick a .stune project directory.  (Ctrl+O)");
-        }
-        if (!state.status_msg.empty()) {
-            ImGui::Dummy(ImVec2(0.0f, 8.0f));
-            ImGui::Separator();
-            ImGui::Dummy(ImVec2(0.0f, 4.0f));
-            ImGui::TextWrapped("%s", state.status_msg.c_str());
-        }
+        ImGui::TextDisabled("Tables will appear here.");
         ImGui::End();
         return;
     }
 
     auto const &def = state.project->definition();
-    ImGui::TextDisabled("Pack: %s", def.pack().id.c_str());
 
     // Filter input. Ctrl+F (handled in main loop) hands keyboard focus
     // here for the next frame; Esc clears the buffer and unfocuses by
@@ -1202,7 +1321,9 @@ void render_sidebar(AppState &state) {
                               ImGuiInputTextFlags_EscapeClearsAll);
 
     std::string_view const filter{state.table_filter};
-    // Count matches once so the header line can report "N of M".
+    // Count matches once so the active-filter header line can report
+    // "N of M". When the filter is empty, the count is noise — the tree
+    // below already conveys "how many tables" at a glance.
     std::size_t matched = 0;
     for (auto const &t : def.tables()) {
         if (filter.empty()
@@ -1210,13 +1331,11 @@ void render_sidebar(AppState &state) {
             ++matched;
         }
     }
-    if (filter.empty()) {
-        ImGui::TextDisabled("%zu tables", def.tables().size());
-    } else {
+    if (!filter.empty()) {
         ImGui::TextDisabled("%zu of %zu tables", matched,
                              def.tables().size());
+        ImGui::Separator();
     }
-    ImGui::Separator();
 
     if (!filter.empty() && matched == 0) {
         ImGui::Dummy(ImVec2(0.0f, 8.0f));
@@ -1531,7 +1650,8 @@ void render_table_grid(st::Definition::TableData const &td,
                        GridStats const &               stats,
                        Selection &                     selection,
                        Fonts const &                   fonts,
-                       AppState &                      state) {
+                       AppState &                      state,
+                       std::vector<std::vector<bool>> const &edited_mask) {
     int const  precision = scal != nullptr ? scal->precision : 0;
     auto const cols      = static_cast<int>(td.axis_x.size()) + 1;
     if (cols < 2) {
@@ -1655,18 +1775,37 @@ void render_table_grid(st::Definition::TableData const &td,
         std::snprintf(buf, sizeof(buf), "%g", x);
         ImGui::TableSetupColumn(buf, ImGuiTableColumnFlags_WidthFixed, 80.0f);
     }
-    ImGui::TableHeadersRow();
+    // Custom header row so the axis-X labels can right-align to match
+    // the data cells beneath. TableHeadersRow() left-aligns its label
+    // text, which looks broken against right-aligned numerical data.
+    // Row-flag Headers gets us the TableHeaderBg fill for free.
+    ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+    for (int col = 0; col < cols; ++col) {
+        ImGui::TableSetColumnIndex(col);
+        char const *name = ImGui::TableGetColumnName(col);
+        if (name == nullptr || name[0] == '\0') {
+            continue;
+        }
+        text_right_aligned(name);
+    }
 
     auto const grid_cols = td.values.empty() ? std::size_t{0} : td.values.front().size();
     char       buf[32];
     for (std::size_t r = 0; r < td.values.size(); ++r) {
         ImGui::TableNextRow();
-        // Leftmost axis-Y label column: right-aligned plain text, no
-        // heatmap, not clickable — it's metadata, not data.
+        // Leftmost axis-Y label column: right-aligned dimmed text on a
+        // header-tinted background so it reads as table chrome (matching
+        // the column header row) rather than another data cell.
         ImGui::TableNextColumn();
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
+                                ImGui::GetColorU32(ImGuiCol_TableHeaderBg));
         if (!td.axis_y.empty() && r < td.axis_y.size()) {
             std::snprintf(buf, sizeof(buf), "%.*f", precision, td.axis_y[r]);
+            ImGui::PushStyleColor(
+                ImGuiCol_Text,
+                ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
             text_right_aligned(buf);
+            ImGui::PopStyleColor();
         }
         for (std::size_t c = 0; c < td.values[r].size(); ++c) {
             double const v = td.values[r][c];
@@ -1792,6 +1931,48 @@ void render_table_grid(st::Definition::TableData const &td,
                             "Close → reopen).");
                     }
                     ImGui::EndPopup();
+                }
+            }
+
+            // Edited-cell marker. A small accent dot in the top-left
+            // corner of any cell whose working value differs from its
+            // source value. Left corner (not right) so it doesn't
+            // collide with the right-aligned cell value text. Drawn on
+            // the window draw list so it overlays the heatmap shading
+            // and the selection tint without competing with the value.
+            bool const edited =
+                r < edited_mask.size()
+                && c < edited_mask[r].size()
+                && edited_mask[r][c];
+            if (edited) {
+                ImVec2 const a = ImGui::GetItemRectMin();
+                ImVec2 const b = ImGui::GetItemRectMax();
+                if (b.x > a.x && b.y > a.y) {
+                    auto * const dl = ImGui::GetWindowDrawList();
+                    constexpr float pad   = 3.0f;
+                    constexpr float r_dot = 2.5f;
+                    ImVec2 const center(a.x + pad + r_dot,
+                                         a.y + pad + r_dot);
+                    dl->AddCircleFilled(center, r_dot,
+                                         IM_COL32(190, 215, 255, 235));
+                }
+            }
+
+            // Cursor-cell outline. Within a multi-cell selection, this
+            // is the active cell — where F2 opens the editor and where
+            // arrow keys move from. Bright accent border mirrors the
+            // Excel/Sheets convention so the focus is unambiguous when
+            // the selection covers more than one cell.
+            if (is_cursor && !state.editing_cell) {
+                ImVec2 const a = ImGui::GetItemRectMin();
+                ImVec2 const b = ImGui::GetItemRectMax();
+                if (b.x > a.x && b.y > a.y) {
+                    auto * const dl = ImGui::GetWindowDrawList();
+                    dl->AddRect(a, b,
+                                 IM_COL32(120, 180, 250, 255),
+                                 0.0f,
+                                 0,
+                                 2.0f);
                 }
             }
 
@@ -1944,6 +2125,7 @@ void render_welcome_panel(AppState &state) {
             // top, dimmed full path beneath). Dead entries are
             // disabled — visible so the user knows the project moved
             // rather than silently dropped.
+            float const button_left_x = ImGui::GetCursorPosX();
             ImGui::BeginDisabled(!exists);
             if (ImGui::Button(basename.c_str(), ImVec2(kRowW, 0.0f))) {
                 clicked_idx = i;
@@ -1962,16 +2144,30 @@ void render_welcome_panel(AppState &state) {
                         e.path.string().c_str());
                 }
             }
-            // Subtitle: dimmed full path, smaller and aligned under the
-            // row. The two-line shape comes from Button + this label
-            // pair rather than a multi-line button (which ImGui doesn't
-            // do well with text alignment).
-            center_cursor_x(kRowW);
+            // Subtitle: dimmed full path + relative time, aligned under
+            // the row. Center inside the button's kRowW span so the
+            // subtitle shares the button's centerline; GetContentRegionAvail
+            // here measures from the button's left edge to the panel's
+            // right edge, which would land the subtitle off-center to the
+            // right.
+            std::string subtitle;
             if (exists) {
-                ImGui::TextDisabled("%s", e.path.string().c_str());
+                subtitle = e.path.string();
+                auto const rel = format_relative_time(e.opened_at);
+                if (!rel.empty()) {
+                    subtitle += "  ·  ";
+                    subtitle += rel;
+                }
             } else {
-                ImGui::TextDisabled("%s  (missing)", e.path.string().c_str());
+                subtitle = e.path.string() + "  (missing)";
             }
+            float const text_w = ImGui::CalcTextSize(subtitle.c_str()).x;
+            if (text_w < kRowW) {
+                ImGui::SetCursorPosX(button_left_x + (kRowW - text_w) * 0.5f);
+            } else {
+                ImGui::SetCursorPosX(button_left_x);
+            }
+            ImGui::TextDisabled("%s", subtitle.c_str());
             ImGui::Dummy(ImVec2(0.0f, 6.0f));
             ImGui::PopID();
         }
@@ -2033,29 +2229,39 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     ImGui::TextUnformatted(title);
     ImGui::SetWindowFontScale(1.0f);
 
-    if (scal != nullptr && !scal->unit.empty()) {
+    // Place a chip on the heading row, wrapping to a new line when it
+    // would overflow the panel's right edge. Without this, narrow
+    // window widths push chips off-screen instead of stacking them.
+    auto place_chip = [](char const *text, ImVec4 fg, ImVec4 bg,
+                         char const *tooltip = nullptr) {
+        constexpr float kChipPad = 16.0f;  // FramePadding.x * 2 from chip()
+        float const     w     = ImGui::CalcTextSize(text).x + kChipPad;
         ImGui::SameLine();
-        chip(scal->unit.c_str(), chip_fg_accent(), chip_bg_accent());
+        float const cx    = ImGui::GetCursorPosX();
+        float const max_x = ImGui::GetWindowContentRegionMax().x;
+        if (cx + w > max_x) {
+            ImGui::NewLine();
+        }
+        chip(text, fg, bg);
+        if (tooltip != nullptr && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", tooltip);
+        }
+    };
+
+    if (scal != nullptr && !scal->unit.empty()) {
+        place_chip(scal->unit.c_str(), chip_fg_accent(), chip_bg_accent());
     }
     if (tbl != nullptr && tbl->engine_safety_critical) {
-        ImGui::SameLine();
-        chip("Engine safety critical", chip_fg_warn(), chip_bg_warn());
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(
-                "Cells in this table affect engine safety — wrong values can\n"
-                "damage the engine. Make small changes, verify, and keep a\n"
-                "stock backup of the working ROM before flashing.");
-        }
+        place_chip("Engine safety critical", chip_fg_warn(), chip_bg_warn(),
+                   "Cells in this table affect engine safety — wrong values can\n"
+                   "damage the engine. Make small changes, verify, and keep a\n"
+                   "stock backup of the working ROM before flashing.");
     }
     if (tbl != nullptr && tbl->emissions_relevant) {
-        ImGui::SameLine();
-        chip("Emissions-relevant", chip_fg_caution(), chip_bg_caution());
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(
-                "Cells in this table influence the vehicle's emissions\n"
-                "behavior. Jurisdiction profile (see docs/06-legal-ethics)\n"
-                "governs warnings; engine-safety refusals still apply.");
-        }
+        place_chip("Emissions-relevant", chip_fg_caution(), chip_bg_caution(),
+                   "Cells in this table influence the vehicle's emissions\n"
+                   "behavior. Jurisdiction profile (see docs/06-legal-ethics)\n"
+                   "governs warnings; engine-safety refusals still apply.");
     }
 
     if (tbl != nullptr) {
@@ -2099,6 +2305,42 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         td_view = td_orig;
     }
 
+    // Per-cell edited mask: working value != source value. The grid
+    // renderer paints a small accent dot on these so user-modified
+    // cells are scannable at a glance. read_table_values applies the
+    // same scaling pipeline to both ROMs, so a byte-equal source
+    // produces a bit-equal double — `==` is correct here.
+    std::vector<std::vector<bool>> edited_mask;
+    if (tbl != nullptr) {
+        if (auto td_src_res =
+                state.project->definition().read_table_values(
+                    state.project->source_rom(), *tbl);
+            td_src_res.has_value()) {
+            auto const &td_src = *td_src_res;
+            std::vector<std::vector<double>> const *src_2d = nullptr;
+            if (is_3d) {
+                if (state.selected_z < td_src.slices.size()) {
+                    src_2d = &td_src.slices[state.selected_z];
+                }
+            } else {
+                src_2d = &td_src.values;
+            }
+            edited_mask.resize(td_view.values.size());
+            for (std::size_t r = 0; r < td_view.values.size(); ++r) {
+                edited_mask[r].assign(td_view.values[r].size(), false);
+                if (src_2d == nullptr) {
+                    continue;
+                }
+                for (std::size_t c = 0; c < td_view.values[r].size(); ++c) {
+                    if (r < src_2d->size() && c < (*src_2d)[r].size()) {
+                        edited_mask[r][c] =
+                            (td_view.values[r][c] != (*src_2d)[r][c]);
+                    }
+                }
+            }
+        }
+    }
+
     if (is_3d) {
         char preview[64];
         if (state.selected_z < td_orig.axis_z.size()) {
@@ -2140,11 +2382,19 @@ void render_table_view(AppState &state, Fonts const &fonts) {
 
     GridStats const stats = compute_stats(td_view);
     if (stats.count > 0) {
-        ImGui::TextDisabled("min %.*f  ·  max %.*f  ·  mean %.*f  ·  %zu cells",
-                            precision, stats.min,
-                            precision, stats.max,
-                            precision, stats.mean,
-                            stats.count);
+        // Table-wide stats are noise when the user has a selection — the
+        // selection-summary line below covers the same shape for the
+        // chosen scope. Hide the table-wide text in that case; keep the
+        // scale legend, which describes the whole-table heatmap mapping
+        // and is useful regardless of selection.
+        bool const show_table_stats = !state.selection.enabled;
+        if (show_table_stats) {
+            ImGui::TextDisabled("min %.*f  ·  max %.*f  ·  mean %.*f  ·  %zu cells",
+                                precision, stats.min,
+                                precision, stats.max,
+                                precision, stats.mean,
+                                stats.count);
+        }
         // Heatmap legend — only meaningful in Grid view (Heatmap view
         // already has a vertical ColormapScale on the right via ImPlot).
         // Sampled from heatmap_color so the strip's gradient matches
@@ -2157,7 +2407,9 @@ void render_table_view(AppState &state, Fonts const &fonts) {
             constexpr float kBarW = 220.0f;
             constexpr float kBarH = 12.0f;
             constexpr int   kSegs = 64;
-            ImGui::SameLine(0.0f, 24.0f);
+            if (show_table_stats) {
+                ImGui::SameLine(0.0f, 24.0f);
+            }
             ImGui::TextDisabled("scale:");
             ImGui::SameLine();
             char buf[32];
@@ -2320,6 +2572,22 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     ImGui::EndDisabled();
 
     ImGui::SameLine(0.0f, 24.0f);
+    ImGui::BeginDisabled(!state.dirty);
+    if (ImGui::Button("Save")) {
+        save_project(state);
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        if (state.dirty) {
+            ImGui::SetTooltip(
+                "Write the working ROM + edits to disk.  (Ctrl+S)");
+        } else {
+            ImGui::SetTooltip(
+                "No unsaved edits.  (Ctrl+S)");
+        }
+    }
+    ImGui::EndDisabled();
+
+    ImGui::SameLine(0.0f, 24.0f);
     ImGui::TextDisabled("|");
     ImGui::SameLine();
     ImGui::TextUnformatted("View:");
@@ -2345,7 +2613,8 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     if (state.view_mode == TableViewMode::Heatmap) {
         render_table_heatmap(td_view, tbl, scal, stats);
     } else {
-        render_table_grid(td_view, scal, stats, state.selection, fonts, state);
+        render_table_grid(td_view, scal, stats, state.selection, fonts, state,
+                          edited_mask);
     }
 
     // Escape clears the current selection when the Table panel has focus.
@@ -2373,30 +2642,33 @@ void render_status_bar(AppState &state) {
     ImGui::PopStyleVar(2);
 
     if (state.project.has_value()) {
-        bool const dirty =
-            state.project->working_rom().crc32() != state.project->source_crc32_at_create();
+        bool const dirty = state.dirty;
 
         // Left cluster: project name → status chip → history position.
         ImGui::TextUnformatted(state.project->display_name().c_str());
-        // Hover the name to see the on-disk path. Two projects with
-        // the same id (different copies, different forks) read the
-        // same in the name line; the path is the unambiguous handle.
+        // Hover the name to see the on-disk path and which definition
+        // pack the project is bound to. Two projects with the same id
+        // (different copies, different forks) read the same in the
+        // name line; the path is the unambiguous handle, and the pack
+        // disambiguates ECU variant.
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s",
-                              state.project->dir().string().c_str());
+            ImGui::SetTooltip(
+                "%s\nPack: %s",
+                state.project->dir().string().c_str(),
+                state.project->definition().pack().id.c_str());
         }
 
         ImGui::SameLine();
         if (dirty) {
             chip("Unsaved edits", chip_fg_warn(), chip_bg_warn());
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Working ROM differs from the source.\n"
+                ImGui::SetTooltip("In-memory edits have not been written to disk.\n"
                                   "Ctrl+S to save the .stune project.");
             }
         } else {
             chip("Clean", chip_fg_muted(), chip_bg_muted());
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Working ROM matches the source — nothing to save.");
+                ImGui::SetTooltip("All edits are saved to disk.");
             }
         }
 
@@ -2441,6 +2713,13 @@ void render_status_bar(AppState &state) {
     }
     ImGui::End();
 }
+
+// Render-frame callable shared between the main loop and GLFW's window-refresh
+// callback. Windows enters a modal resize loop while the user drags a border;
+// the main thread is blocked inside glfwPollEvents for the entire drag, so the
+// only way to keep painting is to render from inside the WM_PAINT-driven
+// refresh callback that GLFW dispatches during the modal loop.
+std::function<void()> g_render_frame;
 
 } // namespace
 
@@ -2499,9 +2778,7 @@ int main(int argc, char *argv[]) {
         state.status_msg = "Open a .stune project: File → Open (Ctrl+O).";
     }
 
-    while (!state.user_confirmed_quit) {
-        glfwPollEvents();
-
+    auto render_frame = [&]() {
         // The user clicked the window's close button (or any other
         // path that toggled GLFW's close flag). Route it through the
         // same confirm-action machinery as Ctrl+Q / File → Quit so an
@@ -2574,8 +2851,43 @@ int main(int argc, char *argv[]) {
             glfwMakeContextCurrent(prev_ctx);
         }
 
+        // OS window title reflects current state: project name + dirty
+        // marker so taskbar / alt-tab show what's open and whether
+        // there are unsaved changes. Static cache avoids the glfw call
+        // every frame.
+        {
+            static std::string last_title;
+            std::string        desired;
+            if (state.project.has_value()) {
+                if (state.dirty) {
+                    desired = "\xE2\x97\x8F ";
+                }
+                desired += state.project->display_name();
+                desired += " \xE2\x80\x94 SubuwuTuner";
+            } else {
+                desired = "SubuwuTuner";
+            }
+            if (desired != last_title) {
+                glfwSetWindowTitle(window, desired.c_str());
+                last_title = std::move(desired);
+            }
+        }
+
         glfwSwapBuffers(window);
+    };
+
+    g_render_frame = render_frame;
+    glfwSetWindowRefreshCallback(window, [](GLFWwindow * /*w*/) {
+        if (g_render_frame) {
+            g_render_frame();
+        }
+    });
+
+    while (!state.user_confirmed_quit) {
+        glfwPollEvents();
+        render_frame();
     }
+    g_render_frame = nullptr;
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
