@@ -701,6 +701,76 @@ class DimensionsTest(unittest.TestCase):
         )
 
 
+class DisplayNameFallbackTest(unittest.TestCase):
+    """When the OEM name fails the clean-room filter (too long, contains a
+    period or comma), we used to emit `name = ""`. That made `pack-info`
+    and `table-list` show blank rows for the entries that needed a label
+    most (DTC tables with terse abbreviation-laden descriptions). Fall back
+    to title-cased slug instead — same factual content, readable form."""
+
+    def test_short_factual_name_is_kept(self):
+        self.assertEqual(defgen._display_name("Boost Target", "boost_target"),
+                         "Boost Target")
+
+    def test_long_name_falls_back_to_titlecased_slug(self):
+        long_name = "A" * 70  # > 64 chars
+        slug = "boost_target_high_octane"
+        self.assertEqual(defgen._display_name(long_name, slug),
+                         "Boost Target High Octane")
+
+    def test_name_with_period_falls_back(self):
+        self.assertEqual(
+            defgen._display_name("Neutral pos. switch high input", "neutral_pos_switch_high_input"),
+            "Neutral Pos Switch High Input",
+        )
+
+    def test_name_with_comma_falls_back(self):
+        self.assertEqual(
+            defgen._display_name("Boost, target, high octane", "boost_target_high_octane"),
+            "Boost Target High Octane",
+        )
+
+    def test_empty_slug_yields_empty_string(self):
+        # Defensive: if the slug somehow ended up empty too, don't crash.
+        self.assertEqual(defgen._display_name("A" * 70, ""), "")
+
+    def test_table_with_rejected_name_uses_titlecased_slug(self):
+        # End-to-end: a DTC table whose name contains a period should still
+        # come out of parse_rom_xml with a readable name.
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="1D" name="P1590 Neutral pos. switch high input" category="diagnostic trouble codes"
+                 storageaddress="0x100" storagetype="uint8" endian="big">
+            <scaling units="" expression="x" to_byte="x" format="0"
+                     endian="big" storagetype="uint8"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        table = packs[0].tables[0]
+        self.assertEqual(table.id, "p1590_neutral_pos_switch_high_input")
+        self.assertEqual(table.name, "P1590 Neutral Pos Switch High Input")
+
+    def test_axis_with_rejected_name_uses_titlecased_slug(self):
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="2D" name="boost_target" storageaddress="0x100"
+                 storagetype="uint8" endian="big" sizex="8">
+            <scaling units="" expression="x" to_byte="x" format="0"
+                     endian="big" storagetype="uint8"/>
+            <table type="X Axis" name="RPM, primary axis"
+                   storageaddress="0x200" storagetype="uint16" endian="big" size="8">
+              <scaling units="rpm" expression="x" to_byte="x" format="0"
+                       endian="big" storagetype="uint16"/>
+            </table>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        axis = next(a for a in packs[0].axes if a.id == "rpm_primary_axis")
+        self.assertEqual(axis.name, "Rpm Primary Axis")
+
+
 class ApplyToPackTest(unittest.TestCase):
     def setUp(self):
         import tempfile

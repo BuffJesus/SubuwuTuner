@@ -985,7 +985,7 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
     category = (t_el.get("category") or "").strip().lower()
     table = TableRecord(
         id=table_slug,
-        name=name if _is_factual_name(name) else "",
+        name=_display_name(name, table_slug),
         category=category,
         dimensions=dims,
         address=address,
@@ -1027,9 +1027,10 @@ def _axis_from_element(el: ET.Element,
             data_type = rec.data_type
             scaling_id = rec.id
 
+    axis_slug = _slugify(name)
     return AxisRecord(
-        id=_slugify(name),
-        name=name if _is_factual_name(name) else "",
+        id=axis_slug,
+        name=_display_name(name, axis_slug),
         unit="",  # we don't carry the axis's unit text from XML
         type="static",
         address=_table_address(el),
@@ -1048,6 +1049,15 @@ def _is_factual_name(name: str) -> bool:
     we drop.
     """
     return len(name) <= 64 and "." not in name and "," not in name
+
+
+def _display_name(name: str, slug: str) -> str:
+    """Keep `name` when it passes `_is_factual_name`; else title-case the
+    slug. Slug already strips OEM prose punctuation, so title-casing it
+    presents the same factual content readably without republishing prose."""
+    if _is_factual_name(name):
+        return name
+    return slug.replace("_", " ").title() if slug else ""
 
 
 # ---------------------------------------------------------------------------
