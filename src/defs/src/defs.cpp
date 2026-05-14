@@ -845,14 +845,19 @@ Status resolve_includes(Definition                                  &def,
         }
         // Record-level merge only — the fragment's own [pack] is informational
         // (gives the file a loadable id for stand-alone `pack-info`) but does
-        // NOT replace the parent pack metadata.
+        // NOT replace the parent pack metadata. A malformed fragment [pack]
+        // is still an error: we'd otherwise silently lose nested includes.
         Pack frag_pack;
         bool has_frag_includes = false;
         if (auto const *pack_node = tbl->get("pack"); pack_node != nullptr) {
-            if (auto r = parse_pack(*pack_node); r.has_value()) {
-                frag_pack = std::move(*r);
-                has_frag_includes = !frag_pack.includes.empty();
+            auto r = parse_pack(*pack_node);
+            if (!r.has_value()) {
+                return failure(ErrorCode::ParseError,
+                               "include " + resolved.string() + ": "
+                                   + std::string{r.error().message()});
             }
+            frag_pack = std::move(*r);
+            has_frag_includes = !frag_pack.includes.empty();
         }
         if (auto r = DefinitionBuilder::merge(*tbl, def, /*accept_pack=*/false,
                                               /*require_pack=*/false);

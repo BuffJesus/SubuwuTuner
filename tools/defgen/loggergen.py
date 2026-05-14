@@ -45,13 +45,11 @@ import defgen  # noqa: E402
 
 
 def _parse_address(text: str | None) -> int:
-    """RomRaider logger addresses are bare hex with `0x` prefix."""
+    """RomRaider logger addresses are hex — with or without an `0x` prefix.
+    `int(s, 16)` accepts both, so we don't need to special-case the prefix."""
     if text is None:
         return 0
-    text = text.strip()
-    if text.lower().startswith("0x"):
-        return int(text, 16)
-    return int(text, 16)
+    return int(text.strip(), 16)
 
 
 def _length_to_data_type(length: str | None) -> tuple[int, str]:
