@@ -627,7 +627,7 @@ at::KnockPullResult build_pull_result(std::vector<AddBackCell> const &cells) {
 
 } // namespace
 
-TEST_CASE("apply_knock_add_back: disabled → passthrough",
+TEST_CASE("apply_knock_add_back: disabled -> passthrough",
           "[autotune][knock][addback]") {
     auto const in = build_pull_result({
         {20.0, 20.0, 0.0, 100, false},

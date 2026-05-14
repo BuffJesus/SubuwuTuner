@@ -20,14 +20,14 @@ constexpr std::string_view kMinimalHeader =
 
 }  // namespace
 
-TEST_CASE("read_maf_samples_csv: empty input → empty vector",
+TEST_CASE("read_maf_samples_csv: empty input -> empty vector",
           "[autotune][csv]") {
     auto const r = at::read_maf_samples_csv("");
     REQUIRE(r.has_value());
     CHECK(r->empty());
 }
 
-TEST_CASE("read_maf_samples_csv: header only → empty vector",
+TEST_CASE("read_maf_samples_csv: header only -> empty vector",
           "[autotune][csv]") {
     auto const r = at::read_maf_samples_csv(kMinimalHeader);
     REQUIRE(r.has_value());
@@ -58,7 +58,7 @@ TEST_CASE("read_maf_samples_csv: required columns populate fields",
     CHECK(s.throttle_rate   == Approx(0.0));
 }
 
-TEST_CASE("read_maf_samples_csv: missing required column → error",
+TEST_CASE("read_maf_samples_csv: missing required column -> error",
           "[autotune][csv]") {
     // Drop iat_c.
     std::string text =
@@ -132,7 +132,7 @@ TEST_CASE("read_maf_samples_csv: CRLF tolerated",
     CHECK((*r)[1].rpm == Approx(2600.0));
 }
 
-TEST_CASE("read_maf_samples_csv: non-numeric value → error w/ row + col",
+TEST_CASE("read_maf_samples_csv: non-numeric value -> error w/ row + col",
           "[autotune][csv]") {
     std::string text(kMinimalHeader);
     text += "2.31,14.5,14.7,2500,45,90,30\n";
@@ -166,7 +166,7 @@ TEST_CASE("read_maf_samples_csv: optional booleans",
     CHECK((*r)[2].limp_mode   == false);
 }
 
-TEST_CASE("read_maf_samples_csv: non-boolean in bool column → error",
+TEST_CASE("read_maf_samples_csv: non-boolean in bool column -> error",
           "[autotune][csv]") {
     std::string text =
         "maf_voltage,actual_afr,commanded_afr,rpm,throttle_pct,coolant_c,iat_c,"
@@ -279,7 +279,7 @@ TEST_CASE("read_maf_samples_csv: unknown columns are tolerated",
     CHECK((*r)[0].maf_voltage == Approx(2.31));
 }
 
-TEST_CASE("read_maf_samples_csv: missing trailing field in a row → error",
+TEST_CASE("read_maf_samples_csv: missing trailing field in a row -> error",
           "[autotune][csv]") {
     std::string text(kMinimalHeader);
     text += "2.31,14.5,14.7,2500,45,90\n";   // missing iat_c value
@@ -337,7 +337,7 @@ constexpr std::string_view kKnockHeader =
 
 }  // namespace
 
-TEST_CASE("read_knock_samples_csv: empty input → empty vector",
+TEST_CASE("read_knock_samples_csv: empty input -> empty vector",
           "[autotune][csv][knock]") {
     auto const r = at::read_knock_samples_csv("");
     REQUIRE(r.has_value());
@@ -361,7 +361,7 @@ TEST_CASE("read_knock_samples_csv: required columns populate fields",
     CHECK(s.limp_mode      == false);
 }
 
-TEST_CASE("read_knock_samples_csv: missing required column → error",
+TEST_CASE("read_knock_samples_csv: missing required column -> error",
           "[autotune][csv][knock]") {
     // Drop feedback_knock.
     std::string text = "rpm,load,coolant_c,iat_c\n3000,2.5,90,30\n";
@@ -388,7 +388,7 @@ TEST_CASE("read_knock_samples_csv: optional limp_mode",
     CHECK((*r)[2].limp_mode == false);
 }
 
-TEST_CASE("read_knock_samples_csv: non-numeric feedback_knock → error",
+TEST_CASE("read_knock_samples_csv: non-numeric feedback_knock -> error",
           "[autotune][csv][knock]") {
     std::string text(kKnockHeader);
     text += "3000,2.5,nope,90,30\n";

@@ -34,7 +34,7 @@ at::MafTuneResult build_result(std::vector<double> const &current,
 
 }  // namespace
 
-TEST_CASE("lint_maf_proposal: clean proposal → no violations",
+TEST_CASE("lint_maf_proposal: clean proposal -> no violations",
           "[autotune][lint]") {
     std::vector<double> axis     {1.0, 2.0, 3.0, 4.0};
     std::vector<double> current  {2.0, 4.0, 6.0, 8.0};
@@ -231,7 +231,7 @@ at::KnockPullResult build_knock_result(std::size_t                rows,
 
 }  // namespace
 
-TEST_CASE("lint_knock_proposal: smooth surface → no violations",
+TEST_CASE("lint_knock_proposal: smooth surface -> no violations",
           "[autotune][lint][knock]") {
     std::vector<double> rpm_axis {2000.0, 3000.0, 4000.0};
     std::vector<double> load_axis{1.5, 2.5};
