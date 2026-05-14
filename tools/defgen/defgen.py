@@ -275,8 +275,12 @@ class ScalingRecord:
     factor: float = 1.0
     offset: float = 0.0
     unit: str = ""
-    minimum: float = 0.0
-    maximum: float = 0.0
+    # min/max default to None when the source XML didn't carry them. The
+    # C++ loader tolerates an absent key (defaults to 0.0); emitting the
+    # explicit 0.0 sentinel made every Merp scaling look like it had a
+    # 0..0 range, which is indistinguishable from a real deadband.
+    minimum: float | None = None
+    maximum: float | None = None
     precision: int = 0
     data_type: str = "uint16_be"
     formula: str = "linear"  # only "linear" is generated; piecewise is manual
@@ -433,9 +437,13 @@ def _toml_string(s: str) -> str:
 
 
 def _emit_table(header: str, fields: dict[str, Any]) -> str:
+    # Skip fields whose value is None — this is how callers express "the
+    # source didn't carry this field, leave it out of the TOML so the
+    # loader's default kicks in" (e.g. absent min/max on a scaling).
+    present = {k: v for k, v in fields.items() if v is not None}
     lines = [header]
-    key_width = max((len(k) for k in fields), default=0)
-    for k, v in fields.items():
+    key_width = max((len(k) for k in present), default=0)
+    for k, v in present.items():
         lines.append(f"{k.ljust(key_width)} = {_toml_value(v)}")
     return "\n".join(lines) + "\n"
 
@@ -855,13 +863,18 @@ def _scaling_from_element(el: ET.Element,
                 f"defaulted to uint16_be",
             ))
 
+    # `raw_min or None` collapses both `None` (attr absent) and `""`
+    # (attr present but empty, which the old code swallowed via `or 0.0`)
+    # into a single "omit it" signal — anything else gets parsed as float.
+    raw_min = el.get("min") or None
+    raw_max = el.get("max") or None
     return ScalingRecord(
         id=slug,
         factor=factor,
         offset=offset,
         unit=(el.get("units") or "").strip(),
-        minimum=float(el.get("min") or 0.0),
-        maximum=float(el.get("max") or 0.0),
+        minimum=float(raw_min) if raw_min is not None else None,
+        maximum=float(raw_max) if raw_max is not None else None,
         precision=_format_to_precision(el.get("format")),
         data_type=data_type,
     )
@@ -1052,9 +1065,15 @@ def _is_factual_name(name: str) -> bool:
 
 
 def _display_name(name: str, slug: str) -> str:
-    """Keep `name` when it passes `_is_factual_name`; else title-case the
-    slug. Slug already strips OEM prose punctuation, so title-casing it
-    presents the same factual content readably without republishing prose."""
+    """Pick a readable display name for a table/axis record.
+
+    If the OEM-provided `name` passes the clean-room filter we keep it. Else
+    we fall back to the slug with underscores → spaces and Title-Case so
+    `pack-info`/`table-list` show something readable instead of an empty
+    string. The slug is already a defgen-derived identifier (lowercased,
+    punctuation-stripped) — title-casing it doesn't republish OEM prose,
+    just presents the same factual content in human-readable form.
+    """
     if _is_factual_name(name):
         return name
     return slug.replace("_", " ").title() if slug else ""

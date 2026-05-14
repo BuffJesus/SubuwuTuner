@@ -701,6 +701,96 @@ class DimensionsTest(unittest.TestCase):
         )
 
 
+class ScalingMinMaxOmissionTest(unittest.TestCase):
+    """RomRaider XML often omits min= / max= on scalings (the canonical Merp
+    ecu_defs.xml does so for ~all table scalings). defgen used to emit
+    `min = 0.0` / `max = 0.0` regardless, making every scaling look like
+    it had a 0..0 deadband range. Now: omit the field when the source
+    didn't carry it. The C++ loader already tolerates absent keys."""
+
+    def test_present_min_max_emitted(self):
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="1D" name="t" storageaddress="0x100" storagetype="uint8" endian="big">
+            <scaling name="bounded" units="rpm" expression="x" to_byte="x"
+                     format="0" min="100" max="9000" endian="big" storagetype="uint16"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        s = next(s for s in packs[0].scalings if s.id == "bounded")
+        self.assertEqual(s.minimum, 100.0)
+        self.assertEqual(s.maximum, 9000.0)
+        toml_text = defgen.pack_to_toml(packs[0])
+        self.assertIn("min       = 100.0", toml_text)
+        self.assertIn("max       = 9000.0", toml_text)
+
+    def test_absent_min_max_omitted(self):
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="1D" name="t" storageaddress="0x100" storagetype="uint8" endian="big">
+            <scaling name="unbounded" units="" expression="x" to_byte="x"
+                     format="0" endian="big" storagetype="uint16"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        s = next(s for s in packs[0].scalings if s.id == "unbounded")
+        self.assertIsNone(s.minimum)
+        self.assertIsNone(s.maximum)
+        toml_text = defgen.pack_to_toml(packs[0])
+        # No `min = ` / `max = ` line should appear in the emitted scaling
+        # block — but the table block can still reference axis x/y. Slice
+        # the unbounded scaling's own block.
+        block = toml_text.split('id        = "unbounded"', 1)[1]
+        block = block.split("[[", 1)[0]
+        self.assertNotIn("min ", block)
+        self.assertNotIn("max ", block)
+
+    def test_partial_min_only(self):
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="1D" name="t" storageaddress="0x100" storagetype="uint8" endian="big">
+            <scaling name="lower_only" units="" expression="x" to_byte="x"
+                     format="0" min="0" endian="big" storagetype="uint16"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        s = next(s for s in packs[0].scalings if s.id == "lower_only")
+        self.assertEqual(s.minimum, 0.0)
+        self.assertIsNone(s.maximum)
+        toml_text = defgen.pack_to_toml(packs[0])
+        block = toml_text.split('id        = "lower_only"', 1)[1]
+        block = block.split("[[", 1)[0]
+        self.assertIn("min       = 0.0", block)
+        self.assertNotIn("max ", block)
+
+    def test_empty_string_min_max_omitted(self):
+        # `<scaling min="" max="">` is rare but appeared in the wild; the
+        # old `float(el.get("min") or 0.0)` swallowed it as 0.0. We now
+        # treat empty string the same as missing — omit from output.
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="1D" name="t" storageaddress="0x100" storagetype="uint8" endian="big">
+            <scaling name="empty_attrs" units="" expression="x" to_byte="x"
+                     format="0" min="" max="" endian="big" storagetype="uint16"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        s = next(s for s in packs[0].scalings if s.id == "empty_attrs")
+        self.assertIsNone(s.minimum)
+        self.assertIsNone(s.maximum)
+
+    def test_emit_table_skips_none(self):
+        # Direct unit on _emit_table — None-valued keys drop out.
+        out = defgen._emit_table("[[x]]", {"a": 1, "b": None, "c": "v"})
+        self.assertIn("a = 1", out)
+        self.assertIn('c = "v"', out)
+        self.assertNotIn("b ", out)
+
+
 class DisplayNameFallbackTest(unittest.TestCase):
     """When the OEM name fails the clean-room filter (too long, contains a
     period or comma), we used to emit `name = ""`. That made `pack-info`
