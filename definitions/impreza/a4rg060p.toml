@@ -2292,7 +2292,7 @@ address                = 0x00028560
 data_type              = "uint16_be"
 scaling                = "air_fuel_ratio_x_0001220703125_14_7"
 axis_x                 = "front_oxygen_sensor"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2305,7 +2305,7 @@ address                = 0x0002852D
 data_type              = "uint16_be"
 scaling                = "front_oxygen_sensor_compensation_x_00003051758"
 axis_x                 = "atmospheric_pressure"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2317,7 +2317,7 @@ dimensions             = 0
 address                = 0x000155AC
 data_type              = "uint16_be"
 scaling                = "estimated_air_fuel_ratio_x_00179443359375_22_05"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2330,7 +2330,7 @@ address                = 0x00028F49
 data_type              = "uint16_be"
 scaling                = "estimated_air_fuel_ratio_x_00179443359375"
 axis_x                 = "cl_fueling_target_limits"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2344,7 +2344,7 @@ data_type              = "uint16_be"
 scaling                = "estimated_air_fuel_ratio_points_additive_x_00179443359375"
 axis_x                 = "engine_load"
 axis_y                 = "engine_speed"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2358,7 +2358,7 @@ data_type              = "uint16_be"
 scaling                = "estimated_air_fuel_ratio_points_additive_x_00179443359375"
 axis_x                 = "engine_load"
 axis_y                 = "engine_speed"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2371,7 +2371,7 @@ address                = 0x00028F81
 data_type              = "uint16_be"
 scaling                = "estimated_air_fuel_ratio_points_additive_x_00179443359375_00000000000001"
 axis_x                 = "coolant_temperature_c"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2384,7 +2384,7 @@ address                = 0x00028FCD
 data_type              = "uint16_be"
 scaling                = "estimated_air_fuel_ratio_points_additive_x_00179443359375_00000000000001"
 axis_x                 = "coolant_temperature_c"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2397,7 +2397,7 @@ address                = 0x00028F5B
 data_type              = "uint16_be"
 scaling                = "estimated_air_fuel_ratio_points_additive_x_00179443359375_00000000000001"
 axis_x                 = "coolant_temperature_c"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2410,7 +2410,7 @@ address                = 0x00028FA7
 data_type              = "uint16_be"
 scaling                = "estimated_air_fuel_ratio_points_additive_x_00179443359375_00000000000001"
 axis_x                 = "coolant_temperature_c"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2423,7 +2423,7 @@ address                = 0x0002919B
 data_type              = "uint16_be"
 scaling                = "counter_threshold_x"
 axis_x                 = "delay_group_value"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2436,7 +2436,7 @@ address                = 0x000291C5
 data_type              = "uint16_be"
 scaling                = "throttle_x_591715976"
 axis_x                 = "engine_speed_rpm"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2449,7 +2449,7 @@ address                = 0x00029180
 data_type              = "uint16_be"
 scaling                = "throttle_x_591715976"
 axis_x                 = "ol_to_cl_transition"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2462,7 +2462,7 @@ address                = 0x000291DB
 data_type              = "uint16_be"
 scaling                = "base_pulse_width_ms_x_064"
 axis_x                 = "engine_speed_rpm"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2475,7 +2475,7 @@ address                = 0x00029181
 data_type              = "uint16_be"
 scaling                = "base_pulse_width_ms_x_002"
 axis_x                 = "ol_to_cl_transition"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2488,7 +2488,7 @@ address                = 0x0002918D
 data_type              = "uint16_be"
 scaling                = "throttle_x_591715976"
 axis_x                 = "condition_result_time_since_engine_start"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2501,7 +2501,7 @@ address                = 0x00029185
 data_type              = "uint16_be"
 scaling                = "engine_speed_rpm_x_1953125"
 axis_x                 = "condition_result"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2514,7 +2514,7 @@ address                = 0x00029191
 data_type              = "uint16_be"
 scaling                = "vehicle_speed_kmh_x"
 axis_x                 = "condition_result"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2527,7 +2527,7 @@ address                = 0x00029183
 data_type              = "uint16_be"
 scaling                = "degrees_c_x_00244140625_40"
 axis_x                 = "condition_result"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2540,7 +2540,7 @@ address                = 0x000291BB
 data_type              = "uint16_be"
 scaling                = "atmospheric_pressure_bar_x_001333224"
 axis_x                 = "throttle_table_selection_at"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2553,7 +2553,7 @@ address                = 0x0002918B
 data_type              = "uint16_be"
 scaling                = "throttle_x_591715976"
 axis_x                 = "condition_result"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -2566,7 +2566,7 @@ address                = 0x00029189
 data_type              = "uint16_be"
 scaling                = "throttle_x_591715976"
 axis_x                 = "condition_result"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -3126,7 +3126,7 @@ address                = 0x00029098
 data_type              = "uint16_be"
 scaling                = "a_f_learning_1_x_048828125_50"
 axis_x                 = "a_f_learning_limits"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -3139,7 +3139,7 @@ address                = 0x0002909E
 data_type              = "uint16_be"
 scaling                = "airflow_g_s_x_004577637"
 axis_x                 = "a_f_learning_store_apply_ranges"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -3996,7 +3996,7 @@ dimensions             = 0
 address                = 0x0001BA7C
 data_type              = "uint16_be"
 scaling                = ""
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -4008,7 +4008,7 @@ dimensions             = 0
 address                = 0x0002BBFE
 data_type              = "uint16_be"
 scaling                = ""
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -4020,7 +4020,7 @@ dimensions             = 0
 address                = 0x0002BC21
 data_type              = "uint16_be"
 scaling                = ""
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -4032,7 +4032,7 @@ dimensions             = 0
 address                = 0x0002BC0E
 data_type              = "uint16_be"
 scaling                = ""
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 
@@ -4044,7 +4044,7 @@ dimensions             = 0
 address                = 0x0002D49F
 data_type              = "uint16_be"
 scaling                = ""
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 

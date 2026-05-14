@@ -181,6 +181,54 @@ def parse_toexpr(expr: str) -> tuple[float, float] | None:
 
 
 # ---------------------------------------------------------------------------
+# Emissions-relevance heuristic
+# ---------------------------------------------------------------------------
+#
+# `Table.emissions_relevant` drives the EmissionsLinter behaviour described
+# in `docs/06-legal-ethics.md`. RomRaider's `category=` attribute already
+# groups tables by function, so we pattern-match against that. Categories
+# we mark relevant cover the bits that emissions regulators actually care
+# about: DTC behaviour (suppressing codes), OBD-II readiness, closed-loop
+# fueling target / lambda learning. We deliberately do NOT flag open-loop
+# fueling, knock control, boost target, ignition timing, etc. — those
+# affect emissions indirectly but are core tuning surface; flagging them
+# would make the badge meaningless.
+
+_EMISSIONS_CATEGORY_KEYWORDS = (
+    "obd-ii",
+    "obd ii",
+    "closed loop",
+    "cl/ol",
+    "af correction",
+    "af learning",
+    "a/f learning",
+    "a/f correction",
+    "catalyst",
+    "egr",
+    "evap",
+    "o2 sensor",
+    "lambda",
+    "readiness",
+    "emission",
+)
+# We deliberately do NOT match `diagnostic trouble codes` here. DTC editing
+# is a separate concern from "edits that change measurable emissions
+# output" — a future `obd_inspection_relevant` flag is the right home for
+# that. Folding DTCs in would push the badge to ~55% of tables and drown
+# out the genuinely-emissions edits.
+
+
+def is_emissions_relevant(category: str) -> bool:
+    """Heuristic match against the keyword set above. Case-insensitive,
+    substring match — RomRaider categories like 'Fueling - Closed Loop'
+    and 'Fueling - CL/OL Transition' both hit."""
+    if not category:
+        return False
+    c = category.lower()
+    return any(kw in c for kw in _EMISSIONS_CATEGORY_KEYWORDS)
+
+
+# ---------------------------------------------------------------------------
 # XML extraction
 # ---------------------------------------------------------------------------
 
@@ -887,16 +935,18 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
         ))
         dims = 1
 
+    category = (t_el.get("category") or "").strip().lower()
     table = TableRecord(
         id=table_slug,
         name=name if _is_factual_name(name) else "",
-        category=(t_el.get("category") or "").strip().lower(),
+        category=category,
         dimensions=dims,
         address=address,
         data_type=data_type,
         scaling=scaling_id,
         axis_x=axis_x_id,
         axis_y=axis_y_id,
+        emissions_relevant=is_emissions_relevant(category),
     )
     pack.tables.append(table)
 

@@ -459,6 +459,56 @@ class AxisLengthTest(unittest.TestCase):
         self.assertEqual(axes["curve_x"].length, 7)
 
 
+class EmissionsRelevanceTest(unittest.TestCase):
+    def test_closed_loop_fueling_is_flagged(self):
+        # Real Merp category strings — verbatim except for case.
+        self.assertTrue(defgen.is_emissions_relevant("Fueling - Closed Loop"))
+        self.assertTrue(defgen.is_emissions_relevant("fueling - cl/ol transition"))
+        self.assertTrue(defgen.is_emissions_relevant("fueling - a/f learning"))
+        self.assertTrue(defgen.is_emissions_relevant("OBD-II"))
+        self.assertTrue(defgen.is_emissions_relevant("Fueling - AF Correction / Learning"))
+
+    def test_open_loop_and_safety_categories_are_not_flagged(self):
+        # Edits to these affect emissions indirectly but flagging them would
+        # drown out the genuinely-emissions edits.
+        self.assertFalse(defgen.is_emissions_relevant("Fueling - Primary Open Loop"))
+        self.assertFalse(defgen.is_emissions_relevant("Ignition Timing - Knock Control"))
+        self.assertFalse(defgen.is_emissions_relevant("Boost Control - Target"))
+        self.assertFalse(defgen.is_emissions_relevant("Idle Control"))
+
+    def test_dtc_is_not_flagged_emissions(self):
+        # DTC editing is a separate concern; see comment in defgen.
+        self.assertFalse(defgen.is_emissions_relevant("Diagnostic Trouble Codes"))
+
+    def test_empty_category_is_not_flagged(self):
+        self.assertFalse(defgen.is_emissions_relevant(""))
+        self.assertFalse(defgen.is_emissions_relevant("   "))
+
+    def test_table_record_carries_flag_from_xml(self):
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="2D" name="cl_target" category="Fueling - Closed Loop"
+                 storageaddress="0x100" storagetype="uint8" endian="big">
+            <scaling units="afr" expression="x" to_byte="x"
+                     format="0" endian="big" storagetype="uint8"/>
+            <table type="X Axis" name="cl_target_x" storageaddress="0x200"
+                   storagetype="uint8" endian="big" size="4"/>
+          </table>
+          <table type="2D" name="boost_target" category="Boost Control - Target"
+                 storageaddress="0x300" storagetype="uint8" endian="big">
+            <scaling units="kpa" expression="x" to_byte="x"
+                     format="0" endian="big" storagetype="uint8"/>
+            <table type="X Axis" name="boost_x" storageaddress="0x400"
+                   storagetype="uint8" endian="big" size="4"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        flags = {t.id: t.emissions_relevant for t in packs[0].tables}
+        self.assertTrue(flags["cl_target"])
+        self.assertFalse(flags["boost_target"])
+
+
 class DimensionsTest(unittest.TestCase):
     def test_romraider_1d_maps_to_scalar(self):
         # RomRaider counts the value dimension; "1D" = single scalar with

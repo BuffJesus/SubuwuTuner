@@ -104,7 +104,7 @@ address                = 0x00029202
 data_type              = "uint16_be"
 scaling                = "airflow_g_s_x_004577637"
 axis_x                 = "a_f_learning_store_apply_ranges"
-emissions_relevant     = false
+emissions_relevant     = true
 engine_safety_critical = false
 
 

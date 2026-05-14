@@ -612,6 +612,15 @@ int cmd_pack_info(int argc, char *argv[]) {
     std::printf("Axes:            %zu\n", def->axes().size());
     std::printf("Scalings:        %zu\n", def->scalings().size());
     std::printf("Tables:          %zu\n", def->tables().size());
+    {
+        std::size_t emissions = 0;
+        for (auto const &t : def->tables()) {
+            if (t.emissions_relevant) ++emissions;
+        }
+        if (emissions > 0) {
+            std::printf("  emissions:     %zu\n", emissions);
+        }
+    }
     std::printf("PIDs:            %zu\n", def->pids().size());
     std::printf("Switches:        %zu\n", def->switches().size());
 
