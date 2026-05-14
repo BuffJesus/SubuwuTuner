@@ -393,6 +393,93 @@ class NonLinearFormulaWarningTest(unittest.TestCase):
         self.assertEqual(packs[0].warnings, [])
 
 
+class DimensionsTest(unittest.TestCase):
+    def test_romraider_1d_maps_to_scalar(self):
+        # RomRaider counts the value dimension; "1D" = single scalar with
+        # no axis. Our schema needs dimensions=0 so the C++ validator
+        # doesn't demand an axis_x.
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="1D" name="rev_limit" storageaddress="0x100" storagetype="uint8" endian="big">
+            <scaling units="rpm" expression="(x)*100.0" to_byte="(x)/100.0"
+                     format="0" endian="big" storagetype="uint8"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        self.assertEqual(len(packs), 1)
+        self.assertEqual(len(packs[0].tables), 1)
+        self.assertEqual(packs[0].tables[0].dimensions, 0)
+        self.assertEqual(packs[0].tables[0].axis_x, "")
+        self.assertEqual(packs[0].tables[0].axis_y, "")
+
+    def test_romraider_2d_maps_to_one_axis(self):
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="2D" name="boost" storageaddress="0x100" storagetype="uint8" endian="big">
+            <scaling units="kPa" expression="x" to_byte="x"
+                     format="0" endian="big" storagetype="uint8"/>
+            <table type="X Axis" name="boost_x" storageaddress="0x200" storagetype="uint8" endian="big" size="8">
+              <scaling units="rpm" expression="x" to_byte="x"
+                       format="0" endian="big" storagetype="uint8"/>
+            </table>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        self.assertEqual(packs[0].tables[0].dimensions, 1)
+        self.assertEqual(packs[0].tables[0].axis_x, "boost_x")
+
+    def test_romraider_3d_maps_to_two_axes(self):
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="3D" name="vvt" storageaddress="0x100" storagetype="uint8" endian="big">
+            <scaling units="deg" expression="x" to_byte="x"
+                     format="0" endian="big" storagetype="uint8"/>
+            <table type="X Axis" name="vvt_x" storageaddress="0x200" storagetype="uint8" endian="big" size="8">
+              <scaling units="rpm" expression="x" to_byte="x"
+                       format="0" endian="big" storagetype="uint8"/>
+            </table>
+            <table type="Y Axis" name="vvt_y" storageaddress="0x208" storagetype="uint8" endian="big" size="8">
+              <scaling units="load" expression="x" to_byte="x"
+                       format="0" endian="big" storagetype="uint8"/>
+            </table>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        self.assertEqual(packs[0].tables[0].dimensions, 2)
+        self.assertEqual(packs[0].tables[0].axis_x, "vvt_x")
+        self.assertEqual(packs[0].tables[0].axis_y, "vvt_y")
+
+    def test_2d_with_unresolved_axis_demotes_to_scalar_with_warning(self):
+        # RomRaider's scrubbed XML can leave a 2D table with an X-axis
+        # element that has no storageaddress (no inherited override either).
+        # The table can't be read as a multi-axis lookup; defgen demotes
+        # to scalar so the pack still validates, with a warning so the user
+        # can hand-edit the axis address later.
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="2D" name="ghost" storageaddress="0x100" storagetype="uint8" endian="big" sizey="8">
+            <scaling units="%" expression="x" to_byte="x"
+                     format="0" endian="big" storagetype="uint8"/>
+            <table type="X Axis" name="ghost_x" storagetype="uint16" endian="big" size="8">
+              <scaling units="C" expression="x" to_byte="x"
+                       format="0" endian="big" storagetype="uint16"/>
+            </table>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        self.assertEqual(packs[0].tables[0].dimensions, 0)
+        self.assertEqual(packs[0].tables[0].axis_x, "")
+        table_warnings = [w for w in packs[0].warnings if w[0] == "table"]
+        self.assertTrue(
+            any(w[1] == "ghost" and "demoted to scalar" in w[2] for w in table_warnings),
+            f"expected demote warning for ghost; got {table_warnings!r}",
+        )
+
+
 class ApplyToPackTest(unittest.TestCase):
     def setUp(self):
         import tempfile

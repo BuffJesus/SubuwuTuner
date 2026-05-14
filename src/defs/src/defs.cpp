@@ -266,9 +266,9 @@ Result<Table> parse_table(toml::table const &t) {
     tab.emissions_relevant     = optional_value<bool>(t, "emissions_relevant", false);
     tab.engine_safety_critical = optional_value<bool>(t, "engine_safety_critical", false);
 
-    if (tab.dimensions < 1 || tab.dimensions > 3) {
+    if (tab.dimensions < 0 || tab.dimensions > 3) {
         return failure(ErrorCode::ParseError,
-                       "table '" + tab.id + "' dimensions must be 1, 2, or 3");
+                       "table '" + tab.id + "' dimensions must be 0, 1, 2, or 3");
     }
     return tab;
 }

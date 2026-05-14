@@ -444,6 +444,67 @@ data_type = "uint16_be"
     REQUIRE(vals.error().code() == st::ErrorCode::OutOfRange);
 }
 
+TEST_CASE("Definition accepts dimensions=0 for scalar tables (no axes required)",
+          "[defs][scalar]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 64
+
+[[scaling]]
+id        = "raw_u8"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint8"
+
+[[table]]
+id         = "rev_limit_slot"
+dimensions = 0
+address    = 16
+data_type  = "uint8"
+scaling    = "raw_u8"
+)toml");
+    REQUIRE(def_r.has_value());
+    auto const &def = *def_r;
+
+    auto const rom = st::Rom::from_bytes({
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x42,                                            // scalar at offset 16
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    });
+
+    auto const *table = def.find_table("rev_limit_slot");
+    REQUIRE(table != nullptr);
+    REQUIRE(table->dimensions == 0);
+
+    auto const td = def.read_table_values(rom, *table);
+    REQUIRE(td.has_value());
+    REQUIRE(td->axis_x.empty());
+    REQUIRE(td->axis_y.empty());
+    REQUIRE(td->axis_z.empty());
+    REQUIRE(td->values.size() == 1);
+    REQUIRE(td->values[0].size() == 1);
+    REQUIRE(td->values[0][0] == 0x42);
+}
+
+TEST_CASE("Definition rejects out-of-range dimensions", "[defs][scalar]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 64
+
+[[table]]
+id         = "bogus"
+dimensions = 4
+address    = 0
+data_type  = "uint8"
+)toml");
+    REQUIRE_FALSE(def_r.has_value());
+}
+
 TEST_CASE("Definition::read_table_values reads a 1D table", "[defs][read_table_values]") {
     auto const def_r = st::Definition::from_toml_string(R"toml(
 [pack]

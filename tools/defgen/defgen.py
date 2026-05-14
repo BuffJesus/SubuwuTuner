@@ -787,11 +787,16 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
     ttype = (t_el.get("type") or "").strip()
     address = _table_address(t_el)
 
-    # Dimensions
+    # Dimensions — RomRaider counts the value dimension, so:
+    #   "1D" = single scalar, no axes
+    #   "2D" = 1-axis lookup
+    #   "3D" = 2-axis lookup
     if ttype.endswith("3D") or ttype == "3D":
-        dims = 2  # RomRaider's "3D" = 2-axis lookup
+        dims = 2
     elif ttype.endswith("2D") or ttype == "2D":
         dims = 1
+    elif ttype.endswith("1D") or ttype == "1D":
+        dims = 0
     else:
         dims = 1
 
@@ -837,8 +842,30 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
     if dims == 1 and not axis_x_id and axis_y_id:
         axis_x_id, axis_y_id = axis_y_id, ""
 
+    # A non-scalar table with no resolvable axis storage means the source XML
+    # named an axis but didn't (after inheritance flatten) supply its
+    # storageaddress. Demote to a scalar so the pack still validates; the
+    # warning lets the user spot the demotion and hand-edit if the axis is
+    # actually present at a known address.
+    table_slug = _slugify(name)
+    if dims >= 1 and not axis_x_id:
+        pack.warnings.append((
+            "table", table_slug,
+            f"RomRaider {ttype} table has no resolvable axis storage; "
+            f"demoted to scalar (dimensions=0)",
+        ))
+        dims = 0
+        axis_y_id = ""
+    elif dims >= 2 and not axis_y_id:
+        pack.warnings.append((
+            "table", table_slug,
+            f"RomRaider {ttype} table has no resolvable Y axis storage; "
+            f"demoted to 1D (dimensions=1)",
+        ))
+        dims = 1
+
     table = TableRecord(
-        id=_slugify(name),
+        id=table_slug,
         name=name if _is_factual_name(name) else "",
         category=(t_el.get("category") or "").strip().lower(),
         dimensions=dims,
