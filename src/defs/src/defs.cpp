@@ -1097,6 +1097,49 @@ Dtc const *Definition::find_dtc(std::string_view code) const noexcept {
     return it == dtcs_.end() ? nullptr : &*it;
 }
 
+namespace {
+Result<std::size_t> dtc_byte_offset(Rom const &rom,
+                                    DtcBitmap const &bitmap,
+                                    Dtc const &dtc) {
+    if (dtc.byte_offset >= bitmap.length_bytes) {
+        return failure(ErrorCode::OutOfRange,
+                       "dtc '" + dtc.code + "' byte_offset is outside its bitmap");
+    }
+    auto const offset = bitmap.address + dtc.byte_offset;
+    if (offset >= rom.size()) {
+        return failure(ErrorCode::OutOfRange,
+                       "dtc '" + dtc.code + "' bitmap byte is past end of ROM");
+    }
+    return offset;
+}
+} // namespace
+
+Result<bool> is_dtc_enabled(Rom const &rom, DtcBitmap const &bitmap, Dtc const &dtc) {
+    auto const off = dtc_byte_offset(rom, bitmap, dtc);
+    if (!off.has_value()) return failure(off.error());
+    auto const byte = rom.read_u8(*off);
+    if (!byte.has_value()) return failure(byte.error());
+    return ((*byte >> dtc.bit) & 1U) != 0U;
+}
+
+Result<DtcBitChange> set_dtc_enabled(Rom &rom, DtcBitmap const &bitmap,
+                                      Dtc const &dtc, bool enabled) {
+    auto const off = dtc_byte_offset(rom, bitmap, dtc);
+    if (!off.has_value()) return failure(off.error());
+    auto const cur = rom.read_u8(*off);
+    if (!cur.has_value()) return failure(cur.error());
+    DtcBitChange ch{};
+    ch.before          = *cur;
+    auto const mask    = static_cast<std::uint8_t>(1U << dtc.bit);
+    ch.after           = enabled
+                             ? static_cast<std::uint8_t>(ch.before | mask)
+                             : static_cast<std::uint8_t>(ch.before & ~mask);
+    if (auto s = rom.write_u8(*off, ch.after); !s.has_value()) {
+        return failure(s.error());
+    }
+    return ch;
+}
+
 Result<std::vector<double>> Definition::read_axis_values(Rom const &rom,
                                                           Axis const &axis) const {
     std::vector<double> out;

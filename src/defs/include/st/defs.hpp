@@ -193,6 +193,24 @@ struct Dtc {
     bool        emissions_relevant{false};
 };
 
+// Read / set the enable bit for `dtc` inside `bitmap` in `rom`. The
+// effective byte address is `bitmap.address + dtc.byte_offset`; OutOfRange
+// if that's past `rom.size()`. `set_dtc_enabled` returns the byte's value
+// before/after the change so callers can show a diff or print an audit
+// line.
+struct DtcBitChange {
+    std::uint8_t before{};
+    std::uint8_t after{};
+};
+
+[[nodiscard]] Result<bool>         is_dtc_enabled(Rom const &rom,
+                                                  DtcBitmap const &bitmap,
+                                                  Dtc const &dtc);
+[[nodiscard]] Result<DtcBitChange> set_dtc_enabled(Rom &rom,
+                                                   DtcBitmap const &bitmap,
+                                                   Dtc const &dtc,
+                                                   bool enabled);
+
 // A complete definition pack: one Pack header, plus 0..N of each child kind.
 class Definition {
   public:

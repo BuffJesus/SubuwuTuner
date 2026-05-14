@@ -678,6 +678,54 @@ bit         = 0
     REQUIRE(std::string{v.error().message()}.find("outside bitmap") != std::string::npos);
 }
 
+TEST_CASE("set_dtc_enabled toggles the correct bit", "[defs][dtc][bit]") {
+    auto rom = st::Rom::from_bytes(std::vector<std::uint8_t>(32, 0xFFU));
+
+    st::DtcBitmap const bm{
+        "bm", "Bitmap", /*address*/ 0, /*length_bytes*/ 32, "big"};
+    st::Dtc const d{
+        "P0401", "EGR Flow Insufficient", "bm",
+        /*byte_offset*/ 4, /*bit*/ 3, /*emissions_relevant*/ true};
+
+    // Starts enabled (all-FF bitmap is the factory default).
+    auto en1 = st::is_dtc_enabled(rom, bm, d);
+    REQUIRE(en1.has_value());
+    REQUIRE(*en1);
+
+    // Disable: bit 3 of byte 4 clears.
+    auto disable = st::set_dtc_enabled(rom, bm, d, false);
+    REQUIRE(disable.has_value());
+    REQUIRE(disable->before == 0xFFU);
+    REQUIRE(disable->after  == 0xF7U);  // 0b1111_0111
+    auto en2 = st::is_dtc_enabled(rom, bm, d);
+    REQUIRE(en2.has_value());
+    REQUIRE_FALSE(*en2);
+
+    // Re-enable: bit 3 sets back.
+    auto enable = st::set_dtc_enabled(rom, bm, d, true);
+    REQUIRE(enable.has_value());
+    REQUIRE(enable->before == 0xF7U);
+    REQUIRE(enable->after  == 0xFFU);
+}
+
+TEST_CASE("set_dtc_enabled rejects out-of-range byte_offset",
+          "[defs][dtc][bit]") {
+    auto rom = st::Rom::from_bytes(std::vector<std::uint8_t>(8, 0xFFU));
+    st::DtcBitmap const bm{"bm", "", 0, 4, "big"};
+    st::Dtc const d{"P0001", "", "bm", /*byte_offset*/ 4, /*bit*/ 0, false};
+    auto r = st::set_dtc_enabled(rom, bm, d, false);
+    REQUIRE_FALSE(r.has_value());
+}
+
+TEST_CASE("set_dtc_enabled rejects address past end of ROM",
+          "[defs][dtc][bit]") {
+    auto rom = st::Rom::from_bytes(std::vector<std::uint8_t>(8, 0xFFU));
+    st::DtcBitmap const bm{"bm", "", /*address*/ 0x100, /*length_bytes*/ 4, "big"};
+    st::Dtc const d{"P0001", "", "bm", 0, 0, false};
+    auto r = st::set_dtc_enabled(rom, bm, d, false);
+    REQUIRE_FALSE(r.has_value());
+}
+
 TEST_CASE("Definition::validate flags dtc_bitmap past rom_size_bytes",
           "[defs][dtc][validate]") {
     auto const def_r = st::Definition::from_toml_string(R"toml(

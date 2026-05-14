@@ -151,6 +151,11 @@ constexpr std::string_view kUsage =
     "    pack-dtcs <DEF> [--bitmap <id>] [--emissions]\n"
     "                            List DTC codes in a pack, with their bitmap\n"
     "                            location and emissions-relevant flag.\n"
+    "    project-disable-dtc --code P0401[,...] <dir>\n"
+    "    project-enable-dtc  --code P0401[,...] <dir>\n"
+    "                            Clear or set the enable bit for one or more\n"
+    "                            DTC codes in the project's working ROM. DTC\n"
+    "                            edits bypass edit::History (no project-undo).\n"
     "    policy [--profile P]    Print the jurisdiction-profile lint matrix\n"
     "                            (emissions on-save/on-flash, engine-safety) for\n"
     "                            the named profile (or all profiles if omitted).\n"
@@ -953,6 +958,126 @@ int cmd_pack_dtcs(int argc, char *argv[]) {
     std::printf("\n%zu DTC(s) shown (of %zu in pack). "
                 "Flag: E=emissions-relevant.\n",
                 matched, def->dtcs().size());
+    return 0;
+}
+
+// `project-disable-dtc` / `project-enable-dtc` — flip the enable bit for one
+// or more DTC codes inside the project's working ROM. DTC edits write
+// directly to the working ROM and DO NOT go through edit::History; they
+// won't be rolled back by project-undo. The flash-time policy gate still
+// applies on emissions-flagged DTCs when the user runs project-flash.
+int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
+    char const *cmd_name = enable ? "project-enable-dtc" : "project-disable-dtc";
+    std::optional<std::string>           codes_arg;
+    std::optional<std::filesystem::path> proj_path;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const             require = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "%s: %s requires a value\n", cmd_name, name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--code") {
+            if (auto const *v = require("--code"); v) codes_arg = std::string{v};
+            else return 2;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "%s: unknown option: %s\n", cmd_name, argv[i]);
+            return 2;
+        } else if (!proj_path.has_value()) {
+            proj_path = std::filesystem::path{a};
+        } else {
+            std::fprintf(stderr, "%s: extra argument: %s\n", cmd_name, argv[i]);
+            return 2;
+        }
+    }
+
+    if (!codes_arg.has_value() || !proj_path.has_value()) {
+        std::fprintf(stderr, "%s: missing required arguments\n", cmd_name);
+        std::fprintf(stderr,
+                     "Usage: subuwutuner-cli %s --code P0401[,P0420,...] <dir>\n",
+                     cmd_name);
+        return 2;
+    }
+
+    // Split the comma-separated code list.
+    std::vector<std::string> codes;
+    {
+        std::string_view rest = *codes_arg;
+        while (!rest.empty()) {
+            auto const comma = rest.find(',');
+            auto const token = rest.substr(0, comma);
+            if (!token.empty()) codes.emplace_back(token);
+            if (comma == std::string_view::npos) break;
+            rest = rest.substr(comma + 1);
+        }
+    }
+    if (codes.empty()) {
+        std::fprintf(stderr, "%s: --code list is empty\n", cmd_name);
+        return 2;
+    }
+
+    auto proj = st::Project::open(*proj_path);
+    if (!proj.has_value()) {
+        std::fprintf(stderr, "%s: %s\n", cmd_name, proj.error().to_string().c_str());
+        return 1;
+    }
+
+    auto const &def = proj->definition();
+    auto       &rom = proj->working_rom();
+
+    bool        any_changed     = false;
+    std::size_t emissions_count = 0;
+    for (auto const &code : codes) {
+        auto const *dtc = def.find_dtc(code);
+        if (dtc == nullptr) {
+            std::fprintf(stderr, "%s: code '%s' not found in pack\n",
+                         cmd_name, code.c_str());
+            return 1;
+        }
+        auto const *bm = def.find_dtc_bitmap(dtc->bitmap_id);
+        if (bm == nullptr) {
+            std::fprintf(stderr, "%s: code '%s' references unknown bitmap '%s'\n",
+                         cmd_name, code.c_str(), dtc->bitmap_id.c_str());
+            return 1;
+        }
+        auto result = st::set_dtc_enabled(rom, *bm, *dtc, enable);
+        if (!result.has_value()) {
+            std::fprintf(stderr, "%s: %s\n", cmd_name,
+                         result.error().to_string().c_str());
+            return 1;
+        }
+        bool const byte_changed = result->before != result->after;
+        if (byte_changed) any_changed = true;
+        if (dtc->emissions_relevant) ++emissions_count;
+        std::printf("  %s %-6s %s  (byte 0x%02X -> 0x%02X)%s\n",
+                    enable ? "ENABLE " : "DISABLE",
+                    dtc->code.c_str(),
+                    byte_changed ? "changed" : "no-op  ",
+                    result->before, result->after,
+                    dtc->emissions_relevant ? "  [emissions]" : "");
+    }
+
+    if (any_changed) {
+        if (auto s = proj->save_working_rom(); !s.has_value()) {
+            std::fprintf(stderr, "%s: save: %s\n", cmd_name,
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        std::printf("\nWorking ROM saved. New CRC32: 0x%08X\n", rom.crc32());
+    } else {
+        std::printf("\nNo bits changed; working ROM not rewritten.\n");
+    }
+    if (emissions_count > 0) {
+        std::printf("Note: %zu of the affected codes are emissions-flagged. "
+                    "The flash-time policy gate will surface this when you "
+                    "run project-flash under a non-motorsport profile.\n",
+                    emissions_count);
+    }
+    std::printf("Note: DTC edits bypass edit::History and will NOT be rolled "
+                "back by project-undo.\n");
     return 0;
 }
 
@@ -6276,6 +6401,12 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "pack-dtcs") {
         return cmd_pack_dtcs(argc - 2, argv + 2);
+    }
+    if (cmd == "project-disable-dtc") {
+        return cmd_project_dtc_toggle(argc - 2, argv + 2, /*enable*/ false);
+    }
+    if (cmd == "project-enable-dtc") {
+        return cmd_project_dtc_toggle(argc - 2, argv + 2, /*enable*/ true);
     }
     if (cmd == "policy") {
         return cmd_policy(argc - 2, argv + 2);
