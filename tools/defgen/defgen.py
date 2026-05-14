@@ -75,10 +75,18 @@ def map_data_type(storagetype: str | None, endian: str | None) -> str:
 #   (x-100)*0.5     -> factor=0.5, offset=-50
 # Returns (factor, offset) for the equivalent `raw * factor + offset`, or None
 # if we can't parse it as linear.
+_NUM = r"[0-9]*\.[0-9]+|[0-9]+"
+# Linear toexpr / expression forms we accept. Captures roughly:
+#   1) (x ± B) * K           -> factor=K, offset=±B*K
+#   2) (x * K) ± B  or  x * K ± B   -> factor=K, offset=±B
+#   3) (-x * K) ± B          -> factor=-K, offset=±B   (RomRaider writes inversions this way)
+#   4) x                     -> identity
+# Both `x*K` and `(x*K)` are accepted; an optional `-` before x lets the
+# inversion case fall through the same machinery.
 _LINEAR_RE = re.compile(
-    r"""^\s*
-        (?:\(\s*x\s*([-+])\s*([0-9]+(?:\.[0-9]+)?)\s*\)\s*\*\s*([0-9]+(?:\.[0-9]+)?)
-        |   x\s*\*\s*([-+]?[0-9]+(?:\.[0-9]+)?)\s*(?:([-+])\s*([0-9]+(?:\.[0-9]+)?))?
+    rf"""^\s*
+        (?:\(\s*x\s*([-+])\s*({_NUM})\s*\)\s*\*\s*({_NUM})
+        |   \(?\s*(-?)x\s*\*\s*([-+]?(?:{_NUM}))\s*\)?\s*(?:([-+])\s*({_NUM}))?
         |   x
         )\s*$""",
     re.VERBOSE,
@@ -92,7 +100,8 @@ def parse_toexpr(expr: str) -> tuple[float, float] | None:
     m = _LINEAR_RE.match(expr)
     if m is None:
         return None
-    paren_sign, paren_offset, paren_factor, mul_factor, post_sign, post_offset = m.groups()
+    (paren_sign, paren_offset, paren_factor,
+     x_neg, mul_factor, post_sign, post_offset) = m.groups()
     if paren_factor is not None:
         # (x ± off) * factor   ==   x*factor ± off*factor
         f = float(paren_factor)
@@ -102,9 +111,11 @@ def parse_toexpr(expr: str) -> tuple[float, float] | None:
         return (f, o)
     if mul_factor is not None:
         f = float(mul_factor)
+        if x_neg == "-":
+            f = -f
         o = 0.0
-        if post_factor := post_offset:
-            o = float(post_factor)
+        if post_offset is not None:
+            o = float(post_offset)
             if post_sign == "-":
                 o = -o
         return (f, o)
@@ -343,6 +354,22 @@ def _parse_int(s: str | None) -> int:
     return int(s)
 
 
+def _parse_hex_address(s: str | None) -> int:
+    """Parse a hex address as written in RomRaider XML.
+
+    RomRaider uses two conventions: `address="0x1234"` (attribute form, with
+    0x prefix) and `<internalidaddress>CC176</internalidaddress>` (element
+    form, bare hex). Both are hex; the bare form is the source of the
+    "CC176" -> ValueError bug when blindly fed through `int()`.
+    """
+    if s is None or s == "":
+        return 0
+    s = s.strip()
+    if s.lower().startswith("0x"):
+        return int(s, 16)
+    return int(s, 16)
+
+
 def _parse_filesize(s: str | None) -> int:
     """Accepts '1.5MB', '1572864', '1MB', etc."""
     if s is None or s == "":
@@ -446,25 +473,85 @@ def _flatten_rom_inheritance(rom: ET.Element, by_xmlid: dict[str, ET.Element],
             else:
                 ET.SubElement(merged_romid, el.tag).text = el.text
 
-    # Indexes from parent that the child can override by name.
+    # Inheriting <rom>s in RomRaider XML write a sparse <table> that ONLY
+    # carries the attributes that differ from the base (typically just
+    # `name` + `storageaddress`). The base table holds type / storagetype /
+    # endian / sizex / sizey / inline <scaling> / nested axis <table>s. So
+    # for each child table that names a base table, we overlay attrs +
+    # children rather than replacing — the previous behaviour dropped
+    # storageaddress on the floor because the child's bare <table> had no
+    # type / storagetype to fall back on.
     parent_tables   = {(t.get("name") or ""): t for t in parent.findall("table")}
     parent_scalings = {(s.get("name") or ""): s for s in parent.findall("scaling")}
 
-    child_table_names   = {(t.get("name") or "") for t in rom.findall("table")}
-    child_scaling_names = {(s.get("name") or "") for s in rom.findall("scaling")}
+    child_table_by_name   = {(t.get("name") or ""): t for t in rom.findall("table")}
+    child_scaling_by_name = {(s.get("name") or ""): s for s in rom.findall("scaling")}
 
-    # Emit parent's items that the child didn't override.
-    for name, el in parent_tables.items():
-        if name not in child_table_names:
-            merged.append(el)
-    for name, el in parent_scalings.items():
-        if name not in child_scaling_names:
-            merged.append(el)
-    # Then child's own items.
-    for t in rom.findall("table"):
-        merged.append(t)
-    for s in rom.findall("scaling"):
-        merged.append(s)
+    # Tables: parent's first (with child overlays), then any child-only ones.
+    for name, base_el in parent_tables.items():
+        if name in child_table_by_name:
+            merged.append(_overlay_table(base_el, child_table_by_name[name]))
+        else:
+            merged.append(base_el)
+    for name, child_el in child_table_by_name.items():
+        if name not in parent_tables:
+            merged.append(child_el)
+
+    # Scalings: same overlay pattern.
+    for name, base_el in parent_scalings.items():
+        if name in child_scaling_by_name:
+            merged.append(_overlay_scaling(base_el, child_scaling_by_name[name]))
+        else:
+            merged.append(base_el)
+    for name, child_el in child_scaling_by_name.items():
+        if name not in parent_scalings:
+            merged.append(child_el)
+    return merged
+
+
+def _overlay_table(base: ET.Element, child: ET.Element) -> ET.Element:
+    """Overlay child's attrs + children onto base, returning a fresh element.
+
+    Child attributes override base. For children, axis sub-tables are matched
+    by `type` (X Axis / Y Axis / Static X Axis / Static Y Axis); other child
+    elements (scaling, description) are matched by tag.
+    """
+    merged = ET.Element(base.tag, base.attrib)
+    for k, v in child.attrib.items():
+        merged.set(k, v)
+
+    def key(c: ET.Element) -> tuple:
+        if c.tag == "table":
+            return ("table", (c.get("type") or "").strip().lower())
+        return (c.tag,)
+
+    base_children  = {key(c): c for c in base}
+    child_children = {key(c): c for c in child}
+    for k, base_c in base_children.items():
+        if k in child_children:
+            child_c = child_children[k]
+            if base_c.tag == "table":
+                merged.append(_overlay_table(base_c, child_c))
+            else:
+                # scaling / description / anything else: child wins wholesale.
+                merged.append(child_c)
+        else:
+            merged.append(base_c)
+    for k, child_c in child_children.items():
+        if k not in base_children:
+            merged.append(child_c)
+    return merged
+
+
+def _overlay_scaling(base: ET.Element, child: ET.Element) -> ET.Element:
+    """Overlay child's attrs onto base. Scalings rarely carry children."""
+    merged = ET.Element(base.tag, base.attrib)
+    for k, v in child.attrib.items():
+        merged.set(k, v)
+    for c in base:
+        merged.append(c)
+    for c in child:
+        merged.append(c)
     return merged
 
 
@@ -552,7 +639,7 @@ def _rom_to_pack(rom: ET.Element) -> Pack | None:
 
     # Identification — DO NOT strip cid_str: real ECUs pad with spaces and the
     # padding is part of the byte sequence we have to match.
-    cid_addr = _parse_int(romid.findtext("internalidaddress"))
+    cid_addr = _parse_hex_address(romid.findtext("internalidaddress"))
     cid_str  = romid.findtext("internalidstring") or ""
     if cid_str.strip():
         pack.identifications.append(IdentificationRecord(
@@ -585,12 +672,22 @@ def _rom_to_pack(rom: ET.Element) -> Pack | None:
 def _scaling_from_element(el: ET.Element,
                           pack: "Pack | None" = None) -> ScalingRecord | None:
     name = (el.get("name") or "").strip()
-    if not name:
-        return None
     storagetype = el.get("storagetype")
     endian = el.get("endian")
-    toexpr = el.get("toexpr") or "x"
+    # RomRaider's canonical attribute is `expression`; some fixtures use
+    # `toexpr`. Accept either, expression winning.
+    toexpr = (el.get("expression") or el.get("toexpr") or "x").strip()
     parsed = parse_toexpr(toexpr)
+    # Inline scalings inside <table> typically have no name= attribute; only
+    # `units` + `expression`. Synthesise a stable id from those so identical
+    # inline scalings dedup across tables that share them, and so the table
+    # can reference the resulting record by id.
+    if not name:
+        units = (el.get("units") or "").strip()
+        if units or toexpr != "x":
+            name = f"{units} {toexpr}".strip() or "identity"
+        else:
+            return None
     slug = _slugify(name)
     if parsed is None:
         # Non-linear toexpr; emit a linear identity and let the user replace
@@ -636,12 +733,25 @@ def _format_to_precision(fmt: str | None) -> int:
     return len(m.group(1)) if m else 0
 
 
+def _table_address(t_el: ET.Element) -> int:
+    """RomRaider's canonical attribute is `storageaddress`; some synthetic
+    fixtures use `address`. Accept both, with `storageaddress` winning."""
+    return _parse_int(t_el.get("storageaddress") or t_el.get("address"))
+
+
 def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> None:
     name = (t_el.get("name") or "").strip()
     if not name:
         return
+    # A table without a storageaddress (after inheritance merge) is a base
+    # entry that this specific ROM doesn't expose. Emitting it would put a
+    # phantom record at offset 0 in the pack, where the C++ side would read
+    # garbage. RomRaider's effective semantic is the same: no storageaddress
+    # → not applicable to this CID.
+    if t_el.get("storageaddress") is None and t_el.get("address") is None:
+        return
     ttype = (t_el.get("type") or "").strip()
-    address = _parse_int(t_el.get("address"))
+    address = _table_address(t_el)
 
     # Dimensions
     if ttype.endswith("3D") or ttype == "3D":
@@ -688,6 +798,11 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
         elif child_type in ("y axis", "static y axis"):
             axis_y_id = axis.id
 
+    # RomRaider's 2D (= our 1D) tables put the single axis on `Y Axis`. Our
+    # schema needs it under `axis_x` for dimensions=1, so demote.
+    if dims == 1 and not axis_x_id and axis_y_id:
+        axis_x_id, axis_y_id = axis_y_id, ""
+
     table = TableRecord(
         id=_slugify(name),
         name=name if _is_factual_name(name) else "",
@@ -706,6 +821,14 @@ def _axis_from_element(el: ET.Element) -> AxisRecord | None:
     name = (el.get("name") or "").strip()
     if not name:
         return None
+    # See _extract_table — drop dynamic axes that this ROM doesn't override.
+    # Static axes carry their values literally via <data> children, so they
+    # legitimately have no storageaddress.
+    ttype = (el.get("type") or "").strip().lower()
+    is_static = ttype.startswith("static")
+    if not is_static \
+            and el.get("storageaddress") is None and el.get("address") is None:
+        return None
     elements = el.get("elements")
     inline_scaling = el.find("scaling")
     data_type = "uint16_be"
@@ -721,7 +844,7 @@ def _axis_from_element(el: ET.Element) -> AxisRecord | None:
         name=name if _is_factual_name(name) else "",
         unit="",  # we don't carry the axis's unit text from XML
         type="static",
-        address=_parse_int(el.get("address")),
+        address=_table_address(el),
         length=int(elements) if elements and elements.isdigit() else 0,
         data_type=data_type,
         scaling=scaling_id,
