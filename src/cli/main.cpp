@@ -87,6 +87,8 @@ constexpr std::string_view kUsage =
     "                            Set the project's jurisdiction profile (see\n"
     "                            docs/06-legal-ethics.md). Valid: motorsport-only,\n"
     "                            alberta-ca, eu-roadworthy, california-us.\n"
+    "    project-history <dir>   List the project's edit history with cursor\n"
+    "                            position and per-edit emissions/safety flags.\n"
     "    project-flash <dir> --trace <FILE.uds>\n"
     "                  [--journal <FILE.toml>] [--manifest <FILE.toml>]\n"
     "                  [--confirm] [--reason \"…\"] [--dry-run]\n"
@@ -1103,6 +1105,88 @@ int cmd_project_set_profile(int argc, char *argv[]) {
     }
     std::printf("Profile set to: %s\n",
                 std::string{st::policy::profile_name(*parsed)}.c_str());
+    return 0;
+}
+
+int cmd_project_history(int argc, char *argv[]) {
+    if (argc < 1) {
+        std::fputs("project-history: missing project directory\n"
+                   "Usage: subuwutuner-cli project-history <dir>\n",
+                   stderr);
+        return 2;
+    }
+    std::filesystem::path const dir{argv[0]};
+
+    auto const proj = st::Project::open(dir);
+    if (!proj.has_value()) {
+        std::fprintf(stderr, "project-history: %s\n",
+                     proj.error().to_string().c_str());
+        return 1;
+    }
+    auto const &history = proj->history();
+    auto const &records = history.records();
+    auto const  cursor  = history.cursor();
+
+    std::printf("Project:  %s\n", dir.string().c_str());
+    std::printf("Profile:  %s\n",
+                std::string{st::policy::profile_name(
+                    proj->policy_profile())}.c_str());
+    std::printf("History:  %zu edit(s), cursor at %zu",
+                records.size(), cursor);
+    if (cursor < records.size()) {
+        std::printf("  (%zu redo step(s) available)",
+                    records.size() - cursor);
+    }
+    std::printf("\n\n");
+
+    if (records.empty()) {
+        std::printf("(no edits)\n");
+        return 0;
+    }
+
+    std::printf("%-4s %-30s %-22s %-25s %s\n",
+                "#", "table_id", "rect", "description", "flags");
+    std::printf("%-4s %-30s %-22s %-25s %s\n",
+                "----", "------------------------------",
+                "----------------------",
+                "-------------------------", "-----");
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        auto const &e   = records[i];
+        auto const  rec = e.before.rect;
+        char        rect_buf[32]{};
+        std::snprintf(rect_buf, sizeof(rect_buf), "[%zu:%zu, %zu:%zu]",
+                      rec.r_start, rec.r_end, rec.c_start, rec.c_end);
+
+        // Marker: '>' for the entry the cursor sits AT (next to undo),
+        // '·' for entries already undone past, ' ' for active entries.
+        char marker = ' ';
+        if (i + 1 == cursor)      marker = '>';   // most-recent committed
+        else if (i >= cursor)     marker = '.';   // redo-pending
+
+        // Pull emissions/safety flags from the table being edited so the
+        // history doubles as an audit log of which edits would trip the
+        // policy gate at flash time.
+        auto const *table = proj->definition().find_table(e.table_id);
+        std::string flags;
+        if (table != nullptr) {
+            if (table->emissions_relevant)     flags += "E";
+            if (table->engine_safety_critical) flags += "S";
+        }
+        if (flags.empty()) flags = "-";
+
+        char idx_buf[8]{};
+        std::snprintf(idx_buf, sizeof(idx_buf), "%c%zu", marker, i);
+
+        std::printf("%-4s %-30s %-22s %-25s %s\n",
+                    idx_buf,
+                    e.table_id.c_str(),
+                    rect_buf,
+                    e.description.empty() ? "(no description)"
+                                          : e.description.c_str(),
+                    flags.c_str());
+    }
+    std::printf("\nFlags: E=emissions-relevant, S=engine-safety-critical, "
+                "-=neither.\n");
     return 0;
 }
 
@@ -4500,6 +4584,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-set-profile") {
         return cmd_project_set_profile(argc - 2, argv + 2);
+    }
+    if (cmd == "project-history") {
+        return cmd_project_history(argc - 2, argv + 2);
     }
     if (cmd == "project-flash") {
         return cmd_project_flash(argc - 2, argv + 2);

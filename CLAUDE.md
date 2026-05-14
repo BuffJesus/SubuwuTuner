@@ -35,7 +35,7 @@ SubuwuTuner/
 │   ├── autotune/                          (st::autotune — MAF auto-tune + knock-based ignition pull per docs/12: per-cell trimmed-mean error → clamped delta; 2D table monotonic-subtract on sustained knock)
 │   ├── ui/                                (subuwutuner-gui — Dear ImGui front-end on top of the domain libs)
 │   ├── policy/                            (st::policy — jurisdiction-profile + Emissions/EngineSafety lint matrix from docs/06)
-│   └── cli/                               (subuwutuner-cli — rom-info, rom-pull, dump-axis[--csv], dump-table[--csv], rom-diff, table-edit, project-{new,info,edit,undo,redo}, pack-info, table-list, policy, project-set-profile, project-flash, log, can-{replay,diff,discover,export-dbc,decode}, flash-{plan-info,delta,resume,apply,trace})
+│   └── cli/                               (subuwutuner-cli — rom-info, rom-pull, dump-axis[--csv], dump-table[--csv], rom-diff, table-edit, project-{new,info,edit,undo,redo}, pack-info, table-list, policy, project-set-profile, project-history, project-flash, log, can-{replay,diff,discover,export-dbc,decode}, flash-{plan-info,delta,resume,apply,trace})
 ├── tools/defgen/                          (Python: RomRaider XML -> our TOML; clean-room facts-only; handles <base> inheritance; `loggergen.py` for SSM logger.xml -> pid/switch TOML + per-CID ecuparam fragments)
 ├── definitions/                           (358 defgen-generated ECU packs: 26 current-WRX from fact-only XML, 332 older Subarus from Merp; `pids.toml` (91 SSM PIDs + 68 switches); `ecuparams/<rom_id>.toml` (331 per-CID extended-PID fragments))
 ├── fixtures/
