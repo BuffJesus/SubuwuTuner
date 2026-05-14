@@ -41,6 +41,11 @@
 #include <utility>
 #include <vector>
 
+// Defined far below alongside the other autotune CLI helpers (which all
+// sit at file scope, outside the anonymous namespace). Forward-declared
+// here so callers inside the anonymous namespace below can find it.
+std::optional<double> parse_fraction_or_percent(std::string_view raw);
+
 namespace {
 
 constexpr std::string_view kUsage =
@@ -89,6 +94,13 @@ constexpr std::string_view kUsage =
     "                            alberta-ca, eu-roadworthy, california-us.\n"
     "    project-history <dir>   List the project's edit history with cursor\n"
     "                            position and per-edit emissions/safety flags.\n"
+    "    project-autotune-maf <dir> --table <id> --log <CSV>\n"
+    "                  [--gain N] [--max-delta P] [--min-samples-per-cell N]\n"
+    "                  [--require-open-loop] [--no-smooth] [--strict-lint] [--apply]\n"
+    "                            Run the docs/12 MAF auto-tune kernel against\n"
+    "                            the project's MAF scaling table and a CSV\n"
+    "                            datalog. Prints per-cell proposals; with\n"
+    "                            --apply, commits them as a single project edit.\n"
     "    project-flash <dir> [--trace <FILE.uds>]\n"
     "                  [--journal <FILE.toml>] [--manifest <FILE.toml>]\n"
     "                  [--confirm] [--reason \"…\"] [--dry-run]\n"
@@ -1190,6 +1202,284 @@ int cmd_project_history(int argc, char *argv[]) {
     }
     std::printf("\nFlags: E=emissions-relevant, S=engine-safety-critical, "
                 "-=neither.\n");
+    return 0;
+}
+
+int cmd_project_autotune_maf(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> project_dir;
+    std::optional<std::string>           table_id;
+    std::optional<std::filesystem::path> log_path;
+    std::optional<double>                gain;
+    std::optional<double>                max_delta_pct;
+    std::optional<std::size_t>           min_samples;
+    bool                                 require_open_loop = false;
+    bool                                 skip_smooth       = false;
+    bool                                 strict_lint       = false;
+    bool                                 apply             = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "project-autotune-maf: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--table") {
+            if (auto const *v = require_arg("--table"); v) table_id = std::string{v};
+            else return 2;
+        } else if (a == "--log") {
+            if (auto const *v = require_arg("--log"); v) log_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--gain") {
+            auto const *v = require_arg("--gain"); if (!v) return 2;
+            auto const parsed = parse_fraction_or_percent(v);
+            if (!parsed.has_value()) {
+                std::fprintf(stderr,
+                    "project-autotune-maf: --gain must be a number (got '%s')\n", v);
+                return 2;
+            }
+            gain = *parsed;
+        } else if (a == "--max-delta" || a == "--max-delta-pct") {
+            auto const *v = require_arg("--max-delta"); if (!v) return 2;
+            auto const parsed = parse_fraction_or_percent(v);
+            if (!parsed.has_value()) {
+                std::fprintf(stderr,
+                    "project-autotune-maf: --max-delta must be a number (got '%s')\n", v);
+                return 2;
+            }
+            max_delta_pct = *parsed;
+        } else if (a == "--min-samples-per-cell") {
+            auto const *v = require_arg("--min-samples-per-cell"); if (!v) return 2;
+            std::size_t val = 0;
+            auto const  res = std::from_chars(v, v + std::strlen(v), val);
+            if (res.ec != std::errc{}) {
+                std::fprintf(stderr,
+                    "project-autotune-maf: --min-samples-per-cell must be a "
+                    "non-negative integer (got '%s')\n", v);
+                return 2;
+            }
+            min_samples = val;
+        } else if (a == "--require-open-loop") {
+            require_open_loop = true;
+        } else if (a == "--no-smooth") {
+            skip_smooth = true;
+        } else if (a == "--strict-lint") {
+            strict_lint = true;
+        } else if (a == "--apply") {
+            apply = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr,
+                "project-autotune-maf: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!project_dir.has_value()) {
+            project_dir = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr,
+                "project-autotune-maf: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!project_dir.has_value() || !table_id.has_value() || !log_path.has_value()) {
+        std::fputs("project-autotune-maf: missing required arguments\n"
+                   "Usage: subuwutuner-cli project-autotune-maf <dir>\n"
+                   "       --table <id> --log <CSV>\n"
+                   "       [--gain <num>] [--max-delta <pct>]\n"
+                   "       [--min-samples-per-cell <N>] [--require-open-loop]\n"
+                   "       [--no-smooth] [--strict-lint] [--apply]\n"
+                   "  Reads the project's MAF scaling table (must be 1D),\n"
+                   "  runs the docs/12 auto-tune kernel against the supplied\n"
+                   "  CSV datalog, prints per-cell proposals, and optionally\n"
+                   "  commits them as a project edit when --apply is given.\n",
+                   stderr);
+        return 2;
+    }
+
+    auto proj = st::Project::open(*project_dir);
+    if (!proj.has_value()) {
+        std::fprintf(stderr, "project-autotune-maf: %s\n",
+                     proj.error().to_string().c_str());
+        return 1;
+    }
+    auto const *table = proj->definition().find_table(*table_id);
+    if (table == nullptr) {
+        std::fprintf(stderr,
+            "project-autotune-maf: table '%s' not found in pack\n",
+            table_id->c_str());
+        return 1;
+    }
+    if (table->dimensions != 1) {
+        std::fprintf(stderr,
+            "project-autotune-maf: table '%s' has dimensions=%d; MAF scaling "
+            "must be 1D\n", table->id.c_str(), table->dimensions);
+        return 1;
+    }
+    if (!table->axis_x.has_value() || table->axis_x->empty()) {
+        std::fprintf(stderr,
+            "project-autotune-maf: table '%s' has no axis_x\n",
+            table->id.c_str());
+        return 1;
+    }
+    auto const *axis = proj->definition().find_axis(*table->axis_x);
+    if (axis == nullptr) {
+        std::fprintf(stderr,
+            "project-autotune-maf: axis '%s' (referenced by '%s') not found\n",
+            table->axis_x->c_str(), table->id.c_str());
+        return 1;
+    }
+
+    auto td = proj->definition().read_table_values(proj->working_rom(), *table);
+    if (!td.has_value()) {
+        std::fprintf(stderr, "project-autotune-maf: %s\n",
+                     td.error().to_string().c_str());
+        return 1;
+    }
+    if (td->values.empty() || td->values[0].empty()) {
+        std::fprintf(stderr,
+            "project-autotune-maf: table '%s' is empty\n", table->id.c_str());
+        return 1;
+    }
+
+    // Axis values come from `td->axis_x` (already scaled). Current cell
+    // values are `td->values[0][i]` for the 1D row.
+    auto const                 &axis_values = td->axis_x;
+    std::vector<double> const   current(td->values[0].begin(), td->values[0].end());
+    if (axis_values.size() != current.size()) {
+        std::fprintf(stderr,
+            "project-autotune-maf: axis length %zu doesn't match current "
+            "row length %zu\n", axis_values.size(), current.size());
+        return 1;
+    }
+
+    // Read log file.
+    std::ifstream log_in{*log_path, std::ios::binary};
+    if (!log_in) {
+        std::fprintf(stderr, "project-autotune-maf: cannot open log: %s\n",
+                     log_path->string().c_str());
+        return 1;
+    }
+    std::ostringstream log_ss;
+    log_ss << log_in.rdbuf();
+    auto samples = st::autotune::read_maf_samples_csv(log_ss.str());
+    if (!samples.has_value()) {
+        std::fprintf(stderr, "project-autotune-maf: %s\n",
+                     samples.error().to_string().c_str());
+        return 1;
+    }
+
+    st::autotune::MafTuneOptions opts;
+    if (gain.has_value())          opts.gain                 = *gain;
+    if (max_delta_pct.has_value()) opts.max_delta_pct        = *max_delta_pct;
+    if (min_samples.has_value())   opts.min_samples_per_cell = *min_samples;
+    opts.require_open_loop         = require_open_loop;
+
+    auto result = st::autotune::tune_maf(
+        axis_values, current, *samples, opts);
+    if (!result.has_value()) {
+        std::fprintf(stderr, "project-autotune-maf: %s\n",
+                     result.error().to_string().c_str());
+        return 1;
+    }
+    if (!skip_smooth) {
+        *result = st::autotune::smooth_proposals(*result, opts.max_delta_pct);
+    }
+    auto const lints = st::autotune::lint_maf_proposal(axis_values, current, *result);
+
+    // Summary.
+    std::printf("Table:               %s\n", table->id.c_str());
+    std::printf("Profile:             %s\n",
+                std::string{st::policy::profile_name(proj->policy_profile())}.c_str());
+    std::printf("Samples (raw):       %zu\n", result->total_samples);
+    std::printf("Samples after gates: %zu\n", result->samples_after_gates);
+    std::printf("\n%-4s %-9s %-9s %-9s %-8s %-7s\n",
+                "#", "axis", "current", "proposed", "samples", "conf");
+    std::size_t modified = 0;
+    std::size_t underpowered = 0;
+    for (auto const &c : result->cells) {
+        char marker = ' ';
+        if (c.confidence == 0.0) {
+            ++underpowered;
+            marker = '.';
+        } else if (c.proposed_value != c.current_value) {
+            ++modified;
+            marker = '>';
+        }
+        std::printf("%c%-3zu %-9.4f %-9.4f %-9.4f %-8zu %.2f\n",
+                    marker, c.cell_index,
+                    axis_values[c.cell_index],
+                    c.current_value, c.proposed_value,
+                    c.samples_used, c.confidence);
+    }
+    std::printf("\nmodified: %zu / %zu cells; underpowered (samples < %zu): %zu\n",
+                modified, result->cells.size(),
+                opts.min_samples_per_cell, underpowered);
+    if (!lints.empty()) {
+        std::printf("\nLint findings (%zu):\n", lints.size());
+        for (auto const &v : lints) {
+            std::printf("  - cells %zu..%zu: %s (%s)\n",
+                        v.cell_index, v.cell_index + 1,
+                        v.message.c_str(),
+                        st::autotune::lint_kind_name(v.kind));
+        }
+        if (strict_lint) {
+            std::fprintf(stderr, "project-autotune-maf: --strict-lint set; "
+                         "refusing to apply with %zu lint violation(s)\n",
+                         lints.size());
+            return 3;
+        }
+    }
+
+    if (!apply) {
+        std::printf("\n(Dry-run — pass --apply to commit the proposals as a "
+                    "project edit.)\n");
+        return 0;
+    }
+
+    // ---- Apply ----------------------------------------------------------
+    // Snapshot the row before mutation, set each cell to its proposed
+    // value, snapshot after, write back to the working ROM, record an
+    // edit in History, save.
+
+    st::edit::Rect const rect{0, 0, 0, result->cells.size() - 1};
+    auto before = st::edit::snapshot(*td, rect);
+    if (!before.has_value()) {
+        std::fprintf(stderr, "project-autotune-maf: %s\n",
+                     before.error().to_string().c_str());
+        return 1;
+    }
+    for (auto const &c : result->cells) {
+        td->values[0][c.cell_index] = c.proposed_value;
+    }
+    auto after = st::edit::snapshot(*td, rect);
+    if (!after.has_value()) {
+        std::fprintf(stderr, "project-autotune-maf: %s\n",
+                     after.error().to_string().c_str());
+        return 1;
+    }
+    if (auto wb = proj->definition().write_table_values(
+            proj->working_rom(), *table, *td);
+        !wb.has_value()) {
+        std::fprintf(stderr, "project-autotune-maf: writeback: %s\n",
+                     wb.error().to_string().c_str());
+        return 1;
+    }
+    {
+        char descbuf[64];
+        std::snprintf(descbuf, sizeof descbuf,
+                      "autotune maf (%zu cell%s)",
+                      modified, modified == 1 ? "" : "s");
+        proj->history().record({table->id, std::move(*before),
+                                std::move(*after), std::string{descbuf}});
+    }
+    if (auto s = proj->save_working_rom(); !s.has_value()) {
+        std::fprintf(stderr, "project-autotune-maf: save: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+    std::printf("\nApplied. New CRC32: 0x%08X\n",
+                proj->working_rom().crc32());
     return 0;
 }
 
@@ -4705,6 +4995,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-flash") {
         return cmd_project_flash(argc - 2, argv + 2);
+    }
+    if (cmd == "project-autotune-maf") {
+        return cmd_project_autotune_maf(argc - 2, argv + 2);
     }
     if (cmd == "pack-info") {
         return cmd_pack_info(argc - 2, argv + 2);
