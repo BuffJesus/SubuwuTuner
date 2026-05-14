@@ -101,6 +101,16 @@ constexpr std::string_view kUsage =
     "                            the project's MAF scaling table and a CSV\n"
     "                            datalog. Prints per-cell proposals; with\n"
     "                            --apply, commits them as a single project edit.\n"
+    "    project-autotune-knock-pull <dir> --table <id> --log <CSV>\n"
+    "                  [--trigger-degrees D] [--pull-step-degrees D]\n"
+    "                  [--min-samples-per-cell N] [--strict-lint] [--apply]\n"
+    "                  [--enable-add-back [--add-back-step-degrees D]\n"
+    "                                     [--add-back-min-clean-samples N]\n"
+    "                                     [--add-back-clean-threshold-degrees D]]\n"
+    "                            Run the docs/12 knock-pull algorithm against\n"
+    "                            the project's 2D timing table (load × RPM) and\n"
+    "                            a CSV datalog. Prints a 2D delta-ledger; with\n"
+    "                            --apply, commits as a single project edit.\n"
     "    project-flash <dir> [--trace <FILE.uds>]\n"
     "                  [--journal <FILE.toml>] [--manifest <FILE.toml>]\n"
     "                  [--confirm] [--reason \"…\"] [--dry-run]\n"
@@ -1475,6 +1485,333 @@ int cmd_project_autotune_maf(int argc, char *argv[]) {
     }
     if (auto s = proj->save_working_rom(); !s.has_value()) {
         std::fprintf(stderr, "project-autotune-maf: save: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+    std::printf("\nApplied. New CRC32: 0x%08X\n",
+                proj->working_rom().crc32());
+    return 0;
+}
+
+int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> project_dir;
+    std::optional<std::string>           table_id;
+    std::optional<std::filesystem::path> log_path;
+    std::optional<double>                trigger_degrees;
+    std::optional<double>                pull_step_degrees;
+    std::optional<std::size_t>           min_samples;
+    bool                                 strict_lint     = false;
+    bool                                 enable_add_back = false;
+    std::optional<double>                add_step_degrees;
+    std::optional<std::size_t>           add_back_min_clean;
+    std::optional<double>                clean_threshold;
+    bool                                 apply           = false;
+    // Which of the pack's two axes is the RPM axis. Default 'y' matches
+    // the common Subaru convention (axis_x = load, axis_y = engine speed).
+    char                                 rpm_axis_kind   = 'y';
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                    "project-autotune-knock-pull: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        auto const parse_double = [&](char const *v, double &out, char const *label) -> bool {
+            char *end = nullptr;
+            double const d = std::strtod(v, &end);
+            if (end == v || *end != '\0') {
+                std::fprintf(stderr,
+                    "project-autotune-knock-pull: %s must be numeric (got '%s')\n",
+                    label, v);
+                return false;
+            }
+            out = d;
+            return true;
+        };
+        if (a == "--table") {
+            if (auto const *v = require_arg("--table"); v) table_id = std::string{v};
+            else return 2;
+        } else if (a == "--log") {
+            if (auto const *v = require_arg("--log"); v) log_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--trigger-degrees") {
+            auto const *v = require_arg("--trigger-degrees"); if (!v) return 2;
+            double d = 0.0; if (!parse_double(v, d, "--trigger-degrees")) return 2;
+            trigger_degrees = d;
+        } else if (a == "--pull-step-degrees") {
+            auto const *v = require_arg("--pull-step-degrees"); if (!v) return 2;
+            double d = 0.0; if (!parse_double(v, d, "--pull-step-degrees")) return 2;
+            pull_step_degrees = d;
+        } else if (a == "--min-samples-per-cell") {
+            auto const *v = require_arg("--min-samples-per-cell"); if (!v) return 2;
+            std::size_t val = 0;
+            auto const res = std::from_chars(v, v + std::strlen(v), val);
+            if (res.ec != std::errc{}) {
+                std::fprintf(stderr,
+                    "project-autotune-knock-pull: --min-samples-per-cell must be a "
+                    "non-negative integer (got '%s')\n", v);
+                return 2;
+            }
+            min_samples = val;
+        } else if (a == "--enable-add-back") {
+            enable_add_back = true;
+        } else if (a == "--add-back-step-degrees") {
+            auto const *v = require_arg("--add-back-step-degrees"); if (!v) return 2;
+            double d = 0.0; if (!parse_double(v, d, "--add-back-step-degrees")) return 2;
+            add_step_degrees = d;
+        } else if (a == "--add-back-min-clean-samples") {
+            auto const *v = require_arg("--add-back-min-clean-samples"); if (!v) return 2;
+            std::size_t val = 0;
+            auto const res = std::from_chars(v, v + std::strlen(v), val);
+            if (res.ec != std::errc{}) {
+                std::fprintf(stderr,
+                    "project-autotune-knock-pull: --add-back-min-clean-samples must be a "
+                    "non-negative integer (got '%s')\n", v);
+                return 2;
+            }
+            add_back_min_clean = val;
+        } else if (a == "--add-back-clean-threshold-degrees") {
+            auto const *v = require_arg("--add-back-clean-threshold-degrees"); if (!v) return 2;
+            double d = 0.0; if (!parse_double(v, d, "--add-back-clean-threshold-degrees")) return 2;
+            clean_threshold = d;
+        } else if (a == "--rpm-axis") {
+            auto const *v = require_arg("--rpm-axis"); if (!v) return 2;
+            std::string_view const sv{v};
+            if (sv == "x" || sv == "X")      rpm_axis_kind = 'x';
+            else if (sv == "y" || sv == "Y") rpm_axis_kind = 'y';
+            else {
+                std::fprintf(stderr,
+                    "project-autotune-knock-pull: --rpm-axis must be 'x' or 'y' "
+                    "(got '%s')\n", v);
+                return 2;
+            }
+        } else if (a == "--strict-lint") {
+            strict_lint = true;
+        } else if (a == "--apply") {
+            apply = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr,
+                "project-autotune-knock-pull: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!project_dir.has_value()) {
+            project_dir = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr,
+                "project-autotune-knock-pull: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!project_dir.has_value() || !table_id.has_value() || !log_path.has_value()) {
+        std::fputs("project-autotune-knock-pull: missing required arguments\n"
+                   "Usage: subuwutuner-cli project-autotune-knock-pull <dir>\n"
+                   "       --table <id> --log <CSV>\n"
+                   "       [--rpm-axis x|y]\n"
+                   "       [--trigger-degrees D] [--pull-step-degrees D]\n"
+                   "       [--min-samples-per-cell N] [--strict-lint] [--apply]\n"
+                   "       [--enable-add-back [--add-back-step-degrees D]\n"
+                   "                          [--add-back-min-clean-samples N]\n"
+                   "                          [--add-back-clean-threshold-degrees D]]\n"
+                   "  Runs the docs/12 knock-pull algorithm against the project's\n"
+                   "  2D timing table and a CSV datalog. --rpm-axis tells the tool\n"
+                   "  which of the pack's axes is RPM (default 'y' matches the\n"
+                   "  Subaru convention axis_x=load, axis_y=engine_speed).\n",
+                   stderr);
+        return 2;
+    }
+
+    auto proj = st::Project::open(*project_dir);
+    if (!proj.has_value()) {
+        std::fprintf(stderr, "project-autotune-knock-pull: %s\n",
+                     proj.error().to_string().c_str());
+        return 1;
+    }
+    auto const *table = proj->definition().find_table(*table_id);
+    if (table == nullptr) {
+        std::fprintf(stderr,
+            "project-autotune-knock-pull: table '%s' not found in pack\n",
+            table_id->c_str());
+        return 1;
+    }
+    if (table->dimensions != 2) {
+        std::fprintf(stderr,
+            "project-autotune-knock-pull: table '%s' has dimensions=%d; "
+            "knock-pull needs a 2D timing table (load × RPM)\n",
+            table->id.c_str(), table->dimensions);
+        return 1;
+    }
+    auto td = proj->definition().read_table_values(proj->working_rom(), *table);
+    if (!td.has_value()) {
+        std::fprintf(stderr, "project-autotune-knock-pull: %s\n",
+                     td.error().to_string().c_str());
+        return 1;
+    }
+
+    // Map the pack's (axis_x, axis_y) onto the kernel's (rpm_axis,
+    // load_axis). td.values is indexed [r=axis_y_idx][c=axis_x_idx].
+    // The kernel wants `current_timing` flattened as
+    // `cell_index = load_row * rpm_count + rpm_col`, i.e. load on the
+    // outer axis and rpm on the inner axis.
+    bool const          rpm_is_y    = (rpm_axis_kind == 'y');
+    auto const         &rpm_axis    = rpm_is_y ? td->axis_y : td->axis_x;
+    auto const         &load_axis   = rpm_is_y ? td->axis_x : td->axis_y;
+    std::vector<double> current_timing;
+    current_timing.reserve(load_axis.size() * rpm_axis.size());
+    for (std::size_t li = 0; li < load_axis.size(); ++li) {
+        for (std::size_t ri = 0; ri < rpm_axis.size(); ++ri) {
+            std::size_t td_r = rpm_is_y ? ri : li;
+            std::size_t td_c = rpm_is_y ? li : ri;
+            current_timing.push_back(td->values[td_r][td_c]);
+        }
+    }
+
+    std::ifstream log_in{*log_path, std::ios::binary};
+    if (!log_in) {
+        std::fprintf(stderr, "project-autotune-knock-pull: cannot open log: %s\n",
+                     log_path->string().c_str());
+        return 1;
+    }
+    std::ostringstream log_ss;
+    log_ss << log_in.rdbuf();
+    auto samples = st::autotune::read_knock_samples_csv(log_ss.str());
+    if (!samples.has_value()) {
+        std::fprintf(stderr, "project-autotune-knock-pull: %s\n",
+                     samples.error().to_string().c_str());
+        return 1;
+    }
+
+    st::autotune::KnockPullOptions opts;
+    if (trigger_degrees.has_value())   opts.trigger_degrees      = *trigger_degrees;
+    if (pull_step_degrees.has_value()) opts.pull_step_degrees    = *pull_step_degrees;
+    if (min_samples.has_value())       opts.min_samples_per_cell = *min_samples;
+
+    auto result = st::autotune::tune_knock_pull(
+        rpm_axis, load_axis, current_timing, *samples, opts);
+    if (!result.has_value()) {
+        std::fprintf(stderr, "project-autotune-knock-pull: %s\n",
+                     result.error().to_string().c_str());
+        return 1;
+    }
+    if (enable_add_back) {
+        st::autotune::KnockAddBackOptions abo;
+        abo.enabled = true;
+        if (add_step_degrees.has_value())    abo.add_step_degrees           = *add_step_degrees;
+        if (add_back_min_clean.has_value())  abo.min_clean_samples_per_cell = *add_back_min_clean;
+        if (clean_threshold.has_value())     abo.clean_threshold_degrees    = *clean_threshold;
+        *result = st::autotune::apply_knock_add_back(*result, abo);
+    }
+    auto const lints = st::autotune::lint_knock_proposal(
+        rpm_axis, load_axis, *result);
+
+    std::printf("Table:               %s\n", table->id.c_str());
+    std::printf("Profile:             %s\n",
+                std::string{st::policy::profile_name(proj->policy_profile())}.c_str());
+    std::printf("Grid:                %zu rows × %zu cols (load × RPM)\n",
+                result->rows, result->cols);
+    std::printf("Samples (raw):       %zu\n", result->total_samples);
+    std::printf("Samples after gates: %zu\n", result->samples_after_gates);
+
+    std::size_t pulled = 0;
+    std::size_t added  = 0;
+    for (auto const &c : result->cells) {
+        if (c.pulled) ++pulled;
+        else if (c.proposed_value > c.current_value) ++added;
+    }
+    std::printf("Cells pulled:        %zu\n", pulled);
+    if (enable_add_back) {
+        std::printf("Cells added-back:    %zu\n", added);
+    }
+
+    // 2D ledger: rows are load breakpoints, columns are RPM breakpoints.
+    // For each cell where the value changed, print the delta.
+    std::printf("\n%-9s", "load\\rpm");
+    for (auto rpm : rpm_axis) std::printf(" %8.0f", rpm);
+    std::printf("\n");
+    for (std::size_t r = 0; r < result->rows; ++r) {
+        std::printf("%-9.2f", load_axis[r]);
+        for (std::size_t c = 0; c < result->cols; ++c) {
+            auto const &cell = result->cells[r * result->cols + c];
+            double const delta = cell.proposed_value - cell.current_value;
+            if (std::abs(delta) < 0.0001) {
+                std::printf("       . ");
+            } else {
+                std::printf(" %+8.2f", delta);
+            }
+        }
+        std::printf("\n");
+    }
+
+    if (!lints.empty()) {
+        std::printf("\nLint findings (%zu):\n", lints.size());
+        for (auto const &v : lints) {
+            std::printf("  - cell %zu: %s (%s)\n",
+                        v.cell_index, v.message.c_str(),
+                        st::autotune::lint_kind_name(v.kind));
+        }
+        if (strict_lint) {
+            std::fprintf(stderr,
+                "project-autotune-knock-pull: --strict-lint set; refusing to "
+                "apply with %zu lint violation(s)\n", lints.size());
+            return 3;
+        }
+    }
+
+    if (!apply) {
+        std::printf("\n(Dry-run — pass --apply to commit the proposals as a "
+                    "project edit.)\n");
+        return 0;
+    }
+
+    // --apply: rewrite td.values from the proposal grid, snapshot+writeback+history.
+    // The proposal grid is (load × rpm) in kernel-row-major; td.values
+    // is the pack's native (axis_y × axis_x) layout — un-transpose
+    // accordingly. Edit rect covers the whole table.
+    std::size_t const grid_rows = td->values.size();
+    std::size_t const grid_cols = grid_rows > 0 ? td->values[0].size() : 0;
+    st::edit::Rect const rect{0, grid_rows > 0 ? grid_rows - 1 : 0,
+                              0, grid_cols > 0 ? grid_cols - 1 : 0};
+    auto before = st::edit::snapshot(*td, rect);
+    if (!before.has_value()) {
+        std::fprintf(stderr, "project-autotune-knock-pull: %s\n",
+                     before.error().to_string().c_str());
+        return 1;
+    }
+    for (std::size_t li = 0; li < result->rows; ++li) {
+        for (std::size_t ri = 0; ri < result->cols; ++ri) {
+            std::size_t td_r = rpm_is_y ? ri : li;
+            std::size_t td_c = rpm_is_y ? li : ri;
+            td->values[td_r][td_c] =
+                result->cells[li * result->cols + ri].proposed_value;
+        }
+    }
+    auto after = st::edit::snapshot(*td, rect);
+    if (!after.has_value()) {
+        std::fprintf(stderr, "project-autotune-knock-pull: %s\n",
+                     after.error().to_string().c_str());
+        return 1;
+    }
+    if (auto wb = proj->definition().write_table_values(
+            proj->working_rom(), *table, *td);
+        !wb.has_value()) {
+        std::fprintf(stderr, "project-autotune-knock-pull: writeback: %s\n",
+                     wb.error().to_string().c_str());
+        return 1;
+    }
+    {
+        char descbuf[80];
+        std::snprintf(descbuf, sizeof descbuf,
+                      "autotune knock-pull (%zu pulled%s%s)",
+                      pulled,
+                      added > 0 ? ", " : "",
+                      added > 0 ? (std::to_string(added) + " added-back").c_str() : "");
+        proj->history().record({table->id, std::move(*before),
+                                std::move(*after), std::string{descbuf}});
+    }
+    if (auto s = proj->save_working_rom(); !s.has_value()) {
+        std::fprintf(stderr, "project-autotune-knock-pull: save: %s\n",
                      s.error().to_string().c_str());
         return 1;
     }
@@ -4998,6 +5335,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-autotune-maf") {
         return cmd_project_autotune_maf(argc - 2, argv + 2);
+    }
+    if (cmd == "project-autotune-knock-pull") {
+        return cmd_project_autotune_knock_pull(argc - 2, argv + 2);
     }
     if (cmd == "pack-info") {
         return cmd_pack_info(argc - 2, argv + 2);
