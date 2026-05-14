@@ -476,11 +476,19 @@ Result<std::vector<MafSample>> read_maf_samples_csv(std::string_view text) {
         return std::vector<MafSample>{};
     }
 
-    // Build column-name → index map from the header row.
+    // Build column-name → index map from the header row. We strip any
+    // trailing " [unit]" annotation that the log subcommand's CsvSink
+    // adds (e.g. `coolant_c [C]` -> `coolant_c`) so a `log` CSV drops
+    // directly into autotune without a rename pass.
     auto const                         header = split_csv_fields(lines[0]);
     std::map<std::string, std::size_t> col_idx;
     for (std::size_t i = 0; i < header.size(); ++i) {
-        col_idx.emplace(to_lower_str(trim_view(header[i])), i);
+        auto       name      = to_lower_str(trim_view(header[i]));
+        auto const bracket   = name.find(" [");
+        if (bracket != std::string::npos) {
+            name.resize(bracket);
+        }
+        col_idx.emplace(std::move(name), i);
     }
 
     auto require_col = [&](char const *name) -> Result<std::size_t> {
@@ -728,10 +736,17 @@ Result<std::vector<KnockSample>> read_knock_samples_csv(
         return std::vector<KnockSample>{};
     }
 
+    // Same " [unit]" stripping as in read_maf_samples_csv so a `log`-
+    // emitted CSV matches the knock reader's expected column names.
     auto const                         header = split_csv_fields(lines[0]);
     std::map<std::string, std::size_t> col_idx;
     for (std::size_t i = 0; i < header.size(); ++i) {
-        col_idx.emplace(to_lower_str(trim_view(header[i])), i);
+        auto       name    = to_lower_str(trim_view(header[i]));
+        auto const bracket = name.find(" [");
+        if (bracket != std::string::npos) {
+            name.resize(bracket);
+        }
+        col_idx.emplace(std::move(name), i);
     }
 
     auto require_col = [&](char const *name) -> Result<std::size_t> {

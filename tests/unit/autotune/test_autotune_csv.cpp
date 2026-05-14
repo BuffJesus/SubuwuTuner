@@ -58,6 +58,22 @@ TEST_CASE("read_maf_samples_csv: required columns populate fields",
     CHECK(s.throttle_rate   == Approx(0.0));
 }
 
+TEST_CASE("read_maf_samples_csv: [unit] header suffix is stripped",
+          "[autotune][csv][header]") {
+    // CsvSink in st::log writes columns like `coolant_c [C]` — the unit
+    // annotation comes from the channel's scaling. The autotune reader
+    // strips ` [...]` so a log CSV drops straight in.
+    std::string text =
+        "maf_voltage [V],actual_afr [AFR],commanded_afr [AFR],"
+        "rpm [rpm],throttle_pct [%],coolant_c [C],iat_c [C]\n"
+        "2.31,14.5,14.7,2500,45,90,30\n";
+    auto const r = at::read_maf_samples_csv(text);
+    REQUIRE(r.has_value());
+    REQUIRE(r->size() == 1);
+    CHECK((*r)[0].maf_voltage == Approx(2.31));
+    CHECK((*r)[0].coolant_c   == Approx(90.0));
+}
+
 TEST_CASE("read_maf_samples_csv: missing required column -> error",
           "[autotune][csv]") {
     // Drop iat_c.

@@ -139,11 +139,17 @@ constexpr std::string_view kUsage =
     "    project-undo <dir>      Walk back one edit in the project's history.\n"
     "    project-redo <dir>      Walk forward one edit in the project's history.\n"
     "    log --def <pack> --pid <id[,id...]> --trace <file> [--output <csv>]\n"
+    "        [--canonical-columns]\n"
     "                            Replay an SSM-response trace file through a mock\n"
     "                            transport and write a CSV datalog. Trace format:\n"
     "                            one response frame per line as whitespace-separated\n"
     "                            hex bytes; '#' starts a comment. Without --output,\n"
-    "                            the CSV is written to stdout.\n"
+    "                            the CSV is written to stdout. --canonical-columns\n"
+    "                            renames standard SSM PIDs to autotune-friendly\n"
+    "                            column names (p2→coolant_c, p7→throttle_pct,\n"
+    "                            p8→rpm, p11→iat_c, p18→maf_voltage) so the output\n"
+    "                            drops into `autotune *` / `project-autotune-*`\n"
+    "                            without a rename pass.\n"
     "    can-replay <FILE.asc>   Load a Vector .asc CAN trace and print per-id\n"
     "                            statistics (count, rate, dlc, first byte mode).\n"
     "    can-diff <A.asc> <B.asc>\n"
@@ -2438,6 +2444,7 @@ int cmd_log(int argc, char *argv[]) {
     std::optional<std::string>           pid_list_arg;
     std::optional<std::filesystem::path> trace_path;
     std::optional<std::filesystem::path> output_path;
+    bool                                 canonical_columns = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -2461,11 +2468,25 @@ int cmd_log(int argc, char *argv[]) {
         } else if (a == "--output" || a == "-o") {
             if (auto const *v = require_arg("--output"); v) output_path = std::filesystem::path{v};
             else return 2;
+        } else if (a == "--canonical-columns") {
+            canonical_columns = true;
         } else {
             std::fprintf(stderr, "log: unknown argument: %s\n", argv[i]);
             return 2;
         }
     }
+
+    // SSM PID id → autotune-canonical column name. Stable RomRaider/SSM
+    // mapping per Merp's logger.xml. Anything not in this table keeps its
+    // original PID id as the column header.
+    auto const canonical_for = [](std::string_view pid_id) -> std::string_view {
+        if (pid_id == "p2")  return "coolant_c";
+        if (pid_id == "p7")  return "throttle_pct";
+        if (pid_id == "p8")  return "rpm";
+        if (pid_id == "p11") return "iat_c";
+        if (pid_id == "p18") return "maf_voltage";
+        return {};
+    };
 
     if (!def_path.has_value() || !pid_list_arg.has_value() || !trace_path.has_value()) {
         std::fputs("log: missing required arguments\n", stderr);
@@ -2496,8 +2517,13 @@ int cmd_log(int argc, char *argv[]) {
             return 1;
         }
         auto const *scaling = def->find_scaling(pid->scaling);
+        std::string channel_name = pid->id;
+        if (canonical_columns) {
+            auto const canon = canonical_for(pid->id);
+            if (!canon.empty()) channel_name = std::string{canon};
+        }
         channels.push_back(st::log::LogChannel{
-            pid->id,
+            std::move(channel_name),
             static_cast<std::uint32_t>(pid->ssm_address),
             pid->data_type,
             scaling != nullptr ? std::optional<st::Scaling>{*scaling}
