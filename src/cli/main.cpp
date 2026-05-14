@@ -1507,11 +1507,62 @@ int cmd_project_info(int argc, char *argv[]) {
     } else {
         std::printf("  (working differs from source — edits applied)\n");
     }
-    std::printf("Definition: pack id %s\n", p->definition().pack().id.c_str());
+    std::printf("Definition: pack id %s (%zu table%s)\n",
+                p->definition().pack().id.c_str(),
+                p->definition().tables().size(),
+                p->definition().tables().size() == 1 ? "" : "s");
     auto const cid = p->definition().matches(p->source_rom());
     std::printf("CID match:  %s\n", cid.has_value() ? cid->c_str() : "(no match)");
     std::printf("Profile:    %s\n",
                 std::string{st::policy::profile_name(p->policy_profile())}.c_str());
+
+    // Edit-history summary. Collapse per-table edits to a flag set so
+    // the user sees at-a-glance which tables have been touched + whether
+    // any of them carry E/S flags that the policy gate will pick up.
+    auto const &records = p->history().records();
+    auto const  cursor  = p->history().cursor();
+    if (records.empty()) {
+        std::printf("Edits:      0\n");
+    } else {
+        std::printf("Edits:      %zu (cursor at %zu",
+                    records.size(), cursor);
+        if (cursor < records.size()) {
+            std::printf(", %zu redo step%s available",
+                        records.size() - cursor,
+                        records.size() - cursor == 1 ? "" : "s");
+        }
+        std::printf(")\n");
+
+        struct TableTouch {
+            std::string id;
+            std::size_t count{};
+            bool        emissions{};
+            bool        safety{};
+        };
+        std::vector<TableTouch> touched;
+        for (auto const &e : records) {
+            auto it = std::find_if(touched.begin(), touched.end(),
+                [&](TableTouch const &t) { return t.id == e.table_id; });
+            if (it == touched.end()) {
+                auto const *table = p->definition().find_table(e.table_id);
+                touched.push_back({e.table_id, 1,
+                    table != nullptr && table->emissions_relevant,
+                    table != nullptr && table->engine_safety_critical});
+            } else {
+                ++it->count;
+            }
+        }
+        std::printf("Tables touched: %zu\n", touched.size());
+        for (auto const &t : touched) {
+            std::string flags;
+            if (t.emissions) flags += "E";
+            if (t.safety)    flags += "S";
+            if (flags.empty()) flags = "-";
+            std::printf("  %-30s %zu edit%s  [%s]\n",
+                        t.id.c_str(), t.count,
+                        t.count == 1 ? "" : "s", flags.c_str());
+        }
+    }
     return 0;
 }
 
