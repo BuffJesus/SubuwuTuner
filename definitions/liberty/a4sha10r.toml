@@ -118,7 +118,7 @@ data_type              = "uint16_be"
 scaling                = "engine_load_g_rev_x_00006103515625"
 axis_x                 = "potential_fine_correction_stored_value_adjustments"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -131,7 +131,7 @@ data_type              = "uint16_be"
 scaling                = "engine_speed_rpm_x_1953125"
 axis_x                 = "fine_correction_stored_applied_rpm_ranges"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]

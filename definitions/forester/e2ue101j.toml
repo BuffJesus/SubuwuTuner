@@ -2670,7 +2670,7 @@ data_type              = "uint16_be"
 scaling                = "engine_speed_rpm_x"
 axis_x                 = "rev_limit_fuel_cut"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -2683,7 +2683,7 @@ data_type              = "uint16_be"
 scaling                = "vehicle_speed_kmh_x"
 axis_x                 = "speed_limiter_fuel_cut"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -2696,7 +2696,7 @@ data_type              = "uint16_be"
 scaling                = "vehicle_speed_kmh_x"
 axis_x                 = "speed_limiter_fuel_cut"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -2709,7 +2709,7 @@ data_type              = "uint16_be"
 scaling                = "vehicle_speed_kmh_x"
 axis_x                 = "throttle_reduction"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -2722,7 +2722,7 @@ data_type              = "uint16_be"
 scaling                = "vehicle_speed_kmh_x"
 axis_x                 = "throttle_reduction"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -2890,7 +2890,7 @@ address                = 0x000FFB80
 data_type              = "uint16_be"
 scaling                = ""
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]

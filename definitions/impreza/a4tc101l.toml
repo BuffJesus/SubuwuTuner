@@ -1680,7 +1680,7 @@ data_type              = "uint16_be"
 scaling                = "bar_absolute_x_001333224"
 axis_x                 = "atmospheric_pressure_bar"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -1692,7 +1692,7 @@ address                = 0x0002AF60
 data_type              = "uint16_be"
 scaling                = "counter_threshold_x"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -1705,7 +1705,7 @@ data_type              = "uint16_be"
 scaling                = "bar_absolute_x_001333224"
 axis_x                 = "atmospheric_pressure_bar"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -1718,7 +1718,7 @@ data_type              = "uint16_be"
 scaling                = "iam_raw_ecu_value_x"
 axis_x                 = "boost_control"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -1731,7 +1731,7 @@ data_type              = "uint16_be"
 scaling                = "current_fine_correction_learning_degrees_of_correction_x_3515625_45"
 axis_x                 = "boost_control"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -1743,7 +1743,7 @@ address                = 0x0002A7FE
 data_type              = "uint16_be"
 scaling                = "counter_threshold_x"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3192,7 +3192,7 @@ data_type              = "uint16_be"
 scaling                = "engine_speed_rpm_x_1953125"
 axis_x                 = "feedback_knock_correction"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3205,7 +3205,7 @@ data_type              = "uint16_be"
 scaling                = "engine_load_g_rev_x_00006103515625"
 axis_x                 = "feedback_knock_correction"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3217,7 +3217,7 @@ address                = 0x000299BF
 data_type              = "uint16_be"
 scaling                = "degrees_of_correction_x_3515625"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3229,7 +3229,7 @@ address                = 0x000299BE
 data_type              = "uint16_be"
 scaling                = "degrees_of_correction_x_3515625"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3241,7 +3241,7 @@ address                = 0x000299C0
 data_type              = "uint16_be"
 scaling                = "degrees_of_correction_x_3515625"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3253,7 +3253,7 @@ address                = 0x000299BA
 data_type              = "uint16_be"
 scaling                = "counter_threshold_x"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3266,7 +3266,7 @@ data_type              = "uint16_be"
 scaling                = "engine_speed_rpm_x_1953125"
 axis_x                 = "potential_fine_correction_stored_value_adjustments"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3279,7 +3279,7 @@ data_type              = "uint16_be"
 scaling                = "engine_load_g_rev_x_00006103515625"
 axis_x                 = "potential_fine_correction_stored_value_adjustments"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3292,7 +3292,7 @@ data_type              = "uint16_be"
 scaling                = "engine_speed_rpm_x_1953125"
 axis_x                 = "fine_correction_stored_applied_rpm_ranges"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3305,7 +3305,7 @@ data_type              = "uint16_be"
 scaling                = "engine_load_g_rev_x_00006103515625"
 axis_x                 = "fine_correction_stored_applied_load_ranges"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3317,7 +3317,7 @@ address                = 0x000299FE
 data_type              = "uint16_be"
 scaling                = "degrees_of_correction_x_3515625"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3329,7 +3329,7 @@ address                = 0x000299FC
 data_type              = "uint16_be"
 scaling                = "degrees_of_correction_x_3515625_45"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3341,7 +3341,7 @@ address                = 0x000299FD
 data_type              = "uint16_be"
 scaling                = "degrees_of_correction_x_3515625"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3353,7 +3353,7 @@ address                = 0x000299FB
 data_type              = "uint16_be"
 scaling                = "degrees_of_correction_x_3515625_45"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3365,7 +3365,7 @@ address                = 0x000299F9
 data_type              = "uint16_be"
 scaling                = "counter_threshold_x"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3378,7 +3378,7 @@ data_type              = "uint16_be"
 scaling                = "engine_speed_rpm_x_1953125"
 axis_x                 = "potential_rough_correction_learning_iam"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3391,7 +3391,7 @@ data_type              = "uint16_be"
 scaling                = "engine_load_g_rev_x_00006103515625"
 axis_x                 = "potential_rough_correction_learning_iam"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3404,7 +3404,7 @@ data_type              = "uint16_be"
 scaling                = "current_knock_correction_advance_max_map_value_degrees_x_3515625"
 axis_x                 = "potential_rough_correction_learning_iam"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3417,7 +3417,7 @@ data_type              = "uint16_be"
 scaling                = "counter_threshold_x"
 axis_x                 = "engine_speed_rpm"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3429,7 +3429,7 @@ address                = 0x00029991
 data_type              = "uint16_be"
 scaling                = "iam_raw_ecu_value_x"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3441,7 +3441,7 @@ address                = 0x000299A3
 data_type              = "uint16_be"
 scaling                = "change_in_raw_ecu_value_x"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3455,7 +3455,7 @@ scaling                = "exhaust_gas_temperature_degrees_c_x_3_984375_200"
 axis_x                 = "engine_load"
 axis_y                 = "engine_speed"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3468,7 +3468,7 @@ data_type              = "uint16_be"
 scaling                = "engine_speed_rpm_x_1953125"
 axis_x                 = "rev_limit_fuel_cut"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3481,7 +3481,7 @@ data_type              = "uint16_be"
 scaling                = "vehicle_speed_kmh_x"
 axis_x                 = "fuel_cut_transmission_type"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3493,7 +3493,7 @@ address                = 0x000129D2
 data_type              = "uint16_be"
 scaling                = ""
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3506,7 +3506,7 @@ data_type              = "uint16_be"
 scaling                = "vehicle_speed_kmh_x"
 axis_x                 = "wastegate_duty"
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]
@@ -3518,7 +3518,7 @@ address                = 0x0002A7EB
 data_type              = "uint16_be"
 scaling                = ""
 emissions_relevant     = false
-engine_safety_critical = false
+engine_safety_critical = true
 
 
 [[table]]

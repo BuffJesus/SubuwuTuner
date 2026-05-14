@@ -640,11 +640,16 @@ int cmd_pack_info(int argc, char *argv[]) {
     std::printf("Tables:          %zu\n", def->tables().size());
     {
         std::size_t emissions = 0;
+        std::size_t safety    = 0;
         for (auto const &t : def->tables()) {
-            if (t.emissions_relevant) ++emissions;
+            if (t.emissions_relevant)     ++emissions;
+            if (t.engine_safety_critical) ++safety;
         }
         if (emissions > 0) {
             std::printf("  emissions:     %zu\n", emissions);
+        }
+        if (safety > 0) {
+            std::printf("  safety:        %zu\n", safety);
         }
     }
     std::printf("PIDs:            %zu\n", def->pids().size());

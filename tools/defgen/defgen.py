@@ -229,6 +229,43 @@ def is_emissions_relevant(category: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Engine-safety heuristic
+# ---------------------------------------------------------------------------
+#
+# `Table.engine_safety_critical` is the other policy flag (see docs/06).
+# Edits that would let the engine destroy itself if cranked the wrong way
+# — over-rev, over-boost, knock retard reductions, checksum-corruption —
+# fall here. The policy module blocks flashing these in EVERY profile,
+# so be conservative: false-positives mean a legitimate edit gets
+# refused; false-negatives mean a dangerous edit gets through unflagged.
+#
+# Categories we mark safety-critical:
+#   - "knock control"  : all feedback/fine-correction tables. A bad edit
+#                        here disables knock protection — engine damage
+#                        on the first detonation event.
+#   - " - limits"      : both `boost control - limits` and
+#                        `miscellaneous - limits` (rev limit, fuel cut,
+#                        speed limit, EGT failsafe). Cranking these
+#                        relaxes the protections that keep parts intact.
+#   - "checksum"       : CRC fixups. A wrong byte here bricks the ECU.
+
+_ENGINE_SAFETY_CATEGORY_KEYWORDS = (
+    "knock control",
+    " - limits",
+    "checksum",
+)
+
+
+def is_engine_safety_critical(category: str) -> bool:
+    """Heuristic match against the safety-keyword set. Substring match,
+    case-insensitive."""
+    if not category:
+        return False
+    c = category.lower()
+    return any(kw in c for kw in _ENGINE_SAFETY_CATEGORY_KEYWORDS)
+
+
+# ---------------------------------------------------------------------------
 # XML extraction
 # ---------------------------------------------------------------------------
 
@@ -947,6 +984,7 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
         axis_x=axis_x_id,
         axis_y=axis_y_id,
         emissions_relevant=is_emissions_relevant(category),
+        engine_safety_critical=is_engine_safety_critical(category),
     )
     pack.tables.append(table)
 

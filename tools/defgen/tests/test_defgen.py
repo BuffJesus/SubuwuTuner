@@ -509,6 +509,76 @@ class EmissionsRelevanceTest(unittest.TestCase):
         self.assertFalse(flags["boost_target"])
 
 
+class EngineSafetyHeuristicTest(unittest.TestCase):
+    def test_knock_control_is_flagged(self):
+        self.assertTrue(defgen.is_engine_safety_critical(
+            "Ignition Timing - Knock Control"))
+        # Sub-categories that name knock control elsewhere also hit.
+        self.assertTrue(defgen.is_engine_safety_critical(
+            "Some Section - Knock Control - Detail"))
+
+    def test_limits_categories_are_flagged(self):
+        # Both `boost control - limits` and `miscellaneous - limits` should
+        # match the " - limits" suffix.
+        self.assertTrue(defgen.is_engine_safety_critical(
+            "Boost Control - Limits"))
+        self.assertTrue(defgen.is_engine_safety_critical(
+            "Miscellaneous - Limits"))
+
+    def test_checksum_is_flagged(self):
+        self.assertTrue(defgen.is_engine_safety_critical("Checksum Fix"))
+
+    def test_non_safety_categories_are_not_flagged(self):
+        # Tuning surface that doesn't directly disable a protection
+        # mechanism. False-positives on the safety side would block
+        # legitimate edits across every profile.
+        self.assertFalse(defgen.is_engine_safety_critical(
+            "Ignition Timing - Advance"))
+        self.assertFalse(defgen.is_engine_safety_critical(
+            "Fueling - Closed Loop"))
+        self.assertFalse(defgen.is_engine_safety_critical(
+            "Boost Control - Target"))
+        self.assertFalse(defgen.is_engine_safety_critical(
+            "Miscellaneous - Thresholds"))
+        self.assertFalse(defgen.is_engine_safety_critical(""))
+
+    def test_table_record_carries_both_flags(self):
+        # A knock-control table (engine-safety) should pop both flags
+        # cleanly: safety=true, emissions=false. Closed-loop fueling pops
+        # the inverse pair. Plain ignition advance pops neither.
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="2D" name="knock_retard" category="Ignition Timing - Knock Control"
+                 storageaddress="0x100" storagetype="uint8" endian="big">
+            <scaling units="deg" expression="x" to_byte="x"
+                     format="0" endian="big" storagetype="uint8"/>
+            <table type="X Axis" name="knock_x" storageaddress="0x200"
+                   storagetype="uint8" endian="big" size="4"/>
+          </table>
+          <table type="2D" name="cl_target" category="Fueling - Closed Loop"
+                 storageaddress="0x300" storagetype="uint8" endian="big">
+            <scaling units="afr" expression="x" to_byte="x"
+                     format="0" endian="big" storagetype="uint8"/>
+            <table type="X Axis" name="cl_x" storageaddress="0x400"
+                   storagetype="uint8" endian="big" size="4"/>
+          </table>
+          <table type="2D" name="adv" category="Ignition Timing - Advance"
+                 storageaddress="0x500" storagetype="uint8" endian="big">
+            <scaling units="deg" expression="x" to_byte="x"
+                     format="0" endian="big" storagetype="uint8"/>
+            <table type="X Axis" name="adv_x" storageaddress="0x600"
+                   storagetype="uint8" endian="big" size="4"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        flags = {t.id: (t.emissions_relevant, t.engine_safety_critical)
+                 for t in packs[0].tables}
+        self.assertEqual(flags["knock_retard"], (False, True))
+        self.assertEqual(flags["cl_target"],    (True,  False))
+        self.assertEqual(flags["adv"],          (False, False))
+
+
 class DimensionsTest(unittest.TestCase):
     def test_romraider_1d_maps_to_scalar(self):
         # RomRaider counts the value dimension; "1D" = single scalar with
