@@ -551,6 +551,151 @@ bit         = 8
     REQUIRE_FALSE(def_r.has_value());
 }
 
+TEST_CASE("Definition parses [[dtc_bitmap]] + [[dtc]] records", "[defs][dtc]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 0x00200000
+
+[[dtc_bitmap]]
+id           = "primary_dtc_enable"
+name         = "Primary DTC enable bitmap"
+address      = 0x00100000
+length_bytes = 32
+endianness   = "big"
+
+[[dtc]]
+code               = "P0401"
+name               = "Insufficient EGR Flow Detected"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 12
+bit                = 3
+emissions_relevant = true
+
+[[dtc]]
+code               = "P0420"
+name               = "Catalyst System Efficiency Below Threshold (Bank 1)"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 14
+bit                = 0
+emissions_relevant = true
+)toml");
+    REQUIRE(def_r.has_value());
+    auto const &def = *def_r;
+    REQUIRE(def.dtc_bitmaps().size() == 1);
+    REQUIRE(def.dtc_bitmaps()[0].id == "primary_dtc_enable");
+    REQUIRE(def.dtc_bitmaps()[0].length_bytes == 32);
+    REQUIRE(def.dtc_bitmaps()[0].address == 0x00100000);
+    REQUIRE(def.find_dtc_bitmap("primary_dtc_enable") != nullptr);
+    REQUIRE(def.find_dtc_bitmap("nope") == nullptr);
+
+    REQUIRE(def.dtcs().size() == 2);
+    auto const *p0401 = def.find_dtc("P0401");
+    REQUIRE(p0401 != nullptr);
+    REQUIRE(p0401->byte_offset == 12);
+    REQUIRE(p0401->bit == 3);
+    REQUIRE(p0401->emissions_relevant);
+    REQUIRE(def.find_dtc("P9999") == nullptr);
+}
+
+TEST_CASE("Definition rejects dtc with out-of-range bit", "[defs][dtc]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id = "x"
+
+[[dtc_bitmap]]
+id           = "bm"
+address      = 0x100
+length_bytes = 4
+
+[[dtc]]
+code        = "P0001"
+bitmap_id   = "bm"
+byte_offset = 0
+bit         = 8
+)toml");
+    REQUIRE_FALSE(def_r.has_value());
+}
+
+TEST_CASE("Definition rejects dtc_bitmap with length_bytes = 0", "[defs][dtc]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id = "x"
+
+[[dtc_bitmap]]
+id           = "empty"
+address      = 0x100
+length_bytes = 0
+)toml");
+    REQUIRE_FALSE(def_r.has_value());
+}
+
+TEST_CASE("Definition::validate flags dtc with unknown bitmap", "[defs][dtc][validate]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+rom_size_bytes = 0x1000
+
+[[dtc_bitmap]]
+id           = "known"
+address      = 0x100
+length_bytes = 4
+
+[[dtc]]
+code        = "P0001"
+bitmap_id   = "ghost"
+byte_offset = 0
+bit         = 0
+)toml");
+    REQUIRE(def_r.has_value());
+    auto const v = def_r->validate();
+    REQUIRE_FALSE(v.has_value());
+    REQUIRE(std::string{v.error().message()}.find("unknown bitmap") != std::string::npos);
+}
+
+TEST_CASE("Definition::validate flags dtc byte_offset past bitmap end",
+          "[defs][dtc][validate]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+rom_size_bytes = 0x1000
+
+[[dtc_bitmap]]
+id           = "bm"
+address      = 0x100
+length_bytes = 4
+
+[[dtc]]
+code        = "P0001"
+bitmap_id   = "bm"
+byte_offset = 4
+bit         = 0
+)toml");
+    REQUIRE(def_r.has_value());
+    auto const v = def_r->validate();
+    REQUIRE_FALSE(v.has_value());
+    REQUIRE(std::string{v.error().message()}.find("outside bitmap") != std::string::npos);
+}
+
+TEST_CASE("Definition::validate flags dtc_bitmap past rom_size_bytes",
+          "[defs][dtc][validate]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+rom_size_bytes = 0x100
+
+[[dtc_bitmap]]
+id           = "huge"
+address      = 0xF0
+length_bytes = 32
+)toml");
+    REQUIRE(def_r.has_value());
+    auto const v = def_r->validate();
+    REQUIRE_FALSE(v.has_value());
+    REQUIRE(std::string{v.error().message()}.find("past rom_size_bytes") != std::string::npos);
+}
+
 TEST_CASE("Definition::read_table_values reads a 1D table", "[defs][read_table_values]") {
     auto const def_r = st::Definition::from_toml_string(R"toml(
 [pack]

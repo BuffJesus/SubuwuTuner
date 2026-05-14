@@ -168,6 +168,31 @@ struct Switch {
     bool        default_log{false};
 };
 
+// A DTC enable bitmap region in the ROM. Modern ECUs gate each diagnostic
+// trouble code behind a bit in such a bitmap; clearing the bit suppresses
+// the code (the monitoring logic still runs but the MIL stays off and the
+// code doesn't surface to a scanner). See docs/11-definition-format.md
+// "dtcs.toml — diagnostic-code enable bitmaps".
+struct DtcBitmap {
+    std::string id;
+    std::string name;
+    std::size_t address{};
+    std::size_t length_bytes{};
+    std::string endianness{"big"};
+};
+
+// A single diagnostic trouble code. Identified by its standard OBD-II code
+// string ("P0401", "P0420", etc.); `byte_offset`/`bit` locate the enable
+// bit inside the named bitmap. `bit=0` is the LSB of the byte.
+struct Dtc {
+    std::string code;
+    std::string name;
+    std::string bitmap_id;
+    std::size_t byte_offset{};
+    int         bit{};
+    bool        emissions_relevant{false};
+};
+
 // A complete definition pack: one Pack header, plus 0..N of each child kind.
 class Definition {
   public:
@@ -196,12 +221,18 @@ class Definition {
     [[nodiscard]] std::vector<Table> const &   tables() const noexcept { return tables_; }
     [[nodiscard]] std::vector<Pid> const &     pids() const noexcept { return pids_; }
     [[nodiscard]] std::vector<Switch> const &  switches() const noexcept { return switches_; }
+    [[nodiscard]] std::vector<DtcBitmap> const &dtc_bitmaps() const noexcept {
+        return dtc_bitmaps_;
+    }
+    [[nodiscard]] std::vector<Dtc> const &     dtcs() const noexcept { return dtcs_; }
 
-    [[nodiscard]] Axis const *    find_axis(std::string_view id) const noexcept;
-    [[nodiscard]] Scaling const * find_scaling(std::string_view id) const noexcept;
-    [[nodiscard]] Table const *   find_table(std::string_view id) const noexcept;
-    [[nodiscard]] Pid const *     find_pid(std::string_view id) const noexcept;
-    [[nodiscard]] Switch const *  find_switch(std::string_view id) const noexcept;
+    [[nodiscard]] Axis const *      find_axis(std::string_view id) const noexcept;
+    [[nodiscard]] Scaling const *   find_scaling(std::string_view id) const noexcept;
+    [[nodiscard]] Table const *     find_table(std::string_view id) const noexcept;
+    [[nodiscard]] Pid const *       find_pid(std::string_view id) const noexcept;
+    [[nodiscard]] Switch const *    find_switch(std::string_view id) const noexcept;
+    [[nodiscard]] DtcBitmap const * find_dtc_bitmap(std::string_view id) const noexcept;
+    [[nodiscard]] Dtc const *       find_dtc(std::string_view code) const noexcept;
 
     // If `rom` matches one of the [[identification]] entries, return the
     // entry's `name`. Otherwise nullopt.
@@ -267,6 +298,8 @@ class Definition {
     std::vector<Table>          tables_;
     std::vector<Pid>            pids_;
     std::vector<Switch>         switches_;
+    std::vector<DtcBitmap>      dtc_bitmaps_;
+    std::vector<Dtc>            dtcs_;
 
     friend class DefinitionBuilder;
 };

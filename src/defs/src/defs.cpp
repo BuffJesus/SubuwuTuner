@@ -313,6 +313,48 @@ Result<Switch> parse_switch(toml::table const &t) {
     return s;
 }
 
+Result<DtcBitmap> parse_dtc_bitmap(toml::table const &t) {
+    DtcBitmap b;
+    if (auto const v = t["id"].value<std::string>(); v.has_value()) {
+        b.id = *v;
+    } else {
+        return failure(ErrorCode::ParseError, "[[dtc_bitmap]] missing id");
+    }
+    b.name         = optional_value<std::string>(t, "name", {});
+    b.address      = static_cast<std::size_t>(optional_value<std::int64_t>(t, "address", 0));
+    b.length_bytes = static_cast<std::size_t>(optional_value<std::int64_t>(t, "length_bytes", 0));
+    if (b.length_bytes == 0) {
+        return failure(ErrorCode::ParseError,
+                       "[[dtc_bitmap]] '" + b.id + "' length_bytes must be > 0");
+    }
+    b.endianness = optional_value<std::string>(t, "endianness", "big");
+    return b;
+}
+
+Result<Dtc> parse_dtc(toml::table const &t) {
+    Dtc d;
+    if (auto const v = t["code"].value<std::string>(); v.has_value()) {
+        d.code = *v;
+    } else {
+        return failure(ErrorCode::ParseError, "[[dtc]] missing code");
+    }
+    d.name        = optional_value<std::string>(t, "name", {});
+    if (auto const v = t["bitmap_id"].value<std::string>(); v.has_value()) {
+        d.bitmap_id = *v;
+    } else {
+        return failure(ErrorCode::ParseError,
+                       "[[dtc]] '" + d.code + "' missing bitmap_id");
+    }
+    d.byte_offset = static_cast<std::size_t>(optional_value<std::int64_t>(t, "byte_offset", 0));
+    d.bit         = static_cast<int>(optional_value<std::int64_t>(t, "bit", 0));
+    if (d.bit < 0 || d.bit > 7) {
+        return failure(ErrorCode::ParseError,
+                       "[[dtc]] '" + d.code + "' bit must be 0..7");
+    }
+    d.emissions_relevant = optional_value<bool>(t, "emissions_relevant", false);
+    return d;
+}
+
 } // namespace
 
 // ---- DataType helpers ----------------------------------------------------
@@ -640,6 +682,13 @@ class DefinitionBuilder {
         if (auto r = visit_array("switch", parse_switch, def.switches_); !r.has_value()) {
             return failure(r.error());
         }
+        if (auto r = visit_array("dtc_bitmap", parse_dtc_bitmap, def.dtc_bitmaps_);
+            !r.has_value()) {
+            return failure(r.error());
+        }
+        if (auto r = visit_array("dtc", parse_dtc, def.dtcs_); !r.has_value()) {
+            return failure(r.error());
+        }
         return ok();
     }
 
@@ -672,6 +721,18 @@ class DefinitionBuilder {
         upsert(parent.tables_,   child.tables_);
         upsert(parent.pids_,     child.pids_);
         upsert(parent.switches_, child.switches_);
+        upsert(parent.dtc_bitmaps_, child.dtc_bitmaps_);
+        // DTCs are keyed by `code` rather than `id`; same upsert semantics
+        // but a different key field.
+        for (auto &el : child.dtcs_) {
+            auto it = std::find_if(parent.dtcs_.begin(), parent.dtcs_.end(),
+                                   [&](Dtc const &x) { return x.code == el.code; });
+            if (it == parent.dtcs_.end()) {
+                parent.dtcs_.push_back(std::move(el));
+            } else {
+                *it = std::move(el);
+            }
+        }
         return parent;
     }
 
@@ -970,6 +1031,23 @@ Status Definition::validate() const {
             note("identification '" + id.name + "' cid_address extends past rom_size_bytes");
         }
     }
+    for (auto const &b : dtc_bitmaps_) {
+        if (!fits(b.address, b.length_bytes)) {
+            note("dtc_bitmap '" + b.id + "' extends past rom_size_bytes");
+        }
+    }
+    for (auto const &d : dtcs_) {
+        auto const *bm = find_dtc_bitmap(d.bitmap_id);
+        if (bm == nullptr) {
+            note("dtc '" + d.code + "' references unknown bitmap '" + d.bitmap_id + "'");
+            continue;
+        }
+        if (d.byte_offset >= bm->length_bytes) {
+            note("dtc '" + d.code + "' byte_offset " + std::to_string(d.byte_offset)
+                 + " is outside bitmap '" + bm->id + "' (length_bytes="
+                 + std::to_string(bm->length_bytes) + ")");
+        }
+    }
 
     if (!violations.empty()) {
         return failure(ErrorCode::ParseError, std::move(violations));
@@ -1005,6 +1083,18 @@ Switch const *Definition::find_switch(std::string_view id) const noexcept {
     auto it = std::find_if(switches_.begin(), switches_.end(),
                            [&](Switch const &s) { return s.id == id; });
     return it == switches_.end() ? nullptr : &*it;
+}
+
+DtcBitmap const *Definition::find_dtc_bitmap(std::string_view id) const noexcept {
+    auto it = std::find_if(dtc_bitmaps_.begin(), dtc_bitmaps_.end(),
+                           [&](DtcBitmap const &b) { return b.id == id; });
+    return it == dtc_bitmaps_.end() ? nullptr : &*it;
+}
+
+Dtc const *Definition::find_dtc(std::string_view code) const noexcept {
+    auto it = std::find_if(dtcs_.begin(), dtcs_.end(),
+                           [&](Dtc const &d) { return d.code == code; });
+    return it == dtcs_.end() ? nullptr : &*it;
 }
 
 Result<std::vector<double>> Definition::read_axis_values(Rom const &rom,
