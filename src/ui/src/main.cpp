@@ -362,6 +362,13 @@ struct AppState {
     // DTC code (P0401) or name.
     char                                     dtc_filter[128]{};
 
+    // Visibility toggles for the secondary panels. The Sidebar and Table
+    // panels are always-on (closing them would orphan the user); these
+    // two are as-needed and are exposed via View menu checkboxes + the
+    // standard dock tab-close X.
+    bool                                     show_stats_panel{true};
+    bool                                     show_dtcs_panel{true};
+
     // Inline cell-value editor state. Active iff `editing_cell` is true;
     // the cell being edited is identified by selection.r_cursor /
     // selection.c_cursor (these don't change while editing — the
@@ -1516,6 +1523,12 @@ void render_menubar(AppState &state) {
                 state.view_mode = TableViewMode::Heatmap;
             }
             ImGui::Separator();
+            // Panel visibility. Sidebar + Table are always-on (primary
+            // navigation); Stats and DTCs are secondary panels the user
+            // may want hidden when working in the table grid full-screen.
+            ImGui::MenuItem("Stats panel", nullptr, &state.show_stats_panel);
+            ImGui::MenuItem("DTCs panel",  nullptr, &state.show_dtcs_panel);
+            ImGui::Separator();
             // Dev-only escape hatch. Tucked one level deeper so the
             // ImGui example isn't a peer of the user-facing view modes.
             if (ImGui::BeginMenu("Debug")) {
@@ -2482,7 +2495,13 @@ void render_welcome_panel(AppState &state) {
 // against source), and an ImPlot histogram. Read-only; updates each
 // frame the table data is loaded.
 void render_stats_panel(AppState &state) {
-    ImGui::Begin("Stats");
+    if (!state.show_stats_panel) {
+        return;
+    }
+    if (!ImGui::Begin("Stats", &state.show_stats_panel)) {
+        ImGui::End();
+        return;
+    }
     if (!state.project.has_value()) {
         ImGui::TextDisabled("No project loaded.");
         ImGui::End();
@@ -2597,7 +2616,13 @@ void render_stats_panel(AppState &state) {
 // flagged codes get a yellow "E" chip; the flash-time policy gate still
 // enforces the jurisdiction profile.
 void render_dtcs_panel(AppState &state) {
-    ImGui::Begin("DTCs");
+    if (!state.show_dtcs_panel) {
+        return;
+    }
+    if (!ImGui::Begin("DTCs", &state.show_dtcs_panel)) {
+        ImGui::End();
+        return;
+    }
     if (!state.project.has_value()) {
         ImGui::TextDisabled("No project loaded.");
         ImGui::End();
