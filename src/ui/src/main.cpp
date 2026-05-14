@@ -358,6 +358,10 @@ struct AppState {
     char                                     table_filter[128]{};
     bool                                     focus_table_filter{false};
 
+    // DTC-panel filter buffer. Same shape as table_filter; matched against
+    // DTC code (P0401) or name.
+    char                                     dtc_filter[128]{};
+
     // Inline cell-value editor state. Active iff `editing_cell` is true;
     // the cell being edited is identified by selection.r_cursor /
     // selection.c_cursor (these don't change while editing — the
@@ -2584,6 +2588,139 @@ void render_stats_panel(AppState &state) {
     ImGui::End();
 }
 
+// "DTCs" panel — surface the diagnostic trouble codes declared by the pack
+// with their current enable/disable state, and let the user toggle them.
+// Mirrors the CLI's `project-{enable,disable}-dtc`: each toggle directly
+// writes the bit through `st::set_dtc_enabled` and marks the project
+// dirty. DTC edits bypass `edit::History` (the Edit struct is rect-based,
+// not a byte-level operation), so Ctrl+Z won't roll them back. Emissions-
+// flagged codes get a yellow "E" chip; the flash-time policy gate still
+// enforces the jurisdiction profile.
+void render_dtcs_panel(AppState &state) {
+    ImGui::Begin("DTCs");
+    if (!state.project.has_value()) {
+        ImGui::TextDisabled("No project loaded.");
+        ImGui::End();
+        return;
+    }
+    auto const &def = state.project->definition();
+    if (def.dtcs().empty()) {
+        ImGui::TextDisabled("This pack declares no DTC bitmaps.");
+        ImGui::End();
+        return;
+    }
+
+    std::size_t emissions_total = 0;
+    for (auto const &d : def.dtcs()) {
+        if (d.emissions_relevant) ++emissions_total;
+    }
+    ImGui::TextDisabled("%zu DTC(s), %zu emissions-flagged",
+                         def.dtcs().size(), emissions_total);
+    ImGui::Separator();
+
+    // Filter input — substring against the code or name. Same shape as the
+    // sidebar's table filter but no global Ctrl+F focus binding (DTCs are
+    // a secondary surface).
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputTextWithHint("##dtc_filter", "Filter DTCs…",
+                              state.dtc_filter, sizeof state.dtc_filter,
+                              ImGuiInputTextFlags_EscapeClearsAll);
+    std::string_view const filter{state.dtc_filter};
+
+    auto const &rom = state.project->working_rom();
+    if (ImGui::BeginTable("dtc_table", 3,
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH
+                          | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit)) {
+        ImGui::TableSetupColumn("On", ImGuiTableColumnFlags_WidthFixed, 28.0f);
+        ImGui::TableSetupColumn("Code", ImGuiTableColumnFlags_WidthFixed, 56.0f);
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableHeadersRow();
+
+        std::size_t shown = 0;
+        for (auto const &d : def.dtcs()) {
+            if (!filter.empty() && !icontains(d.code, filter)
+                && !icontains(d.name, filter)) {
+                continue;
+            }
+            ++shown;
+            auto const *bm = def.find_dtc_bitmap(d.bitmap_id);
+            if (bm == nullptr) {
+                // Validation should have caught this at load time, but if it
+                // somehow snuck through, render a disabled row rather than
+                // crashing on the bit read.
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextDisabled("%s", d.code.c_str());
+                ImGui::TableSetColumnIndex(2);
+                ImGui::TextDisabled("(broken bitmap reference '%s')",
+                                     d.bitmap_id.c_str());
+                continue;
+            }
+            auto const enabled_r = st::is_dtc_enabled(rom, *bm, d);
+            bool enabled = enabled_r.has_value() ? *enabled_r : true;
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::PushID(d.code.c_str());
+            bool toggled = enabled;
+            if (ImGui::Checkbox("##en", &toggled) && toggled != enabled) {
+                auto change = st::set_dtc_enabled(state.project->working_rom(),
+                                                   *bm, d, toggled);
+                if (!change.has_value()) {
+                    state.status_msg = "DTC toggle failed: "
+                                       + change.error().to_string();
+                } else {
+                    state.dirty = true;
+                    state.status_msg = (toggled ? "Enabled " : "Disabled ")
+                                       + d.code;
+                }
+            }
+            ImGui::PopID();
+
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(d.code.c_str());
+            if (d.emissions_relevant) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.96f, 0.94f, 0.65f, 1.0f), "E");
+            }
+
+            ImGui::TableSetColumnIndex(2);
+            if (d.name.empty()) {
+                ImGui::TextDisabled("(no name)");
+            } else {
+                ImGui::TextUnformatted(d.name.c_str());
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::BeginTooltip();
+                ImGui::TextUnformatted(d.code.c_str());
+                if (!d.name.empty()) {
+                    ImGui::TextDisabled("%s", d.name.c_str());
+                }
+                ImGui::Separator();
+                ImGui::Text("Bitmap:    %s", d.bitmap_id.c_str());
+                ImGui::Text("Address:   0x%08zX + %zu",
+                             bm->address, d.byte_offset);
+                ImGui::Text("Bit:       %d", d.bit);
+                if (d.emissions_relevant) {
+                    ImGui::TextColored(ImVec4(0.96f, 0.94f, 0.65f, 1.0f),
+                                       "emissions-relevant");
+                }
+                ImGui::EndTooltip();
+            }
+        }
+        ImGui::EndTable();
+
+        if (!filter.empty()) {
+            ImGui::TextDisabled("Showing %zu of %zu.", shown, def.dtcs().size());
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::TextDisabled("DTC edits bypass undo (Ctrl+Z); save to persist.");
+    ImGui::End();
+}
+
 void render_table_view(AppState &state, Fonts const &fonts) {
     ImGui::Begin("Table");
 
@@ -3342,6 +3479,7 @@ int main(int argc, char *argv[]) {
         render_sidebar(state);
         render_table_view(state, fonts);
         render_stats_panel(state);
+        render_dtcs_panel(state);
         render_status_bar(state);
         render_unsaved_modal(state);
         render_flash_modal(state);
