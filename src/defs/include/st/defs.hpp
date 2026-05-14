@@ -70,6 +70,12 @@ struct Pack {
     std::vector<std::string>  data_sources;
     std::string               license;
     std::optional<std::string> extends;
+    // Relative paths to sibling fragment TOMLs whose [[scaling]]/[[axis]]/
+    // [[table]]/[[pid]]/[[switch]] arrays get merged into this pack at load
+    // time. Fragments may themselves carry a [pack] header — it's ignored
+    // (only records flow through). Paths are resolved against the pack
+    // file's parent directory.
+    std::vector<std::string>  includes;
 };
 
 // Linear: raw -> (raw * factor) + offset.

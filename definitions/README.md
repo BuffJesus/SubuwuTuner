@@ -113,11 +113,29 @@ subuwutuner-cli dump-table --def definitions/impreza/a4sg900c.toml \
 subuwutuner-cli pack-info definitions/pids.toml    # 91 SSM PIDs, no tables
 ```
 
+## How fragments wire into ECU packs
+
+Every SSM-capable ECU pack declares an `includes` list in its `[pack]`
+header pointing at the universal PID/switch payload and (where one
+exists) at its per-CID ecuparam fragment. For example:
+
+```
+# definitions/impreza/a4sg900c.toml
+[pack]
+…
+includes = ["../ecuparams/a4sg900c.toml", "../pids.toml"]
+```
+
+The C++ loader (`Definition::from_file`) walks `includes` after parsing
+the main TOML, ingests each fragment's `[[scaling]]`/`[[axis]]`/
+`[[table]]`/`[[pid]]`/`[[switch]]` arrays (the fragment's own `[pack]`
+header is ignored — only records flow through), and recurses depth-first
+into the fragment's own `includes` if it has any. Paths are resolved
+relative to the pack file's directory; cycles raise ParseError.
+
+VA/VB packs live on UDS, not SSM, so they don't include `../pids.toml`.
+
 ## What's NOT here
 
 - **Bit-level breakdowns** of multi-flag bytes that aren't already
   modelled as individual switches.
-- **Auto-loading of `ecuparams/<cid>.toml`** alongside its matching ECU
-  pack — currently the fragment is a sibling file with a different
-  `[pack].id`; integration with the C++ pack loader is future work.
-  Until then, load the fragment explicitly when you want extended PIDs.

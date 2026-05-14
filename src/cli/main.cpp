@@ -598,6 +598,11 @@ int cmd_pack_info(int argc, char *argv[]) {
     if (pack.extends.has_value()) {
         std::printf("Extends:        %s\n", pack.extends->c_str());
     }
+    if (!pack.includes.empty()) {
+        std::printf("Includes:      ");
+        for (auto const &inc : pack.includes) std::printf(" %s", inc.c_str());
+        std::printf("\n");
+    }
     std::printf("\n");
     std::printf("Identifications: %zu\n", def->identifications().size());
     for (auto const &id : def->identifications()) {

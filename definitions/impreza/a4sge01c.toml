@@ -15,6 +15,7 @@ years          = [2]
 endianness     = "big"
 rom_size_bytes = 196608
 license        = "Apache-2.0"
+includes       = ["../ecuparams/a4sge01c.toml", "../pids.toml"]
 
 
 [[identification]]

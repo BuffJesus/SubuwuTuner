@@ -15,6 +15,7 @@ years          = []
 endianness     = "big"
 rom_size_bytes = 1048576
 license        = "Apache-2.0"
+includes       = ["../ecuparams/a8dk100i.toml", "../pids.toml"]
 
 
 [[identification]]

@@ -142,6 +142,7 @@ Result<Pack> parse_pack(toml::node const &node) {
     if (auto const v = t->at_path("extends").value<std::string>(); v.has_value()) {
         p.extends = *v;
     }
+    p.includes = string_array(*t, "includes");
     if (p.endianness != "big" && p.endianness != "little") {
         return failure(ErrorCode::ParseError,
                        "[pack].endianness must be 'big' or 'little', got: " + p.endianness);
@@ -812,6 +813,64 @@ Result<Definition> Definition::from_toml_string(std::string_view toml) {
     return def;
 }
 
+namespace {
+// Walk `pack.includes` relative to `base_dir`, parse each fragment, merge
+// records-only into `def`. `visited` carries the canonical paths reached so
+// far in the recursion; revisits raise ParseError. Fragments may themselves
+// declare `includes` and we walk those depth-first.
+Status resolve_includes(Definition                                  &def,
+                        std::vector<std::string> const              &includes,
+                        std::filesystem::path const                 &base_dir,
+                        std::vector<std::filesystem::path>          &visited) {
+    for (auto const &rel : includes) {
+        std::error_code ec;
+        auto const candidate = base_dir / rel;
+        auto const canon     = std::filesystem::weakly_canonical(candidate, ec);
+        auto const resolved  = ec ? candidate : canon;
+        if (std::find(visited.begin(), visited.end(), resolved) != visited.end()) {
+            return failure(ErrorCode::ParseError,
+                           "include cycle detected at: " + resolved.string());
+        }
+        std::error_code read_ec;
+        std::string const contents = read_file(resolved, read_ec);
+        if (read_ec) {
+            return failure(ErrorCode::FileNotFound,
+                           "include not found: " + resolved.string());
+        }
+        auto tbl = parse_toml(contents);
+        if (!tbl.has_value()) {
+            return failure(ErrorCode::ParseError,
+                           "include parse: " + resolved.string() + ": "
+                               + std::string{tbl.error().message()});
+        }
+        // Record-level merge only — the fragment's own [pack] is informational
+        // (gives the file a loadable id for stand-alone `pack-info`) but does
+        // NOT replace the parent pack metadata.
+        Pack frag_pack;
+        bool has_frag_includes = false;
+        if (auto const *pack_node = tbl->get("pack"); pack_node != nullptr) {
+            if (auto r = parse_pack(*pack_node); r.has_value()) {
+                frag_pack = std::move(*r);
+                has_frag_includes = !frag_pack.includes.empty();
+            }
+        }
+        if (auto r = DefinitionBuilder::merge(*tbl, def, /*accept_pack=*/false,
+                                              /*require_pack=*/false);
+            !r.has_value()) {
+            return failure(r.error());
+        }
+        if (has_frag_includes) {
+            visited.push_back(resolved);
+            auto status = resolve_includes(def, frag_pack.includes,
+                                           resolved.parent_path(), visited);
+            visited.pop_back();
+            if (!status.has_value()) return failure(status.error());
+        }
+    }
+    return ok();
+}
+} // namespace
+
 Result<Definition> Definition::from_file(std::filesystem::path const &path) {
     std::error_code ec;
     if (std::filesystem::is_directory(path, ec) && !ec) {
@@ -821,7 +880,20 @@ Result<Definition> Definition::from_file(std::filesystem::path const &path) {
     if (ec) {
         return failure(ErrorCode::FileNotFound, path.string());
     }
-    return from_toml_string(contents);
+    auto def_r = from_toml_string(contents);
+    if (!def_r.has_value()) return def_r;
+    auto def = std::move(*def_r);
+    if (!def.pack_.includes.empty()) {
+        auto const canon = std::filesystem::weakly_canonical(path, ec);
+        auto const self  = ec ? path : canon;
+        std::vector<std::filesystem::path> visited{self};
+        if (auto status = resolve_includes(def, def.pack_.includes,
+                                           self.parent_path(), visited);
+            !status.has_value()) {
+            return failure(status.error());
+        }
+    }
+    return def;
 }
 
 Result<Definition> Definition::from_directory(std::filesystem::path const &path) {

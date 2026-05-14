@@ -1209,6 +1209,114 @@ endianness = "big"
     REQUIRE(d->pack().id == "auto-dispatch");
 }
 
+// ----- includes (single-file pack imports records from a sibling) --------
+
+TEST_CASE("from_file resolves `includes` and merges fragment records",
+          "[defs][includes]") {
+    TempDir td;
+    write_text(td.path / "frag.toml", R"toml(
+[pack]
+id         = "subaru-ssm-ecuparams-x"
+endianness = "big"
+
+[[scaling]]
+id        = "raw_x"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint8"
+
+[[pid]]
+id          = "e1"
+name        = "IAM*"
+ssm_address = 0x20118
+length      = 1
+data_type   = "uint8"
+scaling     = "raw_x"
+unit        = "raw"
+)toml");
+    write_text(td.path / "main.toml", R"toml(
+[pack]
+id         = "lf9c102p"
+endianness = "big"
+includes   = ["frag.toml"]
+)toml");
+    auto const d = st::Definition::from_file(td.path / "main.toml");
+    REQUIRE(d.has_value());
+    REQUIRE(d->pack().id == "lf9c102p");
+    // Fragment's [pack] is ignored — parent id wins.
+    REQUIRE(d->pids().size() == 1);
+    REQUIRE(d->pids()[0].id == "e1");
+    REQUIRE(d->pids()[0].ssm_address == 0x20118);
+    REQUIRE(d->scalings().size() == 1);
+    REQUIRE(d->find_pid("e1") != nullptr);
+}
+
+TEST_CASE("from_file resolves a chain of includes depth-first",
+          "[defs][includes]") {
+    TempDir td;
+    write_text(td.path / "leaf.toml", R"toml(
+[[pid]]
+id          = "leaf_pid"
+ssm_address = 0x00
+length      = 1
+data_type   = "uint8"
+)toml");
+    write_text(td.path / "mid.toml", R"toml(
+[pack]
+id         = "mid"
+endianness = "big"
+includes   = ["leaf.toml"]
+
+[[pid]]
+id          = "mid_pid"
+ssm_address = 0x01
+length      = 1
+data_type   = "uint8"
+)toml");
+    write_text(td.path / "main.toml", R"toml(
+[pack]
+id         = "root"
+endianness = "big"
+includes   = ["mid.toml"]
+)toml");
+    auto const d = st::Definition::from_file(td.path / "main.toml");
+    REQUIRE(d.has_value());
+    REQUIRE(d->pids().size() == 2);
+    REQUIRE(d->find_pid("mid_pid") != nullptr);
+    REQUIRE(d->find_pid("leaf_pid") != nullptr);
+}
+
+TEST_CASE("from_file `includes` reports a missing fragment cleanly",
+          "[defs][includes]") {
+    TempDir td;
+    write_text(td.path / "main.toml", R"toml(
+[pack]
+id         = "x"
+endianness = "big"
+includes   = ["does_not_exist.toml"]
+)toml");
+    auto const d = st::Definition::from_file(td.path / "main.toml");
+    REQUIRE_FALSE(d.has_value());
+}
+
+TEST_CASE("from_file detects an include cycle", "[defs][includes]") {
+    TempDir td;
+    write_text(td.path / "a.toml", R"toml(
+[pack]
+id         = "a"
+endianness = "big"
+includes   = ["b.toml"]
+)toml");
+    write_text(td.path / "b.toml", R"toml(
+[pack]
+id         = "b"
+endianness = "big"
+includes   = ["a.toml"]
+)toml");
+    auto const d = st::Definition::from_file(td.path / "a.toml");
+    REQUIRE_FALSE(d.has_value());
+}
+
 // ----- extends / inheritance ---------------------------------------------
 
 TEST_CASE("from_directory resolves a single 'extends' chain",
