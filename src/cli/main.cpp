@@ -88,11 +88,12 @@ constexpr std::string_view kUsage =
     "    project-edit --table <id> [--rows A:B] [--cols A:B] OP [VALUE] <dir>\n"
     "                            Apply an edit to a project's working ROM and\n"
     "                            update project.toml. Same OPs as table-edit.\n"
-    "    project-edit-csv <dir> --table <id> --from <FILE.csv>\n"
+    "    project-edit-csv <dir> --table <id> --from <FILE.csv> [--dry-run]\n"
     "                            Bulk cell-edit import. CSV: optional header,\n"
     "                            then one edit per row as `row,col,value`.\n"
     "                            Applied as a single project edit through\n"
-    "                            edit::History.\n"
+    "                            edit::History. --dry-run previews the edits\n"
+    "                            (before -> after) without writing.\n"
     "    project-export-csv <dir> --table <id> [--diff-only] [--output <FILE>]\n"
     "                            Export the table's working-ROM cells as\n"
     "                            `row,col,value` rows (the format project-edit-\n"
@@ -1018,6 +1019,7 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
     std::optional<std::filesystem::path> proj_path;
     std::optional<std::string>           table_id;
     std::optional<std::filesystem::path> csv_path;
+    bool                                 dry_run = false;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         auto const require = [&](char const *name) -> char const * {
@@ -1033,6 +1035,8 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
         } else if (a == "--from") {
             if (auto const *v = require("--from"); v) csv_path = std::filesystem::path{v};
             else return 2;
+        } else if (a == "--dry-run") {
+            dry_run = true;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "project-edit-csv: unknown option: %s\n", argv[i]);
             return 2;
@@ -1046,11 +1050,14 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
     if (!proj_path.has_value() || !table_id.has_value() || !csv_path.has_value()) {
         std::fputs("project-edit-csv: missing required arguments\n"
                    "Usage: subuwutuner-cli project-edit-csv <dir> "
-                   "--table <id> --from <FILE.csv>\n"
+                   "--table <id> --from <FILE.csv> [--dry-run]\n"
                    "  CSV format: optional header row, then one edit per row\n"
                    "  in the shape `row,col,value` (engineering units; the\n"
                    "  pack's scaling does the byte conversion). Applied as a\n"
-                   "  single project edit through edit::History.\n",
+                   "  single project edit through edit::History.\n"
+                   "  --dry-run validates and previews the edits (table+bounds\n"
+                   "  match, cells in range, identity headers OK) and prints a\n"
+                   "  before->after preview without touching the project.\n",
                    stderr);
         return 2;
     }
@@ -1216,6 +1223,28 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
     for (auto const &e : edits) {
         r_min = std::min(r_min, e.r); r_max = std::max(r_max, e.r);
         c_min = std::min(c_min, e.c); c_max = std::max(c_max, e.c);
+    }
+    if (dry_run) {
+        auto const *scaling = proj->definition().find_scaling(table->scaling);
+        int const   prec    = scaling != nullptr ? scaling->precision : 6;
+        std::printf("Table:      %s\n", table->id.c_str());
+        std::printf("Cells:      %zu  (dry-run; no edits applied)\n",
+                    edits.size());
+        std::printf("Bounding:   rows %zu..%zu, cols %zu..%zu\n",
+                    r_min, r_max, c_min, c_max);
+        constexpr std::size_t kPreviewLimit = 10;
+        std::size_t const     shown = std::min(kPreviewLimit, edits.size());
+        std::printf("Preview:    %zu of %zu edits (row,col: before -> after)\n",
+                    shown, edits.size());
+        for (std::size_t i = 0; i < shown; ++i) {
+            auto const &e = edits[i];
+            std::printf("  (%zu,%zu): %.*f -> %.*f\n", e.r, e.c,
+                        prec, td->values[e.r][e.c], prec, e.v);
+        }
+        if (edits.size() > shown) {
+            std::printf("  ... %zu more not shown\n", edits.size() - shown);
+        }
+        return 0;
     }
     st::edit::Rect const rect{r_min, r_max, c_min, c_max};
     auto before = st::edit::snapshot(*td, rect);
