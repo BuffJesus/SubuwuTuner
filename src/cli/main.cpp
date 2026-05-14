@@ -88,6 +88,11 @@ constexpr std::string_view kUsage =
     "    project-edit --table <id> [--rows A:B] [--cols A:B] OP [VALUE] <dir>\n"
     "                            Apply an edit to a project's working ROM and\n"
     "                            update project.toml. Same OPs as table-edit.\n"
+    "    project-edit-csv <dir> --table <id> --from <FILE.csv>\n"
+    "                            Bulk cell-edit import. CSV: optional header,\n"
+    "                            then one edit per row as `row,col,value`.\n"
+    "                            Applied as a single project edit through\n"
+    "                            edit::History.\n"
     "    project-set-profile <dir> <profile>\n"
     "                            Set the project's jurisdiction profile (see\n"
     "                            docs/06-legal-ethics.md). Valid: motorsport-only,\n"
@@ -1000,6 +1005,200 @@ int cmd_project_edit(int argc, char *argv[]) {
                 rect.r_start, rect.r_end, rect.c_start, rect.c_end,
                 rect.rows() * rect.cols());
     std::printf("Saved to:   %s\n", proj_path->string().c_str());
+    std::printf("New CRC32:  0x%08X\n", proj->working_rom().crc32());
+    return 0;
+}
+
+int cmd_project_edit_csv(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> proj_path;
+    std::optional<std::string>           table_id;
+    std::optional<std::filesystem::path> csv_path;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "project-edit-csv: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--table") {
+            if (auto const *v = require("--table"); v) table_id = std::string{v};
+            else return 2;
+        } else if (a == "--from") {
+            if (auto const *v = require("--from"); v) csv_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "project-edit-csv: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!proj_path.has_value()) {
+            proj_path = std::filesystem::path{a};
+        } else {
+            std::fprintf(stderr, "project-edit-csv: extra positional: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!proj_path.has_value() || !table_id.has_value() || !csv_path.has_value()) {
+        std::fputs("project-edit-csv: missing required arguments\n"
+                   "Usage: subuwutuner-cli project-edit-csv <dir> "
+                   "--table <id> --from <FILE.csv>\n"
+                   "  CSV format: optional header row, then one edit per row\n"
+                   "  in the shape `row,col,value` (engineering units; the\n"
+                   "  pack's scaling does the byte conversion). Applied as a\n"
+                   "  single project edit through edit::History.\n",
+                   stderr);
+        return 2;
+    }
+
+    auto proj = st::Project::open(*proj_path);
+    if (!proj.has_value()) {
+        std::fprintf(stderr, "project-edit-csv: %s\n",
+                     proj.error().to_string().c_str());
+        return 1;
+    }
+    auto const *table = proj->definition().find_table(*table_id);
+    if (table == nullptr) {
+        std::fprintf(stderr, "project-edit-csv: table '%s' not found in pack\n",
+                     table_id->c_str());
+        return 1;
+    }
+    auto td = proj->definition().read_table_values(proj->working_rom(), *table);
+    if (!td.has_value()) {
+        std::fprintf(stderr, "project-edit-csv: %s\n",
+                     td.error().to_string().c_str());
+        return 1;
+    }
+    std::size_t const rows = td->values.size();
+    std::size_t const cols = rows > 0 ? td->values[0].size() : 0;
+
+    // Parse the CSV. Skip blank lines and `#` comments. Tolerate a header
+    // row when its first field is non-numeric.
+    std::ifstream in{*csv_path, std::ios::binary};
+    if (!in) {
+        std::fprintf(stderr, "project-edit-csv: cannot open %s\n",
+                     csv_path->string().c_str());
+        return 1;
+    }
+    struct Cell { std::size_t r, c; double v; };
+    std::vector<Cell> edits;
+    std::string       line;
+    std::size_t       line_no = 0;
+    while (std::getline(in, line)) {
+        ++line_no;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        // Strip comment.
+        if (auto p = line.find('#'); p != std::string::npos) line.resize(p);
+        // Skip blank.
+        bool blank = true;
+        for (char c : line) if (!std::isspace(static_cast<unsigned char>(c))) {
+            blank = false; break;
+        }
+        if (blank) continue;
+        // Split on commas.
+        std::vector<std::string_view> fields;
+        {
+            std::size_t start = 0;
+            for (std::size_t i = 0; i <= line.size(); ++i) {
+                if (i == line.size() || line[i] == ',') {
+                    fields.push_back(std::string_view{line}.substr(start, i - start));
+                    start = i + 1;
+                }
+            }
+        }
+        if (fields.size() < 3) {
+            std::fprintf(stderr,
+                "project-edit-csv: line %zu: expected 3 fields, got %zu\n",
+                line_no, fields.size());
+            return 1;
+        }
+        auto parse_size = [](std::string_view sv, std::size_t &out) {
+            std::size_t v = 0;
+            char const *first = sv.data();
+            char const *last  = sv.data() + sv.size();
+            while (first < last && std::isspace(static_cast<unsigned char>(*first))) ++first;
+            while (last > first && std::isspace(static_cast<unsigned char>(*(last-1)))) --last;
+            auto const res = std::from_chars(first, last, v);
+            if (res.ec != std::errc{} || res.ptr != last) return false;
+            out = v; return true;
+        };
+        auto parse_dbl = [](std::string_view sv, double &out) {
+            std::string s{sv};
+            char *end = nullptr;
+            double const d = std::strtod(s.c_str(), &end);
+            if (end == s.c_str() || end == nullptr || *end != '\0') return false;
+            out = d; return true;
+        };
+        std::size_t r = 0, c = 0;
+        double      v = 0.0;
+        if (!parse_size(fields[0], r) || !parse_size(fields[1], c)) {
+            // First-line header tolerance.
+            if (edits.empty()) continue;
+            std::fprintf(stderr,
+                "project-edit-csv: line %zu: row/col not integers\n", line_no);
+            return 1;
+        }
+        if (!parse_dbl(fields[2], v)) {
+            std::fprintf(stderr,
+                "project-edit-csv: line %zu: value '%s' is not numeric\n",
+                line_no, std::string{fields[2]}.c_str());
+            return 1;
+        }
+        if (r >= rows || c >= cols) {
+            std::fprintf(stderr,
+                "project-edit-csv: line %zu: (%zu,%zu) is outside table "
+                "(%zu rows x %zu cols)\n", line_no, r, c, rows, cols);
+            return 1;
+        }
+        edits.push_back({r, c, v});
+    }
+    if (edits.empty()) {
+        std::fputs("project-edit-csv: no edit rows parsed; nothing to do.\n",
+                   stderr);
+        return 0;
+    }
+
+    // Bounding rect over all touched cells. Snapshot once, mutate, snapshot.
+    std::size_t r_min = edits[0].r, r_max = edits[0].r;
+    std::size_t c_min = edits[0].c, c_max = edits[0].c;
+    for (auto const &e : edits) {
+        r_min = std::min(r_min, e.r); r_max = std::max(r_max, e.r);
+        c_min = std::min(c_min, e.c); c_max = std::max(c_max, e.c);
+    }
+    st::edit::Rect const rect{r_min, r_max, c_min, c_max};
+    auto before = st::edit::snapshot(*td, rect);
+    if (!before.has_value()) {
+        std::fprintf(stderr, "project-edit-csv: %s\n",
+                     before.error().to_string().c_str());
+        return 1;
+    }
+    for (auto const &e : edits) td->values[e.r][e.c] = e.v;
+    auto after = st::edit::snapshot(*td, rect);
+    if (!after.has_value()) {
+        std::fprintf(stderr, "project-edit-csv: %s\n",
+                     after.error().to_string().c_str());
+        return 1;
+    }
+    if (auto wb = proj->definition().write_table_values(
+            proj->working_rom(), *table, *td);
+        !wb.has_value()) {
+        std::fprintf(stderr, "project-edit-csv: writeback: %s\n",
+                     wb.error().to_string().c_str());
+        return 1;
+    }
+    char descbuf[64];
+    std::snprintf(descbuf, sizeof descbuf, "csv import (%zu cell%s)",
+                  edits.size(), edits.size() == 1 ? "" : "s");
+    proj->history().record({table->id, std::move(*before),
+                            std::move(*after), std::string{descbuf}});
+    if (auto s = proj->save_working_rom(); !s.has_value()) {
+        std::fprintf(stderr, "project-edit-csv: save: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+    std::printf("Table:      %s\n", table->id.c_str());
+    std::printf("Cells:      %zu\n", edits.size());
+    std::printf("Bounding:   rows %zu..%zu, cols %zu..%zu\n",
+                r_min, r_max, c_min, c_max);
     std::printf("New CRC32:  0x%08X\n", proj->working_rom().crc32());
     return 0;
 }
@@ -5596,6 +5795,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-edit") {
         return cmd_project_edit(argc - 2, argv + 2);
+    }
+    if (cmd == "project-edit-csv") {
+        return cmd_project_edit_csv(argc - 2, argv + 2);
     }
     if (cmd == "project-set-profile") {
         return cmd_project_set_profile(argc - 2, argv + 2);
