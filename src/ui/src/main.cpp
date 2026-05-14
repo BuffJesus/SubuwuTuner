@@ -3316,6 +3316,48 @@ void render_status_bar(AppState &state) {
             }
         }
 
+        // DTCs-disabled chip — only present when the pack declares DTCs
+        // AND at least one is currently disabled. Walks the pack each
+        // frame (a few hundred byte reads at worst, dwarfed by the data
+        // grid's per-cell scaling work). Click to focus the DTCs panel.
+        {
+            auto const &def = state.project->definition();
+            if (!def.dtcs().empty()) {
+                auto const &rom = state.project->working_rom();
+                std::size_t disabled         = 0;
+                std::size_t emissions_off    = 0;
+                for (auto const &d : def.dtcs()) {
+                    auto const *bm = def.find_dtc_bitmap(d.bitmap_id);
+                    if (bm == nullptr) continue;
+                    auto const en = st::is_dtc_enabled(rom, *bm, d);
+                    if (en.has_value() && !*en) {
+                        ++disabled;
+                        if (d.emissions_relevant) ++emissions_off;
+                    }
+                }
+                if (disabled > 0) {
+                    char buf[48];
+                    std::snprintf(buf, sizeof buf, "%zu DTC off", disabled);
+                    ImGui::SameLine();
+                    chip(buf, chip_fg_muted(), chip_bg_muted());
+                    if (ImGui::IsItemHovered()) {
+                        if (emissions_off > 0) {
+                            ImGui::SetTooltip(
+                                "%zu DTC(s) disabled in this working ROM\n"
+                                "(%zu emissions-flagged).\n"
+                                "See the DTCs panel to toggle.",
+                                disabled, emissions_off);
+                        } else {
+                            ImGui::SetTooltip(
+                                "%zu DTC(s) disabled in this working ROM.\n"
+                                "See the DTCs panel to toggle.",
+                                disabled);
+                        }
+                    }
+                }
+            }
+        }
+
         ImGui::SameLine();
         ImGui::TextDisabled("edits %zu / %zu",
                             state.project->history().cursor(),
