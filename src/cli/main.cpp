@@ -89,7 +89,7 @@ constexpr std::string_view kUsage =
     "                            alberta-ca, eu-roadworthy, california-us.\n"
     "    project-history <dir>   List the project's edit history with cursor\n"
     "                            position and per-edit emissions/safety flags.\n"
-    "    project-flash <dir> --trace <FILE.uds>\n"
+    "    project-flash <dir> [--trace <FILE.uds>]\n"
     "                  [--journal <FILE.toml>] [--manifest <FILE.toml>]\n"
     "                  [--confirm] [--reason \"…\"] [--dry-run]\n"
     "                  [--sector-size <N>] [--base-address <addr>]\n"
@@ -97,9 +97,12 @@ constexpr std::string_view kUsage =
     "                            working delta, gate it through st::policy using\n"
     "                            the project's stored profile, then run the\n"
     "                            orchestrator against a MockTransport-replayed UDS\n"
-    "                            trace. Refuses on engine-safety violations and on\n"
-    "                            emissions edits without the confirmation/reason\n"
-    "                            the active profile demands.\n"
+    "                            trace. Without --trace, runs everything up\n"
+    "                            through the policy gate and exits — a preview of\n"
+    "                            what the flash would do without touching the\n"
+    "                            transport. Refuses on engine-safety violations\n"
+    "                            and on emissions edits without the confirmation/\n"
+    "                            reason the active profile demands.\n"
     "    pack-info <DEF>         Print metadata + counts for a definition pack.\n"
     "    table-list <DEF> [--category C] [--emissions] [--safety-critical]\n"
     "                            List tables in a pack with optional filters.\n"
@@ -3930,15 +3933,18 @@ int cmd_project_flash(int argc, char *argv[]) {
             return 2;
         }
     }
-    if (!project_dir.has_value() || !trace_path.has_value()) {
-        std::fputs("project-flash: missing required arguments\n"
-                   "Usage: subuwutuner-cli project-flash <dir> --trace <FILE.uds>\n"
+    if (!project_dir.has_value()) {
+        std::fputs("project-flash: missing project directory\n"
+                   "Usage: subuwutuner-cli project-flash <dir> [--trace <FILE.uds>]\n"
                    "       [--journal <FILE.toml>] [--manifest <FILE.toml>]\n"
                    "       [--confirm] [--reason \"…\"] [--dry-run]\n"
-                   "       [--sector-size <N>] [--base-address <addr>]\n",
+                   "       [--sector-size <N>] [--base-address <addr>]\n"
+                   "  Without --trace, runs everything up through the policy\n"
+                   "  gate and exits — a preview of what the flash would do.\n",
                    stderr);
         return 2;
     }
+    bool const preview_only = !trace_path.has_value();
 
     auto project = st::Project::open(*project_dir);
     if (!project.has_value()) {
@@ -3991,6 +3997,19 @@ int cmd_project_flash(int argc, char *argv[]) {
                                   confirm, reason);
         rc != 0) {
         return rc;
+    }
+
+    if (preview_only) {
+        std::printf("project-flash: preview only (no --trace supplied); "
+                    "policy gate cleared %zu sector(s), %zu bytes. No "
+                    "transport contacted.\n",
+                    plan.writes.size(),
+                    std::accumulate(plan.writes.begin(), plan.writes.end(),
+                                    std::size_t{0},
+                                    [](std::size_t a, auto const &w) {
+                                        return a + w.data.size();
+                                    }));
+        return 0;
     }
 
     // Replay trace through MockTransport, exactly like flash-apply.
