@@ -36,7 +36,7 @@ SubuwuTuner/
 │   ├── ui/                                (subuwutuner-gui — Dear ImGui front-end on top of the domain libs)
 │   └── cli/                               (subuwutuner-cli — rom-info, rom-pull, dump-axis[--csv], dump-table[--csv], rom-diff, table-edit, project-{new,info,edit,undo,redo}, pack-info, table-list, log, can-{replay,diff,discover,export-dbc,decode}, flash-{plan-info,delta,resume,apply,trace})
 ├── tools/defgen/                          (Python: RomRaider XML -> our TOML; clean-room facts-only; handles <base> inheritance)
-├── definitions/                           (8 VA + 18 VB WRX TOML packs, defgen-generated from fact-only XML)
+├── definitions/                           (358 defgen-generated TOML packs: 26 current-WRX from fact-only XML, 332 older Subarus from Merp's community pack)
 ├── fixtures/
 │   ├── demo-pack/                         (committed: multi-file demo TOML pack — axes, scalings, tables, pids)
 │   ├── demo.stune/                        (committed: synthetic project, 1024-byte ROM)
