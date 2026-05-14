@@ -1077,13 +1077,31 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
     std::size_t const cols = rows > 0 ? td->values[0].size() : 0;
 
     // Parse the CSV. Skip blank lines and `#` comments. Tolerate a header
-    // row when its first field is non-numeric.
+    // row when its first field is non-numeric. Recognise our own
+    // `# pack_id = "..."` / `# table = "..."` identity headers and warn
+    // (or refuse, on a hard mismatch of `table`) when the CSV was
+    // exported against a different pack.
     std::ifstream in{*csv_path, std::ios::binary};
     if (!in) {
         std::fprintf(stderr, "project-edit-csv: cannot open %s\n",
                      csv_path->string().c_str());
         return 1;
     }
+    auto const extract_quoted = [](std::string_view line) -> std::string {
+        auto const eq = line.find('=');
+        if (eq == std::string_view::npos) return {};
+        auto       rest = line.substr(eq + 1);
+        while (!rest.empty() && std::isspace(static_cast<unsigned char>(rest.front()))) {
+            rest.remove_prefix(1);
+        }
+        if (rest.size() >= 2 && rest.front() == '"') {
+            auto const close = rest.find('"', 1);
+            if (close != std::string_view::npos) {
+                return std::string{rest.substr(1, close - 1)};
+            }
+        }
+        return std::string{rest};
+    };
     struct Cell { std::size_t r, c; double v; };
     std::vector<Cell> edits;
     std::string       line;
@@ -1091,6 +1109,36 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
     while (std::getline(in, line)) {
         ++line_no;
         if (!line.empty() && line.back() == '\r') line.pop_back();
+        // Check for identity headers before stripping comments — they
+        // live INSIDE the comment, after the `#`.
+        if (!line.empty() && line.front() == '#') {
+            std::string_view rest{line.data() + 1, line.size() - 1};
+            while (!rest.empty()
+                   && std::isspace(static_cast<unsigned char>(rest.front()))) {
+                rest.remove_prefix(1);
+            }
+            if (rest.starts_with("pack_id")) {
+                auto const declared = extract_quoted(rest);
+                auto const ours     = proj->definition().pack().id;
+                if (!declared.empty() && declared != ours) {
+                    std::fprintf(stderr,
+                        "project-edit-csv: WARNING: CSV pack_id=\"%s\" "
+                        "differs from project pack=\"%s\"; scaling and "
+                        "addresses may not match\n",
+                        declared.c_str(), ours.c_str());
+                }
+            } else if (rest.starts_with("table")) {
+                auto const declared = extract_quoted(rest);
+                if (!declared.empty() && declared != table->id) {
+                    std::fprintf(stderr,
+                        "project-edit-csv: REFUSED: CSV table=\"%s\" "
+                        "differs from --table \"%s\"; pass the matching "
+                        "--table or use a different CSV\n",
+                        declared.c_str(), table->id.c_str());
+                    return 1;
+                }
+            }
+        }
         // Strip comment.
         if (auto p = line.find('#'); p != std::string::npos) line.resize(p);
         // Skip blank.
@@ -1299,6 +1347,12 @@ int cmd_project_export_csv(int argc, char *argv[]) {
         }
         out = &file;
     }
+    // Identity header — lets project-edit-csv verify on import that the
+    // CSV is being applied against a matching pack + table. Both lines
+    // are # comments so the file still round-trips as plain CSV through
+    // generic tools.
+    *out << "# pack_id = \"" << proj->definition().pack().id << "\"\n";
+    *out << "# table   = \"" << table->id << "\"\n";
     *out << "row,col,value\n";
     std::size_t emitted = 0;
     char buf[64];
