@@ -148,6 +148,9 @@ constexpr std::string_view kUsage =
     "    pack-info <DEF>         Print metadata + counts for a definition pack.\n"
     "    table-list <DEF> [--category C] [--emissions] [--safety-critical]\n"
     "                            List tables in a pack with optional filters.\n"
+    "    pack-dtcs <DEF> [--bitmap <id>] [--emissions]\n"
+    "                            List DTC codes in a pack, with their bitmap\n"
+    "                            location and emissions-relevant flag.\n"
     "    policy [--profile P]    Print the jurisdiction-profile lint matrix\n"
     "                            (emissions on-save/on-flash, engine-safety) for\n"
     "                            the named profile (or all profiles if omitted).\n"
@@ -710,6 +713,17 @@ int cmd_pack_info(int argc, char *argv[]) {
     }
     std::printf("PIDs:            %zu\n", def->pids().size());
     std::printf("Switches:        %zu\n", def->switches().size());
+    std::printf("DTC bitmaps:     %zu\n", def->dtc_bitmaps().size());
+    std::printf("DTCs:            %zu\n", def->dtcs().size());
+    {
+        std::size_t emissions = 0;
+        for (auto const &d : def->dtcs()) {
+            if (d.emissions_relevant) ++emissions;
+        }
+        if (emissions > 0) {
+            std::printf("  emissions:     %zu\n", emissions);
+        }
+    }
 
     // Quick validate so users see issues without running rom-info.
     auto const validity = def->validate();
@@ -861,6 +875,84 @@ int cmd_table_list(int argc, char *argv[]) {
     std::printf("\n%zu tables shown (of %zu in pack). "
                 "Flags: E=emissions, S=engine-safety.\n",
                 matched, def->tables().size());
+    return 0;
+}
+
+int cmd_pack_dtcs(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::string>           bitmap_filter;
+    bool                                 emissions_only = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const             require = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "pack-dtcs: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--bitmap") {
+            if (auto const *v = require("--bitmap"); v) bitmap_filter = std::string{v};
+            else return 2;
+        } else if (a == "--emissions") {
+            emissions_only = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "pack-dtcs: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!def_path.has_value()) {
+            def_path = std::filesystem::path{a};
+        } else {
+            std::fprintf(stderr, "pack-dtcs: extra argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!def_path.has_value()) {
+        std::fputs("pack-dtcs: missing path\n", stderr);
+        std::fputs("Usage: subuwutuner-cli pack-dtcs <DEF> "
+                   "[--bitmap <id>] [--emissions]\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const def = st::Definition::from_file(*def_path);
+    if (!def.has_value()) {
+        std::fprintf(stderr, "pack-dtcs: %s\n", def.error().to_string().c_str());
+        return 1;
+    }
+
+    if (def->dtc_bitmaps().empty() && def->dtcs().empty()) {
+        std::printf("(no DTC bitmaps or codes declared in this pack)\n");
+        return 0;
+    }
+
+    if (!def->dtc_bitmaps().empty()) {
+        std::printf("Bitmaps:\n");
+        for (auto const &b : def->dtc_bitmaps()) {
+            std::printf("  %-24s @ 0x%08zX  %zu bytes\n",
+                        b.id.c_str(), b.address, b.length_bytes);
+        }
+        std::printf("\n");
+    }
+
+    std::size_t matched = 0;
+    std::printf("%-6s %-1s %-32s %s\n", "code", "F", "location", "name");
+    for (auto const &d : def->dtcs()) {
+        if (emissions_only && !d.emissions_relevant) continue;
+        if (bitmap_filter.has_value() && d.bitmap_id != *bitmap_filter) continue;
+        char location[64];
+        std::snprintf(location, sizeof(location), "%s:%zu.%d",
+                      d.bitmap_id.c_str(), d.byte_offset, d.bit);
+        std::printf("%-6s %c %-32s %s\n",
+                    d.code.c_str(),
+                    d.emissions_relevant ? 'E' : '-',
+                    location, d.name.c_str());
+        ++matched;
+    }
+    std::printf("\n%zu DTC(s) shown (of %zu in pack). "
+                "Flag: E=emissions-relevant.\n",
+                matched, def->dtcs().size());
     return 0;
 }
 
@@ -6181,6 +6273,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "table-list") {
         return cmd_table_list(argc - 2, argv + 2);
+    }
+    if (cmd == "pack-dtcs") {
+        return cmd_pack_dtcs(argc - 2, argv + 2);
     }
     if (cmd == "policy") {
         return cmd_policy(argc - 2, argv + 2);
