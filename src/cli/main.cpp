@@ -93,6 +93,11 @@ constexpr std::string_view kUsage =
     "                            then one edit per row as `row,col,value`.\n"
     "                            Applied as a single project edit through\n"
     "                            edit::History.\n"
+    "    project-export-csv <dir> --table <id> [--diff-only] [--output <FILE>]\n"
+    "                            Export the table's working-ROM cells as\n"
+    "                            `row,col,value` rows (the format project-edit-\n"
+    "                            csv consumes). --diff-only restricts to cells\n"
+    "                            that differ from source — share-able tune diff.\n"
     "    project-set-profile <dir> <profile>\n"
     "                            Set the project's jurisdiction profile (see\n"
     "                            docs/06-legal-ethics.md). Valid: motorsport-only,\n"
@@ -1200,6 +1205,122 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
     std::printf("Bounding:   rows %zu..%zu, cols %zu..%zu\n",
                 r_min, r_max, c_min, c_max);
     std::printf("New CRC32:  0x%08X\n", proj->working_rom().crc32());
+    return 0;
+}
+
+int cmd_project_export_csv(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> proj_path;
+    std::optional<std::string>           table_id;
+    std::optional<std::filesystem::path> output_path;
+    bool                                 diff_only = false;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "project-export-csv: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--table") {
+            if (auto const *v = require("--table"); v) table_id = std::string{v};
+            else return 2;
+        } else if (a == "--output" || a == "-o") {
+            if (auto const *v = require("--output"); v) output_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--diff-only") {
+            diff_only = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "project-export-csv: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!proj_path.has_value()) {
+            proj_path = std::filesystem::path{a};
+        } else {
+            std::fprintf(stderr, "project-export-csv: extra positional: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!proj_path.has_value() || !table_id.has_value()) {
+        std::fputs("project-export-csv: missing required arguments\n"
+                   "Usage: subuwutuner-cli project-export-csv <dir> "
+                   "--table <id> [--diff-only] [--output <FILE.csv>]\n"
+                   "  Emits the table's working-ROM cells in the "
+                   "`row,col,value` format that project-edit-csv consumes.\n"
+                   "  --diff-only restricts the output to cells whose working\n"
+                   "  value differs from the source. Without --output, the CSV\n"
+                   "  goes to stdout.\n",
+                   stderr);
+        return 2;
+    }
+    auto proj = st::Project::open(*proj_path);
+    if (!proj.has_value()) {
+        std::fprintf(stderr, "project-export-csv: %s\n",
+                     proj.error().to_string().c_str());
+        return 1;
+    }
+    auto const *table = proj->definition().find_table(*table_id);
+    if (table == nullptr) {
+        std::fprintf(stderr,
+            "project-export-csv: table '%s' not found in pack\n",
+            table_id->c_str());
+        return 1;
+    }
+    auto const working_td = proj->definition().read_table_values(
+        proj->working_rom(), *table);
+    if (!working_td.has_value()) {
+        std::fprintf(stderr, "project-export-csv: %s\n",
+                     working_td.error().to_string().c_str());
+        return 1;
+    }
+    std::optional<st::Definition::TableData> source_td;
+    if (diff_only) {
+        auto s = proj->definition().read_table_values(
+            proj->source_rom(), *table);
+        if (!s.has_value()) {
+            std::fprintf(stderr, "project-export-csv: source read: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        source_td = std::move(*s);
+    }
+
+    auto const *scaling = proj->definition().find_scaling(table->scaling);
+    auto const  prec    = scaling != nullptr ? scaling->precision : 6;
+
+    // Open output (default stdout).
+    std::ofstream  file;
+    std::ostream  *out = &std::cout;
+    if (output_path.has_value()) {
+        file.open(*output_path, std::ios::trunc);
+        if (!file) {
+            std::fprintf(stderr, "project-export-csv: cannot open %s\n",
+                         output_path->string().c_str());
+            return 1;
+        }
+        out = &file;
+    }
+    *out << "row,col,value\n";
+    std::size_t emitted = 0;
+    char buf[64];
+    for (std::size_t r = 0; r < working_td->values.size(); ++r) {
+        for (std::size_t c = 0; c < working_td->values[r].size(); ++c) {
+            double const v = working_td->values[r][c];
+            if (diff_only) {
+                if (r >= source_td->values.size()
+                    || c >= source_td->values[r].size()) continue;
+                if (v == source_td->values[r][c]) continue;
+            }
+            std::snprintf(buf, sizeof buf, "%zu,%zu,%.*f\n",
+                          r, c, prec, v);
+            *out << buf;
+            ++emitted;
+        }
+    }
+    if (output_path.has_value()) {
+        std::fprintf(stderr, "project-export-csv: wrote %zu cell%s to %s\n",
+                     emitted, emitted == 1 ? "" : "s",
+                     output_path->string().c_str());
+    }
     return 0;
 }
 
@@ -5798,6 +5919,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-edit-csv") {
         return cmd_project_edit_csv(argc - 2, argv + 2);
+    }
+    if (cmd == "project-export-csv") {
+        return cmd_project_export_csv(argc - 2, argv + 2);
     }
     if (cmd == "project-set-profile") {
         return cmd_project_set_profile(argc - 2, argv + 2);
