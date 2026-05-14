@@ -108,11 +108,12 @@ constexpr std::string_view kUsage =
     "                            position and per-edit emissions/safety flags.\n"
     "                            --table filters to one table; --limit caps to\n"
     "                            the most-recent N rows after filtering.\n"
-    "    project-diff <A.stune> <B.stune> [--profile P] [--verbose]\n"
+    "    project-diff <A.stune> <B.stune> [--table <id>] [--profile P] [--verbose]\n"
     "                            Compare two projects' working ROMs table-by-\n"
-    "                            table. Both must reference the same pack. With\n"
-    "                            --profile, also runs the policy gate on the\n"
-    "                            A->B byte changes.\n"
+    "                            table. Both must reference the same pack.\n"
+    "                            --table filters the comparison to one table.\n"
+    "                            --profile runs the policy gate on the full\n"
+    "                            A->B byte changes (independent of --table).\n"
     "    project-autotune-maf <dir> --table <id> --log <CSV>\n"
     "                  [--gain N] [--max-delta P] [--min-samples-per-cell N]\n"
     "                  [--require-open-loop] [--no-smooth] [--strict-lint] [--apply]\n"
@@ -2617,6 +2618,7 @@ int cmd_project_diff(int argc, char *argv[]) {
     std::optional<std::filesystem::path> proj_a;
     std::optional<std::filesystem::path> proj_b;
     std::optional<std::string>           profile_arg;
+    std::optional<std::string>           table_filter;
     bool                                 verbose = false;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -2629,6 +2631,9 @@ int cmd_project_diff(int argc, char *argv[]) {
         };
         if (a == "--profile") {
             if (auto const *v = require_arg("--profile"); v) profile_arg = std::string{v};
+            else return 2;
+        } else if (a == "--table") {
+            if (auto const *v = require_arg("--table"); v) table_filter = std::string{v};
             else return 2;
         } else if (a == "--verbose" || a == "-v") {
             verbose = true;
@@ -2647,10 +2652,12 @@ int cmd_project_diff(int argc, char *argv[]) {
     if (!proj_a.has_value() || !proj_b.has_value()) {
         std::fputs("project-diff: missing required arguments\n"
                    "Usage: subuwutuner-cli project-diff <A.stune> <B.stune> "
-                   "[--profile P] [--verbose]\n"
+                   "[--table <id>] [--profile P] [--verbose]\n"
                    "  Compares two projects' working ROMs table-by-table.\n"
                    "  Both must reference the same pack id. With --profile,\n"
-                   "  also runs the policy gate over the A->B byte changes.\n",
+                   "  also runs the policy gate over the A->B byte changes.\n"
+                   "  --table restricts the comparison + policy gate to a\n"
+                   "  single table.\n",
                    stderr);
         return 2;
     }
@@ -2678,11 +2685,22 @@ int cmd_project_diff(int argc, char *argv[]) {
         return 1;
     }
 
+    if (table_filter.has_value()
+        && a->definition().find_table(*table_filter) == nullptr) {
+        std::fprintf(stderr,
+            "project-diff: table '%s' not found in pack '%s'\n",
+            table_filter->c_str(), a->definition().pack().id.c_str());
+        return 1;
+    }
+
     std::printf("A:    %s  (working CRC32=0x%08X)\n",
                 proj_a->string().c_str(), a->working_rom().crc32());
     std::printf("B:    %s  (working CRC32=0x%08X)\n",
                 proj_b->string().c_str(), b->working_rom().crc32());
     std::printf("Pack: %s\n", a->definition().pack().id.c_str());
+    if (table_filter.has_value()) {
+        std::printf("Filter: --table %s\n", table_filter->c_str());
+    }
 
     struct Row {
         std::string id;
@@ -2697,7 +2715,10 @@ int cmd_project_diff(int argc, char *argv[]) {
     std::vector<Row> rows;
     std::size_t      changed_count = 0;
     std::size_t      skipped       = 0;
+    std::size_t      considered    = 0;
     for (auto const &table : a->definition().tables()) {
+        if (table_filter.has_value() && table.id != *table_filter) continue;
+        ++considered;
         auto const d = a->definition().diff_table(
             a->working_rom(), b->working_rom(), table);
         if (!d.has_value()) {
@@ -2719,7 +2740,7 @@ int cmd_project_diff(int argc, char *argv[]) {
     }
 
     std::printf("\nTables compared: %zu  changed: %zu  skipped: %zu\n",
-                a->definition().tables().size(), changed_count, skipped);
+                considered, changed_count, skipped);
     if (rows.empty()) {
         std::printf("\nNo tables differ.\n");
     } else {
@@ -2769,6 +2790,10 @@ int cmd_project_diff(int argc, char *argv[]) {
             plan, a->definition(), a->working_rom().data(), *profile);
         std::printf("\nPolicy preview (profile=%s, A->B):\n",
                     profile_arg->c_str());
+        if (table_filter.has_value()) {
+            std::printf("  (note: --table filters the diff display only; the\n"
+                        "   policy gate still covers ALL bytes that would flash)\n");
+        }
         std::printf("  engine_safety_tables = %zu",
                     d.engine_safety_tables.size());
         for (auto const &id : d.engine_safety_tables) std::printf(" %s", id.c_str());
