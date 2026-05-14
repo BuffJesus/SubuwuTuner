@@ -68,6 +68,101 @@ class ParseToExprTest(unittest.TestCase):
         self.assertIsNone(defgen.parse_toexpr("x*x"))
         self.assertIsNone(defgen.parse_toexpr("sin(x)"))
 
+    def test_division_by_constant(self):
+        # `(x)/256.0` and `(x)/5.12` are the most-common Subaru scaling
+        # shapes; the previous regex parser didn't accept `/` at all.
+        result = defgen.parse_toexpr("(x)/256.0")
+        assert result is not None
+        f, o = result
+        self.assertAlmostEqual(f, 1.0 / 256.0)
+        self.assertAlmostEqual(o, 0.0)
+
+        result = defgen.parse_toexpr("(x)/5.12")
+        assert result is not None
+        f, o = result
+        self.assertAlmostEqual(f, 1.0 / 5.12)
+        self.assertAlmostEqual(o, 0.0)
+
+    def test_paren_x_times_constant(self):
+        # `(x)*0.5` — paren around x alone, then multiplication.
+        result = defgen.parse_toexpr("(x)*0.5")
+        assert result is not None
+        f, o = result
+        self.assertAlmostEqual(f, 0.5)
+        self.assertAlmostEqual(o, 0.0)
+
+    def test_paren_offset_then_divide(self):
+        # `((x)-16000.0)/80.0` — subtract then divide.
+        result = defgen.parse_toexpr("((x)-16000.0)/80.0")
+        assert result is not None
+        f, o = result
+        self.assertAlmostEqual(f, 1.0 / 80.0)
+        self.assertAlmostEqual(o, -16000.0 / 80.0)
+
+    def test_chained_divide_then_offset(self):
+        # `((x)/256.0)+1.0` — the AFR scaling.
+        result = defgen.parse_toexpr("((x)/256.0)+1.0")
+        assert result is not None
+        f, o = result
+        self.assertAlmostEqual(f, 1.0 / 256.0)
+        self.assertAlmostEqual(o, 1.0)
+
+    def test_chained_divide_then_multiply(self):
+        # `(((x)-128.0)/128.0)*100.0` — typical short-trim percentage shape.
+        result = defgen.parse_toexpr("(((x)-128.0)/128.0)*100.0")
+        assert result is not None
+        f, o = result
+        self.assertAlmostEqual(f, 100.0 / 128.0)
+        self.assertAlmostEqual(o, -100.0)
+
+    def test_inversion_by_negative(self):
+        # `(x)*-1.0` and `((x)-1260.0)*-1.0`.
+        result = defgen.parse_toexpr("(x)*-1.0")
+        assert result is not None
+        self.assertEqual(result, (-1.0, 0.0))
+
+        result = defgen.parse_toexpr("((x)-1260.0)*-1.0")
+        assert result is not None
+        f, o = result
+        self.assertAlmostEqual(f, -1.0)
+        self.assertAlmostEqual(o, 1260.0)
+
+    def test_deeply_nested_linear_composition(self):
+        # Real VA chain: `((((x)*256.0)/25600.0)*14.5038)/5.0`.
+        result = defgen.parse_toexpr("((((x)*256.0)/25600.0)*14.5038)/5.0")
+        assert result is not None
+        f, o = result
+        self.assertAlmostEqual(f, 256.0 / 25600.0 * 14.5038 / 5.0)
+        self.assertAlmostEqual(o, 0.0)
+
+    def test_unary_minus_on_x(self):
+        result = defgen.parse_toexpr("-x*2")
+        assert result is not None
+        self.assertEqual(result, (-2.0, 0.0))
+
+    def test_division_by_x_is_non_linear(self):
+        # `c/x` and `c/(x+k)` are non-linear; must return None rather than
+        # silently producing nonsense from the constant numerator.
+        self.assertIsNone(defgen.parse_toexpr("1/x"))
+        self.assertIsNone(defgen.parse_toexpr("1.0/(x+5)"))
+
+    def test_hardware_shift_comment_is_non_linear(self):
+        # RomRaider embeds RSHIFT(N)/LSHIFT(N)/INVERSE_DIVIDE(N) in C-style
+        # block comments to encode hardware semantics that change the
+        # meaning of the surrounding expression. We can't safely strip and
+        # evaluate the remainder — flag as non-linear and let the user
+        # hand-edit.
+        self.assertIsNone(defgen.parse_toexpr("/*RSHIFT(8.0)*/x"))
+        self.assertIsNone(defgen.parse_toexpr("(/*INVERSE_DIVIDE(1.0)*/x)*12500.0"))
+
+    def test_empty_string_is_identity(self):
+        self.assertEqual(defgen.parse_toexpr(""), (1.0, 0.0))
+        self.assertEqual(defgen.parse_toexpr("   "), (1.0, 0.0))
+
+    def test_division_by_zero_is_non_linear(self):
+        self.assertIsNone(defgen.parse_toexpr("x/0"))
+        self.assertIsNone(defgen.parse_toexpr("(x+1)/0.0"))
+
 
 class HexAndPrecisionTest(unittest.TestCase):
     def test_hex_format(self):

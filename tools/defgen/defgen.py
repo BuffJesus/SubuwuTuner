@@ -23,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
 import math
 import re
 import sys
@@ -63,64 +64,97 @@ def map_data_type(storagetype: str | None, endian: str | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# toexpr parsing (linear only, the 95% case)
+# toexpr parsing (linear via AST simplification)
 # ---------------------------------------------------------------------------
+#
+# We accept any expression composed of `+`, `-`, `*`, `/`, unary `-`/`+`,
+# parentheses, numeric literals, and the variable `x`, and reduce it to
+# `(factor, offset)` such that `value == raw * factor + offset`. Each AST
+# node carries the same (factor, offset) representation; binary operators
+# combine the two operands' linear forms and raise `_NonLinear` when the
+# result would be non-linear (e.g. `x*x`, `1/x`).
+#
+# RomRaider also writes hardware-shift semantics inside C-style block
+# comments — `/*RSHIFT(8.0)*/x`, `/*INVERSE_DIVIDE(1.0)*/x*12500.0`. The
+# comment changes the meaning (the shift IS the scaling factor, or the
+# divide makes it non-linear), so we can't safely strip and parse the
+# remainder. Any input containing `/*` falls through as non-linear and
+# gets the hand-edit warning.
 
-# Matches expressions like:
-#   x
-#   x*0.5
-#   x * 0.5
-#   x*0.5+10
-#   x*0.5 - 10
-#   (x-100)*0.5     -> factor=0.5, offset=-50
-# Returns (factor, offset) for the equivalent `raw * factor + offset`, or None
-# if we can't parse it as linear.
-_NUM = r"[0-9]*\.[0-9]+|[0-9]+"
-# Linear toexpr / expression forms we accept. Captures roughly:
-#   1) (x ± B) * K           -> factor=K, offset=±B*K
-#   2) (x * K) ± B  or  x * K ± B   -> factor=K, offset=±B
-#   3) (-x * K) ± B          -> factor=-K, offset=±B   (RomRaider writes inversions this way)
-#   4) x                     -> identity
-# Both `x*K` and `(x*K)` are accepted; an optional `-` before x lets the
-# inversion case fall through the same machinery.
-_LINEAR_RE = re.compile(
-    rf"""^\s*
-        (?:\(\s*x\s*([-+])\s*({_NUM})\s*\)\s*\*\s*({_NUM})
-        |   \(?\s*(-?)x\s*\*\s*([-+]?(?:{_NUM}))\s*\)?\s*(?:([-+])\s*({_NUM}))?
-        |   x
-        )\s*$""",
-    re.VERBOSE,
-)
+
+class _NonLinear(Exception):
+    """Raised internally when an AST node can't be reduced to a*x + b."""
+
+
+def _simplify(node: ast.AST) -> tuple[float, float]:
+    """Reduce `node` to (factor, offset) with the contract value == factor*x + offset.
+
+    Pure constants come back as (0, c); `x` comes back as (1, 0). Operators
+    combine according to linear algebra; anything that would produce a
+    non-linear term (x*x, division by x, function calls, etc.) raises
+    `_NonLinear` and bubbles up to `parse_toexpr`, which returns `None`.
+    """
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+            raise _NonLinear
+        return (0.0, float(node.value))
+    if isinstance(node, ast.Name):
+        if node.id == "x":
+            return (1.0, 0.0)
+        raise _NonLinear
+    if isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, ast.UAdd):
+            return _simplify(node.operand)
+        if isinstance(node.op, ast.USub):
+            f, o = _simplify(node.operand)
+            return (-f, -o)
+        raise _NonLinear
+    if isinstance(node, ast.BinOp):
+        lf, lo = _simplify(node.left)
+        rf, ro = _simplify(node.right)
+        op = node.op
+        if isinstance(op, ast.Add):
+            return (lf + rf, lo + ro)
+        if isinstance(op, ast.Sub):
+            return (lf - rf, lo - ro)
+        if isinstance(op, ast.Mult):
+            # (lf*x + lo) * (rf*x + ro): the x^2 term is lf*rf, which must be 0
+            # for the product to stay linear.
+            if lf != 0.0 and rf != 0.0:
+                raise _NonLinear
+            return (lf * ro + rf * lo, lo * ro)
+        if isinstance(op, ast.Div):
+            # (lf*x + lo) / (rf*x + ro): linear only when the denominator is a
+            # nonzero constant (rf == 0, ro != 0). Anything with x in the
+            # denominator is `c/x`, non-linear.
+            if rf != 0.0:
+                raise _NonLinear
+            if ro == 0.0:
+                raise _NonLinear
+            return (lf / ro, lo / ro)
+        raise _NonLinear
+    raise _NonLinear
 
 
 def parse_toexpr(expr: str) -> tuple[float, float] | None:
     """Return (factor, offset) for a linear `toexpr`, or None if non-linear."""
     if expr is None:
         return (1.0, 0.0)
-    m = _LINEAR_RE.match(expr)
-    if m is None:
+    expr = expr.strip()
+    if not expr:
+        return (1.0, 0.0)
+    # RomRaider hardware-shift comments — the comment IS part of the scaling
+    # semantics, so the remainder isn't safe to evaluate on its own.
+    if "/*" in expr:
         return None
-    (paren_sign, paren_offset, paren_factor,
-     x_neg, mul_factor, post_sign, post_offset) = m.groups()
-    if paren_factor is not None:
-        # (x ± off) * factor   ==   x*factor ± off*factor
-        f = float(paren_factor)
-        o = float(paren_offset) * f
-        if paren_sign == "-":
-            o = -o
-        return (f, o)
-    if mul_factor is not None:
-        f = float(mul_factor)
-        if x_neg == "-":
-            f = -f
-        o = 0.0
-        if post_offset is not None:
-            o = float(post_offset)
-            if post_sign == "-":
-                o = -o
-        return (f, o)
-    # plain "x"
-    return (1.0, 0.0)
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return None
+    try:
+        return _simplify(tree.body)
+    except _NonLinear:
+        return None
 
 
 # ---------------------------------------------------------------------------
