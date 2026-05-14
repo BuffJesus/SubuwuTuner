@@ -148,9 +148,11 @@ constexpr std::string_view kUsage =
     "    pack-info <DEF>         Print metadata + counts for a definition pack.\n"
     "    table-list <DEF> [--category C] [--emissions] [--safety-critical]\n"
     "                            List tables in a pack with optional filters.\n"
-    "    pack-dtcs <DEF> [--bitmap <id>] [--emissions]\n"
+    "    pack-dtcs <DEF> [--bitmap <id>] [--emissions] [--show-state <ROM>]\n"
     "                            List DTC codes in a pack, with their bitmap\n"
     "                            location and emissions-relevant flag.\n"
+    "                            --show-state reads enable bits from <ROM>\n"
+    "                            and adds an On column (Y/n) per code.\n"
     "    project-disable-dtc --code P0401[,...] <dir>\n"
     "    project-enable-dtc  --code P0401[,...] <dir>\n"
     "                            Clear or set the enable bit for one or more\n"
@@ -885,6 +887,7 @@ int cmd_table_list(int argc, char *argv[]) {
 
 int cmd_pack_dtcs(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
+    std::optional<std::filesystem::path> rom_path;
     std::optional<std::string>           bitmap_filter;
     bool                                 emissions_only = false;
 
@@ -902,6 +905,10 @@ int cmd_pack_dtcs(int argc, char *argv[]) {
             else return 2;
         } else if (a == "--emissions") {
             emissions_only = true;
+        } else if (a == "--show-state") {
+            if (auto const *v = require("--show-state"); v)
+                rom_path = std::filesystem::path{v};
+            else return 2;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "pack-dtcs: unknown option: %s\n", argv[i]);
             return 2;
@@ -916,7 +923,7 @@ int cmd_pack_dtcs(int argc, char *argv[]) {
     if (!def_path.has_value()) {
         std::fputs("pack-dtcs: missing path\n", stderr);
         std::fputs("Usage: subuwutuner-cli pack-dtcs <DEF> "
-                   "[--bitmap <id>] [--emissions]\n",
+                   "[--bitmap <id>] [--emissions] [--show-state <ROM>]\n",
                    stderr);
         return 2;
     }
@@ -925,6 +932,19 @@ int cmd_pack_dtcs(int argc, char *argv[]) {
     if (!def.has_value()) {
         std::fprintf(stderr, "pack-dtcs: %s\n", def.error().to_string().c_str());
         return 1;
+    }
+
+    // Optional ROM read for the "On" column. Loaded once; we just need
+    // byte access to compute per-DTC enable state.
+    std::optional<st::Rom> rom;
+    if (rom_path.has_value()) {
+        auto r = st::Rom::from_file(*rom_path);
+        if (!r.has_value()) {
+            std::fprintf(stderr, "pack-dtcs: --show-state ROM: %s\n",
+                         r.error().to_string().c_str());
+            return 1;
+        }
+        rom = std::move(*r);
     }
 
     if (def->dtc_bitmaps().empty() && def->dtcs().empty()) {
@@ -941,23 +961,52 @@ int cmd_pack_dtcs(int argc, char *argv[]) {
         std::printf("\n");
     }
 
-    std::size_t matched = 0;
-    std::printf("%-6s %-1s %-32s %s\n", "code", "F", "location", "name");
+    std::size_t matched      = 0;
+    std::size_t disabled_cnt = 0;
+    if (rom.has_value()) {
+        std::printf("%-6s %-2s %-1s %-32s %s\n",
+                    "code", "On", "F", "location", "name");
+    } else {
+        std::printf("%-6s %-1s %-32s %s\n", "code", "F", "location", "name");
+    }
     for (auto const &d : def->dtcs()) {
         if (emissions_only && !d.emissions_relevant) continue;
         if (bitmap_filter.has_value() && d.bitmap_id != *bitmap_filter) continue;
         char location[64];
         std::snprintf(location, sizeof(location), "%s:%zu.%d",
                       d.bitmap_id.c_str(), d.byte_offset, d.bit);
-        std::printf("%-6s %c %-32s %s\n",
-                    d.code.c_str(),
-                    d.emissions_relevant ? 'E' : '-',
-                    location, d.name.c_str());
+        if (rom.has_value()) {
+            auto const *bm = def->find_dtc_bitmap(d.bitmap_id);
+            char        on_glyph = '?';
+            if (bm != nullptr) {
+                auto const en = st::is_dtc_enabled(*rom, *bm, d);
+                if (en.has_value()) {
+                    on_glyph = *en ? 'Y' : 'n';
+                    if (!*en) ++disabled_cnt;
+                }
+            }
+            std::printf("%-6s %c  %c %-32s %s\n",
+                        d.code.c_str(),
+                        on_glyph,
+                        d.emissions_relevant ? 'E' : '-',
+                        location, d.name.c_str());
+        } else {
+            std::printf("%-6s %c %-32s %s\n",
+                        d.code.c_str(),
+                        d.emissions_relevant ? 'E' : '-',
+                        location, d.name.c_str());
+        }
         ++matched;
     }
-    std::printf("\n%zu DTC(s) shown (of %zu in pack). "
-                "Flag: E=emissions-relevant.\n",
-                matched, def->dtcs().size());
+    if (rom.has_value()) {
+        std::printf("\n%zu DTC(s) shown (of %zu in pack); %zu disabled. "
+                    "Flags: On=Y/n, F=E (emissions-relevant).\n",
+                    matched, def->dtcs().size(), disabled_cnt);
+    } else {
+        std::printf("\n%zu DTC(s) shown (of %zu in pack). "
+                    "Flag: E=emissions-relevant.\n",
+                    matched, def->dtcs().size());
+    }
     return 0;
 }
 
