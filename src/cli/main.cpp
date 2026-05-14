@@ -843,21 +843,24 @@ int cmd_table_list(int argc, char *argv[]) {
     }
 
     std::size_t matched = 0;
-    std::printf("%-3s %-10s %-32s %-18s %s\n", "D", "address", "id", "category", "name");
+    std::printf("%-3s %-3s %-10s %-32s %-18s %s\n",
+                "D", "F", "address", "id", "category", "name");
     for (auto const &t : def->tables()) {
         if (category_filter.has_value() && t.category != *category_filter) continue;
         if (emissions_only && !t.emissions_relevant) continue;
         if (safety_critical_only && !t.engine_safety_critical) continue;
-        char flags[8];
-        std::snprintf(flags, sizeof(flags), "%s%s",
-                      t.emissions_relevant ? "E" : "-",
-                      t.engine_safety_critical ? "S" : "-");
-        (void) flags; // currently not printed; reserved for a future --flags column
-        std::printf("%dD  0x%08zX %-32s %-18s %s\n", t.dimensions, t.address,
+        char flags[3];
+        flags[0] = t.emissions_relevant     ? 'E' : '-';
+        flags[1] = t.engine_safety_critical ? 'S' : '-';
+        flags[2] = '\0';
+        std::printf("%dD  %-3s 0x%08zX %-32s %-18s %s\n",
+                    t.dimensions, flags, t.address,
                     t.id.c_str(), t.category.c_str(), t.name.c_str());
         ++matched;
     }
-    std::printf("\n%zu tables shown (of %zu in pack).\n", matched, def->tables().size());
+    std::printf("\n%zu tables shown (of %zu in pack). "
+                "Flags: E=emissions, S=engine-safety.\n",
+                matched, def->tables().size());
     return 0;
 }
 
