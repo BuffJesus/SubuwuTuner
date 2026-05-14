@@ -146,14 +146,43 @@ class ParseToExprTest(unittest.TestCase):
         self.assertIsNone(defgen.parse_toexpr("1/x"))
         self.assertIsNone(defgen.parse_toexpr("1.0/(x+5)"))
 
-    def test_hardware_shift_comment_is_non_linear(self):
-        # RomRaider embeds RSHIFT(N)/LSHIFT(N)/INVERSE_DIVIDE(N) in C-style
-        # block comments to encode hardware semantics that change the
-        # meaning of the surrounding expression. We can't safely strip and
-        # evaluate the remainder — flag as non-linear and let the user
-        # hand-edit.
-        self.assertIsNone(defgen.parse_toexpr("/*RSHIFT(8.0)*/x"))
+    def test_rshift_comment_is_linear_scaling(self):
+        # `/*RSHIFT(N)*/x` is a fixed-point hint: read the raw bytes and
+        # divide by 2**N. Linear with factor=1/2**N.
+        self.assertEqual(defgen.parse_toexpr("/*RSHIFT(7.0)*/x"),
+                         (1.0 / 128.0, 0.0))
+        self.assertEqual(defgen.parse_toexpr("/*RSHIFT(8.0)*/x"),
+                         (1.0 / 256.0, 0.0))
+
+    def test_lshift_comment_is_linear_scaling(self):
+        # `/*LSHIFT(N)*/x` is the inverse — multiply by 2**N.
+        self.assertEqual(defgen.parse_toexpr("/*LSHIFT(8.0)*/x"),
+                         (256.0, 0.0))
+
+    def test_shift_comment_composes_with_outer_expression(self):
+        # Real VA shape: `(/*RSHIFT(11.0)*/(x)*5.0)-40.0` ≡ x*5/2048 - 40.
+        result = defgen.parse_toexpr("(/*RSHIFT(11.0)*/(x)*5.0)-40.0")
+        assert result is not None
+        f, o = result
+        self.assertAlmostEqual(f, 5.0 / 2048.0)
+        self.assertAlmostEqual(o, -40.0)
+
+    def test_stacked_shift_comments_compose(self):
+        # `/*RSHIFT(7.0)*//*RSHIFT(1.0)*/x` ≡ x/(128*2) = x/256.
+        result = defgen.parse_toexpr("/*RSHIFT(7.0)*//*RSHIFT(1.0)*/x")
+        assert result is not None
+        f, o = result
+        self.assertAlmostEqual(f, 1.0 / 256.0)
+        self.assertAlmostEqual(o, 0.0)
+
+    def test_inverse_divide_comment_is_non_linear(self):
+        # `/*INVERSE_DIVIDE(N)*/x` is N/x — genuinely non-linear.
+        self.assertIsNone(defgen.parse_toexpr("/*INVERSE_DIVIDE(1.0)*/x"))
         self.assertIsNone(defgen.parse_toexpr("(/*INVERSE_DIVIDE(1.0)*/x)*12500.0"))
+
+    def test_and_mask_comment_is_non_linear(self):
+        # `/*AND(N)*/x` is a bitmask, non-linear in general.
+        self.assertIsNone(defgen.parse_toexpr("/*AND(1.0)*/x"))
 
     def test_empty_string_is_identity(self):
         self.assertEqual(defgen.parse_toexpr(""), (1.0, 0.0))
@@ -391,6 +420,43 @@ class NonLinearFormulaWarningTest(unittest.TestCase):
         </rom></roms>"""
         packs = defgen.parse_rom_xml(xml)
         self.assertEqual(packs[0].warnings, [])
+
+
+class AxisLengthTest(unittest.TestCase):
+    def test_size_attribute_populates_axis_length(self):
+        # RomRaider's canonical attribute is `size`; some synthetic fixtures
+        # (including this test suite's older fixtures) use `elements`. defgen
+        # must accept both — production XML uses `size`, so prior to this
+        # fix every real-world axis came out with length=0.
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="2D" name="curve" storageaddress="0x100" storagetype="uint8" endian="big">
+            <scaling units="" expression="x" to_byte="x"
+                     format="0" endian="big" storagetype="uint8"/>
+            <table type="X Axis" name="curve_x" storageaddress="0x200"
+                   storagetype="uint16" endian="big" size="12">
+              <scaling units="" expression="x" to_byte="x"
+                       format="0" endian="big" storagetype="uint16"/>
+            </table>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        axes = {a.id: a for a in packs[0].axes}
+        self.assertEqual(axes["curve_x"].length, 12)
+
+    def test_elements_still_works_as_fallback(self):
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="2D" name="curve" storageaddress="0x100" storagetype="uint8" endian="big">
+            <table type="X Axis" name="curve_x" storageaddress="0x200"
+                   storagetype="uint16" endian="big" elements="7"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        axes = {a.id: a for a in packs[0].axes}
+        self.assertEqual(axes["curve_x"].length, 7)
 
 
 class DimensionsTest(unittest.TestCase):

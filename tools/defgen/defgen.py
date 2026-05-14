@@ -75,11 +75,33 @@ def map_data_type(storagetype: str | None, endian: str | None) -> str:
 # result would be non-linear (e.g. `x*x`, `1/x`).
 #
 # RomRaider also writes hardware-shift semantics inside C-style block
-# comments — `/*RSHIFT(8.0)*/x`, `/*INVERSE_DIVIDE(1.0)*/x*12500.0`. The
-# comment changes the meaning (the shift IS the scaling factor, or the
-# divide makes it non-linear), so we can't safely strip and parse the
-# remainder. Any input containing `/*` falls through as non-linear and
-# gets the hand-edit warning.
+# comments. RSHIFT(N) and LSHIFT(N) compose as linear scaling factors
+# `2^-N` and `2^N` respectively, so we pre-expand them into ordinary
+# multiplications before parsing. INVERSE_DIVIDE(N) is `N/x`, genuinely
+# non-linear, and AND(N) is a bitmask — both leave the `/*…*/` marker
+# in place, which trips the `"/*" in expr` short-circuit and falls
+# through to the hand-edit warning. The interpretation of RSHIFT/LSHIFT
+# as a `2^N` factor is the standard fixed-point convention in Subaru
+# ECU work but should be re-verified against real ROM data when the
+# bench rig lands.
+
+
+_SHIFT_RE = re.compile(
+    r"/\*(?P<op>RSHIFT|LSHIFT)\(\s*(?P<n>[0-9]+(?:\.[0-9]+)?)\s*\)\*/")
+
+
+def _expand_shifts(expr: str) -> str:
+    """Replace `/*RSHIFT(N)*/` with `(1.0/2**N)*` and `/*LSHIFT(N)*/` with
+    `(2**N)*`. Other `/*…*/` markers are left untouched so the upstream
+    `"/*" in expr` check still flags them."""
+
+    def repl(m: re.Match[str]) -> str:
+        n = float(m.group("n"))
+        if m.group("op") == "RSHIFT":
+            return f"(1.0/{2.0**n!r})*"
+        return f"({2.0**n!r})*"
+
+    return _SHIFT_RE.sub(repl, expr)
 
 
 class _NonLinear(Exception):
@@ -143,8 +165,9 @@ def parse_toexpr(expr: str) -> tuple[float, float] | None:
     expr = expr.strip()
     if not expr:
         return (1.0, 0.0)
-    # RomRaider hardware-shift comments — the comment IS part of the scaling
-    # semantics, so the remainder isn't safe to evaluate on its own.
+    expr = _expand_shifts(expr)
+    # Any leftover `/*…*/` marker (INVERSE_DIVIDE, AND, etc.) is RomRaider
+    # hardware semantics we can't safely simplify.
     if "/*" in expr:
         return None
     try:
@@ -890,7 +913,9 @@ def _axis_from_element(el: ET.Element) -> AxisRecord | None:
     if not is_static \
             and el.get("storageaddress") is None and el.get("address") is None:
         return None
-    elements = el.get("elements")
+    # RomRaider's canonical attribute is `size`; some synthetic fixtures use
+    # `elements`. Accept either, with `size` winning when both are present.
+    length_str = el.get("size") or el.get("elements")
     inline_scaling = el.find("scaling")
     data_type = "uint16_be"
     scaling_id = ""
@@ -906,7 +931,7 @@ def _axis_from_element(el: ET.Element) -> AxisRecord | None:
         unit="",  # we don't carry the axis's unit text from XML
         type="static",
         address=_table_address(el),
-        length=int(elements) if elements and elements.isdigit() else 0,
+        length=int(length_str) if length_str and length_str.isdigit() else 0,
         data_type=data_type,
         scaling=scaling_id,
     )
