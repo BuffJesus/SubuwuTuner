@@ -7,6 +7,7 @@
 #include "st/core/result.hpp"
 #include "st/defs.hpp"
 #include "st/edit.hpp"
+#include "st/policy.hpp"
 #include "st/rom.hpp"
 
 #include <cstdint>
@@ -64,6 +65,17 @@ class Project {
         display_name_ = std::move(n);
     }
 
+    // Active jurisdiction profile (see docs/06-legal-ethics.md). Defaults
+    // to `MotorsportOnly` on a freshly-created project, matching the doc's
+    // first-run-default. Persisted in `project.toml` as `policy_profile =
+    // "..."`. Drives flash-time linting and (eventually) the GUI badge.
+    [[nodiscard]] policy::Profile policy_profile() const noexcept {
+        return policy_profile_;
+    }
+    void set_policy_profile(policy::Profile p) noexcept {
+        policy_profile_ = p;
+    }
+
     [[nodiscard]] Rom const &       source_rom() const noexcept { return source_; }
     [[nodiscard]] Rom const &       working_rom() const noexcept { return working_; }
     [[nodiscard]] Rom &             working_rom() noexcept { return working_; }
@@ -84,6 +96,7 @@ class Project {
     std::string           notes_;
     std::string           created_;
     std::uint32_t         source_crc32_{0};
+    policy::Profile       policy_profile_{policy::Profile::MotorsportOnly};
 
     std::filesystem::path source_rel_{"source.bin"};
     std::filesystem::path working_rel_{"working.bin"};

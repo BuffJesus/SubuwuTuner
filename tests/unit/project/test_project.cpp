@@ -282,3 +282,101 @@ path = "../pack"
     REQUIRE_FALSE(p.has_value());
     REQUIRE(p.error().code() == st::ErrorCode::UnsupportedVersion);
 }
+
+
+// ---- policy_profile ------------------------------------------------------
+
+TEST_CASE("Project defaults policy_profile to MotorsportOnly", "[project][policy]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+
+    auto const proj_dir = td.path / "fresh.stune";
+    auto const r = st::Project::create(proj_dir, rom_path, pack_dir, "Fresh");
+    REQUIRE(r.has_value());
+    REQUIRE(r->policy_profile() == st::policy::Profile::MotorsportOnly);
+}
+
+TEST_CASE("Project::open reads policy_profile from project.toml", "[project][policy]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    write_bytes(td.path / "stock.bin", make_rom_bytes());
+
+    auto const proj_dir = td.path / "with_profile.stune";
+    std::filesystem::create_directories(proj_dir);
+    write_bytes(proj_dir / "source.bin",  make_rom_bytes());
+    write_bytes(proj_dir / "working.bin", make_rom_bytes());
+    write_text(proj_dir / "project.toml", R"toml(
+[project]
+schema_version  = 1
+display_name    = "Roadworthy build"
+created         = ""
+notes           = ""
+policy_profile  = "eu-roadworthy"
+
+[project.source_rom]
+path  = "source.bin"
+crc32 = 0
+
+[project.working_rom]
+path  = "working.bin"
+crc32 = 0
+
+[project.definition]
+path = "../pack"
+)toml");
+    auto const p = st::Project::open(proj_dir);
+    REQUIRE(p.has_value());
+    REQUIRE(p->policy_profile() == st::policy::Profile::EuRoadworthy);
+}
+
+TEST_CASE("Project::open rejects unknown policy_profile string",
+          "[project][policy]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const proj_dir = td.path / "bogus.stune";
+    std::filesystem::create_directories(proj_dir);
+    write_bytes(proj_dir / "source.bin",  make_rom_bytes());
+    write_bytes(proj_dir / "working.bin", make_rom_bytes());
+    write_text(proj_dir / "project.toml", R"toml(
+[project]
+schema_version  = 1
+display_name    = ""
+created         = ""
+notes           = ""
+policy_profile  = "freeworld"
+
+[project.source_rom]
+path  = "source.bin"
+crc32 = 0
+
+[project.working_rom]
+path  = "working.bin"
+crc32 = 0
+
+[project.definition]
+path = "../pack"
+)toml");
+    auto const p = st::Project::open(proj_dir);
+    REQUIRE_FALSE(p.has_value());
+    REQUIRE(p.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("Project::save_metadata round-trips policy_profile",
+          "[project][policy]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    write_bytes(td.path / "stock.bin", make_rom_bytes());
+
+    auto const proj_dir = td.path / "set_profile.stune";
+    auto       r = st::Project::create(proj_dir, td.path / "stock.bin",
+                                        pack_dir, "Set");
+    REQUIRE(r.has_value());
+    r->set_policy_profile(st::policy::Profile::CaliforniaUs);
+    REQUIRE(r->save_metadata().has_value());
+
+    auto const reopened = st::Project::open(proj_dir);
+    REQUIRE(reopened.has_value());
+    REQUIRE(reopened->policy_profile() == st::policy::Profile::CaliforniaUs);
+}

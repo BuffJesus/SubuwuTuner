@@ -83,6 +83,10 @@ constexpr std::string_view kUsage =
     "    project-edit --table <id> [--rows A:B] [--cols A:B] OP [VALUE] <dir>\n"
     "                            Apply an edit to a project's working ROM and\n"
     "                            update project.toml. Same OPs as table-edit.\n"
+    "    project-set-profile <dir> <profile>\n"
+    "                            Set the project's jurisdiction profile (see\n"
+    "                            docs/06-legal-ethics.md). Valid: motorsport-only,\n"
+    "                            alberta-ca, eu-roadworthy, california-us.\n"
     "    pack-info <DEF>         Print metadata + counts for a definition pack.\n"
     "    table-list <DEF> [--category C] [--emissions] [--safety-critical]\n"
     "                            List tables in a pack with optional filters.\n"
@@ -1041,6 +1045,47 @@ int cmd_project_info(int argc, char *argv[]) {
     std::printf("Definition: pack id %s\n", p->definition().pack().id.c_str());
     auto const cid = p->definition().matches(p->source_rom());
     std::printf("CID match:  %s\n", cid.has_value() ? cid->c_str() : "(no match)");
+    std::printf("Profile:    %s\n",
+                std::string{st::policy::profile_name(p->policy_profile())}.c_str());
+    return 0;
+}
+
+int cmd_project_set_profile(int argc, char *argv[]) {
+    if (argc < 2) {
+        std::fputs("project-set-profile: missing arguments\n"
+                   "Usage: subuwutuner-cli project-set-profile <dir> <profile>\n"
+                   "  profile: motorsport-only | alberta-ca | eu-roadworthy "
+                   "| california-us\n",
+                   stderr);
+        return 2;
+    }
+    std::filesystem::path const dir{argv[0]};
+    std::string_view      const profile_arg{argv[1]};
+
+    auto const parsed = st::policy::parse_profile(profile_arg);
+    if (!parsed.has_value()) {
+        std::fprintf(stderr,
+            "project-set-profile: unknown profile '%.*s' "
+            "(valid: motorsport-only, alberta-ca, eu-roadworthy, "
+            "california-us)\n",
+            static_cast<int>(profile_arg.size()), profile_arg.data());
+        return 2;
+    }
+
+    auto p = st::Project::open(dir);
+    if (!p.has_value()) {
+        std::fprintf(stderr, "project-set-profile: %s\n",
+                     p.error().to_string().c_str());
+        return 1;
+    }
+    p->set_policy_profile(*parsed);
+    if (auto s = p->save_metadata(); !s.has_value()) {
+        std::fprintf(stderr, "project-set-profile: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+    std::printf("Profile set to: %s\n",
+                std::string{st::policy::profile_name(*parsed)}.c_str());
     return 0;
 }
 
@@ -4231,6 +4276,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-edit") {
         return cmd_project_edit(argc - 2, argv + 2);
+    }
+    if (cmd == "project-set-profile") {
+        return cmd_project_set_profile(argc - 2, argv + 2);
     }
     if (cmd == "pack-info") {
         return cmd_pack_info(argc - 2, argv + 2);

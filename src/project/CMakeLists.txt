@@ -16,6 +16,7 @@ target_link_libraries(st_project
         st::rom
         st::defs
         st::edit
+        st::policy
     PRIVATE
         tomlplusplus::tomlplusplus
         st::warnings

@@ -218,9 +218,10 @@ std::string render_project_toml(Project const &p, std::uint32_t source_crc32,
 
     ss << "[project]\n";
     ss << "schema_version = " << Project::kSchemaVersion << "\n";
-    emit_string("display_name ", p.display_name());
-    emit_string("created      ", created);
-    emit_string("notes        ", p.notes());
+    emit_string("display_name  ", p.display_name());
+    emit_string("created       ", created);
+    emit_string("notes         ", p.notes());
+    emit_string("policy_profile", policy::profile_name(p.policy_profile()));
     ss << "\n";
     ss << "[project.source_rom]\n";
     emit_string("path  ", source_rel.generic_string());
@@ -349,6 +350,19 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
     p.display_name_ = (*project)["display_name"].value_or<std::string>("");
     p.notes_        = (*project)["notes"].value_or<std::string>("");
     p.created_      = (*project)["created"].value_or<std::string>("");
+    if (auto const pp = (*project)["policy_profile"].value<std::string>();
+            pp.has_value() && !pp->empty()) {
+        auto const parsed = policy::parse_profile(*pp);
+        if (!parsed.has_value()) {
+            return failure(ErrorCode::ParseError,
+                           "project.policy_profile unknown: '" + *pp
+                               + "' (valid: motorsport-only, alberta-ca, "
+                                 "eu-roadworthy, california-us)");
+        }
+        p.policy_profile_ = *parsed;
+    }
+    // else: default is MotorsportOnly via member init — silently OK for
+    // older projects that pre-date the field.
 
     auto const get_path = [&](toml::table const &t, char const *key) -> std::string {
         return t[key].value_or<std::string>("");
