@@ -417,6 +417,12 @@ int cmd_dump_table(int argc, char *argv[]) {
     auto const &zs = td->axis_z;
 
     auto const print_slice_csv = [&](std::vector<std::vector<double>> const &grid) {
+        // Scalars print as the single value on its own line — no axis
+        // header row, no leading comma.
+        if (xs.empty() && ys.empty() && grid.size() == 1 && grid[0].size() == 1) {
+            std::printf("%.*f\n", precision, grid[0][0]);
+            return;
+        }
         for (auto const x : xs) std::printf(",%.*f", precision, x);
         std::printf("\n");
         for (std::size_t r = 0; r < grid.size(); ++r) {
@@ -429,6 +435,10 @@ int cmd_dump_table(int argc, char *argv[]) {
     constexpr int kColWidth = 10;
     auto const    print_slice_pretty =
         [&](std::vector<std::vector<double>> const &grid) {
+        if (xs.empty() && ys.empty() && grid.size() == 1 && grid[0].size() == 1) {
+            std::printf("%.*f\n", precision, grid[0][0]);
+            return;
+        }
         std::printf("%*s", kColWidth, "");
         for (auto const x : xs) std::printf(" %*.*f", kColWidth - 1, precision, x);
         std::printf("\n");

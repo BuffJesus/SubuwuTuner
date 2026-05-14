@@ -2772,7 +2772,15 @@ int main(int argc, char *argv[]) {
 
     AppState state;
     state.recents = load_recents();
-    if (argc >= 2) {
+    std::string_view const arg1 = (argc >= 2) ? argv[1] : "";
+    if (arg1 == "-h" || arg1 == "--help" || arg1 == "/?") {
+        std::fputs("Usage: subuwutuner-gui [PROJECT.stune]\n"
+                   "  Open the optional .stune project on launch. Without an "
+                   "argument, the GUI starts on the welcome panel.\n",
+                   stderr);
+        return 0;
+    }
+    if (!arg1.empty()) {
         state.try_open_project(argv[1]);
     } else {
         state.status_msg = "Open a .stune project: File → Open (Ctrl+O).";
