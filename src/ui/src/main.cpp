@@ -11,6 +11,7 @@
 
 #include "st/core/version.hpp"
 #include "st/edit.hpp"
+#include "st/policy.hpp"
 #include "st/project.hpp"
 
 // ImGui + backends.
@@ -2669,6 +2670,33 @@ void render_status_bar(AppState &state) {
             chip("Clean", chip_fg_muted(), chip_bg_muted());
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("All edits are saved to disk.");
+            }
+        }
+
+        // Jurisdiction profile chip — disabled-muted in motorsport-only
+        // (the default, silent gate), accent for any other profile so the
+        // user notices when they're under a real regulatory posture. See
+        // docs/06-legal-ethics.md.
+        ImGui::SameLine();
+        {
+            auto const  profile     = state.project->policy_profile();
+            auto const  profile_str = std::string{
+                st::policy::profile_name(profile)};
+            bool const  is_default  =
+                profile == st::policy::Profile::MotorsportOnly;
+            if (is_default) {
+                chip(profile_str.c_str(), chip_fg_muted(), chip_bg_muted());
+            } else {
+                chip(profile_str.c_str(), chip_fg_accent(), chip_bg_accent());
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Active jurisdiction profile (project.toml).\n"
+                    "Drives the EmissionsLinter at flash time — emissions-\n"
+                    "flagged edits may require Confirm / Confirm+Reason\n"
+                    "under stricter profiles. Engine-safety violations\n"
+                    "always block, every profile.\n"
+                    "Change via: subuwutuner-cli project-set-profile <dir> <P>");
             }
         }
 

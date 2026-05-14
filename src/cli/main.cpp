@@ -139,7 +139,7 @@ constexpr std::string_view kUsage =
     "                            format CSV (timestamp_ns,bus,can_id,signal,value,\n"
     "                            unit) — one row per (frame, signal) pair. Frames\n"
     "                            whose id is not in the DBC are skipped.\n"
-    "    flash-plan-info <FILE.toml>\n"
+    "    flash-plan-info <FILE.toml> [--def <pack> --source <rom> [--profile P]]\n"
     "                            Load a flash plan TOML and print its summary —\n"
     "                            session, options, and the address/length of each\n"
     "                            sector write. Hardware-free; touches no transport.\n"
@@ -3344,9 +3344,28 @@ int cmd_can_decode(int argc, char *argv[]) {
 
 int cmd_flash_plan_info(int argc, char *argv[]) {
     std::optional<std::filesystem::path> plan_path;
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::filesystem::path> source_path;
+    std::optional<std::string>           profile_arg;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        if (a.starts_with("--")) {
+        auto const             require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "flash-plan-info: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--def") {
+            if (auto const *v = require_arg("--def"); v) def_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--source") {
+            if (auto const *v = require_arg("--source"); v) source_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--profile") {
+            if (auto const *v = require_arg("--profile"); v) profile_arg = std::string{v};
+            else return 2;
+        } else if (a.starts_with("--")) {
             std::fprintf(stderr, "flash-plan-info: unknown option: %s\n", argv[i]);
             return 2;
         } else if (!plan_path.has_value()) {
@@ -3358,7 +3377,13 @@ int cmd_flash_plan_info(int argc, char *argv[]) {
     }
     if (!plan_path.has_value()) {
         std::fputs("flash-plan-info: missing required argument\n"
-                   "Usage: subuwutuner-cli flash-plan-info <FILE.toml>\n",
+                   "Usage: subuwutuner-cli flash-plan-info <FILE.toml>\n"
+                   "       [--def <pack.toml> --source <rom.bin> "
+                   "[--profile <P>]]\n"
+                   "  With --def + --source, runs the same policy evaluation\n"
+                   "  as flash-apply --profile (default profile is\n"
+                   "  motorsport-only) and prints the lint summary without\n"
+                   "  contacting any transport.\n",
                    stderr);
         return 2;
     }
@@ -3395,6 +3420,59 @@ int cmd_flash_plan_info(int argc, char *argv[]) {
         total_bytes += w.sector.length;
     }
     std::printf("  total              = %zu bytes\n", total_bytes);
+
+    // Optional policy preview. --def + --source are required together
+    // (need both the schema and the byte-baseline to map changes back to
+    // tables). --profile is optional and defaults to motorsport-only.
+    if (def_path.has_value() || source_path.has_value() || profile_arg.has_value()) {
+        if (!def_path.has_value() || !source_path.has_value()) {
+            std::fputs("\nflash-plan-info: policy preview requires both "
+                       "--def and --source\n", stderr);
+            return 2;
+        }
+        auto profile = st::policy::Profile::MotorsportOnly;
+        if (profile_arg.has_value()) {
+            auto const parsed = st::policy::parse_profile(*profile_arg);
+            if (!parsed.has_value()) {
+                std::fprintf(stderr,
+                    "flash-plan-info: unknown profile '%s' (valid: "
+                    "motorsport-only, alberta-ca, eu-roadworthy, "
+                    "california-us)\n",
+                    profile_arg->c_str());
+                return 2;
+            }
+            profile = *parsed;
+        }
+        auto const def = st::Definition::from_file(*def_path);
+        if (!def.has_value()) {
+            std::fprintf(stderr, "flash-plan-info: %s\n",
+                         def.error().to_string().c_str());
+            return 1;
+        }
+        auto const src = st::Rom::from_file(*source_path);
+        if (!src.has_value()) {
+            std::fprintf(stderr, "flash-plan-info: %s\n",
+                         src.error().to_string().c_str());
+            return 1;
+        }
+        auto const d = st::flash::evaluate_plan_policy(p, *def, src->data(), profile);
+        std::printf("\nPolicy preview (profile=%s):\n",
+                    std::string{st::policy::profile_name(profile)}.c_str());
+        std::printf("  engine_safety_tables = %zu", d.engine_safety_tables.size());
+        for (auto const &id : d.engine_safety_tables) std::printf(" %s", id.c_str());
+        std::printf("\n  emissions_tables     = %zu", d.emissions_tables.size());
+        for (auto const &id : d.emissions_tables)     std::printf(" %s", id.c_str());
+        char const *action = "?";
+        switch (d.overall_action) {
+            case st::policy::Action::Silent:            action = "silent"; break;
+            case st::policy::Action::Badge:             action = "badge"; break;
+            case st::policy::Action::Warn:              action = "warn"; break;
+            case st::policy::Action::Confirm:           action = "confirm"; break;
+            case st::policy::Action::ConfirmWithReason: action = "confirm+reason"; break;
+            case st::policy::Action::Block:             action = "block"; break;
+        }
+        std::printf("\n  overall_action       = %s\n", action);
+    }
     return 0;
 }
 
