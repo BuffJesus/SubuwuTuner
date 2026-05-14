@@ -57,7 +57,7 @@ constexpr std::string_view kUsage =
     "                            Print size, CRC32, embedded ASCII strings of a ROM.\n"
     "                            With --def, also identify the ROM against the pack\n"
     "                            and summarize its tables.\n"
-    "    dump-axis --def <pack.toml> --axis <id> <FILE>\n"
+    "    dump-axis --def <pack.toml> --axis <id> [--csv] <FILE>\n"
     "                            Read the named axis from the ROM via the pack and\n"
     "                            print its scaled values, one per line.\n"
     "    dump-table --def <pack.toml> --table <id> [--csv] <FILE>\n"
@@ -266,6 +266,7 @@ int cmd_dump_axis(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
     std::optional<std::string>           axis_id;
     std::optional<std::filesystem::path> rom_path;
+    bool                                 csv = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -281,6 +282,8 @@ int cmd_dump_axis(int argc, char *argv[]) {
                 return 2;
             }
             axis_id = std::string{argv[++i]};
+        } else if (a == "--csv") {
+            csv = true;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "dump-axis: unknown option: %s\n", argv[i]);
             return 2;
@@ -295,7 +298,7 @@ int cmd_dump_axis(int argc, char *argv[]) {
     if (!def_path.has_value() || !axis_id.has_value() || !rom_path.has_value()) {
         std::fputs(
             "dump-axis: missing required arguments\n"
-            "Usage: subuwutuner-cli dump-axis --def <pack.toml> --axis <id> <FILE>\n",
+            "Usage: subuwutuner-cli dump-axis --def <pack.toml> --axis <id> [--csv] <FILE>\n",
             stderr);
         return 2;
     }
@@ -332,10 +335,18 @@ int cmd_dump_axis(int argc, char *argv[]) {
     auto const  precision =
         scaling != nullptr ? scaling->precision : 0;
 
-    std::printf("# %s  (%zu values%s%s)\n", axis->id.c_str(), values->size(),
-                unit.empty() ? "" : ", unit=", unit.c_str());
-    for (auto const v : *values) {
-        std::printf("%.*f\n", precision, v);
+    if (csv) {
+        for (std::size_t i = 0; i < values->size(); ++i) {
+            if (i > 0) std::printf(",");
+            std::printf("%.*f", precision, (*values)[i]);
+        }
+        std::printf("\n");
+    } else {
+        std::printf("# %s  (%zu values%s%s)\n", axis->id.c_str(), values->size(),
+                    unit.empty() ? "" : ", unit=", unit.c_str());
+        for (auto const v : *values) {
+            std::printf("%.*f\n", precision, v);
+        }
     }
     return 0;
 }
