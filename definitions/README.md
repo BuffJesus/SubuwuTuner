@@ -5,6 +5,7 @@ One TOML per ROM CID. Each file is a self-contained `[pack]` with its own
 
 ```
 definitions/
+├── pids.toml          — Subaru SSM datalogger PIDs (91, shared across all SSM ECUs)
 ├── va/         8 packs — WRX VA (2015–2021), fact-only XML → defgen
 ├── vb/        18 packs — WRX VB (2022+, through MY2026), fact-only XML → defgen
 ├── impreza/  150 packs — older Impreza (incl. WRX/STi pre-VA), Merp pack
@@ -17,7 +18,8 @@ definitions/
 └── exiga/      2 packs — Exiga (JDM), Merp pack
 ```
 
-332 ROMs from Merp + 26 from VA/VB fact-only XML = **358 packs total**.
+332 ROMs from Merp + 26 from VA/VB fact-only XML = **358 ECU packs total**,
+plus one cross-cutting `pids.toml` for SSM datalogger parameters.
 
 ## Provenance
 
@@ -84,6 +86,11 @@ python tools/defgen/defgen.py \
     build/scratch/SubaruDefs/RomRaider/ecu/metric/ecu_defs.xml \
     -o build/scratch/legacy/
 # Then split by [pack].platform into definitions/{impreza,forester,...}/.
+
+# SSM datalogger PIDs (one shared file, applies to every SSM-capable ROM):
+python tools/defgen/loggergen.py \
+    build/scratch/SubaruDefs/RomRaider/logger/metric/logger.xml \
+    -o definitions/pids.toml
 ```
 
 `--apply-to-pack` is the right mode if you've hand-edited a pack and want
@@ -96,4 +103,13 @@ subuwutuner-cli pack-info definitions/va/lf9c102p.toml
 subuwutuner-cli table-list definitions/impreza/a4sg900c.toml
 subuwutuner-cli dump-table --def definitions/impreza/a4sg900c.toml \
                            --table target_boost_mt stock.bin
+subuwutuner-cli pack-info definitions/pids.toml    # 91 SSM PIDs, no tables
 ```
+
+## What's NOT here
+
+- **`<switch>`** entries from the logger XML (68 single-bit status flags).
+  Not yet modelled in our schema.
+- **`<ecuparam>`** entries (124 extended parameters whose RAM address
+  varies per ROM CID). Future work to merge into per-CID packs.
+- **Bit-level breakdowns** of multi-flag bytes — same as switches.
