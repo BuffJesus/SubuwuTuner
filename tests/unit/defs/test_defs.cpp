@@ -505,6 +505,52 @@ data_type  = "uint8"
     REQUIRE_FALSE(def_r.has_value());
 }
 
+TEST_CASE("Definition parses [[switch]] records with bit-position validation",
+          "[defs][switch]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 0
+
+[[switch]]
+id          = "s1"
+name        = "Neutral Switch"
+ssm_address = 0x000062
+bit         = 7
+default_log = false
+
+[[switch]]
+id          = "s2"
+name        = "Idle Switch"
+ssm_address = 0x000062
+bit         = 6
+)toml");
+    REQUIRE(def_r.has_value());
+    auto const &def = *def_r;
+    REQUIRE(def.switches().size() == 2);
+    REQUIRE(def.switches()[0].id == "s1");
+    REQUIRE(def.switches()[0].bit == 7);
+    REQUIRE(def.switches()[0].ssm_address == 0x62);
+    REQUIRE(def.find_switch("s2") != nullptr);
+    REQUIRE(def.find_switch("s2")->name == "Idle Switch");
+    REQUIRE(def.find_switch("nope") == nullptr);
+}
+
+TEST_CASE("Definition rejects switch with out-of-range bit", "[defs][switch]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+
+[[switch]]
+id          = "bogus"
+ssm_address = 0x100
+bit         = 8
+)toml");
+    REQUIRE_FALSE(def_r.has_value());
+}
+
 TEST_CASE("Definition::read_table_values reads a 1D table", "[defs][read_table_values]") {
     auto const def_r = st::Definition::from_toml_string(R"toml(
 [pack]

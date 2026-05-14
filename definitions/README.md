@@ -5,7 +5,8 @@ One TOML per ROM CID. Each file is a self-contained `[pack]` with its own
 
 ```
 definitions/
-├── pids.toml          — Subaru SSM datalogger PIDs (91, shared across all SSM ECUs)
+├── pids.toml          — Shared SSM datalogger payload: 91 PIDs + 68 switches
+├── ecuparams/         — 331 per-CID extended-PID fragments (load alongside the pack)
 ├── va/         8 packs — WRX VA (2015–2021), fact-only XML → defgen
 ├── vb/        18 packs — WRX VB (2022+, through MY2026), fact-only XML → defgen
 ├── impreza/  150 packs — older Impreza (incl. WRX/STi pre-VA), Merp pack
@@ -19,7 +20,9 @@ definitions/
 ```
 
 332 ROMs from Merp + 26 from VA/VB fact-only XML = **358 ECU packs total**,
-plus one cross-cutting `pids.toml` for SSM datalogger parameters.
+plus one cross-cutting `pids.toml` for SSM datalogger params/switches and
+331 per-CID `ecuparams/<rom_id>.toml` fragments for the ROM-specific
+extended logger parameters.
 
 ## Provenance
 
@@ -87,10 +90,14 @@ python tools/defgen/defgen.py \
     -o build/scratch/legacy/
 # Then split by [pack].platform into definitions/{impreza,forester,...}/.
 
-# SSM datalogger PIDs (one shared file, applies to every SSM-capable ROM):
+# SSM datalogger PIDs + switches + per-CID ecuparams. The ecuparam pass
+# resolves each <ecu id=…> against the `ecu_part` field in existing
+# packs, so run defgen first, then loggergen with --packs-dir.
 python tools/defgen/loggergen.py \
     build/scratch/SubaruDefs/RomRaider/logger/metric/logger.xml \
-    -o definitions/pids.toml
+    -o definitions/pids.toml \
+    --ecuparams-into definitions/ecuparams/ \
+    --packs-dir definitions/
 ```
 
 `--apply-to-pack` is the right mode if you've hand-edited a pack and want
@@ -108,8 +115,9 @@ subuwutuner-cli pack-info definitions/pids.toml    # 91 SSM PIDs, no tables
 
 ## What's NOT here
 
-- **`<switch>`** entries from the logger XML (68 single-bit status flags).
-  Not yet modelled in our schema.
-- **`<ecuparam>`** entries (124 extended parameters whose RAM address
-  varies per ROM CID). Future work to merge into per-CID packs.
-- **Bit-level breakdowns** of multi-flag bytes — same as switches.
+- **Bit-level breakdowns** of multi-flag bytes that aren't already
+  modelled as individual switches.
+- **Auto-loading of `ecuparams/<cid>.toml`** alongside its matching ECU
+  pack — currently the fragment is a sibling file with a different
+  `[pack].id`; integration with the C++ pack loader is future work.
+  Until then, load the fragment explicitly when you want extended PIDs.

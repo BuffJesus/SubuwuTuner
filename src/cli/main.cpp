@@ -608,6 +608,7 @@ int cmd_pack_info(int argc, char *argv[]) {
     std::printf("Scalings:        %zu\n", def->scalings().size());
     std::printf("Tables:          %zu\n", def->tables().size());
     std::printf("PIDs:            %zu\n", def->pids().size());
+    std::printf("Switches:        %zu\n", def->switches().size());
 
     // Quick validate so users see issues without running rom-info.
     auto const validity = def->validate();

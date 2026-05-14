@@ -1386,3 +1386,547 @@ data_type   = "uint8"
 scaling     = "degrees_x_0_25_32"
 unit        = "degrees"
 default_log = false
+
+
+[[switch]]
+id          = "s1"
+name        = "AT Vehicle ID"
+ssm_address = 0x00000061
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s2"
+name        = "Test Mode Connector"
+ssm_address = 0x00000061
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s3"
+name        = "Read Memory Connector"
+ssm_address = 0x00000061
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s4"
+name        = "Neutral Position Switch"
+ssm_address = 0x00000062
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s5"
+name        = "Idle Switch"
+ssm_address = 0x00000062
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s6"
+name        = "Intercooler AutoWash Switch"
+ssm_address = 0x00000062
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s7"
+name        = "Ignition Switch"
+ssm_address = 0x00000062
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s8"
+name        = "Power Steering Switch"
+ssm_address = 0x00000062
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s9"
+name        = "Air Conditioning Switch"
+ssm_address = 0x00000062
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s10"
+name        = "Handle Switch"
+ssm_address = 0x00000063
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s11"
+name        = "Starter Switch"
+ssm_address = 0x00000063
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s12"
+name        = "Front O2 Rich Signal"
+ssm_address = 0x00000063
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s13"
+name        = "Rear O2 Rich Signal"
+ssm_address = 0x00000063
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s14"
+name        = "Front O2 #2 Rich Signal"
+ssm_address = 0x00000063
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s15"
+name        = "Knock Signal 1"
+ssm_address = 0x00000063
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s16"
+name        = "Knock Signal 2"
+ssm_address = 0x00000063
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s17"
+name        = "Electrical Load Signal"
+ssm_address = 0x00000063
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s18"
+name        = "Crank Position Sensor"
+ssm_address = 0x00000064
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s19"
+name        = "Cam Position Sensor"
+ssm_address = 0x00000064
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s20"
+name        = "Defogger Switch"
+ssm_address = 0x00000064
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s21"
+name        = "Blower Switch"
+ssm_address = 0x00000064
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s22"
+name        = "Interior Light Switch"
+ssm_address = 0x00000064
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s23"
+name        = "Wiper Switch"
+ssm_address = 0x00000064
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s24"
+name        = "Air-Con Lock Signal"
+ssm_address = 0x00000064
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s25"
+name        = "Air-Con Mid Pressure Switch"
+ssm_address = 0x00000064
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s26"
+name        = "Air-Con Compressor Signal"
+ssm_address = 0x00000065
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s27"
+name        = "Radiator Fan Relay #3"
+ssm_address = 0x00000065
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s28"
+name        = "Radiator Fan Relay #1"
+ssm_address = 0x00000065
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s29"
+name        = "Radiator Fan Relay #2"
+ssm_address = 0x00000065
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s30"
+name        = "Fuel Pump Relay"
+ssm_address = 0x00000065
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s31"
+name        = "Intercooler Auto-Wash Relay"
+ssm_address = 0x00000065
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s32"
+name        = "CPC Solenoid Valve"
+ssm_address = 0x00000065
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s33"
+name        = "Blow-By Leak Connector"
+ssm_address = 0x00000065
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s34"
+name        = "PCV Solenoid Valve"
+ssm_address = 0x00000066
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s35"
+name        = "TGV Output"
+ssm_address = 0x00000066
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s36"
+name        = "TGV Drive"
+ssm_address = 0x00000066
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s37"
+name        = "Variable Intake Air Solenoid"
+ssm_address = 0x00000066
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s38"
+name        = "Pressure Sources Change"
+ssm_address = 0x00000066
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s39"
+name        = "Vent Solenoid Valve"
+ssm_address = 0x00000066
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s40"
+name        = "P/S Solenoid Valve"
+ssm_address = 0x00000066
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s41"
+name        = "Assist Air Solenoid Valve"
+ssm_address = 0x00000066
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s42"
+name        = "Tank Sensor Control Valve"
+ssm_address = 0x00000067
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s43"
+name        = "Relief Valve Solenoid 1"
+ssm_address = 0x00000067
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s44"
+name        = "Relief Valve Solenoid 2"
+ssm_address = 0x00000067
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s45"
+name        = "TCS Relief Valve Solenoid"
+ssm_address = 0x00000067
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s46"
+name        = "Ex. Gas Positive Pressure"
+ssm_address = 0x00000067
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s47"
+name        = "Ex. Gas Negative Pressure"
+ssm_address = 0x00000067
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s48"
+name        = "Intake Air Solenoid"
+ssm_address = 0x00000067
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s49"
+name        = "Muffler Control"
+ssm_address = 0x00000067
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s50"
+name        = "Retard Signal from AT"
+ssm_address = 0x00000068
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s51"
+name        = "Fuel Cut Signal from AT"
+ssm_address = 0x00000068
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s52"
+name        = "Ban of Torque Down"
+ssm_address = 0x00000068
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s53"
+name        = "Request Torque Down VDC"
+ssm_address = 0x00000068
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s54"
+name        = "Torque Control Signal #1"
+ssm_address = 0x00000069
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s55"
+name        = "Torque Control Signal #2"
+ssm_address = 0x00000069
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s56"
+name        = "Torque Permission Signal"
+ssm_address = 0x00000069
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s57"
+name        = "EAM Signal"
+ssm_address = 0x00000069
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s58"
+name        = "AT coop. lock up signal"
+ssm_address = 0x00000069
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s59"
+name        = "AT coop. lean burn signal"
+ssm_address = 0x00000069
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s60"
+name        = "AT coop. rich spike signal"
+ssm_address = 0x00000069
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s61"
+name        = "AET Signal"
+ssm_address = 0x00000069
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s62"
+name        = "ETC Motor Relay"
+ssm_address = 0x00000120
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s63"
+name        = "Clutch Switch"
+ssm_address = 0x00000121
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s64"
+name        = "Stop Light Switch"
+ssm_address = 0x00000121
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s65"
+name        = "Set/Coast Switch"
+ssm_address = 0x00000121
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s66"
+name        = "Resume/Accelerate Switch"
+ssm_address = 0x00000121
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s67"
+name        = "Brake Switch"
+ssm_address = 0x00000121
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s68"
+name        = "Accelerator Switch"
+ssm_address = 0x00000121
+bit         = 1
+default_log = false

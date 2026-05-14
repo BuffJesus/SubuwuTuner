@@ -152,6 +152,16 @@ struct Pid {
     bool        default_log{false};
 };
 
+// A single-bit status flag in an SSM RAM byte. RomRaider numbers bits with
+// `bit=0` as the LSB. `default_log` mirrors the Pid convention.
+struct Switch {
+    std::string id;
+    std::string name;
+    std::size_t ssm_address{};
+    int         bit{};
+    bool        default_log{false};
+};
+
 // A complete definition pack: one Pack header, plus 0..N of each child kind.
 class Definition {
   public:
@@ -179,11 +189,13 @@ class Definition {
     [[nodiscard]] std::vector<Scaling> const & scalings() const noexcept { return scalings_; }
     [[nodiscard]] std::vector<Table> const &   tables() const noexcept { return tables_; }
     [[nodiscard]] std::vector<Pid> const &     pids() const noexcept { return pids_; }
+    [[nodiscard]] std::vector<Switch> const &  switches() const noexcept { return switches_; }
 
     [[nodiscard]] Axis const *    find_axis(std::string_view id) const noexcept;
     [[nodiscard]] Scaling const * find_scaling(std::string_view id) const noexcept;
     [[nodiscard]] Table const *   find_table(std::string_view id) const noexcept;
     [[nodiscard]] Pid const *     find_pid(std::string_view id) const noexcept;
+    [[nodiscard]] Switch const *  find_switch(std::string_view id) const noexcept;
 
     // If `rom` matches one of the [[identification]] entries, return the
     // entry's `name`. Otherwise nullopt.
@@ -248,6 +260,7 @@ class Definition {
     std::vector<Scaling>        scalings_;
     std::vector<Table>          tables_;
     std::vector<Pid>            pids_;
+    std::vector<Switch>         switches_;
 
     friend class DefinitionBuilder;
 };

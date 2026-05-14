@@ -294,6 +294,24 @@ Result<Pid> parse_pid(toml::table const &t) {
     return p;
 }
 
+Result<Switch> parse_switch(toml::table const &t) {
+    Switch s;
+    if (auto const v = t["id"].value<std::string>(); v.has_value()) {
+        s.id = *v;
+    } else {
+        return failure(ErrorCode::ParseError, "[[switch]] missing id");
+    }
+    s.name        = optional_value<std::string>(t, "name", {});
+    s.ssm_address = static_cast<std::size_t>(optional_value<std::int64_t>(t, "ssm_address", 0));
+    s.bit         = static_cast<int>(optional_value<std::int64_t>(t, "bit", 0));
+    if (s.bit < 0 || s.bit > 7) {
+        return failure(ErrorCode::ParseError,
+                       "[[switch]] '" + s.id + "' bit must be 0..7");
+    }
+    s.default_log = optional_value<bool>(t, "default_log", false);
+    return s;
+}
+
 } // namespace
 
 // ---- DataType helpers ----------------------------------------------------
@@ -618,6 +636,9 @@ class DefinitionBuilder {
         if (auto r = visit_array("pid", parse_pid, def.pids_); !r.has_value()) {
             return failure(r.error());
         }
+        if (auto r = visit_array("switch", parse_switch, def.switches_); !r.has_value()) {
+            return failure(r.error());
+        }
         return ok();
     }
 
@@ -649,6 +670,7 @@ class DefinitionBuilder {
         upsert(parent.scalings_, child.scalings_);
         upsert(parent.tables_,   child.tables_);
         upsert(parent.pids_,     child.pids_);
+        upsert(parent.switches_, child.switches_);
         return parent;
     }
 
@@ -900,6 +922,12 @@ Pid const *Definition::find_pid(std::string_view id) const noexcept {
     auto it = std::find_if(pids_.begin(), pids_.end(),
                            [&](Pid const &p) { return p.id == id; });
     return it == pids_.end() ? nullptr : &*it;
+}
+
+Switch const *Definition::find_switch(std::string_view id) const noexcept {
+    auto it = std::find_if(switches_.begin(), switches_.end(),
+                           [&](Switch const &s) { return s.id == id; });
+    return it == switches_.end() ? nullptr : &*it;
 }
 
 Result<std::vector<double>> Definition::read_axis_values(Rom const &rom,

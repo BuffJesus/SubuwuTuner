@@ -42,7 +42,7 @@ class LoggergenParseTest(unittest.TestCase):
             </conversions>
           </parameter>
         ''')
-        scalings, pids, warnings = loggergen.parse_logger_xml(xml)
+        scalings, pids, _switches, warnings = loggergen.parse_logger_xml(xml)
         self.assertEqual(warnings, [])
         self.assertEqual(len(pids), 1)
         pid = pids[0]
@@ -66,7 +66,7 @@ class LoggergenParseTest(unittest.TestCase):
             </conversions>
           </parameter>
         ''')
-        _, pids, _ = loggergen.parse_logger_xml(xml)
+        _, pids, _switches, _ = loggergen.parse_logger_xml(xml)
         self.assertEqual(pids[0]["length"], 2)
         self.assertEqual(pids[0]["data_type"], "uint16_be")
         self.assertEqual(pids[0]["ssm_address"], "0x0000000E")
@@ -88,7 +88,7 @@ class LoggergenParseTest(unittest.TestCase):
             <conversions><conversion units="%" expr="(x-128)*100/128" format="0.00"/></conversions>
           </parameter>
         ''')
-        scalings, pids, _ = loggergen.parse_logger_xml(xml)
+        scalings, pids, _switches, _ = loggergen.parse_logger_xml(xml)
         self.assertEqual(len(pids), 3)
         self.assertEqual(len(scalings), 1)
         # All three PIDs reference the same scaling id.
@@ -103,7 +103,7 @@ class LoggergenParseTest(unittest.TestCase):
             <conversions><conversion units="" expr="x" format="0"/></conversions>
           </parameter>
         ''')
-        _, pids, warnings = loggergen.parse_logger_xml(xml)
+        _, pids, _switches, warnings = loggergen.parse_logger_xml(xml)
         self.assertEqual(pids, [])
         self.assertEqual(len(warnings), 1)
         self.assertEqual(warnings[0][:2], ("pid", "p200"))
@@ -117,7 +117,7 @@ class LoggergenParseTest(unittest.TestCase):
             <conversions><conversion units="%" expr="(x-128)*100/x" format="0.00"/></conversions>
           </parameter>
         ''')
-        scalings, pids, warnings = loggergen.parse_logger_xml(xml)
+        scalings, pids, _switches, warnings = loggergen.parse_logger_xml(xml)
         self.assertEqual(len(pids), 1)
         self.assertEqual(scalings[0].factor, 1.0)
         self.assertEqual(scalings[0].offset, 0.0)
@@ -132,7 +132,7 @@ class LoggergenParseTest(unittest.TestCase):
             <conversions><conversion units="%" expr="x*100/255" format="0.00"/></conversions>
           </parameter>
         ''')
-        scalings, pids, _ = loggergen.parse_logger_xml(xml)
+        scalings, pids, _switches, _ = loggergen.parse_logger_xml(xml)
         text = loggergen.emit_pack_toml(scalings, pids)
         raw  = tomllib.loads(text)
         self.assertEqual(raw["pack"]["id"], "subaru-ssm-pids")
@@ -140,6 +140,113 @@ class LoggergenParseTest(unittest.TestCase):
         self.assertEqual(len(raw["pid"]), 1)
         self.assertEqual(raw["pid"][0]["id"], "p1")
         self.assertEqual(raw["pid"][0]["ssm_address"], 0x07)
+
+
+def _wrap_switches(switches_xml: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<logger>
+  <protocols>
+    <protocol id="SSM">
+      <parameters/>
+      <switches>
+        {switches_xml}
+      </switches>
+      <ecuparams/>
+    </protocol>
+  </protocols>
+</logger>"""
+
+
+def _wrap_ecuparams(ecuparams_xml: str) -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<logger>
+  <protocols>
+    <protocol id="SSM">
+      <parameters/>
+      <switches/>
+      <ecuparams>
+        {ecuparams_xml}
+      </ecuparams>
+    </protocol>
+  </protocols>
+</logger>"""
+
+
+class LoggergenSwitchTest(unittest.TestCase):
+    def test_switch_extracted(self):
+        xml = _wrap_switches('''
+          <switch id="S4" name="Neutral Position Switch" byte="0x000062" bit="7"/>
+          <switch id="S5" name="Idle Switch"             byte="0x000062" bit="6"/>
+        ''')
+        _, _, switches, warnings = loggergen.parse_logger_xml(xml)
+        self.assertEqual(warnings, [])
+        self.assertEqual(len(switches), 2)
+        self.assertEqual(switches[0]["id"], "s4")
+        self.assertEqual(switches[0]["name"], "Neutral Position Switch")
+        self.assertEqual(switches[0]["ssm_address"], "0x00000062")
+        self.assertEqual(switches[0]["bit"], 7)
+
+    def test_switch_with_out_of_range_bit_skipped(self):
+        xml = _wrap_switches(
+            '<switch id="S99" name="Bogus" byte="0x000100" bit="8"/>'
+        )
+        _, _, switches, warnings = loggergen.parse_logger_xml(xml)
+        self.assertEqual(switches, [])
+        self.assertEqual(warnings[0][:2], ("switch", "s99"))
+        self.assertIn("out of range", warnings[0][2])
+
+    def test_emit_pack_toml_includes_switches(self):
+        xml = _wrap_switches(
+            '<switch id="S1" name="AT Vehicle ID" byte="0x000061" bit="6"/>'
+        )
+        scalings, pids, switches, _ = loggergen.parse_logger_xml(xml)
+        text = loggergen.emit_pack_toml(scalings, pids, switches)
+        raw  = tomllib.loads(text)
+        self.assertEqual(len(raw["switch"]), 1)
+        self.assertEqual(raw["switch"][0]["id"], "s1")
+        self.assertEqual(raw["switch"][0]["ssm_address"], 0x61)
+        self.assertEqual(raw["switch"][0]["bit"], 6)
+
+
+class LoggergenEcuparamTest(unittest.TestCase):
+    def test_single_ecuid_fanout(self):
+        xml = _wrap_ecuparams('''
+          <ecuparam id="E1" name="IAM*">
+            <ecu id="1B14400305">
+              <address>0x20118</address>
+            </ecu>
+            <conversions>
+              <conversion units="raw ecu value" expr="x" format="0"/>
+            </conversions>
+          </ecuparam>
+        ''')
+        scalings, per_ecuid, warnings = loggergen.parse_ecuparams(xml)
+        self.assertEqual(warnings, [])
+        self.assertIn("1B14400305", per_ecuid)
+        records = per_ecuid["1B14400305"]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["id"], "e1")
+        self.assertEqual(records[0]["ssm_address"], "0x00020118")
+
+    def test_space_separated_ecuid_fans_out(self):
+        xml = _wrap_ecuparams('''
+          <ecuparam id="E2" name="Fine Knock Learn">
+            <ecu id="AAA111 BBB222 CCC333">
+              <address length="2">0x20200</address>
+            </ecu>
+            <conversions>
+              <conversion units="deg" expr="x/2" format="0.0"/>
+            </conversions>
+          </ecuparam>
+        ''')
+        _, per_ecuid, _ = loggergen.parse_ecuparams(xml)
+        self.assertEqual(set(per_ecuid.keys()), {"AAA111", "BBB222", "CCC333"})
+        # All three should get the same address/length/scaling.
+        for ecuid in ("AAA111", "BBB222", "CCC333"):
+            r = per_ecuid[ecuid][0]
+            self.assertEqual(r["length"], 2)
+            self.assertEqual(r["data_type"], "uint16_be")
+            self.assertEqual(r["ssm_address"], "0x00020200")
 
 
 if __name__ == "__main__":
