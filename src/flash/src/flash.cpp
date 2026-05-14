@@ -455,6 +455,94 @@ std::string format_hex_bytes(std::span<std::uint8_t const> bytes) {
 
 } // namespace
 
+// ---- evaluate_plan_policy -----------------------------------------------
+
+namespace {
+
+// Return the byte extent of `t` in the ROM, taking grid + axes into account.
+// Returns 0 when the data type can't be sized (shouldn't happen on a
+// well-formed pack but the validator could in principle let it through).
+std::size_t table_byte_extent(Table const &t, Definition const &def) noexcept {
+    auto const cell_bytes = byte_size(t.data_type);
+    if (cell_bytes == 0) return 0;
+    std::size_t cells = 1;
+    if (t.dimensions >= 1 && t.axis_x.has_value()) {
+        auto const *ax = def.find_axis(*t.axis_x);
+        if (ax != nullptr && ax->length > 0) {
+            cells *= ax->length;
+        }
+    }
+    if (t.dimensions >= 2 && t.axis_y.has_value()) {
+        auto const *ay = def.find_axis(*t.axis_y);
+        if (ay != nullptr && ay->length > 0) {
+            cells *= ay->length;
+        }
+    }
+    if (t.dimensions >= 3 && t.axis_z.has_value()) {
+        auto const *az = def.find_axis(*t.axis_z);
+        if (az != nullptr && az->length > 0) {
+            cells *= az->length;
+        }
+    }
+    return cells * cell_bytes;
+}
+
+// True iff `plan` writes any byte in `[start, end)` that differs from
+// `source`. Bytes outside any SectorWrite or past the source's end count
+// as unchanged.
+bool plan_touches_changed_byte_in(FlashPlan                     const &plan,
+                                   std::span<std::uint8_t const>      source,
+                                   std::size_t                        start,
+                                   std::size_t                        end) noexcept {
+    if (start >= end) return false;
+    for (auto const &w : plan.writes) {
+        auto const sec_start = static_cast<std::size_t>(w.sector.address);
+        auto const sec_end   = sec_start + w.data.size();
+        auto const lo = std::max(start, sec_start);
+        auto const hi = std::min(end,   sec_end);
+        if (lo >= hi) continue;
+        for (auto off = lo; off < hi; ++off) {
+            std::uint8_t const target_byte = w.data[off - sec_start];
+            std::uint8_t const source_byte = off < source.size() ? source[off] : 0x00;
+            if (target_byte != source_byte) return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+PolicyDecision evaluate_plan_policy(FlashPlan                     const &plan,
+                                     Definition                    const &def,
+                                     std::span<std::uint8_t const>        source_rom,
+                                     policy::Profile                      profile) noexcept {
+    PolicyDecision result;
+    for (auto const &t : def.tables()) {
+        auto const extent = table_byte_extent(t, def);
+        if (extent == 0) continue;
+        auto const start = t.address;
+        auto const end   = start + extent;
+        if (!plan_touches_changed_byte_in(plan, source_rom, start, end)) {
+            continue;
+        }
+        if (t.engine_safety_critical) {
+            result.engine_safety_tables.push_back(t.id);
+        }
+        if (t.emissions_relevant) {
+            result.emissions_tables.push_back(t.id);
+        }
+    }
+    // No dedup pass needed — each table appears at most once in the loop.
+
+    result.emissions_action = result.emissions_tables.empty()
+                                ? policy::Action::Silent
+                                : policy::emissions_action(profile).on_flash;
+    result.overall_action   = result.engine_safety_tables.empty()
+                                ? result.emissions_action
+                                : policy::engine_safety_on_flash(profile);
+    return result;
+}
+
 namespace {
 
 // Load a binary file into a byte vector. Used by parse_plan when a

@@ -138,13 +138,19 @@ constexpr std::string_view kUsage =
     "                            done sector differs).\n"
     "    flash-apply --plan <FILE.toml> --trace <FILE.uds>\n"
     "                [--journal <FILE.toml>] [--manifest <FILE.toml>]\n"
-    "                            Run a flash plan against a MockTransport-replayed UDS\n"
-    "                            trace. The trace is text with one '> req hex' /\n"
-    "                            '< resp hex' pair per exchange; '#' starts a comment.\n"
-    "                            Hardware-free smoke for the Flasher orchestrator;\n"
-    "                            prints the FlashReport summary; if --manifest is set,\n"
-    "                            writes a Manifest of the run; if --journal is set,\n"
-    "                            sets FlashPlan.journal_path for incremental writes.\n"
+    "                [--profile <P> --def <pack.toml> --source <rom.bin>]\n"
+    "                [--confirm] [--reason \"…\"]\n"
+    "                Apply a flash plan against a MockTransport-replayed UDS\n"
+    "                trace. With --profile + --def + --source, gates the flash\n"
+    "                through st::policy: refuses on engine-safety violations\n"
+    "                regardless of profile, and on emissions edits that the\n"
+    "                profile demands a confirmation/reason for without one.\n"
+    "                            Trace is text with one '> req hex' / '< resp hex'\n"
+    "                            pair per exchange; '#' starts a comment. Hardware-\n"
+    "                            free smoke for the Flasher orchestrator; prints the\n"
+    "                            FlashReport summary. With --manifest, writes a\n"
+    "                            Manifest of the run; with --journal, sets\n"
+    "                            FlashPlan.journal_path for incremental writes.\n"
     "    rom-pull --addr <hex> --size <hex> --trace <FILE.uds> --output <FILE.bin>\n"
     "             [--max-chunk <hex>]\n"
     "                            Read N bytes of ECU memory via Flasher::read_full_rom\n"
@@ -3601,6 +3607,11 @@ int cmd_flash_apply(int argc, char *argv[]) {
     std::optional<std::filesystem::path> trace_path;
     std::optional<std::filesystem::path> manifest_path;
     std::optional<std::filesystem::path> journal_path;
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::filesystem::path> source_path;
+    std::optional<std::string>           profile_arg;
+    bool                                 confirm  = false;
+    std::optional<std::string>           reason;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -3623,6 +3634,20 @@ int cmd_flash_apply(int argc, char *argv[]) {
         } else if (a == "--journal") {
             if (auto const *v = require_arg("--journal"); v) journal_path = std::filesystem::path{v};
             else return 2;
+        } else if (a == "--def") {
+            if (auto const *v = require_arg("--def"); v) def_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--source") {
+            if (auto const *v = require_arg("--source"); v) source_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--profile") {
+            if (auto const *v = require_arg("--profile"); v) profile_arg = std::string{v};
+            else return 2;
+        } else if (a == "--confirm") {
+            confirm = true;
+        } else if (a == "--reason") {
+            if (auto const *v = require_arg("--reason"); v) reason = std::string{v};
+            else return 2;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "flash-apply: unknown option: %s\n", argv[i]);
             return 2;
@@ -3636,7 +3661,9 @@ int cmd_flash_apply(int argc, char *argv[]) {
         std::fputs("flash-apply: missing required arguments\n"
                    "Usage: subuwutuner-cli flash-apply --plan <FILE.toml> "
                    "--trace <FILE.uds>\n"
-                   "       [--journal <FILE.toml>] [--manifest <FILE.toml>]\n",
+                   "       [--journal <FILE.toml>] [--manifest <FILE.toml>]\n"
+                   "       [--profile <P> --def <pack.toml> --source <rom.bin>]\n"
+                   "       [--confirm] [--reason \"…\"]\n",
                    stderr);
         return 2;
     }
@@ -3649,6 +3676,99 @@ int cmd_flash_apply(int argc, char *argv[]) {
     }
     if (journal_path.has_value()) {
         plan->journal_path = *journal_path;
+    }
+
+    // ---- Policy gate -----------------------------------------------------
+    //
+    // Optional: when --profile is provided we diff the plan against
+    // --source under --def, run evaluate_plan_policy, and refuse the flash
+    // if the active profile demands a confirmation/reason the caller did
+    // not supply. Engine-safety always blocks.
+    if (profile_arg.has_value()) {
+        if (!def_path.has_value() || !source_path.has_value()) {
+            std::fputs("flash-apply: --profile requires --def AND --source\n",
+                       stderr);
+            return 2;
+        }
+        auto const profile = st::policy::parse_profile(*profile_arg);
+        if (!profile.has_value()) {
+            std::fprintf(stderr,
+                "flash-apply: unknown profile '%s'. Known: motorsport-only, "
+                "alberta-ca, eu-roadworthy, california-us\n",
+                profile_arg->c_str());
+            return 2;
+        }
+        auto const def = st::Definition::from_file(*def_path);
+        if (!def.has_value()) {
+            std::fprintf(stderr, "flash-apply: %s\n", def.error().to_string().c_str());
+            return 1;
+        }
+        auto const src = st::Rom::from_file(*source_path);
+        if (!src.has_value()) {
+            std::fprintf(stderr, "flash-apply: %s\n", src.error().to_string().c_str());
+            return 1;
+        }
+        auto const decision = st::flash::evaluate_plan_policy(
+            *plan, *def, src->data(), *profile);
+
+        if (!decision.engine_safety_tables.empty()) {
+            std::fprintf(stderr,
+                "flash-apply: REFUSED: plan changes engine-safety-critical "
+                "tables: ");
+            for (auto const &id : decision.engine_safety_tables) {
+                std::fprintf(stderr, "%s ", id.c_str());
+            }
+            std::fprintf(stderr,
+                "\nEngine-safety violations block in every profile (see "
+                "docs/06-legal-ethics.md).\n");
+            return 3;
+        }
+        using A = st::policy::Action;
+        if (decision.overall_action == A::Block) {
+            std::fprintf(stderr,
+                "flash-apply: REFUSED by policy under profile '%s'.\n",
+                profile_arg->c_str());
+            return 3;
+        }
+        if (decision.overall_action == A::Confirm && !confirm) {
+            std::fprintf(stderr,
+                "flash-apply: profile '%s' requires --confirm to flash a plan "
+                "that changes emissions-relevant tables: ",
+                profile_arg->c_str());
+            for (auto const &id : decision.emissions_tables) {
+                std::fprintf(stderr, "%s ", id.c_str());
+            }
+            std::fputc('\n', stderr);
+            return 3;
+        }
+        if (decision.overall_action == A::ConfirmWithReason
+                && (!confirm || !reason.has_value() || reason->empty())) {
+            std::fprintf(stderr,
+                "flash-apply: profile '%s' requires --confirm AND a non-empty "
+                "--reason to flash a plan that changes emissions-relevant "
+                "tables: ",
+                profile_arg->c_str());
+            for (auto const &id : decision.emissions_tables) {
+                std::fprintf(stderr, "%s ", id.c_str());
+            }
+            std::fputc('\n', stderr);
+            return 3;
+        }
+        // Print what the linter found so the operator sees it.
+        if (!decision.emissions_tables.empty()) {
+            std::fprintf(stderr,
+                "flash-apply: policy(%s) flagged emissions-relevant edits "
+                "in %zu table(s); proceeding (%s)%s%s.\n",
+                profile_arg->c_str(),
+                decision.emissions_tables.size(),
+                decision.overall_action == A::ConfirmWithReason
+                    ? "confirmed + reason"
+                    : (decision.overall_action == A::Confirm
+                          ? "confirmed"
+                          : "no confirmation required"),
+                reason.has_value() ? ", reason=" : "",
+                reason.has_value() ? reason->c_str() : "");
+        }
     }
 
     std::vector<UdsTracePair> pairs;

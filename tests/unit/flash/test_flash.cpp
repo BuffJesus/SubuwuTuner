@@ -1004,3 +1004,157 @@ TEST_CASE("Flasher::execute reports verify_after_write mismatch",
     REQUIRE_FALSE(r.report.all_sectors_verified());
     REQUIRE(t.exhausted());
 }
+
+// ---- evaluate_plan_policy ------------------------------------------------
+
+namespace {
+
+// Build a minimal Definition with two tables: one engine-safety-critical,
+// one emissions-relevant. Both 1-byte scalars at distinct addresses so we
+// can compose plans that touch either, both, or neither.
+st::Definition make_two_table_def() {
+    auto def = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "policy-test"
+endianness     = "big"
+rom_size_bytes = 256
+
+[[scaling]]
+id        = "raw"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint8"
+
+[[table]]
+id                     = "rev_limit"
+dimensions             = 0
+address                = 0x10
+data_type              = "uint8"
+scaling                = "raw"
+engine_safety_critical = true
+
+[[table]]
+id                     = "cl_target"
+dimensions             = 0
+address                = 0x20
+data_type              = "uint8"
+scaling                = "raw"
+emissions_relevant     = true
+
+[[table]]
+id                     = "boost_target"
+dimensions             = 0
+address                = 0x30
+data_type              = "uint8"
+scaling                = "raw"
+)toml");
+    REQUIRE(def.has_value());
+    return std::move(*def);
+}
+
+// A 256-byte source ROM filled with a known background pattern.
+std::vector<std::uint8_t> make_source_rom() {
+    std::vector<std::uint8_t> rom(256, 0x00);
+    rom[0x10] = 0x50;  // rev_limit baseline
+    rom[0x20] = 0x80;  // cl_target  baseline
+    rom[0x30] = 0xA0;  // boost_target baseline
+    return rom;
+}
+
+// Build a one-sector plan that overwrites `[start, start + bytes.size())`.
+flash::FlashPlan plan_for(std::uint32_t start, std::vector<std::uint8_t> bytes) {
+    flash::FlashPlan p;
+    p.writes.push_back({{start, static_cast<std::uint32_t>(bytes.size())}, std::move(bytes)});
+    return p;
+}
+
+} // namespace
+
+TEST_CASE("evaluate_plan_policy: no flagged tables -> Silent regardless of profile",
+          "[flash][policy]") {
+    auto const def = make_two_table_def();
+    auto const src = make_source_rom();
+    // Plan changes byte 0x30 only — boost_target, neither flag.
+    auto const plan = plan_for(0x30, {0xB0});
+    for (auto p : {st::policy::Profile::MotorsportOnly,
+                   st::policy::Profile::AlbertaCa,
+                   st::policy::Profile::CaliforniaUs}) {
+        auto const d = flash::evaluate_plan_policy(plan, def, src, p);
+        REQUIRE(d.engine_safety_tables.empty());
+        REQUIRE(d.emissions_tables.empty());
+        REQUIRE(d.overall_action == st::policy::Action::Silent);
+    }
+}
+
+TEST_CASE("evaluate_plan_policy: emissions-flagged table changes -> profile action",
+          "[flash][policy]") {
+    auto const def  = make_two_table_def();
+    auto const src  = make_source_rom();
+    auto const plan = plan_for(0x20, {0x90});  // cl_target: 0x80 -> 0x90
+
+    auto const motorsport = flash::evaluate_plan_policy(
+        plan, def, src, st::policy::Profile::MotorsportOnly);
+    REQUIRE(motorsport.emissions_tables == std::vector<std::string>{"cl_target"});
+    REQUIRE(motorsport.engine_safety_tables.empty());
+    REQUIRE(motorsport.overall_action == st::policy::Action::Silent);
+
+    auto const calif = flash::evaluate_plan_policy(
+        plan, def, src, st::policy::Profile::CaliforniaUs);
+    REQUIRE(calif.emissions_tables == std::vector<std::string>{"cl_target"});
+    REQUIRE(calif.overall_action == st::policy::Action::ConfirmWithReason);
+}
+
+TEST_CASE("evaluate_plan_policy: engine-safety table -> Block every profile",
+          "[flash][policy]") {
+    auto const def = make_two_table_def();
+    auto const src = make_source_rom();
+    // Plan changes BOTH the safety-critical rev_limit AND the emissions
+    // cl_target. Safety wins → Block, regardless of profile.
+    flash::FlashPlan plan;
+    plan.writes.push_back({{0x10, 1}, {0x55}});   // rev_limit changed
+    plan.writes.push_back({{0x20, 1}, {0x90}});   // cl_target changed
+
+    for (auto p : {st::policy::Profile::MotorsportOnly,
+                   st::policy::Profile::AlbertaCa,
+                   st::policy::Profile::EuRoadworthy,
+                   st::policy::Profile::CaliforniaUs}) {
+        auto const d = flash::evaluate_plan_policy(plan, def, src, p);
+        REQUIRE(d.engine_safety_tables == std::vector<std::string>{"rev_limit"});
+        REQUIRE(d.emissions_tables == std::vector<std::string>{"cl_target"});
+        REQUIRE(d.overall_action == st::policy::Action::Block);
+    }
+}
+
+TEST_CASE("evaluate_plan_policy: writing identical bytes is not a change",
+          "[flash][policy]") {
+    // A plan that writes the same bytes already in source should NOT trip
+    // the linter — there's no actual edit happening.
+    auto const def = make_two_table_def();
+    auto const src = make_source_rom();
+    auto const plan = plan_for(0x20, {0x80});  // cl_target's existing value
+    auto const d = flash::evaluate_plan_policy(
+        plan, def, src, st::policy::Profile::CaliforniaUs);
+    REQUIRE(d.emissions_tables.empty());
+    REQUIRE(d.engine_safety_tables.empty());
+    REQUIRE(d.overall_action == st::policy::Action::Silent);
+}
+
+TEST_CASE("evaluate_plan_policy: sector that overlaps multiple tables flags each one",
+          "[flash][policy]") {
+    auto const def = make_two_table_def();
+    auto const src = make_source_rom();
+    // One sector spans 0x10..0x30 inclusive and changes a byte in each
+    // of the three tables. Both flagged tables should appear.
+    std::vector<std::uint8_t> bytes(0x21, 0x00);
+    bytes[0x10 - 0x10] = 0x55;  // rev_limit
+    bytes[0x20 - 0x10] = 0x90;  // cl_target
+    bytes[0x30 - 0x10] = 0xB0;  // boost_target (unflagged)
+    flash::FlashPlan plan;
+    plan.writes.push_back({{0x10, static_cast<std::uint32_t>(bytes.size())}, std::move(bytes)});
+
+    auto const d = flash::evaluate_plan_policy(
+        plan, def, src, st::policy::Profile::EuRoadworthy);
+    REQUIRE(d.engine_safety_tables == std::vector<std::string>{"rev_limit"});
+    REQUIRE(d.emissions_tables == std::vector<std::string>{"cl_target"});
+    REQUIRE(d.overall_action == st::policy::Action::Block);
+}

@@ -13,6 +13,8 @@ target_compile_features(st_flash PUBLIC cxx_std_23)
 target_link_libraries(st_flash
     PUBLIC
         st::core
+        st::defs
+        st::policy
         st::transport
         st::ecu
     PRIVATE

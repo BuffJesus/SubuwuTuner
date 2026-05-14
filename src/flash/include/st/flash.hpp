@@ -5,7 +5,9 @@
 #define ST_FLASH_HPP
 
 #include "st/core/result.hpp"
+#include "st/defs.hpp"
 #include "st/ecu/uds.hpp"
+#include "st/policy.hpp"
 #include "st/transport.hpp"
 
 #include <chrono>
@@ -195,6 +197,48 @@ class Flasher {
   private:
     ecu::uds::UdsClient client_;
 };
+
+// =====================================================================
+// Plan-vs-policy evaluation
+// =====================================================================
+//
+// Before executing a plan against a real ECU, the host has to decide:
+//   1. Does the plan touch any engine-safety-critical table?
+//      If yes -> Block (every profile blocks engine-safety per docs/06).
+//   2. Does the plan touch any emissions-relevant table?
+//      If yes -> profile-dependent action (silent / confirm / etc.).
+//
+// `evaluate_plan_policy` does both: walks every `SectorWrite` in `plan`,
+// diffs each byte against `source_rom`, maps the changed-byte ranges to
+// tables via `def`, and accumulates the union of flagged table ids.
+// Pure function — no transport calls, no I/O.
+
+struct PolicyDecision {
+    // Distinct table ids whose `engine_safety_critical = true` AND whose
+    // byte extent overlaps a sector in the plan with at least one
+    // changed byte.
+    std::vector<std::string> engine_safety_tables;
+
+    // Same for `emissions_relevant = true`.
+    std::vector<std::string> emissions_tables;
+
+    // The Action `policy::emissions_action(profile).on_flash` resolves
+    // to, given this plan's contents. `Silent` when no emissions tables
+    // are touched, regardless of profile.
+    policy::Action emissions_action{policy::Action::Silent};
+
+    // Combined verdict: `Block` if any engine-safety table is touched,
+    // else the emissions action. This is the value a caller should
+    // compare against to decide whether to proceed / require a
+    // confirmation / refuse.
+    policy::Action overall_action{policy::Action::Silent};
+};
+
+[[nodiscard]] PolicyDecision evaluate_plan_policy(
+    FlashPlan                     const &plan,
+    Definition                    const &def,
+    std::span<std::uint8_t const>        source_rom,
+    policy::Profile                      profile) noexcept;
 
 // =====================================================================
 // FlashPlan TOML persistence
