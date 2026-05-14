@@ -17,6 +17,7 @@ target_link_libraries(subuwutuner-cli
         st::discover
         st::flash
         st::autotune
+        st::policy
         st::warnings
         st::sanitizers
         st::platform

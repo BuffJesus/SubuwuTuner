@@ -11,6 +11,7 @@
 #include "st/edit.hpp"
 #include "st/flash.hpp"
 #include "st/log.hpp"
+#include "st/policy.hpp"
 #include "st/project.hpp"
 #include "st/rom.hpp"
 #include "st/transport/mock.hpp"
@@ -85,6 +86,9 @@ constexpr std::string_view kUsage =
     "    pack-info <DEF>         Print metadata + counts for a definition pack.\n"
     "    table-list <DEF> [--category C] [--emissions] [--safety-critical]\n"
     "                            List tables in a pack with optional filters.\n"
+    "    policy [--profile P]    Print the jurisdiction-profile lint matrix\n"
+    "                            (emissions on-save/on-flash, engine-safety) for\n"
+    "                            the named profile (or all profiles if omitted).\n"
     "    project-undo <dir>      Walk back one edit in the project's history.\n"
     "    project-redo <dir>      Walk forward one edit in the project's history.\n"
     "    log --def <pack> --pid <id[,id...]> --trace <file> [--output <csv>]\n"
@@ -631,6 +635,80 @@ int cmd_pack_info(int argc, char *argv[]) {
         return 1;
     }
     std::printf("\nValidation: OK\n");
+    return 0;
+}
+
+namespace {
+char const *action_name(st::policy::Action a) noexcept {
+    using A = st::policy::Action;
+    switch (a) {
+        case A::Silent:            return "silent";
+        case A::Badge:             return "badge";
+        case A::Warn:              return "warn";
+        case A::Confirm:           return "confirm";
+        case A::ConfirmWithReason: return "confirm+reason";
+        case A::Block:             return "block";
+    }
+    return "?";
+}
+
+void print_policy_row(st::policy::Profile p) {
+    auto const  emissions = st::policy::emissions_action(p);
+    auto const  safety    = st::policy::engine_safety_on_flash(p);
+    std::printf("%-18s  %-16s  %-16s  %-16s\n",
+                std::string{st::policy::profile_name(p)}.c_str(),
+                action_name(emissions.on_save),
+                action_name(emissions.on_flash),
+                action_name(safety));
+}
+} // namespace
+
+int cmd_policy(int argc, char *argv[]) {
+    std::optional<std::string> profile_name;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--profile") {
+            if (i + 1 >= argc) {
+                std::fputs("policy: --profile requires a value\n", stderr);
+                return 2;
+            }
+            profile_name = std::string{argv[++i]};
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "policy: unknown option: %s\n", argv[i]);
+            return 2;
+        } else {
+            std::fprintf(stderr, "policy: unexpected positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    std::optional<st::policy::Profile> only;
+    if (profile_name.has_value()) {
+        only = st::policy::parse_profile(*profile_name);
+        if (!only.has_value()) {
+            std::fprintf(stderr,
+                "policy: unknown profile '%s'. Known: motorsport-only, "
+                "alberta-ca, eu-roadworthy, california-us\n",
+                profile_name->c_str());
+            return 1;
+        }
+    }
+
+    std::printf("%-18s  %-16s  %-16s  %-16s\n",
+                "profile", "emissions-save", "emissions-flash", "safety-flash");
+    std::printf("%-18s  %-16s  %-16s  %-16s\n",
+                "------", "--------------", "---------------", "------------");
+
+    if (only.has_value()) {
+        print_policy_row(*only);
+    } else {
+        for (auto p : {st::policy::Profile::MotorsportOnly,
+                       st::policy::Profile::AlbertaCa,
+                       st::policy::Profile::EuRoadworthy,
+                       st::policy::Profile::CaliforniaUs}) {
+            print_policy_row(p);
+        }
+    }
     return 0;
 }
 
@@ -4039,6 +4117,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "table-list") {
         return cmd_table_list(argc - 2, argv + 2);
+    }
+    if (cmd == "policy") {
+        return cmd_policy(argc - 2, argv + 2);
     }
     if (cmd == "project-undo") {
         return cmd_project_step(argc - 2, argv + 2, /*forward=*/false);
