@@ -94,6 +94,11 @@ constexpr std::string_view kUsage =
     "                            alberta-ca, eu-roadworthy, california-us.\n"
     "    project-history <dir>   List the project's edit history with cursor\n"
     "                            position and per-edit emissions/safety flags.\n"
+    "    project-diff <A.stune> <B.stune> [--profile P] [--verbose]\n"
+    "                            Compare two projects' working ROMs table-by-\n"
+    "                            table. Both must reference the same pack. With\n"
+    "                            --profile, also runs the policy gate on the\n"
+    "                            A->B byte changes.\n"
     "    project-autotune-maf <dir> --table <id> --log <CSV>\n"
     "                  [--gain N] [--max-delta P] [--min-samples-per-cell N]\n"
     "                  [--require-open-loop] [--no-smooth] [--strict-lint] [--apply]\n"
@@ -162,6 +167,9 @@ constexpr std::string_view kUsage =
     "                            unit) — one row per (frame, signal) pair. Frames\n"
     "                            whose id is not in the DBC are skipped.\n"
     "    flash-plan-info <FILE.toml> [--def <pack> --source <rom> [--profile P]]\n"
+    "    flash-manifest-info <FILE.toml>\n"
+    "                            Pretty-print a flash manifest: schema, timestamps,\n"
+    "                            CRCs, policy fields, per-sector status.\n"
     "                            Load a flash plan TOML and print its summary —\n"
     "                            session, options, and the address/length of each\n"
     "                            sector write. Hardware-free; touches no transport.\n"
@@ -2119,6 +2127,182 @@ int cmd_rom_diff(int argc, char *argv[]) {
             std::printf(" %s", r.unit.c_str());
         }
         std::printf("\n");
+    }
+    return 0;
+}
+
+int cmd_project_diff(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> proj_a;
+    std::optional<std::filesystem::path> proj_b;
+    std::optional<std::string>           profile_arg;
+    bool                                 verbose = false;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "project-diff: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--profile") {
+            if (auto const *v = require_arg("--profile"); v) profile_arg = std::string{v};
+            else return 2;
+        } else if (a == "--verbose" || a == "-v") {
+            verbose = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "project-diff: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!proj_a.has_value()) {
+            proj_a = std::filesystem::path{argv[i]};
+        } else if (!proj_b.has_value()) {
+            proj_b = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "project-diff: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!proj_a.has_value() || !proj_b.has_value()) {
+        std::fputs("project-diff: missing required arguments\n"
+                   "Usage: subuwutuner-cli project-diff <A.stune> <B.stune> "
+                   "[--profile P] [--verbose]\n"
+                   "  Compares two projects' working ROMs table-by-table.\n"
+                   "  Both must reference the same pack id. With --profile,\n"
+                   "  also runs the policy gate over the A->B byte changes.\n",
+                   stderr);
+        return 2;
+    }
+    auto a = st::Project::open(*proj_a);
+    if (!a.has_value()) {
+        std::fprintf(stderr, "project-diff: A: %s\n", a.error().to_string().c_str());
+        return 1;
+    }
+    auto b = st::Project::open(*proj_b);
+    if (!b.has_value()) {
+        std::fprintf(stderr, "project-diff: B: %s\n", b.error().to_string().c_str());
+        return 1;
+    }
+    if (a->definition().pack().id != b->definition().pack().id) {
+        std::fprintf(stderr,
+            "project-diff: A and B reference different packs ('%s' vs '%s')\n",
+            a->definition().pack().id.c_str(),
+            b->definition().pack().id.c_str());
+        return 1;
+    }
+    if (a->working_rom().size() != b->working_rom().size()) {
+        std::fprintf(stderr,
+            "project-diff: ROM sizes differ (%zu vs %zu)\n",
+            a->working_rom().size(), b->working_rom().size());
+        return 1;
+    }
+
+    std::printf("A:    %s  (working CRC32=0x%08X)\n",
+                proj_a->string().c_str(), a->working_rom().crc32());
+    std::printf("B:    %s  (working CRC32=0x%08X)\n",
+                proj_b->string().c_str(), b->working_rom().crc32());
+    std::printf("Pack: %s\n", a->definition().pack().id.c_str());
+
+    struct Row {
+        std::string id;
+        std::size_t total{};
+        std::size_t changed{};
+        double      max{};
+        double      mean{};
+        std::string unit;
+        bool        emissions{};
+        bool        safety{};
+    };
+    std::vector<Row> rows;
+    std::size_t      changed_count = 0;
+    std::size_t      skipped       = 0;
+    for (auto const &table : a->definition().tables()) {
+        auto const d = a->definition().diff_table(
+            a->working_rom(), b->working_rom(), table);
+        if (!d.has_value()) {
+            ++skipped;
+            if (verbose) {
+                std::fprintf(stderr, "  skip %s: %s\n", table.id.c_str(),
+                             d.error().to_string().c_str());
+            }
+            continue;
+        }
+        if (!d->changed()) continue;
+        ++changed_count;
+        auto const *scal = a->definition().find_scaling(table.scaling);
+        rows.push_back({table.id, d->total_cells, d->cells_changed,
+                        d->max_abs_delta, d->mean_abs_delta,
+                        scal != nullptr ? scal->unit : std::string{},
+                        table.emissions_relevant,
+                        table.engine_safety_critical});
+    }
+
+    std::printf("\nTables compared: %zu  changed: %zu  skipped: %zu\n",
+                a->definition().tables().size(), changed_count, skipped);
+    if (rows.empty()) {
+        std::printf("\nNo tables differ.\n");
+    } else {
+        std::printf("\n%-40s %10s %12s %12s %s\n",
+                    "table", "cells", "max |Δ|", "mean |Δ|", "flags");
+        for (auto const &r : rows) {
+            char cell_buf[32];
+            std::snprintf(cell_buf, sizeof(cell_buf), "%zu/%zu", r.changed, r.total);
+            std::string flags;
+            if (r.emissions) flags += "E";
+            if (r.safety)    flags += "S";
+            if (flags.empty()) flags = "-";
+            std::printf("%-40s %10s %12.3f %12.3f %s",
+                        r.id.c_str(), cell_buf, r.max, r.mean, flags.c_str());
+            if (!r.unit.empty()) std::printf(" %s", r.unit.c_str());
+            std::printf("\n");
+        }
+    }
+
+    // Optional policy gate: build a synthetic FlashPlan from A->B byte
+    // differences and ask evaluate_plan_policy what would happen.
+    if (profile_arg.has_value()) {
+        auto const profile = st::policy::parse_profile(*profile_arg);
+        if (!profile.has_value()) {
+            std::fprintf(stderr,
+                "project-diff: unknown profile '%s'. Known: motorsport-only, "
+                "alberta-ca, eu-roadworthy, california-us\n",
+                profile_arg->c_str());
+            return 2;
+        }
+        auto const sectors = st::flash::Flasher::compute_delta(
+            a->working_rom().data(), b->working_rom().data(),
+            /*sector_size=*/0x1000, /*base_address=*/0);
+        st::flash::FlashPlan plan;
+        plan.writes.reserve(sectors.size());
+        for (auto const &s : sectors) {
+            st::flash::SectorWrite sw;
+            sw.sector = s;
+            std::size_t const off = static_cast<std::size_t>(s.address);
+            sw.data.assign(
+                b->working_rom().data().begin() + static_cast<std::ptrdiff_t>(off),
+                b->working_rom().data().begin()
+                    + static_cast<std::ptrdiff_t>(off + s.length));
+            plan.writes.push_back(std::move(sw));
+        }
+        auto const d = st::flash::evaluate_plan_policy(
+            plan, a->definition(), a->working_rom().data(), *profile);
+        std::printf("\nPolicy preview (profile=%s, A->B):\n",
+                    profile_arg->c_str());
+        std::printf("  engine_safety_tables = %zu",
+                    d.engine_safety_tables.size());
+        for (auto const &id : d.engine_safety_tables) std::printf(" %s", id.c_str());
+        std::printf("\n  emissions_tables     = %zu",
+                    d.emissions_tables.size());
+        for (auto const &id : d.emissions_tables)     std::printf(" %s", id.c_str());
+        char const *action = "?";
+        switch (d.overall_action) {
+            case st::policy::Action::Silent:            action = "silent"; break;
+            case st::policy::Action::Badge:             action = "badge"; break;
+            case st::policy::Action::Warn:              action = "warn"; break;
+            case st::policy::Action::Confirm:           action = "confirm"; break;
+            case st::policy::Action::ConfirmWithReason: action = "confirm+reason"; break;
+            case st::policy::Action::Block:             action = "block"; break;
+        }
+        std::printf("\n  overall_action       = %s\n", action);
     }
     return 0;
 }
@@ -4103,6 +4287,69 @@ int cmd_flash_plan_info(int argc, char *argv[]) {
     return 0;
 }
 
+int cmd_flash_manifest_info(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> manifest_path;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a.starts_with("--")) {
+            std::fprintf(stderr, "flash-manifest-info: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!manifest_path.has_value()) {
+            manifest_path = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr,
+                "flash-manifest-info: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!manifest_path.has_value()) {
+        std::fputs("flash-manifest-info: missing required argument\n"
+                   "Usage: subuwutuner-cli flash-manifest-info <FILE.toml>\n",
+                   stderr);
+        return 2;
+    }
+    auto const r = st::flash::read_manifest(*manifest_path);
+    if (!r.has_value()) {
+        std::fprintf(stderr, "flash-manifest-info: %s\n",
+                     r.error().to_string().c_str());
+        return 1;
+    }
+    auto const &m = *r;
+    std::printf("Manifest:           %s\n", manifest_path->string().c_str());
+    std::printf("  schema_version    = %d\n", m.schema_version);
+    if (!m.created_at.empty()) {
+        std::printf("  created_at        = %s\n", m.created_at.c_str());
+    }
+    std::printf("  plan_crc32        = 0x%08X\n", m.plan_crc32);
+    std::printf("  overall_crc32     = 0x%08X\n", m.overall_crc32);
+    if (!m.policy_profile.empty()) {
+        std::printf("  policy_profile    = %s\n", m.policy_profile.c_str());
+    }
+    if (!m.policy_reason.empty()) {
+        std::printf("  policy_reason     = %s\n", m.policy_reason.c_str());
+    }
+    std::size_t transferred = 0;
+    std::size_t verified    = 0;
+    std::size_t bytes       = 0;
+    for (auto const &e : m.entries) {
+        if (e.transferred) ++transferred;
+        if (e.verified)    ++verified;
+        bytes += e.sector.length;
+    }
+    std::printf("\nEntries: %zu  (transferred %zu, verified %zu, %zu bytes)\n",
+                m.entries.size(), transferred, verified, bytes);
+    for (std::size_t i = 0; i < m.entries.size(); ++i) {
+        auto const &e = m.entries[i];
+        std::printf("  [%zu] 0x%08X..0x%08X  crc=0x%08X  transferred=%s  verified=%s\n",
+                    i, e.sector.address,
+                    e.sector.address + e.sector.length,
+                    e.data_crc32,
+                    e.transferred ? "true" : "false",
+                    e.verified    ? "true" : "false");
+    }
+    return 0;
+}
+
 int cmd_flash_delta(int argc, char *argv[]) {
     std::optional<std::filesystem::path> source_path;
     std::optional<std::filesystem::path> target_path;
@@ -5333,6 +5580,9 @@ int main(int argc, char *argv[]) {
     if (cmd == "project-flash") {
         return cmd_project_flash(argc - 2, argv + 2);
     }
+    if (cmd == "project-diff") {
+        return cmd_project_diff(argc - 2, argv + 2);
+    }
     if (cmd == "project-autotune-maf") {
         return cmd_project_autotune_maf(argc - 2, argv + 2);
     }
@@ -5374,6 +5624,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "flash-plan-info") {
         return cmd_flash_plan_info(argc - 2, argv + 2);
+    }
+    if (cmd == "flash-manifest-info") {
+        return cmd_flash_manifest_info(argc - 2, argv + 2);
     }
     if (cmd == "flash-delta") {
         return cmd_flash_delta(argc - 2, argv + 2);
