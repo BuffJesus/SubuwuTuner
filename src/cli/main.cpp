@@ -103,8 +103,11 @@ constexpr std::string_view kUsage =
     "                            Set the project's jurisdiction profile (see\n"
     "                            docs/06-legal-ethics.md). Valid: motorsport-only,\n"
     "                            alberta-ca, eu-roadworthy, california-us.\n"
-    "    project-history <dir>   List the project's edit history with cursor\n"
+    "    project-history <dir> [--table <id>] [--limit N]\n"
+    "                            List the project's edit history with cursor\n"
     "                            position and per-edit emissions/safety flags.\n"
+    "                            --table filters to one table; --limit caps to\n"
+    "                            the most-recent N rows after filtering.\n"
     "    project-diff <A.stune> <B.stune> [--profile P] [--verbose]\n"
     "                            Compare two projects' working ROMs table-by-\n"
     "                            table. Both must reference the same pack. With\n"
@@ -1551,15 +1554,58 @@ int cmd_project_set_profile(int argc, char *argv[]) {
 }
 
 int cmd_project_history(int argc, char *argv[]) {
-    if (argc < 1) {
+    std::optional<std::filesystem::path> proj_path;
+    std::optional<std::string>           table_filter;
+    std::optional<std::size_t>           limit;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "project-history: %s requires a value\n",
+                             name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--table") {
+            if (auto const *v = require("--table"); v) table_filter = std::string{v};
+            else return 2;
+        } else if (a == "--limit") {
+            if (auto const *v = require("--limit"); v) {
+                std::size_t n = 0;
+                auto const  res = std::from_chars(v, v + std::strlen(v), n);
+                if (res.ec != std::errc{} || *res.ptr != '\0' || n == 0) {
+                    std::fprintf(stderr,
+                        "project-history: --limit expects a positive integer, "
+                        "got '%s'\n", v);
+                    return 2;
+                }
+                limit = n;
+            } else return 2;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "project-history: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        } else if (!proj_path.has_value()) {
+            proj_path = std::filesystem::path{a};
+        } else {
+            std::fprintf(stderr, "project-history: extra positional: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+    if (!proj_path.has_value()) {
         std::fputs("project-history: missing project directory\n"
-                   "Usage: subuwutuner-cli project-history <dir>\n",
+                   "Usage: subuwutuner-cli project-history <dir> "
+                   "[--table <id>] [--limit N]\n"
+                   "  --table <id>  Filter to edits on a single table.\n"
+                   "  --limit N     Show only the most recent N rows after\n"
+                   "                filtering (counts the full set, prints N).\n",
                    stderr);
         return 2;
     }
-    std::filesystem::path const dir{argv[0]};
 
-    auto const proj = st::Project::open(dir);
+    auto const proj = st::Project::open(*proj_path);
     if (!proj.has_value()) {
         std::fprintf(stderr, "project-history: %s\n",
                      proj.error().to_string().c_str());
@@ -1569,7 +1615,7 @@ int cmd_project_history(int argc, char *argv[]) {
     auto const &records = history.records();
     auto const  cursor  = history.cursor();
 
-    std::printf("Project:  %s\n", dir.string().c_str());
+    std::printf("Project:  %s\n", proj_path->string().c_str());
     std::printf("Profile:  %s\n",
                 std::string{st::policy::profile_name(
                     proj->policy_profile())}.c_str());
@@ -1579,11 +1625,37 @@ int cmd_project_history(int argc, char *argv[]) {
         std::printf("  (%zu redo step(s) available)",
                     records.size() - cursor);
     }
-    std::printf("\n\n");
+    std::printf("\n");
 
-    if (records.empty()) {
-        std::printf("(no edits)\n");
+    // Materialize the filtered index set (preserves natural order +
+    // original indices so the marker semantics still make sense).
+    std::vector<std::size_t> filtered;
+    filtered.reserve(records.size());
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        if (table_filter.has_value() && records[i].table_id != *table_filter) {
+            continue;
+        }
+        filtered.push_back(i);
+    }
+
+    if (table_filter.has_value()) {
+        std::printf("Filter:   --table %s (%zu match%s)\n",
+                    table_filter->c_str(), filtered.size(),
+                    filtered.size() == 1 ? "" : "es");
+    }
+    std::printf("\n");
+
+    if (filtered.empty()) {
+        std::printf("(no edits%s)\n",
+                    table_filter.has_value() ? " matching --table" : "");
         return 0;
+    }
+
+    std::size_t start_at = 0;
+    if (limit.has_value() && *limit < filtered.size()) {
+        start_at = filtered.size() - *limit;
+        std::printf("(showing most recent %zu of %zu)\n\n",
+                    *limit, filtered.size());
     }
 
     std::printf("%-4s %-30s %-22s %-25s %s\n",
@@ -1592,15 +1664,16 @@ int cmd_project_history(int argc, char *argv[]) {
                 "----", "------------------------------",
                 "----------------------",
                 "-------------------------", "-----");
-    for (std::size_t i = 0; i < records.size(); ++i) {
-        auto const &e   = records[i];
-        auto const  rec = e.before.rect;
-        char        rect_buf[32]{};
+    for (std::size_t k = start_at; k < filtered.size(); ++k) {
+        std::size_t const i   = filtered[k];
+        auto const       &e   = records[i];
+        auto const        rec = e.before.rect;
+        char              rect_buf[32]{};
         std::snprintf(rect_buf, sizeof(rect_buf), "[%zu:%zu, %zu:%zu]",
                       rec.r_start, rec.r_end, rec.c_start, rec.c_end);
 
         // Marker: '>' for the entry the cursor sits AT (next to undo),
-        // '·' for entries already undone past, ' ' for active entries.
+        // '.' for entries already undone past, ' ' for active entries.
         char marker = ' ';
         if (i + 1 == cursor)      marker = '>';   // most-recent committed
         else if (i >= cursor)     marker = '.';   // redo-pending
