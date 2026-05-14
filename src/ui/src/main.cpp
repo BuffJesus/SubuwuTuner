@@ -2675,8 +2675,8 @@ void render_status_bar(AppState &state) {
 
         // Jurisdiction profile chip — disabled-muted in motorsport-only
         // (the default, silent gate), accent for any other profile so the
-        // user notices when they're under a real regulatory posture. See
-        // docs/06-legal-ethics.md.
+        // user notices when they're under a real regulatory posture. Click
+        // to open a chooser. See docs/06-legal-ethics.md.
         ImGui::SameLine();
         {
             auto const  profile     = state.project->policy_profile();
@@ -2696,7 +2696,46 @@ void render_status_bar(AppState &state) {
                     "flagged edits may require Confirm / Confirm+Reason\n"
                     "under stricter profiles. Engine-safety violations\n"
                     "always block, every profile.\n"
-                    "Change via: subuwutuner-cli project-set-profile <dir> <P>");
+                    "Click to change.");
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            }
+            if (ImGui::IsItemClicked()) {
+                ImGui::OpenPopup("##profile_chooser");
+            }
+            if (ImGui::BeginPopup("##profile_chooser")) {
+                ImGui::TextDisabled("Jurisdiction profile");
+                ImGui::Separator();
+                auto pick = [&](st::policy::Profile p, char const *label,
+                                char const *desc) {
+                    bool const is_current = (profile == p);
+                    if (ImGui::Selectable(label, is_current)) {
+                        state.project->set_policy_profile(p);
+                        if (auto s = state.project->save_metadata();
+                            !s.has_value()) {
+                            state.status_msg = "Profile save failed: "
+                                + s.error().to_string();
+                        } else {
+                            state.status_msg = std::string{"Profile: "} + label;
+                        }
+                        ImGui::CloseCurrentPopup();
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("%s", desc);
+                    }
+                };
+                pick(st::policy::Profile::MotorsportOnly, "motorsport-only",
+                     "Silent on save and on flash. No emissions warnings.\n"
+                     "Engine-safety violations still block.");
+                pick(st::policy::Profile::AlbertaCa, "alberta-ca",
+                     "Yellow badge on emissions-flagged edits.\n"
+                     "No flash-time prompt. Engine-safety still blocks.");
+                pick(st::policy::Profile::EuRoadworthy, "eu-roadworthy",
+                     "Warning on save, confirmation on flash for emissions\n"
+                     "edits. Engine-safety still blocks.");
+                pick(st::policy::Profile::CaliforniaUs, "california-us",
+                     "Confirm + free-text reason on save AND on flash for\n"
+                     "emissions edits. Engine-safety still blocks.");
+                ImGui::EndPopup();
             }
         }
 
