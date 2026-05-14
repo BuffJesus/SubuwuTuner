@@ -70,7 +70,7 @@ struct RecentEntry {
 
 constexpr std::size_t kRecentsCap = 8;
 
-std::filesystem::path recents_config_path() {
+std::filesystem::path config_dir_root() {
     auto const env = [](char const *name) -> std::filesystem::path {
         auto const *v = std::getenv(name);
         return v != nullptr ? std::filesystem::path{v}
@@ -80,12 +80,11 @@ std::filesystem::path recents_config_path() {
     auto base = env("LOCALAPPDATA");
     if (base.empty()) base = env("USERPROFILE");
     if (base.empty()) base = std::filesystem::current_path();
-    return base / "SubuwuTuner" / "recents.txt";
+    return base / "SubuwuTuner";
 #elif defined(__APPLE__)
     auto base = env("HOME");
     if (base.empty()) base = std::filesystem::current_path();
-    return base / "Library" / "Application Support" / "SubuwuTuner"
-           / "recents.txt";
+    return base / "Library" / "Application Support" / "SubuwuTuner";
 #else
     auto base = env("XDG_CONFIG_HOME");
     if (base.empty()) {
@@ -93,8 +92,16 @@ std::filesystem::path recents_config_path() {
         if (home.empty()) home = std::filesystem::current_path();
         base = home / ".config";
     }
-    return base / "subuwutuner" / "recents.txt";
+    return base / "subuwutuner";
 #endif
+}
+
+std::filesystem::path recents_config_path() {
+    return config_dir_root() / "recents.txt";
+}
+
+std::filesystem::path settings_config_path() {
+    return config_dir_root() / "settings.txt";
 }
 
 std::string iso8601_utc_now() {
@@ -201,6 +208,46 @@ void save_recents(std::vector<RecentEntry> const &recents) {
     }
 }
 
+// User-preferences persistence. Stored next to recents.txt as a
+// `key=value\n` plain-text file (one setting per line). New settings can
+// land without breaking older builds — unknown keys are silently
+// ignored on load. Currently:
+//   default_policy_profile = motorsport-only|alberta-ca|eu-roadworthy|california-us
+struct Settings {
+    st::policy::Profile default_policy_profile{st::policy::Profile::MotorsportOnly};
+};
+
+Settings load_settings() {
+    Settings s;
+    std::ifstream in{settings_config_path()};
+    if (!in) return s;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        auto const eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string_view const key{line.data(), eq};
+        std::string_view const val{line.data() + eq + 1,
+                                    line.size() - eq - 1};
+        if (key == "default_policy_profile") {
+            if (auto p = st::policy::parse_profile(val); p.has_value()) {
+                s.default_policy_profile = *p;
+            }
+        }
+    }
+    return s;
+}
+
+void save_settings(Settings const &s) {
+    auto const  path = settings_config_path();
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    std::ofstream out{path, std::ios::trunc};
+    if (!out) return;
+    out << "default_policy_profile="
+        << st::policy::profile_name(s.default_policy_profile) << '\n';
+}
+
 // Move `path` to the front of `recents`, deduplicating by canonical
 // path comparison and capping the list at `kRecentsCap`. Idempotent.
 void push_recent(std::vector<RecentEntry>     &recents,
@@ -302,6 +349,7 @@ struct AppState {
     // Loaded once at startup, persisted on every successful open. See
     // recents_config_path() for the on-disk location.
     std::vector<RecentEntry>                 recents;
+    Settings                                 settings;
 
     // Sidebar filter. Substring-matched (case-insensitive) against table
     // name + id. 128 chars is generous — table identifiers in real packs
@@ -1352,11 +1400,15 @@ void render_dockspace_host() {
         ImGui::DockBuilderSetNodeSize(id, vp->WorkSize);
 
         ImGuiID left  = 0;
+        ImGuiID middle = 0;
+        ImGui::DockBuilderSplitNode(id, ImGuiDir_Left, 0.22f, &left, &middle);
+        ImGuiID right = 0;
         ImGuiID center = 0;
-        ImGui::DockBuilderSplitNode(id, ImGuiDir_Left, 0.22f, &left, &center);
+        ImGui::DockBuilderSplitNode(middle, ImGuiDir_Right, 0.25f, &right, &center);
 
         ImGui::DockBuilderDockWindow("Tables", left);
-        ImGui::DockBuilderDockWindow("Table", center);
+        ImGui::DockBuilderDockWindow("Table",  center);
+        ImGui::DockBuilderDockWindow("Stats",  right);
 
         ImGui::DockBuilderFinish(id);
     }
@@ -1599,8 +1651,29 @@ void render_sidebar(AppState &state) {
         // tooltip instead.
         char const *label = t.name.empty() ? t.id.c_str() : t.name.c_str();
         ImGui::PushID(t.id.c_str());
-        if (ImGui::Selectable(label, selected)) {
+        if (ImGui::Selectable(label, selected,
+                              ImGuiSelectableFlags_AllowOverlap)) {
             state.select_table(t.id);
+        }
+        // Right-aligned policy badges: S (engine-safety-critical, warm
+        // amber) and E (emissions-relevant, muted yellow). Drawn AFTER
+        // the Selectable so AllowOverlap is needed; reads "tagged" at a
+        // glance while browsing.
+        if (t.engine_safety_critical || t.emissions_relevant) {
+            char buf[4]{};
+            std::size_t bi = 0;
+            if (t.engine_safety_critical) buf[bi++] = 'S';
+            if (t.emissions_relevant)     buf[bi++] = 'E';
+            float const w = ImGui::CalcTextSize(buf).x;
+            float const right_x =
+                ImGui::GetWindowContentRegionMax().x - w
+                - ImGui::GetStyle().FramePadding.x;
+            ImGui::SameLine();
+            ImGui::SetCursorPosX(right_x);
+            ImVec4 const color = t.engine_safety_critical
+                ? ImVec4(1.00f, 0.86f, 0.55f, 1.0f)
+                : ImVec4(0.96f, 0.94f, 0.65f, 1.0f);
+            ImGui::TextColored(color, "%s", buf);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::BeginTooltip();
@@ -2400,6 +2473,117 @@ void render_welcome_panel(AppState &state) {
     }
 }
 
+// Right-rail quick-stats panel for the currently-selected table.
+// Min/max/mean/stddev across all cells, count of edited cells (diff
+// against source), and an ImPlot histogram. Read-only; updates each
+// frame the table data is loaded.
+void render_stats_panel(AppState &state) {
+    ImGui::Begin("Stats");
+    if (!state.project.has_value()) {
+        ImGui::TextDisabled("No project loaded.");
+        ImGui::End();
+        return;
+    }
+    if (state.selected_table_id.empty() || !state.current_table_data.has_value()) {
+        ImGui::TextDisabled("Select a table to see its stats.");
+        ImGui::End();
+        return;
+    }
+    auto const *table = state.project->definition().find_table(state.selected_table_id);
+    if (table == nullptr) {
+        ImGui::TextDisabled("Selected table not found in pack.");
+        ImGui::End();
+        return;
+    }
+    auto const &td = *state.current_table_data;
+
+    // Flatten cells for stats + histogram. Skip dim=0 scalar — stats of
+    // one value are useless.
+    std::vector<float> cells;
+    cells.reserve(td.values.size() * (td.values.empty() ? 0 : td.values[0].size()));
+    for (auto const &row : td.values) {
+        for (auto v : row) cells.push_back(static_cast<float>(v));
+    }
+    if (cells.empty() || (cells.size() == 1 && table->dimensions == 0)) {
+        ImGui::TextDisabled("Scalar table — stats N/A.");
+        ImGui::Separator();
+        if (!cells.empty()) {
+            ImGui::Text("Value: %g", static_cast<double>(cells[0]));
+        }
+        ImGui::End();
+        return;
+    }
+
+    float min = cells[0], max = cells[0];
+    double sum = 0.0;
+    for (auto v : cells) {
+        if (v < min) min = v;
+        if (v > max) max = v;
+        sum += static_cast<double>(v);
+    }
+    double const mean = sum / static_cast<double>(cells.size());
+    double sq = 0.0;
+    for (auto v : cells) {
+        double const d = static_cast<double>(v) - mean;
+        sq += d * d;
+    }
+    double const stddev =
+        cells.size() > 1 ? std::sqrt(sq / static_cast<double>(cells.size() - 1)) : 0.0;
+
+    // Count edited cells (diff working vs source). Cheap: re-read source
+    // table data once per frame. For 1D / 2D tables of moderate size this
+    // is well under a millisecond.
+    std::size_t edited = 0;
+    auto const  source_td = state.project->definition().read_table_values(
+        state.project->source_rom(), *table);
+    if (source_td.has_value()
+        && source_td->values.size() == td.values.size()) {
+        for (std::size_t r = 0; r < td.values.size(); ++r) {
+            if (source_td->values[r].size() != td.values[r].size()) continue;
+            for (std::size_t c = 0; c < td.values[r].size(); ++c) {
+                if (td.values[r][c] != source_td->values[r][c]) ++edited;
+            }
+        }
+    }
+
+    auto const *scal = state.project->definition().find_scaling(table->scaling);
+    auto const  unit = (scal != nullptr) ? scal->unit : std::string{};
+    auto const  prec = (scal != nullptr) ? scal->precision : 2;
+
+    ImGui::Text("%s", table->id.c_str());
+    if (!unit.empty()) ImGui::TextDisabled("unit: %s", unit.c_str());
+    ImGui::Separator();
+
+    auto stat_row = [&](char const *label, double v) {
+        ImGui::Text("%-7s %.*f%s%s", label, prec, v,
+                    unit.empty() ? "" : " ", unit.c_str());
+    };
+    stat_row("min",    static_cast<double>(min));
+    stat_row("max",    static_cast<double>(max));
+    stat_row("mean",   mean);
+    stat_row("stddev", stddev);
+    ImGui::Text("cells:  %zu", cells.size());
+    ImGui::Text("edited: %zu", edited);
+
+    ImGui::Separator();
+    ImGui::TextDisabled("histogram");
+    if (ImPlot::BeginPlot("##stats_hist", ImVec2(-FLT_MIN, 160.0f),
+                          ImPlotFlags_NoMouseText | ImPlotFlags_NoLegend
+                          | ImPlotFlags_NoTitle | ImPlotFlags_NoMenus
+                          | ImPlotFlags_NoBoxSelect)) {
+        ImPlot::SetupAxes(nullptr, nullptr,
+                          ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoMenus,
+                          ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoMenus);
+        // Pick a reasonable bin count; ImPlot::PlotHistogram chooses
+        // smart defaults when bins=ImPlotBin_Sturges.
+        ImPlot::PlotHistogram("##bins", cells.data(),
+                              static_cast<int>(cells.size()),
+                              ImPlotBin_Sturges);
+        ImPlot::EndPlot();
+    }
+    ImGui::End();
+}
+
 void render_table_view(AppState &state, Fonts const &fonts) {
     ImGui::Begin("Table");
 
@@ -2935,12 +3119,20 @@ void render_status_bar(AppState &state) {
                 ImGui::OpenPopup("##profile_chooser");
             }
             if (ImGui::BeginPopup("##profile_chooser")) {
-                ImGui::TextDisabled("Jurisdiction profile");
+                ImGui::TextDisabled("Jurisdiction profile (this project)");
                 ImGui::Separator();
                 auto pick = [&](st::policy::Profile p, char const *label,
                                 char const *desc) {
-                    bool const is_current = (profile == p);
-                    if (ImGui::Selectable(label, is_current)) {
+                    bool const is_current        = (profile == p);
+                    bool const is_saved_default =
+                        (state.settings.default_policy_profile == p);
+                    char row[64];
+                    if (is_saved_default) {
+                        std::snprintf(row, sizeof row, "%s  (default)", label);
+                    } else {
+                        std::snprintf(row, sizeof row, "%s", label);
+                    }
+                    if (ImGui::Selectable(row, is_current)) {
                         state.project->set_policy_profile(p);
                         if (auto s = state.project->save_metadata();
                             !s.has_value()) {
@@ -2967,6 +3159,22 @@ void render_status_bar(AppState &state) {
                 pick(st::policy::Profile::CaliforniaUs, "california-us",
                      "Confirm + free-text reason on save AND on flash for\n"
                      "emissions edits. Engine-safety still blocks.");
+                ImGui::Separator();
+                if (ImGui::MenuItem(
+                        "Save current as default for new projects")) {
+                    state.settings.default_policy_profile = profile;
+                    save_settings(state.settings);
+                    state.status_msg = std::string{"Default profile: "}
+                        + std::string{st::policy::profile_name(profile)};
+                    ImGui::CloseCurrentPopup();
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip(
+                        "Persist the project's current profile in\n"
+                        "settings.txt as the default for future projects.\n"
+                        "The CLI's `project-new` still defaults to\n"
+                        "motorsport-only — this setting is GUI-only for now.");
+                }
                 ImGui::EndPopup();
             }
         }
@@ -3070,7 +3278,8 @@ int main(int argc, char *argv[]) {
     NFD::Guard nfd_guard;
 
     AppState state;
-    state.recents = load_recents();
+    state.recents  = load_recents();
+    state.settings = load_settings();
     std::string_view const arg1 = (argc >= 2) ? argv[1] : "";
     if (arg1 == "-h" || arg1 == "--help" || arg1 == "/?") {
         std::fputs("Usage: subuwutuner-gui [PROJECT.stune]\n"
@@ -3132,6 +3341,7 @@ int main(int argc, char *argv[]) {
         render_dockspace_host();
         render_sidebar(state);
         render_table_view(state, fonts);
+        render_stats_panel(state);
         render_status_bar(state);
         render_unsaved_modal(state);
         render_flash_modal(state);
