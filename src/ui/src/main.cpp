@@ -11,6 +11,7 @@
 
 #include "st/core/version.hpp"
 #include "st/edit.hpp"
+#include "st/flash.hpp"
 #include "st/policy.hpp"
 #include "st/project.hpp"
 
@@ -332,6 +333,14 @@ struct AppState {
     // that they want to quit. Main loop reads this AFTER rendering each
     // frame and breaks when true.
     bool                                     user_confirmed_quit{false};
+
+    // Flash-flow modal state. `show_flash_modal` opens the popup on the
+    // next frame; the rest are buffers for the confirm / reason UI bound
+    // to the active project's profile. Fixed-size char buffer keeps the
+    // ImGui call free of the `imgui_stdlib` std::string helper.
+    bool                                     show_flash_modal{false};
+    bool                                     flash_confirm_checked{false};
+    char                                     flash_reason[512]{};
 
     void try_open_project(std::filesystem::path const &path) {
         auto r = st::Project::open(path);
@@ -806,6 +815,210 @@ void render_unsaved_modal(AppState &state) {
         }
         ImGui::EndPopup();
     }
+}
+
+// Build the FlashPlan + PolicyDecision for the currently-loaded project.
+// Returns nullopt if there's no project, no delta, or a size mismatch.
+struct PendingFlash {
+    st::flash::FlashPlan       plan;
+    st::flash::PolicyDecision  decision;
+    std::size_t                total_bytes;
+};
+
+std::optional<PendingFlash> build_pending_flash(AppState const &state) {
+    if (!state.project.has_value()) return std::nullopt;
+    auto const &proj = *state.project;
+    if (proj.source_rom().size() != proj.working_rom().size()) return std::nullopt;
+
+    constexpr std::uint32_t kSectorSize  = 0x1000;
+    constexpr std::uint32_t kBaseAddress = 0;
+    auto const sectors = st::flash::Flasher::compute_delta(
+        proj.source_rom().data(), proj.working_rom().data(),
+        kSectorSize, kBaseAddress);
+    if (sectors.empty()) return std::nullopt;
+
+    PendingFlash pf;
+    pf.total_bytes = 0;
+    pf.plan.writes.reserve(sectors.size());
+    for (auto const &s : sectors) {
+        st::flash::SectorWrite sw;
+        sw.sector = s;
+        std::size_t const off = static_cast<std::size_t>(s.address - kBaseAddress);
+        sw.data.assign(
+            proj.working_rom().data().begin() + static_cast<std::ptrdiff_t>(off),
+            proj.working_rom().data().begin()
+                + static_cast<std::ptrdiff_t>(off + s.length));
+        pf.total_bytes += s.length;
+        pf.plan.writes.push_back(std::move(sw));
+    }
+    pf.decision = st::flash::evaluate_plan_policy(
+        pf.plan, proj.definition(), proj.source_rom().data(),
+        proj.policy_profile());
+    return pf;
+}
+
+void render_flash_modal(AppState &state) {
+    if (state.show_flash_modal) {
+        ImGui::OpenPopup("Flash...##flash_modal");
+        state.show_flash_modal = false;
+    }
+    ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing,
+                             ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(560.0f, 0.0f), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Flash...##flash_modal", nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+
+    auto const pending = build_pending_flash(state);
+
+    if (!state.project.has_value()) {
+        ImGui::TextUnformatted("No project loaded.");
+        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f))
+                || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+        return;
+    }
+    if (!pending.has_value()) {
+        ImGui::TextUnformatted("Working ROM matches source — nothing to flash.");
+        ImGui::Dummy(ImVec2(0.0f, 12.0f));
+        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f))
+                || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+        return;
+    }
+
+    auto const &d        = pending->decision;
+    auto const  profile  = state.project->policy_profile();
+    auto const  pname    = std::string{st::policy::profile_name(profile)};
+    using A              = st::policy::Action;
+
+    // Header: plan stats.
+    ImGui::Text("Sectors: %zu   Bytes: %zu   Profile: %s",
+                pending->plan.writes.size(),
+                pending->total_bytes, pname.c_str());
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+
+    // Engine-safety is a hard refusal across every profile.
+    if (!d.engine_safety_tables.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.55f, 1.0f));
+        ImGui::TextUnformatted("REFUSED: engine-safety-critical tables in plan");
+        ImGui::PopStyleColor();
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        for (auto const &id : d.engine_safety_tables) {
+            ImGui::BulletText("%s", id.c_str());
+        }
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::TextDisabled(
+            "Engine-safety violations block in every profile (docs/06).");
+        ImGui::Dummy(ImVec2(0.0f, 12.0f));
+        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f))
+                || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+        return;
+    }
+
+    // Emissions-flagged list (informational; the action below decides what
+    // the user has to do about it).
+    if (!d.emissions_tables.empty()) {
+        ImGui::TextUnformatted("Emissions-relevant tables in plan:");
+        ImGui::Indent();
+        for (auto const &id : d.emissions_tables) {
+            ImGui::BulletText("%s", id.c_str());
+        }
+        ImGui::Unindent();
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    } else {
+        ImGui::TextDisabled("No emissions-flagged tables touched.");
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    }
+
+    // Action-specific UI: silent / confirm / confirm+reason.
+    bool ready_to_send = true;
+    switch (d.overall_action) {
+        case A::Silent:
+        case A::Badge:
+            // The profile demands no user interaction — just go.
+            ImGui::TextDisabled(
+                "Profile '%s' raises no gate for this plan.", pname.c_str());
+            break;
+        case A::Warn:
+            ImGui::TextDisabled(
+                "Profile '%s' would flag this on save; no flash-time gate.",
+                pname.c_str());
+            break;
+        case A::Confirm:
+            ImGui::Checkbox("I confirm flashing these emissions edits",
+                             &state.flash_confirm_checked);
+            ready_to_send = state.flash_confirm_checked;
+            break;
+        case A::ConfirmWithReason:
+            ImGui::Checkbox("I confirm flashing these emissions edits",
+                             &state.flash_confirm_checked);
+            ImGui::TextUnformatted("Reason (required):");
+            ImGui::InputTextMultiline("##flash_reason",
+                                       state.flash_reason,
+                                       sizeof state.flash_reason,
+                                       ImVec2(-FLT_MIN, 60.0f));
+            ready_to_send = state.flash_confirm_checked
+                            && state.flash_reason[0] != '\0';
+            break;
+        case A::Block:
+            // Distinct from the engine-safety branch above: profile-level
+            // Block, e.g. a hypothetical future strict profile.
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.55f, 1.0f));
+            ImGui::TextUnformatted("REFUSED by policy.");
+            ImGui::PopStyleColor();
+            ready_to_send = false;
+            break;
+    }
+
+    ImGui::Dummy(ImVec2(0.0f, 14.0f));
+
+    // Buttons. "Send to ECU" is intentionally never enabled in this build:
+    // the GUI doesn't have a transport binding yet. The dry-run "Verify"
+    // button completes the gate workflow without contacting hardware.
+    ImGui::BeginDisabled(!ready_to_send);
+    if (ImGui::Button("Verify policy", ImVec2(140.0f, 0.0f))) {
+        state.status_msg = "Flash plan cleared policy gate ("
+                         + pname + ").";
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        if (ready_to_send) {
+            ImGui::SetTooltip(
+                "Acknowledge that the plan cleared the policy gate.\n"
+                "No bytes are sent to any ECU.");
+        } else {
+            ImGui::SetTooltip(
+                "Tick the confirm box (and fill the reason) first.");
+        }
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(true);
+    ImGui::Button("Send to ECU", ImVec2(140.0f, 0.0f));
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip(
+            "Real transport not yet wired. Use the CLI for a MockTransport-\n"
+            "replayed UDS trace: subuwutuner-cli project-flash <dir> --trace …");
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))
+            || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
 }
 
 void glfw_error_callback(int err, char const *desc) {
@@ -2588,6 +2801,25 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     }
     ImGui::EndDisabled();
 
+    // Flash button — opens the policy-gate modal. Enabled whenever there's
+    // a project loaded; the modal itself handles the "nothing to flash"
+    // and "blocked by policy" branches.
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!state.project.has_value());
+    if (ImGui::Button("Flash...")) {
+        state.show_flash_modal       = true;
+        state.flash_confirm_checked  = false;
+        state.flash_reason[0]        = '\0';
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip(
+            "Preview the flash plan (source -> working) and run the\n"
+            "EmissionsLinter under the project's jurisdiction profile.\n"
+            "Real transport not yet wired — the modal shows what would\n"
+            "happen without sending bytes to an ECU.");
+    }
+    ImGui::EndDisabled();
+
     ImGui::SameLine(0.0f, 24.0f);
     ImGui::TextDisabled("|");
     ImGui::SameLine();
@@ -2902,6 +3134,7 @@ int main(int argc, char *argv[]) {
         render_table_view(state, fonts);
         render_status_bar(state);
         render_unsaved_modal(state);
+        render_flash_modal(state);
 
         if (state.show_imgui_demo) {
             ImGui::ShowDemoWindow(&state.show_imgui_demo);

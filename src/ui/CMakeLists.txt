@@ -90,6 +90,8 @@ target_link_libraries(subuwutuner-gui
         st::rom
         st::defs
         st::edit
+        st::flash
+        st::policy
         st::project
         imgui_lib
         implot_lib
