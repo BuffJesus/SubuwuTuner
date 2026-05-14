@@ -68,7 +68,7 @@ name      = "A/F Learning Store/Apply Ranges"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 3
 data_type = "uint16_be"
 scaling   = ""
 
@@ -79,7 +79,7 @@ name      = "Potential Fine Correction Stored Value Adjustments"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 4
 data_type = "uint16_be"
 scaling   = ""
 
@@ -90,7 +90,7 @@ name      = "Fine Correction Stored/Applied RPM Ranges"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 7
 data_type = "uint16_be"
 scaling   = ""
 

@@ -932,7 +932,7 @@ name      = "Throttle"
 unit      = ""
 type      = "static"
 address   = 0x0002C2F3
-length    = 0
+length    = 8
 data_type = "uint16_be"
 scaling   = "x_00229800533137237"
 
@@ -943,7 +943,7 @@ name      = "Engine Speed"
 unit      = ""
 type      = "static"
 address   = 0x0002C2E0
-length    = 0
+length    = 9
 data_type = "uint16_be"
 scaling   = "rpm_x_1953125"
 
@@ -954,7 +954,7 @@ name      = "Intake Temperature"
 unit      = ""
 type      = "static"
 address   = 0x0002C370
-length    = 0
+length    = 8
 data_type = "uint16_be"
 scaling   = "c_x_00244140625_40"
 
@@ -965,7 +965,7 @@ name      = "Atmospheric Pressure (bar)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 12
 data_type = "uint16_be"
 scaling   = ""
 
@@ -976,7 +976,7 @@ name      = "Boost Control"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 2
 data_type = "uint16_be"
 scaling   = ""
 
@@ -987,7 +987,7 @@ name      = "Engine Speed (RPM)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 15
 data_type = "uint16_be"
 scaling   = ""
 
@@ -998,7 +998,7 @@ name      = "Intake Temperature (C)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 16
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1009,7 +1009,7 @@ name      = "Boost Error"
 unit      = ""
 type      = "static"
 address   = 0x0002C3E8
-length    = 0
+length    = 9
 data_type = "uint16_be"
 scaling   = "bar_x_32768_001333224"
 
@@ -1020,7 +1020,7 @@ name      = "Turbo Dynamics Burst"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 2
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1031,7 +1031,7 @@ name      = "Turbo Dynamics Continuous"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 2
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1042,7 +1042,7 @@ name      = "MPS Voltage to Manifold Absolute Pressure"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1053,7 +1053,7 @@ name      = "Trigger High Input CEL"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1064,7 +1064,7 @@ name      = "Trigger Low Input CEL"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1075,7 +1075,7 @@ name      = "Engine Load"
 unit      = ""
 type      = "static"
 address   = 0x0002932B
-length    = 0
+length    = 16
 data_type = "uint16_be"
 scaling   = "g_rev_x_00006103515625"
 
@@ -1086,7 +1086,7 @@ name      = "Switch to Failsafe Fueling Map"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1097,7 +1097,7 @@ name      = "Active Primary Open Loop Fueling"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1108,7 +1108,7 @@ name      = "Intermediate CL to OL Enrichment"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1119,7 +1119,7 @@ name      = "Coolant Temperature (C)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 16
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1130,7 +1130,7 @@ name      = "Front Oxygen Sensor"
 unit      = ""
 type      = "static"
 address   = 0x0002851F
-length    = 0
+length    = 13
 data_type = "uint16_be"
 scaling   = "ma_x_00152587890625_62_98828125"
 
@@ -1141,7 +1141,7 @@ name      = "Atmospheric Pressure"
 unit      = ""
 type      = "static"
 address   = 0x000284FE
-length    = 0
+length    = 4
 data_type = "uint16_be"
 scaling   = "bar_x_001333224"
 
@@ -1152,7 +1152,7 @@ name      = "CL Fueling Target Limits"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 2
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1163,7 +1163,7 @@ name      = "Disable 'CL Fueling Target Compensation (ECT)'"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1174,7 +1174,7 @@ name      = "Delay Group-Value"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 16
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1185,7 +1185,7 @@ name      = "OL to CL Transition"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1196,7 +1196,7 @@ name      = "(Condition) - Result - (Time Since Engine Start)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 4
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1207,7 +1207,7 @@ name      = "(Condition) - Result"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 2
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1218,7 +1218,7 @@ name      = "Throttle Table Selection (AT)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 2
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1229,7 +1229,7 @@ name      = "Battery Output (volts)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 5
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1240,7 +1240,7 @@ name      = "Manifold Pressure (bar absolute)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 10
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1251,7 +1251,7 @@ name      = "Throttle Angle Change"
 unit      = ""
 type      = "static"
 address   = 0x000298FF
-length    = 0
+length    = 18
 data_type = "uint16_be"
 scaling   = "x_591715976_75_29411712"
 
@@ -1262,7 +1262,7 @@ name      = "Tip-in Enrichment"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1273,7 +1273,7 @@ name      = "Boost Error (bar)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 9
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1284,7 +1284,7 @@ name      = "Disable Tip-in Enrichment"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1295,7 +1295,7 @@ name      = "Clear Tip-in Enrichment Applied Counter"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1306,7 +1306,7 @@ name      = "Clear Applied Tip-in Cumulative Throttle"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1317,7 +1317,7 @@ name      = "Engine Load (g/rev)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 9
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1328,7 +1328,7 @@ name      = "Active Decay"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1339,7 +1339,7 @@ name      = "A/F Learning Limits"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 2
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1350,7 +1350,7 @@ name      = "A/F Learning Store/Apply Ranges"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 3
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1361,7 +1361,7 @@ name      = "MAF sensor"
 unit      = ""
 type      = "static"
 address   = 0x00028027
-length    = 0
+length    = 48
 data_type = "uint16_be"
 scaling   = "volts_x_000076293945"
 
@@ -1372,7 +1372,7 @@ name      = "Mass Airflow"
 unit      = ""
 type      = "static"
 address   = 0x0002822E
-length    = 0
+length    = 8
 data_type = "uint16_be"
 scaling   = "g_s_x_1_171875072"
 
@@ -1383,7 +1383,7 @@ name      = "Manifold Pressure"
 unit      = ""
 type      = "static"
 address   = 0x00028192
-length    = 0
+length    = 11
 data_type = "uint16_be"
 scaling   = "bar_absolute_x_001333224"
 
@@ -1394,7 +1394,7 @@ name      = "'Base Timing Idle' active"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1405,7 +1405,7 @@ name      = "Timing Compensation (IAT)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1416,7 +1416,7 @@ name      = "Per Cylinder Timing Compensation"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 1
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1427,7 +1427,7 @@ name      = "Feedback Knock Correction"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 4
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1438,7 +1438,7 @@ name      = "Potential Fine Correction Stored Value Adjustments"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 4
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1449,7 +1449,7 @@ name      = "Fine Correction Stored/Applied RPM Ranges"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 7
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1460,7 +1460,7 @@ name      = "Fine Correction Stored/Applied Load Ranges"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 7
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1471,7 +1471,7 @@ name      = "Potential Rough Correction Learning (IAM)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 4
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1482,7 +1482,7 @@ name      = "Rev Limit Fuel Cut"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 2
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1493,7 +1493,7 @@ name      = "Fuel Cut - Transmission Type"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 4
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1504,7 +1504,7 @@ name      = "Wastegate Duty"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 3
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1515,7 +1515,7 @@ name      = "Intake Temperature Sensor (volts)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 30
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1526,7 +1526,7 @@ name      = "Coolant Temperature Sensor (volts)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 28
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1537,7 +1537,7 @@ name      = "Mode Determination (coolant temp change)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 4
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1548,7 +1548,7 @@ name      = "Mode Determination (vehicle speed change)"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 6
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1559,7 +1559,7 @@ name      = "Vehicle Speed Mode/Coolant Temp Mode/Air Conditioning"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 24
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1570,7 +1570,7 @@ name      = "Gear Thresholds"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 4
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1581,7 +1581,7 @@ name      = "IC Spray in Autowash Mode"
 unit      = ""
 type      = "static"
 address   = 0x00000000
-length    = 0
+length    = 2
 data_type = "uint16_be"
 scaling   = ""
 

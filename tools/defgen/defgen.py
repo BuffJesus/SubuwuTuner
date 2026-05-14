@@ -921,14 +921,24 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
                 pack.scalings.append(rec)
                 seen_scaling_ids.add(rec.id)
 
-    # Axes (nested <table type="X Axis"/> and <table type="Y Axis"/>)
+    # Axes (nested <table type="X Axis"/> and <table type="Y Axis"/>).
+    # In Merp's canonical ecu_defs.xml, axis length lives on the PARENT
+    # table's `sizex=` / `sizey=` attribute, not on the axis element. The
+    # VA/VB scrubber, by contrast, puts `size=N` on the axis itself. Pass
+    # the parent's sizex/sizey through so `_axis_from_element` can fall
+    # back to them when the axis carries no length of its own.
+    parent_sizex = t_el.get("sizex")
+    parent_sizey = t_el.get("sizey")
     axis_x_id = ""
     axis_y_id = ""
     for child in t_el.findall("table"):
         child_type = (child.get("type") or "").strip().lower()
         if child_type not in ("x axis", "y axis", "static y axis", "static x axis"):
             continue
-        axis = _axis_from_element(child)
+        fallback = (parent_sizex
+                    if child_type in ("x axis", "static x axis")
+                    else parent_sizey)
+        axis = _axis_from_element(child, fallback_length=fallback)
         if axis is None:
             continue
         if axis.id not in {a.id for a in pack.axes}:
@@ -989,7 +999,8 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
     pack.tables.append(table)
 
 
-def _axis_from_element(el: ET.Element) -> AxisRecord | None:
+def _axis_from_element(el: ET.Element,
+                       fallback_length: str | None = None) -> AxisRecord | None:
     name = (el.get("name") or "").strip()
     if not name:
         return None
@@ -1001,9 +1012,12 @@ def _axis_from_element(el: ET.Element) -> AxisRecord | None:
     if not is_static \
             and el.get("storageaddress") is None and el.get("address") is None:
         return None
-    # RomRaider's canonical attribute is `size`; some synthetic fixtures use
-    # `elements`. Accept either, with `size` winning when both are present.
-    length_str = el.get("size") or el.get("elements")
+    # RomRaider's canonical attribute is `size`; some fixtures use `elements`.
+    # Merp's `ecu_defs.xml` does neither — axis length lives on the PARENT
+    # table's `sizex=` / `sizey=`. Caller in `_extract_table` passes the
+    # parent's attribute through `fallback_length` so we can use it when the
+    # axis element carries no length of its own.
+    length_str = el.get("size") or el.get("elements") or fallback_length
     inline_scaling = el.find("scaling")
     data_type = "uint16_be"
     scaling_id = ""

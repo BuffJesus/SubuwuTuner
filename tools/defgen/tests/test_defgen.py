@@ -445,6 +445,41 @@ class AxisLengthTest(unittest.TestCase):
         axes = {a.id: a for a in packs[0].axes}
         self.assertEqual(axes["curve_x"].length, 12)
 
+    def test_parent_sizex_sizey_fallback(self):
+        # Merp's ecu_defs.xml puts axis length on the PARENT table's
+        # `sizex=` / `sizey=` attributes, not on the axis element. defgen
+        # must fall back to those when the axis itself carries no length.
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="3D" name="vvt" sizex="20" sizey="12"
+                 storageaddress="0x100" storagetype="uint8" endian="big">
+            <table type="X Axis" name="vvt_x"
+                   storageaddress="0x200" storagetype="uint8" endian="big"/>
+            <table type="Y Axis" name="vvt_y"
+                   storageaddress="0x210" storagetype="uint8" endian="big"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        axes = {a.id: a for a in packs[0].axes}
+        self.assertEqual(axes["vvt_x"].length, 20)
+        self.assertEqual(axes["vvt_y"].length, 12)
+
+    def test_axis_own_size_wins_over_parent_fallback(self):
+        # An axis with its own `size=` overrides whatever the parent says.
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="2D" name="curve" sizey="99"
+                 storageaddress="0x100" storagetype="uint8" endian="big">
+            <table type="X Axis" name="curve_x" size="7"
+                   storageaddress="0x200" storagetype="uint8" endian="big"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        axes = {a.id: a for a in packs[0].axes}
+        self.assertEqual(axes["curve_x"].length, 7)
+
     def test_elements_still_works_as_fallback(self):
         xml = """<roms><rom>
           <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
