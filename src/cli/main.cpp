@@ -87,6 +87,17 @@ constexpr std::string_view kUsage =
     "                            Set the project's jurisdiction profile (see\n"
     "                            docs/06-legal-ethics.md). Valid: motorsport-only,\n"
     "                            alberta-ca, eu-roadworthy, california-us.\n"
+    "    project-flash <dir> --trace <FILE.uds>\n"
+    "                  [--journal <FILE.toml>] [--manifest <FILE.toml>]\n"
+    "                  [--confirm] [--reason \"…\"] [--dry-run]\n"
+    "                  [--sector-size <N>] [--base-address <addr>]\n"
+    "                            Build a FlashPlan from the project's source vs\n"
+    "                            working delta, gate it through st::policy using\n"
+    "                            the project's stored profile, then run the\n"
+    "                            orchestrator against a MockTransport-replayed UDS\n"
+    "                            trace. Refuses on engine-safety violations and on\n"
+    "                            emissions edits without the confirmation/reason\n"
+    "                            the active profile demands.\n"
     "    pack-info <DEF>         Print metadata + counts for a definition pack.\n"
     "    table-list <DEF> [--category C] [--emissions] [--safety-critical]\n"
     "                            List tables in a pack with optional filters.\n"
@@ -3647,6 +3658,297 @@ bool parse_uds_trace(std::filesystem::path const &path,
     return true;
 }
 
+namespace {
+// Print the FlashReport from a successful or failed ExecuteOutcome. Shared
+// between flash-apply and project-flash so the summary format stays
+// identical across both entry points.
+void print_flash_report(char const                       *cmd,
+                        st::flash::ExecuteOutcome const  &outcome) {
+    auto const &report = outcome.report;
+    std::printf("%s: %s\n", cmd, outcome.ok() ? "SUCCESS" : "FAILED");
+    std::printf("  entered_session    = %s\n",
+                report.entered_session ? "true" : "false");
+    std::printf("  silenced_bus       = %s\n",
+                report.silenced_bus ? "true" : "false");
+    std::printf("  restored_bus       = %s\n",
+                report.restored_bus ? "true" : "false");
+    std::printf("  bytes_transferred  = %zu\n", report.bytes_transferred);
+    std::printf("  sectors            = %zu\n", report.sectors.size());
+    for (std::size_t i = 0; i < report.sectors.size(); ++i) {
+        auto const &so = report.sectors[i];
+        std::printf("    [%zu] 0x%08X .. 0x%08X  erased=%d downloaded=%d "
+                    "transferred=%d exited=%d check_deps=%d verified=%d\n",
+                    i, so.sector.address,
+                    so.sector.address + so.sector.length,
+                    static_cast<int>(so.erased),
+                    static_cast<int>(so.downloaded),
+                    static_cast<int>(so.transferred),
+                    static_cast<int>(so.exited),
+                    static_cast<int>(so.check_deps_passed),
+                    static_cast<int>(so.verified));
+    }
+    if (!outcome.ok()) {
+        std::fprintf(stderr, "%s: %s\n", cmd,
+                     outcome.error->to_string().c_str());
+    }
+}
+
+// Evaluate `plan` against `def` + `source_rom` under `profile`, print what
+// the linter found, and return 0 if the host should proceed or a non-zero
+// exit code if the plan is REFUSED by the active policy. `confirm` and
+// `reason` are user-supplied: the linter checks they match what the
+// profile demands (Confirm → --confirm; ConfirmWithReason → both).
+int run_policy_gate(char const                          *cmd,
+                    st::flash::FlashPlan const          &plan,
+                    st::Definition const                &def,
+                    std::span<std::uint8_t const>        source_rom,
+                    st::policy::Profile                  profile,
+                    bool                                 confirm,
+                    std::optional<std::string> const    &reason) {
+    auto const d = st::flash::evaluate_plan_policy(plan, def, source_rom, profile);
+
+    if (!d.engine_safety_tables.empty()) {
+        std::fprintf(stderr,
+            "%s: REFUSED: plan changes engine-safety-critical tables: ",
+            cmd);
+        for (auto const &id : d.engine_safety_tables) {
+            std::fprintf(stderr, "%s ", id.c_str());
+        }
+        std::fprintf(stderr,
+            "\nEngine-safety violations block in every profile (see "
+            "docs/06-legal-ethics.md).\n");
+        return 3;
+    }
+    using A = st::policy::Action;
+    auto const profile_str = std::string{st::policy::profile_name(profile)};
+    if (d.overall_action == A::Block) {
+        std::fprintf(stderr, "%s: REFUSED by policy under profile '%s'.\n",
+                     cmd, profile_str.c_str());
+        return 3;
+    }
+    if (d.overall_action == A::Confirm && !confirm) {
+        std::fprintf(stderr,
+            "%s: profile '%s' requires --confirm to flash a plan that "
+            "changes emissions-relevant tables: ",
+            cmd, profile_str.c_str());
+        for (auto const &id : d.emissions_tables) {
+            std::fprintf(stderr, "%s ", id.c_str());
+        }
+        std::fputc('\n', stderr);
+        return 3;
+    }
+    if (d.overall_action == A::ConfirmWithReason
+            && (!confirm || !reason.has_value() || reason->empty())) {
+        std::fprintf(stderr,
+            "%s: profile '%s' requires --confirm AND a non-empty --reason "
+            "to flash a plan that changes emissions-relevant tables: ",
+            cmd, profile_str.c_str());
+        for (auto const &id : d.emissions_tables) {
+            std::fprintf(stderr, "%s ", id.c_str());
+        }
+        std::fputc('\n', stderr);
+        return 3;
+    }
+    if (!d.emissions_tables.empty()) {
+        std::fprintf(stderr,
+            "%s: policy(%s) flagged emissions-relevant edits in %zu "
+            "table(s); proceeding (%s)%s%s.\n",
+            cmd, profile_str.c_str(), d.emissions_tables.size(),
+            d.overall_action == A::ConfirmWithReason
+                ? "confirmed + reason"
+                : (d.overall_action == A::Confirm
+                      ? "confirmed"
+                      : "no confirmation required"),
+            reason.has_value() ? ", reason=" : "",
+            reason.has_value() ? reason->c_str() : "");
+    }
+    return 0;
+}
+} // namespace
+
+int cmd_project_flash(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> project_dir;
+    std::optional<std::filesystem::path> trace_path;
+    std::optional<std::filesystem::path> manifest_path;
+    std::optional<std::filesystem::path> journal_path;
+    bool                                 confirm = false;
+    bool                                 dry_run = false;
+    std::optional<std::string>           reason;
+    std::uint32_t                        sector_size  = 0x1000;
+    std::uint32_t                        base_address = 0;
+
+    auto const parse_uint = [](char const *raw, std::uint32_t &out) -> bool {
+        std::string_view sv{raw};
+        int base = 10;
+        if (sv.starts_with("0x") || sv.starts_with("0X")) {
+            sv.remove_prefix(2);
+            base = 16;
+        }
+        auto const res = std::from_chars(sv.data(), sv.data() + sv.size(),
+                                          out, base);
+        return res.ec == std::errc{} && res.ptr == sv.data() + sv.size();
+    };
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "project-flash: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--trace") {
+            if (auto const *v = require_arg("--trace"); v) trace_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--manifest") {
+            if (auto const *v = require_arg("--manifest"); v) manifest_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--journal") {
+            if (auto const *v = require_arg("--journal"); v) journal_path = std::filesystem::path{v};
+            else return 2;
+        } else if (a == "--reason") {
+            if (auto const *v = require_arg("--reason"); v) reason = std::string{v};
+            else return 2;
+        } else if (a == "--confirm") {
+            confirm = true;
+        } else if (a == "--dry-run") {
+            dry_run = true;
+        } else if (a == "--sector-size") {
+            auto const *v = require_arg("--sector-size");
+            if (v == nullptr) return 2;
+            std::uint32_t val = 0;
+            if (!parse_uint(v, val) || val == 0) {
+                std::fprintf(stderr, "project-flash: --sector-size must be a positive integer\n");
+                return 2;
+            }
+            sector_size = val;
+        } else if (a == "--base-address") {
+            auto const *v = require_arg("--base-address");
+            if (v == nullptr) return 2;
+            if (!parse_uint(v, base_address)) {
+                std::fprintf(stderr, "project-flash: --base-address must be an integer\n");
+                return 2;
+            }
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "project-flash: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!project_dir.has_value()) {
+            project_dir = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "project-flash: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!project_dir.has_value() || !trace_path.has_value()) {
+        std::fputs("project-flash: missing required arguments\n"
+                   "Usage: subuwutuner-cli project-flash <dir> --trace <FILE.uds>\n"
+                   "       [--journal <FILE.toml>] [--manifest <FILE.toml>]\n"
+                   "       [--confirm] [--reason \"…\"] [--dry-run]\n"
+                   "       [--sector-size <N>] [--base-address <addr>]\n",
+                   stderr);
+        return 2;
+    }
+
+    auto project = st::Project::open(*project_dir);
+    if (!project.has_value()) {
+        std::fprintf(stderr, "project-flash: %s\n",
+                     project.error().to_string().c_str());
+        return 1;
+    }
+
+    // Build the plan from the project's source/working delta. Empty delta
+    // -> nothing to flash; treat as no-op success.
+    if (project->source_rom().size() != project->working_rom().size()) {
+        std::fprintf(stderr,
+            "project-flash: source/working size mismatch (%zu vs %zu); "
+            "abort\n",
+            project->source_rom().size(), project->working_rom().size());
+        return 1;
+    }
+    auto const sectors = st::flash::Flasher::compute_delta(
+        project->source_rom().data(),
+        project->working_rom().data(),
+        sector_size, base_address);
+    if (sectors.empty()) {
+        std::printf("project-flash: working ROM matches source — nothing "
+                    "to flash.\n");
+        return 0;
+    }
+
+    st::flash::FlashPlan plan;
+    plan.dry_run = dry_run;
+    plan.writes.reserve(sectors.size());
+    for (auto const &s : sectors) {
+        st::flash::SectorWrite sw;
+        sw.sector = s;
+        std::size_t const off =
+            static_cast<std::size_t>(s.address - base_address);
+        sw.data.assign(
+            project->working_rom().data().begin() + static_cast<std::ptrdiff_t>(off),
+            project->working_rom().data().begin()
+                + static_cast<std::ptrdiff_t>(off + s.length));
+        plan.writes.push_back(std::move(sw));
+    }
+    if (journal_path.has_value()) {
+        plan.journal_path = *journal_path;
+    }
+
+    // Policy gate uses the profile baked into the project.
+    if (auto rc = run_policy_gate("project-flash", plan, project->definition(),
+                                  project->source_rom().data(),
+                                  project->policy_profile(),
+                                  confirm, reason);
+        rc != 0) {
+        return rc;
+    }
+
+    // Replay trace through MockTransport, exactly like flash-apply.
+    std::vector<UdsTracePair> pairs;
+    std::string               err;
+    if (!parse_uds_trace(*trace_path, pairs, err)) {
+        std::fputs(err.c_str(), stderr);
+        std::fputc('\n', stderr);
+        return 1;
+    }
+    st::transport::MockTransport mock;
+    if (auto s = mock.open({}); !s.has_value()) {
+        std::fprintf(stderr, "project-flash: mock open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+    for (auto &p : pairs) {
+        mock.expect_send_recv(std::move(p.request), std::move(p.response));
+    }
+
+    st::flash::Flasher flasher{mock};
+    auto const         outcome = flasher.execute(plan);
+    print_flash_report("project-flash", outcome);
+    if (!mock.exhausted()) {
+        std::fprintf(stderr,
+                     "project-flash: warning: %zu trace entries unused\n",
+                     mock.remaining());
+    }
+
+    // Optional manifest. plan_text is the rendered plan TOML so plan_crc32
+    // is meaningful even though the plan was built in-memory.
+    if (manifest_path.has_value()) {
+        auto const  plan_text = st::flash::format_plan(plan);
+        auto const  manifest  =
+            st::flash::build_manifest(plan, plan_text, outcome.report);
+        if (auto s = st::flash::write_manifest(*manifest_path, manifest);
+            !s.has_value()) {
+            std::fprintf(stderr, "project-flash: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        std::fprintf(stderr, "project-flash: wrote manifest %s\n",
+                     manifest_path->string().c_str());
+    }
+
+    return outcome.ok() ? 0 : 1;
+}
+
 int cmd_flash_apply(int argc, char *argv[]) {
     std::optional<std::filesystem::path> plan_path;
     std::optional<std::filesystem::path> trace_path;
@@ -3723,12 +4025,10 @@ int cmd_flash_apply(int argc, char *argv[]) {
         plan->journal_path = *journal_path;
     }
 
-    // ---- Policy gate -----------------------------------------------------
-    //
-    // Optional: when --profile is provided we diff the plan against
-    // --source under --def, run evaluate_plan_policy, and refuse the flash
-    // if the active profile demands a confirmation/reason the caller did
-    // not supply. Engine-safety always blocks.
+    // Optional policy gate. When --profile is provided we diff the plan
+    // against --source under --def via the shared run_policy_gate helper —
+    // identical behaviour to project-flash, which loads the profile from
+    // the project instead of from a flag.
     if (profile_arg.has_value()) {
         if (!def_path.has_value() || !source_path.has_value()) {
             std::fputs("flash-apply: --profile requires --def AND --source\n",
@@ -3753,66 +4053,10 @@ int cmd_flash_apply(int argc, char *argv[]) {
             std::fprintf(stderr, "flash-apply: %s\n", src.error().to_string().c_str());
             return 1;
         }
-        auto const decision = st::flash::evaluate_plan_policy(
-            *plan, *def, src->data(), *profile);
-
-        if (!decision.engine_safety_tables.empty()) {
-            std::fprintf(stderr,
-                "flash-apply: REFUSED: plan changes engine-safety-critical "
-                "tables: ");
-            for (auto const &id : decision.engine_safety_tables) {
-                std::fprintf(stderr, "%s ", id.c_str());
-            }
-            std::fprintf(stderr,
-                "\nEngine-safety violations block in every profile (see "
-                "docs/06-legal-ethics.md).\n");
-            return 3;
-        }
-        using A = st::policy::Action;
-        if (decision.overall_action == A::Block) {
-            std::fprintf(stderr,
-                "flash-apply: REFUSED by policy under profile '%s'.\n",
-                profile_arg->c_str());
-            return 3;
-        }
-        if (decision.overall_action == A::Confirm && !confirm) {
-            std::fprintf(stderr,
-                "flash-apply: profile '%s' requires --confirm to flash a plan "
-                "that changes emissions-relevant tables: ",
-                profile_arg->c_str());
-            for (auto const &id : decision.emissions_tables) {
-                std::fprintf(stderr, "%s ", id.c_str());
-            }
-            std::fputc('\n', stderr);
-            return 3;
-        }
-        if (decision.overall_action == A::ConfirmWithReason
-                && (!confirm || !reason.has_value() || reason->empty())) {
-            std::fprintf(stderr,
-                "flash-apply: profile '%s' requires --confirm AND a non-empty "
-                "--reason to flash a plan that changes emissions-relevant "
-                "tables: ",
-                profile_arg->c_str());
-            for (auto const &id : decision.emissions_tables) {
-                std::fprintf(stderr, "%s ", id.c_str());
-            }
-            std::fputc('\n', stderr);
-            return 3;
-        }
-        // Print what the linter found so the operator sees it.
-        if (!decision.emissions_tables.empty()) {
-            std::fprintf(stderr,
-                "flash-apply: policy(%s) flagged emissions-relevant edits "
-                "in %zu table(s); proceeding (%s)%s%s.\n",
-                profile_arg->c_str(),
-                decision.emissions_tables.size(),
-                decision.overall_action == A::ConfirmWithReason
-                    ? "confirmed + reason"
-                    : (decision.overall_action == A::Confirm
-                          ? "confirmed"
-                          : "no confirmation required"),
-                reason.has_value() ? ", reason=" : "",
-                reason.has_value() ? reason->c_str() : "");
+        if (auto rc = run_policy_gate("flash-apply", *plan, *def, src->data(),
+                                      *profile, confirm, reason);
+            rc != 0) {
+            return rc;
         }
     }
 
@@ -3836,37 +4080,8 @@ int cmd_flash_apply(int argc, char *argv[]) {
 
     st::flash::Flasher flasher{mock};
     auto const         outcome = flasher.execute(*plan);
-
-    // Always print a summary, regardless of success/failure, since the
-    // ExecuteOutcome's report is always populated.
+    print_flash_report("flash-apply", outcome);
     auto const &report = outcome.report;
-    std::printf("flash-apply: %s\n",
-                outcome.ok() ? "SUCCESS" : "FAILED");
-    std::printf("  entered_session    = %s\n",
-                report.entered_session ? "true" : "false");
-    std::printf("  silenced_bus       = %s\n",
-                report.silenced_bus ? "true" : "false");
-    std::printf("  restored_bus       = %s\n",
-                report.restored_bus ? "true" : "false");
-    std::printf("  bytes_transferred  = %zu\n", report.bytes_transferred);
-    std::printf("  sectors            = %zu\n", report.sectors.size());
-    for (std::size_t i = 0; i < report.sectors.size(); ++i) {
-        auto const &so = report.sectors[i];
-        std::printf("    [%zu] 0x%08X .. 0x%08X  erased=%d downloaded=%d "
-                    "transferred=%d exited=%d check_deps=%d verified=%d\n",
-                    i, so.sector.address,
-                    so.sector.address + so.sector.length,
-                    static_cast<int>(so.erased),
-                    static_cast<int>(so.downloaded),
-                    static_cast<int>(so.transferred),
-                    static_cast<int>(so.exited),
-                    static_cast<int>(so.check_deps_passed),
-                    static_cast<int>(so.verified));
-    }
-    if (!outcome.ok()) {
-        std::fprintf(stderr, "flash-apply: %s\n",
-                     outcome.error->to_string().c_str());
-    }
     if (!mock.exhausted()) {
         std::fprintf(stderr,
                      "flash-apply: warning: %zu trace entries unused\n",
@@ -4279,6 +4494,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-set-profile") {
         return cmd_project_set_profile(argc - 2, argv + 2);
+    }
+    if (cmd == "project-flash") {
+        return cmd_project_flash(argc - 2, argv + 2);
     }
     if (cmd == "pack-info") {
         return cmd_pack_info(argc - 2, argv + 2);
