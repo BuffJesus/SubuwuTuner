@@ -635,6 +635,44 @@ TEST_CASE("Manifest round-trips through format_manifest + parse_manifest",
     REQUIRE(r->entries[1].verified    == m.entries[1].verified);
 }
 
+TEST_CASE("Manifest round-trips policy_profile + policy_reason",
+          "[flash][manifest][policy]") {
+    flash::Manifest m;
+    m.created_at     = "2026-05-12T15:30:00Z";
+    m.plan_crc32     = 0xAA;
+    m.overall_crc32  = 0xBB;
+    m.policy_profile = "california-us";
+    m.policy_reason  = "Test cell run #42 — verified on dyno";
+    m.entries.push_back({{0x1000, 4}, 0x11223344, true, true});
+
+    auto const text = flash::format_manifest(m);
+    auto const r    = flash::parse_manifest(text);
+    REQUIRE(r.has_value());
+    REQUIRE(r->policy_profile == m.policy_profile);
+    REQUIRE(r->policy_reason  == m.policy_reason);
+}
+
+TEST_CASE("Manifest omits empty policy fields from the emitted TOML",
+          "[flash][manifest][policy]") {
+    flash::Manifest m;
+    m.created_at = "2026-05-12T15:30:00Z";
+    // policy_profile + policy_reason both empty: no gate was applied.
+    auto const text = flash::format_manifest(m);
+    REQUIRE(text.find("policy_profile") == std::string::npos);
+    REQUIRE(text.find("policy_reason")  == std::string::npos);
+}
+
+TEST_CASE("Manifest escapes quotes + backslashes in policy_reason",
+          "[flash][manifest][policy]") {
+    flash::Manifest m;
+    m.policy_profile = "california-us";
+    m.policy_reason  = R"(Run "A/B" \ trial #3)";
+    auto const text = flash::format_manifest(m);
+    auto const r    = flash::parse_manifest(text);
+    REQUIRE(r.has_value());
+    REQUIRE(r->policy_reason == m.policy_reason);
+}
+
 TEST_CASE("parse_manifest rejects an unsupported schema_version",
           "[flash][manifest][toml][error]") {
     constexpr std::string_view text = "schema_version = 999\n";

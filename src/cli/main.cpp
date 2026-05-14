@@ -4043,8 +4043,16 @@ int cmd_project_flash(int argc, char *argv[]) {
     // is meaningful even though the plan was built in-memory.
     if (manifest_path.has_value()) {
         auto const  plan_text = st::flash::format_plan(plan);
-        auto const  manifest  =
+        auto        manifest  =
             st::flash::build_manifest(plan, plan_text, outcome.report);
+        // Persist the audit trail: which profile gated this flash + the
+        // operator-supplied justification (only set when --reason was given,
+        // typically under california-us / EU ConfirmWithReason).
+        manifest.policy_profile = std::string{
+            st::policy::profile_name(project->policy_profile())};
+        if (reason.has_value()) {
+            manifest.policy_reason = *reason;
+        }
         if (auto s = st::flash::write_manifest(*manifest_path, manifest);
             !s.has_value()) {
             std::fprintf(stderr, "project-flash: %s\n",
@@ -4203,8 +4211,18 @@ int cmd_flash_apply(int argc, char *argv[]) {
         std::ifstream pin{*plan_path, std::ios::binary};
         std::ostringstream pss;
         pss << pin.rdbuf();
-        auto const manifest =
+        auto manifest =
             st::flash::build_manifest(*plan, pss.str(), report);
+        // Persist the audit trail when a profile gated this flash. We only
+        // populate `policy_profile` if --profile was supplied (so motorsport-
+        // only ungated runs leave the manifest field blank, which means
+        // "no policy applied" rather than "policy=motorsport-only").
+        if (profile_arg.has_value()) {
+            manifest.policy_profile = *profile_arg;
+            if (reason.has_value()) {
+                manifest.policy_reason = *reason;
+            }
+        }
         if (auto s = st::flash::write_manifest(*manifest_path, manifest);
             !s.has_value()) {
             std::fprintf(stderr, "flash-apply: %s\n",

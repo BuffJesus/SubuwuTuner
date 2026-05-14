@@ -881,6 +881,12 @@ Result<Manifest> parse_manifest(std::string_view text) {
     if (auto const *t = root.get_as<int64_t>("overall_crc32"); t != nullptr) {
         m.overall_crc32 = static_cast<std::uint32_t>(t->get());
     }
+    if (auto const *t = root.get_as<std::string>("policy_profile"); t != nullptr) {
+        m.policy_profile = t->get();
+    }
+    if (auto const *t = root.get_as<std::string>("policy_reason"); t != nullptr) {
+        m.policy_reason = t->get();
+    }
 
     auto const *entries = root["entry"].as_array();
     if (entries != nullptr) {
@@ -921,6 +927,15 @@ Result<Manifest> read_manifest(std::filesystem::path const &path) {
 }
 
 std::string format_manifest(Manifest const &m) {
+    auto const escape = [](std::string_view s) {
+        std::string out;
+        out.reserve(s.size());
+        for (char c : s) {
+            if (c == '"' || c == '\\') out.push_back('\\');
+            out.push_back(c);
+        }
+        return out;
+    };
     std::ostringstream out;
     out << "# SubuwuTuner flash manifest\n";
     out << "schema_version = " << kManifestSchemaVersion << "\n";
@@ -929,6 +944,12 @@ std::string format_manifest(Manifest const &m) {
         << std::hex << m.plan_crc32 << std::dec << "\n";
     out << "overall_crc32  = 0x"
         << std::hex << m.overall_crc32 << std::dec << "\n";
+    if (!m.policy_profile.empty()) {
+        out << "policy_profile = \"" << escape(m.policy_profile) << "\"\n";
+    }
+    if (!m.policy_reason.empty()) {
+        out << "policy_reason  = \"" << escape(m.policy_reason) << "\"\n";
+    }
     for (auto const &e : m.entries) {
         out << "\n[[entry]]\n";
         out << "address     = 0x"

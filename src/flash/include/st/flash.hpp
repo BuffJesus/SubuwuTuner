@@ -341,6 +341,15 @@ struct Manifest {
     // plan order. Independent of the per-entry hashes; both are stored
     // so a tampered single-sector value is detectable two ways.
     std::uint32_t              overall_crc32{0};
+    // Audit-trail fields populated by the CLI when a policy-gated flash
+    // proceeds under a profile that demands `Confirm` / `ConfirmWithReason`
+    // (see `docs/06-legal-ethics.md`). `policy_profile` is the active
+    // jurisdiction profile at flash time; `policy_reason` is the user-
+    // supplied justification for emissions-flagged edits. Both empty when
+    // no policy gate was applied (e.g. `flash-apply` without `--profile`
+    // on motorsport-only).
+    std::string                policy_profile;
+    std::string                policy_reason;
     std::vector<ManifestEntry> entries;
 };
 
