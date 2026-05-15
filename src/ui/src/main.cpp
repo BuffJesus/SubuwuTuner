@@ -492,6 +492,105 @@ void save_project(AppState &state) {
     state.dirty      = false;
 }
 
+// Writes the currently-selected table to `path` as a CSV in the same
+// format `subuwutuner-cli project-export-csv` emits (identity headers
+// + `row,col,value` rows). When `diff_only` is true, emits only cells
+// whose working value differs from the source — the share-a-tune-diff
+// shape. Returns nullopt on success or an error message for the
+// status bar.
+std::optional<std::string> write_current_table_csv(AppState const &state,
+                                                    std::filesystem::path const &path,
+                                                    bool diff_only) {
+    if (!state.project.has_value()) {
+        return std::string{"No project loaded."};
+    }
+    if (state.selected_table_id.empty()) {
+        return std::string{"No table selected."};
+    }
+    auto const *table = state.project->definition().find_table(state.selected_table_id);
+    if (table == nullptr) {
+        return "Table '" + state.selected_table_id + "' not found in pack.";
+    }
+    auto const working_td = state.project->definition().read_table_values(
+        state.project->working_rom(), *table);
+    if (!working_td.has_value()) {
+        return "read working: " + working_td.error().to_string();
+    }
+    std::optional<st::Definition::TableData> source_td;
+    if (diff_only) {
+        auto s = state.project->definition().read_table_values(
+            state.project->source_rom(), *table);
+        if (!s.has_value()) {
+            return "read source: " + s.error().to_string();
+        }
+        source_td = std::move(*s);
+    }
+    auto const *scaling = state.project->definition().find_scaling(table->scaling);
+    int const   prec    = scaling != nullptr ? scaling->precision : 6;
+
+    std::ofstream out{path, std::ios::trunc};
+    if (!out) {
+        return "cannot open " + path.string();
+    }
+    out << "# pack_id = \"" << state.project->definition().pack().id << "\"\n";
+    out << "# table   = \"" << table->id << "\"\n";
+    out << "row,col,value\n";
+    std::size_t emitted = 0;
+    char        buf[64];
+    for (std::size_t r = 0; r < working_td->values.size(); ++r) {
+        for (std::size_t c = 0; c < working_td->values[r].size(); ++c) {
+            double const v = working_td->values[r][c];
+            if (diff_only) {
+                if (r >= source_td->values.size()
+                    || c >= source_td->values[r].size()) continue;
+                if (v == source_td->values[r][c]) continue;
+            }
+            std::snprintf(buf, sizeof buf, "%zu,%zu,%.*f\n", r, c, prec, v);
+            out << buf;
+            ++emitted;
+        }
+    }
+    if (!out) {
+        return "write failed: " + path.string();
+    }
+    // Success — caller composes the status message.
+    return std::nullopt;
+}
+
+// Convenience: NFD-driven save dialog wrapper. Default filename is
+// "<table_id>[.diff].csv" so the file falls under the table being
+// exported on disk without the user having to think about it.
+void export_current_table_csv_dialog(AppState &state, bool diff_only) {
+    if (!state.project.has_value() || state.selected_table_id.empty()) {
+        state.status_msg = "Select a table first.";
+        return;
+    }
+    std::string default_name = state.selected_table_id;
+    if (diff_only) default_name += ".diff";
+    default_name += ".csv";
+
+    nfdu8filteritem_t       filters[1] = {{"CSV", "csv"}};
+    NFD::UniquePathU8       out_path;
+    nfdresult_t const       r = NFD::SaveDialog(out_path, filters, 1,
+                                                 nullptr, default_name.c_str());
+    if (r == NFD_CANCEL) {
+        return;
+    }
+    if (r == NFD_ERROR) {
+        state.status_msg = std::string{"Save dialog error: "} + NFD::GetError();
+        return;
+    }
+    std::filesystem::path const path{out_path.get()};
+    if (auto err = write_current_table_csv(state, path, diff_only);
+        err.has_value()) {
+        state.status_msg = "Export failed: " + *err;
+        return;
+    }
+    state.status_msg = "Exported " + state.selected_table_id
+                       + (diff_only ? " (diff) " : " ") + "to "
+                       + path.filename().string() + ".";
+}
+
 // Snapshot, mutate, snapshot, writeback, record. If the writeback fails we
 // restore the in-memory TableData so the rendered grid stays consistent with
 // the ROM bytes — better than silently diverging.
@@ -1468,6 +1567,27 @@ void render_menubar(AppState &state) {
             }
             if (!has_project) {
                 disabled_tip("No project open.");
+            }
+            ImGui::Separator();
+            // CSV export — emits the same `# pack_id` / `# table` /
+            // `row,col,value` format as project-export-csv so the two
+            // surfaces round-trip with each other.
+            bool const can_export = has_project && !state.selected_table_id.empty();
+            if (ImGui::MenuItem("Export table as CSV...", nullptr, false,
+                                 can_export)) {
+                export_current_table_csv_dialog(state, /*diff_only=*/false);
+            }
+            if (!can_export) {
+                disabled_tip("Select a table first.");
+            }
+            if (ImGui::MenuItem("Export table edits as CSV...", nullptr, false,
+                                 can_export)) {
+                export_current_table_csv_dialog(state, /*diff_only=*/true);
+            }
+            if (!can_export) {
+                disabled_tip("Select a table first.\n"
+                             "Emits only cells changed from the source — "
+                             "share-able tune diff.");
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
