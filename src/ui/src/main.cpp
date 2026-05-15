@@ -591,6 +591,131 @@ void export_current_table_csv_dialog(AppState &state, bool diff_only) {
                        + path.filename().string() + ".";
 }
 
+// Reads a CSV from `path` and applies it to the currently-selected
+// table as a single bulk edit recorded through edit::History. Routes
+// the parse through `st::parse_edit_csv` so the GUI and CLI share
+// identity-header validation, comment/blank-line handling, and bounds
+// checking. Returns nullopt on success or an error message for the
+// caller to surface.
+std::optional<std::string> import_csv_into_current_table(AppState &state,
+                                                          std::filesystem::path const &path) {
+    if (!state.project.has_value()) {
+        return std::string{"No project loaded."};
+    }
+    if (state.selected_table_id.empty()) {
+        return std::string{"No table selected."};
+    }
+    auto const *table = state.project->definition().find_table(
+        state.selected_table_id);
+    if (table == nullptr) {
+        return "Table '" + state.selected_table_id + "' not found in pack.";
+    }
+    auto td = state.project->definition().read_table_values(
+        state.project->working_rom(), *table);
+    if (!td.has_value()) {
+        return "read working: " + td.error().to_string();
+    }
+    std::size_t const rows = td->values.size();
+    std::size_t const cols = rows > 0 ? td->values[0].size() : 0;
+    if (rows == 0 || cols == 0) {
+        return std::string{"Cannot import into a zero-dimension table."};
+    }
+
+    // Slurp the file.
+    std::ifstream in{path, std::ios::binary};
+    if (!in) {
+        return "cannot open " + path.string();
+    }
+    std::stringstream buf;
+    buf << in.rdbuf();
+    std::string const text = std::move(buf).str();
+
+    st::EditCsvParseOptions opts;
+    opts.expected_pack_id  = state.project->definition().pack().id;
+    opts.expected_table_id = table->id;
+    opts.table_rows        = rows;
+    opts.table_cols        = cols;
+    auto parsed = st::parse_edit_csv(text, opts);
+    if (!parsed.has_value()) {
+        return parsed.error().to_string();
+    }
+    if (parsed->cells.empty()) {
+        return std::string{"No edit rows parsed; nothing to import."};
+    }
+
+    // Bounding rect for the History entry — same shape the CLI records.
+    std::size_t r_min = parsed->cells[0].row, r_max = parsed->cells[0].row;
+    std::size_t c_min = parsed->cells[0].col, c_max = parsed->cells[0].col;
+    for (auto const &e : parsed->cells) {
+        r_min = std::min(r_min, e.row); r_max = std::max(r_max, e.row);
+        c_min = std::min(c_min, e.col); c_max = std::max(c_max, e.col);
+    }
+    st::edit::Rect const rect{r_min, r_max, c_min, c_max};
+    auto before = st::edit::snapshot(*td, rect);
+    if (!before.has_value()) {
+        return "snapshot before: " + before.error().to_string();
+    }
+    for (auto const &e : parsed->cells) td->values[e.row][e.col] = e.value;
+    auto after = st::edit::snapshot(*td, rect);
+    if (!after.has_value()) {
+        return "snapshot after: " + after.error().to_string();
+    }
+    if (auto wb = state.project->definition().write_table_values(
+            state.project->working_rom(), *table, *td);
+        !wb.has_value()) {
+        return "writeback: " + wb.error().to_string();
+    }
+
+    char descbuf[64];
+    std::snprintf(descbuf, sizeof descbuf, "csv import (%zu cell%s)",
+                   parsed->cells.size(), parsed->cells.size() == 1 ? "" : "s");
+    state.project->history().record({table->id, std::move(*before),
+                                      std::move(*after), std::string{descbuf}});
+
+    if (table->id == state.selected_table_id) {
+        state.current_table_data = std::move(*td);
+    }
+    state.dirty = true;
+
+    // Surface non-fatal warnings (pack_id mismatch) on the status bar
+    // alongside the success count.
+    std::string status = "Imported " + std::to_string(parsed->cells.size())
+                          + " cell" + (parsed->cells.size() == 1 ? "" : "s")
+                          + " into " + table->id + ".";
+    if (!parsed->warnings.empty()) {
+        status += "  Warning: " + parsed->warnings.front().message;
+        if (parsed->warnings.size() > 1) {
+            status += "  (+" + std::to_string(parsed->warnings.size() - 1)
+                       + " more)";
+        }
+    }
+    state.status_msg = std::move(status);
+    return std::nullopt;
+}
+
+// NFD-driven open dialog wrapper for CSV import.
+void import_csv_into_current_table_dialog(AppState &state) {
+    if (!state.project.has_value() || state.selected_table_id.empty()) {
+        state.status_msg = "Select a table first.";
+        return;
+    }
+    nfdu8filteritem_t filters[1] = {{"CSV", "csv"}};
+    NFD::UniquePathU8 out_path;
+    nfdresult_t const r = NFD::OpenDialog(out_path, filters, 1);
+    if (r == NFD_CANCEL) {
+        return;
+    }
+    if (r == NFD_ERROR) {
+        state.status_msg = std::string{"Open dialog error: "} + NFD::GetError();
+        return;
+    }
+    std::filesystem::path const path{out_path.get()};
+    if (auto err = import_csv_into_current_table(state, path);
+        err.has_value()) {
+        state.status_msg = "Import failed: " + *err;
+    }
+}
+
 // Snapshot, mutate, snapshot, writeback, record. If the writeback fails we
 // restore the in-memory TableData so the rendered grid stays consistent with
 // the ROM bytes — better than silently diverging.
@@ -1569,22 +1694,32 @@ void render_menubar(AppState &state) {
                 disabled_tip("No project open.");
             }
             ImGui::Separator();
-            // CSV export — emits the same `# pack_id` / `# table` /
-            // `row,col,value` format as project-export-csv so the two
-            // surfaces round-trip with each other.
-            bool const can_export = has_project && !state.selected_table_id.empty();
+            // CSV import/export — same `# pack_id` / `# table` /
+            // `row,col,value` format as project-export-csv / -edit-csv,
+            // and same parser, so the two surfaces round-trip with each
+            // other.
+            bool const can_csv = has_project && !state.selected_table_id.empty();
+            if (ImGui::MenuItem("Import CSV into table...", nullptr, false,
+                                 can_csv)) {
+                import_csv_into_current_table_dialog(state);
+            }
+            if (!can_csv) {
+                disabled_tip("Select a table first.\n"
+                             "Imports a row,col,value CSV as a single bulk edit\n"
+                             "(undoable via Ctrl+Z).");
+            }
             if (ImGui::MenuItem("Export table as CSV...", nullptr, false,
-                                 can_export)) {
+                                 can_csv)) {
                 export_current_table_csv_dialog(state, /*diff_only=*/false);
             }
-            if (!can_export) {
+            if (!can_csv) {
                 disabled_tip("Select a table first.");
             }
             if (ImGui::MenuItem("Export table edits as CSV...", nullptr, false,
-                                 can_export)) {
+                                 can_csv)) {
                 export_current_table_csv_dialog(state, /*diff_only=*/true);
             }
-            if (!can_export) {
+            if (!can_csv) {
                 disabled_tip("Select a table first.\n"
                              "Emits only cells changed from the source — "
                              "share-able tune diff.");
