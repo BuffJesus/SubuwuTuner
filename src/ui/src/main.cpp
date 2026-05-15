@@ -407,6 +407,18 @@ struct AppState {
     bool                                     flash_confirm_checked{false};
     char                                     flash_reason[512]{};
 
+    // CSV import preview modal. Populated by the Import dialog after a
+    // successful parse; the modal renders a before->after preview and
+    // applies the edit only on explicit user confirmation. Mirrors the
+    // CLI's `project-edit-csv --dry-run` safety net for share-able CSVs.
+    bool                                     show_csv_import_modal{false};
+    st::EditCsvParseResult                   csv_import_parsed;
+    std::string                              csv_import_table_id;
+    std::filesystem::path                    csv_import_source_path;
+    // Working-ROM values at parse time, kept so the preview can show
+    // "before -> after" without re-reading per frame.
+    std::optional<st::Definition::TableData> csv_import_before_values;
+
     void try_open_project(std::filesystem::path const &path) {
         auto r = st::Project::open(path);
         if (!r.has_value()) {
@@ -591,40 +603,121 @@ void export_current_table_csv_dialog(AppState &state, bool diff_only) {
                        + path.filename().string() + ".";
 }
 
-// Reads a CSV from `path` and applies it to the currently-selected
-// table as a single bulk edit recorded through edit::History. Routes
-// the parse through `st::parse_edit_csv` so the GUI and CLI share
-// identity-header validation, comment/blank-line handling, and bounds
-// checking. Returns nullopt on success or an error message for the
-// caller to surface.
-std::optional<std::string> import_csv_into_current_table(AppState &state,
-                                                          std::filesystem::path const &path) {
+// Applies a previously-parsed CSV cell list to the currently-selected
+// table as a single bulk edit recorded through edit::History. Used by
+// both the import-preview modal's Apply button and any non-interactive
+// caller. Returns nullopt on success or an error message.
+std::optional<std::string> apply_parsed_csv_edits(AppState &state,
+                                                   std::string const &target_table_id,
+                                                   st::EditCsvParseResult const &parsed) {
     if (!state.project.has_value()) {
         return std::string{"No project loaded."};
     }
-    if (state.selected_table_id.empty()) {
-        return std::string{"No table selected."};
-    }
-    auto const *table = state.project->definition().find_table(
-        state.selected_table_id);
+    auto const *table = state.project->definition().find_table(target_table_id);
     if (table == nullptr) {
-        return "Table '" + state.selected_table_id + "' not found in pack.";
+        return "Table '" + target_table_id + "' not found in pack.";
+    }
+    if (parsed.cells.empty()) {
+        return std::string{"Nothing to apply."};
     }
     auto td = state.project->definition().read_table_values(
         state.project->working_rom(), *table);
     if (!td.has_value()) {
         return "read working: " + td.error().to_string();
     }
+    // Bounding rect over all touched cells — same shape the CLI records.
+    std::size_t r_min = parsed.cells[0].row, r_max = parsed.cells[0].row;
+    std::size_t c_min = parsed.cells[0].col, c_max = parsed.cells[0].col;
+    for (auto const &e : parsed.cells) {
+        r_min = std::min(r_min, e.row); r_max = std::max(r_max, e.row);
+        c_min = std::min(c_min, e.col); c_max = std::max(c_max, e.col);
+    }
+    st::edit::Rect const rect{r_min, r_max, c_min, c_max};
+    auto before = st::edit::snapshot(*td, rect);
+    if (!before.has_value()) {
+        return "snapshot before: " + before.error().to_string();
+    }
+    for (auto const &e : parsed.cells) td->values[e.row][e.col] = e.value;
+    auto after = st::edit::snapshot(*td, rect);
+    if (!after.has_value()) {
+        return "snapshot after: " + after.error().to_string();
+    }
+    if (auto wb = state.project->definition().write_table_values(
+            state.project->working_rom(), *table, *td);
+        !wb.has_value()) {
+        return "writeback: " + wb.error().to_string();
+    }
+    char descbuf[64];
+    std::snprintf(descbuf, sizeof descbuf, "csv import (%zu cell%s)",
+                   parsed.cells.size(), parsed.cells.size() == 1 ? "" : "s");
+    state.project->history().record({table->id, std::move(*before),
+                                      std::move(*after), std::string{descbuf}});
+    if (table->id == state.selected_table_id) {
+        state.current_table_data = std::move(*td);
+    }
+    state.dirty = true;
+
+    std::string status = "Imported " + std::to_string(parsed.cells.size())
+                          + " cell" + (parsed.cells.size() == 1 ? "" : "s")
+                          + " into " + table->id + ".";
+    if (!parsed.warnings.empty()) {
+        status += "  Warning: " + parsed.warnings.front().message;
+        if (parsed.warnings.size() > 1) {
+            status += "  (+" + std::to_string(parsed.warnings.size() - 1)
+                       + " more)";
+        }
+    }
+    state.status_msg = std::move(status);
+    return std::nullopt;
+}
+
+// NFD-driven open dialog wrapper for CSV import. Parses the file
+// through st::parse_edit_csv and, on success, stages the parsed cells
+// in AppState and opens the preview modal — the apply happens only
+// after the user explicitly confirms (matching the CLI's --dry-run
+// safety net for shared / untrusted CSVs).
+void import_csv_into_current_table_dialog(AppState &state) {
+    if (!state.project.has_value() || state.selected_table_id.empty()) {
+        state.status_msg = "Select a table first.";
+        return;
+    }
+    auto const *table = state.project->definition().find_table(
+        state.selected_table_id);
+    if (table == nullptr) {
+        state.status_msg = "Table not in pack.";
+        return;
+    }
+    auto td = state.project->definition().read_table_values(
+        state.project->working_rom(), *table);
+    if (!td.has_value()) {
+        state.status_msg = "Import failed: read working: "
+                            + td.error().to_string();
+        return;
+    }
     std::size_t const rows = td->values.size();
     std::size_t const cols = rows > 0 ? td->values[0].size() : 0;
     if (rows == 0 || cols == 0) {
-        return std::string{"Cannot import into a zero-dimension table."};
+        state.status_msg = "Import failed: cannot import into a "
+                           "zero-dimension table.";
+        return;
     }
 
-    // Slurp the file.
+    nfdu8filteritem_t filters[1] = {{"CSV", "csv"}};
+    NFD::UniquePathU8 out_path;
+    nfdresult_t const r = NFD::OpenDialog(out_path, filters, 1);
+    if (r == NFD_CANCEL) {
+        return;
+    }
+    if (r == NFD_ERROR) {
+        state.status_msg = std::string{"Open dialog error: "} + NFD::GetError();
+        return;
+    }
+    std::filesystem::path const path{out_path.get()};
+
     std::ifstream in{path, std::ios::binary};
     if (!in) {
-        return "cannot open " + path.string();
+        state.status_msg = "Import failed: cannot open " + path.string();
+        return;
     }
     std::stringstream buf;
     buf << in.rdbuf();
@@ -637,83 +730,20 @@ std::optional<std::string> import_csv_into_current_table(AppState &state,
     opts.table_cols        = cols;
     auto parsed = st::parse_edit_csv(text, opts);
     if (!parsed.has_value()) {
-        return parsed.error().to_string();
+        state.status_msg = "Import failed: " + parsed.error().to_string();
+        return;
     }
     if (parsed->cells.empty()) {
-        return std::string{"No edit rows parsed; nothing to import."};
-    }
-
-    // Bounding rect for the History entry — same shape the CLI records.
-    std::size_t r_min = parsed->cells[0].row, r_max = parsed->cells[0].row;
-    std::size_t c_min = parsed->cells[0].col, c_max = parsed->cells[0].col;
-    for (auto const &e : parsed->cells) {
-        r_min = std::min(r_min, e.row); r_max = std::max(r_max, e.row);
-        c_min = std::min(c_min, e.col); c_max = std::max(c_max, e.col);
-    }
-    st::edit::Rect const rect{r_min, r_max, c_min, c_max};
-    auto before = st::edit::snapshot(*td, rect);
-    if (!before.has_value()) {
-        return "snapshot before: " + before.error().to_string();
-    }
-    for (auto const &e : parsed->cells) td->values[e.row][e.col] = e.value;
-    auto after = st::edit::snapshot(*td, rect);
-    if (!after.has_value()) {
-        return "snapshot after: " + after.error().to_string();
-    }
-    if (auto wb = state.project->definition().write_table_values(
-            state.project->working_rom(), *table, *td);
-        !wb.has_value()) {
-        return "writeback: " + wb.error().to_string();
-    }
-
-    char descbuf[64];
-    std::snprintf(descbuf, sizeof descbuf, "csv import (%zu cell%s)",
-                   parsed->cells.size(), parsed->cells.size() == 1 ? "" : "s");
-    state.project->history().record({table->id, std::move(*before),
-                                      std::move(*after), std::string{descbuf}});
-
-    if (table->id == state.selected_table_id) {
-        state.current_table_data = std::move(*td);
-    }
-    state.dirty = true;
-
-    // Surface non-fatal warnings (pack_id mismatch) on the status bar
-    // alongside the success count.
-    std::string status = "Imported " + std::to_string(parsed->cells.size())
-                          + " cell" + (parsed->cells.size() == 1 ? "" : "s")
-                          + " into " + table->id + ".";
-    if (!parsed->warnings.empty()) {
-        status += "  Warning: " + parsed->warnings.front().message;
-        if (parsed->warnings.size() > 1) {
-            status += "  (+" + std::to_string(parsed->warnings.size() - 1)
-                       + " more)";
-        }
-    }
-    state.status_msg = std::move(status);
-    return std::nullopt;
-}
-
-// NFD-driven open dialog wrapper for CSV import.
-void import_csv_into_current_table_dialog(AppState &state) {
-    if (!state.project.has_value() || state.selected_table_id.empty()) {
-        state.status_msg = "Select a table first.";
+        state.status_msg = "Import: no edit rows parsed; nothing to do.";
         return;
     }
-    nfdu8filteritem_t filters[1] = {{"CSV", "csv"}};
-    NFD::UniquePathU8 out_path;
-    nfdresult_t const r = NFD::OpenDialog(out_path, filters, 1);
-    if (r == NFD_CANCEL) {
-        return;
-    }
-    if (r == NFD_ERROR) {
-        state.status_msg = std::string{"Open dialog error: "} + NFD::GetError();
-        return;
-    }
-    std::filesystem::path const path{out_path.get()};
-    if (auto err = import_csv_into_current_table(state, path);
-        err.has_value()) {
-        state.status_msg = "Import failed: " + *err;
-    }
+
+    // Stash the parse + the current values for the modal preview.
+    state.csv_import_parsed        = std::move(*parsed);
+    state.csv_import_table_id      = table->id;
+    state.csv_import_source_path   = path;
+    state.csv_import_before_values = std::move(*td);
+    state.show_csv_import_modal    = true;
 }
 
 // Snapshot, mutate, snapshot, writeback, record. If the writeback fails we
@@ -1144,6 +1174,167 @@ std::optional<PendingFlash> build_pending_flash(AppState const &state) {
         pf.plan, proj.definition(), proj.source_rom().data(),
         proj.policy_profile());
     return pf;
+}
+
+// Preview modal for CSV import. Renders the parsed cell list as a
+// before->after diff and only applies the edit on explicit user
+// confirmation — the GUI equivalent of `project-edit-csv --dry-run`.
+void render_csv_import_modal(AppState &state) {
+    if (state.show_csv_import_modal) {
+        ImGui::OpenPopup("Import CSV##csv_import_modal");
+        state.show_csv_import_modal = false;
+    }
+    ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(560.0f, 320.0f),
+                                         ImVec2(900.0f, 700.0f));
+    if (!ImGui::BeginPopupModal("Import CSV##csv_import_modal", nullptr,
+                                  ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+
+    auto const &parsed = state.csv_import_parsed;
+    auto const &before_td = state.csv_import_before_values;
+
+    ImGui::Text("Importing: %s",
+                 state.csv_import_source_path.filename().string().c_str());
+    ImGui::Text("Target:    %s", state.csv_import_table_id.c_str());
+    ImGui::Text("Cells:     %zu", parsed.cells.size());
+
+    if (!parsed.cells.empty()) {
+        std::size_t r_min = parsed.cells[0].row, r_max = parsed.cells[0].row;
+        std::size_t c_min = parsed.cells[0].col, c_max = parsed.cells[0].col;
+        for (auto const &e : parsed.cells) {
+            r_min = std::min(r_min, e.row); r_max = std::max(r_max, e.row);
+            c_min = std::min(c_min, e.col); c_max = std::max(c_max, e.col);
+        }
+        ImGui::Text("Bounds:    rows %zu..%zu, cols %zu..%zu",
+                     r_min, r_max, c_min, c_max);
+    }
+
+    // Warnings (yellow chip). pack_id mismatch is the common one.
+    if (!parsed.warnings.empty()) {
+        ImGui::Spacing();
+        for (auto const &w : parsed.warnings) {
+            ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f),
+                                "warning: %s", w.message.c_str());
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Before/after preview. Pull precision from the table's scaling so
+    // the diff reads consistently with the grid view.
+    auto const *table = state.project.has_value()
+                         ? state.project->definition().find_table(
+                               state.csv_import_table_id)
+                         : nullptr;
+    auto const *scaling = (table != nullptr && state.project.has_value())
+                           ? state.project->definition().find_scaling(table->scaling)
+                           : nullptr;
+    int const prec = scaling != nullptr ? scaling->precision : 4;
+
+    constexpr std::size_t kPreviewLimit = 12;
+    std::size_t const     shown =
+        std::min(kPreviewLimit, parsed.cells.size());
+    ImGui::TextDisabled("Preview (first %zu of %zu):", shown,
+                         parsed.cells.size());
+    if (ImGui::BeginTable("##csv_preview", 4,
+                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH
+                           | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("row",    ImGuiTableColumnFlags_WidthFixed, 48.0f);
+        ImGui::TableSetupColumn("col",    ImGuiTableColumnFlags_WidthFixed, 48.0f);
+        ImGui::TableSetupColumn("before", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("after",  ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+        for (std::size_t i = 0; i < shown; ++i) {
+            auto const &e = parsed.cells[i];
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0); ImGui::Text("%zu", e.row);
+            ImGui::TableSetColumnIndex(1); ImGui::Text("%zu", e.col);
+
+            ImGui::TableSetColumnIndex(2);
+            if (before_td.has_value()
+                && e.row < before_td->values.size()
+                && e.col < before_td->values[e.row].size()) {
+                double const b = before_td->values[e.row][e.col];
+                ImGui::Text("%.*f", prec, b);
+            } else {
+                ImGui::TextDisabled("?");
+            }
+
+            ImGui::TableSetColumnIndex(3);
+            // Color-code: green when value increases, red when decreases.
+            // Tuner shorthand — "raising" vs "pulling" — keep neutral
+            // when unchanged or the before value is unknown.
+            ImVec4 color = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+            if (before_td.has_value()
+                && e.row < before_td->values.size()
+                && e.col < before_td->values[e.row].size()) {
+                double const b = before_td->values[e.row][e.col];
+                if (e.value > b) color = ImVec4(0.5f, 0.95f, 0.5f, 1.0f);
+                else if (e.value < b) color = ImVec4(0.95f, 0.55f, 0.55f, 1.0f);
+            }
+            ImGui::TextColored(color, "%.*f", prec, e.value);
+        }
+        ImGui::EndTable();
+    }
+    if (parsed.cells.size() > shown) {
+        ImGui::TextDisabled("... %zu more not shown",
+                             parsed.cells.size() - shown);
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    bool const want_apply  =
+        ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false)
+        || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, /*repeat=*/false);
+    bool const want_cancel =
+        ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+
+    constexpr float kBtnW = 160.0f;
+    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.21f, 0.46f, 0.76f, 1.00f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.31f, 0.56f, 0.86f, 1.00f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.38f, 0.65f, 0.94f, 1.00f));
+    bool const apply_clicked =
+        ImGui::Button("Apply edits", ImVec2(kBtnW, 0.0f));
+    ImGui::PopStyleColor(3);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Apply the CSV as a single bulk edit. "
+                          "Undoable via Ctrl+Z.  (Enter)");
+    }
+    ImGui::SameLine();
+    bool const cancel_clicked =
+        ImGui::Button("Cancel", ImVec2(kBtnW * 0.7f, 0.0f));
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Discard the preview. Nothing is written. "
+                          "(Esc)");
+    }
+
+    if (apply_clicked || want_apply) {
+        if (auto err = apply_parsed_csv_edits(
+                state, state.csv_import_table_id, state.csv_import_parsed);
+            err.has_value()) {
+            state.status_msg = "Import failed: " + *err;
+        }
+        state.csv_import_parsed = {};
+        state.csv_import_before_values.reset();
+        state.csv_import_table_id.clear();
+        state.csv_import_source_path.clear();
+        ImGui::CloseCurrentPopup();
+    } else if (cancel_clicked || want_cancel) {
+        state.csv_import_parsed = {};
+        state.csv_import_before_values.reset();
+        state.csv_import_table_id.clear();
+        state.csv_import_source_path.clear();
+        state.status_msg = "Import cancelled.";
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
 }
 
 void render_flash_modal(AppState &state) {
@@ -4035,6 +4226,7 @@ int main(int argc, char *argv[]) {
         render_history_panel(state);
         render_status_bar(state);
         render_unsaved_modal(state);
+        render_csv_import_modal(state);
         render_flash_modal(state);
 
         if (state.show_imgui_demo) {
