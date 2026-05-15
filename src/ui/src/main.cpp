@@ -333,6 +333,7 @@ enum class ConfirmAction {
     None,
     OpenDialog,
     OpenRecent,
+    NewProject,
     Close,
     Quit,
 };
@@ -418,6 +419,16 @@ struct AppState {
     // Working-ROM values at parse time, kept so the preview can show
     // "before -> after" without re-reading per frame.
     std::optional<st::Definition::TableData> csv_import_before_values;
+
+    // New-project modal. GUI front for `subuwutuner-cli project-new`.
+    // Three path fields (source ROM, def pack folder, target project
+    // dir) and an optional display name. NFD pickers populate the
+    // fields; Create runs Project::create + try_open_project.
+    bool                                     show_new_project_modal{false};
+    char                                     np_source_path[1024]{};
+    char                                     np_def_path[1024]{};
+    char                                     np_dir_path[1024]{};
+    char                                     np_display_name[256]{};
 
     void try_open_project(std::filesystem::path const &path) {
         auto r = st::Project::open(path);
@@ -998,6 +1009,9 @@ void execute_action(AppState &state, ConfirmAction action,
         case ConfirmAction::OpenRecent:
             state.try_open_project(path);
             break;
+        case ConfirmAction::NewProject:
+            state.show_new_project_modal = true;
+            break;
         case ConfirmAction::Close:
             state.close_project();
             break;
@@ -1027,6 +1041,7 @@ char const *modal_save_label(ConfirmAction a) noexcept {
     switch (a) {
         case ConfirmAction::OpenDialog:
         case ConfirmAction::OpenRecent: return "Save and open";
+        case ConfirmAction::NewProject: return "Save and create new";
         case ConfirmAction::Close:      return "Save and close";
         case ConfirmAction::Quit:       return "Save and quit";
         case ConfirmAction::None:       break;
@@ -1038,6 +1053,7 @@ char const *modal_discard_label(ConfirmAction a) noexcept {
     switch (a) {
         case ConfirmAction::OpenDialog:
         case ConfirmAction::OpenRecent: return "Discard and open";
+        case ConfirmAction::NewProject: return "Discard and create new";
         case ConfirmAction::Close:      return "Discard and close";
         case ConfirmAction::Quit:       return "Discard and quit";
         case ConfirmAction::None:       break;
@@ -1050,6 +1066,8 @@ char const *modal_subtitle(ConfirmAction a) noexcept {
         case ConfirmAction::OpenDialog:
         case ConfirmAction::OpenRecent:
             return "Opening another project will replace this one.";
+        case ConfirmAction::NewProject:
+            return "Creating a new project will replace this one.";
         case ConfirmAction::Close:
             return "Closing this project will reset the editor.";
         case ConfirmAction::Quit:
@@ -1334,6 +1352,181 @@ void render_csv_import_modal(AppState &state) {
         state.status_msg = "Import cancelled.";
         ImGui::CloseCurrentPopup();
     }
+    ImGui::EndPopup();
+}
+
+// New-project modal. GUI parity with `subuwutuner-cli project-new`:
+// three path inputs (source ROM, def pack folder, target dir) plus an
+// optional display name. Each Browse… button fires NFD and rewrites
+// the matching buffer. Create calls Project::create and, on success,
+// hands the new directory off to try_open_project so the caller lands
+// in the open project immediately.
+void render_new_project_modal(AppState &state) {
+    if (state.show_new_project_modal) {
+        ImGui::OpenPopup("New project##new_project_modal");
+        state.show_new_project_modal = false;
+    }
+    ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(520.0f, 280.0f),
+                                         ImVec2(900.0f, 600.0f));
+    if (!ImGui::BeginPopupModal("New project##new_project_modal", nullptr,
+                                  ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+
+    // One row = label, text-input that fills the horizontal space, and
+    // a Browse... button. ImGui::Begin/EndDisabled wraps the text input
+    // to keep it read-only — the canonical-path constraint is "use
+    // Browse..."; typing in random paths invites mistakes.
+    auto const path_row =
+        [](char const *label, char *buf, std::size_t buf_size,
+            char const *btn_id, char const *tooltip) -> bool {
+            ImGui::TextUnformatted(label);
+            float const  avail   = ImGui::GetContentRegionAvail().x;
+            float const  btn_w   = 96.0f;
+            float const  input_w = std::max(120.0f, avail - btn_w - 8.0f);
+            ImGui::SetNextItemWidth(input_w);
+            ImGui::InputText((std::string{"##"} + btn_id).c_str(),
+                              buf, buf_size,
+                              ImGuiInputTextFlags_ReadOnly);
+            ImGui::SameLine();
+            bool const clicked = ImGui::Button(
+                (std::string{"Browse…##"} + btn_id).c_str(),
+                ImVec2(btn_w, 0.0f));
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", tooltip);
+            }
+            return clicked;
+        };
+
+    if (path_row("Source ROM",
+                  state.np_source_path, sizeof state.np_source_path,
+                  "src",
+                  "Pick the stock ROM dump (.bin). Copied into the\n"
+                  "project as source.bin and never modified.")) {
+        NFD::UniquePathU8 out;
+        nfdresult_t const r = NFD::OpenDialog(out);
+        if (r == NFD_OKAY) {
+            std::snprintf(state.np_source_path,
+                           sizeof state.np_source_path,
+                           "%s", out.get());
+        } else if (r == NFD_ERROR) {
+            state.status_msg = std::string{"Source dialog error: "}
+                                + NFD::GetError();
+        }
+    }
+    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+
+    if (path_row("Definition pack",
+                  state.np_def_path, sizeof state.np_def_path,
+                  "def",
+                  "Pick the directory containing the pack TOML files,\n"
+                  "or a sibling pack folder. Single-file packs aren't\n"
+                  "supported from this dialog yet — use the CLI for those.")) {
+        NFD::UniquePathU8 out;
+        nfdresult_t const r = NFD::PickFolder(out);
+        if (r == NFD_OKAY) {
+            std::snprintf(state.np_def_path, sizeof state.np_def_path,
+                           "%s", out.get());
+        } else if (r == NFD_ERROR) {
+            state.status_msg = std::string{"Def dialog error: "}
+                                + NFD::GetError();
+        }
+    }
+    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+
+    if (path_row("Project directory",
+                  state.np_dir_path, sizeof state.np_dir_path,
+                  "dir",
+                  "Pick the empty target directory. project.toml,\n"
+                  "source.bin, and working.bin land here.")) {
+        NFD::UniquePathU8 out;
+        nfdresult_t const r = NFD::PickFolder(out);
+        if (r == NFD_OKAY) {
+            std::snprintf(state.np_dir_path, sizeof state.np_dir_path,
+                           "%s", out.get());
+        } else if (r == NFD_ERROR) {
+            state.status_msg = std::string{"Dir dialog error: "}
+                                + NFD::GetError();
+        }
+    }
+    ImGui::Dummy(ImVec2(0.0f, 12.0f));
+
+    ImGui::TextUnformatted("Display name (optional)");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputTextWithHint("##np_name",
+                              "Defaults to the project directory's basename.",
+                              state.np_display_name,
+                              sizeof state.np_display_name);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    bool const have_source = state.np_source_path[0] != '\0';
+    bool const have_def    = state.np_def_path[0]    != '\0';
+    bool const have_dir    = state.np_dir_path[0]    != '\0';
+    bool const can_create  = have_source && have_def && have_dir;
+
+    bool const want_cancel =
+        ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+    bool create_clicked = false;
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.21f, 0.46f, 0.76f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.31f, 0.56f, 0.86f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.38f, 0.65f, 0.94f, 1.00f));
+        ImGui::BeginDisabled(!can_create);
+        create_clicked = ImGui::Button("Create", ImVec2(160.0f, 0.0f));
+        ImGui::EndDisabled();
+        ImGui::PopStyleColor(3);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            if (!can_create) {
+                ImGui::SetTooltip("Source ROM, definition pack, and "
+                                  "project directory are all required.");
+            } else {
+                ImGui::SetTooltip("Create the project and open it.");
+            }
+        }
+    }
+    ImGui::SameLine();
+    bool const cancel_clicked =
+        ImGui::Button("Cancel", ImVec2(110.0f, 0.0f));
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Close without creating.  (Esc)");
+    }
+
+    auto const reset_fields = [&]() {
+        state.np_source_path[0]   = '\0';
+        state.np_def_path[0]      = '\0';
+        state.np_dir_path[0]      = '\0';
+        state.np_display_name[0]  = '\0';
+    };
+
+    if (create_clicked && can_create) {
+        std::filesystem::path const dir{state.np_dir_path};
+        std::string                 name{state.np_display_name};
+        if (name.empty()) {
+            name = dir.filename().string();
+            if (name.empty()) name = "Untitled";
+        }
+        auto r = st::Project::create(dir,
+                                      std::filesystem::path{state.np_source_path},
+                                      std::filesystem::path{state.np_def_path},
+                                      name);
+        if (!r.has_value()) {
+            state.status_msg = "Create failed: " + r.error().to_string();
+        } else {
+            reset_fields();
+            ImGui::CloseCurrentPopup();
+            // try_open_project handles status_msg + recents update.
+            state.try_open_project(dir);
+        }
+    } else if (cancel_clicked || want_cancel) {
+        reset_fields();
+        ImGui::CloseCurrentPopup();
+    }
+
     ImGui::EndPopup();
 }
 
@@ -1868,6 +2061,9 @@ void render_menubar(AppState &state) {
 
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("New project...")) {
+                request_action(state, ConfirmAction::NewProject);
+            }
             if (ImGui::MenuItem("Open Project...", "Ctrl+O")) {
                 request_action(state, ConfirmAction::OpenDialog);
             }
@@ -2839,6 +3035,25 @@ void render_welcome_panel(AppState &state) {
     }
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
     text_centered_disabled("Ctrl+O");
+
+    // New-project CTA. Slightly smaller than Open Project so the
+    // welcome panel keeps its primary-action / secondary-action
+    // hierarchy — opening an existing project is the more common
+    // first move.
+    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    constexpr float kSecondaryW = 200.0f;
+    center_cursor_x(kSecondaryW);
+    if (ImGui::Button("New project…", ImVec2(kSecondaryW, 30.0f))) {
+        // Welcome panel only renders when no project is loaded, so the
+        // dirty-state guard inside request_action is a no-op here —
+        // but routing through it keeps every entry point consistent
+        // with the File menu's New project... item.
+        request_action(state, ConfirmAction::NewProject);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Pick a source ROM and definition pack, then\n"
+                          "create a new .stune project directory.");
+    }
 
     // Recents block. Empty list → render nothing here; first-run users
     // see the original clean welcome.
@@ -4227,6 +4442,7 @@ int main(int argc, char *argv[]) {
         render_status_bar(state);
         render_unsaved_modal(state);
         render_csv_import_modal(state);
+        render_new_project_modal(state);
         render_flash_modal(state);
 
         if (state.show_imgui_demo) {
