@@ -380,3 +380,166 @@ TEST_CASE("Project::save_metadata round-trips policy_profile",
     REQUIRE(reopened.has_value());
     REQUIRE(reopened->policy_profile() == st::policy::Profile::CaliforniaUs);
 }
+
+// --------------------------------------------------------------------------
+// parse_edit_csv — CSV bulk-edit parser. Same code drives the CLI's
+// project-edit-csv command and the GUI's Import CSV path; these tests
+// cover the format invariants both consumers rely on.
+// --------------------------------------------------------------------------
+
+TEST_CASE("parse_edit_csv parses a minimal row,col,value block",
+          "[project][edit_csv]") {
+    st::EditCsvParseOptions opts;
+    opts.table_rows = 4;
+    opts.table_cols = 4;
+    auto r = st::parse_edit_csv("0,0,12.5\n1,2,7.0\n3,3,-1.5\n", opts);
+    REQUIRE(r.has_value());
+    REQUIRE(r->warnings.empty());
+    REQUIRE(r->cells.size() == 3);
+    REQUIRE(r->cells[0].row == 0);
+    REQUIRE(r->cells[0].col == 0);
+    REQUIRE(r->cells[0].value == 12.5);
+    REQUIRE(r->cells[2].value == -1.5);
+}
+
+TEST_CASE("parse_edit_csv tolerates a non-numeric header row",
+          "[project][edit_csv]") {
+    st::EditCsvParseOptions opts;
+    opts.table_rows = 2; opts.table_cols = 2;
+    auto r = st::parse_edit_csv("row,col,value\n0,1,3.14\n", opts);
+    REQUIRE(r.has_value());
+    REQUIRE(r->cells.size() == 1);
+    REQUIRE(r->cells[0].value == 3.14);
+}
+
+TEST_CASE("parse_edit_csv skips blank lines and # comments",
+          "[project][edit_csv]") {
+    st::EditCsvParseOptions opts;
+    opts.table_rows = 2; opts.table_cols = 2;
+    auto r = st::parse_edit_csv("\n# a comment\n  \n0,0,1.0\n# trailing\n",
+                                 opts);
+    REQUIRE(r.has_value());
+    REQUIRE(r->cells.size() == 1);
+    REQUIRE(r->cells[0].value == 1.0);
+}
+
+TEST_CASE("parse_edit_csv tolerates CRLF line endings",
+          "[project][edit_csv]") {
+    st::EditCsvParseOptions opts;
+    opts.table_rows = 1; opts.table_cols = 2;
+    auto r = st::parse_edit_csv("0,0,1.0\r\n0,1,2.0\r\n", opts);
+    REQUIRE(r.has_value());
+    REQUIRE(r->cells.size() == 2);
+}
+
+TEST_CASE("parse_edit_csv strips inline `#` comment from a data line",
+          "[project][edit_csv]") {
+    st::EditCsvParseOptions opts;
+    opts.table_rows = 1; opts.table_cols = 1;
+    auto r = st::parse_edit_csv("0,0,5.0 # trailing comment\n", opts);
+    REQUIRE(r.has_value());
+    REQUIRE(r->cells.size() == 1);
+    REQUIRE(r->cells[0].value == 5.0);
+}
+
+TEST_CASE("parse_edit_csv warns on pack_id mismatch but still parses",
+          "[project][edit_csv]") {
+    st::EditCsvParseOptions opts;
+    opts.expected_pack_id = "current_pack";
+    opts.table_rows = 1; opts.table_cols = 1;
+    auto r = st::parse_edit_csv(
+        "# pack_id = \"some_other_pack\"\n0,0,1.0\n", opts);
+    REQUIRE(r.has_value());
+    REQUIRE(r->warnings.size() == 1);
+    REQUIRE(r->warnings[0].message.find("some_other_pack") != std::string::npos);
+    REQUIRE(r->cells.size() == 1);
+}
+
+TEST_CASE("parse_edit_csv does NOT warn when pack_id matches",
+          "[project][edit_csv]") {
+    st::EditCsvParseOptions opts;
+    opts.expected_pack_id = "pack_xyz";
+    opts.table_rows = 1; opts.table_cols = 1;
+    auto r = st::parse_edit_csv("# pack_id = \"pack_xyz\"\n0,0,1.0\n", opts);
+    REQUIRE(r.has_value());
+    REQUIRE(r->warnings.empty());
+}
+
+TEST_CASE("parse_edit_csv refuses on table id mismatch",
+          "[project][edit_csv]") {
+    st::EditCsvParseOptions opts;
+    opts.expected_table_id = "fuel_map";
+    auto r = st::parse_edit_csv("# table = \"ignition_main\"\n0,0,1.0\n",
+                                 opts);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+    REQUIRE(r.error().to_string().find("ignition_main") != std::string::npos);
+}
+
+TEST_CASE("parse_edit_csv accepts matching table id without warning",
+          "[project][edit_csv]") {
+    st::EditCsvParseOptions opts;
+    opts.expected_table_id = "fuel_map";
+    opts.table_rows = 1; opts.table_cols = 1;
+    auto r = st::parse_edit_csv("# table = \"fuel_map\"\n0,0,1.0\n", opts);
+    REQUIRE(r.has_value());
+    REQUIRE(r->warnings.empty());
+    REQUIRE(r->cells.size() == 1);
+}
+
+TEST_CASE("parse_edit_csv errors on cells outside table bounds",
+          "[project][edit_csv]") {
+    st::EditCsvParseOptions opts;
+    opts.table_rows = 2;
+    opts.table_cols = 2;
+    auto r = st::parse_edit_csv("0,0,1.0\n5,5,2.0\n", opts);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::OutOfRange);
+}
+
+TEST_CASE("parse_edit_csv skips bounds check when dims are zero",
+          "[project][edit_csv]") {
+    // Both dims zero → bounds disabled. Caller validates separately.
+    st::EditCsvParseOptions opts;
+    auto r = st::parse_edit_csv("0,0,1.0\n100,200,2.0\n", opts);
+    REQUIRE(r.has_value());
+    REQUIRE(r->cells.size() == 2);
+}
+
+TEST_CASE("parse_edit_csv rejects rows with fewer than 3 fields",
+          "[project][edit_csv]") {
+    auto r = st::parse_edit_csv("0,0\n", {});
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("parse_edit_csv rejects non-numeric value",
+          "[project][edit_csv]") {
+    auto r = st::parse_edit_csv("0,0,abc\n", {});
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("parse_edit_csv rejects mid-stream non-numeric row/col",
+          "[project][edit_csv]") {
+    // First-line header tolerance only applies before any edit is parsed.
+    auto r = st::parse_edit_csv("0,0,1.0\nbad,col,2.0\n", {});
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("parse_edit_csv returns empty result for an empty input",
+          "[project][edit_csv]") {
+    auto r = st::parse_edit_csv("", {});
+    REQUIRE(r.has_value());
+    REQUIRE(r->cells.empty());
+    REQUIRE(r->warnings.empty());
+}
+
+TEST_CASE("parse_edit_csv handles file without trailing newline",
+          "[project][edit_csv]") {
+    auto r = st::parse_edit_csv("0,0,1.5", {});
+    REQUIRE(r.has_value());
+    REQUIRE(r->cells.size() == 1);
+    REQUIRE(r->cells[0].value == 1.5);
+}

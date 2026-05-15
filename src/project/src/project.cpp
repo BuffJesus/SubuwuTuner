@@ -11,8 +11,11 @@
 
 #include <toml++/toml.hpp>
 
+#include <cctype>
+#include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -438,6 +441,193 @@ Status Project::save_metadata() const {
                                                created_, source_rel_, working_rel_,
                                                def_rel_);
     return write_file(dir_ / "project.toml", toml_text);
+}
+
+// --------------------------------------------------------------------------
+// parse_edit_csv — bulk-edit CSV parser shared by the CLI and the GUI.
+//
+// Rules (kept identical to the prior CLI-embedded version):
+//   * `# pack_id = "X"` and `# table = "Y"` are identity headers that live
+//     INSIDE a `#` comment so the file still parses cleanly through generic
+//     CSV tools (Excel, Python's csv module, etc.).
+//   * pack_id mismatch → warning (returned in result.warnings).
+//   * table mismatch   → hard error (InvalidArgument).
+//   * Comment portion of a line (`#` and onward) is stripped before
+//     field-splitting; blank/comment-only lines skip.
+//   * A non-numeric first row is tolerated as a CSV header row IFF no
+//     edits have been parsed yet — protects against `row,col,value` being
+//     read as a literal data row.
+//   * `row,col,value` — value is parsed as double in engineering units
+//     (the pack's scaling applies during writeback by the caller).
+//
+namespace {
+
+std::string extract_quoted(std::string_view line) {
+    auto const eq = line.find('=');
+    if (eq == std::string_view::npos) return {};
+    auto rest = line.substr(eq + 1);
+    while (!rest.empty()
+           && std::isspace(static_cast<unsigned char>(rest.front()))) {
+        rest.remove_prefix(1);
+    }
+    if (rest.size() >= 2 && rest.front() == '"') {
+        auto const close = rest.find('"', 1);
+        if (close != std::string_view::npos) {
+            return std::string{rest.substr(1, close - 1)};
+        }
+    }
+    return std::string{rest};
+}
+
+bool parse_size_field(std::string_view sv, std::size_t &out) {
+    char const *first = sv.data();
+    char const *last  = sv.data() + sv.size();
+    while (first < last && std::isspace(static_cast<unsigned char>(*first))) ++first;
+    while (last > first && std::isspace(static_cast<unsigned char>(*(last - 1)))) --last;
+    std::size_t v   = 0;
+    auto const  res = std::from_chars(first, last, v);
+    if (res.ec != std::errc{} || res.ptr != last) return false;
+    out = v;
+    return true;
+}
+
+bool parse_double_field(std::string_view sv, double &out) {
+    // Trim surrounding whitespace to match parse_size_field semantics — a
+    // value like " 5.0 " or "5.0 # ..." (after comment strip → "5.0 ")
+    // should parse cleanly.
+    while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.front()))) {
+        sv.remove_prefix(1);
+    }
+    while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.back()))) {
+        sv.remove_suffix(1);
+    }
+    if (sv.empty()) return false;
+    std::string s{sv};
+    char       *end = nullptr;
+    double const d  = std::strtod(s.c_str(), &end);
+    if (end == s.c_str() || end == nullptr || *end != '\0') return false;
+    out = d;
+    return true;
+}
+
+} // namespace
+
+Result<EditCsvParseResult> parse_edit_csv(std::string_view text,
+                                           EditCsvParseOptions const &opts) {
+    EditCsvParseResult result;
+
+    std::size_t line_no = 0;
+    std::size_t pos     = 0;
+    while (pos <= text.size()) {
+        ++line_no;
+        std::size_t const eol = text.find('\n', pos);
+        std::size_t const end = (eol == std::string_view::npos) ? text.size() : eol;
+        std::string_view  line = text.substr(pos, end - pos);
+        pos = (eol == std::string_view::npos) ? text.size() + 1 : eol + 1;
+
+        if (!line.empty() && line.back() == '\r') {
+            line.remove_suffix(1);
+        }
+
+        // Identity-header detection — pre-comment-strip so the `# pack_id`
+        // and `# table` markers stay inside a CSV comment.
+        if (!line.empty() && line.front() == '#') {
+            std::string_view rest = line.substr(1);
+            while (!rest.empty()
+                   && std::isspace(static_cast<unsigned char>(rest.front()))) {
+                rest.remove_prefix(1);
+            }
+            if (rest.starts_with("pack_id")) {
+                auto const declared = extract_quoted(rest);
+                if (!opts.expected_pack_id.empty()
+                    && !declared.empty()
+                    && declared != opts.expected_pack_id) {
+                    result.warnings.push_back({
+                        "CSV pack_id=\"" + declared
+                        + "\" differs from project pack=\""
+                        + std::string{opts.expected_pack_id}
+                        + "\"; scaling and addresses may not match"});
+                }
+            } else if (rest.starts_with("table")) {
+                auto const declared = extract_quoted(rest);
+                if (!opts.expected_table_id.empty()
+                    && !declared.empty()
+                    && declared != opts.expected_table_id) {
+                    return failure(ErrorCode::InvalidArgument,
+                                    "CSV table=\"" + declared
+                                    + "\" differs from target table \""
+                                    + std::string{opts.expected_table_id}
+                                    + "\"");
+                }
+            }
+        }
+
+        // Strip the inline-comment tail.
+        std::string clean{line};
+        if (auto p = clean.find('#'); p != std::string::npos) {
+            clean.resize(p);
+        }
+
+        // Skip blank / whitespace-only lines.
+        bool blank = true;
+        for (char c : clean) {
+            if (!std::isspace(static_cast<unsigned char>(c))) {
+                blank = false;
+                break;
+            }
+        }
+        if (blank) continue;
+
+        // Split on commas. Trailing comma → trailing empty field, which
+        // fails field-count or numeric-parse below.
+        std::vector<std::string_view> fields;
+        {
+            std::size_t start = 0;
+            for (std::size_t i = 0; i <= clean.size(); ++i) {
+                if (i == clean.size() || clean[i] == ',') {
+                    fields.push_back(
+                        std::string_view{clean}.substr(start, i - start));
+                    start = i + 1;
+                }
+            }
+        }
+        if (fields.size() < 3) {
+            return failure(ErrorCode::ParseError,
+                            "line " + std::to_string(line_no)
+                            + ": expected 3 fields, got "
+                            + std::to_string(fields.size()));
+        }
+
+        std::size_t r = 0, c = 0;
+        double      v = 0.0;
+        if (!parse_size_field(fields[0], r)
+            || !parse_size_field(fields[1], c)) {
+            // First-line header tolerance — `row,col,value` parses as
+            // non-integers and is skipped exactly once at the top.
+            if (result.cells.empty()) continue;
+            return failure(ErrorCode::ParseError,
+                            "line " + std::to_string(line_no)
+                            + ": row/col not integers");
+        }
+        if (!parse_double_field(fields[2], v)) {
+            return failure(ErrorCode::ParseError,
+                            "line " + std::to_string(line_no) + ": value '"
+                            + std::string{fields[2]} + "' is not numeric");
+        }
+        if (opts.table_rows > 0 && opts.table_cols > 0) {
+            if (r >= opts.table_rows || c >= opts.table_cols) {
+                return failure(ErrorCode::OutOfRange,
+                                "line " + std::to_string(line_no) + ": ("
+                                + std::to_string(r) + "," + std::to_string(c)
+                                + ") is outside table ("
+                                + std::to_string(opts.table_rows)
+                                + " rows x " + std::to_string(opts.table_cols)
+                                + " cols)");
+            }
+        }
+        result.cells.push_back({r, c, v});
+    }
+    return result;
 }
 
 } // namespace st

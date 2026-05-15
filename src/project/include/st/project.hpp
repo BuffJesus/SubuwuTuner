@@ -10,9 +10,12 @@
 #include "st/policy.hpp"
 #include "st/rom.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace st {
 
@@ -107,6 +110,57 @@ class Project {
     Definition    def_;
     edit::History history_;
 };
+
+// CSV bulk-edit parser. Shared between the CLI's `project-edit-csv` and
+// the GUI's File > Import CSV path so identity-header validation,
+// bounds checking, and comment/blank-line handling stay single-source.
+//
+// CSV format (matches what `project-export-csv` emits):
+//
+//   # pack_id = "..."   (optional — warning on mismatch)
+//   # table   = "..."   (optional — HARD ERROR on mismatch)
+//   row,col,value       (an optional non-numeric header row is tolerated)
+//   0,0,12.5
+//   ...
+//
+// `#` introduces a line comment; blank/comment-only lines are skipped.
+// Identity headers live inside `#` comments so the file still
+// round-trips through generic CSV tools.
+struct EditCsvCell {
+    std::size_t row;
+    std::size_t col;
+    double      value;
+};
+
+struct EditCsvWarning {
+    std::string message;
+};
+
+struct EditCsvParseResult {
+    std::vector<EditCsvCell>    cells;
+    std::vector<EditCsvWarning> warnings;
+};
+
+struct EditCsvParseOptions {
+    // If non-empty, the CSV's `# pack_id = "..."` header is compared
+    // against this. Mismatch emits a warning (not an error) — pack
+    // IDs can drift across versions while scaling/addresses still
+    // align well enough to apply the edit.
+    std::string_view expected_pack_id;
+
+    // If non-empty, the CSV's `# table = "..."` header is compared
+    // against this. Mismatch is a hard error — applying a CSV made
+    // for a different table would corrupt the working ROM.
+    std::string_view expected_table_id;
+
+    // Bounds-check parsed (row,col) against the target grid. Zero
+    // means "skip the check" (caller validates).
+    std::size_t      table_rows{0};
+    std::size_t      table_cols{0};
+};
+
+[[nodiscard]] Result<EditCsvParseResult> parse_edit_csv(
+    std::string_view text, EditCsvParseOptions const &opts);
 
 } // namespace st
 
