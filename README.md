@@ -33,6 +33,8 @@ For the full design rationale, read [`docs/`](docs/README.md):
 - [Glossary](docs/10-glossary.md)
 - [Definition format](docs/11-definition-format.md)
 - [Auto-tuning](docs/12-auto-tuning.md)
+- [Data distribution policy](docs/17-data-distribution-policy.md)
+- [Installing definition packs](docs/install.md)
 
 ## Building
 
@@ -51,6 +53,12 @@ ctest --preset linux-gcc
 ```
 
 See [`CMakePresets.json`](CMakePresets.json) for the full preset list.
+
+## Definition packs
+
+SubuwuTuner ships the *infrastructure* — loader, table editor, project model, flash orchestrator, auto-tune kernels, CAN toolkit, GUI — without bundled calibration definitions. Drop a TOML pack into the per-platform user-data directory (see [`docs/install.md`](docs/install.md)), or generate one from a public RomRaider XML with [`tools/defgen/`](tools/defgen/). The repo includes [`fixtures/demo-pack/`](fixtures/demo-pack/) as a synthetic always-available example so the tool is exercisable from a fresh checkout.
+
+The reasoning behind this distribution choice lives in [`docs/17-data-distribution-policy.md`](docs/17-data-distribution-policy.md).
 
 ## Safety
 

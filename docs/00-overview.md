@@ -50,7 +50,7 @@ Subsequent versions expand both platform coverage and feature scope. Highlights:
 A user with a supported adapter and a VA or VB WRX (MT) can:
 
 1. Read the stock ROM off the ECU
-2. Open it in SubuwuTuner, recognize all factory maps via a definition pack
+2. Open it in SubuwuTuner, recognize all factory maps via a definition pack (user-supplied — see `17-data-distribution-policy.md` and `install.md`)
 3. Edit common maps (fuel, ignition, boost, throttle) with the table editor
 4. Datalog at ≥ 50 Hz across ≥ 20 PIDs
 5. Reflash with delta-only writes and brick recovery armed before the write

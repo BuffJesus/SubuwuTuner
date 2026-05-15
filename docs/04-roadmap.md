@@ -15,11 +15,11 @@ Six phases. Each ends with a demoable artifact and a "ship gate" that must pass 
 
 - `st::rom` reads raw binary dumps, computes CRC32 / sector hashes
 - TOML definition parser (`st::defs`)
-- Port public RomRaider definitions for VA-WRX-MT and VB-WRX-MT into our TOML
+- Validate the loader against a real RomRaider XML through `tools/defgen` — definitions are user-supplied at runtime per `17-data-distribution-policy.md`, not first-party shipped
 - Read-only 2D and 3D table render in a Dear ImGui window
 - Open a known stock dump → see the boost target map laid out correctly
 
-**Gate:** load a known ROM, identify ≥ 20 factory maps with correct scaling, screenshot looks like a table.
+**Gate:** load a known ROM with a user-supplied definition pack, identify ≥ 20 factory maps with correct scaling, screenshot looks like a table.
 
 ## Phase 2 — Editing & projects (3–4 weeks)
 
