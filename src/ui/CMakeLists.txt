@@ -93,6 +93,7 @@ target_link_libraries(subuwutuner-gui
         st::flash
         st::policy
         st::project
+        st::autotune
         imgui_lib
         implot_lib
         nfd
