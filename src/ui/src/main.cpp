@@ -2784,7 +2784,7 @@ void render_history_panel(AppState &state) {
                              records.size() - cursor == 1 ? "" : "s");
     }
 
-    ImGui::InputTextWithHint("##history_filter", "Filter by table id…",
+    ImGui::InputTextWithHint("##history_filter", "Filter by table id or op…",
                               state.history_filter, sizeof state.history_filter);
     std::string_view const filter{state.history_filter};
 
@@ -2844,7 +2844,9 @@ void render_history_panel(AppState &state) {
         std::size_t matched = 0;
         for (std::size_t i = 0; i < records.size(); ++i) {
             auto const &e = records[i];
-            if (!filter.empty() && !icontains(e.table_id, filter)) {
+            if (!filter.empty()
+                && !icontains(e.table_id, filter)
+                && !icontains(e.description, filter)) {
                 continue;
             }
             ++matched;
