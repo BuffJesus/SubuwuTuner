@@ -58,8 +58,44 @@ Definitions-*.atlas
 fixtures/roms/
 fixtures/private/
 
-# Unrelated third-party material that lives next to the workspace
+# Path B distribution posture. VA/VB definition packs were moved out of
+# this repo so the public release ships infrastructure only; users supply
+# their own definitions at install/runtime. Master copy lives off-repo
+# (analyst-side, private). See SubuwuTuner-specs/AUDIT.md (2026-05-14)
+# and path-b-implementation-checklist.md for the rationale.
+definitions/va/
+definitions/vb/
+
+# Clean-room defenses (see docs/15-clean-room-engineering.md §6).
+# The wall lives in process discipline; these patterns are the safety
+# net for when a protected reference ends up inside the working tree
+# by accident — drag-and-drop, symlink, stray copy.
+
+# Atlas mirror (GitHub). Canonical orientation read is the README +
+# LICENSE only; the rest is All-Rights-Reserved.
 atlas-public-main/
+
+# Decompiled Atlas Java source (jd-gui dump). Canonical off-repo path
+# is C:\Users\Cornelio\Desktop\jd-gui-master\atlas-decompiled\.
+atlas-decompiled/
+*-decompiled/
+
+# Raw RomRaider XML and the analyst-side scrubber workspace. Canonical
+# off-repo path is D:\Documents\atlas-personal\. The scrubbed
+# `*.facts.xml` and `*.name-mapping.tsv` derivatives are wall-clean
+# inputs to defgen, but they live analyst-side too — never in this repo.
+atlas-personal/
+romraider_*.xml
+*.facts.xml
+*.name-mapping.tsv
+
+# Analyst working notes and the analyst-side specs repo. The kickoff
+# brief at docs/analyst-mode-prompt.md steers output to
+# D:\Documents\atlas-personal\analyst-notes\ and
+# D:\Documents\SubuwuTuner-specs\; ignore both shapes here too in case
+# someone nests them inside the workspace.
+analyst-notes/
+SubuwuTuner-specs/
 
 # Binaries / packages we don't track
 *.exe
