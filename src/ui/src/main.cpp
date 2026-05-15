@@ -364,10 +364,16 @@ struct AppState {
 
     // Visibility toggles for the secondary panels. The Sidebar and Table
     // panels are always-on (closing them would orphan the user); these
-    // two are as-needed and are exposed via View menu checkboxes + the
+    // are as-needed and are exposed via View menu checkboxes + the
     // standard dock tab-close X.
     bool                                     show_stats_panel{true};
     bool                                     show_dtcs_panel{true};
+    bool                                     show_history_panel{true};
+
+    // History-panel filter buffer. Substring-matched (case-insensitive)
+    // against the edit's table_id; mirrors the CLI's project-history
+    // --table flag at the GUI surface.
+    char                                     history_filter[128]{};
 
     // Inline cell-value editor state. Active iff `editing_cell` is true;
     // the cell being edited is identified by selection.r_cursor /
@@ -1417,9 +1423,10 @@ void render_dockspace_host() {
         ImGuiID center = 0;
         ImGui::DockBuilderSplitNode(middle, ImGuiDir_Right, 0.25f, &right, &center);
 
-        ImGui::DockBuilderDockWindow("Tables", left);
-        ImGui::DockBuilderDockWindow("Table",  center);
-        ImGui::DockBuilderDockWindow("Stats",  right);
+        ImGui::DockBuilderDockWindow("Tables",  left);
+        ImGui::DockBuilderDockWindow("Table",   center);
+        ImGui::DockBuilderDockWindow("Stats",   right);
+        ImGui::DockBuilderDockWindow("History", right);
 
         ImGui::DockBuilderFinish(id);
     }
@@ -1526,8 +1533,9 @@ void render_menubar(AppState &state) {
             // Panel visibility. Sidebar + Table are always-on (primary
             // navigation); Stats and DTCs are secondary panels the user
             // may want hidden when working in the table grid full-screen.
-            ImGui::MenuItem("Stats panel", nullptr, &state.show_stats_panel);
-            ImGui::MenuItem("DTCs panel",  nullptr, &state.show_dtcs_panel);
+            ImGui::MenuItem("Stats panel",   nullptr, &state.show_stats_panel);
+            ImGui::MenuItem("DTCs panel",    nullptr, &state.show_dtcs_panel);
+            ImGui::MenuItem("History panel", nullptr, &state.show_history_panel);
             ImGui::Separator();
             // Dev-only escape hatch. Tucked one level deeper so the
             // ImGui example isn't a peer of the user-facing view modes.
@@ -2746,6 +2754,210 @@ void render_dtcs_panel(AppState &state) {
     ImGui::End();
 }
 
+// "History" panel — GUI mirror of `subuwutuner-cli project-history`. Lists
+// every edit in insertion order with a marker for the current History
+// cursor, optional table-id filter, and a per-row "Jump" button that
+// walks the cursor to make that edit the most-recently-applied. Jumps
+// re-use do_undo / do_redo so the dirty flag, status line, and the
+// currently-displayed table data all stay coherent with manual Ctrl+Z.
+void render_history_panel(AppState &state) {
+    if (!state.show_history_panel) {
+        return;
+    }
+    if (!ImGui::Begin("History", &state.show_history_panel)) {
+        ImGui::End();
+        return;
+    }
+    if (!state.project.has_value()) {
+        ImGui::TextDisabled("No project loaded.");
+        ImGui::End();
+        return;
+    }
+    auto const &records = state.project->history().records();
+    auto const  cursor  = state.project->history().cursor();
+
+    ImGui::Text("%zu edit(s), cursor at %zu", records.size(), cursor);
+    if (cursor < records.size()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(%zu redo step%s)",
+                             records.size() - cursor,
+                             records.size() - cursor == 1 ? "" : "s");
+    }
+
+    ImGui::InputTextWithHint("##history_filter", "Filter by table id…",
+                              state.history_filter, sizeof state.history_filter);
+    std::string_view const filter{state.history_filter};
+
+    if (records.empty()) {
+        ImGui::Separator();
+        ImGui::TextDisabled("(no edits yet)");
+        ImGui::End();
+        return;
+    }
+
+    ImGui::Separator();
+    // Quick-action row: walk the cursor all the way down or up.
+    bool wants_revert_all  = false;
+    bool wants_reapply_all = false;
+    if (ImGui::SmallButton("Revert all")) {
+        wants_revert_all = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Undo every edit — cursor returns to 0 (ignores filter). "
+                          "Redo stays available until you make a new edit.");
+    }
+    ImGui::SameLine();
+    bool const can_reapply = cursor < records.size();
+    if (!can_reapply) ImGui::BeginDisabled();
+    if (ImGui::SmallButton("Re-apply all")) {
+        wants_reapply_all = true;
+    }
+    if (!can_reapply) ImGui::EndDisabled();
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Redo every undone edit — cursor returns to the end "
+                          "(ignores filter).");
+    }
+
+    ImGui::Separator();
+
+    // We collect any jump target in this frame and apply it *after*
+    // EndTable so the rendering loop isn't interleaved with mutations
+    // of `records` (do_undo/do_redo don't actually invalidate the
+    // vector — std::vector doesn't shrink on cursor moves — but it
+    // keeps the control flow honest). `has_jump` is the only gate;
+    // jump_target is only read when has_jump is true.
+    std::size_t jump_target = 0;
+    bool        has_jump    = false;
+
+    if (ImGui::BeginTable("##history_tbl", 5,
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH
+                          | ImGuiTableFlags_SizingStretchProp
+                          | ImGuiTableFlags_ScrollY)) {
+        ImGui::TableSetupColumn("#",     ImGuiTableColumnFlags_WidthFixed, 36.0f);
+        ImGui::TableSetupColumn("table", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn("op",    ImGuiTableColumnFlags_WidthStretch, 1.5f);
+        ImGui::TableSetupColumn("flags", ImGuiTableColumnFlags_WidthFixed, 40.0f);
+        ImGui::TableSetupColumn("",      ImGuiTableColumnFlags_WidthFixed, 56.0f);
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableHeadersRow();
+
+        std::size_t matched = 0;
+        for (std::size_t i = 0; i < records.size(); ++i) {
+            auto const &e = records[i];
+            if (!filter.empty() && !icontains(e.table_id, filter)) {
+                continue;
+            }
+            ++matched;
+
+            bool const is_undone = i >= cursor;
+            bool const is_top    = (i + 1 == cursor); // most-recent applied
+
+            ImGui::TableNextRow();
+
+            // Index column with a cursor marker. Accent color for the
+            // "next to undo" row; muted text for already-undone rows.
+            ImGui::TableSetColumnIndex(0);
+            if (is_top) {
+                ImGui::TextColored(ImVec4(0.40f, 0.85f, 1.00f, 1.0f), ">%zu", i);
+            } else if (is_undone) {
+                ImGui::TextDisabled(" %zu", i);
+            } else {
+                ImGui::Text(" %zu", i);
+            }
+
+            ImGui::TableSetColumnIndex(1);
+            if (is_undone) {
+                ImGui::TextDisabled("%s", e.table_id.c_str());
+            } else {
+                ImGui::TextUnformatted(e.table_id.c_str());
+            }
+
+            // Op column = description plus the rect.
+            ImGui::TableSetColumnIndex(2);
+            char rectbuf[32]{};
+            std::snprintf(rectbuf, sizeof rectbuf, "[%zu:%zu, %zu:%zu]",
+                           e.before.rect.r_start, e.before.rect.r_end,
+                           e.before.rect.c_start, e.before.rect.c_end);
+            char opbuf[160]{};
+            std::snprintf(opbuf, sizeof opbuf, "%s  %s",
+                           e.description.empty() ? "(no description)"
+                                                  : e.description.c_str(),
+                           rectbuf);
+            if (is_undone) {
+                ImGui::TextDisabled("%s", opbuf);
+            } else {
+                ImGui::TextUnformatted(opbuf);
+            }
+
+            // Flags column: S (engine-safety) in red, E (emissions) in
+            // amber, '-' if neither. Pulled from the live pack so a
+            // pack swap re-classifies without rewriting history.
+            ImGui::TableSetColumnIndex(3);
+            auto const *table = state.project->definition().find_table(e.table_id);
+            bool        had_flag = false;
+            if (table != nullptr) {
+                if (table->engine_safety_critical) {
+                    ImGui::TextColored(ImVec4(1.00f, 0.40f, 0.40f, 1.0f), "S");
+                    had_flag = true;
+                }
+                if (table->emissions_relevant) {
+                    if (had_flag) ImGui::SameLine();
+                    ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f), "E");
+                    had_flag = true;
+                }
+            }
+            if (!had_flag) ImGui::TextDisabled("-");
+
+            // Action column: Jump → make this edit the cursor (cursor = i + 1).
+            // No-op when already at top: disable to remove the temptation.
+            ImGui::TableSetColumnIndex(4);
+            ImGui::PushID(static_cast<int>(i));
+            if (is_top) ImGui::BeginDisabled();
+            if (ImGui::SmallButton("Jump")) {
+                jump_target = i + 1;
+                has_jump    = true;
+            }
+            if (is_top) ImGui::EndDisabled();
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Walk the cursor to make this edit the "
+                                  "most-recently-applied. Reversible.");
+            }
+            ImGui::PopID();
+        }
+
+        ImGui::EndTable();
+
+        if (!filter.empty()) {
+            ImGui::TextDisabled("Showing %zu of %zu.", matched, records.size());
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::TextDisabled("Flags: S=engine-safety, E=emissions, -=neither.");
+
+    // Apply pending cursor moves AFTER the table is closed. Each step
+    // re-uses do_undo/do_redo so dirty/status/current_table_data stay
+    // coherent. If a step fails (apply_history_step's rollback re-bumps
+    // the cursor back to where it started), the loop detects the lack
+    // of progress and bails — no infinite spin.
+    if (wants_revert_all)   { jump_target = 0; has_jump = true; }
+    if (wants_reapply_all)  { jump_target = records.size(); has_jump = true; }
+
+    if (has_jump) {
+        std::size_t prev = static_cast<std::size_t>(-1);
+        while (true) {
+            std::size_t const c = state.project->history().cursor();
+            if (c == jump_target) break;
+            if (c == prev)        break; // step didn't move the cursor → stop.
+            prev = c;
+            if (c > jump_target) do_undo(state);
+            else                  do_redo(state);
+        }
+    }
+
+    ImGui::End();
+}
+
 void render_table_view(AppState &state, Fonts const &fonts) {
     ImGui::Begin("Table");
 
@@ -3547,6 +3759,7 @@ int main(int argc, char *argv[]) {
         render_table_view(state, fonts);
         render_stats_panel(state);
         render_dtcs_panel(state);
+        render_history_panel(state);
         render_status_bar(state);
         render_unsaved_modal(state);
         render_flash_modal(state);
