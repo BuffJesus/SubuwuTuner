@@ -289,6 +289,26 @@ void print_version() {
 
 void print_usage() { std::fputs(kUsage.data(), stdout); }
 
+// Print a definition-load failure with a Path-B context hint when the
+// supplied path doesn't exist on disk. SubuwuTuner ships infrastructure
+// only — calibration packs are user-supplied — so a missing path is a
+// "where do I get a pack" moment, not just a generic I/O error.
+int print_def_load_error(char const                    *subcmd,
+                         std::filesystem::path const &path,
+                         st::Error const               &err) {
+    std::fprintf(stderr, "%s: %s\n", subcmd, err.to_string().c_str());
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec) || ec) {
+        std::fputs(
+            "\n  No definition pack found at the path above.\n"
+            "  SubuwuTuner does not ship with bundled calibration packs;\n"
+            "  generate one with tools/defgen/defgen.py from a public\n"
+            "  RomRaider XML, or use fixtures/demo-pack/ as an example.\n",
+            stderr);
+    }
+    return 1;
+}
+
 bool arg_matches(char const *arg, std::string_view short_form, std::string_view long_form) {
     std::string_view const sv{arg};
     return sv == short_form || sv == long_form;
@@ -397,8 +417,7 @@ int cmd_dump_axis(int argc, char *argv[]) {
 
     auto const def = st::Definition::from_file(*def_path);
     if (!def.has_value()) {
-        std::fprintf(stderr, "dump-axis: %s\n", def.error().to_string().c_str());
-        return 1;
+        return print_def_load_error("dump-axis", *def_path, def.error());
     }
     auto const rom = st::Rom::from_file(*rom_path);
     if (!rom.has_value()) {
@@ -486,8 +505,7 @@ int cmd_dump_table(int argc, char *argv[]) {
 
     auto const def = st::Definition::from_file(*def_path);
     if (!def.has_value()) {
-        std::fprintf(stderr, "dump-table: %s\n", def.error().to_string().c_str());
-        return 1;
+        return print_def_load_error("dump-table", *def_path, def.error());
     }
     auto const rom = st::Rom::from_file(*rom_path);
     if (!rom.has_value()) {
@@ -658,8 +676,7 @@ int cmd_pack_info(int argc, char *argv[]) {
     std::filesystem::path const path{argv[0]};
     auto const                  def = st::Definition::from_file(path);
     if (!def.has_value()) {
-        std::fprintf(stderr, "pack-info: %s\n", def.error().to_string().c_str());
-        return 1;
+        return print_def_load_error("pack-info", path, def.error());
     }
     auto const &pack = def->pack();
     std::printf("Path:           %s\n", path.string().c_str());
@@ -859,8 +876,7 @@ int cmd_table_list(int argc, char *argv[]) {
 
     auto const def = st::Definition::from_file(*def_path);
     if (!def.has_value()) {
-        std::fprintf(stderr, "table-list: %s\n", def.error().to_string().c_str());
-        return 1;
+        return print_def_load_error("table-list", *def_path, def.error());
     }
 
     std::size_t matched = 0;
@@ -930,8 +946,7 @@ int cmd_pack_dtcs(int argc, char *argv[]) {
 
     auto const def = st::Definition::from_file(*def_path);
     if (!def.has_value()) {
-        std::fprintf(stderr, "pack-dtcs: %s\n", def.error().to_string().c_str());
-        return 1;
+        return print_def_load_error("pack-dtcs", *def_path, def.error());
     }
 
     // Optional ROM read for the "On" column. Loaded once; we just need
@@ -1729,8 +1744,7 @@ int cmd_project_new(int argc, char *argv[]) {
 
     auto p = st::Project::create(*proj_path, *source_path, *def_path, display_name);
     if (!p.has_value()) {
-        std::fprintf(stderr, "project-new: %s\n", p.error().to_string().c_str());
-        return 1;
+        return print_def_load_error("project-new", *def_path, p.error());
     }
 
     std::printf("Created project: %s\n", proj_path->string().c_str());
@@ -2730,8 +2744,7 @@ int cmd_table_edit(int argc, char *argv[]) {
 
     auto const def = st::Definition::from_file(*def_path);
     if (!def.has_value()) {
-        std::fprintf(stderr, "table-edit: %s\n", def.error().to_string().c_str());
-        return 1;
+        return print_def_load_error("table-edit", *def_path, def.error());
     }
     auto rom = st::Rom::from_file(*rom_path);
     if (!rom.has_value()) {
@@ -2856,8 +2869,7 @@ int cmd_rom_diff(int argc, char *argv[]) {
 
     auto const def = st::Definition::from_file(*def_path);
     if (!def.has_value()) {
-        std::fprintf(stderr, "rom-diff: %s\n", def.error().to_string().c_str());
-        return 1;
+        return print_def_load_error("rom-diff", *def_path, def.error());
     }
     auto const a = st::Rom::from_file(*rom_a);
     if (!a.has_value()) {
@@ -3173,9 +3185,7 @@ int cmd_rom_info(int argc, char *argv[]) {
     if (def_path.has_value()) {
         auto const def = st::Definition::from_file(*def_path);
         if (!def.has_value()) {
-            std::fprintf(stderr, "rom-info: failed to load definition: %s\n",
-                         def.error().to_string().c_str());
-            return 1;
+            return print_def_load_error("rom-info", *def_path, def.error());
         }
         auto const validity = def->validate();
         if (!validity.has_value()) {
@@ -3319,8 +3329,7 @@ int cmd_log(int argc, char *argv[]) {
 
     auto const def = st::Definition::from_file(*def_path);
     if (!def.has_value()) {
-        std::fprintf(stderr, "log: %s\n", def.error().to_string().c_str());
-        return 1;
+        return print_def_load_error("log", *def_path, def.error());
     }
 
     // Resolve each named PID to a LogChannel.
@@ -5103,9 +5112,7 @@ int cmd_flash_plan_info(int argc, char *argv[]) {
         }
         auto const def = st::Definition::from_file(*def_path);
         if (!def.has_value()) {
-            std::fprintf(stderr, "flash-plan-info: %s\n",
-                         def.error().to_string().c_str());
-            return 1;
+            return print_def_load_error("flash-plan-info", *def_path, def.error());
         }
         auto const src = st::Rom::from_file(*source_path);
         if (!src.has_value()) {
@@ -5961,8 +5968,7 @@ int cmd_flash_apply(int argc, char *argv[]) {
         }
         auto const def = st::Definition::from_file(*def_path);
         if (!def.has_value()) {
-            std::fprintf(stderr, "flash-apply: %s\n", def.error().to_string().c_str());
-            return 1;
+            return print_def_load_error("flash-apply", *def_path, def.error());
         }
         auto const src = st::Rom::from_file(*source_path);
         if (!src.has_value()) {

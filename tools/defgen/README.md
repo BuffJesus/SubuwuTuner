@@ -28,7 +28,7 @@ are spelled out in
 python tools/defgen/defgen.py path/to/rom.xml
 
 # Write to a file
-python tools/defgen/defgen.py path/to/rom.xml -o definitions/va-wrx-mt-2019.toml
+python tools/defgen/defgen.py path/to/rom.xml -o path/to/out.toml
 
 # Multi-rom XML: emit one .toml per <rom> into a directory
 python tools/defgen/defgen.py path/to/multi.xml -o definitions/

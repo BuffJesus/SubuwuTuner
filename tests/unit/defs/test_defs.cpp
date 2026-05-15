@@ -1429,13 +1429,13 @@ unit        = "raw"
 )toml");
     write_text(td.path / "main.toml", R"toml(
 [pack]
-id         = "lf9c102p"
+id         = "test-pack-001"
 endianness = "big"
 includes   = ["frag.toml"]
 )toml");
     auto const d = st::Definition::from_file(td.path / "main.toml");
     REQUIRE(d.has_value());
-    REQUIRE(d->pack().id == "lf9c102p");
+    REQUIRE(d->pack().id == "test-pack-001");
     // Fragment's [pack] is ignored — parent id wins.
     REQUIRE(d->pids().size() == 1);
     REQUIRE(d->pids()[0].id == "e1");
