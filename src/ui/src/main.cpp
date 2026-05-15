@@ -2865,11 +2865,27 @@ void render_history_panel(AppState &state) {
                 ImGui::Text(" %zu", i);
             }
 
+            // Table-id cell. Clickable Selectable that drives the main
+            // table view — clicking jumps the sidebar selection to this
+            // edit's table so the user can immediately inspect the
+            // cells that changed.
             ImGui::TableSetColumnIndex(1);
+            bool const is_selected = (e.table_id == state.selected_table_id);
             if (is_undone) {
-                ImGui::TextDisabled("%s", e.table_id.c_str());
-            } else {
-                ImGui::TextUnformatted(e.table_id.c_str());
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                                       ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            }
+            ImGui::PushID(static_cast<int>(i) + 0x100000);
+            if (ImGui::Selectable(e.table_id.c_str(), is_selected)) {
+                state.select_table(e.table_id);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Click to open %s in the table view.",
+                                   e.table_id.c_str());
+            }
+            ImGui::PopID();
+            if (is_undone) {
+                ImGui::PopStyleColor();
             }
 
             // Op column = description plus the rect.
