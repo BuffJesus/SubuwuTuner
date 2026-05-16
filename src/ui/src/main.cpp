@@ -414,6 +414,16 @@ struct AppState {
     // click of a node body, cleared on click of empty canvas, on
     // graph clear/load, and when the selected node is removed.
     std::optional<st::feature::NodeId>       features_selected_node;
+    // Currently-selected edge on the designer canvas. Mutually
+    // exclusive with the selected node — selecting either clears
+    // the other. Cleared on graph clear/load, when the edge is
+    // removed, or when either endpoint node is removed.
+    std::optional<st::feature::Edge>         features_selected_edge;
+    // Edge captured by the most recent right-click, used only as a
+    // reference for the edge context-menu popup. Independent of
+    // `features_selected_edge` — dismissing the menu without acting
+    // should leave the selection state unchanged.
+    std::optional<st::feature::Edge>         features_context_edge;
     // Canvas pan + zoom. `view_offset` translates graph-space
     // coords to screen-space (post-canvas-origin), `view_scale`
     // multiplies them. Defaults are identity. Middle-mouse drag
@@ -2409,9 +2419,9 @@ std::vector<ShortcutGroup> const &shortcuts_reference() {
             { "Esc",          "Close / cancel without applying"     },
         }},
         { "Designer canvas", {
-            { "Click",        "Select a node"                       },
-            { "Click (empty)","Clear node selection"                },
-            { "Delete",       "Remove the selected node"            },
+            { "Click",        "Select a node or edge"               },
+            { "Click (empty)","Clear selection"                     },
+            { "Delete",       "Remove the selected node or edge"    },
             { "Drag body",    "Move a node (snaps to grid on "
                               "release)"                            },
             { "Drag pin → pin","Wire two pins"                      },
@@ -2420,8 +2430,8 @@ std::vector<ShortcutGroup> const &shortcuts_reference() {
             { "Reset view",   "Toolbar button — reset pan + zoom"   },
             { "Esc / Right-click",
                               "Cancel an in-progress wire"          },
-            { "Right-click",  "Context menu (delete node / "
-                              "disconnect edge)"                    },
+            { "Right-click",  "Context menu (delete node, "
+                              "disconnect edge / pin)"              },
         }},
     };
     return groups;
@@ -5192,6 +5202,8 @@ void render_features_designer(AppState &state) {
         state.features_wiring_active = false;
         state.features_wire_error.clear();
         state.features_selected_node.reset();
+        state.features_selected_edge.reset();
+        state.features_context_edge.reset();
     }
     ImGui::SameLine();
     if (ImGui::Button("Reset view")) {
@@ -5237,6 +5249,8 @@ void render_features_designer(AppState &state) {
                     state.features_wiring_active = false;
                     state.features_wire_error.clear();
                     state.features_selected_node.reset();
+                    state.features_selected_edge.reset();
+                    state.features_context_edge.reset();
                 }
             }
         }
@@ -5253,12 +5267,13 @@ void render_features_designer(AppState &state) {
         ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
                             "wire: %s", state.features_wire_error.c_str());
     }
-    ImGui::TextDisabled("Click a node to select; Delete removes the "
-                        "selection. Drag a node body to move; drag "
-                        "pin → pin to wire. Middle-drag pans, wheel "
-                        "zooms. Esc / right-click / release-on-empty "
-                        "cancels an in-progress wire. Right-click "
-                        "(when not wiring) for delete / disconnect.");
+    ImGui::TextDisabled("Click a node or edge to select; Delete "
+                        "removes the selection. Drag a node body to "
+                        "move; drag pin → pin to wire. Middle-drag "
+                        "pans, wheel zooms. Esc / right-click / "
+                        "release-on-empty cancels an in-progress "
+                        "wire. Right-click (when not wiring) for "
+                        "delete / disconnect.");
 
     ImGui::Spacing();
 
@@ -5391,15 +5406,19 @@ void render_features_designer(AppState &state) {
     std::optional<st::feature::NodeId> pending_delete_node;
     std::optional<st::feature::Edge>   pending_delete_edge;
 
-    // Delete key removes the currently-selected node. Gated on
-    // window focus so deletes elsewhere (table-cell editing, etc.)
-    // don't blow away the designer's selection by accident.
+    // Delete key removes the current selection — either node or
+    // edge, whichever is set. Gated on window focus so deletes
+    // elsewhere (table-cell editing, etc.) don't blow away the
+    // designer's selection by accident.
     bool const designer_focused =
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     if (designer_focused
-        && state.features_selected_node.has_value()
         && ImGui::IsKeyPressed(ImGuiKey_Delete, /*repeat=*/false)) {
-        pending_delete_node = state.features_selected_node;
+        if (state.features_selected_node.has_value()) {
+            pending_delete_node = state.features_selected_node;
+        } else if (state.features_selected_edge.has_value()) {
+            pending_delete_edge = state.features_selected_edge;
+        }
     }
 
     ImFont * const fnt      = ImGui::GetFont();
@@ -5410,6 +5429,15 @@ void render_features_designer(AppState &state) {
     float const    width_s  = kNodeWidth      * scale;
     float const    pin_r_s  = kPinRadius      * scale;
     float const    pin_hr_s = kPinHitRadius   * scale;
+
+    // Tracks whether any per-node body or pin InvisibleButton ended
+    // up hovered this frame. Edge hit-test consumes this to decide
+    // whether to even consider beziers — but ImGui's stock
+    // `IsAnyItemHovered()` ORs in the *previous* frame's hovered id,
+    // which means the canvas-bg button (always hovered last frame
+    // when cursor is over empty canvas) keeps it permanently true.
+    // Tracking manually inside the loop dodges that one-frame lag.
+    bool any_node_pin_hovered = false;
 
     for (auto const &n : nodes) {
         std::size_t const inputs  = static_cast<std::size_t>(std::count_if(
@@ -5438,6 +5466,7 @@ void render_features_designer(AppState &state) {
                        static_cast<unsigned>(n.id));
         ImGui::SetCursorScreenPos(node_tl);
         ImGui::InvisibleButton(body_id, ImVec2(width_s, node_h_s));
+        if (ImGui::IsItemHovered()) any_node_pin_hovered = true;
         bool const body_active        = ImGui::IsItemActive();
         bool const body_deactivated   = ImGui::IsItemDeactivated();
         bool const body_left_clicked  =
@@ -5446,6 +5475,7 @@ void render_features_designer(AppState &state) {
             ImGui::IsItemClicked(ImGuiMouseButton_Right);
         if (body_left_clicked) {
             state.features_selected_node = n.id;
+            state.features_selected_edge.reset();
         }
         if (body_active
             && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
@@ -5566,6 +5596,7 @@ void render_features_designer(AppState &state) {
                                            pin_hr_s * 2.0f));
             bool const pin_hovered = ImGui::IsItemHovered();
             bool const pin_active  = ImGui::IsItemActive();
+            if (pin_hovered) any_node_pin_hovered = true;
             // Tooltip with type info on hover.
             if (pin_hovered) {
                 ImGui::SetTooltip("%s : %s%s%s",
@@ -5657,12 +5688,15 @@ void render_features_designer(AppState &state) {
         }
     }
 
-    // ---- Edge rendering -------------------------------------------
-    // Render after nodes so the bezier hosts on top of the chrome
-    // looks intentional. Walks the cached pin positions to find
-    // endpoints; if an edge references a pin that didn't render
-    // (e.g. mid-animation removal), skip it.
-    ImU32 const edge_col = ImGui::GetColorU32(accent.base);
+    // ---- Edge hit-test, click handling, and rendering -------------
+    // Edges aren't ImGui items (no InvisibleButton — they're
+    // drawn-only beziers), so click handling rolls its own. The
+    // approach: sample N points along each curve, find the closest
+    // edge to the cursor under an 8px threshold. Skip while any
+    // node/pin is hovered (those win in overlap) and while a wire
+    // is in flight (the in-flight bezier would self-hit otherwise).
+    ImU32 const edge_col          = ImGui::GetColorU32(accent.base);
+    ImU32 const edge_sel_col      = ImGui::GetColorU32(accent.hover);
     auto const find_pos = [&](st::feature::NodeId nid,
                                st::feature::PinId pid) -> ImVec2 const * {
         for (auto const &pp : pin_positions) {
@@ -5670,14 +5704,128 @@ void render_features_designer(AppState &state) {
         }
         return nullptr;
     };
-    for (auto const &e : state.features_graph.edges()) {
+    auto const edge_eq = [](st::feature::Edge const &a,
+                             st::feature::Edge const &b) {
+        return a.from_node == b.from_node && a.from_pin == b.from_pin
+            && a.to_node   == b.to_node   && a.to_pin   == b.to_pin;
+    };
+    auto const cubic_at = [](ImVec2 p0, ImVec2 p1, ImVec2 p2, ImVec2 p3,
+                              float t) {
+        float const u  = 1.0f - t;
+        float const w0 = u * u * u;
+        float const w1 = 3.0f * u * u * t;
+        float const w2 = 3.0f * u * t * t;
+        float const w3 = t * t * t;
+        return ImVec2(w0 * p0.x + w1 * p1.x + w2 * p2.x + w3 * p3.x,
+                       w0 * p0.y + w1 * p1.y + w2 * p2.y + w3 * p3.y);
+    };
+
+    auto const &edges = state.features_graph.edges();
+
+    // Find the closest edge under the cursor. Empty means none in
+    // range or hit-test suppressed this frame.
+    std::optional<std::size_t> hovered_edge_idx;
+    {
+        bool const can_hit =
+            !state.features_wiring_active
+            && !any_node_pin_hovered
+            && ImGui::IsMouseHoveringRect(canvas_p, canvas_end);
+        if (can_hit) {
+            ImVec2 const mouse = ImGui::GetIO().MousePos;
+            // 14 px screen-space threshold — wide enough that the
+            // user doesn't need to land precisely on the 2.5-3 px
+            // stroke. Tightening this past ~10 makes the curve
+            // genuinely fiddly to click on a moving cursor.
+            float const  thresh_px = 14.0f;
+            float        best_d2   = thresh_px * thresh_px;
+            constexpr int   kSamples = 24;
+            for (std::size_t i = 0; i < edges.size(); ++i) {
+                auto const &e  = edges[i];
+                auto const *a  = find_pos(e.from_node, e.from_pin);
+                auto const *b  = find_pos(e.to_node,   e.to_pin);
+                if (a == nullptr || b == nullptr) continue;
+                float const d  = std::max(40.0f, std::abs(b->x - a->x) * 0.5f);
+                ImVec2 const c1(a->x + d, a->y);
+                ImVec2 const c2(b->x - d, b->y);
+                for (int s = 0; s <= kSamples; ++s) {
+                    float const t = static_cast<float>(s) / static_cast<float>(kSamples);
+                    ImVec2 const pt = cubic_at(*a, c1, c2, *b, t);
+                    float const dx = pt.x - mouse.x;
+                    float const dy = pt.y - mouse.y;
+                    float const d2 = dx * dx + dy * dy;
+                    if (d2 < best_d2) {
+                        best_d2          = d2;
+                        hovered_edge_idx = i;
+                    }
+                }
+            }
+        }
+    }
+
+    // Edge click → select (clears node selection — only one thing
+    // highlighted at a time). Right-click → open context menu
+    // WITHOUT changing selection; the popup reads from
+    // features_context_edge instead, so dismissing the menu leaves
+    // the prior selection alone (matches typical desktop UX).
+    bool edge_consumed_left_click = false;
+    if (hovered_edge_idx.has_value()
+        && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        state.features_selected_edge = edges[*hovered_edge_idx];
+        state.features_selected_node.reset();
+        edge_consumed_left_click = true;
+    }
+    if (hovered_edge_idx.has_value()
+        && ImGui::IsMouseClicked(ImGuiMouseButton_Right)
+        && !was_wiring_at_start) {
+        state.features_context_edge = edges[*hovered_edge_idx];
+        ImGui::OpenPopup("##fectx");
+    }
+    if (ImGui::BeginPopup("##fectx")) {
+        if (state.features_context_edge.has_value()) {
+            auto const &se = *state.features_context_edge;
+            auto const *fn = state.features_graph.find_node(se.from_node);
+            auto const *fp = state.features_graph.find_pin(se.from_node, se.from_pin);
+            auto const *tn = state.features_graph.find_node(se.to_node);
+            auto const *tp = state.features_graph.find_pin(se.to_node, se.to_pin);
+            char label[128];
+            std::snprintf(label, sizeof label, "%s.%s → %s.%s",
+                           fn != nullptr
+                               ? (fn->label.empty() ? fn->kind.c_str()
+                                                     : fn->label.c_str())
+                               : "?",
+                           fp != nullptr ? fp->name.c_str() : "?",
+                           tn != nullptr
+                               ? (tn->label.empty() ? tn->kind.c_str()
+                                                     : tn->label.c_str())
+                               : "?",
+                           tp != nullptr ? tp->name.c_str() : "?");
+            ImGui::TextDisabled("%s", label);
+            ImGui::Separator();
+            if (ImGui::MenuItem("Disconnect")) {
+                pending_delete_edge = se;
+            }
+        }
+        ImGui::EndPopup();
+    }
+
+    // Render edges. Selected and hovered states are deliberately
+    // exaggerated — at 2.5 px default stroke a one-pixel difference
+    // doesn't read on a moving cursor.
+    for (std::size_t i = 0; i < edges.size(); ++i) {
+        auto const &e  = edges[i];
         auto const *p1 = find_pos(e.from_node, e.from_pin);
         auto const *p2 = find_pos(e.to_node,   e.to_pin);
         if (p1 == nullptr || p2 == nullptr) continue;
         float const dist = std::max(40.0f, std::abs(p2->x - p1->x) * 0.5f);
         ImVec2 const c1(p1->x + dist, p1->y);
         ImVec2 const c2(p2->x - dist, p2->y);
-        dl->AddBezierCubic(*p1, c1, c2, *p2, edge_col, 2.5f);
+        bool const is_sel = state.features_selected_edge.has_value()
+                             && edge_eq(*state.features_selected_edge, e);
+        bool const is_hov = hovered_edge_idx.has_value()
+                             && *hovered_edge_idx == i;
+        ImU32 const col   = (is_sel || is_hov) ? edge_sel_col : edge_col;
+        float const thick = is_sel ? 5.0f : (is_hov ? 4.0f : 2.5f);
+        dl->AddBezierCubic(*p1, c1, c2, *p2, col, thick);
     }
 
     // ---- In-progress wire ------------------------------------------
@@ -5763,6 +5911,10 @@ void render_features_designer(AppState &state) {
     // consumed, so we never touch invalidated state.
     if (pending_delete_edge.has_value()) {
         state.features_graph.remove_edge(*pending_delete_edge);
+        if (state.features_selected_edge.has_value()
+            && edge_eq(*state.features_selected_edge, *pending_delete_edge)) {
+            state.features_selected_edge.reset();
+        }
     }
     if (pending_delete_node.has_value()) {
         state.features_graph.remove_node(*pending_delete_node);
@@ -5776,15 +5928,23 @@ void render_features_designer(AppState &state) {
             && *state.features_selected_node == *pending_delete_node) {
             state.features_selected_node.reset();
         }
+        // remove_node cascades to edges touching the removed node —
+        // drop the selected edge if it referenced either endpoint.
+        if (state.features_selected_edge.has_value()
+            && (state.features_selected_edge->from_node == *pending_delete_node
+                || state.features_selected_edge->to_node == *pending_delete_node)) {
+            state.features_selected_edge.reset();
+        }
     }
 
-    // Click on empty canvas → drop selection. Applied last so an
-    // in-progress wire's release-over-empty path (which fires
-    // IsMouseReleased, not IsItemClicked) doesn't get tangled with
-    // this; the two are on different mouse events but it costs
-    // nothing to keep them lexically separated.
-    if (canvas_empty_clicked) {
+    // Click on empty canvas → drop selection. Gated on
+    // edge_consumed_left_click because edges aren't ImGui items;
+    // clicking on a bezier still leaves the canvas-bg button
+    // "hovered", so without this gate every edge-click would be
+    // immediately followed by a deselect-on-empty.
+    if (canvas_empty_clicked && !edge_consumed_left_click) {
         state.features_selected_node.reset();
+        state.features_selected_edge.reset();
     }
 
     // Reserve the canvas footprint so the rest of the window scrolls
