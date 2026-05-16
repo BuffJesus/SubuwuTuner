@@ -410,6 +410,10 @@ struct AppState {
     // wire is rejected (type mismatch, fan-in, etc.); cleared on the
     // next successful connect or when a drag starts.
     std::string                              features_wire_error;
+    // Currently-selected node on the designer canvas. Set on left-
+    // click of a node body, cleared on click of empty canvas, on
+    // graph clear/load, and when the selected node is removed.
+    std::optional<st::feature::NodeId>       features_selected_node;
     // Loaded once at startup, persisted on every successful open. See
     // recents_config_path() for the on-disk location.
     std::vector<RecentEntry>                 recents;
@@ -2396,6 +2400,18 @@ std::vector<ShortcutGroup> const &shortcuts_reference() {
                               "Create — whatever is the "
                               "highlighted button)"                 },
             { "Esc",          "Close / cancel without applying"     },
+        }},
+        { "Designer canvas", {
+            { "Click",        "Select a node"                       },
+            { "Click (empty)","Clear node selection"                },
+            { "Delete",       "Remove the selected node"            },
+            { "Drag body",    "Move a node (snaps to grid on "
+                              "release)"                            },
+            { "Drag pin → pin","Wire two pins"                      },
+            { "Esc / Right-click",
+                              "Cancel an in-progress wire"          },
+            { "Right-click",  "Context menu (delete node / "
+                              "disconnect edge)"                    },
         }},
     };
     return groups;
@@ -5165,6 +5181,7 @@ void render_features_designer(AppState &state) {
         state.features_graph = st::feature::Graph{};
         state.features_wiring_active = false;
         state.features_wire_error.clear();
+        state.features_selected_node.reset();
     }
     ImGui::SameLine();
     if (ImGui::Button("Save…")) {
@@ -5204,6 +5221,7 @@ void render_features_designer(AppState &state) {
                     state.features_graph         = std::move(*loaded);
                     state.features_wiring_active = false;
                     state.features_wire_error.clear();
+                    state.features_selected_node.reset();
                 }
             }
         }
@@ -5220,11 +5238,12 @@ void render_features_designer(AppState &state) {
         ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
                             "wire: %s", state.features_wire_error.c_str());
     }
-    ImGui::TextDisabled("Drag a node body to move; drag pin → pin to "
-                        "wire. Esc / right-click / release-on-empty "
-                        "cancels an in-progress wire. Right-click on "
-                        "a node or pin (when not wiring) for delete / "
-                        "disconnect.");
+    ImGui::TextDisabled("Click a node to select; Delete removes the "
+                        "selection. Drag a node body to move; drag "
+                        "pin → pin to wire. Esc / right-click / "
+                        "release-on-empty cancels an in-progress "
+                        "wire. Right-click (when not wiring) for "
+                        "delete / disconnect.");
 
     ImGui::Spacing();
 
@@ -5296,6 +5315,17 @@ void render_features_designer(AppState &state) {
     std::optional<st::feature::NodeId> pending_delete_node;
     std::optional<st::feature::Edge>   pending_delete_edge;
 
+    // Delete key removes the currently-selected node. Gated on
+    // window focus so deletes elsewhere (table-cell editing, etc.)
+    // don't blow away the designer's selection by accident.
+    bool const designer_focused =
+        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+    if (designer_focused
+        && state.features_selected_node.has_value()
+        && ImGui::IsKeyPressed(ImGuiKey_Delete, /*repeat=*/false)) {
+        pending_delete_node = state.features_selected_node;
+    }
+
     for (auto const &n : nodes) {
         std::size_t const inputs  = static_cast<std::size_t>(std::count_if(
             n.pins.begin(), n.pins.end(),
@@ -5325,8 +5355,13 @@ void render_features_designer(AppState &state) {
         ImGui::InvisibleButton(body_id, ImVec2(kNodeWidth, node_h));
         bool const body_active        = ImGui::IsItemActive();
         bool const body_deactivated   = ImGui::IsItemDeactivated();
+        bool const body_left_clicked  =
+            ImGui::IsItemClicked(ImGuiMouseButton_Left);
         bool const body_right_clicked =
             ImGui::IsItemClicked(ImGuiMouseButton_Right);
+        if (body_left_clicked) {
+            state.features_selected_node = n.id;
+        }
         if (body_active
             && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
             ImVec2 const d = ImGui::GetIO().MouseDelta;
@@ -5364,13 +5399,20 @@ void render_features_designer(AppState &state) {
             ImGui::EndPopup();
         }
 
-        // Draw chrome.
+        // Draw chrome. Selected nodes get a thicker accent-coloured
+        // border so the active selection reads at a glance.
+        bool const is_selected =
+            state.features_selected_node.has_value()
+            && *state.features_selected_node == n.id;
         dl->AddRectFilled(node_tl, node_br, node_bg, 6.0f);
         dl->AddRectFilled(
             node_tl,
             ImVec2(node_br.x, node_tl.y + kHeaderHeight),
             hdr_bg, 6.0f, ImDrawFlags_RoundCornersTop);
-        dl->AddRect(node_tl, node_br, node_brd, 6.0f);
+        ImU32 const this_brd =
+            is_selected ? ImGui::GetColorU32(accent.base) : node_brd;
+        float const this_thick = is_selected ? 2.5f : 1.0f;
+        dl->AddRect(node_tl, node_br, this_brd, 6.0f, 0, this_thick);
         // Header label.
         char const *label = n.label.empty() ? n.kind.c_str() : n.label.c_str();
         dl->AddText(ImVec2(node_tl.x + 8.0f,
@@ -5607,6 +5649,15 @@ void render_features_designer(AppState &state) {
         }
     }
 
+    // Canvas-background hit zone for click-to-deselect. Issued AFTER
+    // every node body and pin so the earlier items naturally claim
+    // their own hit regions — this one only fires when the click
+    // landed on empty canvas.
+    ImGui::SetCursorScreenPos(canvas_p);
+    ImGui::InvisibleButton("##fcanvas_bg", canvas_sz);
+    bool const canvas_empty_clicked =
+        ImGui::IsItemClicked(ImGuiMouseButton_Left);
+
     dl->PopClipRect();
 
     // Apply pending mutations from context menus. Done here, after
@@ -5623,6 +5674,19 @@ void render_features_designer(AppState &state) {
             && state.features_wiring_from_node == *pending_delete_node) {
             state.features_wiring_active = false;
         }
+        if (state.features_selected_node.has_value()
+            && *state.features_selected_node == *pending_delete_node) {
+            state.features_selected_node.reset();
+        }
+    }
+
+    // Click on empty canvas → drop selection. Applied last so an
+    // in-progress wire's release-over-empty path (which fires
+    // IsMouseReleased, not IsItemClicked) doesn't get tangled with
+    // this; the two are on different mouse events but it costs
+    // nothing to keep them lexically separated.
+    if (canvas_empty_clicked) {
+        state.features_selected_node.reset();
     }
 
     // Reserve the canvas footprint so the rest of the window scrolls
