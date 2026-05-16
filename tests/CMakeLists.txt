@@ -33,6 +33,7 @@ add_executable(st_unit_tests
     unit/autotune/test_autotune_csv.cpp
     unit/autotune/test_autotune_lint.cpp
     unit/policy/test_policy.cpp
+    unit/feature/test_feature.cpp
 )
 
 target_link_libraries(st_unit_tests
@@ -51,6 +52,7 @@ target_link_libraries(st_unit_tests
         st::flash
         st::autotune
         st::policy
+        st::feature
         st::warnings
         st::sanitizers
         st::platform

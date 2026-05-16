@@ -12,6 +12,7 @@
 #include "st/autotune.hpp"
 #include "st/core/version.hpp"
 #include "st/edit.hpp"
+#include "st/feature.hpp"
 #include "st/flash.hpp"
 #include "st/policy.hpp"
 #include "st/project.hpp"
@@ -391,6 +392,10 @@ struct AppState {
     std::size_t                              selected_z{0};
     bool                                     show_imgui_demo{false};
     bool                                     show_shortcuts_modal{false};
+    // Phase 5 placeholder. Custom-features designer; data model lives
+    // in st::feature, GUI is a stub. Hidden behind View → Debug.
+    bool                                     show_features_designer{false};
+    st::feature::Graph                       features_graph;
     // Loaded once at startup, persisted on every successful open. See
     // recents_config_path() for the on-disk location.
     std::vector<RecentEntry>                 recents;
@@ -3519,6 +3524,13 @@ void render_menubar(AppState &state) {
             if (ImGui::BeginMenu("Debug")) {
                 ImGui::MenuItem("ImGui demo window", nullptr,
                                  &state.show_imgui_demo);
+                ImGui::MenuItem("Custom features designer (WIP)", nullptr,
+                                 &state.show_features_designer);
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Phase 5 preview. Data model is\n"
+                                      "implemented (st::feature::Graph);\n"
+                                      "the editor canvas is a placeholder.");
+                }
                 ImGui::EndMenu();
             }
             ImGui::EndMenu();
@@ -5041,6 +5053,104 @@ void render_history_panel(AppState &state) {
     ImGui::End();
 }
 
+// Phase 5 placeholder — custom-features node-graph designer. Data
+// model lives in st::feature::Graph and is fully implemented; the
+// canvas here is intentionally a stub. Future work (multi-session)
+// builds out: a grid-backed canvas with pan/zoom, node rendering
+// keyed off the pack's hook declarations, drag-to-connect with
+// type-checked edges, undo/redo via st::edit::History.
+void render_features_designer(AppState &state) {
+    if (!state.show_features_designer) {
+        return;
+    }
+    ImGui::SetNextWindowSize(ImVec2(720.0f, 480.0f), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Custom features designer (WIP)",
+                       &state.show_features_designer)) {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f),
+                        "\xE2\x9A\xA0 Phase 5 preview.");
+    ImGui::TextDisabled("Data model: st::feature::Graph (built, tested).");
+    ImGui::TextDisabled("Editor:     placeholder — canvas / nodes / wires "
+                        "land in follow-ups.");
+    ImGui::TextDisabled("See docs/16-custom-features.md for the planned "
+                        "design.");
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Graph state");
+    ImGui::Text("Nodes: %zu     Edges: %zu",
+                 state.features_graph.nodes().size(),
+                 state.features_graph.edges().size());
+
+    if (ImGui::Button("Add test source (rpm, Float out)")) {
+        st::feature::Node n;
+        n.kind  = "sensor.rpm";
+        n.label = "RPM";
+        n.x     = 40.0f;
+        n.y     = 40.0f + 60.0f
+                  * static_cast<float>(state.features_graph.nodes().size());
+        n.pins.push_back(st::feature::Pin{
+            0, "out", st::feature::PinType::Float,
+            st::feature::PinDirection::Output, "rpm"});
+        state.features_graph.add_node(std::move(n));
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Clear graph")) {
+        state.features_graph = st::feature::Graph{};
+    }
+    if (auto v = state.features_graph.validate(); !v.has_value()) {
+        ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
+                            "validate: %s", v.error().to_string().c_str());
+    } else {
+        ImGui::TextDisabled("validate: ok");
+    }
+
+    ImGui::Spacing();
+    ImGui::SeparatorText("Canvas (placeholder)");
+    // A grid-backed canvas so the panel feels like the eventual node
+    // editor rather than a debug dialog. Just a draw-list demo for
+    // now; nodes / edges land in a follow-up commit.
+    ImVec2 const canvas_p   = ImGui::GetCursorScreenPos();
+    ImVec2 const canvas_sz  = ImVec2(
+        std::max(120.0f, ImGui::GetContentRegionAvail().x),
+        std::max(120.0f, ImGui::GetContentRegionAvail().y - 8.0f));
+    auto * const dl         = ImGui::GetWindowDrawList();
+    ImU32 const grid_col    = ImGui::GetColorU32(ImGuiCol_Separator);
+    ImU32 const bg_col      = ImGui::GetColorU32(ImGuiCol_ChildBg);
+    dl->AddRectFilled(canvas_p,
+                       ImVec2(canvas_p.x + canvas_sz.x,
+                              canvas_p.y + canvas_sz.y), bg_col);
+    constexpr float kGridStep = 24.0f;
+    for (float x = std::fmod(0.0f, kGridStep); x < canvas_sz.x; x += kGridStep) {
+        dl->AddLine(ImVec2(canvas_p.x + x, canvas_p.y),
+                     ImVec2(canvas_p.x + x, canvas_p.y + canvas_sz.y),
+                     grid_col);
+    }
+    for (float y = std::fmod(0.0f, kGridStep); y < canvas_sz.y; y += kGridStep) {
+        dl->AddLine(ImVec2(canvas_p.x,                canvas_p.y + y),
+                     ImVec2(canvas_p.x + canvas_sz.x, canvas_p.y + y),
+                     grid_col);
+    }
+    // Render any added nodes as labeled rectangles. Drag + edges are
+    // future work; this just confirms the data model is wired through.
+    ImU32 const node_bg  = ImGui::GetColorU32(ImGuiCol_FrameBg);
+    ImU32 const node_brd = ImGui::GetColorU32(ImGuiCol_Border);
+    ImU32 const txt_col  = ImGui::GetColorU32(ImGuiCol_Text);
+    for (auto const &n : state.features_graph.nodes()) {
+        ImVec2 const top_left(canvas_p.x + n.x, canvas_p.y + n.y);
+        ImVec2 const btm_rt  (top_left.x + 140.0f, top_left.y + 48.0f);
+        dl->AddRectFilled(top_left, btm_rt, node_bg, 4.0f);
+        dl->AddRect      (top_left, btm_rt, node_brd, 4.0f);
+        dl->AddText(ImVec2(top_left.x + 8.0f, top_left.y + 6.0f), txt_col,
+                     n.label.empty() ? n.kind.c_str() : n.label.c_str());
+    }
+    ImGui::Dummy(canvas_sz);
+
+    ImGui::End();
+}
+
 void render_table_view(AppState &state, Fonts const &fonts) {
     ImGui::Begin("Table");
 
@@ -5849,6 +5959,7 @@ int main(int argc, char *argv[]) {
         render_stats_panel(state);
         render_dtcs_panel(state);
         render_history_panel(state);
+        render_features_designer(state);
         render_status_bar(state);
         render_unsaved_modal(state);
         render_csv_import_modal(state);
