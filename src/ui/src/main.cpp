@@ -5090,7 +5090,8 @@ void render_features_designer(AppState &state) {
     // the next frame because the mouse is still held over the source
     // pin. Latch suppresses re-spawn until the mouse button is
     // released.
-    if (state.features_wiring_active
+    bool const was_wiring_at_start = state.features_wiring_active;
+    if (was_wiring_at_start
         && (ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false)
             || ImGui::IsMouseClicked(ImGuiMouseButton_Right))) {
         state.features_wiring_active  = false;
@@ -5177,10 +5178,11 @@ void render_features_designer(AppState &state) {
         ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
                             "wire: %s", state.features_wire_error.c_str());
     }
-    ImGui::TextDisabled("Drag a node body to move; drag from one pin "
-                        "to another to wire. Esc or right-click "
-                        "cancels an in-progress wire (or release the "
-                        "mouse over empty canvas).");
+    ImGui::TextDisabled("Drag a node body to move; drag pin → pin to "
+                        "wire. Esc / right-click / release-on-empty "
+                        "cancels an in-progress wire. Right-click on "
+                        "a node or pin (when not wiring) for delete / "
+                        "disconnect.");
 
     ImGui::Spacing();
 
@@ -5247,6 +5249,11 @@ void render_features_designer(AppState &state) {
     // mutated mid-loop via set_node_position).
     auto const &nodes = state.features_graph.nodes();
 
+    // Pending mutations from context-menu actions. Deferred until
+    // after the loop so we don't invalidate iteration / pin caches.
+    std::optional<st::feature::NodeId> pending_delete_node;
+    std::optional<st::feature::Edge>   pending_delete_edge;
+
     for (auto const &n : nodes) {
         std::size_t const inputs  = static_cast<std::size_t>(std::count_if(
             n.pins.begin(), n.pins.end(),
@@ -5274,11 +5281,34 @@ void render_features_designer(AppState &state) {
                        static_cast<unsigned>(n.id));
         ImGui::SetCursorScreenPos(node_tl);
         ImGui::InvisibleButton(body_id, ImVec2(kNodeWidth, node_h));
-        bool const body_active = ImGui::IsItemActive();
+        bool const body_active        = ImGui::IsItemActive();
+        bool const body_right_clicked =
+            ImGui::IsItemClicked(ImGuiMouseButton_Right);
         if (body_active
             && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
             ImVec2 const d = ImGui::GetIO().MouseDelta;
             state.features_graph.set_node_position(n.id, n.x + d.x, n.y + d.y);
+        }
+        // Right-click on the body opens a context menu. Suppressed
+        // when the click cancelled an in-progress wire (handled at
+        // the top of the function) — using `was_wiring_at_start`
+        // because by this point in the frame, features_wiring_active
+        // has already been cleared.
+        char node_popup_id[28];
+        std::snprintf(node_popup_id, sizeof node_popup_id,
+                       "##nctx_%u", static_cast<unsigned>(n.id));
+        if (body_right_clicked && !was_wiring_at_start) {
+            ImGui::OpenPopup(node_popup_id);
+        }
+        if (ImGui::BeginPopup(node_popup_id)) {
+            ImGui::TextDisabled("%s",
+                                 n.label.empty() ? n.kind.c_str()
+                                                  : n.label.c_str());
+            ImGui::Separator();
+            if (ImGui::MenuItem("Delete node")) {
+                pending_delete_node = n.id;
+            }
+            ImGui::EndPopup();
         }
 
         // Draw chrome.
@@ -5357,6 +5387,8 @@ void render_features_designer(AppState &state) {
             // starts a wire heading toward an output. We resolve the
             // direction on drop so the user doesn't have to think
             // about pin polarity.
+            bool const pin_right_clicked =
+                ImGui::IsItemClicked(ImGuiMouseButton_Right);
             if (pin_active
                 && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 4.0f)
                 && !state.features_wiring_active
@@ -5365,6 +5397,55 @@ void render_features_designer(AppState &state) {
                 state.features_wiring_from_node  = n.id;
                 state.features_wiring_from_pin   = p.id;
                 state.features_wire_error.clear();
+            }
+            // Right-click on a pin opens a context menu listing every
+            // edge touching it (typically 0 or 1, more on output fan-
+            // out). Each row deletes that edge.
+            char pin_popup_id[40];
+            std::snprintf(pin_popup_id, sizeof pin_popup_id,
+                           "##pctx_%u_%u",
+                           static_cast<unsigned>(n.id),
+                           static_cast<unsigned>(p.id));
+            if (pin_right_clicked && !was_wiring_at_start) {
+                ImGui::OpenPopup(pin_popup_id);
+            }
+            if (ImGui::BeginPopup(pin_popup_id)) {
+                ImGui::TextDisabled("%s : %s",
+                                     p.name.c_str(),
+                                     st::feature::pin_type_name(p.type));
+                ImGui::Separator();
+                bool any_edge = false;
+                for (auto const &e : state.features_graph.edges()) {
+                    bool const touches =
+                        (e.from_node == n.id && e.from_pin == p.id)
+                        || (e.to_node == n.id && e.to_pin == p.id);
+                    if (!touches) continue;
+                    any_edge = true;
+                    // Label the other end so the user knows what
+                    // they're disconnecting on a fan-out.
+                    st::feature::NodeId other_n =
+                        (e.from_node == n.id) ? e.to_node : e.from_node;
+                    st::feature::PinId  other_p =
+                        (e.from_node == n.id) ? e.to_pin  : e.from_pin;
+                    auto const *on = state.features_graph.find_node(other_n);
+                    auto const *op = state.features_graph.find_pin(other_n, other_p);
+                    char item_label[96];
+                    std::snprintf(item_label, sizeof item_label,
+                                   "Disconnect from %s.%s",
+                                   on != nullptr
+                                       ? (on->label.empty()
+                                              ? on->kind.c_str()
+                                              : on->label.c_str())
+                                       : "?",
+                                   op != nullptr ? op->name.c_str() : "?");
+                    if (ImGui::MenuItem(item_label)) {
+                        pending_delete_edge = e;
+                    }
+                }
+                if (!any_edge) {
+                    ImGui::TextDisabled("(no edges)");
+                }
+                ImGui::EndPopup();
             }
             // Highlight pins that would accept the in-flight wire.
             if (state.features_wiring_active
@@ -5474,6 +5555,23 @@ void render_features_designer(AppState &state) {
     }
 
     dl->PopClipRect();
+
+    // Apply pending mutations from context menus. Done here, after
+    // every reference into `nodes` / `pin_positions` has been
+    // consumed, so we never touch invalidated state.
+    if (pending_delete_edge.has_value()) {
+        state.features_graph.remove_edge(*pending_delete_edge);
+    }
+    if (pending_delete_node.has_value()) {
+        state.features_graph.remove_node(*pending_delete_node);
+        // If the user was about to wire FROM this node, drop the
+        // wiring state so we don't reference a vanished pin.
+        if (state.features_wiring_active
+            && state.features_wiring_from_node == *pending_delete_node) {
+            state.features_wiring_active = false;
+        }
+    }
+
     // Reserve the canvas footprint so the rest of the window scrolls
     // sensibly when more nodes are added than fit.
     ImGui::SetCursorScreenPos(canvas_p);
