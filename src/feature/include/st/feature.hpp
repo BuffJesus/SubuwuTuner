@@ -161,6 +161,17 @@ class Graph {
 // update when a new PinType lands.
 [[nodiscard]] char const *pin_type_name(PinType t) noexcept;
 
+// Inverse of pin_type_name. Returns nullopt on unknown text — the
+// loader uses this to validate persisted graphs.
+[[nodiscard]] std::optional<PinType> parse_pin_type(std::string_view s) noexcept;
+
+// Persistence (a minimal slice of the docs/16 `.stmod` format —
+// graph only, no compiled patch bytes yet). Round-trip stable for
+// every valid graph. Schema-versioned via [graph].schema_version so
+// future-compatible changes can be detected at load time.
+[[nodiscard]] std::string         to_toml(Graph const &g);
+[[nodiscard]] Result<Graph>       from_toml(std::string_view text);
+
 } // namespace st::feature
 
 #endif // ST_FEATURE_HPP

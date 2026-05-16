@@ -14,6 +14,7 @@ target_link_libraries(st_feature
     PUBLIC
         st::core
     PRIVATE
+        tomlplusplus::tomlplusplus
         st::warnings
         st::sanitizers
 )

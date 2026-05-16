@@ -5166,6 +5166,48 @@ void render_features_designer(AppState &state) {
         state.features_wiring_active = false;
         state.features_wire_error.clear();
     }
+    ImGui::SameLine();
+    if (ImGui::Button("Save…")) {
+        nfdu8filteritem_t filters[1] = {{"SubuwuTuner mod (TOML)", "stmod"}};
+        NFD::UniquePathU8 out;
+        nfdresult_t const r = NFD::SaveDialog(out, filters, 1, nullptr,
+                                                "graph.stmod");
+        if (r == NFD_OKAY) {
+            std::ofstream ofs{out.get(), std::ios::trunc};
+            if (!ofs) {
+                state.features_wire_error =
+                    std::string{"save: cannot open "} + out.get();
+            } else {
+                ofs << st::feature::to_toml(state.features_graph);
+                state.features_wire_error.clear();
+            }
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Load…")) {
+        nfdu8filteritem_t filters[1] = {{"SubuwuTuner mod (TOML)", "stmod"}};
+        NFD::UniquePathU8 out;
+        nfdresult_t const r = NFD::OpenDialog(out, filters, 1);
+        if (r == NFD_OKAY) {
+            std::ifstream ifs{out.get(), std::ios::binary};
+            if (!ifs) {
+                state.features_wire_error =
+                    std::string{"load: cannot open "} + out.get();
+            } else {
+                std::stringstream buf;
+                buf << ifs.rdbuf();
+                auto loaded = st::feature::from_toml(buf.str());
+                if (!loaded.has_value()) {
+                    state.features_wire_error =
+                        "load: " + loaded.error().to_string();
+                } else {
+                    state.features_graph         = std::move(*loaded);
+                    state.features_wiring_active = false;
+                    state.features_wire_error.clear();
+                }
+            }
+        }
+    }
 
     if (auto v = state.features_graph.validate(); !v.has_value()) {
         ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),

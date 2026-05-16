@@ -5,7 +5,11 @@
 
 #include "st/core/result.hpp"
 
+#include <toml++/toml.hpp>
+
 #include <algorithm>
+#include <sstream>
+#include <unordered_map>
 #include <utility>
 
 namespace st::feature {
@@ -17,6 +21,192 @@ char const *pin_type_name(PinType t) noexcept {
         case PinType::Bool:  return "bool";
     }
     return "?";
+}
+
+std::optional<PinType> parse_pin_type(std::string_view s) noexcept {
+    if (s == "float") return PinType::Float;
+    if (s == "int")   return PinType::Int;
+    if (s == "bool")  return PinType::Bool;
+    return std::nullopt;
+}
+
+namespace {
+
+char const *pin_direction_name(PinDirection d) noexcept {
+    return d == PinDirection::Output ? "output" : "input";
+}
+
+std::optional<PinDirection> parse_pin_direction(std::string_view s) noexcept {
+    if (s == "input")  return PinDirection::Input;
+    if (s == "output") return PinDirection::Output;
+    return std::nullopt;
+}
+
+// TOML strings need quotes + standard escape handling. The values we
+// emit are short user-authored labels; rather than pulling in a full
+// quoter, escape the two characters that would break a basic string
+// (backslash and double-quote) and reject anything with a newline.
+std::string toml_quote(std::string_view s) {
+    std::string out;
+    out.reserve(s.size() + 2);
+    out.push_back('"');
+    for (char c : s) {
+        if (c == '\\' || c == '"') out.push_back('\\');
+        out.push_back(c);
+    }
+    out.push_back('"');
+    return out;
+}
+
+} // namespace
+
+std::string to_toml(Graph const &g) {
+    std::ostringstream out;
+    out << "[graph]\n";
+    out << "schema_version = 1\n\n";
+    for (auto const &n : g.nodes()) {
+        out << "[[node]]\n";
+        out << "id    = "  << n.id    << "\n";
+        out << "kind  = "  << toml_quote(n.kind)  << "\n";
+        out << "label = "  << toml_quote(n.label) << "\n";
+        out << "x     = "  << n.x << "\n";
+        out << "y     = "  << n.y << "\n";
+        out << "pins  = [\n";
+        for (std::size_t i = 0; i < n.pins.size(); ++i) {
+            auto const &p = n.pins[i];
+            out << "  { id = " << p.id
+                << ", name = " << toml_quote(p.name)
+                << ", type = " << toml_quote(pin_type_name(p.type))
+                << ", direction = " << toml_quote(pin_direction_name(p.direction))
+                << ", unit = " << toml_quote(p.unit)
+                << " }";
+            if (i + 1 < n.pins.size()) out << ",";
+            out << "\n";
+        }
+        out << "]\n\n";
+    }
+    for (auto const &e : g.edges()) {
+        out << "[[edge]]\n";
+        out << "from_node = " << e.from_node << "\n";
+        out << "from_pin  = " << e.from_pin  << "\n";
+        out << "to_node   = " << e.to_node   << "\n";
+        out << "to_pin    = " << e.to_pin    << "\n\n";
+    }
+    return out.str();
+}
+
+Result<Graph> from_toml(std::string_view text) {
+    toml::table tbl;
+    try {
+        tbl = toml::parse(text);
+    } catch (toml::parse_error const &e) {
+        std::string msg{"feature TOML parse: "};
+        msg.append(e.description());
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    auto const *gtbl = tbl["graph"].as_table();
+    if (gtbl == nullptr) {
+        return failure(ErrorCode::ParseError,
+                       "feature TOML: missing [graph] section");
+    }
+    int const schema = static_cast<int>(
+        (*gtbl)["schema_version"].value_or<std::int64_t>(0));
+    if (schema < 1) {
+        return failure(ErrorCode::ParseError,
+                       "feature TOML: [graph].schema_version must be >= 1");
+    }
+
+    Graph g;
+    // Persisted-id → assigned-id, since Graph::add_node assigns its
+    // own monotonic ids. Edges remap through this on the second pass.
+    std::unordered_map<NodeId, NodeId> id_map;
+
+    auto const *nodes = tbl["node"].as_array();
+    if (nodes != nullptr) {
+        for (auto const &elem : *nodes) {
+            auto const *ntbl = elem.as_table();
+            if (ntbl == nullptr) {
+                return failure(ErrorCode::ParseError,
+                               "feature TOML: [[node]] not a table");
+            }
+            Node n;
+            auto const persisted_id = static_cast<NodeId>(
+                (*ntbl)["id"].value_or<std::int64_t>(0));
+            if (persisted_id == 0) {
+                return failure(ErrorCode::ParseError,
+                               "feature TOML: [[node]] missing id");
+            }
+            n.kind  = (*ntbl)["kind"].value_or<std::string>("");
+            n.label = (*ntbl)["label"].value_or<std::string>("");
+            n.x     = static_cast<float>(
+                (*ntbl)["x"].value_or<double>(0.0));
+            n.y     = static_cast<float>(
+                (*ntbl)["y"].value_or<double>(0.0));
+            auto const *pins = (*ntbl)["pins"].as_array();
+            if (pins != nullptr) {
+                for (auto const &pe : *pins) {
+                    auto const *ptbl = pe.as_table();
+                    if (ptbl == nullptr) {
+                        return failure(ErrorCode::ParseError,
+                                       "feature TOML: pin not a table");
+                    }
+                    Pin p;
+                    p.id   = static_cast<PinId>(
+                        (*ptbl)["id"].value_or<std::int64_t>(0));
+                    p.name = (*ptbl)["name"].value_or<std::string>("");
+                    auto const type_s = (*ptbl)["type"].value_or<std::string>("");
+                    auto const dir_s  = (*ptbl)["direction"].value_or<std::string>("");
+                    p.unit = (*ptbl)["unit"].value_or<std::string>("");
+                    auto const t = parse_pin_type(type_s);
+                    auto const d = parse_pin_direction(dir_s);
+                    if (!t.has_value() || !d.has_value()) {
+                        return failure(ErrorCode::ParseError,
+                                       "feature TOML: unknown pin type / "
+                                       "direction");
+                    }
+                    p.type      = *t;
+                    p.direction = *d;
+                    n.pins.push_back(std::move(p));
+                }
+            }
+            auto const assigned = g.add_node(std::move(n));
+            id_map[persisted_id] = assigned;
+        }
+    }
+
+    auto const *edges = tbl["edge"].as_array();
+    if (edges != nullptr) {
+        for (auto const &elem : *edges) {
+            auto const *etbl = elem.as_table();
+            if (etbl == nullptr) {
+                return failure(ErrorCode::ParseError,
+                               "feature TOML: [[edge]] not a table");
+            }
+            auto const from_persisted = static_cast<NodeId>(
+                (*etbl)["from_node"].value_or<std::int64_t>(0));
+            auto const to_persisted = static_cast<NodeId>(
+                (*etbl)["to_node"].value_or<std::int64_t>(0));
+            auto const fit = id_map.find(from_persisted);
+            auto const tit = id_map.find(to_persisted);
+            if (fit == id_map.end() || tit == id_map.end()) {
+                return failure(ErrorCode::ParseError,
+                               "feature TOML: edge references unknown node");
+            }
+            auto const from_pin = static_cast<PinId>(
+                (*etbl)["from_pin"].value_or<std::int64_t>(0));
+            auto const to_pin = static_cast<PinId>(
+                (*etbl)["to_pin"].value_or<std::int64_t>(0));
+            if (auto r = g.connect(fit->second, from_pin,
+                                    tit->second, to_pin);
+                !r.has_value()) {
+                return failure(ErrorCode::ParseError,
+                               "feature TOML: connect rejected: "
+                                   + r.error().to_string());
+            }
+        }
+    }
+
+    return g;
 }
 
 NodeId Graph::add_node(Node node) {

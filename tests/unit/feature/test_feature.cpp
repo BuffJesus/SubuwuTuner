@@ -127,3 +127,49 @@ TEST_CASE("Graph::validate accepts a clean DAG", "[feature][graph]") {
     REQUIRE(g.connect(b, 0, d, 0).has_value());
     REQUIRE(g.validate().has_value());
 }
+
+TEST_CASE("Graph TOML round-trip preserves shape", "[feature][toml]") {
+    st::feature::Graph g;
+    auto const a = g.add_node(make_source_node("rpm",  st::feature::PinType::Float));
+    auto const b = g.add_node(make_sink_node("out",    st::feature::PinType::Float));
+    g.set_node_position(a, 12.5f, 24.0f);
+    g.set_node_position(b, 200.0f, 80.5f);
+    REQUIRE(g.connect(a, 0, b, 0).has_value());
+
+    auto const text = st::feature::to_toml(g);
+    REQUIRE_FALSE(text.empty());
+
+    auto loaded = st::feature::from_toml(text);
+    REQUIRE(loaded.has_value());
+    REQUIRE(loaded->nodes().size() == 2);
+    REQUIRE(loaded->edges().size() == 1);
+    // Positions survive — even though node ids may have been
+    // remapped, the order is preserved.
+    REQUIRE(loaded->nodes()[0].x == 12.5f);
+    REQUIRE(loaded->nodes()[1].y == 80.5f);
+    REQUIRE(loaded->validate().has_value());
+}
+
+TEST_CASE("Graph from_toml rejects unknown pin type", "[feature][toml]") {
+    std::string const bad =
+        "[graph]\n"
+        "schema_version = 1\n\n"
+        "[[node]]\n"
+        "id    = 1\n"
+        "kind  = \"x\"\n"
+        "label = \"x\"\n"
+        "x     = 0.0\n"
+        "y     = 0.0\n"
+        "pins  = [\n"
+        "  { id = 0, name = \"o\", type = \"complex\", direction = \"output\", unit = \"\" },\n"
+        "]\n";
+    auto r = st::feature::from_toml(bad);
+    REQUIRE_FALSE(r.has_value());
+}
+
+TEST_CASE("Graph from_toml rejects missing schema_version",
+          "[feature][toml]") {
+    std::string const bad = "[graph]\n";
+    auto r = st::feature::from_toml(bad);
+    REQUIRE_FALSE(r.has_value());
+}
