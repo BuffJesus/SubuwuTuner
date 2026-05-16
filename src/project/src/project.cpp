@@ -462,20 +462,27 @@ Status Project::save_metadata() const {
 //
 namespace {
 
+// "Separator" = whitespace or `;`. Spreadsheet round-trips through
+// Calc / Excel in non-US locales splatter `;` through the comment lines
+// (e.g. `#;pack_id;=;demo;;`); treating `;` as a separator keeps the
+// identity-header checks alive on those files.
+bool is_sep(char c) {
+    return std::isspace(static_cast<unsigned char>(c)) || c == ';';
+}
+
 std::string extract_quoted(std::string_view line) {
     auto const eq = line.find('=');
     if (eq == std::string_view::npos) return {};
     auto rest = line.substr(eq + 1);
-    while (!rest.empty()
-           && std::isspace(static_cast<unsigned char>(rest.front()))) {
-        rest.remove_prefix(1);
-    }
+    while (!rest.empty() && is_sep(rest.front())) rest.remove_prefix(1);
     if (rest.size() >= 2 && rest.front() == '"') {
         auto const close = rest.find('"', 1);
         if (close != std::string_view::npos) {
             return std::string{rest.substr(1, close - 1)};
         }
     }
+    // Strip trailing separators so a value like `demo;;` reads as `demo`.
+    while (!rest.empty() && is_sep(rest.back())) rest.remove_suffix(1);
     return std::string{rest};
 }
 
@@ -533,10 +540,7 @@ Result<EditCsvParseResult> parse_edit_csv(std::string_view text,
         // and `# table` markers stay inside a CSV comment.
         if (!line.empty() && line.front() == '#') {
             std::string_view rest = line.substr(1);
-            while (!rest.empty()
-                   && std::isspace(static_cast<unsigned char>(rest.front()))) {
-                rest.remove_prefix(1);
-            }
+            while (!rest.empty() && is_sep(rest.front())) rest.remove_prefix(1);
             if (rest.starts_with("pack_id")) {
                 auto const declared = extract_quoted(rest);
                 if (!opts.expected_pack_id.empty()
@@ -578,13 +582,19 @@ Result<EditCsvParseResult> parse_edit_csv(std::string_view text,
         }
         if (blank) continue;
 
-        // Split on commas. Trailing comma → trailing empty field, which
-        // fails field-count or numeric-parse below.
+        // Split on commas OR semicolons. Spreadsheet round-trips
+        // (Excel / LibreOffice / OpenOffice in non-US locales) rewrite
+        // comma-delimited CSVs with `;` and pad rows with trailing empty
+        // separators; accepting both keeps the export → edit-in-Calc →
+        // re-import workflow alive. Numeric values can't contain either
+        // character so there's no ambiguity.
+        // Trailing separator → trailing empty field, which fails
+        // field-count or numeric-parse below.
         std::vector<std::string_view> fields;
         {
             std::size_t start = 0;
             for (std::size_t i = 0; i <= clean.size(); ++i) {
-                if (i == clean.size() || clean[i] == ',') {
+                if (i == clean.size() || clean[i] == ',' || clean[i] == ';') {
                     fields.push_back(
                         std::string_view{clean}.substr(start, i - start));
                     start = i + 1;

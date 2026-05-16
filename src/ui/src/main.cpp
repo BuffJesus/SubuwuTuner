@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -1307,13 +1308,17 @@ void render_csv_import_modal(AppState &state) {
             // Color-code: green when value increases, red when decreases.
             // Tuner shorthand — "raising" vs "pulling" — keep neutral
             // when unchanged or the before value is unknown.
+            // Tolerance = half a display-precision step so a value that
+            // round-trips through the CSV (`%.*f` write → strtod read)
+            // doesn't get flagged as a "decrease" by 1e-15 of FP noise.
             ImVec4 color = ImGui::GetStyleColorVec4(ImGuiCol_Text);
             if (before_td.has_value()
                 && e.row < before_td->values.size()
                 && e.col < before_td->values[e.row].size()) {
-                double const b = before_td->values[e.row][e.col];
-                if (e.value > b) color = ImVec4(0.5f, 0.95f, 0.5f, 1.0f);
-                else if (e.value < b) color = ImVec4(0.95f, 0.55f, 0.55f, 1.0f);
+                double const b   = before_td->values[e.row][e.col];
+                double const eps = 0.5 * std::pow(10.0, -prec);
+                if (e.value > b + eps)      color = ImVec4(0.5f, 0.95f, 0.5f, 1.0f);
+                else if (e.value < b - eps) color = ImVec4(0.95f, 0.55f, 0.55f, 1.0f);
             }
             ImGui::TextColored(color, "%.*f", prec, e.value);
         }
