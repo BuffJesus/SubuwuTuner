@@ -423,14 +423,27 @@ struct AppState {
     std::optional<st::Definition::TableData> csv_import_before_values;
 
     // New-project modal. GUI front for `subuwutuner-cli project-new`.
-    // Three path fields (source ROM, def pack folder, target project
-    // dir) and an optional display name. NFD pickers populate the
-    // fields; Create runs Project::create + try_open_project.
+    // Three path fields (source ROM, def pack folder OR single-file
+    // pack, target project dir) and an optional display name. NFD
+    // pickers populate the fields; Create runs Project::create +
+    // try_open_project.
     bool                                     show_new_project_modal{false};
     char                                     np_source_path[1024]{};
     char                                     np_def_path[1024]{};
     char                                     np_dir_path[1024]{};
     char                                     np_display_name[256]{};
+    // Inline ROM/def match check. Recomputed only when either path
+    // changes (cached_* mirrors the last-checked paths). Status drives
+    // the colored line under the Definition row; load failure also
+    // disables Create.
+    enum class NpMatchStatus { None, Match, NoMatch, LoadFailed };
+    NpMatchStatus                            np_match_status{NpMatchStatus::None};
+    std::string                              np_match_message;
+    std::string                              np_cached_source_path;
+    std::string                              np_cached_def_path;
+    // Surface Project::create's error inline — the bottom status bar
+    // is hidden behind the modal, so the user otherwise sees nothing.
+    std::string                              np_create_error;
 
     // MAF autotune modal. GUI front for `subuwutuner-cli
     // project-autotune-maf`. Inputs (table id, log path, tuning
@@ -1849,21 +1862,116 @@ void render_new_project_modal(AppState &state) {
     }
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
 
-    if (path_row("Definition pack",
-                  state.np_def_path, sizeof state.np_def_path,
-                  "def",
-                  "Pick the directory containing the pack TOML files,\n"
-                  "or a sibling pack folder. Single-file packs aren't\n"
-                  "supported from this dialog yet — use the CLI for those.")) {
-        NFD::UniquePathU8 out;
-        nfdresult_t const r = NFD::PickFolder(out);
-        if (r == NFD_OKAY) {
-            std::snprintf(state.np_def_path, sizeof state.np_def_path,
-                           "%s", out.get());
-        } else if (r == NFD_ERROR) {
-            state.status_msg = std::string{"Def dialog error: "}
-                                + NFD::GetError();
+    // Definition-pack row: custom because it needs two pickers
+    // (multi-file directory layout vs. single-file pack).
+    {
+        ImGui::TextUnformatted("Definition pack");
+        float const avail   = ImGui::GetContentRegionAvail().x;
+        float const btn_w   = 96.0f;
+        float const input_w = std::max(120.0f, avail - btn_w * 2.0f - 16.0f);
+        ImGui::SetNextItemWidth(input_w);
+        ImGui::InputText("##def_path", state.np_def_path,
+                          sizeof state.np_def_path,
+                          ImGuiInputTextFlags_ReadOnly);
+        ImGui::SameLine();
+        if (ImGui::Button("Folder…##def_folder", ImVec2(btn_w, 0.0f))) {
+            NFD::UniquePathU8 out;
+            nfdresult_t const r = NFD::PickFolder(out);
+            if (r == NFD_OKAY) {
+                std::snprintf(state.np_def_path, sizeof state.np_def_path,
+                               "%s", out.get());
+            } else if (r == NFD_ERROR) {
+                state.status_msg = std::string{"Def dialog error: "}
+                                    + NFD::GetError();
+            }
         }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Pick a directory laid out as a multi-file\n"
+                              "pack (must contain pack.toml).");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("File…##def_file", ImVec2(btn_w, 0.0f))) {
+            nfdu8filteritem_t filters[1] = {{"TOML pack", "toml"}};
+            NFD::UniquePathU8 out;
+            nfdresult_t const r = NFD::OpenDialog(out, filters, 1);
+            if (r == NFD_OKAY) {
+                std::snprintf(state.np_def_path, sizeof state.np_def_path,
+                               "%s", out.get());
+            } else if (r == NFD_ERROR) {
+                state.status_msg = std::string{"Def dialog error: "}
+                                    + NFD::GetError();
+            }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Pick a single-file TOML pack\n"
+                              "(one ROM/CID per file).");
+        }
+    }
+
+    // Inline ROM/def match check. Recompute only when either path has
+    // changed since the last run — both loaders touch disk, and the
+    // modal would otherwise re-load every frame.
+    if (state.np_source_path[0] != '\0' && state.np_def_path[0] != '\0') {
+        std::string const cur_source = state.np_source_path;
+        std::string const cur_def    = state.np_def_path;
+        if (cur_source != state.np_cached_source_path
+            || cur_def != state.np_cached_def_path) {
+            state.np_cached_source_path = cur_source;
+            state.np_cached_def_path    = cur_def;
+            // Path changed — last create attempt's error is stale.
+            state.np_create_error.clear();
+            auto rom_r = st::Rom::from_file(cur_source);
+            if (!rom_r.has_value()) {
+                state.np_match_status  = AppState::NpMatchStatus::LoadFailed;
+                state.np_match_message = "ROM load failed: "
+                                         + rom_r.error().to_string();
+            } else {
+                auto def_r = st::Definition::from_file(cur_def);
+                if (!def_r.has_value()) {
+                    state.np_match_status  = AppState::NpMatchStatus::LoadFailed;
+                    state.np_match_message = "Pack load failed: "
+                                             + def_r.error().to_string();
+                } else {
+                    auto const name = def_r->matches(*rom_r);
+                    if (name.has_value()) {
+                        state.np_match_status  = AppState::NpMatchStatus::Match;
+                        state.np_match_message = "Matches \"" + *name + "\"";
+                    } else {
+                        state.np_match_status  = AppState::NpMatchStatus::NoMatch;
+                        state.np_match_message = "No matching identification "
+                                                 "in this pack — Create still "
+                                                 "allowed.";
+                    }
+                }
+            }
+        }
+    } else {
+        state.np_match_status = AppState::NpMatchStatus::None;
+        state.np_match_message.clear();
+        state.np_cached_source_path.clear();
+        state.np_cached_def_path.clear();
+    }
+    if (state.np_match_status != AppState::NpMatchStatus::None) {
+        ImVec4 color{1, 1, 1, 1};
+        char const *prefix = "";
+        switch (state.np_match_status) {
+            case AppState::NpMatchStatus::Match:
+                color = ImVec4(0.40f, 0.82f, 0.45f, 1.0f);
+                prefix = "\xE2\x9C\x93 "; // ✓
+                break;
+            case AppState::NpMatchStatus::NoMatch:
+                color = ImVec4(0.95f, 0.78f, 0.30f, 1.0f);
+                prefix = "\xE2\x9A\xA0 "; // ⚠
+                break;
+            case AppState::NpMatchStatus::LoadFailed:
+                color = ImVec4(0.92f, 0.45f, 0.45f, 1.0f);
+                prefix = "\xE2\x9C\x97 "; // ✗
+                break;
+            case AppState::NpMatchStatus::None:
+                break;
+        }
+        ImGui::TextColored(color, "%s%s", prefix,
+                            state.np_match_message.c_str());
     }
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
 
@@ -1898,7 +2006,10 @@ void render_new_project_modal(AppState &state) {
     bool const have_source = state.np_source_path[0] != '\0';
     bool const have_def    = state.np_def_path[0]    != '\0';
     bool const have_dir    = state.np_dir_path[0]    != '\0';
-    bool const can_create  = have_source && have_def && have_dir;
+    bool const load_failed =
+        state.np_match_status == AppState::NpMatchStatus::LoadFailed;
+    bool const can_create  =
+        have_source && have_def && have_dir && !load_failed;
 
     bool const want_cancel =
         ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
@@ -1912,9 +2023,12 @@ void render_new_project_modal(AppState &state) {
         ImGui::EndDisabled();
         ImGui::PopStyleColor(3);
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            if (!can_create) {
+            if (!have_source || !have_def || !have_dir) {
                 ImGui::SetTooltip("Source ROM, definition pack, and "
                                   "project directory are all required.");
+            } else if (load_failed) {
+                ImGui::SetTooltip("Cannot create: ROM or pack failed to "
+                                  "load. See message above.");
             } else {
                 ImGui::SetTooltip("Create the project and open it.");
             }
@@ -1932,6 +2046,11 @@ void render_new_project_modal(AppState &state) {
         state.np_def_path[0]      = '\0';
         state.np_dir_path[0]      = '\0';
         state.np_display_name[0]  = '\0';
+        state.np_match_status     = AppState::NpMatchStatus::None;
+        state.np_match_message.clear();
+        state.np_cached_source_path.clear();
+        state.np_cached_def_path.clear();
+        state.np_create_error.clear();
     };
 
     if (create_clicked && can_create) {
@@ -1946,7 +2065,9 @@ void render_new_project_modal(AppState &state) {
                                       std::filesystem::path{state.np_def_path},
                                       name);
         if (!r.has_value()) {
-            state.status_msg = "Create failed: " + r.error().to_string();
+            auto const err  = r.error().to_string();
+            state.status_msg      = "Create failed: " + err;
+            state.np_create_error = err;
         } else {
             reset_fields();
             ImGui::CloseCurrentPopup();
@@ -1956,6 +2077,13 @@ void render_new_project_modal(AppState &state) {
     } else if (cancel_clicked || want_cancel) {
         reset_fields();
         ImGui::CloseCurrentPopup();
+    }
+
+    if (!state.np_create_error.empty()) {
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
+                            "\xE2\x9C\x97 Create failed: %s",
+                            state.np_create_error.c_str());
     }
 
     ImGui::EndPopup();
