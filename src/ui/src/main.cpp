@@ -215,8 +215,25 @@ void save_recents(std::vector<RecentEntry> const &recents) {
 // land without breaking older builds — unknown keys are silently
 // ignored on load. Currently:
 //   default_policy_profile = motorsport-only|alberta-ca|eu-roadworthy|california-us
+enum class Theme { Dark, Light };
+
+char const *theme_name(Theme t) noexcept {
+    switch (t) {
+        case Theme::Dark:  return "dark";
+        case Theme::Light: return "light";
+    }
+    return "dark";
+}
+
+std::optional<Theme> parse_theme(std::string_view s) noexcept {
+    if (s == "dark")  return Theme::Dark;
+    if (s == "light") return Theme::Light;
+    return std::nullopt;
+}
+
 struct Settings {
     st::policy::Profile default_policy_profile{st::policy::Profile::MotorsportOnly};
+    Theme               theme{Theme::Dark};
 };
 
 Settings load_settings() {
@@ -235,6 +252,10 @@ Settings load_settings() {
             if (auto p = st::policy::parse_profile(val); p.has_value()) {
                 s.default_policy_profile = *p;
             }
+        } else if (key == "theme") {
+            if (auto t = parse_theme(val); t.has_value()) {
+                s.theme = *t;
+            }
         }
     }
     return s;
@@ -248,6 +269,7 @@ void save_settings(Settings const &s) {
     if (!out) return;
     out << "default_policy_profile="
         << st::policy::profile_name(s.default_policy_profile) << '\n';
+    out << "theme=" << theme_name(s.theme) << '\n';
 }
 
 // Move `path` to the front of `recents`, deduplicating by canonical
@@ -2932,9 +2954,10 @@ Fonts load_fonts() {
 // Custom dark palette tuned for long tuning sessions: high contrast for the
 // numerical grids, low chroma so the chrome reads as neutral. Accent colour
 // nods to Subaru rally blue without dominating.
-void apply_theme() {
-    auto &s = ImGui::GetStyle();
-
+// Shape + sizing settings — identical between themes. Only the palette
+// differs; pulling these out keeps apply_theme() short and avoids
+// re-stating the layout twice.
+void apply_style_shape(ImGuiStyle &s) {
     s.WindowPadding        = ImVec2(10.0f, 10.0f);
     s.FramePadding         = ImVec2(8.0f, 5.0f);
     s.CellPadding          = ImVec2(6.0f, 4.0f);
@@ -2957,7 +2980,9 @@ void apply_theme() {
     s.ScrollbarRounding    = 8.0f;
     s.WindowTitleAlign     = ImVec2(0.0f, 0.5f);
     s.DockingSeparatorSize = 1.0f;
+}
 
+void apply_palette_dark(ImGuiStyle &s) {
     constexpr ImVec4 accent       (0.21f, 0.46f, 0.76f, 1.00f);
     constexpr ImVec4 accent_hover (0.31f, 0.56f, 0.86f, 1.00f);
     constexpr ImVec4 accent_active(0.38f, 0.65f, 0.94f, 1.00f);
@@ -3025,24 +3050,108 @@ void apply_theme() {
     c[ImGuiCol_TableRowBg]            = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
     c[ImGuiCol_TableRowBgAlt]         = ImVec4(1.00f, 1.00f, 1.00f, 0.03f);
 
-    // NavCursor was previously `accent`, which made it render as a
-    // bright outline around whichever widget last received focus.
-    // Combined with viewports/docking, this manifested as "one cell
-    // is highlighted and never unhighlights" in the data grid — even
-    // after disabling NavEnableKeyboard, the cursor color was still
-    // being applied wherever the nav system happened to land. We
-    // don't ship any explicit nav-focus indicator, so making this
-    // fully transparent is harmless and removes the offending visual.
     c[ImGuiCol_NavCursor]             = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
     c[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
     c[ImGuiCol_NavWindowingDimBg]     = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
     c[ImGuiCol_ModalWindowDimBg]      = ImVec4(0.80f, 0.80f, 0.80f, 0.35f);
+}
 
-    // With viewports enabled, OS-level windows render with their own alpha;
-    // force fully-opaque WindowBg so detached panels don't show through to
-    // the desktop.
+void apply_palette_light(ImGuiStyle &s) {
+    // Same blue accent as the dark theme — keeps brand identity
+    // consistent across both modes. The accent on a light background
+    // reads as bolder, which is appropriate for the "selected/active"
+    // states.
+    constexpr ImVec4 accent       (0.21f, 0.46f, 0.76f, 1.00f);
+    constexpr ImVec4 accent_hover (0.16f, 0.40f, 0.70f, 1.00f);
+    constexpr ImVec4 accent_active(0.10f, 0.34f, 0.62f, 1.00f);
+
+    auto &c = s.Colors;
+    c[ImGuiCol_WindowBg]              = ImVec4(0.96f, 0.97f, 0.98f, 1.00f);
+    c[ImGuiCol_ChildBg]               = ImVec4(0.96f, 0.97f, 0.98f, 1.00f);
+    c[ImGuiCol_PopupBg]               = ImVec4(0.93f, 0.94f, 0.96f, 0.98f);
+    c[ImGuiCol_MenuBarBg]             = ImVec4(0.91f, 0.92f, 0.94f, 1.00f);
+    c[ImGuiCol_Border]                = ImVec4(0.78f, 0.80f, 0.83f, 1.00f);
+    c[ImGuiCol_BorderShadow]          = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+
+    c[ImGuiCol_Text]                  = ImVec4(0.13f, 0.15f, 0.18f, 1.00f);
+    c[ImGuiCol_TextDisabled]          = ImVec4(0.55f, 0.58f, 0.62f, 1.00f);
+    c[ImGuiCol_TextSelectedBg]        = ImVec4(0.42f, 0.62f, 0.83f, 0.45f);
+
+    c[ImGuiCol_FrameBg]               = ImVec4(0.88f, 0.90f, 0.93f, 1.00f);
+    c[ImGuiCol_FrameBgHovered]        = ImVec4(0.83f, 0.86f, 0.90f, 1.00f);
+    c[ImGuiCol_FrameBgActive]         = ImVec4(0.78f, 0.81f, 0.86f, 1.00f);
+
+    c[ImGuiCol_TitleBg]               = ImVec4(0.91f, 0.92f, 0.94f, 1.00f);
+    c[ImGuiCol_TitleBgActive]         = ImVec4(0.86f, 0.88f, 0.91f, 1.00f);
+    c[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.94f, 0.95f, 0.96f, 1.00f);
+
+    c[ImGuiCol_ScrollbarBg]           = ImVec4(0.94f, 0.95f, 0.96f, 1.00f);
+    c[ImGuiCol_ScrollbarGrab]         = ImVec4(0.74f, 0.76f, 0.80f, 1.00f);
+    c[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(0.66f, 0.69f, 0.73f, 1.00f);
+    c[ImGuiCol_ScrollbarGrabActive]   = ImVec4(0.58f, 0.62f, 0.67f, 1.00f);
+
+    c[ImGuiCol_CheckMark]             = accent_active;
+    c[ImGuiCol_SliderGrab]            = accent;
+    c[ImGuiCol_SliderGrabActive]      = accent_active;
+
+    c[ImGuiCol_Button]                = ImVec4(0.88f, 0.90f, 0.93f, 1.00f);
+    c[ImGuiCol_ButtonHovered]         = ImVec4(0.83f, 0.86f, 0.90f, 1.00f);
+    c[ImGuiCol_ButtonActive]          = accent;
+    c[ImGuiCol_Header]                = ImVec4(0.88f, 0.90f, 0.93f, 1.00f);
+    c[ImGuiCol_HeaderHovered]         = ImVec4(0.83f, 0.86f, 0.90f, 1.00f);
+    c[ImGuiCol_HeaderActive]          = accent;
+    c[ImGuiCol_Separator]             = ImVec4(0.78f, 0.80f, 0.83f, 1.00f);
+    c[ImGuiCol_SeparatorHovered]      = accent_hover;
+    c[ImGuiCol_SeparatorActive]       = accent_active;
+    c[ImGuiCol_ResizeGrip]            = ImVec4(0.78f, 0.80f, 0.83f, 1.00f);
+    c[ImGuiCol_ResizeGripHovered]     = accent_hover;
+    c[ImGuiCol_ResizeGripActive]      = accent_active;
+
+    c[ImGuiCol_Tab]                   = ImVec4(0.91f, 0.92f, 0.94f, 1.00f);
+    c[ImGuiCol_TabHovered]            = ImVec4(0.83f, 0.86f, 0.90f, 1.00f);
+    c[ImGuiCol_TabSelected]           = ImVec4(0.86f, 0.88f, 0.91f, 1.00f);
+    c[ImGuiCol_TabSelectedOverline]   = accent;
+    c[ImGuiCol_TabDimmed]             = ImVec4(0.91f, 0.92f, 0.94f, 1.00f);
+    c[ImGuiCol_TabDimmedSelected]     = ImVec4(0.86f, 0.88f, 0.91f, 1.00f);
+
+    c[ImGuiCol_DockingPreview]        = ImVec4(0.21f, 0.46f, 0.76f, 0.70f);
+    c[ImGuiCol_DockingEmptyBg]        = ImVec4(0.96f, 0.97f, 0.98f, 1.00f);
+
+    c[ImGuiCol_PlotLines]             = ImVec4(0.40f, 0.42f, 0.46f, 1.00f);
+    c[ImGuiCol_PlotLinesHovered]      = accent_hover;
+    c[ImGuiCol_PlotHistogram]         = accent;
+    c[ImGuiCol_PlotHistogramHovered]  = accent_hover;
+
+    c[ImGuiCol_TableHeaderBg]         = ImVec4(0.84f, 0.87f, 0.92f, 1.00f);
+    c[ImGuiCol_TableBorderStrong]     = ImVec4(0.78f, 0.80f, 0.83f, 1.00f);
+    c[ImGuiCol_TableBorderLight]      = ImVec4(0.88f, 0.90f, 0.93f, 1.00f);
+    c[ImGuiCol_TableRowBg]            = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    c[ImGuiCol_TableRowBgAlt]         = ImVec4(0.00f, 0.00f, 0.00f, 0.04f);
+
+    c[ImGuiCol_NavCursor]             = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+    c[ImGuiCol_NavWindowingHighlight] = ImVec4(0.20f, 0.20f, 0.20f, 0.70f);
+    c[ImGuiCol_NavWindowingDimBg]     = ImVec4(0.20f, 0.20f, 0.20f, 0.20f);
+    c[ImGuiCol_ModalWindowDimBg]      = ImVec4(0.20f, 0.20f, 0.20f, 0.35f);
+}
+
+// NavCursor was previously `accent`, which made it render as a bright
+// outline around whichever widget last received focus. Combined with
+// viewports/docking, this manifested as "one cell is highlighted and
+// never unhighlights" in the data grid — even after disabling
+// NavEnableKeyboard, the cursor color was still being applied wherever
+// the nav system happened to land. We don't ship any explicit
+// nav-focus indicator, so both palettes zero out NavCursor (above).
+//
+// With viewports enabled, OS-level windows render with their own
+// alpha; force fully-opaque WindowBg so detached panels don't show
+// through to the desktop.
+void apply_theme(Theme t) {
+    auto &s = ImGui::GetStyle();
+    apply_style_shape(s);
+    if (t == Theme::Light) apply_palette_light(s);
+    else                   apply_palette_dark(s);
     if ((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0) {
-        c[ImGuiCol_WindowBg].w = 1.0f;
+        s.Colors[ImGuiCol_WindowBg].w = 1.0f;
     }
 }
 
@@ -3274,6 +3383,22 @@ void render_menubar(AppState &state) {
             ImGui::MenuItem("Stats panel",   nullptr, &state.show_stats_panel);
             ImGui::MenuItem("DTCs panel",    nullptr, &state.show_dtcs_panel);
             ImGui::MenuItem("History panel", nullptr, &state.show_history_panel);
+            ImGui::Separator();
+            if (ImGui::BeginMenu("Theme")) {
+                bool const is_dark  = state.settings.theme == Theme::Dark;
+                bool const is_light = state.settings.theme == Theme::Light;
+                if (ImGui::MenuItem("Dark",  nullptr, is_dark)  && !is_dark) {
+                    state.settings.theme = Theme::Dark;
+                    apply_theme(Theme::Dark);
+                    save_settings(state.settings);
+                }
+                if (ImGui::MenuItem("Light", nullptr, is_light) && !is_light) {
+                    state.settings.theme = Theme::Light;
+                    apply_theme(Theme::Light);
+                    save_settings(state.settings);
+                }
+                ImGui::EndMenu();
+            }
             ImGui::Separator();
             // Dev-only escape hatch. Tucked one level deeper so the
             // ImGui example isn't a peer of the user-facing view modes.
@@ -5465,7 +5590,6 @@ int main(int argc, char *argv[]) {
     io.ConfigDockingAlwaysTabBar = true;
 
     Fonts const fonts = load_fonts();
-    apply_theme();
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 130");
@@ -5476,6 +5600,8 @@ int main(int argc, char *argv[]) {
     AppState state;
     state.recents  = load_recents();
     state.settings = load_settings();
+    // Apply the persisted theme before any user-visible frame renders.
+    apply_theme(state.settings.theme);
     std::string_view const arg1 = (argc >= 2) ? argv[1] : "";
     if (arg1 == "-h" || arg1 == "--help" || arg1 == "/?") {
         std::fputs("Usage: subuwutuner-gui [PROJECT.stune]\n"
