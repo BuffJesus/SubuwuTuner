@@ -414,6 +414,13 @@ struct AppState {
     // click of a node body, cleared on click of empty canvas, on
     // graph clear/load, and when the selected node is removed.
     std::optional<st::feature::NodeId>       features_selected_node;
+    // Canvas pan + zoom. `view_offset` translates graph-space
+    // coords to screen-space (post-canvas-origin), `view_scale`
+    // multiplies them. Defaults are identity. Middle-mouse drag
+    // updates the offset; the mouse wheel updates the scale and
+    // re-anchors the offset around the cursor.
+    ImVec2                                   features_view_offset{0.0f, 0.0f};
+    float                                    features_view_scale{1.0f};
     // Loaded once at startup, persisted on every successful open. See
     // recents_config_path() for the on-disk location.
     std::vector<RecentEntry>                 recents;
@@ -2408,6 +2415,9 @@ std::vector<ShortcutGroup> const &shortcuts_reference() {
             { "Drag body",    "Move a node (snaps to grid on "
                               "release)"                            },
             { "Drag pin → pin","Wire two pins"                      },
+            { "Middle-drag",  "Pan the canvas"                      },
+            { "Mouse wheel",  "Zoom in/out (anchored to cursor)"    },
+            { "Reset view",   "Toolbar button — reset pan + zoom"   },
             { "Esc / Right-click",
                               "Cancel an in-progress wire"          },
             { "Right-click",  "Context menu (delete node / "
@@ -5184,6 +5194,11 @@ void render_features_designer(AppState &state) {
         state.features_selected_node.reset();
     }
     ImGui::SameLine();
+    if (ImGui::Button("Reset view")) {
+        state.features_view_offset = ImVec2(0.0f, 0.0f);
+        state.features_view_scale  = 1.0f;
+    }
+    ImGui::SameLine();
     if (ImGui::Button("Save…")) {
         nfdu8filteritem_t filters[1] = {{"SubuwuTuner mod (TOML)", "stmod"}};
         NFD::UniquePathU8 out;
@@ -5240,16 +5255,19 @@ void render_features_designer(AppState &state) {
     }
     ImGui::TextDisabled("Click a node to select; Delete removes the "
                         "selection. Drag a node body to move; drag "
-                        "pin → pin to wire. Esc / right-click / "
-                        "release-on-empty cancels an in-progress "
-                        "wire. Right-click (when not wiring) for "
-                        "delete / disconnect.");
+                        "pin → pin to wire. Middle-drag pans, wheel "
+                        "zooms. Esc / right-click / release-on-empty "
+                        "cancels an in-progress wire. Right-click "
+                        "(when not wiring) for delete / disconnect.");
 
     ImGui::Spacing();
 
     // ---- Canvas ----------------------------------------------------
-    // Layout constants. Sized so a 3-pin node fits comfortably and the
-    // pin rows align on the standard ImGui text line height.
+    // Layout constants in graph space. The viewport applies a pan
+    // (`view_offset`) and zoom (`view_scale`) on top, so anything
+    // that converts a graph-space measurement to screen pixels has
+    // to multiply by `scale`. Snap-to-grid stays in graph space —
+    // the grid drawing scales but the snap step doesn't.
     constexpr float kNodeWidth      = 150.0f;
     constexpr float kHeaderHeight   = 24.0f;
     constexpr float kPinRowHeight   = 20.0f;
@@ -5264,19 +5282,77 @@ void render_features_designer(AppState &state) {
         std::max(240.0f, ImGui::GetContentRegionAvail().y - 8.0f));
     ImVec2 const canvas_end(canvas_p.x + canvas_sz.x,
                              canvas_p.y + canvas_sz.y);
+
+    // View transform. Lambdas take graph-space, return screen-space
+    // (and back). Kept as locals so the rest of the function can
+    // read `scale` directly when it's the cleaner expression.
+    float const  scale  = state.features_view_scale;
+    ImVec2 const offset = state.features_view_offset;
+    auto const   to_screen = [&](float gx, float gy) {
+        return ImVec2(canvas_p.x + offset.x + gx * scale,
+                       canvas_p.y + offset.y + gy * scale);
+    };
+
+    // Pan + zoom input. Middle-mouse drag pans; mouse wheel zooms
+    // anchored to the cursor (the graph point under the cursor stays
+    // put as the scale changes). Both gated on canvas hover so they
+    // don't fight with toolbar / context menus elsewhere in the panel.
+    bool const canvas_hovered =
+        ImGui::IsMouseHoveringRect(canvas_p, canvas_end)
+        && ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup);
+    if (canvas_hovered
+        && ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.0f)) {
+        ImVec2 const d = ImGui::GetIO().MouseDelta;
+        state.features_view_offset.x += d.x;
+        state.features_view_offset.y += d.y;
+    }
+    if (canvas_hovered) {
+        float const wheel = ImGui::GetIO().MouseWheel;
+        if (wheel != 0.0f) {
+            float const old_scale = state.features_view_scale;
+            float const factor    = wheel > 0.0f ? 1.1f : 1.0f / 1.1f;
+            float const new_scale = std::clamp(old_scale * factor,
+                                                 0.25f, 3.0f);
+            if (new_scale != old_scale) {
+                ImVec2 const m = ImGui::GetIO().MousePos;
+                // Graph-space point under the cursor at the old scale.
+                float const gx = (m.x - canvas_p.x - state.features_view_offset.x)
+                                  / old_scale;
+                float const gy = (m.y - canvas_p.y - state.features_view_offset.y)
+                                  / old_scale;
+                state.features_view_offset.x = m.x - canvas_p.x - gx * new_scale;
+                state.features_view_offset.y = m.y - canvas_p.y - gy * new_scale;
+                state.features_view_scale    = new_scale;
+            }
+        }
+    }
+
     auto * const dl       = ImGui::GetWindowDrawList();
     ImU32 const grid_col  = ImGui::GetColorU32(ImGuiCol_Separator);
     ImU32 const bg_col    = ImGui::GetColorU32(ImGuiCol_ChildBg);
     dl->AddRectFilled(canvas_p, canvas_end, bg_col);
-    for (float x = 0.0f; x < canvas_sz.x; x += kGridStep) {
-        dl->AddLine(ImVec2(canvas_p.x + x, canvas_p.y),
-                     ImVec2(canvas_p.x + x, canvas_p.y + canvas_sz.y),
-                     grid_col);
-    }
-    for (float y = 0.0f; y < canvas_sz.y; y += kGridStep) {
-        dl->AddLine(ImVec2(canvas_p.x,                canvas_p.y + y),
-                     ImVec2(canvas_p.x + canvas_sz.x, canvas_p.y + y),
-                     grid_col);
+    // Grid lines: drawn in graph-aligned screen positions. Hidden
+    // when the on-screen step would be too dense to be useful.
+    {
+        float const step_s = kGridStep * scale;
+        if (step_s >= 4.0f) {
+            float start_x = std::fmod(state.features_view_offset.x, step_s);
+            if (start_x > 0.0f) start_x -= step_s;
+            for (float x = start_x; x < canvas_sz.x; x += step_s) {
+                if (x < 0.0f) continue;
+                dl->AddLine(ImVec2(canvas_p.x + x, canvas_p.y),
+                             ImVec2(canvas_p.x + x, canvas_p.y + canvas_sz.y),
+                             grid_col);
+            }
+            float start_y = std::fmod(state.features_view_offset.y, step_s);
+            if (start_y > 0.0f) start_y -= step_s;
+            for (float y = start_y; y < canvas_sz.y; y += step_s) {
+                if (y < 0.0f) continue;
+                dl->AddLine(ImVec2(canvas_p.x,                canvas_p.y + y),
+                             ImVec2(canvas_p.x + canvas_sz.x, canvas_p.y + y),
+                             grid_col);
+            }
+        }
     }
     dl->PushClipRect(canvas_p, canvas_end, true);
 
@@ -5326,6 +5402,15 @@ void render_features_designer(AppState &state) {
         pending_delete_node = state.features_selected_node;
     }
 
+    ImFont * const fnt      = ImGui::GetFont();
+    float const    fnt_sz_s = ImGui::GetFontSize() * scale;
+    float const    hdr_h_s  = kHeaderHeight   * scale;
+    float const    row_h_s  = kPinRowHeight   * scale;
+    float const    foot_s   = kFooterPadding  * scale;
+    float const    width_s  = kNodeWidth      * scale;
+    float const    pin_r_s  = kPinRadius      * scale;
+    float const    pin_hr_s = kPinHitRadius   * scale;
+
     for (auto const &n : nodes) {
         std::size_t const inputs  = static_cast<std::size_t>(std::count_if(
             n.pins.begin(), n.pins.end(),
@@ -5338,12 +5423,12 @@ void render_features_designer(AppState &state) {
                 return p.direction == st::feature::PinDirection::Output;
             }));
         std::size_t const rows    = std::max<std::size_t>(1, std::max(inputs, outputs));
-        float const node_h = kHeaderHeight
-                             + static_cast<float>(rows) * kPinRowHeight
-                             + kFooterPadding;
+        float const node_h_s = hdr_h_s
+                               + static_cast<float>(rows) * row_h_s
+                               + foot_s;
 
-        ImVec2 const node_tl(canvas_p.x + n.x, canvas_p.y + n.y);
-        ImVec2 const node_br(node_tl.x + kNodeWidth, node_tl.y + node_h);
+        ImVec2 const node_tl = to_screen(n.x, n.y);
+        ImVec2 const node_br(node_tl.x + width_s, node_tl.y + node_h_s);
 
         // Body hit zone — InvisibleButton lives at the body origin so
         // ImGui's IsItemActive + drag-delta machinery handles the
@@ -5352,7 +5437,7 @@ void render_features_designer(AppState &state) {
         std::snprintf(body_id, sizeof body_id, "##fnode_%u",
                        static_cast<unsigned>(n.id));
         ImGui::SetCursorScreenPos(node_tl);
-        ImGui::InvisibleButton(body_id, ImVec2(kNodeWidth, node_h));
+        ImGui::InvisibleButton(body_id, ImVec2(width_s, node_h_s));
         bool const body_active        = ImGui::IsItemActive();
         bool const body_deactivated   = ImGui::IsItemDeactivated();
         bool const body_left_clicked  =
@@ -5364,14 +5449,20 @@ void render_features_designer(AppState &state) {
         }
         if (body_active
             && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
+            // Mouse delta is in screen pixels; convert back to graph
+            // space before storing — otherwise a zoomed-in canvas
+            // would over-shoot moves and a zoomed-out one would lag.
             ImVec2 const d = ImGui::GetIO().MouseDelta;
-            state.features_graph.set_node_position(n.id, n.x + d.x, n.y + d.y);
+            state.features_graph.set_node_position(
+                n.id, n.x + d.x / scale, n.y + d.y / scale);
         }
         // Snap-to-grid on drag release. IsItemDeactivated fires once
         // on the frame the active button stops being active — exactly
         // the "user just let go" event we want. Snap is intentionally
         // release-only (not live) so the drag feels smooth and the
-        // tidy-up happens after the user commits the move.
+        // tidy-up happens after the user commits the move. The step
+        // is in graph space, so the snapped position stays consistent
+        // across zoom levels.
         if (body_deactivated) {
             float const sx = std::round(n.x / kGridStep) * kGridStep;
             float const sy = std::round(n.y / kGridStep) * kGridStep;
@@ -5407,16 +5498,19 @@ void render_features_designer(AppState &state) {
         dl->AddRectFilled(node_tl, node_br, node_bg, 6.0f);
         dl->AddRectFilled(
             node_tl,
-            ImVec2(node_br.x, node_tl.y + kHeaderHeight),
+            ImVec2(node_br.x, node_tl.y + hdr_h_s),
             hdr_bg, 6.0f, ImDrawFlags_RoundCornersTop);
         ImU32 const this_brd =
             is_selected ? ImGui::GetColorU32(accent.base) : node_brd;
         float const this_thick = is_selected ? 2.5f : 1.0f;
         dl->AddRect(node_tl, node_br, this_brd, 6.0f, 0, this_thick);
-        // Header label.
+        // Header label. Drawn at the scaled font size so it tracks
+        // the zoom level — ImGui's default AddText overload uses the
+        // active font size, which is wrong here.
         char const *label = n.label.empty() ? n.kind.c_str() : n.label.c_str();
-        dl->AddText(ImVec2(node_tl.x + 8.0f,
-                            node_tl.y + (kHeaderHeight - ImGui::GetTextLineHeight()) * 0.5f),
+        dl->AddText(fnt, fnt_sz_s,
+                     ImVec2(node_tl.x + 8.0f * scale,
+                             node_tl.y + (hdr_h_s - fnt_sz_s) * 0.5f),
                      txt_col, label);
 
         // Lay pins out by direction. Inputs sit on the left edge,
@@ -5428,22 +5522,26 @@ void render_features_designer(AppState &state) {
             bool const is_input = p.direction == st::feature::PinDirection::Input;
             std::size_t const row_idx = is_input ? in_idx++ : out_idx++;
             float const row_center_y =
-                node_tl.y + kHeaderHeight
-                + (static_cast<float>(row_idx) + 0.5f) * kPinRowHeight;
+                node_tl.y + hdr_h_s
+                + (static_cast<float>(row_idx) + 0.5f) * row_h_s;
             float const pin_x = is_input ? node_tl.x : node_br.x;
             ImVec2 const pin_center(pin_x, row_center_y);
 
-            dl->AddCircleFilled(pin_center, kPinRadius, pin_fill);
-            dl->AddCircle      (pin_center, kPinRadius, pin_brd);
-            // Pin name beside the circle, on the inside edge.
+            dl->AddCircleFilled(pin_center, pin_r_s, pin_fill);
+            dl->AddCircle      (pin_center, pin_r_s, pin_brd);
+            // Pin name beside the circle, on the inside edge. Text
+            // width measured at the scaled font size so the trailing
+            // offset for output pins stays correct under zoom.
+            ImVec2 const text_size =
+                fnt->CalcTextSizeA(fnt_sz_s, FLT_MAX, 0.0f, p.name.c_str());
             ImVec2 const text_pos =
                 is_input
-                    ? ImVec2(pin_center.x + kPinRadius + 6.0f,
-                              row_center_y - ImGui::GetTextLineHeight() * 0.5f)
-                    : ImVec2(pin_center.x - kPinRadius - 6.0f
-                                - ImGui::CalcTextSize(p.name.c_str()).x,
-                              row_center_y - ImGui::GetTextLineHeight() * 0.5f);
-            dl->AddText(text_pos, txt_col, p.name.c_str());
+                    ? ImVec2(pin_center.x + pin_r_s + 6.0f * scale,
+                              row_center_y - fnt_sz_s * 0.5f)
+                    : ImVec2(pin_center.x - pin_r_s - 6.0f * scale
+                                - text_size.x,
+                              row_center_y - fnt_sz_s * 0.5f);
+            dl->AddText(fnt, fnt_sz_s, text_pos, txt_col, p.name.c_str());
 
             pin_positions.push_back(PinPos{n.id, p.id, p.direction,
                                             p.type, pin_center});
@@ -5461,11 +5559,11 @@ void render_features_designer(AppState &state) {
                            static_cast<unsigned>(n.id),
                            static_cast<unsigned>(p.id));
             ImGui::SetCursorScreenPos(
-                ImVec2(pin_center.x - kPinHitRadius,
-                        pin_center.y - kPinHitRadius));
+                ImVec2(pin_center.x - pin_hr_s,
+                        pin_center.y - pin_hr_s));
             ImGui::InvisibleButton(pin_id_buf,
-                                    ImVec2(kPinHitRadius * 2.0f,
-                                           kPinHitRadius * 2.0f));
+                                    ImVec2(pin_hr_s * 2.0f,
+                                           pin_hr_s * 2.0f));
             bool const pin_hovered = ImGui::IsItemHovered();
             bool const pin_active  = ImGui::IsItemActive();
             // Tooltip with type info on hover.
@@ -5552,7 +5650,7 @@ void render_features_designer(AppState &state) {
                 if (from != nullptr
                     && from->direction != p.direction
                     && from->type      == p.type) {
-                    dl->AddCircle(pin_center, kPinRadius + 3.0f,
+                    dl->AddCircle(pin_center, pin_r_s + 3.0f * scale,
                                    pin_fill, 0, 2.0f);
                 }
             }
@@ -5616,7 +5714,7 @@ void render_features_designer(AppState &state) {
                 }
                 float const dx = pp.pos.x - mouse.x;
                 float const dy = pp.pos.y - mouse.y;
-                if (dx * dx + dy * dy <= kPinHitRadius * kPinHitRadius) {
+                if (dx * dx + dy * dy <= pin_hr_s * pin_hr_s) {
                     target = &pp;
                     break;
                 }
