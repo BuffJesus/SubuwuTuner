@@ -392,10 +392,24 @@ struct AppState {
     std::size_t                              selected_z{0};
     bool                                     show_imgui_demo{false};
     bool                                     show_shortcuts_modal{false};
-    // Phase 5 placeholder. Custom-features designer; data model lives
-    // in st::feature, GUI is a stub. Hidden behind View → Debug.
+    // Phase 5 custom-features designer. Hidden behind View → Debug.
+    // Graph data model lives in st::feature; the wiring fields below
+    // are transient editor state (only meaningful while the user is
+    // mid-drag on a pin) and reset on completion or escape.
     bool                                     show_features_designer{false};
     st::feature::Graph                       features_graph;
+    bool                                     features_wiring_active{false};
+    st::feature::NodeId                      features_wiring_from_node{0};
+    st::feature::PinId                       features_wiring_from_pin{0};
+    // Set true when Esc / right-click cancels a wire; blocks the
+    // pin-drag handler from spawning a fresh wire while the mouse
+    // is still held over the source pin. Cleared when the mouse
+    // button is released.
+    bool                                     features_wiring_blocked{false};
+    // Last connect-attempt error. Surfaced under the canvas when a
+    // wire is rejected (type mismatch, fan-in, etc.); cleared on the
+    // next successful connect or when a drag starts.
+    std::string                              features_wire_error;
     // Loaded once at startup, persisted on every successful open. See
     // recents_config_path() for the on-disk location.
     std::vector<RecentEntry>                 recents;
@@ -5070,36 +5084,88 @@ void render_features_designer(AppState &state) {
         return;
     }
 
+    // Esc / right-click cancel an in-progress wire. The non-obvious
+    // bit is the `features_wiring_blocked` latch: ImGui DOES detect
+    // Esc fine, but the pin-drag handler below re-spawns a wire on
+    // the next frame because the mouse is still held over the source
+    // pin. Latch suppresses re-spawn until the mouse button is
+    // released.
+    if (state.features_wiring_active
+        && (ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false)
+            || ImGui::IsMouseClicked(ImGuiMouseButton_Right))) {
+        state.features_wiring_active  = false;
+        state.features_wiring_blocked = true;
+    }
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        state.features_wiring_blocked = false;
+    }
+
     ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f),
                         "\xE2\x9A\xA0 Phase 5 preview.");
-    ImGui::TextDisabled("Data model: st::feature::Graph (built, tested).");
-    ImGui::TextDisabled("Editor:     placeholder — canvas / nodes / wires "
-                        "land in follow-ups.");
-    ImGui::TextDisabled("See docs/16-custom-features.md for the planned "
-                        "design.");
+    ImGui::TextDisabled("See docs/16-custom-features.md for the full "
+                        "design. Codegen, IR, and .stmod persistence "
+                        "land in later phases.");
 
     ImGui::Spacing();
-    ImGui::SeparatorText("Graph state");
     ImGui::Text("Nodes: %zu     Edges: %zu",
                  state.features_graph.nodes().size(),
                  state.features_graph.edges().size());
 
-    if (ImGui::Button("Add test source (rpm, Float out)")) {
+    // Helper-lambda for spawning test nodes at a free-ish slot.
+    auto const next_slot_y = [&]() {
+        return 40.0f + 80.0f * static_cast<float>(
+                              state.features_graph.nodes().size());
+    };
+    if (ImGui::Button("Add source (Float out)")) {
         st::feature::Node n;
-        n.kind  = "sensor.rpm";
-        n.label = "RPM";
+        n.kind  = "sensor.float";
+        n.label = "Source";
         n.x     = 40.0f;
-        n.y     = 40.0f + 60.0f
-                  * static_cast<float>(state.features_graph.nodes().size());
+        n.y     = next_slot_y();
         n.pins.push_back(st::feature::Pin{
             0, "out", st::feature::PinType::Float,
-            st::feature::PinDirection::Output, "rpm"});
+            st::feature::PinDirection::Output, ""});
+        state.features_graph.add_node(std::move(n));
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Add sink (Float in)")) {
+        st::feature::Node n;
+        n.kind  = "output.float";
+        n.label = "Sink";
+        n.x     = 320.0f;
+        n.y     = next_slot_y();
+        n.pins.push_back(st::feature::Pin{
+            0, "in", st::feature::PinType::Float,
+            st::feature::PinDirection::Input, ""});
+        state.features_graph.add_node(std::move(n));
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Add 2-in/1-out (Float)")) {
+        // A multi-pin node — useful for verifying that pin layout
+        // handles more than one row per side.
+        st::feature::Node n;
+        n.kind  = "math.add";
+        n.label = "Add";
+        n.x     = 180.0f;
+        n.y     = next_slot_y();
+        n.pins.push_back(st::feature::Pin{
+            0, "a",   st::feature::PinType::Float,
+            st::feature::PinDirection::Input,  ""});
+        n.pins.push_back(st::feature::Pin{
+            1, "b",   st::feature::PinType::Float,
+            st::feature::PinDirection::Input,  ""});
+        n.pins.push_back(st::feature::Pin{
+            2, "out", st::feature::PinType::Float,
+            st::feature::PinDirection::Output, ""});
         state.features_graph.add_node(std::move(n));
     }
     ImGui::SameLine();
     if (ImGui::Button("Clear graph")) {
         state.features_graph = st::feature::Graph{};
+        state.features_wiring_active = false;
+        state.features_wire_error.clear();
     }
+
     if (auto v = state.features_graph.validate(); !v.has_value()) {
         ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
                             "validate: %s", v.error().to_string().c_str());
@@ -5107,45 +5173,310 @@ void render_features_designer(AppState &state) {
         ImGui::TextDisabled("validate: ok");
     }
 
+    if (!state.features_wire_error.empty()) {
+        ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
+                            "wire: %s", state.features_wire_error.c_str());
+    }
+    ImGui::TextDisabled("Drag a node body to move; drag from one pin "
+                        "to another to wire. Esc or right-click "
+                        "cancels an in-progress wire (or release the "
+                        "mouse over empty canvas).");
+
     ImGui::Spacing();
-    ImGui::SeparatorText("Canvas (placeholder)");
-    // A grid-backed canvas so the panel feels like the eventual node
-    // editor rather than a debug dialog. Just a draw-list demo for
-    // now; nodes / edges land in a follow-up commit.
-    ImVec2 const canvas_p   = ImGui::GetCursorScreenPos();
-    ImVec2 const canvas_sz  = ImVec2(
+
+    // ---- Canvas ----------------------------------------------------
+    // Layout constants. Sized so a 3-pin node fits comfortably and the
+    // pin rows align on the standard ImGui text line height.
+    constexpr float kNodeWidth      = 150.0f;
+    constexpr float kHeaderHeight   = 24.0f;
+    constexpr float kPinRowHeight   = 20.0f;
+    constexpr float kPinRadius      =  5.0f;
+    constexpr float kPinHitRadius   = 10.0f;
+    constexpr float kFooterPadding  =  8.0f;
+    constexpr float kGridStep       = 24.0f;
+
+    ImVec2 const canvas_p  = ImGui::GetCursorScreenPos();
+    ImVec2 const canvas_sz = ImVec2(
         std::max(120.0f, ImGui::GetContentRegionAvail().x),
-        std::max(120.0f, ImGui::GetContentRegionAvail().y - 8.0f));
-    auto * const dl         = ImGui::GetWindowDrawList();
-    ImU32 const grid_col    = ImGui::GetColorU32(ImGuiCol_Separator);
-    ImU32 const bg_col      = ImGui::GetColorU32(ImGuiCol_ChildBg);
-    dl->AddRectFilled(canvas_p,
-                       ImVec2(canvas_p.x + canvas_sz.x,
-                              canvas_p.y + canvas_sz.y), bg_col);
-    constexpr float kGridStep = 24.0f;
-    for (float x = std::fmod(0.0f, kGridStep); x < canvas_sz.x; x += kGridStep) {
+        std::max(240.0f, ImGui::GetContentRegionAvail().y - 8.0f));
+    ImVec2 const canvas_end(canvas_p.x + canvas_sz.x,
+                             canvas_p.y + canvas_sz.y);
+    auto * const dl       = ImGui::GetWindowDrawList();
+    ImU32 const grid_col  = ImGui::GetColorU32(ImGuiCol_Separator);
+    ImU32 const bg_col    = ImGui::GetColorU32(ImGuiCol_ChildBg);
+    dl->AddRectFilled(canvas_p, canvas_end, bg_col);
+    for (float x = 0.0f; x < canvas_sz.x; x += kGridStep) {
         dl->AddLine(ImVec2(canvas_p.x + x, canvas_p.y),
                      ImVec2(canvas_p.x + x, canvas_p.y + canvas_sz.y),
                      grid_col);
     }
-    for (float y = std::fmod(0.0f, kGridStep); y < canvas_sz.y; y += kGridStep) {
+    for (float y = 0.0f; y < canvas_sz.y; y += kGridStep) {
         dl->AddLine(ImVec2(canvas_p.x,                canvas_p.y + y),
                      ImVec2(canvas_p.x + canvas_sz.x, canvas_p.y + y),
                      grid_col);
     }
-    // Render any added nodes as labeled rectangles. Drag + edges are
-    // future work; this just confirms the data model is wired through.
-    ImU32 const node_bg  = ImGui::GetColorU32(ImGuiCol_FrameBg);
-    ImU32 const node_brd = ImGui::GetColorU32(ImGuiCol_Border);
-    ImU32 const txt_col  = ImGui::GetColorU32(ImGuiCol_Text);
-    for (auto const &n : state.features_graph.nodes()) {
-        ImVec2 const top_left(canvas_p.x + n.x, canvas_p.y + n.y);
-        ImVec2 const btm_rt  (top_left.x + 140.0f, top_left.y + 48.0f);
-        dl->AddRectFilled(top_left, btm_rt, node_bg, 4.0f);
-        dl->AddRect      (top_left, btm_rt, node_brd, 4.0f);
-        dl->AddText(ImVec2(top_left.x + 8.0f, top_left.y + 6.0f), txt_col,
-                     n.label.empty() ? n.kind.c_str() : n.label.c_str());
+    dl->PushClipRect(canvas_p, canvas_end, true);
+
+    // Per-pin screen-position cache. Built while drawing nodes and
+    // read when rendering edges + during wiring hit-tests.
+    struct PinPos {
+        st::feature::NodeId       node_id;
+        st::feature::PinId        pin_id;
+        st::feature::PinDirection direction;
+        st::feature::PinType      type;
+        ImVec2                    pos;
+    };
+    std::vector<PinPos> pin_positions;
+    pin_positions.reserve(state.features_graph.nodes().size() * 3);
+
+    // Pin appearance constants — derived from the active accent. The
+    // pin fill matches the type's category (today only Float/Int/Bool
+    // share one color; future work could vary).
+    auto const          accent     = accent_for(state.settings.theme);
+    ImU32 const         pin_fill   = ImGui::GetColorU32(accent.base);
+    ImU32 const         pin_brd    = ImGui::GetColorU32(ImGuiCol_Border);
+    ImU32 const         node_bg    = ImGui::GetColorU32(ImGuiCol_FrameBg);
+    ImU32 const         node_brd   = ImGui::GetColorU32(ImGuiCol_Border);
+    ImU32 const         hdr_bg     = ImGui::GetColorU32(ImGuiCol_TitleBgActive);
+    ImU32 const         txt_col    = ImGui::GetColorU32(ImGuiCol_Text);
+    ImU32 const         disabled_t = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    (void)disabled_t;  // reserved for future pin labels in disabled state
+
+    // Snapshot the nodes by id so we can iterate stably while issuing
+    // ImGui::InvisibleButton hit-tests (the node positions get
+    // mutated mid-loop via set_node_position).
+    auto const &nodes = state.features_graph.nodes();
+
+    for (auto const &n : nodes) {
+        std::size_t const inputs  = static_cast<std::size_t>(std::count_if(
+            n.pins.begin(), n.pins.end(),
+            [](st::feature::Pin const &p) {
+                return p.direction == st::feature::PinDirection::Input;
+            }));
+        std::size_t const outputs = static_cast<std::size_t>(std::count_if(
+            n.pins.begin(), n.pins.end(),
+            [](st::feature::Pin const &p) {
+                return p.direction == st::feature::PinDirection::Output;
+            }));
+        std::size_t const rows    = std::max<std::size_t>(1, std::max(inputs, outputs));
+        float const node_h = kHeaderHeight
+                             + static_cast<float>(rows) * kPinRowHeight
+                             + kFooterPadding;
+
+        ImVec2 const node_tl(canvas_p.x + n.x, canvas_p.y + n.y);
+        ImVec2 const node_br(node_tl.x + kNodeWidth, node_tl.y + node_h);
+
+        // Body hit zone — InvisibleButton lives at the body origin so
+        // ImGui's IsItemActive + drag-delta machinery handles the
+        // move logic without needing manual click bookkeeping.
+        char body_id[24];
+        std::snprintf(body_id, sizeof body_id, "##fnode_%u",
+                       static_cast<unsigned>(n.id));
+        ImGui::SetCursorScreenPos(node_tl);
+        ImGui::InvisibleButton(body_id, ImVec2(kNodeWidth, node_h));
+        bool const body_active = ImGui::IsItemActive();
+        if (body_active
+            && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
+            ImVec2 const d = ImGui::GetIO().MouseDelta;
+            state.features_graph.set_node_position(n.id, n.x + d.x, n.y + d.y);
+        }
+
+        // Draw chrome.
+        dl->AddRectFilled(node_tl, node_br, node_bg, 6.0f);
+        dl->AddRectFilled(
+            node_tl,
+            ImVec2(node_br.x, node_tl.y + kHeaderHeight),
+            hdr_bg, 6.0f, ImDrawFlags_RoundCornersTop);
+        dl->AddRect(node_tl, node_br, node_brd, 6.0f);
+        // Header label.
+        char const *label = n.label.empty() ? n.kind.c_str() : n.label.c_str();
+        dl->AddText(ImVec2(node_tl.x + 8.0f,
+                            node_tl.y + (kHeaderHeight - ImGui::GetTextLineHeight()) * 0.5f),
+                     txt_col, label);
+
+        // Lay pins out by direction. Inputs sit on the left edge,
+        // outputs on the right; both vertically distributed within
+        // the pin-row band.
+        std::size_t in_idx  = 0;
+        std::size_t out_idx = 0;
+        for (auto const &p : n.pins) {
+            bool const is_input = p.direction == st::feature::PinDirection::Input;
+            std::size_t const row_idx = is_input ? in_idx++ : out_idx++;
+            float const row_center_y =
+                node_tl.y + kHeaderHeight
+                + (static_cast<float>(row_idx) + 0.5f) * kPinRowHeight;
+            float const pin_x = is_input ? node_tl.x : node_br.x;
+            ImVec2 const pin_center(pin_x, row_center_y);
+
+            dl->AddCircleFilled(pin_center, kPinRadius, pin_fill);
+            dl->AddCircle      (pin_center, kPinRadius, pin_brd);
+            // Pin name beside the circle, on the inside edge.
+            ImVec2 const text_pos =
+                is_input
+                    ? ImVec2(pin_center.x + kPinRadius + 6.0f,
+                              row_center_y - ImGui::GetTextLineHeight() * 0.5f)
+                    : ImVec2(pin_center.x - kPinRadius - 6.0f
+                                - ImGui::CalcTextSize(p.name.c_str()).x,
+                              row_center_y - ImGui::GetTextLineHeight() * 0.5f);
+            dl->AddText(text_pos, txt_col, p.name.c_str());
+
+            pin_positions.push_back(PinPos{n.id, p.id, p.direction,
+                                            p.type, pin_center});
+
+            // Pin hit zone — slightly larger than the visible circle
+            // so the pin is easy to grab. Tracked by InvisibleButton
+            // so we can detect drag start cleanly without colliding
+            // with the body's hit zone (which we cover with the body
+            // button above; ImGui's last-issued button wins on overlap,
+            // so issuing the pin zone AFTER the body means the pin
+            // takes precedence in the overlap region).
+            char pin_id_buf[40];
+            std::snprintf(pin_id_buf, sizeof pin_id_buf,
+                           "##fpin_%u_%u",
+                           static_cast<unsigned>(n.id),
+                           static_cast<unsigned>(p.id));
+            ImGui::SetCursorScreenPos(
+                ImVec2(pin_center.x - kPinHitRadius,
+                        pin_center.y - kPinHitRadius));
+            ImGui::InvisibleButton(pin_id_buf,
+                                    ImVec2(kPinHitRadius * 2.0f,
+                                           kPinHitRadius * 2.0f));
+            bool const pin_hovered = ImGui::IsItemHovered();
+            bool const pin_active  = ImGui::IsItemActive();
+            // Tooltip with type info on hover.
+            if (pin_hovered) {
+                ImGui::SetTooltip("%s : %s%s%s",
+                                   p.name.c_str(),
+                                   st::feature::pin_type_name(p.type),
+                                   p.unit.empty() ? "" : "  ",
+                                   p.unit.c_str());
+            }
+            // Start wiring on drag-out from a pin. The wiring is
+            // bi-directional intent: dragging from an output starts a
+            // wire heading toward an input; dragging from an input
+            // starts a wire heading toward an output. We resolve the
+            // direction on drop so the user doesn't have to think
+            // about pin polarity.
+            if (pin_active
+                && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 4.0f)
+                && !state.features_wiring_active
+                && !state.features_wiring_blocked) {
+                state.features_wiring_active     = true;
+                state.features_wiring_from_node  = n.id;
+                state.features_wiring_from_pin   = p.id;
+                state.features_wire_error.clear();
+            }
+            // Highlight pins that would accept the in-flight wire.
+            if (state.features_wiring_active
+                && (state.features_wiring_from_node != n.id
+                    || state.features_wiring_from_pin != p.id)) {
+                auto const *from = state.features_graph.find_pin(
+                    state.features_wiring_from_node,
+                    state.features_wiring_from_pin);
+                if (from != nullptr
+                    && from->direction != p.direction
+                    && from->type      == p.type) {
+                    dl->AddCircle(pin_center, kPinRadius + 3.0f,
+                                   pin_fill, 0, 2.0f);
+                }
+            }
+        }
     }
+
+    // ---- Edge rendering -------------------------------------------
+    // Render after nodes so the bezier hosts on top of the chrome
+    // looks intentional. Walks the cached pin positions to find
+    // endpoints; if an edge references a pin that didn't render
+    // (e.g. mid-animation removal), skip it.
+    ImU32 const edge_col = ImGui::GetColorU32(accent.base);
+    auto const find_pos = [&](st::feature::NodeId nid,
+                               st::feature::PinId pid) -> ImVec2 const * {
+        for (auto const &pp : pin_positions) {
+            if (pp.node_id == nid && pp.pin_id == pid) return &pp.pos;
+        }
+        return nullptr;
+    };
+    for (auto const &e : state.features_graph.edges()) {
+        auto const *p1 = find_pos(e.from_node, e.from_pin);
+        auto const *p2 = find_pos(e.to_node,   e.to_pin);
+        if (p1 == nullptr || p2 == nullptr) continue;
+        float const dist = std::max(40.0f, std::abs(p2->x - p1->x) * 0.5f);
+        ImVec2 const c1(p1->x + dist, p1->y);
+        ImVec2 const c2(p2->x - dist, p2->y);
+        dl->AddBezierCubic(*p1, c1, c2, *p2, edge_col, 2.5f);
+    }
+
+    // ---- In-progress wire ------------------------------------------
+    if (state.features_wiring_active) {
+        auto const *from_pos = find_pos(state.features_wiring_from_node,
+                                          state.features_wiring_from_pin);
+        if (from_pos != nullptr) {
+            ImVec2 const mouse = ImGui::GetIO().MousePos;
+            float const dist = std::max(40.0f, std::abs(mouse.x - from_pos->x) * 0.5f);
+            auto const *from = state.features_graph.find_pin(
+                state.features_wiring_from_node,
+                state.features_wiring_from_pin);
+            bool const from_is_output =
+                from != nullptr
+                && from->direction == st::feature::PinDirection::Output;
+            ImVec2 const c1 = from_is_output
+                ? ImVec2(from_pos->x + dist, from_pos->y)
+                : ImVec2(from_pos->x - dist, from_pos->y);
+            ImVec2 const c2 = from_is_output
+                ? ImVec2(mouse.x - dist, mouse.y)
+                : ImVec2(mouse.x + dist, mouse.y);
+            dl->AddBezierCubic(*from_pos, c1, c2, mouse, edge_col, 2.0f);
+        }
+
+        // Mouse-up while wiring: try to land on a pin. Hit-test by
+        // distance to the cached pin centers.
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+            ImVec2 const mouse = ImGui::GetIO().MousePos;
+            PinPos const *target = nullptr;
+            for (auto const &pp : pin_positions) {
+                if (pp.node_id == state.features_wiring_from_node
+                    && pp.pin_id == state.features_wiring_from_pin) {
+                    continue;
+                }
+                float const dx = pp.pos.x - mouse.x;
+                float const dy = pp.pos.y - mouse.y;
+                if (dx * dx + dy * dy <= kPinHitRadius * kPinHitRadius) {
+                    target = &pp;
+                    break;
+                }
+            }
+            if (target != nullptr) {
+                auto const *from = state.features_graph.find_pin(
+                    state.features_wiring_from_node,
+                    state.features_wiring_from_pin);
+                if (from != nullptr) {
+                    // Normalize endpoints to (output → input) regardless
+                    // of which pin the user grabbed first.
+                    st::feature::NodeId src_n = state.features_wiring_from_node;
+                    st::feature::PinId  src_p = state.features_wiring_from_pin;
+                    st::feature::NodeId dst_n = target->node_id;
+                    st::feature::PinId  dst_p = target->pin_id;
+                    if (from->direction == st::feature::PinDirection::Input) {
+                        std::swap(src_n, dst_n);
+                        std::swap(src_p, dst_p);
+                    }
+                    auto r = state.features_graph.connect(src_n, src_p,
+                                                           dst_n, dst_p);
+                    if (!r.has_value()) {
+                        state.features_wire_error = r.error().to_string();
+                    } else {
+                        state.features_wire_error.clear();
+                    }
+                }
+            }
+            state.features_wiring_active = false;
+        }
+    }
+
+    dl->PopClipRect();
+    // Reserve the canvas footprint so the rest of the window scrolls
+    // sensibly when more nodes are added than fit.
+    ImGui::SetCursorScreenPos(canvas_p);
     ImGui::Dummy(canvas_sz);
 
     ImGui::End();

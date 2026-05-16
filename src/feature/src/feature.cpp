@@ -90,6 +90,16 @@ void Graph::remove_node(NodeId id) {
                   edges_.end());
 }
 
+void Graph::set_node_position(NodeId id, float x, float y) {
+    for (auto &n : nodes_) {
+        if (n.id == id) {
+            n.x = x;
+            n.y = y;
+            return;
+        }
+    }
+}
+
 void Graph::remove_edge(Edge const &target) {
     edges_.erase(std::remove_if(edges_.begin(), edges_.end(),
                                  [&](Edge const &e) {

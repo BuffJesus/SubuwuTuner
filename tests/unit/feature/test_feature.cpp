@@ -100,6 +100,21 @@ TEST_CASE("Graph::validate flags a two-node cycle", "[feature][graph]") {
     REQUIRE_FALSE(r.has_value());
 }
 
+TEST_CASE("Graph::set_node_position updates position",
+          "[feature][graph]") {
+    st::feature::Graph g;
+    auto const a = g.add_node(make_source_node("a", st::feature::PinType::Float));
+    g.set_node_position(a, 123.5f, 456.25f);
+    auto const *n = g.find_node(a);
+    REQUIRE(n != nullptr);
+    REQUIRE(n->x == 123.5f);
+    REQUIRE(n->y == 456.25f);
+    // Idempotent on unknown ids.
+    g.set_node_position(static_cast<st::feature::NodeId>(99999),
+                         1.0f, 2.0f);
+    REQUIRE(g.nodes().size() == 1);
+}
+
 TEST_CASE("Graph::validate accepts a clean DAG", "[feature][graph]") {
     st::feature::Graph g;
     auto const a = g.add_node(make_source_node("rpm",  st::feature::PinType::Float));

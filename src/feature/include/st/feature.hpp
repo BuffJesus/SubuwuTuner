@@ -123,6 +123,12 @@ class Graph {
     // non-existent ids.
     void remove_node(NodeId id);
 
+    // Update a node's editor position. Idempotent on unknown ids.
+    // The renderer calls this when the user drags a node so the new
+    // position persists into the graph data model rather than living
+    // in transient editor state.
+    void set_node_position(NodeId id, float x, float y);
+
     // Remove a specific edge. Idempotent.
     void remove_edge(Edge const &edge);
 
