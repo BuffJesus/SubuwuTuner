@@ -390,6 +390,7 @@ struct AppState {
     TableViewMode                            view_mode{TableViewMode::Grid};
     std::size_t                              selected_z{0};
     bool                                     show_imgui_demo{false};
+    bool                                     show_shortcuts_modal{false};
     // Loaded once at startup, persisted on every successful open. See
     // recents_config_path() for the on-disk location.
     std::vector<RecentEntry>                 recents;
@@ -2341,6 +2342,99 @@ void render_maf_autotune_modal(AppState &state) {
     ImGui::EndPopup();
 }
 
+// Static help reference. Lists every binding the GUI listens for,
+// grouped by context. Single source of truth — when a new shortcut
+// lands, add a row here.
+struct ShortcutRow { char const *binding; char const *description; };
+struct ShortcutGroup { char const *heading; std::vector<ShortcutRow> rows; };
+
+std::vector<ShortcutGroup> const &shortcuts_reference() {
+    static std::vector<ShortcutGroup> const groups = {
+        { "Global", {
+            { "Ctrl+O",       "Open project…"                       },
+            { "Ctrl+S",       "Save project"                        },
+            { "Ctrl+Q",       "Quit (with unsaved-changes guard)"   },
+            { "Ctrl+F",       "Focus the sidebar table filter"      },
+            { "Ctrl+Z",       "Undo last edit"                      },
+            { "Ctrl+Shift+Z", "Redo (alt: Ctrl+Y)"                  },
+        }},
+        { "Table grid", {
+            { "Arrows",       "Move cursor cell"                    },
+            { "Shift+Arrows", "Extend selection from cursor"        },
+            { "Click",        "Select cell"                         },
+            { "Shift+Click",  "Extend selection to clicked cell"    },
+            { "F2",           "Start editing the cursor cell"       },
+            { "Enter",        "Commit value (or Ctrl+Enter to "
+                              "fill every selected cell)"           },
+            { "Esc",          "Cancel the in-cell editor"           },
+            { "Ctrl+C",       "Copy selection as tab-separated "
+                              "values"                              },
+            { "Ctrl+V",       "Paste tab-separated values at "
+                              "cursor"                              },
+        }},
+        { "Modals", {
+            { "Enter",        "Primary action (Save / Apply / "
+                              "Create — whatever is the "
+                              "highlighted button)"                 },
+            { "Esc",          "Close / cancel without applying"     },
+        }},
+    };
+    return groups;
+}
+
+// Help → Keyboard shortcuts reference. Read-only, scrollable, two
+// columns. Esc closes.
+void render_shortcuts_modal(AppState &state) {
+    if (state.show_shortcuts_modal) {
+        ImGui::OpenPopup("Keyboard shortcuts##shortcuts_modal");
+        state.show_shortcuts_modal = false;
+    }
+    ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(560.0f, 380.0f),
+                                         ImVec2(900.0f, 720.0f));
+    if (!ImGui::BeginPopupModal("Keyboard shortcuts##shortcuts_modal", nullptr,
+                                  ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+
+    ImGui::TextDisabled("All bindings the GUI listens for, grouped by "
+                        "context.");
+    ImGui::Spacing();
+
+    for (auto const &group : shortcuts_reference()) {
+        ImGui::SeparatorText(group.heading);
+        if (ImGui::BeginTable(group.heading, 2,
+                               ImGuiTableFlags_RowBg
+                               | ImGuiTableFlags_BordersInnerH
+                               | ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("binding",
+                                     ImGuiTableColumnFlags_WidthFixed, 180.0f);
+            ImGui::TableSetupColumn("description",
+                                     ImGuiTableColumnFlags_WidthStretch);
+            for (auto const &row : group.rows) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(row.binding);
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextUnformatted(row.description);
+            }
+            ImGui::EndTable();
+        }
+        ImGui::Spacing();
+    }
+
+    ImGui::Separator();
+    ImGui::Spacing();
+    bool const close_clicked = ImGui::Button("Close", ImVec2(120.0f, 0.0f));
+    bool const want_close    =
+        ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+    if (close_clicked || want_close) {
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
 // New-project modal. GUI parity with `subuwutuner-cli project-new`:
 // three path inputs (source ROM, def pack folder, target dir) plus an
 // optional display name. Each Browse… button fires NFD and rewrites
@@ -3433,6 +3527,10 @@ void render_menubar(AppState &state) {
             ImGui::Text("SubuwuTuner %.*s",
                         static_cast<int>(st::Version::string().size()),
                         st::Version::string().data());
+            ImGui::Separator();
+            if (ImGui::MenuItem("Keyboard shortcuts...")) {
+                state.show_shortcuts_modal = true;
+            }
             ImGui::Separator();
             ImGui::TextDisabled("Getting started");
             ImGui::BulletText("File \xE2\x86\x92 Open Project\xE2\x80\xA6 (Ctrl+O) to pick a .stune directory.");
@@ -5694,6 +5792,7 @@ int main(int argc, char *argv[]) {
         render_maf_autotune_modal(state);
         render_kp_autotune_modal(state);
         render_flash_modal(state);
+        render_shortcuts_modal(state);
 
         if (state.show_imgui_demo) {
             ImGui::ShowDemoWindow(&state.show_imgui_demo);
