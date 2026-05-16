@@ -4497,6 +4497,70 @@ void render_welcome_panel(AppState &state) {
         ImGui::Dummy(ImVec2(0.0f, has_recents ? 16.0f : 32.0f));
         text_centered_disabled(state.status_msg.c_str());
     }
+
+    // What's new — short list of recent additions, refreshed when a
+    // feature lands. Kept brief on purpose: the welcome panel reads
+    // best when it stays uncluttered. Tucked beneath recents so first-
+    // run users see CTAs first.
+    static constexpr std::array<char const *, 4> kWhatsNew = {
+        "Autotune modals (MAF + knock pull) — Edit menu",
+        "Light / Dark theme toggle — View \xE2\x86\x92 Theme",
+        "Single-file definition packs — New project \xE2\x86\x92 File\xE2\x80\xA6",
+        "Keyboard shortcuts reference — Help \xE2\x86\x92 Keyboard shortcuts\xE2\x80\xA6",
+    };
+    {
+        ImGui::Dummy(ImVec2(0.0f, has_recents ? 22.0f : 28.0f));
+        constexpr float kRowW = 480.0f;
+        center_cursor_x(kRowW);
+        ImGui::BeginGroup();
+        ImGui::TextUnformatted("What's new");
+        {
+            ImVec2 const p   = ImGui::GetCursorScreenPos();
+            auto * const dl  = ImGui::GetWindowDrawList();
+            ImU32 const  col = ImGui::GetColorU32(ImGuiCol_Separator);
+            dl->AddLine(ImVec2(p.x, p.y + 2.0f),
+                        ImVec2(p.x + kRowW, p.y + 2.0f), col);
+            ImGui::Dummy(ImVec2(kRowW, 4.0f));
+        }
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        for (auto const *line : kWhatsNew) {
+            ImGui::TextDisabled("\xE2\x80\xA2  %s", line);
+            ImGui::Dummy(ImVec2(0.0f, 2.0f));
+        }
+        ImGui::EndGroup();
+    }
+
+    // Footer: version + a small Help shortcut. Subtle enough to not
+    // compete with the CTAs above, present enough to be discoverable.
+    ImGui::Dummy(ImVec2(0.0f, 24.0f));
+    {
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "SubuwuTuner %.*s",
+                       static_cast<int>(st::Version::string().size()),
+                       st::Version::string().data());
+        float const text_w = ImGui::CalcTextSize(buf).x
+                              + ImGui::CalcTextSize(" \xC2\xB7 ").x
+                              + ImGui::CalcTextSize("Keyboard shortcuts").x;
+        center_cursor_x(text_w);
+        ImGui::TextDisabled("%s", buf);
+        ImGui::SameLine();
+        ImGui::TextDisabled(" \xC2\xB7 ");
+        ImGui::SameLine();
+        // Render as a button styled to look like a link — TextDisabled
+        // color, no frame. Reduces visual weight while keeping it
+        // clickable and tab-reachable.
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0,0,0,0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0,0,0,0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0,0,0,0));
+        ImGui::PushStyleColor(ImGuiCol_Text,
+                               ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+        if (ImGui::Button("Keyboard shortcuts")) {
+            state.show_shortcuts_modal = true;
+        }
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(4);
+    }
 }
 
 // Right-rail quick-stats panel for the currently-selected table.
