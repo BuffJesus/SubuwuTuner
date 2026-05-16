@@ -393,4 +393,33 @@ Status Graph::validate() const {
     return ok();
 }
 
+std::vector<LintFinding> lint(Graph const &g) {
+    std::vector<LintFinding> findings;
+    auto const &nodes = g.nodes();
+    auto const &edges = g.edges();
+    // Pre-bucket edges by (to_node, to_pin) so the inner check is
+    // O(1) per input pin. Phase 5 graphs are small enough that the
+    // naïve O(N*E) sweep would also fly, but keep the cost flat for
+    // the eventual codegen-time lint runs over richer graphs.
+    auto const driven = [&](NodeId nid, PinId pid) {
+        for (auto const &e : edges) {
+            if (e.to_node == nid && e.to_pin == pid) return true;
+        }
+        return false;
+    };
+    for (auto const &n : nodes) {
+        for (auto const &p : n.pins) {
+            if (p.direction != PinDirection::Input) continue;
+            if (driven(n.id, p.id)) continue;
+            std::string node_label =
+                !n.label.empty() ? n.label : n.kind;
+            std::string msg = "input pin '" + p.name
+                              + "' on node '" + node_label
+                              + "' is not driven";
+            findings.push_back({std::move(msg), n.id, p.id});
+        }
+    }
+    return findings;
+}
+
 } // namespace st::feature

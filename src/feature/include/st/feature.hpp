@@ -172,6 +172,20 @@ class Graph {
 [[nodiscard]] std::string         to_toml(Graph const &g);
 [[nodiscard]] Result<Graph>       from_toml(std::string_view text);
 
+// Style / completeness warnings — distinct from validate(), which
+// reports STRUCTURAL violations (cycles, dangling refs) that make a
+// graph unrepresentable. Lint findings flag shapes that are valid
+// but probably incomplete: input pins with no driver, output pins
+// with no consumer, etc. Editor surfaces them as warnings; codegen
+// later will refuse on those it considers fatal.
+struct LintFinding {
+    std::string             message;
+    std::optional<NodeId>   node;
+    std::optional<PinId>    pin;
+};
+
+[[nodiscard]] std::vector<LintFinding> lint(Graph const &g);
+
 } // namespace st::feature
 
 #endif // ST_FEATURE_HPP

@@ -4398,6 +4398,10 @@ inline ImVec4 chip_fg_caution()   { return ImVec4(0.96f, 0.94f, 0.65f, 1.0f); }
 inline ImVec4 chip_bg_caution()   { return ImVec4(0.34f, 0.32f, 0.08f, 0.55f); }
 inline ImVec4 chip_fg_muted()     { return ImVec4(0.78f, 0.80f, 0.82f, 1.0f); }
 inline ImVec4 chip_bg_muted()     { return ImVec4(0.22f, 0.24f, 0.28f, 0.55f); }
+inline ImVec4 chip_fg_ok()        { return ImVec4(0.70f, 0.94f, 0.72f, 1.0f); }
+inline ImVec4 chip_bg_ok()        { return ImVec4(0.14f, 0.34f, 0.18f, 0.55f); }
+inline ImVec4 chip_fg_danger()    { return ImVec4(1.00f, 0.75f, 0.72f, 1.0f); }
+inline ImVec4 chip_bg_danger()    { return ImVec4(0.46f, 0.18f, 0.18f, 0.60f); }
 
 // Cold-start panel — what the user sees before any project is loaded. The
 // goal is welcoming, not utilitarian: clean type hierarchy, one obvious
@@ -5324,11 +5328,56 @@ void render_features_designer(AppState &state) {
         }
     }
 
-    if (auto v = state.features_graph.validate(); !v.has_value()) {
-        ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
-                            "validate: %s", v.error().to_string().c_str());
+    // Status chip — three-state, styled like the status-bar profile
+    // chip so the editor's quality signal lives at the eye-line of
+    // the toolbar rather than in muted body text below it. Click
+    // opens a popup with the actionable detail.
+    auto const         validate_result = state.features_graph.validate();
+    auto const         lint_findings   = st::feature::lint(state.features_graph);
+    char const *       chip_label;
+    ImVec4             chip_fg, chip_bg;
+    char               chip_buf[48];
+    if (!validate_result.has_value()) {
+        chip_label = "Invalid";
+        chip_fg    = chip_fg_danger();
+        chip_bg    = chip_bg_danger();
+    } else if (!lint_findings.empty()) {
+        std::snprintf(chip_buf, sizeof chip_buf, "%zu warning%s",
+                       lint_findings.size(),
+                       lint_findings.size() == 1 ? "" : "s");
+        chip_label = chip_buf;
+        chip_fg    = chip_fg_warn();
+        chip_bg    = chip_bg_warn();
     } else {
-        ImGui::TextDisabled("validate: ok");
+        chip_label = "OK";
+        chip_fg    = chip_fg_ok();
+        chip_bg    = chip_bg_ok();
+    }
+    chip(chip_label, chip_fg, chip_bg);
+    if (ImGui::IsItemClicked()) {
+        ImGui::OpenPopup("##features_status_popup");
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Click for details.");
+    }
+    if (ImGui::BeginPopup("##features_status_popup")) {
+        if (!validate_result.has_value()) {
+            ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
+                                "Structural error");
+            ImGui::Separator();
+            ImGui::TextWrapped("%s",
+                                validate_result.error().to_string().c_str());
+        } else if (!lint_findings.empty()) {
+            ImGui::TextDisabled("Completeness warnings");
+            ImGui::Separator();
+            for (auto const &f : lint_findings) {
+                ImGui::BulletText("%s", f.message.c_str());
+            }
+        } else {
+            ImGui::TextDisabled("Graph passes structural validation "
+                                 "and has no completeness warnings.");
+        }
+        ImGui::EndPopup();
     }
 
     if (!state.features_wire_error.empty()) {
@@ -5565,13 +5614,50 @@ void render_features_designer(AppState &state) {
                        static_cast<unsigned>(n.id));
         ImGui::SetCursorScreenPos(node_tl);
         ImGui::InvisibleButton(body_id, ImVec2(node_w_s, node_h_s));
-        if (ImGui::IsItemHovered()) any_node_pin_hovered = true;
+        bool const body_hovered       = ImGui::IsItemHovered();
+        if (body_hovered) any_node_pin_hovered = true;
         bool const body_active        = ImGui::IsItemActive();
         bool const body_deactivated   = ImGui::IsItemDeactivated();
         bool const body_left_clicked  =
             ImGui::IsItemClicked(ImGuiMouseButton_Left);
         bool const body_right_clicked =
             ImGui::IsItemClicked(ImGuiMouseButton_Right);
+
+        // Hover tooltip — surfaces the human-friendly description
+        // from the pack-declared hook (or just the kind for generic
+        // debug nodes). Suppressed during drag so it doesn't track
+        // the cursor mid-move. Suppressed while wiring so the user
+        // can read the in-flight target instead.
+        if (body_hovered && !body_active
+            && !state.features_wiring_active) {
+            char const *node_kind = n.kind.c_str();
+            bool const   is_hook  = n.kind.starts_with("hook.");
+            st::Hook const *hook  = nullptr;
+            if (is_hook && state.project.has_value()) {
+                std::string_view const hook_id{
+                    n.kind.data() + 5, n.kind.size() - 5};
+                hook = state.project->definition().find_hook(hook_id);
+            }
+            ImGui::BeginTooltip();
+            // Title line: human label, with the kind tag in muted
+            // text below for the technically-inclined user.
+            char const *title_str =
+                !n.label.empty() ? n.label.c_str() : node_kind;
+            ImGui::TextUnformatted(title_str);
+            ImGui::TextDisabled("%s", node_kind);
+            if (hook != nullptr && !hook->description.empty()) {
+                ImGui::Separator();
+                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                ImGui::TextWrapped("%s", hook->description.c_str());
+                ImGui::PopTextWrapPos();
+            } else if (!is_hook) {
+                ImGui::Separator();
+                ImGui::TextDisabled(
+                    "Generic debug node. Load a project with hooks "
+                    "to insert pack-declared nodes from the palette.");
+            }
+            ImGui::EndTooltip();
+        }
         if (body_left_clicked) {
             state.features_selected_node = n.id;
             state.features_selected_edge.reset();

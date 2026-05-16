@@ -231,3 +231,62 @@ TEST_CASE("Graph from_toml rejects duplicate pin id within a node",
     auto r = st::feature::from_toml(bad);
     REQUIRE_FALSE(r.has_value());
 }
+
+TEST_CASE("lint on an empty graph reports nothing",
+          "[feature][lint]") {
+    st::feature::Graph g;
+    REQUIRE(st::feature::lint(g).empty());
+}
+
+TEST_CASE("lint flags an unconnected input pin",
+          "[feature][lint]") {
+    st::feature::Graph g;
+    g.add_node(make_sink_node("hook.commit", st::feature::PinType::Float));
+    auto const findings = st::feature::lint(g);
+    REQUIRE(findings.size() == 1);
+    REQUIRE(findings[0].node.has_value());
+    REQUIRE(findings[0].pin.has_value());
+    REQUIRE(findings[0].message.find("not driven") != std::string::npos);
+}
+
+TEST_CASE("lint clears once the input pin is driven",
+          "[feature][lint]") {
+    st::feature::Graph g;
+    auto const a = g.add_node(make_source_node("rpm", st::feature::PinType::Float));
+    auto const b = g.add_node(make_sink_node("hook",  st::feature::PinType::Float));
+    REQUIRE(g.connect(a, 0, b, 0).has_value());
+    REQUIRE(st::feature::lint(g).empty());
+}
+
+TEST_CASE("lint reports each undriven input separately",
+          "[feature][lint]") {
+    // Two-input node, one driven, one not. Only the dangling input
+    // surfaces in the findings.
+    st::feature::Graph g;
+    auto const src = g.add_node(make_source_node("src", st::feature::PinType::Float));
+    st::feature::Node sink;
+    sink.kind  = "hook.add";
+    sink.label = "add";
+    sink.pins.push_back(st::feature::Pin{
+        0, "a", st::feature::PinType::Float,
+        st::feature::PinDirection::Input,  ""});
+    sink.pins.push_back(st::feature::Pin{
+        1, "b", st::feature::PinType::Float,
+        st::feature::PinDirection::Input,  ""});
+    auto const sk = g.add_node(std::move(sink));
+    REQUIRE(g.connect(src, 0, sk, 0).has_value());
+    auto const findings = st::feature::lint(g);
+    REQUIRE(findings.size() == 1);
+    REQUIRE(findings[0].pin.has_value());
+    REQUIRE(*findings[0].pin == 1);
+}
+
+TEST_CASE("lint ignores output pins regardless of consumer count",
+          "[feature][lint]") {
+    // Output without consumer is allowed (it just produces a value
+    // nobody reads). Not warn-worthy at this stage; that's a future
+    // "dead code" lint when we have IR.
+    st::feature::Graph g;
+    g.add_node(make_source_node("rpm", st::feature::PinType::Float));
+    REQUIRE(st::feature::lint(g).empty());
+}
