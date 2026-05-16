@@ -6,6 +6,7 @@
 #include "st/core/version.hpp"
 #include "st/dbc.hpp"
 #include "st/defs.hpp"
+#include "st/feature.hpp"
 #include "st/discover.hpp"
 #include "st/ecu/ssm.hpp"
 #include "st/edit.hpp"
@@ -279,7 +280,13 @@ constexpr std::string_view kUsage =
     "                            knock was clean over enough samples; default off per\n"
     "                            spec. Runs the docs/12 neighbor-smoothness lint on the\n"
     "                            final proposed surface; --strict-lint exits 3 on any\n"
-    "                            violation. Hardware-free.\n";
+    "                            violation. Hardware-free.\n"
+    "    lint-graph <FILE.stmod> [--strict]\n"
+    "                            Load a .stmod feature-graph file, run structural\n"
+    "                            validate() + lint() (see docs/16). Prints any\n"
+    "                            structural error first (exit 1), then a bulleted\n"
+    "                            list of completeness warnings (exit 0 by default,\n"
+    "                            3 with --strict).\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -6287,6 +6294,70 @@ int cmd_rom_pull(int argc, char *argv[]) {
     return 0;
 }
 
+int cmd_lint_graph(int argc, char *argv[]) {
+    if (argc < 1) {
+        std::fputs("lint-graph: missing path\n", stderr);
+        std::fputs("Usage: subuwutuner-cli lint-graph <FILE.stmod> [--strict]\n",
+                   stderr);
+        return 2;
+    }
+    bool strict = false;
+    std::optional<std::filesystem::path> path;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a = argv[i];
+        if (a == "--strict") { strict = true; continue; }
+        if (!a.empty() && a.front() == '-') {
+            std::fprintf(stderr, "lint-graph: unknown flag '%.*s'\n",
+                         static_cast<int>(a.size()), a.data());
+            return 2;
+        }
+        if (path.has_value()) {
+            std::fprintf(stderr, "lint-graph: unexpected extra argument '%.*s'\n",
+                         static_cast<int>(a.size()), a.data());
+            return 2;
+        }
+        path = std::filesystem::path{a};
+    }
+    if (!path.has_value()) {
+        std::fputs("lint-graph: missing path\n", stderr);
+        return 2;
+    }
+    std::ifstream ifs{*path, std::ios::binary};
+    if (!ifs) {
+        std::fprintf(stderr, "lint-graph: cannot open '%s'\n",
+                     path->string().c_str());
+        return 1;
+    }
+    std::stringstream buf;
+    buf << ifs.rdbuf();
+    auto g = st::feature::from_toml(buf.str());
+    if (!g.has_value()) {
+        std::fprintf(stderr, "lint-graph: parse failed: %s\n",
+                     g.error().to_string().c_str());
+        return 1;
+    }
+    if (auto v = g->validate(); !v.has_value()) {
+        std::fprintf(stderr, "lint-graph: structural error: %s\n",
+                     v.error().to_string().c_str());
+        return 1;
+    }
+    auto const findings = st::feature::lint(*g);
+    if (findings.empty()) {
+        std::printf("OK (%zu node%s, %zu edge%s)\n",
+                     g->nodes().size(),
+                     g->nodes().size() == 1 ? "" : "s",
+                     g->edges().size(),
+                     g->edges().size() == 1 ? "" : "s");
+        return 0;
+    }
+    std::printf("%zu warning%s:\n",
+                 findings.size(), findings.size() == 1 ? "" : "s");
+    for (auto const &f : findings) {
+        std::printf("  - %s\n", f.message.c_str());
+    }
+    return strict ? 3 : 0;
+}
+
 int main(int argc, char *argv[]) {
     if (argc <= 1) {
         print_usage();
@@ -6413,6 +6484,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "flash-trace") {
         return cmd_flash_trace(argc - 2, argv + 2);
+    }
+    if (cmd == "lint-graph") {
+        return cmd_lint_graph(argc - 2, argv + 2);
     }
     if (cmd == "autotune") {
         if (argc < 3) {

@@ -410,10 +410,19 @@ struct AppState {
     // wire is rejected (type mismatch, fan-in, etc.); cleared on the
     // next successful connect or when a drag starts.
     std::string                              features_wire_error;
-    // Currently-selected node on the designer canvas. Set on left-
-    // click of a node body, cleared on click of empty canvas, on
-    // graph clear/load, and when the selected node is removed.
-    std::optional<st::feature::NodeId>       features_selected_node;
+    // Currently-selected nodes on the designer canvas. Plain click
+    // replaces with {id}; Shift+click toggles a node in the set;
+    // box-select via left-drag from empty canvas replaces with every
+    // node whose body intersects the rubber-band rectangle. Cleared
+    // on click of empty canvas, on graph clear/load, and when any
+    // selected node is removed.
+    std::vector<st::feature::NodeId>         features_selected_nodes;
+    // Rubber-band selection state. While `band_active` is true the
+    // user is dragging out a rectangle from `band_start` (screen
+    // coords) — selection is recomputed each frame from the
+    // rectangle until release.
+    bool                                     features_band_active{false};
+    ImVec2                                   features_band_start{0.0f, 0.0f};
     // Currently-selected edge on the designer canvas. Mutually
     // exclusive with the selected node — selecting either clears
     // the other. Cleared on graph clear/load, when the edge is
@@ -2420,10 +2429,13 @@ std::vector<ShortcutGroup> const &shortcuts_reference() {
         }},
         { "Designer canvas", {
             { "Click",        "Select a node or edge"               },
+            { "Shift+Click",  "Toggle a node in the selection"      },
             { "Click (empty)","Clear selection"                     },
-            { "Delete",       "Remove the selected node or edge"    },
-            { "Drag body",    "Move a node (snaps to grid on "
-                              "release)"                            },
+            { "Drag (empty)", "Box-select nodes inside the "
+                              "rectangle (Shift to add)"            },
+            { "Delete",       "Remove the selected nodes / edge"    },
+            { "Drag body",    "Move the selected nodes as a group "
+                              "(snaps to grid on release)"          },
             { "Drag pin → pin","Wire two pins"                      },
             { "Middle-drag",  "Pan the canvas"                      },
             { "Mouse wheel",  "Zoom in/out (anchored to cursor)"    },
@@ -5273,9 +5285,10 @@ void render_features_designer(AppState &state) {
         state.features_graph = st::feature::Graph{};
         state.features_wiring_active = false;
         state.features_wire_error.clear();
-        state.features_selected_node.reset();
+        state.features_selected_nodes.clear();
         state.features_selected_edge.reset();
         state.features_context_edge.reset();
+        state.features_band_active = false;
     }
     ImGui::SameLine();
     if (ImGui::Button("Reset view")) {
@@ -5320,9 +5333,10 @@ void render_features_designer(AppState &state) {
                     state.features_graph         = std::move(*loaded);
                     state.features_wiring_active = false;
                     state.features_wire_error.clear();
-                    state.features_selected_node.reset();
+                    state.features_selected_nodes.clear();
                     state.features_selected_edge.reset();
                     state.features_context_edge.reset();
+                    state.features_band_active = false;
                 }
             }
         }
@@ -5384,13 +5398,13 @@ void render_features_designer(AppState &state) {
         ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
                             "wire: %s", state.features_wire_error.c_str());
     }
-    ImGui::TextDisabled("Click a node or edge to select; Delete "
-                        "removes the selection. Drag a node body to "
-                        "move; drag pin → pin to wire. Middle-drag "
-                        "pans, wheel zooms. Esc / right-click / "
-                        "release-on-empty cancels an in-progress "
-                        "wire. Right-click (when not wiring) for "
-                        "delete / disconnect.");
+    ImGui::TextDisabled("Click a node or edge to select; Shift+click "
+                        "to multi-select. Drag from empty canvas to "
+                        "box-select. Delete removes the selection. "
+                        "Drag a body to move (group-drag works); "
+                        "drag pin → pin to wire. Middle-drag pans, "
+                        "wheel zooms. Right-click (when not wiring) "
+                        "for delete / disconnect.");
 
     ImGui::Spacing();
 
@@ -5518,21 +5532,31 @@ void render_features_designer(AppState &state) {
     // mutated mid-loop via set_node_position).
     auto const &nodes = state.features_graph.nodes();
 
+    // Per-node screen-rect cache, populated during the draw pass and
+    // consumed by the rubber-band hit-test below. Saves recomputing
+    // the per-node width measurement (which involves CalcTextSizeA
+    // on every pin label).
+    struct NodeRect { st::feature::NodeId id; ImVec2 tl; ImVec2 br; };
+    std::vector<NodeRect> node_rects;
+    node_rects.reserve(nodes.size());
+
     // Pending mutations from context-menu actions. Deferred until
     // after the loop so we don't invalidate iteration / pin caches.
-    std::optional<st::feature::NodeId> pending_delete_node;
+    // Nodes are batched for the multi-select Delete-key path; the
+    // edge variant stays singular (no edge multi-select yet).
+    std::vector<st::feature::NodeId>   pending_delete_nodes;
     std::optional<st::feature::Edge>   pending_delete_edge;
 
-    // Delete key removes the current selection — either node or
-    // edge, whichever is set. Gated on window focus so deletes
-    // elsewhere (table-cell editing, etc.) don't blow away the
-    // designer's selection by accident.
+    // Delete key removes the current selection — every selected
+    // node, or the selected edge, depending on which one is set.
+    // Gated on window focus so deletes elsewhere (table-cell editing,
+    // etc.) don't blow away the designer's selection by accident.
     bool const designer_focused =
         ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     if (designer_focused
         && ImGui::IsKeyPressed(ImGuiKey_Delete, /*repeat=*/false)) {
-        if (state.features_selected_node.has_value()) {
-            pending_delete_node = state.features_selected_node;
+        if (!state.features_selected_nodes.empty()) {
+            pending_delete_nodes = state.features_selected_nodes;
         } else if (state.features_selected_edge.has_value()) {
             pending_delete_edge = state.features_selected_edge;
         }
@@ -5605,6 +5629,7 @@ void render_features_designer(AppState &state) {
 
         ImVec2 const node_tl = to_screen(n.x, n.y);
         ImVec2 const node_br(node_tl.x + node_w_s, node_tl.y + node_h_s);
+        node_rects.push_back({n.id, node_tl, node_br});
 
         // Body hit zone — InvisibleButton lives at the body origin so
         // ImGui's IsItemActive + drag-delta machinery handles the
@@ -5659,7 +5684,23 @@ void render_features_designer(AppState &state) {
             ImGui::EndTooltip();
         }
         if (body_left_clicked) {
-            state.features_selected_node = n.id;
+            // Shift toggles the node in/out of the selection set.
+            // Plain click on a non-selected node replaces with
+            // {this}; plain click on an already-selected node keeps
+            // the selection intact so a subsequent drag moves every
+            // selected node together (file-manager / Sketch / Figma
+            // style group-drag). Edge selection always clears — only
+            // one kind of thing highlighted at a time.
+            bool const shift      = ImGui::GetIO().KeyShift;
+            auto      &sel        = state.features_selected_nodes;
+            auto       it         = std::find(sel.begin(), sel.end(), n.id);
+            bool const was_in_sel = (it != sel.end());
+            if (shift) {
+                if (was_in_sel) sel.erase(it);
+                else            sel.push_back(n.id);
+            } else if (!was_in_sel) {
+                sel.assign({n.id});
+            }
             state.features_selected_edge.reset();
         }
         if (body_active
@@ -5667,21 +5708,50 @@ void render_features_designer(AppState &state) {
             // Mouse delta is in screen pixels; convert back to graph
             // space before storing — otherwise a zoomed-in canvas
             // would over-shoot moves and a zoomed-out one would lag.
-            ImVec2 const d = ImGui::GetIO().MouseDelta;
-            state.features_graph.set_node_position(
-                n.id, n.x + d.x / scale, n.y + d.y / scale);
+            // Move every selected node by the same delta so group
+            // drag works; fall back to just the active node if it
+            // somehow isn't in the selection (shouldn't happen given
+            // the click handler above, but the cost is one set
+            // membership check).
+            ImVec2 const  d   = ImGui::GetIO().MouseDelta;
+            auto const   &sel = state.features_selected_nodes;
+            bool const    active_in_sel =
+                std::find(sel.begin(), sel.end(), n.id) != sel.end();
+            if (active_in_sel) {
+                for (auto id : sel) {
+                    if (auto const *nn = state.features_graph.find_node(id)) {
+                        state.features_graph.set_node_position(
+                            id, nn->x + d.x / scale, nn->y + d.y / scale);
+                    }
+                }
+            } else {
+                state.features_graph.set_node_position(
+                    n.id, n.x + d.x / scale, n.y + d.y / scale);
+            }
         }
         // Snap-to-grid on drag release. IsItemDeactivated fires once
         // on the frame the active button stops being active — exactly
         // the "user just let go" event we want. Snap is intentionally
         // release-only (not live) so the drag feels smooth and the
-        // tidy-up happens after the user commits the move. The step
-        // is in graph space, so the snapped position stays consistent
-        // across zoom levels.
+        // tidy-up happens after the user commits the move. With
+        // group drag, snap every selected node so the whole group
+        // lands on the grid.
         if (body_deactivated) {
-            float const sx = std::round(n.x / kGridStep) * kGridStep;
-            float const sy = std::round(n.y / kGridStep) * kGridStep;
-            state.features_graph.set_node_position(n.id, sx, sy);
+            auto const   &sel = state.features_selected_nodes;
+            bool const    active_in_sel =
+                std::find(sel.begin(), sel.end(), n.id) != sel.end();
+            auto const snap_one = [&](st::feature::NodeId id) {
+                if (auto const *nn = state.features_graph.find_node(id)) {
+                    float const sx = std::round(nn->x / kGridStep) * kGridStep;
+                    float const sy = std::round(nn->y / kGridStep) * kGridStep;
+                    state.features_graph.set_node_position(id, sx, sy);
+                }
+            };
+            if (active_in_sel) {
+                for (auto id : sel) snap_one(id);
+            } else {
+                snap_one(n.id);
+            }
         }
         // Right-click on the body opens a context menu. Suppressed
         // when the click cancelled an in-progress wire (handled at
@@ -5700,7 +5770,7 @@ void render_features_designer(AppState &state) {
                                                   : n.label.c_str());
             ImGui::Separator();
             if (ImGui::MenuItem("Delete node")) {
-                pending_delete_node = n.id;
+                pending_delete_nodes.push_back(n.id);
             }
             ImGui::EndPopup();
         }
@@ -5708,8 +5778,9 @@ void render_features_designer(AppState &state) {
         // Draw chrome. Selected nodes get a thicker accent-coloured
         // border so the active selection reads at a glance.
         bool const is_selected =
-            state.features_selected_node.has_value()
-            && *state.features_selected_node == n.id;
+            std::find(state.features_selected_nodes.begin(),
+                       state.features_selected_nodes.end(), n.id)
+            != state.features_selected_nodes.end();
         dl->AddRectFilled(node_tl, node_br, node_bg, 6.0f);
         dl->AddRectFilled(
             node_tl,
@@ -5956,7 +6027,7 @@ void render_features_designer(AppState &state) {
     if (hovered_edge_idx.has_value()
         && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         state.features_selected_edge = edges[*hovered_edge_idx];
-        state.features_selected_node.reset();
+        state.features_selected_nodes.clear();
         edge_consumed_left_click = true;
     }
     if (hovered_edge_idx.has_value()
@@ -6080,14 +6151,73 @@ void render_features_designer(AppState &state) {
         }
     }
 
-    // Canvas-background hit zone for click-to-deselect. Issued AFTER
-    // every node body and pin so the earlier items naturally claim
-    // their own hit regions — this one only fires when the click
-    // landed on empty canvas.
+    // Canvas-background hit zone — handles click-to-deselect AND
+    // box-select rubber-banding. Issued AFTER every node body and
+    // pin so the earlier items naturally claim their own hit
+    // regions. The same InvisibleButton drives both gestures:
+    // IsItemActivated → start the band; IsItemActive → drag the
+    // band; IsItemDeactivated → finalize; IsItemClicked (which
+    // ImGui fires for press+release with no movement) → treat as
+    // empty-click deselect.
     ImGui::SetCursorScreenPos(canvas_p);
     ImGui::InvisibleButton("##fcanvas_bg", canvas_sz);
     bool const canvas_empty_clicked =
         ImGui::IsItemClicked(ImGuiMouseButton_Left);
+
+    // Rubber-band start. Suppressed while wiring so the wire-cancel
+    // path stays on the empty-release branch.
+    if (ImGui::IsItemActivated() && !state.features_wiring_active) {
+        state.features_band_active = true;
+        state.features_band_start  = ImGui::GetIO().MousePos;
+    }
+    // Rubber-band drag — recompute selection live each frame from
+    // the rectangle. Without Shift, every drag starts from a clean
+    // set so the rectangle alone determines membership. With Shift,
+    // the existing selection is preserved and the rectangle adds
+    // to it (toggling individual nodes already works via
+    // Shift+click on a body).
+    if (state.features_band_active && ImGui::IsItemActive()) {
+        ImVec2 const m  = ImGui::GetIO().MousePos;
+        float const  x0 = std::min(state.features_band_start.x, m.x);
+        float const  x1 = std::max(state.features_band_start.x, m.x);
+        float const  y0 = std::min(state.features_band_start.y, m.y);
+        float const  y1 = std::max(state.features_band_start.y, m.y);
+        bool const   additive = ImGui::GetIO().KeyShift;
+        // Cache the additive set on the first frame so re-sweeps
+        // don't double-count already-toggled nodes. Stored as a
+        // function-local static via `state` isn't needed — we
+        // just rebuild from scratch each frame using the current
+        // node positions. With additive=true, start from whatever
+        // was selected when the band started; without, start empty.
+        std::vector<st::feature::NodeId> result;
+        if (additive) result = state.features_selected_nodes;
+        for (auto const &nr : node_rects) {
+            bool const intersects =
+                !(nr.br.x < x0 || nr.tl.x > x1
+                  || nr.br.y < y0 || nr.tl.y > y1);
+            if (!intersects) continue;
+            if (std::find(result.begin(), result.end(), nr.id)
+                == result.end()) {
+                result.push_back(nr.id);
+            }
+        }
+        state.features_selected_nodes = std::move(result);
+        state.features_selected_edge.reset();
+        // Draw the band rectangle on top of nodes + edges so it
+        // reads as a marquee. Filled rect for area cue, accent
+        // border for the edge. Cheap to compute, redrawn every
+        // frame so it tracks the cursor without lag.
+        ImU32 const fill =
+            ImGui::GetColorU32(ImVec4(accent.base.x, accent.base.y,
+                                       accent.base.z, 0.20f));
+        ImU32 const brd  = ImGui::GetColorU32(accent.base);
+        dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), fill);
+        dl->AddRect      (ImVec2(x0, y0), ImVec2(x1, y1), brd,
+                           0.0f, 0, 1.5f);
+    }
+    if (state.features_band_active && ImGui::IsItemDeactivated()) {
+        state.features_band_active = false;
+    }
 
     dl->PopClipRect();
 
@@ -6101,34 +6231,36 @@ void render_features_designer(AppState &state) {
             state.features_selected_edge.reset();
         }
     }
-    if (pending_delete_node.has_value()) {
-        state.features_graph.remove_node(*pending_delete_node);
+    for (auto const id : pending_delete_nodes) {
+        state.features_graph.remove_node(id);
         // If the user was about to wire FROM this node, drop the
         // wiring state so we don't reference a vanished pin.
         if (state.features_wiring_active
-            && state.features_wiring_from_node == *pending_delete_node) {
+            && state.features_wiring_from_node == id) {
             state.features_wiring_active = false;
         }
-        if (state.features_selected_node.has_value()
-            && *state.features_selected_node == *pending_delete_node) {
-            state.features_selected_node.reset();
-        }
+        auto &sel = state.features_selected_nodes;
+        sel.erase(std::remove(sel.begin(), sel.end(), id), sel.end());
         // remove_node cascades to edges touching the removed node —
         // drop the selected edge if it referenced either endpoint.
         if (state.features_selected_edge.has_value()
-            && (state.features_selected_edge->from_node == *pending_delete_node
-                || state.features_selected_edge->to_node == *pending_delete_node)) {
+            && (state.features_selected_edge->from_node == id
+                || state.features_selected_edge->to_node == id)) {
             state.features_selected_edge.reset();
         }
     }
 
-    // Click on empty canvas → drop selection. Gated on
-    // edge_consumed_left_click because edges aren't ImGui items;
-    // clicking on a bezier still leaves the canvas-bg button
-    // "hovered", so without this gate every edge-click would be
-    // immediately followed by a deselect-on-empty.
-    if (canvas_empty_clicked && !edge_consumed_left_click) {
-        state.features_selected_node.reset();
+    // Click on empty canvas → drop selection. Gated on:
+    // - edge_consumed_left_click: edges aren't ImGui items; clicking
+    //   a bezier still leaves the canvas-bg button "hovered", so
+    //   without this gate every edge-click would be immediately
+    //   followed by a deselect-on-empty.
+    // - Shift: Shift+empty-click is additive (no-op), to match the
+    //   Shift+band-drag and Shift+body-click semantics.
+    if (canvas_empty_clicked
+        && !edge_consumed_left_click
+        && !ImGui::GetIO().KeyShift) {
+        state.features_selected_nodes.clear();
         state.features_selected_edge.reset();
     }
 

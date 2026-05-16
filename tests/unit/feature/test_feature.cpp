@@ -37,6 +37,67 @@ TEST_CASE("Graph assigns monotonic node ids", "[feature][graph]") {
     REQUIRE(g.nodes().size() == 3);
 }
 
+TEST_CASE("Graph::connect rejects unit mismatch on otherwise-compatible pins",
+          "[feature][graph]") {
+    st::feature::Graph g;
+    st::feature::Node src;
+    src.kind  = "sensor.rpm";
+    src.label = "rpm";
+    src.pins.push_back(st::feature::Pin{
+        0, "out", st::feature::PinType::Float,
+        st::feature::PinDirection::Output, "rpm"});
+    auto const a = g.add_node(std::move(src));
+    st::feature::Node snk;
+    snk.kind  = "hook.set_load_target";
+    snk.label = "set_load_target";
+    snk.pins.push_back(st::feature::Pin{
+        0, "in", st::feature::PinType::Float,
+        st::feature::PinDirection::Input, "%"});
+    auto const b = g.add_node(std::move(snk));
+    auto const r = g.connect(a, 0, b, 0);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().message().find("unit mismatch") != std::string::npos);
+}
+
+TEST_CASE("Graph::connect accepts matching units", "[feature][graph]") {
+    st::feature::Graph g;
+    st::feature::Node src;
+    src.kind  = "sensor.rpm";
+    src.pins.push_back(st::feature::Pin{
+        0, "out", st::feature::PinType::Float,
+        st::feature::PinDirection::Output, "rpm"});
+    auto const a = g.add_node(std::move(src));
+    st::feature::Node snk;
+    snk.kind  = "hook.set_rpm";
+    snk.pins.push_back(st::feature::Pin{
+        0, "in", st::feature::PinType::Float,
+        st::feature::PinDirection::Input, "rpm"});
+    auto const b = g.add_node(std::move(snk));
+    REQUIRE(g.connect(a, 0, b, 0).has_value());
+}
+
+TEST_CASE("Graph::connect treats an empty unit as unit-agnostic",
+          "[feature][graph]") {
+    // Generic math nodes don't declare units. Connecting a
+    // unit-bearing sensor output to such a node should succeed —
+    // otherwise pack-driven hook nodes couldn't feed any generic
+    // arithmetic without explicit conversion plumbing.
+    st::feature::Graph g;
+    st::feature::Node src;
+    src.kind = "sensor.rpm";
+    src.pins.push_back(st::feature::Pin{
+        0, "out", st::feature::PinType::Float,
+        st::feature::PinDirection::Output, "rpm"});
+    auto const a = g.add_node(std::move(src));
+    st::feature::Node snk;
+    snk.kind = "math.passthrough";
+    snk.pins.push_back(st::feature::Pin{
+        0, "in", st::feature::PinType::Float,
+        st::feature::PinDirection::Input, ""});
+    auto const b = g.add_node(std::move(snk));
+    REQUIRE(g.connect(a, 0, b, 0).has_value());
+}
+
 TEST_CASE("Graph::connect rejects type mismatch", "[feature][graph]") {
     st::feature::Graph g;
     auto const a = g.add_node(make_source_node("rpm",   st::feature::PinType::Float));
@@ -238,15 +299,18 @@ TEST_CASE("lint on an empty graph reports nothing",
     REQUIRE(st::feature::lint(g).empty());
 }
 
-TEST_CASE("lint flags an unconnected input pin",
+TEST_CASE("lint flags an orphan node that has any input pin",
           "[feature][lint]") {
+    // A truly-disconnected node with an input is almost always a
+    // mistake. Surfaces as a single 'no connections' message
+    // rather than amplifying into one warning per undriven pin.
     st::feature::Graph g;
     g.add_node(make_sink_node("hook.commit", st::feature::PinType::Float));
     auto const findings = st::feature::lint(g);
     REQUIRE(findings.size() == 1);
     REQUIRE(findings[0].node.has_value());
-    REQUIRE(findings[0].pin.has_value());
-    REQUIRE(findings[0].message.find("not driven") != std::string::npos);
+    REQUIRE_FALSE(findings[0].pin.has_value());
+    REQUIRE(findings[0].message.find("no connections") != std::string::npos);
 }
 
 TEST_CASE("lint clears once the input pin is driven",

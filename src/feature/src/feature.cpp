@@ -290,6 +290,17 @@ Status Graph::connect(NodeId from_node, PinId from_pin,
                            + pin_type_name(from_p->type) + " -> "
                            + pin_type_name(to_p->type) + ")");
     }
+    // Unit check — both pins must agree when both declare a unit.
+    // An empty unit on either side means "unit-agnostic" (generic
+    // math nodes, etc.) and connects to anything compatible by type.
+    // Pack-declared hook signals always carry a unit so dimensional
+    // mistakes (rpm into %, ms into °C) are caught at wire time.
+    if (!from_p->unit.empty() && !to_p->unit.empty()
+        && from_p->unit != to_p->unit) {
+        return failure(ErrorCode::InvalidArgument,
+                       std::string{"connect: unit mismatch ("}
+                           + from_p->unit + " -> " + to_p->unit + ")");
+    }
     // Single-driver invariant: an input is driven by at most one edge.
     // Outputs can fan out without limit.
     for (auto const &e : edges_) {
@@ -397,24 +408,49 @@ std::vector<LintFinding> lint(Graph const &g) {
     std::vector<LintFinding> findings;
     auto const &nodes = g.nodes();
     auto const &edges = g.edges();
-    // Pre-bucket edges by (to_node, to_pin) so the inner check is
-    // O(1) per input pin. Phase 5 graphs are small enough that the
-    // naïve O(N*E) sweep would also fly, but keep the cost flat for
-    // the eventual codegen-time lint runs over richer graphs.
+
     auto const driven = [&](NodeId nid, PinId pid) {
         for (auto const &e : edges) {
             if (e.to_node == nid && e.to_pin == pid) return true;
         }
         return false;
     };
+    auto const has_any_edge = [&](NodeId nid) {
+        for (auto const &e : edges) {
+            if (e.from_node == nid || e.to_node == nid) return true;
+        }
+        return false;
+    };
+    auto const node_display = [](Node const &n) -> std::string {
+        return !n.label.empty() ? n.label : n.kind;
+    };
+
     for (auto const &n : nodes) {
+        // Orphan-node check first — a totally-disconnected node
+        // that requires at least one input is almost certainly
+        // accidental (user dropped a hook and forgot to wire its
+        // overrides). Pure-source nodes with only output pins
+        // aren't flagged: a dangling output is a future "dead
+        // code" concern, not an editor-shape one.
+        bool has_input = false;
+        for (auto const &p : n.pins) {
+            if (p.direction == PinDirection::Input) {
+                has_input = true;
+                break;
+            }
+        }
+        if (has_input && !has_any_edge(n.id)) {
+            findings.push_back({
+                "node '" + node_display(n)
+                    + "' has no connections",
+                n.id, std::nullopt});
+            continue;
+        }
         for (auto const &p : n.pins) {
             if (p.direction != PinDirection::Input) continue;
             if (driven(n.id, p.id)) continue;
-            std::string node_label =
-                !n.label.empty() ? n.label : n.kind;
             std::string msg = "input pin '" + p.name
-                              + "' on node '" + node_label
+                              + "' on node '" + node_display(n)
                               + "' is not driven";
             findings.push_back({std::move(msg), n.id, p.id});
         }
