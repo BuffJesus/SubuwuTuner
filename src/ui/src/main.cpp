@@ -5324,12 +5324,23 @@ void render_features_designer(AppState &state) {
         ImGui::SetCursorScreenPos(node_tl);
         ImGui::InvisibleButton(body_id, ImVec2(kNodeWidth, node_h));
         bool const body_active        = ImGui::IsItemActive();
+        bool const body_deactivated   = ImGui::IsItemDeactivated();
         bool const body_right_clicked =
             ImGui::IsItemClicked(ImGuiMouseButton_Right);
         if (body_active
             && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
             ImVec2 const d = ImGui::GetIO().MouseDelta;
             state.features_graph.set_node_position(n.id, n.x + d.x, n.y + d.y);
+        }
+        // Snap-to-grid on drag release. IsItemDeactivated fires once
+        // on the frame the active button stops being active — exactly
+        // the "user just let go" event we want. Snap is intentionally
+        // release-only (not live) so the drag feels smooth and the
+        // tidy-up happens after the user commits the move.
+        if (body_deactivated) {
+            float const sx = std::round(n.x / kGridStep) * kGridStep;
+            float const sy = std::round(n.y / kGridStep) * kGridStep;
+            state.features_graph.set_node_position(n.id, sx, sy);
         }
         // Right-click on the body opens a context menu. Suppressed
         // when the click cancelled an in-progress wire (handled at
