@@ -4942,6 +4942,11 @@ int main(int argc, char *argv[]) {
     // IsKeyPressed and works without the nav system being on.
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+    // Force a tab bar on every docked window — even alone-in-node ones.
+    // Without this, ImGui auto-hides the tab on single-window nodes and
+    // there's no visible drag handle, so the panel can't be undocked or
+    // moved by dragging once it's settled.
+    io.ConfigDockingAlwaysTabBar = true;
 
     Fonts const fonts = load_fonts();
     apply_theme();
