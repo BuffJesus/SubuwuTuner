@@ -136,7 +136,23 @@ Result<Graph> from_toml(std::string_view text) {
                 return failure(ErrorCode::ParseError,
                                "feature TOML: [[node]] missing id");
             }
-            n.kind  = (*ntbl)["kind"].value_or<std::string>("");
+            // Required fields. value_or returns the default for both
+            // "key missing" and "key present but wrong type", so an
+            // empty-string check catches both forms of tampering.
+            n.kind = (*ntbl)["kind"].value_or<std::string>("");
+            if (n.kind.empty()) {
+                return failure(ErrorCode::ParseError,
+                               "feature TOML: [[node]] id="
+                                   + std::to_string(persisted_id)
+                                   + " missing required `kind`");
+            }
+            // Duplicate-id detection — id_map's invariant doubles as
+            // a uniqueness check.
+            if (id_map.contains(persisted_id)) {
+                return failure(ErrorCode::ParseError,
+                               "feature TOML: duplicate node id "
+                                   + std::to_string(persisted_id));
+            }
             n.label = (*ntbl)["label"].value_or<std::string>("");
             n.x     = static_cast<float>(
                 (*ntbl)["x"].value_or<double>(0.0));
@@ -154,6 +170,12 @@ Result<Graph> from_toml(std::string_view text) {
                     p.id   = static_cast<PinId>(
                         (*ptbl)["id"].value_or<std::int64_t>(0));
                     p.name = (*ptbl)["name"].value_or<std::string>("");
+                    if (p.name.empty()) {
+                        return failure(ErrorCode::ParseError,
+                                       "feature TOML: node id="
+                                           + std::to_string(persisted_id)
+                                           + " has a pin with no `name`");
+                    }
                     auto const type_s = (*ptbl)["type"].value_or<std::string>("");
                     auto const dir_s  = (*ptbl)["direction"].value_or<std::string>("");
                     p.unit = (*ptbl)["unit"].value_or<std::string>("");
@@ -162,10 +184,21 @@ Result<Graph> from_toml(std::string_view text) {
                     if (!t.has_value() || !d.has_value()) {
                         return failure(ErrorCode::ParseError,
                                        "feature TOML: unknown pin type / "
-                                       "direction");
+                                       "direction on node id="
+                                           + std::to_string(persisted_id));
                     }
                     p.type      = *t;
                     p.direction = *d;
+                    // Pin-id uniqueness within a node.
+                    for (auto const &existing : n.pins) {
+                        if (existing.id == p.id) {
+                            return failure(ErrorCode::ParseError,
+                                           "feature TOML: node id="
+                                               + std::to_string(persisted_id)
+                                               + " has duplicate pin id "
+                                               + std::to_string(p.id));
+                        }
+                    }
                     n.pins.push_back(std::move(p));
                 }
             }

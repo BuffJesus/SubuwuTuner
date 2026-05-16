@@ -173,3 +173,61 @@ TEST_CASE("Graph from_toml rejects missing schema_version",
     auto r = st::feature::from_toml(bad);
     REQUIRE_FALSE(r.has_value());
 }
+
+TEST_CASE("Graph from_toml rejects empty kind", "[feature][toml]") {
+    std::string const bad =
+        "[graph]\nschema_version = 1\n\n"
+        "[[node]]\n"
+        "id = 1\nkind = \"\"\nlabel = \"x\"\nx = 0.0\ny = 0.0\n"
+        "pins = []\n";
+    auto r = st::feature::from_toml(bad);
+    REQUIRE_FALSE(r.has_value());
+}
+
+TEST_CASE("Graph from_toml rejects missing kind key", "[feature][toml]") {
+    std::string const bad =
+        "[graph]\nschema_version = 1\n\n"
+        "[[node]]\n"
+        "id = 1\nlabel = \"x\"\nx = 0.0\ny = 0.0\n"
+        "pins = []\n";
+    auto r = st::feature::from_toml(bad);
+    REQUIRE_FALSE(r.has_value());
+}
+
+TEST_CASE("Graph from_toml rejects duplicate node id", "[feature][toml]") {
+    std::string const bad =
+        "[graph]\nschema_version = 1\n\n"
+        "[[node]]\nid = 1\nkind = \"a\"\nlabel = \"\"\nx = 0.0\ny = 0.0\n"
+        "pins = []\n\n"
+        "[[node]]\nid = 1\nkind = \"b\"\nlabel = \"\"\nx = 0.0\ny = 0.0\n"
+        "pins = []\n";
+    auto r = st::feature::from_toml(bad);
+    REQUIRE_FALSE(r.has_value());
+}
+
+TEST_CASE("Graph from_toml rejects pin with empty name",
+          "[feature][toml]") {
+    std::string const bad =
+        "[graph]\nschema_version = 1\n\n"
+        "[[node]]\n"
+        "id = 1\nkind = \"x\"\nlabel = \"x\"\nx = 0.0\ny = 0.0\n"
+        "pins = [\n"
+        "  { id = 0, name = \"\", type = \"float\", direction = \"output\", unit = \"\" },\n"
+        "]\n";
+    auto r = st::feature::from_toml(bad);
+    REQUIRE_FALSE(r.has_value());
+}
+
+TEST_CASE("Graph from_toml rejects duplicate pin id within a node",
+          "[feature][toml]") {
+    std::string const bad =
+        "[graph]\nschema_version = 1\n\n"
+        "[[node]]\n"
+        "id = 1\nkind = \"x\"\nlabel = \"x\"\nx = 0.0\ny = 0.0\n"
+        "pins = [\n"
+        "  { id = 0, name = \"a\", type = \"float\", direction = \"input\",  unit = \"\" },\n"
+        "  { id = 0, name = \"b\", type = \"float\", direction = \"output\", unit = \"\" },\n"
+        "]\n";
+    auto r = st::feature::from_toml(bad);
+    REQUIRE_FALSE(r.has_value());
+}
