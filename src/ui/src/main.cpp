@@ -5148,53 +5148,121 @@ void render_features_designer(AppState &state) {
                  state.features_graph.nodes().size(),
                  state.features_graph.edges().size());
 
-    // Helper-lambda for spawning test nodes at a free-ish slot.
+    // Helper-lambda for spawning nodes at a free-ish slot.
     auto const next_slot_y = [&]() {
         return 40.0f + 80.0f * static_cast<float>(
                               state.features_graph.nodes().size());
     };
-    if (ImGui::Button("Add source (Float out)")) {
-        st::feature::Node n;
-        n.kind  = "sensor.float";
-        n.label = "Source";
-        n.x     = 40.0f;
-        n.y     = next_slot_y();
-        n.pins.push_back(st::feature::Pin{
-            0, "out", st::feature::PinType::Float,
-            st::feature::PinDirection::Output, ""});
-        state.features_graph.add_node(std::move(n));
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Add sink (Float in)")) {
-        st::feature::Node n;
-        n.kind  = "output.float";
-        n.label = "Sink";
-        n.x     = 320.0f;
-        n.y     = next_slot_y();
-        n.pins.push_back(st::feature::Pin{
-            0, "in", st::feature::PinType::Float,
-            st::feature::PinDirection::Input, ""});
-        state.features_graph.add_node(std::move(n));
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Add 2-in/1-out (Float)")) {
-        // A multi-pin node — useful for verifying that pin layout
-        // handles more than one row per side.
-        st::feature::Node n;
-        n.kind  = "math.add";
-        n.label = "Add";
-        n.x     = 180.0f;
-        n.y     = next_slot_y();
-        n.pins.push_back(st::feature::Pin{
-            0, "a",   st::feature::PinType::Float,
-            st::feature::PinDirection::Input,  ""});
-        n.pins.push_back(st::feature::Pin{
-            1, "b",   st::feature::PinType::Float,
-            st::feature::PinDirection::Input,  ""});
-        n.pins.push_back(st::feature::Pin{
-            2, "out", st::feature::PinType::Float,
-            st::feature::PinDirection::Output, ""});
-        state.features_graph.add_node(std::move(n));
+
+    // Pack-driven node palette. Hooks declared in the loaded project's
+    // definition pack (per docs/16 §"Definition-pack hooks") become the
+    // node-library palette. Pin directions are flipped from the pack
+    // declaration: the hook's `inputs` are values the ECU offers TO
+    // user logic, so they're Output pins on the node; `outputs` are
+    // values the user must SUPPLY, so they're Input pins. Without a
+    // loaded project, fall back to the generic debug buttons.
+    bool const have_hooks =
+        state.project.has_value()
+        && !state.project->definition().hooks().empty();
+    if (have_hooks) {
+        if (ImGui::Button("Hooks \xE2\x96\xBE")) {
+            ImGui::OpenPopup("##features_hooks_palette");
+        }
+        if (ImGui::BeginPopup("##features_hooks_palette")) {
+            ImGui::TextDisabled("Insert a hook node");
+            ImGui::Separator();
+            auto const &hooks =
+                state.project->definition().hooks();
+            for (auto const &h : hooks) {
+                // Palette shows the human-readable display_name (or the
+                // canonical id when the pack hasn't supplied one).
+                char const *human =
+                    !h.display_name.empty() ? h.display_name.c_str()
+                                             : h.id.c_str();
+                char label[200];
+                std::snprintf(label, sizeof label, "%s##hook_%s",
+                               human, h.id.c_str());
+                if (ImGui::MenuItem(label)) {
+                    st::feature::Node n;
+                    n.kind  = std::string{"hook."} + h.id;
+                    n.label = !h.display_name.empty()
+                                  ? h.display_name : h.id;
+                    n.x     = 40.0f;
+                    n.y     = next_slot_y();
+                    st::feature::PinId next_pin = 0;
+                    auto const push_pin =
+                        [&](st::HookSignal const &s,
+                            st::feature::PinDirection d) {
+                            auto pt = st::feature::parse_pin_type(s.type);
+                            // Pin name = human label when supplied,
+                            // canonical name otherwise. Codegen will
+                            // resolve back via kind + slot order
+                            // against the hook definition.
+                            std::string const pin_label =
+                                !s.label.empty() ? s.label : s.name;
+                            n.pins.push_back(st::feature::Pin{
+                                next_pin++,
+                                pin_label,
+                                pt.value_or(st::feature::PinType::Float),
+                                d, s.unit});
+                        };
+                    // Note the inversion vs. pack declaration.
+                    for (auto const &s : h.inputs) {
+                        push_pin(s, st::feature::PinDirection::Output);
+                    }
+                    for (auto const &s : h.outputs) {
+                        push_pin(s, st::feature::PinDirection::Input);
+                    }
+                    state.features_graph.add_node(std::move(n));
+                }
+                if (!h.description.empty() && ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", h.description.c_str());
+                }
+            }
+            ImGui::EndPopup();
+        }
+    } else {
+        if (ImGui::Button("Add source (Float out)")) {
+            st::feature::Node n;
+            n.kind  = "sensor.float";
+            n.label = "Source";
+            n.x     = 40.0f;
+            n.y     = next_slot_y();
+            n.pins.push_back(st::feature::Pin{
+                0, "out", st::feature::PinType::Float,
+                st::feature::PinDirection::Output, ""});
+            state.features_graph.add_node(std::move(n));
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Add sink (Float in)")) {
+            st::feature::Node n;
+            n.kind  = "output.float";
+            n.label = "Sink";
+            n.x     = 320.0f;
+            n.y     = next_slot_y();
+            n.pins.push_back(st::feature::Pin{
+                0, "in", st::feature::PinType::Float,
+                st::feature::PinDirection::Input, ""});
+            state.features_graph.add_node(std::move(n));
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Add 2-in/1-out (Float)")) {
+            st::feature::Node n;
+            n.kind  = "math.add";
+            n.label = "Add";
+            n.x     = 180.0f;
+            n.y     = next_slot_y();
+            n.pins.push_back(st::feature::Pin{
+                0, "a",   st::feature::PinType::Float,
+                st::feature::PinDirection::Input,  ""});
+            n.pins.push_back(st::feature::Pin{
+                1, "b",   st::feature::PinType::Float,
+                st::feature::PinDirection::Input,  ""});
+            n.pins.push_back(st::feature::Pin{
+                2, "out", st::feature::PinType::Float,
+                st::feature::PinDirection::Output, ""});
+            state.features_graph.add_node(std::move(n));
+        }
     }
     ImGui::SameLine();
     if (ImGui::Button("Clear graph")) {
@@ -5455,8 +5523,39 @@ void render_features_designer(AppState &state) {
                                + static_cast<float>(rows) * row_h_s
                                + foot_s;
 
+        // Per-node body width — fits the longest input-name +
+        // longest output-name on any row, plus the header label,
+        // so pack-driven hooks with verbose signal names (e.g.
+        // `commanded_pw_override`) don't overflow the 150 px
+        // default. Falls back to the default when labels are short.
+        char const *header_text =
+            n.label.empty() ? n.kind.c_str() : n.label.c_str();
+        float const header_w =
+            fnt->CalcTextSizeA(fnt_sz_s, FLT_MAX, 0.0f, header_text).x;
+        float max_in_w  = 0.0f;
+        float max_out_w = 0.0f;
+        for (auto const &p : n.pins) {
+            float const w = fnt->CalcTextSizeA(
+                fnt_sz_s, FLT_MAX, 0.0f, p.name.c_str()).x;
+            if (p.direction == st::feature::PinDirection::Input) {
+                max_in_w  = std::max(max_in_w,  w);
+            } else {
+                max_out_w = std::max(max_out_w, w);
+            }
+        }
+        // Pin row: [circle][6px gap][in_name] … [out_name][6px gap][circle]
+        float const pad_s        = 6.0f * scale;
+        float const inner_gap_s  = 12.0f * scale;  // visible gutter
+                                                    // between the two
+                                                    // text columns
+        float const pins_w =
+            pin_r_s + pad_s + max_in_w + inner_gap_s
+            + max_out_w + pad_s + pin_r_s;
+        float const header_w_total = header_w + 16.0f * scale;
+        float const node_w_s = std::max({ width_s, pins_w, header_w_total });
+
         ImVec2 const node_tl = to_screen(n.x, n.y);
-        ImVec2 const node_br(node_tl.x + width_s, node_tl.y + node_h_s);
+        ImVec2 const node_br(node_tl.x + node_w_s, node_tl.y + node_h_s);
 
         // Body hit zone — InvisibleButton lives at the body origin so
         // ImGui's IsItemActive + drag-delta machinery handles the
@@ -5465,7 +5564,7 @@ void render_features_designer(AppState &state) {
         std::snprintf(body_id, sizeof body_id, "##fnode_%u",
                        static_cast<unsigned>(n.id));
         ImGui::SetCursorScreenPos(node_tl);
-        ImGui::InvisibleButton(body_id, ImVec2(width_s, node_h_s));
+        ImGui::InvisibleButton(body_id, ImVec2(node_w_s, node_h_s));
         if (ImGui::IsItemHovered()) any_node_pin_hovered = true;
         bool const body_active        = ImGui::IsItemActive();
         bool const body_deactivated   = ImGui::IsItemDeactivated();

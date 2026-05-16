@@ -1,0 +1,43 @@
+# Example custom-feature hooks per docs/16-custom-features.md. These are
+# illustrative — the addresses and RAM regions are NOT real ECU values,
+# they're placeholders so the designer-canvas hook palette can be
+# exercised end-to-end against this synthetic pack. Real packs supply
+# addresses derived from each ECU's firmware analysis.
+#
+# The `name` on each signal is the canonical id (snake_case, what
+# codegen will eventually emit). `label` is what the editor shows the
+# user — keep it short and tuning-vocabulary, not programmer-vocabulary.
+
+[[hook]]
+id           = "after_fuel_calc"
+display_name = "After fuel calc"
+description  = "After the ECU has computed commanded injector pulse width"
+ecu_address  = 0x000ABCD0
+free_ram     = { base = 0x40000000, length = 256 }
+inputs = [
+  { name = "rpm",          label = "Engine RPM",       type = "float", unit = "rpm" },
+  { name = "load",         label = "Engine load",      type = "float", unit = "%"   },
+  { name = "commanded_pw", label = "Commanded fuel PW", type = "float", unit = "ms"  },
+  { name = "coolant_temp", label = "Coolant temp",     type = "float", unit = "°C"  },
+]
+outputs = [
+  { name = "commanded_pw_override", label = "Override fuel PW", type = "float", unit = "ms" },
+]
+
+[[hook]]
+id           = "read_rpm"
+display_name = "Engine RPM"
+description  = "Read the current engine RPM (sensor-style input node)"
+ecu_address  = 0x000AB100
+outputs = [
+  { name = "rpm", label = "RPM", type = "float", unit = "rpm" },
+]
+
+[[hook]]
+id           = "clutch_switch"
+display_name = "Clutch switch"
+description  = "Read the clutch-pedal switch (engaged when held to the floor)"
+ecu_address  = 0x000AB200
+outputs = [
+  { name = "pressed", label = "Pressed", type = "bool" },
+]

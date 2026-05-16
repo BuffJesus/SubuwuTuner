@@ -211,6 +211,39 @@ struct DtcBitChange {
                                                    Dtc const &dtc,
                                                    bool enabled);
 
+// One named pin on a hook — typed (Float/Int/Bool) signal that the user's
+// custom-feature graph either reads from the ECU or writes back. `name` is
+// the canonical id used by codegen (snake_case, stable across pack
+// revisions); `label` is what the editor shows the user (free-form, may
+// contain spaces, falls back to `name` when empty). Unit is optional
+// human-readable metadata (e.g. "rpm", "kPa"); the editor surfaces it in
+// tooltips but doesn't enforce dimensional analysis yet — that's the
+// future "type system beyond enum" work in docs/16.
+struct HookSignal {
+    std::string name;
+    std::string label;
+    std::string type;   // "float" | "int" | "bool" (matches feature::PinType)
+    std::string unit;
+};
+
+// A custom-features splice point declared by the definition pack. Per
+// docs/16, the pack author owns the responsibility of identifying ECU
+// addresses where a hook can safely splice; the editor only needs the
+// signal-level interface (inputs flow OUT of the hook node into user
+// logic, outputs flow IN from user logic to the hook). ecu_address +
+// free_ram are codegen metadata — present in the pack for forward use
+// but the editor doesn't read them.
+struct Hook {
+    std::string                 id;
+    std::string                 display_name;   // human label; falls back to id
+    std::string                 description;
+    std::vector<HookSignal>     inputs;
+    std::vector<HookSignal>     outputs;
+    std::optional<std::size_t>  ecu_address;
+    std::optional<std::size_t>  free_ram_base;
+    std::optional<std::size_t>  free_ram_length;
+};
+
 // A complete definition pack: one Pack header, plus 0..N of each child kind.
 class Definition {
   public:
@@ -243,6 +276,7 @@ class Definition {
         return dtc_bitmaps_;
     }
     [[nodiscard]] std::vector<Dtc> const &     dtcs() const noexcept { return dtcs_; }
+    [[nodiscard]] std::vector<Hook> const &    hooks() const noexcept { return hooks_; }
 
     [[nodiscard]] Axis const *      find_axis(std::string_view id) const noexcept;
     [[nodiscard]] Scaling const *   find_scaling(std::string_view id) const noexcept;
@@ -251,6 +285,7 @@ class Definition {
     [[nodiscard]] Switch const *    find_switch(std::string_view id) const noexcept;
     [[nodiscard]] DtcBitmap const * find_dtc_bitmap(std::string_view id) const noexcept;
     [[nodiscard]] Dtc const *       find_dtc(std::string_view code) const noexcept;
+    [[nodiscard]] Hook const *      find_hook(std::string_view id) const noexcept;
 
     // If `rom` matches one of the [[identification]] entries, return the
     // entry's `name`. Otherwise nullopt.
@@ -318,6 +353,7 @@ class Definition {
     std::vector<Switch>         switches_;
     std::vector<DtcBitmap>      dtc_bitmaps_;
     std::vector<Dtc>            dtcs_;
+    std::vector<Hook>           hooks_;
 
     friend class DefinitionBuilder;
 };

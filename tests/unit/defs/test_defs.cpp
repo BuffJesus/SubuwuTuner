@@ -1746,3 +1746,178 @@ TEST_CASE("parse_data_type round-trips known values", "[defs][types]") {
     REQUIRE(st::byte_size(*st::parse_data_type("float32_le")) == 4);
     REQUIRE_FALSE(st::parse_data_type("uint37").has_value());
 }
+
+// ---- [[hook]] ----------------------------------------------------
+// Custom-feature splice-point declarations per docs/16. The parser
+// surfaces them on Definition; the editor builds nodes from them.
+
+TEST_CASE("Definition parses a [[hook]] with typed inputs/outputs",
+          "[defs][hooks]") {
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[hook]]
+id          = "after_fuel_calc"
+description = "After commanded injector PW is computed"
+ecu_address = 0x000ABCD0
+free_ram    = { base = 0x40000000, length = 256 }
+inputs  = [
+  { name = "rpm",          type = "float", unit = "rpm" },
+  { name = "load",         type = "float", unit = "%"   },
+  { name = "commanded_pw", type = "float", unit = "ms"  },
+]
+outputs = [
+  { name = "commanded_pw_override", type = "float", unit = "ms" },
+]
+)toml");
+    REQUIRE(d.has_value());
+    REQUIRE(d->hooks().size() == 1);
+    auto const &h = d->hooks().front();
+    REQUIRE(h.id          == "after_fuel_calc");
+    REQUIRE(h.description == "After commanded injector PW is computed");
+    REQUIRE(h.inputs.size()  == 3);
+    REQUIRE(h.outputs.size() == 1);
+    REQUIRE(h.inputs[0].name == "rpm");
+    REQUIRE(h.inputs[0].type == "float");
+    REQUIRE(h.inputs[0].unit == "rpm");
+    REQUIRE(h.outputs[0].name == "commanded_pw_override");
+    REQUIRE(h.outputs[0].type == "float");
+    REQUIRE(h.ecu_address.has_value());
+    REQUIRE(*h.ecu_address == 0x000ABCD0u);
+    REQUIRE(h.free_ram_base.has_value());
+    REQUIRE(*h.free_ram_base == 0x40000000u);
+    REQUIRE(h.free_ram_length.has_value());
+    REQUIRE(*h.free_ram_length == 256u);
+}
+
+TEST_CASE("Hooks with no inputs/outputs and no codegen metadata still parse",
+          "[defs][hooks]") {
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[hook]]
+id          = "trigger_only"
+description = "A pure side-effect hook"
+)toml");
+    REQUIRE(d.has_value());
+    REQUIRE(d->hooks().size() == 1);
+    auto const &h = d->hooks().front();
+    REQUIRE(h.inputs.empty());
+    REQUIRE(h.outputs.empty());
+    REQUIRE_FALSE(h.ecu_address.has_value());
+    REQUIRE_FALSE(h.free_ram_base.has_value());
+}
+
+TEST_CASE("Hook rejects missing id", "[defs][hooks]") {
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[hook]]
+description = "no id field"
+)toml");
+    REQUIRE_FALSE(d.has_value());
+    REQUIRE(d.error().code() == st::ErrorCode::ParseError);
+    REQUIRE(d.error().message().find("missing id") != std::string::npos);
+}
+
+TEST_CASE("Hook rejects signal with unknown type", "[defs][hooks]") {
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[hook]]
+id      = "h"
+inputs  = [ { name = "x", type = "string" } ]
+)toml");
+    REQUIRE_FALSE(d.has_value());
+    REQUIRE(d.error().code() == st::ErrorCode::ParseError);
+    REQUIRE(d.error().message().find("type must be") != std::string::npos);
+}
+
+TEST_CASE("Hook rejects signal with empty name", "[defs][hooks]") {
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[hook]]
+id      = "h"
+outputs = [ { name = "", type = "float" } ]
+)toml");
+    REQUIRE_FALSE(d.has_value());
+    REQUIRE(d.error().code() == st::ErrorCode::ParseError);
+    REQUIRE(d.error().message().find("missing name") != std::string::npos);
+}
+
+TEST_CASE("Hook rejects signal that isn't an inline table", "[defs][hooks]") {
+    // docs/16 uses bare strings in its illustrative example, but the
+    // parsed schema requires typed signals — bare strings would not
+    // carry a type, so they're rejected to fail-loud.
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[hook]]
+id     = "h"
+inputs = [ "rpm", "load" ]
+)toml");
+    REQUIRE_FALSE(d.has_value());
+    REQUIRE(d.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("Hook + signal labels parse, default to empty when omitted",
+          "[defs][hooks]") {
+    // display_name on the hook, label on signals — both optional. Editor
+    // uses them when non-empty; falls back to id/name otherwise.
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[hook]]
+id           = "after_fuel_calc"
+display_name = "After fuel calc"
+description  = "Splice point."
+inputs = [
+  { name = "commanded_pw", label = "Commanded fuel PW", type = "float" },
+  { name = "rpm",                                          type = "float" },
+]
+outputs = [
+  { name = "commanded_pw_override", label = "Override fuel PW", type = "float" },
+]
+)toml");
+    REQUIRE(d.has_value());
+    REQUIRE(d->hooks().size() == 1);
+    auto const &h = d->hooks().front();
+    REQUIRE(h.display_name == "After fuel calc");
+    REQUIRE(h.inputs[0].label  == "Commanded fuel PW");
+    REQUIRE(h.inputs[1].label  == "");  // omitted → empty
+    REQUIRE(h.outputs[0].label == "Override fuel PW");
+}
+
+TEST_CASE("Definition::find_hook locates a parsed hook by id",
+          "[defs][hooks]") {
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[hook]]
+id = "a"
+
+[[hook]]
+id = "b"
+)toml");
+    REQUIRE(d.has_value());
+    REQUIRE(d->find_hook("a") != nullptr);
+    REQUIRE(d->find_hook("b") != nullptr);
+    REQUIRE(d->find_hook("c") == nullptr);
+}

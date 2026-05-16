@@ -355,6 +355,85 @@ Result<Dtc> parse_dtc(toml::table const &t) {
     return d;
 }
 
+Result<HookSignal> parse_hook_signal(toml::node const &n,
+                                      std::string_view hook_id,
+                                      std::string_view side) {
+    auto const *t = n.as_table();
+    if (t == nullptr) {
+        return failure(ErrorCode::ParseError,
+                       "[[hook]] '" + std::string{hook_id} + "' "
+                           + std::string{side}
+                           + " entry is not a table (expected "
+                             "{ name = ..., type = ..., ... })");
+    }
+    HookSignal s;
+    if (auto const v = (*t)["name"].value<std::string>();
+        v.has_value() && !v->empty()) {
+        s.name = *v;
+    } else {
+        return failure(ErrorCode::ParseError,
+                       "[[hook]] '" + std::string{hook_id} + "' "
+                           + std::string{side} + " entry missing name");
+    }
+    s.label = optional_value<std::string>(*t, "label", {});
+    if (auto const v = (*t)["type"].value<std::string>(); v.has_value()) {
+        s.type = *v;
+    } else {
+        return failure(ErrorCode::ParseError,
+                       "[[hook]] '" + std::string{hook_id} + "' "
+                           + std::string{side} + " entry '" + s.name
+                           + "' missing type");
+    }
+    if (s.type != "float" && s.type != "int" && s.type != "bool") {
+        return failure(ErrorCode::ParseError,
+                       "[[hook]] '" + std::string{hook_id} + "' "
+                           + std::string{side} + " entry '" + s.name
+                           + "' type must be float|int|bool, got '"
+                           + s.type + "'");
+    }
+    s.unit = optional_value<std::string>(*t, "unit", {});
+    return s;
+}
+
+Result<Hook> parse_hook(toml::table const &t) {
+    Hook h;
+    if (auto const v = t["id"].value<std::string>();
+        v.has_value() && !v->empty()) {
+        h.id = *v;
+    } else {
+        return failure(ErrorCode::ParseError, "[[hook]] missing id");
+    }
+    h.display_name = optional_value<std::string>(t, "display_name", {});
+    h.description  = optional_value<std::string>(t, "description", {});
+
+    auto const parse_side = [&](char const *key,
+                                 std::vector<HookSignal> &out) -> Status {
+        auto const *arr = t[key].as_array();
+        if (arr == nullptr) return ok();   // omitted side is just empty
+        for (auto const &el : *arr) {
+            auto sig = parse_hook_signal(el, h.id, key);
+            if (!sig.has_value()) return failure(sig.error());
+            out.push_back(std::move(*sig));
+        }
+        return ok();
+    };
+    if (auto r = parse_side("inputs",  h.inputs);  !r.has_value()) return failure(r.error());
+    if (auto r = parse_side("outputs", h.outputs); !r.has_value()) return failure(r.error());
+
+    if (auto const v = t["ecu_address"].value<std::int64_t>(); v.has_value()) {
+        h.ecu_address = static_cast<std::size_t>(*v);
+    }
+    if (auto const *fr = t["free_ram"].as_table(); fr != nullptr) {
+        if (auto const v = (*fr)["base"].value<std::int64_t>(); v.has_value()) {
+            h.free_ram_base = static_cast<std::size_t>(*v);
+        }
+        if (auto const v = (*fr)["length"].value<std::int64_t>(); v.has_value()) {
+            h.free_ram_length = static_cast<std::size_t>(*v);
+        }
+    }
+    return h;
+}
+
 } // namespace
 
 // ---- DataType helpers ----------------------------------------------------
@@ -689,6 +768,9 @@ class DefinitionBuilder {
         if (auto r = visit_array("dtc", parse_dtc, def.dtcs_); !r.has_value()) {
             return failure(r.error());
         }
+        if (auto r = visit_array("hook", parse_hook, def.hooks_); !r.has_value()) {
+            return failure(r.error());
+        }
         return ok();
     }
 
@@ -722,6 +804,7 @@ class DefinitionBuilder {
         upsert(parent.pids_,     child.pids_);
         upsert(parent.switches_, child.switches_);
         upsert(parent.dtc_bitmaps_, child.dtc_bitmaps_);
+        upsert(parent.hooks_,    child.hooks_);
         // DTCs are keyed by `code` rather than `id`; same upsert semantics
         // but a different key field.
         for (auto &el : child.dtcs_) {
@@ -1095,6 +1178,12 @@ Dtc const *Definition::find_dtc(std::string_view code) const noexcept {
     auto it = std::find_if(dtcs_.begin(), dtcs_.end(),
                            [&](Dtc const &d) { return d.code == code; });
     return it == dtcs_.end() ? nullptr : &*it;
+}
+
+Hook const *Definition::find_hook(std::string_view id) const noexcept {
+    auto it = std::find_if(hooks_.begin(), hooks_.end(),
+                           [&](Hook const &h) { return h.id == id; });
+    return it == hooks_.end() ? nullptr : &*it;
 }
 
 namespace {

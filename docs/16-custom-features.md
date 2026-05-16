@@ -69,13 +69,39 @@ The graph editor's available output nodes (where the user can splice in custom l
 
 ```toml
 [[hook]]
-id          = "after_fuel_calc"
-description = "After the ECU has computed commanded injector pulse width"
-inputs      = ["rpm", "load", "commanded_pw", "coolant_temp"]
-outputs     = ["commanded_pw_override"]
-ecu_address = 0x000ABCD0         # where the hook splices into the firmware
-free_ram    = { base = 0x40000000, length = 256 }
+id           = "after_fuel_calc"
+display_name = "After fuel calc"
+description  = "After the ECU has computed commanded injector pulse width"
+ecu_address  = 0x000ABCD0         # where the hook splices into the firmware
+free_ram     = { base = 0x40000000, length = 256 }
+inputs = [
+  { name = "rpm",          label = "Engine RPM",        type = "float", unit = "rpm" },
+  { name = "load",         label = "Engine load",       type = "float", unit = "%"   },
+  { name = "commanded_pw", label = "Commanded fuel PW", type = "float", unit = "ms"  },
+  { name = "coolant_temp", label = "Coolant temp",      type = "float", unit = "°C"  },
+]
+outputs = [
+  { name = "commanded_pw_override", label = "Override fuel PW", type = "float", unit = "ms" },
+]
 ```
+
+**Field semantics:**
+
+- `id` (required, unique) — short stable identifier referenced by `.stmod` files and codegen
+- `display_name` (optional) — what the editor's hook palette shows; falls back to `id` when omitted
+- `description` (optional) — human-readable text, surfaced in the editor's hook palette tooltip
+- `inputs` (optional) — typed signals the hook **provides** (data the user's logic can read). On the graph node these appear as **output** pins (data flowing out of the hook node into the user's logic)
+- `outputs` (optional) — typed signals the hook **requires** (values the user must drive). On the graph node these appear as **input** pins
+- `ecu_address` (optional, codegen-only) — firmware address where the hook splices; the editor doesn't read this
+- `free_ram` (optional, codegen-only) — scratch-RAM region the compiled patch may claim
+
+**Signal fields:** each signal is `{ name, label, type, unit }`.
+- `name` is the canonical codegen identifier (snake_case, stable across pack revisions).
+- `label` (optional) is what the editor renders on the pin; falls back to `name` when omitted. Keep these short and in tuning vocabulary, not programmer vocabulary — `commanded_pw_override` is fine as `name`, but the pin should read `Override fuel PW`.
+- `type` ∈ `float | int | bool` (matches `st::feature::PinType`).
+- `unit` is informational metadata — dimensional analysis is future work (see "Type system" in the table above).
+
+**Pin direction inversion** — the rationale is that at the splice point, the ECU is *about to make a decision* (e.g., commanded fuel). The hook offers the user the current ECU state (`inputs`, which the user reads) and asks for the override values (`outputs`, which the user writes). On the canvas, data flow follows the read/write semantics, not the pack-declaration nesting — which means the names "inputs" and "outputs" are inverted between the TOML and the graph. Pack-declaration view dominates because it matches the codegen side of the contract, and the editor flips signs when instantiating a node.
 
 The pack author owns the responsibility of identifying valid hook points (where it's safe to splice without trashing the ECU's state). Untrusted packs would be a serious foot-gun; for v1.x, hook definitions are first-party only.
 
