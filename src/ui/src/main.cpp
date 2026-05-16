@@ -231,6 +231,25 @@ std::optional<Theme> parse_theme(std::string_view s) noexcept {
     return std::nullopt;
 }
 
+// Accent triple — the three shades used everywhere the GUI emphasises
+// a primary action (modal "Create" / "Apply" buttons, ButtonActive,
+// HeaderActive, SliderGrabActive, etc.). Per-theme so contrast with
+// the surrounding palette stays right (hover/active go LIGHTER on
+// dark backgrounds, DARKER on light ones).
+struct AccentTriple { ImVec4 base; ImVec4 hover; ImVec4 active; };
+
+inline AccentTriple accent_for(Theme t) noexcept {
+    constexpr ImVec4 accent_purple(0.55f, 0.35f, 0.85f, 1.00f);
+    if (t == Theme::Light) {
+        return { accent_purple,
+                 ImVec4(0.48f, 0.28f, 0.78f, 1.00f),
+                 ImVec4(0.40f, 0.20f, 0.70f, 1.00f) };
+    }
+    return { accent_purple,
+             ImVec4(0.62f, 0.45f, 0.90f, 1.00f),
+             ImVec4(0.70f, 0.55f, 0.95f, 1.00f) };
+}
+
 struct Settings {
     st::policy::Profile default_policy_profile{st::policy::Profile::MotorsportOnly};
     Theme               theme{Theme::Dark};
@@ -1194,9 +1213,10 @@ void render_unsaved_modal(AppState &state) {
         constexpr float kBtnW = 180.0f;
         // Save is the default action (Enter) and the safe path — give it
         // accent fill so the eye lands on it first.
-        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.21f, 0.46f, 0.76f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.31f, 0.56f, 0.86f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.38f, 0.65f, 0.94f, 1.00f));
+        auto const a_save = accent_for(state.settings.theme);
+        ImGui::PushStyleColor(ImGuiCol_Button,        a_save.base);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_save.hover);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  a_save.active);
         bool const save_clicked =
             ImGui::Button(modal_save_label(what), ImVec2(kBtnW, 0.0f));
         ImGui::PopStyleColor(3);
@@ -1405,9 +1425,10 @@ void render_csv_import_modal(AppState &state) {
         ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
 
     constexpr float kBtnW = 160.0f;
-    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.21f, 0.46f, 0.76f, 1.00f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.31f, 0.56f, 0.86f, 1.00f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.38f, 0.65f, 0.94f, 1.00f));
+    auto const a_csv = accent_for(state.settings.theme);
+    ImGui::PushStyleColor(ImGuiCol_Button,        a_csv.base);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_csv.hover);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  a_csv.active);
     bool const apply_clicked =
         ImGui::Button("Apply edits", ImVec2(kBtnW, 0.0f));
     ImGui::PopStyleColor(3);
@@ -2001,9 +2022,10 @@ void render_kp_autotune_modal(AppState &state) {
         ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
     bool apply_clicked = false;
     {
-        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.21f, 0.46f, 0.76f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.31f, 0.56f, 0.86f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.38f, 0.65f, 0.94f, 1.00f));
+        auto const a_btn = accent_for(state.settings.theme);
+        ImGui::PushStyleColor(ImGuiCol_Button,        a_btn.base);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_btn.hover);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  a_btn.active);
         ImGui::BeginDisabled(!have_preview);
         apply_clicked = ImGui::Button("Apply proposal", ImVec2(160.0f, 0.0f));
         ImGui::EndDisabled();
@@ -2274,9 +2296,10 @@ void render_maf_autotune_modal(AppState &state) {
         ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
     bool apply_clicked = false;
     {
-        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.21f, 0.46f, 0.76f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.31f, 0.56f, 0.86f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.38f, 0.65f, 0.94f, 1.00f));
+        auto const a_btn = accent_for(state.settings.theme);
+        ImGui::PushStyleColor(ImGuiCol_Button,        a_btn.base);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_btn.hover);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  a_btn.active);
         ImGui::BeginDisabled(!have_preview);
         apply_clicked = ImGui::Button("Apply proposal", ImVec2(160.0f, 0.0f));
         ImGui::EndDisabled();
@@ -2534,9 +2557,10 @@ void render_new_project_modal(AppState &state) {
         ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
     bool create_clicked = false;
     {
-        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.21f, 0.46f, 0.76f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.31f, 0.56f, 0.86f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.38f, 0.65f, 0.94f, 1.00f));
+        auto const a_btn = accent_for(state.settings.theme);
+        ImGui::PushStyleColor(ImGuiCol_Button,        a_btn.base);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_btn.hover);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  a_btn.active);
         ImGui::BeginDisabled(!can_create);
         create_clicked = ImGui::Button("Create", ImVec2(160.0f, 0.0f));
         ImGui::EndDisabled();
@@ -2983,9 +3007,7 @@ void apply_style_shape(ImGuiStyle &s) {
 }
 
 void apply_palette_dark(ImGuiStyle &s) {
-    constexpr ImVec4 accent       (0.21f, 0.46f, 0.76f, 1.00f);
-    constexpr ImVec4 accent_hover (0.31f, 0.56f, 0.86f, 1.00f);
-    constexpr ImVec4 accent_active(0.38f, 0.65f, 0.94f, 1.00f);
+    auto const [accent, accent_hover, accent_active] = accent_for(Theme::Dark);
 
     auto &c = s.Colors;
     c[ImGuiCol_WindowBg]              = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
@@ -3036,7 +3058,7 @@ void apply_palette_dark(ImGuiStyle &s) {
     c[ImGuiCol_TabDimmed]             = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
     c[ImGuiCol_TabDimmedSelected]     = ImVec4(0.13f, 0.14f, 0.17f, 1.00f);
 
-    c[ImGuiCol_DockingPreview]        = ImVec4(0.21f, 0.46f, 0.76f, 0.70f);
+    c[ImGuiCol_DockingPreview]        = ImVec4(accent.x, accent.y, accent.z, 0.70f);
     c[ImGuiCol_DockingEmptyBg]        = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
 
     c[ImGuiCol_PlotLines]             = ImVec4(0.61f, 0.61f, 0.61f, 1.00f);
@@ -3057,13 +3079,11 @@ void apply_palette_dark(ImGuiStyle &s) {
 }
 
 void apply_palette_light(ImGuiStyle &s) {
-    // Same blue accent as the dark theme — keeps brand identity
-    // consistent across both modes. The accent on a light background
-    // reads as bolder, which is appropriate for the "selected/active"
-    // states.
-    constexpr ImVec4 accent       (0.21f, 0.46f, 0.76f, 1.00f);
-    constexpr ImVec4 accent_hover (0.16f, 0.40f, 0.70f, 1.00f);
-    constexpr ImVec4 accent_active(0.10f, 0.34f, 0.62f, 1.00f);
+    // Same purple accent as the dark theme — keeps brand identity
+    // consistent across both modes. Hover/active go DARKER (toward
+    // saturated indigo) on the light background so they don't wash
+    // out, opposite of the dark-theme convention.
+    auto const [accent, accent_hover, accent_active] = accent_for(Theme::Light);
 
     auto &c = s.Colors;
     c[ImGuiCol_WindowBg]              = ImVec4(0.96f, 0.97f, 0.98f, 1.00f);
@@ -3114,7 +3134,7 @@ void apply_palette_light(ImGuiStyle &s) {
     c[ImGuiCol_TabDimmed]             = ImVec4(0.91f, 0.92f, 0.94f, 1.00f);
     c[ImGuiCol_TabDimmedSelected]     = ImVec4(0.86f, 0.88f, 0.91f, 1.00f);
 
-    c[ImGuiCol_DockingPreview]        = ImVec4(0.21f, 0.46f, 0.76f, 0.70f);
+    c[ImGuiCol_DockingPreview]        = ImVec4(accent.x, accent.y, accent.z, 0.70f);
     c[ImGuiCol_DockingEmptyBg]        = ImVec4(0.96f, 0.97f, 0.98f, 1.00f);
 
     c[ImGuiCol_PlotLines]             = ImVec4(0.40f, 0.42f, 0.46f, 1.00f);
@@ -3926,9 +3946,10 @@ void render_table_grid(st::Definition::TableData const &td,
         ImGui::PushFont(fonts.mono);
     }
     ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(1.0f, 0.5f));
-    ImGui::PushStyleColor(ImGuiCol_Header,        ImVec4(0.21f, 0.46f, 0.76f, 0.55f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.31f, 0.56f, 0.86f, 0.40f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive,  ImVec4(0.38f, 0.65f, 0.94f, 0.65f));
+    auto const a_hdr = accent_for(state.settings.theme);
+    ImGui::PushStyleColor(ImGuiCol_Header,        ImVec4(a_hdr.base.x,   a_hdr.base.y,   a_hdr.base.z,   0.55f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(a_hdr.hover.x,  a_hdr.hover.y,  a_hdr.hover.z,  0.40f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive,  ImVec4(a_hdr.active.x, a_hdr.active.y, a_hdr.active.z, 0.65f));
 
     auto const pop_style = [&]() {
         ImGui::PopStyleColor(3);
