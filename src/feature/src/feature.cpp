@@ -71,6 +71,9 @@ std::string to_toml(Graph const &g) {
         out << "label = "  << toml_quote(n.label) << "\n";
         out << "x     = "  << n.x << "\n";
         out << "y     = "  << n.y << "\n";
+        if (n.is_phase_break) {
+            out << "phase_break = true\n";
+        }
         out << "pins  = [\n";
         for (std::size_t i = 0; i < n.pins.size(); ++i) {
             auto const &p = n.pins[i];
@@ -153,11 +156,13 @@ Result<Graph> from_toml(std::string_view text) {
                                "feature TOML: duplicate node id "
                                    + std::to_string(persisted_id));
             }
-            n.label = (*ntbl)["label"].value_or<std::string>("");
-            n.x     = static_cast<float>(
+            n.label          = (*ntbl)["label"].value_or<std::string>("");
+            n.x              = static_cast<float>(
                 (*ntbl)["x"].value_or<double>(0.0));
-            n.y     = static_cast<float>(
+            n.y              = static_cast<float>(
                 (*ntbl)["y"].value_or<double>(0.0));
+            n.is_phase_break =
+                (*ntbl)["phase_break"].value_or<bool>(false);
             auto const *pins = (*ntbl)["pins"].as_array();
             if (pins != nullptr) {
                 for (auto const &pe : *pins) {
@@ -366,9 +371,18 @@ Status Graph::validate() const {
                            "validate: edge type mismatch");
         }
     }
-    // Cycle detection via DFS over the node graph. Adjacency is
-    // built per call — this is O(V+E) and Phase 5 graphs are small
-    // (tens to low hundreds of nodes).
+    // Cycle detection. Each Node expands into two vertices in the
+    // DFS graph: an "input side" (id*2) and an "output side"
+    // (id*2+1). Edges go from one node's output-side to another
+    // node's input-side. For non-phase-break nodes (primitives,
+    // generic debug nodes), an internal edge input-side →
+    // output-side captures "output is a pure function of input at
+    // the same time T", so primitive.out → x → primitive.in IS a
+    // cycle. Phase-break nodes (hooks) omit the internal edge:
+    // their output-side fires at time T (ECU state available
+    // before user logic), input-side fires at time T+ε (user
+    // override applied after), so hook.out → user_logic →
+    // hook.in is a legitimate DAG.
     enum class Mark : std::uint8_t { Unvisited, OnStack, Done };
     std::vector<NodeId> ids;
     ids.reserve(nodes_.size());
@@ -379,13 +393,24 @@ Status Graph::validate() const {
         }
         return ids.size();
     };
-    std::vector<std::vector<std::size_t>> adj(ids.size());
+    // Side encoding: 0 = input side, 1 = output side. Vertex index
+    // for (node i, side s) is 2*i + s.
+    std::size_t const   nv = ids.size() * 2;
+    std::vector<std::vector<std::size_t>> adj(nv);
+    auto const input_v  = [](std::size_t i) { return i * 2; };
+    auto const output_v = [](std::size_t i) { return i * 2 + 1; };
     for (auto const &e : edges_) {
         auto const a = index_of(e.from_node);
         auto const b = index_of(e.to_node);
-        if (a < adj.size() && b < adj.size()) adj[a].push_back(b);
+        if (a >= ids.size() || b >= ids.size()) continue;
+        adj[output_v(a)].push_back(input_v(b));
     }
-    std::vector<Mark> mark(ids.size(), Mark::Unvisited);
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        if (!nodes_[i].is_phase_break) {
+            adj[input_v(i)].push_back(output_v(i));
+        }
+    }
+    std::vector<Mark> mark(nv, Mark::Unvisited);
     auto visit = [&](auto &&self, std::size_t u) -> bool {
         mark[u] = Mark::OnStack;
         for (auto v : adj[u]) {
@@ -395,7 +420,7 @@ Status Graph::validate() const {
         mark[u] = Mark::Done;
         return false;
     };
-    for (std::size_t i = 0; i < ids.size(); ++i) {
+    for (std::size_t i = 0; i < nv; ++i) {
         if (mark[i] == Mark::Unvisited && visit(visit, i)) {
             return failure(ErrorCode::ParseError,
                            "validate: graph has a cycle");

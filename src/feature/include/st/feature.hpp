@@ -96,6 +96,18 @@ struct Node {
     float       x{0.0f};
     float       y{0.0f};
     std::vector<Pin> pins;
+    // Phase-break flag: true when the node's Input side fires at a
+    // strictly later time than its Output side within one ECU loop
+    // iteration. Hooks set this — their Output pins emit ECU state
+    // at the splice point (time T) while their Input pins consume
+    // user-overridden values that the ECU applies after the user's
+    // logic ran (time T+ε). Cycle detection treats these as two
+    // vertices with no internal edge, so the legitimate pattern
+    // `hook.out → user_logic → hook.in` is not a cycle. Primitives
+    // and generic debug nodes leave this false: their output is a
+    // pure function of their inputs at the same time, so a path
+    // from a primitive's output back to its input IS a cycle.
+    bool        is_phase_break{false};
 };
 
 struct Edge {

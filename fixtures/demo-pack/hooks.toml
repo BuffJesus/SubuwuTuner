@@ -4,9 +4,18 @@
 # exercised end-to-end against this synthetic pack. Real packs supply
 # addresses derived from each ECU's firmware analysis.
 #
-# The `name` on each signal is the canonical id (snake_case, what
-# codegen will eventually emit). `label` is what the editor shows the
-# user — keep it short and tuning-vocabulary, not programmer-vocabulary.
+# Direction convention per docs/16: a hook's `inputs` block lists the
+# values the hook PROVIDES to the user's logic (these become graph
+# Output pins on the node); the `outputs` block lists values the user
+# must SUPPLY back (graph Input pins). A pure sensor read therefore
+# uses only `inputs`; a pure action splice (e.g. ignition_cut) uses
+# only `outputs`; a value-override splice uses both.
+#
+# `name` is the canonical id (snake_case, what codegen will eventually
+# emit). `label` is what the editor shows the user — keep it short and
+# in tuning vocabulary.
+
+# ---- Splice points -------------------------------------------------
 
 [[hook]]
 id           = "after_fuel_calc"
@@ -25,12 +34,41 @@ outputs = [
 ]
 
 [[hook]]
+id           = "ignition_cut"
+display_name = "Ignition cut"
+description  = "Suppress ignition events while the input is true (e.g. for flat-foot shifting)"
+ecu_address  = 0x000ABE00
+outputs = [
+  { name = "cut_active", label = "Cut active", type = "bool" },
+]
+
+# ---- Sensor reads --------------------------------------------------
+
+[[hook]]
 id           = "read_rpm"
 display_name = "Engine RPM"
-description  = "Read the current engine RPM (sensor-style input node)"
+description  = "Read the current engine RPM"
 ecu_address  = 0x000AB100
-outputs = [
+inputs = [
   { name = "rpm", label = "RPM", type = "float", unit = "rpm" },
+]
+
+[[hook]]
+id           = "read_throttle_pct"
+display_name = "Throttle position"
+description  = "Read the requested-throttle pedal percentage"
+ecu_address  = 0x000AB110
+inputs = [
+  { name = "throttle_pct", label = "Throttle %", type = "float", unit = "%" },
+]
+
+[[hook]]
+id           = "read_ethanol_pct"
+display_name = "Ethanol content"
+description  = "Read the flex-fuel sensor's ethanol-percentage estimate"
+ecu_address  = 0x000AB120
+inputs = [
+  { name = "ethanol_pct", label = "Ethanol %", type = "float", unit = "%" },
 ]
 
 [[hook]]
@@ -38,6 +76,6 @@ id           = "clutch_switch"
 display_name = "Clutch switch"
 description  = "Read the clutch-pedal switch (engaged when held to the floor)"
 ecu_address  = 0x000AB200
-outputs = [
+inputs = [
   { name = "pressed", label = "Pressed", type = "bool" },
 ]

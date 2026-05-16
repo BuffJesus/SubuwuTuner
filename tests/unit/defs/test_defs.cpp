@@ -1903,6 +1903,89 @@ outputs = [
     REQUIRE(h.outputs[0].label == "Override fuel PW");
 }
 
+// ---- [[primitive]] -----------------------------------------------
+// Reusable computation nodes (arithmetic, boolean logic) declared
+// in the pack and exposed by the editor's palette alongside hooks.
+
+TEST_CASE("Definition parses a [[primitive]] with typed pins",
+          "[defs][primitives]") {
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[primitive]]
+id           = "multiply"
+display_name = "Multiply"
+description  = "Pure floating-point product of two inputs."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", type = "float" },
+]
+)toml");
+    REQUIRE(d.has_value());
+    REQUIRE(d->primitives().size() == 1);
+    auto const &p = d->primitives().front();
+    REQUIRE(p.id == "multiply");
+    REQUIRE(p.display_name == "Multiply");
+    REQUIRE(p.inputs.size() == 2);
+    REQUIRE(p.outputs.size() == 1);
+    REQUIRE(p.outputs[0].name == "out");
+}
+
+TEST_CASE("Primitive rejects missing id", "[defs][primitives]") {
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[primitive]]
+display_name = "no id field"
+)toml");
+    REQUIRE_FALSE(d.has_value());
+    REQUIRE(d.error().message().find("missing id") != std::string::npos);
+}
+
+TEST_CASE("Primitive rejects signal with unknown type",
+          "[defs][primitives]") {
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[primitive]]
+id     = "weird"
+inputs = [ { name = "x", type = "decimal" } ]
+)toml");
+    REQUIRE_FALSE(d.has_value());
+    REQUIRE(d.error().message().find("type must be") != std::string::npos);
+}
+
+TEST_CASE("Hooks and primitives co-exist in one pack",
+          "[defs][primitives]") {
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[hook]]
+id = "h"
+
+[[primitive]]
+id = "p"
+)toml");
+    REQUIRE(d.has_value());
+    REQUIRE(d->hooks().size() == 1);
+    REQUIRE(d->primitives().size() == 1);
+    REQUIRE(d->find_hook("h")       != nullptr);
+    REQUIRE(d->find_primitive("p")  != nullptr);
+    REQUIRE(d->find_hook("p")       == nullptr);
+    REQUIRE(d->find_primitive("h")  == nullptr);
+}
+
 TEST_CASE("Definition::find_hook locates a parsed hook by id",
           "[defs][hooks]") {
     auto const d = st::Definition::from_toml_string(R"toml(

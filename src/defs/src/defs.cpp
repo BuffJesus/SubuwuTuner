@@ -355,16 +355,18 @@ Result<Dtc> parse_dtc(toml::table const &t) {
     return d;
 }
 
-Result<HookSignal> parse_hook_signal(toml::node const &n,
-                                      std::string_view hook_id,
-                                      std::string_view side) {
+Result<HookSignal> parse_signal(toml::node const &n,
+                                 std::string_view kind,
+                                 std::string_view owner_id,
+                                 std::string_view side) {
     auto const *t = n.as_table();
+    auto const  prefix =
+        "[[" + std::string{kind} + "]] '" + std::string{owner_id}
+        + "' " + std::string{side};
     if (t == nullptr) {
         return failure(ErrorCode::ParseError,
-                       "[[hook]] '" + std::string{hook_id} + "' "
-                           + std::string{side}
-                           + " entry is not a table (expected "
-                             "{ name = ..., type = ..., ... })");
+                       prefix + " entry is not a table (expected "
+                                 "{ name = ..., type = ..., ... })");
     }
     HookSignal s;
     if (auto const v = (*t)["name"].value<std::string>();
@@ -372,22 +374,18 @@ Result<HookSignal> parse_hook_signal(toml::node const &n,
         s.name = *v;
     } else {
         return failure(ErrorCode::ParseError,
-                       "[[hook]] '" + std::string{hook_id} + "' "
-                           + std::string{side} + " entry missing name");
+                       prefix + " entry missing name");
     }
     s.label = optional_value<std::string>(*t, "label", {});
     if (auto const v = (*t)["type"].value<std::string>(); v.has_value()) {
         s.type = *v;
     } else {
         return failure(ErrorCode::ParseError,
-                       "[[hook]] '" + std::string{hook_id} + "' "
-                           + std::string{side} + " entry '" + s.name
-                           + "' missing type");
+                       prefix + " entry '" + s.name + "' missing type");
     }
     if (s.type != "float" && s.type != "int" && s.type != "bool") {
         return failure(ErrorCode::ParseError,
-                       "[[hook]] '" + std::string{hook_id} + "' "
-                           + std::string{side} + " entry '" + s.name
+                       prefix + " entry '" + s.name
                            + "' type must be float|int|bool, got '"
                            + s.type + "'");
     }
@@ -411,7 +409,7 @@ Result<Hook> parse_hook(toml::table const &t) {
         auto const *arr = t[key].as_array();
         if (arr == nullptr) return ok();   // omitted side is just empty
         for (auto const &el : *arr) {
-            auto sig = parse_hook_signal(el, h.id, key);
+            auto sig = parse_signal(el, "hook", h.id, key);
             if (!sig.has_value()) return failure(sig.error());
             out.push_back(std::move(*sig));
         }
@@ -432,6 +430,32 @@ Result<Hook> parse_hook(toml::table const &t) {
         }
     }
     return h;
+}
+
+Result<Primitive> parse_primitive(toml::table const &t) {
+    Primitive p;
+    if (auto const v = t["id"].value<std::string>();
+        v.has_value() && !v->empty()) {
+        p.id = *v;
+    } else {
+        return failure(ErrorCode::ParseError, "[[primitive]] missing id");
+    }
+    p.display_name = optional_value<std::string>(t, "display_name", {});
+    p.description  = optional_value<std::string>(t, "description", {});
+    auto const parse_side = [&](char const *key,
+                                 std::vector<HookSignal> &out) -> Status {
+        auto const *arr = t[key].as_array();
+        if (arr == nullptr) return ok();
+        for (auto const &el : *arr) {
+            auto sig = parse_signal(el, "primitive", p.id, key);
+            if (!sig.has_value()) return failure(sig.error());
+            out.push_back(std::move(*sig));
+        }
+        return ok();
+    };
+    if (auto r = parse_side("inputs",  p.inputs);  !r.has_value()) return failure(r.error());
+    if (auto r = parse_side("outputs", p.outputs); !r.has_value()) return failure(r.error());
+    return p;
 }
 
 } // namespace
@@ -771,6 +795,10 @@ class DefinitionBuilder {
         if (auto r = visit_array("hook", parse_hook, def.hooks_); !r.has_value()) {
             return failure(r.error());
         }
+        if (auto r = visit_array("primitive", parse_primitive, def.primitives_);
+            !r.has_value()) {
+            return failure(r.error());
+        }
         return ok();
     }
 
@@ -805,6 +833,7 @@ class DefinitionBuilder {
         upsert(parent.switches_, child.switches_);
         upsert(parent.dtc_bitmaps_, child.dtc_bitmaps_);
         upsert(parent.hooks_,    child.hooks_);
+        upsert(parent.primitives_, child.primitives_);
         // DTCs are keyed by `code` rather than `id`; same upsert semantics
         // but a different key field.
         for (auto &el : child.dtcs_) {
@@ -1184,6 +1213,12 @@ Hook const *Definition::find_hook(std::string_view id) const noexcept {
     auto it = std::find_if(hooks_.begin(), hooks_.end(),
                            [&](Hook const &h) { return h.id == id; });
     return it == hooks_.end() ? nullptr : &*it;
+}
+
+Primitive const *Definition::find_primitive(std::string_view id) const noexcept {
+    auto it = std::find_if(primitives_.begin(), primitives_.end(),
+                           [&](Primitive const &p) { return p.id == id; });
+    return it == primitives_.end() ? nullptr : &*it;
 }
 
 namespace {

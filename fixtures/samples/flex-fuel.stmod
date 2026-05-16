@@ -1,0 +1,97 @@
+# Flex-fuel sample feature — illustrative starter for the
+# custom-features designer.
+#
+# What it does: reads the flex-fuel sensor's ethanol-percentage
+# estimate, looks up a fuel-multiplier via the flex_fuel_scale
+# primitive (E0 = 1.00, E85 ≈ 1.28), multiplies the ECU's commanded
+# fuel pulse width by that factor, and writes the result back to
+# the after-fuel-calc splice point.
+#
+# Pairs with fixtures/demo-pack — load that pack first, then open
+# this file via the designer's Load… button.
+#
+# Caveat: this is a working *shape*, not a flight-ready calibration.
+# A real flex-fuel implementation would gate on coolant temperature,
+# blend more carefully around startup, and use a table-lookup
+# primitive rather than the hardcoded curve. Those land alongside
+# the per-instance-constant feature in a later session.
+
+[graph]
+schema_version = 1
+
+[[node]]
+id    = 1
+kind  = "hook.read_ethanol_pct"
+label = "Ethanol content"
+x     = 48.0
+y     = 48.0
+phase_break = true
+pins  = [
+  { id = 0, name = "Ethanol %", type = "float", direction = "output", unit = "%" }
+]
+
+[[node]]
+id    = 2
+kind  = "primitive.flex_fuel_scale"
+label = "Flex-fuel scale curve"
+x     = 288.0
+y     = 48.0
+pins  = [
+  { id = 0, name = "Ethanol %",  type = "float", direction = "input",  unit = "%" },
+  { id = 1, name = "Fuel scale", type = "float", direction = "output", unit = "" }
+]
+
+[[node]]
+id    = 4
+kind  = "primitive.multiply_float"
+label = "Multiply"
+x     = 528.0
+y     = 48.0
+pins  = [
+  { id = 0, name = "a",   type = "float", direction = "input",  unit = "" },
+  { id = 1, name = "b",   type = "float", direction = "input",  unit = "" },
+  { id = 2, name = "out", type = "float", direction = "output", unit = "" }
+]
+
+[[node]]
+id    = 3
+kind  = "hook.after_fuel_calc"
+label = "After fuel calc"
+x     = 768.0
+y     = 48.0
+phase_break = true
+pins  = [
+  { id = 0, name = "Engine RPM",        type = "float", direction = "output", unit = "rpm" },
+  { id = 1, name = "Engine load",       type = "float", direction = "output", unit = "%" },
+  { id = 2, name = "Commanded fuel PW", type = "float", direction = "output", unit = "ms" },
+  { id = 3, name = "Coolant temp",      type = "float", direction = "output", unit = "°C" },
+  { id = 4, name = "Override fuel PW",  type = "float", direction = "input",  unit = "ms" }
+]
+
+# Ethanol % → flex_fuel_scale.ethanol_pct
+[[edge]]
+from_node = 1
+from_pin  = 0
+to_node   = 2
+to_pin    = 0
+
+# flex_fuel_scale.scale → multiply.a
+[[edge]]
+from_node = 2
+from_pin  = 1
+to_node   = 4
+to_pin    = 0
+
+# after_fuel_calc.commanded_pw → multiply.b
+[[edge]]
+from_node = 3
+from_pin  = 2
+to_node   = 4
+to_pin    = 1
+
+# multiply.out → after_fuel_calc.Override fuel PW
+[[edge]]
+from_node = 4
+from_pin  = 2
+to_node   = 3
+to_pin    = 4

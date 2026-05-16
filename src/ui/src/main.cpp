@@ -5170,50 +5170,54 @@ void render_features_designer(AppState &state) {
                               state.features_graph.nodes().size());
     };
 
-    // Pack-driven node palette. Hooks declared in the loaded project's
-    // definition pack (per docs/16 §"Definition-pack hooks") become the
-    // node-library palette. Pin directions are flipped from the pack
-    // declaration: the hook's `inputs` are values the ECU offers TO
-    // user logic, so they're Output pins on the node; `outputs` are
-    // values the user must SUPPLY, so they're Input pins. Without a
-    // loaded project, fall back to the generic debug buttons.
-    bool const have_hooks =
+    // Pack-driven node palette. Two groups in one popup:
+    //   - Hooks (splice / sensor / action points declared by the pack)
+    //   - Primitives (pure-computation nodes)
+    // Pin-direction convention differs between the two groups:
+    //   - For hooks, pack-declared `inputs` become graph Output pins
+    //     (the hook offers data TO user logic) and `outputs` become
+    //     graph Input pins (the hook demands data FROM user logic).
+    //   - For primitives, the convention is the obvious one:
+    //     pack-declared `inputs` = graph Input pins, `outputs` =
+    //     graph Output pins.
+    // Without a loaded project, fall back to the generic debug
+    // buttons so an empty workspace can still be exercised.
+    bool const have_palette =
         state.project.has_value()
-        && !state.project->definition().hooks().empty();
-    if (have_hooks) {
-        if (ImGui::Button("Hooks \xE2\x96\xBE")) {
-            ImGui::OpenPopup("##features_hooks_palette");
+        && (!state.project->definition().hooks().empty()
+            || !state.project->definition().primitives().empty());
+    if (have_palette) {
+        if (ImGui::Button("Insert \xE2\x96\xBE")) {
+            ImGui::OpenPopup("##features_palette");
         }
-        if (ImGui::BeginPopup("##features_hooks_palette")) {
-            ImGui::TextDisabled("Insert a hook node");
-            ImGui::Separator();
-            auto const &hooks =
+        if (ImGui::BeginPopup("##features_palette")) {
+            auto const   &hooks =
                 state.project->definition().hooks();
-            for (auto const &h : hooks) {
-                // Palette shows the human-readable display_name (or the
-                // canonical id when the pack hasn't supplied one).
-                char const *human =
-                    !h.display_name.empty() ? h.display_name.c_str()
-                                             : h.id.c_str();
-                char label[200];
-                std::snprintf(label, sizeof label, "%s##hook_%s",
-                               human, h.id.c_str());
-                if (ImGui::MenuItem(label)) {
+            auto const   &prims =
+                state.project->definition().primitives();
+            // Spawn helper — shared between the two groups. The pin-
+            // direction lambda decides what `inputs`/`outputs` mean on
+            // a given kind of node.
+            auto const spawn_node =
+                [&](std::string const &kind_prefix,
+                    std::string const &id,
+                    std::string const &display_name,
+                    std::vector<st::HookSignal> const &decl_inputs,
+                    std::vector<st::HookSignal> const &decl_outputs,
+                    st::feature::PinDirection in_dir,
+                    st::feature::PinDirection out_dir,
+                    bool phase_break) {
                     st::feature::Node n;
-                    n.kind  = std::string{"hook."} + h.id;
-                    n.label = !h.display_name.empty()
-                                  ? h.display_name : h.id;
-                    n.x     = 40.0f;
-                    n.y     = next_slot_y();
+                    n.kind            = kind_prefix + id;
+                    n.label           = !display_name.empty() ? display_name : id;
+                    n.x               = 40.0f;
+                    n.y               = next_slot_y();
+                    n.is_phase_break  = phase_break;
                     st::feature::PinId next_pin = 0;
                     auto const push_pin =
                         [&](st::HookSignal const &s,
                             st::feature::PinDirection d) {
                             auto pt = st::feature::parse_pin_type(s.type);
-                            // Pin name = human label when supplied,
-                            // canonical name otherwise. Codegen will
-                            // resolve back via kind + slot order
-                            // against the hook definition.
                             std::string const pin_label =
                                 !s.label.empty() ? s.label : s.name;
                             n.pins.push_back(st::feature::Pin{
@@ -5222,17 +5226,56 @@ void render_features_designer(AppState &state) {
                                 pt.value_or(st::feature::PinType::Float),
                                 d, s.unit});
                         };
-                    // Note the inversion vs. pack declaration.
-                    for (auto const &s : h.inputs) {
-                        push_pin(s, st::feature::PinDirection::Output);
-                    }
-                    for (auto const &s : h.outputs) {
-                        push_pin(s, st::feature::PinDirection::Input);
-                    }
+                    for (auto const &s : decl_inputs)  push_pin(s, in_dir);
+                    for (auto const &s : decl_outputs) push_pin(s, out_dir);
                     state.features_graph.add_node(std::move(n));
+                };
+
+            if (!hooks.empty()) {
+                ImGui::TextDisabled("Hooks");
+                ImGui::Separator();
+                for (auto const &h : hooks) {
+                    char const *human =
+                        !h.display_name.empty() ? h.display_name.c_str()
+                                                 : h.id.c_str();
+                    char label[200];
+                    std::snprintf(label, sizeof label, "%s##hook_%s",
+                                   human, h.id.c_str());
+                    if (ImGui::MenuItem(label)) {
+                        spawn_node("hook.", h.id, h.display_name,
+                                    h.inputs, h.outputs,
+                                    /*in_dir =*/st::feature::PinDirection::Output,
+                                    /*out_dir=*/st::feature::PinDirection::Input,
+                                    /*phase_break=*/true);
+                    }
+                    if (!h.description.empty() && ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("%s", h.description.c_str());
+                    }
                 }
-                if (!h.description.empty() && ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("%s", h.description.c_str());
+            }
+            if (!prims.empty()) {
+                if (!hooks.empty()) {
+                    ImGui::Spacing();
+                }
+                ImGui::TextDisabled("Primitives");
+                ImGui::Separator();
+                for (auto const &p : prims) {
+                    char const *human =
+                        !p.display_name.empty() ? p.display_name.c_str()
+                                                 : p.id.c_str();
+                    char label[200];
+                    std::snprintf(label, sizeof label, "%s##prim_%s",
+                                   human, p.id.c_str());
+                    if (ImGui::MenuItem(label)) {
+                        spawn_node("primitive.", p.id, p.display_name,
+                                    p.inputs, p.outputs,
+                                    /*in_dir =*/st::feature::PinDirection::Input,
+                                    /*out_dir=*/st::feature::PinDirection::Output,
+                                    /*phase_break=*/false);
+                    }
+                    if (!p.description.empty() && ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("%s", p.description.c_str());
+                    }
                 }
             }
             ImGui::EndPopup();
@@ -5649,33 +5692,46 @@ void render_features_designer(AppState &state) {
             ImGui::IsItemClicked(ImGuiMouseButton_Right);
 
         // Hover tooltip — surfaces the human-friendly description
-        // from the pack-declared hook (or just the kind for generic
-        // debug nodes). Suppressed during drag so it doesn't track
-        // the cursor mid-move. Suppressed while wiring so the user
-        // can read the in-flight target instead.
+        // from the pack-declared hook or primitive (or just the
+        // kind for generic debug nodes). Suppressed during drag so
+        // it doesn't track the cursor mid-move. Suppressed while
+        // wiring so the user can read the in-flight target instead.
         if (body_hovered && !body_active
             && !state.features_wiring_active) {
             char const *node_kind = n.kind.c_str();
-            bool const   is_hook  = n.kind.starts_with("hook.");
-            st::Hook const *hook  = nullptr;
-            if (is_hook && state.project.has_value()) {
-                std::string_view const hook_id{
-                    n.kind.data() + 5, n.kind.size() - 5};
-                hook = state.project->definition().find_hook(hook_id);
+            std::string description;
+            bool        is_pack_node = false;
+            if (state.project.has_value()) {
+                auto const &def = state.project->definition();
+                if (n.kind.starts_with("hook.")) {
+                    is_pack_node = true;
+                    std::string_view const id{
+                        n.kind.data() + 5, n.kind.size() - 5};
+                    if (auto const *h = def.find_hook(id);
+                        h != nullptr) {
+                        description = h->description;
+                    }
+                } else if (n.kind.starts_with("primitive.")) {
+                    is_pack_node = true;
+                    std::string_view const id{
+                        n.kind.data() + 10, n.kind.size() - 10};
+                    if (auto const *p = def.find_primitive(id);
+                        p != nullptr) {
+                        description = p->description;
+                    }
+                }
             }
             ImGui::BeginTooltip();
-            // Title line: human label, with the kind tag in muted
-            // text below for the technically-inclined user.
             char const *title_str =
                 !n.label.empty() ? n.label.c_str() : node_kind;
             ImGui::TextUnformatted(title_str);
             ImGui::TextDisabled("%s", node_kind);
-            if (hook != nullptr && !hook->description.empty()) {
+            if (!description.empty()) {
                 ImGui::Separator();
                 ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
-                ImGui::TextWrapped("%s", hook->description.c_str());
+                ImGui::TextWrapped("%s", description.c_str());
                 ImGui::PopTextWrapPos();
-            } else if (!is_hook) {
+            } else if (!is_pack_node) {
                 ImGui::Separator();
                 ImGui::TextDisabled(
                     "Generic debug node. Load a project with hooks "

@@ -756,6 +756,7 @@ int cmd_pack_info(int argc, char *argv[]) {
         }
     }
     std::printf("Hooks:           %zu\n", def->hooks().size());
+    std::printf("Primitives:      %zu\n", def->primitives().size());
 
     // Quick validate so users see issues without running rom-info.
     auto const validity = def->validate();

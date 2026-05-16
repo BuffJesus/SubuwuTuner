@@ -105,6 +105,43 @@ outputs = [
 
 The pack author owns the responsibility of identifying valid hook points (where it's safe to splice without trashing the ECU's state). Untrusted packs would be a serious foot-gun; for v1.x, hook definitions are first-party only.
 
+## Definition-pack primitives
+
+Alongside `[[hook]]`s, packs declare reusable computation nodes via `[[primitive]]`. Primitives are pure functions — arithmetic, boolean logic, table lookup once that lands — that wire between hook outputs and hook inputs. They have no `ecu_address` or `free_ram` because there's nothing to splice; codegen lowers them into machine code that runs in the user's logic block.
+
+```toml
+[[primitive]]
+id           = "multiply_float"
+display_name = "Multiply"
+description  = "Floating-point product of two inputs."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", type = "float" },
+]
+```
+
+Signal fields are the same as hooks (`name`, optional `label`, `type`, optional `unit`). The direction convention, however, is the obvious one: primitive `inputs` become graph **Input** pins (consumed from upstream) and `outputs` become graph **Output** pins (produced for downstream). No inversion. This differs from hooks because primitives aren't splice points — there's no read/write phase distinction to flip.
+
+The designer palette groups palette entries by source: a `Hooks` section and a `Primitives` section. Both sets come from the same loaded definition pack.
+
+## Cycle detection and phase-break nodes
+
+A naive view of the graph would flag the most common feature shape — `hook.out → user_logic → hook.in` — as a 2-cycle through the hook node. But the cycle is illusory: the hook's Output pins fire at splice-time T (ECU state read out for user logic to consume), and its Input pins fire at T+ε (user-driven overrides applied back). User logic runs in between. There is no real cycle in execution time.
+
+The data model encodes this with `Node.is_phase_break`. When set (and the editor sets it automatically for every hook-derived node), cycle detection models the node as two vertices with no internal edge — output-side and input-side are independent. Primitives leave the flag false: a primitive's output IS a pure function of its inputs at the same time, so a path from a primitive's output back to its input is a real cycle.
+
+## Sample packs
+
+Two starter `.stmod` files ship in `fixtures/samples/` and demonstrate the editor end-to-end against the demo definition pack:
+
+- `flex-fuel.stmod` — read ethanol-content sensor → flex-fuel-scale curve → multiply the ECU's commanded fuel pulse width by the scale → write back to the after-fuel-calc splice. A clean DAG with all inputs driven; passes lint.
+- `flat-foot-shift.stmod` — combine clutch + throttle + RPM thresholds through AND gates into the ignition-cut splice. Lint reports two undriven inputs (`throttle > X` and `rpm > Y` need constants), illustrating both what a real feature looks like AND the gap a future per-instance-constants feature will fill.
+
+These are illustrative shapes, not flight-ready calibrations. Both will rehydrate cleanly into the designer canvas via the `Load…` button once a project with the demo pack is loaded.
+
 ## Safety considerations
 
 Custom features are categorically more dangerous than table edits:

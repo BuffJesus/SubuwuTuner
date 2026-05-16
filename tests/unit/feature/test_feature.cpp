@@ -293,6 +293,74 @@ TEST_CASE("Graph from_toml rejects duplicate pin id within a node",
     REQUIRE_FALSE(r.has_value());
 }
 
+TEST_CASE("Graph::validate accepts hook.out -> middle -> hook.in "
+          "when the hook is a phase break",
+          "[feature][graph]") {
+    // This pattern is the most common shape for a custom feature:
+    // read an ECU value from a splice, transform it, write the
+    // override back to the same splice. Topologically that's a
+    // 2-cycle through the hook node, but the hook's read-side
+    // fires strictly before its write-side, so it's a legitimate
+    // DAG in execution-time terms. The phase-break flag tells the
+    // validator to model the hook as two separate vertices.
+    st::feature::Graph g;
+    st::feature::Node hook;
+    hook.kind            = "hook.after_fuel_calc";
+    hook.label           = "hook";
+    hook.is_phase_break  = true;
+    hook.pins.push_back(st::feature::Pin{
+        0, "out", st::feature::PinType::Float,
+        st::feature::PinDirection::Output, ""});
+    hook.pins.push_back(st::feature::Pin{
+        1, "in",  st::feature::PinType::Float,
+        st::feature::PinDirection::Input,  ""});
+    auto const h = g.add_node(std::move(hook));
+    st::feature::Node mid;
+    mid.kind  = "primitive.passthrough";
+    mid.label = "mid";
+    mid.pins.push_back(st::feature::Pin{
+        0, "in",  st::feature::PinType::Float,
+        st::feature::PinDirection::Input,  ""});
+    mid.pins.push_back(st::feature::Pin{
+        1, "out", st::feature::PinType::Float,
+        st::feature::PinDirection::Output, ""});
+    auto const m = g.add_node(std::move(mid));
+    REQUIRE(g.connect(h, 0, m, 0).has_value());
+    REQUIRE(g.connect(m, 1, h, 1).has_value());
+    REQUIRE(g.validate().has_value());
+}
+
+TEST_CASE("Graph::validate still flags a real cycle through primitives",
+          "[feature][graph]") {
+    // Same shape but with the middle node also marked phase-break-
+    // free (a primitive). The hook stays phase-break; the cycle is
+    // through two primitives so it should fire.
+    st::feature::Graph g;
+    st::feature::Node a;
+    a.kind = "primitive.a";
+    a.pins.push_back(st::feature::Pin{
+        0, "in",  st::feature::PinType::Float,
+        st::feature::PinDirection::Input,  ""});
+    a.pins.push_back(st::feature::Pin{
+        1, "out", st::feature::PinType::Float,
+        st::feature::PinDirection::Output, ""});
+    auto const aid = g.add_node(std::move(a));
+    st::feature::Node b;
+    b.kind = "primitive.b";
+    b.pins.push_back(st::feature::Pin{
+        0, "in",  st::feature::PinType::Float,
+        st::feature::PinDirection::Input,  ""});
+    b.pins.push_back(st::feature::Pin{
+        1, "out", st::feature::PinType::Float,
+        st::feature::PinDirection::Output, ""});
+    auto const bid = g.add_node(std::move(b));
+    REQUIRE(g.connect(aid, 1, bid, 0).has_value());
+    REQUIRE(g.connect(bid, 1, aid, 0).has_value());
+    auto const v = g.validate();
+    REQUIRE_FALSE(v.has_value());
+    REQUIRE(v.error().message().find("cycle") != std::string::npos);
+}
+
 TEST_CASE("lint on an empty graph reports nothing",
           "[feature][lint]") {
     st::feature::Graph g;

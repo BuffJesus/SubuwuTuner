@@ -1,0 +1,166 @@
+# Flat-foot shifting sample feature — illustrative starter for the
+# custom-features designer.
+#
+# What it does: cuts ignition while the clutch is held to the floor
+# AND the driver is at high throttle AND engine RPM is up in the
+# powerband. Real flat-foot tuning gates more carefully (gear
+# detection, debounce, etc.); this is the minimum-viable shape so
+# the user can see how clutch + throttle + RPM combine through AND
+# gates into the ignition_cut hook.
+#
+# Pairs with fixtures/demo-pack — load that pack first, then open
+# this file via the designer's Load… button.
+#
+# Caveat: the threshold comparisons (throttle > X, RPM > Y) wire
+# their `b` pin to nothing because per-instance constants don't
+# exist yet. The lint chip will report two undriven inputs — that's
+# the editor correctly identifying the missing pieces a real flat-
+# foot calibration would supply. Treat as a teaching exhibit, not
+# something to flash.
+
+[graph]
+schema_version = 1
+
+# ---- Reads -------------------------------------------------------
+
+[[node]]
+id    = 1
+kind  = "hook.clutch_switch"
+label = "Clutch switch"
+x     = 48.0
+y     = 48.0
+phase_break = true
+pins  = [
+  { id = 0, name = "Pressed", type = "bool", direction = "output", unit = "" }
+]
+
+[[node]]
+id    = 2
+kind  = "hook.read_throttle_pct"
+label = "Throttle position"
+x     = 48.0
+y     = 168.0
+phase_break = true
+pins  = [
+  { id = 0, name = "Throttle %", type = "float", direction = "output", unit = "%" }
+]
+
+[[node]]
+id    = 3
+kind  = "hook.read_rpm"
+label = "Engine RPM"
+x     = 48.0
+y     = 288.0
+phase_break = true
+pins  = [
+  { id = 0, name = "RPM", type = "float", direction = "output", unit = "rpm" }
+]
+
+# ---- Threshold checks --------------------------------------------
+
+[[node]]
+id    = 4
+kind  = "primitive.compare_gt"
+label = "throttle > X"
+x     = 312.0
+y     = 168.0
+pins  = [
+  { id = 0, name = "a",     type = "float", direction = "input",  unit = "" },
+  { id = 1, name = "b",     type = "float", direction = "input",  unit = "" },
+  { id = 2, name = "a > b", type = "bool",  direction = "output", unit = "" }
+]
+
+[[node]]
+id    = 5
+kind  = "primitive.compare_gt"
+label = "rpm > Y"
+x     = 312.0
+y     = 288.0
+pins  = [
+  { id = 0, name = "a",     type = "float", direction = "input",  unit = "" },
+  { id = 1, name = "b",     type = "float", direction = "input",  unit = "" },
+  { id = 2, name = "a > b", type = "bool",  direction = "output", unit = "" }
+]
+
+# ---- Combine + drive --------------------------------------------
+
+[[node]]
+id    = 6
+kind  = "primitive.and_bool"
+label = "throttle AND rpm"
+x     = 576.0
+y     = 228.0
+pins  = [
+  { id = 0, name = "a",   type = "bool", direction = "input",  unit = "" },
+  { id = 1, name = "b",   type = "bool", direction = "input",  unit = "" },
+  { id = 2, name = "out", type = "bool", direction = "output", unit = "" }
+]
+
+[[node]]
+id    = 7
+kind  = "primitive.and_bool"
+label = "clutch AND arm"
+x     = 816.0
+y     = 138.0
+pins  = [
+  { id = 0, name = "a",   type = "bool", direction = "input",  unit = "" },
+  { id = 1, name = "b",   type = "bool", direction = "input",  unit = "" },
+  { id = 2, name = "out", type = "bool", direction = "output", unit = "" }
+]
+
+[[node]]
+id    = 8
+kind  = "hook.ignition_cut"
+label = "Ignition cut"
+x     = 1056.0
+y     = 138.0
+phase_break = true
+pins  = [
+  { id = 0, name = "Cut active", type = "bool", direction = "input", unit = "" }
+]
+
+# Throttle into compare-gt.a
+[[edge]]
+from_node = 2
+from_pin  = 0
+to_node   = 4
+to_pin    = 0
+
+# RPM into compare-gt.a
+[[edge]]
+from_node = 3
+from_pin  = 0
+to_node   = 5
+to_pin    = 0
+
+# Throttle-check + RPM-check → AND
+[[edge]]
+from_node = 4
+from_pin  = 2
+to_node   = 6
+to_pin    = 0
+
+[[edge]]
+from_node = 5
+from_pin  = 2
+to_node   = 6
+to_pin    = 1
+
+# Clutch + armed → AND → cut
+[[edge]]
+from_node = 1
+from_pin  = 0
+to_node   = 7
+to_pin    = 0
+
+[[edge]]
+from_node = 6
+from_pin  = 2
+to_node   = 7
+to_pin    = 1
+
+[[edge]]
+from_node = 7
+from_pin  = 2
+to_node   = 8
+to_pin    = 0

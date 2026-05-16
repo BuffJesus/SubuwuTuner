@@ -1,0 +1,111 @@
+# Pack-declared primitive nodes per docs/16. Primitives are pure
+# computation — they connect between hook outputs and hook inputs to
+# transform values. Unlike hooks, primitives don't splice into
+# firmware; they have no ecu_address or free_ram region. The signal-
+# direction convention is the obvious one: `inputs` are graph Input
+# pins (consumed from upstream), `outputs` are graph Output pins.
+#
+# Type ergonomics still apply — wires refuse to cross non-empty unit
+# boundaries. The generic numeric primitives below deliberately
+# declare no unit so they pass through whatever upstream provides.
+
+# ---- Arithmetic ----------------------------------------------------
+
+[[primitive]]
+id           = "add_float"
+display_name = "Add"
+description  = "Floating-point sum of two inputs."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", type = "float" },
+]
+
+[[primitive]]
+id           = "multiply_float"
+display_name = "Multiply"
+description  = "Floating-point product of two inputs."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", type = "float" },
+]
+
+[[primitive]]
+id           = "divide_float"
+display_name = "Divide"
+description  = "Floating-point a / b. Codegen will inject a divide-by-zero guard."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", type = "float" },
+]
+
+# ---- Comparison + boolean logic ------------------------------------
+
+[[primitive]]
+id           = "compare_gt"
+display_name = "Greater than"
+description  = "True when a > b."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", label = "a > b", type = "bool" },
+]
+
+[[primitive]]
+id           = "and_bool"
+display_name = "AND"
+description  = "Logical AND of two booleans."
+inputs = [
+  { name = "a", type = "bool" },
+  { name = "b", type = "bool" },
+]
+outputs = [
+  { name = "out", type = "bool" },
+]
+
+[[primitive]]
+id           = "or_bool"
+display_name = "OR"
+description  = "Logical OR of two booleans."
+inputs = [
+  { name = "a", type = "bool" },
+  { name = "b", type = "bool" },
+]
+outputs = [
+  { name = "out", type = "bool" },
+]
+
+[[primitive]]
+id           = "not_bool"
+display_name = "NOT"
+description  = "Logical NOT — inverts a boolean input."
+inputs = [
+  { name = "in", type = "bool" },
+]
+outputs = [
+  { name = "out", type = "bool" },
+]
+
+# ---- Domain helpers (encapsulate hardcoded curves so sample graphs
+# don't need a constants feature to be readable) --------------------
+
+[[primitive]]
+id           = "flex_fuel_scale"
+display_name = "Flex-fuel scale curve"
+description  = "Map ethanol-content percentage to a fuel-multiplier curve. E0 = 1.00, E85 = 1.28 (approx), interpolated linearly. A future revision will replace this with a table-lookup primitive once the table-binding feature lands."
+inputs = [
+  { name = "ethanol_pct", label = "Ethanol %", type = "float", unit = "%" },
+]
+outputs = [
+  { name = "scale", label = "Fuel scale", type = "float" },
+]

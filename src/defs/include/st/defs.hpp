@@ -244,6 +244,22 @@ struct Hook {
     std::optional<std::size_t>  free_ram_length;
 };
 
+// A reusable computation node declared by the pack — arithmetic,
+// boolean logic, table lookup, etc. Distinct from Hook in that
+// primitives don't splice into the firmware; they're pure functions
+// that compose between hook inputs and hook outputs. Pin direction
+// follows ordinary dataflow: a primitive's `inputs` are its graph
+// Input pins (consumed from upstream), `outputs` are graph Output
+// pins (driven to downstream). No ECU-address or RAM-region fields
+// — those make no sense for a pure computation.
+struct Primitive {
+    std::string             id;
+    std::string             display_name;
+    std::string             description;
+    std::vector<HookSignal> inputs;
+    std::vector<HookSignal> outputs;
+};
+
 // A complete definition pack: one Pack header, plus 0..N of each child kind.
 class Definition {
   public:
@@ -277,6 +293,9 @@ class Definition {
     }
     [[nodiscard]] std::vector<Dtc> const &     dtcs() const noexcept { return dtcs_; }
     [[nodiscard]] std::vector<Hook> const &    hooks() const noexcept { return hooks_; }
+    [[nodiscard]] std::vector<Primitive> const &primitives() const noexcept {
+        return primitives_;
+    }
 
     [[nodiscard]] Axis const *      find_axis(std::string_view id) const noexcept;
     [[nodiscard]] Scaling const *   find_scaling(std::string_view id) const noexcept;
@@ -286,6 +305,7 @@ class Definition {
     [[nodiscard]] DtcBitmap const * find_dtc_bitmap(std::string_view id) const noexcept;
     [[nodiscard]] Dtc const *       find_dtc(std::string_view code) const noexcept;
     [[nodiscard]] Hook const *      find_hook(std::string_view id) const noexcept;
+    [[nodiscard]] Primitive const * find_primitive(std::string_view id) const noexcept;
 
     // If `rom` matches one of the [[identification]] entries, return the
     // entry's `name`. Otherwise nullopt.
@@ -354,6 +374,7 @@ class Definition {
     std::vector<DtcBitmap>      dtc_bitmaps_;
     std::vector<Dtc>            dtcs_;
     std::vector<Hook>           hooks_;
+    std::vector<Primitive>      primitives_;
 
     friend class DefinitionBuilder;
 };
