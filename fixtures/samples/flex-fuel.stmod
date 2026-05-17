@@ -27,7 +27,7 @@ x     = 48.0
 y     = 48.0
 phase_break = true
 pins  = [
-  { id = 0, name = "Ethanol %", type = "float", direction = "output", unit = "%" }
+  { id = 0, name = "ethanol_pct", type = "float", direction = "output", unit = "%" }
 ]
 
 [[node]]
@@ -37,7 +37,7 @@ label = "Flex-fuel scale curve"
 x     = 288.0
 y     = 48.0
 pins  = [
-  { id = 0, name = "Ethanol %",  type = "float", direction = "input",  unit = "%" },
+  { id = 0, name = "ethanol_pct",  type = "float", direction = "input",  unit = "%" },
   { id = 1, name = "Fuel scale", type = "float", direction = "output", unit = "" }
 ]
 

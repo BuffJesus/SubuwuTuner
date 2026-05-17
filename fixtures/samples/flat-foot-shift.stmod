@@ -29,7 +29,7 @@ x     = 48.0
 y     = 48.0
 phase_break = true
 pins  = [
-  { id = 0, name = "Pressed", type = "bool", direction = "output", unit = "" }
+  { id = 0, name = "pressed", type = "bool", direction = "output", unit = "" }
 ]
 
 [[node]]
@@ -40,7 +40,7 @@ x     = 48.0
 y     = 168.0
 phase_break = true
 pins  = [
-  { id = 0, name = "Throttle %", type = "float", direction = "output", unit = "%" }
+  { id = 0, name = "throttle_pct", type = "float", direction = "output", unit = "%" }
 ]
 
 [[node]]
@@ -51,7 +51,7 @@ x     = 48.0
 y     = 288.0
 phase_break = true
 pins  = [
-  { id = 0, name = "RPM", type = "float", direction = "output", unit = "rpm" }
+  { id = 0, name = "rpm", type = "float", direction = "output", unit = "rpm" }
 ]
 
 # ---- Threshold checks --------------------------------------------
@@ -114,7 +114,7 @@ x     = 1056.0
 y     = 138.0
 phase_break = true
 pins  = [
-  { id = 0, name = "Cut active", type = "bool", direction = "input", unit = "" }
+  { id = 0, name = "cut_active", type = "bool", direction = "input", unit = "" }
 ]
 
 # Throttle into compare-gt.a

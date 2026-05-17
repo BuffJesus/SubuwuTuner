@@ -51,7 +51,7 @@ display_name = "Engine RPM"
 description  = "Read the current engine RPM"
 ecu_address  = 0x000AB100
 inputs = [
-  { name = "rpm", label = "RPM", type = "float", unit = "rpm" },
+  { name = "rpm", label = "RPM", type = "float", unit = "rpm", address = 0x000F2000 },
 ]
 
 [[hook]]
@@ -60,7 +60,7 @@ display_name = "Throttle position"
 description  = "Read the requested-throttle pedal percentage"
 ecu_address  = 0x000AB110
 inputs = [
-  { name = "throttle_pct", label = "Throttle %", type = "float", unit = "%" },
+  { name = "throttle_pct", label = "Throttle %", type = "float", unit = "%", address = 0x000F2010 },
 ]
 
 [[hook]]
@@ -69,7 +69,7 @@ display_name = "Ethanol content"
 description  = "Read the flex-fuel sensor's ethanol-percentage estimate"
 ecu_address  = 0x000AB120
 inputs = [
-  { name = "ethanol_pct", label = "Ethanol %", type = "float", unit = "%" },
+  { name = "ethanol_pct", label = "Ethanol %", type = "float", unit = "%", address = 0x000F2020 },
 ]
 
 [[hook]]
@@ -78,7 +78,7 @@ display_name = "Clutch switch"
 description  = "Read the clutch-pedal switch (engaged when held to the floor)"
 ecu_address  = 0x000AB200
 inputs = [
-  { name = "pressed", label = "Pressed", type = "bool" },
+  { name = "pressed", label = "Pressed", type = "bool", address = 0x000F2030 },
 ]
 
 [[hook]]
@@ -87,5 +87,5 @@ display_name = "Vehicle speed"
 description  = "Read the current vehicle speed from the ECU's VSS input"
 ecu_address  = 0x000AB210
 inputs = [
-  { name = "speed", label = "Speed", type = "float", unit = "km/h" },
+  { name = "speed", label = "Speed", type = "float", unit = "km/h", address = 0x000F2040 },
 ]

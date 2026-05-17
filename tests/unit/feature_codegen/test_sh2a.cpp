@@ -2119,6 +2119,155 @@ TEST_CASE("Sh2aBackend: compare_eq_float emits FCMP/EQ",
     REQUIRE(seen_fcmp_eq);
 }
 
+// ---- Cross-hook value flow ----------------------------------------
+
+namespace {
+// Multi-hook test pack: one sensor-read hook (read_rpm) + one
+// override-store hook (ignition_cut). Used to exercise the cross-
+// hook value-flow path — a LoadHookInput from one hook feeding a
+// StoreHookOutput on a different hook.
+constexpr std::string_view kPackTwoHooksToml = R"toml(
+[pack]
+schema_version = 1
+id             = "test-pack-cross-hook"
+endianness     = "big"
+
+[[hook]]
+id              = "read_rpm"
+ecu_address     = 0x000AB100
+inputs = [
+  { name = "rpm", label = "RPM", type = "int", unit = "rpm", address = 0x000F2000 },
+]
+
+[[hook]]
+id              = "ignition_cut"
+ecu_address     = 0x000ABE00
+free_ram        = { base = 0x40000100, length = 64 }
+outputs = [
+  { name = "cut_active", label = "Cut active", type = "bool" },
+]
+)toml";
+} // namespace
+
+TEST_CASE("Sh2aBackend: cross-hook LoadHookInput → Store compiles",
+          "[feature_codegen][sh2a][cross_hook]") {
+    // Read RPM from `read_rpm`, store it directly into the
+    // `ignition_cut` hook's RAM slot. Pre-move-#7 this hit a
+    // NotImplemented; post-#7 the codegen treats the foreign hook's
+    // pin address as just-another firmware address.
+    auto def = st::Definition::from_toml_string(kPackTwoHooksToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(1, "read_rpm", "rpm",
+                                              st::feature::PinType::Int));
+    m.instructions.push_back(store("ignition_cut", "cut_active", 1));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+
+    auto const &hp = r->hooks[0];
+    // Patch is owned by the Store hook (ignition_cut), not the
+    // source-read hook (read_rpm). The source's ecu_address never
+    // appears in the patch's splice metadata.
+    REQUIRE(hp.symbol == "ignition_cut");
+    REQUIRE(hp.splice_address == 0x000ABE00);
+
+    // The source pin's address (0x000F2000) must appear verbatim in
+    // the literal pool — that's how the patch reads the sensor.
+    bool seen_source_addr = false;
+    bool seen_dest_addr   = false;
+    for (std::size_t i = 0; i + 3 < hp.code.size(); i += 4) {
+        std::uint32_t v = be32_at(hp.code, i);
+        if (v == 0x000F2000U) seen_source_addr = true;
+        if (v == 0x40000100U) seen_dest_addr   = true;
+    }
+    REQUIRE(seen_source_addr);
+    REQUIRE(seen_dest_addr);
+}
+
+TEST_CASE("Sh2aBackend: cross-hook flow through a primitive compiles",
+          "[feature_codegen][sh2a][cross_hook]") {
+    // Cross-hook + nested CallPrimitive: read RPM, compare against a
+    // constant, store the bool result into ignition_cut. Both call
+    // sites of resolve_hook_input_address (direct Load→Store and
+    // primitive operand) take the same path post-#7.
+    auto def = st::Definition::from_toml_string(kPackTwoHooksToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(1, "read_rpm", "rpm",
+                                              st::feature::PinType::Int));
+    m.instructions.push_back(load_const_int(2, 4000));
+    ir::Instruction cmp{};
+    cmp.op          = ir::Op::CallPrimitive;
+    cmp.symbol      = "compare_gt_int";
+    cmp.result_type = st::feature::PinType::Bool;
+    cmp.result_id   = 3;
+    cmp.pin_name    = "out";
+    cmp.operands    = {1, 2};
+    m.instructions.push_back(cmp);
+    m.instructions.push_back(store("ignition_cut", "cut_active", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    REQUIRE(r->hooks[0].symbol == "ignition_cut");
+
+    // Source pin address must still show up — it's loaded as the
+    // primitive's first operand from inside the ignition_cut patch.
+    bool seen_source_addr = false;
+    for (std::size_t i = 0; i + 3 < r->hooks[0].code.size(); i += 4) {
+        if (be32_at(r->hooks[0].code, i) == 0x000F2000U) {
+            seen_source_addr = true;
+        }
+    }
+    REQUIRE(seen_source_addr);
+}
+
+TEST_CASE("Sh2aBackend: cross-hook with missing source-pin address errors",
+          "[feature_codegen][sh2a][cross_hook]") {
+    // Removing the pin-address field on the source hook should
+    // still fail loudly — the cross-hook gate is lifted, but the
+    // "pin has no address" check remains.
+    constexpr std::string_view bad = R"toml(
+[pack]
+schema_version = 1
+id             = "test-pack-cross-hook-no-addr"
+endianness     = "big"
+
+[[hook]]
+id          = "read_rpm"
+ecu_address = 0x000AB100
+inputs = [
+  { name = "rpm", type = "int" },
+]
+
+[[hook]]
+id          = "ignition_cut"
+ecu_address = 0x000ABE00
+free_ram    = { base = 0x40000100, length = 64 }
+outputs = [
+  { name = "cut_active", type = "bool" },
+]
+)toml";
+    auto def = st::Definition::from_toml_string(bad);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(1, "read_rpm", "rpm",
+                                              st::feature::PinType::Int));
+    m.instructions.push_back(store("ignition_cut", "cut_active", 1));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
 TEST_CASE("Sh2aBackend: add_float operand load uses HookInputPointer deref",
           "[feature_codegen][sh2a][float]") {
     // Verify load_operand_into_fr handles HookInputPointer the same

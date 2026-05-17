@@ -814,28 +814,30 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
 }
 
 // Resolve a LoadHookInput instruction's source pin to its firmware
-// address. Encapsulates the four error paths shared by direct
+// address. Encapsulates the three error paths shared by direct
 // LoadHookInput→Store chains and CallPrimitive operands: hook
-// missing, hook != Store's hook, pin missing on the hook, pin has
-// no `address`. Returns the address in `out` on success.
+// missing, pin missing on the hook, pin has no `address`. The
+// `target_hook` parameter is informational only — cross-hook reads
+// are legal under a flat memory model. Returns the address in `out`
+// on success.
+//
+// `target_hook` is the hook owning the Store this load feeds into
+// (kept on the signature because earlier slices used it for a
+// "same-hook only" sanity gate). It's not needed for correctness on
+// SH-2A — any firmware address is reachable from any patch — but
+// callers retain it for future per-hook checks (e.g. detecting that
+// a sensor pin is updated AFTER the splice point's PC, which would
+// make the read produce a stale value within a single ECU loop
+// iteration). v1.x accepts any source-hook.
 [[nodiscard]] Status resolve_hook_input_address(
     Definition const &def, ir::Instruction const &load_ins,
-    Hook const *target_hook, std::uint32_t &out) {
+    Hook const * /*target_hook*/, std::uint32_t &out) {
     Hook const *src_hook = find_hook(def, load_ins.symbol);
     if (src_hook == nullptr) {
         std::string msg{"SH-2A backend: LoadHookInput hook '"};
         msg.append(load_ins.symbol);
         msg.append("' not declared in the loaded definition pack");
         return failure(ErrorCode::InvalidArgument, std::move(msg));
-    }
-    if (src_hook != target_hook) {
-        std::string msg{"SH-2A backend: cross-hook value flow from '"};
-        msg.append(src_hook->id);
-        msg.append("' to '");
-        msg.append(target_hook->id);
-        msg.append("' not yet implemented (slice requires Store and its "
-                   "source LoadHookInput on the same hook)");
-        return failure(ErrorCode::NotImplemented, std::move(msg));
     }
     HookSignal const *pin = find_hook_input(*src_hook, load_ins.pin_name);
     if (pin == nullptr) {

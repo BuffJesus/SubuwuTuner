@@ -30,7 +30,7 @@ x     = 48.0
 y     = 48.0
 phase_break = true
 pins  = [
-  { id = 0, name = "Pressed", type = "bool", direction = "output", unit = "" }
+  { id = 0, name = "pressed", type = "bool", direction = "output", unit = "" }
 ]
 
 [[node]]
@@ -41,7 +41,7 @@ x     = 48.0
 y     = 168.0
 phase_break = true
 pins  = [
-  { id = 0, name = "Throttle %", type = "float", direction = "output", unit = "%" }
+  { id = 0, name = "throttle_pct", type = "float", direction = "output", unit = "%" }
 ]
 
 [[node]]
@@ -52,7 +52,7 @@ x     = 48.0
 y     = 288.0
 phase_break = true
 pins  = [
-  { id = 0, name = "Speed", type = "float", direction = "output", unit = "km/h" }
+  { id = 0, name = "speed", type = "float", direction = "output", unit = "km/h" }
 ]
 
 [[node]]
@@ -63,7 +63,7 @@ x     = 48.0
 y     = 408.0
 phase_break = true
 pins  = [
-  { id = 0, name = "RPM", type = "float", direction = "output", unit = "rpm" }
+  { id = 0, name = "rpm", type = "float", direction = "output", unit = "rpm" }
 ]
 
 # ---- Threshold checks --------------------------------------------
@@ -152,7 +152,7 @@ x     = 1104.0
 y     = 228.0
 phase_break = true
 pins  = [
-  { id = 0, name = "Cut active", type = "bool", direction = "input", unit = "" }
+  { id = 0, name = "cut_active", type = "bool", direction = "input", unit = "" }
 ]
 
 # Sensor → compare wires
