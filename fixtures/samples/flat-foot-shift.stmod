@@ -11,12 +11,10 @@
 # Pairs with fixtures/demo-pack — load that pack first, then open
 # this file via the designer's Load… button.
 #
-# Caveat: the threshold comparisons (throttle > X, RPM > Y) wire
-# their `b` pin to nothing because per-instance constants don't
-# exist yet. The lint chip will report two undriven inputs — that's
-# the editor correctly identifying the missing pieces a real flat-
-# foot calibration would supply. Treat as a teaching exhibit, not
-# something to flash.
+# The threshold compares (throttle > X, RPM > Y) supply their
+# threshold values via Pin.default_value — 90% throttle and 4000
+# rpm respectively. The user can right-click those pins and edit
+# the constants inline in the designer.
 
 [graph]
 schema_version = 1
@@ -61,24 +59,24 @@ pins  = [
 [[node]]
 id    = 4
 kind  = "primitive.compare_gt"
-label = "throttle > X"
+label = "throttle > 90"
 x     = 312.0
 y     = 168.0
 pins  = [
   { id = 0, name = "a",     type = "float", direction = "input",  unit = "" },
-  { id = 1, name = "b",     type = "float", direction = "input",  unit = "" },
+  { id = 1, name = "b",     type = "float", direction = "input",  unit = "", default = 90.0 },
   { id = 2, name = "a > b", type = "bool",  direction = "output", unit = "" }
 ]
 
 [[node]]
 id    = 5
 kind  = "primitive.compare_gt"
-label = "rpm > Y"
+label = "rpm > 4000"
 x     = 312.0
 y     = 288.0
 pins  = [
   { id = 0, name = "a",     type = "float", direction = "input",  unit = "" },
-  { id = 1, name = "b",     type = "float", direction = "input",  unit = "" },
+  { id = 1, name = "b",     type = "float", direction = "input",  unit = "", default = 4000.0 },
   { id = 2, name = "a > b", type = "bool",  direction = "output", unit = "" }
 ]
 

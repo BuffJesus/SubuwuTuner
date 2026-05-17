@@ -390,6 +390,53 @@ TEST_CASE("lint clears once the input pin is driven",
     REQUIRE(st::feature::lint(g).empty());
 }
 
+TEST_CASE("lint treats an undriven input with default_value as driven",
+          "[feature][lint]") {
+    // Per-instance constants supply a value when no edge is wired,
+    // so the lint should NOT flag the pin as undriven.
+    st::feature::Graph g;
+    st::feature::Node n;
+    n.kind  = "primitive.compare_gt";
+    n.label = "rpm > Y";
+    n.pins.push_back(st::feature::Pin{
+        0, "a", st::feature::PinType::Float,
+        st::feature::PinDirection::Input,  ""});
+    st::feature::Pin b{
+        1, "b", st::feature::PinType::Float,
+        st::feature::PinDirection::Input,  ""};
+    b.default_value = 4000.0;
+    n.pins.push_back(std::move(b));
+    n.pins.push_back(st::feature::Pin{
+        2, "out", st::feature::PinType::Bool,
+        st::feature::PinDirection::Output, ""});
+    auto const cid = g.add_node(std::move(n));
+    // Drive `a` via a sensor so the node isn't orphan.
+    auto const src = g.add_node(make_source_node("rpm",
+                                                  st::feature::PinType::Float));
+    REQUIRE(g.connect(src, 0, cid, 0).has_value());
+    auto const findings = st::feature::lint(g);
+    REQUIRE(findings.empty());
+}
+
+TEST_CASE("Pin.default_value survives TOML round-trip",
+          "[feature][toml]") {
+    st::feature::Graph g;
+    st::feature::Node n;
+    n.kind  = "primitive.compare_gt";
+    n.label = "rpm > Y";
+    st::feature::Pin b{
+        0, "b", st::feature::PinType::Float,
+        st::feature::PinDirection::Input, ""};
+    b.default_value = 4000.0;
+    n.pins.push_back(std::move(b));
+    g.add_node(std::move(n));
+    auto const text  = st::feature::to_toml(g);
+    auto const back  = st::feature::from_toml(text);
+    REQUIRE(back.has_value());
+    REQUIRE(back->nodes().front().pins.front().default_value.has_value());
+    REQUIRE(*back->nodes().front().pins.front().default_value == 4000.0);
+}
+
 TEST_CASE("lint reports each undriven input separately",
           "[feature][lint]") {
     // Two-input node, one driven, one not. Only the dangling input

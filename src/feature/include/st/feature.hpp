@@ -78,6 +78,26 @@ struct Pin {
     // form for now; the unit-checking pass in a later phase will
     // formalize the small set of canonical names a Graph may use.
     std::string  unit;
+    // Per-instance constant supplied to an Input pin when no edge
+    // drives it. Stored as double regardless of PinType (Int casts,
+    // Bool reads `value > 0.5`) so the wire format stays uniform.
+    // Meaningless on Output pins — the editor only surfaces the
+    // editor for Input pins. Empty == undefined; lint flags an
+    // empty default + no driver as "not driven".
+    std::optional<double> default_value;
+
+    // Five-argument constructor to keep the historical brace-init
+    // shape (id, name, type, direction, unit) working without
+    // forcing every call site to spell out an empty default_value.
+    // Default and copy/move stay synthesized.
+    Pin() = default;
+    Pin(PinId id_, std::string name_, PinType type_,
+         PinDirection direction_, std::string unit_)
+        : id(id_)
+        , name(std::move(name_))
+        , type(type_)
+        , direction(direction_)
+        , unit(std::move(unit_)) {}
 };
 
 struct Node {
@@ -140,6 +160,14 @@ class Graph {
     // position persists into the graph data model rather than living
     // in transient editor state.
     void set_node_position(NodeId id, float x, float y);
+
+    // Set or clear the per-instance default value on a pin. Used by
+    // the editor when the user types a value into the pin's right-
+    // click popup. Idempotent on unknown ids. The value is stored
+    // as double regardless of pin type — Int truncates, Bool reads
+    // `v > 0.5` — keeping the persisted wire format uniform.
+    void set_pin_default(NodeId id, PinId pin_id,
+                          std::optional<double> value);
 
     // Remove a specific edge. Idempotent.
     void remove_edge(Edge const &edge);

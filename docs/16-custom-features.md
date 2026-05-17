@@ -52,14 +52,16 @@ Module layout (planned):
 
 ```
 src/
-├── feature/        st::feature::Graph (data structure, validation, persistence)
-├── feature_ir/     st::feature::ir::Module (typed dataflow + CFG)
+├── feature/        st::feature::Graph + st::feature::ir::Module
+│                   (data structure, validation, persistence, IR lowering)
 ├── feature_codegen/
 │   ├── sh2a/       Renesas SH-2A backend (VA WRX et al.)
 │   └── rh850/      Renesas RH850 backend (VB WRX et al.)
 ├── feature_patch/  Patch insertion — finds free RAM, writes hook table, splices into existing interrupt vectors
 └── ui/feature/     The ImGui-based graph editor (links into the existing subuwutuner-gui)
 ```
+
+(The IR initially lived in its own module `src/feature_ir/` in the plan; in practice it ships inside `src/feature/` since it shares types with the Graph and Codegen is the natural fission point. It can be split out if it grows.)
 
 Both backends speak a small subset of their respective ISAs — only what the compiler emits. We never need to *parse* SH-2A or RH850 instructions, only emit.
 
@@ -133,14 +135,21 @@ A naive view of the graph would flag the most common feature shape — `hook.out
 
 The data model encodes this with `Node.is_phase_break`. When set (and the editor sets it automatically for every hook-derived node), cycle detection models the node as two vertices with no internal edge — output-side and input-side are independent. Primitives leave the flag false: a primitive's output IS a pure function of its inputs at the same time, so a path from a primitive's output back to its input is a real cycle.
 
+## Per-instance constants
+
+Every Input pin carries an optional `default_value` (stored as a double regardless of pin type — Int truncates, Bool reads `v > 0.5`). When no edge drives the pin, the default supplies the value. In the editor, right-clicking an unconnected Input pin opens a typed editor (InputFloat / InputInt / Checkbox per `PinType`) plus a "Clear value" entry; the value renders inline next to the pin label as ` = N` in the same row, so a glance reads the actual constants without opening anything.
+
+`lint()` treats a defaulted Input pin as driven — no "not driven" warning surfaces. Codegen will read the default at compile time exactly like an edge-driven value would be.
+
 ## Sample packs
 
-Two starter `.stmod` files ship in `fixtures/samples/` and demonstrate the editor end-to-end against the demo definition pack:
+Three starter `.stmod` files ship in `fixtures/samples/` and demonstrate the editor end-to-end against the demo definition pack:
 
 - `flex-fuel.stmod` — read ethanol-content sensor → flex-fuel-scale curve → multiply the ECU's commanded fuel pulse width by the scale → write back to the after-fuel-calc splice. A clean DAG with all inputs driven; passes lint.
-- `flat-foot-shift.stmod` — combine clutch + throttle + RPM thresholds through AND gates into the ignition-cut splice. Lint reports two undriven inputs (`throttle > X` and `rpm > Y` need constants), illustrating both what a real feature looks like AND the gap a future per-instance-constants feature will fill.
+- `flat-foot-shift.stmod` — combine clutch + throttle + RPM thresholds through AND gates into the ignition-cut splice. Uses per-instance default values on the threshold compares (`throttle > 90`, `rpm > 4000`); the user can right-click those pins to retune the constants. Passes lint.
+- `launch-control.stmod` — arms an ignition cut while clutch held + throttle > 95% + speed < 10 km/h + rpm > 4500 (the canonical AND-tree pattern). Demonstrates `compare_lt` and a tri-input stage-arming combiner. Passes lint.
 
-These are illustrative shapes, not flight-ready calibrations. Both will rehydrate cleanly into the designer canvas via the `Load…` button once a project with the demo pack is loaded.
+All three will rehydrate cleanly into the designer canvas via the `Load…` button once a project with the demo pack is loaded.
 
 ## Safety considerations
 

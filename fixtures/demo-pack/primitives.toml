@@ -50,6 +50,18 @@ outputs = [
 # ---- Comparison + boolean logic ------------------------------------
 
 [[primitive]]
+id           = "subtract_float"
+display_name = "Subtract"
+description  = "Floating-point a - b."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", type = "float" },
+]
+
+[[primitive]]
 id           = "compare_gt"
 display_name = "Greater than"
 description  = "True when a > b."
@@ -59,6 +71,31 @@ inputs = [
 ]
 outputs = [
   { name = "out", label = "a > b", type = "bool" },
+]
+
+[[primitive]]
+id           = "compare_lt"
+display_name = "Less than"
+description  = "True when a < b."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", label = "a < b", type = "bool" },
+]
+
+[[primitive]]
+id           = "select_float"
+display_name = "Select (ternary)"
+description  = "Returns `t` when cond is true, otherwise `f`. The codegen-equivalent of a conditional expression."
+inputs = [
+  { name = "cond", type = "bool" },
+  { name = "t",    type = "float" },
+  { name = "f",    type = "float" },
+]
+outputs = [
+  { name = "out", type = "float" },
 ]
 
 [[primitive]]

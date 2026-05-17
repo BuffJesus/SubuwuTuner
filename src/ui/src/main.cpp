@@ -43,6 +43,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -423,6 +424,11 @@ struct AppState {
     // rectangle until release.
     bool                                     features_band_active{false};
     ImVec2                                   features_band_start{0.0f, 0.0f};
+    // Transient buffer for the pin-default-value editor opened from
+    // the pin context menu. Pre-filled with the pin's current
+    // default_value (or 0) when the popup is opened. The popup
+    // commits on Apply / clears on Clear via pending_default below.
+    float                                    features_pin_edit_buf{0.0f};
     // Currently-selected edge on the designer canvas. Mutually
     // exclusive with the selected node — selecting either clears
     // the other. Cleared on graph clear/load, when the edge is
@@ -5557,6 +5563,64 @@ void render_features_designer(AppState &state) {
     std::vector<PinPos> pin_positions;
     pin_positions.reserve(state.features_graph.nodes().size() * 3);
 
+    // Set of (node, pin) pairs for Input pins currently driven by
+    // an edge. Used both to render the "= value" suffix on
+    // unconnected-but-defaulted pins and to gate the default-value
+    // editor (only shows on undriven inputs). Pre-computed once so
+    // the per-pin path doesn't redo it.
+    auto const pin_key = [](st::feature::NodeId nid,
+                             st::feature::PinId  pid) {
+        return (static_cast<std::uint64_t>(nid) << 32)
+             | static_cast<std::uint64_t>(pid);
+    };
+    std::unordered_set<std::uint64_t> driven_inputs;
+    for (auto const &e : state.features_graph.edges()) {
+        driven_inputs.insert(pin_key(e.to_node, e.to_pin));
+    }
+    auto const is_pin_driven =
+        [&](st::feature::NodeId nid, st::feature::PinId pid) {
+            return driven_inputs.find(pin_key(nid, pid))
+                != driven_inputs.end();
+        };
+
+    // Helper: what text the editor renders for a pin's label. For
+    // unconnected Input pins with a default_value set, the suffix
+    // "= value" is appended so the constant is visible inline.
+    // Bool prints true/false; Int truncates; Float uses %g.
+    auto const pin_display_text =
+        [&](st::feature::Node const &node,
+            st::feature::Pin const &p) -> std::string {
+            if (p.direction == st::feature::PinDirection::Input
+                && !is_pin_driven(node.id, p.id)
+                && p.default_value.has_value()) {
+                char buf[96];
+                if (p.type == st::feature::PinType::Bool) {
+                    std::snprintf(buf, sizeof buf, "%s = %s",
+                                   p.name.c_str(),
+                                   *p.default_value > 0.5 ? "true" : "false");
+                } else if (p.type == st::feature::PinType::Int) {
+                    std::snprintf(buf, sizeof buf, "%s = %lld",
+                                   p.name.c_str(),
+                                   static_cast<long long>(*p.default_value));
+                } else {
+                    std::snprintf(buf, sizeof buf, "%s = %g",
+                                   p.name.c_str(), *p.default_value);
+                }
+                return buf;
+            }
+            return p.name;
+        };
+
+    // Pending default-value mutation, applied after the loop. Empty
+    // value clears the default; populated value sets it. Captured
+    // by the pin context menu's editor.
+    struct PendingDefault {
+        st::feature::NodeId    node_id;
+        st::feature::PinId     pin_id;
+        std::optional<double>  value;
+    };
+    std::optional<PendingDefault> pending_default;
+
     // Pin appearance constants — derived from the active accent. The
     // pin fill matches the type's category (today only Float/Int/Bool
     // share one color; future work could vary).
@@ -5651,8 +5715,9 @@ void render_features_designer(AppState &state) {
         float max_in_w  = 0.0f;
         float max_out_w = 0.0f;
         for (auto const &p : n.pins) {
+            std::string const txt = pin_display_text(n, p);
             float const w = fnt->CalcTextSizeA(
-                fnt_sz_s, FLT_MAX, 0.0f, p.name.c_str()).x;
+                fnt_sz_s, FLT_MAX, 0.0f, txt.c_str()).x;
             if (p.direction == st::feature::PinDirection::Input) {
                 max_in_w  = std::max(max_in_w,  w);
             } else {
@@ -5873,9 +5938,14 @@ void render_features_designer(AppState &state) {
             dl->AddCircle      (pin_center, pin_r_s, pin_brd);
             // Pin name beside the circle, on the inside edge. Text
             // width measured at the scaled font size so the trailing
-            // offset for output pins stays correct under zoom.
-            ImVec2 const text_size =
-                fnt->CalcTextSizeA(fnt_sz_s, FLT_MAX, 0.0f, p.name.c_str());
+            // offset for output pins stays correct under zoom. The
+            // display text includes a "= value" suffix when the
+            // pin is an undriven Input with a default_value — the
+            // constant editor populates this and the renderer
+            // surfaces it inline.
+            std::string const display_text = pin_display_text(n, p);
+            ImVec2 const text_size = fnt->CalcTextSizeA(
+                fnt_sz_s, FLT_MAX, 0.0f, display_text.c_str());
             ImVec2 const text_pos =
                 is_input
                     ? ImVec2(pin_center.x + pin_r_s + 6.0f * scale,
@@ -5883,7 +5953,8 @@ void render_features_designer(AppState &state) {
                     : ImVec2(pin_center.x - pin_r_s - 6.0f * scale
                                 - text_size.x,
                               row_center_y - fnt_sz_s * 0.5f);
-            dl->AddText(fnt, fnt_sz_s, text_pos, txt_col, p.name.c_str());
+            dl->AddText(fnt, fnt_sz_s, text_pos, txt_col,
+                         display_text.c_str());
 
             pin_positions.push_back(PinPos{n.id, p.id, p.direction,
                                             p.type, pin_center});
@@ -5944,6 +6015,13 @@ void render_features_designer(AppState &state) {
                            static_cast<unsigned>(p.id));
             if (pin_right_clicked && !was_wiring_at_start) {
                 ImGui::OpenPopup(pin_popup_id);
+                // Pre-fill the constant editor with the pin's
+                // current value (or 0 when none), so the InputFloat
+                // inside the popup starts on the right number.
+                state.features_pin_edit_buf =
+                    p.default_value.has_value()
+                        ? static_cast<float>(*p.default_value)
+                        : 0.0f;
             }
             if (ImGui::BeginPopup(pin_popup_id)) {
                 ImGui::TextDisabled("%s : %s",
@@ -5978,7 +6056,56 @@ void render_features_designer(AppState &state) {
                         pending_delete_edge = e;
                     }
                 }
-                if (!any_edge) {
+                // Constant-value editor — only shown on Input pins
+                // (Output pins don't consume values) and only when
+                // no edge drives the pin (a driver always wins over
+                // the default; surfacing the editor for a wired
+                // input would be misleading).
+                bool const editor_eligible =
+                    p.direction == st::feature::PinDirection::Input
+                    && !is_pin_driven(n.id, p.id);
+                if (editor_eligible) {
+                    if (any_edge) ImGui::Separator();
+                    ImGui::TextDisabled("Constant value");
+                    ImGui::SetNextItemWidth(120.0f);
+                    bool commit = false;
+                    if (p.type == st::feature::PinType::Bool) {
+                        bool b =
+                            state.features_pin_edit_buf > 0.5f;
+                        if (ImGui::Checkbox("##pin_def_bool", &b)) {
+                            state.features_pin_edit_buf = b ? 1.0f : 0.0f;
+                            commit = true;
+                        }
+                    } else if (p.type == st::feature::PinType::Int) {
+                        int v = static_cast<int>(state.features_pin_edit_buf);
+                        if (ImGui::InputInt("##pin_def_int", &v, 0, 0,
+                                              ImGuiInputTextFlags_EnterReturnsTrue)) {
+                            state.features_pin_edit_buf =
+                                static_cast<float>(v);
+                            commit = true;
+                        }
+                    } else {
+                        if (ImGui::InputFloat("##pin_def_float",
+                                                &state.features_pin_edit_buf,
+                                                0.0f, 0.0f, "%.4g",
+                                                ImGuiInputTextFlags_EnterReturnsTrue)) {
+                            commit = true;
+                        }
+                    }
+                    if (commit) {
+                        pending_default = PendingDefault{
+                            n.id, p.id,
+                            static_cast<double>(state.features_pin_edit_buf)};
+                        ImGui::CloseCurrentPopup();
+                    }
+                    if (p.default_value.has_value()) {
+                        if (ImGui::MenuItem("Clear value")) {
+                            pending_default = PendingDefault{
+                                n.id, p.id, std::nullopt};
+                        }
+                    }
+                }
+                if (!any_edge && !editor_eligible) {
                     ImGui::TextDisabled("(no edges)");
                 }
                 ImGui::EndPopup();
@@ -6280,6 +6407,11 @@ void render_features_designer(AppState &state) {
     // Apply pending mutations from context menus. Done here, after
     // every reference into `nodes` / `pin_positions` has been
     // consumed, so we never touch invalidated state.
+    if (pending_default.has_value()) {
+        state.features_graph.set_pin_default(
+            pending_default->node_id, pending_default->pin_id,
+            pending_default->value);
+    }
     if (pending_delete_edge.has_value()) {
         state.features_graph.remove_edge(*pending_delete_edge);
         if (state.features_selected_edge.has_value()

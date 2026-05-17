@@ -79,3 +79,12 @@ ecu_address  = 0x000AB200
 inputs = [
   { name = "pressed", label = "Pressed", type = "bool" },
 ]
+
+[[hook]]
+id           = "read_vehicle_speed"
+display_name = "Vehicle speed"
+description  = "Read the current vehicle speed from the ECU's VSS input"
+ecu_address  = 0x000AB210
+inputs = [
+  { name = "speed", label = "Speed", type = "float", unit = "km/h" },
+]

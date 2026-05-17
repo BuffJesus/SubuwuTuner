@@ -81,8 +81,11 @@ std::string to_toml(Graph const &g) {
                 << ", name = " << toml_quote(p.name)
                 << ", type = " << toml_quote(pin_type_name(p.type))
                 << ", direction = " << toml_quote(pin_direction_name(p.direction))
-                << ", unit = " << toml_quote(p.unit)
-                << " }";
+                << ", unit = " << toml_quote(p.unit);
+            if (p.default_value.has_value()) {
+                out << ", default = " << *p.default_value;
+            }
+            out << " }";
             if (i + 1 < n.pins.size()) out << ",";
             out << "\n";
         }
@@ -194,6 +197,18 @@ Result<Graph> from_toml(std::string_view text) {
                     }
                     p.type      = *t;
                     p.direction = *d;
+                    if (auto const dv = (*ptbl)["default"].value<double>();
+                        dv.has_value()) {
+                        p.default_value = *dv;
+                    } else if (auto const di =
+                                   (*ptbl)["default"].value<std::int64_t>();
+                               di.has_value()) {
+                        p.default_value = static_cast<double>(*di);
+                    } else if (auto const db =
+                                   (*ptbl)["default"].value<bool>();
+                               db.has_value()) {
+                        p.default_value = *db ? 1.0 : 0.0;
+                    }
                     // Pin-id uniqueness within a node.
                     for (auto const &existing : n.pins) {
                         if (existing.id == p.id) {
@@ -339,6 +354,19 @@ void Graph::set_node_position(NodeId id, float x, float y) {
     }
 }
 
+void Graph::set_pin_default(NodeId id, PinId pin_id,
+                             std::optional<double> value) {
+    for (auto &n : nodes_) {
+        if (n.id != id) continue;
+        for (auto &p : n.pins) {
+            if (p.id != pin_id) continue;
+            p.default_value = value;
+            return;
+        }
+        return;
+    }
+}
+
 void Graph::remove_edge(Edge const &target) {
     edges_.erase(std::remove_if(edges_.begin(), edges_.end(),
                                  [&](Edge const &e) {
@@ -474,6 +502,7 @@ std::vector<LintFinding> lint(Graph const &g) {
         for (auto const &p : n.pins) {
             if (p.direction != PinDirection::Input) continue;
             if (driven(n.id, p.id)) continue;
+            if (p.default_value.has_value()) continue;
             std::string msg = "input pin '" + p.name
                               + "' on node '" + node_display(n)
                               + "' is not driven";
