@@ -23,6 +23,7 @@ add_executable(st_unit_tests
     unit/project/test_project.cpp
     unit/transport/test_mock.cpp
     unit/transport/test_obdx_dvi.cpp
+    unit/transport/test_j2534.cpp
     unit/ecu/test_ssm.cpp
     unit/ecu/test_uds.cpp
     unit/log/test_log.cpp
