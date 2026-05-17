@@ -2,6 +2,7 @@ add_library(st_transport STATIC
     src/mock.cpp
     src/obdx_dvi.cpp
     src/j2534.cpp
+    src/j2534_transport.cpp
     src/native.cpp
 )
 add_library(st::transport ALIAS st_transport)
