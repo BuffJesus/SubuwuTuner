@@ -162,6 +162,23 @@ enum class Reg : std::uint8_t {
         | (static_cast<std::uint16_t>(rm) << 4U));
 }
 
+// BT label  — branch if T=1. NO delay slot (the /S variant has one).
+// 8-bit signed displacement in 16-bit-word units; target = PC + 4 +
+// disp*2. Range: [PC-252, PC+258] bytes. Encoding: 1000 1001 dddddddd.
+[[nodiscard]] constexpr std::uint16_t enc_bt(std::int8_t disp) noexcept {
+    return static_cast<std::uint16_t>(
+        0x8900U | static_cast<std::uint16_t>(static_cast<std::uint8_t>(disp)));
+}
+
+// BRA label  — unconditional branch WITH delay slot. 12-bit signed
+// displacement (word units); target = PC + 4 + disp*2. Range:
+// [PC-4092, PC+4098] bytes. Encoding: 1010 dddddddddddd.
+[[nodiscard]] constexpr std::uint16_t enc_bra(std::int16_t disp) noexcept {
+    return static_cast<std::uint16_t>(
+        0xA000U
+        | (static_cast<std::uint16_t>(disp) & 0x0FFFU));
+}
+
 // RTS — return from subroutine. Encoded as 0x000B.
 [[nodiscard]] constexpr std::uint16_t enc_rts() noexcept { return 0x000BU; }
 

@@ -7,12 +7,14 @@
 #include "st/core/error.hpp"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -114,12 +116,36 @@ void emit_be32(std::vector<std::uint8_t> &code, std::uint32_t v) {
 // padding + the consolidated literal pool, and back-patches every
 // MOV.L's 8-bit disp once the literal pool's final offset is known.
 //
+// Also supports forward-reference branches via Label tokens. BT/BRA
+// are emitted with placeholder disp bytes; place_label() marks the
+// target offset within the body; finalize() re-encodes each branch
+// with the computed PC-relative disp.
+//
 // This lets single-fragment patches (LoadConst→Store etc.) and
 // multi-fragment patches (nested add_int trees) share the same
 // epilogue + pool machinery without each emit site re-deriving
-// disp values manually.
+// disp values manually. select uses BT/BRA backpatching for its
+// then/else control flow.
 class FragmentEmitter {
   public:
+    // Opaque label token for forward-reference branches. Returned by
+    // create_label(), placed via place_label(), referenced by bt() /
+    // bra(). Multiple branches may target the same label.
+    struct Label {
+        std::size_t id;
+    };
+
+    [[nodiscard]] Label create_label() {
+        labels_.push_back(std::nullopt);
+        return Label{labels_.size() - 1};
+    }
+
+    // Mark `label` at the current body offset. Must be called before
+    // finalize().
+    void place_label(Label const &label) {
+        labels_[label.id] = body_.size();
+    }
+
     // MOV.L @(d, PC), Rn — disp filled in at finalize() time.
     void mov_l_disp_pc(sh2a::Reg rn, std::uint32_t pool_literal) {
         backpatches_.push_back({body_.size(), pool_.size()});
@@ -164,12 +190,53 @@ class FragmentEmitter {
     void tst(sh2a::Reg rm, sh2a::Reg rn) {
         emit_be16(body_, sh2a::enc_tst(rm, rn));
     }
+    // BT label — branch if T=1. Placeholder bytes emitted now; disp
+    // back-patched at finalize() once the label is known.
+    void bt(Label const &target) {
+        branch_backpatches_.push_back(
+            {body_.size(), target.id, BranchKind::Bt});
+        emit_be16(body_, sh2a::enc_bt(0));
+    }
+    // BRA label — unconditional branch (delay slot follows). Same
+    // backpatch semantics as bt().
+    void bra(Label const &target) {
+        branch_backpatches_.push_back(
+            {body_.size(), target.id, BranchKind::Bra});
+        emit_be16(body_, sh2a::enc_bra(0));
+    }
     void nop() { emit_be16(body_, sh2a::enc_nop()); }
 
     // Append RTS + delay-slot NOP + pool-alignment NOP(s) + literal
-    // pool. Patch each MOV.L's disp byte. Returns the finished byte
-    // buffer; the emitter is single-use after this call.
+    // pool. Patch each MOV.L's disp byte and each branch's disp
+    // bytes. Returns the finished byte buffer; the emitter is
+    // single-use after this call.
     std::vector<std::uint8_t> finalize() {
+        // Branches must be resolved before we append RTS/pool —
+        // their targets are body offsets, which are stable across
+        // the epilogue/pool append. Re-encode each branch with the
+        // computed PC-relative disp (in 16-bit-word units).
+        for (auto const &bp : branch_backpatches_) {
+            auto const target_opt = labels_[bp.label_id];
+            // target_opt is required to be set by emit time —
+            // unplaced labels are a codegen bug. Refuse rather than
+            // emit garbage.
+            std::size_t const target = target_opt.value();
+            // PC-relative formula: target = (this_pc + 4) + disp*2.
+            // disp_words = (target - this_pc - 4) / 2.
+            std::int32_t const disp_words =
+                (static_cast<std::int32_t>(target)
+                 - static_cast<std::int32_t>(bp.body_offset) - 4)
+                / 2;
+            std::uint16_t enc = 0;
+            if (bp.kind == BranchKind::Bt) {
+                enc = sh2a::enc_bt(static_cast<std::int8_t>(disp_words));
+            } else {
+                enc = sh2a::enc_bra(static_cast<std::int16_t>(disp_words));
+            }
+            body_[bp.body_offset]     = static_cast<std::uint8_t>(enc >> 8);
+            body_[bp.body_offset + 1] = static_cast<std::uint8_t>(enc & 0xFF);
+        }
+
         emit_be16(body_, sh2a::enc_rts());
         emit_be16(body_, sh2a::enc_nop());  // delay slot
         while (body_.size() % 4 != 0) {
@@ -202,9 +269,17 @@ class FragmentEmitter {
         std::size_t body_offset;  // byte offset of the MOV.L instruction
         std::size_t pool_index;   // index into `pool_`
     };
-    std::vector<std::uint8_t>  body_;
-    std::vector<std::uint32_t> pool_;
-    std::vector<Backpatch>     backpatches_;
+    enum class BranchKind : std::uint8_t { Bt, Bra };
+    struct BranchBackpatch {
+        std::size_t body_offset;  // byte offset of the branch instruction
+        std::size_t label_id;     // index into `labels_`
+        BranchKind  kind;
+    };
+    std::vector<std::uint8_t>                 body_;
+    std::vector<std::uint32_t>                pool_;
+    std::vector<Backpatch>                    backpatches_;
+    std::vector<std::optional<std::size_t>>   labels_;
+    std::vector<BranchBackpatch>              branch_backpatches_;
 };
 
 // Emit the canonical "load constant, store to RAM slot" sequence per
@@ -394,6 +469,44 @@ void emit_not_fragment(FragmentEmitter &fe, PrimitiveOperand op,
     emit_store_r1_to(fe, dst);
 }
 
+// Body fragment for `select_int(cond, true_val, false_val)` → store.
+// First primitive that needs control flow. Layout:
+//
+//   load cond → R0
+//   TST R0, R0           ; T = 1 if cond == 0 (false)
+//   BT use_false         ; if T, jump to false branch (no delay slot)
+//   load true_val → R1
+//   BRA done             ; jump over the false branch (has delay slot)
+//   NOP                  ; delay slot
+//   use_false:
+//   load false_val → R1
+//   done:
+//   load dest → R2
+//   MOV.L R1, @R2
+//
+// Both branch disp values are back-patched by FragmentEmitter::finalize
+// once the body offsets are known. Result type for select is the
+// shared type of true_val/false_val (Int in this slice).
+void emit_select_int_fragment(FragmentEmitter &fe,
+                               PrimitiveOperand cond,
+                               PrimitiveOperand true_val,
+                               PrimitiveOperand false_val,
+                               std::uint32_t    dst) {
+    auto use_false = fe.create_label();
+    auto done      = fe.create_label();
+
+    load_operand_into(fe, cond, sh2a::Reg::R0);
+    fe.tst(sh2a::Reg::R0, sh2a::Reg::R0);
+    fe.bt(use_false);
+    load_operand_into(fe, true_val, sh2a::Reg::R1);
+    fe.bra(done);
+    fe.nop();                                  // BRA delay slot
+    fe.place_label(use_false);
+    load_operand_into(fe, false_val, sh2a::Reg::R1);
+    fe.place_label(done);
+    emit_store_r1_to(fe, dst);
+}
+
 // Body fragment for a comparison primitive. All three variants
 // (compare_lt / compare_gt / compare_eq) share the same shape:
 // load operands → CMP/X (sets T-bit) → MOVT R1 (R1 = T as 0/1) →
@@ -475,11 +588,16 @@ void emit_cmp_eq_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
         emit_not_fragment(fe, operands[0], dst);
         return ok();
     }
+    if (symbol == "select_int") {
+        emit_select_int_fragment(fe, operands[0], operands[1],
+                                  operands[2], dst);
+        return ok();
+    }
     std::string msg{"SH-2A backend: CallPrimitive '"};
     msg.append(symbol);
     msg.append("' not yet implemented (slice supports add_int, "
                "subtract_int, multiply_int, compare_lt, compare_gt, "
-               "compare_eq, and_bool, or_bool, not_bool)");
+               "compare_eq, and_bool, or_bool, not_bool, select_int)");
     return failure(ErrorCode::NotImplemented, std::move(msg));
 }
 
@@ -666,33 +784,42 @@ void emit_cmp_eq_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
                    "producer op");
 }
 
-// Per-primitive shape: how many operands it takes, what type the
-// operands must be, and what result type it produces. The codegen
+// Per-primitive shape: how many operands it takes, what type each
+// operand must be, and what result type it produces. The codegen
 // rejects mismatches between this table and the IR's actual
-// instruction.
+// instruction. operand_types holds 3 slots; only the first `arity`
+// are read. The 3-slot upper bound matches the widest primitive
+// (select), so adding new ternary primitives doesn't require
+// growing the array.
 struct PrimitiveShape {
-    std::size_t arity;
-    PinType     operand_type;
-    PinType     result_type;
+    std::size_t            arity;
+    std::array<PinType, 3> operand_types;
+    PinType                result_type;
 };
 
 [[nodiscard]] PrimitiveShape const *primitive_shape(
     std::string_view symbol) noexcept {
-    // Arithmetic: 2 Int → Int.       Comparison: 2 Int → Bool.
+    // Arithmetic:    2 Int → Int.
+    // Comparison:    2 Int → Bool.
     // Boolean logic: 2 (or 1) Bool → Bool.
+    // Select:        3 operands — first is Bool (condition); other
+    //                two share the result type.
+    // Unused trailing slots are filled with the prior slot's type;
+    // they're never read at arity-checked dispatch time.
     static constexpr struct Entry {
         std::string_view name;
         PrimitiveShape   shape;
     } kTable[] = {
-        {"add_int",      {2, PinType::Int,  PinType::Int}},
-        {"subtract_int", {2, PinType::Int,  PinType::Int}},
-        {"multiply_int", {2, PinType::Int,  PinType::Int}},
-        {"compare_lt",   {2, PinType::Int,  PinType::Bool}},
-        {"compare_gt",   {2, PinType::Int,  PinType::Bool}},
-        {"compare_eq",   {2, PinType::Int,  PinType::Bool}},
-        {"and_bool",     {2, PinType::Bool, PinType::Bool}},
-        {"or_bool",      {2, PinType::Bool, PinType::Bool}},
-        {"not_bool",     {1, PinType::Bool, PinType::Bool}},
+        {"add_int",      {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Int}},
+        {"subtract_int", {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Int}},
+        {"multiply_int", {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Int}},
+        {"compare_lt",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
+        {"compare_gt",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
+        {"compare_eq",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
+        {"and_bool",     {2, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
+        {"or_bool",      {2, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
+        {"not_bool",     {1, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
+        {"select_int",   {3, {PinType::Bool, PinType::Int,  PinType::Int},  PinType::Int}},
     };
     for (auto const &e : kTable) {
         if (e.name == symbol) return &e.shape;
@@ -712,7 +839,7 @@ struct PrimitiveShape {
         msg.append("' not yet implemented (slice supports add_int, "
                    "subtract_int, multiply_int, compare_lt, "
                    "compare_gt, compare_eq, and_bool, or_bool, "
-                   "not_bool)");
+                   "not_bool, select_int)");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
     if (prim.operands.size() != shape->arity) {
@@ -811,7 +938,8 @@ struct PrimitiveShape {
         operands.reserve(shape->arity);
         for (std::size_t i = 0; i < shape->arity; ++i) {
             auto op = operand_from_producer(
-                def, m, prim->operands[i], hook, shape->operand_type, slots);
+                def, m, prim->operands[i], hook,
+                shape->operand_types[i], slots);
             if (!op.has_value()) return failure(op.error());
             operands.push_back(*op);
         }
@@ -1033,7 +1161,7 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
                 for (std::size_t i = 0; i < shape->arity; ++i) {
                     auto op = operand_from_producer(
                         def, m, src->operands[i], hook,
-                        shape->operand_type, empty_slots);
+                        shape->operand_types[i], empty_slots);
                     if (!op.has_value()) return failure(op.error());
                     operands.push_back(*op);
                 }

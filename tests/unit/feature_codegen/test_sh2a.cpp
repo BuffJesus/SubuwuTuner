@@ -1620,6 +1620,204 @@ TEST_CASE("Sh2aBackend: flat-foot AND-tree — and(compare_lt, compare_gt)",
     REQUIRE(movt_count == 2);
 }
 
+// ---- select_int (branch support) ----------------------------------------
+
+TEST_CASE("Sh2aBackend: select_int(LC, LC, LC) → Store branch layout",
+          "[feature_codegen][sh2a][select]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_bool(1, true));     // cond
+    m.instructions.push_back(load_const_int(2, 42));        // true_val
+    m.instructions.push_back(load_const_int(3, 99));        // false_val
+    ir::Instruction sel{};
+    sel.op          = ir::Op::CallPrimitive;
+    sel.symbol      = "select_int";
+    sel.result_type = st::feature::PinType::Int;
+    sel.result_id   = 4;
+    sel.pin_name    = "out";
+    sel.operands    = {1, 2, 3};
+    m.instructions.push_back(sel);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 4));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+    REQUIRE(hp.code.size() == 40);
+
+    // Body bytes — verifies both branch disp values + MOV.L disp
+    // calculation against the actual pool offset (24).
+    REQUIRE(be16_at(hp.code, 0)  == 0xD005);  // MOV.L pool[0]=cond → R0
+    REQUIRE(be16_at(hp.code, 2)  == 0x2008);  // TST R0, R0
+    REQUIRE(be16_at(hp.code, 4)  == 0x8902);  // BT use_false (disp=2)
+    REQUIRE(be16_at(hp.code, 6)  == 0xD105);  // MOV.L pool[1]=true_val → R1
+    REQUIRE(be16_at(hp.code, 8)  == 0xA001);  // BRA done (disp=1)
+    REQUIRE(be16_at(hp.code, 10) == 0x0009);  // NOP (BRA delay slot)
+    REQUIRE(be16_at(hp.code, 12) == 0xD104);  // MOV.L pool[2]=false_val → R1
+    REQUIRE(be16_at(hp.code, 14) == 0xD205);  // MOV.L pool[3]=dest → R2
+    REQUIRE(be16_at(hp.code, 16) == 0x2212);  // MOV.L R1, @R2
+    REQUIRE(be16_at(hp.code, 18) == 0x000B);  // RTS
+    REQUIRE(be16_at(hp.code, 20) == 0x0009);  // NOP (RTS delay)
+    REQUIRE(be16_at(hp.code, 22) == 0x0009);  // NOP (pool-align pad)
+
+    REQUIRE(be32_at(hp.code, 24) == 1U);          // cond = true → 1
+    REQUIRE(be32_at(hp.code, 28) == 42U);         // true_val
+    REQUIRE(be32_at(hp.code, 32) == 99U);         // false_val
+    REQUIRE(be32_at(hp.code, 36) == 0x40000000U); // dest
+}
+
+TEST_CASE("Sh2aBackend: select_int with HookInput cond",
+          "[feature_codegen][sh2a][select]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    // The pack-declared "rpm" pin is Int, but we lie about the IR
+    // result_type to Bool so it satisfies select_int's cond slot.
+    // (At runtime the firmware would interpret the bytes per the
+    // canonical 0/1 convention regardless.)
+    m.instructions.push_back(load_hook_input(
+        1, "after_fuel_calc", "rpm", st::feature::PinType::Bool));
+    m.instructions.push_back(load_const_int(2, 100));
+    m.instructions.push_back(load_const_int(3, 200));
+    ir::Instruction sel{};
+    sel.op          = ir::Op::CallPrimitive;
+    sel.symbol      = "select_int";
+    sel.result_type = st::feature::PinType::Int;
+    sel.result_id   = 4;
+    sel.pin_name    = "out";
+    sel.operands    = {1, 2, 3};
+    m.instructions.push_back(sel);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 4));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+    // HookInput cond adds one deref instruction → body grows by 2
+    // bytes. Pad+pool re-align: body 20 bytes → epilogue 24 →
+    // pool-aligned (no pad shift since 20+4=24 still 4-aligned but
+    // adds 0 bytes pad — actually we land on 4-aligned without pad
+    // this time). Pool 16 bytes. Total 40 bytes.
+    REQUIRE(hp.code.size() == 40);
+    // First two instructions: load rpm pointer (disp depends on pool
+    // offset, just check the opcode high nibble = 0xD with target
+    // register R0), then deref it, then TST.
+    REQUIRE((be16_at(hp.code, 0) & 0xFF00) == 0xD000);  // MOV.L @(?,PC), R0
+    REQUIRE(be16_at(hp.code, 2) == 0x6002);             // MOV.L @R0, R0
+    REQUIRE(be16_at(hp.code, 4) == 0x2008);             // TST R0, R0
+    REQUIRE(be16_at(hp.code, 6) == 0x8902);             // BT use_false (disp=2)
+
+    // First literal in the pool is the rpm input address. With body
+    // size = 24 (20 instr + RTS+NOP+pad NOP), pool starts at 24.
+    REQUIRE(be32_at(hp.code, 24) == 0x000F1234U);
+}
+
+TEST_CASE("Sh2aBackend: select_int nested inside add_int",
+          "[feature_codegen][sh2a][select][nested]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    // add_int(select_int(cond, 10, 20), 5)
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_bool(1, true));
+    m.instructions.push_back(load_const_int(2, 10));
+    m.instructions.push_back(load_const_int(3, 20));
+    ir::Instruction sel{};
+    sel.op          = ir::Op::CallPrimitive;
+    sel.symbol      = "select_int";
+    sel.result_type = st::feature::PinType::Int;
+    sel.result_id   = 4;
+    sel.pin_name    = "out";
+    sel.operands    = {1, 2, 3};
+    m.instructions.push_back(sel);
+    m.instructions.push_back(load_const_int(5, 5));
+    m.instructions.push_back(call_primitive(6, "add_int", {4, 5}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 6));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+    // 2 RAM claims: output pin + select intermediate.
+    REQUIRE(hp.ram_claims.size() == 2);
+    REQUIRE(hp.ram_claims[0].address == 0x40000000);  // output pin
+    REQUIRE(hp.ram_claims[1].address == 0x40000004);  // select intermediate
+
+    // Body should contain both the select branch sequence (BT + BRA
+    // opcodes) and the add (ADD R0, R1).
+    bool seen_bt = false;
+    bool seen_bra = false;
+    bool seen_add = false;
+    for (std::size_t i = 0; i + 1 < hp.code.size(); i += 2) {
+        std::uint16_t inst = be16_at(hp.code, i);
+        // BT: 0x89?? (any disp); BRA: 0xA??? (top 4 bits 0xA).
+        if ((inst & 0xFF00) == 0x8900) seen_bt = true;
+        if ((inst & 0xF000) == 0xA000) seen_bra = true;
+        if (inst == 0x310C) seen_add = true;
+    }
+    REQUIRE(seen_bt);
+    REQUIRE(seen_bra);
+    REQUIRE(seen_add);
+}
+
+TEST_CASE("Sh2aBackend: select_int with wrong arity",
+          "[feature_codegen][sh2a][select]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_bool(1, true));
+    m.instructions.push_back(load_const_int(2, 10));
+    // Missing third operand.
+    ir::Instruction sel{};
+    sel.op          = ir::Op::CallPrimitive;
+    sel.symbol      = "select_int";
+    sel.result_type = st::feature::PinType::Int;
+    sel.result_id   = 3;
+    sel.pin_name    = "out";
+    sel.operands    = {1, 2};  // only 2
+    m.instructions.push_back(sel);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("Sh2aBackend: select_int with non-Bool cond rejected",
+          "[feature_codegen][sh2a][select]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 42));  // Int — wrong for cond
+    m.instructions.push_back(load_const_int(2, 10));
+    m.instructions.push_back(load_const_int(3, 20));
+    ir::Instruction sel{};
+    sel.op          = ir::Op::CallPrimitive;
+    sel.symbol      = "select_int";
+    sel.result_type = st::feature::PinType::Int;
+    sel.result_id   = 4;
+    sel.pin_name    = "out";
+    sel.operands    = {1, 2, 3};
+    m.instructions.push_back(sel);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 4));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+}
+
 TEST_CASE("Sh2aBackend: not_bool(compare_lt) — single-compare invert",
           "[feature_codegen][sh2a][bool_prim][nested]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
