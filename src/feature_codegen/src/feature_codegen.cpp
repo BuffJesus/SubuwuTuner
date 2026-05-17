@@ -153,6 +153,17 @@ class FragmentEmitter {
     void movt(sh2a::Reg rn) {
         emit_be16(body_, sh2a::enc_movt(rn));
     }
+    // Trailing underscore on `and_`/`or_` because `and`/`or` are
+    // alternate spellings of the boolean operators in C++.
+    void and_(sh2a::Reg rm, sh2a::Reg rn) {
+        emit_be16(body_, sh2a::enc_and(rm, rn));
+    }
+    void or_(sh2a::Reg rm, sh2a::Reg rn) {
+        emit_be16(body_, sh2a::enc_or(rm, rn));
+    }
+    void tst(sh2a::Reg rm, sh2a::Reg rn) {
+        emit_be16(body_, sh2a::enc_tst(rm, rn));
+    }
     void nop() { emit_be16(body_, sh2a::enc_nop()); }
 
     // Append RTS + delay-slot NOP + pool-alignment NOP(s) + literal
@@ -349,6 +360,40 @@ void emit_mul_fragment(FragmentEmitter &fe,
     emit_store_r1_to(fe, destination_address);
 }
 
+// Body fragment for `and_bool(op1, op2)` → store. AND is commutative
+// so the natural mapping works (op1 → R0, op2 → R1; AND R0, R1
+// leaves the bitwise-AND in R1). On canonical 0/1 operands the bits
+// align so the result is canonical 0/1 logical AND.
+void emit_and_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
+                        PrimitiveOperand op2, std::uint32_t dst) {
+    load_operand_into(fe, op1, sh2a::Reg::R0);
+    load_operand_into(fe, op2, sh2a::Reg::R1);
+    fe.and_(sh2a::Reg::R0, sh2a::Reg::R1);
+    emit_store_r1_to(fe, dst);
+}
+
+// Body fragment for `or_bool(op1, op2)` → store. Same shape as
+// and_bool with the OR opcode.
+void emit_or_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
+                       PrimitiveOperand op2, std::uint32_t dst) {
+    load_operand_into(fe, op1, sh2a::Reg::R0);
+    load_operand_into(fe, op2, sh2a::Reg::R1);
+    fe.or_(sh2a::Reg::R0, sh2a::Reg::R1);
+    emit_store_r1_to(fe, dst);
+}
+
+// Body fragment for `not_bool(op)` → store. Unary primitive — only
+// one operand. TST Rn, Rn sets T iff Rn==0; MOVT R1 then materializes
+// that as 1 (when op was 0) or 0 (when op was non-zero). One
+// instruction shorter than going through a constant + XOR.
+void emit_not_fragment(FragmentEmitter &fe, PrimitiveOperand op,
+                        std::uint32_t dst) {
+    load_operand_into(fe, op, sh2a::Reg::R0);
+    fe.tst(sh2a::Reg::R0, sh2a::Reg::R0);
+    fe.movt(sh2a::Reg::R1);
+    emit_store_r1_to(fe, dst);
+}
+
 // Body fragment for a comparison primitive. All three variants
 // (compare_lt / compare_gt / compare_eq) share the same shape:
 // load operands → CMP/X (sets T-bit) → MOVT R1 (R1 = T as 0/1) →
@@ -388,41 +433,53 @@ void emit_cmp_eq_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
 // Dispatch a CallPrimitive instruction to the right fragment emitter
 // by symbol. Both the single-level and nested-emit paths route
 // through this, so adding a new primitive only needs a new
-// emit_X_fragment plus a clause here.
-[[nodiscard]] Status emit_primitive_fragment(FragmentEmitter &fe,
-                                              std::string_view symbol,
-                                              PrimitiveOperand op1,
-                                              PrimitiveOperand op2,
-                                              std::uint32_t    dst) {
+// emit_X_fragment plus a clause here. Operand count is validated by
+// validate_call_primitive before we get here, so each branch can
+// index `operands` confidently.
+[[nodiscard]] Status emit_primitive_fragment(
+    FragmentEmitter &fe, std::string_view symbol,
+    std::vector<PrimitiveOperand> const &operands, std::uint32_t dst) {
     if (symbol == "add_int") {
-        emit_add_fragment(fe, op1, op2, dst);
+        emit_add_fragment(fe, operands[0], operands[1], dst);
         return ok();
     }
     if (symbol == "subtract_int") {
-        emit_sub_fragment(fe, op1, op2, dst);
+        emit_sub_fragment(fe, operands[0], operands[1], dst);
         return ok();
     }
     if (symbol == "multiply_int") {
-        emit_mul_fragment(fe, op1, op2, dst);
+        emit_mul_fragment(fe, operands[0], operands[1], dst);
         return ok();
     }
     if (symbol == "compare_lt") {
-        emit_cmp_lt_fragment(fe, op1, op2, dst);
+        emit_cmp_lt_fragment(fe, operands[0], operands[1], dst);
         return ok();
     }
     if (symbol == "compare_gt") {
-        emit_cmp_gt_fragment(fe, op1, op2, dst);
+        emit_cmp_gt_fragment(fe, operands[0], operands[1], dst);
         return ok();
     }
     if (symbol == "compare_eq") {
-        emit_cmp_eq_fragment(fe, op1, op2, dst);
+        emit_cmp_eq_fragment(fe, operands[0], operands[1], dst);
+        return ok();
+    }
+    if (symbol == "and_bool") {
+        emit_and_fragment(fe, operands[0], operands[1], dst);
+        return ok();
+    }
+    if (symbol == "or_bool") {
+        emit_or_fragment(fe, operands[0], operands[1], dst);
+        return ok();
+    }
+    if (symbol == "not_bool") {
+        emit_not_fragment(fe, operands[0], dst);
         return ok();
     }
     std::string msg{"SH-2A backend: CallPrimitive '"};
     msg.append(symbol);
     msg.append("' not yet implemented (slice supports add_int, "
                "subtract_int, multiply_int, compare_lt, compare_gt, "
-               "compare_eq)");
+               "compare_eq, and_bool, or_bool, not_bool)");
     return failure(ErrorCode::NotImplemented, std::move(msg));
 }
 
@@ -554,12 +611,14 @@ void emit_cmp_eq_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
     return nullptr;
 }
 
-// Build a PrimitiveOperand from a producing instruction, given the
-// hook the consuming Store lives on (for cross-hook validation) and
-// any pre-allocated SSA RAM slots for nested CallPrimitive results.
+// Build a PrimitiveOperand from a producing instruction. Checks that
+// the producer's result_type matches the primitive's declared
+// operand_type (e.g. add_int requires Int operands, and_bool requires
+// Bool operands); cross-hook flow rejected; pre-allocated SSA RAM
+// slots for nested CallPrimitive results read from `slots`.
 [[nodiscard]] Result<PrimitiveOperand> operand_from_producer(
     Definition const &def, ir::Module const &m, ir::ValueId value_id,
-    Hook const *target_hook,
+    Hook const *target_hook, PinType expected_operand_type,
     std::unordered_map<ir::ValueId, std::uint32_t> const &slots) {
     ir::Instruction const *prod = find_producer(m, value_id);
     if (prod == nullptr) {
@@ -567,13 +626,11 @@ void emit_cmp_eq_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
                        "SH-2A backend: primitive operand does not "
                        "resolve to any producing instruction");
     }
-    // add_int requires Int operands. The operand check here mirrors
-    // the per-primitive contract — add_float will need its own
-    // operand-type check in a later bundle.
-    if (prod->result_type != PinType::Int) {
+    if (prod->result_type != expected_operand_type) {
         std::string msg{"SH-2A backend: primitive operand of type "};
         msg.append(pin_type_name(prod->result_type));
-        msg.append(" not yet implemented (add_int requires Int operands)");
+        msg.append(" does not match expected operand type ");
+        msg.append(pin_type_name(expected_operand_type));
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
     if (prod->op == ir::Op::LoadConstant) {
@@ -609,28 +666,33 @@ void emit_cmp_eq_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
                    "producer op");
 }
 
-// Per-primitive shape: how many operands it takes and what result
-// type it produces. The codegen rejects mismatches between this
-// table and the IR's actual instruction.
+// Per-primitive shape: how many operands it takes, what type the
+// operands must be, and what result type it produces. The codegen
+// rejects mismatches between this table and the IR's actual
+// instruction.
 struct PrimitiveShape {
     std::size_t arity;
+    PinType     operand_type;
     PinType     result_type;
 };
 
 [[nodiscard]] PrimitiveShape const *primitive_shape(
     std::string_view symbol) noexcept {
-    // Arithmetic: 2 Int operands → Int.
-    // Comparison: 2 Int operands → Bool (0 or 1 via MOVT).
+    // Arithmetic: 2 Int → Int.       Comparison: 2 Int → Bool.
+    // Boolean logic: 2 (or 1) Bool → Bool.
     static constexpr struct Entry {
         std::string_view name;
         PrimitiveShape   shape;
     } kTable[] = {
-        {"add_int",      {2, PinType::Int}},
-        {"subtract_int", {2, PinType::Int}},
-        {"multiply_int", {2, PinType::Int}},
-        {"compare_lt",   {2, PinType::Bool}},
-        {"compare_gt",   {2, PinType::Bool}},
-        {"compare_eq",   {2, PinType::Bool}},
+        {"add_int",      {2, PinType::Int,  PinType::Int}},
+        {"subtract_int", {2, PinType::Int,  PinType::Int}},
+        {"multiply_int", {2, PinType::Int,  PinType::Int}},
+        {"compare_lt",   {2, PinType::Int,  PinType::Bool}},
+        {"compare_gt",   {2, PinType::Int,  PinType::Bool}},
+        {"compare_eq",   {2, PinType::Int,  PinType::Bool}},
+        {"and_bool",     {2, PinType::Bool, PinType::Bool}},
+        {"or_bool",      {2, PinType::Bool, PinType::Bool}},
+        {"not_bool",     {1, PinType::Bool, PinType::Bool}},
     };
     for (auto const &e : kTable) {
         if (e.name == symbol) return &e.shape;
@@ -649,7 +711,8 @@ struct PrimitiveShape {
         msg.append(prim.symbol);
         msg.append("' not yet implemented (slice supports add_int, "
                    "subtract_int, multiply_int, compare_lt, "
-                   "compare_gt, compare_eq)");
+                   "compare_gt, compare_eq, and_bool, or_bool, "
+                   "not_bool)");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
     if (prim.operands.size() != shape->arity) {
@@ -737,14 +800,24 @@ struct PrimitiveShape {
 
     FragmentEmitter fe;
     for (ir::Instruction const *prim : emit_order) {
-        auto op1 = operand_from_producer(def, m, prim->operands[0], hook, slots);
-        if (!op1.has_value()) return failure(op1.error());
-        auto op2 = operand_from_producer(def, m, prim->operands[1], hook, slots);
-        if (!op2.has_value()) return failure(op2.error());
-
+        PrimitiveShape const *shape = primitive_shape(prim->symbol);
+        if (shape == nullptr) {
+            // Unreachable — validate_call_primitive checked earlier.
+            return failure(ErrorCode::ParseError,
+                           "SH-2A backend: primitive symbol lookup "
+                           "regressed after validation");
+        }
+        std::vector<PrimitiveOperand> operands;
+        operands.reserve(shape->arity);
+        for (std::size_t i = 0; i < shape->arity; ++i) {
+            auto op = operand_from_producer(
+                def, m, prim->operands[i], hook, shape->operand_type, slots);
+            if (!op.has_value()) return failure(op.error());
+            operands.push_back(*op);
+        }
         std::uint32_t const this_dest =
             (prim == &root_prim) ? dst_addr : slots.at(prim->result_id);
-        if (auto s = emit_primitive_fragment(fe, prim->symbol, *op1, *op2,
+        if (auto s = emit_primitive_fragment(fe, prim->symbol, operands,
                                               this_dest);
             !s.has_value()) {
             return failure(s.error());
@@ -926,14 +999,19 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
             // Detect nested CallPrimitive operands. Single-level
             // calls use the existing single-fragment emit; nested
             // trees go through the multi-fragment path that allocates
-            // SSA RAM slots.
+            // SSA RAM slots. Loop covers both unary (arity 1) and
+            // binary (arity 2) primitives.
             auto const producer_is_primitive = [&](ir::ValueId vid) {
                 ir::Instruction const *prod = find_producer(m, vid);
                 return prod != nullptr && prod->op == ir::Op::CallPrimitive;
             };
-            bool const nested =
-                producer_is_primitive(src->operands[0])
-                || producer_is_primitive(src->operands[1]);
+            bool nested = false;
+            for (auto operand_id : src->operands) {
+                if (producer_is_primitive(operand_id)) {
+                    nested = true;
+                    break;
+                }
+            }
             if (nested) {
                 if (auto s = emit_nested_call_primitive(
                         def, m, *src, hook, work.ram,
@@ -943,15 +1021,25 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
                 }
             } else {
                 std::unordered_map<ir::ValueId, std::uint32_t> empty_slots;
-                auto op1 = operand_from_producer(
-                    def, m, src->operands[0], hook, empty_slots);
-                if (!op1.has_value()) return failure(op1.error());
-                auto op2 = operand_from_producer(
-                    def, m, src->operands[1], hook, empty_slots);
-                if (!op2.has_value()) return failure(op2.error());
+                PrimitiveShape const *shape = primitive_shape(src->symbol);
+                if (shape == nullptr) {
+                    // Unreachable — validate_call_primitive checked earlier.
+                    return failure(ErrorCode::ParseError,
+                                   "SH-2A backend: primitive symbol "
+                                   "lookup regressed after validation");
+                }
+                std::vector<PrimitiveOperand> operands;
+                operands.reserve(shape->arity);
+                for (std::size_t i = 0; i < shape->arity; ++i) {
+                    auto op = operand_from_producer(
+                        def, m, src->operands[i], hook,
+                        shape->operand_type, empty_slots);
+                    if (!op.has_value()) return failure(op.error());
+                    operands.push_back(*op);
+                }
                 FragmentEmitter fe;
                 if (auto s = emit_primitive_fragment(fe, src->symbol,
-                                                      *op1, *op2, dst_addr);
+                                                      operands, dst_addr);
                     !s.has_value()) {
                     return failure(s.error());
                 }

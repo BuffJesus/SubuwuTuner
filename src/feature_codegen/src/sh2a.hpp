@@ -132,6 +132,36 @@ enum class Reg : std::uint8_t {
         | (static_cast<std::uint16_t>(rn) << 8U));
 }
 
+// AND Rm, Rn  — Rn = Rn & Rm. Bitwise AND of two 32-bit registers.
+// On canonical 0/1 Bool inputs, produces canonical 0/1 logical AND.
+// Encoding: 0010 nnnn mmmm 1001.
+[[nodiscard]] constexpr std::uint16_t enc_and(Reg rm, Reg rn) noexcept {
+    return static_cast<std::uint16_t>(
+        0x2009U
+        | (static_cast<std::uint16_t>(rn) << 8U)
+        | (static_cast<std::uint16_t>(rm) << 4U));
+}
+
+// OR Rm, Rn  — Rn = Rn | Rm. Bitwise OR. On canonical 0/1 Bool
+// inputs, produces canonical 0/1 logical OR.
+// Encoding: 0010 nnnn mmmm 1011.
+[[nodiscard]] constexpr std::uint16_t enc_or(Reg rm, Reg rn) noexcept {
+    return static_cast<std::uint16_t>(
+        0x200BU
+        | (static_cast<std::uint16_t>(rn) << 8U)
+        | (static_cast<std::uint16_t>(rm) << 4U));
+}
+
+// TST Rm, Rn  — T = ((Rn & Rm) == 0). Used as the "is zero" test for
+// logical NOT: TST Rn, Rn followed by MOVT flips 0↔1. Encoding:
+// 0010 nnnn mmmm 1000.
+[[nodiscard]] constexpr std::uint16_t enc_tst(Reg rm, Reg rn) noexcept {
+    return static_cast<std::uint16_t>(
+        0x2008U
+        | (static_cast<std::uint16_t>(rn) << 8U)
+        | (static_cast<std::uint16_t>(rm) << 4U));
+}
+
 // RTS — return from subroutine. Encoded as 0x000B.
 [[nodiscard]] constexpr std::uint16_t enc_rts() noexcept { return 0x000BU; }
 

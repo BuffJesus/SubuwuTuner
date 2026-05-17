@@ -119,6 +119,15 @@ ir::Instruction call_primitive(ir::ValueId result_id,
     return ins;
 }
 
+ir::Instruction load_const_bool(ir::ValueId result_id, bool value) {
+    ir::Instruction ins{};
+    ins.op             = ir::Op::LoadConstant;
+    ins.result_type    = st::feature::PinType::Bool;
+    ins.result_id      = result_id;
+    ins.constant_value = value ? 1.0 : 0.0;
+    return ins;
+}
+
 ir::Instruction store(std::string symbol, std::string pin_name,
                       ir::ValueId operand) {
     ir::Instruction ins{};
@@ -1376,4 +1385,286 @@ TEST_CASE("Sh2aBackend: nested mixed primitives — add(sub, mul)",
     REQUIRE(seen_mul_l);
     REQUIRE(seen_sts_macl);
     REQUIRE(seen_add);
+}
+
+// ---- and_bool / or_bool / not_bool ---------------------------------------
+
+TEST_CASE("Sh2aBackend: and_bool(LC, LC) → Store emits AND",
+          "[feature_codegen][sh2a][bool_prim]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_bool(1, true));
+    m.instructions.push_back(load_const_bool(2, true));
+    ir::Instruction and_ins{};
+    and_ins.op          = ir::Op::CallPrimitive;
+    and_ins.symbol      = "and_bool";
+    and_ins.result_type = st::feature::PinType::Bool;
+    and_ins.result_id   = 3;
+    and_ins.pin_name    = "out";
+    and_ins.operands    = {1, 2};
+    m.instructions.push_back(and_ins);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+
+    // 5 body instructions + RTS + NOP + pad (28 bytes total like add):
+    //   load op1, load op2, AND R0 R1, load dest, store R1
+    REQUIRE(hp.code.size() == 28);
+    REQUIRE(be16_at(hp.code, 0) == 0xD003);  // MOV.L pool[0]=1 → R0
+    REQUIRE(be16_at(hp.code, 2) == 0xD104);  // MOV.L pool[1]=1 → R1
+    REQUIRE(be16_at(hp.code, 4) == 0x2109);  // AND R0, R1
+    REQUIRE(be16_at(hp.code, 6) == 0xD204);  // MOV.L pool[2]=dest → R2
+    REQUIRE(be16_at(hp.code, 8) == 0x2212);  // MOV.L R1, @R2
+
+    REQUIRE(be32_at(hp.code, 16) == 1U);
+    REQUIRE(be32_at(hp.code, 20) == 1U);
+    REQUIRE(be32_at(hp.code, 24) == 0x40000000U);
+}
+
+TEST_CASE("Sh2aBackend: or_bool(LC, LC) → Store emits OR",
+          "[feature_codegen][sh2a][bool_prim]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_bool(1, false));
+    m.instructions.push_back(load_const_bool(2, true));
+    ir::Instruction or_ins{};
+    or_ins.op          = ir::Op::CallPrimitive;
+    or_ins.symbol      = "or_bool";
+    or_ins.result_type = st::feature::PinType::Bool;
+    or_ins.result_id   = 3;
+    or_ins.pin_name    = "out";
+    or_ins.operands    = {1, 2};
+    m.instructions.push_back(or_ins);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+    // Same shape as and_bool; only the opcode differs.
+    REQUIRE(be16_at(hp.code, 4) == 0x210B);  // OR R0, R1
+    REQUIRE(be32_at(hp.code, 16) == 0U);     // op1 = false → 0
+    REQUIRE(be32_at(hp.code, 20) == 1U);     // op2 = true → 1
+}
+
+TEST_CASE("Sh2aBackend: not_bool(LC) → Store emits TST + MOVT (unary)",
+          "[feature_codegen][sh2a][bool_prim]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_bool(1, true));
+    ir::Instruction not_ins{};
+    not_ins.op          = ir::Op::CallPrimitive;
+    not_ins.symbol      = "not_bool";
+    not_ins.result_type = st::feature::PinType::Bool;
+    not_ins.result_id   = 2;
+    not_ins.pin_name    = "out";
+    not_ins.operands    = {1};
+    m.instructions.push_back(not_ins);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 2));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+
+    // 5 body instructions: load op → R0, TST R0,R0, MOVT R1,
+    // load dest → R2, store R1. + RTS + NOP + pad NOP = 8 instr.
+    // 16 bytes body+epilogue + 2 longwords pool = 24 bytes.
+    REQUIRE(hp.code.size() == 24);
+    // pool[0]@16 disp from pc=0: (16-4)/4 = 3 → 0xD003.
+    // pool[1]@20 disp from pc=6: aligned=8, (20-8)/4 = 3 → 0xD203.
+    REQUIRE(be16_at(hp.code, 0) == 0xD003);  // MOV.L pool[0]=1 → R0
+    REQUIRE(be16_at(hp.code, 2) == 0x2008);  // TST R0, R0
+    REQUIRE(be16_at(hp.code, 4) == 0x0129);  // MOVT R1
+    REQUIRE(be16_at(hp.code, 6) == 0xD203);  // MOV.L pool[1]=dest → R2
+    REQUIRE(be16_at(hp.code, 8) == 0x2212);  // MOV.L R1, @R2
+
+    REQUIRE(be32_at(hp.code, 16) == 1U);          // op value
+    REQUIRE(be32_at(hp.code, 20) == 0x40000000U); // dest
+}
+
+TEST_CASE("Sh2aBackend: and_bool rejects Int operand",
+          "[feature_codegen][sh2a][bool_prim]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_bool(1, true));
+    m.instructions.push_back(load_const_int(2, 5));  // Int — wrong type
+    ir::Instruction and_ins{};
+    and_ins.op          = ir::Op::CallPrimitive;
+    and_ins.symbol      = "and_bool";
+    and_ins.result_type = st::feature::PinType::Bool;
+    and_ins.result_id   = 3;
+    and_ins.pin_name    = "out";
+    and_ins.operands    = {1, 2};
+    m.instructions.push_back(and_ins);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+}
+
+TEST_CASE("Sh2aBackend: not_bool with wrong operand count",
+          "[feature_codegen][sh2a][bool_prim]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_bool(1, true));
+    m.instructions.push_back(load_const_bool(2, false));
+    ir::Instruction not_ins{};
+    not_ins.op          = ir::Op::CallPrimitive;
+    not_ins.symbol      = "not_bool";
+    not_ins.result_type = st::feature::PinType::Bool;
+    not_ins.result_id   = 3;
+    not_ins.pin_name    = "out";
+    not_ins.operands    = {1, 2};  // 2 operands — wrong for unary
+    m.instructions.push_back(not_ins);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+// ---- Flat-foot pattern: and_bool(compare_lt, compare_gt) ----------------
+
+TEST_CASE("Sh2aBackend: flat-foot AND-tree — and(compare_lt, compare_gt)",
+          "[feature_codegen][sh2a][bool_prim][nested][flat_foot]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    // The canonical flat-foot-shift gate pattern: ignition-cut armed
+    // when (rpm > rpm_threshold) AND (throttle > throttle_threshold).
+    // Two compares produce Bool intermediates; and_bool combines them.
+    // Stripped down to two threshold compares for the test.
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm"));
+    m.instructions.push_back(load_const_int(2, 4000));
+    // compare_gt(rpm, 4000) → Bool
+    ir::Instruction cmp1{};
+    cmp1.op          = ir::Op::CallPrimitive;
+    cmp1.symbol      = "compare_gt";
+    cmp1.result_type = st::feature::PinType::Bool;
+    cmp1.result_id   = 3;
+    cmp1.pin_name    = "out";
+    cmp1.operands    = {1, 2};
+    m.instructions.push_back(cmp1);
+
+    m.instructions.push_back(load_hook_input(4, "after_fuel_calc", "load"));
+    m.instructions.push_back(load_const_int(5, 90));
+    // compare_gt(throttle, 90) → Bool
+    ir::Instruction cmp2{};
+    cmp2.op          = ir::Op::CallPrimitive;
+    cmp2.symbol      = "compare_gt";
+    cmp2.result_type = st::feature::PinType::Bool;
+    cmp2.result_id   = 6;
+    cmp2.pin_name    = "out";
+    cmp2.operands    = {4, 5};
+    m.instructions.push_back(cmp2);
+
+    // and_bool(cmp1, cmp2) → Bool
+    ir::Instruction and_ins{};
+    and_ins.op          = ir::Op::CallPrimitive;
+    and_ins.symbol      = "and_bool";
+    and_ins.result_type = st::feature::PinType::Bool;
+    and_ins.result_id   = 7;
+    and_ins.pin_name    = "out";
+    and_ins.operands    = {3, 6};
+    m.instructions.push_back(and_ins);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 7));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+
+    // 3 RAM claims: output pin + 2 intermediate slots (for the two
+    // compare results).
+    REQUIRE(hp.ram_claims.size() == 3);
+
+    // Spot-check the patch body contains all three opcodes:
+    //   0x3017 — CMP/GT R1, R0 (compare_gt mirrored variant)
+    //   0x2109 — AND R0, R1
+    //   0x0129 — MOVT R1 (twice — once per compare)
+    int movt_count = 0;
+    bool seen_cmp_gt = false;
+    bool seen_and = false;
+    for (std::size_t i = 0; i + 1 < hp.code.size(); i += 2) {
+        std::uint16_t inst = be16_at(hp.code, i);
+        if (inst == 0x3017) seen_cmp_gt = true;
+        if (inst == 0x2109) seen_and = true;
+        if (inst == 0x0129) ++movt_count;
+    }
+    REQUIRE(seen_cmp_gt);
+    REQUIRE(seen_and);
+    REQUIRE(movt_count == 2);
+}
+
+TEST_CASE("Sh2aBackend: not_bool(compare_lt) — single-compare invert",
+          "[feature_codegen][sh2a][bool_prim][nested]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    // !(rpm < 1000) — used in launch-control to require non-low RPM.
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm"));
+    m.instructions.push_back(load_const_int(2, 1000));
+    ir::Instruction cmp{};
+    cmp.op          = ir::Op::CallPrimitive;
+    cmp.symbol      = "compare_lt";
+    cmp.result_type = st::feature::PinType::Bool;
+    cmp.result_id   = 3;
+    cmp.pin_name    = "out";
+    cmp.operands    = {1, 2};
+    m.instructions.push_back(cmp);
+
+    ir::Instruction not_ins{};
+    not_ins.op          = ir::Op::CallPrimitive;
+    not_ins.symbol      = "not_bool";
+    not_ins.result_type = st::feature::PinType::Bool;
+    not_ins.result_id   = 4;
+    not_ins.pin_name    = "out";
+    not_ins.operands    = {3};
+    m.instructions.push_back(not_ins);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 4));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+    // 2 RAM claims: output pin + compare intermediate.
+    REQUIRE(hp.ram_claims.size() == 2);
+
+    // Check that both TST (for not_bool) and CMP/GT (for compare_lt)
+    // opcodes appear in the body.
+    bool seen_tst = false;
+    bool seen_cmp = false;
+    for (std::size_t i = 0; i + 1 < hp.code.size(); i += 2) {
+        std::uint16_t inst = be16_at(hp.code, i);
+        if (inst == 0x2008) seen_tst = true;
+        if (inst == 0x3107) seen_cmp = true;
+    }
+    REQUIRE(seen_tst);
+    REQUIRE(seen_cmp);
 }
