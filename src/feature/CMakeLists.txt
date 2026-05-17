@@ -1,5 +1,6 @@
 add_library(st_feature STATIC
     src/feature.cpp
+    src/feature_ir.cpp
 )
 add_library(st::feature ALIAS st_feature)
 

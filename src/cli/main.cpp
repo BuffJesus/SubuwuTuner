@@ -7,6 +7,7 @@
 #include "st/dbc.hpp"
 #include "st/defs.hpp"
 #include "st/feature.hpp"
+#include "st/feature_ir.hpp"
 #include "st/discover.hpp"
 #include "st/ecu/ssm.hpp"
 #include "st/edit.hpp"
@@ -286,7 +287,18 @@ constexpr std::string_view kUsage =
     "                            validate() + lint() (see docs/16). Prints any\n"
     "                            structural error first (exit 1), then a bulleted\n"
     "                            list of completeness warnings (exit 0 by default,\n"
-    "                            3 with --strict).\n";
+    "                            3 with --strict).\n"
+    "    dump-ir <FILE.stmod>    Lower a .stmod feature-graph to st::feature::ir\n"
+    "                            and print one instruction per line (see docs/16).\n"
+    "                            Intended as a developer / regression-fixture aid;\n"
+    "                            codegen will consume the same Module.\n"
+    "    lint-ir <FILE.stmod> [--budget N] [--strict]\n"
+    "                            Lower a .stmod, then run st::feature::ir::lint —\n"
+    "                            catches RT-budget overruns and duplicate hook-\n"
+    "                            override stores (see docs/16 §Safety). --budget\n"
+    "                            sets the per-module cycle budget (0 disables;\n"
+    "                            default 200). Exit 0 normally, 3 with --strict\n"
+    "                            on any finding.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -6359,6 +6371,126 @@ int cmd_lint_graph(int argc, char *argv[]) {
     return strict ? 3 : 0;
 }
 
+int cmd_dump_ir(int argc, char *argv[]) {
+    if (argc < 1) {
+        std::fputs("dump-ir: missing path\n", stderr);
+        std::fputs("Usage: subuwutuner-cli dump-ir <FILE.stmod>\n", stderr);
+        return 2;
+    }
+    std::filesystem::path const path{argv[0]};
+    std::ifstream ifs{path, std::ios::binary};
+    if (!ifs) {
+        std::fprintf(stderr, "dump-ir: cannot open '%s'\n",
+                     path.string().c_str());
+        return 1;
+    }
+    std::stringstream buf;
+    buf << ifs.rdbuf();
+    auto g = st::feature::from_toml(buf.str());
+    if (!g.has_value()) {
+        std::fprintf(stderr, "dump-ir: parse failed: %s\n",
+                     g.error().to_string().c_str());
+        return 1;
+    }
+    auto m = st::feature::ir::lower(*g);
+    if (!m.has_value()) {
+        std::fprintf(stderr, "dump-ir: lowering failed: %s\n",
+                     m.error().to_string().c_str());
+        return 1;
+    }
+    std::fputs(st::feature::ir::dump(*m).c_str(), stdout);
+    return 0;
+}
+
+int cmd_lint_ir(int argc, char *argv[]) {
+    if (argc < 1) {
+        std::fputs("lint-ir: missing path\n", stderr);
+        std::fputs("Usage: subuwutuner-cli lint-ir <FILE.stmod> "
+                   "[--budget N] [--strict]\n",
+                   stderr);
+        return 2;
+    }
+    std::filesystem::path path;
+    bool                  strict = false;
+    std::size_t           budget = 200;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--strict") {
+            strict = true;
+        } else if (a == "--budget") {
+            if (i + 1 >= argc) {
+                std::fputs("lint-ir: --budget needs a value\n", stderr);
+                return 2;
+            }
+            char       *end = nullptr;
+            auto const  v   = std::strtoull(argv[i + 1], &end, 10);
+            if (end == argv[i + 1] || *end != '\0') {
+                std::fprintf(stderr,
+                             "lint-ir: --budget '%s' not a non-negative "
+                             "integer\n",
+                             argv[i + 1]);
+                return 2;
+            }
+            budget = static_cast<std::size_t>(v);
+            ++i;
+        } else if (!a.empty() && a[0] == '-') {
+            std::fprintf(stderr, "lint-ir: unknown flag '%.*s'\n",
+                         static_cast<int>(a.size()), a.data());
+            return 2;
+        } else if (path.empty()) {
+            path = argv[i];
+        } else {
+            std::fprintf(stderr,
+                         "lint-ir: unexpected positional '%.*s'\n",
+                         static_cast<int>(a.size()), a.data());
+            return 2;
+        }
+    }
+    if (path.empty()) {
+        std::fputs("lint-ir: missing path\n", stderr);
+        return 2;
+    }
+    std::ifstream ifs{path, std::ios::binary};
+    if (!ifs) {
+        std::fprintf(stderr, "lint-ir: cannot open '%s'\n",
+                     path.string().c_str());
+        return 1;
+    }
+    std::stringstream buf;
+    buf << ifs.rdbuf();
+    auto g = st::feature::from_toml(buf.str());
+    if (!g.has_value()) {
+        std::fprintf(stderr, "lint-ir: parse failed: %s\n",
+                     g.error().to_string().c_str());
+        return 1;
+    }
+    auto m = st::feature::ir::lower(*g);
+    if (!m.has_value()) {
+        std::fprintf(stderr, "lint-ir: lowering failed: %s\n",
+                     m.error().to_string().c_str());
+        return 1;
+    }
+    auto const findings = st::feature::ir::lint(
+        *m, st::feature::ir::LintOptions{budget});
+    if (findings.empty()) {
+        std::printf("lint-ir: clean (cost %zu cycles, budget %zu)\n",
+                    st::feature::ir::estimate_cost(*m), budget);
+        return 0;
+    }
+    std::printf("lint-ir: %zu finding%s\n",
+                findings.size(),
+                findings.size() == 1 ? "" : "s");
+    for (auto const &f : findings) {
+        if (f.instruction_index.has_value()) {
+            std::printf("  - [%zu] %s\n",
+                        *f.instruction_index, f.message.c_str());
+        } else {
+            std::printf("  - %s\n", f.message.c_str());
+        }
+    }
+    return strict ? 3 : 0;
+}
+
 int main(int argc, char *argv[]) {
     if (argc <= 1) {
         print_usage();
@@ -6488,6 +6620,12 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "lint-graph") {
         return cmd_lint_graph(argc - 2, argv + 2);
+    }
+    if (cmd == "dump-ir") {
+        return cmd_dump_ir(argc - 2, argv + 2);
+    }
+    if (cmd == "lint-ir") {
+        return cmd_lint_ir(argc - 2, argv + 2);
     }
     if (cmd == "autotune") {
         if (argc < 3) {
