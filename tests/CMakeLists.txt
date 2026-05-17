@@ -35,6 +35,7 @@ add_executable(st_unit_tests
     unit/policy/test_policy.cpp
     unit/feature/test_feature.cpp
     unit/feature/test_feature_ir.cpp
+    unit/feature_codegen/test_feature_codegen.cpp
 )
 
 target_link_libraries(st_unit_tests
@@ -54,6 +55,7 @@ target_link_libraries(st_unit_tests
         st::autotune
         st::policy
         st::feature
+        st::feature_codegen
         st::warnings
         st::sanitizers
         st::platform

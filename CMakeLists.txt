@@ -67,6 +67,7 @@ add_subdirectory(src/flash)
 add_subdirectory(src/autotune)
 add_subdirectory(src/policy)
 add_subdirectory(src/feature)
+add_subdirectory(src/feature_codegen)
 
 if(ST_BUILD_CLI)
     add_subdirectory(src/cli)

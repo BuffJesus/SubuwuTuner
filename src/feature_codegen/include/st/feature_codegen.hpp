@@ -1,0 +1,178 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The SubuwuTuner Authors
+//
+// st::feature::codegen — IR-to-machine-code backends for custom features.
+//
+// Sits downstream of `st::feature::ir::Module` (the typed dataflow IR
+// produced by lower(Graph)). Each ECU family has its own backend:
+//
+//   sh2a   — Renesas SH-2A (VA WRX et al.)
+//   rh850  — Renesas RH850 (VB WRX et al.)
+//
+// This header is the public seam: the IBackend interface, the
+// architecture-agnostic PatchObject that backends emit, the per-hook
+// RamAllocator that backends share, and the select_backend() factory
+// that picks the right backend by the loaded definition pack's
+// platform.
+//
+// The backends themselves currently return NotImplemented — the
+// scaffolding lands first so parallel work on SH-2A and RH850 has a
+// shared seam. Per docs/16 §"Architectural fit", we never need to
+// *parse* SH-2A or RH850 — only emit.
+
+#ifndef ST_FEATURE_CODEGEN_HPP
+#define ST_FEATURE_CODEGEN_HPP
+
+#include "st/core/result.hpp"
+#include "st/defs.hpp"
+#include "st/feature_ir.hpp"
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace st::feature::codegen {
+
+// The ECU instruction-set families this layer can target. `Unknown` is
+// the "no backend selected" sentinel — `select_backend` returns it
+// inside the Result error when the pack's platform field doesn't
+// resolve.
+enum class Arch : std::uint8_t {
+    Unknown,
+    Sh2a,
+    Rh850,
+};
+
+[[nodiscard]] char const     *arch_name(Arch a) noexcept;
+[[nodiscard]] std::string_view arch_name_sv(Arch a) noexcept;
+
+// One absolute-address byte allocation inside a hook's free_ram
+// region. Backends emit one of these per scratch variable they need
+// (intermediate SSA values, primitive temporaries). The RAM allocator
+// guarantees no two claims overlap and stays within the hook's
+// declared bounds.
+struct RamClaim {
+    std::size_t address{0};  // absolute ROM/RAM address
+    std::size_t size{0};     // bytes
+    std::size_t alignment{1}; // bytes the address must be a multiple of
+};
+
+// RamAllocator — bump allocator over a hook's free_ram region. Tracks
+// the high-water cursor; each `claim` rounds up to alignment then
+// reserves `size` bytes. Refuses on overflow past the region's bounds.
+//
+// Reusable across both backends — neither SH-2A nor RH850 need
+// anything more sophisticated for v1.x (no reuse of freed slots —
+// custom-feature lifetimes are bounded by one hook invocation so
+// reset() between hooks is enough).
+class RamAllocator {
+  public:
+    // Construct over `[base, base + length)`. `length == 0` is a valid
+    // "no scratch RAM available" allocator that refuses every claim.
+    RamAllocator(std::size_t base, std::size_t length) noexcept;
+
+    // Reserve `size` bytes, aligned to `alignment` (must be a power of
+    // two; values <2 are treated as 1). Returns the claim on success,
+    // OutOfRange on overflow, InvalidArgument on a non-power-of-two
+    // alignment.
+    [[nodiscard]] Result<RamClaim> claim(std::size_t size,
+                                          std::size_t alignment = 1) noexcept;
+
+    // Reset the cursor — useful between hook code-gen passes when each
+    // hook owns its own RAM region in the same allocator instance.
+    void reset() noexcept;
+
+    [[nodiscard]] std::size_t base() const noexcept { return base_; }
+    [[nodiscard]] std::size_t length() const noexcept { return length_; }
+    [[nodiscard]] std::size_t used() const noexcept { return cursor_ - base_; }
+    [[nodiscard]] std::size_t remaining() const noexcept {
+        return base_ + length_ - cursor_;
+    }
+
+  private:
+    std::size_t base_{0};
+    std::size_t length_{0};
+    std::size_t cursor_{0};
+};
+
+// One compiled hook — the bytes the patch loader will splice into the
+// firmware at `splice_address`. Symbol identifies the hook by its
+// pack-declared id (e.g. "after_fuel_calc") so the patch loader can
+// resolve splice_address out of the current definition pack.
+struct HookPatch {
+    std::string               symbol;
+    std::size_t               splice_address{0};
+    std::vector<std::uint8_t> code;
+    std::vector<RamClaim>     ram_claims;
+};
+
+// Output of `IBackend::compile`. One PatchObject per compiled
+// `.stmod` — holds the target arch and one HookPatch per distinct
+// hook the user's graph wrote to. Generic enough that both backends
+// can emit the same shape; downstream patch-insertion (free-RAM map,
+// hook table, vector-table splicing — `src/feature_patch/` once it
+// lands) consumes this without caring which backend produced it.
+struct PatchObject {
+    Arch                   arch{Arch::Unknown};
+    std::vector<HookPatch> hooks;
+};
+
+// Pure-virtual backend interface. One concrete impl per target ISA.
+// Backends are stateless across calls — `compile` reads the IR and
+// produces a PatchObject; any per-call state is local.
+class IBackend {
+  public:
+    IBackend()                                = default;
+    virtual ~IBackend()                       = default;
+    IBackend(IBackend const &)                = delete;
+    IBackend &operator=(IBackend const &)     = delete;
+    IBackend(IBackend &&) noexcept            = delete;
+    IBackend &operator=(IBackend &&) noexcept = delete;
+
+    [[nodiscard]] virtual Arch arch() const noexcept = 0;
+
+    // Compile a lowered IR module into a target-architecture
+    // PatchObject. The Definition supplies hook splice addresses,
+    // free_ram regions, and primitive signatures. NotImplemented
+    // while backends are stubs.
+    [[nodiscard]] virtual Result<PatchObject>
+    compile(ir::Module const &m, Definition const &def) = 0;
+};
+
+// SH-2A backend for VA WRX (et al.). Currently a stub — `compile`
+// always returns NotImplemented. Full implementation: a later bundle.
+class Sh2aBackend final : public IBackend {
+  public:
+    [[nodiscard]] Arch arch() const noexcept override { return Arch::Sh2a; }
+    [[nodiscard]] Result<PatchObject>
+    compile(ir::Module const &m, Definition const &def) override;
+};
+
+// RH850 backend for VB WRX (et al.). Currently a stub — `compile`
+// always returns NotImplemented. Full implementation: a later bundle.
+class Rh850Backend final : public IBackend {
+  public:
+    [[nodiscard]] Arch arch() const noexcept override { return Arch::Rh850; }
+    [[nodiscard]] Result<PatchObject>
+    compile(ir::Module const &m, Definition const &def) override;
+};
+
+// Pick the right backend by the loaded pack's platform field. v1.0
+// recognizes "VA" → Sh2a, "VB" → Rh850; anything else is
+// UnsupportedVersion (it's the closest existing ErrorCode — we're
+// declining the pack, not failing on a malformed one). Returns a
+// fresh heap-allocated backend; ownership transfers to the caller.
+[[nodiscard]] Result<std::unique_ptr<IBackend>>
+select_backend(Definition const &def);
+
+// Same as above but driven by the platform string directly. Used by
+// tests and any caller that already has the string in hand.
+[[nodiscard]] Result<std::unique_ptr<IBackend>>
+select_backend(std::string_view platform);
+
+} // namespace st::feature::codegen
+
+#endif // ST_FEATURE_CODEGEN_HPP
