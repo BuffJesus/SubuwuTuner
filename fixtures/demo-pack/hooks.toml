@@ -38,6 +38,7 @@ id           = "ignition_cut"
 display_name = "Ignition cut"
 description  = "Suppress ignition events while the input is true (e.g. for flat-foot shifting)"
 ecu_address  = 0x000ABE00
+free_ram     = { base = 0x40000100, length = 64 }
 outputs = [
   { name = "cut_active", label = "Cut active", type = "bool" },
 ]

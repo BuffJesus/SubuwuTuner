@@ -1,0 +1,98 @@
+# Synthetic Int/Bool sample — proves the SH-2A backend compiles
+# end-to-end through the demo pack today. Exercises the entire
+# integer-and-bool codegen surface: LoadConstant, CallPrimitive
+# (compare_gt_int, not_bool, and_bool nested through SSA slots), and
+# StoreHookOutput. Cross-hook value flow is move #7 in the
+# 2026-05-17 handoff — until that lands, samples have to stay within
+# one hook, and ignition_cut has no input pins, so all sources are
+# constants.
+#
+# Pairs with fixtures/demo-pack. Compile with:
+#   subuwutuner-cli feature-compile fixtures/samples/clutch-kill.stmod \
+#     --def fixtures/demo-pack --arch sh2a
+#
+# What it expresses, logically:
+#   rev_limit_hit = (5000 > 4000)         # compare_gt_int → bool
+#   armed         = not(false)            # not_bool → bool
+#   cut           = rev_limit_hit AND armed
+#   ignition_cut.cut_active = cut
+#
+# Once cross-hook flow + Float arithmetic land, the flat-foot-shift
+# sample takes over as the "real" demo and this becomes a developer-
+# only smoke fixture.
+
+[graph]
+schema_version = 1
+
+# ---- Synthetic operands ----------------------------------------
+
+[[node]]
+id    = 1
+kind  = "primitive.compare_gt_int"
+label = "5000 > 4000"
+x     = 48.0
+y     = 48.0
+pins  = [
+  { id = 0, name = "a",     type = "int",  direction = "input",  unit = "", default = 5000.0 },
+  { id = 1, name = "b",     type = "int",  direction = "input",  unit = "", default = 4000.0 },
+  { id = 2, name = "a > b", type = "bool", direction = "output", unit = "" }
+]
+
+[[node]]
+id    = 2
+kind  = "primitive.not_bool"
+label = "not(false)"
+x     = 48.0
+y     = 168.0
+pins  = [
+  { id = 0, name = "in",  type = "bool", direction = "input",  unit = "", default = 0.0 },
+  { id = 1, name = "out", type = "bool", direction = "output", unit = "" }
+]
+
+# ---- Combine ---------------------------------------------------
+
+[[node]]
+id    = 3
+kind  = "primitive.and_bool"
+label = "rev_limit_hit AND armed"
+x     = 312.0
+y     = 108.0
+pins  = [
+  { id = 0, name = "a",   type = "bool", direction = "input",  unit = "" },
+  { id = 1, name = "b",   type = "bool", direction = "input",  unit = "" },
+  { id = 2, name = "out", type = "bool", direction = "output", unit = "" }
+]
+
+# ---- Drive -----------------------------------------------------
+
+[[node]]
+id    = 4
+kind  = "hook.ignition_cut"
+label = "Ignition cut"
+x     = 576.0
+y     = 108.0
+phase_break = true
+pins  = [
+  { id = 0, name = "cut_active", type = "bool", direction = "input", unit = "" }
+]
+
+# compare_gt_int.out → and_bool.a
+[[edge]]
+from_node = 1
+from_pin  = 2
+to_node   = 3
+to_pin    = 0
+
+# not_bool.out → and_bool.b
+[[edge]]
+from_node = 2
+from_pin  = 1
+to_node   = 3
+to_pin    = 1
+
+# and_bool.out → ignition_cut.cut_active
+[[edge]]
+from_node = 3
+from_pin  = 2
+to_node   = 4
+to_pin    = 0

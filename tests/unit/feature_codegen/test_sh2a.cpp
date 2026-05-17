@@ -1164,7 +1164,7 @@ TEST_CASE("Sh2aBackend: compare_lt(LC, LC) → Store emits CMP/GT R0,R1 + MOVT",
     // compare_lt(3, 10) → true (1)
     ir::Instruction cmp{};
     cmp.op          = ir::Op::CallPrimitive;
-    cmp.symbol      = "compare_lt";
+    cmp.symbol      = "compare_lt_int";
     cmp.result_type = st::feature::PinType::Bool;
     cmp.result_id   = 3;
     cmp.pin_name    = "out";
@@ -1203,7 +1203,7 @@ TEST_CASE("Sh2aBackend: compare_gt uses CMP/GT R1,R0 (mirrored)",
     m.instructions.push_back(load_const_int(2, 3));
     ir::Instruction cmp{};
     cmp.op          = ir::Op::CallPrimitive;
-    cmp.symbol      = "compare_gt";
+    cmp.symbol      = "compare_gt_int";
     cmp.result_type = st::feature::PinType::Bool;
     cmp.result_id   = 3;
     cmp.pin_name    = "out";
@@ -1231,7 +1231,7 @@ TEST_CASE("Sh2aBackend: compare_eq emits CMP/EQ + MOVT",
     m.instructions.push_back(load_const_int(2, 42));
     ir::Instruction cmp{};
     cmp.op          = ir::Op::CallPrimitive;
-    cmp.symbol      = "compare_eq";
+    cmp.symbol      = "compare_eq_int";
     cmp.result_type = st::feature::PinType::Bool;
     cmp.result_id   = 3;
     cmp.pin_name    = "out";
@@ -1258,7 +1258,7 @@ TEST_CASE("Sh2aBackend: compare result_type must be Bool",
     // Lying about result_type — IR says Int but compare_lt produces Bool.
     ir::Instruction cmp{};
     cmp.op          = ir::Op::CallPrimitive;
-    cmp.symbol      = "compare_lt";
+    cmp.symbol      = "compare_lt_int";
     cmp.result_type = st::feature::PinType::Int;  // wrong!
     cmp.result_id   = 3;
     cmp.pin_name    = "out";
@@ -1313,7 +1313,7 @@ TEST_CASE("Sh2aBackend: nested compare inside arithmetic — add(compare, 5)",
     m.instructions.push_back(load_const_int(2, 4000));
     ir::Instruction cmp{};
     cmp.op          = ir::Op::CallPrimitive;
-    cmp.symbol      = "compare_lt";
+    cmp.symbol      = "compare_lt_int";
     cmp.result_type = st::feature::PinType::Bool;
     cmp.result_id   = 3;
     cmp.pin_name    = "out";
@@ -1563,7 +1563,7 @@ TEST_CASE("Sh2aBackend: flat-foot AND-tree — and(compare_lt, compare_gt)",
     // compare_gt(rpm, 4000) → Bool
     ir::Instruction cmp1{};
     cmp1.op          = ir::Op::CallPrimitive;
-    cmp1.symbol      = "compare_gt";
+    cmp1.symbol      = "compare_gt_int";
     cmp1.result_type = st::feature::PinType::Bool;
     cmp1.result_id   = 3;
     cmp1.pin_name    = "out";
@@ -1575,7 +1575,7 @@ TEST_CASE("Sh2aBackend: flat-foot AND-tree — and(compare_lt, compare_gt)",
     // compare_gt(throttle, 90) → Bool
     ir::Instruction cmp2{};
     cmp2.op          = ir::Op::CallPrimitive;
-    cmp2.symbol      = "compare_gt";
+    cmp2.symbol      = "compare_gt_int";
     cmp2.result_type = st::feature::PinType::Bool;
     cmp2.result_id   = 6;
     cmp2.pin_name    = "out";
@@ -1830,7 +1830,7 @@ TEST_CASE("Sh2aBackend: not_bool(compare_lt) — single-compare invert",
     m.instructions.push_back(load_const_int(2, 1000));
     ir::Instruction cmp{};
     cmp.op          = ir::Op::CallPrimitive;
-    cmp.symbol      = "compare_lt";
+    cmp.symbol      = "compare_lt_int";
     cmp.result_type = st::feature::PinType::Bool;
     cmp.result_id   = 3;
     cmp.pin_name    = "out";

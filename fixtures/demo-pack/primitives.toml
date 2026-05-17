@@ -47,6 +47,48 @@ outputs = [
   { name = "out", type = "float" },
 ]
 
+# ---- Integer arithmetic --------------------------------------------
+#
+# Mirror of the float arithmetic primitives but typed Int throughout.
+# Wired up so the SH-2A backend (which currently implements Int + Bool
+# + control flow but not FPU) has matching primitives to demo against.
+
+[[primitive]]
+id           = "add_int"
+display_name = "Add (int)"
+description  = "Integer sum of two inputs."
+inputs = [
+  { name = "a", type = "int" },
+  { name = "b", type = "int" },
+]
+outputs = [
+  { name = "out", type = "int" },
+]
+
+[[primitive]]
+id           = "subtract_int"
+display_name = "Subtract (int)"
+description  = "Integer a - b."
+inputs = [
+  { name = "a", type = "int" },
+  { name = "b", type = "int" },
+]
+outputs = [
+  { name = "out", type = "int" },
+]
+
+[[primitive]]
+id           = "multiply_int"
+display_name = "Multiply (int)"
+description  = "Integer product of two inputs."
+inputs = [
+  { name = "a", type = "int" },
+  { name = "b", type = "int" },
+]
+outputs = [
+  { name = "out", type = "int" },
+]
+
 # ---- Comparison + boolean logic ------------------------------------
 
 [[primitive]]
@@ -86,6 +128,42 @@ outputs = [
 ]
 
 [[primitive]]
+id           = "compare_lt_int"
+display_name = "Less than (int)"
+description  = "True when a < b (integer compare)."
+inputs = [
+  { name = "a", type = "int" },
+  { name = "b", type = "int" },
+]
+outputs = [
+  { name = "out", label = "a < b", type = "bool" },
+]
+
+[[primitive]]
+id           = "compare_gt_int"
+display_name = "Greater than (int)"
+description  = "True when a > b (integer compare)."
+inputs = [
+  { name = "a", type = "int" },
+  { name = "b", type = "int" },
+]
+outputs = [
+  { name = "out", label = "a > b", type = "bool" },
+]
+
+[[primitive]]
+id           = "compare_eq_int"
+display_name = "Equal (int)"
+description  = "True when a == b (integer compare)."
+inputs = [
+  { name = "a", type = "int" },
+  { name = "b", type = "int" },
+]
+outputs = [
+  { name = "out", label = "a == b", type = "bool" },
+]
+
+[[primitive]]
 id           = "select_float"
 display_name = "Select (ternary)"
 description  = "Returns `t` when cond is true, otherwise `f`. The codegen-equivalent of a conditional expression."
@@ -96,6 +174,19 @@ inputs = [
 ]
 outputs = [
   { name = "out", type = "float" },
+]
+
+[[primitive]]
+id           = "select_int"
+display_name = "Select (ternary, int)"
+description  = "Returns `t` when cond is true, otherwise `f` — int operands, supported by the SH-2A backend today."
+inputs = [
+  { name = "cond", type = "bool" },
+  { name = "t",    type = "int" },
+  { name = "f",    type = "int" },
+]
+outputs = [
+  { name = "out", type = "int" },
 ]
 
 [[primitive]]

@@ -508,7 +508,7 @@ void emit_select_int_fragment(FragmentEmitter &fe,
 }
 
 // Body fragment for a comparison primitive. All three variants
-// (compare_lt / compare_gt / compare_eq) share the same shape:
+// (compare_lt_int / compare_gt_int / compare_eq_int) share the same shape:
 // load operands → CMP/X (sets T-bit) → MOVT R1 (R1 = T as 0/1) →
 // store R1. The only thing that differs is the CMP opcode + the
 // operand-to-register mapping. Bool widening = canonical 0/1.
@@ -564,15 +564,15 @@ void emit_cmp_eq_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
         emit_mul_fragment(fe, operands[0], operands[1], dst);
         return ok();
     }
-    if (symbol == "compare_lt") {
+    if (symbol == "compare_lt_int") {
         emit_cmp_lt_fragment(fe, operands[0], operands[1], dst);
         return ok();
     }
-    if (symbol == "compare_gt") {
+    if (symbol == "compare_gt_int") {
         emit_cmp_gt_fragment(fe, operands[0], operands[1], dst);
         return ok();
     }
-    if (symbol == "compare_eq") {
+    if (symbol == "compare_eq_int") {
         emit_cmp_eq_fragment(fe, operands[0], operands[1], dst);
         return ok();
     }
@@ -596,8 +596,9 @@ void emit_cmp_eq_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
     std::string msg{"SH-2A backend: CallPrimitive '"};
     msg.append(symbol);
     msg.append("' not yet implemented (slice supports add_int, "
-               "subtract_int, multiply_int, compare_lt, compare_gt, "
-               "compare_eq, and_bool, or_bool, not_bool, select_int)");
+               "subtract_int, multiply_int, compare_lt_int, "
+               "compare_gt_int, compare_eq_int, and_bool, or_bool, "
+               "not_bool, select_int)");
     return failure(ErrorCode::NotImplemented, std::move(msg));
 }
 
@@ -813,9 +814,9 @@ struct PrimitiveShape {
         {"add_int",      {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Int}},
         {"subtract_int", {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Int}},
         {"multiply_int", {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Int}},
-        {"compare_lt",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
-        {"compare_gt",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
-        {"compare_eq",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
+        {"compare_lt_int",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
+        {"compare_gt_int",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
+        {"compare_eq_int",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
         {"and_bool",     {2, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
         {"or_bool",      {2, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
         {"not_bool",     {1, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
@@ -837,8 +838,8 @@ struct PrimitiveShape {
         std::string msg{"SH-2A backend: CallPrimitive '"};
         msg.append(prim.symbol);
         msg.append("' not yet implemented (slice supports add_int, "
-                   "subtract_int, multiply_int, compare_lt, "
-                   "compare_gt, compare_eq, and_bool, or_bool, "
+                   "subtract_int, multiply_int, compare_lt_int, "
+                   "compare_gt_int, compare_eq_int, and_bool, or_bool, "
                    "not_bool, select_int)");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
