@@ -7,6 +7,7 @@
 #include "st/dbc.hpp"
 #include "st/defs.hpp"
 #include "st/feature.hpp"
+#include "st/feature_codegen.hpp"
 #include "st/feature_ir.hpp"
 #include "st/discover.hpp"
 #include "st/ecu/ssm.hpp"
@@ -298,7 +299,18 @@ constexpr std::string_view kUsage =
     "                            override stores (see docs/16 §Safety). --budget\n"
     "                            sets the per-module cycle budget (0 disables;\n"
     "                            default 200). Exit 0 normally, 3 with --strict\n"
-    "                            on any finding.\n";
+    "                            on any finding.\n"
+    "    feature-compile <FILE.stmod> --def <pack.toml> [--arch sh2a|rh850]\n"
+    "                    [--format hex|toml|raw] [--output <FILE>]\n"
+    "                            Lower a .stmod, pick a codegen backend by the\n"
+    "                            pack's platform (or --arch override), and emit\n"
+    "                            the compiled PatchObject. Default --format=hex\n"
+    "                            renders a per-hook header + line-wrapped hex of\n"
+    "                            the code bytes; --format=toml emits a structured\n"
+    "                            patch table ([patch] arch + [[patch.hook]] rows);\n"
+    "                            --format=raw writes the code bytes verbatim and\n"
+    "                            requires a single-hook patch + --output. Without\n"
+    "                            --output the text formats print to stdout.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -6568,6 +6580,281 @@ int cmd_lint_ir(int argc, char *argv[]) {
     return strict ? 3 : 0;
 }
 
+namespace {
+
+// Render a PatchObject as a per-hook hex dump. Header lines start with
+// '#'; bytes lay out 16 per row with an offset column. Each hook
+// trailer summarizes its RAM claims.
+std::string render_patch_hex(st::feature::codegen::PatchObject const &p) {
+    std::string out;
+    out.reserve(256 + 80 * p.hooks.size());
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "# arch: %s\n",
+                  st::feature::codegen::arch_name(p.arch));
+    out.append(buf);
+    if (p.hooks.empty()) {
+        out.append("# (no hooks)\n");
+        return out;
+    }
+    for (auto const &h : p.hooks) {
+        std::snprintf(buf, sizeof(buf),
+                      "# hook: %s @ 0x%zX (%zu bytes)\n",
+                      h.symbol.c_str(), h.splice_address, h.code.size());
+        out.append(buf);
+        for (std::size_t i = 0; i < h.code.size(); i += 16) {
+            std::snprintf(buf, sizeof(buf), "%04zX:", i);
+            out.append(buf);
+            std::size_t const end = std::min(i + 16, h.code.size());
+            for (std::size_t j = i; j < end; ++j) {
+                std::snprintf(buf, sizeof(buf), " %02X",
+                              static_cast<unsigned>(h.code[j]));
+                out.append(buf);
+            }
+            out.append("\n");
+        }
+        for (auto const &rc : h.ram_claims) {
+            std::snprintf(buf, sizeof(buf),
+                          "# ram_claim: 0x%zX size=%zu align=%zu\n",
+                          rc.address, rc.size, rc.alignment);
+            out.append(buf);
+        }
+    }
+    return out;
+}
+
+// Render a PatchObject as TOML. Shape is forward-compatible with a
+// future PatchObject::from_toml deserializer (see docs/16 §"Patch-
+// bytes serialization", next-likely-moves #4 in the 2026-05-17
+// handoff). Code bytes are an uppercase hex string with no separators
+// to keep the TOML compact while still diffable.
+std::string render_patch_toml(st::feature::codegen::PatchObject const &p) {
+    std::string out;
+    out.reserve(256 + 128 * p.hooks.size());
+    char buf[64];
+    out.append("[patch]\n");
+    std::snprintf(buf, sizeof(buf), "arch = \"%s\"\n",
+                  st::feature::codegen::arch_name(p.arch));
+    out.append(buf);
+    for (auto const &h : p.hooks) {
+        out.append("\n[[patch.hook]]\n");
+        out.append("symbol = \"");
+        out.append(h.symbol);
+        out.append("\"\n");
+        std::snprintf(buf, sizeof(buf), "splice_address = 0x%zX\n",
+                      h.splice_address);
+        out.append(buf);
+        out.append("code = \"");
+        for (auto const b : h.code) {
+            std::snprintf(buf, sizeof(buf), "%02X", static_cast<unsigned>(b));
+            out.append(buf);
+        }
+        out.append("\"\n");
+        for (auto const &rc : h.ram_claims) {
+            out.append("\n[[patch.hook.ram_claim]]\n");
+            std::snprintf(buf, sizeof(buf), "address = 0x%zX\n", rc.address);
+            out.append(buf);
+            std::snprintf(buf, sizeof(buf), "size = %zu\n", rc.size);
+            out.append(buf);
+            std::snprintf(buf, sizeof(buf), "alignment = %zu\n", rc.alignment);
+            out.append(buf);
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+int cmd_feature_compile(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> stmod_path;
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::filesystem::path> output_path;
+    std::optional<std::string>           arch_override;
+    std::string                          format = "hex";
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--def") {
+            if (i + 1 >= argc) {
+                std::fputs("feature-compile: --def requires a path\n", stderr);
+                return 2;
+            }
+            def_path = std::filesystem::path{argv[++i]};
+        } else if (a == "--output") {
+            if (i + 1 >= argc) {
+                std::fputs("feature-compile: --output requires a path\n",
+                           stderr);
+                return 2;
+            }
+            output_path = std::filesystem::path{argv[++i]};
+        } else if (a == "--arch") {
+            if (i + 1 >= argc) {
+                std::fputs("feature-compile: --arch requires a value\n",
+                           stderr);
+                return 2;
+            }
+            arch_override = std::string{argv[++i]};
+        } else if (a == "--format") {
+            if (i + 1 >= argc) {
+                std::fputs("feature-compile: --format requires a value\n",
+                           stderr);
+                return 2;
+            }
+            format = std::string{argv[++i]};
+            if (format != "hex" && format != "toml" && format != "raw") {
+                std::fprintf(stderr,
+                             "feature-compile: --format must be one of "
+                             "hex|toml|raw (got '%s')\n",
+                             format.c_str());
+                return 2;
+            }
+        } else if (!a.empty() && a[0] == '-') {
+            std::fprintf(stderr, "feature-compile: unknown flag '%.*s'\n",
+                         static_cast<int>(a.size()), a.data());
+            return 2;
+        } else if (!stmod_path.has_value()) {
+            stmod_path = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr,
+                         "feature-compile: unexpected positional '%s'\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+
+    if (!stmod_path.has_value()) {
+        std::fputs("feature-compile: missing .stmod path\n", stderr);
+        std::fputs("Usage: subuwutuner-cli feature-compile <FILE.stmod> "
+                   "--def <pack.toml> [--arch sh2a|rh850] "
+                   "[--format hex|toml|raw] [--output <FILE>]\n",
+                   stderr);
+        return 2;
+    }
+    if (!def_path.has_value()) {
+        std::fputs("feature-compile: --def is required\n", stderr);
+        return 2;
+    }
+    if (format == "raw" && !output_path.has_value()) {
+        std::fputs("feature-compile: --format=raw requires --output "
+                   "(refusing to write binary to a terminal)\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const def = st::Definition::from_file(*def_path);
+    if (!def.has_value()) {
+        return print_def_load_error("feature-compile", *def_path, def.error());
+    }
+
+    std::ifstream ifs{*stmod_path, std::ios::binary};
+    if (!ifs) {
+        std::fprintf(stderr, "feature-compile: cannot open '%s'\n",
+                     stmod_path->string().c_str());
+        return 1;
+    }
+    std::stringstream buf;
+    buf << ifs.rdbuf();
+    auto g = st::feature::from_toml(buf.str());
+    if (!g.has_value()) {
+        std::fprintf(stderr, "feature-compile: parse failed: %s\n",
+                     g.error().to_string().c_str());
+        return 1;
+    }
+    auto m = st::feature::ir::lower(*g);
+    if (!m.has_value()) {
+        std::fprintf(stderr, "feature-compile: lowering failed: %s\n",
+                     m.error().to_string().c_str());
+        return 1;
+    }
+
+    std::unique_ptr<st::feature::codegen::IBackend> backend;
+    if (arch_override.has_value()) {
+        // Explicit arch name — bypass platform detection. Keeps the
+        // CLI usable against demo packs whose platform string doesn't
+        // map through select_backend()'s VA/VB recognizer.
+        std::string a = *arch_override;
+        std::transform(a.begin(), a.end(), a.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        if (a == "sh2a") {
+            backend = std::make_unique<st::feature::codegen::Sh2aBackend>();
+        } else if (a == "rh850") {
+            backend = std::make_unique<st::feature::codegen::Rh850Backend>();
+        } else {
+            std::fprintf(stderr,
+                         "feature-compile: --arch must be sh2a or rh850 "
+                         "(got '%s')\n",
+                         arch_override->c_str());
+            return 2;
+        }
+    } else {
+        auto sel = st::feature::codegen::select_backend(*def);
+        if (!sel.has_value()) {
+            std::fprintf(stderr, "feature-compile: %s\n",
+                         sel.error().to_string().c_str());
+            std::fputs("(pass --arch sh2a|rh850 to override platform "
+                       "detection)\n",
+                       stderr);
+            return 1;
+        }
+        backend = std::move(*sel);
+    }
+
+    auto patch = backend->compile(*m, *def);
+    if (!patch.has_value()) {
+        std::fprintf(stderr, "feature-compile: compile failed: %s\n",
+                     patch.error().to_string().c_str());
+        return 1;
+    }
+
+    if (format == "raw") {
+        if (patch->hooks.size() != 1) {
+            std::fprintf(stderr,
+                         "feature-compile: --format=raw needs exactly one "
+                         "hook (got %zu)\n",
+                         patch->hooks.size());
+            return 1;
+        }
+        std::ofstream ofs{*output_path, std::ios::binary | std::ios::trunc};
+        if (!ofs) {
+            std::fprintf(stderr, "feature-compile: cannot open '%s' for "
+                                 "writing\n",
+                         output_path->string().c_str());
+            return 1;
+        }
+        auto const &code = patch->hooks.front().code;
+        ofs.write(reinterpret_cast<char const *>(code.data()),
+                  static_cast<std::streamsize>(code.size()));
+        if (!ofs) {
+            std::fprintf(stderr, "feature-compile: write to '%s' failed\n",
+                         output_path->string().c_str());
+            return 1;
+        }
+        return 0;
+    }
+
+    std::string const text = (format == "toml")
+        ? render_patch_toml(*patch)
+        : render_patch_hex(*patch);
+
+    if (output_path.has_value()) {
+        std::ofstream ofs{*output_path, std::ios::binary | std::ios::trunc};
+        if (!ofs) {
+            std::fprintf(stderr, "feature-compile: cannot open '%s' for "
+                                 "writing\n",
+                         output_path->string().c_str());
+            return 1;
+        }
+        ofs.write(text.data(), static_cast<std::streamsize>(text.size()));
+        if (!ofs) {
+            std::fprintf(stderr, "feature-compile: write to '%s' failed\n",
+                         output_path->string().c_str());
+            return 1;
+        }
+    } else {
+        std::fputs(text.c_str(), stdout);
+    }
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     if (argc <= 1) {
         print_usage();
@@ -6703,6 +6990,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "lint-ir") {
         return cmd_lint_ir(argc - 2, argv + 2);
+    }
+    if (cmd == "feature-compile") {
+        return cmd_feature_compile(argc - 2, argv + 2);
     }
     if (cmd == "autotune") {
         if (argc < 3) {

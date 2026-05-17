@@ -18,6 +18,7 @@ target_link_libraries(subuwutuner-cli
         st::flash
         st::autotune
         st::feature
+        st::feature_codegen
         st::policy
         st::warnings
         st::sanitizers
