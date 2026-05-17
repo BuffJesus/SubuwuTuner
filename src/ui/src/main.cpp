@@ -518,6 +518,13 @@ struct AppState {
     // Working-ROM values at parse time, kept so the preview can show
     // "before -> after" without re-reading per frame.
     std::optional<st::Definition::TableData> csv_import_before_values;
+    // Inline apply error. Set when "Apply edits" fails (e.g. the ROM
+    // changed under us, an out-of-range cell snuck through, the table
+    // disappeared from the def). Rendered above the buttons inside
+    // the modal so the user sees the cause without losing the parsed
+    // preview state — keeps the modal "non-intimidating" instead of
+    // bouncing them out to the status bar.
+    std::string                              csv_import_apply_error;
 
     // New-project modal. GUI front for `subuwutuner-cli project-new`.
     // Three path fields (source ROM, def pack folder OR single-file
@@ -1521,22 +1528,41 @@ void render_csv_import_modal(AppState &state) {
                           "(Esc)");
     }
 
+    // Inline error from a prior failed apply. Surfaces between the
+    // preview and the buttons so the user sees the cause and can fix
+    // + retry without losing the parsed edits. We do NOT close the
+    // popup on apply failure — only on success or explicit cancel.
+    if (!state.csv_import_apply_error.empty()) {
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.94f, 0.40f, 0.40f, 1.00f),
+                            "Apply failed:  %s",
+                            state.csv_import_apply_error.c_str());
+        ImGui::TextDisabled(
+            "The preview is preserved — fix the underlying issue and "
+            "click Apply again, or Cancel to discard.");
+    }
+
     if (apply_clicked || want_apply) {
         if (auto err = apply_parsed_csv_edits(
                 state, state.csv_import_table_id, state.csv_import_parsed);
             err.has_value()) {
-            state.status_msg = "Import failed: " + *err;
+            // Stay in the modal; show the error inline. Don't touch
+            // status_msg — failure feedback belongs in the modal.
+            state.csv_import_apply_error = *err;
+        } else {
+            state.csv_import_parsed = {};
+            state.csv_import_before_values.reset();
+            state.csv_import_table_id.clear();
+            state.csv_import_source_path.clear();
+            state.csv_import_apply_error.clear();
+            ImGui::CloseCurrentPopup();
         }
-        state.csv_import_parsed = {};
-        state.csv_import_before_values.reset();
-        state.csv_import_table_id.clear();
-        state.csv_import_source_path.clear();
-        ImGui::CloseCurrentPopup();
     } else if (cancel_clicked || want_cancel) {
         state.csv_import_parsed = {};
         state.csv_import_before_values.reset();
         state.csv_import_table_id.clear();
         state.csv_import_source_path.clear();
+        state.csv_import_apply_error.clear();
         state.status_msg = "Import cancelled.";
         ImGui::CloseCurrentPopup();
     }
@@ -2638,6 +2664,14 @@ void render_new_project_modal(AppState &state) {
             ImGui::SetTooltip("Pick a single-file TOML pack\n"
                               "(one ROM/CID per file).");
         }
+        // First-run hint. The single most common new-user question
+        // ("where do I get a pack?") deserves a visible answer in
+        // the modal, not a buried doc reference. Kept compact +
+        // TextDisabled so it doesn't compete with the inputs.
+        ImGui::TextDisabled(
+            "Don't have a pack? Try the bundled "
+            "fixtures/demo-pack/ to explore the UI, or see "
+            "docs/11-definition-format.md to author one.");
     }
 
     // Inline ROM/def match check. Recompute only when either path has
@@ -2735,6 +2769,17 @@ void render_new_project_modal(AppState &state) {
     ImGui::Separator();
     ImGui::Spacing();
 
+    // Inline create error from a prior failed click, rendered ABOVE
+    // the buttons so retries don't have to chase the eye to the
+    // bottom of the modal. Kept compact (one red line) — detailed
+    // diagnostics go in tooltips on the offending field.
+    if (!state.np_create_error.empty()) {
+        ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
+                            "\xE2\x9C\x97 Create failed: %s",
+                            state.np_create_error.c_str());
+        ImGui::Spacing();
+    }
+
     bool const have_source = state.np_source_path[0] != '\0';
     bool const have_def    = state.np_def_path[0]    != '\0';
     bool const have_dir    = state.np_dir_path[0]    != '\0';
@@ -2798,9 +2843,10 @@ void render_new_project_modal(AppState &state) {
                                       std::filesystem::path{state.np_def_path},
                                       name);
         if (!r.has_value()) {
-            auto const err  = r.error().to_string();
-            state.status_msg      = "Create failed: " + err;
-            state.np_create_error = err;
+            // Inline error only — status_msg would compete with the
+            // modal's own surface. The error renders above the
+            // buttons on next frame.
+            state.np_create_error = r.error().to_string();
         } else {
             reset_fields();
             ImGui::CloseCurrentPopup();
@@ -2810,13 +2856,6 @@ void render_new_project_modal(AppState &state) {
     } else if (cancel_clicked || want_cancel) {
         reset_fields();
         ImGui::CloseCurrentPopup();
-    }
-
-    if (!state.np_create_error.empty()) {
-        ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
-                            "\xE2\x9C\x97 Create failed: %s",
-                            state.np_create_error.c_str());
     }
 
     ImGui::EndPopup();
@@ -2968,20 +3007,24 @@ void render_flash_modal(AppState &state) {
                 "Tick the confirm box (and fill the reason) first.");
         }
     }
-    ImGui::SameLine();
-    ImGui::BeginDisabled(true);
-    ImGui::Button("Send to ECU", ImVec2(140.0f, 0.0f));
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip(
-            "Real transport not yet wired. Use the CLI for a MockTransport-\n"
-            "replayed UDS trace: subuwutuner-cli project-flash <dir> --trace …");
-    }
+    // "Send to ECU" stays hidden until a real transport binding lands
+    // (Phase 3). Greying out a permanently-disabled CTA with the
+    // explanation buried in a hover tooltip reads as "the app is
+    // broken." Replacing it with an explicit inline note (below)
+    // tells the user the same fact without the dead-button surface.
     ImGui::SameLine();
     if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))
             || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
         ImGui::CloseCurrentPopup();
     }
+
+    ImGui::Spacing();
+    ImGui::TextDisabled(
+        "ECU send is CLI-only in this build (no in-app transport "
+        "binding yet). After Verify, drive the flash from:");
+    ImGui::Indent();
+    ImGui::TextDisabled("subuwutuner-cli project-flash <dir> --trace …");
+    ImGui::Unindent();
 
     ImGui::EndPopup();
 }
@@ -3610,18 +3653,25 @@ void render_menubar(AppState &state) {
                 ImGui::EndMenu();
             }
             ImGui::Separator();
+            // Custom features designer — Phase 5 user-facing surface.
+            // Promoted out of Debug to top-level so users actually
+            // discover it; the audit flagged that hiding it next to
+            // the ImGui demo made it read as a developer escape hatch.
+            ImGui::MenuItem("Custom features designer (preview)", nullptr,
+                             &state.show_features_designer);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Phase 5 node-graph editor for authoring custom\n"
+                    "features (rev limiters, flat-foot shift, etc.).\n"
+                    "Graph + IR + SH-2A codegen are implemented;\n"
+                    "wire-up to flash lands in Phase 5 patch insertion.");
+            }
+            ImGui::Separator();
             // Dev-only escape hatch. Tucked one level deeper so the
             // ImGui example isn't a peer of the user-facing view modes.
             if (ImGui::BeginMenu("Debug")) {
                 ImGui::MenuItem("ImGui demo window", nullptr,
                                  &state.show_imgui_demo);
-                ImGui::MenuItem("Custom features designer (WIP)", nullptr,
-                                 &state.show_features_designer);
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Phase 5 preview. Data model is\n"
-                                      "implemented (st::feature::Graph);\n"
-                                      "the editor canvas is a placeholder.");
-                }
                 ImGui::EndMenu();
             }
             ImGui::EndMenu();
