@@ -68,6 +68,20 @@ target_link_libraries(st_unit_tests
         Catch2::Catch2WithMain
 )
 
+# Private integration tests — exercise against locally-staged ROM
+# dumps in fixtures/private/. Source files are gitignored
+# (`.gitignore` whitelists only README + template); CONFIGURE_DEPENDS
+# re-runs the glob at build-system regen so dropping a new *.cpp in
+# tests/private/ picks it up without editing this file. Filter at
+# runtime with the [private] Catch2 tag the template demonstrates.
+file(GLOB PRIVATE_TEST_SOURCES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/private/*.cpp")
+if(PRIVATE_TEST_SOURCES)
+    target_sources(st_unit_tests PRIVATE ${PRIVATE_TEST_SOURCES})
+    message(STATUS "Private integration tests staged: "
+                   "${PRIVATE_TEST_SOURCES}")
+endif()
+
 # Catch2's discovery integrates each TEST_CASE as an individual ctest entry.
 catch_discover_tests(st_unit_tests
     REPORTER console

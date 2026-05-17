@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The SubuwuTuner Authors
+//
+// **TEMPLATE** for private integration tests. Copy this file to
+// a new `*.cpp` in this directory and edit. New `.cpp` files are
+// gitignored automatically (per `.gitignore` whitelist for the
+// README + this template only).
+//
+// The CMake glob in tests/CMakeLists.txt picks up any
+// `tests/private/*.cpp` on the next rebuild — no CMakeLists
+// edits needed.
+//
+// Tag convention: use `[private]` on every TEST_CASE so the
+// suite can be filtered:
+//   ./st_unit_tests.exe [private]
+
+#include <catch2/catch_test_macros.hpp>
+
+#include "st/rom.hpp"
+#include "st/defs.hpp"
+
+#include <filesystem>
+
+// All paths are relative to the build's working directory, which
+// the test harness runs from the repo root. Adjust if you run
+// the tests from a different cwd.
+namespace {
+std::filesystem::path const kRomPath{
+    "fixtures/private/AS80U_aw0123_stock.bin"};
+}
+
+TEST_CASE("private: AS80U stock ROM loads cleanly with expected size",
+          "[private][rom][va]") {
+    if (!std::filesystem::exists(kRomPath)) {
+        SKIP("Stage " + kRomPath.string() + " in fixtures/private/ "
+             "and add an entry to PROVENANCE.toml. This test stays "
+             "dormant until then.");
+    }
+    auto const rom = st::Rom::from_file(kRomPath);
+    REQUIRE(rom.has_value());
+    // VA WRX ROM size convention. Adjust if your dump differs —
+    // some early VA + late VB ROMs are different sizes.
+    REQUIRE(rom->size() == 1572864);
+}
+
+TEST_CASE("private: AS80U ROM CID matches what the pack identifies",
+          "[private][rom][va]") {
+    if (!std::filesystem::exists(kRomPath)) {
+        SKIP("Stage " + kRomPath.string());
+    }
+    auto rom = st::Rom::from_file(kRomPath);
+    REQUIRE(rom.has_value());
+
+    // CID lives at byte offset 0x00002000 per Subaru convention
+    // (see docs in 58a821f). 8 chars, ASCII, trailing spaces
+    // are real.
+    auto const cid_span = std::span<std::uint8_t const>{
+        rom->bytes().data() + 0x2000, 8};
+    std::string const cid{cid_span.begin(), cid_span.end()};
+    REQUIRE(cid == "AS80U   ");
+}
+
+// More examples to crib from when adding real tests:
+//
+//  - Load a private definition pack and verify dump-table
+//    against this ROM produces sensible numbers:
+//
+//        auto const def = st::Definition::from_directory(
+//            "D:/Documents/SubuwuTuner-defs-private/va/AS80U/");
+//        REQUIRE(def.has_value());
+//        auto const td = def->read_table(*rom, "primary_open_loop_fuel");
+//        REQUIRE(td.has_value());
+//        // ... spot-check a few cells against the RomRaider XML
+//
+//  - Round-trip a project create + edit + save:
+//
+//        auto const proj = st::Project::create(
+//            tmpdir / "smoke.stune", kRomPath, def_path, "Smoke");
+//        REQUIRE(proj.has_value());
+//
+//  - Phase 4 (once it lands): verify checksum repair against a
+//    known-stock dump produces the same bytes the dump already
+//    carries.

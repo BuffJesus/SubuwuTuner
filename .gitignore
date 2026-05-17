@@ -53,10 +53,29 @@ Testing/
 *.gcno
 coverage/
 
-# User-private fixtures (never commit these)
+# User-private fixtures (never commit these). Real ROM dumps,
+# captured traces, ECU-bound binaries — anything that's
+# calibration data or copyrighted content sits under
+# fixtures/roms/ or fixtures/private/ and is gitignored
+# entirely.
+#
+# Exception: the README + PROVENANCE template at the root of
+# fixtures/private/ ARE tracked so the convention is
+# discoverable in-tree (whitelist rules below).
 Definitions-*.atlas
 fixtures/roms/
-fixtures/private/
+fixtures/private/*
+!fixtures/private/README.md
+!fixtures/private/PROVENANCE.template.toml
+
+# Private integration tests — same shape as fixtures/private/.
+# Source files dropped here are gitignored so individual
+# developers can stage tests against their local ROM dumps
+# without those tests leaking into the public CI. The README
+# + example template ARE tracked.
+tests/private/*
+!tests/private/README.md
+!tests/private/example_private_test.cpp.template
 
 # Path B distribution posture. VA/VB definition packs were moved out of
 # this repo so the public release ships infrastructure only; users supply
