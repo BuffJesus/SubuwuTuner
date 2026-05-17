@@ -8,7 +8,7 @@ This is the part that actually matters and is the most reusable across platforms
 
 - **Transport:** ISO 15765-2 (CAN-TP) on VB, K-Line / ISO 14230 (KWP2000) on VA via a J2534-class adapter
 - **Application layer:** Subaru SSM (`A8` read, `B0` write) over KWP, UDS-style services (`22 RDBI`, `2E WDBI`, `27 SecurityAccess`, `34/36 RequestDownload/TransferData`) on CAN
-- **Flashing:** seed/key challenge (Subaru's algorithm has been public for years), erase + program in 64KB/256KB sectors, CRC at end
+- **Flashing:** seed/key challenge (Subaru's algorithm has been public for years), erase + program in 64KB/256KB sectors, CRC at end. **Caveat:** RomRaider's SSM source has **no `securityAccess`/seed-key implementation** — RR's RamTune test harness doesn't reflash. We can't crib the seed/key derivation from RR; it has to come from forum threads, captured traces against a bench ECU, or clean-room analysis of ECUFlash behavior.
 - **Datalogging:** continuous SSM `A8` polling of RAM addresses; PID definitions are the same data we already need for the editor
 
 References that are legitimate to study (see the clean-room boundary section for hygiene rules):
@@ -24,13 +24,12 @@ References that are legitimate to study (see the clean-room boundary section for
 
 | File / location | What it teaches us | How we use it |
 |---|---|---|
-| `RomRaider/src/main/java/com/romraider/io/protocol/ssm/iso9141/SSMProtocol.java` (and CAN variant) | SSM frame layout, command bytes, checksum | Spec input for `st::ecu::ssm` — write fresh C++ from observed framing |
-| `RomRaider/src/main/java/com/romraider/io/connection/...` | Tactrix J2534 wrapping | Spec input for `st::transport::j2534` |
-| `RomRaider/src/main/java/com/romraider/io/protocol/ssm/iso9141/command/...` | Seed/key request flow, address-table queries | Spec input for `st::ecu::ssm::SeedKey` |
-| `RomRaider/src/main/resources/definitions/` | Per-CID table addresses, axes, scaling formulas | **Translate to our TOML schema via the `defgen` tool** (see below) |
-| `RomRaider/.../logger/`*.xml | Logger PID addresses and scalings | Translate the same way |
-| Community forks (e.g. `bludgod/RomRaider`) | Newer or WIP definitions and features | Diff against mainline; cherry-pick concepts (not code) into our spec docs |
-| RomRaider forum sticky threads on VA / VB | Stock ROM dumps by CID, new-map announcements | Source of test fixtures (private to `fixtures/private/`, not redistributed) |
+| `RomRaider/src/main/java/com/romraider/io/protocol/ssm/iso9141/SSMProtocol.java` (and CAN variant) | SSM frame layout, command bytes, checksum, line settings | Spec input for `st::ecu::ssm` — write fresh C++ from observed framing |
+| `RomRaider/src/main/java/com/romraider/io/connection/...` + `io/j2534/api/J2534Impl.java` | Tactrix J2534 wrapping, vendor-DLL discovery via the Windows registry | Spec input for `st::transport::j2534` |
+| `RomRaider/src/main/java/com/romraider/ramtune/test/` | The closest thing RR has to an "ECU dump" tool — single-shot read/write of memory at raw addresses. **Self-described in its source as a test harness**; there is no whole-ROM flash wizard in RR. We can crib framing and command generation, not orchestration. | Spec input for `st::ecu::ssm` and Phase 4 flash design (which has to be ours) |
+| `RomRaider/src/main/java/com/romraider/maps/checksum/` | Per-family checksum-repair classes (`ChecksumSTD`, `ChecksumALT`, `ChecksumALT2`, …) keyed by a `<checksum type="…">` attribute in the def XML | Spec input for our post-write checksum repair — write fresh C++ from the algorithm, then validate against a known stock dump |
+| `Merp/SubaruDefs` (https://github.com/Merp/SubaruDefs) | Definition data only, no code. Ships **both** ECUFlash XML and RomRaider XML in sibling subtrees; `defgen` can target either. Branches: `Stable` (default, pin here), `Beta` (advanced), `Alpha` (dev/tester only — the README warns explicitly against flashing from it). `MerpMod_dev_<ROMID>` branches carry per-ROM development of custom features. | Source for `defgen`. Pin to `Stable` unless a specific feature lives elsewhere. |
+| RomRaider forum sticky threads on VA / VB | Stock ROM dumps by CID, new-map announcements, **seed/key algorithm threads** (see caveat below) | Source of test fixtures (private to `fixtures/private/`, not redistributed) |
 
 ## Problem 2 — Our own definition format
 

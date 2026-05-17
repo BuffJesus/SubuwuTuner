@@ -55,6 +55,7 @@ transmission    = "manual"
 years           = [2015, 2016, 2017, 2018, 2019, 2020, 2021]
 endianness      = "big"           # Subaru ECUs are big-endian
 rom_size_bytes  = 1572864         # 1.5 MB typical
+checksum_type   = "subaru_std"    # see below; Phase 4 uses this for post-write repair
 authors         = ["The SubuwuTuner Authors"]
 data_sources    = [
     "Derived from RomRaider XML via tools/defgen (facts only, no code copied — see docs/01-reverse-engineering.md)",
@@ -67,6 +68,25 @@ license         = "Apache-2.0"
 public_key  = "..."
 signature   = "..."
 ```
+
+### `checksum_type` values
+
+Post-write checksum repair is a Phase 4 concern, but the pack should already
+carry the selector so `defgen` can populate it from upstream data and we don't
+have to revisit every pack later. Mirrors RomRaider's `maps/checksum/` family
+(`ChecksumSTD`, `ChecksumALT`, `ChecksumALT2`, `ChecksumCOPY`, `ChecksumBYTEXOR`,
+…) and ECUFlash's `<checksummodule>` strings (`subarudbw`, …):
+
+| `checksum_type` | Meaning |
+|---|---|
+| `subaru_std`  | Standard Subaru SH7058 / 68HC16Y5 checksum (the common case). |
+| `subaru_alt`  | Alternate variant on some 16-bit ROMs. |
+| `subaru_alt2` | Alternate variant used by some 32-bit ROMs. |
+| `none`        | No checksum repair needed (placeholder for ROMs that don't validate). |
+
+The loader does not act on this field yet; it only validates that the value is
+one of the known enum members. When Phase 4 lands, `st::flash` resolves it to
+a checksum-repair function.
 
 ## `identification.toml` — CID detection
 

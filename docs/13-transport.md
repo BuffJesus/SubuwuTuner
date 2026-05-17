@@ -51,8 +51,11 @@ enum class LinkKind {
 
 struct LinkConfig {
     LinkKind kind;
-    int      baud{};        // K-Line: 10400 typical; CAN: 500000 typical
-    int      can_id_request{};  // for CAN only
+    int      baud{};        // SSM K-Line: 4800 (Subaru's spec; RR's SSMProtocol.java
+                            //   hardcodes 4800/8N1, 2000 ms connect, 55 ms send).
+                            //   KWP2000/ISO-14230 K-Line on other platforms: 10400.
+                            //   CAN: 500000 typical.
+    int      can_id_request{};  // for CAN only — Subaru SSM-on-CAN uses 0x7E0 / 0x7E8
     int      can_id_response{}; //   "
 };
 
@@ -157,12 +160,18 @@ class SsmClient {
 public:
     explicit SsmClient(ITransport &t);
 
-    // SSM A8 read: reads N bytes from the ECU's address space (RAM or flash).
+    // Block read (READ_MEMORY, 0xA0) when the link supports it; otherwise loops
+    // single-address reads (READ_ADDRESS, 0xA8). K-Line tops out at 128 bytes
+    // per block read (the request's num_bytes field is one byte holding N-1);
+    // larger lengths must be chunked. SSM-on-CAN does not implement block
+    // operations — the implementation must fall back to per-byte 0xA8 there.
     Result<std::vector<std::uint8_t>> read(std::uint32_t address, std::size_t length,
                                             std::chrono::milliseconds timeout);
 
-    // SSM B0 (or B8 on newer ECUs) write: writes N bytes. Returns the bytes
-    // the ECU echoed, which is how we confirm the write took.
+    // Block write (WRITE_MEMORY, 0xB0) when supported; otherwise per-byte
+    // single-address write (WRITE_ADDRESS, 0xB8). Same CAN restriction as read:
+    // block write is K-Line-only. Returns the bytes the ECU echoed, which is
+    // how we confirm the write took.
     Result<std::vector<std::uint8_t>> write(std::uint32_t address,
                                              std::span<std::uint8_t const> data,
                                              std::chrono::milliseconds timeout);
@@ -183,6 +192,30 @@ Frame format (well-known):
 Header   Dest    Source   Length  Command  Body                       Checksum
 0x80     0x10    0xF0     0xNN    0xA8     [01] [addr_hi] [addr_lo]... [csum]
 ```
+
+K-Line opcodes (host → ECU / ECU → host):
+
+| Direction | Name                    | Opcode |
+|-----------|-------------------------|--------|
+| Request   | `READ_MEMORY` (block)   | `0xA0` |
+| Request   | `READ_ADDRESS` (single) | `0xA8` |
+| Request   | `WRITE_MEMORY` (block)  | `0xB0` |
+| Request   | `WRITE_ADDRESS` (single)| `0xB8` |
+| Request   | `ECU_INIT`              | `0xBF` |
+| Response  | `READ_MEMORY_RESPONSE`  | `0xE0` |
+| Response  | `READ_ADDRESS_RESPONSE` | `0xE8` |
+| Response  | `WRITE_MEMORY_RESPONSE` | `0xF0` |
+| Response  | `WRITE_ADDRESS_RESPONSE`| `0xF8` |
+| Response  | `ECU_INIT_RESPONSE`     | `0xFF` |
+
+SSM-on-CAN uses **different opcodes** — do not assume the K-Line value works
+on CAN. CAN init is `0xAA` request / `0xEA` response; only single-address read
+(`0xA8`) and single-address write (`0xB8`) are implemented in any public
+SSM-on-CAN code. The CAN transport handles SSM's header/tester/length/checksum
+implicitly via ISO-TP, so the CAN payload is just `<opcode> <args…>`.
+
+Checksum (K-Line only — CAN doesn't need it): sum of every byte preceding the
+checksum slot, kept modulo 2¹⁶, then truncated to one byte.
 
 ### `st::ecu::uds::UdsClient`
 
