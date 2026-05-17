@@ -102,6 +102,36 @@ enum class Reg : std::uint8_t {
         | (static_cast<std::uint16_t>(rn) << 8U));
 }
 
+// CMP/EQ Rm, Rn  — T = (Rn == Rm). Commutative — operand swap
+// produces the same result. Encoding: 0011 nnnn mmmm 0000.
+[[nodiscard]] constexpr std::uint16_t enc_cmp_eq(Reg rm, Reg rn) noexcept {
+    return static_cast<std::uint16_t>(
+        0x3000U
+        | (static_cast<std::uint16_t>(rn) << 8U)
+        | (static_cast<std::uint16_t>(rm) << 4U));
+}
+
+// CMP/GT Rm, Rn  — T = (Rn > Rm) signed. NOT commutative; callers
+// pick the operand placement to express either `<` (CMP/GT R0, R1
+// for "R1 > R0 = b > a = a < b") or `>` (CMP/GT R1, R0 for
+// "R0 > R1 = a > b"). Encoding: 0011 nnnn mmmm 0111.
+[[nodiscard]] constexpr std::uint16_t enc_cmp_gt(Reg rm, Reg rn) noexcept {
+    return static_cast<std::uint16_t>(
+        0x3007U
+        | (static_cast<std::uint16_t>(rn) << 8U)
+        | (static_cast<std::uint16_t>(rm) << 4U));
+}
+
+// MOVT Rn  — Rn = T (zero-extended; result is 0 or 1). Materializes
+// the comparison outcome as a 32-bit register value so it can be
+// stored to memory like any other SSA value. Encoding:
+// 0000 nnnn 0010 1001.
+[[nodiscard]] constexpr std::uint16_t enc_movt(Reg rn) noexcept {
+    return static_cast<std::uint16_t>(
+        0x0029U
+        | (static_cast<std::uint16_t>(rn) << 8U));
+}
+
 // RTS — return from subroutine. Encoded as 0x000B.
 [[nodiscard]] constexpr std::uint16_t enc_rts() noexcept { return 0x000BU; }
 

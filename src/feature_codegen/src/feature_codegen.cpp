@@ -144,6 +144,15 @@ class FragmentEmitter {
     void sts_macl(sh2a::Reg rn) {
         emit_be16(body_, sh2a::enc_sts_macl(rn));
     }
+    void cmp_eq(sh2a::Reg rm, sh2a::Reg rn) {
+        emit_be16(body_, sh2a::enc_cmp_eq(rm, rn));
+    }
+    void cmp_gt(sh2a::Reg rm, sh2a::Reg rn) {
+        emit_be16(body_, sh2a::enc_cmp_gt(rm, rn));
+    }
+    void movt(sh2a::Reg rn) {
+        emit_be16(body_, sh2a::enc_movt(rn));
+    }
     void nop() { emit_be16(body_, sh2a::enc_nop()); }
 
     // Append RTS + delay-slot NOP + pool-alignment NOP(s) + literal
@@ -340,6 +349,42 @@ void emit_mul_fragment(FragmentEmitter &fe,
     emit_store_r1_to(fe, destination_address);
 }
 
+// Body fragment for a comparison primitive. All three variants
+// (compare_lt / compare_gt / compare_eq) share the same shape:
+// load operands → CMP/X (sets T-bit) → MOVT R1 (R1 = T as 0/1) →
+// store R1. The only thing that differs is the CMP opcode + the
+// operand-to-register mapping. Bool widening = canonical 0/1.
+void emit_cmp_lt_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
+                           PrimitiveOperand op2, std::uint32_t dst) {
+    // T = (op1 < op2) = (op2 > op1) = (R1 > R0) ⇒ CMP/GT R0, R1.
+    load_operand_into(fe, op1, sh2a::Reg::R0);
+    load_operand_into(fe, op2, sh2a::Reg::R1);
+    fe.cmp_gt(sh2a::Reg::R0, sh2a::Reg::R1);
+    fe.movt(sh2a::Reg::R1);
+    emit_store_r1_to(fe, dst);
+}
+
+void emit_cmp_gt_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
+                           PrimitiveOperand op2, std::uint32_t dst) {
+    // T = (op1 > op2) = (R0 > R1) ⇒ CMP/GT R1, R0.
+    load_operand_into(fe, op1, sh2a::Reg::R0);
+    load_operand_into(fe, op2, sh2a::Reg::R1);
+    fe.cmp_gt(sh2a::Reg::R1, sh2a::Reg::R0);
+    fe.movt(sh2a::Reg::R1);
+    emit_store_r1_to(fe, dst);
+}
+
+void emit_cmp_eq_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
+                           PrimitiveOperand op2, std::uint32_t dst) {
+    // T = (op1 == op2). CMP/EQ is commutative; load order doesn't
+    // affect correctness, only the operand-naming consistency.
+    load_operand_into(fe, op1, sh2a::Reg::R0);
+    load_operand_into(fe, op2, sh2a::Reg::R1);
+    fe.cmp_eq(sh2a::Reg::R0, sh2a::Reg::R1);
+    fe.movt(sh2a::Reg::R1);
+    emit_store_r1_to(fe, dst);
+}
+
 // Dispatch a CallPrimitive instruction to the right fragment emitter
 // by symbol. Both the single-level and nested-emit paths route
 // through this, so adding a new primitive only needs a new
@@ -361,10 +406,23 @@ void emit_mul_fragment(FragmentEmitter &fe,
         emit_mul_fragment(fe, op1, op2, dst);
         return ok();
     }
+    if (symbol == "compare_lt") {
+        emit_cmp_lt_fragment(fe, op1, op2, dst);
+        return ok();
+    }
+    if (symbol == "compare_gt") {
+        emit_cmp_gt_fragment(fe, op1, op2, dst);
+        return ok();
+    }
+    if (symbol == "compare_eq") {
+        emit_cmp_eq_fragment(fe, op1, op2, dst);
+        return ok();
+    }
     std::string msg{"SH-2A backend: CallPrimitive '"};
     msg.append(symbol);
     msg.append("' not yet implemented (slice supports add_int, "
-               "subtract_int, multiply_int)");
+               "subtract_int, multiply_int, compare_lt, compare_gt, "
+               "compare_eq)");
     return failure(ErrorCode::NotImplemented, std::move(msg));
 }
 
@@ -474,9 +532,12 @@ void emit_mul_fragment(FragmentEmitter &fe,
             return std::bit_cast<std::uint32_t>(f);
         }
         case PinType::Bool:
-            return failure(ErrorCode::NotImplemented,
-                           "SH-2A backend: Bool LoadConstant not yet "
-                           "implemented (widening policy pending)");
+            // Canonical Bool widening: 0 = false, 1 = true in a
+            // 32-bit word. Matches the MOVT output of comparison
+            // primitives, so a Bool value flowing through registers
+            // / memory keeps a uniform representation regardless of
+            // whether it came from a LoadConstant or a compare_*.
+            return v > 0.5 ? std::uint32_t{1} : std::uint32_t{0};
     }
     return failure(ErrorCode::NotImplemented,
                    "SH-2A backend: unknown PinType for LoadConstant");
@@ -548,35 +609,66 @@ void emit_mul_fragment(FragmentEmitter &fe,
                    "producer op");
 }
 
+// Per-primitive shape: how many operands it takes and what result
+// type it produces. The codegen rejects mismatches between this
+// table and the IR's actual instruction.
+struct PrimitiveShape {
+    std::size_t arity;
+    PinType     result_type;
+};
+
+[[nodiscard]] PrimitiveShape const *primitive_shape(
+    std::string_view symbol) noexcept {
+    // Arithmetic: 2 Int operands → Int.
+    // Comparison: 2 Int operands → Bool (0 or 1 via MOVT).
+    static constexpr struct Entry {
+        std::string_view name;
+        PrimitiveShape   shape;
+    } kTable[] = {
+        {"add_int",      {2, PinType::Int}},
+        {"subtract_int", {2, PinType::Int}},
+        {"multiply_int", {2, PinType::Int}},
+        {"compare_lt",   {2, PinType::Bool}},
+        {"compare_gt",   {2, PinType::Bool}},
+        {"compare_eq",   {2, PinType::Bool}},
+    };
+    for (auto const &e : kTable) {
+        if (e.name == symbol) return &e.shape;
+    }
+    return nullptr;
+}
+
 // Validate a CallPrimitive at structural level: id is recognized,
-// operand count matches the primitive's arity, result type is
-// supported. Used by both the topo walk and the per-primitive emit.
+// operand count matches the primitive's arity, result type matches
+// the primitive's declared shape. Used by both the topo walk and
+// the per-primitive emit.
 [[nodiscard]] Status validate_call_primitive(ir::Instruction const &prim) {
-    bool const recognized = prim.symbol == "add_int"
-                            || prim.symbol == "subtract_int"
-                            || prim.symbol == "multiply_int";
-    if (!recognized) {
+    PrimitiveShape const *shape = primitive_shape(prim.symbol);
+    if (shape == nullptr) {
         std::string msg{"SH-2A backend: CallPrimitive '"};
         msg.append(prim.symbol);
         msg.append("' not yet implemented (slice supports add_int, "
-                   "subtract_int, multiply_int)");
+                   "subtract_int, multiply_int, compare_lt, "
+                   "compare_gt, compare_eq)");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
-    if (prim.operands.size() != 2) {
+    if (prim.operands.size() != shape->arity) {
         std::string msg{"SH-2A backend: "};
         msg.append(prim.symbol);
-        msg.append(" requires exactly 2 operands, got ");
+        msg.append(" requires exactly ");
+        msg.append(std::to_string(shape->arity));
+        msg.append(" operands, got ");
         msg.append(std::to_string(prim.operands.size()));
         return failure(ErrorCode::ParseError, std::move(msg));
     }
-    if (prim.result_type != PinType::Int) {
+    if (prim.result_type != shape->result_type) {
         std::string msg{"SH-2A backend: "};
         msg.append(prim.symbol);
-        msg.append(" result of type ");
+        msg.append(" expects result type ");
+        msg.append(pin_type_name(shape->result_type));
+        msg.append(", got ");
         msg.append(pin_type_name(prim.result_type));
-        msg.append(" not yet implemented (Int-family primitives "
-                   "produce Int)");
-        return failure(ErrorCode::NotImplemented, std::move(msg));
+        return failure(ErrorCode::ParseError, std::move(msg));
     }
     return ok();
 }
@@ -739,17 +831,12 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
                            "CallPrimitive in this slice");
         }
 
-        // Int and Float share the MOV.L emit path — both are 4-byte
-        // values; the firmware does the type interpretation. Bool
-        // still needs a widening-policy decision (0/1 vs other
-        // canonical representations).
-        if (src->result_type == PinType::Bool) {
-            std::string msg{"SH-2A backend: "};
-            msg.append(ir::op_name(src->op));
-            msg.append(" of type Bool not yet implemented (widening "
-                       "policy pending)");
-            return failure(ErrorCode::NotImplemented, std::move(msg));
-        }
+        // All three PinTypes (Int, Float, Bool) flow through the
+        // same 4-byte MOV.L paths. The codegen doesn't reinterpret
+        // the bytes — the firmware does. Bool widening (0/1
+        // canonical) happens inside coerce_constant_to_u32 and is
+        // produced by MOVT after comparison primitives, keeping the
+        // representation uniform.
         if (src->op == ir::Op::LoadConstant
             && !src->constant_value.has_value()) {
             return failure(ErrorCode::ParseError,

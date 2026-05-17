@@ -814,24 +814,41 @@ TEST_CASE("Sh2aBackend: Float LoadConstant narrows from double silently",
     REQUIRE(be32_at(r->hooks[0].code, 12) == 0x3DCCCCCDU);
 }
 
-TEST_CASE("Sh2aBackend: Bool LoadConstant returns NotImplemented",
+TEST_CASE("Sh2aBackend: Bool LoadConstant canonical 0/1 widening",
           "[feature_codegen][sh2a][bool]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
 
-    cg::Sh2aBackend backend;
-    ir::Module      m;
-    ir::Instruction lc{};
-    lc.op             = ir::Op::LoadConstant;
-    lc.result_type    = st::feature::PinType::Bool;
-    lc.result_id      = 1;
-    lc.constant_value = 1.0;
-    m.instructions.push_back(lc);
-    m.instructions.push_back(store("after_fuel_calc",
-                                    "commanded_pw_override", 1));
-    auto r = backend.compile(m, *def);
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+    // The widening contract: v > 0.5 → 1, else → 0. We assert both
+    // sides to lock in the canonical representation.
+    struct Case {
+        double        input;
+        std::uint32_t expected_bits;
+    };
+    auto const cases = std::vector<Case>{
+        { 0.0, 0U },
+        { 1.0, 1U },
+        { 0.4, 0U },   // below threshold
+        { 0.6, 1U },   // above threshold
+        { -1.0, 0U },  // negative → false (matches `v > 0.5`)
+    };
+
+    for (auto const &c : cases) {
+        cg::Sh2aBackend backend;
+        ir::Module      m;
+        ir::Instruction lc{};
+        lc.op             = ir::Op::LoadConstant;
+        lc.result_type    = st::feature::PinType::Bool;
+        lc.result_id      = 1;
+        lc.constant_value = c.input;
+        m.instructions.push_back(lc);
+        m.instructions.push_back(store("after_fuel_calc",
+                                        "commanded_pw_override", 1));
+        auto r = backend.compile(m, *def);
+        REQUIRE(r.has_value());
+        REQUIRE(r->hooks.size() == 1);
+        REQUIRE(be32_at(r->hooks[0].code, 12) == c.expected_bits);
+    }
 }
 
 // ---- Nested CallPrimitive ----------------------------------------------
@@ -1122,6 +1139,197 @@ TEST_CASE("Sh2aBackend: multiply_int with HookInput operand",
     REQUIRE(be16_at(hp.code, 4) == 0xD104);  // MOV.L pool[1]=2 → R1
     REQUIRE(be16_at(hp.code, 6) == 0x0107);  // MUL.L R0, R1
     REQUIRE(be16_at(hp.code, 8) == 0x011A);  // STS MACL, R1
+}
+
+// ---- compare_lt / compare_gt / compare_eq --------------------------------
+
+TEST_CASE("Sh2aBackend: compare_lt(LC, LC) → Store emits CMP/GT R0,R1 + MOVT",
+          "[feature_codegen][sh2a][compare]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 3));
+    m.instructions.push_back(load_const_int(2, 10));
+    // compare_lt(3, 10) → true (1)
+    ir::Instruction cmp{};
+    cmp.op          = ir::Op::CallPrimitive;
+    cmp.symbol      = "compare_lt";
+    cmp.result_type = st::feature::PinType::Bool;
+    cmp.result_id   = 3;
+    cmp.pin_name    = "out";
+    cmp.operands    = {1, 2};
+    m.instructions.push_back(cmp);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+
+    // Body: 6 instrs (load op1, load op2, CMP/GT, MOVT, load dest,
+    // store) + RTS + NOP = 16 bytes (4-aligned, no pad) + 12 pool = 28.
+    REQUIRE(hp.code.size() == 28);
+    REQUIRE(be16_at(hp.code, 0) == 0xD003);  // MOV.L pool[0]=3 (op1) → R0
+    REQUIRE(be16_at(hp.code, 2) == 0xD104);  // MOV.L pool[1]=10 (op2) → R1
+    REQUIRE(be16_at(hp.code, 4) == 0x3107);  // CMP/GT R0, R1 (T = R1>R0 = op2>op1 = op1<op2)
+    REQUIRE(be16_at(hp.code, 6) == 0x0129);  // MOVT R1
+    REQUIRE(be16_at(hp.code, 8) == 0xD203);  // MOV.L pool[2]=dest → R2
+    REQUIRE(be16_at(hp.code, 10) == 0x2212); // MOV.L R1, @R2
+
+    REQUIRE(be32_at(hp.code, 16) == 3U);   // op1
+    REQUIRE(be32_at(hp.code, 20) == 10U);  // op2
+    REQUIRE(be32_at(hp.code, 24) == 0x40000000U);  // dest
+}
+
+TEST_CASE("Sh2aBackend: compare_gt uses CMP/GT R1,R0 (mirrored)",
+          "[feature_codegen][sh2a][compare]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 10));
+    m.instructions.push_back(load_const_int(2, 3));
+    ir::Instruction cmp{};
+    cmp.op          = ir::Op::CallPrimitive;
+    cmp.symbol      = "compare_gt";
+    cmp.result_type = st::feature::PinType::Bool;
+    cmp.result_id   = 3;
+    cmp.pin_name    = "out";
+    cmp.operands    = {1, 2};
+    m.instructions.push_back(cmp);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+    // Same shape as compare_lt, just CMP/GT R1,R0 (Rm=R1, Rn=R0).
+    REQUIRE(be16_at(hp.code, 4) == 0x3017);  // CMP/GT R1, R0 (T = R0>R1 = op1>op2)
+    REQUIRE(be16_at(hp.code, 6) == 0x0129);  // MOVT R1
+}
+
+TEST_CASE("Sh2aBackend: compare_eq emits CMP/EQ + MOVT",
+          "[feature_codegen][sh2a][compare]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 42));
+    m.instructions.push_back(load_const_int(2, 42));
+    ir::Instruction cmp{};
+    cmp.op          = ir::Op::CallPrimitive;
+    cmp.symbol      = "compare_eq";
+    cmp.result_type = st::feature::PinType::Bool;
+    cmp.result_id   = 3;
+    cmp.pin_name    = "out";
+    cmp.operands    = {1, 2};
+    m.instructions.push_back(cmp);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(be16_at(r->hooks[0].code, 4) == 0x3100);  // CMP/EQ R0, R1
+    REQUIRE(be16_at(r->hooks[0].code, 6) == 0x0129);  // MOVT R1
+}
+
+TEST_CASE("Sh2aBackend: compare result_type must be Bool",
+          "[feature_codegen][sh2a][compare]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 1));
+    m.instructions.push_back(load_const_int(2, 2));
+    // Lying about result_type — IR says Int but compare_lt produces Bool.
+    ir::Instruction cmp{};
+    cmp.op          = ir::Op::CallPrimitive;
+    cmp.symbol      = "compare_lt";
+    cmp.result_type = st::feature::PinType::Int;  // wrong!
+    cmp.result_id   = 3;
+    cmp.pin_name    = "out";
+    cmp.operands    = {1, 2};
+    m.instructions.push_back(cmp);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("Sh2aBackend: arithmetic result_type must be Int",
+          "[feature_codegen][sh2a][validation]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 1));
+    m.instructions.push_back(load_const_int(2, 2));
+    // add_int with Bool result_type — codegen should reject.
+    ir::Instruction add{};
+    add.op          = ir::Op::CallPrimitive;
+    add.symbol      = "add_int";
+    add.result_type = st::feature::PinType::Bool;  // wrong!
+    add.result_id   = 3;
+    add.pin_name    = "out";
+    add.operands    = {1, 2};
+    m.instructions.push_back(add);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("Sh2aBackend: nested compare inside arithmetic — add(compare, 5)",
+          "[feature_codegen][sh2a][compare][nested]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    // (rpm < 4000) + 5 — exercises Bool → Int flow through a slot.
+    // The compare result (0 or 1) gets spilled to a RAM slot, then
+    // re-loaded as an int operand to the add. Numerically: add of
+    // {0,1} + 5 = 5 or 6.
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm"));
+    m.instructions.push_back(load_const_int(2, 4000));
+    ir::Instruction cmp{};
+    cmp.op          = ir::Op::CallPrimitive;
+    cmp.symbol      = "compare_lt";
+    cmp.result_type = st::feature::PinType::Bool;
+    cmp.result_id   = 3;
+    cmp.pin_name    = "out";
+    cmp.operands    = {1, 2};
+    m.instructions.push_back(cmp);
+    m.instructions.push_back(load_const_int(4, 5));
+    // add_int with one Bool operand — currently the operand-type
+    // check requires Int. The test verifies the check fires.
+    ir::Instruction add{};
+    add.op          = ir::Op::CallPrimitive;
+    add.symbol      = "add_int";
+    add.result_type = st::feature::PinType::Int;
+    add.result_id   = 5;
+    add.pin_name    = "out";
+    add.operands    = {3, 4};
+    m.instructions.push_back(add);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 5));
+
+    auto r = backend.compile(m, *def);
+    // add_int requires Int operands; %3 (compare result) is Bool.
+    // Codegen refuses with NotImplemented (operand type mismatch
+    // is the per-primitive contract enforcement).
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
 }
 
 TEST_CASE("Sh2aBackend: nested mixed primitives — add(sub, mul)",
