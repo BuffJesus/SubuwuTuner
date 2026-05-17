@@ -280,8 +280,8 @@ TEST_CASE("Sh2aBackend: distinct pins get distinct RAM slots",
     REQUIRE(be32_at(hp.code, 36) == 0x40000004U);
 }
 
-TEST_CASE("Sh2aBackend: Float LoadConstant returns NotImplemented",
-          "[feature_codegen][sh2a]") {
+TEST_CASE("Sh2aBackend: Float LoadConstant emits IEEE 754 bit pattern",
+          "[feature_codegen][sh2a][float]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
 
@@ -291,8 +291,14 @@ TEST_CASE("Sh2aBackend: Float LoadConstant returns NotImplemented",
     m.instructions.push_back(store("after_fuel_calc",
                                     "commanded_pw_override", 1));
     auto r = backend.compile(m, *def);
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+
+    auto const &hp = r->hooks[0];
+    REQUIRE(hp.code.size() == cg::sh2a::kStoreSequenceSize);
+    // 1.5f as IEEE 754 binary32 = 0x3FC00000 (sign 0, exp 127, mantissa 0.5).
+    REQUIRE(be32_at(hp.code, 12) == 0x3FC00000U);
+    REQUIRE(be32_at(hp.code, 16) == 0x40000000U);  // dest = free_ram_base
 }
 
 TEST_CASE("Sh2aBackend: LoadHookInput with no consumer is dead code",
@@ -496,8 +502,8 @@ TEST_CASE("Sh2aBackend: mixed LoadConstant + LoadHookInput in one module",
     REQUIRE(be32_at(hp.code, 36) == 0x40000004U);
 }
 
-TEST_CASE("Sh2aBackend: LoadHookInput Float type returns NotImplemented",
-          "[feature_codegen][sh2a][load_hook_input]") {
+TEST_CASE("Sh2aBackend: LoadHookInput Float emits same MOV.L shape",
+          "[feature_codegen][sh2a][float][load_hook_input]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
 
@@ -508,8 +514,12 @@ TEST_CASE("Sh2aBackend: LoadHookInput Float type returns NotImplemented",
     m.instructions.push_back(store("after_fuel_calc",
                                     "commanded_pw_override", 1));
     auto r = backend.compile(m, *def);
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    // MOV.L is type-agnostic — 4 bytes is 4 bytes. The bytes through
+    // R0 are the same whether the upstream pin is Float or Int.
+    REQUIRE(r->hooks[0].code.size() == cg::sh2a::kLoadStoreSequenceSize);
+    REQUIRE(be32_at(r->hooks[0].code, 12) == 0x000F1234U);  // rpm pin addr
 }
 
 TEST_CASE("Sh2aBackend: LoadHookInput referencing unknown hook fails",
@@ -747,6 +757,78 @@ TEST_CASE("Sh2aBackend: add_int with Float operand returns NotImplemented",
     m.instructions.push_back(store("after_fuel_calc",
                                     "commanded_pw_override", 3));
 
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+}
+
+// ---- Float LoadConstant slice -------------------------------------------
+
+TEST_CASE("Sh2aBackend: Float LoadConstant special values",
+          "[feature_codegen][sh2a][float]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    // 0.0  -> 0x00000000
+    // -1.0 -> 0xBF800000
+    // 2.0  -> 0x40000000
+    struct Case {
+        double        input;
+        std::uint32_t expected_bits;
+    };
+    auto const cases = std::vector<Case>{
+        {  0.0,  0x00000000U },
+        { -1.0,  0xBF800000U },
+        {  2.0,  0x40000000U },
+        {  3.14f, 0x4048F5C3U },  // exact 3.14f bit pattern
+    };
+
+    for (auto const &c : cases) {
+        cg::Sh2aBackend backend;
+        ir::Module      m;
+        m.instructions.push_back(load_const_float(1, c.input));
+        m.instructions.push_back(store("after_fuel_calc",
+                                        "commanded_pw_override", 1));
+        auto r = backend.compile(m, *def);
+        REQUIRE(r.has_value());
+        REQUIRE(r->hooks.size() == 1);
+        REQUIRE(be32_at(r->hooks[0].code, 12) == c.expected_bits);
+    }
+}
+
+TEST_CASE("Sh2aBackend: Float LoadConstant narrows from double silently",
+          "[feature_codegen][sh2a][float]") {
+    // 0.1 has no exact binary representation. Double-stored 0.1 narrows
+    // to the nearest float (0x3DCCCCCD). The codegen does NOT refuse —
+    // the float pin author is consenting to single-precision.
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_float(1, 0.1));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 1));
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(be32_at(r->hooks[0].code, 12) == 0x3DCCCCCDU);
+}
+
+TEST_CASE("Sh2aBackend: Bool LoadConstant returns NotImplemented",
+          "[feature_codegen][sh2a][bool]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    ir::Instruction lc{};
+    lc.op             = ir::Op::LoadConstant;
+    lc.result_type    = st::feature::PinType::Bool;
+    lc.result_id      = 1;
+    lc.constant_value = 1.0;
+    m.instructions.push_back(lc);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 1));
     auto r = backend.compile(m, *def);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);

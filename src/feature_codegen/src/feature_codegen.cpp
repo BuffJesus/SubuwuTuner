@@ -7,6 +7,7 @@
 #include "st/core/error.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -331,11 +332,18 @@ void emit_add_store_sequence(std::vector<std::uint8_t> &code,
     return ok();
 }
 
-// Coerce a LoadConstant's stored double to a 32-bit signed int.
-// Refuses out-of-range as ParseError — the IR-level invariant is
-// that Int-typed LoadConstants came from an integer-representable
-// pin default; anything else is a pack/graph authoring bug.
-[[nodiscard]] Result<std::uint32_t> coerce_int_constant(
+// Coerce a LoadConstant's stored double to the 32-bit machine word
+// that the SH-2A literal pool holds. Type-dispatched:
+//
+//   Int   — range-check, two's-complement int32 encoding.
+//   Float — narrow to IEEE 754 binary32, bit_cast to uint32. Both
+//           the precision narrowing and any out-of-range values
+//           (Inf, NaN) propagate per the standard cast rules; the
+//           pack/graph author is consenting to single-precision by
+//           authoring a float pin.
+//   Bool  — NotImplemented; widening (0/1 vs other booleans) is a
+//           policy decision that lands with a future bundle.
+[[nodiscard]] Result<std::uint32_t> coerce_constant_to_u32(
     ir::Instruction const &load_ins) {
     if (!load_ins.constant_value.has_value()) {
         return failure(ErrorCode::ParseError,
@@ -343,16 +351,30 @@ void emit_add_store_sequence(std::vector<std::uint8_t> &code,
                        "constant_value (lower() invariant violation)");
     }
     double const v = *load_ins.constant_value;
-    if (v < -2147483648.0 || v > 2147483647.0) {
-        std::string msg{"SH-2A backend: LoadConstant value "};
-        msg.append(std::to_string(v));
-        msg.append(" out of int32 range");
-        return failure(ErrorCode::ParseError, std::move(msg));
+    switch (load_ins.result_type) {
+        case PinType::Int: {
+            if (v < -2147483648.0 || v > 2147483647.0) {
+                std::string msg{"SH-2A backend: LoadConstant value "};
+                msg.append(std::to_string(v));
+                msg.append(" out of int32 range");
+                return failure(ErrorCode::ParseError, std::move(msg));
+            }
+            auto const i32 = static_cast<std::int32_t>(v);
+            std::uint32_t u32 = 0;
+            std::memcpy(&u32, &i32, sizeof u32);
+            return u32;
+        }
+        case PinType::Float: {
+            auto const f = static_cast<float>(v);
+            return std::bit_cast<std::uint32_t>(f);
+        }
+        case PinType::Bool:
+            return failure(ErrorCode::NotImplemented,
+                           "SH-2A backend: Bool LoadConstant not yet "
+                           "implemented (widening policy pending)");
     }
-    auto const i32 = static_cast<std::int32_t>(v);
-    std::uint32_t u32 = 0;
-    std::memcpy(&u32, &i32, sizeof u32);
-    return u32;
+    return failure(ErrorCode::NotImplemented,
+                   "SH-2A backend: unknown PinType for LoadConstant");
 }
 
 // Locate the producing Instruction for `value_id`. Returns nullptr
@@ -377,14 +399,17 @@ void emit_add_store_sequence(std::vector<std::uint8_t> &code,
                        "SH-2A backend: primitive operand does not "
                        "resolve to any producing instruction");
     }
+    // add_int requires Int operands. The operand check here mirrors
+    // the per-primitive contract — add_float will need its own
+    // operand-type check in a later bundle.
     if (prod->result_type != PinType::Int) {
         std::string msg{"SH-2A backend: primitive operand of type "};
         msg.append(pin_type_name(prod->result_type));
-        msg.append(" not yet implemented (slice supports Int only)");
+        msg.append(" not yet implemented (add_int requires Int operands)");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
     if (prod->op == ir::Op::LoadConstant) {
-        auto r = coerce_int_constant(*prod);
+        auto r = coerce_constant_to_u32(*prod);
         if (!r.has_value()) return failure(r.error());
         return PrimitiveOperand{PrimitiveOperand::Kind::Constant, *r};
     }
@@ -479,20 +504,15 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
                            "CallPrimitive in this slice");
         }
 
-        // Int only in this slice. Float/Bool need narrowing /
-        // truncation considerations we defer to follow-up bundles.
-        // LoadHookInput shares the same constraint because the
-        // emitted MOV.L moves 4 bytes regardless — Float/Bool would
-        // emit the same bytes, but signalling the type-narrowing
-        // decision is the safer path.
-        if (src->result_type != PinType::Int) {
+        // Int and Float share the MOV.L emit path — both are 4-byte
+        // values; the firmware does the type interpretation. Bool
+        // still needs a widening-policy decision (0/1 vs other
+        // canonical representations).
+        if (src->result_type == PinType::Bool) {
             std::string msg{"SH-2A backend: "};
             msg.append(ir::op_name(src->op));
-            msg.append(" of type ");
-            msg.append(pin_type_name(src->result_type));
-            msg.append(" not yet implemented (slice supports Int "
-                       "only — Float bit-cast and Bool widening "
-                       "land in follow-up bundles)");
+            msg.append(" of type Bool not yet implemented (widening "
+                       "policy pending)");
             return failure(ErrorCode::NotImplemented, std::move(msg));
         }
         if (src->op == ir::Op::LoadConstant
@@ -563,7 +583,7 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
         }
 
         if (src->op == ir::Op::LoadConstant) {
-            auto u32 = coerce_int_constant(*src);
+            auto u32 = coerce_constant_to_u32(*src);
             if (!u32.has_value()) return failure(u32.error());
             emit_load_const_store_sequence(work.code, *u32, dst_addr);
         } else if (src->op == ir::Op::LoadHookInput) {
