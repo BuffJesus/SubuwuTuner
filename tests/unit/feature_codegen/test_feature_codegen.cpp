@@ -162,16 +162,10 @@ TEST_CASE("select_backend refuses an empty platform string",
 
 // ---- Stub backends ------------------------------------------------------
 
-TEST_CASE("Sh2aBackend::compile returns NotImplemented",
-          "[feature_codegen][stub][sh2a]") {
+TEST_CASE("Sh2aBackend reports its arch",
+          "[feature_codegen][sh2a]") {
     cg::Sh2aBackend backend;
     REQUIRE(backend.arch() == cg::Arch::Sh2a);
-
-    st::feature::ir::Module m;
-    st::Definition          def;
-    auto r = backend.compile(m, def);
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
 }
 
 TEST_CASE("Rh850Backend::compile returns NotImplemented",
