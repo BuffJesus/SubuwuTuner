@@ -70,7 +70,7 @@ pins  = [
 
 [[node]]
 id    = 5
-kind  = "primitive.compare_gt"
+kind  = "primitive.compare_gt_float"
 label = "throttle > 95"
 x     = 312.0
 y     = 168.0
@@ -82,7 +82,7 @@ pins  = [
 
 [[node]]
 id    = 6
-kind  = "primitive.compare_lt"
+kind  = "primitive.compare_lt_float"
 label = "speed < 10"
 x     = 312.0
 y     = 288.0
@@ -94,7 +94,7 @@ pins  = [
 
 [[node]]
 id    = 7
-kind  = "primitive.compare_gt"
+kind  = "primitive.compare_gt_float"
 label = "rpm > 4500"
 x     = 312.0
 y     = 408.0

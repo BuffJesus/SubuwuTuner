@@ -209,6 +209,36 @@ class FragmentEmitter {
         emit_be16(body_, sh2a::enc_bra(0));
     }
     void nop() { emit_be16(body_, sh2a::enc_nop()); }
+    void fadd(sh2a::FReg frm, sh2a::FReg frn) {
+        emit_be16(body_, sh2a::enc_fadd(frm, frn));
+    }
+    void fsub(sh2a::FReg frm, sh2a::FReg frn) {
+        emit_be16(body_, sh2a::enc_fsub(frm, frn));
+    }
+    void fmul(sh2a::FReg frm, sh2a::FReg frn) {
+        emit_be16(body_, sh2a::enc_fmul(frm, frn));
+    }
+    void fdiv(sh2a::FReg frm, sh2a::FReg frn) {
+        emit_be16(body_, sh2a::enc_fdiv(frm, frn));
+    }
+    void lds_r_fpul(sh2a::Reg rm) {
+        emit_be16(body_, sh2a::enc_lds_r_fpul(rm));
+    }
+    void sts_fpul_r(sh2a::Reg rn) {
+        emit_be16(body_, sh2a::enc_sts_fpul_r(rn));
+    }
+    void fsts_fpul_freg(sh2a::FReg frn) {
+        emit_be16(body_, sh2a::enc_fsts_fpul_freg(frn));
+    }
+    void flds_freg_fpul(sh2a::FReg frm) {
+        emit_be16(body_, sh2a::enc_flds_freg_fpul(frm));
+    }
+    void fcmp_eq(sh2a::FReg frm, sh2a::FReg frn) {
+        emit_be16(body_, sh2a::enc_fcmp_eq(frm, frn));
+    }
+    void fcmp_gt(sh2a::FReg frm, sh2a::FReg frn) {
+        emit_be16(body_, sh2a::enc_fcmp_gt(frm, frn));
+    }
 
     // Append RTS + delay-slot NOP + pool-alignment NOP(s) + literal
     // pool. Patch each MOV.L's disp byte and each branch's disp
@@ -395,6 +425,34 @@ void emit_store_r1_to(FragmentEmitter &fe,
     fe.mov_l_reg_at_reg(sh2a::Reg::R1, sh2a::Reg::R2);
 }
 
+// Float-operand loader. Reuses the integer load path to land the
+// float's bit pattern in R0 (4 bytes, via PC-relative pool fetch +
+// optional dereference for HookInput / SSA slots), then transfers
+// to the target FRn via FPUL: LDS R0, FPUL ; FSTS FPUL, FRn.
+//
+// Three instructions per Constant operand, four per HookInput /
+// SSA-slot operand. Mirrors `load_operand_into` for Int + Bool.
+void load_operand_into_fr(FragmentEmitter &fe, PrimitiveOperand op,
+                            sh2a::FReg frn) {
+    fe.mov_l_disp_pc(sh2a::Reg::R0, op.value);
+    if (op.kind == PrimitiveOperand::Kind::HookInputPointer) {
+        fe.mov_l_at_reg_reg(sh2a::Reg::R0, sh2a::Reg::R0);
+    }
+    fe.lds_r_fpul(sh2a::Reg::R0);
+    fe.fsts_fpul_freg(frn);
+}
+
+// Float-result store. Mirror of `emit_store_r1_to`: pull FRm's bit
+// pattern out via FPUL into R1, then take the existing int store
+// tail. The destination-pointer pool entry lands at the same place
+// regardless of int/float — the bits in memory are byte-identical.
+void emit_store_fr_to(FragmentEmitter &fe, sh2a::FReg frm,
+                       std::uint32_t destination_address) {
+    fe.flds_freg_fpul(frm);
+    fe.sts_fpul_r(sh2a::Reg::R1);
+    emit_store_r1_to(fe, destination_address);
+}
+
 // Body fragment for `add_int(op1, op2)` → store. ADD is commutative
 // so the operand-to-register mapping is the natural one (op1 → R0,
 // op2 → R1; ADD R0, R1 leaves the sum in R1).
@@ -547,6 +605,102 @@ void emit_cmp_eq_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
     emit_store_r1_to(fe, dst);
 }
 
+// ---- Float arithmetic ---------------------------------------------
+//
+// Shared shape per primitive:
+//   load op1 → R0 → FPUL → FR0
+//   load op2 → R0 → FPUL → FR1   (R0 is scratch — re-used each load)
+//   F* FRm, FRn                  (FR1 = FR1 op FR0; sub/div pick the
+//                                  Rm/Rn mapping to match op1-op2 /
+//                                  op1÷op2 semantics)
+//   FLDS FR1, FPUL ; STS FPUL, R1
+//   MOV.L @(d,PC), R2 ; MOV.L R1, @R2  (the int-side store tail)
+//
+// Add and multiply are commutative so the natural FR0=op1, FR1=op2,
+// `FOP FR0, FR1` works. Sub and div are not — SH-2A's `FSUB FRm, FRn`
+// computes FRn = FRn − FRm, which means FRn must hold the minuend; we
+// load op1 → FR1 and op2 → FR0 so `FSUB FR0, FR1` yields op1 − op2.
+// Identical reordering for `FDIV FR0, FR1` → op1 ÷ op2.
+
+void emit_add_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
+                              PrimitiveOperand op2, std::uint32_t dst) {
+    load_operand_into_fr(fe, op1, sh2a::FReg::FR0);
+    load_operand_into_fr(fe, op2, sh2a::FReg::FR1);
+    fe.fadd(sh2a::FReg::FR0, sh2a::FReg::FR1);   // FR1 = FR1 + FR0
+    emit_store_fr_to(fe, sh2a::FReg::FR1, dst);
+}
+
+void emit_sub_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
+                              PrimitiveOperand op2, std::uint32_t dst) {
+    // FSUB FRm, FRn ⇒ FRn = FRn − FRm. Put minuend (op1) in FR1.
+    load_operand_into_fr(fe, op2, sh2a::FReg::FR0);  // subtrahend
+    load_operand_into_fr(fe, op1, sh2a::FReg::FR1);  // minuend
+    fe.fsub(sh2a::FReg::FR0, sh2a::FReg::FR1);       // FR1 = FR1 − FR0
+    emit_store_fr_to(fe, sh2a::FReg::FR1, dst);
+}
+
+void emit_mul_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
+                              PrimitiveOperand op2, std::uint32_t dst) {
+    load_operand_into_fr(fe, op1, sh2a::FReg::FR0);
+    load_operand_into_fr(fe, op2, sh2a::FReg::FR1);
+    fe.fmul(sh2a::FReg::FR0, sh2a::FReg::FR1);   // FR1 = FR1 * FR0
+    emit_store_fr_to(fe, sh2a::FReg::FR1, dst);
+}
+
+void emit_div_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
+                              PrimitiveOperand op2, std::uint32_t dst) {
+    // FDIV FRm, FRn ⇒ FRn = FRn / FRm. Put dividend (op1) in FR1.
+    // Divide-by-zero produces a FPU exception per the SH-2A spec;
+    // when authoring features that may divide by user-supplied values,
+    // gate with a compare → select. v1.x doesn't insert a guard.
+    load_operand_into_fr(fe, op2, sh2a::FReg::FR0);  // divisor
+    load_operand_into_fr(fe, op1, sh2a::FReg::FR1);  // dividend
+    fe.fdiv(sh2a::FReg::FR0, sh2a::FReg::FR1);       // FR1 = FR1 / FR0
+    emit_store_fr_to(fe, sh2a::FReg::FR1, dst);
+}
+
+// ---- Float compares (Float, Float) → Bool -------------------------
+//
+// All three variants share the shape: load op1→FR0, op2→FR1, FCMP/*
+// (sets T-bit), MOVT R1 (R1 = T as 0/1), int-side store tail. The
+// FPU-side FCMP/EQ and FCMP/GT are IEEE 754 ordered — NaN operands
+// produce T=0. compare_lt uses FCMP/GT with the operand mapping
+// inverted relative to compare_gt.
+
+void emit_cmp_lt_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
+                                  PrimitiveOperand op2, std::uint32_t dst) {
+    // T = (op1 < op2) ⇔ (op2 > op1). Load op1→FR0, op2→FR1;
+    // FCMP/GT FR0, FR1 ⇒ T = (FR1 > FR0).
+    load_operand_into_fr(fe, op1, sh2a::FReg::FR0);
+    load_operand_into_fr(fe, op2, sh2a::FReg::FR1);
+    fe.fcmp_gt(sh2a::FReg::FR0, sh2a::FReg::FR1);
+    fe.movt(sh2a::Reg::R1);
+    emit_store_r1_to(fe, dst);
+}
+
+void emit_cmp_gt_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
+                                  PrimitiveOperand op2, std::uint32_t dst) {
+    // T = (op1 > op2). Mirror the int convention: load op1→FR0,
+    // op2→FR1; FCMP/GT FR1, FR0 ⇒ T = (FR0 > FR1) = (op1 > op2).
+    load_operand_into_fr(fe, op1, sh2a::FReg::FR0);
+    load_operand_into_fr(fe, op2, sh2a::FReg::FR1);
+    fe.fcmp_gt(sh2a::FReg::FR1, sh2a::FReg::FR0);
+    fe.movt(sh2a::Reg::R1);
+    emit_store_r1_to(fe, dst);
+}
+
+void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
+                                  PrimitiveOperand op2, std::uint32_t dst) {
+    // T = (op1 == op2). FCMP/EQ is commutative; load order
+    // arbitrary. IEEE 754 quirk: -0.0 == 0.0, NaN compares
+    // unequal to itself.
+    load_operand_into_fr(fe, op1, sh2a::FReg::FR0);
+    load_operand_into_fr(fe, op2, sh2a::FReg::FR1);
+    fe.fcmp_eq(sh2a::FReg::FR0, sh2a::FReg::FR1);
+    fe.movt(sh2a::Reg::R1);
+    emit_store_r1_to(fe, dst);
+}
+
 // Dispatch a CallPrimitive instruction to the right fragment emitter
 // by symbol. Both the single-level and nested-emit paths route
 // through this, so adding a new primitive only needs a new
@@ -597,12 +751,42 @@ void emit_cmp_eq_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
                                   operands[2], dst);
         return ok();
     }
+    if (symbol == "add_float") {
+        emit_add_float_fragment(fe, operands[0], operands[1], dst);
+        return ok();
+    }
+    if (symbol == "subtract_float") {
+        emit_sub_float_fragment(fe, operands[0], operands[1], dst);
+        return ok();
+    }
+    if (symbol == "multiply_float") {
+        emit_mul_float_fragment(fe, operands[0], operands[1], dst);
+        return ok();
+    }
+    if (symbol == "divide_float") {
+        emit_div_float_fragment(fe, operands[0], operands[1], dst);
+        return ok();
+    }
+    if (symbol == "compare_lt_float") {
+        emit_cmp_lt_float_fragment(fe, operands[0], operands[1], dst);
+        return ok();
+    }
+    if (symbol == "compare_gt_float") {
+        emit_cmp_gt_float_fragment(fe, operands[0], operands[1], dst);
+        return ok();
+    }
+    if (symbol == "compare_eq_float") {
+        emit_cmp_eq_float_fragment(fe, operands[0], operands[1], dst);
+        return ok();
+    }
     std::string msg{"SH-2A backend: CallPrimitive '"};
     msg.append(symbol);
     msg.append("' not yet implemented (slice supports add_int, "
                "subtract_int, multiply_int, compare_lt_int, "
                "compare_gt_int, compare_eq_int, and_bool, or_bool, "
-               "not_bool, select_int)");
+               "not_bool, select_int, add_float, subtract_float, "
+               "multiply_float, divide_float, compare_lt_float, "
+               "compare_gt_float, compare_eq_float)");
     return failure(ErrorCode::NotImplemented, std::move(msg));
 }
 
@@ -825,6 +1009,13 @@ struct PrimitiveShape {
         {"or_bool",      {2, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
         {"not_bool",     {1, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
         {"select_int",   {3, {PinType::Bool, PinType::Int,  PinType::Int},  PinType::Int}},
+        {"add_float",        {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
+        {"subtract_float",   {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
+        {"multiply_float",   {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
+        {"divide_float",     {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
+        {"compare_lt_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},
+        {"compare_gt_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},
+        {"compare_eq_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},
     };
     for (auto const &e : kTable) {
         if (e.name == symbol) return &e.shape;
@@ -844,7 +1035,9 @@ struct PrimitiveShape {
         msg.append("' not yet implemented (slice supports add_int, "
                    "subtract_int, multiply_int, compare_lt_int, "
                    "compare_gt_int, compare_eq_int, and_bool, or_bool, "
-                   "not_bool, select_int)");
+                   "not_bool, select_int, add_float, subtract_float, "
+                   "multiply_float, divide_float, compare_lt_float, "
+                   "compare_gt_float, compare_eq_float)");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
     if (prim.operands.size() != shape->arity) {

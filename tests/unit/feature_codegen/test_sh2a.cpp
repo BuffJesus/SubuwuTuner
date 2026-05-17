@@ -1866,3 +1866,287 @@ TEST_CASE("Sh2aBackend: not_bool(compare_lt) — single-compare invert",
     REQUIRE(seen_tst);
     REQUIRE(seen_cmp);
 }
+
+// ---- Float arithmetic (FPU) -------------------------------------
+
+namespace {
+// Pack with one hook that has a float-typed output, so Float
+// arithmetic tests have somewhere to store their results.
+constexpr std::string_view kPackFloatHookToml = R"toml(
+[pack]
+schema_version = 1
+id             = "test-pack-float"
+endianness     = "big"
+
+[[hook]]
+id              = "after_fuel_calc"
+ecu_address     = 0x000ABCD0
+free_ram        = { base = 0x40000000, length = 256 }
+inputs = [
+  { name = "rpm", label = "RPM", type = "float", unit = "rpm", address = 0x000F1234 },
+]
+outputs = [
+  { name = "commanded_pw_override", label = "Override fuel PW", type = "float", unit = "ms" },
+]
+)toml";
+} // namespace
+
+TEST_CASE("Sh2aBackend: add_float emits FADD with FPUL transfers",
+          "[feature_codegen][sh2a][float]") {
+    auto def = st::Definition::from_toml_string(kPackFloatHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_float(1, 1.5));
+    m.instructions.push_back(load_const_float(2, 0.25));
+    m.instructions.push_back(call_primitive(3, "add_float", {1, 2},
+                                             st::feature::PinType::Float));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+
+    // Scan for the key SH-2A FPU opcodes.
+    bool seen_lds_r0_fpul    = false;  // 0x405A
+    bool seen_fsts_fpul_fr0  = false;  // 0xF00D
+    bool seen_fsts_fpul_fr1  = false;  // 0xF10D
+    bool seen_fadd           = false;  // 0xF100 (FADD FR0, FR1)
+    bool seen_flds_fr1_fpul  = false;  // 0xF11D
+    bool seen_sts_fpul_r1    = false;  // 0x015A
+    for (std::size_t i = 0; i + 1 < hp.code.size(); i += 2) {
+        std::uint16_t inst = be16_at(hp.code, i);
+        if (inst == 0x405A) seen_lds_r0_fpul    = true;
+        if (inst == 0xF00D) seen_fsts_fpul_fr0  = true;
+        if (inst == 0xF10D) seen_fsts_fpul_fr1  = true;
+        if (inst == 0xF100) seen_fadd           = true;
+        if (inst == 0xF11D) seen_flds_fr1_fpul  = true;
+        if (inst == 0x015A) seen_sts_fpul_r1    = true;
+    }
+    REQUIRE(seen_lds_r0_fpul);
+    REQUIRE(seen_fsts_fpul_fr0);
+    REQUIRE(seen_fsts_fpul_fr1);
+    REQUIRE(seen_fadd);
+    REQUIRE(seen_flds_fr1_fpul);
+    REQUIRE(seen_sts_fpul_r1);
+
+    // The literal pool must carry the IEEE 754 bit patterns of 1.5
+    // and 0.25 verbatim. 1.5 = 0x3FC00000, 0.25 = 0x3E800000.
+    bool seen_15 = false, seen_025 = false;
+    for (std::size_t i = 0; i + 3 < hp.code.size(); i += 4) {
+        std::uint32_t v = be32_at(hp.code, i);
+        if (v == 0x3FC00000U) seen_15  = true;
+        if (v == 0x3E800000U) seen_025 = true;
+    }
+    REQUIRE(seen_15);
+    REQUIRE(seen_025);
+}
+
+TEST_CASE("Sh2aBackend: subtract_float emits FSUB with op1 in FR1",
+          "[feature_codegen][sh2a][float]") {
+    auto def = st::Definition::from_toml_string(kPackFloatHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_float(1, 5.0));
+    m.instructions.push_back(load_const_float(2, 2.0));
+    m.instructions.push_back(call_primitive(3, "subtract_float", {1, 2},
+                                             st::feature::PinType::Float));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    // FSUB FR0, FR1 ⇒ FR1 = FR1 − FR0. Encoding: 1111_0001_0000_0001 = 0xF101.
+    bool seen_fsub = false;
+    for (std::size_t i = 0; i + 1 < r->hooks[0].code.size(); i += 2) {
+        if (be16_at(r->hooks[0].code, i) == 0xF101) seen_fsub = true;
+    }
+    REQUIRE(seen_fsub);
+}
+
+TEST_CASE("Sh2aBackend: multiply_float emits FMUL",
+          "[feature_codegen][sh2a][float]") {
+    auto def = st::Definition::from_toml_string(kPackFloatHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_float(1, 1.5));
+    m.instructions.push_back(load_const_float(2, 2.0));
+    m.instructions.push_back(call_primitive(3, "multiply_float", {1, 2},
+                                             st::feature::PinType::Float));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    // FMUL FR0, FR1 ⇒ FR1 = FR1 * FR0. Encoding: 1111_0001_0000_0010 = 0xF102.
+    bool seen_fmul = false;
+    for (std::size_t i = 0; i + 1 < r->hooks[0].code.size(); i += 2) {
+        if (be16_at(r->hooks[0].code, i) == 0xF102) seen_fmul = true;
+    }
+    REQUIRE(seen_fmul);
+}
+
+TEST_CASE("Sh2aBackend: divide_float emits FDIV with op1 in FR1",
+          "[feature_codegen][sh2a][float]") {
+    auto def = st::Definition::from_toml_string(kPackFloatHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_float(1, 10.0));
+    m.instructions.push_back(load_const_float(2, 4.0));
+    m.instructions.push_back(call_primitive(3, "divide_float", {1, 2},
+                                             st::feature::PinType::Float));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    // FDIV FR0, FR1 ⇒ FR1 = FR1 / FR0. Encoding: 1111_0001_0000_0011 = 0xF103.
+    bool seen_fdiv = false;
+    for (std::size_t i = 0; i + 1 < r->hooks[0].code.size(); i += 2) {
+        if (be16_at(r->hooks[0].code, i) == 0xF103) seen_fdiv = true;
+    }
+    REQUIRE(seen_fdiv);
+}
+
+TEST_CASE("Sh2aBackend: compare_gt_float emits FCMP/GT + MOVT",
+          "[feature_codegen][sh2a][float]") {
+    // Use the int-hook pack — compare_gt_float produces Bool, and the
+    // Int pack's commanded_pw_override is declared as Int, so Bool
+    // widening lands cleanly into a 32-bit slot.
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_float(1, 5.0));
+    m.instructions.push_back(load_const_float(2, 3.0));
+    ir::Instruction cmp{};
+    cmp.op          = ir::Op::CallPrimitive;
+    cmp.symbol      = "compare_gt_float";
+    cmp.result_type = st::feature::PinType::Bool;
+    cmp.result_id   = 3;
+    cmp.pin_name    = "out";
+    cmp.operands    = {1, 2};
+    m.instructions.push_back(cmp);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+
+    // FCMP/GT FR1, FR0 ⇒ T = (FR0 > FR1) = (op1 > op2).
+    // Encoding: 1111_0000_0001_0101 = 0xF015.
+    // MOVT R1: 0x0129.
+    bool seen_fcmp_gt = false;
+    bool seen_movt    = false;
+    for (std::size_t i = 0; i + 1 < r->hooks[0].code.size(); i += 2) {
+        std::uint16_t inst = be16_at(r->hooks[0].code, i);
+        if (inst == 0xF015) seen_fcmp_gt = true;
+        if (inst == 0x0129) seen_movt    = true;
+    }
+    REQUIRE(seen_fcmp_gt);
+    REQUIRE(seen_movt);
+}
+
+TEST_CASE("Sh2aBackend: compare_lt_float swaps operand mapping vs gt",
+          "[feature_codegen][sh2a][float]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_float(1, 5.0));
+    m.instructions.push_back(load_const_float(2, 3.0));
+    ir::Instruction cmp{};
+    cmp.op          = ir::Op::CallPrimitive;
+    cmp.symbol      = "compare_lt_float";
+    cmp.result_type = st::feature::PinType::Bool;
+    cmp.result_id   = 3;
+    cmp.pin_name    = "out";
+    cmp.operands    = {1, 2};
+    m.instructions.push_back(cmp);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    // compare_lt_float: load op1→FR0, op2→FR1, FCMP/GT FR0, FR1
+    // ⇒ T = (FR1 > FR0). Encoding: 1111_0001_0000_0101 = 0xF105.
+    bool seen_fcmp_gt_swapped = false;
+    for (std::size_t i = 0; i + 1 < r->hooks[0].code.size(); i += 2) {
+        if (be16_at(r->hooks[0].code, i) == 0xF105) {
+            seen_fcmp_gt_swapped = true;
+        }
+    }
+    REQUIRE(seen_fcmp_gt_swapped);
+}
+
+TEST_CASE("Sh2aBackend: compare_eq_float emits FCMP/EQ",
+          "[feature_codegen][sh2a][float]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_float(1, 3.14));
+    m.instructions.push_back(load_const_float(2, 3.14));
+    ir::Instruction cmp{};
+    cmp.op          = ir::Op::CallPrimitive;
+    cmp.symbol      = "compare_eq_float";
+    cmp.result_type = st::feature::PinType::Bool;
+    cmp.result_id   = 3;
+    cmp.pin_name    = "out";
+    cmp.operands    = {1, 2};
+    m.instructions.push_back(cmp);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    // FCMP/EQ FR0, FR1 ⇒ T = (FR1 == FR0). Encoding: 1111_0001_0000_0100 = 0xF104.
+    bool seen_fcmp_eq = false;
+    for (std::size_t i = 0; i + 1 < r->hooks[0].code.size(); i += 2) {
+        if (be16_at(r->hooks[0].code, i) == 0xF104) seen_fcmp_eq = true;
+    }
+    REQUIRE(seen_fcmp_eq);
+}
+
+TEST_CASE("Sh2aBackend: add_float operand load uses HookInputPointer deref",
+          "[feature_codegen][sh2a][float]") {
+    // Verify load_operand_into_fr handles HookInputPointer the same
+    // way load_operand_into handles it for int (extra MOV.L @Rn, Rn).
+    auto def = st::Definition::from_toml_string(kPackFloatHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm",
+                                              st::feature::PinType::Float));
+    m.instructions.push_back(load_const_float(2, 0.1));
+    m.instructions.push_back(call_primitive(3, "add_float", {1, 2},
+                                             st::feature::PinType::Float));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    // MOV.L @R0, R0 (deref of the hook-input pointer):
+    // 0110_0000_0000_0010 = 0x6002.
+    bool seen_deref = false;
+    bool seen_fadd  = false;
+    for (std::size_t i = 0; i + 1 < r->hooks[0].code.size(); i += 2) {
+        std::uint16_t inst = be16_at(r->hooks[0].code, i);
+        if (inst == 0x6002) seen_deref = true;
+        if (inst == 0xF100) seen_fadd  = true;
+    }
+    REQUIRE(seen_deref);
+    REQUIRE(seen_fadd);
+}

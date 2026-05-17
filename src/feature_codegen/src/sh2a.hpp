@@ -179,6 +179,121 @@ enum class Reg : std::uint8_t {
         | (static_cast<std::uint16_t>(disp) & 0x0FFFU));
 }
 
+// ---- FPU (single-precision, FPSCR.PR=0) -----------------------------
+//
+// SH-2A's FPU operates on FR0..FR15 single-precision registers (PR=0)
+// or DR0..DR14 double-precision pairs (PR=1). We target single
+// precision exclusively — Subaru ECU firmware works in float32 and
+// our hook code inherits FPSCR.PR=0 from the host context. If we
+// later need to defend against a host that flipped PR=1, the FADD
+// chain will need an LDS Rm, FPSCR prologue to clear PR; v1.x
+// assumes PR is already 0.
+//
+// All Float-arithmetic opcodes share the shape 1111 nnnn mmmm OOOO
+// where OOOO is the operation:
+//   0000 FADD, 0001 FSUB, 0010 FMUL, 0011 FDIV
+// FRn is the destination AND the second source: FRn = FRn op FRm.
+
+enum class FReg : std::uint8_t {
+    FR0  = 0,  FR1  = 1,  FR2  = 2,  FR3  = 3,
+    FR4  = 4,  FR5  = 5,  FR6  = 6,  FR7  = 7,
+    FR8  = 8,  FR9  = 9,  FR10 = 10, FR11 = 11,
+    FR12 = 12, FR13 = 13, FR14 = 14, FR15 = 15,
+};
+
+// FADD FRm, FRn — FRn = FRn + FRm. Encoding: 1111 nnnn mmmm 0000.
+[[nodiscard]] constexpr std::uint16_t enc_fadd(FReg frm, FReg frn) noexcept {
+    return static_cast<std::uint16_t>(
+        0xF000U
+        | (static_cast<std::uint16_t>(frn) << 8U)
+        | (static_cast<std::uint16_t>(frm) << 4U));
+}
+
+// FSUB FRm, FRn — FRn = FRn - FRm. NOT commutative.
+// Encoding: 1111 nnnn mmmm 0001.
+[[nodiscard]] constexpr std::uint16_t enc_fsub(FReg frm, FReg frn) noexcept {
+    return static_cast<std::uint16_t>(
+        0xF001U
+        | (static_cast<std::uint16_t>(frn) << 8U)
+        | (static_cast<std::uint16_t>(frm) << 4U));
+}
+
+// FMUL FRm, FRn — FRn = FRn * FRm. Encoding: 1111 nnnn mmmm 0010.
+[[nodiscard]] constexpr std::uint16_t enc_fmul(FReg frm, FReg frn) noexcept {
+    return static_cast<std::uint16_t>(
+        0xF002U
+        | (static_cast<std::uint16_t>(frn) << 8U)
+        | (static_cast<std::uint16_t>(frm) << 4U));
+}
+
+// FDIV FRm, FRn — FRn = FRn / FRm. NOT commutative.
+// Encoding: 1111 nnnn mmmm 0011. Divide-by-zero raises a FPU
+// exception per the SH-2A spec; for v1.x we mirror int divide_int's
+// posture and trust the user to not author a zero-divisor (a
+// divide-by-zero guard primitive is a later concern).
+[[nodiscard]] constexpr std::uint16_t enc_fdiv(FReg frm, FReg frn) noexcept {
+    return static_cast<std::uint16_t>(
+        0xF003U
+        | (static_cast<std::uint16_t>(frn) << 8U)
+        | (static_cast<std::uint16_t>(frm) << 4U));
+}
+
+// LDS Rm, FPUL — FPUL = Rm (transfer GPR → FPU communications
+// register). Used as the first step of "move int-bit pattern into
+// FPU side." Encoding: 0100 mmmm 0101 1010.
+[[nodiscard]] constexpr std::uint16_t enc_lds_r_fpul(Reg rm) noexcept {
+    return static_cast<std::uint16_t>(
+        0x405AU | (static_cast<std::uint16_t>(rm) << 8U));
+}
+
+// STS FPUL, Rn — Rn = FPUL (transfer FPU communications register →
+// GPR). Used as the first step of "move FPU result back into the
+// int-side store path." Encoding: 0000 nnnn 0101 1010.
+[[nodiscard]] constexpr std::uint16_t enc_sts_fpul_r(Reg rn) noexcept {
+    return static_cast<std::uint16_t>(
+        0x005AU | (static_cast<std::uint16_t>(rn) << 8U));
+}
+
+// FSTS FPUL, FRn — FRn = FPUL. Bit-cast: copies the 32 bits of
+// FPUL into FRn verbatim, no float conversion. Used to land an
+// integer-typed bit pattern (just loaded into FPUL via LDS) into a
+// floating-point register so FADD/FSUB/FMUL/FDIV can operate on it.
+// Encoding: 1111 nnnn 0000 1101.
+[[nodiscard]] constexpr std::uint16_t enc_fsts_fpul_freg(FReg frn) noexcept {
+    return static_cast<std::uint16_t>(
+        0xF00DU | (static_cast<std::uint16_t>(frn) << 8U));
+}
+
+// FLDS FRm, FPUL — FPUL = FRm. Mirror of fsts: bit-cast FRm into
+// FPUL so STS FPUL, Rn can pull the bits out to a GPR for the
+// memory store. Encoding: 1111 mmmm 0001 1101.
+[[nodiscard]] constexpr std::uint16_t enc_flds_freg_fpul(FReg frm) noexcept {
+    return static_cast<std::uint16_t>(
+        0xF01DU | (static_cast<std::uint16_t>(frm) << 8U));
+}
+
+// FCMP/EQ FRm, FRn — T = (FRn == FRm). IEEE 754 ordered compare: NaN
+// operands produce T=0. Commutative — operand swap is identical.
+// Encoding: 1111 nnnn mmmm 0100.
+[[nodiscard]] constexpr std::uint16_t enc_fcmp_eq(FReg frm, FReg frn) noexcept {
+    return static_cast<std::uint16_t>(
+        0xF004U
+        | (static_cast<std::uint16_t>(frn) << 8U)
+        | (static_cast<std::uint16_t>(frm) << 4U));
+}
+
+// FCMP/GT FRm, FRn — T = (FRn > FRm), signed IEEE 754 ordered. NaN
+// operands produce T=0. NOT commutative — callers pick the Rm/Rn
+// mapping (mirror the integer `enc_cmp_gt` convention: `fcmp_gt(FR1,
+// FR0)` after loading op1→FR0 / op2→FR1 yields T=(op1 > op2)).
+// Encoding: 1111 nnnn mmmm 0101.
+[[nodiscard]] constexpr std::uint16_t enc_fcmp_gt(FReg frm, FReg frn) noexcept {
+    return static_cast<std::uint16_t>(
+        0xF005U
+        | (static_cast<std::uint16_t>(frn) << 8U)
+        | (static_cast<std::uint16_t>(frm) << 4U));
+}
+
 // RTS — return from subroutine. Encoded as 0x000B.
 [[nodiscard]] constexpr std::uint16_t enc_rts() noexcept { return 0x000BU; }
 

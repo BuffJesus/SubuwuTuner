@@ -104,9 +104,9 @@ outputs = [
 ]
 
 [[primitive]]
-id           = "compare_gt"
-display_name = "Greater than"
-description  = "True when a > b."
+id           = "compare_gt_float"
+display_name = "Greater than (float)"
+description  = "True when a > b (float compare via FCMP/GT)."
 inputs = [
   { name = "a", type = "float" },
   { name = "b", type = "float" },
@@ -116,15 +116,27 @@ outputs = [
 ]
 
 [[primitive]]
-id           = "compare_lt"
-display_name = "Less than"
-description  = "True when a < b."
+id           = "compare_lt_float"
+display_name = "Less than (float)"
+description  = "True when a < b (float compare via FCMP/GT, operand-swapped)."
 inputs = [
   { name = "a", type = "float" },
   { name = "b", type = "float" },
 ]
 outputs = [
   { name = "out", label = "a < b", type = "bool" },
+]
+
+[[primitive]]
+id           = "compare_eq_float"
+display_name = "Equal (float)"
+description  = "True when a == b (float compare via FCMP/EQ; IEEE 754 ordered — NaN compares unequal)."
+inputs = [
+  { name = "a", type = "float" },
+  { name = "b", type = "float" },
+]
+outputs = [
+  { name = "out", label = "a == b", type = "bool" },
 ]
 
 [[primitive]]
