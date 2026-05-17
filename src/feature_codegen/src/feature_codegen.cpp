@@ -6,15 +6,19 @@
 #include "sh2a.hpp"
 #include "st/core/error.hpp"
 
+#include <toml++/toml.hpp>
+
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <map>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -1237,6 +1241,175 @@ Result<std::unique_ptr<IBackend>> select_backend(std::string_view platform) {
 
 Result<std::unique_ptr<IBackend>> select_backend(Definition const &def) {
     return select_backend(def.pack().platform);
+}
+
+// ---- PatchObject TOML round-trip ----------------------------------
+
+namespace {
+
+[[nodiscard]] std::optional<Arch> parse_arch(std::string_view s) noexcept {
+    if (s == "sh2a")    return Arch::Sh2a;
+    if (s == "rh850")   return Arch::Rh850;
+    if (s == "unknown") return Arch::Unknown;
+    return std::nullopt;
+}
+
+// Parse an even-length, all-hex string into bytes. Tolerant of leading
+// 0x and embedded whitespace would complicate the diff story, so this
+// function requires a contiguous run of [0-9A-Fa-f] of even length.
+[[nodiscard]] Result<std::vector<std::uint8_t>> parse_hex_bytes(
+    std::string_view s) {
+    if (s.size() % 2 != 0) {
+        return failure(ErrorCode::ParseError,
+                       "patch TOML: code hex string has odd length");
+    }
+    std::vector<std::uint8_t> out;
+    out.reserve(s.size() / 2);
+    auto const nibble = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    for (std::size_t i = 0; i < s.size(); i += 2) {
+        int const hi = nibble(s[i]);
+        int const lo = nibble(s[i + 1]);
+        if (hi < 0 || lo < 0) {
+            return failure(ErrorCode::ParseError,
+                           "patch TOML: code hex string has non-hex chars");
+        }
+        out.push_back(static_cast<std::uint8_t>((hi << 4) | lo));
+    }
+    return out;
+}
+
+} // namespace
+
+std::string patch_to_toml(PatchObject const &p) {
+    std::ostringstream out;
+    out << "[patch]\n";
+    out << "arch = \"" << arch_name(p.arch) << "\"\n";
+    for (auto const &h : p.hooks) {
+        out << "\n[[patch.hook]]\n";
+        // Symbol uses TOML basic-string quoting — escape backslash and
+        // double-quote, reject literal newlines. Mirrors feature::
+        // toml_quote in src/feature/src/feature.cpp.
+        out << "symbol = \"";
+        for (char c : h.symbol) {
+            if (c == '\\' || c == '"') out << '\\';
+            out << c;
+        }
+        out << "\"\n";
+        out << "splice_address = 0x" << std::hex << std::uppercase
+            << h.splice_address << std::dec << std::nouppercase << "\n";
+        out << "code = \"";
+        char buf[3];
+        for (auto const b : h.code) {
+            std::snprintf(buf, sizeof(buf), "%02X",
+                          static_cast<unsigned>(b));
+            out << buf;
+        }
+        out << "\"\n";
+        for (auto const &rc : h.ram_claims) {
+            out << "\n[[patch.hook.ram_claim]]\n";
+            out << "address = 0x" << std::hex << std::uppercase
+                << rc.address << std::dec << std::nouppercase << "\n";
+            out << "size = " << rc.size << "\n";
+            out << "alignment = " << rc.alignment << "\n";
+        }
+    }
+    return out.str();
+}
+
+Result<std::optional<PatchObject>> patch_from_toml(std::string_view text) {
+    toml::table tbl;
+    try {
+        tbl = toml::parse(text);
+    } catch (toml::parse_error const &e) {
+        std::string msg{"patch TOML parse: "};
+        msg.append(e.description());
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    auto const *ptbl = tbl["patch"].as_table();
+    if (ptbl == nullptr) {
+        // No [patch] section — legitimate (a graph-only .stmod).
+        return std::optional<PatchObject>{};
+    }
+    PatchObject p;
+    auto const arch_s = (*ptbl)["arch"].value_or<std::string>("");
+    if (arch_s.empty()) {
+        return failure(ErrorCode::ParseError,
+                       "patch TOML: [patch] missing `arch`");
+    }
+    auto const arch = parse_arch(arch_s);
+    if (!arch.has_value()) {
+        std::string msg{"patch TOML: unknown arch '"};
+        msg.append(arch_s);
+        msg.append("' (recognized: sh2a, rh850, unknown)");
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    p.arch = *arch;
+    auto const *hooks = (*ptbl)["hook"].as_array();
+    if (hooks != nullptr) {
+        for (auto const &elem : *hooks) {
+            auto const *htbl = elem.as_table();
+            if (htbl == nullptr) {
+                return failure(ErrorCode::ParseError,
+                               "patch TOML: [[patch.hook]] not a table");
+            }
+            HookPatch hp;
+            hp.symbol = (*htbl)["symbol"].value_or<std::string>("");
+            if (hp.symbol.empty()) {
+                return failure(ErrorCode::ParseError,
+                               "patch TOML: [[patch.hook]] missing `symbol`");
+            }
+            auto const splice = (*htbl)["splice_address"]
+                                    .value<std::int64_t>();
+            if (!splice.has_value()) {
+                return failure(ErrorCode::ParseError,
+                               "patch TOML: [[patch.hook]] '" + hp.symbol
+                                   + "' missing `splice_address`");
+            }
+            hp.splice_address = static_cast<std::size_t>(*splice);
+            auto const code_s = (*htbl)["code"].value_or<std::string>("");
+            auto code_r = parse_hex_bytes(code_s);
+            if (!code_r.has_value()) {
+                std::string msg{"patch TOML: [[patch.hook]] '"};
+                msg.append(hp.symbol);
+                msg.append("': ");
+                msg.append(code_r.error().message());
+                return failure(ErrorCode::ParseError, std::move(msg));
+            }
+            hp.code = std::move(*code_r);
+            auto const *claims = (*htbl)["ram_claim"].as_array();
+            if (claims != nullptr) {
+                for (auto const &ce : *claims) {
+                    auto const *ctbl = ce.as_table();
+                    if (ctbl == nullptr) {
+                        return failure(ErrorCode::ParseError,
+                                       "patch TOML: [[patch.hook.ram_claim]]"
+                                       " not a table");
+                    }
+                    RamClaim rc;
+                    auto const ad = (*ctbl)["address"].value<std::int64_t>();
+                    auto const sz = (*ctbl)["size"].value<std::int64_t>();
+                    auto const al = (*ctbl)["alignment"].value<std::int64_t>();
+                    if (!ad.has_value() || !sz.has_value()
+                        || !al.has_value()) {
+                        return failure(ErrorCode::ParseError,
+                                       "patch TOML: ram_claim missing "
+                                       "address/size/alignment");
+                    }
+                    rc.address   = static_cast<std::size_t>(*ad);
+                    rc.size      = static_cast<std::size_t>(*sz);
+                    rc.alignment = static_cast<std::size_t>(*al);
+                    hp.ram_claims.push_back(rc);
+                }
+            }
+            p.hooks.push_back(std::move(hp));
+        }
+    }
+    return std::optional<PatchObject>{std::move(p)};
 }
 
 } // namespace st::feature::codegen

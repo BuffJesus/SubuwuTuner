@@ -16,6 +16,7 @@ target_link_libraries(st_feature_codegen
         st::defs
         st::feature
     PRIVATE
+        tomlplusplus::tomlplusplus
         st::warnings
         st::sanitizers
 )

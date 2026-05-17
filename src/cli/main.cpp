@@ -6622,46 +6622,6 @@ std::string render_patch_hex(st::feature::codegen::PatchObject const &p) {
     return out;
 }
 
-// Render a PatchObject as TOML. Shape is forward-compatible with a
-// future PatchObject::from_toml deserializer (see docs/16 §"Patch-
-// bytes serialization", next-likely-moves #4 in the 2026-05-17
-// handoff). Code bytes are an uppercase hex string with no separators
-// to keep the TOML compact while still diffable.
-std::string render_patch_toml(st::feature::codegen::PatchObject const &p) {
-    std::string out;
-    out.reserve(256 + 128 * p.hooks.size());
-    char buf[64];
-    out.append("[patch]\n");
-    std::snprintf(buf, sizeof(buf), "arch = \"%s\"\n",
-                  st::feature::codegen::arch_name(p.arch));
-    out.append(buf);
-    for (auto const &h : p.hooks) {
-        out.append("\n[[patch.hook]]\n");
-        out.append("symbol = \"");
-        out.append(h.symbol);
-        out.append("\"\n");
-        std::snprintf(buf, sizeof(buf), "splice_address = 0x%zX\n",
-                      h.splice_address);
-        out.append(buf);
-        out.append("code = \"");
-        for (auto const b : h.code) {
-            std::snprintf(buf, sizeof(buf), "%02X", static_cast<unsigned>(b));
-            out.append(buf);
-        }
-        out.append("\"\n");
-        for (auto const &rc : h.ram_claims) {
-            out.append("\n[[patch.hook.ram_claim]]\n");
-            std::snprintf(buf, sizeof(buf), "address = 0x%zX\n", rc.address);
-            out.append(buf);
-            std::snprintf(buf, sizeof(buf), "size = %zu\n", rc.size);
-            out.append(buf);
-            std::snprintf(buf, sizeof(buf), "alignment = %zu\n", rc.alignment);
-            out.append(buf);
-        }
-    }
-    return out;
-}
-
 } // namespace
 
 int cmd_feature_compile(int argc, char *argv[]) {
@@ -6832,7 +6792,7 @@ int cmd_feature_compile(int argc, char *argv[]) {
     }
 
     std::string const text = (format == "toml")
-        ? render_patch_toml(*patch)
+        ? st::feature::codegen::patch_to_toml(*patch)
         : render_patch_hex(*patch);
 
     if (output_path.has_value()) {

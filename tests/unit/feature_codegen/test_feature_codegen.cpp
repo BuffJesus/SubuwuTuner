@@ -179,3 +179,213 @@ TEST_CASE("Rh850Backend::compile returns NotImplemented",
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
 }
+
+// ---- PatchObject ↔ TOML round-trip --------------------------------
+
+TEST_CASE("patch_from_toml: empty text returns nullopt",
+          "[feature_codegen][patch_toml]") {
+    auto r = cg::patch_from_toml("");
+    REQUIRE(r.has_value());
+    REQUIRE_FALSE(r->has_value());
+}
+
+TEST_CASE("patch_from_toml: text without [patch] section returns nullopt",
+          "[feature_codegen][patch_toml]") {
+    auto r = cg::patch_from_toml(R"toml(
+[graph]
+schema_version = 1
+)toml");
+    REQUIRE(r.has_value());
+    REQUIRE_FALSE(r->has_value());
+}
+
+TEST_CASE("patch_to_toml: empty patch round-trips through patch_from_toml",
+          "[feature_codegen][patch_toml]") {
+    cg::PatchObject p;
+    p.arch = cg::Arch::Sh2a;
+    auto const text = cg::patch_to_toml(p);
+    auto r = cg::patch_from_toml(text);
+    REQUIRE(r.has_value());
+    REQUIRE(r->has_value());
+    REQUIRE((*r)->arch == cg::Arch::Sh2a);
+    REQUIRE((*r)->hooks.empty());
+}
+
+TEST_CASE("patch_to_toml: single-hook patch round-trips",
+          "[feature_codegen][patch_toml]") {
+    cg::PatchObject p;
+    p.arch = cg::Arch::Sh2a;
+    cg::HookPatch h;
+    h.symbol         = "after_fuel_calc";
+    h.splice_address = 0x000ABCD0;
+    h.code           = {0xD0, 0x03, 0xD1, 0x04, 0x31, 0x0C, 0xFF};
+    h.ram_claims.push_back(cg::RamClaim{0x40000000, 4, 4});
+    h.ram_claims.push_back(cg::RamClaim{0x40000004, 8, 4});
+    p.hooks.push_back(std::move(h));
+
+    auto const text = cg::patch_to_toml(p);
+    auto r = cg::patch_from_toml(text);
+    REQUIRE(r.has_value());
+    REQUIRE(r->has_value());
+
+    cg::PatchObject const &q = **r;
+    REQUIRE(q.arch == cg::Arch::Sh2a);
+    REQUIRE(q.hooks.size() == 1);
+    REQUIRE(q.hooks[0].symbol == "after_fuel_calc");
+    REQUIRE(q.hooks[0].splice_address == 0x000ABCD0);
+    REQUIRE(q.hooks[0].code == p.hooks[0].code);
+    REQUIRE(q.hooks[0].ram_claims.size() == 2);
+    REQUIRE(q.hooks[0].ram_claims[0].address == 0x40000000);
+    REQUIRE(q.hooks[0].ram_claims[0].size == 4);
+    REQUIRE(q.hooks[0].ram_claims[0].alignment == 4);
+    REQUIRE(q.hooks[0].ram_claims[1].address == 0x40000004);
+    REQUIRE(q.hooks[0].ram_claims[1].size == 8);
+}
+
+TEST_CASE("patch_to_toml: multi-hook patch keeps hook order",
+          "[feature_codegen][patch_toml]") {
+    cg::PatchObject p;
+    p.arch = cg::Arch::Rh850;
+    cg::HookPatch h1;
+    h1.symbol = "hook_a"; h1.splice_address = 0x100; h1.code = {0x01, 0x02};
+    cg::HookPatch h2;
+    h2.symbol = "hook_b"; h2.splice_address = 0x200; h2.code = {0x03, 0x04};
+    p.hooks.push_back(std::move(h1));
+    p.hooks.push_back(std::move(h2));
+
+    auto r = cg::patch_from_toml(cg::patch_to_toml(p));
+    REQUIRE(r.has_value());
+    REQUIRE(r->has_value());
+    REQUIRE((*r)->arch == cg::Arch::Rh850);
+    REQUIRE((*r)->hooks.size() == 2);
+    REQUIRE((*r)->hooks[0].symbol == "hook_a");
+    REQUIRE((*r)->hooks[1].symbol == "hook_b");
+}
+
+TEST_CASE("patch_from_toml: malformed TOML returns ParseError",
+          "[feature_codegen][patch_toml]") {
+    auto r = cg::patch_from_toml("[patch\nbroken");
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("patch_from_toml: missing arch returns ParseError",
+          "[feature_codegen][patch_toml]") {
+    auto r = cg::patch_from_toml(R"toml(
+[patch]
+)toml");
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("patch_from_toml: unknown arch returns ParseError",
+          "[feature_codegen][patch_toml]") {
+    auto r = cg::patch_from_toml(R"toml(
+[patch]
+arch = "v850"
+)toml");
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("patch_from_toml: odd-length code hex returns ParseError",
+          "[feature_codegen][patch_toml]") {
+    auto r = cg::patch_from_toml(R"toml(
+[patch]
+arch = "sh2a"
+[[patch.hook]]
+symbol = "x"
+splice_address = 0x100
+code = "ABC"
+)toml");
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("patch_from_toml: non-hex chars in code returns ParseError",
+          "[feature_codegen][patch_toml]") {
+    auto r = cg::patch_from_toml(R"toml(
+[patch]
+arch = "sh2a"
+[[patch.hook]]
+symbol = "x"
+splice_address = 0x100
+code = "XXYY"
+)toml");
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("patch_from_toml: hook without splice_address returns ParseError",
+          "[feature_codegen][patch_toml]") {
+    auto r = cg::patch_from_toml(R"toml(
+[patch]
+arch = "sh2a"
+[[patch.hook]]
+symbol = "x"
+code = ""
+)toml");
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("patch_from_toml: accepts lowercase hex too",
+          "[feature_codegen][patch_toml]") {
+    auto r = cg::patch_from_toml(R"toml(
+[patch]
+arch = "sh2a"
+[[patch.hook]]
+symbol = "x"
+splice_address = 0x100
+code = "deadbeef"
+)toml");
+    REQUIRE(r.has_value());
+    REQUIRE(r->has_value());
+    REQUIRE((*r)->hooks[0].code
+            == std::vector<std::uint8_t>{0xDE, 0xAD, 0xBE, 0xEF});
+}
+
+TEST_CASE("patch_from_toml: ignores graph sections in a bundled .stmod",
+          "[feature_codegen][patch_toml]") {
+    // Simulates a .stmod file holding both source graph and compiled
+    // patch. The graph loader (feature::from_toml) will read the
+    // [graph]/[[node]]/[[edge]] side and ignore [patch]; this loader
+    // does the reverse.
+    auto r = cg::patch_from_toml(R"toml(
+[graph]
+schema_version = 1
+
+[[node]]
+id   = 1
+kind = "primitive.add_int"
+pins = []
+
+[patch]
+arch = "sh2a"
+
+[[patch.hook]]
+symbol = "after_fuel_calc"
+splice_address = 0xABCD0
+code = "DEADBEEF"
+)toml");
+    REQUIRE(r.has_value());
+    REQUIRE(r->has_value());
+    REQUIRE((*r)->arch == cg::Arch::Sh2a);
+    REQUIRE((*r)->hooks.size() == 1);
+    REQUIRE((*r)->hooks[0].symbol == "after_fuel_calc");
+}
+
+TEST_CASE("patch_to_toml: escapes backslash and double-quote in symbol",
+          "[feature_codegen][patch_toml]") {
+    cg::PatchObject p;
+    p.arch = cg::Arch::Sh2a;
+    cg::HookPatch h;
+    h.symbol = R"(weird"\name)";
+    h.splice_address = 0x100;
+    p.hooks.push_back(std::move(h));
+
+    auto r = cg::patch_from_toml(cg::patch_to_toml(p));
+    REQUIRE(r.has_value());
+    REQUIRE(r->has_value());
+    REQUIRE((*r)->hooks[0].symbol == R"(weird"\name)");
+}

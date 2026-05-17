@@ -30,6 +30,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -196,6 +197,23 @@ select_backend(Definition const &def);
 // tests and any caller that already has the string in hand.
 [[nodiscard]] Result<std::unique_ptr<IBackend>>
 select_backend(std::string_view platform);
+
+// PatchObject ↔ TOML round-trip. `patch_to_toml` emits a single
+// top-level `[patch]` table plus one `[[patch.hook]]` per hook, each
+// with its `[[patch.hook.ram_claim]]` nested array. Code bytes go in
+// as one uppercase hex string with no separators. `patch_from_toml`
+// scans a TOML text for `[patch]` and reconstructs the object; absent
+// table → `std::nullopt`; malformed → ParseError.
+//
+// Designed for distribution: a `.stmod` file is a TOML document
+// holding `[graph]` + `[[node]]` + `[[edge]]` for the source graph
+// AND `[patch]` for the compiled bytes. The graph loader
+// (`feature::from_toml`) ignores `[patch]`; this loader ignores
+// everything outside it. Callers parse both to roundtrip the whole
+// file.
+[[nodiscard]] std::string patch_to_toml(PatchObject const &p);
+[[nodiscard]] Result<std::optional<PatchObject>>
+patch_from_toml(std::string_view text);
 
 } // namespace st::feature::codegen
 
