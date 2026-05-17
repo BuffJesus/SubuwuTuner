@@ -2,7 +2,12 @@
 
 A **custom feature** is a piece of new ECU behavior the user authors visually, that SubuwuTuner compiles into a ROM patch and flashes alongside the calibration. Table edits change *parameters*; custom features change *control flow*. The two are different categories, and the latter is structurally more dangerous — which is why this is Phase 5, well after manual editing, datalogging, and the brick-protection work in `docs/05-improvements.md` §4.
 
-This document captures the planned design. Custom features are **not** a v1.0 feature — they land in Phase 5 (see `docs/04-roadmap.md`), once flashing is solid and we have a real bench rig that can recover a brick.
+This document captures the design. Phase 5 work is in progress: the
+authoring data model, IR lowerer, SH-2A codegen, CLI, and `.stmod`
+file format have shipped end-to-end. **Flashing** is not yet wired —
+patch insertion (`src/feature_patch/`) and real-hardware validation
+gate on bench-rig work. See *Current state* below for the granular
+matrix.
 
 ## Stance on third-party prior art
 
@@ -15,15 +20,21 @@ See `docs/15-clean-room-engineering.md` for the full methodology. The list of re
 
 ## What ships
 
-| Layer | What it does | Phase |
+Status legend: ✅ shipped · 🟡 partial · ⬜ not yet.
+
+| Layer | What it does | Status |
 |---|---|---|
-| **Graph editor** | ImGui-based 2D canvas; nodes are typed boxes with input/output pins; edges carry typed values. Pan/zoom, multi-select, copy/paste, undo/redo bound to the same `st::edit::History` substrate that maps use. | 5 |
-| **Node library** | Sensors (RPM, MAF, MAP, …), arithmetic, conditional, state-machine, table-lookup, output (override commanded fuel, command additional injector pulse, …). The library is per-platform and lives in the definition pack so a 2020 WRX and a 2008 STI can expose different hooks. | 5 |
-| **Type system** | Pin types — `float32`, `uint8`, `bool`, units (`rpm`, `kPa`, `°C`). Edges must type-match; the editor refuses invalid wires before compile time. | 5 |
-| **Compiler** | Graph → SubuwuTuner IR → ECU machine code (Renesas SH-2A for VA, RH850 for VB) → ROM patch. Validation pass enforces real-time budget (max instructions per ECU loop iteration) before allowing flash. | 5 |
-| **Patch format** | `.stmod` (SubuwuTuner Mod) — a TOML-and-binary bundle: the graph as authored, the compiled patch bytes, target ECU family, target free-RAM range, source-pack id, semver. Importable, exportable, signable. | 5 |
-| **Sample packs** | Flat-foot shifting and rolling launch control ship in-box as reference implementations. Anything more aggressive is community-authored. | 5 |
-| **Linter** | Refuses unsafe shapes — recursive output→input cycles, unbounded loops, writes to safety-critical regions, RAM allocations exceeding the platform's known free pool. | 5 |
+| **Graph editor** | ImGui-based 2D canvas; nodes are typed boxes with input/output pins; edges carry typed values. Pin labels show pack `label` (pretty) but route to canonical `name` underneath. Right-click pins for per-instance defaults; right-click empty canvas for the Insert palette. | ✅ |
+| **Node library** | Hooks (splice points + sensor reads) and primitives (pure computation), both pack-declared. The library is per-platform and lives in the definition pack so a 2020 WRX and a 2008 STI can expose different hooks. | ✅ |
+| **Type system** | Pin types — `Float`, `Int`, `Bool`, plus per-pin `unit` strings. Edges must type-match AND unit-match (empty unit acts as wildcard); the editor refuses invalid wires before compile time. Dimensional analysis stays string-equality for v1.x. | ✅ |
+| **Compiler (SH-2A)** | Graph → IR → SH-2A machine code → PatchObject. Covers Int arithmetic (add/sub/mul), Int compares (lt/gt/eq), Bool ops (and/or/not), select (int/bool/float), Float arithmetic via FPU (FADD/FSUB/FMUL/FDIV), Float compares (FCMP/EQ + FCMP/GT). Handles nested CallPrimitive trees with SSA spill, cross-hook value flow, and fan-out dedup. | ✅ |
+| **Compiler (RH850)** | Stub backend that returns NotImplemented. VB WRX support waits until SH-2A is bench-validated. | ⬜ |
+| **CLI** | `subuwutuner-cli feature-compile <stmod> --def <pack> [--arch sh2a\|rh850] [--format hex\|toml\|raw] [--output <file>]`. Plus `dump-ir`, `lint-graph`, `lint-ir`. | ✅ |
+| **Patch format** | `.stmod` — TOML document carrying both the source graph (`[graph]` + `[[node]]` + `[[edge]]`) and the compiled patch (`[patch]` + `[[patch.hook]]` + `[[patch.hook.ram_claim]]`). Single-file, diffable, round-trippable. Signable is a future concern. | ✅ |
+| **Linter** | `feature::lint(Graph)` flags undriven inputs + orphan nodes; `feature::ir::lint(Module)` flags duplicate hook overrides + RT-budget overruns. RT budget is a placeholder cycle count until real per-ISA profiling lands. | ✅ |
+| **Sample packs** | `clutch-kill` (Bool-only synthetic smoke), `flat-foot-shift` (3-sensor AND chain), `launch-control` (4-sensor 3-compare AND tree). Compile end-to-end through SH-2A. `flex-fuel` exists but blocks on a curve-table primitive. | 🟡 |
+| **Patch insertion** | Finding free RAM, writing the hook table, splicing into existing interrupt vectors. Bench-rig-blocked — requires a real ECU to develop against. | ⬜ |
+| **Flashing** | Loading a `.stmod` and burning the patch to an ECU. Gates on Patch insertion + Phase 3 transport. | ⬜ |
 
 What does not ship:
 
@@ -48,22 +59,120 @@ What does not ship:
                                   └──────────────┘              └──────────────┘
 ```
 
-Module layout (planned):
+Module layout (current):
 
 ```
 src/
-├── feature/        st::feature::Graph + st::feature::ir::Module
-│                   (data structure, validation, persistence, IR lowering)
-├── feature_codegen/
-│   ├── sh2a/       Renesas SH-2A backend (VA WRX et al.)
-│   └── rh850/      Renesas RH850 backend (VB WRX et al.)
-├── feature_patch/  Patch insertion — finds free RAM, writes hook table, splices into existing interrupt vectors
-└── ui/feature/     The ImGui-based graph editor (links into the existing subuwutuner-gui)
+├── feature/             st::feature::Graph + st::feature::ir::Module
+│                        (data structure, validation, persistence,
+│                         IR lowering, graph-level + IR-level linters)
+├── feature_codegen/     IBackend + Sh2aBackend + Rh850Backend (stub) +
+│                        PatchObject + RamAllocator + select_backend +
+│                        patch_to_toml / patch_from_toml
+├── feature_patch/       (not yet — patch insertion, free-RAM map,
+│                         hook table, vector-table splicing)
+└── ui/src/main.cpp      The ImGui-based designer ("Custom features
+                         designer (preview)" in the View menu) +
+                         all other panels; designer is not yet a
+                         separate module.
 ```
 
 (The IR initially lived in its own module `src/feature_ir/` in the plan; in practice it ships inside `src/feature/` since it shares types with the Graph and Codegen is the natural fission point. It can be split out if it grows.)
 
 Both backends speak a small subset of their respective ISAs — only what the compiler emits. We never need to *parse* SH-2A or RH850 instructions, only emit.
+
+## Current state — SH-2A primitive coverage
+
+The SH-2A backend recognizes the following CallPrimitive symbols.
+Adding a new arithmetic primitive is one entry in the `primitive_shape`
+table plus one `emit_*_fragment` function — see
+`src/feature_codegen/src/feature_codegen.cpp`.
+
+| Symbol | Operand types | Result | Underlying SH-2A op |
+|---|---|---|---|
+| `add_int` | (Int, Int) | Int | `ADD Rm, Rn` |
+| `subtract_int` | (Int, Int) | Int | `SUB Rm, Rn` |
+| `multiply_int` | (Int, Int) | Int | `MUL.L` + `STS MACL, Rn` |
+| `compare_lt_int` | (Int, Int) | Bool | `CMP/GT Rn, Rm` + `MOVT` |
+| `compare_gt_int` | (Int, Int) | Bool | `CMP/GT Rm, Rn` + `MOVT` |
+| `compare_eq_int` | (Int, Int) | Bool | `CMP/EQ Rm, Rn` + `MOVT` |
+| `and_bool` | (Bool, Bool) | Bool | `AND Rm, Rn` (canonical 0/1) |
+| `or_bool` | (Bool, Bool) | Bool | `OR Rm, Rn` |
+| `not_bool` | (Bool,) | Bool | `TST Rn, Rn` + `MOVT` |
+| `select_int` / `select_bool` / `select_float` | (Bool, T, T) | T | `TST` + `BT` + `BRA` + `MOVT` |
+| `add_float` | (Float, Float) | Float | `FADD FRm, FRn` (via FPUL transfer) |
+| `subtract_float` | (Float, Float) | Float | `FSUB FRm, FRn` |
+| `multiply_float` | (Float, Float) | Float | `FMUL FRm, FRn` |
+| `divide_float` | (Float, Float) | Float | `FDIV FRm, FRn` |
+| `compare_lt_float` | (Float, Float) | Bool | `FCMP/GT FRm, FRn` (swapped) + `MOVT` |
+| `compare_gt_float` | (Float, Float) | Bool | `FCMP/GT FRm, FRn` + `MOVT` |
+| `compare_eq_float` | (Float, Float) | Bool | `FCMP/EQ FRm, FRn` + `MOVT` |
+
+Naming convention: typed primitives carry a `_int` / `_float` suffix
+so the same operation name doesn't ambiguously dispatch. `add_int`
+and `add_float` are different symbols emitting different instruction
+sequences; the IR-side type checker (and PrimitiveShape table)
+enforces that operand types match the symbol's declared shape.
+
+**Not yet implemented:** `divide_int` (DIV1 iterative sequence is
+mechanical but voluminous; DIVS single-instruction encoding needs
+Renesas-manual verification), per-ISA cycle costs for the RT-budget
+linter (today's costs are placeholder), and any curve / table-lookup
+primitive (relevant for the unblocked `flex-fuel` sample).
+
+## Current state — `.stmod` file format
+
+A `.stmod` is a single TOML document with two halves:
+
+```toml
+[graph]
+schema_version = 1
+
+[[node]]
+id    = 1
+kind  = "hook.read_rpm"
+label = "Engine RPM"
+x     = 48.0
+y     = 48.0
+phase_break = true
+pins  = [
+  { id = 0, name = "rpm", label = "RPM", type = "float",
+    direction = "output", unit = "rpm" },
+]
+
+[[edge]]
+from_node = 1
+from_pin  = 0
+to_node   = 2
+to_pin    = 0
+
+[patch]
+arch = "sh2a"
+
+[[patch.hook]]
+symbol = "ignition_cut"
+splice_address = 0xABE00
+code = "D009D10A30170129..."     # uppercase hex, no separators
+
+[[patch.hook.ram_claim]]
+address = 0x40000100
+size = 4
+alignment = 4
+```
+
+`feature::from_toml(text)` reads the `[graph]` half and ignores
+`[patch]`; `feature_codegen::patch_from_toml(text)` does the reverse.
+A bundled `.stmod` round-trips both halves; a graph-only `.stmod`
+(no `[patch]`) parses cleanly with `patch_from_toml` returning
+`nullopt`.
+
+Pin field convention (load-bearing — silent failure if violated):
+`name` is the canonical id used by codegen to resolve back to the
+pack's `HookSignal.name`. `label` is the human-readable display
+text. Mixing them — putting the label in `name` — produces a
+"hook does not declare input pin '<label>'" error at compile time.
+The designer's Insert palette sets both fields correctly; hand-
+authored `.stmod` files need to follow the convention.
 
 ## Definition-pack hooks
 
@@ -143,13 +252,23 @@ Every Input pin carries an optional `default_value` (stored as a double regardle
 
 ## Sample packs
 
-Three starter `.stmod` files ship in `fixtures/samples/` and demonstrate the editor end-to-end against the demo definition pack:
+Four starter `.stmod` files ship in `fixtures/samples/`. All paired
+with `fixtures/demo-pack/`. Compile from the shell:
 
-- `flex-fuel.stmod` — read ethanol-content sensor → flex-fuel-scale curve → multiply the ECU's commanded fuel pulse width by the scale → write back to the after-fuel-calc splice. A clean DAG with all inputs driven; passes lint.
-- `flat-foot-shift.stmod` — combine clutch + throttle + RPM thresholds through AND gates into the ignition-cut splice. Uses per-instance default values on the threshold compares (`throttle > 90`, `rpm > 4000`); the user can right-click those pins to retune the constants. Passes lint.
-- `launch-control.stmod` — arms an ignition cut while clutch held + throttle > 95% + speed < 10 km/h + rpm > 4500 (the canonical AND-tree pattern). Demonstrates `compare_lt` and a tri-input stage-arming combiner. Passes lint.
+```
+subuwutuner-cli feature-compile fixtures/samples/<name>.stmod \
+  --def fixtures/demo-pack --arch sh2a
+```
 
-All three will rehydrate cleanly into the designer canvas via the `Load…` button once a project with the demo pack is loaded.
+| Sample | Bytes | What it exercises | Compiles? |
+|---|---|---|---|
+| `clutch-kill.stmod` | 72 | `LoadConstant` + `compare_gt_int` + `not_bool` + `and_bool` + `StoreHookOutput`. Pure synthetic — all constants, no sensor reads. Smallest viable graph through every codegen path. | ✅ |
+| `flat-foot-shift.stmod` | 124 | Clutch + throttle + RPM read from 3 different hooks, threshold compares with default-value constants, AND chain into `ignition_cut.cut_active`. Exercises cross-hook value flow + Float compares. | ✅ |
+| `launch-control.stmod` | 184 | 4 sensor reads, 3 Float compares, 3 ANDs. Same general shape as flat-foot but one stage wider. | ✅ |
+| `flex-fuel.stmod` | — | Read ethanol-content sensor → flex-fuel-scale curve → multiply commanded fuel pulse width → write back. **Blocked** on the `flex_fuel_scale` curve primitive (codegen has no table-lookup primitive yet). | ⬜ |
+
+All four rehydrate cleanly into the designer canvas via `File → Open`
+once a project with the demo pack is loaded.
 
 ## Safety considerations
 
@@ -163,16 +282,37 @@ Custom features are categorically more dangerous than table edits:
 
 ## Scope and timing
 
-Phase 5 is sized at 4–6 weeks in the roadmap. That's the *minimum* for the editor + IR + one codegen backend + the sample packs; expect ~10 weeks realistic if both SH-2A and RH850 backends ship together. This is the single largest feature on the roadmap. The work breaks down roughly:
+The original sizing — 4-6 weeks minimum for editor + IR + one
+codegen backend + samples; ~10 weeks with both backends — was
+conservative. Actual progress:
 
-- Graph data structure + persistence + editor: 2–3 weeks
-- IR + linter + RT-budget analyzer: 2 weeks
-- One codegen backend (SH-2A, the simpler ISA): 2–3 weeks
-- Patch insertion + free-RAM management: 1–2 weeks
-- Sample packs (flat-foot, launch) + docs: 1 week
-- Second codegen backend (RH850): 2–3 weeks if shipping at the same time
+| Slice | Original estimate | Actual |
+|---|---|---|
+| Graph data structure + persistence + editor | 2–3 wk | shipped (Phase 5 designer is in `View → Custom features designer (preview)`; editor canvas is functional with pin labels, defaults, pin-context menus, wire dragging) |
+| IR + linter + RT-budget analyzer | 2 wk | shipped; RT-budget uses placeholder per-Op costs (real per-ISA cycle counts wait on bench profiling) |
+| One codegen backend (SH-2A) | 2–3 wk | shipped: Int + Bool + control flow + Float + Float compares + cross-hook flow + fan-out dedup. Open gaps: `divide_int`, table-lookup primitives. |
+| Patch insertion + free-RAM management | 1–2 wk | not started — bench-rig-blocked. Needs a real ECU's vector table and the firmware's known free-RAM map to develop against. |
+| Sample packs + docs | 1 wk | 4 samples ship (3 compile end-to-end, 1 waits on `flex_fuel_scale` curve primitive). This doc you're reading is the design + current-state ref. |
+| Second backend (RH850) | 2–3 wk | not started; stub returns NotImplemented. Per the original recommendation, RH850 drops first under timing pressure — VA users get custom features, VB waits a release. |
 
-If timing pressure shows up, **drop the RH850 backend first** — VA WRX ships with custom features, VB WRX waits a release. Don't compromise the linter or the brick protection.
+The pieces that REMAIN before custom features ship to a user:
+
+1. **Patch insertion layer** (`src/feature_patch/`) — turns a
+   PatchObject into bytes spliced into a ROM image at the right
+   addresses. Bench-rig-blocked.
+2. **Bench-rig validation** of the SH-2A bytes against a real
+   ECU — every emission so far is byte-exact-tested against the
+   public Renesas encoding but unverified on silicon. The handoff's
+   standing caveat applies.
+3. **Phase 3 transport** (`docs/13-transport.md`) — the channel
+   that delivers a patched ROM to an ECU. OBDX adapter pending.
+4. **Brick recovery story** (`docs/05-improvements.md` §4) —
+   signed-section verification + recovery-mode boot ROM remain
+   the hard ship gate for any user-facing flash.
+
+The Phase 5 *design + tooling* surface is essentially complete and
+the CLI lets you compile features today; the *delivery* path is
+still gated on hardware.
 
 ## Why not just ship Lua
 
