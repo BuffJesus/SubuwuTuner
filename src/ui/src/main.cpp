@@ -233,6 +233,24 @@ std::optional<Theme> parse_theme(std::string_view s) noexcept {
     return std::nullopt;
 }
 
+// Map an autotune lint-kind enum to plain-language descriptive text
+// for end-user display. The library-side `lint_kind_name` returns
+// kebab-cased technical terms ("non-monotonic", "step discontinuity")
+// useful for debug/CLI output but jargon-y for tuners. This wrapper
+// produces a short fix-oriented phrase that explains the problem
+// without requiring familiarity with the underlying enum.
+[[nodiscard]] char const *
+pretty_lint_kind(st::autotune::LintViolationKind kind) noexcept {
+    using K = st::autotune::LintViolationKind;
+    switch (kind) {
+        case K::NonMonotonic:
+            return "neighbor cells out of expected order";
+        case K::StepDiscontinuity:
+            return "neighbor-cell jump exceeds smoothness threshold";
+    }
+    return "lint violation";
+}
+
 // Accent triple — the three shades used everywhere the GUI emphasises
 // a primary action (modal "Create" / "Apply" buttons, ButtonActive,
 // HeaderActive, SliderGrabActive, etc.). Per-theme so contrast with
@@ -385,7 +403,18 @@ enum class ConfirmAction {
 
 struct AppState {
     std::optional<st::Project>               project;
+    // Transient status line shown in the status bar's middle cluster.
+    // Set whenever an action wants to surface a confirmation or a non-
+    // fatal error ("Saved.", "Open dialog error: …"). Auto-clears
+    // after ~5 s so stale messages don't sit indefinitely — the
+    // tick_status_msg() pass in the render loop manages this; call
+    // sites just write the string.
     std::string                              status_msg;
+    // Change-detection shadow + first-seen timestamp for the auto-
+    // clear pass. Touched only by tick_status_msg(). Internal — no
+    // call site reads or writes these directly.
+    std::string                              status_msg_prev;
+    double                                   status_msg_seen_at{0.0};
     std::string                              selected_table_id;
     std::optional<st::Definition::TableData> current_table_data;
     Selection                                selection;
@@ -2109,10 +2138,10 @@ void render_kp_autotune_modal(AppState &state) {
                                 "Lint findings (%zu):",
                                 state.kp_at_lints.size());
             for (auto const &v : state.kp_at_lints) {
-                ImGui::BulletText("cell %zu: %s (%s)",
+                ImGui::BulletText("cell %zu — %s\n    %s",
                                    v.cell_index,
-                                   v.message.c_str(),
-                                   st::autotune::lint_kind_name(v.kind));
+                                   pretty_lint_kind(v.kind),
+                                   v.message.c_str());
             }
         }
     }
@@ -2383,10 +2412,10 @@ void render_maf_autotune_modal(AppState &state) {
                                 "Lint findings (%zu):",
                                 state.maf_at_lints.size());
             for (auto const &v : state.maf_at_lints) {
-                ImGui::BulletText("cells %zu..%zu: %s (%s)",
+                ImGui::BulletText("cells %zu..%zu — %s\n    %s",
                                    v.cell_index, v.cell_index + 1,
-                                   v.message.c_str(),
-                                   st::autotune::lint_kind_name(v.kind));
+                                   pretty_lint_kind(v.kind),
+                                   v.message.c_str());
             }
         }
     }
@@ -5032,12 +5061,48 @@ void render_history_panel(AppState &state) {
     // Quick-action row: walk the cursor all the way down or up.
     bool wants_revert_all  = false;
     bool wants_reapply_all = false;
-    if (ImGui::SmallButton("Revert all")) {
-        wants_revert_all = true;
+    // "Revert all" is destructive (walks the cursor to 0). Use a
+    // two-click arm pattern so a fat-finger doesn't wipe 100+ edits.
+    // First click → label flips to "Click again to confirm" for ~2s
+    // and the button turns red-ish; second click within that window
+    // runs the revert. Timer expires → state resets quietly.
+    constexpr double kRevertArmTtl = 2.0;
+    static double s_revert_armed_at = -1.0;
+    double const now = ImGui::GetTime();
+    bool const armed =
+        s_revert_armed_at >= 0.0
+        && (now - s_revert_armed_at) < kRevertArmTtl;
+    char const *revert_label =
+        armed ? "Click again to confirm" : "Revert all";
+    if (armed) {
+        ImGui::PushStyleColor(ImGuiCol_Button,
+                               ImVec4(0.62f, 0.30f, 0.30f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                               ImVec4(0.74f, 0.36f, 0.36f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                               ImVec4(0.82f, 0.40f, 0.40f, 1.0f));
+    }
+    bool const revert_clicked = ImGui::SmallButton(revert_label);
+    if (armed) ImGui::PopStyleColor(3);
+    if (revert_clicked) {
+        if (armed) {
+            wants_revert_all  = true;
+            s_revert_armed_at = -1.0;
+        } else {
+            s_revert_armed_at = now;
+        }
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Undo every edit — cursor returns to 0 (ignores filter). "
-                          "Redo stays available until you make a new edit.");
+        if (armed) {
+            ImGui::SetTooltip(
+                "About to walk the cursor back through every edit "
+                "(redo stays available — new edits clear it).");
+        } else {
+            ImGui::SetTooltip(
+                "Undo every edit — cursor returns to 0 (ignores filter). "
+                "Click twice to confirm. Redo stays available until you "
+                "make a new edit.");
+        }
     }
     ImGui::SameLine();
     bool const can_reapply = cursor < records.size();
@@ -7055,6 +7120,34 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     ImGui::End();
 }
 
+// Status-bar TTL pass. Called once per frame before render_status_bar
+// to fade out stale transient messages. Detects "new message" via a
+// shadow string + per-message timestamp; after ~5s of the same
+// content, clears it. Call sites just write to state.status_msg — no
+// per-callsite TTL bookkeeping. Edge cases:
+//  - Two consecutive identical messages (e.g. "Saved." twice) only
+//    reset the timer on STRING change. That's the right trade-off:
+//    rapid duplicate writes are usually the same event, and the
+//    alternative (timer reset on every frame the string is set) would
+//    pin the message forever.
+//  - Time source is ImGui::GetTime() (wall-clock seconds since app
+//    start, monotonic). No allocations, no calls outside ImGui.
+constexpr double kStatusMsgTtlSeconds = 5.0;
+
+void tick_status_msg(AppState &state) {
+    double const now = ImGui::GetTime();
+    if (state.status_msg != state.status_msg_prev) {
+        state.status_msg_prev   = state.status_msg;
+        state.status_msg_seen_at = now;
+        return;
+    }
+    if (!state.status_msg.empty()
+        && now - state.status_msg_seen_at >= kStatusMsgTtlSeconds) {
+        state.status_msg.clear();
+        state.status_msg_prev.clear();
+    }
+}
+
 void render_status_bar(AppState &state) {
     auto const *vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(
@@ -7398,6 +7491,7 @@ int main(int argc, char *argv[]) {
             do_redo(state);
         }
 
+        tick_status_msg(state);
         render_menubar(state);
         render_dockspace_host();
         render_sidebar(state);
