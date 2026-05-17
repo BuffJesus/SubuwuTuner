@@ -7206,10 +7206,14 @@ void render_status_bar(AppState &state) {
                 st::policy::profile_name(profile)};
             bool const  is_default  =
                 profile == st::policy::Profile::MotorsportOnly;
+            // Appended "▾" makes the chip read as a menu trigger
+            // without needing a hover. The chip helper renders text
+            // verbatim, so the glyph is part of the label.
+            auto const  chip_label  = profile_str + "  \xE2\x96\xBE";
             if (is_default) {
-                chip(profile_str.c_str(), chip_fg_muted(), chip_bg_muted());
+                chip(chip_label.c_str(), chip_fg_muted(), chip_bg_muted());
             } else {
-                chip(profile_str.c_str(), chip_fg_accent(), chip_bg_accent());
+                chip(chip_label.c_str(), chip_fg_accent(), chip_bg_accent());
             }
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
