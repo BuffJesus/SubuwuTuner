@@ -2300,6 +2300,89 @@ TEST_CASE("Sh2aBackend: add_float operand load uses HookInputPointer deref",
     REQUIRE(seen_fadd);
 }
 
+// ---- Fan-out (shared SSA) -----------------------------------------
+
+TEST_CASE("Sh2aBackend: fanned-out CallPrimitive result is emitted once",
+          "[feature_codegen][sh2a][fanout]") {
+    // Graph: compare_gt_int(LC, LC) → cmp ; and_bool(cmp, true) → a ;
+    // or_bool(cmp, false) → b ; select_bool(_, a, b) → root ; Store.
+    // `cmp` fans out to two consumers (and_bool + or_bool).
+    //
+    // Before the fan-out fix the walk visited compare_gt_int twice —
+    // claimed two RAM slots and emitted the CMP fragment twice, with
+    // both writes targeting the second slot (the first was leaked).
+    // After the fix the walk dedupes by result_id: ONE slot, ONE
+    // emit, shared between consumers.
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 7));
+    m.instructions.push_back(load_const_int(2, 3));
+    ir::Instruction cmp{};
+    cmp.op          = ir::Op::CallPrimitive;
+    cmp.symbol      = "compare_gt_int";
+    cmp.result_type = st::feature::PinType::Bool;
+    cmp.result_id   = 3;
+    cmp.pin_name    = "out";
+    cmp.operands    = {1, 2};
+    m.instructions.push_back(cmp);
+
+    m.instructions.push_back(load_const_bool(4, true));
+    m.instructions.push_back(load_const_bool(5, false));
+    ir::Instruction and_ins{};
+    and_ins.op          = ir::Op::CallPrimitive;
+    and_ins.symbol      = "and_bool";
+    and_ins.result_type = st::feature::PinType::Bool;
+    and_ins.result_id   = 6;
+    and_ins.pin_name    = "out";
+    and_ins.operands    = {3, 4};  // reads cmp
+    m.instructions.push_back(and_ins);
+
+    ir::Instruction or_ins{};
+    or_ins.op          = ir::Op::CallPrimitive;
+    or_ins.symbol      = "or_bool";
+    or_ins.result_type = st::feature::PinType::Bool;
+    or_ins.result_id   = 7;
+    or_ins.pin_name    = "out";
+    or_ins.operands    = {3, 5};   // reads cmp AGAIN — fan-out
+    m.instructions.push_back(or_ins);
+
+    ir::Instruction sel{};
+    sel.op          = ir::Op::CallPrimitive;
+    sel.symbol      = "select_bool";
+    sel.result_type = st::feature::PinType::Bool;
+    sel.result_id   = 8;
+    sel.pin_name    = "out";
+    sel.operands    = {3, 6, 7};   // cmp as cond + fan-out from and/or
+    m.instructions.push_back(sel);
+
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 8));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+
+    // RAM claims: ONE for the output pin (commanded_pw_override) +
+    // ONE each for cmp, and_bool, or_bool (three nested CallPrimitive
+    // results that aren't the root). The select is the root → no slot.
+    // Without dedup `cmp` would claim THREE slots (one per consumer),
+    // for a total of 6 claims.
+    REQUIRE(hp.ram_claims.size() == 4);
+
+    // Count CMP/GT opcodes in the body. compare_gt_int's body fragment
+    // emits CMP/GT R1, R0 (Rm=R1, Rn=R0; encoding 0x3017). Before the
+    // fan-out fix this would appear three times (once per consumer);
+    // after, exactly once.
+    std::size_t cmp_gt_count = 0;
+    for (std::size_t i = 0; i + 1 < hp.code.size(); i += 2) {
+        if (be16_at(hp.code, i) == 0x3017) ++cmp_gt_count;
+    }
+    REQUIRE(cmp_gt_count == 1);
+}
+
 // ---- select_bool / select_float -----------------------------------
 //
 // emit_select_fragment is type-agnostic at the register level — same

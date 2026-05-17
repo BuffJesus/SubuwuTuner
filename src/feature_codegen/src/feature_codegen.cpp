@@ -22,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace st::feature::codegen {
 
@@ -1098,12 +1099,25 @@ struct PrimitiveShape {
 
     // Topological walk: recurse into CallPrimitive operands first so
     // intermediate slots exist by the time the consumer emits.
+    //
+    // Fan-out (shared SSA values): when one CallPrimitive's result
+    // feeds multiple consumers down the tree, the walk would otherwise
+    // visit it once per consumer — wasting a RAM slot per extra visit
+    // and emitting the compute fragment redundantly. `visited` tracks
+    // by result_id so each producer fragment is materialized exactly
+    // once and all consumers share its single slot.
     std::unordered_map<ir::ValueId, std::uint32_t> slots;
+    std::unordered_set<ir::ValueId>                visited;
     std::vector<ir::Instruction const *>           emit_order;
 
     auto const walk = [&](auto &self_ref,
                            ir::Instruction const *prim,
                            bool is_root) -> Status {
+        // Already walked? (Only happens on shared SSA values, since
+        // root primitives are entered exactly once from the caller.)
+        if (!is_root && visited.find(prim->result_id) != visited.end()) {
+            return ok();
+        }
         if (auto s = validate_call_primitive(*prim); !s.has_value()) {
             return failure(s.error());
         }
@@ -1133,6 +1147,7 @@ struct PrimitiveShape {
             slots[prim->result_id] =
                 static_cast<std::uint32_t>(claim_r->address);
             claims.push_back(*claim_r);
+            visited.insert(prim->result_id);
         }
         emit_order.push_back(prim);
         return ok();
