@@ -4581,6 +4581,18 @@ void render_welcome_panel(AppState &state) {
                           "create a new .stune project directory.");
     }
 
+    // First-run-only pack hint. Answers "what do I need to start?"
+    // without forcing the user to open the New Project modal first
+    // to find out. Hidden once the user has any recents — they've
+    // clearly figured out the flow by then.
+    if (!has_recents) {
+        ImGui::Dummy(ImVec2(0.0f, 18.0f));
+        text_centered_disabled(
+            "First time? You'll need an ECU ROM dump + a definition pack.");
+        text_centered_disabled(
+            "The repo ships fixtures/demo-pack/ to explore the UI.");
+    }
+
     // Recents block. Empty list → render nothing here; first-run users
     // see the original clean welcome.
     if (has_recents) {
