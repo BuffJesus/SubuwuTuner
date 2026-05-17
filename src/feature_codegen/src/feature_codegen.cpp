@@ -531,7 +531,7 @@ void emit_not_fragment(FragmentEmitter &fe, PrimitiveOperand op,
     emit_store_r1_to(fe, dst);
 }
 
-// Body fragment for `select_int(cond, true_val, false_val)` → store.
+// Body fragment for `select(cond, true_val, false_val)` → store.
 // First primitive that needs control flow. Layout:
 //
 //   load cond → R0
@@ -547,13 +547,23 @@ void emit_not_fragment(FragmentEmitter &fe, PrimitiveOperand op,
 //   MOV.L R1, @R2
 //
 // Both branch disp values are back-patched by FragmentEmitter::finalize
-// once the body offsets are known. Result type for select is the
-// shared type of true_val/false_val (Int in this slice).
-void emit_select_int_fragment(FragmentEmitter &fe,
-                               PrimitiveOperand cond,
-                               PrimitiveOperand true_val,
-                               PrimitiveOperand false_val,
-                               std::uint32_t    dst) {
+// once the body offsets are known.
+//
+// **Type-agnostic at the register level.** true_val and false_val are
+// always 4-byte words flowing through R1 — whether they came from an
+// Int constant, a canonical 0/1 Bool, or an IEEE 754 binary32 bit
+// pattern is irrelevant to the move/store sequence. The same code
+// path emits select_int, select_bool, and select_float; the
+// PrimitiveShape table records the type so the IR-side type checker
+// catches mismatches before we get here. Float values DON'T go
+// through the FPU here because there's no arithmetic — we're just
+// shuffling a 32-bit word from a literal/RAM source to a RAM
+// destination.
+void emit_select_fragment(FragmentEmitter &fe,
+                           PrimitiveOperand cond,
+                           PrimitiveOperand true_val,
+                           PrimitiveOperand false_val,
+                           std::uint32_t    dst) {
     auto use_false = fe.create_label();
     auto done      = fe.create_label();
 
@@ -746,9 +756,11 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
         emit_not_fragment(fe, operands[0], dst);
         return ok();
     }
-    if (symbol == "select_int") {
-        emit_select_int_fragment(fe, operands[0], operands[1],
-                                  operands[2], dst);
+    if (symbol == "select_int"
+        || symbol == "select_bool"
+        || symbol == "select_float") {
+        emit_select_fragment(fe, operands[0], operands[1],
+                              operands[2], dst);
         return ok();
     }
     if (symbol == "add_float") {
@@ -784,9 +796,10 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
     msg.append("' not yet implemented (slice supports add_int, "
                "subtract_int, multiply_int, compare_lt_int, "
                "compare_gt_int, compare_eq_int, and_bool, or_bool, "
-               "not_bool, select_int, add_float, subtract_float, "
-               "multiply_float, divide_float, compare_lt_float, "
-               "compare_gt_float, compare_eq_float)");
+               "not_bool, select_int, select_bool, select_float, "
+               "add_float, subtract_float, multiply_float, "
+               "divide_float, compare_lt_float, compare_gt_float, "
+               "compare_eq_float)");
     return failure(ErrorCode::NotImplemented, std::move(msg));
 }
 
@@ -1011,6 +1024,7 @@ struct PrimitiveShape {
         {"or_bool",      {2, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
         {"not_bool",     {1, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
         {"select_int",   {3, {PinType::Bool, PinType::Int,  PinType::Int},  PinType::Int}},
+        {"select_bool",  {3, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
         {"add_float",        {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
         {"subtract_float",   {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
         {"multiply_float",   {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
@@ -1018,6 +1032,7 @@ struct PrimitiveShape {
         {"compare_lt_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},
         {"compare_gt_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},
         {"compare_eq_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},
+        {"select_float", {3, {PinType::Bool, PinType::Float, PinType::Float}, PinType::Float}},
     };
     for (auto const &e : kTable) {
         if (e.name == symbol) return &e.shape;
@@ -1037,9 +1052,10 @@ struct PrimitiveShape {
         msg.append("' not yet implemented (slice supports add_int, "
                    "subtract_int, multiply_int, compare_lt_int, "
                    "compare_gt_int, compare_eq_int, and_bool, or_bool, "
-                   "not_bool, select_int, add_float, subtract_float, "
-                   "multiply_float, divide_float, compare_lt_float, "
-                   "compare_gt_float, compare_eq_float)");
+                   "not_bool, select_int, select_bool, select_float, "
+                   "add_float, subtract_float, multiply_float, "
+                   "divide_float, compare_lt_float, compare_gt_float, "
+                   "compare_eq_float)");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
     if (prim.operands.size() != shape->arity) {

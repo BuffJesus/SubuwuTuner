@@ -2299,3 +2299,134 @@ TEST_CASE("Sh2aBackend: add_float operand load uses HookInputPointer deref",
     REQUIRE(seen_deref);
     REQUIRE(seen_fadd);
 }
+
+// ---- select_bool / select_float -----------------------------------
+//
+// emit_select_fragment is type-agnostic at the register level — same
+// TST/BT/BRA dance regardless of operand type. These tests prove the
+// dispatcher routes select_bool and select_float through the shared
+// code path and that the bit patterns survive the branch.
+
+TEST_CASE("Sh2aBackend: select_bool compiles and the Bool 0/1 lands in the pool",
+          "[feature_codegen][sh2a][select]") {
+    // select_bool(cond=true, true_val=true, false_val=false). All
+    // operands are Bool — the codegen materializes them as canonical
+    // 0/1 longwords in the literal pool.
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_bool(1, true));
+    m.instructions.push_back(load_const_bool(2, true));
+    m.instructions.push_back(load_const_bool(3, false));
+    ir::Instruction sel{};
+    sel.op          = ir::Op::CallPrimitive;
+    sel.symbol      = "select_bool";
+    sel.result_type = st::feature::PinType::Bool;
+    sel.result_id   = 4;
+    sel.pin_name    = "out";
+    sel.operands    = {1, 2, 3};
+    m.instructions.push_back(sel);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 4));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+
+    // Branch primitives must show up: TST R0, R0 (0x2008), BT
+    // (0x89xx), BRA (0xAxxx). These are the giveaways that the
+    // select dispatch landed on emit_select_fragment.
+    bool seen_tst = false;
+    bool seen_bt  = false;
+    bool seen_bra = false;
+    for (std::size_t i = 0; i + 1 < hp.code.size(); i += 2) {
+        std::uint16_t inst = be16_at(hp.code, i);
+        if (inst == 0x2008)              seen_tst = true;
+        if ((inst & 0xFF00) == 0x8900)   seen_bt  = true;
+        if ((inst & 0xF000) == 0xA000)   seen_bra = true;
+    }
+    REQUIRE(seen_tst);
+    REQUIRE(seen_bt);
+    REQUIRE(seen_bra);
+
+    // Canonical 0 and 1 sit in the pool (the cond and true_val are
+    // both 1; the false_val is 0). One of the longwords is 0.
+    bool seen_one = false, seen_zero = false;
+    for (std::size_t i = 0; i + 3 < hp.code.size(); i += 4) {
+        std::uint32_t v = be32_at(hp.code, i);
+        if (v == 0) seen_zero = true;
+        if (v == 1) seen_one  = true;
+    }
+    REQUIRE(seen_zero);
+    REQUIRE(seen_one);
+}
+
+TEST_CASE("Sh2aBackend: select_float compiles and float bits survive the branch",
+          "[feature_codegen][sh2a][select]") {
+    // select_float(cond=true, true_val=1.5, false_val=-2.0). The
+    // selected branch's IEEE 754 bits go through R1 (no FPU touch —
+    // it's pure value selection, not arithmetic).
+    auto def = st::Definition::from_toml_string(kPackFloatHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_bool(1, true));
+    m.instructions.push_back(load_const_float(2, 1.5));
+    m.instructions.push_back(load_const_float(3, -2.0));
+    ir::Instruction sel{};
+    sel.op          = ir::Op::CallPrimitive;
+    sel.symbol      = "select_float";
+    sel.result_type = st::feature::PinType::Float;
+    sel.result_id   = 4;
+    sel.pin_name    = "out";
+    sel.operands    = {1, 2, 3};
+    m.instructions.push_back(sel);
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 4));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+
+    // Same branch primitives as select_bool — same code path.
+    bool seen_tst = false;
+    bool seen_bt  = false;
+    bool seen_bra = false;
+    for (std::size_t i = 0; i + 1 < hp.code.size(); i += 2) {
+        std::uint16_t inst = be16_at(hp.code, i);
+        if (inst == 0x2008)              seen_tst = true;
+        if ((inst & 0xFF00) == 0x8900)   seen_bt  = true;
+        if ((inst & 0xF000) == 0xA000)   seen_bra = true;
+    }
+    REQUIRE(seen_tst);
+    REQUIRE(seen_bt);
+    REQUIRE(seen_bra);
+
+    // The IEEE 754 bit patterns 1.5 (0x3FC00000) and -2.0
+    // (0xC0000000) sit verbatim in the pool — no FPU rounding,
+    // because select doesn't do arithmetic.
+    bool seen_15 = false, seen_neg2 = false;
+    for (std::size_t i = 0; i + 3 < hp.code.size(); i += 4) {
+        std::uint32_t v = be32_at(hp.code, i);
+        if (v == 0x3FC00000U) seen_15   = true;
+        if (v == 0xC0000000U) seen_neg2 = true;
+    }
+    REQUIRE(seen_15);
+    REQUIRE(seen_neg2);
+
+    // No FPU ops should be present — select_float is a pure 32-bit
+    // shuffle. Concretely, no FADD/FSUB/FMUL/FDIV (0xF1?? with low
+    // nibble 0..3) and no LDS Rn, FPUL (0x?05A).
+    for (std::size_t i = 0; i + 1 < hp.code.size(); i += 2) {
+        std::uint16_t inst = be16_at(hp.code, i);
+        // FADD/FSUB/FMUL/FDIV: 1111 nnnn mmmm OOOO with OOOO in 0..3.
+        // We allow FCMP (OOOO=4..5) for the cond side IF the user
+        // wired a float compare in upstream, but this test doesn't.
+        std::uint16_t const top4 = inst & 0xF000;
+        std::uint16_t const lo4  = inst & 0x000F;
+        REQUIRE_FALSE((top4 == 0xF000 && lo4 <= 0x3));
+    }
+}

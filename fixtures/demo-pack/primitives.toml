@@ -202,6 +202,19 @@ outputs = [
 ]
 
 [[primitive]]
+id           = "select_bool"
+display_name = "Select (ternary, bool)"
+description  = "Returns `t` when cond is true, otherwise `f` — bool operands. Useful for short-circuit-style logic where the selected branch is itself a boolean."
+inputs = [
+  { name = "cond", type = "bool" },
+  { name = "t",    type = "bool" },
+  { name = "f",    type = "bool" },
+]
+outputs = [
+  { name = "out", type = "bool" },
+]
+
+[[primitive]]
 id           = "and_bool"
 display_name = "AND"
 description  = "Logical AND of two booleans."
