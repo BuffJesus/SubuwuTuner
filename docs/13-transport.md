@@ -123,21 +123,63 @@ Implementation strategy:
 
 Risks: J2534 v04.04 vs v05.00 ABI differences (we target v04.04 because Tactrix's adapter implements that). Vendor DLLs vary in quality — we keep a per-adapter quirk table in `transport_j2534/quirks.cpp`.
 
-### OBDX Pro VX (STN2120-based, native USB / Wi-Fi / BT)
+### OBDX Pro VX (STN2120 silicon; native USB / Wi-Fi / BT)
 
-OBDX exposes both an ELM-compatible AT command set and a richer native protocol. We use the native protocol for performance, falling back to AT only for adapter probing. Native protocol is well-documented by OBDX.
+OBDX runs the STN2120 chip but the firmware presents its **own** command set — *not* the STN command set documented by Scantool.net (no `STSBR`/`STCFCP`/`STMA`). Two modes:
+
+- **ELM** — string-based, ELM327 v1.4-compatible AT command set, plus a small `DX *` extension set (`DX DP`, `DX SD`, `DX VS1/4`, `DX PT0/1`, `DX SM`, `DX RA`, `DX RE`, `DX US`, `DX I`). Default mode at power-on; prompts with `>`.
+- **DVI** (Direct Vehicle Interface) — binary, framed, much faster. Enabled by sending the ELM string `DX DP 1`. **This is the mode we target.**
+
+DVI framing (per *OBDX Pro VT Command Set Reference Guide v1.06*, the public spec):
+
+```
+Request:  CMD  LEN  [DATA…]  CHK
+Response: (CMD|0x10)  LEN  [DATA…]  CHK     ; response opcode = request opcode with bit 4 set
+Error:    0x7F  LEN  CMD  ERRCODE  CHK
+Checksum: sum of all preceding bytes, then bitwise NOT, kept as a uint8.
+```
+
+Documented opcodes we'll use:
+
+| Opcode | Name | Notes |
+|---|---|---|
+| `0x08` | RX from network (small, ≤255 B length) | normal datalogging path |
+| `0x09` | RX from network (large, 2-byte length) | for fragmented or batched reads |
+| `0x10` | TX to network (≤255 B) | normal request emission |
+| `0x11` | TX to network (large, up to 12000 B) | bulk uploads — relevant for Phase 5 flash blocks |
+| `0x22` | Scantool info (sub-ops 0x01–0x06: HW / FW / model / name / serial / supported protocols) | capability probe at session start |
+| `0x24` | Settings (sub-op `0x03` = enable µs-resolution RX timestamp) | turn on at log-session start so frame arrival times come from the adapter, not the host |
+| `0x25` | Soft reboot back to ELM mode | clean shutdown |
+| `0x31` | Set OBD protocol + enable/disable network + switch ELM↔DVI | post-handshake configuration |
+| `0x33` | VPW-specific (15 sub-ops) | unused for Subaru |
+| `0x3A` | ADC — read DLC pin 16 voltage | battery-health check before flash |
 
 Implementation strategy:
 
-- Open the USB CDC ACM endpoint via libusb (Windows + Linux) or the platform native serial driver (macOS, since Apple's I/O Kit handles CDC USB devices). BT and Wi-Fi route to virtual COM ports we treat identically.
-- Send `STN` extension commands for CAN config (`STSBR` set baud, `STCFCP` configure CAN flow control protocol, `STMA` monitor all).
-- ISO-TP fragmentation handled by the adapter when configured; we receive whole responses.
+- Open the USB CDC ACM endpoint via libusb (Windows + Linux) or the platform native serial driver (macOS). BT and Wi-Fi route to virtual COM ports we treat identically.
+- Handshake in ELM mode: send `AT @1` (probe), confirm OBDX signature, send `DX DP 1` to switch into DVI, then drive everything else via the binary opcodes above.
+- ISO-TP fragmentation is handled by the adapter when configured; we receive whole application-layer responses. CAN filter / flow-control IDs go in via `0x31` setup + filter table.
+- VX supported-protocol matrix is **HSCAN + J1850 VPW + GM UART ALDL only** (no K-line / SSM-over-K). VA/VB WRX is HSCAN-only so the VX covers our v1.0 targets; legacy Subaru SSM2-over-K-line is out of scope for this adapter and we steer those users to OpenPort 2.0.
 
-Risks: OBDX-specific firmware quirks aren't as widely tested in the community as Tactrix. We test against the developer's own adapter once it arrives and document any quirks discovered.
+Risks:
+
+- The GitHub org (`github.com/OBDXPro`) was effectively dormant 2023-05 → 2025-11 on source-bearing repos; treat the v1.06 PDF as the stable spec and budget for trial-and-error on undocumented edges (CAN-side ISO-TP setup details, firmware-version branching, exact USB framing on the wire).
+- Their J2534 driver is also closed-source but exposes a debug-log toggle at `%AppData%\OBDX Pro\J2534\Settings\OBDXFT_Config.cfg` (`LoggingEnabled=1` → logs land in `…\J2534\Logs`). Useful for diagnosing other tools' behavior against an OBDX, even though we won't go through their J2534 layer ourselves.
+
+Clean-room boundary (per `docs/15-clean-room-engineering.md`):
+
+- The **VT v1.06 PDF** is a public protocol spec with no embargo clause — implement against it freely, cite it in source comments.
+- The `OBDXPro/OBDX-Templates` C# samples have **no SPDX license file** and only a README sentence permitting use in commercial products. Treat them as API-shape reference only: one engineer reads them to understand the lifecycle (search → connect → set-protocol → set-filter → enable → write/read), writes a plain-English spec, and a different engineer implements the bytes from the PDF.
+- The `OBDXPro/J2534` installers and `OBDXPro/OBDX-Pro-VX-GT-FT-USB-Driver` repo are **all-rights-reserved binaries** ("Redistribution, modification, reverse engineering, or derivative works are strictly prohibited"). Use as-shipped; do not decompile. We don't depend on them in our pipeline.
+- The closed-source `OBDXWindows` / `OBDXMAUI` NuGets are .NET-only, last updated 2023-06, and unsuitable for our C++/cross-platform target. Skip.
+
+### OBDX J2534 vs. native DVI
+
+OBDX *also* ships a J2534 v04.04 DLL, and we have a `transport_j2534` path. The catch: per the VT v1.06 PDF §1.2, **the OBDX J2534 DLL is internally just a DVI multiplexer** — it speaks the same DVI bytes we'd speak directly. Going through their J2534 layer adds a Windows-only dependency on their installer for zero protocol gain. So `transport_obdx` targets DVI direct over USB CDC, and a user with an OBDX adapter routes through `transport_obdx`, not `transport_j2534`. Tactrix users go through `transport_j2534`.
 
 ### OBDLink (STN-series — STN1110, STN2100, etc.)
 
-Same approach as OBDX (they share the STN chip family). Different USB VID/PID and slightly different default config. We share most of `transport_obdx` with `transport_stn`.
+OBDLink shares the STN chip family with OBDX but ships the **real** STN command set (`STSBR`, `STCFCP`, `STMA`, `STPX`, etc. per Scantool.net's docs), not OBDX's `DX *` extensions. So `transport_stn` and `transport_obdx` share USB CDC handling but diverge on the command vocabulary above — no shared protocol code.
 
 ### ELM327 (read-only, no write support)
 
@@ -310,5 +352,6 @@ Concretely:
 ## Open questions
 
 - **Tactrix runtime on macOS arm64.** Their Mac driver historically lagged. May require shipping x64-only on Mac for v1, or pushing OBDX as the recommended adapter for M-series users.
-- **OBDX firmware versions.** Different firmware revisions may have subtly different STN extensions. Test against the dev's adapter and capture quirks as we find them.
+- **OBDX firmware versions.** Different firmware revisions may have subtly different DVI quirks (the v1.06 PDF is the documented spec, but per-revision behavior on, e.g., timestamp resolution or the exact protocol-switch handshake may drift). Test against the dev's adapter on receipt, log the `0x22` sub-op `0x02` firmware string into a per-adapter quirks table.
+- **Exact CAN-side DVI configuration sequence.** The v1.06 PDF documents VPW concretely (filter, CRC, 1×/4× timings) but is thinner on CAN ISO-TP setup — the `0x31` "set protocol + enable" plus filter table layout will need trial-and-error against a known-good CAN target before we trust it on Subaru. Capture a session log via the OBDX J2534 debug toggle as a reference trace.
 - **Bench-mode (ECU on a bench harness) protocol.** The Phase-4 bench rig assumed in `docs/08` may need a different connect handshake than an in-car ECU; design TBD until we have a bench ECU to experiment with.
