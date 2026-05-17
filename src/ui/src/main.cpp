@@ -5283,13 +5283,17 @@ void render_features_designer(AppState &state) {
                         [&](st::HookSignal const &s,
                             st::feature::PinDirection d) {
                             auto pt = st::feature::parse_pin_type(s.type);
-                            std::string const pin_label =
-                                !s.label.empty() ? s.label : s.name;
+                            // Canonical `name` goes into Pin.name so
+                            // codegen can resolve it back to the pack's
+                            // HookSignal; pretty `label` (if any)
+                            // populates Pin.label for display only.
+                            // Before this fix Pin.name held the label,
+                            // which silently broke compilation.
                             n.pins.push_back(st::feature::Pin{
                                 next_pin++,
-                                pin_label,
+                                s.name,
                                 pt.value_or(st::feature::PinType::Float),
-                                d, s.unit});
+                                d, s.unit, s.label});
                         };
                     for (auto const &s : decl_inputs)  push_pin(s, in_dir);
                     for (auto const &s : decl_outputs) push_pin(s, out_dir);
@@ -5649,25 +5653,30 @@ void render_features_designer(AppState &state) {
     auto const pin_display_text =
         [&](st::feature::Node const &node,
             st::feature::Pin const &p) -> std::string {
+            // Display prefers `label` (the pretty name from the pack);
+            // falls back to `name` (the snake_case canonical) when no
+            // label was supplied. Codegen lookups still use `name`.
+            std::string const &disp =
+                !p.label.empty() ? p.label : p.name;
             if (p.direction == st::feature::PinDirection::Input
                 && !is_pin_driven(node.id, p.id)
                 && p.default_value.has_value()) {
                 char buf[96];
                 if (p.type == st::feature::PinType::Bool) {
                     std::snprintf(buf, sizeof buf, "%s = %s",
-                                   p.name.c_str(),
+                                   disp.c_str(),
                                    *p.default_value > 0.5 ? "true" : "false");
                 } else if (p.type == st::feature::PinType::Int) {
                     std::snprintf(buf, sizeof buf, "%s = %lld",
-                                   p.name.c_str(),
+                                   disp.c_str(),
                                    static_cast<long long>(*p.default_value));
                 } else {
                     std::snprintf(buf, sizeof buf, "%s = %g",
-                                   p.name.c_str(), *p.default_value);
+                                   disp.c_str(), *p.default_value);
                 }
                 return buf;
             }
-            return p.name;
+            return disp;
         };
 
     // Pending default-value mutation, applied after the loop. Empty
@@ -6039,13 +6048,25 @@ void render_features_designer(AppState &state) {
             bool const pin_hovered = ImGui::IsItemHovered();
             bool const pin_active  = ImGui::IsItemActive();
             if (pin_hovered) any_node_pin_hovered = true;
-            // Tooltip with type info on hover.
+            // Tooltip: prefers the pretty label, parenthesizes the
+            // canonical name when both are present (so users can see
+            // the snake_case id needed for hand-authoring .stmod
+            // files or for codegen error messages).
             if (pin_hovered) {
-                ImGui::SetTooltip("%s : %s%s%s",
-                                   p.name.c_str(),
-                                   st::feature::pin_type_name(p.type),
-                                   p.unit.empty() ? "" : "  ",
-                                   p.unit.c_str());
+                if (!p.label.empty() && p.label != p.name) {
+                    ImGui::SetTooltip("%s (%s) : %s%s%s",
+                                       p.label.c_str(),
+                                       p.name.c_str(),
+                                       st::feature::pin_type_name(p.type),
+                                       p.unit.empty() ? "" : "  ",
+                                       p.unit.c_str());
+                } else {
+                    ImGui::SetTooltip("%s : %s%s%s",
+                                       p.name.c_str(),
+                                       st::feature::pin_type_name(p.type),
+                                       p.unit.empty() ? "" : "  ",
+                                       p.unit.c_str());
+                }
             }
             // Start wiring on drag-out from a pin. The wiring is
             // bi-directional intent: dragging from an output starts a
@@ -6083,9 +6104,16 @@ void render_features_designer(AppState &state) {
                         : 0.0f;
             }
             if (ImGui::BeginPopup(pin_popup_id)) {
-                ImGui::TextDisabled("%s : %s",
-                                     p.name.c_str(),
-                                     st::feature::pin_type_name(p.type));
+                if (!p.label.empty() && p.label != p.name) {
+                    ImGui::TextDisabled("%s (%s) : %s",
+                                         p.label.c_str(),
+                                         p.name.c_str(),
+                                         st::feature::pin_type_name(p.type));
+                } else {
+                    ImGui::TextDisabled("%s : %s",
+                                         p.name.c_str(),
+                                         st::feature::pin_type_name(p.type));
+                }
                 ImGui::Separator();
                 bool any_edge = false;
                 for (auto const &e : state.features_graph.edges()) {

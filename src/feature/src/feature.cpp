@@ -82,6 +82,9 @@ std::string to_toml(Graph const &g) {
                 << ", type = " << toml_quote(pin_type_name(p.type))
                 << ", direction = " << toml_quote(pin_direction_name(p.direction))
                 << ", unit = " << toml_quote(p.unit);
+            if (!p.label.empty()) {
+                out << ", label = " << toml_quote(p.label);
+            }
             if (p.default_value.has_value()) {
                 out << ", default = " << *p.default_value;
             }
@@ -186,7 +189,8 @@ Result<Graph> from_toml(std::string_view text) {
                     }
                     auto const type_s = (*ptbl)["type"].value_or<std::string>("");
                     auto const dir_s  = (*ptbl)["direction"].value_or<std::string>("");
-                    p.unit = (*ptbl)["unit"].value_or<std::string>("");
+                    p.unit  = (*ptbl)["unit"].value_or<std::string>("");
+                    p.label = (*ptbl)["label"].value_or<std::string>("");
                     auto const t = parse_pin_type(type_s);
                     auto const d = parse_pin_direction(dir_s);
                     if (!t.has_value() || !d.has_value()) {

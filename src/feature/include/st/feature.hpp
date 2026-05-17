@@ -71,6 +71,10 @@ enum class PinDirection : std::uint8_t {
 
 struct Pin {
     PinId        id{};
+    // Canonical identifier — must match the pack's HookSignal `name`
+    // (snake_case by convention) so the codegen can resolve the pin
+    // back to its firmware address. NEVER use the display label here;
+    // mismatched name vs canonical = silent codegen lookup failure.
     std::string  name;
     PinType      type{PinType::Float};
     PinDirection direction{PinDirection::Input};
@@ -78,6 +82,12 @@ struct Pin {
     // form for now; the unit-checking pass in a later phase will
     // formalize the small set of canonical names a Graph may use.
     std::string  unit;
+    // Human-readable display label ("Throttle %", "Engine RPM").
+    // Optional — when empty, displays fall back to `name`. The pack's
+    // HookSignal `label` field flows into this on Insert. Decoupling
+    // it from `name` lets the canvas show pretty labels while the
+    // codegen lookup stays on canonical names.
+    std::string  label;
     // Per-instance constant supplied to an Input pin when no edge
     // drives it. Stored as double regardless of PinType (Int casts,
     // Bool reads `value > 0.5`) so the wire format stays uniform.
@@ -86,18 +96,20 @@ struct Pin {
     // empty default + no driver as "not driven".
     std::optional<double> default_value;
 
-    // Five-argument constructor to keep the historical brace-init
-    // shape (id, name, type, direction, unit) working without
-    // forcing every call site to spell out an empty default_value.
-    // Default and copy/move stay synthesized.
+    // Constructor accepts the historical 5-arg shape (id, name, type,
+    // direction, unit) plus an optional sixth label. Existing call
+    // sites that pass five args still compile; new code spells out the
+    // label explicitly. Default and copy/move stay synthesized.
     Pin() = default;
     Pin(PinId id_, std::string name_, PinType type_,
-         PinDirection direction_, std::string unit_)
+         PinDirection direction_, std::string unit_,
+         std::string label_ = "")
         : id(id_)
         , name(std::move(name_))
         , type(type_)
         , direction(direction_)
-        , unit(std::move(unit_)) {}
+        , unit(std::move(unit_))
+        , label(std::move(label_)) {}
 };
 
 struct Node {
