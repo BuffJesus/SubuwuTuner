@@ -139,6 +139,41 @@ void emit_load_const_store_sequence(std::vector<std::uint8_t> &code,
     emit_be32(code, destination_address);
 }
 
+// Emit the "load from hook-input address, dereference, store to RAM
+// slot" sequence. source_address holds the firmware variable backing
+// a hook-input pin; destination_address is the RAM slot allocated for
+// the hook-output pin the Store targets.
+//
+//   offset  bytes        instruction
+//   0       D002         MOV.L @(2, PC), R0  ; R0 = source pointer
+//   2       6002         MOV.L @R0, R0       ; R0 = mem[R0] (the value)
+//   4       D102         MOV.L @(2, PC), R1  ; R1 = destination pointer
+//   6       2102         MOV.L R0, @R1       ; mem[R1] = R0
+//   8       000B         RTS
+//   10      0009         NOP                 ; delay slot
+//   12      <src>        literal: source address (big-endian)
+//   16      <dst>        literal: destination address (big-endian)
+//
+// 6 instructions × 2 bytes = 12 bytes, which is already 4-aligned, so
+// no padding NOP is needed (unlike the const→store shape).
+//
+// PC-relative formula: target = ((this_pc + 4) & ~3) + disp*4.
+//   PC=0: (4 & ~3) = 4; for target 12, disp = (12-4)/4 = 2.
+//   PC=4: (8 & ~3) = 8; for target 16, disp = (16-8)/4 = 2.
+void emit_load_hook_store_sequence(std::vector<std::uint8_t> &code,
+                                    std::uint32_t source_address,
+                                    std::uint32_t destination_address) {
+    using namespace sh2a;
+    emit_be16(code, enc_mov_l_disp_pc(Reg::R0, 2));            // source ptr
+    emit_be16(code, enc_mov_l_at_reg_reg(Reg::R0, Reg::R0));   // deref
+    emit_be16(code, enc_mov_l_disp_pc(Reg::R1, 2));            // dest ptr
+    emit_be16(code, enc_mov_l_reg_at_reg(Reg::R0, Reg::R1));   // store
+    emit_be16(code, enc_rts());
+    emit_be16(code, enc_nop());                                // delay slot
+    emit_be32(code, source_address);
+    emit_be32(code, destination_address);
+}
+
 // Look up a hook by id in the loaded definition. Linear scan — pack
 // hook counts are small (<<100 in practice).
 [[nodiscard]] Hook const *find_hook(Definition const &def,
@@ -149,16 +184,25 @@ void emit_load_const_store_sequence(std::vector<std::uint8_t> &code,
     return nullptr;
 }
 
-// Locate the LoadConstant Instruction that produced `value_id`.
-// Returns nullptr if `value_id` doesn't resolve to any LoadConstant —
-// caller turns that into a NotImplemented error (the operand came
-// from a non-LoadConstant op, which the slice doesn't support yet).
-[[nodiscard]] ir::Instruction const *find_load_constant(
-    ir::Module const &m, ir::ValueId value_id) noexcept {
+// Look up a hook's input pin by name (matches a `HookSignal` in the
+// hook's `inputs` array — the data-out-from-ECU side; not the
+// graph-side "input pin" of the user's logic). Returns nullptr if
+// the hook doesn't declare that pin.
+[[nodiscard]] HookSignal const *find_hook_input(Hook const &h,
+                                                 std::string_view name) noexcept {
+    for (auto const &s : h.inputs) {
+        if (s.name == name) return &s;
+    }
+    return nullptr;
+}
+
+// Locate the producing Instruction for `value_id`. Returns nullptr
+// if no instruction in the module produces it. Caller is responsible
+// for verifying the op kind is one the slice supports.
+[[nodiscard]] ir::Instruction const *find_producer(ir::Module const &m,
+                                                    ir::ValueId value_id) noexcept {
     for (auto const &ins : m.instructions) {
-        if (ins.op == ir::Op::LoadConstant && ins.result_id == value_id) {
-            return &ins;
-        }
+        if (ins.result_id == value_id) return &ins;
     }
     return nullptr;
 }
@@ -183,26 +227,22 @@ struct HookWork {
 
 Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
                                           Definition const &def) {
-    // First pass: refuse anything outside the LoadConstant + Store-Int
-    // shape with a specific per-Op message so callers know exactly
-    // which feature is still pending. The shape rejection is structural
-    // (which Op appeared), the per-Store checks below are semantic
-    // (whether the LoadConstant operand is Int, etc.).
+    // First pass: refuse anything outside the supported op set with a
+    // specific per-Op message so callers know exactly which feature
+    // is still pending. The shape rejection is structural (which Op
+    // appeared), the per-Store checks below are semantic (whether the
+    // source op is one we can emit, whether types match, etc.).
     for (auto const &ins : m.instructions) {
         switch (ins.op) {
             case ir::Op::LoadConstant:
-            case ir::Op::StoreHookOutput:
-                break;  // supported in this slice
             case ir::Op::LoadHookInput:
-                return failure(ErrorCode::NotImplemented,
-                               "SH-2A backend: LoadHookInput not yet "
-                               "implemented (slice supports only "
-                               "LoadConstant + StoreHookOutput)");
+            case ir::Op::StoreHookOutput:
+                break;  // supported
             case ir::Op::CallPrimitive:
                 return failure(ErrorCode::NotImplemented,
                                "SH-2A backend: CallPrimitive not yet "
-                               "implemented (slice supports only "
-                               "LoadConstant + StoreHookOutput)");
+                               "implemented (slice supports LoadConstant, "
+                               "LoadHookInput, and StoreHookOutput)");
         }
     }
 
@@ -226,31 +266,43 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
                            "exactly one operand");
         }
         // Find the source instruction. Slice rule: it must be a
-        // LoadConstant. Anything else (LoadHookInput / CallPrimitive)
-        // was caught by the first-pass filter, but a Store consuming
-        // a non-existent ValueId is its own error.
-        ir::Instruction const *src =
-            find_load_constant(m, ins.operands[0]);
+        // LoadConstant or LoadHookInput (a Store consuming the result
+        // of a CallPrimitive was caught by the first-pass filter).
+        // A Store consuming a non-existent ValueId is its own error.
+        ir::Instruction const *src = find_producer(m, ins.operands[0]);
         if (src == nullptr) {
-            return failure(ErrorCode::NotImplemented,
+            return failure(ErrorCode::ParseError,
                            "SH-2A backend: StoreHookOutput operand "
-                           "does not resolve to a LoadConstant (only "
-                           "direct LoadConstant operands supported in "
-                           "this slice)");
+                           "does not resolve to any producing instruction "
+                           "(invariant: lower() should assign result_id "
+                           "to every value-producing op)");
+        }
+        if (src->op != ir::Op::LoadConstant
+            && src->op != ir::Op::LoadHookInput) {
+            return failure(ErrorCode::NotImplemented,
+                           "SH-2A backend: StoreHookOutput source must "
+                           "be a LoadConstant or LoadHookInput in this "
+                           "slice");
         }
 
         // Int only in this slice. Float/Bool need narrowing /
         // truncation considerations we defer to follow-up bundles.
+        // LoadHookInput shares the same constraint because the
+        // emitted MOV.L moves 4 bytes regardless — Float/Bool would
+        // emit the same bytes, but signalling the type-narrowing
+        // decision is the safer path.
         if (src->result_type != PinType::Int) {
-            std::string msg{
-                "SH-2A backend: LoadConstant of type "};
+            std::string msg{"SH-2A backend: "};
+            msg.append(ir::op_name(src->op));
+            msg.append(" of type ");
             msg.append(pin_type_name(src->result_type));
             msg.append(" not yet implemented (slice supports Int "
                        "only — Float bit-cast and Bool widening "
                        "land in follow-up bundles)");
             return failure(ErrorCode::NotImplemented, std::move(msg));
         }
-        if (!src->constant_value.has_value()) {
+        if (src->op == ir::Op::LoadConstant
+            && !src->constant_value.has_value()) {
             return failure(ErrorCode::ParseError,
                            "SH-2A backend: LoadConstant has no "
                            "constant_value (lower() invariant violation)");
@@ -316,25 +368,74 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
             dst_addr = slot_it->second;
         }
 
-        // Encode the constant as a 32-bit signed value (Int slice).
-        // Double → int32 cast is bounded by the IR's invariant that
-        // an Int-typed LoadConstant's constant_value came from a
-        // pin default that the editor/loader stored as a finite
-        // integer-representable double; out-of-range values are a
-        // pack/graph authoring bug we surface as ParseError so the
-        // user fixes the .stmod, not the codegen.
-        double const v = *src->constant_value;
-        if (v < -2147483648.0 || v > 2147483647.0) {
-            std::string msg{"SH-2A backend: LoadConstant value "};
-            msg.append(std::to_string(v));
-            msg.append(" out of int32 range");
-            return failure(ErrorCode::ParseError, std::move(msg));
-        }
-        auto const i32 = static_cast<std::int32_t>(v);
-        std::uint32_t u32 = 0;
-        std::memcpy(&u32, &i32, sizeof u32);
+        if (src->op == ir::Op::LoadConstant) {
+            // Encode the constant as a 32-bit signed value (Int slice).
+            // Double → int32 cast is bounded by the IR's invariant that
+            // an Int-typed LoadConstant's constant_value came from a
+            // pin default that the editor/loader stored as a finite
+            // integer-representable double; out-of-range values are a
+            // pack/graph authoring bug we surface as ParseError so the
+            // user fixes the .stmod, not the codegen.
+            double const v = *src->constant_value;
+            if (v < -2147483648.0 || v > 2147483647.0) {
+                std::string msg{"SH-2A backend: LoadConstant value "};
+                msg.append(std::to_string(v));
+                msg.append(" out of int32 range");
+                return failure(ErrorCode::ParseError, std::move(msg));
+            }
+            auto const i32 = static_cast<std::int32_t>(v);
+            std::uint32_t u32 = 0;
+            std::memcpy(&u32, &i32, sizeof u32);
 
-        emit_load_const_store_sequence(work.code, u32, dst_addr);
+            emit_load_const_store_sequence(work.code, u32, dst_addr);
+        } else {
+            // LoadHookInput — read from the hook's input-pin address
+            // and store to the output RAM slot. The pin lives on the
+            // SAME hook that produced the value (LoadHookInput's
+            // symbol field). For this slice we require the Store and
+            // the Load to be on the same hook — multi-hook flows need
+            // a register-spill mechanism that arrives with primitives.
+            Hook const *src_hook = find_hook(def, src->symbol);
+            if (src_hook == nullptr) {
+                std::string msg{"SH-2A backend: LoadHookInput hook '"};
+                msg.append(src->symbol);
+                msg.append("' not declared in the loaded definition pack");
+                return failure(ErrorCode::InvalidArgument, std::move(msg));
+            }
+            if (src_hook != hook) {
+                std::string msg{"SH-2A backend: cross-hook value flow "
+                                "from '"};
+                msg.append(src_hook->id);
+                msg.append("' to '");
+                msg.append(hook->id);
+                msg.append("' not yet implemented (slice requires Store "
+                           "and its source LoadHookInput on the same hook)");
+                return failure(ErrorCode::NotImplemented, std::move(msg));
+            }
+            HookSignal const *pin = find_hook_input(*src_hook, src->pin_name);
+            if (pin == nullptr) {
+                std::string msg{"SH-2A backend: hook '"};
+                msg.append(src_hook->id);
+                msg.append("' does not declare input pin '");
+                msg.append(src->pin_name);
+                msg.append("'");
+                return failure(ErrorCode::InvalidArgument, std::move(msg));
+            }
+            if (!pin->address.has_value()) {
+                std::string msg{"SH-2A backend: hook input '"};
+                msg.append(src_hook->id);
+                msg.append(".");
+                msg.append(pin->name);
+                msg.append("' has no address — pack must declare the "
+                           "firmware address backing this signal for "
+                           "codegen");
+                return failure(ErrorCode::InvalidArgument, std::move(msg));
+            }
+
+            emit_load_hook_store_sequence(
+                work.code, static_cast<std::uint32_t>(*pin->address),
+                dst_addr);
+        }
     }
 
     // Build the PatchObject. Empty Module → empty hooks list, still

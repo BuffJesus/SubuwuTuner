@@ -225,6 +225,15 @@ struct HookSignal {
     std::string label;
     std::string type;   // "float" | "int" | "bool" (matches feature::PinType)
     std::string unit;
+    // Firmware address backing this signal. For a hook's *input* pin
+    // (data the ECU offers to user logic), this is where codegen reads
+    // from. For an *output* pin (user-written override), this is
+    // where the firmware reads the override after the splice returns;
+    // codegen would write to a private RAM slot, and the patch
+    // insertion layer would later wire that slot to this address.
+    // Optional — the editor doesn't need it; codegen refuses on
+    // missing values with a specific error.
+    std::optional<std::size_t> address;
 };
 
 // A custom-features splice point declared by the definition pack. Per

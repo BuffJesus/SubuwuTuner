@@ -29,7 +29,11 @@ endianness     = "big"
 id              = "after_fuel_calc"
 ecu_address     = 0x000ABCD0
 free_ram        = { base = 0x40000000, length = 256 }
-inputs  = []
+inputs = [
+  { name = "rpm",  label = "Engine RPM", type = "int", unit = "rpm", address = 0x000F1234 },
+  { name = "load", label = "Engine load", type = "int", unit = "%",   address = 0x000F1238 },
+  { name = "no_addr_pin", type = "int" },
+]
 outputs = [
   { name = "commanded_pw_override", label = "Override fuel PW", type = "int", unit = "ms" },
   { name = "second_override",        label = "Second override",  type = "int", unit = "ms" },
@@ -83,6 +87,20 @@ ir::Instruction load_const_float(ir::ValueId result_id, double value) {
     ins.result_type    = st::feature::PinType::Float;
     ins.result_id      = result_id;
     ins.constant_value = value;
+    return ins;
+}
+
+ir::Instruction load_hook_input(ir::ValueId result_id,
+                                 std::string hook_id,
+                                 std::string pin_name,
+                                 st::feature::PinType type
+                                     = st::feature::PinType::Int) {
+    ir::Instruction ins{};
+    ins.op          = ir::Op::LoadHookInput;
+    ins.result_type = type;
+    ins.result_id   = result_id;
+    ins.symbol      = std::move(hook_id);
+    ins.pin_name    = std::move(pin_name);
     return ins;
 }
 
@@ -262,19 +280,23 @@ TEST_CASE("Sh2aBackend: Float LoadConstant returns NotImplemented",
     REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
 }
 
-TEST_CASE("Sh2aBackend: LoadHookInput returns NotImplemented",
-          "[feature_codegen][sh2a]") {
+TEST_CASE("Sh2aBackend: LoadHookInput with no consumer is dead code",
+          "[feature_codegen][sh2a][load_hook_input]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
 
     cg::Sh2aBackend backend;
     ir::Module      m;
     ir::Instruction ins{};
-    ins.op = ir::Op::LoadHookInput;
+    ins.op          = ir::Op::LoadHookInput;
+    ins.result_id   = 1;
+    ins.result_type = st::feature::PinType::Int;
+    ins.symbol      = "after_fuel_calc";
+    ins.pin_name    = "rpm";
     m.instructions.push_back(ins);
     auto r = backend.compile(m, *def);
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.empty());
 }
 
 TEST_CASE("Sh2aBackend: CallPrimitive returns NotImplemented",
@@ -355,4 +377,166 @@ TEST_CASE("Sh2aBackend: out-of-int32-range constant returns ParseError",
     auto r = backend.compile(m, *def);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+// ---- LoadHookInput slice ------------------------------------------------
+
+TEST_CASE("Sh2aBackend: LoadHookInput + Store emits 20-byte sequence",
+          "[feature_codegen][sh2a][load_hook_input]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm"));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 1));
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->arch == cg::Arch::Sh2a);
+    REQUIRE(r->hooks.size() == 1);
+
+    auto const &hp = r->hooks[0];
+    REQUIRE(hp.symbol == "after_fuel_calc");
+    REQUIRE(hp.splice_address == 0x000ABCD0);
+    REQUIRE(hp.code.size() == cg::sh2a::kLoadStoreSequenceSize);
+
+    // Verify the SH-2A opcode bytes against the load-deref-store
+    // layout documented in feature_codegen.cpp.
+    REQUIRE(be16_at(hp.code, 0)  == 0xD002);  // MOV.L @(2, PC), R0
+    REQUIRE(be16_at(hp.code, 2)  == 0x6002);  // MOV.L @R0, R0
+    REQUIRE(be16_at(hp.code, 4)  == 0xD102);  // MOV.L @(2, PC), R1
+    REQUIRE(be16_at(hp.code, 6)  == 0x2102);  // MOV.L R0, @R1
+    REQUIRE(be16_at(hp.code, 8)  == 0x000B);  // RTS
+    REQUIRE(be16_at(hp.code, 10) == 0x0009);  // NOP (delay slot)
+
+    // Literal pool: source address, then destination address.
+    REQUIRE(be32_at(hp.code, 12) == 0x000F1234U);  // rpm pin address
+    REQUIRE(be32_at(hp.code, 16) == 0x40000000U);  // free_ram_base
+
+    // One RAM claim for the output slot. No claim for the SSA value
+    // itself — it flows through R0 register.
+    REQUIRE(hp.ram_claims.size() == 1);
+    REQUIRE(hp.ram_claims[0].address == 0x40000000);
+}
+
+TEST_CASE("Sh2aBackend: distinct LoadHookInputs target distinct addresses",
+          "[feature_codegen][sh2a][load_hook_input]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm"));
+    m.instructions.push_back(load_hook_input(2, "after_fuel_calc", "load"));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 1));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "second_override", 2));
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    auto const &hp = r->hooks[0];
+    REQUIRE(hp.code.size() == 2 * cg::sh2a::kLoadStoreSequenceSize);
+    REQUIRE(hp.ram_claims.size() == 2);
+    // First chain: rpm → first output slot.
+    REQUIRE(be32_at(hp.code, 12) == 0x000F1234U);
+    REQUIRE(be32_at(hp.code, 16) == 0x40000000U);
+    // Second chain: load → second output slot at base+4.
+    REQUIRE(be32_at(hp.code, 32) == 0x000F1238U);
+    REQUIRE(be32_at(hp.code, 36) == 0x40000004U);
+}
+
+TEST_CASE("Sh2aBackend: mixed LoadConstant + LoadHookInput in one module",
+          "[feature_codegen][sh2a][load_hook_input]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 42));
+    m.instructions.push_back(load_hook_input(2, "after_fuel_calc", "rpm"));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 1));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "second_override", 2));
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    auto const &hp = r->hooks[0];
+    // Both shapes are 20 bytes, so total = 40.
+    REQUIRE(hp.code.size() == 40);
+    // First chain (LoadConstant → Store) literal pool at 12,16.
+    REQUIRE(be32_at(hp.code, 12) == 42U);
+    REQUIRE(be32_at(hp.code, 16) == 0x40000000U);
+    // First instruction of the second chain (offset 20) is the
+    // LoadHookInput "MOV.L @(2, PC), R0" preamble — 0xD002.
+    REQUIRE(be16_at(hp.code, 20) == 0xD002);
+    REQUIRE(be16_at(hp.code, 22) == 0x6002);  // dereference
+    // Second chain literal pool at 32,36.
+    REQUIRE(be32_at(hp.code, 32) == 0x000F1234U);
+    REQUIRE(be32_at(hp.code, 36) == 0x40000004U);
+}
+
+TEST_CASE("Sh2aBackend: LoadHookInput Float type returns NotImplemented",
+          "[feature_codegen][sh2a][load_hook_input]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(
+        1, "after_fuel_calc", "rpm", st::feature::PinType::Float));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 1));
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+}
+
+TEST_CASE("Sh2aBackend: LoadHookInput referencing unknown hook fails",
+          "[feature_codegen][sh2a][load_hook_input]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(1, "ghost_hook", "rpm"));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 1));
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("Sh2aBackend: LoadHookInput referencing unknown pin fails",
+          "[feature_codegen][sh2a][load_hook_input]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(
+        1, "after_fuel_calc", "ghost_pin"));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 1));
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("Sh2aBackend: LoadHookInput pin without address fails",
+          "[feature_codegen][sh2a][load_hook_input]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(
+        1, "after_fuel_calc", "no_addr_pin"));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 1));
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }

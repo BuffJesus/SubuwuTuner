@@ -160,15 +160,28 @@ class Rh850Backend final : public IBackend {
     compile(ir::Module const &m, Definition const &def) override;
 };
 
-// Public layout constants for the SH-2A `LoadConstant + StoreHook`
-// emission shape (slice landing this bundle). The emitted sequence is
-// 5 instructions + 2 bytes of pool-alignment padding + 2 longwords
-// of literal pool, in that order. Exposed so the patch-insertion
-// layer and test code can reference offsets without re-hardcoding.
+// Public layout constants for the SH-2A emission shapes the codegen
+// produces today. Exposed so the patch-insertion layer and tests can
+// reference offsets without re-hardcoding.
+//
+// LoadConstant → StoreHookOutput (`kStoreSequenceSize`):
+//   5 instructions + 1 instruction of pool-alignment padding +
+//   2 longwords of literal pool = 20 bytes.
+//
+// LoadHookInput → StoreHookOutput (`kLoadStoreSequenceSize`):
+//   6 instructions (no pad — already 4-aligned) + 2 longwords of
+//   literal pool = 20 bytes. Same total size, different shape.
+//
+// Both shapes terminate with RTS + NOP (delay slot) and place the
+// 4-byte-aligned literal pool last.
 namespace sh2a {
 inline constexpr std::size_t kStoreSequenceSize       = 20;
 inline constexpr std::size_t kStoreLiteralPoolOffset  = 12;
 inline constexpr std::size_t kStoreLiteralStride      = 4;
+
+inline constexpr std::size_t kLoadStoreSequenceSize       = 20;
+inline constexpr std::size_t kLoadStoreLiteralPoolOffset  = 12;
+inline constexpr std::size_t kLoadStoreLiteralStride      = 4;
 } // namespace sh2a
 
 // Pick the right backend by the loaded pack's platform field. v1.0

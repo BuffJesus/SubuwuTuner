@@ -390,6 +390,9 @@ Result<HookSignal> parse_signal(toml::node const &n,
                            + s.type + "'");
     }
     s.unit = optional_value<std::string>(*t, "unit", {});
+    if (auto const v = (*t)["address"].value<std::int64_t>(); v.has_value()) {
+        s.address = static_cast<std::size_t>(*v);
+    }
     return s;
 }
 

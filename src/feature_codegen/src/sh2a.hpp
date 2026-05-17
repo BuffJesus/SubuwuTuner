@@ -53,6 +53,15 @@ enum class Reg : std::uint8_t {
         | (static_cast<std::uint16_t>(rm) << 4U));
 }
 
+// MOV.L @Rm, Rn  — load the 32-bit value at the address in Rm into Rn.
+// Encoding: 0110 nnnn mmmm 0010.
+[[nodiscard]] constexpr std::uint16_t enc_mov_l_at_reg_reg(Reg rm, Reg rn) noexcept {
+    return static_cast<std::uint16_t>(
+        0x6002U
+        | (static_cast<std::uint16_t>(rn) << 8U)
+        | (static_cast<std::uint16_t>(rm) << 4U));
+}
+
 // RTS — return from subroutine. Encoded as 0x000B.
 [[nodiscard]] constexpr std::uint16_t enc_rts() noexcept { return 0x000BU; }
 
