@@ -1,5 +1,6 @@
 add_library(st_transport STATIC
     src/mock.cpp
+    src/obdx_dvi.cpp
 )
 add_library(st::transport ALIAS st_transport)
 
