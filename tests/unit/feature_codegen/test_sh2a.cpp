@@ -718,7 +718,7 @@ TEST_CASE("Sh2aBackend: unknown primitive id returns NotImplemented",
     ir::Module      m;
     m.instructions.push_back(load_const_int(1, 1));
     m.instructions.push_back(load_const_int(2, 2));
-    m.instructions.push_back(call_primitive(3, "multiply_int", {1, 2}));
+    m.instructions.push_back(call_primitive(3, "divide_int", {1, 2}));
     m.instructions.push_back(store("after_fuel_calc",
                                     "commanded_pw_override", 3));
 
@@ -987,7 +987,7 @@ TEST_CASE("Sh2aBackend: nested primitive with unsupported id fails",
     ir::Module      m;
     m.instructions.push_back(load_const_int(1, 1));
     m.instructions.push_back(load_const_int(2, 2));
-    m.instructions.push_back(call_primitive(3, "multiply_int", {1, 2}));
+    m.instructions.push_back(call_primitive(3, "divide_int", {1, 2}));
     m.instructions.push_back(load_const_int(4, 10));
     m.instructions.push_back(call_primitive(5, "add_int", {3, 4}));
     m.instructions.push_back(store("after_fuel_calc",
@@ -996,4 +996,176 @@ TEST_CASE("Sh2aBackend: nested primitive with unsupported id fails",
     auto r = backend.compile(m, *def);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+}
+
+// ---- subtract_int / multiply_int -----------------------------------------
+
+TEST_CASE("Sh2aBackend: subtract_int(LC, LC) → Store emits SUB",
+          "[feature_codegen][sh2a][sub]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 10));
+    m.instructions.push_back(load_const_int(2, 3));
+    m.instructions.push_back(call_primitive(3, "subtract_int", {1, 2}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    auto const &hp = r->hooks[0];
+    REQUIRE(hp.code.size() == 28);  // same size as add (single-fragment)
+
+    // Convention for SUB: op2 → R0 (subtrahend), op1 → R1 (minuend).
+    // So pool[0] = op2 = 3, pool[1] = op1 = 10, pool[2] = dest.
+    REQUIRE(be16_at(hp.code, 0) == 0xD003);  // MOV.L pool[0]=3 → R0
+    REQUIRE(be16_at(hp.code, 2) == 0xD104);  // MOV.L pool[1]=10 → R1
+    REQUIRE(be16_at(hp.code, 4) == 0x3108);  // SUB R0, R1  (R1 = 10 - 3 = 7)
+    REQUIRE(be16_at(hp.code, 6) == 0xD204);  // MOV.L pool[2]=dest → R2
+    REQUIRE(be16_at(hp.code, 8) == 0x2212);  // MOV.L R1, @R2
+
+    REQUIRE(be32_at(hp.code, 16) == 3U);          // pool[0] = subtrahend
+    REQUIRE(be32_at(hp.code, 20) == 10U);         // pool[1] = minuend
+    REQUIRE(be32_at(hp.code, 24) == 0x40000000U); // pool[2] = dest
+}
+
+TEST_CASE("Sh2aBackend: subtract_int — operand order matters",
+          "[feature_codegen][sh2a][sub]") {
+    // subtract_int(3, 10) should compute 3 - 10 = -7, NOT 10 - 3 = 7.
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 3));
+    m.instructions.push_back(load_const_int(2, 10));
+    m.instructions.push_back(call_primitive(3, "subtract_int", {1, 2}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+    // Pool order reflects the load order: op2 first (subtrahend, in R0),
+    // op1 second (minuend, in R1). For subtract_int(3, 10): op1=3, op2=10.
+    REQUIRE(be32_at(hp.code, 16) == 10U);  // pool[0] = op2 = 10 (subtrahend)
+    REQUIRE(be32_at(hp.code, 20) == 3U);   // pool[1] = op1 = 3 (minuend)
+    // R1 = 3 - 10 = -7 at runtime; the math is encoded in operand
+    // placement, which we verify via the pool ordering.
+}
+
+TEST_CASE("Sh2aBackend: multiply_int(LC, LC) → Store emits MUL.L + STS MACL",
+          "[feature_codegen][sh2a][mul]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 4));
+    m.instructions.push_back(load_const_int(2, 6));
+    m.instructions.push_back(call_primitive(3, "multiply_int", {1, 2}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    auto const &hp = r->hooks[0];
+    // mul fragment is one instruction longer than add (STS MACL).
+    //   load op1, load op2, MUL.L, STS MACL, load dest, store = 6 instr
+    //   + RTS + NOP delay = 8 instr = 16 bytes body
+    //   16 bytes is 4-aligned ⇒ no pool-align pad
+    //   3 longwords = 12 bytes
+    //   Total: 28 bytes
+    REQUIRE(hp.code.size() == 28);
+    REQUIRE(be16_at(hp.code, 0)  == 0xD003);  // MOV.L pool[0]=4 → R0
+    REQUIRE(be16_at(hp.code, 2)  == 0xD104);  // MOV.L pool[1]=6 → R1
+    REQUIRE(be16_at(hp.code, 4)  == 0x0107);  // MUL.L R0, R1  (MACL = 4*6)
+    REQUIRE(be16_at(hp.code, 6)  == 0x011A);  // STS MACL, R1
+    // pc=8: ((8+4)&~3) = 12; pool[2] at 24; disp = (24-12)/4 = 3.
+    REQUIRE(be16_at(hp.code, 8)  == 0xD203);  // MOV.L pool[2]=dest → R2
+    REQUIRE(be16_at(hp.code, 10) == 0x2212);  // MOV.L R1, @R2
+    REQUIRE(be16_at(hp.code, 12) == 0x000B);  // RTS
+    REQUIRE(be16_at(hp.code, 14) == 0x0009);  // NOP delay
+
+    REQUIRE(be32_at(hp.code, 16) == 4U);
+    REQUIRE(be32_at(hp.code, 20) == 6U);
+    REQUIRE(be32_at(hp.code, 24) == 0x40000000U);
+}
+
+TEST_CASE("Sh2aBackend: multiply_int with HookInput operand",
+          "[feature_codegen][sh2a][mul]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm"));
+    m.instructions.push_back(load_const_int(2, 2));
+    m.instructions.push_back(call_primitive(3, "multiply_int", {1, 2}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+    // Mul + one deref = 7 body instrs + RTS + NOP = 9 = 18 bytes
+    // + 2 pad = 20 + 12 pool = 32 bytes
+    REQUIRE(hp.code.size() == 32);
+    // 7 body instructions: load ptr, deref, load const, MUL.L,
+    // STS MACL, load dest, store.
+    REQUIRE(be16_at(hp.code, 0) == 0xD004);  // MOV.L pool[0]=rpm_addr → R0
+    REQUIRE(be16_at(hp.code, 2) == 0x6002);  // MOV.L @R0, R0
+    REQUIRE(be16_at(hp.code, 4) == 0xD104);  // MOV.L pool[1]=2 → R1
+    REQUIRE(be16_at(hp.code, 6) == 0x0107);  // MUL.L R0, R1
+    REQUIRE(be16_at(hp.code, 8) == 0x011A);  // STS MACL, R1
+}
+
+TEST_CASE("Sh2aBackend: nested mixed primitives — add(sub, mul)",
+          "[feature_codegen][sh2a][nested][sub][mul]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    // ((10 - 3) + (4 * 6)) = 7 + 24 = 31
+    m.instructions.push_back(load_const_int(1, 10));
+    m.instructions.push_back(load_const_int(2, 3));
+    m.instructions.push_back(call_primitive(3, "subtract_int", {1, 2}));  // = 7
+    m.instructions.push_back(load_const_int(4, 4));
+    m.instructions.push_back(load_const_int(5, 6));
+    m.instructions.push_back(call_primitive(6, "multiply_int", {4, 5}));  // = 24
+    m.instructions.push_back(call_primitive(7, "add_int", {3, 6}));       // = 31
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 7));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+    // 3 RAM claims: output pin + 2 intermediates (sub and mul results).
+    REQUIRE(hp.ram_claims.size() == 3);
+    REQUIRE(hp.ram_claims[0].address == 0x40000000);  // output pin
+    REQUIRE(hp.ram_claims[1].address == 0x40000004);  // sub intermediate
+    REQUIRE(hp.ram_claims[2].address == 0x40000008);  // mul intermediate
+    // The patch contains all 3 primitive fragments + epilogue + pool.
+    // Spot-check the SUB and MUL opcodes appear in the body somewhere
+    // (exact offsets depend on fragment order).
+    bool seen_sub = false;
+    bool seen_mul_l = false;
+    bool seen_sts_macl = false;
+    bool seen_add = false;
+    for (std::size_t i = 0; i + 1 < hp.code.size(); i += 2) {
+        std::uint16_t inst = be16_at(hp.code, i);
+        if (inst == 0x3108) seen_sub = true;
+        if (inst == 0x0107) seen_mul_l = true;
+        if (inst == 0x011A) seen_sts_macl = true;
+        if (inst == 0x310C) seen_add = true;
+    }
+    REQUIRE(seen_sub);
+    REQUIRE(seen_mul_l);
+    REQUIRE(seen_sts_macl);
+    REQUIRE(seen_add);
 }

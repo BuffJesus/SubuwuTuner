@@ -71,6 +71,37 @@ enum class Reg : std::uint8_t {
         | (static_cast<std::uint16_t>(rm) << 4U));
 }
 
+// SUB Rm, Rn  — Rn = Rn - Rm. Encoding: 0011 nnnn mmmm 1000.
+// Caller convention: put the minuend in Rn and the subtrahend in Rm
+// so the result lands in Rn following the codegen's "result in R1"
+// convention.
+[[nodiscard]] constexpr std::uint16_t enc_sub(Reg rm, Reg rn) noexcept {
+    return static_cast<std::uint16_t>(
+        0x3008U
+        | (static_cast<std::uint16_t>(rn) << 8U)
+        | (static_cast<std::uint16_t>(rm) << 4U));
+}
+
+// MUL.L Rm, Rn  — MACL = Rn * Rm (low 32 bits of the 64-bit signed
+// product; the high 32 bits land in MACH). The result is in the
+// MACL system register, not a GPR — callers must follow up with
+// STS MACL, Rn to extract the value. Encoding: 0000 nnnn mmmm 0111.
+[[nodiscard]] constexpr std::uint16_t enc_mul_l(Reg rm, Reg rn) noexcept {
+    return static_cast<std::uint16_t>(
+        0x0007U
+        | (static_cast<std::uint16_t>(rn) << 8U)
+        | (static_cast<std::uint16_t>(rm) << 4U));
+}
+
+// STS MACL, Rn  — Rn = MACL. Used after MUL.L to copy the low 32
+// bits of the multiplication result into a general-purpose register.
+// Encoding: 0000 nnnn 0001 1010.
+[[nodiscard]] constexpr std::uint16_t enc_sts_macl(Reg rn) noexcept {
+    return static_cast<std::uint16_t>(
+        0x001AU
+        | (static_cast<std::uint16_t>(rn) << 8U));
+}
+
 // RTS — return from subroutine. Encoded as 0x000B.
 [[nodiscard]] constexpr std::uint16_t enc_rts() noexcept { return 0x000BU; }
 

@@ -135,6 +135,15 @@ class FragmentEmitter {
     void add(sh2a::Reg rm, sh2a::Reg rn) {
         emit_be16(body_, sh2a::enc_add(rm, rn));
     }
+    void sub(sh2a::Reg rm, sh2a::Reg rn) {
+        emit_be16(body_, sh2a::enc_sub(rm, rn));
+    }
+    void mul_l(sh2a::Reg rm, sh2a::Reg rn) {
+        emit_be16(body_, sh2a::enc_mul_l(rm, rn));
+    }
+    void sts_macl(sh2a::Reg rn) {
+        emit_be16(body_, sh2a::enc_sts_macl(rn));
+    }
     void nop() { emit_be16(body_, sh2a::enc_nop()); }
 
     // Append RTS + delay-slot NOP + pool-alignment NOP(s) + literal
@@ -268,42 +277,97 @@ struct PrimitiveOperand {
 //   target = ((this_pc + 4) & ~3) + disp*4
 // which means a MOV.L at offset N reading from pool offset P uses
 // disp = (P - ((N + 4) & ~3)) / 4.
-// Body fragment for one add primitive — loads two operands into
-// R0/R1, ADDs them, then stores R1 to the destination address. No
-// RTS / pool — those are appended by the FragmentEmitter's
-// finalize(). Used by both the single-primitive emit (one fragment
-// per patch) and the nested emit (multiple fragments share one
-// finalize).
-void emit_add_fragment(FragmentEmitter &fe,
-                        PrimitiveOperand op1,
-                        PrimitiveOperand op2,
-                        std::uint32_t    destination_address) {
-    // Operand 1 → R0 (deref if pointer)
-    fe.mov_l_disp_pc(sh2a::Reg::R0, op1.value);
-    if (op1.kind == PrimitiveOperand::Kind::HookInputPointer) {
-        fe.mov_l_at_reg_reg(sh2a::Reg::R0, sh2a::Reg::R0);
+// Load an operand into the given register, dereferencing through a
+// pointer if the operand is a HookInputPointer (or SSA RAM slot).
+// Shared by all binary-primitive fragment emitters.
+void load_operand_into(FragmentEmitter &fe, PrimitiveOperand op,
+                        sh2a::Reg reg) {
+    fe.mov_l_disp_pc(reg, op.value);
+    if (op.kind == PrimitiveOperand::Kind::HookInputPointer) {
+        fe.mov_l_at_reg_reg(reg, reg);
     }
-    // Operand 2 → R1 (deref if pointer)
-    fe.mov_l_disp_pc(sh2a::Reg::R1, op2.value);
-    if (op2.kind == PrimitiveOperand::Kind::HookInputPointer) {
-        fe.mov_l_at_reg_reg(sh2a::Reg::R1, sh2a::Reg::R1);
-    }
-    // R1 = R1 + R0
-    fe.add(sh2a::Reg::R0, sh2a::Reg::R1);
-    // Destination → R2; store R1 to (R2)
+}
+
+// Store the convention-result register (R1) to `destination_address`.
+// Used as the tail of every binary-primitive fragment.
+void emit_store_r1_to(FragmentEmitter &fe,
+                       std::uint32_t destination_address) {
     fe.mov_l_disp_pc(sh2a::Reg::R2, destination_address);
     fe.mov_l_reg_at_reg(sh2a::Reg::R1, sh2a::Reg::R2);
 }
 
-void emit_add_store_sequence(std::vector<std::uint8_t> &code,
-                              PrimitiveOperand op1,
-                              PrimitiveOperand op2,
-                              std::uint32_t    destination_address) {
-    FragmentEmitter fe;
-    emit_add_fragment(fe, op1, op2, destination_address);
-    auto bytes = fe.finalize();
-    code.insert(code.end(), bytes.begin(), bytes.end());
+// Body fragment for `add_int(op1, op2)` → store. ADD is commutative
+// so the operand-to-register mapping is the natural one (op1 → R0,
+// op2 → R1; ADD R0, R1 leaves the sum in R1).
+void emit_add_fragment(FragmentEmitter &fe,
+                        PrimitiveOperand op1,
+                        PrimitiveOperand op2,
+                        std::uint32_t    destination_address) {
+    load_operand_into(fe, op1, sh2a::Reg::R0);
+    load_operand_into(fe, op2, sh2a::Reg::R1);
+    fe.add(sh2a::Reg::R0, sh2a::Reg::R1);
+    emit_store_r1_to(fe, destination_address);
 }
+
+// Body fragment for `subtract_int(op1, op2)` → store. SUB is NOT
+// commutative — the user expects `op1 - op2`. SH-2A `SUB Rm, Rn`
+// computes Rn = Rn - Rm, so we put the minuend (op1) in R1 and the
+// subtrahend (op2) in R0; the result lands in R1 by convention.
+void emit_sub_fragment(FragmentEmitter &fe,
+                        PrimitiveOperand op1,
+                        PrimitiveOperand op2,
+                        std::uint32_t    destination_address) {
+    load_operand_into(fe, op2, sh2a::Reg::R0);  // subtrahend
+    load_operand_into(fe, op1, sh2a::Reg::R1);  // minuend
+    fe.sub(sh2a::Reg::R0, sh2a::Reg::R1);       // R1 = R1 - R0 = op1 - op2
+    emit_store_r1_to(fe, destination_address);
+}
+
+// Body fragment for `multiply_int(op1, op2)` → store. MUL.L is
+// commutative on the values but writes its result to the MACL system
+// register, NOT a general-purpose register; we follow up with
+// STS MACL, R1 to extract the low 32 bits. Truncating to int32
+// (matching int32 + int32 → int32 semantics; high 32 bits in MACH
+// are discarded — overflow wraps two's-complement, same as add).
+void emit_mul_fragment(FragmentEmitter &fe,
+                        PrimitiveOperand op1,
+                        PrimitiveOperand op2,
+                        std::uint32_t    destination_address) {
+    load_operand_into(fe, op1, sh2a::Reg::R0);
+    load_operand_into(fe, op2, sh2a::Reg::R1);
+    fe.mul_l(sh2a::Reg::R0, sh2a::Reg::R1);     // MACL = R0 * R1
+    fe.sts_macl(sh2a::Reg::R1);                  // R1 = MACL
+    emit_store_r1_to(fe, destination_address);
+}
+
+// Dispatch a CallPrimitive instruction to the right fragment emitter
+// by symbol. Both the single-level and nested-emit paths route
+// through this, so adding a new primitive only needs a new
+// emit_X_fragment plus a clause here.
+[[nodiscard]] Status emit_primitive_fragment(FragmentEmitter &fe,
+                                              std::string_view symbol,
+                                              PrimitiveOperand op1,
+                                              PrimitiveOperand op2,
+                                              std::uint32_t    dst) {
+    if (symbol == "add_int") {
+        emit_add_fragment(fe, op1, op2, dst);
+        return ok();
+    }
+    if (symbol == "subtract_int") {
+        emit_sub_fragment(fe, op1, op2, dst);
+        return ok();
+    }
+    if (symbol == "multiply_int") {
+        emit_mul_fragment(fe, op1, op2, dst);
+        return ok();
+    }
+    std::string msg{"SH-2A backend: CallPrimitive '"};
+    msg.append(symbol);
+    msg.append("' not yet implemented (slice supports add_int, "
+               "subtract_int, multiply_int)");
+    return failure(ErrorCode::NotImplemented, std::move(msg));
+}
+
 
 // Look up a hook by id in the loaded definition. Linear scan — pack
 // hook counts are small (<<100 in practice).
@@ -488,22 +552,30 @@ void emit_add_store_sequence(std::vector<std::uint8_t> &code,
 // operand count matches the primitive's arity, result type is
 // supported. Used by both the topo walk and the per-primitive emit.
 [[nodiscard]] Status validate_call_primitive(ir::Instruction const &prim) {
-    if (prim.symbol != "add_int") {
+    bool const recognized = prim.symbol == "add_int"
+                            || prim.symbol == "subtract_int"
+                            || prim.symbol == "multiply_int";
+    if (!recognized) {
         std::string msg{"SH-2A backend: CallPrimitive '"};
         msg.append(prim.symbol);
-        msg.append("' not yet implemented (slice supports add_int only)");
+        msg.append("' not yet implemented (slice supports add_int, "
+                   "subtract_int, multiply_int)");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
     if (prim.operands.size() != 2) {
-        std::string msg{"SH-2A backend: add_int requires exactly 2 "
-                        "operands, got "};
+        std::string msg{"SH-2A backend: "};
+        msg.append(prim.symbol);
+        msg.append(" requires exactly 2 operands, got ");
         msg.append(std::to_string(prim.operands.size()));
         return failure(ErrorCode::ParseError, std::move(msg));
     }
     if (prim.result_type != PinType::Int) {
-        std::string msg{"SH-2A backend: add_int result of type "};
+        std::string msg{"SH-2A backend: "};
+        msg.append(prim.symbol);
+        msg.append(" result of type ");
         msg.append(pin_type_name(prim.result_type));
-        msg.append(" not yet implemented (add_int produces Int)");
+        msg.append(" not yet implemented (Int-family primitives "
+                   "produce Int)");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
     return ok();
@@ -580,7 +652,11 @@ void emit_add_store_sequence(std::vector<std::uint8_t> &code,
 
         std::uint32_t const this_dest =
             (prim == &root_prim) ? dst_addr : slots.at(prim->result_id);
-        emit_add_fragment(fe, *op1, *op2, this_dest);
+        if (auto s = emit_primitive_fragment(fe, prim->symbol, *op1, *op2,
+                                              this_dest);
+            !s.has_value()) {
+            return failure(s.error());
+        }
     }
     auto bytes = fe.finalize();
     out_code.insert(out_code.end(), bytes.begin(), bytes.end());
@@ -753,35 +829,24 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
             }
             emit_load_hook_store_sequence(work.code, pin_addr, dst_addr);
         } else {
-            // CallPrimitive. Recognized symbols: "add_int". Anything
-            // else is NotImplemented with a message naming the symbol
-            // so users know what's still pending.
-            if (src->symbol != "add_int") {
-                std::string msg{"SH-2A backend: CallPrimitive '"};
-                msg.append(src->symbol);
-                msg.append("' not yet implemented (slice supports add_int "
-                           "only)");
-                return failure(ErrorCode::NotImplemented, std::move(msg));
-            }
-            if (src->operands.size() != 2) {
-                std::string msg{"SH-2A backend: add_int requires exactly "
-                                "2 operands, got "};
-                msg.append(std::to_string(src->operands.size()));
-                return failure(ErrorCode::ParseError, std::move(msg));
+            // CallPrimitive. Structural validation (recognized symbol,
+            // operand count, result type) is shared with the nested
+            // path; emission is dispatched by symbol through
+            // emit_primitive_fragment.
+            if (auto s = validate_call_primitive(*src); !s.has_value()) {
+                return failure(s.error());
             }
             // Detect nested CallPrimitive operands. Single-level
-            // calls use the existing emit; nested trees go through
-            // the multi-fragment path that allocates SSA RAM slots.
-            // Operand count is validated inside the emit paths — for
-            // this peek we tolerate missing operands and just say
-            // "not nested" (the existing emit will report the error).
+            // calls use the existing single-fragment emit; nested
+            // trees go through the multi-fragment path that allocates
+            // SSA RAM slots.
             auto const producer_is_primitive = [&](ir::ValueId vid) {
                 ir::Instruction const *prod = find_producer(m, vid);
                 return prod != nullptr && prod->op == ir::Op::CallPrimitive;
             };
             bool const nested =
-                (src->operands.size() >= 1 && producer_is_primitive(src->operands[0]))
-                || (src->operands.size() >= 2 && producer_is_primitive(src->operands[1]));
+                producer_is_primitive(src->operands[0])
+                || producer_is_primitive(src->operands[1]);
             if (nested) {
                 if (auto s = emit_nested_call_primitive(
                         def, m, *src, hook, work.ram,
@@ -797,7 +862,14 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
                 auto op2 = operand_from_producer(
                     def, m, src->operands[1], hook, empty_slots);
                 if (!op2.has_value()) return failure(op2.error());
-                emit_add_store_sequence(work.code, *op1, *op2, dst_addr);
+                FragmentEmitter fe;
+                if (auto s = emit_primitive_fragment(fe, src->symbol,
+                                                      *op1, *op2, dst_addr);
+                    !s.has_value()) {
+                    return failure(s.error());
+                }
+                auto bytes = fe.finalize();
+                work.code.insert(work.code.end(), bytes.begin(), bytes.end());
             }
         }
     }
