@@ -174,6 +174,95 @@ void emit_load_hook_store_sequence(std::vector<std::uint8_t> &code,
     emit_be32(code, destination_address);
 }
 
+// One operand of an ADD-style binary primitive. Either an immediate
+// constant from a LoadConstant, or a firmware-address pointer from a
+// LoadHookInput. The emitter dereferences the latter inline.
+struct PrimitiveOperand {
+    enum class Kind : std::uint8_t { Constant, HookInputPointer };
+    Kind          kind{Kind::Constant};
+    std::uint32_t value{0};  // constant value, or pin address
+};
+
+// Emit a self-contained "compute add, store result" patch. The
+// emitted shape varies in size (28 or 32 bytes) depending on whether
+// each operand needs an indirect deref:
+//
+//   1 instr per Constant operand  (MOV.L @(d, PC), Rn)
+//   2 instr per HookInput operand (MOV.L @(d, PC), Rn; MOV.L @Rn, Rn)
+//   1 instr ADD R0, R1
+//   1 instr MOV.L @(d, PC), R2  (destination pointer)
+//   1 instr MOV.L R1, @R2       (store)
+//   1 instr RTS
+//   1 instr NOP (delay slot)
+//   0..1 instr NOP padding to 4-byte-align the literal pool
+//   3 longwords pool: operand1 datum, operand2 datum, destination addr
+//
+// Disp values are computed per the SH-2A PC-relative formula:
+//   target = ((this_pc + 4) & ~3) + disp*4
+// which means a MOV.L at offset N reading from pool offset P uses
+// disp = (P - ((N + 4) & ~3)) / 4.
+void emit_add_store_sequence(std::vector<std::uint8_t> &code,
+                              PrimitiveOperand op1,
+                              PrimitiveOperand op2,
+                              std::uint32_t    destination_address) {
+    using namespace sh2a;
+
+    auto const instr_for = [](PrimitiveOperand const &o) -> std::size_t {
+        return o.kind == PrimitiveOperand::Kind::Constant ? 1U : 2U;
+    };
+    std::size_t const n_load_instrs =
+        instr_for(op1) + instr_for(op2)
+        + 1U /*ADD*/ + 1U /*MOV.L dest*/ + 1U /*store*/
+        + 1U /*RTS*/  + 1U /*NOP*/;
+    std::size_t const body_bytes = n_load_instrs * 2U;
+    std::size_t const pool_start = (body_bytes + 3U) & ~std::size_t{3};
+    std::size_t const pad_bytes  = pool_start - body_bytes;
+
+    std::size_t const pool_op1  = pool_start;
+    std::size_t const pool_op2  = pool_start + 4U;
+    std::size_t const pool_dest = pool_start + 8U;
+
+    std::size_t pc = 0;
+    auto const  disp_to = [&](std::size_t target) -> std::uint8_t {
+        std::size_t const aligned = (pc + 4U) & ~std::size_t{3};
+        return static_cast<std::uint8_t>((target - aligned) / 4U);
+    };
+    auto const  emit_instr = [&](std::uint16_t v) {
+        emit_be16(code, v);
+        pc += 2;
+    };
+
+    // Operand 1 → R0
+    emit_instr(enc_mov_l_disp_pc(Reg::R0, disp_to(pool_op1)));
+    if (op1.kind == PrimitiveOperand::Kind::HookInputPointer) {
+        emit_instr(enc_mov_l_at_reg_reg(Reg::R0, Reg::R0));
+    }
+    // Operand 2 → R1
+    emit_instr(enc_mov_l_disp_pc(Reg::R1, disp_to(pool_op2)));
+    if (op2.kind == PrimitiveOperand::Kind::HookInputPointer) {
+        emit_instr(enc_mov_l_at_reg_reg(Reg::R1, Reg::R1));
+    }
+    // R1 = R1 + R0
+    emit_instr(enc_add(Reg::R0, Reg::R1));
+    // Destination → R2
+    emit_instr(enc_mov_l_disp_pc(Reg::R2, disp_to(pool_dest)));
+    // Store R1 to (R2)
+    emit_instr(enc_mov_l_reg_at_reg(Reg::R1, Reg::R2));
+    // Return
+    emit_instr(enc_rts());
+    emit_instr(enc_nop());
+
+    // Pool-alignment padding (0 or 2 bytes).
+    for (std::size_t i = 0; i < pad_bytes / 2; ++i) {
+        emit_instr(enc_nop());
+    }
+
+    // Literal pool.
+    emit_be32(code, op1.value);
+    emit_be32(code, op2.value);
+    emit_be32(code, destination_address);
+}
+
 // Look up a hook by id in the loaded definition. Linear scan — pack
 // hook counts are small (<<100 in practice).
 [[nodiscard]] Hook const *find_hook(Definition const &def,
@@ -196,6 +285,76 @@ void emit_load_hook_store_sequence(std::vector<std::uint8_t> &code,
     return nullptr;
 }
 
+// Resolve a LoadHookInput instruction's source pin to its firmware
+// address. Encapsulates the four error paths shared by direct
+// LoadHookInput→Store chains and CallPrimitive operands: hook
+// missing, hook != Store's hook, pin missing on the hook, pin has
+// no `address`. Returns the address in `out` on success.
+[[nodiscard]] Status resolve_hook_input_address(
+    Definition const &def, ir::Instruction const &load_ins,
+    Hook const *target_hook, std::uint32_t &out) {
+    Hook const *src_hook = find_hook(def, load_ins.symbol);
+    if (src_hook == nullptr) {
+        std::string msg{"SH-2A backend: LoadHookInput hook '"};
+        msg.append(load_ins.symbol);
+        msg.append("' not declared in the loaded definition pack");
+        return failure(ErrorCode::InvalidArgument, std::move(msg));
+    }
+    if (src_hook != target_hook) {
+        std::string msg{"SH-2A backend: cross-hook value flow from '"};
+        msg.append(src_hook->id);
+        msg.append("' to '");
+        msg.append(target_hook->id);
+        msg.append("' not yet implemented (slice requires Store and its "
+                   "source LoadHookInput on the same hook)");
+        return failure(ErrorCode::NotImplemented, std::move(msg));
+    }
+    HookSignal const *pin = find_hook_input(*src_hook, load_ins.pin_name);
+    if (pin == nullptr) {
+        std::string msg{"SH-2A backend: hook '"};
+        msg.append(src_hook->id);
+        msg.append("' does not declare input pin '");
+        msg.append(load_ins.pin_name);
+        msg.append("'");
+        return failure(ErrorCode::InvalidArgument, std::move(msg));
+    }
+    if (!pin->address.has_value()) {
+        std::string msg{"SH-2A backend: hook input '"};
+        msg.append(src_hook->id);
+        msg.append(".");
+        msg.append(pin->name);
+        msg.append("' has no address — pack must declare the firmware "
+                   "address backing this signal for codegen");
+        return failure(ErrorCode::InvalidArgument, std::move(msg));
+    }
+    out = static_cast<std::uint32_t>(*pin->address);
+    return ok();
+}
+
+// Coerce a LoadConstant's stored double to a 32-bit signed int.
+// Refuses out-of-range as ParseError — the IR-level invariant is
+// that Int-typed LoadConstants came from an integer-representable
+// pin default; anything else is a pack/graph authoring bug.
+[[nodiscard]] Result<std::uint32_t> coerce_int_constant(
+    ir::Instruction const &load_ins) {
+    if (!load_ins.constant_value.has_value()) {
+        return failure(ErrorCode::ParseError,
+                       "SH-2A backend: LoadConstant has no "
+                       "constant_value (lower() invariant violation)");
+    }
+    double const v = *load_ins.constant_value;
+    if (v < -2147483648.0 || v > 2147483647.0) {
+        std::string msg{"SH-2A backend: LoadConstant value "};
+        msg.append(std::to_string(v));
+        msg.append(" out of int32 range");
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    auto const i32 = static_cast<std::int32_t>(v);
+    std::uint32_t u32 = 0;
+    std::memcpy(&u32, &i32, sizeof u32);
+    return u32;
+}
+
 // Locate the producing Instruction for `value_id`. Returns nullptr
 // if no instruction in the module produces it. Caller is responsible
 // for verifying the op kind is one the slice supports.
@@ -205,6 +364,43 @@ void emit_load_hook_store_sequence(std::vector<std::uint8_t> &code,
         if (ins.result_id == value_id) return &ins;
     }
     return nullptr;
+}
+
+// Build a PrimitiveOperand from a producing instruction, given the
+// hook the consuming Store lives on (for cross-hook validation).
+[[nodiscard]] Result<PrimitiveOperand> operand_from_producer(
+    Definition const &def, ir::Module const &m, ir::ValueId value_id,
+    Hook const *target_hook) {
+    ir::Instruction const *prod = find_producer(m, value_id);
+    if (prod == nullptr) {
+        return failure(ErrorCode::ParseError,
+                       "SH-2A backend: primitive operand does not "
+                       "resolve to any producing instruction");
+    }
+    if (prod->result_type != PinType::Int) {
+        std::string msg{"SH-2A backend: primitive operand of type "};
+        msg.append(pin_type_name(prod->result_type));
+        msg.append(" not yet implemented (slice supports Int only)");
+        return failure(ErrorCode::NotImplemented, std::move(msg));
+    }
+    if (prod->op == ir::Op::LoadConstant) {
+        auto r = coerce_int_constant(*prod);
+        if (!r.has_value()) return failure(r.error());
+        return PrimitiveOperand{PrimitiveOperand::Kind::Constant, *r};
+    }
+    if (prod->op == ir::Op::LoadHookInput) {
+        std::uint32_t addr = 0;
+        if (auto s = resolve_hook_input_address(def, *prod, target_hook, addr);
+            !s.has_value()) {
+            return failure(s.error());
+        }
+        return PrimitiveOperand{PrimitiveOperand::Kind::HookInputPointer,
+                                  addr};
+    }
+    return failure(ErrorCode::NotImplemented,
+                   "SH-2A backend: primitive operand sources other than "
+                   "LoadConstant and LoadHookInput not yet implemented "
+                   "(no nested primitives in this slice)");
 }
 
 // Per-hook accumulator. We group emitted code by hook so the
@@ -227,22 +423,17 @@ struct HookWork {
 
 Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
                                           Definition const &def) {
-    // First pass: refuse anything outside the supported op set with a
-    // specific per-Op message so callers know exactly which feature
-    // is still pending. The shape rejection is structural (which Op
-    // appeared), the per-Store checks below are semantic (whether the
-    // source op is one we can emit, whether types match, etc.).
+    // First pass: every Op is now structurally supported (each one
+    // has at least one emission path that goes through it). Per-op
+    // semantic checks — supported primitive id, operand sources,
+    // type compatibility — happen below at Store-emit time.
     for (auto const &ins : m.instructions) {
         switch (ins.op) {
             case ir::Op::LoadConstant:
             case ir::Op::LoadHookInput:
-            case ir::Op::StoreHookOutput:
-                break;  // supported
             case ir::Op::CallPrimitive:
-                return failure(ErrorCode::NotImplemented,
-                               "SH-2A backend: CallPrimitive not yet "
-                               "implemented (slice supports LoadConstant, "
-                               "LoadHookInput, and StoreHookOutput)");
+            case ir::Op::StoreHookOutput:
+                break;
         }
     }
 
@@ -265,10 +456,8 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
                            "SH-2A backend: StoreHookOutput must have "
                            "exactly one operand");
         }
-        // Find the source instruction. Slice rule: it must be a
-        // LoadConstant or LoadHookInput (a Store consuming the result
-        // of a CallPrimitive was caught by the first-pass filter).
-        // A Store consuming a non-existent ValueId is its own error.
+        // Find the source instruction. A Store consuming a
+        // non-existent ValueId is an IR invariant violation.
         ir::Instruction const *src = find_producer(m, ins.operands[0]);
         if (src == nullptr) {
             return failure(ErrorCode::ParseError,
@@ -277,12 +466,17 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
                            "(invariant: lower() should assign result_id "
                            "to every value-producing op)");
         }
+
+        // Slice rule: Store source must be LoadConstant, LoadHookInput,
+        // or a supported CallPrimitive. Anything else (deeper nesting,
+        // unsupported primitive kind) gets a specific NotImplemented.
         if (src->op != ir::Op::LoadConstant
-            && src->op != ir::Op::LoadHookInput) {
+            && src->op != ir::Op::LoadHookInput
+            && src->op != ir::Op::CallPrimitive) {
             return failure(ErrorCode::NotImplemented,
                            "SH-2A backend: StoreHookOutput source must "
-                           "be a LoadConstant or LoadHookInput in this "
-                           "slice");
+                           "be a LoadConstant, LoadHookInput, or "
+                           "CallPrimitive in this slice");
         }
 
         // Int only in this slice. Float/Bool need narrowing /
@@ -369,72 +563,38 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
         }
 
         if (src->op == ir::Op::LoadConstant) {
-            // Encode the constant as a 32-bit signed value (Int slice).
-            // Double → int32 cast is bounded by the IR's invariant that
-            // an Int-typed LoadConstant's constant_value came from a
-            // pin default that the editor/loader stored as a finite
-            // integer-representable double; out-of-range values are a
-            // pack/graph authoring bug we surface as ParseError so the
-            // user fixes the .stmod, not the codegen.
-            double const v = *src->constant_value;
-            if (v < -2147483648.0 || v > 2147483647.0) {
-                std::string msg{"SH-2A backend: LoadConstant value "};
-                msg.append(std::to_string(v));
-                msg.append(" out of int32 range");
-                return failure(ErrorCode::ParseError, std::move(msg));
+            auto u32 = coerce_int_constant(*src);
+            if (!u32.has_value()) return failure(u32.error());
+            emit_load_const_store_sequence(work.code, *u32, dst_addr);
+        } else if (src->op == ir::Op::LoadHookInput) {
+            std::uint32_t pin_addr = 0;
+            if (auto s = resolve_hook_input_address(def, *src, hook, pin_addr);
+                !s.has_value()) {
+                return failure(s.error());
             }
-            auto const i32 = static_cast<std::int32_t>(v);
-            std::uint32_t u32 = 0;
-            std::memcpy(&u32, &i32, sizeof u32);
-
-            emit_load_const_store_sequence(work.code, u32, dst_addr);
+            emit_load_hook_store_sequence(work.code, pin_addr, dst_addr);
         } else {
-            // LoadHookInput — read from the hook's input-pin address
-            // and store to the output RAM slot. The pin lives on the
-            // SAME hook that produced the value (LoadHookInput's
-            // symbol field). For this slice we require the Store and
-            // the Load to be on the same hook — multi-hook flows need
-            // a register-spill mechanism that arrives with primitives.
-            Hook const *src_hook = find_hook(def, src->symbol);
-            if (src_hook == nullptr) {
-                std::string msg{"SH-2A backend: LoadHookInput hook '"};
+            // CallPrimitive. Recognized symbols: "add_int". Anything
+            // else is NotImplemented with a message naming the symbol
+            // so users know what's still pending.
+            if (src->symbol != "add_int") {
+                std::string msg{"SH-2A backend: CallPrimitive '"};
                 msg.append(src->symbol);
-                msg.append("' not declared in the loaded definition pack");
-                return failure(ErrorCode::InvalidArgument, std::move(msg));
-            }
-            if (src_hook != hook) {
-                std::string msg{"SH-2A backend: cross-hook value flow "
-                                "from '"};
-                msg.append(src_hook->id);
-                msg.append("' to '");
-                msg.append(hook->id);
-                msg.append("' not yet implemented (slice requires Store "
-                           "and its source LoadHookInput on the same hook)");
+                msg.append("' not yet implemented (slice supports add_int "
+                           "only)");
                 return failure(ErrorCode::NotImplemented, std::move(msg));
             }
-            HookSignal const *pin = find_hook_input(*src_hook, src->pin_name);
-            if (pin == nullptr) {
-                std::string msg{"SH-2A backend: hook '"};
-                msg.append(src_hook->id);
-                msg.append("' does not declare input pin '");
-                msg.append(src->pin_name);
-                msg.append("'");
-                return failure(ErrorCode::InvalidArgument, std::move(msg));
+            if (src->operands.size() != 2) {
+                std::string msg{"SH-2A backend: add_int requires exactly "
+                                "2 operands, got "};
+                msg.append(std::to_string(src->operands.size()));
+                return failure(ErrorCode::ParseError, std::move(msg));
             }
-            if (!pin->address.has_value()) {
-                std::string msg{"SH-2A backend: hook input '"};
-                msg.append(src_hook->id);
-                msg.append(".");
-                msg.append(pin->name);
-                msg.append("' has no address — pack must declare the "
-                           "firmware address backing this signal for "
-                           "codegen");
-                return failure(ErrorCode::InvalidArgument, std::move(msg));
-            }
-
-            emit_load_hook_store_sequence(
-                work.code, static_cast<std::uint32_t>(*pin->address),
-                dst_addr);
+            auto op1 = operand_from_producer(def, m, src->operands[0], hook);
+            if (!op1.has_value()) return failure(op1.error());
+            auto op2 = operand_from_producer(def, m, src->operands[1], hook);
+            if (!op2.has_value()) return failure(op2.error());
+            emit_add_store_sequence(work.code, *op1, *op2, dst_addr);
         }
     }
 

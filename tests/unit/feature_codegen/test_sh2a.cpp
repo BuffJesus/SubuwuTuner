@@ -104,6 +104,21 @@ ir::Instruction load_hook_input(ir::ValueId result_id,
     return ins;
 }
 
+ir::Instruction call_primitive(ir::ValueId result_id,
+                                std::string symbol,
+                                std::vector<ir::ValueId> operands,
+                                st::feature::PinType type
+                                    = st::feature::PinType::Int) {
+    ir::Instruction ins{};
+    ins.op          = ir::Op::CallPrimitive;
+    ins.result_type = type;
+    ins.result_id   = result_id;
+    ins.symbol      = std::move(symbol);
+    ins.pin_name    = "out";  // single-output primitives
+    ins.operands    = std::move(operands);
+    return ins;
+}
+
 ir::Instruction store(std::string symbol, std::string pin_name,
                       ir::ValueId operand) {
     ir::Instruction ins{};
@@ -299,19 +314,22 @@ TEST_CASE("Sh2aBackend: LoadHookInput with no consumer is dead code",
     REQUIRE(r->hooks.empty());
 }
 
-TEST_CASE("Sh2aBackend: CallPrimitive returns NotImplemented",
-          "[feature_codegen][sh2a]") {
+TEST_CASE("Sh2aBackend: CallPrimitive with no consumer is dead code",
+          "[feature_codegen][sh2a][call_primitive]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
 
     cg::Sh2aBackend backend;
     ir::Module      m;
     ir::Instruction ins{};
-    ins.op = ir::Op::CallPrimitive;
+    ins.op          = ir::Op::CallPrimitive;
+    ins.symbol      = "add_int";
+    ins.result_id   = 1;
+    ins.result_type = st::feature::PinType::Int;
     m.instructions.push_back(ins);
     auto r = backend.compile(m, *def);
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.empty());
 }
 
 TEST_CASE("Sh2aBackend: missing hook id returns InvalidArgument",
@@ -539,4 +557,218 @@ TEST_CASE("Sh2aBackend: LoadHookInput pin without address fails",
     auto r = backend.compile(m, *def);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
+// ---- CallPrimitive add_int slice ----------------------------------------
+
+TEST_CASE("Sh2aBackend: add_int(const,const) → Store emits 28-byte sequence",
+          "[feature_codegen][sh2a][call_primitive]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 42));
+    m.instructions.push_back(load_const_int(2, 8));
+    m.instructions.push_back(call_primitive(3, "add_int", {1, 2}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    auto const &hp = r->hooks[0];
+    REQUIRE(hp.code.size() == 28);
+
+    // 7 body instructions + 1 pool-pad NOP + 3 longwords.
+    REQUIRE(be16_at(hp.code, 0)  == 0xD003);  // MOV.L @(3, PC), R0
+    REQUIRE(be16_at(hp.code, 2)  == 0xD104);  // MOV.L @(4, PC), R1
+    REQUIRE(be16_at(hp.code, 4)  == 0x310C);  // ADD R0, R1
+    REQUIRE(be16_at(hp.code, 6)  == 0xD204);  // MOV.L @(4, PC), R2
+    REQUIRE(be16_at(hp.code, 8)  == 0x2212);  // MOV.L R1, @R2
+    REQUIRE(be16_at(hp.code, 10) == 0x000B);  // RTS
+    REQUIRE(be16_at(hp.code, 12) == 0x0009);  // NOP delay
+    REQUIRE(be16_at(hp.code, 14) == 0x0009);  // NOP pool pad
+
+    REQUIRE(be32_at(hp.code, 16) == 42U);
+    REQUIRE(be32_at(hp.code, 20) == 8U);
+    REQUIRE(be32_at(hp.code, 24) == 0x40000000U);
+
+    // Output slot lives in free_ram. No intermediate spill (R0/R1
+    // carry the operands across the ADD).
+    REQUIRE(hp.ram_claims.size() == 1);
+    REQUIRE(hp.ram_claims[0].address == 0x40000000);
+}
+
+TEST_CASE("Sh2aBackend: add_int(hook,hook) → Store emits 32-byte sequence",
+          "[feature_codegen][sh2a][call_primitive]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm"));
+    m.instructions.push_back(load_hook_input(2, "after_fuel_calc", "load"));
+    m.instructions.push_back(call_primitive(3, "add_int", {1, 2}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    auto const &hp = r->hooks[0];
+    REQUIRE(hp.code.size() == 32);
+
+    // 9 body instructions + 1 pool-pad NOP + 3 longwords.
+    REQUIRE(be16_at(hp.code, 0)  == 0xD004);  // MOV.L @(4, PC), R0 (rpm addr)
+    REQUIRE(be16_at(hp.code, 2)  == 0x6002);  // MOV.L @R0, R0      (deref)
+    REQUIRE(be16_at(hp.code, 4)  == 0xD104);  // MOV.L @(4, PC), R1 (load addr)
+    REQUIRE(be16_at(hp.code, 6)  == 0x6112);  // MOV.L @R1, R1      (deref)
+    REQUIRE(be16_at(hp.code, 8)  == 0x310C);  // ADD R0, R1
+    REQUIRE(be16_at(hp.code, 10) == 0xD204);  // MOV.L @(4, PC), R2 (dest)
+    REQUIRE(be16_at(hp.code, 12) == 0x2212);  // MOV.L R1, @R2
+    REQUIRE(be16_at(hp.code, 14) == 0x000B);  // RTS
+    REQUIRE(be16_at(hp.code, 16) == 0x0009);  // NOP delay
+    REQUIRE(be16_at(hp.code, 18) == 0x0009);  // NOP pool pad
+
+    REQUIRE(be32_at(hp.code, 20) == 0x000F1234U);  // rpm pin address
+    REQUIRE(be32_at(hp.code, 24) == 0x000F1238U);  // load pin address
+    REQUIRE(be32_at(hp.code, 28) == 0x40000000U);  // free_ram_base
+}
+
+TEST_CASE("Sh2aBackend: add_int(const,hook) → Store emits 28-byte sequence",
+          "[feature_codegen][sh2a][call_primitive]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 100));
+    m.instructions.push_back(load_hook_input(2, "after_fuel_calc", "rpm"));
+    m.instructions.push_back(call_primitive(3, "add_int", {1, 2}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    auto const &hp = r->hooks[0];
+    REQUIRE(hp.code.size() == 28);
+
+    // 8 body instructions + no pool-pad (16-byte body is already
+    // 4-aligned) + 3 longwords. Disp values depend on each MOV.L's
+    // own pc-rel alignment: at pc=8, ((8+4)&~3)=12 so disp=(24-12)/4=3.
+    REQUIRE(be16_at(hp.code, 0)  == 0xD003);  // MOV.L @(3, PC), R0  (const)
+    REQUIRE(be16_at(hp.code, 2)  == 0xD104);  // MOV.L @(4, PC), R1  (rpm addr)
+    REQUIRE(be16_at(hp.code, 4)  == 0x6112);  // MOV.L @R1, R1       (deref)
+    REQUIRE(be16_at(hp.code, 6)  == 0x310C);  // ADD R0, R1
+    REQUIRE(be16_at(hp.code, 8)  == 0xD203);  // MOV.L @(3, PC), R2  (dest)
+    REQUIRE(be16_at(hp.code, 10) == 0x2212);  // MOV.L R1, @R2
+    REQUIRE(be16_at(hp.code, 12) == 0x000B);  // RTS
+    REQUIRE(be16_at(hp.code, 14) == 0x0009);  // NOP delay
+
+    REQUIRE(be32_at(hp.code, 16) == 100U);
+    REQUIRE(be32_at(hp.code, 20) == 0x000F1234U);
+    REQUIRE(be32_at(hp.code, 24) == 0x40000000U);
+}
+
+TEST_CASE("Sh2aBackend: add_int operand-order matters for emit layout",
+          "[feature_codegen][sh2a][call_primitive]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    // hook first, const second — same shape size (28 bytes) but the
+    // deref happens on op1, not op2.
+    m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm"));
+    m.instructions.push_back(load_const_int(2, 7));
+    m.instructions.push_back(call_primitive(3, "add_int", {1, 2}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    auto const &hp = r->hooks[0];
+    REQUIRE(hp.code.size() == 28);
+    REQUIRE(be16_at(hp.code, 0) == 0xD003);  // MOV.L @(3, PC), R0  (rpm addr)
+    REQUIRE(be16_at(hp.code, 2) == 0x6002);  // MOV.L @R0, R0       (deref)
+    // pc=4: ((4+4)&~3) = 8; pool_op2 = 20; disp = (20-8)/4 = 3.
+    REQUIRE(be16_at(hp.code, 4) == 0xD103);  // MOV.L @(3, PC), R1  (const)
+    REQUIRE(be16_at(hp.code, 6) == 0x310C);  // ADD R0, R1
+}
+
+TEST_CASE("Sh2aBackend: unknown primitive id returns NotImplemented",
+          "[feature_codegen][sh2a][call_primitive]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 1));
+    m.instructions.push_back(load_const_int(2, 2));
+    m.instructions.push_back(call_primitive(3, "multiply_int", {1, 2}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+}
+
+TEST_CASE("Sh2aBackend: add_int with wrong operand count returns ParseError",
+          "[feature_codegen][sh2a][call_primitive]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 1));
+    m.instructions.push_back(call_primitive(2, "add_int", {1}));  // only 1 operand
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 2));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("Sh2aBackend: add_int with Float operand returns NotImplemented",
+          "[feature_codegen][sh2a][call_primitive]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_float(1, 1.5));
+    m.instructions.push_back(load_const_int(2, 2));
+    m.instructions.push_back(call_primitive(3, "add_int", {1, 2}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+}
+
+TEST_CASE("Sh2aBackend: nested CallPrimitive operand returns NotImplemented",
+          "[feature_codegen][sh2a][call_primitive]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 1));
+    m.instructions.push_back(load_const_int(2, 2));
+    m.instructions.push_back(call_primitive(3, "add_int", {1, 2}));
+    // Second add: one operand is the result of the first add.
+    m.instructions.push_back(load_const_int(4, 10));
+    m.instructions.push_back(call_primitive(5, "add_int", {3, 4}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 5));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
 }
