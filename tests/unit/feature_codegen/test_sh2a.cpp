@@ -834,8 +834,152 @@ TEST_CASE("Sh2aBackend: Bool LoadConstant returns NotImplemented",
     REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
 }
 
-TEST_CASE("Sh2aBackend: nested CallPrimitive operand returns NotImplemented",
-          "[feature_codegen][sh2a][call_primitive]") {
+// ---- Nested CallPrimitive ----------------------------------------------
+
+TEST_CASE("Sh2aBackend: nested add(add(LC,LC), LC) → Store allocates a slot",
+          "[feature_codegen][sh2a][nested]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 5));
+    m.instructions.push_back(load_const_int(2, 3));
+    m.instructions.push_back(call_primitive(3, "add_int", {1, 2}));   // = 8
+    m.instructions.push_back(load_const_int(4, 10));
+    m.instructions.push_back(call_primitive(5, "add_int", {3, 4}));   // = 18
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 5));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    auto const &hp = r->hooks[0];
+
+    // Two RAM claims (in allocation order):
+    //   - claims[0]: output pin slot @ free_ram_base (allocated first
+    //                by the Store-processing loop's pin_slots logic)
+    //   - claims[1]: intermediate slot for %3 @ free_ram_base + 4
+    //                (allocated by the nested walk for non-root prims)
+    REQUIRE(hp.ram_claims.size() == 2);
+    REQUIRE(hp.ram_claims[0].address == 0x40000000);  // output pin
+    REQUIRE(hp.ram_claims[0].size == 4);
+    REQUIRE(hp.ram_claims[1].address == 0x40000004);  // intermediate
+
+    // Body layout (5 instrs inner + 6 instrs outer + RTS + NOP +
+    // pool-alignment NOP = 26 bytes; pool of 6 longwords = 24 bytes;
+    // total = 50 ... but wait, 22+2+2 = 26 isn't 4-aligned at 26,
+    // pad adds 2 → body 28, pool 24 = 52.
+    REQUIRE(hp.code.size() == 52);
+
+    // Inner add fragment (offsets 0..9): op1=Const 5, op2=Const 3,
+    // dest=intermediate slot @ 0x40000004.
+    REQUIRE(be16_at(hp.code, 0)  == 0xD006);  // MOV.L @(6,PC), R0  (pool[0]=5 @ 28)
+    REQUIRE(be16_at(hp.code, 2)  == 0xD107);  // MOV.L @(7,PC), R1  (pool[1]=3 @ 32)
+    REQUIRE(be16_at(hp.code, 4)  == 0x310C);  // ADD R0, R1
+    REQUIRE(be16_at(hp.code, 6)  == 0xD207);  // MOV.L @(7,PC), R2  (pool[2]=slot @ 36)
+    REQUIRE(be16_at(hp.code, 8)  == 0x2212);  // MOV.L R1, @R2
+
+    // Outer add fragment (offsets 10..21): op1=intermediate slot
+    // (with deref), op2=Const 10, dest=output pin @ 0x40000000.
+    REQUIRE(be16_at(hp.code, 10) == 0xD007);  // MOV.L @(7,PC), R0  (pool[3]=slot @ 40)
+    REQUIRE(be16_at(hp.code, 12) == 0x6002);  // MOV.L @R0, R0       (deref)
+    REQUIRE(be16_at(hp.code, 14) == 0xD107);  // MOV.L @(7,PC), R1  (pool[4]=10 @ 44)
+    REQUIRE(be16_at(hp.code, 16) == 0x310C);  // ADD R0, R1
+    REQUIRE(be16_at(hp.code, 18) == 0xD207);  // MOV.L @(7,PC), R2  (pool[5]=dest @ 48)
+    REQUIRE(be16_at(hp.code, 20) == 0x2212);  // MOV.L R1, @R2
+
+    // Epilogue.
+    REQUIRE(be16_at(hp.code, 22) == 0x000B);  // RTS
+    REQUIRE(be16_at(hp.code, 24) == 0x0009);  // NOP (delay slot)
+    REQUIRE(be16_at(hp.code, 26) == 0x0009);  // NOP (pool-align pad)
+
+    // Pool.
+    REQUIRE(be32_at(hp.code, 28) == 5U);
+    REQUIRE(be32_at(hp.code, 32) == 3U);
+    REQUIRE(be32_at(hp.code, 36) == 0x40000004U);  // intermediate
+    REQUIRE(be32_at(hp.code, 40) == 0x40000004U);  // intermediate (dup)
+    REQUIRE(be32_at(hp.code, 44) == 10U);
+    REQUIRE(be32_at(hp.code, 48) == 0x40000000U);  // output pin
+}
+
+TEST_CASE("Sh2aBackend: nested add(LC, add(LC, LC)) → Store (right-deep)",
+          "[feature_codegen][sh2a][nested]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 100));
+    m.instructions.push_back(load_const_int(2, 5));
+    m.instructions.push_back(load_const_int(3, 3));
+    m.instructions.push_back(call_primitive(4, "add_int", {2, 3}));   // inner = 8
+    m.instructions.push_back(call_primitive(5, "add_int", {1, 4}));   // outer = 108
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 5));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    auto const &hp = r->hooks[0];
+    REQUIRE(hp.ram_claims.size() == 2);
+    REQUIRE(hp.code.size() == 52);  // same size as left-deep
+}
+
+TEST_CASE("Sh2aBackend: 3-level nested add tree → Store",
+          "[feature_codegen][sh2a][nested]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    // ((1+2) + 4) + 8 — three levels of add, four LoadConstants.
+    m.instructions.push_back(load_const_int(1, 1));
+    m.instructions.push_back(load_const_int(2, 2));
+    m.instructions.push_back(call_primitive(3, "add_int", {1, 2}));   // = 3
+    m.instructions.push_back(load_const_int(4, 4));
+    m.instructions.push_back(call_primitive(5, "add_int", {3, 4}));   // = 7
+    m.instructions.push_back(load_const_int(6, 8));
+    m.instructions.push_back(call_primitive(7, "add_int", {5, 6}));   // = 15
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 7));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+    // 3 intermediate slots (slots for %3, %5; root %7 writes to
+    // output pin) + 1 output pin slot = 3 total claims.
+    REQUIRE(hp.ram_claims.size() == 3);
+    REQUIRE(hp.ram_claims[0].address == 0x40000000);  // output pin
+    REQUIRE(hp.ram_claims[1].address == 0x40000004);  // intermediate %3
+    REQUIRE(hp.ram_claims[2].address == 0x40000008);  // intermediate %5
+}
+
+TEST_CASE("Sh2aBackend: nested add with LoadHookInput leaf",
+          "[feature_codegen][sh2a][nested]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    // ((rpm + 100) + load) — mixed Const + HookInput operands at
+    // different nesting levels.
+    m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm"));
+    m.instructions.push_back(load_const_int(2, 100));
+    m.instructions.push_back(call_primitive(3, "add_int", {1, 2}));
+    m.instructions.push_back(load_hook_input(4, "after_fuel_calc", "load"));
+    m.instructions.push_back(call_primitive(5, "add_int", {3, 4}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 5));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    REQUIRE(r->hooks[0].ram_claims.size() == 2);
+}
+
+TEST_CASE("Sh2aBackend: nested primitive with unsupported id fails",
+          "[feature_codegen][sh2a][nested]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
 
@@ -843,8 +987,7 @@ TEST_CASE("Sh2aBackend: nested CallPrimitive operand returns NotImplemented",
     ir::Module      m;
     m.instructions.push_back(load_const_int(1, 1));
     m.instructions.push_back(load_const_int(2, 2));
-    m.instructions.push_back(call_primitive(3, "add_int", {1, 2}));
-    // Second add: one operand is the result of the first add.
+    m.instructions.push_back(call_primitive(3, "multiply_int", {1, 2}));
     m.instructions.push_back(load_const_int(4, 10));
     m.instructions.push_back(call_primitive(5, "add_int", {3, 4}));
     m.instructions.push_back(store("after_fuel_calc",

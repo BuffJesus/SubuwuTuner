@@ -107,6 +107,77 @@ void emit_be32(std::vector<std::uint8_t> &code, std::uint32_t v) {
     code.push_back(static_cast<std::uint8_t>(v & 0xFFU));
 }
 
+// FragmentEmitter — incremental SH-2A patch builder. Body fragments
+// register their PC-relative literals into a shared deferred pool
+// and emit MOV.L @(d, PC), Rn instructions with placeholder disp
+// bytes; finalize() appends RTS + NOP delay slot + pool-alignment
+// padding + the consolidated literal pool, and back-patches every
+// MOV.L's 8-bit disp once the literal pool's final offset is known.
+//
+// This lets single-fragment patches (LoadConst→Store etc.) and
+// multi-fragment patches (nested add_int trees) share the same
+// epilogue + pool machinery without each emit site re-deriving
+// disp values manually.
+class FragmentEmitter {
+  public:
+    // MOV.L @(d, PC), Rn — disp filled in at finalize() time.
+    void mov_l_disp_pc(sh2a::Reg rn, std::uint32_t pool_literal) {
+        backpatches_.push_back({body_.size(), pool_.size()});
+        pool_.push_back(pool_literal);
+        emit_be16(body_, sh2a::enc_mov_l_disp_pc(rn, 0));
+    }
+    void mov_l_at_reg_reg(sh2a::Reg rm, sh2a::Reg rn) {
+        emit_be16(body_, sh2a::enc_mov_l_at_reg_reg(rm, rn));
+    }
+    void mov_l_reg_at_reg(sh2a::Reg rm, sh2a::Reg rn) {
+        emit_be16(body_, sh2a::enc_mov_l_reg_at_reg(rm, rn));
+    }
+    void add(sh2a::Reg rm, sh2a::Reg rn) {
+        emit_be16(body_, sh2a::enc_add(rm, rn));
+    }
+    void nop() { emit_be16(body_, sh2a::enc_nop()); }
+
+    // Append RTS + delay-slot NOP + pool-alignment NOP(s) + literal
+    // pool. Patch each MOV.L's disp byte. Returns the finished byte
+    // buffer; the emitter is single-use after this call.
+    std::vector<std::uint8_t> finalize() {
+        emit_be16(body_, sh2a::enc_rts());
+        emit_be16(body_, sh2a::enc_nop());  // delay slot
+        while (body_.size() % 4 != 0) {
+            emit_be16(body_, sh2a::enc_nop());  // pool-alignment pad
+        }
+        std::size_t const pool_start = body_.size();
+        for (auto const &bp : backpatches_) {
+            std::size_t const literal_offset =
+                pool_start + bp.pool_index * 4;
+            std::size_t const aligned =
+                (bp.body_offset + 4) & ~std::size_t{3};
+            std::size_t const disp = (literal_offset - aligned) / 4;
+            // The disp lives in the low byte of the 16-bit MOV.L
+            // instruction; body_[bp.body_offset] is the high byte
+            // (0xD0 | Rn), body_[bp.body_offset + 1] is the disp.
+            body_[bp.body_offset + 1] = static_cast<std::uint8_t>(disp);
+        }
+        for (auto val : pool_) {
+            emit_be32(body_, val);
+        }
+        return std::move(body_);
+    }
+
+    [[nodiscard]] std::size_t body_size() const noexcept {
+        return body_.size();
+    }
+
+  private:
+    struct Backpatch {
+        std::size_t body_offset;  // byte offset of the MOV.L instruction
+        std::size_t pool_index;   // index into `pool_`
+    };
+    std::vector<std::uint8_t>  body_;
+    std::vector<std::uint32_t> pool_;
+    std::vector<Backpatch>     backpatches_;
+};
+
 // Emit the canonical "load constant, store to RAM slot" sequence per
 // the layout documented in sh2a.hpp. constant_value lands at literal-
 // pool offset 0 (code offset 12); destination_address at offset 4
@@ -129,15 +200,12 @@ void emit_be32(std::vector<std::uint8_t> &code, std::uint32_t v) {
 void emit_load_const_store_sequence(std::vector<std::uint8_t> &code,
                                      std::uint32_t constant_value,
                                      std::uint32_t destination_address) {
-    using namespace sh2a;
-    emit_be16(code, enc_mov_l_disp_pc(Reg::R0, 2));      // load constant
-    emit_be16(code, enc_mov_l_disp_pc(Reg::R1, 3));      // load destination
-    emit_be16(code, enc_mov_l_reg_at_reg(Reg::R0, Reg::R1));  // store
-    emit_be16(code, enc_rts());
-    emit_be16(code, enc_nop());                          // delay slot
-    emit_be16(code, enc_nop());                          // pool alignment pad
-    emit_be32(code, constant_value);
-    emit_be32(code, destination_address);
+    FragmentEmitter fe;
+    fe.mov_l_disp_pc(sh2a::Reg::R0, constant_value);
+    fe.mov_l_disp_pc(sh2a::Reg::R1, destination_address);
+    fe.mov_l_reg_at_reg(sh2a::Reg::R0, sh2a::Reg::R1);
+    auto bytes = fe.finalize();
+    code.insert(code.end(), bytes.begin(), bytes.end());
 }
 
 // Emit the "load from hook-input address, dereference, store to RAM
@@ -164,15 +232,13 @@ void emit_load_const_store_sequence(std::vector<std::uint8_t> &code,
 void emit_load_hook_store_sequence(std::vector<std::uint8_t> &code,
                                     std::uint32_t source_address,
                                     std::uint32_t destination_address) {
-    using namespace sh2a;
-    emit_be16(code, enc_mov_l_disp_pc(Reg::R0, 2));            // source ptr
-    emit_be16(code, enc_mov_l_at_reg_reg(Reg::R0, Reg::R0));   // deref
-    emit_be16(code, enc_mov_l_disp_pc(Reg::R1, 2));            // dest ptr
-    emit_be16(code, enc_mov_l_reg_at_reg(Reg::R0, Reg::R1));   // store
-    emit_be16(code, enc_rts());
-    emit_be16(code, enc_nop());                                // delay slot
-    emit_be32(code, source_address);
-    emit_be32(code, destination_address);
+    FragmentEmitter fe;
+    fe.mov_l_disp_pc(sh2a::Reg::R0, source_address);
+    fe.mov_l_at_reg_reg(sh2a::Reg::R0, sh2a::Reg::R0);
+    fe.mov_l_disp_pc(sh2a::Reg::R1, destination_address);
+    fe.mov_l_reg_at_reg(sh2a::Reg::R0, sh2a::Reg::R1);
+    auto bytes = fe.finalize();
+    code.insert(code.end(), bytes.begin(), bytes.end());
 }
 
 // One operand of an ADD-style binary primitive. Either an immediate
@@ -202,66 +268,41 @@ struct PrimitiveOperand {
 //   target = ((this_pc + 4) & ~3) + disp*4
 // which means a MOV.L at offset N reading from pool offset P uses
 // disp = (P - ((N + 4) & ~3)) / 4.
+// Body fragment for one add primitive — loads two operands into
+// R0/R1, ADDs them, then stores R1 to the destination address. No
+// RTS / pool — those are appended by the FragmentEmitter's
+// finalize(). Used by both the single-primitive emit (one fragment
+// per patch) and the nested emit (multiple fragments share one
+// finalize).
+void emit_add_fragment(FragmentEmitter &fe,
+                        PrimitiveOperand op1,
+                        PrimitiveOperand op2,
+                        std::uint32_t    destination_address) {
+    // Operand 1 → R0 (deref if pointer)
+    fe.mov_l_disp_pc(sh2a::Reg::R0, op1.value);
+    if (op1.kind == PrimitiveOperand::Kind::HookInputPointer) {
+        fe.mov_l_at_reg_reg(sh2a::Reg::R0, sh2a::Reg::R0);
+    }
+    // Operand 2 → R1 (deref if pointer)
+    fe.mov_l_disp_pc(sh2a::Reg::R1, op2.value);
+    if (op2.kind == PrimitiveOperand::Kind::HookInputPointer) {
+        fe.mov_l_at_reg_reg(sh2a::Reg::R1, sh2a::Reg::R1);
+    }
+    // R1 = R1 + R0
+    fe.add(sh2a::Reg::R0, sh2a::Reg::R1);
+    // Destination → R2; store R1 to (R2)
+    fe.mov_l_disp_pc(sh2a::Reg::R2, destination_address);
+    fe.mov_l_reg_at_reg(sh2a::Reg::R1, sh2a::Reg::R2);
+}
+
 void emit_add_store_sequence(std::vector<std::uint8_t> &code,
                               PrimitiveOperand op1,
                               PrimitiveOperand op2,
                               std::uint32_t    destination_address) {
-    using namespace sh2a;
-
-    auto const instr_for = [](PrimitiveOperand const &o) -> std::size_t {
-        return o.kind == PrimitiveOperand::Kind::Constant ? 1U : 2U;
-    };
-    std::size_t const n_load_instrs =
-        instr_for(op1) + instr_for(op2)
-        + 1U /*ADD*/ + 1U /*MOV.L dest*/ + 1U /*store*/
-        + 1U /*RTS*/  + 1U /*NOP*/;
-    std::size_t const body_bytes = n_load_instrs * 2U;
-    std::size_t const pool_start = (body_bytes + 3U) & ~std::size_t{3};
-    std::size_t const pad_bytes  = pool_start - body_bytes;
-
-    std::size_t const pool_op1  = pool_start;
-    std::size_t const pool_op2  = pool_start + 4U;
-    std::size_t const pool_dest = pool_start + 8U;
-
-    std::size_t pc = 0;
-    auto const  disp_to = [&](std::size_t target) -> std::uint8_t {
-        std::size_t const aligned = (pc + 4U) & ~std::size_t{3};
-        return static_cast<std::uint8_t>((target - aligned) / 4U);
-    };
-    auto const  emit_instr = [&](std::uint16_t v) {
-        emit_be16(code, v);
-        pc += 2;
-    };
-
-    // Operand 1 → R0
-    emit_instr(enc_mov_l_disp_pc(Reg::R0, disp_to(pool_op1)));
-    if (op1.kind == PrimitiveOperand::Kind::HookInputPointer) {
-        emit_instr(enc_mov_l_at_reg_reg(Reg::R0, Reg::R0));
-    }
-    // Operand 2 → R1
-    emit_instr(enc_mov_l_disp_pc(Reg::R1, disp_to(pool_op2)));
-    if (op2.kind == PrimitiveOperand::Kind::HookInputPointer) {
-        emit_instr(enc_mov_l_at_reg_reg(Reg::R1, Reg::R1));
-    }
-    // R1 = R1 + R0
-    emit_instr(enc_add(Reg::R0, Reg::R1));
-    // Destination → R2
-    emit_instr(enc_mov_l_disp_pc(Reg::R2, disp_to(pool_dest)));
-    // Store R1 to (R2)
-    emit_instr(enc_mov_l_reg_at_reg(Reg::R1, Reg::R2));
-    // Return
-    emit_instr(enc_rts());
-    emit_instr(enc_nop());
-
-    // Pool-alignment padding (0 or 2 bytes).
-    for (std::size_t i = 0; i < pad_bytes / 2; ++i) {
-        emit_instr(enc_nop());
-    }
-
-    // Literal pool.
-    emit_be32(code, op1.value);
-    emit_be32(code, op2.value);
-    emit_be32(code, destination_address);
+    FragmentEmitter fe;
+    emit_add_fragment(fe, op1, op2, destination_address);
+    auto bytes = fe.finalize();
+    code.insert(code.end(), bytes.begin(), bytes.end());
 }
 
 // Look up a hook by id in the loaded definition. Linear scan — pack
@@ -389,10 +430,12 @@ void emit_add_store_sequence(std::vector<std::uint8_t> &code,
 }
 
 // Build a PrimitiveOperand from a producing instruction, given the
-// hook the consuming Store lives on (for cross-hook validation).
+// hook the consuming Store lives on (for cross-hook validation) and
+// any pre-allocated SSA RAM slots for nested CallPrimitive results.
 [[nodiscard]] Result<PrimitiveOperand> operand_from_producer(
     Definition const &def, ir::Module const &m, ir::ValueId value_id,
-    Hook const *target_hook) {
+    Hook const *target_hook,
+    std::unordered_map<ir::ValueId, std::uint32_t> const &slots) {
     ir::Instruction const *prod = find_producer(m, value_id);
     if (prod == nullptr) {
         return failure(ErrorCode::ParseError,
@@ -422,10 +465,126 @@ void emit_add_store_sequence(std::vector<std::uint8_t> &code,
         return PrimitiveOperand{PrimitiveOperand::Kind::HookInputPointer,
                                   addr};
     }
+    if (prod->op == ir::Op::CallPrimitive) {
+        // Read the operand value from the slot allocated for this
+        // nested primitive's result. Mechanically identical to
+        // HookInputPointer at the SH-2A level (load address, deref);
+        // semantically distinct (firmware variable vs scratch RAM slot).
+        auto it = slots.find(value_id);
+        if (it == slots.end()) {
+            return failure(ErrorCode::ParseError,
+                           "SH-2A backend: nested primitive operand has "
+                           "no RAM slot (walk should have allocated one)");
+        }
+        return PrimitiveOperand{PrimitiveOperand::Kind::HookInputPointer,
+                                  it->second};
+    }
     return failure(ErrorCode::NotImplemented,
-                   "SH-2A backend: primitive operand sources other than "
-                   "LoadConstant and LoadHookInput not yet implemented "
-                   "(no nested primitives in this slice)");
+                   "SH-2A backend: primitive operand has unsupported "
+                   "producer op");
+}
+
+// Validate a CallPrimitive at structural level: id is recognized,
+// operand count matches the primitive's arity, result type is
+// supported. Used by both the topo walk and the per-primitive emit.
+[[nodiscard]] Status validate_call_primitive(ir::Instruction const &prim) {
+    if (prim.symbol != "add_int") {
+        std::string msg{"SH-2A backend: CallPrimitive '"};
+        msg.append(prim.symbol);
+        msg.append("' not yet implemented (slice supports add_int only)");
+        return failure(ErrorCode::NotImplemented, std::move(msg));
+    }
+    if (prim.operands.size() != 2) {
+        std::string msg{"SH-2A backend: add_int requires exactly 2 "
+                        "operands, got "};
+        msg.append(std::to_string(prim.operands.size()));
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    if (prim.result_type != PinType::Int) {
+        std::string msg{"SH-2A backend: add_int result of type "};
+        msg.append(pin_type_name(prim.result_type));
+        msg.append(" not yet implemented (add_int produces Int)");
+        return failure(ErrorCode::NotImplemented, std::move(msg));
+    }
+    return ok();
+}
+
+// Emit a Store rooted at a nested CallPrimitive tree. Walks the tree
+// bottom-up: each interior primitive (non-root) gets a 4-byte RAM
+// slot for its result, then is emitted as a body fragment that
+// stores to that slot. The root primitive's body fragment stores to
+// the Store's destination instead of a slot. All fragments share one
+// FragmentEmitter, so the literal pool and RTS epilogue are
+// consolidated.
+//
+// Supports arbitrary depth as long as every interior node is a
+// recognized CallPrimitive (add_int in this slice). Leaves are
+// LoadConstant or LoadHookInput, validated by operand_from_producer.
+[[nodiscard]] Status emit_nested_call_primitive(
+    Definition const &def, ir::Module const &m,
+    ir::Instruction const &root_prim, Hook const *hook,
+    RamAllocator &ram, std::vector<RamClaim> &claims,
+    std::vector<std::uint8_t> &out_code, std::uint32_t dst_addr) {
+
+    // Topological walk: recurse into CallPrimitive operands first so
+    // intermediate slots exist by the time the consumer emits.
+    std::unordered_map<ir::ValueId, std::uint32_t> slots;
+    std::vector<ir::Instruction const *>           emit_order;
+
+    auto const walk = [&](auto &self_ref,
+                           ir::Instruction const *prim,
+                           bool is_root) -> Status {
+        if (auto s = validate_call_primitive(*prim); !s.has_value()) {
+            return failure(s.error());
+        }
+        for (auto operand_id : prim->operands) {
+            ir::Instruction const *prod = find_producer(m, operand_id);
+            if (prod == nullptr) {
+                return failure(ErrorCode::ParseError,
+                               "SH-2A backend: nested operand does not "
+                               "resolve to any producing instruction");
+            }
+            if (prod->op == ir::Op::CallPrimitive) {
+                if (auto s = self_ref(self_ref, prod, /*is_root=*/false);
+                    !s.has_value()) {
+                    return failure(s.error());
+                }
+            }
+        }
+        if (!is_root) {
+            auto claim_r = ram.claim(4, 4);
+            if (!claim_r.has_value()) {
+                std::string msg{"SH-2A backend: hook '"};
+                msg.append(hook->id);
+                msg.append("' free_ram exhausted while allocating slot "
+                           "for nested primitive result");
+                return failure(ErrorCode::OutOfRange, std::move(msg));
+            }
+            slots[prim->result_id] =
+                static_cast<std::uint32_t>(claim_r->address);
+            claims.push_back(*claim_r);
+        }
+        emit_order.push_back(prim);
+        return ok();
+    };
+    if (auto s = walk(walk, &root_prim, /*is_root=*/true); !s.has_value()) {
+        return failure(s.error());
+    }
+
+    FragmentEmitter fe;
+    for (ir::Instruction const *prim : emit_order) {
+        auto op1 = operand_from_producer(def, m, prim->operands[0], hook, slots);
+        if (!op1.has_value()) return failure(op1.error());
+        auto op2 = operand_from_producer(def, m, prim->operands[1], hook, slots);
+        if (!op2.has_value()) return failure(op2.error());
+
+        std::uint32_t const this_dest =
+            (prim == &root_prim) ? dst_addr : slots.at(prim->result_id);
+        emit_add_fragment(fe, *op1, *op2, this_dest);
+    }
+    auto bytes = fe.finalize();
+    out_code.insert(out_code.end(), bytes.begin(), bytes.end());
+    return ok();
 }
 
 // Per-hook accumulator. We group emitted code by hook so the
@@ -610,11 +769,36 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
                 msg.append(std::to_string(src->operands.size()));
                 return failure(ErrorCode::ParseError, std::move(msg));
             }
-            auto op1 = operand_from_producer(def, m, src->operands[0], hook);
-            if (!op1.has_value()) return failure(op1.error());
-            auto op2 = operand_from_producer(def, m, src->operands[1], hook);
-            if (!op2.has_value()) return failure(op2.error());
-            emit_add_store_sequence(work.code, *op1, *op2, dst_addr);
+            // Detect nested CallPrimitive operands. Single-level
+            // calls use the existing emit; nested trees go through
+            // the multi-fragment path that allocates SSA RAM slots.
+            // Operand count is validated inside the emit paths — for
+            // this peek we tolerate missing operands and just say
+            // "not nested" (the existing emit will report the error).
+            auto const producer_is_primitive = [&](ir::ValueId vid) {
+                ir::Instruction const *prod = find_producer(m, vid);
+                return prod != nullptr && prod->op == ir::Op::CallPrimitive;
+            };
+            bool const nested =
+                (src->operands.size() >= 1 && producer_is_primitive(src->operands[0]))
+                || (src->operands.size() >= 2 && producer_is_primitive(src->operands[1]));
+            if (nested) {
+                if (auto s = emit_nested_call_primitive(
+                        def, m, *src, hook, work.ram,
+                        work.claims, work.code, dst_addr);
+                    !s.has_value()) {
+                    return failure(s.error());
+                }
+            } else {
+                std::unordered_map<ir::ValueId, std::uint32_t> empty_slots;
+                auto op1 = operand_from_producer(
+                    def, m, src->operands[0], hook, empty_slots);
+                if (!op1.has_value()) return failure(op1.error());
+                auto op2 = operand_from_producer(
+                    def, m, src->operands[1], hook, empty_slots);
+                if (!op2.has_value()) return failure(op2.error());
+                emit_add_store_sequence(work.code, *op1, *op2, dst_addr);
+            }
         }
     }
 
