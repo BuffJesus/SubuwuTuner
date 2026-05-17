@@ -643,32 +643,58 @@ int cmd_project_step(int argc, char *argv[], bool forward) {
         return 1;
     }
 
-    auto const *table = proj->definition().find_table(edit_record->table_id);
-    if (table == nullptr) {
-        std::fprintf(stderr,
-                     "%s: edit references table '%s' which is not in the current pack\n",
-                     cmd_name, edit_record->table_id.c_str());
-        return 1;
-    }
+    if (auto const *te = edit_record->as_table(); te != nullptr) {
+        auto const *table = proj->definition().find_table(te->table_id);
+        if (table == nullptr) {
+            std::fprintf(stderr,
+                         "%s: edit references table '%s' which is not in the current pack\n",
+                         cmd_name, te->table_id.c_str());
+            return 1;
+        }
 
-    auto td = proj->definition().read_table_values(proj->working_rom(), *table);
-    if (!td.has_value()) {
-        std::fprintf(stderr, "%s: %s\n", cmd_name, td.error().to_string().c_str());
-        return 1;
-    }
+        auto td = proj->definition().read_table_values(proj->working_rom(), *table);
+        if (!td.has_value()) {
+            std::fprintf(stderr, "%s: %s\n", cmd_name, td.error().to_string().c_str());
+            return 1;
+        }
 
-    // Undo restores `before`; redo restores `after`.
-    auto const &snap = forward ? edit_record->after : edit_record->before;
-    if (auto s = st::edit::restore(*td, snap); !s.has_value()) {
-        std::fprintf(stderr, "%s: %s\n", cmd_name, s.error().to_string().c_str());
-        return 1;
-    }
+        // Undo restores `before`; redo restores `after`.
+        auto const &snap = forward ? te->after : te->before;
+        if (auto s = st::edit::restore(*td, snap); !s.has_value()) {
+            std::fprintf(stderr, "%s: %s\n", cmd_name, s.error().to_string().c_str());
+            return 1;
+        }
 
-    auto wb = proj->definition().write_table_values(proj->working_rom(), *table, *td);
-    if (!wb.has_value()) {
-        std::fprintf(stderr, "%s: writeback: %s\n", cmd_name,
-                     wb.error().to_string().c_str());
-        return 1;
+        auto wb = proj->definition().write_table_values(proj->working_rom(), *table, *td);
+        if (!wb.has_value()) {
+            std::fprintf(stderr, "%s: writeback: %s\n", cmd_name,
+                         wb.error().to_string().c_str());
+            return 1;
+        }
+
+        std::printf("%s applied edit: %s on %s\n",
+                    forward ? "Redo" : "Undo",
+                    edit_record->description.c_str(),
+                    te->table_id.c_str());
+    } else if (auto const *be = edit_record->as_byte(); be != nullptr) {
+        // ByteEdit: walk the per-byte changes and write the appropriate side
+        // directly to the working ROM. No definition indirection — works
+        // even if the originating DTC entry was removed from the pack
+        // between sessions.
+        auto &rom = proj->working_rom();
+        for (auto const &c : be->changes) {
+            auto const v = forward ? c.after : c.before;
+            if (auto s = rom.write_u8(c.address, v); !s.has_value()) {
+                std::fprintf(stderr, "%s: byte writeback @0x%zX: %s\n",
+                             cmd_name, c.address, s.error().to_string().c_str());
+                return 1;
+            }
+        }
+        std::printf("%s applied edit: %s (%zu byte%s)\n",
+                    forward ? "Redo" : "Undo",
+                    edit_record->description.c_str(),
+                    be->changes.size(),
+                    be->changes.size() == 1 ? "" : "s");
     }
 
     if (auto s = proj->save_working_rom(); !s.has_value()) {
@@ -676,10 +702,6 @@ int cmd_project_step(int argc, char *argv[], bool forward) {
         return 1;
     }
 
-    std::printf("%s applied edit: %s on %s\n",
-                forward ? "Redo" : "Undo",
-                edit_record->description.c_str(),
-                edit_record->table_id.c_str());
     std::printf("Working CRC32: 0x%08X\n", proj->working_rom().crc32());
     std::printf("History cursor: %zu / %zu\n", proj->history().cursor(),
                 proj->history().size());
@@ -1047,10 +1069,11 @@ int cmd_pack_dtcs(int argc, char *argv[]) {
 }
 
 // `project-disable-dtc` / `project-enable-dtc` — flip the enable bit for one
-// or more DTC codes inside the project's working ROM. DTC edits write
-// directly to the working ROM and DO NOT go through edit::History; they
-// won't be rolled back by project-undo. The flash-time policy gate still
-// applies on emissions-flagged DTCs when the user runs project-flash.
+// or more DTC codes inside the project's working ROM. The byte writes are
+// captured as a single ByteEdit committed through edit::History, so a
+// follow-up `project-undo` restores the original bit pattern. The flash-time
+// policy gate still applies on emissions-flagged DTCs when the user runs
+// project-flash.
 int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
     char const *cmd_name = enable ? "project-enable-dtc" : "project-disable-dtc";
     std::optional<std::string>           codes_arg;
@@ -1113,8 +1136,15 @@ int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
     auto const &def = proj->definition();
     auto       &rom = proj->working_rom();
 
-    bool        any_changed     = false;
-    std::size_t emissions_count = 0;
+    // We collect ByteEdit::Change entries during the toggle loop and
+    // commit them as one undoable Edit. Two DTCs sharing the same byte
+    // (common — DTC enable bits are packed) coalesce: a second toggle on
+    // the same address updates the prior entry's `after` rather than
+    // appending a new entry, so the recorded delta matches the ROM's
+    // final state and an undo restores the original byte.
+    std::vector<st::edit::ByteEdit::Change> changes;
+    std::size_t                             emissions_count = 0;
+    std::vector<std::string>                touched_codes;
     for (auto const &code : codes) {
         auto const *dtc = def.find_dtc(code);
         if (dtc == nullptr) {
@@ -1135,7 +1165,19 @@ int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
             return 1;
         }
         bool const byte_changed = result->before != result->after;
-        if (byte_changed) any_changed = true;
+        if (byte_changed) {
+            auto it = std::find_if(
+                changes.begin(), changes.end(),
+                [&](st::edit::ByteEdit::Change const &c) {
+                    return c.address == result->address;
+                });
+            if (it == changes.end()) {
+                changes.push_back({result->address, result->before, result->after});
+            } else {
+                it->after = result->after;
+            }
+            touched_codes.push_back(dtc->code);
+        }
         if (dtc->emissions_relevant) ++emissions_count;
         std::printf("  %s %-6s %s  (byte 0x%02X -> 0x%02X)%s\n",
                     enable ? "ENABLE " : "DISABLE",
@@ -1145,7 +1187,16 @@ int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
                     dtc->emissions_relevant ? "  [emissions]" : "");
     }
 
-    if (any_changed) {
+    if (!changes.empty()) {
+        std::string desc;
+        desc.reserve(64);
+        desc.append(enable ? "enable DTC " : "disable DTC ");
+        for (std::size_t i = 0; i < touched_codes.size(); ++i) {
+            if (i > 0) desc.append(", ");
+            desc.append(touched_codes[i]);
+        }
+        proj->history().record(
+            st::edit::Edit::bytes(std::move(changes), std::move(desc)));
         if (auto s = proj->save_working_rom(); !s.has_value()) {
             std::fprintf(stderr, "%s: save: %s\n", cmd_name,
                          s.error().to_string().c_str());
@@ -1161,8 +1212,6 @@ int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
                     "run project-flash under a non-motorsport profile.\n",
                     emissions_count);
     }
-    std::printf("Note: DTC edits bypass edit::History and will NOT be rolled "
-                "back by project-undo.\n");
     return 0;
 }
 
@@ -1304,8 +1353,8 @@ int cmd_project_edit(int argc, char *argv[]) {
         std::snprintf(buf, sizeof(buf), " %g", *value);
         desc.append(buf);
     }
-    proj->history().record({table->id, std::move(*before), std::move(*after),
-                            std::move(desc)});
+    proj->history().record(st::edit::Edit::table(
+        table->id, std::move(*before), std::move(*after), std::move(desc)));
 
     if (auto s = proj->save_working_rom(); !s.has_value()) {
         std::fprintf(stderr, "project-edit: save: %s\n", s.error().to_string().c_str());
@@ -1481,8 +1530,8 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
     char descbuf[64];
     std::snprintf(descbuf, sizeof descbuf, "csv import (%zu cell%s)",
                   edits.size(), edits.size() == 1 ? "" : "s");
-    proj->history().record({table->id, std::move(*before),
-                            std::move(*after), std::string{descbuf}});
+    proj->history().record(st::edit::Edit::table(
+        table->id, std::move(*before), std::move(*after), std::string{descbuf}));
     if (auto s = proj->save_working_rom(); !s.has_value()) {
         std::fprintf(stderr, "project-edit-csv: save: %s\n",
                      s.error().to_string().c_str());
@@ -1746,12 +1795,18 @@ int cmd_project_info(int argc, char *argv[]) {
             bool        safety{};
         };
         std::vector<TableTouch> touched;
+        std::size_t             byte_edit_count = 0;
         for (auto const &e : records) {
+            auto const *te = e.as_table();
+            if (te == nullptr) {
+                ++byte_edit_count;
+                continue;
+            }
             auto it = std::find_if(touched.begin(), touched.end(),
-                [&](TableTouch const &t) { return t.id == e.table_id; });
+                [&](TableTouch const &t) { return t.id == te->table_id; });
             if (it == touched.end()) {
-                auto const *table = p->definition().find_table(e.table_id);
-                touched.push_back({e.table_id, 1,
+                auto const *table = p->definition().find_table(te->table_id);
+                touched.push_back({te->table_id, 1,
                     table != nullptr && table->emissions_relevant,
                     table != nullptr && table->engine_safety_critical});
             } else {
@@ -1767,6 +1822,10 @@ int cmd_project_info(int argc, char *argv[]) {
             std::printf("  %-30s %zu edit%s  [%s]\n",
                         t.id.c_str(), t.count,
                         t.count == 1 ? "" : "s", flags.c_str());
+        }
+        if (byte_edit_count > 0) {
+            std::printf("Byte edits:     %zu (e.g. DTC enable-bit toggles)\n",
+                        byte_edit_count);
         }
     }
     return 0;
@@ -1886,12 +1945,18 @@ int cmd_project_history(int argc, char *argv[]) {
     std::printf("\n");
 
     // Materialize the filtered index set (preserves natural order +
-    // original indices so the marker semantics still make sense).
+    // original indices so the marker semantics still make sense). The
+    // --table filter only matches TableEdit records; byte edits are
+    // filtered out entirely when --table is set since they don't carry
+    // a table id.
     std::vector<std::size_t> filtered;
     filtered.reserve(records.size());
     for (std::size_t i = 0; i < records.size(); ++i) {
-        if (table_filter.has_value() && records[i].table_id != *table_filter) {
-            continue;
+        if (table_filter.has_value()) {
+            auto const *te = records[i].as_table();
+            if (te == nullptr || te->table_id != *table_filter) {
+                continue;
+            }
         }
         filtered.push_back(i);
     }
@@ -1923,12 +1988,8 @@ int cmd_project_history(int argc, char *argv[]) {
                 "----------------------",
                 "-------------------------", "-----");
     for (std::size_t k = start_at; k < filtered.size(); ++k) {
-        std::size_t const i   = filtered[k];
-        auto const       &e   = records[i];
-        auto const        rec = e.before.rect;
-        char              rect_buf[32]{};
-        std::snprintf(rect_buf, sizeof(rect_buf), "[%zu:%zu, %zu:%zu]",
-                      rec.r_start, rec.r_end, rec.c_start, rec.c_end);
+        std::size_t const i = filtered[k];
+        auto const       &e = records[i];
 
         // Marker: '>' for the entry the cursor sits AT (next to undo),
         // '.' for entries already undone past, ' ' for active entries.
@@ -1936,14 +1997,28 @@ int cmd_project_history(int argc, char *argv[]) {
         if (i + 1 == cursor)      marker = '>';   // most-recent committed
         else if (i >= cursor)     marker = '.';   // redo-pending
 
-        // Pull emissions/safety flags from the table being edited so the
-        // history doubles as an audit log of which edits would trip the
-        // policy gate at flash time.
-        auto const *table = proj->definition().find_table(e.table_id);
+        char        rect_buf[32]{};
+        std::string id_str;
         std::string flags;
-        if (table != nullptr) {
-            if (table->emissions_relevant)     flags += "E";
-            if (table->engine_safety_critical) flags += "S";
+        if (auto const *te = e.as_table(); te != nullptr) {
+            auto const rec = te->before.rect;
+            std::snprintf(rect_buf, sizeof(rect_buf), "[%zu:%zu, %zu:%zu]",
+                          rec.r_start, rec.r_end, rec.c_start, rec.c_end);
+            id_str = te->table_id;
+
+            // Pull emissions/safety flags from the table being edited so
+            // the history doubles as an audit log of which edits would
+            // trip the policy gate at flash time.
+            auto const *table = proj->definition().find_table(te->table_id);
+            if (table != nullptr) {
+                if (table->emissions_relevant)     flags += "E";
+                if (table->engine_safety_critical) flags += "S";
+            }
+        } else if (auto const *be = e.as_byte(); be != nullptr) {
+            std::snprintf(rect_buf, sizeof(rect_buf), "%zu byte%s",
+                          be->changes.size(),
+                          be->changes.size() == 1 ? "" : "s");
+            id_str = "(byte-edit)";
         }
         if (flags.empty()) flags = "-";
 
@@ -1952,7 +2027,7 @@ int cmd_project_history(int argc, char *argv[]) {
 
         std::printf("%-4s %-30s %-22s %-25s %s\n",
                     idx_buf,
-                    e.table_id.c_str(),
+                    id_str.c_str(),
                     rect_buf,
                     e.description.empty() ? "(no description)"
                                           : e.description.c_str(),
@@ -2228,8 +2303,9 @@ int cmd_project_autotune_maf(int argc, char *argv[]) {
         std::snprintf(descbuf, sizeof descbuf,
                       "autotune maf (%zu cell%s)",
                       modified, modified == 1 ? "" : "s");
-        proj->history().record({table->id, std::move(*before),
-                                std::move(*after), std::string{descbuf}});
+        proj->history().record(st::edit::Edit::table(
+            table->id, std::move(*before), std::move(*after),
+            std::string{descbuf}));
     }
     if (auto s = proj->save_working_rom(); !s.has_value()) {
         std::fprintf(stderr, "project-autotune-maf: save: %s\n",
@@ -2555,8 +2631,9 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
                       pulled,
                       added > 0 ? ", " : "",
                       added > 0 ? (std::to_string(added) + " added-back").c_str() : "");
-        proj->history().record({table->id, std::move(*before),
-                                std::move(*after), std::string{descbuf}});
+        proj->history().record(st::edit::Edit::table(
+            table->id, std::move(*before), std::move(*after),
+            std::string{descbuf}));
     }
     if (auto s = proj->save_working_rom(); !s.has_value()) {
         std::fprintf(stderr, "project-autotune-knock-pull: save: %s\n",

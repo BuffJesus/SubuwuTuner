@@ -8,7 +8,9 @@
 #include "st/defs.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace st::edit {
@@ -79,17 +81,62 @@ struct Snapshot {
 [[nodiscard]] Result<Snapshot> snapshot(Definition::TableData const &td, Rect r);
 [[nodiscard]] Status           restore(Definition::TableData &td, Snapshot const &s);
 
-// An Edit records one logical change to one table. The History owns a
-// sequence of these and lets the caller walk backwards (undo) or forwards
-// (redo) without knowing how the edit was originally produced. The caller
-// holds the TableData(s) and is responsible for calling restore() on the
-// right one — History is a record-keeper, not a model.
-
-struct Edit {
-    std::string table_id;      // logical table id, for callers managing many
+// One logical change to one table — the original rect-scoped form.
+struct TableEdit {
+    std::string table_id;
     Snapshot    before;
     Snapshot    after;
-    std::string description;   // short human label like "set 14.7" or "smooth x2"
+};
+
+// One logical change to one or more raw ROM bytes. Used for edits that
+// don't map onto a Definition table — DTC enable-bits, calibration ID
+// tweaks, future scalar-not-in-table parameters. Multi-change so that a
+// user gesture touching N bytes (e.g. `--code P0420,P0430`) records as
+// one undoable unit. Apply/revert lives in the project layer because
+// ByteEdit is rom-bytes against an absolute address, not table-relative.
+struct ByteEdit {
+    struct Change {
+        std::size_t  address{0};
+        std::uint8_t before{0};
+        std::uint8_t after{0};
+    };
+    std::vector<Change> changes;
+};
+
+// An Edit records one logical change. The History owns a sequence of
+// these and lets the caller walk backwards (undo) or forwards (redo)
+// without caring whether the underlying op was rect-scoped (TableEdit)
+// or byte-scoped (ByteEdit). The caller dispatches on the payload and
+// applies the appropriate side — History is a record-keeper, not a model.
+
+struct Edit {
+    std::string                      description;
+    std::variant<TableEdit, ByteEdit> payload{TableEdit{}};
+
+    [[nodiscard]] bool is_table() const noexcept {
+        return std::holds_alternative<TableEdit>(payload);
+    }
+    [[nodiscard]] bool is_byte() const noexcept {
+        return std::holds_alternative<ByteEdit>(payload);
+    }
+    [[nodiscard]] TableEdit const *as_table() const noexcept {
+        return std::get_if<TableEdit>(&payload);
+    }
+    [[nodiscard]] ByteEdit const *as_byte() const noexcept {
+        return std::get_if<ByteEdit>(&payload);
+    }
+
+    [[nodiscard]] static Edit table(std::string table_id, Snapshot before,
+                                     Snapshot after, std::string description) {
+        return Edit{
+            std::move(description),
+            TableEdit{std::move(table_id), std::move(before), std::move(after)},
+        };
+    }
+    [[nodiscard]] static Edit bytes(std::vector<ByteEdit::Change> changes,
+                                     std::string description) {
+        return Edit{std::move(description), ByteEdit{std::move(changes)}};
+    }
 };
 
 class History {

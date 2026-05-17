@@ -71,18 +71,35 @@ Status copy_bytes(std::filesystem::path const &src, std::filesystem::path const 
 // ---- History serialization ---------------------------------------------
 // edits.toml schema:
 //
-//   schema_version = 1
-//   cursor         = N           # how many edits are "applied"
+//   schema_version = 2          # v1 = TableEdit-only; v2 adds ByteEdit
+//   cursor         = N          # how many edits are "applied"
+//
+// TableEdit (rect-scoped):
 //
 //   [[edit]]
-//   table_id    = "..."
 //   description = "..."
+//   table_id    = "..."
 //   [edit.before]
 //     r_start = ..  r_end = ..  c_start = ..  c_end = ..
 //     values  = [[...], [...]]   # 2D row-major
 //   [edit.after]
 //     r_start = ..  r_end = ..  c_start = ..  c_end = ..
 //     values  = [[...], [...]]
+//
+// ByteEdit (byte-scoped — used for DTC enable-bit toggles and other
+// edits that don't map onto a Definition table):
+//
+//   [[edit]]
+//   description = "..."
+//   [[edit.byte_changes]]
+//     address = 12345
+//     before  = 255       # 0..255
+//     after   = 254
+//
+// Schema discrimination on read: presence of `table_id` AND
+// `[edit.before]`/`[edit.after]` ⇒ TableEdit; presence of
+// `byte_changes` ⇒ ByteEdit. v1 files are pure TableEdit and load
+// unchanged.
 
 void render_snapshot(std::ostringstream &ss, char const *name,
                      edit::Snapshot const &s) {
@@ -107,14 +124,25 @@ std::string render_history_toml(edit::History const &h) {
     std::ostringstream ss;
     ss << "# Edit history for this SubuwuTuner project. Generated\n";
     ss << "# automatically; hand-edits are discouraged but possible.\n";
-    ss << "schema_version = 1\n";
+    ss << "schema_version = 2\n";
     ss << "cursor = " << h.cursor() << "\n";
     for (auto const &e : h.records()) {
         ss << "\n[[edit]]\n";
-        ss << "  table_id    = \"" << e.table_id << "\"\n";
         ss << "  description = \"" << e.description << "\"\n";
-        render_snapshot(ss, "before", e.before);
-        render_snapshot(ss, "after", e.after);
+        if (auto const *t = e.as_table(); t != nullptr) {
+            ss << "  table_id    = \"" << t->table_id << "\"\n";
+            render_snapshot(ss, "before", t->before);
+            render_snapshot(ss, "after", t->after);
+        } else if (auto const *b = e.as_byte(); b != nullptr) {
+            for (auto const &c : b->changes) {
+                ss << "  [[edit.byte_changes]]\n";
+                ss << "    address = " << c.address << "\n";
+                ss << "    before  = "
+                   << static_cast<unsigned>(c.before) << "\n";
+                ss << "    after   = "
+                   << static_cast<unsigned>(c.after) << "\n";
+            }
+        }
     }
     return std::move(ss).str();
 }
@@ -162,9 +190,9 @@ Result<edit::History> parse_history_toml(std::string_view text) {
         return failure(ErrorCode::ParseError, std::move(msg));
     }
     int const schema = static_cast<int>(tbl["schema_version"].value_or<std::int64_t>(0));
-    if (schema > 1) {
+    if (schema > 2) {
         return failure(ErrorCode::UnsupportedVersion,
-                       "edits.toml schema_version " + std::to_string(schema) + " > 1");
+                       "edits.toml schema_version " + std::to_string(schema) + " > 2");
     }
     auto const cursor =
         static_cast<std::size_t>(tbl["cursor"].value_or<std::int64_t>(0));
@@ -177,21 +205,58 @@ Result<edit::History> parse_history_toml(std::string_view text) {
                 return failure(ErrorCode::ParseError, "[[edit]] element is not a table");
             }
             edit::Edit e;
-            e.table_id    = (*et)["table_id"].value_or<std::string>("");
             e.description = (*et)["description"].value_or<std::string>("");
 
-            auto const *before_t = (*et)["before"].as_table();
-            auto const *after_t  = (*et)["after"].as_table();
-            if (before_t == nullptr || after_t == nullptr) {
-                return failure(ErrorCode::ParseError,
-                               "[[edit]] missing [edit.before] or [edit.after]");
+            // Discriminate kind by which fields are present. ByteEdit's
+            // `byte_changes` array is the v2 addition; absence of it plus
+            // presence of [edit.before]/[edit.after] is the v1 TableEdit
+            // shape that we still accept verbatim.
+            auto const *byte_arr = (*et)["byte_changes"].as_array();
+            if (byte_arr != nullptr) {
+                edit::ByteEdit b;
+                b.changes.reserve(byte_arr->size());
+                for (auto const &cn : *byte_arr) {
+                    auto const *ct = cn.as_table();
+                    if (ct == nullptr) {
+                        return failure(ErrorCode::ParseError,
+                                       "[[edit.byte_changes]] element is not a table");
+                    }
+                    edit::ByteEdit::Change c{};
+                    c.address = static_cast<std::size_t>(
+                        (*ct)["address"].value_or<std::int64_t>(0));
+                    auto const before_raw =
+                        (*ct)["before"].value_or<std::int64_t>(-1);
+                    auto const after_raw =
+                        (*ct)["after"].value_or<std::int64_t>(-1);
+                    if (before_raw < 0 || before_raw > 255
+                        || after_raw < 0 || after_raw > 255) {
+                        return failure(ErrorCode::ParseError,
+                                       "[[edit.byte_changes]] before/after "
+                                       "must be 0..255");
+                    }
+                    c.before = static_cast<std::uint8_t>(before_raw);
+                    c.after  = static_cast<std::uint8_t>(after_raw);
+                    b.changes.push_back(c);
+                }
+                e.payload = std::move(b);
+            } else {
+                edit::TableEdit t;
+                t.table_id = (*et)["table_id"].value_or<std::string>("");
+
+                auto const *before_t = (*et)["before"].as_table();
+                auto const *after_t  = (*et)["after"].as_table();
+                if (before_t == nullptr || after_t == nullptr) {
+                    return failure(ErrorCode::ParseError,
+                                   "[[edit]] missing [edit.before] or [edit.after]");
+                }
+                auto before_r = parse_snapshot(*before_t);
+                if (!before_r.has_value()) return failure(before_r.error());
+                auto after_r = parse_snapshot(*after_t);
+                if (!after_r.has_value()) return failure(after_r.error());
+                t.before = std::move(*before_r);
+                t.after  = std::move(*after_r);
+                e.payload = std::move(t);
             }
-            auto before_r = parse_snapshot(*before_t);
-            if (!before_r.has_value()) return failure(before_r.error());
-            auto after_r = parse_snapshot(*after_t);
-            if (!after_r.has_value()) return failure(after_r.error());
-            e.before = std::move(*before_r);
-            e.after  = std::move(*after_r);
             edits.push_back(std::move(e));
         }
     }

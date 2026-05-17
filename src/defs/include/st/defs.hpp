@@ -195,10 +195,11 @@ struct Dtc {
 
 // Read / set the enable bit for `dtc` inside `bitmap` in `rom`. The
 // effective byte address is `bitmap.address + dtc.byte_offset`; OutOfRange
-// if that's past `rom.size()`. `set_dtc_enabled` returns the byte's value
-// before/after the change so callers can show a diff or print an audit
-// line.
+// if that's past `rom.size()`. `set_dtc_enabled` returns the byte's address
+// and the value before/after the change so callers can show a diff, print
+// an audit line, or record the write as a ByteEdit in edit::History.
 struct DtcBitChange {
+    std::size_t  address{};
     std::uint8_t before{};
     std::uint8_t after{};
 };

@@ -194,7 +194,8 @@ TEST_CASE("Project history round-trips through edits.toml",
         after.rect   = {0, 0, 0, 1};
         after.values = {{10.0, 20.0}};
 
-        p->history().record({"fuel_map", before, after, "set 10/20"});
+        p->history().record(st::edit::Edit::table("fuel_map", before, after,
+                                                  "set 10/20"));
 
         st::edit::Snapshot before2;
         before2.rect   = {1, 1, 0, 1};
@@ -202,7 +203,8 @@ TEST_CASE("Project history round-trips through edits.toml",
         st::edit::Snapshot after2;
         after2.rect   = {1, 1, 0, 1};
         after2.values = {{50.0, 60.0}};
-        p->history().record({"boost_map", before2, after2, "set 50/60"});
+        p->history().record(st::edit::Edit::table("boost_map", before2, after2,
+                                                  "set 50/60"));
 
         REQUIRE(p->save_working_rom().has_value());
         REQUIRE(std::filesystem::exists(proj_dir / "edits.toml"));
@@ -215,19 +217,185 @@ TEST_CASE("Project history round-trips through edits.toml",
     REQUIRE(reopened->history().cursor() == 2);
 
     auto const &records = reopened->history().records();
-    REQUIRE(records[0].table_id == "fuel_map");
-    REQUIRE(records[0].description == "set 10/20");
-    REQUIRE(records[0].before.values == std::vector<std::vector<double>>{{1.0, 2.0}});
-    REQUIRE(records[0].after.values == std::vector<std::vector<double>>{{10.0, 20.0}});
-
-    REQUIRE(records[1].table_id == "boost_map");
-    REQUIRE(records[1].after.values == std::vector<std::vector<double>>{{50.0, 60.0}});
-    REQUIRE(records[1].after.rect.r_start == 1);
-    REQUIRE(records[1].after.rect.c_end == 1);
+    REQUIRE(records.size() == 2);
+    {
+        auto const *te0 = records[0].as_table();
+        REQUIRE(te0 != nullptr);
+        REQUIRE(te0->table_id == "fuel_map");
+        REQUIRE(records[0].description == "set 10/20");
+        REQUIRE(te0->before.values
+                == std::vector<std::vector<double>>{{1.0, 2.0}});
+        REQUIRE(te0->after.values
+                == std::vector<std::vector<double>>{{10.0, 20.0}});
+    }
+    {
+        auto const *te1 = records[1].as_table();
+        REQUIRE(te1 != nullptr);
+        REQUIRE(te1->table_id == "boost_map");
+        REQUIRE(te1->after.values
+                == std::vector<std::vector<double>>{{50.0, 60.0}});
+        REQUIRE(te1->after.rect.r_start == 1);
+        REQUIRE(te1->after.rect.c_end == 1);
+    }
 
     // can_undo / can_redo reflect the restored cursor.
     REQUIRE(reopened->history().can_undo());
     REQUIRE_FALSE(reopened->history().can_redo());
+}
+
+TEST_CASE("Project history round-trips a ByteEdit through edits.toml",
+          "[project][history][byte_edit]") {
+    TempDir td;
+    auto const  pack_dir = make_pack(td.path / "pack");
+    auto const  rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "byteedit.stune";
+
+    {
+        auto p = st::Project::create(proj_dir, rom_path, pack_dir, "byteedit");
+        REQUIRE(p.has_value());
+
+        // Forge a ByteEdit that captures a hypothetical DTC-bit toggle on
+        // two adjacent ROM bytes. The Project layer should serialize it
+        // through edits.toml without caring about the semantics — that's
+        // the contract.
+        p->history().record(st::edit::Edit::bytes(
+            {{0x10, 0xFF, 0xFE}, {0x11, 0x00, 0x01}},
+            "disable DTC P0420, P0430"));
+
+        REQUIRE(p->save_working_rom().has_value());
+        REQUIRE(std::filesystem::exists(proj_dir / "edits.toml"));
+    }
+
+    auto reopened = st::Project::open(proj_dir);
+    REQUIRE(reopened.has_value());
+    REQUIRE(reopened->history().size() == 1);
+
+    auto const &records = reopened->history().records();
+    auto const *be = records[0].as_byte();
+    REQUIRE(be != nullptr);
+    REQUIRE_FALSE(records[0].is_table());
+    REQUIRE(records[0].description == "disable DTC P0420, P0430");
+    REQUIRE(be->changes.size() == 2);
+    REQUIRE(be->changes[0].address == 0x10);
+    REQUIRE(be->changes[0].before == 0xFF);
+    REQUIRE(be->changes[0].after == 0xFE);
+    REQUIRE(be->changes[1].address == 0x11);
+    REQUIRE(be->changes[1].before == 0x00);
+    REQUIRE(be->changes[1].after == 0x01);
+}
+
+TEST_CASE("Project history round-trips mixed TableEdit + ByteEdit records",
+          "[project][history][byte_edit]") {
+    TempDir td;
+    auto const  pack_dir = make_pack(td.path / "pack");
+    auto const  rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "mixed.stune";
+
+    {
+        auto p = st::Project::create(proj_dir, rom_path, pack_dir, "mixed");
+        REQUIRE(p.has_value());
+
+        st::edit::Snapshot before;
+        before.rect   = {0, 0, 0, 1};
+        before.values = {{1.0, 2.0}};
+        st::edit::Snapshot after;
+        after.rect   = {0, 0, 0, 1};
+        after.values = {{10.0, 20.0}};
+        p->history().record(st::edit::Edit::table(
+            "fuel_map", before, after, "set 10/20"));
+
+        p->history().record(st::edit::Edit::bytes(
+            {{0x10, 0xFF, 0xFE}}, "disable DTC P0420"));
+
+        REQUIRE(p->save_working_rom().has_value());
+    }
+
+    auto reopened = st::Project::open(proj_dir);
+    REQUIRE(reopened.has_value());
+    REQUIRE(reopened->history().size() == 2);
+
+    auto const &records = reopened->history().records();
+    {
+        auto const *te = records[0].as_table();
+        REQUIRE(te != nullptr);
+        REQUIRE(te->table_id == "fuel_map");
+        REQUIRE(te->after.values
+                == std::vector<std::vector<double>>{{10.0, 20.0}});
+    }
+    {
+        auto const *be = records[1].as_byte();
+        REQUIRE(be != nullptr);
+        REQUIRE(be->changes.size() == 1);
+        REQUIRE(be->changes[0].address == 0x10);
+    }
+}
+
+TEST_CASE("Project history loads v1 schema (TableEdit-only) edits.toml unchanged",
+          "[project][history][byte_edit][backward_compat]") {
+    TempDir td;
+    auto const  pack_dir = make_pack(td.path / "pack");
+    auto const  rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "legacy.stune";
+
+    {
+        auto p = st::Project::create(proj_dir, rom_path, pack_dir, "legacy");
+        REQUIRE(p.has_value());
+        REQUIRE(p->save_working_rom().has_value());
+    }
+    // Hand-write a v1 edits.toml — pure TableEdit, no schema bump.
+    write_text(proj_dir / "edits.toml", R"toml(
+schema_version = 1
+cursor = 1
+
+[[edit]]
+  description = "set 9"
+  table_id    = "fuel_map"
+  [edit.before]
+  r_start = 0
+  r_end   = 0
+  c_start = 0
+  c_end   = 0
+  values = [ [ 1.0 ], ]
+  [edit.after]
+  r_start = 0
+  r_end   = 0
+  c_start = 0
+  c_end   = 0
+  values = [ [ 9.0 ], ]
+)toml");
+
+    auto reopened = st::Project::open(proj_dir);
+    REQUIRE(reopened.has_value());
+    REQUIRE(reopened->history().size() == 1);
+    auto const *te = reopened->history().records()[0].as_table();
+    REQUIRE(te != nullptr);
+    REQUIRE(te->table_id == "fuel_map");
+}
+
+TEST_CASE("Project::open refuses edits.toml schema_version above 2",
+          "[project][history][schema]") {
+    TempDir td;
+    auto const  pack_dir = make_pack(td.path / "pack");
+    auto const  rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "futureedits.stune";
+
+    {
+        auto p = st::Project::create(proj_dir, rom_path, pack_dir, "futureedits");
+        REQUIRE(p.has_value());
+        REQUIRE(p->save_working_rom().has_value());
+    }
+    write_text(proj_dir / "edits.toml", R"toml(
+schema_version = 3
+cursor = 0
+)toml");
+
+    auto reopened = st::Project::open(proj_dir);
+    REQUIRE_FALSE(reopened.has_value());
+    REQUIRE(reopened.error().code() == st::ErrorCode::UnsupportedVersion);
 }
 
 TEST_CASE("Project history empty on a fresh project until edits land",

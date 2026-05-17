@@ -222,7 +222,7 @@ TEST_CASE("History::record + undo + redo walks a single edit",
     REQUIRE_FALSE(h.can_undo());
     REQUIRE_FALSE(h.can_redo());
 
-    h.record({.table_id = "t", .before = before, .after = after, .description = "set 9"});
+    h.record(st::edit::Edit::table("t", before, after, "set 9"));
     REQUIRE(h.size() == 1);
     REQUIRE(h.can_undo());
     REQUIRE_FALSE(h.can_redo());
@@ -230,14 +230,15 @@ TEST_CASE("History::record + undo + redo walks a single edit",
     auto const *u = h.undo();
     REQUIRE(u != nullptr);
     REQUIRE(u->description == "set 9");
-    REQUIRE(st::edit::restore(td, u->before).has_value());
+    REQUIRE(u->is_table());
+    REQUIRE(st::edit::restore(td, u->as_table()->before).has_value());
     REQUIRE(td.values[0][0] == 1.0);
     REQUIRE_FALSE(h.can_undo());
     REQUIRE(h.can_redo());
 
     auto const *r = h.redo();
     REQUIRE(r != nullptr);
-    REQUIRE(st::edit::restore(td, r->after).has_value());
+    REQUIRE(st::edit::restore(td, r->as_table()->after).has_value());
     REQUIRE(td.values[0][0] == 9.0);
     REQUIRE(h.can_undo());
     REQUIRE_FALSE(h.can_redo());
@@ -288,4 +289,49 @@ TEST_CASE("History::clear empties the stack", "[edit][history]") {
     REQUIRE(h.size() == 0);
     REQUIRE_FALSE(h.can_undo());
     REQUIRE_FALSE(h.can_redo());
+}
+
+TEST_CASE("Edit::bytes builds a ByteEdit-payload Edit", "[edit][byte]") {
+    auto e = st::edit::Edit::bytes(
+        {{0x1000, 0xFF, 0xFE}, {0x1001, 0x00, 0x01}},
+        "disable DTC P0420");
+
+    REQUIRE_FALSE(e.is_table());
+    REQUIRE(e.is_byte());
+    REQUIRE(e.as_table() == nullptr);
+
+    auto const *be = e.as_byte();
+    REQUIRE(be != nullptr);
+    REQUIRE(be->changes.size() == 2);
+    REQUIRE(be->changes[0].address == 0x1000);
+    REQUIRE(be->changes[0].before == 0xFF);
+    REQUIRE(be->changes[0].after == 0xFE);
+    REQUIRE(be->changes[1].address == 0x1001);
+    REQUIRE(e.description == "disable DTC P0420");
+}
+
+TEST_CASE("History records ByteEdits alongside TableEdits", "[edit][byte][history]") {
+    st::edit::History h;
+    h.record(st::edit::Edit::bytes({{0x1000, 0xFF, 0xFE}}, "byte op 1"));
+    h.record(st::edit::Edit::table("fuel_map", {}, {}, "table op"));
+    h.record(st::edit::Edit::bytes({{0x1001, 0x00, 0x01}}, "byte op 2"));
+
+    REQUIRE(h.size() == 3);
+    REQUIRE(h.cursor() == 3);
+
+    // Undo walks back across mixed kinds without losing structure.
+    auto const *e2 = h.undo();
+    REQUIRE(e2 != nullptr);
+    REQUIRE(e2->is_byte());
+    REQUIRE(e2->description == "byte op 2");
+
+    auto const *e1 = h.undo();
+    REQUIRE(e1 != nullptr);
+    REQUIRE(e1->is_table());
+
+    auto const *e0 = h.undo();
+    REQUIRE(e0 != nullptr);
+    REQUIRE(e0->is_byte());
+    REQUIRE(e0->description == "byte op 1");
+    REQUIRE_FALSE(h.can_undo());
 }

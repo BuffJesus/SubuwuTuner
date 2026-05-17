@@ -1253,6 +1253,7 @@ Result<DtcBitChange> set_dtc_enabled(Rom &rom, DtcBitmap const &bitmap,
     auto const cur = rom.read_u8(*off);
     if (!cur.has_value()) return failure(cur.error());
     DtcBitChange ch{};
+    ch.address         = *off;
     ch.before          = *cur;
     auto const mask    = static_cast<std::uint8_t>(1U << dtc.bit);
     ch.after           = enabled

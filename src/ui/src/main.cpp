@@ -822,8 +822,9 @@ std::optional<std::string> apply_parsed_csv_edits(AppState &state,
     char descbuf[64];
     std::snprintf(descbuf, sizeof descbuf, "csv import (%zu cell%s)",
                    parsed.cells.size(), parsed.cells.size() == 1 ? "" : "s");
-    state.project->history().record({table->id, std::move(*before),
-                                      std::move(*after), std::string{descbuf}});
+    state.project->history().record(st::edit::Edit::table(
+        table->id, std::move(*before), std::move(*after),
+        std::string{descbuf}));
     if (table->id == state.selected_table_id) {
         state.current_table_data = std::move(*td);
     }
@@ -965,58 +966,78 @@ void apply_op(AppState &state, std::string label, Op &&op) {
         return;
     }
 
-    state.project->history().record(st::edit::Edit{state.selected_table_id,
-                                                   std::move(*before),
-                                                   std::move(*after),
-                                                   std::move(label)});
+    state.project->history().record(st::edit::Edit::table(
+        state.selected_table_id,
+        std::move(*before),
+        std::move(*after),
+        std::move(label)));
     state.status_msg.clear();
     state.dirty = true;
 }
 
 // Undo/redo share the same restore-and-writeback shape; only the snapshot
 // side and the rollback direction differ. `forward = false` for undo,
-// `forward = true` for redo.
+// `forward = true` for redo. Dispatches on payload kind — TableEdit goes
+// through the definition's read_table_values / write_table_values seam,
+// ByteEdit writes raw bytes directly (no table layer needed).
 void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forward) {
-    auto const *tbl = state.project->definition().find_table(edit.table_id);
-    auto const  rollback_cursor = [&] {
+    auto const rollback_cursor = [&] {
         if (forward) {
             (void) state.project->history().undo();
         } else {
             (void) state.project->history().redo();
         }
     };
-    if (tbl == nullptr) {
-        state.status_msg = "history: table not in pack: " + edit.table_id;
-        rollback_cursor();
-        return;
+
+    if (auto const *te = edit.as_table(); te != nullptr) {
+        auto const *tbl = state.project->definition().find_table(te->table_id);
+        if (tbl == nullptr) {
+            state.status_msg = "history: table not in pack: " + te->table_id;
+            rollback_cursor();
+            return;
+        }
+
+        auto td = state.project->definition().read_table_values(
+            state.project->working_rom(), *tbl);
+        if (!td.has_value()) {
+            state.status_msg = "history re-read: " + td.error().to_string();
+            rollback_cursor();
+            return;
+        }
+
+        auto const &snap = forward ? te->after : te->before;
+        if (auto s = st::edit::restore(*td, snap); !s.has_value()) {
+            state.status_msg = "history restore: " + s.error().to_string();
+            rollback_cursor();
+            return;
+        }
+
+        auto wb = state.project->definition().write_table_values(
+            state.project->working_rom(), *tbl, *td);
+        if (!wb.has_value()) {
+            state.status_msg = "history writeback: " + wb.error().to_string();
+            rollback_cursor();
+            return;
+        }
+
+        if (te->table_id == state.selected_table_id) {
+            state.current_table_data = std::move(*td);
+        }
+    } else if (auto const *be = edit.as_byte(); be != nullptr) {
+        auto &rom = state.project->working_rom();
+        for (auto const &c : be->changes) {
+            auto const v = forward ? c.after : c.before;
+            if (auto s = rom.write_u8(c.address, v); !s.has_value()) {
+                char buf[80];
+                std::snprintf(buf, sizeof buf,
+                              "history byte writeback @0x%zX: ", c.address);
+                state.status_msg = std::string{buf} + s.error().to_string();
+                rollback_cursor();
+                return;
+            }
+        }
     }
 
-    auto td = state.project->definition().read_table_values(
-        state.project->working_rom(), *tbl);
-    if (!td.has_value()) {
-        state.status_msg = "history re-read: " + td.error().to_string();
-        rollback_cursor();
-        return;
-    }
-
-    auto const &snap = forward ? edit.after : edit.before;
-    if (auto s = st::edit::restore(*td, snap); !s.has_value()) {
-        state.status_msg = "history restore: " + s.error().to_string();
-        rollback_cursor();
-        return;
-    }
-
-    auto wb = state.project->definition().write_table_values(
-        state.project->working_rom(), *tbl, *td);
-    if (!wb.has_value()) {
-        state.status_msg = "history writeback: " + wb.error().to_string();
-        rollback_cursor();
-        return;
-    }
-
-    if (edit.table_id == state.selected_table_id) {
-        state.current_table_data = std::move(*td);
-    }
     state.status_msg.clear();
     // Undo / redo modifies the working ROM in memory; flag dirty so the
     // unsaved-changes guard catches an undo-then-quit-without-save.
@@ -1645,8 +1666,9 @@ std::optional<std::string> apply_maf_autotune_proposal(AppState &state) {
     std::snprintf(descbuf, sizeof descbuf,
                    "autotune maf (%zu cell%s)",
                    modified, modified == 1 ? "" : "s");
-    state.project->history().record({table->id, std::move(*before),
-                                      std::move(*after), std::string{descbuf}});
+    state.project->history().record(st::edit::Edit::table(
+        table->id, std::move(*before), std::move(*after),
+        std::string{descbuf}));
     if (table->id == state.selected_table_id) {
         state.current_table_data = std::move(td);
     }
@@ -1806,8 +1828,9 @@ std::optional<std::string> apply_knock_pull_proposal(AppState &state) {
                    pulled,
                    added > 0 ? ", " : "",
                    added > 0 ? (std::to_string(added) + " added-back").c_str() : "");
-    state.project->history().record({table->id, std::move(*before),
-                                      std::move(*after), std::string{descbuf}});
+    state.project->history().record(st::edit::Edit::table(
+        table->id, std::move(*before), std::move(*after),
+        std::string{descbuf}));
     if (table->id == state.selected_table_id) {
         state.current_table_data = std::move(td);
     }
@@ -4766,12 +4789,11 @@ void render_stats_panel(AppState &state) {
 
 // "DTCs" panel — surface the diagnostic trouble codes declared by the pack
 // with their current enable/disable state, and let the user toggle them.
-// Mirrors the CLI's `project-{enable,disable}-dtc`: each toggle directly
-// writes the bit through `st::set_dtc_enabled` and marks the project
-// dirty. DTC edits bypass `edit::History` (the Edit struct is rect-based,
-// not a byte-level operation), so Ctrl+Z won't roll them back. Emissions-
-// flagged codes get a yellow "E" chip; the flash-time policy gate still
-// enforces the jurisdiction profile.
+// Mirrors the CLI's `project-{enable,disable}-dtc`: each toggle writes the
+// bit through `st::set_dtc_enabled` and records the byte change as a
+// ByteEdit in `edit::History` so Ctrl+Z restores the original bit pattern.
+// Emissions-flagged codes get a yellow "E" chip; the flash-time policy
+// gate still enforces the jurisdiction profile.
 void render_dtcs_panel(AppState &state) {
     if (!state.show_dtcs_panel) {
         return;
@@ -4852,7 +4874,19 @@ void render_dtcs_panel(AppState &state) {
                 if (!change.has_value()) {
                     state.status_msg = "DTC toggle failed: "
                                        + change.error().to_string();
-                } else {
+                } else if (change->before != change->after) {
+                    // Record one ByteEdit per toggle so Ctrl+Z reverses
+                    // each gesture individually. Coalescing into a batch
+                    // (like the CLI does for a `--code A,B,C` list) would
+                    // need a debounce and surface less clearly in the
+                    // history panel — one bit per click is the GUI
+                    // semantic users expect.
+                    std::string desc = (toggled ? "enable DTC "
+                                                : "disable DTC ")
+                                       + d.code;
+                    state.project->history().record(st::edit::Edit::bytes(
+                        {{change->address, change->before, change->after}},
+                        std::move(desc)));
                     state.dirty = true;
                     state.status_msg = (toggled ? "Enabled " : "Disabled ")
                                        + d.code;
@@ -4899,7 +4933,7 @@ void render_dtcs_panel(AppState &state) {
     }
 
     ImGui::Spacing();
-    ImGui::TextDisabled("DTC edits bypass undo (Ctrl+Z); save to persist.");
+    ImGui::TextDisabled("Toggles record as ByteEdits; Ctrl+Z reverses each.");
     ImGui::End();
 }
 
@@ -4992,9 +5026,31 @@ void render_history_panel(AppState &state) {
 
         std::size_t matched = 0;
         for (std::size_t i = 0; i < records.size(); ++i) {
-            auto const &e = records[i];
+            auto const &e  = records[i];
+            auto const *te = e.as_table();
+            auto const *be = e.as_byte();
+            // Per-row display strings differ between TableEdit (table id +
+            // rect from the snapshot) and ByteEdit (synthetic label + byte
+            // count). Pre-compute here so the column loops below don't
+            // have to branch.
+            std::string id_str = te != nullptr ? te->table_id
+                                                : std::string{"(byte-edit)"};
+            std::string rect_str;
+            if (te != nullptr) {
+                char rectbuf[32]{};
+                std::snprintf(rectbuf, sizeof rectbuf, "[%zu:%zu, %zu:%zu]",
+                              te->before.rect.r_start, te->before.rect.r_end,
+                              te->before.rect.c_start, te->before.rect.c_end);
+                rect_str = rectbuf;
+            } else if (be != nullptr) {
+                char rectbuf[32]{};
+                std::snprintf(rectbuf, sizeof rectbuf, "%zu byte%s",
+                              be->changes.size(),
+                              be->changes.size() == 1 ? "" : "s");
+                rect_str = rectbuf;
+            }
             if (!filter.empty()
-                && !icontains(e.table_id, filter)
+                && !icontains(id_str, filter)
                 && !icontains(e.description, filter)) {
                 continue;
             }
@@ -5016,40 +5072,39 @@ void render_history_panel(AppState &state) {
                 ImGui::Text(" %zu", i);
             }
 
-            // Table-id cell. Clickable Selectable that drives the main
-            // table view — clicking jumps the sidebar selection to this
-            // edit's table so the user can immediately inspect the
-            // cells that changed.
+            // Table-id cell. For TableEdit: clickable Selectable that
+            // drives the main table view. For ByteEdit: a disabled label
+            // (byte edits don't bind to any one table).
             ImGui::TableSetColumnIndex(1);
-            bool const is_selected = (e.table_id == state.selected_table_id);
             if (is_undone) {
                 ImGui::PushStyleColor(ImGuiCol_Text,
                                        ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
             }
-            ImGui::PushID(static_cast<int>(i) + 0x100000);
-            if (ImGui::Selectable(e.table_id.c_str(), is_selected)) {
-                state.select_table(e.table_id);
+            if (te != nullptr) {
+                bool const is_selected = (te->table_id == state.selected_table_id);
+                ImGui::PushID(static_cast<int>(i) + 0x100000);
+                if (ImGui::Selectable(te->table_id.c_str(), is_selected)) {
+                    state.select_table(te->table_id);
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Click to open %s in the table view.",
+                                       te->table_id.c_str());
+                }
+                ImGui::PopID();
+            } else {
+                ImGui::TextDisabled("%s", id_str.c_str());
             }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Click to open %s in the table view.",
-                                   e.table_id.c_str());
-            }
-            ImGui::PopID();
             if (is_undone) {
                 ImGui::PopStyleColor();
             }
 
-            // Op column = description plus the rect.
+            // Op column = description plus the rect/size string.
             ImGui::TableSetColumnIndex(2);
-            char rectbuf[32]{};
-            std::snprintf(rectbuf, sizeof rectbuf, "[%zu:%zu, %zu:%zu]",
-                           e.before.rect.r_start, e.before.rect.r_end,
-                           e.before.rect.c_start, e.before.rect.c_end);
             char opbuf[160]{};
             std::snprintf(opbuf, sizeof opbuf, "%s  %s",
                            e.description.empty() ? "(no description)"
                                                   : e.description.c_str(),
-                           rectbuf);
+                           rect_str.c_str());
             if (is_undone) {
                 ImGui::TextDisabled("%s", opbuf);
             } else {
@@ -5059,18 +5114,22 @@ void render_history_panel(AppState &state) {
             // Flags column: S (engine-safety) in red, E (emissions) in
             // amber, '-' if neither. Pulled from the live pack so a
             // pack swap re-classifies without rewriting history.
+            // ByteEdits don't bind to a table, so '-'.
             ImGui::TableSetColumnIndex(3);
-            auto const *table = state.project->definition().find_table(e.table_id);
             bool        had_flag = false;
-            if (table != nullptr) {
-                if (table->engine_safety_critical) {
-                    ImGui::TextColored(ImVec4(1.00f, 0.40f, 0.40f, 1.0f), "S");
-                    had_flag = true;
-                }
-                if (table->emissions_relevant) {
-                    if (had_flag) ImGui::SameLine();
-                    ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f), "E");
-                    had_flag = true;
+            if (te != nullptr) {
+                auto const *table =
+                    state.project->definition().find_table(te->table_id);
+                if (table != nullptr) {
+                    if (table->engine_safety_critical) {
+                        ImGui::TextColored(ImVec4(1.00f, 0.40f, 0.40f, 1.0f), "S");
+                        had_flag = true;
+                    }
+                    if (table->emissions_relevant) {
+                        if (had_flag) ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f), "E");
+                        had_flag = true;
+                    }
                 }
             }
             if (!had_flag) ImGui::TextDisabled("-");
