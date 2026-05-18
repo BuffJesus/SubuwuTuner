@@ -3878,14 +3878,14 @@ void render_sidebar(AppState &state) {
             ImGui::BeginTooltip();
             if (!t.name.empty()) {
                 ImGui::TextUnformatted(t.name.c_str());
-                ImGui::TextDisabled("%s", t.id.c_str());
+                text_subtle("%s", t.id.c_str());
             } else {
                 ImGui::TextUnformatted(t.id.c_str());
             }
             ImGui::Separator();
             ImGui::Text("%dD  \xC2\xB7  0x%08zX", t.dimensions, t.address);
             if (!t.category.empty()) {
-                ImGui::TextDisabled("category: %s", t.category.c_str());
+                text_subtle("category: %s", t.category.c_str());
             }
             if (t.engine_safety_critical) {
                 ImGui::TextColored(ImVec4(1.00f, 0.86f, 0.55f, 1.0f),
@@ -7287,7 +7287,7 @@ void render_status_bar(AppState &state) {
                 ImGui::OpenPopup("##profile_chooser");
             }
             if (ImGui::BeginPopup("##profile_chooser")) {
-                ImGui::TextDisabled("Jurisdiction profile (this project)");
+                text_subtle("Jurisdiction profile (this project)");
                 ImGui::Separator();
                 auto pick = [&](st::policy::Profile p, char const *label,
                                 char const *desc) {
