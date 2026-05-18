@@ -1,8 +1,25 @@
 # 13 — Transport & ECU Protocol Design
 
-This document captures the design for Phase 3 (comms and datalogging) **before any of it is implemented**. The Phase 2 calibration side (ROM I/O, definitions, editing, projects) is complete; everything below describes how SubuwuTuner will eventually talk to a real ECU through a real adapter.
+This document captures the design for Phase 3 (comms and datalogging). The Phase 2 calibration side (ROM I/O, definitions, editing, projects) is complete; everything below describes how SubuwuTuner talks to a real ECU through a real adapter.
 
-Writing this now serves two purposes: (1) when the developer's OBDX Pro VX adapter arrives, implementation has a clear target, and (2) it ensures the calibration code we've already shipped is compatible with the transport layer's needs.
+Status today (2026-05-17) — the **shapes** are real and locked under unit tests; the **platform wiring** to actual hardware fills in when the developer's OBDX Pro VX adapter (and a Tactrix OP2.0 for the second-source path) lands on the bench:
+
+| Piece | Status |
+|---|---|
+| `st::transport::ITransport` interface + contract tests | ✅ shipped |
+| `st::transport::MockTransport` (queue + replay) | ✅ shipped |
+| `st::transport::IByteChannel` (USB CDC byte abstraction) | ✅ shipped |
+| `st::transport::open_transport` factory + CLI `--transport <kind>` flag | ✅ shipped (returns `NotImplemented` until platform layers wire up) |
+| `st::transport::j2534::Transport` (skeleton + DLL discovery) | 🟡 shipped, gated on `LoadLibraryA` of a real vendor DLL |
+| `st::transport::obdx::Transport` + DVI codec | 🟡 shipped, gated on a real USB CDC byte channel |
+| `st::transport::native::Transport` + SOF/seq/CRC16 codec | 🟡 shipped, gated on a real USB CDC byte channel |
+| `st::ecu::ssm::SsmClient` (K-Line + CAN paths) | 🟡 shipped against MockTransport; needs real-car validation |
+| `st::ecu::uds::UdsClient` | 🟡 shipped against MockTransport; needs real-car validation |
+| `st::log::LogSession` + ring-buffer pipeline | ⬜ pending — Phase 3 next slice |
+| ELM327 (read-only) | ⬜ deferred — not blocking VA/VB targets |
+| OBDLink (STN) | ⬜ deferred |
+
+Writing this design serves two ongoing purposes: (1) it defines the shape concrete adapters port into, and (2) it ensures the calibration code we've already shipped stays compatible with the transport layer's needs.
 
 ## Goals
 
@@ -19,24 +36,40 @@ Writing this now serves two purposes: (1) when the developer's OBDX Pro VX adapt
 - No transport over the network (Wi-Fi/BT adapters route to a virtual COM port). Networked tuning is a future concern.
 - No adapter-write support for ELM327 — it's been the source of every classic-ELM bricking story; we exclude it on principle. Datalogging only.
 
-## Module map (mirrors `docs/02-architecture.md`)
+## Module map (as-shipped)
+
+Everything below lives under `src/transport/` (single library, internal subdirectories) — we collapsed the per-adapter top-level libs from the original design once it was clear they all share `IByteChannel`, the factory, and `Frame`. The flat layout keeps the CMake target count down and lets the framing codecs (`obdx_dvi.cpp`, `native.cpp`) be unit-tested without dragging the full Transport in.
 
 ```
 src/
-├── transport/                 (st::transport — adapter-agnostic interface)
-│   ├── include/st/transport.hpp
-│   └── src/
-├── transport_j2534/           (st::transport::j2534 — Windows DLL / Mac+Linux runtime)
-├── transport_elm/             (st::transport::elm   — serial AT-command)
-├── transport_stn/             (st::transport::stn   — OBDLink ST/STN extensions)
-├── transport_obdx/            (st::transport::obdx  — OBDX Pro VX)
-├── ecu/
-│   ├── ssm/                   (st::ecu::ssm — Subaru Select Monitor protocol)
-│   └── uds/                   (st::ecu::uds — ISO 14229)
-└── log/                       (st::log — LogStream, ring buffer, CSV/FlatBuffers sinks)
+├── transport/                          (st::transport — library)
+│   ├── include/st/
+│   │   ├── transport.hpp               ITransport, Frame, LinkConfig
+│   │   └── transport/
+│   │       ├── byte_channel.hpp        IByteChannel (USB CDC / serial seam)
+│   │       ├── factory.hpp             Kind / TransportSpec / open_transport
+│   │       ├── mock.hpp                MockTransport (queue + replay)
+│   │       ├── j2534.hpp               J2534Library (vendor DLL wrapper)
+│   │       ├── j2534_discovery.hpp     Windows registry walk for PassThruSupport.04.04
+│   │       ├── j2534_transport.hpp     ITransport on top of J2534Library
+│   │       ├── obdx_dvi.hpp            DVI codec (request/response framing)
+│   │       ├── obdx_transport.hpp      ITransport on top of IByteChannel + DVI
+│   │       ├── native.hpp              Native codec (SOF/seq/opcode/LEN/CRC16)
+│   │       └── native_transport.hpp    ITransport on top of IByteChannel + native codec
+│   └── src/                            matching .cpp per header
+├── ecu/                                (st::ecu)
+│   ├── include/st/ecu/
+│   │   ├── ssm.hpp                     SsmClient — K-Line + CAN
+│   │   └── uds.hpp                     UdsClient — ISO 14229
+│   └── src/                            ssm.cpp, uds.cpp
+└── log/                                (st::log — LogStream, ring buffer, CSV sinks) — ⬜ pending
 ```
 
-The `st::transport` interface depends only on `st::core`; adapter implementations depend on `st::transport` plus their vendor SDK (or libusb / native serial for the open ones). `st::ecu::ssm` and `st::ecu::uds` depend on `st::transport` only, never on a specific adapter — this is what lets the same `SsmClient` talk through any compatible adapter.
+The `st::transport` library depends only on `st::core`. Adapter implementations live as siblings inside `st::transport::{j2534,obdx,native}` rather than separate top-level libs. `st::ecu::ssm` and `st::ecu::uds` depend on `st::transport` only, never on a specific adapter — this is what lets the same `SsmClient` talk through any compatible adapter.
+
+### Why `IByteChannel` is a separate seam
+
+The framing codecs (`obdx_dvi`, `native`) need to test cleanly without a real USB device. `IByteChannel` lets the codec wrap *any* byte sink — a fake in-memory `vector<uint8_t>` for unit tests, libusb for production, a TCP socket for a future networked-adapter shim. J2534 stays outside this abstraction because the vendor DLL owns the byte plumbing internally; we call function pointers, not byte reads.
 
 ## The ITransport interface
 
@@ -337,17 +370,27 @@ Concretely:
 - The UI (or `subuwutuner-cli log`) reads from the ring buffer at its own pace. UI samples a snapshot for gauge update; CSV/FlatBuffers sink drains continuously.
 - A separate I/O-thread-side `timestamp` is taken at frame arrival; we don't trust the UI thread's wall clock for sample timing.
 
-## Suggested order of implementation (when the OBDX adapter arrives)
+## Implementation order — done / pending
 
-1. `st::transport::ITransport` interface + `MockTransport` only. Tests for the contract.
-2. `st::ecu::ssm::SsmClient` against `MockTransport` with canned VA traces.
-3. `st::transport::obdx` adapter — the developer's own adapter, the easiest to iterate against.
-4. Real-car smoke test: `subuwutuner-cli read-rom <output.bin>` reads the developer's car using OBDX.
-5. `st::transport::j2534` adapter (Tactrix OP2.0) — broader community coverage.
-6. `st::log::LogSession` with the ring-buffer pipeline.
-7. `subuwutuner-cli log --pid rpm,iat,maf --rate 100 --csv out.csv` for headless datalogging.
-8. `st::ecu::uds::UdsClient` for VB.
-9. Phase 4 (flashing) gates on all of the above plus the safety story in `docs/08-testing-strategy.md` Tier 4.
+Done (shipped against MockTransport + tests):
+
+1. ✅ `st::transport::ITransport` interface + contract tests.
+2. ✅ `st::transport::MockTransport` (programmatic + replay).
+3. ✅ `st::transport::IByteChannel` for the framed-codec adapters.
+4. ✅ `st::ecu::ssm::SsmClient` (K-Line + CAN paths) — tests run through MockTransport with canned traces.
+5. ✅ `st::ecu::uds::UdsClient` for VB — tests run through MockTransport.
+6. ✅ `st::transport::obdx::Transport` + DVI codec skeleton.
+7. ✅ `st::transport::native::Transport` + SOF/seq/CRC16 codec skeleton.
+8. ✅ `st::transport::j2534::Transport` + Windows registry discovery skeleton.
+9. ✅ `st::transport::open_transport` factory + CLI `--transport <kind>` plumbing.
+
+Pending (gated on hardware on the bench):
+
+10. 🟡 Real-car smoke test: `subuwutuner-cli read-rom <output.bin>` against the developer's car using OBDX. This is the moment platform wiring (libusb open / `CreateFileW` on `COM*`) inside `obdx::Transport::open` flips from `NotImplemented` to live.
+11. 🟡 Same smoke test through Tactrix OP2.0 — flips J2534 from `NotImplemented` to live via `LoadLibraryA` on the registered DLL.
+12. ⬜ `st::log::LogSession` with the ring-buffer pipeline (single-producer-single-consumer, 64 K frames, drop counter).
+13. ⬜ `subuwutuner-cli log --pid rpm,iat,maf --rate 100 --csv out.csv` for headless datalogging.
+14. ⬜ Phase 4 (flashing) gates on all of the above plus the safety story in `docs/08-testing-strategy.md` Tier 4.
 
 ## Open questions
 
