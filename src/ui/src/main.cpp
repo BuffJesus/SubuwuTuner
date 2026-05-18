@@ -50,6 +50,14 @@
 
 namespace {
 
+// Forward-declared so render_* panels defined ahead of the helper
+// body can use it. Definition lives near the other text helpers
+// further down (text_centered_disabled, text_centered_subtle).
+#if defined(__GNUC__)
+[[gnu::format(gnu_printf, 1, 2)]]
+#endif
+void text_subtle(char const *fmt, ...);
+
 struct Fonts {
     ImFont *ui   = nullptr; // Sans for UI chrome (menus, labels, panels)
     ImFont *mono = nullptr; // Monospace for grids, hex, log output
@@ -2697,8 +2705,10 @@ void render_new_project_modal(AppState &state) {
         // First-run hint. The single most common new-user question
         // ("where do I get a pack?") deserves a visible answer in
         // the modal, not a buried doc reference. Kept compact +
-        // TextDisabled so it doesn't compete with the inputs.
-        ImGui::TextDisabled(
+        // muted (text_subtle, not TextDisabled — this is a hint,
+        // not an inactive control) so it doesn't compete with the
+        // inputs.
+        text_subtle(
             "Don't have a pack? Try the bundled "
             "fixtures/demo-pack/ to explore the UI, or see "
             "docs/11-definition-format.md to author one.");
@@ -4930,13 +4940,13 @@ void render_dtcs_panel(AppState &state) {
         return;
     }
     if (!state.project.has_value()) {
-        ImGui::TextDisabled("No project loaded.");
+        text_subtle("No project loaded.");
         ImGui::End();
         return;
     }
     auto const &def = state.project->definition();
     if (def.dtcs().empty()) {
-        ImGui::TextDisabled("This pack declares no DTC bitmaps.");
+        text_subtle("This pack declares no DTC bitmaps.");
         ImGui::End();
         return;
     }
@@ -4945,7 +4955,7 @@ void render_dtcs_panel(AppState &state) {
     for (auto const &d : def.dtcs()) {
         if (d.emissions_relevant) ++emissions_total;
     }
-    ImGui::TextDisabled("%zu DTC(s), %zu emissions-flagged",
+    text_subtle("%zu DTC(s), %zu emissions-flagged",
                          def.dtcs().size(), emissions_total);
     ImGui::Separator();
 
@@ -5030,7 +5040,7 @@ void render_dtcs_panel(AppState &state) {
 
             ImGui::TableSetColumnIndex(2);
             if (d.name.empty()) {
-                ImGui::TextDisabled("(no name)");
+                text_subtle("(no name)");
             } else {
                 ImGui::TextUnformatted(d.name.c_str());
             }
@@ -5038,7 +5048,7 @@ void render_dtcs_panel(AppState &state) {
                 ImGui::BeginTooltip();
                 ImGui::TextUnformatted(d.code.c_str());
                 if (!d.name.empty()) {
-                    ImGui::TextDisabled("%s", d.name.c_str());
+                    text_subtle("%s", d.name.c_str());
                 }
                 ImGui::Separator();
                 ImGui::Text("Bitmap:    %s", d.bitmap_id.c_str());
@@ -5055,12 +5065,12 @@ void render_dtcs_panel(AppState &state) {
         ImGui::EndTable();
 
         if (!filter.empty()) {
-            ImGui::TextDisabled("Showing %zu of %zu.", shown, def.dtcs().size());
+            text_subtle("Showing %zu of %zu.", shown, def.dtcs().size());
         }
     }
 
     ImGui::Spacing();
-    ImGui::TextDisabled("Toggles record as ByteEdits; Ctrl+Z reverses each.");
+    text_subtle("Toggles record as ByteEdits; Ctrl+Z reverses each.");
     ImGui::End();
 }
 
