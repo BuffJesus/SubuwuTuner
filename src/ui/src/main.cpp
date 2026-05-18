@@ -31,6 +31,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -4492,6 +4493,41 @@ void text_centered_disabled(char const *text) {
     ImGui::TextDisabled("%s", text);
 }
 
+// `TextDisabled` is the ImGui-canonical "this is inactive" color
+// (~0.5 alpha, distinctly grey). It's the right choice for a
+// disabled menu item or a button that won't fire. It's the WRONG
+// choice for a subtitle or a piece of metadata — both want a
+// muted-but-not-disabled look so the eye can still distinguish
+// "kind of dim" (subtitle) from "actually inactive" (disabled).
+// `text_subtle` fills that gap at ~0.65 alpha of the normal text
+// color, regardless of theme. printf-style format string mirrors
+// ImGui::Text / ImGui::TextDisabled so call sites can move over
+// 1:1.
+#if defined(__GNUC__)
+// gnu_printf (not bare `printf`) accepts %zu / %ll etc.; bare
+// `printf` on MinGW maps to the MS-printf check which rejects
+// those conversions. ImGui::Text + TextDisabled don't carry a
+// format attribute at all, so existing call sites with %zu
+// already work — we annotate ours for the catch-mismatched-types
+// benefit + match the gnu_printf semantics those sites assume.
+[[gnu::format(gnu_printf, 1, 2)]]
+#endif
+void text_subtle(char const *fmt, ...) {
+    auto const c = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+    ImGui::PushStyleColor(ImGuiCol_Text,
+                           ImVec4(c.x, c.y, c.z, c.w * 0.65f));
+    va_list args;
+    va_start(args, fmt);
+    ImGui::TextV(fmt, args);
+    va_end(args);
+    ImGui::PopStyleColor();
+}
+
+void text_centered_subtle(char const *text) {
+    center_cursor_x(ImGui::CalcTextSize(text).x);
+    text_subtle("%s", text);
+}
+
 // Small framed "tag" used to highlight a per-table attribute (unit, safety
 // flag, …) without it competing with the title. Looks like a button but
 // stays purely visual: the return value is ignored and the hover/active
@@ -4547,7 +4583,7 @@ void render_welcome_panel(AppState &state) {
 
     text_centered("SubuwuTuner", 2.4f);
     ImGui::Dummy(ImVec2(0.0f, 10.0f));
-    text_centered_disabled("Open a Subaru ECU calibration to read, edit, and save.");
+    text_centered_subtle("Open a Subaru ECU calibration to read, edit, and save.");
     ImGui::Dummy(ImVec2(0.0f, 28.0f));
 
     constexpr float kBtnW = 240.0f;
@@ -4560,7 +4596,7 @@ void render_welcome_panel(AppState &state) {
         ImGui::SetTooltip("Pick a .stune project directory.  (Ctrl+O)");
     }
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
-    text_centered_disabled("Ctrl+O");
+    text_centered_subtle("Ctrl+O");
 
     // New-project CTA. Slightly smaller than Open Project so the
     // welcome panel keeps its primary-action / secondary-action
@@ -4587,9 +4623,9 @@ void render_welcome_panel(AppState &state) {
     // clearly figured out the flow by then.
     if (!has_recents) {
         ImGui::Dummy(ImVec2(0.0f, 18.0f));
-        text_centered_disabled(
+        text_centered_subtle(
             "First time? You'll need an ECU ROM dump + a definition pack.");
-        text_centered_disabled(
+        text_centered_subtle(
             "The repo ships fixtures/demo-pack/ to explore the UI.");
     }
 
@@ -4678,7 +4714,7 @@ void render_welcome_panel(AppState &state) {
             } else {
                 ImGui::SetCursorPosX(button_left_x);
             }
-            ImGui::TextDisabled("%s", subtitle.c_str());
+            text_subtle("%s", subtitle.c_str());
             ImGui::Dummy(ImVec2(0.0f, 6.0f));
             ImGui::PopID();
         }
@@ -4693,7 +4729,7 @@ void render_welcome_panel(AppState &state) {
 
     if (!state.status_msg.empty()) {
         ImGui::Dummy(ImVec2(0.0f, has_recents ? 16.0f : 32.0f));
-        text_centered_disabled(state.status_msg.c_str());
+        text_centered_subtle(state.status_msg.c_str());
     }
 
     // What's new — short list of recent additions, refreshed when a
@@ -5043,7 +5079,7 @@ void render_history_panel(AppState &state) {
         return;
     }
     if (!state.project.has_value()) {
-        ImGui::TextDisabled("No project loaded.");
+        text_subtle("No project loaded.");
         ImGui::End();
         return;
     }
@@ -5053,9 +5089,9 @@ void render_history_panel(AppState &state) {
     ImGui::Text("%zu edit(s), cursor at %zu", records.size(), cursor);
     if (cursor < records.size()) {
         ImGui::SameLine();
-        ImGui::TextDisabled("(%zu redo step%s)",
-                             records.size() - cursor,
-                             records.size() - cursor == 1 ? "" : "s");
+        text_subtle("(%zu redo step%s)",
+                     records.size() - cursor,
+                     records.size() - cursor == 1 ? "" : "s");
     }
 
     ImGui::InputTextWithHint("##history_filter", "Filter by table id or op…",
@@ -5064,7 +5100,7 @@ void render_history_panel(AppState &state) {
 
     if (records.empty()) {
         ImGui::Separator();
-        ImGui::TextDisabled("(no edits yet)");
+        text_subtle("(no edits yet)");
         ImGui::End();
         return;
     }
@@ -7344,9 +7380,9 @@ void render_status_bar(AppState &state) {
         }
 
         ImGui::SameLine();
-        ImGui::TextDisabled("edits %zu / %zu",
-                            state.project->history().cursor(),
-                            state.project->history().size());
+        text_subtle("edits %zu / %zu",
+                     state.project->history().cursor(),
+                     state.project->history().size());
 
         // Middle cluster: transient status message. save_project sets
         // this to "Saved."; edit-op errors land here too. Previously
@@ -7354,7 +7390,7 @@ void render_status_bar(AppState &state) {
         // succeeded silently — now it gives the user feedback.
         if (!state.status_msg.empty()) {
             ImGui::SameLine(0.0f, 24.0f);
-            ImGui::TextDisabled("\xE2\x80\x94 %s", state.status_msg.c_str());
+            text_subtle("\xE2\x80\x94 %s", state.status_msg.c_str());
         }
 
         // Right cluster: source / working CRCs, right-aligned. Compute the
@@ -7371,7 +7407,7 @@ void render_status_bar(AppState &state) {
         if (right_x > ImGui::GetCursorPosX()) {
             ImGui::SameLine();
             ImGui::SetCursorPosX(right_x);
-            ImGui::TextDisabled("%s", crc_buf);
+            text_subtle("%s", crc_buf);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
                     "CRC32 of the source ROM (immutable) and the current\n"
@@ -7379,8 +7415,8 @@ void render_status_bar(AppState &state) {
             }
         }
     } else {
-        ImGui::TextDisabled("No project loaded. %s",
-                            state.status_msg.empty() ? "" : state.status_msg.c_str());
+        text_subtle("No project loaded. %s",
+                     state.status_msg.empty() ? "" : state.status_msg.c_str());
     }
     ImGui::End();
 }
