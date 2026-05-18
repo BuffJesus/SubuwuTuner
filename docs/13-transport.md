@@ -15,7 +15,8 @@ Status today (2026-05-17) — the **shapes** are real and locked under unit test
 | `st::transport::native::Transport` + SOF/seq/CRC16 codec | 🟡 shipped, gated on a real USB CDC byte channel |
 | `st::ecu::ssm::SsmClient` (K-Line + CAN paths) | 🟡 shipped against MockTransport; needs real-car validation |
 | `st::ecu::uds::UdsClient` | 🟡 shipped against MockTransport; needs real-car validation |
-| `st::log::LogSession` + ring-buffer pipeline | ⬜ pending — Phase 3 next slice |
+| `st::log::LogStream` (SPSC ring) + `LogSession` (I/O thread) + `CsvSink` | ✅ shipped; consumed by MockTransport-backed tests |
+| `subuwutuner-cli log --def <pack> --pid <ids> [--csv …]` | ✅ shipped; gates on transport platform wiring for live ECU |
 | ELM327 (read-only) | ⬜ deferred — not blocking VA/VB targets |
 | OBDLink (STN) | ⬜ deferred |
 
@@ -383,14 +384,15 @@ Done (shipped against MockTransport + tests):
 7. ✅ `st::transport::native::Transport` + SOF/seq/CRC16 codec skeleton.
 8. ✅ `st::transport::j2534::Transport` + Windows registry discovery skeleton.
 9. ✅ `st::transport::open_transport` factory + CLI `--transport <kind>` plumbing.
+10. ✅ `st::log::LogStream` + `LogSession` + `CsvSink` — SPSC ring, I/O-thread worker, drop counter, CSV streaming (validated under MockTransport).
+11. ✅ `subuwutuner-cli log --def <pack> --pid <ids> [--csv …]` — headless datalogging entry point.
 
 Pending (gated on hardware on the bench):
 
-10. 🟡 Real-car smoke test: `subuwutuner-cli read-rom <output.bin>` against the developer's car using OBDX. This is the moment platform wiring (libusb open / `CreateFileW` on `COM*`) inside `obdx::Transport::open` flips from `NotImplemented` to live.
-11. 🟡 Same smoke test through Tactrix OP2.0 — flips J2534 from `NotImplemented` to live via `LoadLibraryA` on the registered DLL.
-12. ⬜ `st::log::LogSession` with the ring-buffer pipeline (single-producer-single-consumer, 64 K frames, drop counter).
-13. ⬜ `subuwutuner-cli log --pid rpm,iat,maf --rate 100 --csv out.csv` for headless datalogging.
-14. ⬜ Phase 4 (flashing) gates on all of the above plus the safety story in `docs/08-testing-strategy.md` Tier 4.
+12. 🟡 Real-car smoke test: `subuwutuner-cli read-rom <output.bin>` against the developer's car using OBDX. This is the moment platform wiring (libusb open / `CreateFileW` on `COM*`) inside `obdx::Transport::open` flips from `NotImplemented` to live.
+13. 🟡 Same smoke test through Tactrix OP2.0 — flips J2534 from `NotImplemented` to live via `LoadLibraryA` on the registered DLL.
+14. 🟡 `subuwutuner-cli log` against a real car — exercises the LogSession pipeline end-to-end through whichever transport's platform layer comes online first.
+15. ⬜ Phase 4 (flashing) gates on all of the above plus the safety story in `docs/08-testing-strategy.md` Tier 4.
 
 ## Open questions
 
