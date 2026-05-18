@@ -95,10 +95,14 @@ These are user-configurable per profile but the defaults are conservative.
 
 ### Output
 
-Proposed tables are written to a **draft** in the project, never committed automatically. The CLI prints a diff summary:
+Without `--apply` the CLI prints the per-cell proposal (current → proposed
+with retained-sample count and confidence) and exits without touching the
+project. Re-run with `--apply` to commit the proposal as a single project
+edit through `edit::History`:
 
 ```
-$ subuwutuner-cli autotune ve --log run.csv --project mytune.stune
+$ subuwutuner-cli project-autotune-maf mytune.stune \
+    --table maf_scaling --log run.csv
 Loaded 1,847,221 samples from run.csv
 After quality gates: 312,005 samples (16.9% retained)
 
@@ -109,11 +113,12 @@ MAF scaling proposal:
   Max delta:             +6.4% at MAF=2.31 V (n=4,219, σ=0.7%)
   Min delta:             -3.1% at MAF=0.87 V (n=189, σ=2.1%)
 
-Run 'subuwutuner-cli project diff mytune.stune' to review.
-Run 'subuwutuner-cli project commit mytune.stune --message "MAF v3"' to accept.
+Re-run with --apply to commit as a project edit (undoable via
+`subuwutuner-cli project-undo mytune.stune`).
 ```
 
-The GUI shows the same information as a heatmap with confidence shading.
+The GUI shows the same information as a heatmap with confidence shading
+inside the MAF Auto-tune modal (`render_maf_autotune_modal`).
 
 ## Knock-based ignition pull
 
@@ -125,7 +130,7 @@ for each cell c:
         proposed_timing[c] = current_timing[c] - pull_step_degrees
 ```
 
-This is even more conservative than MAF auto-tune — it only ever subtracts timing, never adds. Maximum pull per pass is configurable (default 1.5°). The user can opt into a follow-up pass that *adds back* timing in cells where knock correction has remained at 0 for the entire log, but that's off by default.
+This is even more conservative than MAF auto-tune — the primary pass only ever subtracts timing, never adds. Per-cell pull step is `--pull-step-degrees` (default `0.75°`); trigger threshold is `--trigger-degrees` (default `1.5°` of mean knock correction). The user can opt into a follow-up pass via `--enable-add-back` that *adds back* timing in cells whose knock correction has stayed clean over a configurable sample count — off by default per the docs/12 spec.
 
 ## Engine-safety linting
 
@@ -140,26 +145,55 @@ These checks are **always** on, regardless of jurisdiction profile (see `06-lega
 
 ## CLI surface
 
+Two flows ship per kernel: a **standalone** form that takes axis + current
+values directly (for one-shot analysis without a project), and a
+**project-aware** form that reads/writes the table through `edit::History`
+inside a `.stune` directory.
+
 ```
+# MAF — standalone
 subuwutuner-cli autotune maf \
-    --log <run.csv|run.stlog>                 \
-    --project <path.stune>                    \
-    --gain 0.5                                \
-    --max-delta 8%                            \
-    --min-samples-per-cell 50                 \
-    --quality-gate strict|standard|permissive \
-    [--output-draft <name>]                   \
-    [--apply]                                  # write draft → working tree without manual review
+    --log <run.csv>                                  \
+    (--axis <v,v,…> | --axis-file <path>)             \
+    (--current <gs,gs,…> | --current-file <path>)     \
+    [--gain 0.5] [--max-delta 8%]                     \
+    [--min-samples-per-cell 50] [--require-open-loop] \
+    [--no-smooth] [--strict-lint]
 
+# MAF — bound to a project
+subuwutuner-cli project-autotune-maf <dir>    \
+    --table <id> --log <run.csv>              \
+    [--gain N] [--max-delta P]                \
+    [--min-samples-per-cell N] [--require-open-loop] \
+    [--no-smooth] [--strict-lint] [--apply]
+
+# Knock pull — standalone
 subuwutuner-cli autotune knock-pull \
-    --log <run.csv|run.stlog>      \
-    --project <path.stune>         \
-    --trigger -1.5                 \
-    --pull-step 0.75               \
-    --min-samples-per-cell 30
+    --log <run.csv>                                \
+    (--rpm-axis <…>  | --rpm-axis-file <path>)     \
+    (--load-axis <…> | --load-axis-file <path>)    \
+    (--current-timing <…> | --current-timing-file <path>) \
+    [--trigger-degrees 1.5] [--pull-step-degrees 0.75]    \
+    [--min-samples-per-cell 30] [--strict-lint]            \
+    [--enable-add-back [--add-back-step-degrees 0.5]
+                       [--add-back-min-clean-samples 50]
+                       [--add-back-clean-threshold-degrees 0.05]]
+
+# Knock pull — bound to a project
+subuwutuner-cli project-autotune-knock-pull <dir>  \
+    --table <id> --log <run.csv>                   \
+    [...same options as standalone...] [--apply]
 ```
 
-Same algorithms surfaced in the GUI as a "Review and Apply" pane with the diff summary above and a per-cell heatmap.
+`--strict-lint` exits 3 on any docs/12 lint violation (monotonicity, step
+discontinuity, neighbor-smoothness for knock). Logs are column-headered
+CSV; required columns differ per kernel — `subuwutuner-cli autotune maf
+--help` documents the exact set.
+
+Same algorithms surfaced in the GUI as the MAF and Knock-Pull modals
+(see `render_maf_autotune_modal` / `render_kp_autotune_modal` in
+`src/ui/src/main.cpp`) with the diff summary above and a per-cell
+heatmap-style ledger.
 
 ## Why this matters
 

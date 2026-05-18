@@ -10,20 +10,21 @@ v1.0 ships narrow on purpose — VA (2015–2021) and VB (2022+) WRX manual tran
 
 ## What it does
 
-- **Read** the stock ROM off the ECU over a supported adapter (Tactrix OpenPort 2.0, OBDLink, OBDX Pro, etc.)
+- **Read** the stock ROM off the ECU over a supported adapter (Tactrix OpenPort 2.0 via J2534, OBDX Pro VX via DVI, or a forthcoming Doc-18 standalone handheld via the native USB-CDC framed codec)
 - **Identify** the calibration via CID against a definition pack and reveal every documented map
 - **Edit** common maps (fuel, ignition, boost, throttle, idle, transmission) with a 2D/3D table editor
-- **Datalog** at sustained high rates with per-PID timestamps and a zero-copy replay format
+- **Datalog** at sustained high rates with per-PID timestamps; logs land as CSV via `st::log::CsvSink` for grep-friendly downstream tooling
 - **Auto-tune** MAF scaling and knock-based ignition pull (v1.1) from real driving logs
 - **Flash** the ECU with delta-only writes, brick-protection recovery shim installed and verified beforehand, and tamper-evident manifests on every operation
 - **Script** any of the above from `subuwutuner-cli` for batch and CI workflows
+- **Design custom features** via a node-graph editor (`.stmod` files) that compile to SH-2A patch bytes — `docs/16`
 
 ## What makes it worth building
 
 - **Native and fast.** Sub-second startup, < 150 MB idle RAM, < 60 MB installer — see `05-improvements.md`.
 - **Headless-first.** Same engine drives GUI and CLI; everything you can do in the UI you can script. Dyno operators, tune shops, and CI pipelines stop being second-class users.
 - **Git-friendly definitions.** Definitions are TOML; projects are diffable; pull requests for new maps are realistic.
-- **Open auto-tune.** MAF / knock-pull / closed-loop / boost-trim algorithms shipped first-party with engine-safety linting on by default. See `12-auto-tuning.md`.
+- **Open auto-tune.** MAF + knock-pull kernels shipped first-party with engine-safety linting on by default (v1.1); closed-loop trim integration and boost-trim are roadmap items for v1.2. See `12-auto-tuning.md`.
 - **Jurisdiction-aware, not paternalistic.** First-run profile picker (`motorsport-only` default) decides whether emissions-flagged edits warn, confirm, or stay silent. Engine-safety warnings are always strict. See `06-legal-ethics.md`.
 - **Real brick protection.** First-class subsystem with bench-tested recovery shim, not a marketing bullet. See `05-improvements.md` and `08-testing-strategy.md`.
 - **Cross-platform on day one.** Windows, macOS (Intel + Apple Silicon), Linux (x64 + arm64), all from the same CI matrix.

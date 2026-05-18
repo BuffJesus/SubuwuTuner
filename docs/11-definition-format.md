@@ -25,9 +25,8 @@ v1.0 freezes the format. Schema versioning lets us evolve later.
 A definition pack is a directory:
 
 ```
-definitions/va-wrx-mt-2019/
-├── pack.toml                       (pack metadata)
-├── identification.toml             (CID detection rules)
+my-va-wrx-mt-2019/
+├── pack.toml                       (pack metadata + [[identification]] entries)
 ├── tables/
 │   ├── fuel.toml
 │   ├── ignition.toml
@@ -37,11 +36,16 @@ definitions/va-wrx-mt-2019/
 ├── axes.toml                       (shared axis definitions)
 ├── scalings.toml                   (shared scaling formulas)
 ├── pids.toml                       (datalogger PIDs)
-└── emissions.toml                  (which addresses are emissions-relevant)
+├── hooks.toml                      (custom-feature splice points — docs/16)
+└── primitives.toml                 (custom-feature primitive declarations — docs/16)
 ```
 
-Multiple TOML files keep diffs small. The loader walks the directory and
-concatenates everything; ordering does not matter.
+Multiple TOML files keep diffs small. `Definition::from_directory` walks
+the directory and merges every `*.toml`; ordering does not matter.
+`[[identification]]` lives in `pack.toml` alongside `[pack]`. Per-table
+`emissions_relevant` / `engine_safety_critical` booleans replace the
+earlier-planned `emissions.toml` — the flag travels with the table that
+owns it.
 
 ## `pack.toml` — metadata
 
@@ -63,10 +67,10 @@ data_sources    = [
 ]
 license         = "Apache-2.0"
 
-[pack.signature]
-# Optional: maintainer signature over the pack contents. Loader warns if absent.
-public_key  = "..."
-signature   = "..."
+# Pack signing (`[pack.signature]` with `public_key` + `signature`) is
+# a future concern — neither the loader nor the schema validate it
+# today. Lands with the signed-update channel (docs/03 §"reserved for
+# future").
 ```
 
 ### `checksum_type` values
@@ -84,11 +88,18 @@ have to revisit every pack later. Mirrors RomRaider's `maps/checksum/` family
 | `subaru_alt2` | Alternate variant used by some 32-bit ROMs. |
 | `none`        | No checksum repair needed (placeholder for ROMs that don't validate). |
 
-The loader does not act on this field yet; it only validates that the value is
-one of the known enum members. When Phase 4 lands, `st::flash` resolves it to
-a checksum-repair function.
+`st::flash::make_checksum_repair` resolves this string to an
+`IChecksumRepair` instance via the factory; `apply_checksum_repair(span,
+def)` is the one-call wrapper. The three concrete kinds
+(`subaru_std`/`subaru_alt`/`subaru_alt2`) stub-return `NotImplemented`
+with citation pointers to RomRaider's `ChecksumSTD` family — algorithm
+implementation waits on a known-good stock dump for byte validation
+(see docs/04 §"Phase 4").
 
-## `identification.toml` — CID detection
+## `[[identification]]` — CID detection
+
+Lives in `pack.toml` alongside `[pack]` (or in any other `*.toml` in the
+pack dir — the loader merges everything).
 
 ```toml
 [[identification]]
@@ -101,7 +112,9 @@ ecu_part    = "22765-XXXXX"       # optional, informational
 ```
 
 Multiple `[[identification]]` blocks let one pack cover several near-identical
-CIDs (e.g. the same model year in different markets).
+CIDs (e.g. the same model year in different markets). The CLI's `rom-info`
+prints the first matching CID; `rom-identify --pack-dir <dir>` scans a
+pack collection for matches.
 
 ## `axes.toml` — shared axis definitions
 
