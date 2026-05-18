@@ -272,6 +272,29 @@ enum class FReg : std::uint8_t {
         0xF01DU | (static_cast<std::uint16_t>(frm) << 8U));
 }
 
+// FLOAT FPUL, FRn — FRn = (float32)(int32)FPUL. **Conversion**, not
+// a bit-cast: reads FPUL as a signed 32-bit integer, converts to
+// IEEE 754 binary32, stores in FRn. Used by `divide_int` to bring
+// each integer operand onto the FPU register file so FDIV can run.
+// Precision: int32 values with |x| > 2^24 may lose low-order bits
+// in the conversion. Encoding: 1111 nnnn 0010 1101.
+[[nodiscard]] constexpr std::uint16_t enc_float_fpul_freg(FReg frn) noexcept {
+    return static_cast<std::uint16_t>(
+        0xF02DU | (static_cast<std::uint16_t>(frn) << 8U));
+}
+
+// FTRC FRm, FPUL — FPUL = (int32)trunc(FRm). **Conversion**, not a
+// bit-cast: truncates FRm toward zero (matching C int-division
+// rounding) and stores the result in FPUL as a signed 32-bit int.
+// Used to bring the float-side FDIV result back into the integer
+// register file. Saturating on overflow per the SH-2A spec — values
+// outside int32 range produce INT_MIN / INT_MAX, no trap.
+// Encoding: 1111 mmmm 0011 1101.
+[[nodiscard]] constexpr std::uint16_t enc_ftrc_freg_fpul(FReg frm) noexcept {
+    return static_cast<std::uint16_t>(
+        0xF03DU | (static_cast<std::uint16_t>(frm) << 8U));
+}
+
 // FCMP/EQ FRm, FRn — T = (FRn == FRm). IEEE 754 ordered compare: NaN
 // operands produce T=0. Commutative — operand swap is identical.
 // Encoding: 1111 nnnn mmmm 0100.

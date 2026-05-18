@@ -81,8 +81,7 @@ Heavy progress this session — what was sized at 4–6 weeks for the editor + I
 
 - ✅ Visual node-graph editor with pin labels + per-pin defaults + wire dragging + pin-context menus; promoted out of `View → Debug` to top-level `View → Custom features designer (preview)` (`0cc5c1b`)
 - ✅ Graph data model (`st::feature::Graph`) + IR lowerer (`st::feature::ir::Module`) + graph-level + IR-level linters
-- ✅ SH-2A codegen: Int arithmetic, Int compares, Bool ops, select (int/bool/float), Float arithmetic via FPU (FADD/FSUB/FMUL/FDIV), Float compares (FCMP/EQ/GT), cross-hook value flow, fan-out dedup. **17 primitives recognized.**
-- ⬜ SH-2A `divide_int` (DIV1 iterative sequence) — last codegen gap
+- ✅ SH-2A codegen: Int arithmetic (add/sub/mul/`divide_int` via FPU bridge), Int compares, Bool ops, select (int/bool/float), Float arithmetic via FPU (FADD/FSUB/FMUL/FDIV), Float compares (FCMP/EQ/GT), cross-hook value flow, fan-out dedup. **18 primitives recognized.**
 - ⬜ Curve / table-lookup primitives (e.g. `flex_fuel_scale`) — needs pack-format extension for breakpoints + values
 - ⬜ RH850 codegen for VB — stub backend returns NotImplemented; per `docs/16` recommendation, drop first under timing pressure
 - ✅ `[[hook]]` + `[[primitive]]` schema in def packs with `name` (codegen-canonical) + `label` (display) split per pin

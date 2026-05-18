@@ -727,7 +727,7 @@ TEST_CASE("Sh2aBackend: unknown primitive id returns NotImplemented",
     ir::Module      m;
     m.instructions.push_back(load_const_int(1, 1));
     m.instructions.push_back(load_const_int(2, 2));
-    m.instructions.push_back(call_primitive(3, "divide_int", {1, 2}));
+    m.instructions.push_back(call_primitive(3, "modulo_int", {1, 2}));
     m.instructions.push_back(store("after_fuel_calc",
                                     "commanded_pw_override", 3));
 
@@ -1013,7 +1013,7 @@ TEST_CASE("Sh2aBackend: nested primitive with unsupported id fails",
     ir::Module      m;
     m.instructions.push_back(load_const_int(1, 1));
     m.instructions.push_back(load_const_int(2, 2));
-    m.instructions.push_back(call_primitive(3, "divide_int", {1, 2}));
+    m.instructions.push_back(call_primitive(3, "modulo_int", {1, 2}));
     m.instructions.push_back(load_const_int(4, 10));
     m.instructions.push_back(call_primitive(5, "add_int", {3, 4}));
     m.instructions.push_back(store("after_fuel_calc",
@@ -1148,6 +1148,116 @@ TEST_CASE("Sh2aBackend: multiply_int with HookInput operand",
     REQUIRE(be16_at(hp.code, 4) == 0xD104);  // MOV.L pool[1]=2 → R1
     REQUIRE(be16_at(hp.code, 6) == 0x0107);  // MUL.L R0, R1
     REQUIRE(be16_at(hp.code, 8) == 0x011A);  // STS MACL, R1
+}
+
+// ---- divide_int (FPU bridge) ---------------------------------------------
+
+TEST_CASE("Sh2aBackend: divide_int(LC, LC) → Store emits FLOAT+FDIV+FTRC",
+          "[feature_codegen][sh2a][div]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 10));
+    m.instructions.push_back(load_const_int(2, 2));
+    m.instructions.push_back(call_primitive(3, "divide_int", {1, 2}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    auto const &hp = r->hooks[0];
+
+    // FPU bridge: 11 body instructions.
+    //   op2 → R0 → FPUL → FR0  (3 instr: MOV.L, LDS, FLOAT)
+    //   op1 → R0 → FPUL → FR1  (3 instr)
+    //   FDIV FR0, FR1          (1 instr)
+    //   FTRC FR1, FPUL ; STS FPUL, R1 (2 instr)
+    //   MOV.L dest → R2 ; MOV.L R1, @R2 (2 instr)
+    // = 11 instr × 2 bytes = 22 bytes body, + RTS + NOP delay = 26 bytes.
+    // 26 not 4-aligned ⇒ +1 NOP pad = 28 bytes.
+    // Pool: 3 longwords (op2=2, op1=10, dest) = 12 bytes.
+    // Total: 40 bytes.
+    REQUIRE(hp.code.size() == 40);
+
+    // Spot-check the FPU bridge opcodes appear at the expected
+    // offsets. Operand order: op2 loads first (lands in FR0 to
+    // become the divisor), op1 second (FR1, dividend).
+    REQUIRE(be16_at(hp.code, 0)  == 0xD006);  // MOV.L pool[0]=2 → R0
+    REQUIRE(be16_at(hp.code, 2)  == 0x405A);  // LDS R0, FPUL
+    REQUIRE(be16_at(hp.code, 4)  == 0xF02D);  // FLOAT FPUL, FR0
+    REQUIRE(be16_at(hp.code, 6)  == 0xD006);  // MOV.L pool[1]=10 → R0
+    REQUIRE(be16_at(hp.code, 8)  == 0x405A);  // LDS R0, FPUL
+    REQUIRE(be16_at(hp.code, 10) == 0xF12D);  // FLOAT FPUL, FR1
+    REQUIRE(be16_at(hp.code, 12) == 0xF103);  // FDIV FR0, FR1 (FR1 /= FR0)
+    REQUIRE(be16_at(hp.code, 14) == 0xF13D);  // FTRC FR1, FPUL
+    REQUIRE(be16_at(hp.code, 16) == 0x015A);  // STS FPUL, R1
+    REQUIRE(be16_at(hp.code, 18) == 0xD204);  // MOV.L pool[2]=dest → R2
+    REQUIRE(be16_at(hp.code, 20) == 0x2212);  // MOV.L R1, @R2
+    REQUIRE(be16_at(hp.code, 22) == 0x000B);  // RTS
+    REQUIRE(be16_at(hp.code, 24) == 0x0009);  // NOP delay
+    REQUIRE(be16_at(hp.code, 26) == 0x0009);  // NOP pool-align pad
+
+    // Pool layout: op2 first (loaded into R0 first), then op1, then dest.
+    REQUIRE(be32_at(hp.code, 28) == 2U);    // op2 = 2
+    REQUIRE(be32_at(hp.code, 32) == 10U);   // op1 = 10
+    REQUIRE(be32_at(hp.code, 36) == 0x40000000U);  // dest
+}
+
+TEST_CASE("Sh2aBackend: divide_int with HookInput operand defers via R0",
+          "[feature_codegen][sh2a][div]") {
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm"));
+    m.instructions.push_back(load_const_int(2, 100));
+    m.instructions.push_back(call_primitive(3, "divide_int", {1, 2}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    auto const &hp = r->hooks[0];
+
+    // FPU bridge instructions still in the same shape; HookInput
+    // operand adds one MOV.L @R0, R0 indirect-load before LDS.
+    // Verify the deref appears and FDIV is reached.
+    bool seen_deref = false;
+    bool seen_fdiv  = false;
+    bool seen_ftrc  = false;
+    for (std::size_t i = 0; i + 1 < hp.code.size(); i += 2) {
+        std::uint16_t const inst = be16_at(hp.code, i);
+        if (inst == 0x6002) seen_deref = true;  // MOV.L @R0, R0
+        if (inst == 0xF103) seen_fdiv  = true;
+        if (inst == 0xF13D) seen_ftrc  = true;
+    }
+    REQUIRE(seen_deref);
+    REQUIRE(seen_fdiv);
+    REQUIRE(seen_ftrc);
+}
+
+TEST_CASE("Sh2aBackend: divide_int with Float operand returns NotImplemented",
+          "[feature_codegen][sh2a][div]") {
+    // divide_int requires Int operands; passing a Float producer
+    // should be rejected by operand_from_producer's type check.
+    auto def = st::Definition::from_toml_string(kPackOneHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module      m;
+    m.instructions.push_back(load_const_int(1, 10));
+    m.instructions.push_back(load_const_float(2, 2.0));
+    m.instructions.push_back(call_primitive(3, "divide_int", {1, 2}));
+    m.instructions.push_back(store("after_fuel_calc",
+                                    "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
 }
 
 // ---- compare_lt / compare_gt / compare_eq --------------------------------

@@ -234,6 +234,12 @@ class FragmentEmitter {
     void flds_freg_fpul(sh2a::FReg frm) {
         emit_be16(body_, sh2a::enc_flds_freg_fpul(frm));
     }
+    void float_fpul_freg(sh2a::FReg frn) {
+        emit_be16(body_, sh2a::enc_float_fpul_freg(frn));
+    }
+    void ftrc_freg_fpul(sh2a::FReg frm) {
+        emit_be16(body_, sh2a::enc_ftrc_freg_fpul(frm));
+    }
     void fcmp_eq(sh2a::FReg frm, sh2a::FReg frn) {
         emit_be16(body_, sh2a::enc_fcmp_eq(frm, frn));
     }
@@ -454,6 +460,46 @@ void emit_store_fr_to(FragmentEmitter &fe, sh2a::FReg frm,
     emit_store_r1_to(fe, destination_address);
 }
 
+// Int-to-float operand loader for the FPU bridge used by
+// `divide_int`. Same shape as `load_operand_into_fr` for the GPR
+// load + FPUL transfer, but the final step is `FLOAT FPUL, FRn`
+// (conversion) instead of `FSTS FPUL, FRn` (bit-cast). Result: FRn
+// holds (float32)(int32)<operand> rather than the operand's
+// integer bit pattern reinterpreted as IEEE 754 (which would
+// produce nonsense for any non-trivial operand).
+//
+// Precision: int32 values with |x| > 2^24 lose low-order bits in
+// the float32 representation. For Subaru ECU table cells (typical
+// range ±32768 or ±2^16) this is well within precision; flag the
+// hazard at the primitive level if the user authors an integer
+// table whose range exceeds 2^24.
+void load_int_operand_into_fr_via_float(
+    FragmentEmitter &fe, PrimitiveOperand op, sh2a::FReg frn) {
+    fe.mov_l_disp_pc(sh2a::Reg::R0, op.value);
+    if (op.kind == PrimitiveOperand::Kind::HookInputPointer) {
+        fe.mov_l_at_reg_reg(sh2a::Reg::R0, sh2a::Reg::R0);
+    }
+    fe.lds_r_fpul(sh2a::Reg::R0);
+    fe.float_fpul_freg(frn);
+}
+
+// Int-result store from the float register file via FTRC (truncate
+// toward zero). Mirror of `emit_store_fr_to` but applies the
+// truncate-and-convert opcode instead of FLDS's bit-cast, so the
+// 32-bit word landing in memory is a signed int32 representing the
+// integer part of FRm. Used by `divide_int`'s store tail.
+//
+// Overflow: FTRC saturates to INT_MIN / INT_MAX on out-of-range
+// float values, no trap. This differs from C UB (e.g. INT_MIN / -1
+// would be UB in C; here it lands as INT_MAX).
+void emit_store_fr_truncated_to_int(
+    FragmentEmitter &fe, sh2a::FReg frm,
+    std::uint32_t destination_address) {
+    fe.ftrc_freg_fpul(frm);
+    fe.sts_fpul_r(sh2a::Reg::R1);
+    emit_store_r1_to(fe, destination_address);
+}
+
 // Body fragment for `add_int(op1, op2)` → store. ADD is commutative
 // so the operand-to-register mapping is the natural one (op1 → R0,
 // op2 → R1; ADD R0, R1 leaves the sum in R1).
@@ -670,6 +716,38 @@ void emit_div_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
     emit_store_fr_to(fe, sh2a::FReg::FR1, dst);
 }
 
+// Body fragment for `divide_int(op1, op2)` → store. SH-2A's iterative
+// integer divide (DIV0S + 32× DIV1) is encoding-tricky and has corner
+// cases (INT_MIN / -1 overflow, signed-vs-unsigned modes) that we'd
+// have to validate against silicon to trust. The FPU bridge sidesteps
+// all of that with a well-defined three-step path: convert both
+// operands int→float (FLOAT), divide on the float side (FDIV),
+// convert the result float→int (FTRC, truncate toward zero — matches
+// C int division on the cases that fit in float32 mantissa).
+//
+// Trade-offs vs. a hypothetical DIV1-iterative implementation:
+//   - **Precision:** int32 has 32 bits; float32 has a 24-bit
+//     mantissa. Operands with |x| > 2^24 lose low-order bits in the
+//     conversion. For Subaru ECU tables this is well within the
+//     usable range (typical cells ±32768).
+//   - **Overflow:** FTRC saturates (INT_MIN / INT_MAX). C integer
+//     overflow is UB. We pick saturation as the saner default; gate
+//     INT_MIN/-1 at the design layer if the user needs it.
+//   - **Divide-by-zero:** FPU exception, same as `divide_float`.
+//     Documented caveat; gate with compare → select if needed.
+//   - **Speed:** ~5 FPU ops vs. ~35 GPR ops for DIV1. FPU is fast on
+//     SH-2A when FPSCR.PR=0 (single precision); this is the same
+//     assumption the existing Float arithmetic primitives make.
+//
+// FDIV FRm, FRn ⇒ FRn = FRn / FRm — put dividend (op1) in FR1.
+void emit_div_int_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
+                            PrimitiveOperand op2, std::uint32_t dst) {
+    load_int_operand_into_fr_via_float(fe, op2, sh2a::FReg::FR0);  // divisor
+    load_int_operand_into_fr_via_float(fe, op1, sh2a::FReg::FR1);  // dividend
+    fe.fdiv(sh2a::FReg::FR0, sh2a::FReg::FR1);                     // FR1 /= FR0
+    emit_store_fr_truncated_to_int(fe, sh2a::FReg::FR1, dst);
+}
+
 // ---- Float compares (Float, Float) → Bool -------------------------
 //
 // All three variants share the shape: load op1→FR0, op2→FR1, FCMP/*
@@ -731,6 +809,10 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
     }
     if (symbol == "multiply_int") {
         emit_mul_fragment(fe, operands[0], operands[1], dst);
+        return ok();
+    }
+    if (symbol == "divide_int") {
+        emit_div_int_fragment(fe, operands[0], operands[1], dst);
         return ok();
     }
     if (symbol == "compare_lt_int") {
@@ -795,11 +877,12 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
     std::string msg{"SH-2A backend: CallPrimitive '"};
     msg.append(symbol);
     msg.append("' not yet implemented (slice supports add_int, "
-               "subtract_int, multiply_int, compare_lt_int, "
-               "compare_gt_int, compare_eq_int, and_bool, or_bool, "
-               "not_bool, select_int, select_bool, select_float, "
-               "add_float, subtract_float, multiply_float, "
-               "divide_float, compare_lt_float, compare_gt_float, "
+               "subtract_int, multiply_int, divide_int, "
+               "compare_lt_int, compare_gt_int, compare_eq_int, "
+               "and_bool, or_bool, not_bool, select_int, "
+               "select_bool, select_float, add_float, "
+               "subtract_float, multiply_float, divide_float, "
+               "compare_lt_float, compare_gt_float, "
                "compare_eq_float)");
     return failure(ErrorCode::NotImplemented, std::move(msg));
 }
@@ -1018,6 +1101,7 @@ struct PrimitiveShape {
         {"add_int",      {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Int}},
         {"subtract_int", {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Int}},
         {"multiply_int", {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Int}},
+        {"divide_int",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Int}},
         {"compare_lt_int",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
         {"compare_gt_int",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
         {"compare_eq_int",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
@@ -1051,11 +1135,12 @@ struct PrimitiveShape {
         std::string msg{"SH-2A backend: CallPrimitive '"};
         msg.append(prim.symbol);
         msg.append("' not yet implemented (slice supports add_int, "
-                   "subtract_int, multiply_int, compare_lt_int, "
-                   "compare_gt_int, compare_eq_int, and_bool, or_bool, "
-                   "not_bool, select_int, select_bool, select_float, "
-                   "add_float, subtract_float, multiply_float, "
-                   "divide_float, compare_lt_float, compare_gt_float, "
+                   "subtract_int, multiply_int, divide_int, "
+                   "compare_lt_int, compare_gt_int, compare_eq_int, "
+                   "and_bool, or_bool, not_bool, select_int, "
+                   "select_bool, select_float, add_float, "
+                   "subtract_float, multiply_float, divide_float, "
+                   "compare_lt_float, compare_gt_float, "
                    "compare_eq_float)");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }

@@ -89,6 +89,18 @@ outputs = [
   { name = "out", type = "int" },
 ]
 
+[[primitive]]
+id           = "divide_int"
+display_name = "Divide (int)"
+description  = "Integer a / b via the SH-2A FPU bridge (FLOAT → FDIV → FTRC). Truncates toward zero (matches C int division). Operands above ±2^24 lose precision; divide-by-zero raises a FPU exception — gate with compare → select if needed."
+inputs = [
+  { name = "a", type = "int" },
+  { name = "b", type = "int" },
+]
+outputs = [
+  { name = "out", type = "int" },
+]
+
 # ---- Comparison + boolean logic ------------------------------------
 
 [[primitive]]

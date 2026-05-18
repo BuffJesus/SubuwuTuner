@@ -114,9 +114,19 @@ and `add_float` are different symbols emitting different instruction
 sequences; the IR-side type checker (and PrimitiveShape table)
 enforces that operand types match the symbol's declared shape.
 
-**Not yet implemented:** `divide_int` (DIV1 iterative sequence is
-mechanical but voluminous; DIVS single-instruction encoding needs
-Renesas-manual verification), per-ISA cycle costs for the RT-budget
+`divide_int` ships via an FPU bridge: load each int operand → FPUL →
+`FLOAT FPUL, FRn` (int-to-float conversion), `FDIV` on the float
+side, then `FTRC FRm, FPUL` (truncate toward zero) → `STS FPUL, Rn`
+back to the int register file. Truncation matches C int division
+semantics. Trade-offs: ±2^24 precision ceiling (float32 mantissa),
+saturation on overflow rather than C's UB, FPU exception on
+divide-by-zero (same as `divide_float`). DIV1 iterative + DIVS
+single-instruction were considered and rejected — DIV1 is ~32
+instructions per call with sign-handling corner cases worth bench
+validation; FPU is ~6 instructions and reuses the float code path
+that already shipped.
+
+**Not yet implemented:** per-ISA cycle costs for the RT-budget
 linter (today's costs are placeholder), and any curve / table-lookup
 primitive (relevant for the unblocked `flex-fuel` sample).
 
@@ -290,7 +300,7 @@ conservative. Actual progress:
 |---|---|---|
 | Graph data structure + persistence + editor | 2–3 wk | shipped (Phase 5 designer is in `View → Custom features designer (preview)`; editor canvas is functional with pin labels, defaults, pin-context menus, wire dragging) |
 | IR + linter + RT-budget analyzer | 2 wk | shipped; RT-budget uses placeholder per-Op costs (real per-ISA cycle counts wait on bench profiling) |
-| One codegen backend (SH-2A) | 2–3 wk | shipped: Int + Bool + control flow + Float + Float compares + cross-hook flow + fan-out dedup. Open gaps: `divide_int`, table-lookup primitives. |
+| One codegen backend (SH-2A) | 2–3 wk | shipped: Int + Bool + control flow + Float + Float compares + cross-hook flow + fan-out dedup + `divide_int` (FPU bridge). Open gaps: table-lookup primitives, per-ISA cycle costs. |
 | Patch insertion + free-RAM management | 1–2 wk | not started — bench-rig-blocked. Needs a real ECU's vector table and the firmware's known free-RAM map to develop against. |
 | Sample packs + docs | 1 wk | 4 samples ship (3 compile end-to-end, 1 waits on `flex_fuel_scale` curve primitive). This doc you're reading is the design + current-state ref. |
 | Second backend (RH850) | 2–3 wk | not started; stub returns NotImplemented. Per the original recommendation, RH850 drops first under timing pressure — VA users get custom features, VB waits a release. |
