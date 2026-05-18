@@ -66,7 +66,8 @@ Per the prior handoff, "Phases 0–4 done hardware-free." Orchestrator + Manifes
 - ✅ Manifest + journal + `plan_resume` for crash-safe writes
 - ✅ Policy + mutation gate (`docs/06` + `st::policy`)
 - ✅ `checksum_type` field in pack `[pack]` table (added `58a821f`); enum mirrors RR's ChecksumSTD / ALT / ALT2 family
-- ⬜ Checksum-repair implementations (subaru_std, subaru_alt, subaru_alt2) — algorithms documented in RR but need byte-validation against a known stock dump
+- ✅ `IChecksumRepair` seam + `make_checksum_repair` factory + `apply_checksum_repair(span, Definition)` wrapper + CLI `checksum-verify` / `checksum-repair` exit-3-on-NotImplemented (every concrete kind still returns NotImplemented with an RR citation pointer)
+- ⬜ Checksum-repair implementations (subaru_std, subaru_alt, subaru_alt2) — seam ready; algorithms still need byte-validation against a known stock dump
 - ⬜ Seed/key authentication — no SSM seed/key code exists in RomRaider per this session's findings doc; we'll derive it from forum threads + bench captures
 - 🔒 Brick protection bootstrap + recovery shim — bench rig prerequisite
 - 🔒 Delta-only flashing + dry-run mode — same
@@ -87,7 +88,7 @@ Heavy progress this session — what was sized at 4–6 weeks for the editor + I
 - ✅ `[[hook]]` + `[[primitive]]` schema in def packs with `name` (codegen-canonical) + `label` (display) split per pin
 - ✅ Linter: type-checks via Graph::connect / IR lowerer; RT-budget placeholder (real per-ISA cycle counts wait on bench profiling)
 - ✅ `.stmod` format = TOML `[graph]` + `[patch]` halves, single file, round-trippable via `feature::from_toml` + `feature_codegen::patch_from_toml` (`92daa48`)
-- ✅ CLI `feature-compile <stmod> --def <pack> [--arch sh2a|rh850] [--format hex|toml|raw]` (`87a59f5`)
+- ✅ CLI `feature-compile <stmod> --def <pack> [--arch sh2a|rh850] [--format hex|toml|raw|stmod] [--output <file>] [--validate-only]` (`87a59f5`, `--format stmod` `1406aa5`, `--validate-only` `1f7aafe`)
 - ✅ Sample packs: `clutch-kill`, `flat-foot-shift`, `launch-control` compile end-to-end through SH-2A → real SH-2A bytes. `flex-fuel` blocks on the curve primitive.
 - 🔒 Patch insertion layer (`src/feature_patch/`) — finds free RAM, writes the hook table, splices into existing vector tables. Bench-rig-blocked (needs a real ECU vector table to develop against).
 
