@@ -359,6 +359,7 @@ constexpr std::string_view kUsage =
     "                            once the platform dynload layer lands.\n"
     "    feature-compile <FILE.stmod> --def <pack.toml> [--arch sh2a|rh850]\n"
     "                    [--format hex|toml|raw|stmod] [--output <FILE>]\n"
+    "                    [--validate-only]\n"
     "                            Lower a .stmod, pick a codegen backend by the\n"
     "                            pack's platform (or --arch override), and emit\n"
     "                            the compiled PatchObject. Default --format=hex\n"
@@ -369,7 +370,12 @@ constexpr std::string_view kUsage =
     "                            in one TOML document, ready to redistribute);\n"
     "                            --format=raw writes the code bytes verbatim and\n"
     "                            requires a single-hook patch + --output. Without\n"
-    "                            --output the text formats print to stdout.\n";
+    "                            --output the text formats print to stdout.\n"
+    "                            --validate-only runs parse + lower + compile and\n"
+    "                            exits 0 (success) or non-zero (failure) without\n"
+    "                            producing output — for CI / pre-commit hooks that\n"
+    "                            want to confirm a .stmod still builds against a\n"
+    "                            pack without leaving artifacts behind.\n";
 
 void print_version() {
     std::printf("%.*s %.*s\n",
@@ -7330,6 +7336,7 @@ int cmd_feature_compile(int argc, char *argv[]) {
     std::optional<std::filesystem::path> output_path;
     std::optional<std::string>           arch_override;
     std::string                          format = "hex";
+    bool                                 validate_only = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -7368,6 +7375,14 @@ int cmd_feature_compile(int argc, char *argv[]) {
                              format.c_str());
                 return 2;
             }
+        } else if (a == "--validate-only") {
+            // Parse + lower + compile, then exit with a status code
+            // without emitting any output. Lets CI / pre-commit hooks
+            // confirm a .stmod still builds cleanly against a pack
+            // without producing files or dumping hex on the terminal.
+            // Distinct from "--output /dev/null", which would still
+            // render the patch + traverse the format dispatch.
+            validate_only = true;
         } else if (!a.empty() && a[0] == '-') {
             std::fprintf(stderr, "feature-compile: unknown flag '%.*s'\n",
                          static_cast<int>(a.size()), a.data());
@@ -7386,7 +7401,8 @@ int cmd_feature_compile(int argc, char *argv[]) {
         std::fputs("feature-compile: missing .stmod path\n", stderr);
         std::fputs("Usage: subuwutuner-cli feature-compile <FILE.stmod> "
                    "--def <pack.toml> [--arch sh2a|rh850] "
-                   "[--format hex|toml|raw|stmod] [--output <FILE>]\n",
+                   "[--format hex|toml|raw|stmod] [--output <FILE>] "
+                   "[--validate-only]\n",
                    stderr);
         return 2;
     }
@@ -7394,7 +7410,13 @@ int cmd_feature_compile(int argc, char *argv[]) {
         std::fputs("feature-compile: --def is required\n", stderr);
         return 2;
     }
-    if (format == "raw" && !output_path.has_value()) {
+    if (validate_only && output_path.has_value()) {
+        std::fputs("feature-compile: --validate-only and --output cannot "
+                   "be combined (validate-only suppresses all output)\n",
+                   stderr);
+        return 2;
+    }
+    if (format == "raw" && !output_path.has_value() && !validate_only) {
         std::fputs("feature-compile: --format=raw requires --output "
                    "(refusing to write binary to a terminal)\n",
                    stderr);
@@ -7464,6 +7486,12 @@ int cmd_feature_compile(int argc, char *argv[]) {
         std::fprintf(stderr, "feature-compile: compile failed: %s\n",
                      patch.error().to_string().c_str());
         return 1;
+    }
+
+    if (validate_only) {
+        // Reached only when parse + lower + compile all succeeded. Exit
+        // 0 silently — CI hooks key on the exit code, not stdout.
+        return 0;
     }
 
     if (format == "raw") {
