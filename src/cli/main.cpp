@@ -64,6 +64,16 @@ constexpr std::string_view kUsage =
     "    -V, --version           Print version and exit\n"
     "\n"
     "COMMANDS:\n"
+    "    rom-identify <FILE.bin> --pack-dir <dir> [--quiet]\n"
+    "                            Walk a directory of definition packs (recursive\n"
+    "                            scan for nested pack.toml files) and report which\n"
+    "                            ones match the ROM's CID. For \"I just got this\n"
+    "                            ROM, which pack do I use?\" Prints one line per\n"
+    "                            matching pack with the matched identification\n"
+    "                            name; --quiet suppresses the load-failure noise\n"
+    "                            for packs that don't parse cleanly. Exit 0 on\n"
+    "                            ≥1 match, 1 on zero matches, 2 on argument\n"
+    "                            errors.\n"
     "    rom-info [--def <pack.toml>] <FILE>\n"
     "                            Print size, CRC32, embedded ASCII strings of a ROM.\n"
     "                            With --def, also identify the ROM against the pack\n"
@@ -3235,6 +3245,142 @@ int cmd_project_diff(int argc, char *argv[]) {
         std::printf("\n  overall_action       = %s\n", action);
     }
     return 0;
+}
+
+int cmd_rom_identify(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> rom_path;
+    std::optional<std::filesystem::path> pack_dir;
+    bool                                 quiet = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--pack-dir") {
+            if (i + 1 >= argc) {
+                std::fputs("rom-identify: --pack-dir requires a path\n", stderr);
+                return 2;
+            }
+            pack_dir = std::filesystem::path{argv[++i]};
+        } else if (a == "--quiet" || a == "-q") {
+            quiet = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "rom-identify: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!rom_path.has_value()) {
+            rom_path = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr,
+                         "rom-identify: extra positional argument: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+    if (!rom_path.has_value() || !pack_dir.has_value()) {
+        std::fputs("rom-identify: missing ROM path or --pack-dir\n"
+                   "Usage: subuwutuner-cli rom-identify <FILE.bin> "
+                   "--pack-dir <dir> [--quiet]\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const rom = st::Rom::from_file(*rom_path);
+    if (!rom.has_value()) {
+        std::fprintf(stderr, "rom-identify: %s\n",
+                     rom.error().to_string().c_str());
+        return 1;
+    }
+    std::error_code ec;
+    if (!std::filesystem::is_directory(*pack_dir, ec) || ec) {
+        std::fprintf(stderr,
+                     "rom-identify: --pack-dir is not a directory: %s\n",
+                     pack_dir->string().c_str());
+        return 2;
+    }
+
+    // Walk recursively for pack.toml files. Each one names a
+    // directory-pack we can load via from_directory(parent). We
+    // dedupe by parent path so a pack with includes (multiple
+    // pack.toml-named files in sub-fragments) only counts once.
+    //
+    // The error_code overload of recursive_directory_iterator
+    // doesn't throw on individual file-system errors during the
+    // walk; we still guard with try/catch in case the start
+    // directory itself can't be opened (skip_permission_denied
+    // only handles per-entry failures, not the constructor).
+    std::vector<std::filesystem::path> pack_dirs;
+    try {
+        std::error_code walk_ec;
+        std::filesystem::recursive_directory_iterator it{
+            *pack_dir,
+            std::filesystem::directory_options::skip_permission_denied,
+            walk_ec};
+        if (walk_ec) {
+            std::fprintf(stderr,
+                         "rom-identify: cannot walk %s: %s\n",
+                         pack_dir->string().c_str(),
+                         walk_ec.message().c_str());
+            return 1;
+        }
+        for (auto const &e : it) {
+            std::error_code is_file_ec;
+            if (!e.is_regular_file(is_file_ec) || is_file_ec) continue;
+            if (e.path().filename() != "pack.toml") continue;
+            auto parent = e.path().parent_path();
+            if (std::find(pack_dirs.begin(), pack_dirs.end(), parent)
+                == pack_dirs.end()) {
+                pack_dirs.push_back(std::move(parent));
+            }
+        }
+    } catch (std::filesystem::filesystem_error const &fs_err) {
+        std::fprintf(stderr,
+                     "rom-identify: filesystem error walking %s: %s\n",
+                     pack_dir->string().c_str(), fs_err.what());
+        return 1;
+    }
+    std::sort(pack_dirs.begin(), pack_dirs.end());
+
+    if (pack_dirs.empty()) {
+        std::fprintf(stderr,
+                     "rom-identify: no pack.toml files found under %s\n",
+                     pack_dir->string().c_str());
+        return 1;
+    }
+
+    std::size_t loaded   = 0;
+    std::size_t failed   = 0;
+    std::size_t matched  = 0;
+    for (auto const &dir : pack_dirs) {
+        auto const def = st::Definition::from_directory(dir);
+        if (!def.has_value()) {
+            ++failed;
+            if (!quiet) {
+                std::fprintf(stderr, "  (skip) %s — load failed: %s\n",
+                             dir.string().c_str(),
+                             def.error().to_string().c_str());
+            }
+            continue;
+        }
+        ++loaded;
+        auto const match = def->matches(*rom);
+        if (match.has_value()) {
+            ++matched;
+            std::printf("MATCH  %s\n", dir.string().c_str());
+            std::printf("       (identification: %s)\n", match->c_str());
+            if (!def->pack().display_name.empty()) {
+                std::printf("       (display name:   %s)\n",
+                            def->pack().display_name.c_str());
+            }
+        }
+    }
+
+    std::printf("\n%zu pack%s scanned, %zu loaded, %zu match%s\n",
+                 pack_dirs.size(), pack_dirs.size() == 1 ? "" : "s",
+                 loaded, matched, matched == 1 ? "" : "es");
+    if (failed != 0) {
+        std::printf("(%zu pack%s failed to load%s)\n",
+                     failed, failed == 1 ? "" : "s",
+                     quiet ? " — rerun without --quiet to see errors" : "");
+    }
+    return matched == 0 ? 1 : 0;
 }
 
 int cmd_rom_info(int argc, char *argv[]) {
@@ -7036,6 +7182,9 @@ int main(int argc, char *argv[]) {
     }
 
     std::string_view const cmd{argv[1]};
+    if (cmd == "rom-identify") {
+        return cmd_rom_identify(argc - 2, argv + 2);
+    }
     if (cmd == "rom-info") {
         return cmd_rom_info(argc - 2, argv + 2);
     }
