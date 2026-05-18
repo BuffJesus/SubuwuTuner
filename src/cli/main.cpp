@@ -13,6 +13,7 @@
 #include "st/ecu/ssm.hpp"
 #include "st/edit.hpp"
 #include "st/flash.hpp"
+#include "st/flash/checksum.hpp"
 #include "st/log.hpp"
 #include "st/policy.hpp"
 #include "st/project.hpp"
@@ -82,6 +83,14 @@ constexpr std::string_view kUsage =
     "                            for packs that don't parse cleanly. Exit 0 on\n"
     "                            ≥1 match, 1 on zero matches, 2 on argument\n"
     "                            errors.\n"
+    "    checksum-verify <FILE.bin> --def <pack>\n"
+    "                            Run the pack's declared checksum_type repair\n"
+    "                            algorithm against a copy of the ROM and report\n"
+    "                            whether the existing checksum bytes are already\n"
+    "                            valid. Exit 0 = valid (or pack declares 'none');\n"
+    "                            1 = invalid (would be repaired on flash); 3 =\n"
+    "                            algorithm not yet implemented for the declared\n"
+    "                            kind. Read-only — never modifies the ROM file.\n"
     "    rom-info [--def <pack.toml>] <FILE>\n"
     "                            Print size, CRC32, embedded ASCII strings of a ROM.\n"
     "                            With --def, also identify the ROM against the pack\n"
@@ -3517,6 +3526,107 @@ int cmd_rom_identify(int argc, char *argv[]) {
                      quiet ? " — rerun without --quiet to see errors" : "");
     }
     return matched == 0 ? 1 : 0;
+}
+
+int cmd_checksum_verify(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> rom_path;
+    std::optional<std::filesystem::path> def_path;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--def") {
+            if (i + 1 >= argc) {
+                std::fputs("checksum-verify: --def requires a path\n", stderr);
+                return 2;
+            }
+            def_path = std::filesystem::path{argv[++i]};
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "checksum-verify: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        } else if (!rom_path.has_value()) {
+            rom_path = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr,
+                         "checksum-verify: extra positional argument: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+    if (!rom_path.has_value() || !def_path.has_value()) {
+        std::fputs("checksum-verify: missing ROM path or --def\n"
+                   "Usage: subuwutuner-cli checksum-verify <FILE.bin> "
+                   "--def <pack>\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const rom = st::Rom::from_file(*rom_path);
+    if (!rom.has_value()) {
+        std::fprintf(stderr, "checksum-verify: %s\n",
+                     rom.error().to_string().c_str());
+        return 1;
+    }
+    auto const def = st::Definition::from_file(*def_path);
+    if (!def.has_value()) {
+        return print_def_load_error("checksum-verify", *def_path, def.error());
+    }
+
+    auto const  field = def->pack().checksum_type;
+    auto const  kind  = st::flash::checksum_kind_from_pack(field);
+    auto const *kind_name = st::flash::checksum_kind_name(kind);
+
+    std::printf("ROM:              %s\n", rom_path->string().c_str());
+    std::printf("Pack:             %s\n", def->pack().id.c_str());
+    std::printf("checksum_type:    %s%s\n",
+                field.empty() ? "(unset)" : field.c_str(),
+                field.empty() ? "  → defaulting to 'none'" : "");
+    std::printf("Resolved kind:    %s\n", kind_name);
+
+    auto repair = st::flash::make_checksum_repair(kind);
+    // Copy bytes; never mutate the on-disk image. ROM data() is
+    // read-only here, so build a vector + run repair against it.
+    std::vector<std::uint8_t> copy{rom->data().begin(), rom->data().end()};
+    auto const status = repair->repair(copy);
+
+    if (!status.has_value()) {
+        if (status.error().code() == st::ErrorCode::NotImplemented) {
+            std::printf("\nResult: NOT IMPLEMENTED\n");
+            auto const msg = status.error().message();
+            std::printf("  %.*s\n",
+                        static_cast<int>(msg.size()), msg.data());
+            return 3;
+        }
+        std::fprintf(stderr, "\nchecksum-verify: %s\n",
+                     status.error().to_string().c_str());
+        return 1;
+    }
+
+    // Compare bytes. Equal → existing checksum was already correct
+    // (or the pack declared "none" so no work was needed); unequal
+    // → repair would have rewritten some bytes.
+    if (copy == std::vector<std::uint8_t>{rom->data().begin(),
+                                            rom->data().end()}) {
+        std::printf("\nResult: VALID (no bytes would change)\n");
+        return 0;
+    }
+
+    // Count + summarize the diff.
+    std::size_t diff_bytes = 0;
+    std::size_t first_diff = SIZE_MAX;
+    for (std::size_t i = 0; i < rom->size(); ++i) {
+        if (rom->data()[i] != copy[i]) {
+            ++diff_bytes;
+            if (first_diff == SIZE_MAX) first_diff = i;
+        }
+    }
+    std::printf("\nResult: INVALID (%zu byte%s would be rewritten",
+                diff_bytes, diff_bytes == 1 ? "" : "s");
+    if (first_diff != SIZE_MAX) {
+        std::printf(", first at 0x%08zX", first_diff);
+    }
+    std::printf(")\n");
+    return 1;
 }
 
 int cmd_rom_info(int argc, char *argv[]) {
@@ -7339,6 +7449,9 @@ int main(int argc, char *argv[]) {
     std::string_view const cmd{argv[1]};
     if (cmd == "rom-identify") {
         return cmd_rom_identify(argc - 2, argv + 2);
+    }
+    if (cmd == "checksum-verify") {
+        return cmd_checksum_verify(argc - 2, argv + 2);
     }
     if (cmd == "pack-list") {
         return cmd_pack_list(argc - 2, argv + 2);
