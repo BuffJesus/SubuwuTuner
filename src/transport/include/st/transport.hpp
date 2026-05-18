@@ -25,7 +25,14 @@ enum class LinkKind {
 
 struct LinkConfig {
     LinkKind     kind{LinkKind::KLine};
-    int          baud{10400};         // K-Line: 10400 typical; CAN: 500000 typical
+    // Subaru SSM K-Line is 4800 baud (not the 10400 baud you'd see
+    // for KWP2000-on-K-Line on other vendors' platforms). Subaru
+    // CAN-ISO15765 is 500000 baud. The default reflects the
+    // project's primary use case — SSM-K-Line — so a caller who
+    // forgets to set baud gets the right Subaru-default rather
+    // than a silently-wrong KWP2000 default. Concrete transports
+    // (j2534, native) validate baud > 0; baud == 0 → InvalidArgument.
+    int          baud{4800};
     std::uint32_t can_id_request{0};   // for CAN protocols only
     std::uint32_t can_id_response{0};  // for CAN protocols only
 };
