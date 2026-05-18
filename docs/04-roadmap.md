@@ -2,74 +2,107 @@
 
 Six phases. Each ends with a demoable artifact and a "ship gate" that must pass before the next phase starts. Time estimates assume one to two developers part-time.
 
-## Phase 0 — Foundations (2–3 weeks)
+**Status legend** (per phase / per bullet):
+✅ shipped · 🟡 partially shipped · ⬜ not yet · 🔒 blocked on hardware
 
-- Repo skeleton, CMake presets, vcpkg manifest, CI on Win/Mac/Linux
-- `st::core` (`Result`, `Error`, units, `Span`)
-- Catch2 wired up, first 50 tests green
-- `subuwutuner-cli` "hello" binary that prints version and exits
+## Phase 0 — Foundations (2–3 weeks) ✅ done
 
-**Gate:** green CI on all three OSes; binary runs.
+- ✅ Repo skeleton, CMake presets, vcpkg manifest, CI on Win/Mac/Linux
+- ✅ `st::core` (`Result`, `Error`, units, `Span`)
+- ✅ Catch2 wired up, **700+ tests green** (was sized at 50 originally)
+- ✅ `subuwutuner-cli` binary with version + 40+ subcommands
 
-## Phase 1 — ROM viewer, no hardware (4–6 weeks)
+**Gate:** green CI on all three OSes; binary runs. ✅
 
-- `st::rom` reads raw binary dumps, computes CRC32 / sector hashes
-- TOML definition parser (`st::defs`)
-- Validate the loader against a real RomRaider XML through `tools/defgen` — definitions are user-supplied at runtime per `17-data-distribution-policy.md`, not first-party shipped
-- Read-only 2D and 3D table render in a Dear ImGui window
-- Open a known stock dump → see the boost target map laid out correctly
+## Phase 1 — ROM viewer, no hardware (4–6 weeks) ✅ done hardware-free
 
-**Gate:** load a known ROM with a user-supplied definition pack, identify ≥ 20 factory maps with correct scaling, screenshot looks like a table.
+- ✅ `st::rom` reads raw binary dumps, computes CRC32 / sector hashes
+- ✅ TOML definition parser (`st::defs`) with directory + single-file modes, inheritance via `extends`, validation
+- ✅ `tools/defgen` Python pipeline + per-platform mapping YAMLs
+- ✅ Read-only 2D and 3D table render (Grid + Heatmap views) in a Dear ImGui window
+- ✅ CLI `dump-table` / `dump-axis` / `rom-info` / `rom-diff` for headless inspection
 
-## Phase 2 — Editing & projects (3–4 weeks)
+**Gate:** 🔒 hardware-blocked. Code works end-to-end against synthetic packs + fixtures; the "≥ 20 maps from real definitions on real ROM" verification needs a real ROM dump (drop in `fixtures/private/` per scaffolding at `0a5e0fc`).
 
-- Undo/redo stack (`st::project`)
-- Table editor with selection, paste, smooth, interpolate, percent-scale
-- `.stune` project save/load (zip-backed)
-- Diff view between two ROMs of the same definition
+## Phase 2 — Editing & projects (3–4 weeks) ✅ done
 
-**Gate:** open stock, change a map, save project, close, reopen, change is preserved and visible.
+- ✅ Undo/redo stack via `st::edit::History` (per-action ByteEdits; DTC toggles also undoable as of `0ad6d13`)
+- ✅ Table editor with selection, paste, smooth, interpolate, percent-scale, bulk CSV import + export
+- ✅ `.stune` project save/load (directory-backed, not zip — simpler diffability)
+- ✅ Diff view between two ROMs (`rom-diff` CLI + `project-diff`)
+- ✅ Jurisdiction profile gate (`st::policy`) at edit time per `06-legal-ethics.md`
+- ✅ DTC bitmap toggles via `[[dtc_bitmap]]` schema (CLI `project-disable-dtc` / `project-enable-dtc`)
 
-## Phase 3 — Comms & datalogging (5–7 weeks)
+**Gate:** ✅ done — `project-new` → `project-edit` → save → reopen round-trips work; covered by integration tests.
 
-- `st::transport` abstraction
-- J2534 backend (Tactrix OP2.0 via vendor DLL on Windows; OpenPort runtime on Mac/Linux)
-- ELM327 backend over serial — read-only datalogging at first
-- `st::ecu.ssm` for VA; UDS skeleton for VB
-- Live gauge cluster (4–8 gauges) and CSV log export
-- Sustained 50 Hz logging across 20 PIDs
+## Phase 3 — Comms & datalogging (5–7 weeks) 🟡 in progress
 
-**Gate:** connect to a real VA WRX, see RPM update live, log a 10-minute drive, replay the CSV in our viewer.
+Substantial architecture landed this session; the platform USB / DLL layer + real-hardware validation gate on adapter arrival.
 
-## Phase 4 — Flashing (6–10 weeks, the dangerous one)
+- ✅ `st::transport::ITransport` interface + `MockTransport`
+- ✅ J2534 v04.04 ABI types + status decoder + `J2534Library` wrapper (`44896d4`)
+- ✅ `j2534::Transport` ITransport impl on top of the function table (`2f0d054`)
+- ✅ J2534 adapter discovery via Windows registry walk (`666dd33`) + CLI `transport-list`
+- ✅ OBDX DVI codec (`265e692`) + `obdx::Transport` (`70b2af4`) with ELM→DVI handshake
+- ✅ Native protocol codec (`ee09837`) + `native::Transport` (`059ac9b`) for our own doc-18 handheld when PC-tethered
+- ✅ `IByteChannel` shared abstraction for USB CDC byte-stream transports
+- ✅ `open_transport()` factory + CLI `rom-pull --transport j2534|obdx|native` flag (`3f16b2e`)
+- ✅ `st::ecu::ssm` (SSM K-line + CAN) + `st::ecu::uds` clients (adapter-agnostic; consume `ITransport`)
+- 🔒 Platform USB CDC `IByteChannel` impl (libusb on Win/Linux, native CDC on macOS) — bench-blocked
+- 🔒 Platform DLL dynamic-load for `J2534Library::load()` (`LoadLibraryA` / `dlopen`) — adapter-blocked
+- ⬜ ELM327 backend over serial — deferred (low-priority; ELM is read-only by policy and the existing adapters cover the v1.0 surface)
+- ⬜ Streaming on concrete Transports — `start_streaming` / `stop_streaming` stubbed `NotImplemented` on all three. Lands with the datalogger I/O thread + ring buffer.
+- ⬜ Live gauge cluster (4–8 gauges) + CSV log export — design exists in `docs/13`; impl waits on streaming
+- ⬜ Sustained 50 Hz logging across 20 PIDs — same
 
-- Read full ROM from ECU
-- Seed/key auth, sector erase, program, verify
-- **Brick protection bootstrap** — install our recovery shim *before* the first user write touches main flash. This is the safety story. See `05-improvements.md`.
-- Delta-only flashing — only re-write sectors that changed since the last read
-- "Dry run" mode that exercises every step except the actual write command
+**Gate:** 🔒 hardware-blocked. Code paths are real + unit-tested (108 transport tests across the trio + factory + discovery). When OBDX Pro VX adapter arrives, the path to first ROM dump is: implement one platform `IByteChannel` (libusb on Windows ~1 file), wire it into `obdx::Transport`, run `subuwutuner-cli rom-pull --transport obdx --device <COM>`.
 
-**Gate:** 100 successful flash cycles on a junkyard ECU bench rig — zero bricks, zero corrupted images. **No customer ever flashes a car until this gate is met.**
+## Phase 4 — Flashing (6–10 weeks, the dangerous one) 🟡 skeletons done
 
-## Phase 5 — Custom features (4–6 weeks)
+Per the prior handoff, "Phases 0–4 done hardware-free." Orchestrator + Manifest + journal + policy gate + checksum-type field all exist; the actual algorithms (vendor-specific checksum repair, seed/key derivation, brick recovery) need hardware to develop + validate against.
 
-- Visual node-graph editor: typed pins, dataflow + control-flow nodes, copy-paste, undo/redo bound to `st::edit::History`
-- Graph → SubuwuTuner IR → ECU machine code (SH-2A for VA, RH850 for VB) → ROM patch
-- Per-pack hook table — `[[hook]]` entries in the definition pack declare where it's safe to splice custom logic and how much scratch RAM is available
-- Linter: type-checks, real-time-budget analyzer, RAM allocator, safety/jurisdiction gates
-- `.stmod` portable feature-pack format (graph + compiled patch + target metadata)
-- Sample packs ship in-box: flat-foot shifting, rolling launch control
+- ✅ `Flasher::read_full_rom` via `ITransport` + UDS RequestDownload/TransferData (mock-trace exercised)
+- ✅ FlashPlan + sector model (`st::flash`)
+- ✅ Manifest + journal + `plan_resume` for crash-safe writes
+- ✅ Policy + mutation gate (`docs/06` + `st::policy`)
+- ✅ `checksum_type` field in pack `[pack]` table (added `58a821f`); enum mirrors RR's ChecksumSTD / ALT / ALT2 family
+- ⬜ Checksum-repair implementations (subaru_std, subaru_alt, subaru_alt2) — algorithms documented in RR but need byte-validation against a known stock dump
+- ⬜ Seed/key authentication — no SSM seed/key code exists in RomRaider per this session's findings doc; we'll derive it from forum threads + bench captures
+- 🔒 Brick protection bootstrap + recovery shim — bench rig prerequisite
+- 🔒 Delta-only flashing + dry-run mode — same
+- ⬜ Patch insertion layer (`src/feature_patch/`) — for Phase 5 features; needs real ECU vector tables
 
-Full design + scope tradeoffs (including why we drop the Phase 5 line's earlier "Lua runtime" notion in favor of direct codegen) live in `docs/16-custom-features.md`.
+**Gate:** 🔒 100 successful flash cycles on a junkyard ECU bench rig — zero bricks, zero corrupted images. **No customer ever flashes a car until this gate is met.** Hardware-blocked.
 
-**Gate:** community can publish and import a feature pack; sample pack ships in-box; brick-protection (`docs/05-improvements.md` §4) is verified on the Phase-4 bench rig under stress.
+## Phase 5 — Custom features (4–6 weeks) 🟡 design + tooling complete
 
-## Phase 6 — Polish & 1.0 (ongoing)
+Heavy progress this session — what was sized at 4–6 weeks for the editor + IR + one backend shipped much faster. Delivery path (patch insertion + flashing) waits on Phase 4 hardware.
 
-- Themed UI, accessibility pass, installer/codesigning, auto-update channel
-- Documentation site (rebuild of the Jekyll content under our own brand)
-- Onboarding flow for first-time users
-- Telemetry **opt-in only**, crash-report-only, no analytics
+- ✅ Visual node-graph editor with pin labels + per-pin defaults + wire dragging + pin-context menus; promoted out of `View → Debug` to top-level `View → Custom features designer (preview)` (`0cc5c1b`)
+- ✅ Graph data model (`st::feature::Graph`) + IR lowerer (`st::feature::ir::Module`) + graph-level + IR-level linters
+- ✅ SH-2A codegen: Int arithmetic, Int compares, Bool ops, select (int/bool/float), Float arithmetic via FPU (FADD/FSUB/FMUL/FDIV), Float compares (FCMP/EQ/GT), cross-hook value flow, fan-out dedup. **17 primitives recognized.**
+- ⬜ SH-2A `divide_int` (DIV1 iterative sequence) — last codegen gap
+- ⬜ Curve / table-lookup primitives (e.g. `flex_fuel_scale`) — needs pack-format extension for breakpoints + values
+- ⬜ RH850 codegen for VB — stub backend returns NotImplemented; per `docs/16` recommendation, drop first under timing pressure
+- ✅ `[[hook]]` + `[[primitive]]` schema in def packs with `name` (codegen-canonical) + `label` (display) split per pin
+- ✅ Linter: type-checks via Graph::connect / IR lowerer; RT-budget placeholder (real per-ISA cycle counts wait on bench profiling)
+- ✅ `.stmod` format = TOML `[graph]` + `[patch]` halves, single file, round-trippable via `feature::from_toml` + `feature_codegen::patch_from_toml` (`92daa48`)
+- ✅ CLI `feature-compile <stmod> --def <pack> [--arch sh2a|rh850] [--format hex|toml|raw]` (`87a59f5`)
+- ✅ Sample packs: `clutch-kill`, `flat-foot-shift`, `launch-control` compile end-to-end through SH-2A → real SH-2A bytes. `flex-fuel` blocks on the curve primitive.
+- 🔒 Patch insertion layer (`src/feature_patch/`) — finds free RAM, writes the hook table, splices into existing vector tables. Bench-rig-blocked (needs a real ECU vector table to develop against).
+
+See `docs/16-custom-features.md` for the full current-state matrix + primitive coverage table.
+
+**Gate:** 🔒 community can publish + import a feature pack; samples ship in-box (✅ ship; ⬜ end-to-end flash gated on Phase 4 hardware + patch insertion).
+
+## Phase 6 — Polish & 1.0 (ongoing) 🟡 in progress
+
+- 🟡 Themed UI — Dark/Light themes shipped with purple accent (`accent_for(Theme)`); audit pass shipped 5 fixes (`0cc5c1b`, `4622bbe`, `9d6aabe`, `03f48cd`) covering modal feedback hygiene, status-msg TTL, discoverability hints, Revert-all confirm, plain-language lint findings
+- ⬜ Accessibility pass (Tab nav in modals, screen-reader labels)
+- ⬜ Installer / codesigning / auto-update channel
+- ⬜ Documentation site (Jekyll → MkDocs or similar)
+- ⬜ Onboarding flow for first-time users — partial (welcome panel + new-project modal pack hints landed)
+- ⬜ Telemetry **opt-in only**, crash-report-only, no analytics
 
 ## After 1.0 — platform expansion
 
@@ -78,7 +111,7 @@ The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0
 | Version | Platform / feature | Engineering cost |
 |---|---|---|
 | **v1.1** | VA + VB WRX **AT** | Small. Same ECU, additional transmission map set + AT-specific definitions |
-| **v1.1** | **MAF auto-tune + knock-based ignition pull** (see `docs/12-auto-tuning.md`) | Medium. Pure-domain function, no hardware deps |
+| **v1.1** | **MAF auto-tune + knock-based ignition pull** (see `docs/12-auto-tuning.md`) ✅ shipped (kernels + lint + CLI + GUI modals) | Medium. Pure-domain function, no hardware deps |
 | **v1.2** | **VA STI (EJ257)** + older STI 2008+ | Medium. Different engine family but shares much of the protocol surface |
 | **v1.2** | **Closed-loop trim integration, boost auto-trim, idle target trim** | Medium |
 | **v1.3** | **Older EJ-powered cars** (early WRX/STI, Forester XT, Legacy GT, Outback XT, EJ20/EJ25) | Medium. Oldest ECU tech but very well mapped by RomRaider — mostly definitions work |
@@ -87,17 +120,18 @@ The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0
 
 ## Cross-cutting v1.x improvements
 
-- VB Linux/M-series J2534 parity
-- ELM327 write path (only if we can prove it's safe — likely never)
-- Bench-tools mode for ECU benches (Tactrix Pro J)
-- `defgen` tool to convert RomRaider XML → our TOML schema, run on every supported platform
-- **DTC enable/disable** via `[[dtc_bitmap]]` schema in definition packs (see `11-definition-format.md`). CLI:
+- ⬜ VB Linux/M-series J2534 parity
+- ⬜ ELM327 write path (only if we can prove it's safe — likely never)
+- ⬜ Bench-tools mode for ECU benches (Tactrix Pro J)
+- ✅ `defgen` tool to convert RomRaider XML → our TOML schema (Python 3.12+ in `tools/defgen/`; 88 tests)
+- ✅ **DTC enable/disable** via `[[dtc_bitmap]]` schema in definition packs (see `11-definition-format.md`). CLI:
   ```
   pack-dtcs <DEF>                       # list known codes + emissions flag
   project-disable-dtc --code P0401[,...] <dir>
   project-enable-dtc  --code P0401[,...] <dir>
   ```
-  Same jurisdiction-profile linter applies as for emissions-flagged table edits.
+  Same jurisdiction-profile linter applies as for emissions-flagged table edits. Edits route through `st::edit::History` (DTC undo lands at `0ad6d13`).
+- ⬜ Doc 18 standalone handheld — `transport_native` codec + Transport landed PC-side; the embedded firmware (FlexCAN_T4 + K-Line direct silicon + ESP32 radio coprocessor) is its own multi-quarter project per `docs/18-standalone-master-plan.md`.
 
 ## v1.5+ — CAN reverse-engineering toolkit
 
