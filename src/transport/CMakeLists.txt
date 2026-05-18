@@ -4,10 +4,18 @@ add_library(st_transport STATIC
     src/obdx_transport.cpp
     src/j2534.cpp
     src/j2534_transport.cpp
+    src/j2534_discovery.cpp
     src/native.cpp
     src/native_transport.cpp
     src/factory.cpp
 )
+
+# Win32 registry access for j2534::discover_adapters. advapi32 is
+# normally linked by default but we name it explicitly so MinGW +
+# cross-compile configurations don't surprise us.
+if(WIN32)
+    target_link_libraries(st_transport PRIVATE advapi32)
+endif()
 add_library(st::transport ALIAS st_transport)
 
 target_include_directories(st_transport

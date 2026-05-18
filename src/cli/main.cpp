@@ -18,6 +18,7 @@
 #include "st/project.hpp"
 #include "st/rom.hpp"
 #include "st/transport/factory.hpp"
+#include "st/transport/j2534_discovery.hpp"
 #include "st/transport/mock.hpp"
 
 #include <algorithm>
@@ -313,6 +314,14 @@ constexpr std::string_view kUsage =
     "                            sets the per-module cycle budget (0 disables;\n"
     "                            default 200). Exit 0 normally, 3 with --strict\n"
     "                            on any finding.\n"
+    "    transport-list\n"
+    "                            List J2534 v04.04 vendor DLLs registered on\n"
+    "                            this host (HKLM\\Software\\PassThruSupport.04.04\n"
+    "                            + the Wow6432Node mirror). Read-only — never\n"
+    "                            modifies the registry, never loads any DLL.\n"
+    "                            The DLL path printed for each entry is what\n"
+    "                            you'd pass to `--transport j2534 --dll <path>`\n"
+    "                            once the platform dynload layer lands.\n"
     "    feature-compile <FILE.stmod> --def <pack.toml> [--arch sh2a|rh850]\n"
     "                    [--format hex|toml|raw] [--output <FILE>]\n"
     "                            Lower a .stmod, pick a codegen backend by the\n"
@@ -6285,6 +6294,58 @@ int cmd_flash_trace(int argc, char *argv[]) {
     return 0;
 }
 
+int cmd_transport_list(int argc, char *argv[]) {
+    (void) argv;
+    if (argc != 0) {
+        std::fputs("transport-list: takes no arguments\n", stderr);
+        return 2;
+    }
+    auto const adapters = st::transport::j2534::discover_adapters();
+    if (adapters.empty()) {
+        std::puts("J2534 v04.04 adapters: (none registered on this host)");
+#ifndef _WIN32
+        std::puts("  (non-Windows host — J2534 vendor DLLs only register "
+                  "under the Windows registry; Linux/macOS adapters use "
+                  "a different distribution channel)");
+#else
+        std::puts("  Install a vendor DLL (e.g. Tactrix OpenPort 2.0's");
+        std::puts("  J2534 driver from tactrix.com) and re-run this");
+        std::puts("  command.");
+#endif
+    } else {
+        std::printf("J2534 v04.04 adapters: %zu registered\n",
+                    adapters.size());
+        std::size_t i = 1;
+        for (auto const &a : adapters) {
+            std::printf("\n  [%zu] %s\n", i++, a.name.c_str());
+            std::printf("      DLL:        %s\n", a.function_library.c_str());
+            if (!a.vendor.empty()) {
+                std::printf("      Vendor:     %s\n", a.vendor.c_str());
+            }
+            std::string const protos =
+                st::transport::j2534::format_protocols_supported(
+                    a.protocols_supported);
+            std::printf("      Protocols:  %s\n", protos.c_str());
+            std::printf("      Registry:   %s (subkey: %s)\n",
+                        st::transport::j2534::registry_view_name(a.view),
+                        a.subkey.c_str());
+        }
+        std::printf("\nTo use one, eventually:\n");
+        std::printf("  subuwutuner-cli rom-pull --transport j2534 "
+                    "--dll \"<DLL path above>\" ...\n");
+    }
+    std::puts("");
+    std::puts("Other transport families (not yet implemented):");
+    std::puts("  - OBDX Pro VX (USB CDC + DVI codec):  "
+              "--transport obdx --device <port>");
+    std::puts("  - Doc-18 handheld (USB CDC + native): "
+              "--transport native --device <port>");
+    std::puts("  Both wait on platform USB CDC IByteChannel (libusb on "
+              "Windows + Linux,");
+    std::puts("  native CDC on macOS) — see docs/13-transport.md.");
+    return 0;
+}
+
 int cmd_rom_pull(int argc, char *argv[]) {
     std::optional<std::uint32_t>         addr;
     std::optional<std::uint32_t>         size;
@@ -7022,6 +7083,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "flash-apply") {
         return cmd_flash_apply(argc - 2, argv + 2);
+    }
+    if (cmd == "transport-list") {
+        return cmd_transport_list(argc - 2, argv + 2);
     }
     if (cmd == "rom-pull") {
         return cmd_rom_pull(argc - 2, argv + 2);
