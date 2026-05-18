@@ -4768,7 +4768,7 @@ void render_welcome_panel(AppState &state) {
         }
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
         for (auto const *line : kWhatsNew) {
-            ImGui::TextDisabled("\xE2\x80\xA2  %s", line);
+            text_subtle("\xE2\x80\xA2  %s", line);
             ImGui::Dummy(ImVec2(0.0f, 2.0f));
         }
         ImGui::EndGroup();
@@ -4786,9 +4786,9 @@ void render_welcome_panel(AppState &state) {
                               + ImGui::CalcTextSize(" \xC2\xB7 ").x
                               + ImGui::CalcTextSize("Keyboard shortcuts").x;
         center_cursor_x(text_w);
-        ImGui::TextDisabled("%s", buf);
+        text_subtle("%s", buf);
         ImGui::SameLine();
-        ImGui::TextDisabled(" \xC2\xB7 ");
+        text_subtle(" \xC2\xB7 ");
         ImGui::SameLine();
         // Render as a button styled to look like a link — TextDisabled
         // color, no frame. Reduces visual weight while keeping it
@@ -4820,18 +4820,18 @@ void render_stats_panel(AppState &state) {
         return;
     }
     if (!state.project.has_value()) {
-        ImGui::TextDisabled("No project loaded.");
+        text_subtle("No project loaded.");
         ImGui::End();
         return;
     }
     if (state.selected_table_id.empty() || !state.current_table_data.has_value()) {
-        ImGui::TextDisabled("Select a table to see its stats.");
+        text_subtle("Select a table to see its stats.");
         ImGui::End();
         return;
     }
     auto const *table = state.project->definition().find_table(state.selected_table_id);
     if (table == nullptr) {
-        ImGui::TextDisabled("Selected table not found in pack.");
+        text_subtle("Selected table not found in pack.");
         ImGui::End();
         return;
     }
@@ -4845,7 +4845,7 @@ void render_stats_panel(AppState &state) {
         for (auto v : row) cells.push_back(static_cast<float>(v));
     }
     if (cells.empty() || (cells.size() == 1 && table->dimensions == 0)) {
-        ImGui::TextDisabled("Scalar table — stats N/A.");
+        text_subtle("Scalar table — stats N/A.");
         ImGui::Separator();
         if (!cells.empty()) {
             ImGui::Text("Value: %g", static_cast<double>(cells[0]));
@@ -4891,7 +4891,7 @@ void render_stats_panel(AppState &state) {
     auto const  prec = (scal != nullptr) ? scal->precision : 2;
 
     ImGui::Text("%s", table->id.c_str());
-    if (!unit.empty()) ImGui::TextDisabled("unit: %s", unit.c_str());
+    if (!unit.empty()) text_subtle("unit: %s", unit.c_str());
     ImGui::Separator();
 
     auto stat_row = [&](char const *label, double v) {
@@ -4906,7 +4906,7 @@ void render_stats_panel(AppState &state) {
     ImGui::Text("edited: %zu", edited);
 
     ImGui::Separator();
-    ImGui::TextDisabled("histogram");
+    text_subtle("histogram");
     if (ImPlot::BeginPlot("##stats_hist", ImVec2(-FLT_MIN, 160.0f),
                           ImPlotFlags_NoMouseText | ImPlotFlags_NoLegend
                           | ImPlotFlags_NoTitle | ImPlotFlags_NoMenus
