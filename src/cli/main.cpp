@@ -370,11 +370,68 @@ bool arg_matches(char const *arg, std::string_view short_form, std::string_view 
 // Forward-declared so commands defined ahead of parse_range's body can use it.
 bool parse_range(std::string_view s, std::size_t &lo, std::size_t &hi);
 
+// Subaru-convention CID location. Per ECUFlash + RomRaider XML
+// definitions for every VA / VB / older-EJ family ECU we've
+// catalogued, the 8-byte ASCII "internal ID" (CID) sits at byte
+// offset 0x00002000. Per-pack `internalidaddress` fields exist
+// for outliers, but 0x2000 is the right zero-cost default for
+// "what ROM did I just download?" before a pack is even chosen.
+inline constexpr std::size_t kSubaruCidOffset = 0x00002000;
+inline constexpr std::size_t kSubaruCidLength = 8;
+
+// Print the bytes at the canonical Subaru CID offset if they're
+// all printable ASCII (trailing spaces are real — leave them).
+// Falls back to a "no signature" note for non-Subaru / mutated
+// dumps so users don't see a misleading garbage string.
+void print_subaru_cid(st::Rom const &rom) {
+    if (rom.size() < kSubaruCidOffset + kSubaruCidLength) {
+        std::printf("Subaru CID:     (ROM too short to hold a CID at "
+                    "0x%08zX)\n", kSubaruCidOffset);
+        return;
+    }
+    auto const  data = rom.data();
+    bool        all_printable = true;
+    bool        in_trailing_nul = false;
+    char        cid[kSubaruCidLength + 1] = {};
+    for (std::size_t i = 0; i < kSubaruCidLength; ++i) {
+        auto const b = data[kSubaruCidOffset + i];
+        // Printable ASCII range 0x20..0x7E. Trailing 0x00 padding
+        // is accepted IFF every subsequent byte is also 0x00 —
+        // [41 53 38 30 00 00 00 00] is fine ("AS80"); a single
+        // NUL followed by non-NUL bytes is garbage and rejected
+        // so we don't print a misleading prefix.
+        if (in_trailing_nul) {
+            if (b != 0) { all_printable = false; break; }
+            continue;
+        }
+        if (b == 0 && i > 0) {
+            in_trailing_nul = true;
+            cid[i] = 0;
+            continue;
+        }
+        if (b < 0x20 || b > 0x7E) {
+            all_printable = false;
+            break;
+        }
+        cid[i] = static_cast<char>(b);
+    }
+    if (all_printable) {
+        std::printf("Subaru CID:     '%s'  (8 bytes @ 0x%08zX)\n",
+                    cid, kSubaruCidOffset);
+    } else {
+        std::printf("Subaru CID:     (no printable signature at "
+                    "0x%08zX — not a Subaru-format ROM at this "
+                    "offset, or a corrupted dump)\n",
+                    kSubaruCidOffset);
+    }
+}
+
 void print_rom_summary(std::filesystem::path const &path, st::Rom const &rom) {
     std::printf("File:           %s\n", path.string().c_str());
     std::printf("Size:           %zu bytes (%.2f KiB)\n", rom.size(),
                 static_cast<double>(rom.size()) / 1024.0);
     std::printf("CRC32:          0x%08X\n", rom.crc32());
+    print_subaru_cid(rom);
 
     auto const strings = rom.scan_ascii(/*min_length=*/5);
     std::printf("Embedded ASCII: %zu strings (>=5 chars)\n", strings.size());
