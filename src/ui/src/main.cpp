@@ -2091,8 +2091,8 @@ void render_kp_autotune_modal(AppState &state) {
         // ImGui::BeginTable caps at 64 columns; bail gracefully if the
         // RPM axis is somehow huge. Subaru factory tables max ~16.
         if (n_cols_total > 64) {
-            ImGui::TextDisabled("(RPM axis has %zu cells; ledger requires "
-                                "≤63. Use the CLI for this table.)", cols);
+            text_subtle("(RPM axis has %zu cells; ledger requires "
+                        "≤63. Use the CLI for this table.)", cols);
         } else if (ImGui::BeginTable("##kp_at_ledger",
                                       static_cast<int>(n_cols_total),
                                       ImGuiTableFlags_RowBg
@@ -2558,8 +2558,8 @@ void render_shortcuts_modal(AppState &state) {
         return;
     }
 
-    ImGui::TextDisabled("All bindings the GUI listens for, grouped by "
-                        "context.");
+    text_subtle("All bindings the GUI listens for, grouped by "
+                "context.");
     ImGui::Spacing();
 
     for (auto const &group : shortcuts_reference()) {
