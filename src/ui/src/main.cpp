@@ -1320,7 +1320,7 @@ void render_unsaved_modal(AppState &state) {
 
         ImGui::TextUnformatted("You have unsaved edits in this project.");
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
-        ImGui::TextDisabled("%s", modal_subtitle(what));
+        text_subtle("%s", modal_subtitle(what));
         ImGui::Dummy(ImVec2(0.0f, 16.0f));
 
         // Keyboard shortcuts: Enter = the safe default (Save).
@@ -1485,8 +1485,8 @@ void render_csv_import_modal(AppState &state) {
     constexpr std::size_t kPreviewLimit = 12;
     std::size_t const     shown =
         std::min(kPreviewLimit, parsed.cells.size());
-    ImGui::TextDisabled("Preview (first %zu of %zu):", shown,
-                         parsed.cells.size());
+    text_subtle("Preview (first %zu of %zu):", shown,
+                 parsed.cells.size());
     if (ImGui::BeginTable("##csv_preview", 4,
                            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH
                            | ImGuiTableFlags_SizingStretchProp)) {
@@ -1532,8 +1532,8 @@ void render_csv_import_modal(AppState &state) {
         ImGui::EndTable();
     }
     if (parsed.cells.size() > shown) {
-        ImGui::TextDisabled("... %zu more not shown",
-                             parsed.cells.size() - shown);
+        text_subtle("... %zu more not shown",
+                     parsed.cells.size() - shown);
     }
 
     ImGui::Spacing();
@@ -1575,7 +1575,7 @@ void render_csv_import_modal(AppState &state) {
         ImGui::TextColored(ImVec4(0.94f, 0.40f, 0.40f, 1.00f),
                             "Apply failed:  %s",
                             state.csv_import_apply_error.c_str());
-        ImGui::TextDisabled(
+        text_subtle(
             "The preview is preserved — fix the underlying issue and "
             "click Apply again, or Cancel to discard.");
     }
