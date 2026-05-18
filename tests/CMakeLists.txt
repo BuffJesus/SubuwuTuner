@@ -27,6 +27,7 @@ add_executable(st_unit_tests
     unit/transport/test_j2534.cpp
     unit/transport/test_j2534_transport.cpp
     unit/transport/test_native.cpp
+    unit/transport/test_native_transport.cpp
     unit/ecu/test_ssm.cpp
     unit/ecu/test_uds.cpp
     unit/log/test_log.cpp

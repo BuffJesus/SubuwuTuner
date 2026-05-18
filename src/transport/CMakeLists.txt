@@ -5,6 +5,7 @@ add_library(st_transport STATIC
     src/j2534.cpp
     src/j2534_transport.cpp
     src/native.cpp
+    src/native_transport.cpp
 )
 add_library(st::transport ALIAS st_transport)
 

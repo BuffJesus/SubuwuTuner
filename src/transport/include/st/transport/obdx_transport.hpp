@@ -37,6 +37,7 @@
 #define ST_TRANSPORT_OBDX_TRANSPORT_HPP
 
 #include "st/transport.hpp"
+#include "st/transport/byte_channel.hpp"
 #include "st/transport/obdx_dvi.hpp"
 
 #include <chrono>
@@ -50,35 +51,12 @@
 
 namespace st::transport::obdx {
 
-// Raw byte channel — the abstraction over "things that look like a
-// USB CDC ACM endpoint." Implementations include the real platform
-// USB driver (future) and a test fake (in the unit tests).
-//
-// Semantics:
-//   write_bytes(span) — synchronously write every byte. Returns
-//     TransportUnavailable if the channel went away.
-//   read_bytes(max, timeout) — read AT MOST `max` bytes, with up
-//     to `timeout` to wait for any bytes. Returns an empty vector
-//     on timeout (NOT an error). Real USB endpoints exhibit this
-//     "return what's there" behavior; the Transport's framing
-//     layer is responsible for accumulating multiple read_bytes
-//     calls into a complete frame.
-class IDeviceChannel {
-  public:
-    IDeviceChannel()                                   = default;
-    virtual ~IDeviceChannel()                          = default;
-    IDeviceChannel(IDeviceChannel const &)             = delete;
-    IDeviceChannel &operator=(IDeviceChannel const &)  = delete;
-    IDeviceChannel(IDeviceChannel &&) noexcept         = default;
-    IDeviceChannel &operator=(IDeviceChannel &&) noexcept = default;
-
-    [[nodiscard]] virtual st::Status write_bytes(
-        std::span<std::uint8_t const> bytes) = 0;
-
-    [[nodiscard]] virtual Result<std::vector<std::uint8_t>> read_bytes(
-        std::size_t max_bytes,
-        std::chrono::milliseconds timeout) = 0;
-};
+// Back-compat alias. The byte-channel abstraction lives in
+// st::transport::IByteChannel (byte_channel.hpp) — it's generic
+// to USB CDC, not OBDX-specific, and shared with native::Transport
+// (which speaks our own protocol). Existing references to
+// obdx::IDeviceChannel continue to compile.
+using IDeviceChannel = st::transport::IByteChannel;
 
 // OBDX Transport. Owns the byte channel; serializes every
 // send/recv internally (no concurrent DVI exchanges).
