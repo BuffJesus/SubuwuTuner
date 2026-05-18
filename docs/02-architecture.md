@@ -4,11 +4,11 @@
 
 The longer-term scope is **all Subaru platforms we can brick-test**, not just VA/VB WRX MT. The architecture below is laid out so that adding a new platform is additive, not invasive:
 
-- **New vehicle** = new TOML definition file under `definitions/`. `st::defs` doesn't care whether the file describes a 2019 WRX, a 2008 STI, or a 2015 Forester XT.
-- **New ECU family / protocol variant** = new module under `st::ecu::<family>` and `st::flash::<family>`. Existing modules (`ssm`, `uds`, `denso_va`, etc.) are untouched.
-- **New transport** = new module under `st::transport::<adapter>` implementing the same `ITransport` interface.
+- **New vehicle** = new TOML definition pack (user-supplied; see Path B in `docs/17`). `st::defs` doesn't care whether the pack describes a 2019 WRX, a 2008 STI, or a 2015 Forester XT.
+- **New ECU family / protocol variant** = new module under `st::ecu::<family>`. Existing modules (`ssm`, `uds`) are untouched. Per-family flash quirks belong in `st::flash`'s checksum-repair seam (`IChecksumRepair`) rather than a per-family subdirectory.
+- **New transport** = new module under `st::transport::<adapter>` implementing the same `ITransport` interface and registered with the `open_transport` factory.
 
-What this means in practice: every interface in the layering below takes a `Platform` or `Definition` argument; nothing is hard-coded to "WRX". v1.0 ships with one definition pack for VA-WRX-MT and one for VB-WRX-MT, but `subuwutuner-cli rom-info` will work on any Subaru ROM the moment someone contributes a definition file.
+What this means in practice: every interface in the layering below takes a `Platform` or `Definition` argument; nothing is hard-coded to "WRX". Per Path B (`docs/17`) the public repo no longer bundles calibration packs — `subuwutuner-cli rom-info` will work on any Subaru ROM the moment someone supplies (or generates with `tools/defgen/`) a definition file for it.
 
 See `04-roadmap.md` for the v1.x platform-expansion order.
 
@@ -19,13 +19,15 @@ See `04-roadmap.md` for the v1.x platform-expansion order.
 │  UI layer    (Dear ImGui + GLFW + ImPlot)          │
 ├────────────────────────────────────────────────────┤
 │  Application services  (project mgr, undo/redo,    │
-│                         scripting host, plugins)   │
+│                         policy gate, autotune,     │
+│                         feature designer)          │
 ├────────────────────────────────────────────────────┤
 │  Domain model  (ROM, Table, Axis, Definition,      │
-│                 LogSession, FlashJob)              │
+│                 Edit, LogSession, FlashPlan,       │
+│                 feature::Graph, feature::ir)       │
 ├────────────────────────────────────────────────────┤
-│  Transport    (J2534, ELM327, OBDLink-STN,         │
-│                Tactrix OP2.0 native USB)           │
+│  Transport    (J2534, OBDX Pro VX DVI,             │
+│                native USB-CDC framed codec)        │
 ├────────────────────────────────────────────────────┤
 │  Platform abstraction  (USB, serial, FS, threads)  │
 └────────────────────────────────────────────────────┘
@@ -47,22 +49,28 @@ Every layer depends only on layers below it. The domain model has no ImGui or US
 
 | Module | Responsibility | Key types |
 |---|---|---|
-| `st::core` | Value types, error handling, units | `Result<T, Error>`, `Quantity`, `Span` |
-| `st::rom` | Binary ROM I/O, CRC, sectoring | `Rom`, `Sector`, `Checksum` |
-| `st::defs` | Calibration definitions, scaling | `Definition`, `Table`, `Axis`, `Scaling` |
-| `st::project` | `.stune` project files | `Project`, `ProjectStore` |
-| `st::transport` | ECU comms abstraction | `ITransport`, `Frame`, `Session` |
-| `st::transport.j2534` | J2534 DLL/SO loader | `J2534Device` |
-| `st::transport.elm` | ELM327 AT-command driver | `ElmDevice` |
-| `st::transport.stn` | OBDLink STN extensions | `StnDevice` |
-| `st::ecu.ssm` | Subaru SSM protocol | `SsmClient` |
-| `st::ecu.uds` | UDS / KWP2000 | `UdsClient` |
-| `st::flash` | Erase/program/verify, brick guard | `Flasher`, `FlashPlan` |
-| `st::log` | Datalogging | `LogStream`, `Pid`, `Sample` |
-| `st::script` | Embedded scripting (Lua) for custom maps | `ScriptHost` |
-| `st::nodegraph` | Visual logic compiler for user-authored ECU features | `Graph`, `Node`, `CodeGen` |
+| `st::core` | Value types, error handling, units | `Result<T>`, `Error`, `ErrorCode`, `Status` |
+| `st::rom` | Binary ROM I/O, CRC | `Rom` |
+| `st::defs` | Calibration definitions, scaling | `Definition`, `Table`, `Axis`, `Scaling`, `Pid`, `Hook` |
+| `st::edit` | Undoable edit history (table cells + raw bytes) | `History`, `Edit`, `TableEdit`, `ByteEdit`, `Snapshot` |
+| `st::project` | `.stune` project files | `Project` |
+| `st::policy` | Jurisdiction-profile lint / flash gate | `Profile`, `Decision`, `Action` |
+| `st::transport` | ECU comms abstraction | `ITransport`, `Frame`, `LinkConfig`, `MockTransport`, `IByteChannel`, `open_transport` |
+| `st::transport::j2534` | J2534 v04.04 vendor-DLL wrapper + Windows registry discovery | `J2534Library`, `j2534::Transport`, `j2534_discovery::scan` |
+| `st::transport::obdx` | OBDX Pro VX DVI codec + transport (USB CDC byte channel) | `obdx::Transport`, DVI codec |
+| `st::transport::native` | SOF/seq/opcode/LEN/CRC16 framing for the standalone-master handheld | `native::Transport`, `native` codec |
+| `st::ecu::ssm` | Subaru SSM (K-Line + CAN-encapsulated) | `SsmClient` |
+| `st::ecu::uds` | ISO 14229 UDS / KWP-on-CAN | `UdsClient` |
+| `st::flash` | Erase/program/verify + brick guard + checksum repair seam | `Flasher`, `FlashPlan`, `FlashReport`, `IChecksumRepair`, `make_checksum_repair`, `apply_checksum_repair` |
+| `st::log` | Datalogging (SPSC ring + I/O thread + sinks) | `LogStream`, `LogSession`, `LogChannel`, `CsvSink` |
+| `st::can` | CAN frames + .asc trace I/O | `Frame`, `AscReader`, `AscWriter` |
+| `st::dbc` | DBC parser / emitter / decoder | `Database`, `Message`, `Signal` |
+| `st::discover` | CAN reverse-engineering: baseline + change detection + .cdb bundle | `BaselineModel`, `ChangeDetector`, `DiscoveryEvent`, `Bundle` |
+| `st::autotune` | Docs/12 MAF + knock-pull tuning kernels | `MafTuneOptions`/`Result`, `KnockPullOptions`/`Result`, `LintViolation` |
+| `st::feature` | Custom-feature node graph (designer-canvas source) | `Graph`, `Node`, `Edge`, `Pin`, `feature::ir::Module` |
+| `st::feature::codegen` | Graph → IR → patch bytes (per-ISA backends) | `IBackend`, `Sh2aBackend`, `Rh850Backend`, `PatchObject`, `RamAllocator` |
 | `st::ui` | GUI shell (Dear ImGui + GLFW + ImPlot) | windows, panels, theme, view code bound to domain |
-| `st::cli` | Headless tool | argparse + same domain |
+| `st::cli` | Headless tool (`subuwutuner-cli`) | argparse + same domain |
 
 ## Concurrency model
 
@@ -82,7 +90,7 @@ Communication is via message passing (a typed `concurrent_queue<Cmd>` per worker
 
 We expose two extension points for community contributions and power-user customization:
 
-1. **Definition packs** — TOML files dropped into a search path. Discovered at startup. Hot-reloadable in dev mode.
-2. **Lua scripts** — sandboxed (no `io`, no `os`, no FFI). Used by the node-graph compiler as an intermediate representation, and directly by power users for batch transformations on tables and logs.
+1. **Definition packs** — TOML files / directories supplied by the user (or generated from public RomRaider XML via `tools/defgen/`). Per Path B (`docs/17`) the public repo does not bundle calibration packs; users point the CLI/GUI at their own paths.
+2. **`.stmod` feature graphs** — TOML documents holding `[graph]` + `[[node]]` + `[[edge]]` (the source graph) and optionally `[patch]` (the codegen output bundled in the same file). Lowered through `st::feature::ir` and compiled by `st::feature::codegen` per `docs/16`. The IR is a typed dataflow SSA representation, not Lua — the earlier Lua-as-IR direction was dropped before any of it shipped.
 
 Native (DLL/SO) plugins are explicitly **out of scope for v1** — they are a vector for malicious tunes and a portability hazard.

@@ -63,7 +63,10 @@ src/
 │   │   ├── ssm.hpp                     SsmClient — K-Line + CAN
 │   │   └── uds.hpp                     UdsClient — ISO 14229
 │   └── src/                            ssm.cpp, uds.cpp
-└── log/                                (st::log — LogStream, ring buffer, CSV sinks) — ⬜ pending
+└── log/                                (st::log)
+    ├── include/st/
+    │   └── log.hpp                     LogStream (SPSC ring), LogSession (I/O thread), LogChannel, CsvSink
+    └── src/                            log.cpp
 ```
 
 The `st::transport` library depends only on `st::core`. Adapter implementations live as siblings inside `st::transport::{j2534,obdx,native}` rather than separate top-level libs. `st::ecu::ssm` and `st::ecu::uds` depend on `st::transport` only, never on a specific adapter — this is what lets the same `SsmClient` talk through any compatible adapter.
