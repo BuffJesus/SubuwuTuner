@@ -188,6 +188,16 @@ constexpr std::string_view kUsage =
     "    pack-info <DEF>         Print metadata + counts for a definition pack.\n"
     "    table-list <DEF> [--category C] [--emissions] [--safety-critical]\n"
     "                            List tables in a pack with optional filters.\n"
+    "    primitive-list <DEF> [--type int|float|bool]\n"
+    "                            List custom-feature primitives in a pack with\n"
+    "                            their type signature + description. Useful for\n"
+    "                            .stmod authors browsing what's available.\n"
+    "    hook-list <DEF> [--sensor] [--action]\n"
+    "                            List custom-feature hooks in a pack with their\n"
+    "                            ECU splice address + signal signature. --sensor\n"
+    "                            filters to read-only hooks (data flowing OUT of\n"
+    "                            the ECU); --action filters to write-only hooks\n"
+    "                            (values flowing INTO the ECU).\n"
     "    pack-dtcs <DEF> [--bitmap <id>] [--emissions] [--show-state <ROM>]\n"
     "                            List DTC codes in a pack, with their bitmap\n"
     "                            location and emissions-relevant flag.\n"
@@ -1114,6 +1124,163 @@ int cmd_table_list(int argc, char *argv[]) {
     std::printf("\n%zu tables shown (of %zu in pack). "
                 "Flags: E=emissions, S=engine-safety.\n",
                 matched, def->tables().size());
+    return 0;
+}
+
+// Render a signature pair from the graph designer's perspective as
+// "consumed -> produced". Each side renders as a comma-separated
+// list of type names, or `()` when empty. The arrow is always
+// present so the direction is unambiguous (no chance of reading a
+// bare `float` as "takes a float" when the hook actually emits one).
+std::string format_signature(std::vector<st::HookSignal> const &consumed,
+                              std::vector<st::HookSignal> const &produced) {
+    auto join = [](std::vector<st::HookSignal> const &xs) {
+        if (xs.empty()) return std::string{"()"};
+        std::string s;
+        for (std::size_t i = 0; i < xs.size(); ++i) {
+            if (i > 0) s += ',';
+            s += xs[i].type.empty() ? "?" : xs[i].type;
+        }
+        return s;
+    };
+    return join(consumed) + " -> " + join(produced);
+}
+
+int cmd_primitive_list(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::string>           type_filter;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--type") {
+            if (i + 1 >= argc) {
+                std::fputs("primitive-list: --type requires a value\n", stderr);
+                return 2;
+            }
+            type_filter = std::string{argv[++i]};
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "primitive-list: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!def_path.has_value()) {
+            def_path = std::filesystem::path{a};
+        } else {
+            std::fprintf(stderr, "primitive-list: extra argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!def_path.has_value()) {
+        std::fputs("primitive-list: missing path\n", stderr);
+        std::fputs("Usage: subuwutuner-cli primitive-list <DEF> "
+                   "[--type int|float|bool]\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
+    if (!def.has_value()) {
+        return print_def_load_error("primitive-list", *def_path, def.error());
+    }
+
+    std::size_t matched = 0;
+    std::printf("%-24s %-32s %s\n", "id", "signature", "description");
+    for (auto const &p : def->primitives()) {
+        // --type filter: match when any output pin's type equals the
+        // requested value. Most primitives have a single output so the
+        // any-match semantics rarely surprises; for multi-output
+        // primitives this lists the primitive if any output is the
+        // requested type.
+        if (type_filter.has_value()) {
+            bool ok = false;
+            for (auto const &o : p.outputs) {
+                if (o.type == *type_filter) { ok = true; break; }
+            }
+            if (!ok) continue;
+        }
+        auto const sig = format_signature(p.inputs, p.outputs);
+        // Truncate description for column fit; the user can re-read
+        // the pack's primitives.toml for full text.
+        std::string desc = p.description;
+        if (desc.size() > 64) desc = desc.substr(0, 61) + "...";
+        std::printf("%-24s %-32s %s\n", p.id.c_str(), sig.c_str(), desc.c_str());
+        ++matched;
+    }
+    std::printf("\n%zu primitives shown (of %zu in pack).\n",
+                matched, def->primitives().size());
+    return 0;
+}
+
+int cmd_hook_list(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> def_path;
+    bool                                 only_sensor = false;
+    bool                                 only_action = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--sensor") {
+            only_sensor = true;
+        } else if (a == "--action") {
+            only_action = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "hook-list: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!def_path.has_value()) {
+            def_path = std::filesystem::path{a};
+        } else {
+            std::fprintf(stderr, "hook-list: extra argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!def_path.has_value()) {
+        std::fputs("hook-list: missing path\n", stderr);
+        std::fputs("Usage: subuwutuner-cli hook-list <DEF> "
+                   "[--sensor] [--action]\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
+    if (!def.has_value()) {
+        return print_def_load_error("hook-list", *def_path, def.error());
+    }
+
+    std::size_t matched = 0;
+    std::printf("%-24s %-10s %-32s %s\n",
+                "id", "addr", "signature", "description");
+    for (auto const &h : def->hooks()) {
+        // Sensor hooks expose data to user logic (inputs from the
+        // ECU); action hooks consume user-written values (outputs
+        // back into the ECU). A pure-sensor hook has no outputs;
+        // a pure-action hook has no inputs. Mixed hooks (override
+        // splices like after_fuel_calc) have both.
+        bool const sensor = !h.inputs.empty() && h.outputs.empty();
+        bool const action = h.inputs.empty() && !h.outputs.empty();
+        if (only_sensor && !sensor) continue;
+        if (only_action && !action) continue;
+
+        char addr_buf[16];
+        if (h.ecu_address.has_value()) {
+            std::snprintf(addr_buf, sizeof addr_buf, "0x%06zX",
+                          *h.ecu_address);
+        } else {
+            std::snprintf(addr_buf, sizeof addr_buf, "%s", "-");
+        }
+        // Per docs/16, a Hook's `inputs` are signals flowing FROM the
+        // ECU into user logic (graph designer renders as Output pins
+        // on the hook node); `outputs` are values flowing FROM user
+        // logic back into the ECU (rendered as Input pins). Swap the
+        // pair so the printed signature reads in graph-designer
+        // direction ("what the hook consumes -> what it produces").
+        auto const sig = format_signature(h.outputs, h.inputs);
+        std::string desc = h.description;
+        if (desc.size() > 48) desc = desc.substr(0, 45) + "...";
+        std::printf("%-24s %-10s %-32s %s\n",
+                    h.id.c_str(), addr_buf, sig.c_str(), desc.c_str());
+        ++matched;
+    }
+    std::printf("\n%zu hooks shown (of %zu in pack).\n",
+                matched, def->hooks().size());
     return 0;
 }
 
@@ -7671,6 +7838,12 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "table-list") {
         return cmd_table_list(argc - 2, argv + 2);
+    }
+    if (cmd == "primitive-list") {
+        return cmd_primitive_list(argc - 2, argv + 2);
+    }
+    if (cmd == "hook-list") {
+        return cmd_hook_list(argc - 2, argv + 2);
     }
     if (cmd == "pack-dtcs") {
         return cmd_pack_dtcs(argc - 2, argv + 2);
