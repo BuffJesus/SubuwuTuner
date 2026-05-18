@@ -482,6 +482,9 @@ void print_def_summary(st::Definition const &def, st::Rom const &rom) {
             std::printf("  ! ROM size mismatch (got %zu)\n", rom.size());
         }
     }
+    if (!pack.checksum_type.empty()) {
+        std::printf("  Checksum type: %s\n", pack.checksum_type.c_str());
+    }
 
     auto const match = def.matches(rom);
     if (match.has_value()) {
