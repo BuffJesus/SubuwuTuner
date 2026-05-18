@@ -3725,11 +3725,11 @@ void render_menubar(AppState &state) {
                 state.show_shortcuts_modal = true;
             }
             ImGui::Separator();
-            ImGui::TextDisabled("Getting started");
+            text_subtle("Getting started");
             ImGui::BulletText("File \xE2\x86\x92 Open Project\xE2\x80\xA6 (Ctrl+O) to pick a .stune directory.");
             ImGui::BulletText("Or pass one on the command line: subuwutuner-gui my.stune");
             ImGui::Separator();
-            ImGui::TextDisabled("Editing");
+            text_subtle("Editing");
             ImGui::BulletText("Click cells to select; Shift-click to extend.");
             ImGui::BulletText("Arrow keys move the cursor; Shift+arrows extend.");
             ImGui::BulletText("F2 or double-click a cell to type a new value.  Enter commits, Esc cancels.");
@@ -3739,15 +3739,15 @@ void render_menubar(AppState &state) {
             ImGui::BulletText("Toolbar buttons (+5%%, -5%%, Smooth, Interpolate) act on the selection.");
             ImGui::BulletText("Ctrl+Z / Ctrl+Shift+Z to undo / redo.  Ctrl+S to save.");
             ImGui::Separator();
-            ImGui::TextDisabled("Navigation");
+            text_subtle("Navigation");
             ImGui::BulletText("Ctrl+F focuses the table-filter box.  Esc clears it.");
             ImGui::BulletText("Filter matches both the table's name and its snake_case id.");
             ImGui::Separator();
-            ImGui::TextDisabled("Viewing");
+            text_subtle("Viewing");
             ImGui::BulletText("Switch View: Grid \xE2\x86\x94 Heatmap to inspect a map two ways.");
             ImGui::BulletText("For 3D tables, pick a Z slice above the grid.");
             ImGui::Separator();
-            ImGui::TextDisabled("Documentation");
+            text_subtle("Documentation");
             ImGui::BulletText("Repo:    https://github.com/BuffJesus/SubuwuTuner");
             ImGui::BulletText("Design:  docs/00-overview.md \xE2\x80\xA6 docs/16-custom-features.md");
             ImGui::BulletText("License: Apache 2.0 (see LICENSE in the repo root)");
@@ -3765,7 +3765,7 @@ void render_sidebar(AppState &state) {
         // primary Open Project CTA; the sidebar just acknowledges that
         // tables will appear here once a project is loaded.
         ImGui::Dummy(ImVec2(0.0f, 8.0f));
-        ImGui::TextDisabled("Tables will appear here.");
+        text_subtle("Tables will appear here.");
         ImGui::End();
         return;
     }
@@ -3797,8 +3797,8 @@ void render_sidebar(AppState &state) {
         }
     }
     if (!filter.empty()) {
-        ImGui::TextDisabled("%zu of %zu tables", matched,
-                             def.tables().size());
+        text_subtle("%zu of %zu tables", matched,
+                     def.tables().size());
         ImGui::Separator();
     }
 
@@ -3807,8 +3807,8 @@ void render_sidebar(AppState &state) {
         ImGui::TextWrapped("No tables match \"%s\".",
                             state.table_filter);
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
-        ImGui::TextDisabled("Try a shorter prefix, or clear the filter "
-                             "(Esc).");
+        text_subtle("Try a shorter prefix, or clear the filter "
+                     "(Esc).");
         ImGui::End();
         return;
     }
@@ -5474,7 +5474,7 @@ void render_features_designer(AppState &state) {
                 };
 
             if (!hooks.empty()) {
-                ImGui::TextDisabled("Hooks");
+                text_subtle("Hooks");
                 ImGui::Separator();
                 for (auto const &h : hooks) {
                     char const *human =
@@ -5499,7 +5499,7 @@ void render_features_designer(AppState &state) {
                 if (!hooks.empty()) {
                     ImGui::Spacing();
                 }
-                ImGui::TextDisabled("Primitives");
+                text_subtle("Primitives");
                 ImGui::Separator();
                 for (auto const &p : prims) {
                     char const *human =
