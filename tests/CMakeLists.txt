@@ -37,6 +37,7 @@ add_executable(st_unit_tests
     unit/dbc/test_dbc.cpp
     unit/discover/test_discover.cpp
     unit/flash/test_flash.cpp
+    unit/flash/test_checksum.cpp
     unit/autotune/test_autotune.cpp
     unit/autotune/test_autotune_csv.cpp
     unit/autotune/test_autotune_lint.cpp
