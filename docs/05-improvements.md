@@ -36,11 +36,11 @@ The whole subsystem is bench-tested on real ECUs as part of CI — junkyard ECUs
 - Sustained 100 Hz on supported adapters
 - Lock-free sample ring buffer; UI samples a snapshot, never blocks the I/O thread
 - Per-PID timestamps from the adapter (where available), not wall-clock interpolation
-- Replay format is FlatBuffers — zero-copy decode for instant scrubbing
+- Replay format is CSV (`st::log::CsvSink`) — text-greppable, drops straight into the autotune CLI without a separate parser
 
 ## 6. Plugin safety
 
-The host-side compilation and transform step is sandboxed (Lua, no `io`, no `os`, no FFI), so a malicious community-shared pack cannot exfiltrate your project files or modify them outside the editor's review flow. Any ECU-bytecode patch is reviewed in a preview pane before it ever touches a ROM.
+A community-shared `.stmod` is a TOML document — `[graph]` + `[[node]]` + `[[edge]]` for the source graph plus an optional pre-compiled `[patch]` table. The host-side path is parse → `feature::ir::lower` → `feature::codegen::compile`; there is no arbitrary code execution surface, no `io` / `os` / FFI exposure, because the IR is a typed dataflow SSA — not a scripting runtime. A malicious shared pack cannot exfiltrate project files or write outside the editor's review flow. Any compiled patch is rendered as bytes in `feature-compile`'s preview before it ever touches a ROM.
 
 ## 6a. First-class, open auto-tune
 

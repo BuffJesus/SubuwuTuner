@@ -371,7 +371,7 @@ Concretely:
 - The user picks a set of PIDs from the definition pack's `[[pid]]` entries.
 - `LogSession::start(pids)` builds an SSM/UDS request batch covering those PIDs.
 - The session's I/O thread loops: `send_recv → produce samples into ring buffer → repeat`. The cycle time depends on adapter throughput; we measure and report the achieved rate.
-- The UI (or `subuwutuner-cli log`) reads from the ring buffer at its own pace. UI samples a snapshot for gauge update; CSV/FlatBuffers sink drains continuously.
+- The UI (or `subuwutuner-cli log`) reads from the ring buffer at its own pace. UI samples a snapshot for gauge update; the `CsvSink` (only sink shipped today) drains continuously to disk.
 - A separate I/O-thread-side `timestamp` is taken at frame arrival; we don't trust the UI thread's wall clock for sample timing.
 
 ## Implementation order — done / pending

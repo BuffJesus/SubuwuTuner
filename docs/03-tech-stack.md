@@ -18,7 +18,7 @@
 
 **CMake 3.28+** with presets. No hand-written makefiles, no Bazel, no Meson. Rationale: CMake is what every C++ library we want to depend on already ships, and presets give us reproducible per-platform configs.
 
-Dependencies pulled in via **CMake `FetchContent`** for source-built libraries (Catch2, tomlplusplus, tl::expected, GLFW, Dear ImGui, ImPlot, nativefiledialog-extended). Manifest-mode vcpkg is on standby for the day a dep brings system-package complexity (OpenSSL for a signed-update channel is the most likely trigger). Alternative considered: CPM.cmake — equivalent to FetchContent but adds a transitive dep on its own bootstrap; rejected on YAGNI grounds.
+Dependencies pulled in via **CMake `FetchContent`** for source-built libraries (Catch2 v3, tomlplusplus, `tl::expected` as a portable fallback for `<expected>`, GLFW, Dear ImGui, ImPlot, nativefiledialog-extended). Manifest-mode vcpkg is on standby — no `vcpkg.json` lives in the repo today — for the day a dep brings system-package complexity (OpenSSL for a signed-update channel is the most likely trigger). Alternative considered: CPM.cmake — equivalent to FetchContent but adds a transitive dep on its own bootstrap; rejected on YAGNI grounds.
 
 ## GUI
 
@@ -40,27 +40,31 @@ Trade-offs accepted:
 
 ## Key third-party libraries (all OSS-friendly)
 
+Shipped today — actually linked into `subuwutuner-cli` / `subuwutuner-gui`:
+
 | Need | Library | License | Why |
 |---|---|---|---|
-| GUI core | Dear ImGui (docking branch) | MIT | Immediate-mode rendering for grids + charts |
+| GUI core | Dear ImGui (docking branch) v1.91 | MIT | Immediate-mode rendering for grids + charts |
 | Window/GL/input | GLFW 3.4 | Zlib | Cross-platform OpenGL context + input |
 | Charts | ImPlot | MIT | 100k-point real-time plots; same author as ImGui |
 | File dialogs | nativefiledialog-extended (nfd) | Zlib | OS-native Open/Save dialogs |
-| JSON / TOML | `tomlplusplus`, `nlohmann/json` | MIT | Standard, header-only |
-| Binary schemas | FlatBuffers | Apache 2 | Zero-copy log records & log replay |
-| CSV | `vincentlaucsb/csv-parser` | MIT | Log export |
-| Crypto / TLS | OpenSSL 3 | Apache 2 | Future signed update channel |
-| USB | libusb 1.0 | LGPL 2.1 | Tactrix OP2.0 raw USB |
-| Serial | `serial` or our own thin wrapper | MIT | ELM/OBDLink COM |
-| 3D table view | ImGui + raw OpenGL | MIT | Surface plots — ImPlot covers 2D, custom shader for 3D |
-| Scripting | Lua 5.4 + Sol2 | MIT | Sandboxed user scripts |
-| Logging | spdlog | MIT | App diagnostics |
-| Tests | Catch2 v3 + FakeIt | BSL/MIT | Unit + mocking |
-| Fuzzing | libFuzzer / AFL++ | MIT | ROM and protocol parsers |
-| CRC / hashing | `crc++`, BLAKE3 | MIT/CC0 | Flash verify, project integrity |
-| CLI | `CLI11` | BSD | `subuwutuner` headless binary |
+| TOML | `tomlplusplus` v3.4 | MIT | Pack format, project metadata, flash plans/manifests, `.stmod` |
+| Expected | `tl::expected` | CC0 | Portable fallback for C++23 `<expected>` when the toolchain lacks it |
+| Tests | Catch2 v3 | BSL-1.0 | Unit testing across `tests/unit/<module>/` |
 
-Every GUI-stack library is permissively licensed (MIT/Zlib/BSD), so the binary can ship statically linked with no shared-library shipping or written-offer paperwork. The only LGPL surface that remains is `libusb` for raw USB on the transport side — that one is genuinely useful enough that the LGPL ceremony is worth it, and it's an optional component that only Tactrix-OP2-via-libusb users link against.
+Every shipped library is permissively licensed (MIT/Zlib/BSL/CC0), so the binary can ship statically linked with no shared-library shipping or written-offer paperwork.
+
+CSV is emitted by our own `st::log::CsvSink` (no external parser); CRC32 is inline in `st::rom`. The CLI uses a hand-rolled argparse rather than CLI11. The headline GUI font (Inter) is `#include`d as a header-only binary blob built from the Inter regular ttf; JetBrains Mono is bundled the same way.
+
+Reserved for future work — referenced in roadmap items, not yet linked:
+
+| Need | Library | Where it lands |
+|---|---|---|
+| Crypto / TLS | OpenSSL 3 | Signed-update channel + verified release manifests (post-v1) |
+| USB raw | libusb 1.0 | OBDX Pro VX + native-handheld platform layer on Linux/macOS (hardware-gated) |
+| Hashing | BLAKE3 | Flash-verify upgrade from CRC32 once bench rig validates it (docs/05 §4) |
+
+The earlier plan listed Lua + Sol2, FlatBuffers, nlohmann/json, FakeIt, libFuzzer, csv-parser, spdlog, `serial`, and a raw-OpenGL 3D surface widget. None of them shipped — the typed-dataflow IR in `st::feature::ir` replaced the Lua direction, CSV replaced FlatBuffers, and the 3D surface widget didn't make v1.x. They're tracked in this doc's history if a future direction-flip wants them back.
 
 ## What we are explicitly NOT using
 

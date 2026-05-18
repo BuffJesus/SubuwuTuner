@@ -35,22 +35,16 @@ References that are legitimate to study (see the clean-room boundary section for
 
 We define a SubuwuTuner-native format that we populate from public sources (RomRaider definitions, our own RAM-poking research, owner contributions). The full schema sketch lives in `11-definition-format.md`.
 
-Approach: **TOML for human-edited bits, FlatBuffers for the binary calibration payload.**
+Approach: **TOML everywhere a human might want to diff, version, or pull-request; raw bytes for the ECU image itself; CSV for datalogs.** No FlatBuffers (a previous plan listed it; was dropped before any of it shipped).
 
 ```
-my-project.stune/                      (directory or zip)
-├── project.toml                        (vehicle, ECU id, included roms)
-├── definitions/
-│   ├── va-wrx-mt-2019.toml             (map locations, scaling, axes)
-│   └── vb-wrx-mt-2022.toml
-├── roms/
-│   ├── stock_aw0123.bin                (raw ECU image)
-│   └── mytune_v3.bin
-└── logs/
-    └── 2026-05-11_track.csv
+my-project.stune/                      (directory)
+├── project.toml                        (vehicle, ECU id, pack reference, edit history cursor)
+├── source.bin                          (the imported stock ROM — read-only)
+└── working.bin                         (the in-progress edited copy)
 ```
 
-Plain text everywhere a human might want to diff, version, or pull-request. Binary only where size matters.
+Definitions live OUTSIDE the project at a user-chosen path (Path B in `docs/17`); `project.toml` carries a string reference. Datalogs are emitted ad-hoc by `subuwutuner-cli log` and read back by the autotune kernels — they don't live inside `.stune`.
 
 ## The `defgen` tool
 

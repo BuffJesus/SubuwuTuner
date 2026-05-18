@@ -24,7 +24,7 @@ Tuning software bricks hardware when it's wrong. Test budget is correspondingly 
   - ROM loader (random binaries, malformed)
   - `.stune` project loader (zip with junk inside)
   - TOML definition loader (malformed)
-  - Datalog CSV/FlatBuffers replay
+  - Datalog CSV replay
 - Corpus is checked in; new findings auto-PR'd by the fuzz job
 
 ### Tier 4 — Hardware-in-the-loop (HIL) (nightly + before release)
