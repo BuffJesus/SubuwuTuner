@@ -7,6 +7,7 @@ transmission   = "manual"
 years          = [2019, 2020, 2021]
 endianness     = "big"
 rom_size_bytes = 1024
+checksum_type  = "subaru_std"  # post-write checksum kind; see docs/11
 license        = "Apache-2.0"
 
 [[identification]]

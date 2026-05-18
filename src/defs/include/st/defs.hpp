@@ -66,6 +66,17 @@ struct Pack {
     std::vector<int>          years;
     std::string               endianness{"big"};
     std::size_t               rom_size_bytes{};
+    // Per-ECU-family checksum selector. Names mirror RomRaider's
+    // ChecksumXxx class family (`subaru_std` ↔ ChecksumSTD,
+    // `subaru_alt` ↔ ChecksumALT, `subaru_alt2` ↔ ChecksumALT2).
+    // Empty string is permitted at parse time + treated as
+    // "unspecified" — st::flash::checksum_kind_from() defaults
+    // that to None (no-op repair). The actual repair algorithm
+    // is consumed by st::flash::IChecksumRepair when Phase 4
+    // post-write checksum repair lands; today this field is
+    // recorded + surfaced through pack-info so a pack author can
+    // declare intent ahead of the implementation.
+    std::string               checksum_type;
     std::vector<std::string>  authors;
     std::vector<std::string>  data_sources;
     std::string               license;

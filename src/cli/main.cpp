@@ -853,6 +853,14 @@ int cmd_pack_info(int argc, char *argv[]) {
         std::printf("Expected ROM:   %zu bytes (%.2f KiB)\n", pack.rom_size_bytes,
                     static_cast<double>(pack.rom_size_bytes) / 1024.0);
     }
+    if (!pack.checksum_type.empty()) {
+        // Surface the pack's declared checksum kind. Recognized
+        // values (per the docs/11 enum) are subaru_std / subaru_alt
+        // / subaru_alt2 / none; anything else passes through as-is
+        // for forward-compat with packs from a future schema
+        // revision.
+        std::printf("Checksum type:  %s\n", pack.checksum_type.c_str());
+    }
     if (!pack.license.empty()) {
         std::printf("License:        %s\n", pack.license.c_str());
     }

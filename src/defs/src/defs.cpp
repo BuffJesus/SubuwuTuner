@@ -136,6 +136,7 @@ Result<Pack> parse_pack(toml::node const &node) {
     p.endianness     = optional_value<std::string>(*t, "endianness", "big");
     p.rom_size_bytes = static_cast<std::size_t>(
         optional_value<std::int64_t>(*t, "rom_size_bytes", 0));
+    p.checksum_type  = optional_value<std::string>(*t, "checksum_type", {});
     p.authors      = string_array(*t, "authors");
     p.data_sources = string_array(*t, "data_sources");
     p.license      = optional_value<std::string>(*t, "license", {});
