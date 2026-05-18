@@ -1,0 +1,56 @@
+# Int-only synthetic sample — exercises the SH-2A `divide_int`
+# primitive end-to-end (added in feat(feature_codegen): SH-2A
+# divide_int via FPU bridge). Pairs with fixtures/demo-pack.
+#
+# What it expresses, logically:
+#   raw_counter   = 12              # synthetic operand A
+#   step_size     = 4               # synthetic operand B
+#   map_index     = raw_counter / step_size  # integer-divide → 3
+#   set_active_map.map_index = map_index
+#
+# What this proves end-to-end on compile:
+#   • the SH-2A FPU bridge (FLOAT → FDIV → FTRC) emits cleanly
+#   • the Int store path through `set_active_map.map_index` works
+#   • feature::ir::estimate_cost prices the graph against the new
+#     divide_int = 18 cycles entry in the per-symbol cost table
+#
+# Compile with:
+#   subuwutuner-cli feature-compile fixtures/samples/map-selector-int.stmod \
+#     --def fixtures/demo-pack --arch sh2a
+
+[graph]
+schema_version = 1
+
+# ---- Synthetic operands ----------------------------------------
+
+[[node]]
+id    = 1
+kind  = "primitive.divide_int"
+label = "12 / 4 (integer divide)"
+x     = 48.0
+y     = 48.0
+pins  = [
+  { id = 0, name = "a",   type = "int", direction = "input",  unit = "", default = 12.0 },
+  { id = 1, name = "b",   type = "int", direction = "input",  unit = "", default = 4.0 },
+  { id = 2, name = "out", type = "int", direction = "output", unit = "" }
+]
+
+# ---- Drive -----------------------------------------------------
+
+[[node]]
+id    = 2
+kind  = "hook.set_active_map"
+label = "Active-map selector"
+x     = 312.0
+y     = 48.0
+phase_break = true
+pins  = [
+  { id = 0, name = "map_index", type = "int", direction = "input", unit = "" }
+]
+
+# divide_int.out → set_active_map.map_index
+[[edge]]
+from_node = 1
+from_pin  = 2
+to_node   = 2
+to_pin    = 0

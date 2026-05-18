@@ -43,6 +43,16 @@ outputs = [
   { name = "cut_active", label = "Cut active", type = "bool" },
 ]
 
+[[hook]]
+id           = "set_active_map"
+display_name = "Select active map"
+description  = "Override the calibration's active-map selector (multi-map ECUs choose between maps 0..N-1; this hook routes a user-computed Int selector). Synthetic demo target — exercises the SH-2A Int store path."
+ecu_address  = 0x000ABE40
+free_ram     = { base = 0x40000180, length = 64 }
+outputs = [
+  { name = "map_index", label = "Map index", type = "int" },
+]
+
 # ---- Sensor reads --------------------------------------------------
 
 [[hook]]
