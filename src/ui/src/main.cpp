@@ -2959,7 +2959,7 @@ void render_flash_modal(AppState &state) {
             ImGui::BulletText("%s", id.c_str());
         }
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
-        ImGui::TextDisabled(
+        text_subtle(
             "Engine-safety violations block in every profile (docs/06).");
         ImGui::Dummy(ImVec2(0.0f, 12.0f));
         if (ImGui::Button("Close", ImVec2(120.0f, 0.0f))
@@ -2981,7 +2981,7 @@ void render_flash_modal(AppState &state) {
         ImGui::Unindent();
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
     } else {
-        ImGui::TextDisabled("No emissions-flagged tables touched.");
+        text_subtle("No emissions-flagged tables touched.");
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
     }
 
@@ -2991,11 +2991,11 @@ void render_flash_modal(AppState &state) {
         case A::Silent:
         case A::Badge:
             // The profile demands no user interaction — just go.
-            ImGui::TextDisabled(
+            text_subtle(
                 "Profile '%s' raises no gate for this plan.", pname.c_str());
             break;
         case A::Warn:
-            ImGui::TextDisabled(
+            text_subtle(
                 "Profile '%s' would flag this on save; no flash-time gate.",
                 pname.c_str());
             break;
