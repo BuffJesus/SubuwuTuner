@@ -1,8 +1,8 @@
 # 14 — CAN Reverse-Engineering Toolkit
 
-This is a design doc for a SubuwuTuner subsystem aimed at people doing engine swaps, cluster integration, or general "what does this byte mean?" reverse-engineering on a vehicle's CAN bus. The standard workflow today is SavvyCAN + manual diffing across captures, which is slow, error-prone, and tedious for the hundredth signal. This subsystem makes that loop *programmatic*: the tool watches the bus, detects deviations from baseline, prompts the user to describe what they were doing, and produces a structured discovery file that exports to a draft DBC.
+This is the design doc for a SubuwuTuner subsystem aimed at people doing engine swaps, cluster integration, or general "what does this byte mean?" reverse-engineering on a vehicle's CAN bus. The standard workflow today is SavvyCAN + manual diffing across captures, which is slow, error-prone, and tedious for the hundredth signal. This subsystem makes that loop *programmatic*: the tool watches the bus, detects deviations from baseline, prompts the user to describe what they were doing, and produces a structured discovery file that exports to a draft DBC.
 
-**Scope:** Phase 5+ work. Hardware-free design today; implementation depends on `st::transport`'s streaming side and on having a CAN adapter wired up. The design fits the existing module layering so we don't paint ourselves into a corner.
+**Status (2026-05-17):** the **replay path is shipped** — `st::can` (Frame, `.asc` reader/writer), `st::dbc` (parser/emitter/decoder), `st::discover` (`BaselineModel`, `ChangeDetector`, `.cdb` Bundle), and the five CLI subcommands `can-replay`, `can-diff`, `can-discover --from`, `can-export-dbc`, `can-decode` are all in `main` and unit-tested. The **live path** waits on a transport adapter implementing `start_streaming` with CAN-shaped frames; until then the workflow runs against `.asc` captures from SavvyCAN or another tool. See "Implementation order" below for the per-step status.
 
 ## Goals
 
@@ -36,13 +36,18 @@ src/dbc/
 │                                 parser, emitter)
 └── src/
 
-src/cli (additions)
-  can-record    --bus hs --duration 60s out.asc
-  can-discover  --baseline 10s [--from out.asc | --live] session.cdb
-  can-replay    out.asc                              # validate the log
-  can-decode    --dbc subaru.dbc out.asc > signals.csv
+src/cli (shipped subcommands; see `subuwutuner-cli --help` for the
+authoritative usage)
+  can-replay    out.asc                              # per-id stats summary
   can-diff      a.asc b.asc                          # SavvyCAN-style diff
-  can-export-dbc session.cdb > draft.dbc
+  can-discover  --from out.asc [--baseline <secs>]
+                [--bus <0..3>] [--output session.cdb]
+  can-export-dbc session.cdb [--output draft.dbc]
+  can-decode    --dbc subaru.dbc out.asc [--output signals.csv]
+
+src/cli (future, gated on live transport)
+  can-record    --bus hs --duration 60s out.asc      # live capture
+  can-discover  ... --live session.cdb               # live discovery
 ```
 
 Dependency direction:
@@ -157,16 +162,18 @@ Never autonomous. The LLM produces candidates; the human validates against captu
 
 ## Implementation order
 
-1. **`st::can::Frame`** type + log writer/reader for the `.asc` format (Vector's text log format, the lingua franca that SavvyCAN, Wireshark, and cantools all consume). Tests against canned `.asc` files.
-2. **`st::dbc::Database`** parser + emitter, tested against `opendbc`'s real Subaru DBC files. Used by `can-export-dbc` and `can-decode`.
-3. **`st::discover::BaselineModel`** + **`ChangeDetector`**, replay-mode only at first. Unit-tested with synthetic Frame sequences (no transport needed).
-4. **`can-discover --from <log.asc>`** offline mode — works against any pre-captured log. Lets users with someone else's captures (or our own from previous drives) try the discovery loop without hardware.
-5. **`.cdb` writer + reader**.
-6. **`can-export-dbc`** producing draft DBCs.
-7. **Live mode** — once a real adapter implements `st::transport::ITransport::start_streaming` with CAN-shaped frames. Same algorithm, different input source.
-8. **`can-diff`** — direct SavvyCAN-Discrepancies analog, useful for users who prefer that workflow.
+1. ✅ **`st::can::Frame`** type + `.asc` reader/writer (Vector's text log format — the lingua franca SavvyCAN, Wireshark, and cantools all consume).
+2. ✅ **`st::dbc::Database`** parser + emitter (consumed by `can-export-dbc` and `can-decode`).
+3. ✅ **`st::discover::BaselineModel`** + **`ChangeDetector`** — replay-mode, unit-tested with synthetic Frame sequences (no transport needed).
+4. ✅ **`can-discover --from <log.asc>`** offline mode — works against any pre-captured log.
+5. ✅ **`.cdb` writer + reader** (`Bundle::to_toml` / `from_toml`).
+6. ✅ **`can-export-dbc`** producing draft DBCs.
+7. ⬜ **Live mode** — once a real adapter implements `st::transport::ITransport::start_streaming` with CAN-shaped frames. Same algorithm, different input source. Gated on the bench rig.
+8. ✅ **`can-diff`** — SavvyCAN-Discrepancies analog for users who prefer that workflow.
 
-Each step is independently shippable and unit-testable.
+Each step is independently shippable and unit-testable. Items 1–6 + 8 are in `main`; item 7 (live capture) waits on transport platform wiring (see docs/13).
+
+A hypothetical `can-record` CLI verb is *not* shipped — it would require live transport — so capture today routes through SavvyCAN (or any tool that writes `.asc`) and feeds offline into `can-discover --from`.
 
 ## Open questions
 

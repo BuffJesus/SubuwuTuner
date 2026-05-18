@@ -18,12 +18,12 @@ So SubuwuTuner takes the position that **the tool exposes what the ECU exposes, 
 
 - **No hard refusal** on emissions-relevant edits. The user can change anything the ECU lets us change.
 - **Editor still flags** emissions-relevant maps in the UI (yellow corner badge, tooltip). The flag is informational, not blocking. The user can dismiss it once per project and never see it again.
-- **Per-jurisdiction profiles** ship in-box: `alberta-ca`, `california-us`, `eu-roadworthy`, `motorsport-only`, etc. Each profile decides:
+- **Per-jurisdiction profiles** ship in-box (`st::policy::Profile`): `motorsport-only`, `alberta-ca`, `eu-roadworthy`, `california-us`. Each profile decides:
   - Which warnings are shown
   - Whether the EmissionsLinter blocks-flash, warns-on-flash, or stays silent
   - Whether DTC-suppression for emissions codes is one click or hidden behind a confirmation
   - Default value of "is this car road-registered?"
-- **Default profile** on first run is `motorsport-only` (least restrictive). The first-run wizard asks the user to pick the profile that matches them.
+- **Default profile** for a new project is `motorsport-only` (least restrictive). Today the choice is per-project rather than per-install: `subuwutuner-cli project-set-profile <dir> <profile>` from the shell, or click the status-bar jurisdiction chip in the GUI. A first-run install-wide wizard is a roadmap item, not shipped.
 - **No "delete preset" tunes shipped in-box.** Reason: distributing a finished, ready-to-flash anti-emissions calibration is a different legal category in most places than building a tool that can produce one. Community feature-packs that do this are allowed but unsigned and marked as such; that's the user's choice.
 
 ### What we still won't do
