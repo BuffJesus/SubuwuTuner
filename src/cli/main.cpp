@@ -385,6 +385,33 @@ void print_version() {
 
 void print_usage() { std::fputs(kUsage.data(), stdout); }
 
+// Upgrade a `<dir>/pack.toml` path to its parent directory whenever
+// the parent contains other *.toml files — the multi-file pack shape
+// from docs/11. `Definition::from_file(pack.toml)` only loads the
+// manifest and misses the companion fragments, so any CLI command
+// pointed at `--def path/to/pack.toml` would otherwise silently see
+// "0 tables / 0 hooks" on a perfectly valid split pack. A standalone
+// pack.toml with no companions falls through unchanged, preserving
+// the legacy single-file pack flow.
+std::filesystem::path resolve_def_path(std::filesystem::path const &path) {
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec) || ec) return path;
+    if (path.filename() != "pack.toml") return path;
+    auto const      parent = path.parent_path();
+    std::error_code walk_ec;
+    for (auto const &entry :
+         std::filesystem::directory_iterator{parent, walk_ec}) {
+        if (walk_ec) break;
+        std::error_code is_file_ec;
+        if (!entry.is_regular_file(is_file_ec) || is_file_ec) continue;
+        auto const &p = entry.path();
+        if (p.extension() == ".toml" && p.filename() != "pack.toml") {
+            return parent;
+        }
+    }
+    return path;
+}
+
 // Print a definition-load failure with a Path-B context hint when the
 // supplied path doesn't exist on disk. SubuwuTuner ships infrastructure
 // only — calibration packs are user-supplied — so a missing path is a
@@ -571,7 +598,7 @@ int cmd_dump_axis(int argc, char *argv[]) {
         return 2;
     }
 
-    auto const def = st::Definition::from_file(*def_path);
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
     if (!def.has_value()) {
         return print_def_load_error("dump-axis", *def_path, def.error());
     }
@@ -659,7 +686,7 @@ int cmd_dump_table(int argc, char *argv[]) {
         return 2;
     }
 
-    auto const def = st::Definition::from_file(*def_path);
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
     if (!def.has_value()) {
         return print_def_load_error("dump-table", *def_path, def.error());
     }
@@ -852,36 +879,8 @@ int cmd_pack_info(int argc, char *argv[]) {
         return 2;
     }
     std::filesystem::path const path{argv[0]};
-    // Multi-file packs use pack.toml as the manifest with companion
-    // *.toml fragments sibling to it. `Definition::from_file(pack.toml)`
-    // only loads the manifest and misses the companions — leading to
-    // the confusing "Tables: 0 / PIDs: 0 / Hooks: 0" summary on a pack
-    // that obviously has them. Detect the multi-file shape (file named
-    // pack.toml whose parent contains other *.toml files) and route
-    // through from_directory so the summary reflects the actual
-    // contents. A standalone pack.toml with no companions still loads
-    // via from_file, preserving the legacy single-file behavior.
-    std::filesystem::path load_path = path;
-    {
-        std::error_code ec;
-        if (std::filesystem::is_regular_file(path, ec)
-            && path.filename() == "pack.toml") {
-            auto const parent = path.parent_path();
-            std::error_code walk_ec;
-            for (auto const &entry :
-                 std::filesystem::directory_iterator{parent, walk_ec}) {
-                if (walk_ec) break;
-                std::error_code is_file_ec;
-                if (!entry.is_regular_file(is_file_ec) || is_file_ec) continue;
-                auto const &p = entry.path();
-                if (p.extension() == ".toml" && p.filename() != "pack.toml") {
-                    load_path = parent;
-                    break;
-                }
-            }
-        }
-    }
-    auto const def = st::Definition::from_file(load_path);
+    auto const                  def =
+        st::Definition::from_file(resolve_def_path(path));
     if (!def.has_value()) {
         return print_def_load_error("pack-info", path, def.error());
     }
@@ -1091,7 +1090,7 @@ int cmd_table_list(int argc, char *argv[]) {
         return 2;
     }
 
-    auto const def = st::Definition::from_file(*def_path);
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
     if (!def.has_value()) {
         return print_def_load_error("table-list", *def_path, def.error());
     }
@@ -1161,7 +1160,7 @@ int cmd_pack_dtcs(int argc, char *argv[]) {
         return 2;
     }
 
-    auto const def = st::Definition::from_file(*def_path);
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
     if (!def.has_value()) {
         return print_def_load_error("pack-dtcs", *def_path, def.error());
     }
@@ -2916,7 +2915,7 @@ int cmd_table_edit(int argc, char *argv[]) {
         return 2;
     }
 
-    auto const def = st::Definition::from_file(*def_path);
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
     if (!def.has_value()) {
         return print_def_load_error("table-edit", *def_path, def.error());
     }
@@ -3041,7 +3040,7 @@ int cmd_rom_diff(int argc, char *argv[]) {
         return 2;
     }
 
-    auto const def = st::Definition::from_file(*def_path);
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
     if (!def.has_value()) {
         return print_def_load_error("rom-diff", *def_path, def.error());
     }
@@ -3619,7 +3618,7 @@ int cmd_checksum_repair(int argc, char *argv[]) {
                      rom.error().to_string().c_str());
         return 1;
     }
-    auto const def = st::Definition::from_file(*def_path);
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
     if (!def.has_value()) {
         return print_def_load_error("checksum-repair", *def_path, def.error());
     }
@@ -3705,7 +3704,7 @@ int cmd_checksum_verify(int argc, char *argv[]) {
                      rom.error().to_string().c_str());
         return 1;
     }
-    auto const def = st::Definition::from_file(*def_path);
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
     if (!def.has_value()) {
         return print_def_load_error("checksum-verify", *def_path, def.error());
     }
@@ -3804,7 +3803,7 @@ int cmd_rom_info(int argc, char *argv[]) {
     print_rom_summary(*rom_path, *rom);
 
     if (def_path.has_value()) {
-        auto const def = st::Definition::from_file(*def_path);
+        auto const def = st::Definition::from_file(resolve_def_path(*def_path));
         if (!def.has_value()) {
             return print_def_load_error("rom-info", *def_path, def.error());
         }
@@ -3948,7 +3947,7 @@ int cmd_log(int argc, char *argv[]) {
         return 2;
     }
 
-    auto const def = st::Definition::from_file(*def_path);
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
     if (!def.has_value()) {
         return print_def_load_error("log", *def_path, def.error());
     }
@@ -5731,7 +5730,7 @@ int cmd_flash_plan_info(int argc, char *argv[]) {
             }
             profile = *parsed;
         }
-        auto const def = st::Definition::from_file(*def_path);
+        auto const def = st::Definition::from_file(resolve_def_path(*def_path));
         if (!def.has_value()) {
             return print_def_load_error("flash-plan-info", *def_path, def.error());
         }
@@ -6587,7 +6586,7 @@ int cmd_flash_apply(int argc, char *argv[]) {
                 profile_arg->c_str());
             return 2;
         }
-        auto const def = st::Definition::from_file(*def_path);
+        auto const def = st::Definition::from_file(resolve_def_path(*def_path));
         if (!def.has_value()) {
             return print_def_load_error("flash-apply", *def_path, def.error());
         }
@@ -7452,7 +7451,7 @@ int cmd_feature_compile(int argc, char *argv[]) {
         return 2;
     }
 
-    auto const def = st::Definition::from_file(*def_path);
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
     if (!def.has_value()) {
         return print_def_load_error("feature-compile", *def_path, def.error());
     }
