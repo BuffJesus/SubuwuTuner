@@ -83,6 +83,14 @@ constexpr std::string_view kUsage =
     "                            for packs that don't parse cleanly. Exit 0 on\n"
     "                            ≥1 match, 1 on zero matches, 2 on argument\n"
     "                            errors.\n"
+    "    checksum-repair <FILE.bin> --def <pack> --output <FILE.bin>\n"
+    "                            Run the pack's declared checksum_type repair\n"
+    "                            algorithm against the ROM and write the result\n"
+    "                            to --output. Read-only on the input. Exit 0 on\n"
+    "                            success (even when the repair is a no-op for\n"
+    "                            'none' kinds — output bytes still get written\n"
+    "                            for a clean copy semantic); 3 when the declared\n"
+    "                            kind's algorithm isn't yet implemented.\n"
     "    checksum-verify <FILE.bin> --def <pack>\n"
     "                            Run the pack's declared checksum_type repair\n"
     "                            algorithm against a copy of the ROM and report\n"
@@ -3526,6 +3534,101 @@ int cmd_rom_identify(int argc, char *argv[]) {
                      quiet ? " — rerun without --quiet to see errors" : "");
     }
     return matched == 0 ? 1 : 0;
+}
+
+int cmd_checksum_repair(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> rom_path;
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::filesystem::path> output_path;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--def") {
+            if (i + 1 >= argc) {
+                std::fputs("checksum-repair: --def requires a path\n", stderr);
+                return 2;
+            }
+            def_path = std::filesystem::path{argv[++i]};
+        } else if (a == "--output" || a == "-o") {
+            if (i + 1 >= argc) {
+                std::fputs("checksum-repair: --output requires a path\n",
+                           stderr);
+                return 2;
+            }
+            output_path = std::filesystem::path{argv[++i]};
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "checksum-repair: unknown option: %s\n",
+                         argv[i]);
+            return 2;
+        } else if (!rom_path.has_value()) {
+            rom_path = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr,
+                         "checksum-repair: extra positional argument: %s\n",
+                         argv[i]);
+            return 2;
+        }
+    }
+    if (!rom_path.has_value() || !def_path.has_value()
+        || !output_path.has_value()) {
+        std::fputs("checksum-repair: missing ROM path, --def, or --output\n"
+                   "Usage: subuwutuner-cli checksum-repair <FILE.bin> "
+                   "--def <pack> --output <FILE.bin>\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const rom = st::Rom::from_file(*rom_path);
+    if (!rom.has_value()) {
+        std::fprintf(stderr, "checksum-repair: %s\n",
+                     rom.error().to_string().c_str());
+        return 1;
+    }
+    auto const def = st::Definition::from_file(*def_path);
+    if (!def.has_value()) {
+        return print_def_load_error("checksum-repair", *def_path, def.error());
+    }
+
+    // Apply repair on a working copy. apply_checksum_repair is the
+    // shared seam (st::flash::apply_checksum_repair) that also
+    // backs the future Flasher prepare-flash path.
+    std::vector<std::uint8_t> bytes{rom->data().begin(), rom->data().end()};
+    auto const status = st::flash::apply_checksum_repair(bytes, *def);
+
+    if (!status.has_value()) {
+        if (status.error().code() == st::ErrorCode::NotImplemented) {
+            auto const msg = status.error().message();
+            std::fprintf(stderr,
+                         "checksum-repair: not implemented — %.*s\n",
+                         static_cast<int>(msg.size()), msg.data());
+            return 3;
+        }
+        std::fprintf(stderr, "checksum-repair: %s\n",
+                     status.error().to_string().c_str());
+        return 1;
+    }
+
+    std::ofstream ofs{*output_path, std::ios::binary | std::ios::trunc};
+    if (!ofs) {
+        std::fprintf(stderr,
+                     "checksum-repair: cannot open output: %s\n",
+                     output_path->string().c_str());
+        return 1;
+    }
+    ofs.write(reinterpret_cast<char const *>(bytes.data()),
+              static_cast<std::streamsize>(bytes.size()));
+    if (!ofs) {
+        std::fprintf(stderr, "checksum-repair: write to '%s' failed\n",
+                     output_path->string().c_str());
+        return 1;
+    }
+
+    auto const  field = def->pack().checksum_type;
+    auto const *kind_name = st::flash::checksum_kind_name(
+        st::flash::checksum_kind_from_pack(field));
+    std::printf("checksum-repair: wrote %zu bytes to %s (kind: %s)\n",
+                bytes.size(), output_path->string().c_str(), kind_name);
+    return 0;
 }
 
 int cmd_checksum_verify(int argc, char *argv[]) {
@@ -7452,6 +7555,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "checksum-verify") {
         return cmd_checksum_verify(argc - 2, argv + 2);
+    }
+    if (cmd == "checksum-repair") {
+        return cmd_checksum_repair(argc - 2, argv + 2);
     }
     if (cmd == "pack-list") {
         return cmd_pack_list(argc - 2, argv + 2);

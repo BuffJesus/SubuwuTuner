@@ -4,6 +4,7 @@
 #include "st/flash/checksum.hpp"
 
 #include "st/core/error.hpp"
+#include "st/defs.hpp"
 
 #include <memory>
 #include <span>
@@ -106,6 +107,13 @@ std::unique_ptr<IChecksumRepair> make_checksum_repair(ChecksumKind kind) {
     }
     // Unreachable per the exhaustive switch; defensive None fallback.
     return std::make_unique<NoneRepair>();
+}
+
+st::Status apply_checksum_repair(std::span<std::uint8_t> rom_bytes,
+                                   Definition const &     def) noexcept {
+    auto const kind   = checksum_kind_from_pack(def.pack().checksum_type);
+    auto       repair = make_checksum_repair(kind);
+    return repair->repair(rom_bytes);
 }
 
 } // namespace st::flash

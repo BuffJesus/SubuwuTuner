@@ -101,4 +101,28 @@ class IChecksumRepair {
 
 } // namespace st::flash
 
+// Forward-declared in st:: so apply_checksum_repair can take a
+// Definition without dragging the full defs.hpp into flash/checksum.
+namespace st { class Definition; }
+
+namespace st::flash {
+
+// Convenience: pack lookup + factory + repair in one call. The
+// Definition's pack.checksum_type field selects the kind via
+// checksum_kind_from_pack (lenient — empty / unrecognized → None
+// → no-op). One entry point for the Flasher integration, the CLI
+// checksum-repair command, and any future "pre-flash prep" code
+// path that needs to repair bytes before they touch hardware.
+//
+// Operates in place on the span (typically a working-ROM byte
+// buffer). Returns whatever the underlying repair() returned:
+// ok() for None, NotImplemented for any concrete Subaru kind
+// today, and eventually the real algorithm's result once the
+// implementations land.
+[[nodiscard]] st::Status apply_checksum_repair(
+    std::span<std::uint8_t> rom_bytes,
+    Definition const &      def) noexcept;
+
+} // namespace st::flash
+
 #endif // ST_FLASH_CHECKSUM_HPP

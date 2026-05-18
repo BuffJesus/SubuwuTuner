@@ -5,6 +5,8 @@
 
 #include "st/flash/checksum.hpp"
 
+#include "st/defs.hpp"
+
 #include <cstdint>
 #include <span>
 #include <string>
@@ -148,4 +150,75 @@ TEST_CASE("end-to-end: pack with empty checksum_type → working no-op",
     REQUIRE(repair->name() == "none");
     std::vector<std::uint8_t> rom(16, 0);
     REQUIRE(repair->repair(rom).has_value());
+}
+
+// ---- apply_checksum_repair (Definition-driven wrapper) ----------
+
+namespace {
+constexpr std::string_view kPackSubaruStdToml = R"toml(
+[pack]
+schema_version = 1
+id             = "test-pack-stdsum"
+endianness     = "big"
+checksum_type  = "subaru_std"
+)toml";
+
+constexpr std::string_view kPackNoneToml = R"toml(
+[pack]
+schema_version = 1
+id             = "test-pack-nosum"
+endianness     = "big"
+)toml";
+
+constexpr std::string_view kPackUnknownKindToml = R"toml(
+[pack]
+schema_version = 1
+id             = "test-pack-future"
+endianness     = "big"
+checksum_type  = "subaru_future"
+)toml";
+} // namespace
+
+TEST_CASE("apply_checksum_repair: pack with checksum_type=subaru_std → "
+          "NotImplemented via the wrapper",
+          "[flash][checksum]") {
+    auto def = st::Definition::from_toml_string(kPackSubaruStdToml);
+    REQUIRE(def.has_value());
+
+    std::vector<std::uint8_t> rom(1024, 0xAB);
+    auto const before = rom;
+    auto const status = st::flash::apply_checksum_repair(rom, *def);
+
+    REQUIRE_FALSE(status.has_value());
+    REQUIRE(status.error().code() == st::ErrorCode::NotImplemented);
+    // Failure path must not mutate the bytes — important contract
+    // since callers will spill the repaired buffer to disk only
+    // on success.
+    REQUIRE(rom == before);
+}
+
+TEST_CASE("apply_checksum_repair: pack without checksum_type → no-op success",
+          "[flash][checksum]") {
+    auto def = st::Definition::from_toml_string(kPackNoneToml);
+    REQUIRE(def.has_value());
+
+    std::vector<std::uint8_t> rom(1024, 0xCD);
+    auto const before = rom;
+    auto const status = st::flash::apply_checksum_repair(rom, *def);
+
+    REQUIRE(status.has_value());
+    REQUIRE(rom == before);  // no-op preserves bytes
+}
+
+TEST_CASE("apply_checksum_repair: pack with unrecognized kind → lenient None",
+          "[flash][checksum]") {
+    // checksum_kind_from_pack treats unknown values as None for
+    // forward-compat with future schema revisions. Verify the
+    // wrapper carries that semantic through.
+    auto def = st::Definition::from_toml_string(kPackUnknownKindToml);
+    REQUIRE(def.has_value());
+
+    std::vector<std::uint8_t> rom(1024, 0xEF);
+    auto const status = st::flash::apply_checksum_repair(rom, *def);
+    REQUIRE(status.has_value());  // None → no-op → ok()
 }
