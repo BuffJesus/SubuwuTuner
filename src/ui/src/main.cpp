@@ -5393,9 +5393,9 @@ void render_features_designer(AppState &state) {
 
     ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f),
                         "\xE2\x9A\xA0 Phase 5 preview.");
-    ImGui::TextDisabled("See docs/16-custom-features.md for the full "
-                        "design. Codegen, IR, and .stmod persistence "
-                        "land in later phases.");
+    text_subtle("Editor, IR, SH-2A codegen, and .stmod persistence "
+                "all shipped. Patch insertion + flashing wait on the "
+                "bench rig — see docs/16.");
 
     ImGui::Spacing();
     ImGui::Text("Nodes: %zu     Edges: %zu",
