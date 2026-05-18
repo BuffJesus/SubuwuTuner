@@ -85,7 +85,7 @@ Heavy progress this session — what was sized at 4–6 weeks for the editor + I
 - ⬜ Curve / table-lookup primitives (e.g. `flex_fuel_scale`) — needs pack-format extension for breakpoints + values
 - ⬜ RH850 codegen for VB — stub backend returns NotImplemented; per `docs/16` recommendation, drop first under timing pressure
 - ✅ `[[hook]]` + `[[primitive]]` schema in def packs with `name` (codegen-canonical) + `label` (display) split per pin
-- ✅ Linter: type-checks via Graph::connect / IR lowerer; RT-budget placeholder (real per-ISA cycle counts wait on bench profiling)
+- ✅ Linter: type-checks via Graph::connect / IR lowerer; RT-budget runs against per-primitive cycle costs derived from public SH-2A spec + FPU latencies (e.g. `divide_int` = 18, `add_int` = 1). Bench profiling will refine.
 - ✅ `.stmod` format = TOML `[graph]` + `[patch]` halves, single file, round-trippable via `feature::from_toml` + `feature_codegen::patch_from_toml` (`92daa48`)
 - ✅ CLI `feature-compile <stmod> --def <pack> [--arch sh2a|rh850] [--format hex|toml|raw|stmod] [--output <file>] [--validate-only]` (`87a59f5`, `--format stmod` `1406aa5`, `--validate-only` `1f7aafe`)
 - ✅ Sample packs: `clutch-kill`, `flat-foot-shift`, `launch-control` compile end-to-end through SH-2A → real SH-2A bytes. `flex-fuel` blocks on the curve primitive.

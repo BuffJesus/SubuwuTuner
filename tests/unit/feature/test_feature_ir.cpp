@@ -223,7 +223,9 @@ TEST_CASE("ir::lower refuses a graph that fails validate()",
 TEST_CASE("ir::estimate_cost adds per-op cycle counts",
           "[feature][ir]") {
     // Module from the canonical splice shape (LoadHookInput +
-    // CallPrimitive + StoreHookOutput). Cost: 2 + 3 + 2 = 7.
+    // CallPrimitive + StoreHookOutput). The `passthrough` primitive
+    // is not in the per-symbol cost table → defaults to 3 cycles.
+    // Total: 2 + 3 + 2 = 7.
     st::feature::Graph g;
     auto const src = g.add_node(make_hook_node(
         "hook.read_rpm", {{"rpm", st::feature::PinType::Float}}, {}));
@@ -239,6 +241,93 @@ TEST_CASE("ir::estimate_cost adds per-op cycle counts",
     auto const m = st::feature::ir::lower(g);
     REQUIRE(m.has_value());
     REQUIRE(st::feature::ir::estimate_cost(*m) == 7);
+}
+
+TEST_CASE("ir::estimate_cost is symbol-aware for known primitives",
+          "[feature][ir]") {
+    // Build a Module manually so we can pin the symbol-under-test
+    // exactly. `divide_int` is the FPU-bridge-via-FDIV primitive
+    // priced at 18 cycles in the table.
+    st::feature::ir::Module m;
+
+    st::feature::ir::Instruction load_in;
+    load_in.op          = st::feature::ir::Op::LoadHookInput;
+    load_in.result_type = st::feature::PinType::Int;
+    load_in.result_id   = 1;
+    load_in.symbol      = "read_rpm";
+    load_in.pin_name    = "rpm";
+    m.instructions.push_back(load_in);
+
+    st::feature::ir::Instruction load_k;
+    load_k.op             = st::feature::ir::Op::LoadConstant;
+    load_k.result_type    = st::feature::PinType::Int;
+    load_k.result_id      = 2;
+    load_k.constant_value = 2.0;
+    m.instructions.push_back(load_k);
+
+    st::feature::ir::Instruction call;
+    call.op          = st::feature::ir::Op::CallPrimitive;
+    call.result_type = st::feature::PinType::Int;
+    call.result_id   = 3;
+    call.symbol      = "divide_int";
+    call.pin_name    = "out";
+    call.operands    = {1, 2};
+    m.instructions.push_back(call);
+
+    st::feature::ir::Instruction store;
+    store.op          = st::feature::ir::Op::StoreHookOutput;
+    store.result_type = st::feature::PinType::Int;
+    store.symbol      = "after_fuel_calc";
+    store.pin_name    = "commanded_pw_override";
+    store.operands    = {3};
+    m.instructions.push_back(store);
+
+    // LoadHookInput(2) + LoadConstant(1) + CallPrimitive(divide_int=18)
+    // + StoreHookOutput(2) = 23.
+    REQUIRE(st::feature::ir::estimate_cost(m) == 23);
+}
+
+TEST_CASE("ir::estimate_cost prices add_int below divide_int",
+          "[feature][ir]") {
+    // Two single-primitive modules differing only in symbol. The
+    // table prices add_int as cheap (1 cycle) and divide_int as
+    // expensive (FDIV-latency-dominated, 18 cycles). Verifies the
+    // ordering rather than exact totals — keeps the test resilient
+    // to future cost-table tuning.
+    auto build = [](std::string_view sym) {
+        st::feature::ir::Module m;
+        st::feature::ir::Instruction call;
+        call.op          = st::feature::ir::Op::CallPrimitive;
+        call.result_type = st::feature::PinType::Int;
+        call.result_id   = 1;
+        call.symbol      = sym;
+        call.pin_name    = "out";
+        m.instructions.push_back(call);
+        return m;
+    };
+
+    auto const cheap = st::feature::ir::estimate_cost(build("add_int"));
+    auto const heavy = st::feature::ir::estimate_cost(build("divide_int"));
+    REQUIRE(cheap < heavy);
+    REQUIRE(heavy >= cheap * 10);  // FDIV-dominated, expect at least 10× delta
+}
+
+TEST_CASE("ir::estimate_cost falls back to default for unknown primitives",
+          "[feature][ir]") {
+    // Pack-declared primitives that the codegen doesn't yet handle
+    // (e.g. `flex_fuel_scale`) still get a finite price — the
+    // default constant — so a graph using them lints without a NaN.
+    st::feature::ir::Module m;
+    st::feature::ir::Instruction call;
+    call.op          = st::feature::ir::Op::CallPrimitive;
+    call.result_type = st::feature::PinType::Float;
+    call.result_id   = 1;
+    call.symbol      = "flex_fuel_scale";
+    call.pin_name    = "scale";
+    m.instructions.push_back(call);
+    // Default cost is 3, matching the prior symbol-blind model so
+    // unknown primitives don't suddenly become free.
+    REQUIRE(st::feature::ir::estimate_cost(m) == 3);
 }
 
 TEST_CASE("ir::dump produces a stable human-readable transcript",

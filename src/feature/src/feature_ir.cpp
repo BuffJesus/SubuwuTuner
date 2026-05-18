@@ -298,13 +298,79 @@ std::string dump(Module const &m) {
     return out.str();
 }
 
+namespace {
+
+// Per-primitive cycle costs. Numbers track the SH-2A emission shape
+// of each primitive in `st::feature::codegen` plus the relevant FPU
+// latencies from the public Renesas SH-2A hardware manual.
+//
+// The model is "cycles spent on the primitive-specific instructions
+// only" — operand loads (LoadConstant / LoadHookInput) and the
+// final store are counted by their own IR ops, not bundled here.
+// Default for unrecognized symbols is `kDefaultPrimitiveCycles`, so
+// pack-declared primitives the codegen doesn't yet emit (e.g.
+// `flex_fuel_scale`) still get a finite cost.
+//
+// Latency-dominated ops (FDIV ~14 cycles, MUL.L 2 cycles + STS) get
+// the latency baked into the symbol's cost; pipeline modeling is
+// out of scope until bench profiling lands.
+struct PrimitiveCost {
+    std::string_view symbol;
+    std::size_t      cycles;
+};
+
+constexpr std::size_t kDefaultPrimitiveCycles = 3;
+
+constexpr PrimitiveCost kPrimitiveCosts[] = {
+    // Int arithmetic + multiply
+    {"add_int",          1},
+    {"subtract_int",     1},
+    {"multiply_int",     3},   // MUL.L (2) + STS MACL (1)
+    {"divide_int",      18},   // FPU bridge: 2×LDS + 2×FLOAT + FDIV (~14) + FTRC + STS
+
+    // Int compares (→ Bool)
+    {"compare_lt_int",   2},   // CMP/GT + MOVT
+    {"compare_gt_int",   2},
+    {"compare_eq_int",   2},
+
+    // Bool logic
+    {"and_bool",         1},
+    {"or_bool",          1},
+    {"not_bool",         2},   // TST + MOVT
+
+    // Conditional (any type) — taken-branch worst-case
+    {"select_int",       4},   // TST + BT + BRA + NOP-delay
+    {"select_bool",      4},
+    {"select_float",     4},
+
+    // Float arithmetic
+    {"add_float",        5},   // LDS + FSTS + LDS + FSTS + FADD
+    {"subtract_float",   5},
+    {"multiply_float",   5},
+    {"divide_float",    18},   // FDIV latency dominates
+
+    // Float compares (→ Bool)
+    {"compare_lt_float", 6},   // 2×(LDS+FSTS) + FCMP + MOVT
+    {"compare_gt_float", 6},
+    {"compare_eq_float", 6},
+};
+
+[[nodiscard]] std::size_t primitive_cycles(std::string_view symbol) noexcept {
+    for (auto const &c : kPrimitiveCosts) {
+        if (c.symbol == symbol) return c.cycles;
+    }
+    return kDefaultPrimitiveCycles;
+}
+
+} // namespace
+
 std::size_t estimate_cost(Module const &m) noexcept {
     std::size_t total = 0;
     for (auto const &i : m.instructions) {
         switch (i.op) {
             case Op::LoadConstant:    total += 1; break;
             case Op::LoadHookInput:   total += 2; break;
-            case Op::CallPrimitive:   total += 3; break;
+            case Op::CallPrimitive:   total += primitive_cycles(i.symbol); break;
             case Op::StoreHookOutput: total += 2; break;
         }
     }

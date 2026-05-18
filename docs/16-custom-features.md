@@ -31,7 +31,7 @@ Status legend: ✅ shipped · 🟡 partial · ⬜ not yet.
 | **Compiler (RH850)** | Stub backend that returns NotImplemented. VB WRX support waits until SH-2A is bench-validated. | ⬜ |
 | **CLI** | `subuwutuner-cli feature-compile <stmod> --def <pack> [--arch sh2a\|rh850] [--format hex\|toml\|raw\|stmod] [--output <file>] [--validate-only]`. Plus `dump-ir`, `lint-graph`, `lint-ir`. `--format=stmod` bundles graph + patch in a single TOML; `--validate-only` runs parse + lower + compile and exits 0/non-zero without producing output — for CI / pre-commit hooks. | ✅ |
 | **Patch format** | `.stmod` — TOML document carrying both the source graph (`[graph]` + `[[node]]` + `[[edge]]`) and the compiled patch (`[patch]` + `[[patch.hook]]` + `[[patch.hook.ram_claim]]`). Single-file, diffable, round-trippable. Signable is a future concern. | ✅ |
-| **Linter** | `feature::lint(Graph)` flags undriven inputs + orphan nodes; `feature::ir::lint(Module)` flags duplicate hook overrides + RT-budget overruns. RT budget is a placeholder cycle count until real per-ISA profiling lands. | ✅ |
+| **Linter** | `feature::lint(Graph)` flags undriven inputs + orphan nodes; `feature::ir::lint(Module)` flags duplicate hook overrides + RT-budget overruns. Per-primitive cycle costs in `estimate_cost` (e.g. `divide_int` = 18 cycles, `add_int` = 1) — derived from public SH-2A spec; bench profiling will refine. Unknown symbols default to 3 cycles. | ✅ |
 | **Sample packs** | `clutch-kill` (Bool-only synthetic smoke), `flat-foot-shift` (3-sensor AND chain), `launch-control` (4-sensor 3-compare AND tree). Compile end-to-end through SH-2A. `flex-fuel` exists but blocks on a curve-table primitive. | 🟡 |
 | **Patch insertion** | Finding free RAM, writing the hook table, splicing into existing interrupt vectors. Bench-rig-blocked — requires a real ECU to develop against. | ⬜ |
 | **Flashing** | Loading a `.stmod` and burning the patch to an ECU. Gates on Patch insertion + Phase 3 transport. | ⬜ |
@@ -126,8 +126,11 @@ instructions per call with sign-handling corner cases worth bench
 validation; FPU is ~6 instructions and reuses the float code path
 that already shipped.
 
-**Not yet implemented:** per-ISA cycle costs for the RT-budget
-linter (today's costs are placeholder), and any curve / table-lookup
+**Not yet implemented:** per-ISA *measured* cycle costs (today's
+numbers in `estimate_cost` reflect SH-2A instruction-issue counts +
+documented FPU latencies from the public Renesas spec — accurate
+enough to flag wildly over-budget graphs, not yet validated against
+a real-silicon pipeline trace), and any curve / table-lookup
 primitive (relevant for the unblocked `flex-fuel` sample).
 
 ## Current state — `.stmod` file format
