@@ -44,7 +44,7 @@ my-project.stune/                      (directory)
 └── working.bin                         (the in-progress edited copy)
 ```
 
-Definitions live OUTSIDE the project at a user-chosen path (Path B in `docs/17`); `project.toml` carries a string reference. Datalogs are emitted ad-hoc by `subuwutuner-cli log` and read back by the autotune kernels — they don't live inside `.stune`.
+Definitions live OUTSIDE the `.stune` project at a user-chosen path; `project.toml` carries a string reference. This keeps one pack reusable across many projects and lets the user upgrade a pack without touching their tunes. Datalogs are emitted ad-hoc by `subuwutuner-cli log` and read back by the autotune kernels — they don't live inside `.stune` either.
 
 ## The `defgen` tool
 
