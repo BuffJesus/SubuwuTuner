@@ -5667,14 +5667,14 @@ void render_features_designer(AppState &state) {
             ImGui::TextWrapped("%s",
                                 validate_result.error().to_string().c_str());
         } else if (!lint_findings.empty()) {
-            ImGui::TextDisabled("Completeness warnings");
+            text_subtle("Completeness warnings");
             ImGui::Separator();
             for (auto const &f : lint_findings) {
                 ImGui::BulletText("%s", f.message.c_str());
             }
         } else {
-            ImGui::TextDisabled("Graph passes structural validation "
-                                 "and has no completeness warnings.");
+            text_subtle("Graph passes structural validation "
+                         "and has no completeness warnings.");
         }
         ImGui::EndPopup();
     }
@@ -5683,13 +5683,13 @@ void render_features_designer(AppState &state) {
         ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
                             "wire: %s", state.features_wire_error.c_str());
     }
-    ImGui::TextDisabled("Click a node or edge to select; Shift+click "
-                        "to multi-select. Drag from empty canvas to "
-                        "box-select. Delete removes the selection. "
-                        "Drag a body to move (group-drag works); "
-                        "drag pin → pin to wire. Middle-drag pans, "
-                        "wheel zooms. Right-click (when not wiring) "
-                        "for delete / disconnect.");
+    text_subtle("Click a node or edge to select; Shift+click "
+                "to multi-select. Drag from empty canvas to "
+                "box-select. Delete removes the selection. "
+                "Drag a body to move (group-drag works); "
+                "drag pin → pin to wire. Middle-drag pans, "
+                "wheel zooms. Right-click (when not wiring) "
+                "for delete / disconnect.");
 
     ImGui::Spacing();
 
@@ -6031,7 +6031,7 @@ void render_features_designer(AppState &state) {
             char const *title_str =
                 !n.label.empty() ? n.label.c_str() : node_kind;
             ImGui::TextUnformatted(title_str);
-            ImGui::TextDisabled("%s", node_kind);
+            text_subtle("%s", node_kind);
             if (!description.empty()) {
                 ImGui::Separator();
                 ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
@@ -6039,7 +6039,7 @@ void render_features_designer(AppState &state) {
                 ImGui::PopTextWrapPos();
             } else if (!is_pack_node) {
                 ImGui::Separator();
-                ImGui::TextDisabled(
+                text_subtle(
                     "Generic debug node. Load a project with hooks "
                     "to insert pack-declared nodes from the palette.");
             }
@@ -6127,9 +6127,9 @@ void render_features_designer(AppState &state) {
             ImGui::OpenPopup(node_popup_id);
         }
         if (ImGui::BeginPopup(node_popup_id)) {
-            ImGui::TextDisabled("%s",
-                                 n.label.empty() ? n.kind.c_str()
-                                                  : n.label.c_str());
+            text_subtle("%s",
+                        n.label.empty() ? n.kind.c_str()
+                                         : n.label.c_str());
             ImGui::Separator();
             if (ImGui::MenuItem("Delete node")) {
                 pending_delete_nodes.push_back(n.id);
@@ -6278,14 +6278,14 @@ void render_features_designer(AppState &state) {
             }
             if (ImGui::BeginPopup(pin_popup_id)) {
                 if (!p.label.empty() && p.label != p.name) {
-                    ImGui::TextDisabled("%s (%s) : %s",
-                                         p.label.c_str(),
-                                         p.name.c_str(),
-                                         st::feature::pin_type_name(p.type));
+                    text_subtle("%s (%s) : %s",
+                                p.label.c_str(),
+                                p.name.c_str(),
+                                st::feature::pin_type_name(p.type));
                 } else {
-                    ImGui::TextDisabled("%s : %s",
-                                         p.name.c_str(),
-                                         st::feature::pin_type_name(p.type));
+                    text_subtle("%s : %s",
+                                p.name.c_str(),
+                                st::feature::pin_type_name(p.type));
                 }
                 ImGui::Separator();
                 bool any_edge = false;
@@ -6326,7 +6326,7 @@ void render_features_designer(AppState &state) {
                     && !is_pin_driven(n.id, p.id);
                 if (editor_eligible) {
                     if (any_edge) ImGui::Separator();
-                    ImGui::TextDisabled("Constant value");
+                    text_subtle("Constant value");
                     ImGui::SetNextItemWidth(120.0f);
                     bool commit = false;
                     if (p.type == st::feature::PinType::Bool) {
@@ -6366,7 +6366,7 @@ void render_features_designer(AppState &state) {
                     }
                 }
                 if (!any_edge && !editor_eligible) {
-                    ImGui::TextDisabled("(no edges)");
+                    text_subtle("(no edges)");
                 }
                 ImGui::EndPopup();
             }
@@ -6498,7 +6498,7 @@ void render_features_designer(AppState &state) {
                                                      : tn->label.c_str())
                                : "?",
                            tp != nullptr ? tp->name.c_str() : "?");
-            ImGui::TextDisabled("%s", label);
+            text_subtle("%s", label);
             ImGui::Separator();
             if (ImGui::MenuItem("Disconnect")) {
                 pending_delete_edge = se;
