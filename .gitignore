@@ -56,17 +56,12 @@ coverage/
 # User-private fixtures (never commit these). Real ROM dumps,
 # captured traces, ECU-bound binaries — anything that's
 # calibration data or copyrighted content sits under
-# fixtures/roms/ or fixtures/private/ and is gitignored
-# entirely.
-#
-# Exception: the README + PROVENANCE template at the root of
-# fixtures/private/ ARE tracked so the convention is
-# discoverable in-tree (whitelist rules below).
+# fixtures/roms/ or fixtures/private/ and is gitignored.
+# Convention is documented in `tests/private/README.md` and
+# `docs/01-reverse-engineering.md`.
 Definitions-*.atlas
 fixtures/roms/
-fixtures/private/*
-!fixtures/private/README.md
-!fixtures/private/PROVENANCE.template.toml
+fixtures/private/
 
 # Private integration tests — same shape as fixtures/private/.
 # Source files dropped here are gitignored so individual
