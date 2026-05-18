@@ -6802,21 +6802,21 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         // Subtitle: dev metadata (id, dim, address, category). Single line,
         // disabled gray, separators chosen to read as a path.
         if (have_name && !tbl->category.empty()) {
-            ImGui::TextDisabled("%s  \xC2\xB7  %dD  \xC2\xB7  0x%08zX  \xC2\xB7  %s",
-                                state.selected_table_id.c_str(),
-                                tbl->dimensions, tbl->address,
-                                tbl->category.c_str());
+            text_subtle("%s  \xC2\xB7  %dD  \xC2\xB7  0x%08zX  \xC2\xB7  %s",
+                        state.selected_table_id.c_str(),
+                        tbl->dimensions, tbl->address,
+                        tbl->category.c_str());
         } else if (have_name) {
-            ImGui::TextDisabled("%s  \xC2\xB7  %dD  \xC2\xB7  0x%08zX",
-                                state.selected_table_id.c_str(),
-                                tbl->dimensions, tbl->address);
+            text_subtle("%s  \xC2\xB7  %dD  \xC2\xB7  0x%08zX",
+                        state.selected_table_id.c_str(),
+                        tbl->dimensions, tbl->address);
         } else if (!tbl->category.empty()) {
-            ImGui::TextDisabled("%dD  \xC2\xB7  0x%08zX  \xC2\xB7  %s",
-                                tbl->dimensions, tbl->address,
-                                tbl->category.c_str());
+            text_subtle("%dD  \xC2\xB7  0x%08zX  \xC2\xB7  %s",
+                        tbl->dimensions, tbl->address,
+                        tbl->category.c_str());
         } else {
-            ImGui::TextDisabled("%dD  \xC2\xB7  0x%08zX",
-                                tbl->dimensions, tbl->address);
+            text_subtle("%dD  \xC2\xB7  0x%08zX",
+                        tbl->dimensions, tbl->address);
         }
     }
 
@@ -6910,8 +6910,8 @@ void render_table_view(AppState &state, Fonts const &fonts) {
             ImGui::EndCombo();
         }
         ImGui::SameLine();
-        ImGui::TextDisabled("(%zu slices · 3D editing TBD)",
-                            td_orig.slices.size());
+        text_subtle("(%zu slices · 3D editing TBD)",
+                    td_orig.slices.size());
     }
 
     GridStats const stats = compute_stats(td_view);
@@ -6923,11 +6923,11 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         // and is useful regardless of selection.
         bool const show_table_stats = !state.selection.enabled;
         if (show_table_stats) {
-            ImGui::TextDisabled("min %.*f  ·  max %.*f  ·  mean %.*f  ·  %zu cells",
-                                precision, stats.min,
-                                precision, stats.max,
-                                precision, stats.mean,
-                                stats.count);
+            text_subtle("min %.*f  ·  max %.*f  ·  mean %.*f  ·  %zu cells",
+                        precision, stats.min,
+                        precision, stats.max,
+                        precision, stats.mean,
+                        stats.count);
         }
         // Heatmap legend — only meaningful in Grid view (Heatmap view
         // already has a vertical ColormapScale on the right via ImPlot).
@@ -6944,11 +6944,11 @@ void render_table_view(AppState &state, Fonts const &fonts) {
             if (show_table_stats) {
                 ImGui::SameLine(0.0f, 24.0f);
             }
-            ImGui::TextDisabled("scale:");
+            text_subtle("scale:");
             ImGui::SameLine();
             char buf[32];
             std::snprintf(buf, sizeof buf, "%.*f", precision, stats.min);
-            ImGui::TextDisabled("%s", buf);
+            text_subtle("%s", buf);
             ImGui::SameLine();
             ImVec2 const p0 = ImGui::GetCursorScreenPos();
             ImVec2 const p1 = ImVec2(p0.x + kBarW, p0.y + kBarH);
@@ -6982,7 +6982,7 @@ void render_table_view(AppState &state, Fonts const &fonts) {
             ImGui::Dummy(ImVec2(kBarW, kBarH));
             ImGui::SameLine();
             std::snprintf(buf, sizeof buf, "%.*f", precision, stats.max);
-            ImGui::TextDisabled("%s", buf);
+            text_subtle("%s", buf);
         }
     }
     if (state.selection.enabled) {
@@ -7009,7 +7009,7 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         }
         if (scount > 0) {
             double const smean = ssum / static_cast<double>(scount);
-            ImGui::TextDisabled(
+            text_subtle(
                 "selection: rows %zu:%zu × cols %zu:%zu  ·  "
                 "min %.*f  ·  max %.*f  ·  mean %.*f  ·  %zu cells",
                 rect.r_start, rect.r_end,
@@ -7022,7 +7022,7 @@ void render_table_view(AppState &state, Fonts const &fonts) {
             // Selection rect lies outside the visible data (e.g.,
             // mid-3D-slice change with a stale selection). Fall back
             // to the previous shape so the user still sees the rect.
-            ImGui::TextDisabled(
+            text_subtle(
                 "selection: rows %zu:%zu × cols %zu:%zu  (%zu cells)",
                 rect.r_start, rect.r_end,
                 rect.c_start, rect.c_end,
