@@ -852,7 +852,36 @@ int cmd_pack_info(int argc, char *argv[]) {
         return 2;
     }
     std::filesystem::path const path{argv[0]};
-    auto const                  def = st::Definition::from_file(path);
+    // Multi-file packs use pack.toml as the manifest with companion
+    // *.toml fragments sibling to it. `Definition::from_file(pack.toml)`
+    // only loads the manifest and misses the companions — leading to
+    // the confusing "Tables: 0 / PIDs: 0 / Hooks: 0" summary on a pack
+    // that obviously has them. Detect the multi-file shape (file named
+    // pack.toml whose parent contains other *.toml files) and route
+    // through from_directory so the summary reflects the actual
+    // contents. A standalone pack.toml with no companions still loads
+    // via from_file, preserving the legacy single-file behavior.
+    std::filesystem::path load_path = path;
+    {
+        std::error_code ec;
+        if (std::filesystem::is_regular_file(path, ec)
+            && path.filename() == "pack.toml") {
+            auto const parent = path.parent_path();
+            std::error_code walk_ec;
+            for (auto const &entry :
+                 std::filesystem::directory_iterator{parent, walk_ec}) {
+                if (walk_ec) break;
+                std::error_code is_file_ec;
+                if (!entry.is_regular_file(is_file_ec) || is_file_ec) continue;
+                auto const &p = entry.path();
+                if (p.extension() == ".toml" && p.filename() != "pack.toml") {
+                    load_path = parent;
+                    break;
+                }
+            }
+        }
+    }
+    auto const def = st::Definition::from_file(load_path);
     if (!def.has_value()) {
         return print_def_load_error("pack-info", path, def.error());
     }
