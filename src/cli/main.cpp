@@ -333,13 +333,15 @@ constexpr std::string_view kUsage =
     "                            you'd pass to `--transport j2534 --dll <path>`\n"
     "                            once the platform dynload layer lands.\n"
     "    feature-compile <FILE.stmod> --def <pack.toml> [--arch sh2a|rh850]\n"
-    "                    [--format hex|toml|raw] [--output <FILE>]\n"
+    "                    [--format hex|toml|raw|stmod] [--output <FILE>]\n"
     "                            Lower a .stmod, pick a codegen backend by the\n"
     "                            pack's platform (or --arch override), and emit\n"
     "                            the compiled PatchObject. Default --format=hex\n"
     "                            renders a per-hook header + line-wrapped hex of\n"
-    "                            the code bytes; --format=toml emits a structured\n"
-    "                            patch table ([patch] arch + [[patch.hook]] rows);\n"
+    "                            the code bytes; --format=toml emits the structured\n"
+    "                            [patch] table only; --format=stmod emits a full\n"
+    "                            bundled .stmod file (source graph + compiled patch\n"
+    "                            in one TOML document, ready to redistribute);\n"
     "                            --format=raw writes the code bytes verbatim and\n"
     "                            requires a single-hook patch + --output. Without\n"
     "                            --output the text formats print to stdout.\n";
@@ -7011,10 +7013,11 @@ int cmd_feature_compile(int argc, char *argv[]) {
                 return 2;
             }
             format = std::string{argv[++i]};
-            if (format != "hex" && format != "toml" && format != "raw") {
+            if (format != "hex" && format != "toml" && format != "raw"
+                && format != "stmod") {
                 std::fprintf(stderr,
                              "feature-compile: --format must be one of "
-                             "hex|toml|raw (got '%s')\n",
+                             "hex|toml|raw|stmod (got '%s')\n",
                              format.c_str());
                 return 2;
             }
@@ -7036,7 +7039,7 @@ int cmd_feature_compile(int argc, char *argv[]) {
         std::fputs("feature-compile: missing .stmod path\n", stderr);
         std::fputs("Usage: subuwutuner-cli feature-compile <FILE.stmod> "
                    "--def <pack.toml> [--arch sh2a|rh850] "
-                   "[--format hex|toml|raw] [--output <FILE>]\n",
+                   "[--format hex|toml|raw|stmod] [--output <FILE>]\n",
                    stderr);
         return 2;
     }
@@ -7142,9 +7145,27 @@ int cmd_feature_compile(int argc, char *argv[]) {
         return 0;
     }
 
-    std::string const text = (format == "toml")
-        ? st::feature::codegen::patch_to_toml(*patch)
-        : render_patch_hex(*patch);
+    // Format dispatch (raw already handled above):
+    //   hex   → per-hook hex dump (default)
+    //   toml  → just the [patch] TOML section
+    //   stmod → graph TOML + [patch] TOML, single bundled file —
+    //           pairs with feature::from_toml + patch_from_toml on
+    //           the read side (graph loader ignores [patch], patch
+    //           loader ignores [graph]). The graph is re-serialized
+    //           through feature::to_toml so the output is canonical
+    //           rather than a verbatim copy of the input (loses
+    //           hand-edited comments + whitespace; structurally
+    //           equivalent).
+    std::string text;
+    if (format == "toml") {
+        text = st::feature::codegen::patch_to_toml(*patch);
+    } else if (format == "stmod") {
+        text = st::feature::to_toml(*g);
+        text.append("\n");
+        text.append(st::feature::codegen::patch_to_toml(*patch));
+    } else {
+        text = render_patch_hex(*patch);
+    }
 
     if (output_path.has_value()) {
         std::ofstream ofs{*output_path, std::ios::binary | std::ios::trunc};
