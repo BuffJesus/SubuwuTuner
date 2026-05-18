@@ -17,6 +17,7 @@
 #include "st/policy.hpp"
 #include "st/project.hpp"
 #include "st/rom.hpp"
+#include "st/transport/factory.hpp"
 #include "st/transport/mock.hpp"
 
 #include <algorithm>
@@ -236,12 +237,24 @@ constexpr std::string_view kUsage =
     "                            FlashReport summary. With --manifest, writes a\n"
     "                            Manifest of the run; with --journal, sets\n"
     "                            FlashPlan.journal_path for incremental writes.\n"
-    "    rom-pull --addr <hex> --size <hex> --trace <FILE.uds> --output <FILE.bin>\n"
+    "    rom-pull --addr <hex> --size <hex> --output <FILE.bin>\n"
+    "             (--trace <FILE.uds> | --transport <kind> [--dll <path>]\n"
+    "                                   [--device <path>])\n"
     "             [--max-chunk <hex>]\n"
     "                            Read N bytes of ECU memory via Flasher::read_full_rom\n"
-    "                            against a MockTransport-replayed UDS trace, written\n"
-    "                            as a raw binary file. Trace format matches flash-apply\n"
-    "                            ('> req' / '< resp' pairs). Default --max-chunk=0x100.\n"
+    "                            into a raw binary file. Pick a source:\n"
+    "                              --trace <FILE.uds>: MockTransport-replayed trace\n"
+    "                                  ('> req' / '< resp' pairs). The everyday\n"
+    "                                  testing path; runs hardware-free.\n"
+    "                              --transport <kind>: real adapter via the factory.\n"
+    "                                  <kind> ∈ j2534|obdx|native. j2534 needs\n"
+    "                                  --dll <vendor-DLL-path>; obdx + native need\n"
+    "                                  --device <USB-CDC-endpoint>. NOTE: every\n"
+    "                                  concrete adapter currently returns\n"
+    "                                  NotImplemented at open() because the platform\n"
+    "                                  USB/DLL layer hasn't landed yet — useful as\n"
+    "                                  a dispatch smoke until then.\n"
+    "                            Default --max-chunk=0x100.\n"
     "    flash-trace --plan <FILE.toml> --output <FILE.uds>\n"
     "                            Emit a guaranteed-success UDS trace for the given plan,\n"
     "                            walking the same sequence Flasher::execute would and\n"
@@ -6278,6 +6291,9 @@ int cmd_rom_pull(int argc, char *argv[]) {
     std::uint32_t                        max_chunk = 0x100;
     std::optional<std::filesystem::path> trace_path;
     std::optional<std::filesystem::path> output_path;
+    std::optional<std::string>           transport_kind;
+    std::string                          dll_path;
+    std::string                          device_path;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -6321,6 +6337,15 @@ int cmd_rom_pull(int argc, char *argv[]) {
         } else if (a == "--trace") {
             if (auto const *v = require_arg("--trace"); v) trace_path = std::filesystem::path{v};
             else return 2;
+        } else if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v) transport_kind = std::string{v};
+            else return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v) dll_path = v;
+            else return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v) device_path = v;
+            else return 2;
         } else if (a == "--output" || a == "-o") {
             if (auto const *v = require_arg("--output"); v) output_path = std::filesystem::path{v};
             else return 2;
@@ -6333,35 +6358,93 @@ int cmd_rom_pull(int argc, char *argv[]) {
             return 2;
         }
     }
-    if (!addr.has_value() || !size.has_value() || !trace_path.has_value()
-        || !output_path.has_value()) {
-        std::fputs("rom-pull: missing required arguments\n"
-                   "Usage: subuwutuner-cli rom-pull --addr <hex> --size <hex> "
-                   "--trace <FILE.uds> --output <FILE.bin>\n"
-                   "       [--max-chunk <hex>]\n",
+    if (!addr.has_value() || !size.has_value() || !output_path.has_value()) {
+        std::fputs("rom-pull: missing --addr / --size / --output\n"
+                   "Usage: subuwutuner-cli rom-pull --addr <hex> --size <hex>\n"
+                   "         --output <FILE.bin>\n"
+                   "         (--trace <FILE.uds> | --transport <kind>\n"
+                   "                               [--dll <path>] [--device <path>])\n"
+                   "         [--max-chunk <hex>]\n",
+                   stderr);
+        return 2;
+    }
+    bool const have_trace     = trace_path.has_value();
+    bool const have_transport = transport_kind.has_value();
+    if (have_trace == have_transport) {
+        std::fputs("rom-pull: must pass exactly one of --trace or "
+                   "--transport (they're mutually exclusive — --trace is "
+                   "the offline MockTransport-replayed path; --transport "
+                   "is the real-adapter path).\n",
                    stderr);
         return 2;
     }
 
-    std::vector<UdsTracePair> pairs;
-    std::string               err;
-    if (!parse_uds_trace(*trace_path, pairs, err)) {
-        std::fputs(err.c_str(), stderr);
-        std::fputc('\n', stderr);
-        return 1;
+    // Owning storage for whichever transport we end up using. Mock
+    // path stays as a stack object below; the factory path stashes
+    // its unique_ptr here. `chosen` is the non-owning pointer the
+    // rest of the function uses regardless.
+    st::transport::MockTransport                  mock;
+    std::unique_ptr<st::transport::ITransport>    owned;
+    st::transport::ITransport                    *chosen = nullptr;
+
+    if (have_trace) {
+        std::vector<UdsTracePair> pairs;
+        std::string               err;
+        if (!parse_uds_trace(*trace_path, pairs, err)) {
+            std::fputs(err.c_str(), stderr);
+            std::fputc('\n', stderr);
+            return 1;
+        }
+        if (auto s = mock.open({}); !s.has_value()) {
+            std::fprintf(stderr, "rom-pull: mock open failed: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        for (auto &p : pairs) {
+            mock.expect_send_recv(std::move(p.request), std::move(p.response));
+        }
+        chosen = &mock;
+    } else {
+        // --transport path. parse kind, build a TransportSpec, ask
+        // the factory. The factory currently returns NotImplemented
+        // for every concrete kind because the platform layer isn't
+        // wired yet; surface the error verbatim so the user sees
+        // exactly what's missing.
+        auto const kind = st::transport::parse_kind(*transport_kind);
+        if (!kind.has_value()) {
+            std::fprintf(stderr,
+                         "rom-pull: --transport '%s' not recognized "
+                         "(expected one of: j2534, obdx, native).\n",
+                         transport_kind->c_str());
+            return 2;
+        }
+        st::transport::TransportSpec const spec{
+            *kind, dll_path, device_path};
+        auto t = st::transport::open_transport(spec);
+        if (!t.has_value()) {
+            std::fprintf(stderr, "rom-pull: %s\n",
+                         t.error().to_string().c_str());
+            return 1;
+        }
+        // Default LinkConfig: assume UDS-over-CAN with the standard
+        // Subaru OBD-II IDs. Once we have more transport-aware ECU
+        // detection (or `--link kline|can` + baud flags) this comes
+        // off the command line. For VB WRX this is the right shape;
+        // for VA WRX you'd use --trace today (and --link kline once
+        // K-Line is plumbed end-to-end).
+        st::transport::LinkConfig const link{
+            st::transport::LinkKind::CanIso15765,
+            500000, 0x000007E0, 0x000007E8};
+        if (auto s = (*t)->open(link); !s.has_value()) {
+            std::fprintf(stderr, "rom-pull: transport open failed: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        owned  = std::move(*t);
+        chosen = owned.get();
     }
 
-    st::transport::MockTransport mock;
-    if (auto s = mock.open({}); !s.has_value()) {
-        std::fprintf(stderr, "rom-pull: mock open failed: %s\n",
-                     s.error().to_string().c_str());
-        return 1;
-    }
-    for (auto &p : pairs) {
-        mock.expect_send_recv(std::move(p.request), std::move(p.response));
-    }
-
-    st::flash::Flasher flasher{mock};
+    st::flash::Flasher flasher{*chosen};
     auto const         r = flasher.read_full_rom(*addr, *size, max_chunk);
     if (!r.has_value()) {
         std::fprintf(stderr, "rom-pull: %s\n", r.error().to_string().c_str());
@@ -6382,7 +6465,11 @@ int cmd_rom_pull(int argc, char *argv[]) {
         return 1;
     }
 
-    if (!mock.exhausted()) {
+    // Trace-only warning: any unused trace entries indicate the
+    // captured exchange was longer than the requested read shape.
+    // For the --transport path the underlying ITransport doesn't
+    // have an "exhausted" notion, so skip the warning there.
+    if (have_trace && !mock.exhausted()) {
         std::fprintf(stderr,
                      "rom-pull: warning: %zu trace entries unused\n",
                      mock.remaining());
