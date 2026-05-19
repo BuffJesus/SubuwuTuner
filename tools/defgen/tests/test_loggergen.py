@@ -248,6 +248,26 @@ class LoggergenEcuparamTest(unittest.TestCase):
             self.assertEqual(r["data_type"], "uint16_be")
             self.assertEqual(r["ssm_address"], "0x00020200")
 
+    def test_comma_separated_ecuid_fans_out(self):
+        # RomRaider logger XML v370 (2021-11) packs sibling ECU IDs into a
+        # single comma-delimited list per <ecu>. Same fanout semantics as
+        # the legacy whitespace form.
+        xml = _wrap_ecuparams('''
+          <ecuparam id="E3" name="A/F Sensor #1">
+            <ecu id="AAA111,BBB222,CCC333">
+              <address length="2">0x020080</address>
+            </ecu>
+            <conversions>
+              <conversion units="AFR" expr="x*14.7/128" format="0.00"/>
+            </conversions>
+          </ecuparam>
+        ''')
+        _, per_ecuid, _ = loggergen.parse_ecuparams(xml)
+        self.assertEqual(set(per_ecuid.keys()), {"AAA111", "BBB222", "CCC333"})
+        for ecuid in ("AAA111", "BBB222", "CCC333"):
+            r = per_ecuid[ecuid][0]
+            self.assertEqual(r["ssm_address"], "0x00020080")
+
 
 if __name__ == "__main__":
     unittest.main()

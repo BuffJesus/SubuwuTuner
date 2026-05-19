@@ -34,6 +34,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -264,8 +265,7 @@ def parse_ecuparams(text: str) -> tuple[list[defgen.ScalingRecord],
                 "unit":        scaling.unit,
                 "default_log": False,
             }
-            for ecuid in (ecu.get("id") or "").split():
-                ecuid = ecuid.strip()
+            for ecuid in re.split(r"[\s,]+", (ecu.get("id") or "").strip()):
                 if not ecuid:
                     continue
                 per_ecuid.setdefault(ecuid, []).append(pid_record)
