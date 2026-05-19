@@ -109,19 +109,62 @@ def _strip_defgen_header(text: str) -> str:
     return "".join(lines[cutoff:])
 
 
-def _swap_field(text: str, key: str, new_value: str) -> tuple[str, bool]:
-    """Replace the first `key = "<anything>"` line. Returns (text, ok)."""
-    # Anchor on start-of-line + spaces around `=`. Tolerates the aligned-
-    # equals style defgen emits (`id             = "..."`).
+def _section_slice(text: str, section: str) -> tuple[int, int] | None:
+    """Find the byte range of one TOML section in `text`.
+
+    `section` is the literal header line, e.g. `[pack]` or
+    `[[identification]]`. Returns (start, end) where `start` is the
+    char index of the first line after the header and `end` is the
+    char index of the next `[`-prefixed header (or len(text) if none).
+    Returns None if the header isn't found.
+
+    Bounded by section headers rather than blank lines so that an
+    inner-block field (like `[[identification]].name`) won't be
+    confused with the same field name in a later block (like
+    `[[table]].name`).
+    """
+    header_pat = rf'^{re.escape(section)}\s*$'
+    m = re.search(header_pat, text, flags=re.MULTILINE)
+    if not m:
+        return None
+    start = m.end()
+    next_section = re.search(r'^\[', text[start:], flags=re.MULTILINE)
+    end = start + next_section.start() if next_section else len(text)
+    return start, end
+
+
+def _swap_field(text: str, key: str, new_value: str, *,
+                section: str | None = None) -> tuple[str, bool]:
+    """Replace the first `key = "<anything>"` line. Returns (text, ok).
+
+    When `section` is given, the swap is restricted to within that
+    TOML section's slice — necessary to disambiguate keys that recur
+    across sections (e.g. `id` appears in [pack], every [[scaling]],
+    and every [[table]]; without scoping the first hit could land
+    anywhere).
+    """
     pattern = rf'^(\s*{re.escape(key)}\s*=\s*)"[^"]*"'
-    new_text, n = re.subn(pattern, rf'\1"{new_value}"', text, count=1,
+    replacement = rf'\1"{new_value}"'
+
+    if section is None:
+        new_text, n = re.subn(pattern, replacement, text, count=1,
+                              flags=re.MULTILINE)
+        return new_text, (n == 1)
+
+    slc = _section_slice(text, section)
+    if slc is None:
+        return text, False
+    start, end = slc
+    before, body, after = text[:start], text[start:end], text[end:]
+    new_body, n = re.subn(pattern, replacement, body, count=1,
                           flags=re.MULTILINE)
-    return new_text, (n == 1)
+    return (before + new_body + after), (n == 1)
 
 
-def _clear_field(text: str, key: str) -> tuple[str, bool]:
+def _clear_field(text: str, key: str, *,
+                 section: str | None = None) -> tuple[str, bool]:
     """Set `key = ""`. Same anchoring rules as _swap_field."""
-    return _swap_field(text, key, "")
+    return _swap_field(text, key, "", section=section)
 
 
 def seed_pack(base_text: str,
@@ -152,20 +195,26 @@ def seed_pack(base_text: str,
     if m:
         ecu_part_hint = m.group(1)
 
-    # Swap CID-bearing fields. Each must succeed or we abort (the base
-    # is malformed for our purposes).
+    # Swap CID-bearing fields, each restricted to its own TOML
+    # section so that `id` in [[scaling]] / [[table]] blocks isn't
+    # touched. Every swap must succeed or we abort — silently missing
+    # any one would produce a seed with a mixed-CID identity.
     swaps = [
-        ("id",          new_cid_lower),
-        ("display_name", new_cid_upper),
-        ("name",        new_cid_upper),
-        ("cid_match",   new_cid_upper),
+        ("[pack]",             "id",           new_cid_lower),
+        ("[pack]",             "display_name", new_cid_upper),
+        ("[[identification]]", "name",         new_cid_upper),
+        ("[[identification]]", "cid_match",    new_cid_upper),
     ]
-    for key, value in swaps:
-        body, ok = _swap_field(body, key, value)
+    for section, key, value in swaps:
+        body, ok = _swap_field(body, key, value, section=section)
         if not ok:
-            raise ValueError(f"base pack missing required field: {key}")
+            raise ValueError(
+                f"base pack missing required field: {key} (in {section})"
+            )
 
-    body, _ = _clear_field(body, "ecu_part")
+    # ecu_part absence is fine — the validator will populate it from
+    # the target ROM's ecuid bytes anyway.
+    body, _ = _clear_field(body, "ecu_part", section="[[identification]]")
 
     # Strip the base's per-CID ecuparams from the includes list — those
     # encode SSM extended-PID addresses specific to the base CID, and

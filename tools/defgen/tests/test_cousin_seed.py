@@ -133,12 +133,36 @@ class CousinSeedSwapTest(unittest.TestCase):
         # hint for the validator.
         self.assertIn("5204784007", seeded)
 
+    def test_scaling_id_not_touched(self):
+        # Regression: the previous unscoped _swap_field would land
+        # `id = "..."` on the first match anywhere in the file. With
+        # section scoping, only [pack].id is swapped — [[scaling]].id
+        # stays exactly as authored.
+        seeded = cousin_seed.seed_pack(
+            _BASE_PACK, "A2TB100Z",
+            base_rel="definitions/legacy/a2tb100k.toml")
+        scaling_section = seeded.split("[[scaling]]", 1)[1]
+        self.assertIn('id        = "boost_target_bar"', scaling_section)
+        self.assertNotIn('id        = "a2tb100z"', scaling_section)
+
     def test_missing_required_field_raises(self):
-        bad = _BASE_PACK.replace('cid_match   = "A2TB100K"', '')
-        with self.assertRaises(ValueError) as cm:
-            cousin_seed.seed_pack(bad, "A2TB100Z",
-                                  base_rel="definitions/legacy/a2tb100k.toml")
-        self.assertIn("cid_match", str(cm.exception))
+        # Each of the four CID-bearing field swaps must abort if the
+        # base pack lacks the source line — silently skipping any one
+        # of them would produce a seed with mixed-CID identity.
+        line_to_remove = {
+            "id":           'id             = "a2tb100k"',
+            "display_name": 'display_name   = "A2TB100K"',
+            "name":         'name        = "A2TB100K"',
+            "cid_match":    'cid_match   = "A2TB100K"',
+        }
+        for field, line in line_to_remove.items():
+            with self.subTest(field=field):
+                bad = _BASE_PACK.replace(line, '')
+                with self.assertRaises(ValueError) as cm:
+                    cousin_seed.seed_pack(
+                        bad, "A2TB100Z",
+                        base_rel="definitions/legacy/a2tb100k.toml")
+                self.assertIn(field, str(cm.exception))
 
 
 if __name__ == "__main__":
