@@ -167,13 +167,23 @@ CONFIRMED = [
      "roms_extracted/decrypted/LF79/LF79100P.bin",
      "lf79100p_ori.hex", 1024, 0, 2_098_176),
 
-    # EP5L000J  -> unlocks EP5L00 family (19 CIDs, largest unsolved 1MB)
-    # URL: https://ecutune.shop/downloads/ep5l000j-91363e5007-stage1-tgv_off-chk-ok/
-    #  or: https://ecutune.shop/downloads/ep5l000j-91363e5007-stage1-e2-egr_off-chk-ok/
-    # Drop the stock bin at: roms_extracted/decrypted/EP5L/EP5L000J.bin
-    ("EP5L000_family",
-     "roms_extracted/decrypted/EP5L/EP5L000J.bin",
-     "ep5l000j_ori.hex", 1024, 0, 1_049_600),
+    # NOTE 2026-05-19: EP5L000J was the original intended buy but its
+    # cipher (ep5l000j_ori.hex) is NOT in the EpifanSoft bucket — the
+    # bucket has ep5l000{a,b,c,d,f,g,h,i,m,n,o,p,q,r,w} only. The J
+    # variant is missing. EP5L000J plaintext is on disk for reference
+    # but doesn't recover a keystream.
+    # ("EP5L000J_family",
+    #  "roms_extracted/decrypted/EP5L/EP5L000J.bin",
+    #  "ep5l000j_ori.hex", 1024, 0, 1_049_600),
+    #
+    # Refund/replacement: EP5L000W is the right buy. It's in BOTH the
+    # cipher bucket (ep5l000w_ori.hex) AND the ECUTune catalog
+    # (https://ecutune.shop/downloads/ep5l000w-91063d4007-stage1-e2-chk-ok/).
+    # When that arrives, extract _ori and drop at:
+    #   roms_extracted/decrypted/EP5L/EP5L000W.bin
+    ("EP5L000W_family",
+     "roms_extracted/decrypted/EP5L/EP5L000W.bin",
+     "ep5l000w_ori.hex", 1024, 0, 1_049_600),
 ]
 
 # Buckets with no plaintext anchor at all — Patch B targets these.
@@ -204,8 +214,21 @@ def looks_like_rom(b: bytes, sample: int = 65536) -> tuple[bool, dict]:
 
 
 def cid_readable(b: bytes, cid: str) -> bool:
-    """Patch A's strict gate: cid string appears verbatim in the bytes."""
-    return cid.upper().encode("ascii") in b
+    """Patch A's strict gate: CID string appears verbatim in the bytes.
+
+    Some Subaru CIDs use a mixed-case form in the binary (e.g. EP5L000j,
+    LF9D012h — lowercase trailing letter), while the cipher filename
+    and pack metadata use all-uppercase. Try both forms.
+    """
+    upper = cid.upper().encode("ascii")
+    if upper in b:
+        return True
+    # Mixed-case variant: last char lowercased.
+    if len(cid) >= 2:
+        mixed = (cid[:-1].upper() + cid[-1].lower()).encode("ascii")
+        if mixed in b:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
