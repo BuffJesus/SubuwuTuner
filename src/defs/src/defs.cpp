@@ -159,6 +159,7 @@ Result<Identification> parse_identification(toml::table const &t) {
     id.cid_length  = static_cast<std::size_t>(optional_value<std::int64_t>(t, "cid_length", 0));
     id.cid_match   = optional_value<std::string>(t, "cid_match", {});
     id.ecu_part    = optional_value<std::string>(t, "ecu_part", {});
+    id.cid_scan    = optional_value<bool>(t, "cid_scan", false);
     if (id.cid_match.empty()) {
         return failure(ErrorCode::ParseError,
                        "[[identification]] cid_match is required (name: " + id.name + ")");
@@ -1143,7 +1144,10 @@ Status Definition::validate() const {
         }
     }
     for (auto const &id : ids_) {
-        if (rom_size != 0 && !fits(id.cid_address, id.cid_length)) {
+        // cid_scan mode searches the whole ROM, so cid_address is
+        // ignored and the fixed-offset bounds check doesn't apply.
+        if (!id.cid_scan && rom_size != 0
+            && !fits(id.cid_address, id.cid_length)) {
             note("identification '" + id.name + "' cid_address extends past rom_size_bytes");
         }
     }
@@ -1499,6 +1503,22 @@ Result<Definition::TableDiff> Definition::diff_table(Rom const &  a,
 
 std::optional<std::string> Definition::matches(Rom const &rom) const {
     for (auto const &id : ids_) {
+        if (id.cid_scan) {
+            // Scan mode: search the ROM for any occurrence of cid_match.
+            // Used by FA-DIT WRX firmware where the CID descriptor lives
+            // at a variable per-firmware offset rather than a fixed
+            // 0x2000-style address. The first occurrence anywhere in
+            // the ROM bytes counts as a match.
+            auto const haystack = rom.slice(0, rom.size());
+            if (!haystack.has_value() || id.cid_match.empty()) continue;
+            std::string_view const hay{reinterpret_cast<char const *>(
+                                            haystack->data()),
+                                       haystack->size()};
+            if (hay.find(id.cid_match) != std::string_view::npos) {
+                return id.name;
+            }
+            continue;
+        }
         auto const slice = rom.slice(id.cid_address, id.cid_length);
         if (!slice.has_value()) {
             continue;

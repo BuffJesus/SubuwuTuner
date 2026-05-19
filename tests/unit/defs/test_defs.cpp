@@ -298,6 +298,98 @@ TEST_CASE("Definition::matches returns nullopt on no match", "[defs][matches]") 
     REQUIRE_FALSE(result.has_value());
 }
 
+TEST_CASE("Definition::matches with cid_scan finds CID at variable offset",
+          "[defs][matches][cid_scan]") {
+    // FA-DIT WRX ROMs embed the CID in a descriptor block at a
+    // per-firmware-variable offset (e.g. 0x2F7DD for LF75300E,
+    // 0x38035 for LF9C000C). cid_scan=true tells the loader to scan
+    // for the cid_match string anywhere in the ROM bytes instead of
+    // looking at the fixed cid_address.
+    constexpr std::string_view kPackScan = R"toml(
+[pack]
+id         = "lf75300e"
+endianness = "big"
+
+[[identification]]
+name      = "LF75300E (scan)"
+cid_match = "LF75300E"
+cid_scan  = true
+)toml";
+    auto const dr = st::Definition::from_toml_string(kPackScan);
+    REQUIRE(dr.has_value());
+
+    // Plant the CID at a non-zero, non-0x2000 offset.
+    constexpr std::size_t kPlantedOffset = 0x2F7DD;
+    std::vector<std::uint8_t> bytes(0x40000, 0xFF);
+    std::string const         cid = "LF75300E";
+    for (std::size_t i = 0; i < cid.size(); ++i) {
+        bytes[kPlantedOffset + i] = static_cast<std::uint8_t>(cid[i]);
+    }
+    auto const rom    = st::Rom::from_bytes(std::move(bytes));
+    auto const result = dr->matches(rom);
+    REQUIRE(result.has_value());
+    REQUIRE(*result == "LF75300E (scan)");
+}
+
+TEST_CASE("Definition::matches with cid_scan=true ignores cid_address",
+          "[defs][matches][cid_scan]") {
+    // cid_address is set to a value that points at non-matching bytes;
+    // scan mode should still find the CID at a different location.
+    constexpr std::string_view kPackScan = R"toml(
+[pack]
+id         = "scan_ignores_addr"
+endianness = "big"
+
+[[identification]]
+name        = "scan-ignores-addr"
+cid_address = 0x100
+cid_match   = "HELLO123"
+cid_scan    = true
+)toml";
+    auto const dr = st::Definition::from_toml_string(kPackScan);
+    REQUIRE(dr.has_value());
+
+    std::vector<std::uint8_t> bytes(0x4000, 0xFF);
+    // Plant "HELLO123" away from 0x100, somewhere deep:
+    std::string const cid = "HELLO123";
+    for (std::size_t i = 0; i < cid.size(); ++i) {
+        bytes[0x2500 + i] = static_cast<std::uint8_t>(cid[i]);
+    }
+    auto const rom    = st::Rom::from_bytes(std::move(bytes));
+    auto const result = dr->matches(rom);
+    REQUIRE(result.has_value());
+    REQUIRE(*result == "scan-ignores-addr");
+}
+
+TEST_CASE("Definition::matches with cid_scan=false uses fixed offset (regression)",
+          "[defs][matches][cid_scan]") {
+    // Existing behavior: without cid_scan, the loader compares
+    // `cid_length` bytes at `cid_address`. Confirm a planted CID at
+    // the WRONG offset doesn't match.
+    constexpr std::string_view kPack = R"toml(
+[pack]
+id         = "fixed_offset"
+endianness = "big"
+
+[[identification]]
+name        = "fixed"
+cid_address = 0x2000
+cid_match   = "FIXED123"
+)toml";
+    auto const dr = st::Definition::from_toml_string(kPack);
+    REQUIRE(dr.has_value());
+
+    std::vector<std::uint8_t> bytes(0x4000, 0xFF);
+    // Plant CID at offset 0x2500 (wrong place under fixed mode):
+    std::string const cid = "FIXED123";
+    for (std::size_t i = 0; i < cid.size(); ++i) {
+        bytes[0x2500 + i] = static_cast<std::uint8_t>(cid[i]);
+    }
+    auto const rom    = st::Rom::from_bytes(std::move(bytes));
+    auto const result = dr->matches(rom);
+    REQUIRE_FALSE(result.has_value());
+}
+
 TEST_CASE("read_typed handles every supported DataType", "[defs][read_typed]") {
     // Bytes laid out big-endian: 0x12, 0x34, 0x56, 0x78
     auto const rom = st::Rom::from_bytes({0x12, 0x34, 0x56, 0x78});

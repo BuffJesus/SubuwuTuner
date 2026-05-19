@@ -48,12 +48,24 @@ enum class DataType {
 
 // How to find the calibration ID inside a ROM and which CID strings this pack
 // claims to match.
+//
+// Two location modes:
+// - **Fixed-offset** (default): compare `cid_length` bytes at `cid_address`
+//   against `cid_match`. EJ-era Subaru ROMs put the CID at a stable offset
+//   (typically 0x2000) and this is the natural shape.
+// - **Scan** (`cid_scan = true`): search the entire ROM for an occurrence
+//   of `cid_match` (as raw bytes). FA-DIT WRX / VB ROMs embed the CID in a
+//   descriptor block at a variable per-firmware offset; `0x2F7DD` for one
+//   `LF75300E` plaintext, `0x38035` for an `LF9C000C` plaintext, etc. — same
+//   surrounding shape but no fixed address. When `cid_scan` is true,
+//   `cid_address` is ignored.
 struct Identification {
     std::string name;
     std::size_t cid_address{};
     std::size_t cid_length{};
     std::string cid_match;
     std::string ecu_part;
+    bool        cid_scan{false};
 };
 
 // Pack-level metadata.
