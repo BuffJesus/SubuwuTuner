@@ -60,6 +60,30 @@ must hand-edit the resulting `[[scaling]]` entry to the correct
 `formula = "piecewise"` form (see
 [`docs/11-definition-format.md`](../../docs/11-definition-format.md)).
 
+## Cousin-pack seeding
+
+For CIDs the community has stock bins for but no RomRaider XML — typically
+post-2009 firmware revisions of a family already in `definitions/` — use
+`cousin_seed.py` to clone an existing sibling pack as an unverified
+starting point:
+
+```bash
+python cousin_seed.py --base definitions/legacy/a2tb100k.toml \
+                      --cid A2TB100Z \
+                      -o definitions/legacy/a2tb100z.toml
+```
+
+The output inherits every table address and scaling from the base pack
+and replaces only the CID-bearing fields. It carries a prominent
+`# COUSIN-SEED pack` header with the validation checklist needed before
+the seed graduates to a verified definition (rom-info CID match,
+representative `dump-table` sanity check, `rom_diff_localize.py` against
+stock/tuned of the target). `ecu_part` is cleared in the
+`[[identification]]` block (the validator fills it from the target ROM's
+ecuid bytes); the base's per-CID `../ecuparams/*.toml` is stripped from
+the includes list because those SSM extended-PID addresses are
+CID-specific.
+
 ## Testing
 
 ```bash
