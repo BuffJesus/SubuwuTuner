@@ -101,6 +101,13 @@ implementation waits on a known-good stock dump for byte validation
 Lives in `pack.toml` alongside `[pack]` (or in any other `*.toml` in the
 pack dir — the loader merges everything).
 
+### Fixed-offset mode (default — EJ-era convention)
+
+EJ-engine Subaru ROMs (Impreza, Forester, Legacy, Outback, Baja, Tribeca,
+Exiga) put the calibration ID at a stable offset, typically `0x00002000`.
+For those packs the natural shape is a byte-exact compare at a known
+address:
+
 ```toml
 [[identification]]
 # How to tell whether a given ROM matches this pack.
@@ -111,10 +118,36 @@ cid_match   = "AS80U   "          # ASCII, exact match (trailing spaces ok)
 ecu_part    = "22765-XXXXX"       # optional, informational
 ```
 
+### Scan mode (`cid_scan = true` — FA-DIT WRX / VB convention)
+
+FA-DIT WRX firmware (`LF*`, `LV*`, `LH*`, `AF*`, `AE*` prefix CIDs) embeds
+the CID in a descriptor block at a **variable per-firmware offset**.
+Two empirical data points from clean plaintext dumps: `LF75300E` lives at
+`0x0002F7DD`, `LF9C000C` at `0x00038035`. Same surrounding shape
+(`\x00\x00 [letter] \x00 <CID 8 bytes> \x00\x00\x00\x00 2.0 [engine]`)
+but no fixed address. Hardcoding `cid_address` per CID would mean a
+fresh research step per firmware revision.
+
+For those packs, set `cid_scan = true` instead. The loader searches the
+entire ROM for an occurrence of `cid_match` and reports the discovered
+offset back via `Definition::match_info` (surfaced by `rom-info --def`
+as `Match: LF75300E @ 0x0002F7DD (scanned)`).
+
+```toml
+[[identification]]
+name      = "LF75300E (FA-DIT WRX 2.0)"
+cid_match = "LF75300E"
+cid_scan  = true             # ignore cid_address; scan the whole ROM
+ecu_part  = "22765-AA240"    # optional, informational
+```
+
+`cid_address` is ignored when `cid_scan = true`. `cid_length` defaults
+to `len(cid_match)` if omitted.
+
 Multiple `[[identification]]` blocks let one pack cover several near-identical
 CIDs (e.g. the same model year in different markets). The CLI's `rom-info`
-prints the first matching CID; `rom-identify --pack-dir <dir>` scans a
-pack collection for matches.
+prints the first matching CID with its discovered offset; `rom-identify
+--pack-dir <dir>` scans a pack collection for matches.
 
 ## `axes.toml` — shared axis definitions
 
