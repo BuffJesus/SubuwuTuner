@@ -77,9 +77,11 @@ def patch_pack(text: str, cid: str, xml_path: Path) -> str:
     fam = cid[:4].upper()
     rom_size = ROM_SIZE.get(fam, 0)
 
-    # 1. platform = subaru.impreza
+    # 1. platform = subaru.impreza (handles both LF VA -> "subaru" and
+    # LHB VB -> "subaru.wrx" emitted by defgen; both become impreza
+    # per the existing Path B convention)
     text = re.sub(
-        r'^(platform\s*=\s*)"subaru"',
+        r'^(platform\s*=\s*)"subaru(\.wrx)?"',
         r'\1"subaru.impreza"',
         text, count=1, flags=re.MULTILINE)
 
@@ -140,24 +142,25 @@ def main():
             n_skip += 1
             continue
 
-        # Run defgen
-        r = subprocess.run(
-            ["py", str(DEFGEN), str(xml), "--rom-id", cid_norm],
+        # Run defgen with -o to a tmp file. defgen returns rc=1 on
+        # certain warnings (e.g. axis storagetype warnings on FA-DIT
+        # paks) but still writes valid TOML. Use the file's existence
+        # + size + presence of [pack] header as the success criterion,
+        # not the exit code.
+        import tempfile
+        tmp = Path(tempfile.gettempdir()) / f"defgen_{cid_norm}.toml"
+        if tmp.exists():
+            tmp.unlink()
+        subprocess.run(
+            ["py", str(DEFGEN), str(xml), "-o", str(tmp)],
             capture_output=True, text=True)
-        if r.returncode != 0:
-            print(f"  FAIL {cid}: defgen rc={r.returncode}: {r.stderr.strip()[:150]}", file=sys.stderr)
+        if not tmp.exists() or tmp.stat().st_size < 256:
+            print(f"  FAIL {cid}: no output file from defgen", file=sys.stderr)
             n_fail += 1
             continue
-        text = r.stdout
-        if not text or "[pack]" not in text:
-            # Try without --rom-id (XML may have a single rom)
-            r = subprocess.run(
-                ["py", str(DEFGEN), str(xml)],
-                capture_output=True, text=True)
-            text = r.stdout
-
-        if not text or "[pack]" not in text:
-            print(f"  FAIL {cid}: no [pack] block in output", file=sys.stderr)
+        text = tmp.read_text(encoding="utf-8")
+        if "[pack]" not in text:
+            print(f"  FAIL {cid}: defgen output lacks [pack]", file=sys.stderr)
             n_fail += 1
             continue
 
