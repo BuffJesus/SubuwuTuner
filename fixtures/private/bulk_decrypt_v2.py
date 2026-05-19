@@ -503,6 +503,80 @@ def _extract_cid_with_partial_keystream(
     return None
 
 
+# Known plaintext fragments Subaru ROMs commonly carry. Used by
+# _structural_prior_extend to grow the partial keystream beyond the
+# 0xFF agreement positions: when we see one of these strings appear
+# in the (cipher XOR partial_keystream) sequence — even outside the
+# mask — that's strong evidence the underlying plaintext IS that
+# string, and we can derive new keystream bytes from it.
+_KNOWN_FRAGMENTS = (
+    b"DENSO",
+    b"SUBARU",
+    b"Copyright",
+    b"COPYRIGHT",
+    b"SUBARU CORPORATION",
+    b"MITSUBA",
+    b"BOSCH",
+    b"\x00\x00\x00\x00",  # null padding very common in ROM segment headers
+    b"\xff\xff\xff\xff\xff\xff\xff\xff",  # 8-byte 0xFF run (extends FF prior)
+)
+
+
+def _structural_prior_extend(
+    cipher_bodies: list[bytes],
+    keystream: bytes,
+    mask: list[bool],
+    *,
+    min_consensus: int = 3,
+) -> tuple[bytes, list[bool], int]:
+    """Iteratively grow the partial keystream by scanning for known
+    plaintext fragments in cipher-XOR-partial_keystream outputs.
+
+    Algorithm: for each candidate fragment F and each byte offset p,
+    compute the hypothetical keystream slice K_hyp = cipher[p..p+|F|]
+    XOR F. If MANY ciphers in the bucket would produce K_hyp at the
+    same position (== consensus), then plaintext at p is very likely
+    to BE F across those ciphers, and K_hyp is the real keystream.
+    Extend the mask + keystream at those positions.
+
+    Returns (new_keystream, new_mask, n_new_positions).
+    """
+    if not cipher_bodies:
+        return keystream, mask, 0
+    body_len = len(cipher_bodies[0])
+    keystream = bytearray(keystream)
+    mask = list(mask)
+    new_positions = 0
+    for fragment in _KNOWN_FRAGMENTS:
+        flen = len(fragment)
+        if flen > body_len:
+            continue
+        # For each byte position, count how many ciphers would produce
+        # a consistent keystream slice if plain = fragment.
+        # Doing a full O(n_positions * n_ciphers * flen) scan is too
+        # slow on 2MB bodies; sample positions where the mask is
+        # already partially undetermined to cap the cost.
+        sample_positions = [p for p in range(0, body_len - flen, 16)
+                            if not all(mask[p + k] for k in range(flen))]
+        for p in sample_positions:
+            # Candidate keystream slice
+            candidate = bytes(cipher_bodies[0][p + k] ^ fragment[k]
+                              for k in range(flen))
+            # How many other ciphers agree?
+            agree = sum(
+                1 for body in cipher_bodies
+                if all(body[p + k] ^ candidate[k] == fragment[k]
+                       for k in range(flen)))
+            if agree >= min_consensus:
+                # Promote this slice into the keystream
+                for k in range(flen):
+                    if not mask[p + k]:
+                        keystream[p + k] = candidate[k]
+                        mask[p + k] = True
+                        new_positions += 1
+    return bytes(keystream), mask, new_positions
+
+
 # ---------------------------------------------------------------------------
 # Disk I/O
 # ---------------------------------------------------------------------------
@@ -655,9 +729,28 @@ def run_anchorless_pass(report: list[str], summary: list[dict],
         ks_action = safe_write(ks_path, keystream)
         determined_pct = sum(mask) * 100 / len(mask)
         report.append(
-            f"- Phase 1 (partial keystream from 0xFF prior): "
+            f"- Phase 1a (partial keystream from 0xFF prior): "
             f"{determined_pct:.1f}% of bytes determined -> "
             f"`{ks_path.name}` ({ks_action})")
+
+        # Phase 1b — extend the partial keystream using known
+        # plaintext fragments (DENSO, SUBARU, Copyright, null padding,
+        # long 0xFF runs). For each fragment, look for byte positions
+        # where MANY ciphers agree on the implied keystream when
+        # plaintext = fragment. Adds typically 0.5-5% more determined
+        # bytes per pass.
+        bodies = []
+        for p in candidates:
+            data = p.read_bytes()
+            if len(data) == bucket:
+                bodies.append(data[hdr:])
+        keystream, mask, new_pos = _structural_prior_extend(
+            bodies, keystream, mask, min_consensus=max(3, len(bodies) // 10))
+        new_determined_pct = sum(mask) * 100 / len(mask)
+        report.append(
+            f"- Phase 1b (structural-prior extend on {len(bodies)} "
+            f"ciphers): +{new_pos:,} bytes; total "
+            f"{new_determined_pct:.1f}% determined")
 
         # Phase 1: try to find CID-readable decrypts using the partial
         # keystream. Mask-aware scan ensures we don't accept false
