@@ -52,14 +52,14 @@ data_type = "uint8"
 
 
 [[scaling]]
-id        = "bar_x_37_255_14_50377"
+id        = "kpa_x"
 formula   = "linear"
-factor    = 0.01000416024355642
+factor    = 1.0
 offset    = 0.0
-unit      = "bar"
-min       = -1.2
-max       = 2.8
-precision = 3
+unit      = "kPa"
+min       = -120.0
+max       = 280.0
+precision = 0
 data_type = "uint8"
 
 
@@ -76,13 +76,13 @@ data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "kph_x"
+id        = "km_h_x"
 formula   = "linear"
 factor    = 1.0
 offset    = 0.0
-unit      = "kph"
+unit      = "km/h"
 min       = 0.0
-max       = 0.0
+max       = 300.0
 precision = 0
 data_type = "uint8"
 
@@ -160,26 +160,26 @@ data_type = "uint8"
 
 
 [[scaling]]
-id        = "bar_x_128_37_255_14_50377"
+id        = "kpa_x_128"
 formula   = "linear"
-factor    = 0.01000416024355642
-offset    = -1.2805325111752217
-unit      = "bar"
-min       = -2.0
-max       = 2.0
-precision = 3
+factor    = 1.0
+offset    = -128.0
+unit      = "kPa"
+min       = -130.0
+max       = 130.0
+precision = 0
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "bar_x_128_35_10000_14_50377"
+id        = "kpa_x_128_40"
 formula   = "linear"
-factor    = 0.00024131656803713793
-offset    = -0.030888520708753656
-unit      = "bar"
-min       = 0.0
-max       = 0.0
-precision = 3
+factor    = 0.025
+offset    = -3.2
+unit      = "kPa"
+min       = -5.0
+max       = 5.0
+precision = 2
 data_type = "uint8"
 
 
@@ -239,19 +239,19 @@ offset    = -50.0
 unit      = "degrees"
 min       = 0.0
 max       = 50.0
-precision = 2
+precision = 0
 data_type = "uint8"
 
 
 [[scaling]]
 id        = "ma_x_32"
 formula   = "linear"
-factor    = 0.03125
+factor    = 32.0
 offset    = 0.0
 unit      = "mA"
 min       = 0.0
 max       = 0.0
-precision = 2
+precision = 0
 data_type = "uint8"
 
 
@@ -268,11 +268,11 @@ data_type = "uint8"
 
 
 [[scaling]]
-id        = "ohms_x"
+id        = "ohm_x"
 formula   = "linear"
 factor    = 1.0
 offset    = 0.0
-unit      = "ohms"
+unit      = "ohm"
 min       = 0.0
 max       = 0.0
 precision = 0
@@ -280,11 +280,11 @@ data_type = "uint8"
 
 
 [[scaling]]
-id        = "afr_x_128_14_7"
+id        = "lambda_x_128"
 formula   = "linear"
-factor    = 0.11484375
+factor    = 0.0078125
 offset    = 0.0
-unit      = "AFR"
+unit      = "Lambda"
 min       = 0.0
 max       = 0.0
 precision = 2
@@ -328,14 +328,14 @@ data_type = "uint8"
 
 
 [[scaling]]
-id        = "bar_x_25_10"
+id        = "kpa_x_25_1000"
 formula   = "linear"
-factor    = 0.4
+factor    = 40.0
 offset    = 0.0
-unit      = "bar"
+unit      = "kPa"
 min       = 0.0
 max       = 0.0
-precision = 3
+precision = 2
 data_type = "uint8"
 
 
@@ -384,6 +384,582 @@ unit      = "degrees"
 min       = -12.0
 max       = 8.0
 precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "index_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "index"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "v_x_45"
+formula   = "linear"
+factor    = 0.022222222222222223
+offset    = 0.0
+unit      = "V"
+min       = 0.0
+max       = 0.0
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "rpm_x_32"
+formula   = "linear"
+factor    = 32.0
+offset    = 0.0
+unit      = "rpm"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "c_x_50"
+formula   = "linear"
+factor    = 1.0
+offset    = -50.0
+unit      = "C"
+min       = -50.0
+max       = 205.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "v_x_51"
+formula   = "linear"
+factor    = 0.0196078431372549
+offset    = 0.0
+unit      = "V"
+min       = 0.0
+max       = 0.0
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "a_x_32"
+formula   = "linear"
+factor    = 0.03125
+offset    = 0.0
+unit      = "A"
+min       = 0.0
+max       = 0.0
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "c_x_5_200"
+formula   = "linear"
+factor    = 5.0
+offset    = 200.0
+unit      = "C"
+min       = 200.0
+max       = 1500.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "x_64_128_10"
+formula   = "linear"
+factor    = 0.078125
+offset    = -5.0
+unit      = "%"
+min       = 0.0
+max       = 0.0
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "x_128_128_100"
+formula   = "linear"
+factor    = 0.78125
+offset    = -100.0
+unit      = "%"
+min       = 0.0
+max       = 0.0
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "ohm_x_4_2"
+formula   = "linear"
+factor    = 2.0
+offset    = 0.0
+unit      = "ohm"
+min       = 0.0
+max       = 0.0
+precision = 1
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "km_x_2"
+formula   = "linear"
+factor    = 2.0
+offset    = 0.0
+unit      = "km"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "mpa_x_100"
+formula   = "linear"
+factor    = 0.01
+offset    = 0.0
+unit      = "MPa"
+min       = 0.0
+max       = 0.0
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "x_255_100"
+formula   = "linear"
+factor    = 0.39215686274509803
+offset    = 0.0
+unit      = "%"
+min       = 0.0
+max       = 0.0
+precision = 1
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "raw_ecu_value_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "raw ecu value"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "a_x_255"
+formula   = "linear"
+factor    = 0.00392156862745098
+offset    = 0.0
+unit      = "A"
+min       = 0.0
+max       = 0.0
+precision = 4
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "kpa_x_10"
+formula   = "linear"
+factor    = 10.0
+offset    = 0.0
+unit      = "kPa"
+min       = 0.0
+max       = 2600.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "degrees_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "degrees"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "degrees_x_16"
+formula   = "linear"
+factor    = 0.0625
+offset    = 0.0
+unit      = "degrees"
+min       = 0.0
+max       = 0.0
+precision = 1
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "kpa_x_128_20"
+formula   = "linear"
+factor    = 0.05
+offset    = -6.4
+unit      = "kPa"
+min       = 0.0
+max       = 0.0
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "ca_x_5_15"
+formula   = "linear"
+factor    = 0.2
+offset    = -15.0
+unit      = "°CA"
+min       = 0.0
+max       = 0.0
+precision = 1
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "mm_st_x_256"
+formula   = "linear"
+factor    = 0.00390625
+offset    = 0.0
+unit      = "mm³/st"
+min       = 0.0
+max       = 0.0
+precision = 4
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "count_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "count"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "mg_cyl_x_10"
+formula   = "linear"
+factor    = 10.0
+offset    = 0.0
+unit      = "mg/cyl"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "mpa_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "MPa"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "x_128"
+formula   = "linear"
+factor    = 1.0
+offset    = -128.0
+unit      = "%"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "a_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "A"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "ma_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "mA"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "degrees_s_x_0_19118"
+formula   = "linear"
+factor    = 0.19118
+offset    = 0.0
+unit      = "degrees/s"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "m_s_x_1_0862"
+formula   = "linear"
+factor    = 1.0862
+offset    = 0.0
+unit      = "m/s²"
+min       = 0.0
+max       = 0.0
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "km_x_5"
+formula   = "linear"
+factor    = 5.0
+offset    = 0.0
+unit      = "km"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "s_x_100_10"
+formula   = "linear"
+factor    = 10.0
+offset    = -1000.0
+unit      = "µs"
+min       = -1000.0
+max       = 1500.0
+precision = 1
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "a_x_128"
+formula   = "linear"
+factor    = 1.0
+offset    = -128.0
+unit      = "A"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "c_x_5_40"
+formula   = "linear"
+factor    = 5.0
+offset    = -40.0
+unit      = "C"
+min       = -40.0
+max       = 1300.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "km_h_x_230_255"
+formula   = "linear"
+factor    = 0.9019607843137255
+offset    = 0.0
+unit      = "km/h"
+min       = 0.0
+max       = 300.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "x_40_13107"
+formula   = "linear"
+factor    = 0.0030518043793392844
+offset    = 0.0
+unit      = "%"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "time_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "Time"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "km_x_100"
+formula   = "linear"
+factor    = 100.0
+offset    = 0.0
+unit      = "km"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "km_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "km"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "times_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "Times"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "s_x_128_5"
+formula   = "linear"
+factor    = 5.0
+offset    = -640.0
+unit      = "µs"
+min       = -640.0
+max       = 630.0
+precision = 1
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "ma_x_1000"
+formula   = "linear"
+factor    = 1.0
+offset    = -1000.0
+unit      = "mA"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "s_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "µs"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "mm_st_x_256_30"
+formula   = "linear"
+factor    = 0.00390625
+offset    = -30.0
+unit      = "mm³/st"
+min       = 0.0
+max       = 0.0
+precision = 4
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "ca_x_50"
+formula   = "linear"
+factor    = 0.02
+offset    = 0.0
+unit      = "°CA"
+min       = 0.0
+max       = 0.0
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "g_x_5"
+formula   = "linear"
+factor    = 5.0
+offset    = 0.0
+unit      = "g"
+min       = 0.0
+max       = 0.0
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "nm_x_50"
+formula   = "linear"
+factor    = 1.0
+offset    = -50.0
+unit      = "Nm"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "degrees_0_x"
+formula   = "linear"
+factor    = -1.0
+offset    = 0.0
+unit      = "degrees"
+min       = -5.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "rpm_x_25_3200"
+formula   = "linear"
+factor    = 25.0
+offset    = -3200.0
+unit      = "rpm"
+min       = -100.0
+max       = 300.0
+precision = 0
 data_type = "uint8"
 
 
@@ -459,8 +1035,8 @@ name        = "Manifold Absolute Pressure"
 ssm_address = 0x0000000D
 length      = 1
 data_type   = "uint8"
-scaling     = "bar_x_37_255_14_50377"
-unit        = "bar"
+scaling     = "kpa_x"
+unit        = "kPa"
 default_log = false
 
 
@@ -481,8 +1057,8 @@ name        = "Vehicle Speed"
 ssm_address = 0x00000010
 length      = 1
 data_type   = "uint8"
-scaling     = "kph_x"
-unit        = "kph"
+scaling     = "km_h_x"
+unit        = "km/h"
 default_log = false
 
 
@@ -646,8 +1222,8 @@ name        = "Atmospheric Pressure"
 ssm_address = 0x00000023
 length      = 1
 data_type   = "uint8"
-scaling     = "bar_x_37_255_14_50377"
-unit        = "bar"
+scaling     = "kpa_x"
+unit        = "kPa"
 default_log = false
 
 
@@ -657,8 +1233,8 @@ name        = "Manifold Relative Pressure"
 ssm_address = 0x00000024
 length      = 1
 data_type   = "uint8"
-scaling     = "bar_x_128_37_255_14_50377"
-unit        = "bar"
+scaling     = "kpa_x_128"
+unit        = "kPa"
 default_log = false
 
 
@@ -668,8 +1244,8 @@ name        = "Pressure Differential Sensor"
 ssm_address = 0x00000025
 length      = 1
 data_type   = "uint8"
-scaling     = "bar_x_128_37_255_14_50377"
-unit        = "bar"
+scaling     = "kpa_x_128"
+unit        = "kPa"
 default_log = false
 
 
@@ -679,8 +1255,8 @@ name        = "Fuel Tank Pressure"
 ssm_address = 0x00000026
 length      = 1
 data_type   = "uint8"
-scaling     = "bar_x_128_35_10000_14_50377"
-unit        = "bar"
+scaling     = "kpa_x_128_40"
+unit        = "kPa"
 default_log = false
 
 
@@ -998,8 +1574,8 @@ name        = "A/F Sensor #1 Resistance"
 ssm_address = 0x00000044
 length      = 1
 data_type   = "uint8"
-scaling     = "ohms_x"
-unit        = "ohms"
+scaling     = "ohm_x"
+unit        = "ohm"
 default_log = false
 
 
@@ -1009,8 +1585,8 @@ name        = "A/F Sensor #2 Resistance"
 ssm_address = 0x00000045
 length      = 1
 data_type   = "uint8"
-scaling     = "ohms_x"
-unit        = "ohms"
+scaling     = "ohm_x"
+unit        = "ohm"
 default_log = false
 
 
@@ -1020,8 +1596,8 @@ name        = "A/F Sensor #1"
 ssm_address = 0x00000046
 length      = 1
 data_type   = "uint8"
-scaling     = "afr_x_128_14_7"
-unit        = "AFR"
+scaling     = "lambda_x_128"
+unit        = "Lambda"
 default_log = false
 
 
@@ -1031,8 +1607,8 @@ name        = "A/F Sensor #2"
 ssm_address = 0x00000047
 length      = 1
 data_type   = "uint8"
-scaling     = "afr_x_128_14_7"
-unit        = "AFR"
+scaling     = "lambda_x_128"
+unit        = "Lambda"
 default_log = false
 
 
@@ -1229,8 +1805,8 @@ name        = "Brake Booster Pressure"
 ssm_address = 0x00000104
 length      = 1
 data_type   = "uint8"
-scaling     = "bar_x_37_255_14_50377"
-unit        = "bar"
+scaling     = "kpa_x"
+unit        = "kPa"
 default_log = false
 
 
@@ -1240,8 +1816,8 @@ name        = "Fuel Pressure (High)"
 ssm_address = 0x00000105
 length      = 1
 data_type   = "uint8"
-scaling     = "bar_x_25_10"
-unit        = "bar"
+scaling     = "kpa_x_25_1000"
+unit        = "kPa"
 default_log = false
 
 
@@ -1284,8 +1860,8 @@ name        = "Memorised Cruise Speed"
 ssm_address = 0x0000010A
 length      = 1
 data_type   = "uint8"
-scaling     = "kph_x"
-unit        = "kph"
+scaling     = "km_h_x"
+unit        = "km/h"
 default_log = false
 
 
@@ -1388,6 +1964,1590 @@ unit        = "degrees"
 default_log = false
 
 
+[[pid]]
+id          = "p92"
+name        = "Radiator Fan Control"
+ssm_address = 0x0000002F
+length      = 1
+data_type   = "uint8"
+scaling     = "x"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p93"
+name        = "Front Wheel Speed"
+ssm_address = 0x00000048
+length      = 1
+data_type   = "uint8"
+scaling     = "km_h_x"
+unit        = "km/h"
+default_log = false
+
+
+[[pid]]
+id          = "p94"
+name        = "ATF Temperature"
+ssm_address = 0x00000049
+length      = 1
+data_type   = "uint8"
+scaling     = "index_x"
+unit        = "index"
+default_log = false
+
+
+[[pid]]
+id          = "p95"
+name        = "Line Pressure Duty Ratio"
+ssm_address = 0x0000004B
+length      = 1
+data_type   = "uint8"
+scaling     = "x_2"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p96"
+name        = "Lock Up Duty Ratio"
+ssm_address = 0x0000004C
+length      = 1
+data_type   = "uint8"
+scaling     = "x_2"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p97"
+name        = "Transfer Duty Ratio"
+ssm_address = 0x0000004D
+length      = 1
+data_type   = "uint8"
+scaling     = "x_2"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p98"
+name        = "Throttle Sensor Voltage"
+ssm_address = 0x0000004E
+length      = 1
+data_type   = "uint8"
+scaling     = "v_x_45"
+unit        = "V"
+default_log = false
+
+
+[[pid]]
+id          = "p99"
+name        = "Turbine Revolution Speed"
+ssm_address = 0x0000004F
+length      = 1
+data_type   = "uint8"
+scaling     = "rpm_x_32"
+unit        = "rpm"
+default_log = false
+
+
+[[pid]]
+id          = "p100"
+name        = "Brake Clutch Duty Ratio"
+ssm_address = 0x00000050
+length      = 1
+data_type   = "uint8"
+scaling     = "x_2"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p101"
+name        = "Rear Wheel Speed"
+ssm_address = 0x00000051
+length      = 1
+data_type   = "uint8"
+scaling     = "km_h_x"
+unit        = "km/h"
+default_log = false
+
+
+[[pid]]
+id          = "p102"
+name        = "Manifold Pressure Sensor Voltage"
+ssm_address = 0x00000052
+length      = 1
+data_type   = "uint8"
+scaling     = "v_x_50"
+unit        = "V"
+default_log = false
+
+
+[[pid]]
+id          = "p103"
+name        = "Lateral G Sensor Voltage"
+ssm_address = 0x00000055
+length      = 1
+data_type   = "uint8"
+scaling     = "v_x_50"
+unit        = "V"
+default_log = false
+
+
+[[pid]]
+id          = "p104"
+name        = "ATF Temperature"
+ssm_address = 0x00000056
+length      = 1
+data_type   = "uint8"
+scaling     = "c_x_50"
+unit        = "C"
+default_log = false
+
+
+[[pid]]
+id          = "p105"
+name        = "Low Clutch Duty"
+ssm_address = 0x00000057
+length      = 1
+data_type   = "uint8"
+scaling     = "x_2"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p106"
+name        = "High Clutch Duty"
+ssm_address = 0x00000058
+length      = 1
+data_type   = "uint8"
+scaling     = "x_2"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p107"
+name        = "Load and Reverse Brake (L and RB) Duty"
+ssm_address = 0x00000059
+length      = 1
+data_type   = "uint8"
+scaling     = "x_2"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p108"
+name        = "ATF Temperature 2"
+ssm_address = 0x0000005A
+length      = 1
+data_type   = "uint8"
+scaling     = "c_x_50"
+unit        = "C"
+default_log = false
+
+
+[[pid]]
+id          = "p109"
+name        = "Voltage Center Differential Switch"
+ssm_address = 0x0000005B
+length      = 1
+data_type   = "uint8"
+scaling     = "v_x_51"
+unit        = "V"
+default_log = false
+
+
+[[pid]]
+id          = "p110"
+name        = "AT Turbine Speed 1"
+ssm_address = 0x0000005C
+length      = 1
+data_type   = "uint8"
+scaling     = "rpm_x_32"
+unit        = "rpm"
+default_log = false
+
+
+[[pid]]
+id          = "p111"
+name        = "AT Turbine Speed 2"
+ssm_address = 0x0000005D
+length      = 1
+data_type   = "uint8"
+scaling     = "rpm_x_32"
+unit        = "rpm"
+default_log = false
+
+
+[[pid]]
+id          = "p112"
+name        = "Center Differential Real Current"
+ssm_address = 0x0000005E
+length      = 1
+data_type   = "uint8"
+scaling     = "a_x_32"
+unit        = "A"
+default_log = false
+
+
+[[pid]]
+id          = "p113"
+name        = "Center Differential Indicate Current"
+ssm_address = 0x0000005F
+length      = 1
+data_type   = "uint8"
+scaling     = "a_x_32"
+unit        = "A"
+default_log = false
+
+
+[[pid]]
+id          = "p114"
+name        = "SI-Drive Mode"
+ssm_address = 0x0000016A
+length      = 1
+data_type   = "uint8"
+scaling     = "index_x"
+unit        = "index"
+default_log = false
+
+
+[[pid]]
+id          = "p115"
+name        = "Throttle Sensor Closed Voltage"
+ssm_address = 0x0000016B
+length      = 1
+data_type   = "uint8"
+scaling     = "v_x_50"
+unit        = "V"
+default_log = false
+
+
+[[pid]]
+id          = "p116"
+name        = "Exhaust Gas Temperature 2"
+ssm_address = 0x00000107
+length      = 1
+data_type   = "uint8"
+scaling     = "c_x_5_200"
+unit        = "C"
+default_log = false
+
+
+[[pid]]
+id          = "p117"
+name        = "Air/Fuel Correction #4"
+ssm_address = 0x0000010B
+length      = 1
+data_type   = "uint8"
+scaling     = "x_64_128_10"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p118"
+name        = "Air/Fuel Learning #4"
+ssm_address = 0x0000010C
+length      = 1
+data_type   = "uint8"
+scaling     = "x_128_128_100"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p119"
+name        = "Fuel Level Sensor Resistance"
+ssm_address = 0x0000010D
+length      = 1
+data_type   = "uint8"
+scaling     = "ohm_x_4_2"
+unit        = "ohm"
+default_log = false
+
+
+[[pid]]
+id          = "p120"
+name        = "Estimated odometer"
+ssm_address = 0x0000010E
+length      = 2
+data_type   = "uint16_be"
+scaling     = "km_x_2"
+unit        = "km"
+default_log = false
+
+
+[[pid]]
+id          = "p121"
+name        = "Fuel Tank Air Pressure"
+ssm_address = 0x00000172
+length      = 2
+data_type   = "uint16_be"
+scaling     = "mpa_x_100"
+unit        = "MPa"
+default_log = false
+
+
+[[pid]]
+id          = "p122"
+name        = "Oil Temperature"
+ssm_address = 0x00000113
+length      = 1
+data_type   = "uint8"
+scaling     = "c_x_40"
+unit        = "C"
+default_log = false
+
+
+[[pid]]
+id          = "p123"
+name        = "Oil Switching Solenoid Valve (OSV) Duty (Right)"
+ssm_address = 0x00000114
+length      = 1
+data_type   = "uint8"
+scaling     = "x_255_100"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p124"
+name        = "Oil Switching Solenoid Valve (OSV) Duty (Left)"
+ssm_address = 0x00000115
+length      = 1
+data_type   = "uint8"
+scaling     = "x_255_100"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p125"
+name        = "Oil Switching Solenoid Valve (OSV) Current (Right)"
+ssm_address = 0x00000116
+length      = 1
+data_type   = "uint8"
+scaling     = "ma_x_32"
+unit        = "mA"
+default_log = false
+
+
+[[pid]]
+id          = "p126"
+name        = "Oil Switching Solenoid Valve (OSV) Current (Left)"
+ssm_address = 0x00000117
+length      = 1
+data_type   = "uint8"
+scaling     = "ma_x_32"
+unit        = "mA"
+default_log = false
+
+
+[[pid]]
+id          = "p127"
+name        = "VVL Lift Mode"
+ssm_address = 0x0000011E
+length      = 1
+data_type   = "uint8"
+scaling     = "raw_ecu_value_x"
+unit        = "raw ecu value"
+default_log = false
+
+
+[[pid]]
+id          = "p128"
+name        = "H and LR/C Solenoid Valve Current"
+ssm_address = 0x00000140
+length      = 1
+data_type   = "uint8"
+scaling     = "a_x_255"
+unit        = "A"
+default_log = false
+
+
+[[pid]]
+id          = "p129"
+name        = "D/C Solenoid Valve Current"
+ssm_address = 0x00000141
+length      = 1
+data_type   = "uint8"
+scaling     = "a_x_255"
+unit        = "A"
+default_log = false
+
+
+[[pid]]
+id          = "p130"
+name        = "F/B Solenoid Valve Current"
+ssm_address = 0x00000142
+length      = 1
+data_type   = "uint8"
+scaling     = "a_x_255"
+unit        = "A"
+default_log = false
+
+
+[[pid]]
+id          = "p131"
+name        = "I/C Solenoid Valve Current"
+ssm_address = 0x00000143
+length      = 1
+data_type   = "uint8"
+scaling     = "a_x_255"
+unit        = "A"
+default_log = false
+
+
+[[pid]]
+id          = "p132"
+name        = "P/L Solenoid Valve Current"
+ssm_address = 0x00000144
+length      = 1
+data_type   = "uint8"
+scaling     = "a_x_255"
+unit        = "A"
+default_log = false
+
+
+[[pid]]
+id          = "p133"
+name        = "L/U Solenoid Valve Current"
+ssm_address = 0x00000145
+length      = 1
+data_type   = "uint8"
+scaling     = "a_x_255"
+unit        = "A"
+default_log = false
+
+
+[[pid]]
+id          = "p134"
+name        = "AWD Solenoid Valve Current"
+ssm_address = 0x00000146
+length      = 1
+data_type   = "uint8"
+scaling     = "a_x_255"
+unit        = "A"
+default_log = false
+
+
+[[pid]]
+id          = "p135"
+name        = "Yaw Rate Sensor Voltage"
+ssm_address = 0x00000147
+length      = 1
+data_type   = "uint8"
+scaling     = "v_x_51"
+unit        = "V"
+default_log = false
+
+
+[[pid]]
+id          = "p136"
+name        = "H and LR/C Solenoid Valve Pressure"
+ssm_address = 0x00000148
+length      = 1
+data_type   = "uint8"
+scaling     = "kpa_x_10"
+unit        = "kPa"
+default_log = false
+
+
+[[pid]]
+id          = "p137"
+name        = "D/C Solenoid Valve Pressure"
+ssm_address = 0x00000149
+length      = 1
+data_type   = "uint8"
+scaling     = "kpa_x_10"
+unit        = "kPa"
+default_log = false
+
+
+[[pid]]
+id          = "p138"
+name        = "F/B Solenoid Valve Pressure"
+ssm_address = 0x0000014A
+length      = 1
+data_type   = "uint8"
+scaling     = "kpa_x_10"
+unit        = "kPa"
+default_log = false
+
+
+[[pid]]
+id          = "p139"
+name        = "I/C Solenoid Valve Pressure"
+ssm_address = 0x0000014B
+length      = 1
+data_type   = "uint8"
+scaling     = "kpa_x_10"
+unit        = "kPa"
+default_log = false
+
+
+[[pid]]
+id          = "p140"
+name        = "P/L Solenoid Valve Pressure"
+ssm_address = 0x0000014C
+length      = 1
+data_type   = "uint8"
+scaling     = "kpa_x_10"
+unit        = "kPa"
+default_log = false
+
+
+[[pid]]
+id          = "p141"
+name        = "L/U Solenoid Valve Pressure"
+ssm_address = 0x0000014D
+length      = 1
+data_type   = "uint8"
+scaling     = "kpa_x_10"
+unit        = "kPa"
+default_log = false
+
+
+[[pid]]
+id          = "p142"
+name        = "AWD Solenoid Valve Pressure"
+ssm_address = 0x0000014E
+length      = 1
+data_type   = "uint8"
+scaling     = "kpa_x_10"
+unit        = "kPa"
+default_log = false
+
+
+[[pid]]
+id          = "p143"
+name        = "Yaw Rate and  G Sensor Reference Voltage"
+ssm_address = 0x0000014F
+length      = 1
+data_type   = "uint8"
+scaling     = "v_x_51"
+unit        = "V"
+default_log = false
+
+
+[[pid]]
+id          = "p144"
+name        = "Wheel Speed Front Right"
+ssm_address = 0x0000013C
+length      = 1
+data_type   = "uint8"
+scaling     = "km_h_x"
+unit        = "km/h"
+default_log = false
+
+
+[[pid]]
+id          = "p145"
+name        = "Wheel Speed Front Left"
+ssm_address = 0x0000013D
+length      = 1
+data_type   = "uint8"
+scaling     = "km_h_x"
+unit        = "km/h"
+default_log = false
+
+
+[[pid]]
+id          = "p146"
+name        = "Wheel Speed Rear Right"
+ssm_address = 0x0000013E
+length      = 1
+data_type   = "uint8"
+scaling     = "km_h_x"
+unit        = "km/h"
+default_log = false
+
+
+[[pid]]
+id          = "p147"
+name        = "Wheel Speed Rear Left"
+ssm_address = 0x0000013F
+length      = 1
+data_type   = "uint8"
+scaling     = "km_h_x"
+unit        = "km/h"
+default_log = false
+
+
+[[pid]]
+id          = "p148"
+name        = "Steering Angle Sensor"
+ssm_address = 0x0000008D
+length      = 1
+data_type   = "uint8"
+scaling     = "degrees_x"
+unit        = "degrees"
+default_log = false
+
+
+[[pid]]
+id          = "p149"
+name        = "Fwd/B Solenoid Valve Current"
+ssm_address = 0x00000185
+length      = 1
+data_type   = "uint8"
+scaling     = "a_x_255"
+unit        = "A"
+default_log = false
+
+
+[[pid]]
+id          = "p150"
+name        = "Fwd/B Solenoid Valve Target Pressure"
+ssm_address = 0x00000186
+length      = 1
+data_type   = "uint8"
+scaling     = "kpa_x_10"
+unit        = "kPa"
+default_log = false
+
+
+[[pid]]
+id          = "p151"
+name        = "Roughness Monitor Cylinder #5"
+ssm_address = 0x000000EF
+length      = 1
+data_type   = "uint8"
+scaling     = "misfire_count_x"
+unit        = "misfire count"
+default_log = false
+
+
+[[pid]]
+id          = "p152"
+name        = "Roughness Monitor Cylinder #6"
+ssm_address = 0x000000F8
+length      = 1
+data_type   = "uint8"
+scaling     = "misfire_count_x"
+unit        = "misfire count"
+default_log = false
+
+
+[[pid]]
+id          = "p153"
+name        = "Learned Ignition Timing Correction"
+ssm_address = 0x000000F9
+length      = 1
+data_type   = "uint8"
+scaling     = "degrees_x_16"
+unit        = "degrees"
+default_log = false
+
+
+[[pid]]
+id          = "p154"
+name        = "Fuel Tank Pressure"
+ssm_address = 0x0000019A
+length      = 1
+data_type   = "uint8"
+scaling     = "kpa_x_128_20"
+unit        = "kPa"
+default_log = false
+
+
+[[pid]]
+id          = "p155"
+name        = "Main Injection Period"
+ssm_address = 0x000001E1
+length      = 1
+data_type   = "uint8"
+scaling     = "ca_x_5_15"
+unit        = "°CA"
+default_log = false
+
+
+[[pid]]
+id          = "p156"
+name        = "Final Injection Amount"
+ssm_address = 0x000001E2
+length      = 2
+data_type   = "uint16_be"
+scaling     = "mm_st_x_256"
+unit        = "mm³/st"
+default_log = false
+
+
+[[pid]]
+id          = "p157"
+name        = "Number of Times Injected"
+ssm_address = 0x000001E4
+length      = 1
+data_type   = "uint8"
+scaling     = "count_x"
+unit        = "count"
+default_log = false
+
+
+[[pid]]
+id          = "p158"
+name        = "Target Intake Manifold Pressure"
+ssm_address = 0x000001E5
+length      = 1
+data_type   = "uint8"
+scaling     = "kpa_x"
+unit        = "kPa"
+default_log = false
+
+
+[[pid]]
+id          = "p159"
+name        = "Target Intake Air Amount"
+ssm_address = 0x000001E6
+length      = 1
+data_type   = "uint8"
+scaling     = "mg_cyl_x_10"
+unit        = "mg/cyl"
+default_log = false
+
+
+[[pid]]
+id          = "p160"
+name        = "Air Mass"
+ssm_address = 0x000001E7
+length      = 1
+data_type   = "uint8"
+scaling     = "mg_cyl_x_10"
+unit        = "mg/cyl"
+default_log = false
+
+
+[[pid]]
+id          = "p161"
+name        = "Exhaust Gas Recirculation (EGR) Target Valve Opening Angle"
+ssm_address = 0x000001E8
+length      = 1
+data_type   = "uint8"
+scaling     = "degrees_x_50"
+unit        = "degrees"
+default_log = false
+
+
+[[pid]]
+id          = "p162"
+name        = "Exhaust Gas Recirculation (EGR) Valve Opening Angle"
+ssm_address = 0x000001E9
+length      = 1
+data_type   = "uint8"
+scaling     = "degrees_x_50"
+unit        = "degrees"
+default_log = false
+
+
+[[pid]]
+id          = "p163"
+name        = "Exhaust Gas Recirculation (EGR) Duty"
+ssm_address = 0x000001EA
+length      = 1
+data_type   = "uint8"
+scaling     = "x"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p164"
+name        = "Common Rail Target Pressure"
+ssm_address = 0x000001EB
+length      = 1
+data_type   = "uint8"
+scaling     = "mpa_x"
+unit        = "MPa"
+default_log = false
+
+
+[[pid]]
+id          = "p165"
+name        = "Common Rail Pressure"
+ssm_address = 0x000001EC
+length      = 1
+data_type   = "uint8"
+scaling     = "mpa_x"
+unit        = "MPa"
+default_log = false
+
+
+[[pid]]
+id          = "p166"
+name        = "Intake Air Temperature (combined)"
+ssm_address = 0x000001ED
+length      = 1
+data_type   = "uint8"
+scaling     = "c_x_40"
+unit        = "C"
+default_log = false
+
+
+[[pid]]
+id          = "p167"
+name        = "Target Engine Speed"
+ssm_address = 0x000001EE
+length      = 2
+data_type   = "uint16_be"
+scaling     = "rpm_x_4"
+unit        = "rpm"
+default_log = false
+
+
+[[pid]]
+id          = "p168"
+name        = "Boost Pressure Feedback"
+ssm_address = 0x000001F0
+length      = 1
+data_type   = "uint8"
+scaling     = "x_128"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p169"
+name        = "Electric Power Steering Current"
+ssm_address = 0x000001F5
+length      = 1
+data_type   = "uint8"
+scaling     = "a_x"
+unit        = "A"
+default_log = false
+
+
+[[pid]]
+id          = "p170"
+name        = "Fuel Pump Suction Control Valve Current (Target)"
+ssm_address = 0x000001F6
+length      = 2
+data_type   = "uint16_be"
+scaling     = "ma_x"
+unit        = "mA"
+default_log = false
+
+
+[[pid]]
+id          = "p171"
+name        = "Yaw Rate"
+ssm_address = 0x000001F1
+length      = 1
+data_type   = "uint8"
+scaling     = "degrees_s_x_0_19118"
+unit        = "degrees/s"
+default_log = false
+
+
+[[pid]]
+id          = "p172"
+name        = "Lateral G"
+ssm_address = 0x000001F2
+length      = 1
+data_type   = "uint8"
+scaling     = "m_s_x_1_0862"
+unit        = "m/s²"
+default_log = false
+
+
+[[pid]]
+id          = "p173"
+name        = "Drivers Control Center Differential (DCCD) Torque Allocation"
+ssm_address = 0x000001F3
+length      = 1
+data_type   = "uint8"
+scaling     = "raw_ecu_value_x"
+unit        = "raw ecu value"
+default_log = false
+
+
+[[pid]]
+id          = "p174"
+name        = "Drivers Control Center Differential (DCCD) Mode"
+ssm_address = 0x000001F4
+length      = 1
+data_type   = "uint8"
+scaling     = "raw_ecu_value_x"
+unit        = "raw ecu value"
+default_log = false
+
+
+[[pid]]
+id          = "p175"
+name        = "Fuel Pump Suction Control Valve Current (Actual)"
+ssm_address = 0x000001F8
+length      = 2
+data_type   = "uint16_be"
+scaling     = "ma_x"
+unit        = "mA"
+default_log = false
+
+
+[[pid]]
+id          = "p176"
+name        = "Mileage after Injector Learning"
+ssm_address = 0x000001FA
+length      = 2
+data_type   = "uint16_be"
+scaling     = "km_x_5"
+unit        = "km"
+default_log = false
+
+
+[[pid]]
+id          = "p177"
+name        = "Mileage after Injector Replacement"
+ssm_address = 0x00000204
+length      = 2
+data_type   = "uint16_be"
+scaling     = "km_x_5"
+unit        = "km"
+default_log = false
+
+
+[[pid]]
+id          = "p178"
+name        = "Interior Heater"
+ssm_address = 0x00000270
+length      = 1
+data_type   = "uint8"
+scaling     = "steps_x"
+unit        = "steps"
+default_log = false
+
+
+[[pid]]
+id          = "p179"
+name        = "Quantity Correction Cylinder #1"
+ssm_address = 0x0000025D
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_100_10"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p180"
+name        = "Quantity Correction Cylinder #2"
+ssm_address = 0x0000025E
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_100_10"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p181"
+name        = "Quantity Correction Cylinder #3"
+ssm_address = 0x0000025F
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_100_10"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p182"
+name        = "Quantity Correction Cylinder #4"
+ssm_address = 0x00000260
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_100_10"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p183"
+name        = "Battery Current"
+ssm_address = 0x00000271
+length      = 1
+data_type   = "uint8"
+scaling     = "a_x_128"
+unit        = "A"
+default_log = false
+
+
+[[pid]]
+id          = "p184"
+name        = "Battery Temperature"
+ssm_address = 0x00000273
+length      = 1
+data_type   = "uint8"
+scaling     = "c_x_40"
+unit        = "C"
+default_log = false
+
+
+[[pid]]
+id          = "p185"
+name        = "Alternator Control Mode"
+ssm_address = 0x00000272
+length      = 1
+data_type   = "uint8"
+scaling     = "index_x"
+unit        = "index"
+default_log = false
+
+
+[[pid]]
+id          = "p186"
+name        = "Cumulative Ash Ratio"
+ssm_address = 0x00000275
+length      = 1
+data_type   = "uint8"
+scaling     = "x"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p187"
+name        = "Pressure Difference between Diesel Particulate Filter (DPF) Inlet and Outlet"
+ssm_address = 0x00000276
+length      = 1
+data_type   = "uint8"
+scaling     = "kpa_x"
+unit        = "kPa"
+default_log = false
+
+
+[[pid]]
+id          = "p188"
+name        = "Exhaust Gas Temperature at Catalyst Inlet"
+ssm_address = 0x00000277
+length      = 1
+data_type   = "uint8"
+scaling     = "c_x_5_40"
+unit        = "C"
+default_log = false
+
+
+[[pid]]
+id          = "p189"
+name        = "Exhaust Gas Temperature at Diesel Particulate Filter (DPF) Inlet"
+ssm_address = 0x00000278
+length      = 1
+data_type   = "uint8"
+scaling     = "c_x_5_40"
+unit        = "C"
+default_log = false
+
+
+[[pid]]
+id          = "p190"
+name        = "Estimated Catalyst Temperature"
+ssm_address = 0x00000279
+length      = 1
+data_type   = "uint8"
+scaling     = "c_x_5_40"
+unit        = "C"
+default_log = false
+
+
+[[pid]]
+id          = "p191"
+name        = "Estimated Temperature of the Diesel Particulate Filter (DPF)"
+ssm_address = 0x0000027A
+length      = 1
+data_type   = "uint8"
+scaling     = "c_x_5_40"
+unit        = "C"
+default_log = false
+
+
+[[pid]]
+id          = "p192"
+name        = "Soot Accumulation Ratio"
+ssm_address = 0x0000027B
+length      = 1
+data_type   = "uint8"
+scaling     = "x"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p193"
+name        = "Oil Dilution Ratio"
+ssm_address = 0x0000027C
+length      = 1
+data_type   = "uint8"
+scaling     = "x"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p194"
+name        = "Front-Rear Wheel Rotation Ratio"
+ssm_address = 0x00000293
+length      = 1
+data_type   = "uint8"
+scaling     = "x_128"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p195"
+name        = "ABS/VDC Front Wheel Mean Wheel Speed"
+ssm_address = 0x00000294
+length      = 1
+data_type   = "uint8"
+scaling     = "km_h_x_230_255"
+unit        = "km/h"
+default_log = false
+
+
+[[pid]]
+id          = "p196"
+name        = "ABS/VDC Rear Wheel Mean Wheel Speed"
+ssm_address = 0x00000295
+length      = 1
+data_type   = "uint8"
+scaling     = "km_h_x_230_255"
+unit        = "km/h"
+default_log = false
+
+
+[[pid]]
+id          = "p197"
+name        = "Automatic Transmission Fluid (ATF) Deterioration Degree"
+ssm_address = 0x00000296
+length      = 2
+data_type   = "uint16_be"
+scaling     = "x_40_13107"
+unit        = "%"
+default_log = false
+
+
+[[pid]]
+id          = "p198"
+name        = "Accumulated Count of Overspeed Instances (Very High RPM)"
+ssm_address = 0x00000298
+length      = 1
+data_type   = "uint8"
+scaling     = "time_x"
+unit        = "Time"
+default_log = false
+
+
+[[pid]]
+id          = "p199"
+name        = "Accumulated Count of Overspeed Instances (High RPM)"
+ssm_address = 0x00000299
+length      = 1
+data_type   = "uint8"
+scaling     = "time_x"
+unit        = "Time"
+default_log = false
+
+
+[[pid]]
+id          = "p204"
+name        = "Actual Common Rail Pressure (Time Synchronized)"
+ssm_address = 0x0000021F
+length      = 1
+data_type   = "uint8"
+scaling     = "mpa_x"
+unit        = "MPa"
+default_log = false
+
+
+[[pid]]
+id          = "p205"
+name        = "Estimated Distance to Oil Change"
+ssm_address = 0x0000029A
+length      = 1
+data_type   = "uint8"
+scaling     = "km_x_100"
+unit        = "km"
+default_log = false
+
+
+[[pid]]
+id          = "p206"
+name        = "Running Distance since last Diesel Particulate Filter (DPF) Regeneration"
+ssm_address = 0x0000029B
+length      = 2
+data_type   = "uint16_be"
+scaling     = "km_x"
+unit        = "km"
+default_log = false
+
+
+[[pid]]
+id          = "p207"
+name        = "Diesel Particulate Filter (DPF) Regeneration Count"
+ssm_address = 0x0000029D
+length      = 2
+data_type   = "uint16_be"
+scaling     = "times_x"
+unit        = "Times"
+default_log = false
+
+
+[[pid]]
+id          = "p208"
+name        = "Micro-Quantity-Injection Final Learning Value 1-1"
+ssm_address = 0x0000023D
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p209"
+name        = "Micro-Quantity-Injection Final Learning Value 1-2"
+ssm_address = 0x0000023E
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p210"
+name        = "Micro-Quantity-Injection Final Learning Value 1-3"
+ssm_address = 0x0000023F
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p211"
+name        = "Micro-Quantity-Injection Final Learning Value 1-4"
+ssm_address = 0x00000240
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p212"
+name        = "Micro-Quantity-Injection Final Learning Value 2-1"
+ssm_address = 0x00000241
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p213"
+name        = "Micro-Quantity-Injection Final Learning Value 2-2"
+ssm_address = 0x00000242
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p214"
+name        = "Micro-Quantity-Injection Final Learning Value 2-3"
+ssm_address = 0x00000243
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p215"
+name        = "Micro-Quantity-Injection Final Learning Value 2-4"
+ssm_address = 0x00000244
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p216"
+name        = "Micro-Quantity-Injection Final Learning Value 3-1"
+ssm_address = 0x00000245
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p217"
+name        = "Micro-Quantity-Injection Final Learning Value 3-2"
+ssm_address = 0x00000246
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p218"
+name        = "Micro-Quantity-Injection Final Learning Value 3-3"
+ssm_address = 0x00000247
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p219"
+name        = "Micro-Quantity-Injection Final Learning Value 3-4"
+ssm_address = 0x00000248
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p220"
+name        = "Micro-Quantity-Injection Final Learning Value 4-1"
+ssm_address = 0x00000249
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p221"
+name        = "Micro-Quantity-Injection Final Learning Value 4-2"
+ssm_address = 0x0000024A
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p222"
+name        = "Micro-Quantity-Injection Final Learning Value 4-3"
+ssm_address = 0x0000024B
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p223"
+name        = "Micro-Quantity-Injection Final Learning Value 4-4"
+ssm_address = 0x0000024C
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p224"
+name        = "Micro-Quantity-Injection Final Learning Value 5-1"
+ssm_address = 0x0000024D
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p225"
+name        = "Micro-Quantity-Injection Final Learning Value 5-2"
+ssm_address = 0x0000024E
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p226"
+name        = "Micro-Quantity-Injection Final Learning Value 5-3"
+ssm_address = 0x0000024F
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p227"
+name        = "Micro-Quantity-Injection Final Learning Value 5-4"
+ssm_address = 0x00000250
+length      = 1
+data_type   = "uint8"
+scaling     = "s_x_128_5"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p228"
+name        = "Individual Pump Difference Learning Value"
+ssm_address = 0x00000238
+length      = 2
+data_type   = "uint16_be"
+scaling     = "ma_x_1000"
+unit        = "mA"
+default_log = false
+
+
+[[pid]]
+id          = "p229"
+name        = "Final Main Injection Period"
+ssm_address = 0x00000257
+length      = 2
+data_type   = "uint16_be"
+scaling     = "s_x"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p233"
+name        = "Pre-Injection Final Period"
+ssm_address = 0x00000255
+length      = 2
+data_type   = "uint16_be"
+scaling     = "s_x"
+unit        = "µs"
+default_log = false
+
+
+[[pid]]
+id          = "p234"
+name        = "Pre-Injection Amount"
+ssm_address = 0x0000022F
+length      = 2
+data_type   = "uint16_be"
+scaling     = "mm_st_x_256_30"
+unit        = "mm³/st"
+default_log = false
+
+
+[[pid]]
+id          = "p235"
+name        = "Pre-Injection Interval"
+ssm_address = 0x00000231
+length      = 1
+data_type   = "uint8"
+scaling     = "ca_x_50"
+unit        = "°CA"
+default_log = false
+
+
+[[pid]]
+id          = "p236"
+name        = "Cumulative oil diesel entry"
+ssm_address = 0x000002A2
+length      = 1
+data_type   = "uint8"
+scaling     = "g_x_5"
+unit        = "g"
+default_log = false
+
+
+[[pid]]
+id          = "p238"
+name        = "Final Initial Torque"
+ssm_address = 0x00000232
+length      = 2
+data_type   = "uint16_be"
+scaling     = "nm_x_50"
+unit        = "Nm"
+default_log = false
+
+
+[[pid]]
+id          = "p239"
+name        = "Global Timing User Adjustment Value"
+ssm_address = 0x0000006F
+length      = 1
+data_type   = "uint8"
+scaling     = "degrees_0_x"
+unit        = "degrees"
+default_log = false
+
+
+[[pid]]
+id          = "p240"
+name        = "Engine Idle Speed User Adjustment (A/C off)"
+ssm_address = 0x00000070
+length      = 1
+data_type   = "uint8"
+scaling     = "rpm_x_25_3200"
+unit        = "rpm"
+default_log = false
+
+
+[[pid]]
+id          = "p241"
+name        = "Engine Idle Speed User Adjustment (A/C on)"
+ssm_address = 0x00000071
+length      = 1
+data_type   = "uint8"
+scaling     = "rpm_x_25_3200"
+unit        = "rpm"
+default_log = false
+
+
+[[pid]]
+id          = "p244"
+name        = "Secondary Air Piping Pressure"
+ssm_address = 0x00000108
+length      = 1
+data_type   = "uint8"
+scaling     = "kpa_x"
+unit        = "kPa"
+default_log = false
+
+
+[[pid]]
+id          = "p245"
+name        = "Secondary Air Flow"
+ssm_address = 0x00000182
+length      = 2
+data_type   = "uint16_be"
+scaling     = "g_s_x_100"
+unit        = "g/s"
+default_log = false
+
+
 [[switch]]
 id          = "s1"
 name        = "AT Vehicle ID"
@@ -1398,7 +3558,7 @@ default_log = false
 
 [[switch]]
 id          = "s2"
-name        = "Test Mode Connector"
+name        = "Test Mode Signal"
 ssm_address = 0x00000061
 bit         = 5
 default_log = false
@@ -1406,7 +3566,7 @@ default_log = false
 
 [[switch]]
 id          = "s3"
-name        = "Read Memory Connector"
+name        = "Read Memory Signal"
 ssm_address = 0x00000061
 bit         = 4
 default_log = false
@@ -1430,7 +3590,7 @@ default_log = false
 
 [[switch]]
 id          = "s6"
-name        = "Intercooler AutoWash Switch"
+name        = "Intercooler Auto Washer Switch"
 ssm_address = 0x00000062
 bit         = 4
 default_log = false
@@ -1478,7 +3638,7 @@ default_log = false
 
 [[switch]]
 id          = "s12"
-name        = "Front O2 Rich Signal"
+name        = "Front O2 Sensor #1 Rich Signal"
 ssm_address = 0x00000063
 bit         = 5
 default_log = false
@@ -1486,7 +3646,7 @@ default_log = false
 
 [[switch]]
 id          = "s13"
-name        = "Rear O2 Rich Signal"
+name        = "Rear O2 Sensor Rich Signal"
 ssm_address = 0x00000063
 bit         = 4
 default_log = false
@@ -1494,7 +3654,7 @@ default_log = false
 
 [[switch]]
 id          = "s14"
-name        = "Front O2 #2 Rich Signal"
+name        = "Front O2 Sensor #2 Rich Signal"
 ssm_address = 0x00000063
 bit         = 3
 default_log = false
@@ -1502,7 +3662,7 @@ default_log = false
 
 [[switch]]
 id          = "s15"
-name        = "Knock Signal 1"
+name        = "Knocking Signal #1"
 ssm_address = 0x00000063
 bit         = 2
 default_log = false
@@ -1510,7 +3670,7 @@ default_log = false
 
 [[switch]]
 id          = "s16"
-name        = "Knock Signal 2"
+name        = "Knocking Signal #2"
 ssm_address = 0x00000063
 bit         = 1
 default_log = false
@@ -1526,7 +3686,7 @@ default_log = false
 
 [[switch]]
 id          = "s18"
-name        = "Crank Position Sensor"
+name        = "Crankshaft Position Signal"
 ssm_address = 0x00000064
 bit         = 7
 default_log = false
@@ -1534,7 +3694,7 @@ default_log = false
 
 [[switch]]
 id          = "s19"
-name        = "Cam Position Sensor"
+name        = "Camshaft Position Signal"
 ssm_address = 0x00000064
 bit         = 6
 default_log = false
@@ -1542,7 +3702,7 @@ default_log = false
 
 [[switch]]
 id          = "s20"
-name        = "Defogger Switch"
+name        = "Rear Defogger Switch"
 ssm_address = 0x00000064
 bit         = 5
 default_log = false
@@ -1550,7 +3710,7 @@ default_log = false
 
 [[switch]]
 id          = "s21"
-name        = "Blower Switch"
+name        = "Blower Fan Switch"
 ssm_address = 0x00000064
 bit         = 4
 default_log = false
@@ -1558,7 +3718,7 @@ default_log = false
 
 [[switch]]
 id          = "s22"
-name        = "Interior Light Switch"
+name        = "Light Switch"
 ssm_address = 0x00000064
 bit         = 3
 default_log = false
@@ -1574,7 +3734,7 @@ default_log = false
 
 [[switch]]
 id          = "s24"
-name        = "Air-Con Lock Signal"
+name        = "Air Conditioning Lock Signal"
 ssm_address = 0x00000064
 bit         = 1
 default_log = false
@@ -1582,7 +3742,7 @@ default_log = false
 
 [[switch]]
 id          = "s25"
-name        = "Air-Con Mid Pressure Switch"
+name        = "Air Conditioning Mid Pressure Switch"
 ssm_address = 0x00000064
 bit         = 0
 default_log = false
@@ -1590,7 +3750,7 @@ default_log = false
 
 [[switch]]
 id          = "s26"
-name        = "Air-Con Compressor Signal"
+name        = "Air Conditioning Compressor Signal"
 ssm_address = 0x00000065
 bit         = 7
 default_log = false
@@ -1630,7 +3790,7 @@ default_log = false
 
 [[switch]]
 id          = "s31"
-name        = "Intercooler Auto-Wash Relay"
+name        = "Intercooler Auto Washer Relay"
 ssm_address = 0x00000065
 bit         = 2
 default_log = false
@@ -1638,7 +3798,7 @@ default_log = false
 
 [[switch]]
 id          = "s32"
-name        = "CPC Solenoid Valve"
+name        = "Canister Purge Control (CPC) Solenoid Valve"
 ssm_address = 0x00000065
 bit         = 1
 default_log = false
@@ -1654,7 +3814,7 @@ default_log = false
 
 [[switch]]
 id          = "s34"
-name        = "PCV Solenoid Valve"
+name        = "Positive Crankcase Ventilation (PCV) Solenoid Valve"
 ssm_address = 0x00000066
 bit         = 7
 default_log = false
@@ -1662,7 +3822,7 @@ default_log = false
 
 [[switch]]
 id          = "s35"
-name        = "TGV Output"
+name        = "Tumble Generator Valve (TGV) Output"
 ssm_address = 0x00000066
 bit         = 6
 default_log = false
@@ -1670,7 +3830,7 @@ default_log = false
 
 [[switch]]
 id          = "s36"
-name        = "TGV Drive"
+name        = "Tumble Generator Valve (TGV) Drive"
 ssm_address = 0x00000066
 bit         = 5
 default_log = false
@@ -1694,7 +3854,7 @@ default_log = false
 
 [[switch]]
 id          = "s39"
-name        = "Vent Solenoid Valve"
+name        = "Ventilation Solenoid Valve"
 ssm_address = 0x00000066
 bit         = 2
 default_log = false
@@ -1702,7 +3862,7 @@ default_log = false
 
 [[switch]]
 id          = "s40"
-name        = "P/S Solenoid Valve"
+name        = "Power Steering Solenoid Valve"
 ssm_address = 0x00000066
 bit         = 1
 default_log = false
@@ -1726,7 +3886,7 @@ default_log = false
 
 [[switch]]
 id          = "s43"
-name        = "Relief Valve Solenoid 1"
+name        = "Relief Valve Solenoid #1"
 ssm_address = 0x00000067
 bit         = 6
 default_log = false
@@ -1734,7 +3894,7 @@ default_log = false
 
 [[switch]]
 id          = "s44"
-name        = "Relief Valve Solenoid 2"
+name        = "Relief Valve Solenoid #2"
 ssm_address = 0x00000067
 bit         = 5
 default_log = false
@@ -1742,7 +3902,7 @@ default_log = false
 
 [[switch]]
 id          = "s45"
-name        = "TCS Relief Valve Solenoid"
+name        = "Traction Control System (TCS) Relief Valve Solenoid"
 ssm_address = 0x00000067
 bit         = 4
 default_log = false
@@ -1750,7 +3910,7 @@ default_log = false
 
 [[switch]]
 id          = "s46"
-name        = "Ex. Gas Positive Pressure"
+name        = "Exhaust Gas Positive Pressure"
 ssm_address = 0x00000067
 bit         = 3
 default_log = false
@@ -1758,7 +3918,7 @@ default_log = false
 
 [[switch]]
 id          = "s47"
-name        = "Ex. Gas Negative Pressure"
+name        = "Exhaust Gas Negative Pressure"
 ssm_address = 0x00000067
 bit         = 2
 default_log = false
@@ -1782,7 +3942,7 @@ default_log = false
 
 [[switch]]
 id          = "s50"
-name        = "Retard Signal from AT"
+name        = "Retard Signal From AT"
 ssm_address = 0x00000068
 bit         = 3
 default_log = false
@@ -1790,7 +3950,7 @@ default_log = false
 
 [[switch]]
 id          = "s51"
-name        = "Fuel Cut Signal from AT"
+name        = "Fuel Cut Signal From AT"
 ssm_address = 0x00000068
 bit         = 2
 default_log = false
@@ -1838,7 +3998,7 @@ default_log = false
 
 [[switch]]
 id          = "s57"
-name        = "EAM Signal"
+name        = "Engine AT Masking Flag (EAM) Signal"
 ssm_address = 0x00000069
 bit         = 4
 default_log = false
@@ -1846,7 +4006,7 @@ default_log = false
 
 [[switch]]
 id          = "s58"
-name        = "AT coop. lock up signal"
+name        = "AT Cooperation Lock Up Signal"
 ssm_address = 0x00000069
 bit         = 3
 default_log = false
@@ -1854,7 +4014,7 @@ default_log = false
 
 [[switch]]
 id          = "s59"
-name        = "AT coop. lean burn signal"
+name        = "AT Cooperation Lean Burn Signal"
 ssm_address = 0x00000069
 bit         = 2
 default_log = false
@@ -1862,7 +4022,7 @@ default_log = false
 
 [[switch]]
 id          = "s60"
-name        = "AT coop. rich spike signal"
+name        = "AT Cooperation Rich Spike Signal"
 ssm_address = 0x00000069
 bit         = 1
 default_log = false
@@ -1870,7 +4030,7 @@ default_log = false
 
 [[switch]]
 id          = "s61"
-name        = "AET Signal"
+name        = "AT Engine Torque Request (AET) Signal"
 ssm_address = 0x00000069
 bit         = 0
 default_log = false
@@ -1878,7 +4038,7 @@ default_log = false
 
 [[switch]]
 id          = "s62"
-name        = "ETC Motor Relay"
+name        = "Electronic Throttle Control (ETC) Motor Relay"
 ssm_address = 0x00000120
 bit         = 6
 default_log = false
@@ -1902,7 +4062,7 @@ default_log = false
 
 [[switch]]
 id          = "s65"
-name        = "Set/Coast Switch"
+name        = "Cruise Control Set/Coast Switch"
 ssm_address = 0x00000121
 bit         = 5
 default_log = false
@@ -1910,7 +4070,7 @@ default_log = false
 
 [[switch]]
 id          = "s66"
-name        = "Resume/Accelerate Switch"
+name        = "Cruise Control Resume/Accelerate Switch"
 ssm_address = 0x00000121
 bit         = 4
 default_log = false
@@ -1926,7 +4086,839 @@ default_log = false
 
 [[switch]]
 id          = "s68"
-name        = "Accelerator Switch"
+name        = "Cruise Control Main Toggle Switch"
 ssm_address = 0x00000121
 bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s69"
+name        = "D-Check Require Flag"
+ssm_address = 0x00000061
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s70"
+name        = "Delivery Mode (Test Mode) Connector"
+ssm_address = 0x00000061
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s71"
+name        = "Clear Memory Terminal"
+ssm_address = 0x00000061
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s72"
+name        = "Exhaust By-Pass Valve"
+ssm_address = 0x00000068
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s73"
+name        = "Engine Oil Pressure Switch #1"
+ssm_address = 0x00000068
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s74"
+name        = "Engine Oil Pressure Switch #2"
+ssm_address = 0x00000068
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s75"
+name        = "Canister Purge Control (CPC) Solenoid Valve #2"
+ssm_address = 0x00000068
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s76"
+name        = "Tiptronic Mode Switch"
+ssm_address = 0x0000006A
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s77"
+name        = "Cruise Control Signal"
+ssm_address = 0x0000006A
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s78"
+name        = "ABS Signal"
+ssm_address = 0x0000006A
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s79"
+name        = "Downshift Switch"
+ssm_address = 0x0000006A
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s80"
+name        = "Stop Light Switch"
+ssm_address = 0x0000006A
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s81"
+name        = "Upshift Switch"
+ssm_address = 0x0000006A
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s82"
+name        = "Kick Down Switch"
+ssm_address = 0x0000006A
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s83"
+name        = "Front Wheel Drive (FWD) Switch"
+ssm_address = 0x0000006A
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s84"
+name        = "Power Mode Switch"
+ssm_address = 0x0000006B
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s85"
+name        = "Hold Mode Switch"
+ssm_address = 0x0000006B
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s86"
+name        = "1st Range Signal"
+ssm_address = 0x0000006B
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s87"
+name        = "2nd Range Signal"
+ssm_address = 0x0000006B
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s88"
+name        = "3rd Range Signal"
+ssm_address = 0x0000006B
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s89"
+name        = "D Range Signal"
+ssm_address = 0x0000006B
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s90"
+name        = "R Range Signal"
+ssm_address = 0x0000006B
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s91"
+name        = "N/P Range Signal"
+ssm_address = 0x0000006B
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s92"
+name        = "4th Range Signal"
+ssm_address = 0x0000006C
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s93"
+name        = "Tiptronic Solenoid"
+ssm_address = 0x0000006C
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s94"
+name        = "Torque Control Signal #1"
+ssm_address = 0x0000006C
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s95"
+name        = "Torque Control Signal #2"
+ssm_address = 0x0000006C
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s96"
+name        = "2-4 Brake Timing Solenoid"
+ssm_address = 0x0000006C
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s97"
+name        = "Low Clutch Timing Solenoid"
+ssm_address = 0x0000006C
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s98"
+name        = "Shift Solenoid #2"
+ssm_address = 0x0000006C
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s99"
+name        = "Shift Solenoid #1"
+ssm_address = 0x0000006C
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s100"
+name        = "Shift Output 4"
+ssm_address = 0x0000006D
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s101"
+name        = "Shift Output 3"
+ssm_address = 0x0000006D
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s102"
+name        = "Shift Output 2"
+ssm_address = 0x0000006D
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s103"
+name        = "Shift Output 1"
+ssm_address = 0x0000006D
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s104"
+name        = "Diagnosis Lamp"
+ssm_address = 0x0000006D
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s105"
+name        = "Rear Differential Oil Temperature Switch"
+ssm_address = 0x0000006D
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s106"
+name        = "ATF Temperature Lamp"
+ssm_address = 0x0000006D
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s107"
+name        = "Shift Lock Solenoid"
+ssm_address = 0x0000006D
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s108"
+name        = "Economy Switch"
+ssm_address = 0x0000006E
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s109"
+name        = "Power Mode Lamp"
+ssm_address = 0x0000006E
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s110"
+name        = "P Range"
+ssm_address = 0x0000006E
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s111"
+name        = "Torque Control Cut Signal"
+ssm_address = 0x0000006E
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s112"
+name        = "P/N Signal"
+ssm_address = 0x0000006E
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s113"
+name        = "Traction Control System (TCS) Switch"
+ssm_address = 0x0000006E
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s114"
+name        = "Hold Lamp"
+ssm_address = 0x0000006E
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s115"
+name        = "N Range"
+ssm_address = 0x0000006E
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s116"
+name        = "Judgement of All Wheel Drive (AWD)"
+ssm_address = 0x000000D4
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s117"
+name        = "Inhibitor Switch #1"
+ssm_address = 0x000000D4
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s118"
+name        = "Inhibitor Switch #2"
+ssm_address = 0x000000D4
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s119"
+name        = "Inhibitor Switch #3"
+ssm_address = 0x000000D4
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s120"
+name        = "Inhibitor Switch #4"
+ssm_address = 0x000000D4
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s121"
+name        = "Inhibitor Switch #3 Monitor"
+ssm_address = 0x000000D4
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s122"
+name        = "Back Lamp Relay"
+ssm_address = 0x000000D4
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s123"
+name        = "AT Power Relay"
+ssm_address = 0x000000D4
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s124"
+name        = "H and LR/C Fluid Pressure"
+ssm_address = 0x000000D5
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s125"
+name        = "D/C Fluid Pressure"
+ssm_address = 0x000000D5
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s126"
+name        = "F/B Fluid Pressure"
+ssm_address = 0x000000D5
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s127"
+name        = "I/C Fluid Pressure"
+ssm_address = 0x000000D5
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s128"
+name        = "LC/B Fluid Pressure"
+ssm_address = 0x000000D5
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s129"
+name        = "Signal of Identified Electronic Control Module (ECM)"
+ssm_address = 0x000000D5
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s130"
+name        = "Idle Switch"
+ssm_address = 0x00000120
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s131"
+name        = "Injector Driver Relay"
+ssm_address = 0x00000120
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s132"
+name        = "Cruise Control Inhibitor Switch"
+ssm_address = 0x00000121
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s133"
+name        = "Cruise Control System Status"
+ssm_address = 0x00000121
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s134"
+name        = "LC/B Solenoid Valve"
+ssm_address = 0x00000122
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s135"
+name        = "LU and FWD/B Solenoid Valve"
+ssm_address = 0x00000122
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s136"
+name        = "Center Differential Lamp 1"
+ssm_address = 0x00000122
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s137"
+name        = "Center Differential Lamp 2"
+ssm_address = 0x00000122
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s138"
+name        = "Center Differential Lamp 3"
+ssm_address = 0x00000122
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s139"
+name        = "Center Differential Lamp 4"
+ssm_address = 0x00000122
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s140"
+name        = "Center Differential Lamp 5"
+ssm_address = 0x00000122
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s141"
+name        = "Center Differential Lamp 6"
+ssm_address = 0x00000122
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s142"
+name        = "Parking Position Switch"
+ssm_address = 0x000000D6
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s143"
+name        = "Center Differential Relay"
+ssm_address = 0x000000D6
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s144"
+name        = "AUTO/MANUAL Mode Switch"
+ssm_address = 0x000000D6
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s145"
+name        = "AUTO Mode Lamp"
+ssm_address = 0x000000D6
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s146"
+name        = "Fwd/B Hydraulic Pressure Switch"
+ssm_address = 0x000000D6
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s147"
+name        = "Automatic Transmission Learning Process"
+ssm_address = 0x000000D6
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s148"
+name        = "Body Integrated Unit Data"
+ssm_address = 0x000000D7
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s149"
+name        = "Body Integrated Unit Count"
+ssm_address = 0x000000D7
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s150"
+name        = "Secondary Air Combi Valve Relay #2"
+ssm_address = 0x000000D7
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s151"
+name        = "Secondary Air Pump Relay"
+ssm_address = 0x000000D7
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s152"
+name        = "Secondary Air Combi Valve Relay #1"
+ssm_address = 0x000000D7
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s153"
+name        = "Distance Change Switch"
+ssm_address = 0x000000D7
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s154"
+name        = "Cruise Control Cancel Switch"
+ssm_address = 0x000000D7
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s155"
+name        = "Malfunction Indicator Light (MIL) ON Flag"
+ssm_address = 0x00000196
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s156"
+name        = "Fuel Pressure Switching Solenoid Valve"
+ssm_address = 0x00000196
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s157"
+name        = "Oil Level Switch"
+ssm_address = 0x00000196
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s158"
+name        = "Boost Pressure Control Mode"
+ssm_address = 0x00000197
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s159"
+name        = "Exhaust Gas Recirculation (EGR) Control Mode"
+ssm_address = 0x00000197
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s160"
+name        = "Glow Relay"
+ssm_address = 0x00000197
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s161"
+name        = "Swirl Control Valve"
+ssm_address = 0x00000197
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s162"
+name        = "Sub Fuel Pump Relay"
+ssm_address = 0x00000197
+bit         = 3
+default_log = false
+
+
+[[switch]]
+id          = "s163"
+name        = "Request for 'Compressor ON'"
+ssm_address = 0x00000197
+bit         = 2
+default_log = false
+
+
+[[switch]]
+id          = "s164"
+name        = "Fuel Pump Learning"
+ssm_address = 0x00000197
+bit         = 1
+default_log = false
+
+
+[[switch]]
+id          = "s165"
+name        = "Injector Learning"
+ssm_address = 0x00000197
+bit         = 0
+default_log = false
+
+
+[[switch]]
+id          = "s166"
+name        = "Self-Shut Relay Output"
+ssm_address = 0x000001CD
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s167"
+name        = "Lock-Up ON/OFF Solenoid Valve"
+ssm_address = 0x000001CD
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s168"
+name        = "Exhaust Gas Recirculation (EGR) Learning"
+ssm_address = 0x000001CE
+bit         = 7
+default_log = false
+
+
+[[switch]]
+id          = "s169"
+name        = "Fuel Cut"
+ssm_address = 0x000001CE
+bit         = 6
+default_log = false
+
+
+[[switch]]
+id          = "s170"
+name        = "Fuel Pump Mode"
+ssm_address = 0x000001CE
+bit         = 5
+default_log = false
+
+
+[[switch]]
+id          = "s171"
+name        = "Clutch Switch for Smart-System"
+ssm_address = 0x000001CE
+bit         = 4
+default_log = false
+
+
+[[switch]]
+id          = "s172"
+name        = "Diesel Particulate Filter (DPF) Regeneration"
+ssm_address = 0x000001CE
+bit         = 3
 default_log = false

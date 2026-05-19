@@ -45,8 +45,8 @@ formula   = "linear"
 factor    = 1.0
 offset    = 6.0
 unit      = "status"
-min       = 0.0
-max       = 0.0
+min       = 6.0
+max       = 16.0
 precision = 0
 data_type = "uint8"
 
@@ -64,26 +64,26 @@ data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "bar_x_32768_001333224"
+id        = "mmhg_x_32768"
 formula   = "linear"
-factor    = 0.001333224
-offset    = -43.687084032
-unit      = "bar"
+factor    = 1.0
+offset    = -32768.0
+unit      = "mmHg"
 min       = 0.0
 max       = 0.0
-precision = 3
+precision = 0
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "bar_absolute_x_0_001333224"
+id        = "psi_relative_sea_level_x_760_0_01933677"
 formula   = "linear"
-factor    = 0.001333224
-offset    = 0.0
-unit      = "bar absolute"
+factor    = 0.01933677
+offset    = -14.6959452
+unit      = "psi relative sea level"
 min       = 0.0
 max       = 0.0
-precision = 3
+precision = 2
 data_type = "uint16_be"
 
 
@@ -93,8 +93,8 @@ formula   = "linear"
 factor    = 0.3515625
 offset    = -45.0
 unit      = "degrees"
-min       = 0.0
-max       = 0.0
+min       = -12.0
+max       = 8.0
 precision = 2
 data_type = "uint8"
 
@@ -136,11 +136,23 @@ data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "bar_relative_sea_level_x_760_0_001333224"
+id        = "kpa_absolute_x_0_1333224"
 formula   = "linear"
-factor    = 0.001333224
-offset    = -1.01325024
-unit      = "bar relative sea level"
+factor    = 0.1333224
+offset    = 0.0
+unit      = "kPa absolute"
+min       = 0.0
+max       = 0.0
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "kpa_relative_sea_level_x_760_0_1333224"
+formula   = "linear"
+factor    = 0.1333224
+offset    = -101.325024
+unit      = "kPa relative sea level"
 min       = 0.0
 max       = 0.0
 precision = 3
@@ -220,11 +232,11 @@ data_type = "uint8"
 
 
 [[scaling]]
-id        = "afr_x_0_00179443359375"
+id        = "lambda_x_0001220703125"
 formula   = "linear"
-factor    = 0.00179443359375
+factor    = 0.0001220703125
 offset    = 0.0
-unit      = "AFR"
+unit      = "lambda"
 min       = 0.0
 max       = 0.0
 precision = 2
@@ -280,14 +292,14 @@ data_type = "uint32_be"
 
 
 [[scaling]]
-id        = "bar_x_0_001333224"
+id        = "kpa_x_0_1333224"
 formula   = "linear"
-factor    = 0.001333224
+factor    = 0.1333224
 offset    = 0.0
-unit      = "bar"
+unit      = "kPa"
 min       = 0.0
 max       = 0.0
-precision = 3
+precision = 2
 data_type = "uint32_be"
 
 
@@ -309,8 +321,8 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "degrees"
-min       = 0.0
-max       = 0.0
+min       = -12.0
+max       = 8.0
 precision = 2
 data_type = "uint32_be"
 
@@ -347,7 +359,7 @@ offset    = 0.0
 unit      = "%"
 min       = 0.0
 max       = 0.0
-precision = 2
+precision = 3
 data_type = "uint32_be"
 
 
@@ -364,14 +376,14 @@ data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "bar_relative_x_32768_0_001333224"
+id        = "kpa_relative_x_32768_0_1333224"
 formula   = "linear"
-factor    = 0.001333224
-offset    = -43.687084032
-unit      = "bar relative"
+factor    = 0.1333224
+offset    = -4368.7084032
+unit      = "kPa relative"
 min       = 0.0
 max       = 0.0
-precision = 3
+precision = 2
 data_type = "uint16_be"
 
 
@@ -388,11 +400,11 @@ data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "estimated_afr_14_7_1_x_000030517578125"
+id        = "lambda_1_1_x_000030517578125"
 formula   = "linear"
 factor    = 1.0
 offset    = 0.0
-unit      = "estimated AFR"
+unit      = "lambda"
 min       = 0.0
 max       = 0.0
 precision = 2
@@ -400,23 +412,11 @@ data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "estimated_afr_14_7_x_00048828125"
+id        = "lambda_1_x_00048828125"
 formula   = "linear"
 factor    = 1.0
 offset    = 0.0
-unit      = "estimated AFR"
-min       = 0.0
-max       = 0.0
-precision = 2
-data_type = "uint16_be"
-
-
-[[scaling]]
-id        = "estimated_afr_x_00179443359375"
-formula   = "linear"
-factor    = 0.00179443359375
-offset    = 0.0
-unit      = "estimated AFR"
+unit      = "lambda"
 min       = 0.0
 max       = 0.0
 precision = 2
@@ -472,11 +472,11 @@ data_type = "uint32_be"
 
 
 [[scaling]]
-id        = "estimated_afr_14_7_1_x_00003051758"
+id        = "lambda_1_1_x_00003051758"
 formula   = "linear"
 factor    = 1.0
 offset    = 0.0
-unit      = "estimated AFR"
+unit      = "lambda"
 min       = 0.0
 max       = 0.0
 precision = 2
@@ -568,11 +568,11 @@ data_type = "uint8"
 
 
 [[scaling]]
-id        = "bar_absolute_x_00002542923463176_1999836"
+id        = "kpa_absolute_x_002542923463176_1999836"
 formula   = "linear"
-factor    = 2.542923463176e-05
+factor    = 0.002542923463176
 offset    = -0.1999836
-unit      = "bar absolute"
+unit      = "kPa absolute"
 min       = 0.0
 max       = 0.0
 precision = 3
@@ -597,8 +597,8 @@ formula   = "linear"
 factor    = 0.5
 offset    = -64.0
 unit      = "degrees"
-min       = 0.0
-max       = 0.0
+min       = -12.0
+max       = 8.0
 precision = 2
 data_type = "uint8"
 
@@ -640,11 +640,11 @@ data_type = "uint8"
 
 
 [[scaling]]
-id        = "bar_relative_x_0_001333224"
+id        = "kpa_relative_x_0_1333224"
 formula   = "linear"
-factor    = 0.001333224
+factor    = 0.1333224
 offset    = 0.0
-unit      = "bar relative"
+unit      = "kPa relative"
 min       = 0.0
 max       = 0.0
 precision = 3
@@ -664,11 +664,11 @@ data_type = "uint8"
 
 
 [[scaling]]
-id        = "estimated_afr_x_001794433"
+id        = "lambda_x_0_0001220703"
 formula   = "linear"
-factor    = 0.001794433
+factor    = 0.0001220703
 offset    = 0.0
-unit      = "estimated AFR"
+unit      = "lambda"
 min       = 0.0
 max       = 0.0
 precision = 2
@@ -676,11 +676,11 @@ data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "estimated_afr_14_7_x"
+id        = "lambda_1_x"
 formula   = "linear"
 factor    = 1.0
 offset    = 0.0
-unit      = "estimated AFR"
+unit      = "lambda"
 min       = 0.0
 max       = 0.0
 precision = 2
@@ -688,15 +688,255 @@ data_type = "uint32_be"
 
 
 [[scaling]]
-id        = "estimated_afr_14_7_x_0004882812"
+id        = "lambda_1_x_0004882812"
 formula   = "linear"
 factor    = 1.0
 offset    = 0.0
-unit      = "estimated AFR"
+unit      = "lambda"
 min       = 0.0
 max       = 0.0
 precision = 2
 data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "c_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "C"
+min       = 0.0
+max       = 0.0
+precision = 1
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "kpa_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "kPa"
+min       = 0.0
+max       = 0.0
+precision = 1
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "km_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "km"
+min       = 0.0
+max       = 0.0
+precision = 1
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "x_10000"
+formula   = "linear"
+factor    = 10000.0
+offset    = 0.0
+unit      = "%"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "grams_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "grams"
+min       = 0.0
+max       = 0.0
+precision = 1
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "a_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "A"
+min       = 0.0
+max       = 0.0
+precision = 1
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "km_h_x_0_05625"
+formula   = "linear"
+factor    = 0.05625
+offset    = 0.0
+unit      = "km/h"
+min       = 0.0
+max       = 300.0
+precision = 1
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "mm_st_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "mm³/st"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "litres_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "litres"
+min       = 0.0
+max       = 100.0
+precision = 2
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "nm_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "Nm"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "rpm_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "rpm"
+min       = 0.0
+max       = 2000.0
+precision = 1
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "ca_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "°CA"
+min       = 0.0
+max       = 0.0
+precision = 3
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "s_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "µs"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "rawdata_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "rawdata"
+min       = 0.0
+max       = 0.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "ve_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "VE"
+min       = 0.0
+max       = 120.0
+precision = 2
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "g_s_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "g/s"
+min       = 0.0
+max       = 500.0
+precision = 2
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "ratio_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "ratio"
+min       = 0.0
+max       = 1.0
+precision = 2
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "km_h_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "km/h"
+min       = 0.0
+max       = 300.0
+precision = 1
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "on_off_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "On/Off"
+min       = 0.0
+max       = 1.0
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "gear_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "gear"
+min       = 0.0
+max       = 6.0
+precision = 0
+data_type = "uint32_be"
 
 
 [[pid]]
@@ -749,8 +989,8 @@ name        = "Boost Error*"
 ssm_address = 0x00FF4BEC
 length      = 4
 data_type   = "uint32_be"
-scaling     = "bar_x_0_001333224"
-unit        = "bar"
+scaling     = "kpa_x_0_1333224"
+unit        = "kPa"
 default_log = false
 
 
@@ -760,8 +1000,8 @@ name        = "Target Boost (4-byte)*"
 ssm_address = 0x00FF4BF0
 length      = 4
 data_type   = "uint32_be"
-scaling     = "bar_absolute_x_0_001333224"
-unit        = "bar absolute"
+scaling     = "kpa_absolute_x_0_1333224"
+unit        = "kPa absolute"
 default_log = false
 
 
@@ -914,8 +1154,8 @@ name        = "Manifold Absolute Pressure (4-byte)*"
 ssm_address = 0x00FF4EC0
 length      = 4
 data_type   = "uint32_be"
-scaling     = "bar_absolute_x_0_001333224"
-unit        = "bar absolute"
+scaling     = "kpa_absolute_x_0_1333224"
+unit        = "kPa absolute"
 default_log = false
 
 
@@ -925,8 +1165,8 @@ name        = "Manifold Relative Sea Level Pressure (4-byte)*"
 ssm_address = 0x00FF4EC0
 length      = 4
 data_type   = "uint32_be"
-scaling     = "bar_relative_sea_level_x_760_0_001333224"
-unit        = "bar relative sea level"
+scaling     = "psi_relative_sea_level_x_760_0_01933677"
+unit        = "psi relative sea level"
 default_log = false
 
 
@@ -1134,8 +1374,8 @@ name        = "Primary Open Loop Map Enrichment (2-byte)**"
 ssm_address = 0x00FF5296
 length      = 2
 data_type   = "uint16_be"
-scaling     = "estimated_afr_14_7_1_x_00003051758"
-unit        = "estimated AFR"
+scaling     = "lambda_1_1_x_00003051758"
+unit        = "lambda"
 default_log = false
 
 
@@ -1156,8 +1396,8 @@ name        = "Manifold Absolute Pressure (2-byte)**"
 ssm_address = 0x00FF52AA
 length      = 2
 data_type   = "uint16_be"
-scaling     = "bar_absolute_x_0_001333224"
-unit        = "bar absolute"
+scaling     = "kpa_absolute_x_0_1333224"
+unit        = "kPa absolute"
 default_log = false
 
 
@@ -1167,8 +1407,8 @@ name        = "Manifold Relative Sea Level Pressure (2-byte)**"
 ssm_address = 0x00FF52AA
 length      = 2
 data_type   = "uint16_be"
-scaling     = "bar_relative_sea_level_x_760_0_001333224"
-unit        = "bar relative sea level"
+scaling     = "kpa_relative_sea_level_x_760_0_1333224"
+unit        = "kPa relative sea level"
 default_log = false
 
 
@@ -1178,8 +1418,8 @@ name        = "Target Boost (2-byte)**"
 ssm_address = 0x00FF52B0
 length      = 2
 data_type   = "uint16_be"
-scaling     = "bar_absolute_x_0_001333224"
-unit        = "bar absolute"
+scaling     = "kpa_absolute_x_0_1333224"
+unit        = "kPa absolute"
 default_log = false
 
 
@@ -1255,8 +1495,8 @@ name        = "Manifold Relative Pressure (4-byte)*"
 ssm_address = 0x00FF4EC4
 length      = 4
 data_type   = "uint32_be"
-scaling     = "bar_relative_x_0_001333224"
-unit        = "bar relative"
+scaling     = "kpa_relative_x_0_1333224"
+unit        = "kPa relative"
 default_log = false
 
 
@@ -1299,8 +1539,8 @@ name        = "Closed Loop Fueling Target (2-byte)*"
 ssm_address = 0x00FF52B8
 length      = 2
 data_type   = "uint16_be"
-scaling     = "estimated_afr_x_001794433"
-unit        = "estimated AFR"
+scaling     = "lambda_x_0_0001220703"
+unit        = "lambda"
 default_log = false
 
 
@@ -1310,8 +1550,8 @@ name        = "Final Fueling Base (4-byte)*"
 ssm_address = 0x00FF5530
 length      = 4
 data_type   = "uint32_be"
-scaling     = "estimated_afr_14_7_x"
-unit        = "estimated AFR"
+scaling     = "lambda_1_x"
+unit        = "lambda"
 default_log = false
 
 
@@ -1321,6 +1561,6 @@ name        = "Final Fueling Base (2-byte)*"
 ssm_address = 0x00FF529A
 length      = 2
 data_type   = "uint16_be"
-scaling     = "estimated_afr_14_7_x_0004882812"
-unit        = "estimated AFR"
+scaling     = "lambda_1_x_0004882812"
+unit        = "lambda"
 default_log = false
