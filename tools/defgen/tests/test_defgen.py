@@ -513,6 +513,84 @@ class AxisLengthTest(unittest.TestCase):
         axes = {a.id: a for a in packs[0].axes}
         self.assertEqual(axes["curve_x"].length, 7)
 
+    def test_float_axis_data_type_from_element(self):
+        # RomRaider declares float axes as `storagetype="float"` on the axis
+        # <table> element itself. Before this fix, defgen ignored the axis
+        # element's storagetype and used the inline scaling's data_type
+        # default (uint16_be), making float-axis decoding produce alternating
+        # high-half/low-half garbage at runtime.
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="3D" name="vvt" sizex="16" sizey="16"
+                 storageaddress="0x100" storagetype="uint16" endian="big">
+            <table type="X Axis" name="vvt_x"
+                   storageaddress="0x200" storagetype="float" endian="little">
+              <scaling units="raw ecu value" expression="x" to_byte="x"
+                       format="0.0"/>
+            </table>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        axes = {a.id: a for a in packs[0].axes}
+        # Float axes — actual Subaru storage is big-endian regardless of the
+        # XML's endian attribute (documented Merp/RR quirk). Verify the
+        # axis emits float32_be, not the previous uint16_be default.
+        self.assertEqual(axes["vvt_x"].data_type, "float32_be")
+
+    def test_float_axis_endian_quirk_overridden_to_big(self):
+        # Even when the XML insists endian="little", we override to big for
+        # float axes — see _axis_from_element for the empirical note.
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="2D" name="foo" sizex="8"
+                 storageaddress="0x100" storagetype="uint16" endian="big">
+            <table type="X Axis" name="foo_x"
+                   storageaddress="0x200" storagetype="float" endian="little"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        axes = {a.id: a for a in packs[0].axes}
+        self.assertEqual(axes["foo_x"].data_type, "float32_be")
+
+    def test_uint16_axis_endian_preserved(self):
+        # The float-axis override does NOT apply to uint16/uint8 axes, which
+        # use the XML's declared endian as-is.
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="2D" name="foo" sizex="8"
+                 storageaddress="0x100" storagetype="uint16" endian="big">
+            <table type="X Axis" name="foo_x"
+                   storageaddress="0x200" storagetype="uint16" endian="big"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        axes = {a.id: a for a in packs[0].axes}
+        self.assertEqual(axes["foo_x"].data_type, "uint16_be")
+
+    def test_axis_without_storagetype_falls_through_to_scaling(self):
+        # If the axis element omits storagetype (rare — usually means it
+        # inherited from a base that wasn't merged), fall back to the
+        # inline scaling's data_type (the prior behaviour). The inline
+        # scaling here carries a real `units` so `_scaling_from_element`
+        # actually returns a record instead of dropping it as nameless.
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="2D" name="foo" sizex="8"
+                 storageaddress="0x100" storagetype="uint16" endian="big">
+            <table type="X Axis" name="foo_x" storageaddress="0x200">
+              <scaling units="RPM" expression="x" to_byte="x" format="0"
+                       storagetype="uint8" endian="big"/>
+            </table>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        axes = {a.id: a for a in packs[0].axes}
+        self.assertEqual(axes["foo_x"].data_type, "uint8")
+
 
 class EmissionsRelevanceTest(unittest.TestCase):
     def test_closed_loop_fueling_is_flagged(self):

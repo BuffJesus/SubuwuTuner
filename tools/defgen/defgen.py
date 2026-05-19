@@ -1039,12 +1039,41 @@ def _axis_from_element(el: ET.Element,
     # axis element carries no length of its own.
     length_str = el.get("size") or el.get("elements") or fallback_length
     inline_scaling = el.find("scaling")
-    data_type = "uint16_be"
+
+    # RomRaider's axis storagetype + endian live on the axis <table> element
+    # itself (e.g. `<table type="X Axis" storagetype="float" endian="little">`),
+    # not on its inner <scaling>. The previous code only sourced data_type
+    # from the inline scaling, which meant float axes silently became
+    # `uint16_be`. Read the axis attrs first; fall through to the inline
+    # scaling's data_type only if the element omits storagetype.
+    #
+    # Empirical note on Subaru float axes: Merp's ecu_defs.xml declares
+    # `endian="little"` on float axes, but the bytes on SH-2A ROMs are
+    # actually big-endian (decoding as little-endian yields all-zeros for
+    # plausible torque/RPM values). Treat axis endianness as a fact-source
+    # signal but override to big when the element type is `float` — the
+    # XML attribute is a documented RR quirk, not the actual storage.
+    storagetype = el.get("storagetype")
+    endian      = el.get("endian")
+    if storagetype:
+        if storagetype.lower().strip() == "float":
+            endian = "big"  # See note above re: Merp/Subaru float-axis quirk
+        try:
+            axis_data_type = map_data_type(storagetype, endian)
+        except ValueError:
+            axis_data_type = None
+    else:
+        axis_data_type = None
+
+    data_type = axis_data_type or "uint16_be"
     scaling_id = ""
     if inline_scaling is not None:
         rec = _scaling_from_element(inline_scaling)
         if rec is not None:
-            data_type = rec.data_type
+            if axis_data_type is None:
+                # No axis-level storagetype to override the scaling's
+                # default — fall back to whatever the scaling carries.
+                data_type = rec.data_type
             scaling_id = rec.id
 
     axis_slug = _slugify(name)
