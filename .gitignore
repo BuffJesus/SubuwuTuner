@@ -19,7 +19,8 @@ vcpkg_installed/
 # IDEs
 .vs/
 .vscode/
-.claude/
+.claude/*
+!.claude/HANDOFF.md
 *.user
 *.suo
 *.sdf
