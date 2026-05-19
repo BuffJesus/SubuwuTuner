@@ -546,11 +546,29 @@ void print_def_summary(st::Definition const &def, st::Rom const &rom) {
         std::printf("  Checksum type: %s\n", pack.checksum_type.c_str());
     }
 
-    auto const match = def.matches(rom);
-    if (match.has_value()) {
-        std::printf("  Match:         %s\n", match->c_str());
+    auto const info = def.match_info(rom);
+    if (info.has_value()) {
+        if (info->scanned) {
+            std::printf("  Match:         %s @ 0x%08zX (scanned)\n",
+                        info->name.c_str(), info->offset);
+        } else {
+            std::printf("  Match:         %s @ 0x%08zX\n",
+                        info->name.c_str(), info->offset);
+        }
     } else {
-        std::printf("  Match:         (none — CID at declared offset does not match)\n");
+        // Distinguish "no scan-mode CID anywhere" from "fixed-offset
+        // bytes don't match" — both surface as no-match but the
+        // diagnostic phrasing differs.
+        bool any_scan = false;
+        for (auto const &id : def.identifications()) {
+            if (id.cid_scan) { any_scan = true; break; }
+        }
+        if (any_scan) {
+            std::printf("  Match:         (none — CID not found by scan; "
+                        "ROM may be a different calibration or partial decrypt)\n");
+        } else {
+            std::printf("  Match:         (none — CID at declared offset does not match)\n");
+        }
     }
 
     std::printf("\nTables defined: %zu\n", def.tables().size());
@@ -939,8 +957,16 @@ int cmd_pack_info(int argc, char *argv[]) {
     std::printf("\n");
     std::printf("Identifications: %zu\n", def->identifications().size());
     for (auto const &id : def->identifications()) {
-        std::printf("  - %s  (CID '%s' @ 0x%08zX)\n", id.name.c_str(),
-                    id.cid_match.c_str(), id.cid_address);
+        if (id.cid_scan) {
+            // Scan-mode identifications don't carry a meaningful
+            // cid_address — the loader searches the whole ROM for
+            // cid_match. Show "scan" instead of the misleading 0x0.
+            std::printf("  - %s  (CID '%s', scan)\n", id.name.c_str(),
+                        id.cid_match.c_str());
+        } else {
+            std::printf("  - %s  (CID '%s' @ 0x%08zX)\n", id.name.c_str(),
+                        id.cid_match.c_str(), id.cid_address);
+        }
     }
     std::printf("Axes:            %zu\n", def->axes().size());
     std::printf("Scalings:        %zu\n", def->scalings().size());

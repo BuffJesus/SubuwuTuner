@@ -344,6 +344,18 @@ class Definition {
     // entry's `name`. Otherwise nullopt.
     [[nodiscard]] std::optional<std::string> matches(Rom const &rom) const;
 
+    // Same as `matches`, but also reports the byte offset where the CID
+    // was found and whether scan mode was used. Useful for diagnostic
+    // display (`rom-info --def …` shows the discovered offset for
+    // scan-mode matches). When `scanned == false`, `offset == cid_address`
+    // from the matching identification.
+    struct MatchInfo {
+        std::string name;
+        std::size_t offset{};
+        bool        scanned{false};
+    };
+    [[nodiscard]] std::optional<MatchInfo> match_info(Rom const &rom) const;
+
     // Read `axis.length` values from the ROM, applying `axis.scaling` if it
     // resolves to a known scaling. If the axis has no scaling, raw values
     // are returned as-is.

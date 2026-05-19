@@ -1501,21 +1501,23 @@ Result<Definition::TableDiff> Definition::diff_table(Rom const &  a,
     return diff;
 }
 
-std::optional<std::string> Definition::matches(Rom const &rom) const {
+std::optional<Definition::MatchInfo> Definition::match_info(Rom const &rom) const {
     for (auto const &id : ids_) {
         if (id.cid_scan) {
             // Scan mode: search the ROM for any occurrence of cid_match.
             // Used by FA-DIT WRX firmware where the CID descriptor lives
             // at a variable per-firmware offset rather than a fixed
             // 0x2000-style address. The first occurrence anywhere in
-            // the ROM bytes counts as a match.
+            // the ROM bytes counts as a match; the offset is reported
+            // so callers can show where it was found.
             auto const haystack = rom.slice(0, rom.size());
             if (!haystack.has_value() || id.cid_match.empty()) continue;
             std::string_view const hay{reinterpret_cast<char const *>(
                                             haystack->data()),
                                        haystack->size()};
-            if (hay.find(id.cid_match) != std::string_view::npos) {
-                return id.name;
+            auto const pos = hay.find(id.cid_match);
+            if (pos != std::string_view::npos) {
+                return MatchInfo{id.name, pos, /*scanned=*/true};
             }
             continue;
         }
@@ -1526,8 +1528,15 @@ std::optional<std::string> Definition::matches(Rom const &rom) const {
         std::string_view const got{reinterpret_cast<char const *>(slice->data()),
                                    slice->size()};
         if (got == id.cid_match) {
-            return id.name;
+            return MatchInfo{id.name, id.cid_address, /*scanned=*/false};
         }
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> Definition::matches(Rom const &rom) const {
+    if (auto info = match_info(rom); info.has_value()) {
+        return info->name;
     }
     return std::nullopt;
 }
