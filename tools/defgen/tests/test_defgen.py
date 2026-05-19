@@ -217,6 +217,26 @@ class HexAndPrecisionTest(unittest.TestCase):
                          "boost_target_high_octane")
         self.assertEqual(defgen._slugify("__"), "unnamed")
 
+    def test_table_address_accepts_bare_hex(self):
+        """Some community-sourced XMLs (e.g. aidx_aid43764_EP5G600A.xml)
+        ship the table address as bare hex like `address="dc938"`
+        without the `0x` prefix. The legacy _parse_int call would
+        interpret that as decimal and crash on hex digits A-F."""
+        import xml.etree.ElementTree as ET
+        bare = ET.fromstring('<table address="dc938"/>')
+        prefixed = ET.fromstring('<table address="0xDC938"/>')
+        storage = ET.fromstring('<table storageaddress="dc938"/>')
+        self.assertEqual(defgen._table_address(bare), 0xDC938)
+        self.assertEqual(defgen._table_address(prefixed), 0xDC938)
+        self.assertEqual(defgen._table_address(storage), 0xDC938)
+
+    def test_table_address_handles_empty_and_missing(self):
+        import xml.etree.ElementTree as ET
+        self.assertEqual(defgen._table_address(ET.fromstring('<table/>')), 0)
+        self.assertEqual(
+            defgen._table_address(ET.fromstring('<table address=""/>')),
+            0)
+
 
 class FixtureEndToEndTest(unittest.TestCase):
     """Parse the synthetic XML fixture and assert the emitted TOML is sane."""

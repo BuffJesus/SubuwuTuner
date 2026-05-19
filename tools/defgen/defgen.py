@@ -890,8 +890,15 @@ def _format_to_precision(fmt: str | None) -> int:
 
 def _table_address(t_el: ET.Element) -> int:
     """RomRaider's canonical attribute is `storageaddress`; some synthetic
-    fixtures use `address`. Accept both, with `storageaddress` winning."""
-    return _parse_int(t_el.get("storageaddress") or t_el.get("address"))
+    fixtures use `address`. Accept both, with `storageaddress` winning.
+
+    Always hex — most XMLs prefix with `0x` (e.g. `address="0x000DC938"`)
+    but some community-sourced or per-aid extracted XMLs ship bare hex
+    without the prefix (e.g. `address="dc938"` in
+    `aidx_aid43764_EP5G600A.xml`). `_parse_int` would interpret the
+    bare form as decimal and crash on hex digits A-F; `_parse_hex_address`
+    handles both prefix styles consistently."""
+    return _parse_hex_address(t_el.get("storageaddress") or t_el.get("address"))
 
 
 def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> None:
