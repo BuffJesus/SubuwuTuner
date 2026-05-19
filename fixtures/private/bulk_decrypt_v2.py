@@ -154,6 +154,26 @@ CONFIRMED = [
     ("EZ1GB10_family",
      "roms_extracted/decrypted/EZ1G/EZ1GB10G.bin",
      "ez1gb10g_ori.hex", 1024, 0, 1_049_600),
+
+    # --- Pending ECUTune purchases (2026-05-19). When the downloads
+    # arrive, extract the _ori (stock) binary, place it at the path
+    # below, and re-run bulk_decrypt_v2.py. Each unlocks an entire
+    # 6-char family in its bucket.
+    #
+    # LF79100P  -> unlocks LF7910 family (15 CIDs, includes LF79103P)
+    # URL: https://ecutune.shop/downloads/lf79100p-b029b07007-e2-chk-ok/
+    # Drop the stock bin at: roms_extracted/decrypted/LF79/LF79100P.bin
+    ("LF79100_family",
+     "roms_extracted/decrypted/LF79/LF79100P.bin",
+     "lf79100p_ori.hex", 1024, 0, 2_098_176),
+
+    # EP5L000J  -> unlocks EP5L00 family (19 CIDs, largest unsolved 1MB)
+    # URL: https://ecutune.shop/downloads/ep5l000j-91363e5007-stage1-tgv_off-chk-ok/
+    #  or: https://ecutune.shop/downloads/ep5l000j-91363e5007-stage1-e2-egr_off-chk-ok/
+    # Drop the stock bin at: roms_extracted/decrypted/EP5L/EP5L000J.bin
+    ("EP5L000_family",
+     "roms_extracted/decrypted/EP5L/EP5L000J.bin",
+     "ep5l000j_ori.hex", 1024, 0, 1_049_600),
 ]
 
 # Buckets with no plaintext anchor at all — Patch B targets these.
