@@ -354,7 +354,7 @@ unit      = ""
 type      = "static"
 address   = 0x0002DF4A
 length    = 16
-data_type = "uint16_be"
+data_type = "uint8"
 scaling   = "g_rev_x_0_01293"
 
 
@@ -376,7 +376,7 @@ unit      = ""
 type      = "static"
 address   = 0x00023ABE
 length    = 17
-data_type = "uint16_be"
+data_type = "uint8"
 scaling   = "degrees_x_2_0_125"
 
 
@@ -398,7 +398,7 @@ unit      = ""
 type      = "static"
 address   = 0x0004B446
 length    = 64
-data_type = "uint16_be"
+data_type = "int16_be"
 scaling   = "ma_x_001"
 
 
@@ -464,7 +464,7 @@ unit      = ""
 type      = "static"
 address   = 0x00024F52
 length    = 9
-data_type = "uint16_be"
+data_type = "int16_be"
 scaling   = "bar_x_256_0_01"
 
 
@@ -563,7 +563,7 @@ unit      = ""
 type      = "static"
 address   = 0x0001A9C6
 length    = 8
-data_type = "uint16_be"
+data_type = "uint8"
 scaling   = "gear_x"
 
 
@@ -651,7 +651,7 @@ unit      = ""
 type      = "static"
 address   = 0x0001A120
 length    = 24
-data_type = "uint16_be"
+data_type = "uint8"
 scaling   = "ratio_x_255"
 
 
@@ -662,7 +662,7 @@ unit      = ""
 type      = "static"
 address   = 0x00019CBC
 length    = 24
-data_type = "uint16_be"
+data_type = "uint8"
 scaling   = "ratio_x_255"
 
 
@@ -673,7 +673,7 @@ unit      = ""
 type      = "static"
 address   = 0x0003136A
 length    = 16
-data_type = "uint16_be"
+data_type = "uint8"
 scaling   = "g_rev_x_01293"
 
 
@@ -695,7 +695,7 @@ unit      = ""
 type      = "static"
 address   = 0x0003159A
 length    = 16
-data_type = "uint16_be"
+data_type = "uint8"
 scaling   = "g_rev_x_01293"
 
 
@@ -717,7 +717,7 @@ unit      = ""
 type      = "static"
 address   = 0x000317CA
 length    = 16
-data_type = "uint16_be"
+data_type = "uint8"
 scaling   = "g_rev_x_01293"
 
 
@@ -739,7 +739,7 @@ unit      = ""
 type      = "static"
 address   = 0x000319FA
 length    = 16
-data_type = "uint16_be"
+data_type = "uint8"
 scaling   = "g_rev_x_01293"
 
 

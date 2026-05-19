@@ -716,7 +716,7 @@ unit      = ""
 type      = "static"
 address   = 0x000CB4F4
 length    = 11
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "g_rev_x"
 
 
@@ -727,7 +727,7 @@ unit      = ""
 type      = "static"
 address   = 0x000CB520
 length    = 10
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "rpm_x"
 
 
@@ -749,7 +749,7 @@ unit      = ""
 type      = "static"
 address   = 0x000D3FE8
 length    = 13
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "ma_x"
 
 
@@ -771,7 +771,7 @@ unit      = ""
 type      = "static"
 address   = 0x000C2BE4
 length    = 4
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "psi_x_01933677"
 
 
@@ -782,7 +782,7 @@ unit      = ""
 type      = "static"
 address   = 0x000C842C
 length    = 16
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "degrees_f_x_1_8_32"
 
 
@@ -826,7 +826,7 @@ unit      = ""
 type      = "static"
 address   = 0x000CB6A8
 length    = 5
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "volts_x"
 
 
@@ -837,7 +837,7 @@ unit      = ""
 type      = "static"
 address   = 0x000CB6BC
 length    = 3
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "psi_relative_x_01933677"
 
 
@@ -848,7 +848,7 @@ unit      = ""
 type      = "static"
 address   = 0x000CAD30
 length    = 8
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "ms_x_001"
 
 
@@ -859,7 +859,7 @@ unit      = ""
 type      = "static"
 address   = 0x000C8630
 length    = 6
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "x"
 
 
@@ -870,7 +870,7 @@ unit      = ""
 type      = "static"
 address   = 0x000C8650
 length    = 5
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "degrees_f_x_1_8_32"
 
 
@@ -881,7 +881,7 @@ unit      = ""
 type      = "static"
 address   = 0x000C9C50
 length    = 18
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "x"
 
 
@@ -947,7 +947,7 @@ unit      = ""
 type      = "static"
 address   = 0x000D3E68
 length    = 48
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "volts_x"
 
 
@@ -958,7 +958,7 @@ unit      = ""
 type      = "static"
 address   = 0x000C2F68
 length    = 8
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "g_s_x"
 
 
@@ -1057,7 +1057,7 @@ unit      = ""
 type      = "static"
 address   = 0x000DCCDC
 length    = 28
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "raw_ecu_value_x"
 
 
@@ -1112,7 +1112,7 @@ unit      = ""
 type      = "static"
 address   = 0x000D3C08
 length    = 30
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "volts_x"
 
 
@@ -1123,7 +1123,7 @@ unit      = ""
 type      = "static"
 address   = 0x000D3B28
 length    = 28
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "volts_x"
 
 

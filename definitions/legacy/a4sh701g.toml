@@ -32,8 +32,6 @@ formula   = "linear"
 factor    = 0.004577637
 offset    = 0.0
 unit      = "Airflow (g/s)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -44,8 +42,6 @@ formula   = "linear"
 factor    = 6.103515625e-05
 offset    = 0.0
 unit      = "Engine Load (g/rev)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -56,8 +52,6 @@ formula   = "linear"
 factor    = 0.1953125
 offset    = 0.0
 unit      = "Engine Speed (RPM)"
-min       = 0.0
-max       = 0.0
 precision = 0
 data_type = "uint16_be"
 
@@ -700,7 +694,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p0335_crankshaft_pos_sensor_a_malfunction"
-name                   = ""
+name                   = "P0335 Crankshaft Pos Sensor A Malfunction"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002DD85
@@ -712,7 +706,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p0336_crankshaft_pos_sensor_a_range_perf"
-name                   = ""
+name                   = "P0336 Crankshaft Pos Sensor A Range Perf"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002DD8D
@@ -724,7 +718,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p0340_camshaft_pos_sensor_a_malfunction"
-name                   = ""
+name                   = "P0340 Camshaft Pos Sensor A Malfunction"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002DD95
@@ -736,7 +730,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p0341_camshaft_pos_sensor_a_range_perf"
-name                   = ""
+name                   = "P0341 Camshaft Pos Sensor A Range Perf"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002DD91
@@ -760,7 +754,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p0365_camshaft_pos_sensor_b_bank_1"
-name                   = ""
+name                   = "P0365 Camshaft Pos Sensor B Bank 1"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002DF35
@@ -772,7 +766,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p0390_camshaft_pos_sensor_b_bank_2"
-name                   = ""
+name                   = "P0390 Camshaft Pos Sensor B Bank 2"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002DF39
@@ -1324,7 +1318,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1086_tgv_pos_2_circuit_low"
-name                   = ""
+name                   = "P1086 Tgv Pos 2 Circuit Low"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002E215
@@ -1336,7 +1330,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1087_tgv_pos_2_circuit_high"
-name                   = ""
+name                   = "P1087 Tgv Pos 2 Circuit High"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002E219
@@ -1348,7 +1342,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1088_tgv_pos_1_circuit_low"
-name                   = ""
+name                   = "P1088 Tgv Pos 1 Circuit Low"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002E21D
@@ -1360,7 +1354,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1089_tgv_pos_1_circuit_high"
-name                   = ""
+name                   = "P1089 Tgv Pos 1 Circuit High"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002E221
@@ -1468,7 +1462,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1110_atmos_pressure_sensor_low_input"
-name                   = ""
+name                   = "P1110 Atmos Pressure Sensor Low Input"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002E0C1
@@ -1480,7 +1474,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1111_atmos_pressure_sensor_high_input"
-name                   = ""
+name                   = "P1111 Atmos Pressure Sensor High Input"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002E0C5
@@ -1492,7 +1486,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1112_atmos_pressure_sensor_range_perf"
-name                   = ""
+name                   = "P1112 Atmos Pressure Sensor Range Perf"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002E0C9
@@ -1636,7 +1630,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1237_ecv_solenoid_low_pos_pressure"
-name                   = ""
+name                   = "P1237 Ecv Solenoid Low Pos Pressure"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002DE49
@@ -1648,7 +1642,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1238_ecv_solenoid_high_pos_pressure"
-name                   = ""
+name                   = "P1238 Ecv Solenoid High Pos Pressure"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002DE4D
@@ -1660,7 +1654,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1239_ecv_solenoid_low_neg_pressure"
-name                   = ""
+name                   = "P1239 Ecv Solenoid Low Neg Pressure"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002DE51
@@ -1672,7 +1666,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1240_ecv_solenoid_high_neg_pressure"
-name                   = ""
+name                   = "P1240 Ecv Solenoid High Neg Pressure"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002DE55
@@ -1828,7 +1822,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1400_fuel_tank_pressure_sol_low"
-name                   = ""
+name                   = "P1400 Fuel Tank Pressure Sol Low"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002DF45
@@ -1840,7 +1834,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1420_fuel_tank_pressure_sol_high_input"
-name                   = ""
+name                   = "P1420 Fuel Tank Pressure Sol High Input"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002DF49
@@ -1924,7 +1918,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1590_neutral_pos_switch_high_input_at"
-name                   = ""
+name                   = "P1590 Neutral Pos Switch High Input At"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002DE5D
@@ -1936,7 +1930,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p1591_neutral_pos_switch_low_input_at"
-name                   = ""
+name                   = "P1591 Neutral Pos Switch Low Input At"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0002DE61

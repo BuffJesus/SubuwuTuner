@@ -27,14 +27,12 @@ ecu_part    = "6202154007"
 
 
 [[scaling]]
-id        = "bar_absolute_x_001333224"
+id        = "psi_absolute_x_01933677"
 formula   = "linear"
-factor    = 0.001333224
+factor    = 0.01933677
 offset    = 0.0
-unit      = "bar absolute"
-min       = 0.0
-max       = 0.0
-precision = 4
+unit      = "psi absolute"
+precision = 3
 data_type = "uint16_be"
 
 
@@ -44,8 +42,6 @@ formula   = "linear"
 factor    = 7.6293945e-05
 offset    = 0.0
 unit      = "Volts"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -56,8 +52,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "counter threshold"
-min       = 0.0
-max       = 0.0
 precision = 0
 data_type = "uint16_be"
 
@@ -68,8 +62,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "Estimated Air/Fuel Ratio"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -80,8 +72,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "g/rev"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -92,8 +82,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "RPM"
-min       = 0.0
-max       = 0.0
 precision = 0
 data_type = "uint16_be"
 
@@ -104,8 +92,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "Estimated Air/Fuel Ratio"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -116,8 +102,6 @@ formula   = "linear"
 factor    = 14.7
 offset    = 0.0
 unit      = "Air/Fuel Ratio"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -128,8 +112,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "mA"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -140,21 +122,17 @@ formula   = "linear"
 factor    = 3.051758e-05
 offset    = 0.0
 unit      = "Front Oxygen Sensor Compensation"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "bar_x_001333224"
+id        = "psi_x_01933677"
 formula   = "linear"
-factor    = 0.001333224
+factor    = 0.01933677
 offset    = 0.0
-unit      = "bar"
-min       = 0.0
-max       = 0.0
-precision = 3
+unit      = "psi"
+precision = 2
 data_type = "uint16_be"
 
 
@@ -164,8 +142,6 @@ formula   = "linear"
 factor    = 0.000224304213
 offset    = -7.35
 unit      = "Estimated Air/Fuel Ratio Points (Additive)"
-min       = 0.0
-max       = 0.0
 precision = 3
 data_type = "uint16_be"
 
@@ -176,32 +152,26 @@ formula   = "linear"
 factor    = -0.000224304213
 offset    = 7.350001
 unit      = "Estimated Air/Fuel Ratio Points (Additive)"
-min       = 0.0
-max       = 0.0
 precision = 3
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "degrees_c_x"
+id        = "degrees_f_x_1_8_32"
 formula   = "linear"
-factor    = 1.0
-offset    = 0.0
-unit      = "Degrees C"
-min       = 0.0
-max       = 0.0
+factor    = 1.8
+offset    = 32.0
+unit      = "Degrees F"
 precision = 0
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "coolant_temp_degrees_c_x"
+id        = "coolant_temp_degrees_f_x_1_8_32"
 formula   = "linear"
-factor    = 1.0
-offset    = 0.0
-unit      = "Coolant Temp (Degrees C)"
-min       = 0.0
-max       = 0.0
+factor    = 1.8
+offset    = 32.0
+unit      = "Coolant Temp (Degrees F)"
 precision = 1
 data_type = "uint16_be"
 
@@ -212,8 +182,6 @@ formula   = "linear"
 factor    = 0.4882812
 offset    = 0.0
 unit      = "Accelerator Pedal Angle (%)"
-min       = 0.0
-max       = 0.0
 precision = 1
 data_type = "uint16_be"
 
@@ -224,8 +192,6 @@ formula   = "linear"
 factor    = 1.1904761904761905
 offset    = 0.0
 unit      = "Throttle Plate Opening Angle (%)"
-min       = 0.0
-max       = 0.0
 precision = 1
 data_type = "uint16_be"
 
@@ -236,8 +202,6 @@ formula   = "linear"
 factor    = 0.004
 offset    = 0.0
 unit      = "Base Pulse Width (ms)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -248,8 +212,6 @@ formula   = "linear"
 factor    = 0.001
 offset    = 0.0
 unit      = "Base Pulse Width (ms)"
-min       = 0.0
-max       = 0.0
 precision = 3
 data_type = "uint16_be"
 
@@ -260,8 +222,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "Engine Speed (RPM)"
-min       = 0.0
-max       = 0.0
 precision = 0
 data_type = "uint16_be"
 
@@ -272,8 +232,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "Accelerator Pedal Angle (%)"
-min       = 0.0
-max       = 0.0
 precision = 1
 data_type = "uint16_be"
 
@@ -284,8 +242,6 @@ formula   = "linear"
 factor    = 0.00025
 offset    = 0.0
 unit      = "Latency (ms)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -296,21 +252,17 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "volts"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "bar_relative_x_001333224"
+id        = "psi_relative_x_01933677"
 formula   = "linear"
-factor    = 0.001333224
+factor    = 0.01933677
 offset    = 0.0
-unit      = "bar relative"
-min       = 0.0
-max       = 0.0
-precision = 4
+unit      = "psi relative"
+precision = 2
 data_type = "uint16_be"
 
 
@@ -320,8 +272,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "ESTIMATED Flow Rate - Gas Only (cc/min)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -332,8 +282,6 @@ formula   = "linear"
 factor    = 0.0078125
 offset    = -1.0
 unit      = "Injector Fuel Offset Additive"
-min       = 0.0
-max       = 0.0
 precision = 3
 data_type = "uint16_be"
 
@@ -344,8 +292,6 @@ formula   = "linear"
 factor    = 0.001
 offset    = 0.0
 unit      = "ms"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -356,8 +302,6 @@ formula   = "linear"
 factor    = 0.008
 offset    = 0.0
 unit      = "Injector Pulse Width (ms)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -368,8 +312,6 @@ formula   = "linear"
 factor    = 0.78125
 offset    = -100.0
 unit      = "Cranking Fuel Injector Pulse Width Compensation (%)"
-min       = 0.0
-max       = 0.0
 precision = 1
 data_type = "uint16_be"
 
@@ -380,8 +322,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "%"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -392,8 +332,6 @@ formula   = "linear"
 factor    = 0.004
 offset    = 0.0
 unit      = "Additional Injector Pulse Width (ms)"
-min       = 0.0
-max       = 0.0
 precision = 3
 data_type = "uint16_be"
 
@@ -404,8 +342,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "Throttle Angle Change (%)"
-min       = 0.0
-max       = 0.0
 precision = 1
 data_type = "uint16_be"
 
@@ -416,8 +352,6 @@ formula   = "linear"
 factor    = 0.78125
 offset    = -100.0
 unit      = "Throttle Tip-in Enrichment Compensation (%)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -428,8 +362,6 @@ formula   = "linear"
 factor    = 0.01220703125
 offset    = -100.0
 unit      = "Throttle Tip-in Enrichment Compensation (%)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -440,8 +372,6 @@ formula   = "linear"
 factor    = 0.04882812
 offset    = -99.99998976
 unit      = "Throttle Tip-in Enrichment Compensation (%)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -452,8 +382,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "tip-in enrichment applied counter"
-min       = 0.0
-max       = 0.0
 precision = 0
 data_type = "uint16_be"
 
@@ -464,8 +392,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "tip-in last applied counter period"
-min       = 0.0
-max       = 0.0
 precision = 0
 data_type = "uint16_be"
 
@@ -476,8 +402,6 @@ formula   = "linear"
 factor    = 0.001907349
 offset    = 0.0
 unit      = "cumulative throttle angle change"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -488,8 +412,6 @@ formula   = "linear"
 factor    = 100.0
 offset    = 0.0
 unit      = "A/F Learning #1 Limits (%)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -500,8 +422,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "Mass Airflow (g/s)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -512,8 +432,6 @@ formula   = "linear"
 factor    = 0.390625
 offset    = -50.0
 unit      = "Mass Airflow Compensation (%)"
-min       = 0.0
-max       = 0.0
 precision = 1
 data_type = "uint16_be"
 
@@ -524,8 +442,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "g/s"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -536,8 +452,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "Engine Load (g/rev)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -548,8 +462,6 @@ formula   = "linear"
 factor    = 0.390625
 offset    = -50.0
 unit      = "Engine Load Compensation (%)"
-min       = 0.0
-max       = 0.0
 precision = 1
 data_type = "uint16_be"
 
@@ -560,8 +472,6 @@ formula   = "linear"
 factor    = 1.1904761904761905
 offset    = 0.0
 unit      = "%"
-min       = 0.0
-max       = 0.0
 precision = 1
 data_type = "uint16_be"
 
@@ -572,20 +482,16 @@ formula   = "linear"
 factor    = 0.3515625
 offset    = -20.0
 unit      = "Base Ignition Timing (degrees BTDC)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "vehicle_speed_kmh_x"
+id        = "vehicle_speed_mph_x_621"
 formula   = "linear"
-factor    = 1.0
+factor    = 0.621
 offset    = 0.0
-unit      = "Vehicle Speed (KMH)"
-min       = 0.0
-max       = 0.0
+unit      = "Vehicle Speed (MPH)"
 precision = 0
 data_type = "uint16_be"
 
@@ -596,8 +502,6 @@ formula   = "linear"
 factor    = 0.3515625
 offset    = 0.0
 unit      = "Maximum Knock Correction Timing Advance (degrees)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -608,8 +512,6 @@ formula   = "linear"
 factor    = 0.3515625
 offset    = -45.0
 unit      = "Ignition Timing Correction (degrees)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -620,8 +522,6 @@ formula   = "linear"
 factor    = 6.103516e-05
 offset    = 0.0
 unit      = "Engine Load (g/rev)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -632,8 +532,6 @@ formula   = "linear"
 factor    = -1.0
 offset    = -0.0
 unit      = "Potential Change in Current Feedback Correction per Knock 'Event' (degrees of correction)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -644,8 +542,6 @@ formula   = "linear"
 factor    = -1.0
 offset    = -0.0
 unit      = "degrees of correction"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -656,8 +552,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "'No Knock' Delay Period for Negative Feedback Correction Advance (counter threshold)"
-min       = 0.0
-max       = 0.0
 precision = 0
 data_type = "uint16_be"
 
@@ -668,8 +562,6 @@ formula   = "linear"
 factor    = -1.0
 offset    = -0.0
 unit      = "Potential Change in Fine Correction Stored Value Per Knock 'Event' (degrees of correction)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -680,8 +572,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "Current 'Knock Correction Advance Max' Map Value (degrees)"
-min       = 0.0
-max       = 0.0
 precision = 2
 data_type = "uint16_be"
 
@@ -692,8 +582,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "Rough Correction (IAM) Positive Learning Delay (counter threshold)"
-min       = 0.0
-max       = 0.0
 precision = 0
 data_type = "uint16_be"
 
@@ -704,8 +592,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "Ignition Advance Multiplier (IAM)"
-min       = 0.0
-max       = 0.0
 precision = 4
 data_type = "uint16_be"
 
@@ -716,8 +602,6 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "change in multiplier"
-min       = 0.0
-max       = 0.0
 precision = 4
 data_type = "uint16_be"
 
@@ -728,8 +612,6 @@ formula   = "linear"
 factor    = 0.0078125
 offset    = 0.0
 unit      = "Requested Torque (raw ecu value)"
-min       = 0.0
-max       = 0.0
 precision = 1
 data_type = "uint16_be"
 
@@ -740,8 +622,6 @@ formula   = "linear"
 factor    = 0.002270655357
 offset    = 0.0
 unit      = "Target Throttle Plate Opening Angle (%)"
-min       = 0.0
-max       = 0.0
 precision = 1
 data_type = "uint16_be"
 
@@ -752,20 +632,16 @@ formula   = "linear"
 factor    = 1.0
 offset    = 0.0
 unit      = "raw ecu value"
-min       = 0.0
-max       = 0.0
 precision = 1
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "temperature_degrees_c_x"
+id        = "temperature_degrees_f_x_1_8_32"
 formula   = "linear"
-factor    = 1.0
-offset    = 0.0
-unit      = "Temperature (Degrees C)"
-min       = 0.0
-max       = 0.0
+factor    = 1.8
+offset    = 32.0
+unit      = "Temperature (Degrees F)"
 precision = 1
 data_type = "uint16_be"
 
@@ -776,8 +652,6 @@ formula   = "linear"
 factor    = 0.1953125
 offset    = 0.0
 unit      = "Engine Speed (RPM)"
-min       = 0.0
-max       = 0.0
 precision = 0
 data_type = "uint16_be"
 
@@ -822,7 +696,7 @@ unit      = ""
 type      = "static"
 address   = 0x000C9634
 length    = 11
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "g_rev_x"
 
 
@@ -833,7 +707,7 @@ unit      = ""
 type      = "static"
 address   = 0x000C9660
 length    = 20
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "rpm_x"
 
 
@@ -855,7 +729,7 @@ unit      = ""
 type      = "static"
 address   = 0x000CFF10
 length    = 13
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "ma_x"
 
 
@@ -877,8 +751,8 @@ unit      = ""
 type      = "static"
 address   = 0x000C36AC
 length    = 4
-data_type = "uint16_be"
-scaling   = "bar_x_001333224"
+data_type = "float32_be"
+scaling   = "psi_x_01933677"
 
 
 [[axis]]
@@ -888,8 +762,8 @@ unit      = ""
 type      = "static"
 address   = 0x000C811C
 length    = 16
-data_type = "uint16_be"
-scaling   = "degrees_c_x"
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
 
 
 [[axis]]
@@ -932,7 +806,7 @@ unit      = ""
 type      = "static"
 address   = 0x000C9C20
 length    = 5
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "volts_x"
 
 
@@ -943,8 +817,8 @@ unit      = ""
 type      = "static"
 address   = 0x000C9C34
 length    = 3
-data_type = "uint16_be"
-scaling   = "bar_relative_x_001333224"
+data_type = "float32_be"
+scaling   = "psi_relative_x_01933677"
 
 
 [[axis]]
@@ -954,7 +828,7 @@ unit      = ""
 type      = "static"
 address   = 0x000C9930
 length    = 8
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "ms_x_001"
 
 
@@ -965,7 +839,7 @@ unit      = ""
 type      = "static"
 address   = 0x000C6E4C
 length    = 6
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "x"
 
 
@@ -976,7 +850,7 @@ unit      = ""
 type      = "static"
 address   = 0x000C8CBC
 length    = 18
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "x"
 
 
@@ -1042,7 +916,7 @@ unit      = ""
 type      = "static"
 address   = 0x000CFD90
 length    = 48
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "volts_x"
 
 
@@ -1053,8 +927,8 @@ unit      = ""
 type      = "static"
 address   = 0x000C4594
 length    = 5
-data_type = "uint16_be"
-scaling   = "degrees_c_x"
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
 
 
 [[axis]]
@@ -1064,7 +938,7 @@ unit      = ""
 type      = "static"
 address   = 0x000C45A8
 length    = 8
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "g_s_x"
 
 
@@ -1075,7 +949,7 @@ unit      = ""
 type      = "static"
 address   = 0x000C43B4
 length    = 11
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "x_84"
 
 
@@ -1185,7 +1059,7 @@ unit      = ""
 type      = "static"
 address   = 0x000DC24C
 length    = 26
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "raw_ecu_value_x"
 
 
@@ -1229,7 +1103,7 @@ unit      = ""
 type      = "static"
 address   = 0x00085DD4
 length    = 30
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "volts_x"
 
 
@@ -1240,7 +1114,7 @@ unit      = ""
 type      = "static"
 address   = 0x000CFC30
 length    = 28
-data_type = "uint16_be"
+data_type = "float32_be"
 scaling   = "volts_x"
 
 
@@ -1273,7 +1147,7 @@ category               = "manifold pressure sensor"
 dimensions             = 1
 address                = 0x000C0280
 data_type              = "uint16_be"
-scaling                = "bar_absolute_x_001333224"
+scaling                = "psi_absolute_x_01933677"
 axis_x                 = "mps_voltage_to_manifold_absolute_pressure"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -1374,7 +1248,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "front_oxygen_sensor_compensation_atm_pressure"
-name                   = ""
+name                   = "Front Oxygen Sensor Compensation Atm Pressure"
 category               = "fueling - closed loop"
 dimensions             = 1
 address                = 0x000C36BC
@@ -1433,7 +1307,7 @@ category               = "fueling - closed loop"
 dimensions             = 1
 address                = 0x000C66B0
 data_type              = "uint16_be"
-scaling                = "coolant_temp_degrees_c_x"
+scaling                = "coolant_temp_degrees_f_x_1_8_32"
 axis_x                 = "disable_cl_fueling_target_compensation_ect"
 emissions_relevant     = true
 engine_safety_critical = false
@@ -1441,7 +1315,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "cl_to_ol_delay_a_atm_pressure"
-name                   = ""
+name                   = "Cl To Ol Delay A Atm Pressure"
 category               = "fueling - cl/ol transition"
 dimensions             = 1
 address                = 0x000C8508
@@ -1454,7 +1328,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "cl_to_ol_delay_b_atm_pressure"
-name                   = ""
+name                   = "Cl To Ol Delay B Atm Pressure"
 category               = "fueling - cl/ol transition"
 dimensions             = 1
 address                = 0x000C8534
@@ -1524,7 +1398,7 @@ category               = "fueling - cl/ol transition"
 dimensions             = 1
 address                = 0x000C684C
 data_type              = "uint16_be"
-scaling                = "coolant_temp_degrees_c_x"
+scaling                = "coolant_temp_degrees_f_x_1_8_32"
 axis_x                 = "condition_result"
 emissions_relevant     = true
 engine_safety_critical = false
@@ -2541,7 +2415,7 @@ category               = "ignition timing - advance"
 dimensions             = 1
 address                = 0x000CB2DC
 data_type              = "uint16_be"
-scaling                = "vehicle_speed_kmh_x"
+scaling                = "vehicle_speed_mph_x_621"
 axis_x                 = "base_timing_idle_active"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -2738,7 +2612,7 @@ category               = "ignition timing - compensation"
 dimensions             = 1
 address                = 0x000CB470
 data_type              = "uint16_be"
-scaling                = "coolant_temp_degrees_c_x"
+scaling                = "coolant_temp_degrees_f_x_1_8_32"
 axis_x                 = "per_cylinder_timing_compensation"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3169,7 +3043,7 @@ category               = "miscellaneous - limits"
 dimensions             = 1
 address                = 0x000C6B04
 data_type              = "uint16_be"
-scaling                = "vehicle_speed_kmh_x"
+scaling                = "vehicle_speed_mph_x_621"
 axis_x                 = "speed_limiter_fuel_cut"
 emissions_relevant     = false
 engine_safety_critical = true
@@ -3182,7 +3056,7 @@ category               = "miscellaneous - limits"
 dimensions             = 1
 address                = 0x000C6B0C
 data_type              = "uint16_be"
-scaling                = "vehicle_speed_kmh_x"
+scaling                = "vehicle_speed_mph_x_621"
 axis_x                 = "speed_limiter_fuel_cut"
 emissions_relevant     = false
 engine_safety_critical = true
@@ -3195,7 +3069,7 @@ category               = "miscellaneous - limits"
 dimensions             = 1
 address                = 0x000DBC40
 data_type              = "uint16_be"
-scaling                = "vehicle_speed_kmh_x"
+scaling                = "vehicle_speed_mph_x_621"
 axis_x                 = "throttle_reduction"
 emissions_relevant     = false
 engine_safety_critical = true
@@ -3208,7 +3082,7 @@ category               = "miscellaneous - limits"
 dimensions             = 1
 address                = 0x000DBC4C
 data_type              = "uint16_be"
-scaling                = "vehicle_speed_kmh_x"
+scaling                = "vehicle_speed_mph_x_621"
 axis_x                 = "throttle_reduction"
 emissions_relevant     = false
 engine_safety_critical = true
@@ -3221,7 +3095,7 @@ category               = "miscellaneous - sensor scalings"
 dimensions             = 1
 address                = 0x00085E4C
 data_type              = "uint16_be"
-scaling                = "temperature_degrees_c_x"
+scaling                = "temperature_degrees_f_x_1_8_32"
 axis_x                 = "intake_temp_sensor"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3234,7 +3108,7 @@ category               = "miscellaneous - sensor scalings"
 dimensions             = 1
 address                = 0x000CFCA0
 data_type              = "uint16_be"
-scaling                = "temperature_degrees_c_x"
+scaling                = "temperature_degrees_f_x_1_8_32"
 axis_x                 = "coolant_temp_sensor"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3247,7 +3121,7 @@ category               = "miscellaneous - thresholds"
 dimensions             = 1
 address                = 0x000D0594
 data_type              = "uint16_be"
-scaling                = "coolant_temp_degrees_c_x"
+scaling                = "coolant_temp_degrees_f_x_1_8_32"
 axis_x                 = "mode_determination_coolant_temp_change"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3260,7 +3134,7 @@ category               = "miscellaneous - thresholds"
 dimensions             = 1
 address                = 0x000D05A4
 data_type              = "uint16_be"
-scaling                = "coolant_temp_degrees_c_x"
+scaling                = "coolant_temp_degrees_f_x_1_8_32"
 axis_x                 = "mode_determination_coolant_temp_change"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3273,7 +3147,7 @@ category               = "miscellaneous - thresholds"
 dimensions             = 1
 address                = 0x000D05B4
 data_type              = "uint16_be"
-scaling                = "coolant_temp_degrees_c_x"
+scaling                = "coolant_temp_degrees_f_x_1_8_32"
 axis_x                 = "mode_determination_coolant_temp_change"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3281,12 +3155,12 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "radiator_fan_modes_veh_speed"
-name                   = ""
+name                   = "Radiator Fan Modes Veh Speed"
 category               = "miscellaneous - thresholds"
 dimensions             = 1
 address                = 0x000D05C4
 data_type              = "uint16_be"
-scaling                = "vehicle_speed_kmh_x"
+scaling                = "vehicle_speed_mph_x_621"
 axis_x                 = "mode_determination_vehicle_speed_change"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3852,7 +3726,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p0335_crankshaft_pos_sensor_a_malfunction"
-name                   = ""
+name                   = "P0335 Crankshaft Pos Sensor A Malfunction"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0007F748
@@ -3864,7 +3738,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p0340_camshaft_pos_sensor_a_malfunction"
-name                   = ""
+name                   = "P0340 Camshaft Pos Sensor A Malfunction"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0007F74B
@@ -4368,7 +4242,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p2228_baro_pressure_circuit_low_input"
-name                   = ""
+name                   = "P2228 Baro Pressure Circuit Low Input"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0007F7FA
@@ -4380,7 +4254,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p2229_baro_pressure_circuit_high_input"
-name                   = ""
+name                   = "P2229 Baro Pressure Circuit High Input"
 category               = "diagnostic trouble codes"
 dimensions             = 0
 address                = 0x0007F7F9
