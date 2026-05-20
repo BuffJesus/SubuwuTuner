@@ -33,6 +33,7 @@ add_executable(st_unit_tests
     unit/ecu/test_ssm.cpp
     unit/ecu/test_uds.cpp
     unit/log/test_log.cpp
+    unit/log/test_knock_dashboard.cpp
     unit/can/test_can.cpp
     unit/dbc/test_dbc.cpp
     unit/discover/test_discover.cpp

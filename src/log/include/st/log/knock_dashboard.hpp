@@ -24,6 +24,7 @@
 #include "st/core/result.hpp"
 
 #include <array>
+#include <string_view>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -108,7 +109,7 @@ struct WindowConfig {
 // CSV replay entry point — reads a SubuwuTuner CSV log (per `st::log::CsvSink`
 // format) and returns a snapshot. Returns Err on malformed CSV or missing
 // header columns referenced by `mapping`.
-[[nodiscard]] st::core::Result<KnockSnapshot> snapshot_from_csv(
+[[nodiscard]] st::Result<KnockSnapshot> snapshot_from_csv(
     std::string_view         csv_path,
     PidMapping const        &mapping,
     WindowConfig const      &cfg);
