@@ -66,6 +66,39 @@ Adapter support (Tactrix, OBDLink, ELM327, OBDX Pro) is built on a coroutine-bas
 
 **Zero analytics, zero phone-home.** Crash reporting is opt-in, contains no project content, and is sent to a self-hostable endpoint.
 
+## 11. Surfacing under-served definition coverage
+
+The RomRaider XMLs and the packs we ship from them already expose a long tail of maps and parameters that the existing tools *technically support* but for which **no community workflow exists**. Tuners ignore them because the UI doesn't make them legible, the methodology isn't written down, or both. SubuwuTuner uses this as a deliberate differentiator: ship the visualization and the workflow, not just the editor cell.
+
+The under-served categories below are present in nearly every per-CID RR pack we generate but rarely touched in published tunes:
+
+| Category | What's in the def | Why it's neglected |
+|---|---|---|
+| Cold-start fuel + spark | Coolant-temp-conditioned tables active first 60–120 s | Dyno tuners only tune warm; no community methodology |
+| Adaptive-learning state arrays | LTFT history, idle-adapt, knock-learn DAM history | Read-only views; no UI surfaces drift over time |
+| Per-cylinder knock thresholds | Cyl-1..4 separate noise-floor maps | Community workflow collapses to one global value |
+| Cruise-control PID gains | Throttle PID for set-speed hold | Treated as "comfort," not "performance" |
+| Cooling-fan hysteresis curves | Fan-on/off temp curves | Edited only for race-car overheat fixes |
+| EBCS / WGDC controller gains | Boost-solenoid PID (not just duty/target) | Tuners adjust target/duty, ignore controller loop |
+| VVT actuator gains | Intake/exhaust cam PID coefficients | Tuners adjust cam targets, ignore the loop |
+| CACT compensation | Charge-air-cooler temp pull/enrichment | Logged raw, never overlaid on its own comp map |
+| MAF compensation by RPM band | Per-RPM MAF-flow trim | Subsumed into "MAF scaling," loses RPM-axis structure |
+| AFR target outside peak load | Light-throttle / part-load AFR rows | Tuners hammer WOT row, leave the rest OEM |
+| Cat over-temp protection thresholds | EGT-conditioned fuel enrichment | Never touched — but it's the thing preventing meltdown |
+| Knock-window crank-angle map | Sensor sampling window per cylinder | RR-exposed, never adjusted in any published tune |
+| Boost-by-gear taper | Gear-conditioned target boost | Partially tracked (1st-gear cut), 4th+ usually flat-OEM |
+
+### v1.x feature plays this enables
+
+Four concrete features fall out directly. None require new hardware; all run against existing log + ROM data.
+
+1. **Adaptive-learning history visualizer** — chart LTFT / DAM / idle-adapt drift over weeks. The state arrays are already in the def; the missing piece is a long-cycle UI on top. No IP risk, pure infrastructure win, big diagnostic value (catches dropping injectors, MAF aging, vacuum-leak drift).
+2. **Per-cylinder knock dashboard** — split the cyl-1..4 noise tables into a real cylinder-comparison view with log overlay. Catches uneven fueling, weak coil-pack, knock-sensor placement issues that single-value views hide.
+3. **Cold-start tuning workflow** — define a methodology (target lambda by ECT, recommended timing pull by ambient) and a GUI mode that gates the cold-start tables behind a checklist. Atlas exposes the maps; nobody ships a workflow around them.
+4. **Boost-controller PID assistant** — fit the EBCS PID gains from a tip-in log. The table exists in every WRX def; the fitting methodology is absent from the community. Closes a real long-standing complaint (boost overshoot / undershoot on tip-in).
+
+Plays 1 and 2 are pure visualization (low risk, ship in OSS). Plays 3 and 4 are tuning-domain features that share infrastructure with the auto-tune kernels in `docs/12`.
+
 ---
 
 ## Where we are conservative

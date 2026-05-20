@@ -114,6 +114,7 @@ The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0
 | **v1.1** | **MAF auto-tune + knock-based ignition pull** (see `docs/12-auto-tuning.md`) ✅ shipped (kernels + lint + CLI + GUI modals) | Medium. Pure-domain function, no hardware deps |
 | **v1.2** | **VA STI (EJ257)** + older STI 2008+ | Medium. Different engine family but shares much of the protocol surface |
 | **v1.2** | **Closed-loop trim integration, boost auto-trim, idle target trim** | Medium |
+| **v1.2** | **Under-served-coverage feature pack** — adaptive-learning history visualizer, per-cylinder knock dashboard, cold-start tuning workflow, EBCS PID assistant (see `05-improvements.md` §11) | Medium. Pure-domain features over existing pack data; shares infra with auto-tune |
 | **v1.3** | **Older EJ-powered cars** (early WRX/STI, Forester XT, Legacy GT, Outback XT, EJ20/EJ25) | Medium. Oldest ECU tech but very well mapped by RomRaider — mostly definitions work |
 | **v1.4** | **BRZ / Toyota 86 (FA20D NA)** | Large. Toyota-partnership ECU, different vendor, biggest single-platform engineering ask |
 | **v2.0** | **Crosstrek / Forester (current FB-powered)**, regional variants | Definitions work plus light protocol additions |
