@@ -124,6 +124,10 @@ Hypothesis: LF79101P went through the EpifanSoft layer-1 decode but retains a pe
 
 `checksum_discover.py` produces ranked TSV reports but doesn't identify the algorithm. The bytes that change in every pair are a mix of CID string + always-changing cal cells + the actual checksum slot. Manual review separates them. Once we know the slot location, the algorithm-shape investigation (brute-force-known-algorithms helper) is a separate phase.
 
+### Forum thread to mine — 2017 WRX engine bin
+
+User flagged at end-of-session: <https://mhhauto.com/Thread-2017-Subaru-WRX-need-engine-bin-file> — thread on mhhauto.com discussing/sharing a 2017 WRX engine bin. Worth checking attached files for any LF79xxx CID we don't already have a clean decrypted copy of. Likely most relevant to **P2** (LF79xxx decryption-quality audit — if the forum-attached bin is independently sourced from our pak-decode pipeline, it's a check against whether LF79101P et al. are actually correctly decoded). Login may be required; cookies.txt jar at `D:\Documents\atlas-personal\forumdownloads\cookies.txt` worked for romraider.com earlier — try it here too.
+
 ### `D:\Documents\atlas-personal\` reaches a clean-room boundary
 
 CLAUDE.md is explicit: `romraider_va_wrx.xml` + `romraider_vb_wrx.xml` in that path are Atlas-derived (instrumentation-transcoded into the RR schema) and **off-limits to direct reading** in implementer-mode sessions. Sanctioned access is via analyst-mode (`docs/analyst-mode-prompt.md`) reading only the wall-clean derivatives `va_wrx.facts.xml` / `vb_wrx.facts.xml` + `*.name-mapping.tsv`, with outputs landing in `D:\Documents\SubuwuTuner-specs\`. We don't need that path — our forum-sourced VA/VB XMLs (per `project_intree_va_vb_xml_provenance.md` memory) are §1201-clean and already produced the 25 packs at `ae090b2`.
