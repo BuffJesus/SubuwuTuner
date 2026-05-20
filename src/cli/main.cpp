@@ -18,6 +18,7 @@
 #include "st/log/knock_dashboard.hpp"
 #include "st/log/adaptive_history.hpp"
 #include "st/log/coldstart.hpp"
+#include "st/log/ebcs.hpp"
 #include "st/policy.hpp"
 #include "st/project.hpp"
 #include "st/rom.hpp"
@@ -228,6 +229,19 @@ constexpr std::string_view kUsage =
     "                            p8→rpm, p11→iat_c, p18→maf_voltage) so the output\n"
     "                            drops into `autotune *` / `project-autotune-*`\n"
     "                            without a rename pass.\n"
+    "    ebcs-analyze --log <CSV> --timestamp-col <name>\n"
+    "                 --target-boost-col <name> --actual-boost-col <name>\n"
+    "                 --throttle-col <name>\n"
+    "                 [--wgdc-col <name>] [--rpm-col <name>]\n"
+    "                 [--throttle-step-pct N] [--target-step N]\n"
+    "                 [--max-event-duration N] [--overshoot-warn-pct N]\n"
+    "                 [--timestamp-unit seconds|millis|micros|rows] [--verbose]\n"
+    "                            Detect tip-in events in a boost log, characterize each\n"
+    "                            step response (rise time / overshoot / settling time /\n"
+    "                            steady-state error), and produce heuristic Kp/Ki/Kd\n"
+    "                            gain-adjustment suggestions. Output is advisory — verify\n"
+    "                            on a dyno before driving aggressively. See\n"
+    "                            docs/05-improvements.md §11.\n"
     "    coldstart-analyze --log <CSV> --timestamp-col <name> --ect-col <name> --rpm-col <name>\n"
     "                      [--iat-col <name>] [--observed-lambda-col <name>]\n"
     "                      [--commanded-lambda-col <name>] [--timing-col <name>]\n"
@@ -4856,6 +4870,225 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
     return 0;
 }
 
+int cmd_ebcs_analyze(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> log_path;
+    std::optional<std::string>           ts_col;
+    std::optional<std::string>           target_col;
+    std::optional<std::string>           actual_col;
+    std::optional<std::string>           wgdc_col;
+    std::optional<std::string>           throttle_col;
+    std::optional<std::string>           rpm_col;
+    std::optional<double>                throttle_step_pct;
+    std::optional<double>                target_step;
+    std::optional<double>                max_event_duration_s;
+    std::optional<double>                overshoot_warn_pct;
+    std::optional<std::string>           ts_unit_arg;
+    bool                                 verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const             need = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "ebcs-analyze: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if      (a == "--log")            { auto *v = need("--log");            if (!v) return 2; log_path = std::filesystem::path{v}; }
+        else if (a == "--timestamp-col")  { auto *v = need("--timestamp-col");  if (!v) return 2; ts_col       = v; }
+        else if (a == "--target-boost-col"){ auto *v = need("--target-boost-col"); if (!v) return 2; target_col = v; }
+        else if (a == "--actual-boost-col"){ auto *v = need("--actual-boost-col"); if (!v) return 2; actual_col = v; }
+        else if (a == "--wgdc-col")       { auto *v = need("--wgdc-col");       if (!v) return 2; wgdc_col     = v; }
+        else if (a == "--throttle-col")   { auto *v = need("--throttle-col");   if (!v) return 2; throttle_col = v; }
+        else if (a == "--rpm-col")        { auto *v = need("--rpm-col");        if (!v) return 2; rpm_col      = v; }
+        else if (a == "--throttle-step-pct") {
+            auto *v = need("--throttle-step-pct"); if (!v) return 2;
+            auto const p = parse_decimal(v);
+            if (!p.has_value()) {
+                std::fprintf(stderr, "ebcs-analyze: --throttle-step-pct must "
+                                     "be a number (got '%s')\n", v);
+                return 2;
+            }
+            throttle_step_pct = *p;
+        }
+        else if (a == "--target-step") {
+            auto *v = need("--target-step"); if (!v) return 2;
+            auto const p = parse_decimal(v);
+            if (!p.has_value()) {
+                std::fprintf(stderr, "ebcs-analyze: --target-step must be a "
+                                     "number (got '%s')\n", v);
+                return 2;
+            }
+            target_step = *p;
+        }
+        else if (a == "--max-event-duration") {
+            auto *v = need("--max-event-duration"); if (!v) return 2;
+            auto const p = parse_decimal(v);
+            if (!p.has_value()) {
+                std::fprintf(stderr, "ebcs-analyze: --max-event-duration must "
+                                     "be a number (got '%s')\n", v);
+                return 2;
+            }
+            max_event_duration_s = *p;
+        }
+        else if (a == "--overshoot-warn-pct") {
+            auto *v = need("--overshoot-warn-pct"); if (!v) return 2;
+            auto const p = parse_decimal(v);
+            if (!p.has_value()) {
+                std::fprintf(stderr, "ebcs-analyze: --overshoot-warn-pct must "
+                                     "be a number (got '%s')\n", v);
+                return 2;
+            }
+            overshoot_warn_pct = *p;
+        }
+        else if (a == "--timestamp-unit") {
+            auto *v = need("--timestamp-unit"); if (!v) return 2;
+            ts_unit_arg = v;
+        }
+        else if (a == "--verbose" || a == "-v") { verbose = true; }
+        else {
+            std::fprintf(stderr,
+                         "ebcs-analyze: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!log_path.has_value() || !ts_col.has_value()
+        || !target_col.has_value() || !actual_col.has_value()
+        || !throttle_col.has_value()) {
+        std::fputs(
+            "ebcs-analyze: missing required arguments\n"
+            "Usage: subuwutuner-cli ebcs-analyze --log <CSV>\n"
+            "         --timestamp-col <name> --target-boost-col <name>\n"
+            "         --actual-boost-col <name> --throttle-col <name>\n"
+            "         [--wgdc-col <name>] [--rpm-col <name>]\n"
+            "         [--throttle-step-pct N] [--target-step N]\n"
+            "         [--max-event-duration N] [--overshoot-warn-pct N]\n"
+            "         [--timestamp-unit seconds|millis|micros|rows] [--verbose]\n",
+            stderr);
+        return 2;
+    }
+
+    std::vector<std::string> header;
+    {
+        std::string err;
+        if (!read_csv_header(*log_path, header, err)) {
+            std::fprintf(stderr, "%s\n", err.c_str());
+            return 1;
+        }
+    }
+    auto const resolve = [&](std::string_view name,
+                              char const       *flag) -> std::size_t {
+        std::size_t const idx = find_csv_column(header, name);
+        if (idx == std::string_view::npos) {
+            std::fprintf(stderr,
+                         "ebcs-analyze: %s column '%.*s' not in CSV header\n",
+                         flag, static_cast<int>(name.size()), name.data());
+        }
+        return idx;
+    };
+
+    st::log::ebcs::PidMapping mapping;
+    bool bad = false;
+    {
+        std::size_t const idx = resolve(*ts_col, "--timestamp-col");
+        if (idx == std::string_view::npos) bad = true; else mapping.timestamp_idx = idx;
+    }
+    {
+        std::size_t const idx = resolve(*target_col, "--target-boost-col");
+        if (idx == std::string_view::npos) bad = true; else mapping.target_boost_idx = idx;
+    }
+    {
+        std::size_t const idx = resolve(*actual_col, "--actual-boost-col");
+        if (idx == std::string_view::npos) bad = true; else mapping.actual_boost_idx = idx;
+    }
+    {
+        std::size_t const idx = resolve(*throttle_col, "--throttle-col");
+        if (idx == std::string_view::npos) bad = true; else mapping.throttle_idx = idx;
+    }
+    if (wgdc_col.has_value()) {
+        std::size_t const idx = resolve(*wgdc_col, "--wgdc-col");
+        if (idx == std::string_view::npos) bad = true; else mapping.wgdc_idx = idx;
+    }
+    if (rpm_col.has_value()) {
+        std::size_t const idx = resolve(*rpm_col, "--rpm-col");
+        if (idx == std::string_view::npos) bad = true; else mapping.rpm_idx = idx;
+    }
+    if (bad) return 1;
+
+    st::log::ebcs::DetectorConfig cfg;
+    if (throttle_step_pct.has_value())   cfg.throttle_step_threshold_pct = *throttle_step_pct;
+    if (target_step.has_value())         cfg.target_boost_step_threshold = *target_step;
+    if (max_event_duration_s.has_value())cfg.max_event_duration_s        = *max_event_duration_s;
+    if (overshoot_warn_pct.has_value())  cfg.overshoot_warn_pct          = *overshoot_warn_pct;
+    if (ts_unit_arg.has_value()) {
+        std::string u = *ts_unit_arg;
+        for (auto &c : u) c = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(c)));
+        if      (u == "seconds" || u == "s")   cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixSeconds;
+        else if (u == "millis"  || u == "ms")  cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixMillis;
+        else if (u == "micros"  || u == "us")  cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixMicros;
+        else if (u == "rows"    || u == "row") cfg.timestamp_unit = st::log::ebcs::TimestampUnit::RowIndex;
+        else {
+            std::fprintf(stderr, "ebcs-analyze: --timestamp-unit must be one "
+                                 "of seconds|millis|micros|rows (got '%s')\n",
+                         ts_unit_arg->c_str());
+            return 2;
+        }
+    }
+
+    auto const r = st::log::ebcs::snapshot_from_csv(
+        log_path->string(), mapping, cfg);
+    if (!r.has_value()) {
+        std::fprintf(stderr, "ebcs-analyze: %s\n",
+                     r.error().to_string().c_str());
+        return 1;
+    }
+    auto const &s = *r;
+
+    char const *quality_names[5] = {
+        "Good", "Choppy", "Slow", "Spiked", "Aborted"};
+
+    std::printf("EBCS PID Assistant\n");
+    std::printf("==================\n");
+    std::printf("Log:                     %s\n", log_path->string().c_str());
+    std::printf("Samples considered:      %llu\n",
+                static_cast<unsigned long long>(s.samples_considered));
+    std::printf("Events detected:         %u  (good: %u)\n",
+                static_cast<unsigned>(s.total_event_count),
+                static_cast<unsigned>(s.good_event_count));
+    if (s.good_event_count > 0) {
+        std::printf("Median rise time:        %.3f s\n", s.median_rise_time_s);
+        std::printf("Median overshoot:        %.2f %%\n", s.median_overshoot_pct);
+        std::printf("Median settling time:    %.3f s\n", s.median_settling_time_s);
+        std::printf("Mean steady-state error: %+.3f\n", s.mean_steady_state_error);
+    }
+
+    std::printf("\nSuggestions:\n");
+    for (auto const &line : s.gain_suggestions) {
+        std::printf("  - %s\n", line.c_str());
+    }
+
+    if (verbose && !s.events.empty()) {
+        std::printf("\nPer-event detail:\n");
+        std::printf(" #  | t_start | t_end  | tgt  | peak | ss_boost | rise  | os%%  | settle | sse    | quality\n");
+        std::printf("----+---------+--------+------+------+----------+-------+-------+--------+--------+--------\n");
+        std::size_t n = 0;
+        for (auto const &ev : s.events) {
+            std::printf(" %2zu | %7.2f | %6.2f | %+4.1f | %+4.1f | %+8.2f | %5.2f | %5.1f | %6.2f | %+6.2f | %s\n",
+                        ++n,
+                        ev.start_timestamp, ev.end_timestamp,
+                        ev.target_boost, ev.peak_boost, ev.steady_state_boost,
+                        ev.rise_time_s, ev.overshoot_pct,
+                        ev.settling_time_s, ev.steady_state_error,
+                        quality_names[static_cast<std::size_t>(ev.quality)]);
+        }
+    }
+
+    return 0;
+}
+
 int cmd_log(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
     std::optional<std::string>           pid_list_arg;
@@ -8673,6 +8906,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "coldstart-analyze") {
         return cmd_coldstart_analyze(argc - 2, argv + 2);
+    }
+    if (cmd == "ebcs-analyze") {
+        return cmd_ebcs_analyze(argc - 2, argv + 2);
     }
     if (cmd == "can-replay") {
         return cmd_can_replay(argc - 2, argv + 2);

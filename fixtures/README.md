@@ -98,6 +98,26 @@ ECT bins centered every 5 °C from +7.5 to +52.5, mean lambda
 deviation ≈ 0.04. Same file works for the GUI panel via
 **View → Cold-start analysis (preview) → Browse...**.
 
+## `demo-ebcs-log.csv`
+
+A 51-row synthetic EBCS PID datalog (5 s, 10 Hz, units in psi)
+representing two third-gear tip-ins: the first overshoots target
+boost by ~3 psi (~20%), the second is well-tuned. Used to
+smoke-test the v1.x EBCS PID assistant (`docs/05` §11 play 4).
+Smoke-test:
+
+```bash
+build/win-mingw/bin/subuwutuner-cli.exe ebcs-analyze \
+    --log fixtures/demo-ebcs-log.csv \
+    --timestamp-col ts --target-boost-col target_boost \
+    --actual-boost-col actual_boost --throttle-col throttle \
+    --wgdc-col wgdc --rpm-col rpm
+```
+
+Expected: 2 good events detected, median overshoot ≈ 11%, median
+rise time ≈ 0.3 s. Same file works for the GUI panel via
+**View → EBCS PID assistant (preview) → Browse...**.
+
 ## Private fixtures
 
 `fixtures/private/` and `fixtures/roms/` are gitignored. Drop user-owned ROM

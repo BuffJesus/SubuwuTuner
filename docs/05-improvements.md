@@ -121,7 +121,16 @@ Four concrete features fall out directly. None require new hardware; all run aga
    ```
 
    The shipped fixture (`fixtures/demo-coldstart-log.csv`) is a synthetic 30-second WRX cold-start (5 °C ambient, key-on → drive to operating temp) so the panel has something to chart on first launch.
-4. **Boost-controller PID assistant** — fit the EBCS PID gains from a tip-in log. The table exists in every WRX def; the fitting methodology is absent from the community. Closes a real long-standing complaint (boost overshoot / undershoot on tip-in).
+4. **Boost-controller PID assistant** — fit the EBCS PID gains from a tip-in log. The table exists in every WRX def; the fitting methodology is absent from the community. Closes a real long-standing complaint (boost overshoot / undershoot on tip-in). Implementation: `src/log/{include/st/log/ebcs.hpp,src/ebcs.cpp}` (tip-in detector + step-response characterization: rise time, overshoot, settling time, steady-state error + heuristic suggestions), `tests/unit/log/test_ebcs.cpp` (9 cases), `subuwutuner-cli ebcs-analyze` (summary + suggestions + `--verbose` per-event detail), and a GUI panel under **View → EBCS PID assistant (preview)** (metrics + suggestion list + sortable event table). Output is advisory — verify on a dyno. Try it without bringing your own log:
+
+   ```
+   subuwutuner-cli ebcs-analyze --log fixtures/demo-ebcs-log.csv \
+       --timestamp-col ts --target-boost-col target_boost \
+       --actual-boost-col actual_boost --throttle-col throttle \
+       --wgdc-col wgdc --rpm-col rpm
+   ```
+
+   The shipped fixture (`fixtures/demo-ebcs-log.csv`) is a 5-second 3rd-gear synthetic log with two tip-ins (first overshoots ~20%, second clean) so the panel has both quality classes to display.
 
 Plays 1 and 2 are pure visualization (low risk, ship in OSS). Plays 3 and 4 are tuning-domain features that share infrastructure with the auto-tune kernels in `docs/12`.
 

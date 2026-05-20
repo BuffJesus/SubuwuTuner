@@ -3,6 +3,7 @@ add_library(st_log STATIC
     src/knock_dashboard.cpp
     src/adaptive_history.cpp
     src/coldstart.cpp
+    src/ebcs.cpp
 )
 add_library(st::log ALIAS st_log)
 
