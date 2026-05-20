@@ -1462,10 +1462,29 @@ int cmd_table_list(int argc, char *argv[]) {
         return print_def_load_error("table-list", *def_path, def.error());
     }
 
+    // Case-insensitive substring matcher for --category. Subaru's
+    // category strings are dot-delimited and verbose ("boost control
+    // - target", "ignition timing - knock control"); requiring an
+    // exact match here means `--category boost` returns 0 rows even
+    // though 25+ tables sit under "boost control - *". Substring
+    // match is the natural mental model — `--category boost` ->
+    // every boost-* category, `--category "boost control - target"`
+    // -> just that subcategory.
+    auto const cat_lower = [](std::string s) {
+        for (char &c : s) {
+            if (c >= 'A' && c <= 'Z')
+                c = static_cast<char>(c - 'A' + 'a');
+        }
+        return s;
+    };
+    std::string const category_needle =
+        category_filter.has_value() ? cat_lower(*category_filter) : std::string{};
+
     std::size_t matched = 0;
     std::printf("%-3s %-3s %-10s %-32s %-18s %s\n", "D", "F", "address", "id", "category", "name");
     for (auto const &t : def->tables()) {
-        if (category_filter.has_value() && t.category != *category_filter)
+        if (!category_needle.empty() &&
+            cat_lower(t.category).find(category_needle) == std::string::npos)
             continue;
         if (emissions_only && !t.emissions_relevant)
             continue;
