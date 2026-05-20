@@ -919,6 +919,33 @@ int cmd_dump_axis(int argc, char *argv[]) {
     } else {
         std::printf("# %s  (%zu values%s%s)\n", axis->id.c_str(), values->size(),
                     unit.empty() ? "" : ", unit=", unit.c_str());
+
+        // Summary: range + monotonicity. Axes MUST be strictly
+        // monotonic for table-lookup interpolation to work; a
+        // non-monotonic axis is either a load-error, a bad relocation
+        // (post-cousin_seed before patch-pack), or a corrupted ROM.
+        // Surfacing the check up-front avoids "the dump looks fine
+        // but the table can't actually be used" surprises.
+        if (values->size() >= 2) {
+            double const min_v = *std::min_element(values->begin(), values->end());
+            double const max_v = *std::max_element(values->begin(), values->end());
+            bool strictly_increasing = true;
+            bool strictly_decreasing = true;
+            for (std::size_t i = 1; i < values->size(); ++i) {
+                if ((*values)[i] <= (*values)[i - 1])
+                    strictly_increasing = false;
+                if ((*values)[i] >= (*values)[i - 1])
+                    strictly_decreasing = false;
+            }
+            char const *mono = strictly_increasing   ? "strictly increasing"
+                               : strictly_decreasing ? "strictly decreasing"
+                                                     : "NOT monotonic — axis unusable for lookup";
+            double const span = max_v - min_v;
+            double const avg_step = span / static_cast<double>(values->size() - 1);
+            std::printf("# range %.*f .. %.*f, step ~%.*f, %s\n", precision, min_v, precision,
+                        max_v, precision, avg_step, mono);
+        }
+
         for (auto const v : *values) {
             std::printf("%.*f\n", precision, v);
         }
@@ -3618,6 +3645,16 @@ int cmd_rom_diff(int argc, char *argv[]) {
         std::printf("\nNo tables differ.\n");
         return 0;
     }
+
+    // Sort by max |Δ| descending — the biggest changes lead the
+    // output, which is what someone diffing stock vs tuned actually
+    // wants to see. Ties (e.g. 0-delta tables that happen to differ
+    // in a single byte by 1) broken by table id for determinism.
+    std::sort(rows.begin(), rows.end(), [](Row const &lhs, Row const &rhs) {
+        if (lhs.max != rhs.max)
+            return lhs.max > rhs.max;
+        return lhs.id < rhs.id;
+    });
 
     std::printf("\n%-40s %10s %12s %12s\n", "table", "cells", "max |Δ|", "mean |Δ|");
     for (auto const &r : rows) {
