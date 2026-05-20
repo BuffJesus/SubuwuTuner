@@ -15,6 +15,7 @@
 #include "st/feature.hpp"
 #include "st/flash.hpp"
 #include "st/log/knock_dashboard.hpp"
+#include "st/log/adaptive_history.hpp"
 #include "st/policy.hpp"
 #include "st/project.hpp"
 
@@ -529,6 +530,20 @@ struct AppState {
     bool                                     knock_gate_enabled{true};
     std::optional<st::log::knock::KnockSnapshot> knock_snapshot;
     std::string                              knock_compute_msg;
+    // Adaptive-learning history panel — docs/05 §11 play 1. Same shape as
+    // knock_*: CSV + column mapping + cached snapshot, fully self-contained.
+    bool                                     show_adaptive_history_panel{false};
+    char                                     ah_log_path[1024]{};
+    std::string                              ah_load_error;
+    char                                     ah_ts_col[64]{"ts"};
+    char                                     ah_ltft_col[64]{"ltft"};
+    char                                     ah_dam_col[64]{"dam"};
+    char                                     ah_iac_col[64]{"iac"};
+    float                                    ah_bucket_seconds{86400.0f};
+    int                                      ah_ts_unit{0};   // 0=s,1=ms,2=us,3=rows
+    int                                      ah_min_samples_per_bucket{0};
+    std::optional<st::log::adaptive::HistorySnapshot> ah_snapshot;
+    std::string                              ah_compute_msg;
 
     // History-panel filter buffer. Substring-matched (case-insensitive)
     // against the edit's table_id; mirrors the CLI's project-history
@@ -3707,6 +3722,15 @@ void render_menubar(AppState &state) {
                     "compute a windowed snapshot, view strip charts.\n"
                     "See docs/05-improvements.md §11.");
             }
+            ImGui::MenuItem("Adaptive history (preview)", nullptr,
+                            &state.show_adaptive_history_panel);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Long-cycle LTFT / DAM / idle-adapt drift charts.\n"
+                    "Load a CSV with timestamps + per-signal columns,\n"
+                    "bucket by time (day default), view drift slope.\n"
+                    "See docs/05-improvements.md §11.");
+            }
             ImGui::Separator();
             if (ImGui::BeginMenu("Theme")) {
                 bool const is_dark  = state.settings.theme == Theme::Dark;
@@ -5216,6 +5240,256 @@ void render_knock_dashboard_panel(AppState &state) {
             }
         }
     } else if (state.knock_load_error.empty()) {
+        text_subtle("No snapshot yet — pick a log and click \"Compute snapshot\".");
+    }
+
+    ImGui::End();
+}
+
+// Adaptive-learning history visualizer. Same shape as the knock panel:
+// load CSV, map columns, compute a snapshot via st::log::adaptive,
+// render time-series charts. Domain typing lets us share zero code with
+// the knock panel without anything feeling forced — they're different
+// shapes of data.
+void render_adaptive_history_panel(AppState &state) {
+    if (!state.show_adaptive_history_panel) {
+        return;
+    }
+    if (!ImGui::Begin("Adaptive history (preview)",
+                      &state.show_adaptive_history_panel)) {
+        ImGui::End();
+        return;
+    }
+
+    text_subtle("Long-cycle LTFT / DAM / idle-adapt drift. "
+                "See docs/05-improvements.md §11.");
+    ImGui::Separator();
+
+    ImGui::Text("Log:");
+    ImGui::SetNextItemWidth(-120.0f);
+    ImGui::InputText("##ah_log_path", state.ah_log_path,
+                     sizeof state.ah_log_path);
+    ImGui::SameLine();
+    if (ImGui::Button("Browse…##ah_log")) {
+        nfdu8filteritem_t       filters[1] = {{"CSV", "csv"}};
+        NFD::UniquePathU8       out_path;
+        nfdresult_t const       r = NFD::OpenDialog(out_path, filters, 1);
+        if (r == NFD_OKAY) {
+            std::snprintf(state.ah_log_path, sizeof state.ah_log_path,
+                          "%s", out_path.get());
+            state.ah_load_error.clear();
+        } else if (r == NFD_ERROR) {
+            state.ah_load_error = std::string{"Open dialog error: "}
+                                   + NFD::GetError();
+        }
+    }
+    if (!state.ah_load_error.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.0f));
+        ImGui::TextWrapped("%s", state.ah_load_error.c_str());
+        ImGui::PopStyleColor();
+    }
+
+    if (ImGui::CollapsingHeader("Column mapping", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::SetNextItemWidth(160.0f);
+        ImGui::InputText("Timestamp col",  state.ah_ts_col,   sizeof state.ah_ts_col);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(160.0f);
+        ImGui::InputText("LTFT col",       state.ah_ltft_col, sizeof state.ah_ltft_col);
+        ImGui::SetNextItemWidth(160.0f);
+        ImGui::InputText("DAM col",        state.ah_dam_col,  sizeof state.ah_dam_col);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(160.0f);
+        ImGui::InputText("IdleAdapt col",  state.ah_iac_col,  sizeof state.ah_iac_col);
+        text_subtle("Leave a column name blank to skip that signal.");
+    }
+
+    if (ImGui::CollapsingHeader("Bucketing")) {
+        ImGui::SetNextItemWidth(160.0f);
+        ImGui::InputFloat("Bucket seconds", &state.ah_bucket_seconds,
+                          60.0f, 3600.0f, "%.1f");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("86400 = 1 day  ·  3600 = 1 hour  ·  0 = no bucketing");
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(140.0f);
+        char const *ts_units[] = {"seconds", "millis", "micros", "rows"};
+        ImGui::Combo("Timestamp unit", &state.ah_ts_unit, ts_units, 4);
+        ImGui::SetNextItemWidth(160.0f);
+        ImGui::InputInt("Min samples / bucket",
+                        &state.ah_min_samples_per_bucket, 1, 5);
+        if (state.ah_min_samples_per_bucket < 0)
+            state.ah_min_samples_per_bucket = 0;
+    }
+
+    ImGui::Spacing();
+    if (ImGui::Button("Compute snapshot##ah")) {
+        state.ah_load_error.clear();
+        if (state.ah_log_path[0] == '\0') {
+            state.ah_load_error = "Pick a CSV log first.";
+        } else {
+            // Read header to resolve column names → indices.
+            std::ifstream f{state.ah_log_path};
+            if (!f) {
+                state.ah_load_error = std::string{"Cannot open '"}
+                                       + state.ah_log_path + "'";
+            } else {
+                std::string header_line;
+                bool        got = false;
+                while (std::getline(f, header_line)) {
+                    while (!header_line.empty()
+                           && header_line.back() == '\r') {
+                        header_line.pop_back();
+                    }
+                    if (header_line.empty() || header_line.front() == '#') continue;
+                    got = true; break;
+                }
+                if (!got) {
+                    state.ah_load_error = "CSV has no header.";
+                } else {
+                    std::vector<std::string> header_cols;
+                    std::size_t              start = 0;
+                    for (std::size_t i = 0; i <= header_line.size(); ++i) {
+                        if (i == header_line.size() || header_line[i] == ',') {
+                            std::size_t a = start;
+                            std::size_t b = i;
+                            while (a < b
+                                   && std::isspace(static_cast<unsigned char>(header_line[a]))) ++a;
+                            while (b > a
+                                   && std::isspace(static_cast<unsigned char>(header_line[b - 1]))) --b;
+                            header_cols.emplace_back(header_line.substr(a, b - a));
+                            start = i + 1;
+                        }
+                    }
+                    auto const resolve = [&](char const *name) -> std::size_t {
+                        if (name == nullptr || name[0] == '\0') {
+                            return st::log::adaptive::kNoColumn;
+                        }
+                        std::string want{name};
+                        for (auto &cc : want) {
+                            cc = static_cast<char>(
+                                std::tolower(static_cast<unsigned char>(cc)));
+                        }
+                        for (std::size_t i = 0; i < header_cols.size(); ++i) {
+                            std::string have = header_cols[i];
+                            for (auto &cc : have) {
+                                cc = static_cast<char>(
+                                    std::tolower(static_cast<unsigned char>(cc)));
+                            }
+                            if (have == want) return i;
+                        }
+                        return st::log::adaptive::kNoColumn;
+                    };
+                    st::log::adaptive::ColumnMapping mapping;
+                    mapping.timestamp_idx = resolve(state.ah_ts_col);
+                    mapping.signal_idx[static_cast<std::size_t>(
+                        st::log::adaptive::SignalKind::Ltft)]      = resolve(state.ah_ltft_col);
+                    mapping.signal_idx[static_cast<std::size_t>(
+                        st::log::adaptive::SignalKind::Dam)]       = resolve(state.ah_dam_col);
+                    mapping.signal_idx[static_cast<std::size_t>(
+                        st::log::adaptive::SignalKind::IdleAdapt)] = resolve(state.ah_iac_col);
+
+                    st::log::adaptive::BucketConfig cfg;
+                    cfg.bucket_seconds         = state.ah_bucket_seconds;
+                    cfg.min_samples_per_bucket =
+                        static_cast<std::uint32_t>(state.ah_min_samples_per_bucket);
+                    switch (state.ah_ts_unit) {
+                        case 1: cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixMillis;  break;
+                        case 2: cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixMicros;  break;
+                        case 3: cfg.timestamp_unit = st::log::adaptive::TimestampUnit::RowIndex;    break;
+                        default:cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixSeconds; break;
+                    }
+                    auto const r = st::log::adaptive::snapshot_from_csv(
+                        state.ah_log_path, mapping, cfg);
+                    if (!r.has_value()) {
+                        state.ah_load_error = r.error().to_string();
+                        state.ah_snapshot.reset();
+                    } else {
+                        state.ah_snapshot = *r;
+                        state.ah_compute_msg =
+                            std::to_string(r->total_samples) + " samples across "
+                            + std::to_string(r->time_span_seconds / 86400.0).substr(0, 5)
+                            + " days.";
+                    }
+                }
+            }
+        }
+    }
+    if (!state.ah_compute_msg.empty() && state.ah_snapshot.has_value()) {
+        ImGui::SameLine();
+        text_subtle("%s", state.ah_compute_msg.c_str());
+    }
+
+    if (state.ah_snapshot.has_value()) {
+        auto const &snap = *state.ah_snapshot;
+        ImGui::Separator();
+
+        char const *signal_names[3] = {"LTFT", "DAM", "IdleAdapt"};
+        // Summary table
+        if (ImGui::BeginTable("##ah_summary", 6,
+                              ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
+                              | ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("Signal");
+            ImGui::TableSetupColumn("Buckets");
+            ImGui::TableSetupColumn("Mean");
+            ImGui::TableSetupColumn("Min");
+            ImGui::TableSetupColumn("Max");
+            ImGui::TableSetupColumn("Drift / day");
+            ImGui::TableHeadersRow();
+            for (std::size_t k = 0; k < st::log::adaptive::kSignalCount; ++k) {
+                auto const &ser = snap.series[k];
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn(); ImGui::TextUnformatted(signal_names[k]);
+                if (!ser.has_data) {
+                    for (int c = 0; c < 5; ++c) {
+                        ImGui::TableNextColumn();
+                        text_subtle("—");
+                    }
+                    continue;
+                }
+                ImGui::TableNextColumn(); ImGui::Text("%zu", ser.points.size());
+                ImGui::TableNextColumn(); ImGui::Text("%+.4f", ser.overall_mean);
+                ImGui::TableNextColumn(); ImGui::Text("%+.4f", ser.overall_min);
+                ImGui::TableNextColumn(); ImGui::Text("%+.4f", ser.overall_max);
+                ImGui::TableNextColumn(); ImGui::Text("%+.4f",
+                    ser.drift_per_second * 86400.0);
+            }
+            ImGui::EndTable();
+        }
+        ImGui::Spacing();
+
+        // One time-series plot per signal that has data.
+        ImVec2 const avail   = ImGui::GetContentRegionAvail();
+        float  const plot_w  = avail.x;
+        float  const plot_h  = 140.0f;
+        for (std::size_t k = 0; k < st::log::adaptive::kSignalCount; ++k) {
+            auto const &ser = snap.series[k];
+            if (!ser.has_data || ser.points.empty()) continue;
+            ImGui::Text("%s", signal_names[k]);
+            // Build parallel x/y arrays (ImPlot doesn't take struct
+            // arrays without explicit stride/offset; this is cleaner).
+            std::vector<double> xs;
+            std::vector<double> ys;
+            xs.reserve(ser.points.size());
+            ys.reserve(ser.points.size());
+            for (auto const &p : ser.points) {
+                xs.push_back(p.bucket_center);
+                ys.push_back(p.mean);
+            }
+            char plot_id[32];
+            std::snprintf(plot_id, sizeof plot_id, "##ah_plot_%zu", k);
+            if (ImPlot::BeginPlot(plot_id, ImVec2(plot_w, plot_h),
+                                  ImPlotFlags_NoTitle | ImPlotFlags_NoMenus
+                                  | ImPlotFlags_NoMouseText)) {
+                ImPlot::SetupAxes(nullptr, nullptr,
+                                  ImPlotAxisFlags_AutoFit,
+                                  ImPlotAxisFlags_AutoFit);
+                ImPlot::PlotLine(signal_names[k], xs.data(), ys.data(),
+                                 static_cast<int>(xs.size()));
+                ImPlot::EndPlot();
+            }
+            ImGui::Spacing();
+        }
+    } else if (state.ah_load_error.empty()) {
         text_subtle("No snapshot yet — pick a log and click \"Compute snapshot\".");
     }
 
@@ -7858,6 +8132,7 @@ int main(int argc, char *argv[]) {
         render_dtcs_panel(state);
         render_history_panel(state);
         render_knock_dashboard_panel(state);
+        render_adaptive_history_panel(state);
         render_features_designer(state);
         render_status_bar(state);
         render_unsaved_modal(state);

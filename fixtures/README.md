@@ -59,6 +59,24 @@ Expected output: cyl 1 stands out as the knocker (FLKC mean ≈ -2.88,
 6 events, ≈ -1.78 below all-cyl mean). Same file is a reasonable smoke
 input for the GUI panel under **View → Knock dashboard (preview)**.
 
+## `demo-adaptive-history.csv`
+
+A 33-row synthetic adaptive-learning datalog spanning ~32 days (1
+sample per day at noon, unix epoch seconds). LTFT drifts from 0 to
+-4% (slow injector fouling), DAM stays near 1.0 (no knock learning),
+IAC adapt rises (small idle vacuum leak forming). Smoke-test the
+v1.x adaptive-history feature (`docs/05` §11 play 1):
+
+```bash
+build/win-mingw/bin/subuwutuner-cli.exe adaptive-history \
+    --log fixtures/demo-adaptive-history.csv \
+    --timestamp-col ts --ltft-col ltft --dam-col dam --idle-adapt-col iac
+```
+
+Expected: LTFT drift/day ≈ -0.13, IdleAdapt drift/day ≈ +0.06, DAM
+stable near 1.0. Same file works as the GUI panel input via
+**View → Adaptive history (preview) → Browse...**.
+
 ## Private fixtures
 
 `fixtures/private/` and `fixtures/roms/` are gitignored. Drop user-owned ROM
