@@ -54,8 +54,49 @@ Tuning software bricks hardware when it's wrong. Test budget is correspondingly 
 
 ## Mutation testing
 
-- `mull` on the four core modules, weekly job
-- A surviving mutant on `st::flash` blocks the release of any version that touches `st::flash`. Other modules: file a ticket.
+Two tiers, light → heavy:
+
+**Light tier: `tools/mutation_test.py` (shipped, local + ad-hoc CI).**
+A small Python driver that applies a focused set of single-operator
+mutations (`==↔!=`, `<↔<=`, `>↔>=`, `true↔false`) to a specified
+line range in one file, rebuilds the affected target, and re-runs a
+Catch2-tag-filtered test subset for each mutant. Reports KILLED /
+SURVIVED / BUILD_FAIL / TIMEOUT and an overall mutation score.
+
+```bash
+py tools/mutation_test.py \
+    --file src/flash/src/flash.cpp \
+    --line-start 515 --line-end 544 \
+    --target st_unit_tests \
+    --tag-filter "[flash]"
+```
+
+A SURVIVED mutant is a coverage gap — the test suite didn't catch a
+behaviorally-different version of the code. Hardening the suite to
+kill survivors is the long-term work this tool scaffolds. Default
+exit code is non-zero when survivors exist; CI uses it as an
+informational signal, not a hard fail (until the suite is hardened
+to 0 survivors on `st::flash`).
+
+Limitations of the shipped driver (deliberate, to keep it small):
+- Regex-based, not AST-based — false BUILD_FAILs on template `<...>`
+  syntax overlapping with comparison operators
+- One file, one line range, one rebuild per mutant — runtime scales
+  with mutant count
+- Mutation set is the four operator swaps above; not a comprehensive
+  catalog
+
+**Heavy tier: `mull` (planned, blocked on LLVM toolchain integration).**
+Real AST-based mutation testing via the LLVM `mull` plugin. Catches
+more mutation types (statement deletion, return-value swap, etc.),
+runs faster via shared compilation, integrates with `lit` for
+parallel execution. Weekly CI job. A surviving mutant on `st::flash`
+blocks the release of any version that touches `st::flash`. Other
+modules: file a ticket.
+
+Migration path: as `mull` integration lands, the Python driver stays
+useful for local spot-checks (no LLVM dependency) and for files where
+the regex-vs-AST distinction is fine.
 
 ## Failure injection
 
