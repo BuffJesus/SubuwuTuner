@@ -66,6 +66,16 @@ Relocation strategy (v2, --relocate-low):
   content (the common case for cross-revision firmware where most cal
   bytes are unchanged). Tables that BOTH moved AND were recalibrated
   remain a manual-RE case.
+
+Pack patching (--patch-pack): when paired with --relocate-low, the
+successfully-relocated addresses are written back into the pack TOML
+in place. After patching, the pack should be evaluated against the
+TARGET ROM, not the original sibling — re-running this script with
+the same sibling+target arguments will produce misleading results
+because the sibling no longer has the table at the patched address.
+The relocator's per-row HIGH/MED classification (visible in the TSV
+or the relocation summary) is the authoritative signal that each
+patch landed at a sensible location in the target.
 """
 
 from __future__ import annotations
@@ -73,6 +83,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import re
 import struct
 import sys
 from collections import Counter
@@ -345,6 +356,100 @@ def relocate_low(sib_bytes: bytes, tgt_bytes: bytes, pack_address: int,
     return (addr, conf, f"relocated +{addr - pack_address:#x} ({reason})")
 
 
+def patch_pack_addresses(pack_path: Path, patches: dict[str, int]) -> int:
+    """Rewrite each [[table]] block's `address` field for ids in `patches`.
+
+    `patches` maps table id (e.g. "target_boost") to the new integer
+    address (e.g. 0xC4F00). Only [[table]] sections are touched —
+    [[scaling]] / [[identification]] / [pack] addresses are left
+    alone even if their id happens to collide. Returns the number of
+    tables actually patched (0 if no ids matched).
+
+    Format preservation: line-based; comments, blank lines, and
+    surrounding whitespace are preserved. Only the value after
+    `address = ` is replaced. Indentation and spacing inside the
+    address line are kept as-found.
+
+    Address output format matches existing packs:
+        address   = 0x000C137C
+    (unquoted TOML integer literal, uppercase hex, 8 digits).
+
+    Idempotent: re-running with the same patches map produces the
+    same file content.
+    """
+    if not patches:
+        return 0
+
+    text = pack_path.read_text(encoding="utf-8")
+    out: list[str] = []
+    in_table = False
+    current_id: str | None = None
+    patched = 0
+
+    for raw_line in text.splitlines(keepends=True):
+        s = raw_line.strip()
+
+        if s.startswith("[[table]]"):
+            in_table = True
+            current_id = None
+            out.append(raw_line)
+            continue
+
+        if s.startswith("[[") or s.startswith("["):
+            in_table = False
+            current_id = None
+            out.append(raw_line)
+            continue
+
+        if not in_table or "=" not in s or s.startswith("#"):
+            out.append(raw_line)
+            continue
+
+        key, _, val = s.partition("=")
+        key = key.strip()
+
+        if key == "id":
+            v = val.strip()
+            if "#" in v:
+                v = v.split("#", 1)[0].strip()
+            if v.startswith('"') and v.endswith('"'):
+                current_id = v[1:-1]
+            out.append(raw_line)
+            continue
+
+        if key == "address" and current_id and current_id in patches:
+            # Preserve `address<spaces>=<spaces>` prefix verbatim so
+            # the column alignment doesn't drift.
+            m = re.match(r'^(\s*address\s*=\s*)', raw_line)
+            prefix = m.group(1) if m else "address = "
+            # Preserve trailing comment (if any) and line ending.
+            body = raw_line[len(prefix):]
+            # Body looks like "0x000C137C\n" or "0x000C137C  # note\n"
+            comment_idx = body.find("#")
+            if comment_idx >= 0:
+                trailing = body[comment_idx:].rstrip("\r\n")
+                eol = body[len(body.rstrip("\r\n")):]
+            else:
+                trailing = ""
+                # Preserve original line ending exactly
+                stripped = body.rstrip("\r\n")
+                eol = body[len(stripped):]
+            new_addr = patches[current_id]
+            new_line = f"{prefix}0x{new_addr:08X}"
+            if trailing:
+                new_line += "  " + trailing
+            new_line += eol
+            out.append(new_line)
+            patched += 1
+            continue
+
+        out.append(raw_line)
+
+    if patched > 0:
+        pack_path.write_text("".join(out), encoding="utf-8")
+    return patched
+
+
 def parse_pack(path: Path) -> list[dict]:
     """Minimal TOML parsing: extract table records as dicts. We
     don't need a full TOML parser — just enough to walk [[table]]
@@ -384,6 +489,16 @@ def parse_pack(path: Path) -> list[dict]:
 
 
 def main():
+    # classify_pair emits Δ in some reasons; on Windows the default
+    # stdout encoding (cp1252) can't encode it. Switch stdout to
+    # UTF-8 if possible, otherwise drop non-encodable chars rather
+    # than crashing mid-print.
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     p = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     p.add_argument("--pack",        required=True, type=Path,
                    help="Sibling pack TOML to verify against the target ROM.")
@@ -405,7 +520,14 @@ def main():
                    default=_RELOC_DEFAULT_MAX_DISTANCE,
                    help=f"Cap relocation candidates within ±N bytes of "
                         f"the original address (default {_RELOC_DEFAULT_MAX_DISTANCE:#x}).")
+    p.add_argument("--patch-pack", action="store_true",
+                   help="After --relocate-low resolves candidates, "
+                        "rewrite each successfully-relocated [[table]] "
+                        "block's `address` field in the pack TOML in "
+                        "place. Implies --relocate-low.")
     args = p.parse_args()
+    if args.patch_pack:
+        args.relocate_low = True
 
     if not args.pack.is_file():
         print(f"localize: pack not found: {args.pack}", file=sys.stderr)
@@ -437,6 +559,7 @@ def main():
 
     counts = Counter()
     reloc_counts = Counter()
+    patches: dict[str, int] = {}
     for t in tables:
         addr_s = t.get("address", "0x0")
         try:
@@ -467,6 +590,9 @@ def main():
                 new_addr, new_conf, reloc_reason = reloc
                 row += [f"0x{new_addr:08X}", f"{new_conf}: {reloc_reason}"]
                 reloc_counts[new_conf] += 1
+                table_id = t.get("id", "")
+                if table_id:
+                    patches[table_id] = new_addr
             else:
                 row += ["", "no candidate"]
                 reloc_counts["UNRELOCATED"] += 1
@@ -514,6 +640,16 @@ def main():
                 pct = (100.0 * n / total_low) if total_low else 0.0
                 tag = "relocated->" + label if label != "UNRELOCATED" else label
                 print(f"  {tag:<22} {n:5d}  ({pct:5.1f}%)")
+
+    if args.patch_pack:
+        if patches:
+            n_patched = patch_pack_addresses(args.pack, patches)
+            print()
+            print(f"--patch-pack: rewrote {n_patched} table address(es) "
+                  f"in {args.pack}")
+        else:
+            print()
+            print("--patch-pack: no relocations to apply (pack unchanged)")
 
     return 0 if counts.get("ABSENT", 0) == 0 else 1
 

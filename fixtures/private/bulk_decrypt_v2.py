@@ -33,9 +33,18 @@ original `bulk_decrypt.py`:
 The cipher's structure (empirical, this conversation's analysis):
   ciphertext = (plaintext ⊕ stream_keystream) ⊕ per_family_xor_layer
 The keystream we recover from a (plaintext, ciphertext) pair is
-actually `stream_keystream ⊕ per_family_xor[anchor_family]`, which only
-decrypts other ciphers in the SAME 6-char-prefix family. A bucket with
+actually `stream_keystream ⊕ per_family_xor[anchor_family]`, which
+only fully decrypts other ciphers in the SAME family. A bucket with
 N CID families needs N anchors, one per family.
+
+Family granularity (revised 2026-05-20 audit): originally assumed
+to be the 6-char CID prefix. Empirically tighter — LF79100P and
+LF79101P share the 6-char prefix `LF7910` but only LF79100P fully
+decrypts under the LF79100_family anchor; LF79101P comes out as
+"partial" (heuristic passes but CID region still cipher). Treat
+the per_family key as opaque and at most 7-8 characters; rely on
+the bulk_decrypt_v2_report.md tally to see which ciphers actually
+fall in the same family as a given anchor.
 
 Outputs (independent of bulk_decrypt.py's outputs so they coexist):
   roms_extracted/keystreams_v2/<bucket>_<anchor>.ks
