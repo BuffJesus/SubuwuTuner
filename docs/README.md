@@ -21,6 +21,9 @@ This folder contains the design and planning documents for **SubuwuTuner**, a co
 15. [14-can-reverse-engineering.md](14-can-reverse-engineering.md) — Programmatic CAN signal discovery (Phase 5+)
 16. [15-clean-room-engineering.md](15-clean-room-engineering.md) — Clean-room methodology (analyst/implementer wall, solo-dev adaptations, AI-tool contamination channels)
 17. [16-custom-features.md](16-custom-features.md) — Node-graph custom-feature designer (Phase 5)
+18. [17-data-distribution-policy.md](17-data-distribution-policy.md) — Path B: tool ships public, definition packs are user-supplied
+19. [18-standalone-master-plan.md](18-standalone-master-plan.md) — Portable Teensy/ESP32 handheld plan
+20. [19-live-tuning.md](19-live-tuning.md) — RAM-shadow live tuning design (v1.5+)
 
 ## Status
 

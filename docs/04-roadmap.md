@@ -117,6 +117,7 @@ The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0
 | **v1.2** | **Under-served-coverage feature pack** — adaptive-learning history visualizer, per-cylinder knock dashboard, cold-start tuning workflow, EBCS PID assistant (see `05-improvements.md` §11) | Medium. Pure-domain features over existing pack data; shares infra with auto-tune |
 | **v1.3** | **Older EJ-powered cars** (early WRX/STI, Forester XT, Legacy GT, Outback XT, EJ20/EJ25) | Medium. Oldest ECU tech but very well mapped by RomRaider — mostly definitions work |
 | **v1.4** | **BRZ / Toyota 86 (FA20D NA)** | Large. Toyota-partnership ECU, different vendor, biggest single-platform engineering ask |
+| **v1.5** | **Live tuning** — RAM-shadow override + UDS WriteDataByIdentifier for on-dyno cell editing (see `docs/19-live-tuning.md`) | Large. New `st::live_tune` module + per-CID RAM-shadow address tables + per-write safety linting; gated on Phase 4 hardware validation |
 | **v2.0** | **Crosstrek / Forester (current FB-powered)**, regional variants | Definitions work plus light protocol additions |
 
 ## Cross-cutting v1.x improvements
