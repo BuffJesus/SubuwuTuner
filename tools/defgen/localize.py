@@ -30,8 +30,8 @@ table:
 
   LOW     — bytes look unrelated (random noise vs structured data,
             or wildly different range). The table has likely moved
-            in the target ROM and needs to be located manually OR
-            via the (future) pattern-search relocation pass.
+            in the target ROM. Pass `--relocate-low` to attempt
+            pattern-search relocation.
 
   ABSENT  — target ROM is too short for the address (size mismatch
             between sibling and target).
@@ -46,14 +46,26 @@ Usage:
 Run cousin_seed.py first to generate the draft TOML for the new CID;
 then run localize.py to mark each table HIGH/MED/LOW/ABSENT against
 the target ROM. The user reviews the report and either accepts the
-draft as-is (if everything is HIGH/MED) or manually relocates the
-LOW entries.
+draft as-is (if everything is HIGH/MED) or relocates the LOW entries
+(automatically via `--relocate-low`, or by hand).
 
-Relocation logic (pattern search for moved tables) is intentionally
-NOT in this version. The MED + LOW labels surface what needs
-attention; the human RE work fills in the gaps. A follow-up tool
-can automate relocation for tables whose axis values give a unique
-byte fingerprint.
+Relocation strategy (v2, --relocate-low):
+  For each LOW entry, search the target ROM for the sibling's byte
+  pattern at the pack's address. Tier 1 is exact-substring search
+  using the sibling's first 16 bytes as the needle (C-optimized via
+  bytes.find — O(N) per table). Tier 2 retries with interior anchors
+  at offsets 8/16/24/32 if the leading bytes are uniform (e.g. zero
+  padding). Each candidate is dtype-aligned and re-classified via
+  classify_pair; only candidates that score HIGH or MED at the new
+  address are reported. Distance from the original address is used
+  to break ties — closer wins, capped at --relocate-max-distance
+  (default 64 KB) to suppress coincidental matches in unrelated
+  regions.
+
+  The relocator finds tables that moved while keeping byte-identical
+  content (the common case for cross-revision firmware where most cal
+  bytes are unchanged). Tables that BOTH moved AND were recalibrated
+  remain a manual-RE case.
 """
 
 from __future__ import annotations
@@ -69,6 +81,20 @@ from pathlib import Path
 # Read enough bytes to characterize the table region. Most Subaru
 # tables are 16-256 bytes; 256 is a safe over-read.
 SAMPLE_BYTES = 256
+
+# Pattern-search relocation parameters
+_RELOC_NEEDLE_LEN = 16          # bytes used as the "anchor" pattern
+_RELOC_MAX_CANDIDATES = 32      # cap to avoid pathological scans
+_RELOC_DEFAULT_MAX_DISTANCE = 0x10000  # 64 KB — most relocations are nearby
+
+_TYPE_SIZE = {
+    "uint8": 1, "int8": 1,
+    "uint16_be": 2, "uint16_le": 2,
+    "int16_be": 2, "int16_le": 2,
+    "uint32_be": 4, "uint32_le": 4,
+    "int32_be": 4, "int32_le": 4,
+    "float32_be": 4, "float32_le": 4,
+}
 
 
 def shannon_entropy(data: bytes) -> float:
@@ -190,6 +216,135 @@ def classify_pair(sib_bytes: bytes, tgt_bytes: bytes,
                    f"range ratio={rng_ratio:.2f})")
 
 
+def _find_all(haystack: bytes, needle: bytes,
+              max_hits: int = _RELOC_MAX_CANDIDATES) -> list[int]:
+    """All offsets where `needle` appears in `haystack`, capped.
+
+    Uses bytes.find (C-optimized) repeatedly. Returns offsets in
+    ascending order. Capped to keep pathological needles (e.g. a
+    16-byte run of 0xFF that appears in every padding region) from
+    causing million-hit scans.
+    """
+    hits: list[int] = []
+    start = 0
+    while len(hits) < max_hits:
+        idx = haystack.find(needle, start)
+        if idx == -1:
+            break
+        hits.append(idx)
+        start = idx + 1
+    return hits
+
+
+def _is_anchorable(needle: bytes) -> bool:
+    """Reject needles that are too uniform to anchor on.
+
+    A needle of all-0x00, all-0xFF, or any single byte will match
+    millions of positions and not actually pin a unique table. We
+    require at least 4 distinct byte values to consider an anchor
+    useful.
+    """
+    return len(set(needle)) >= 4
+
+
+def relocate_low(sib_bytes: bytes, tgt_bytes: bytes, pack_address: int,
+                 dtype: str, sample_count: int,
+                 *, max_distance: int = _RELOC_DEFAULT_MAX_DISTANCE
+                 ) -> tuple[int, str, str] | None:
+    """Search target ROM for where pack's table at pack_address moved.
+
+    Returns (new_address, confidence, reason) or None if no
+    relocation candidate scored HIGH or MED at a dtype-aligned
+    offset within max_distance of the original.
+
+    Strategy is two-tier:
+      1. Use sibling's first 16 bytes as a needle, find_all in tgt.
+         Most tables that "moved" kept their content byte-identical;
+         exact substring search catches them in O(N) with bytes.find.
+      2. If the leading 16 bytes are uniform (zero padding, 0xFF
+         padding, single-value table), retry with interior anchors at
+         byte offsets 8/16/24/32 of the sibling slice. The candidate
+         offset is then backed up by the anchor offset so it still
+         points at the table's start.
+
+    Every candidate is dtype-aligned (multiple of the data type's
+    width) and self-verified via classify_pair against the sibling
+    slice — only HIGH/MED candidates are kept. Ties are broken by
+    confidence (HIGH > MED) then by distance from pack_address
+    (closer wins). The max_distance cap rejects coincidental matches
+    in unrelated ROM regions.
+    """
+    if pack_address < 0 or pack_address >= len(sib_bytes):
+        return None
+
+    sib_slice = sib_bytes[pack_address : pack_address + SAMPLE_BYTES]
+    if len(sib_slice) < _RELOC_NEEDLE_LEN:
+        return None
+
+    type_size = _TYPE_SIZE.get(dtype, 1)
+
+    # Try the leading anchor first, then interior anchors at typical
+    # padding-skip offsets. Each entry is (anchor_offset_in_slice,
+    # needle_bytes).
+    anchors: list[tuple[int, bytes]] = []
+    for off in (0, 8, 16, 24, 32):
+        if off + _RELOC_NEEDLE_LEN > len(sib_slice):
+            break
+        needle = sib_slice[off : off + _RELOC_NEEDLE_LEN]
+        if _is_anchorable(needle):
+            anchors.append((off, needle))
+
+    if not anchors:
+        return None
+
+    # Collect all candidate start-addresses, deduplicated.
+    candidates: set[int] = set()
+    for anchor_off, needle in anchors:
+        for hit in _find_all(tgt_bytes, needle):
+            cand_addr = hit - anchor_off
+            if cand_addr < 0 or cand_addr + SAMPLE_BYTES > len(tgt_bytes):
+                continue
+            if cand_addr % type_size != 0:
+                continue  # dtype misalignment — coincidental byte match
+            if abs(cand_addr - pack_address) > max_distance:
+                continue
+            if cand_addr == pack_address:
+                continue  # caller already classified the original
+            candidates.add(cand_addr)
+        if candidates:
+            # Stop at the first anchor that produced any candidates —
+            # leading-anchor hits are most reliable; falling through
+            # to interior anchors only when the leading one finds
+            # nothing.
+            break
+
+    if not candidates:
+        return None
+
+    # Score each candidate. classify_pair gives HIGH/MED/LOW; we keep
+    # HIGH/MED only and prefer closer addresses on ties.
+    best: tuple[int, int, int, str, str] | None = None  # (score, distance, addr, conf, reason)
+    for addr in candidates:
+        cand_slice = tgt_bytes[addr : addr + SAMPLE_BYTES]
+        conf, reason = classify_pair(sib_slice, cand_slice, dtype, sample_count)
+        if conf == "HIGH":
+            score = 0
+        elif conf == "MED":
+            score = 1
+        else:
+            continue
+        distance = abs(addr - pack_address)
+        key = (score, distance, addr, conf, reason)
+        if best is None or (score, distance) < (best[0], best[1]):
+            best = key
+
+    if best is None:
+        return None
+
+    score, distance, addr, conf, reason = best
+    return (addr, conf, f"relocated +{addr - pack_address:#x} ({reason})")
+
+
 def parse_pack(path: Path) -> list[dict]:
     """Minimal TOML parsing: extract table records as dicts. We
     don't need a full TOML parser — just enough to walk [[table]]
@@ -242,6 +397,14 @@ def main():
                    help="If >0, cap the number of tables checked.")
     p.add_argument("--sample-count",type=int, default=16,
                    help="Number of typed values to decode per table.")
+    p.add_argument("--relocate-low", action="store_true",
+                   help="For each LOW entry, search the target ROM for "
+                        "the sibling's byte pattern and report relocation "
+                        "candidates. Adds two columns to the TSV.")
+    p.add_argument("--relocate-max-distance", type=lambda s: int(s, 0),
+                   default=_RELOC_DEFAULT_MAX_DISTANCE,
+                   help=f"Cap relocation candidates within ±N bytes of "
+                        f"the original address (default {_RELOC_DEFAULT_MAX_DISTANCE:#x}).")
     args = p.parse_args()
 
     if not args.pack.is_file():
@@ -267,20 +430,24 @@ def main():
     if args.max_tables > 0:
         tables = tables[:args.max_tables]
 
-    out_rows: list[list[str]] = [[
-        "id", "address_hex", "data_type", "confidence", "reason"
-    ]]
+    header = ["id", "address_hex", "data_type", "confidence", "reason"]
+    if args.relocate_low:
+        header += ["relocated_to", "relocate_reason"]
+    out_rows: list[list[str]] = [header]
 
     counts = Counter()
+    reloc_counts = Counter()
     for t in tables:
         addr_s = t.get("address", "0x0")
         try:
             addr = int(addr_s, 0) if addr_s.startswith("0x") else int(addr_s)
         except ValueError:
             counts["BAD_ADDRESS"] += 1
-            out_rows.append([
-                t.get("id", "?"), addr_s, t.get("data_type", "?"),
-                "ABSENT", "address could not be parsed"])
+            row = [t.get("id", "?"), addr_s, t.get("data_type", "?"),
+                   "ABSENT", "address could not be parsed"]
+            if args.relocate_low:
+                row += ["", ""]
+            out_rows.append(row)
             continue
         dtype = t.get("data_type", "uint8")
 
@@ -289,8 +456,24 @@ def main():
         confidence, reason = classify_pair(
             sib_slice, tgt_slice, dtype, args.sample_count)
         counts[confidence] += 1
-        out_rows.append([
-            t.get("id", "?"), addr_s, dtype, confidence, reason])
+        row = [t.get("id", "?"), addr_s, dtype, confidence, reason]
+
+        if args.relocate_low and confidence == "LOW":
+            reloc = relocate_low(
+                sib_bytes, tgt_bytes, addr, dtype,
+                args.sample_count,
+                max_distance=args.relocate_max_distance)
+            if reloc is not None:
+                new_addr, new_conf, reloc_reason = reloc
+                row += [f"0x{new_addr:08X}", f"{new_conf}: {reloc_reason}"]
+                reloc_counts[new_conf] += 1
+            else:
+                row += ["", "no candidate"]
+                reloc_counts["UNRELOCATED"] += 1
+        elif args.relocate_low:
+            row += ["", ""]
+
+        out_rows.append(row)
 
     if args.out_report:
         args.out_report.parent.mkdir(parents=True, exist_ok=True)
@@ -316,7 +499,22 @@ def main():
     if counts.get("LOW", 0) + counts.get("ABSENT", 0) > 0:
         print()
         print("LOW + ABSENT entries need manual review or pattern-search "
-              "relocation.")
+              "relocation (--relocate-low).")
+
+    if args.relocate_low:
+        total_low = counts.get("LOW", 0)
+        if total_low > 0:
+            print()
+            print("=" * 60)
+            print("Relocation pass (--relocate-low)")
+            print("=" * 60)
+            print(f"  LOW entries:           {total_low}")
+            for label in ("HIGH", "MED", "UNRELOCATED"):
+                n = reloc_counts.get(label, 0)
+                pct = (100.0 * n / total_low) if total_low else 0.0
+                tag = "relocated->" + label if label != "UNRELOCATED" else label
+                print(f"  {tag:<22} {n:5d}  ({pct:5.1f}%)")
+
     return 0 if counts.get("ABSENT", 0) == 0 else 1
 
 
