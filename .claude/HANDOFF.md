@@ -1,10 +1,16 @@
-# Handoff — 2026-05-20 (11 new packs + localize.py v2 + CLI pack-discovery fix)
+# Handoff — 2026-05-20 (11 packs + localize.py v2 + axis correctness arc)
 
-Continuation of the 2026-05-19 handoff. Long, productive session: the `cousin_seed.py → localize.py` bludgod-gap sweep landed 11 new packs across four batches; the LF79xxx partial-decryption audit (one anchor confirmed, 30 partials catalogued, broader same-pattern problem identified across most FlashWrite buckets); the `localize.py` v2 pattern-search relocator with 12 unit tests; the fake-anchor sweep across all 99 anchor entries in `bulk_decrypt_v2.py` (9 disabled); the `--patch-pack` flow that rewrites pack TOMLs in place from relocator output (7 more unit tests); the Windows stdout fix; the family-granularity docstring fix in `bulk_decrypt_v2.py`; and a real user-facing CLI bug fix where `pack-list` + `rom-identify` couldn't see any of definitions/ because they walked for files literally named `pack.toml` while every shipped pack is a flat `<id>.toml`. **HEAD `261f5f8`**, in sync with `origin/main`. **Working tree clean apart from `SubaruTuner.zip`**. **definitions/ pack count: 372** (up from 361 at session start = **+11 packs in one session**).
+Continuation of the 2026-05-19 handoff. Marathon session: cousin_seed + localize landed 11 new packs across four batches; LF79xxx partial-decryption audit (1 anchor confirmed, 30 partials, broader pattern across most FlashWrite buckets); `localize.py` v2 with the pattern-search relocator AND `--patch-pack` AND axis-tracking (22 unit tests total); fake-anchor sweep across all 99 anchor entries in `bulk_decrypt_v2.py` (9 disabled); Windows stdout + bulk_decrypt docstring fixes; real user-facing CLI bug fix for pack-discovery (was missing every flat-file pack); axis-blindness bug discovered via dump-table validation and fixed across 6 of the 11 packs that needed re-patching. **HEAD `6a0130c`**, in sync with `origin/main`. **Working tree clean apart from `SubaruTuner.zip`**. **definitions/ pack count: 372** (up from 361 at session start = **+11 packs in one session**, all axis-validated).
 
 ## What shipped this session (top = newest)
 
 ```
+6a0130c docs(defgen): note axis tracking + end-to-end dump-table validation
+1df935b defs(packs): axis re-patch sweep on 4 more packs from 80a2a0d
+5598683 defs(packs): re-patch ez1g109j + ez1e401h with axis awareness
+3eb6202 tools(defgen): localize.py tracks [[axis]] blocks + axis-aware classifier
+8bf4d26 docs(defgen): document localize.py + cousin-seed lessons learned
+366a3b5 docs(handoff): final-final 2026-05-20 refresh (11 packs + CLI bug fix)
 261f5f8 defs(packs): cousin-seed ez1g108k via newly-landed ez1g109k sibling
 21f89c2 fix(cli): pack-list + rom-identify discover single-file packs
 05c439a docs(handoff): final 2026-05-20 refresh (10 new packs + relocator + patch-pack + sweep)
@@ -18,7 +24,7 @@ de647ba tools(defgen): localize.py --patch-pack + Win stdout fix + bulk_decrypt 
 80a2a0d defs(packs): cousin-seed 6 new USDM packs from bludgod gap
 ```
 
-Nine content commits (plus two handoff snapshots). P2 produced a private-side artifact (`fixtures/private/roms_extracted/decrypted/LF79/RECON.md`, gitignored) and a memory entry (`project_lf79_partial_decrypts.md`).
+Fourteen content commits (plus three handoff snapshots). P2 produced a private-side artifact (`fixtures/private/roms_extracted/decrypted/LF79/RECON.md`, gitignored) and two memory entries (`project_lf79_partial_decrypts.md`, `feedback_cousin_seed_axis_validation.md`).
 
 ## The substantive arc
 
@@ -194,14 +200,36 @@ ez1g109k was NOT a viable sibling 24 hours ago. The sibling pool that today's 11
 
 End-to-end validated via the just-fixed rom-identify against the bludgod target ROM.
 
+### 10. Axis correctness arc (`3eb6202`, `5598683`, `1df935b`, `6a0130c`)
+
+While validating `ez1g109j` end-to-end via `subuwutuner-cli dump-table`, discovered the relocated DATA tables had correct cell values but the AXIS labels were nonsense (Y axis showed 0.0-0.9 fractional values instead of 2800-6300 RPM). Root cause: `[[axis]]` blocks are separate top-level entries from `[[table]]` blocks; the v1 `parse_pack` only walked `[[table]]`, so axes were completely invisible to localize/relocate/patch.
+
+Three layers of fix in `3eb6202`:
+
+1. **`parse_pack` walks `[[axis]]` blocks** alongside `[[table]]`. Each entry carries `_kind` of `"table"` or `"axis"`. `patch_pack_addresses` rewrites both kinds. TSV gains a `kind` column.
+2. **Sample count capped at axis `length`**. Reading past axis-end into neighboring tables/padding corrupted monotonicity (10-value axis + 6 garbage values = "not monotonic"), pushing genuinely-moved axes into MED instead of LOW.
+3. **"Both monotonic" needs cross-checks** before HIGH:
+   - Range ratio ≤ 10x (catches lambda-vs-RPM mismatch).
+   - First-value ratio ≤ 10x (catches the case where ranges coincide because target tail spans into a different axis, e.g. tgt `[0.5..1.3, 2800]` passes a span check by accident but first value 0.5 vs sib 2800 is decisive).
+
+3 new unit tests in `5598683`. Full defgen suite: **22 tests green** (was 19).
+
+Audited all 11 of today's committed packs against the new flow:
+- **Clean (axes all HIGH)**: a2tb002c, az1g702i, e2vg212d, e2vg204b, ez1g108k — 5 packs unchanged.
+- **Re-patched** (`5598683` + `1df935b`): ez1g109j, ez1e401h, a2wc500s, a2wc501k, ez1d301a, ez1d303b — 6 packs, all axes now HIGH or relocated.
+
+Pattern: same-trim same-region pairings (e.g. a2tb001c → a2tb002c, both USDM Legacy AT) have stable axis layouts. AT↔MT crossings (a2wc500r/AT → a2wc500s/MT) and wide-trim siblings shake axes. The dump-table validation step is now documented in `tools/defgen/README.md` (`6a0130c`) + memory (`feedback_cousin_seed_axis_validation.md`).
+
+End-to-end: `dump-table primary_open_loop_fueling_a` on every re-patched pack now shows X axis 0.30-1.30 (lambda) + Y axis 2800-6300 (RPM) byte-identical to the sibling reference.
+
 ## Status snapshot
 
-- **HEAD `261f5f8`**, in sync with `origin/main`
-- **definitions/ pack count: 372** (up from 361 at session start — **+11 packs**)
+- **HEAD `6a0130c`**, in sync with `origin/main`
+- **definitions/ pack count: 372** (up from 361 at session start — **+11 packs**, all axis-validated)
 - **Working tree clean** apart from `SubaruTuner.zip` (untracked 114 MB; gitignore-equivalent — never `git add` it, would break GitHub's 100 MB push limit)
 - **CI clang-format gate: required** — applied to the CLI edit (clang-format 18.1.8 binary at `C:\Users\Cornelio\AppData\Roaming\Python\Python314\Scripts\clang-format.exe`)
-- **defgen test suite: 137 tests green** (12 relocator + 7 patch-pack added this session)
-- **C++ build: passes** (cli binary built clean; some pre-existing `obdx::Transport` + `dvi::checksum` + checksum-kind test failures exist on main unrelated to this session)
+- **defgen test suite: 140 tests green** (12 relocator + 7 patch-pack + 3 axis-tracking added this session)
+- **C++ build: passes** (cli binary built clean; some pre-existing `obdx::Transport` + `dvi::checksum` + checksum-kind test failures exist on main unrelated to this session — verified by stashing my changes and running the same tests on plain `main`)
 
 ## Open threads / known issues
 
@@ -335,16 +363,17 @@ New this session:
 - **The cousin_seed sweet spot is ones/tens-digit deltas within same trim.** Cross-trim (STI↔WRX) and hundreds-digit deltas (model-year revisions) hit real address shifts — drop them rather than commit a high-LOW pack.
 - **Post-seed metadata fixes are manual.** `cousin_seed.py` doesn't update years/transmission from filename hints. After generating a pack from a sibling, eyeball the target filename and patch `years` / `transmission` if they differ.
 - **`decrypted/` ROMs are mostly partials.** When using a ROM as the target for `localize.py` (or as RE input for any cal work), verify it's a real anchor (path appears in `bulk_decrypt_v2.py` CONFIRMED list AND its md5 doesn't match any entry under `decrypted_v2/partial/`). Promoted partials look fine but their cal bodies are still XOR-encrypted. Memory `project_lf79_partial_decrypts.md` captures the structural finding.
+- **Always dump-table-validate cousin-seeded packs before committing.** `localize.py`'s HIGH/MED summary isn't sufficient — axes can be wrong even when data tables are correct. Run `subuwutuner-cli dump-table` on a representative 2D table (one with named axis_x + axis_y, e.g. `primary_open_loop_fueling_a`) and check that the AXIS labels look sensible (RPM in thousands, lambda 0-2, ECT in expected band, etc.). Memory `feedback_cousin_seed_axis_validation.md` captures this. Pre-fix on 2026-05-20, 6 of 11 packs had visually-broken axes despite localize reporting "HIGH+MED ≥ 80%".
 
 ## Suggested opener for next session
 
-> "HEAD `261f5f8`, in sync with `origin/main`. 372 packs in `definitions/` (up +11 from the 2026-05-20 session start). Working tree clean apart from `SubaruTuner.zip`. 137 defgen tests green.
+> "HEAD `6a0130c`, in sync with `origin/main`. 372 packs in `definitions/` (up +11 from the 2026-05-20 session start, all axis-validated). Working tree clean apart from `SubaruTuner.zip`. 140 defgen tests green.
 >
-> Recap from the 2026-05-20 marathon: shipped 11 new packs across four batches (6 → 2 → 2 → 1), P2 (LF79 audit + RECON.md + memory), localize.py v2 with 19 unit tests (--relocate-low pattern-search relocator AND --patch-pack pack-rewriter), 9 fake-anchor PAK_* entries disabled in bulk_decrypt_v2.py, Windows stdout fix, bulk_decrypt docstring fix, and one user-facing C++ bug — pack-list + rom-identify couldn't see flat-file packs and now do.
+> Recap from the 2026-05-20 marathon: shipped 11 new packs across four batches, P2 (LF79 audit + RECON.md + memory), localize.py v2 (--relocate-low pattern-search relocator + --patch-pack pack-rewriter + axis tracking, 22 unit tests), 9 fake-anchor PAK_* entries disabled in bulk_decrypt_v2.py, Windows stdout fix, bulk_decrypt docstring fix, one user-facing C++ bug fix (pack-list + rom-identify couldn't see flat-file packs), and one axis-correctness arc where dump-table validation surfaced a bug that bit 6 of the 11 packs — now fixed in tooling AND in the affected packs.
 >
 > On the deck for this session:
 > **(P1)** `docs/21-oem-baselines.md` — empirical OEM behavior reference doc from the 676-ROM corpus. Deferred four times now. Use only RELIABLE corpus subsets per the LF79 audit findings — bludgod corpus + the high-anchor families in `decrypted/` (EZ1G, EA1{T,U,Y}, DE5M, ZA1J, XH3J).
-> **(P2)** Third-pass bludgod-gap sweep. The 10 new packs from today add to the sibling pool, opening 2-4 more ones-digit-delta candidates. Quick session.
+> **(P2)** Third-pass bludgod-gap sweep. The 11 new packs from yesterday add to the sibling pool, opening more ones-digit-delta candidates. Quick session if any are still findable.
 > **(P3)** Pack-format extension for `[[table.role]]` so §11 panels can apply their suggestions via `edit::History`. Documented in `docs/05` §11.X as the v1.2 path. Substantial C++ work — schema extension, Definition loader, edit::History routing, lint wiring, UI integration.
 > **(P4)** Pattern-search relocator v3 — axis-fingerprint matching. Would push the recalibration-case packs (az1g701v et al.) closer to commitable. Separate body of work from the byte-identical relocator.
 >
