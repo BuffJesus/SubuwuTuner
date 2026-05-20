@@ -150,6 +150,39 @@ re-run localize with the same sibling+target — the sibling no longer
 has the table at the patched address, so `classify_pair` compares
 unrelated bytes and the result is misleading.
 
+**Validate end-to-end with `dump-table`** on a representative table:
+
+```bash
+subuwutuner-cli dump-table --def <patched_pack.toml> \
+    --table primary_open_loop_fueling_a <target_rom.bin>
+```
+
+A correct dump shows sensible cell values AND axis labels (RPM in the
+thousands for engine-speed Y axis, lambda 0-2 or AFR 9-20 for the load
+X axis, etc.). Wrong axis labels with right-looking cell values
+indicates an axis-relocation bug — re-run localize against the pack
+with the sibling+target pair, look for `axis` rows with `LOW`
+classification, and re-apply --patch-pack.
+
+### Axis handling
+
+`localize.py` walks BOTH `[[table]]` and `[[axis]]` blocks (the latter
+are separate top-level entries referenced by tables via `axis_x` /
+`axis_y` id strings). Both kinds are classified, relocated, and
+patched together. The TSV report has a `kind` column distinguishing
+"table" from "axis".
+
+Axis-specific classification rules (in `classify_pair`):
+
+- Sample count is capped at the axis's declared `length` so the
+  monotonicity check doesn't read past the axis end into neighboring
+  table bytes.
+- "Both monotonic" alone isn't sufficient for HIGH — value ranges
+  must be within 10x AND first values within 10x. This catches the
+  false positive where two different monotonic axes (e.g. RPM
+  2800-6300 vs lambda 0.3-1.3) coincidentally pass naive
+  monotonicity matching.
+
 ## Cousin-seed lessons learned (empirical)
 
 Pairing rules that work:
