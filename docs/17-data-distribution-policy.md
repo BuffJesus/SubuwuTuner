@@ -11,14 +11,31 @@ The public release at `github.com/BuffJesus/SubuwuTuner` carries the **tool**:
 - Build system, CI, tests, design docs
 - `tools/defgen/` — the RomRaider-XML → TOML converter
 - `fixtures/demo-pack/` — a synthetic, always-available example pack
-- `definitions/` for older Subarus (Impreza, Forester, Legacy, Liberty, Outback, Baja, Tribeca, Exiga) sourced from genuine community RomRaider/ECUFlash work
+- `definitions/` for older Subarus (Impreza, Forester, Legacy, Liberty, Outback, Baja, Tribeca, Exiga) sourced from genuine community RomRaider/ECUFlash work, plus 25 VA/VB WRX FA-DIT packs landed 2026-05-19 from forum-sourced per-CID RomRaider XMLs (see §2)
 - `definitions/pids.toml` and `definitions/ecuparams/` — SSM datalogger payload + per-CID extended-PID fragments, also community-sourced
 
 The pattern is **infrastructure plus user-supplied data**. SubuwuTuner is structurally similar to TunerStudio, EFI Live, or Ghidra in that respect: the tool is open, the calibration data the user loads into it is the user's own responsibility.
 
-## 2 — What does not ship
+## 2 — What does ship for VA/VB WRX (revised 2026-05-19)
 
-The public release does **not** carry first-party calibration packs for the **VA WRX (2015–2021)** or **VB WRX (2022+)** platforms. Users obtain VA/VB definitions by:
+Path B's original posture (2026-05 initial commit) was: no first-party VA WRX (2015–2021) or VB WRX (2022+) calibration packs in the public repo. That posture was conservative — it assumed the only available VA/VB definition data had upstream §1201 problems.
+
+That assumption was revised when forum-sourced per-CID RomRaider XMLs surfaced for both platforms (in-tree at `fixtures/private/roms_extracted/romraider-xml-per-cid/`, derived from forum-shared `romraider_va_wrx.xml` + `romraider_vb_wrx.xml` via the `make_per_cid_xmls.py` flattener). Provenance was verified clean per `project_intree_va_vb_xml_provenance.md` (memory). Running these through `tools/defgen/` produces packs that pass all four §4 acceptance criteria, so they ship.
+
+Current state of `definitions/impreza/` for FA-DIT WRX:
+
+| Family             | Count | CIDs |
+|--------------------|-------|------|
+| VA WRX 2015–2021 6MT | 7     | LF75404H, LF75404S, LF75600H, LF79103P, LF9C102P, LF9G003T, LF9L000E |
+| VB WRX 2022+         | 18    | LHBH800B00G, LHBH800C00G, LHBH900B00G, LHBH900D00G, LHBHB10B00G, LHBHC01C00G, LHBHD00B00G, LHBHE00Bx0G, LHBHE00Cx0G, LHBKC40M00G, LHBKC40P00G, LHBKC50My0G, LHBP300d00G, LHBP301b00G, LHBP400bz0G, LHBT120bA0G, LHBT210UB0G, LHBT210VB0G |
+
+(All in `definitions/impreza/` — the original `definitions/va/` and `definitions/vb/` directory carve-outs from the initial Path B commit are retired; FA-DIT WRX packs live alongside their EJ-era WRX siblings in the impreza family directory.)
+
+CIDs still NOT shipped because no per-CID XML has been sourced:
+- **LF9D012H** (2019 USDM 6MT) — only VA master entry missing from the per-CID XML set
+- Any platform / family not in the in-tree per-CID set above
+
+For those, users still obtain definitions via:
 
 1. Running `tools/defgen/defgen.py` against a public RomRaider XML they've sourced themselves, or
 2. Generating from their own ROM dump via the planned hardware-capture workflow (when the bench rig lands), or
@@ -48,6 +65,7 @@ Future contributions of first-party calibration packs (i.e., packs intended for 
 2. **§1201 clean** — no part of the data, or any upstream input that produced it, is downstream of an access-control circumvention against any commercial tuning tool (Atlas, COBB, EcuTek, HP Tuners, dealer software, etc.). This includes runtime instrumentation, decryption, debugger attaches, JIT inspection, or any technique that defeats a runtime protection mechanism.
 3. **Provenance documented** — the contribution's PR includes a paragraph stating the source (file paths, repo URLs, commit hashes), the tool used (`defgen` version, `loggergen` version, hardware capture device), and whether the contributor is the original author or is forwarding someone else's work. For forwarded work, name the upstream author.
 4. **Retraction-honoring** — if the upstream source revokes their license or asks for the pack's removal, the contributor agrees to file the retraction PR or accept maintainers doing so.
+5. **Provenance is an actual XML, not a heuristic.** A pack only ships if a real per-CID RomRaider XML (or hardware-capture-derived equivalent) covers the CID being packed. Speculative cousin-seeded packs derived by cloning a related pack's address layout and swapping CID-bearing fields do **not** meet this bar — they were tried in the 2026-05-19 session (commit `5139bea`, reverted in `1010a13`) and produced misleading body values for siblings whose calibration body addresses differed from the cousin. The cousin-seed tool at `tools/defgen/cousin_seed.py` remains in the repo as a private-research scaffold but its output is not for `definitions/`.
 
 These criteria apply going forward. They are not retroactive — see §3 for why retroactive application is not coherent.
 
@@ -61,17 +79,17 @@ Path B is a distribution-boundary change. It does **not** change:
 - **The jurisdiction-policy stance** in `docs/06-legal-ethics.md`. SubuwuTuner remains jurisdiction-neutral on emissions; engine-safety lints remain strict regardless of distribution posture.
 - **The analyst-side workflow** in `docs/15` and `docs/analyst-mode-prompt.md`. Analysts may still extract facts from protected references under the rules in `docs/15`; the resulting specs go to `D:\Documents\SubuwuTuner-specs\`. Implementer sessions then build `src/` from those specs. The Path B boundary affects what *bundled data* lands in the public repo, not what the wall mechanism is for.
 
-## 6 — Where bundled data lives, before and after Path B
+## 6 — Where bundled data lives — three eras
 
-| Artifact | Before Path B | After Path B |
-|---|---|---|
-| `definitions/va/` (8 packs) | public repo | private master at `D:\Documents\SubuwuTuner-defs-private\va\`, runtime install at `%APPDATA%\SubuwuTuner\definitions\va\` |
-| `definitions/vb/` (18 packs) | public repo | private master at `D:\Documents\SubuwuTuner-defs-private\vb\`, runtime install at `%APPDATA%\SubuwuTuner\definitions\vb\` |
-| `definitions/{impreza,forester,legacy,…}/` | public repo (Merp-derived community work) | unchanged — still public |
-| `definitions/pids.toml`, `definitions/ecuparams/` | public repo (community-sourced) | unchanged — still public |
-| `fixtures/demo-pack/` | public repo (synthetic, always-available example) | unchanged — still public |
+| Artifact | Pre-Path B (initial state) | Post-Path B (initial commit) | Post-2026-05-19 revision |
+|---|---|---|---|
+| Atlas-derived VA/VB packs (8 + 18 master) | public repo | private master at `D:\Documents\SubuwuTuner-defs-private\` | unchanged — still private (Atlas-derived, fails §1201) |
+| Forum-sourced VA/VB packs via `tools/defgen/` | did not exist | did not exist | 25 packs in `definitions/impreza/` (7 LF + 18 LHB) |
+| `definitions/{impreza,forester,legacy,…}/` | public repo (Merp-derived community work) | unchanged — still public | unchanged — still public, now joined by FA-DIT WRX packs |
+| `definitions/pids.toml`, `definitions/ecuparams/` | public repo (community-sourced) | unchanged — still public | unchanged — still public |
+| `fixtures/demo-pack/` | public repo (synthetic, always-available example) | unchanged — still public | unchanged — still public |
 
-The git history of the public repo was rewritten to remove `definitions/va/` and `definitions/vb/` from all 143 commits as part of the Path B implementation. The pre-rewrite mirror is preserved at `D:\Documents\SubuwuTuner-backup-pre-pathb.git` for the developer's reference; it is not a public artifact.
+The git history of the public repo was rewritten to remove the Atlas-derived `definitions/va/` and `definitions/vb/` directories from all 143 commits as part of the initial Path B implementation. The pre-rewrite mirror is preserved at `D:\Documents\SubuwuTuner-backup-pre-pathb.git` for the developer's reference; it is not a public artifact. The 2026-05-19 forum-sourced VA/VB packs are independent of that rewrite — they're generated fresh from a different (§1201-clean) upstream and live in `definitions/impreza/` rather than a re-instated `definitions/va/`.
 
 ## 7 — References
 
