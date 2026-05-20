@@ -81,6 +81,103 @@ def _extract_includes_line(pack_text: str) -> str | None:
     return m.group(1) if m else None
 
 
+# Fields under [pack] where we prefer the existing manual value when the
+# regenerated value is empty/default. Maps field name to the "empty"
+# sentinel string defgen emits when the source XML lacks that tag.
+#
+# Why this exists: the 2026-05-20 audit (commits 0008695 + 8ea6d71) found
+# that bulk_regen had silently clobbered rom_size_bytes = 1048576 manual
+# patches back to 0 because the source XMLs lacked <filesize>. defgen now
+# defaults rom_size_bytes to 1MB (8ea6d71), but the same regression class
+# applies to transmission, years, etc. when XMLs omit those tags. This
+# preservation pass is a second line of defense: even if defgen emits
+# empty for a [pack] field, a non-empty existing value wins.
+_PRESERVABLE_PACK_FIELDS: dict[str, str] = {
+    "rom_size_bytes": "0",
+    "transmission":   '""',
+    "years":          "[]",
+    # display_name is sometimes hand-edited; preserve when defgen would
+    # blank it. defgen's actual default emits the XML's <xmlid>, so this
+    # only triggers when an XML had no xmlid (effectively never).
+    "display_name":   '""',
+}
+
+
+def _extract_pack_field(pack_text: str, key: str) -> tuple[str, str] | None:
+    """Return (full_line, value_part) for `key` in the [pack] section.
+
+    Bounded to the [pack] block so it doesn't pick up like-named keys in
+    [[scaling]] / [[table]] blocks. Returns None if [pack] doesn't exist
+    or doesn't contain `key`.
+    """
+    pack_match = re.search(r"^\[pack\]\s*$", pack_text, re.MULTILINE)
+    if pack_match is None:
+        return None
+    body_start = pack_match.end()
+    next_section = re.search(r"^\[", pack_text[body_start:], re.MULTILINE)
+    body_end = body_start + (next_section.start() if next_section else
+                              len(pack_text) - body_start)
+    body = pack_text[body_start:body_end]
+    line_match = re.search(
+        rf"^(\s*{re.escape(key)}\s*=\s*([^\n#]+?))(\s*#.*)?$",
+        body, re.MULTILINE)
+    if line_match is None:
+        return None
+    full_line = line_match.group(1)
+    value_part = line_match.group(2).strip()
+    return (full_line, value_part)
+
+
+def _replace_pack_field(pack_text: str, key: str, new_value_text: str) -> str:
+    """Rewrite the `key = ...` line inside [pack] to use `new_value_text`.
+
+    Preserves indentation and surrounding spacing. No-op if [pack] or
+    the key isn't found.
+    """
+    pack_match = re.search(r"^\[pack\]\s*$", pack_text, re.MULTILINE)
+    if pack_match is None:
+        return pack_text
+    body_start = pack_match.end()
+    next_section = re.search(r"^\[", pack_text[body_start:], re.MULTILINE)
+    body_end = body_start + (next_section.start() if next_section else
+                              len(pack_text) - body_start)
+    body = pack_text[body_start:body_end]
+    new_body, n = re.subn(
+        rf"^(\s*{re.escape(key)}\s*=\s*)[^\n#]+",
+        lambda m: m.group(1) + new_value_text,
+        body, count=1, flags=re.MULTILINE)
+    if n == 0:
+        return pack_text
+    return pack_text[:body_start] + new_body + pack_text[body_end:]
+
+
+def _apply_field_preservation(existing_text: str, new_text: str
+                               ) -> tuple[str, list[tuple[str, str, str]]]:
+    """Overlay existing-pack [pack] field values onto new_text where the
+    new value is the defgen empty/default sentinel but the existing
+    value is non-empty.
+
+    Returns (rewritten_new_text, [(field, kept_value, dropped_value), ...]).
+    The list is empty when no fields needed preservation.
+    """
+    overrides: list[tuple[str, str, str]] = []
+    out_text = new_text
+    for field, default_repr in _PRESERVABLE_PACK_FIELDS.items():
+        existing = _extract_pack_field(existing_text, field)
+        regenerated = _extract_pack_field(new_text, field)
+        if existing is None or regenerated is None:
+            continue
+        existing_val = existing[1]
+        new_val = regenerated[1]
+        if new_val != default_repr:
+            continue  # defgen produced a real value; trust it
+        if existing_val == default_repr:
+            continue  # nothing to preserve
+        out_text = _replace_pack_field(out_text, field, existing_val)
+        overrides.append((field, existing_val, new_val))
+    return (out_text, overrides)
+
+
 def _insert_includes_line(pack_text: str, includes_line: str) -> str:
     """Insert `includes_line` immediately after the `license =` line.
 
@@ -149,12 +246,22 @@ def _regen_pack(pack_path: Path, master_cids: set[str],
     if includes_line:
         new_text = _insert_includes_line(new_text, includes_line)
 
+    # Preserve [pack] fields the existing pack manually patched (e.g.,
+    # rom_size_bytes when the XML omitted <filesize>). See
+    # _apply_field_preservation for the rule.
+    new_text, preservations = _apply_field_preservation(existing_text, new_text)
+
     # No-op detection: skip writing if the regenerated text matches.
     if new_text == existing_text:
         return ("no-change", "already in sync")
 
     pack_path.write_text(new_text, encoding="utf-8")
-    return ("regen", f"wrote {len(new_text)} bytes from {xml_path.name}")
+    detail = f"wrote {len(new_text)} bytes from {xml_path.name}"
+    if preservations:
+        preserved_summary = ", ".join(
+            f"{field}={kept}" for field, kept, _ in preservations)
+        detail += f"; preserved {preserved_summary}"
+    return ("regen", detail)
 
 
 def main(argv: list[str] | None = None) -> int:
