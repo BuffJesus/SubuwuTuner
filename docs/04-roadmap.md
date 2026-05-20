@@ -118,6 +118,7 @@ The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0
 | **v1.3** | **Older EJ-powered cars** (early WRX/STI, Forester XT, Legacy GT, Outback XT, EJ20/EJ25) | Medium. Oldest ECU tech but very well mapped by RomRaider — mostly definitions work |
 | **v1.4** | **BRZ / Toyota 86 (FA20D NA)** | Large. Toyota-partnership ECU, different vendor, biggest single-platform engineering ask |
 | **v1.5** | **Live tuning** — RAM-shadow override + UDS WriteDataByIdentifier for on-dyno cell editing (see `docs/19-live-tuning.md`) | Large. New `st::live_tune` module + per-CID RAM-shadow address tables + per-write safety linting; gated on Phase 4 hardware validation |
+| **v2.0** | **AI advisory surface** — rules-based drift classifier + optional local-LLM explanation layer + "explain this log" assistant (see `docs/20-ai-integration.md`). Advisory only; no path into the write surface. | Medium. New `st::ai` module + Backend abstraction (Ollama / OpenAI / Anthropic) + classifier rules over the existing log snapshots. Compile-time-optional. |
 | **v2.0** | **Crosstrek / Forester (current FB-powered)**, regional variants | Definitions work plus light protocol additions |
 
 ## Cross-cutting v1.x improvements

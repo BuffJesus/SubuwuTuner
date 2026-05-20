@@ -24,6 +24,7 @@ This folder contains the design and planning documents for **SubuwuTuner**, a co
 18. [17-data-distribution-policy.md](17-data-distribution-policy.md) — Path B: tool ships public, definition packs are user-supplied
 19. [18-standalone-master-plan.md](18-standalone-master-plan.md) — Portable Teensy/ESP32 handheld plan
 20. [19-live-tuning.md](19-live-tuning.md) — RAM-shadow live tuning design (v1.5+)
+21. [20-ai-integration.md](20-ai-integration.md) — AI / LLM as advisory surface, not modification surface (v2.0+)
 
 ## Status
 
