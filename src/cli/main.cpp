@@ -40,6 +40,7 @@
 #include <ios>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <optional>
 #include <span>
@@ -790,15 +791,49 @@ void print_def_summary(st::Definition const &def, st::Rom const &rom) {
     }
 
     std::printf("\nTables defined: %zu\n", def.tables().size());
+
+    // Category histogram — top 8 by count. Useful for sizing up an
+    // unfamiliar pack at a glance ("does this have boost tables?
+    // knock tables?") without having to scan a 300-line table list.
+    // Empty-category entries are bucketed under "(uncategorized)".
+    {
+        std::map<std::string, std::size_t> cat_counts;
+        for (auto const &t : def.tables()) {
+            cat_counts[t.category.empty() ? "(uncategorized)" : t.category]++;
+        }
+        if (!cat_counts.empty()) {
+            std::vector<std::pair<std::string, std::size_t>> sorted(cat_counts.begin(),
+                                                                    cat_counts.end());
+            std::sort(sorted.begin(), sorted.end(), [](auto const &a, auto const &b) {
+                if (a.second != b.second)
+                    return a.second > b.second;
+                return a.first < b.first;
+            });
+            constexpr std::size_t kMaxCats = 8;
+            auto const cat_limit = std::min(sorted.size(), kMaxCats);
+            std::printf("  Categories (top %zu of %zu):\n", cat_limit, sorted.size());
+            for (std::size_t i = 0; i < cat_limit; ++i) {
+                std::printf("    %4zu  %s\n", sorted[i].second, sorted[i].first.c_str());
+            }
+            if (sorted.size() > kMaxCats) {
+                std::size_t rest = 0;
+                for (std::size_t i = kMaxCats; i < sorted.size(); ++i)
+                    rest += sorted[i].second;
+                std::printf("    %4zu  (+%zu more categories)\n", rest, sorted.size() - kMaxCats);
+            }
+        }
+    }
+
     constexpr std::size_t kMaxTables = 16;
     auto const limit = def.tables().size() < kMaxTables ? def.tables().size() : kMaxTables;
+    std::printf("  First %zu tables:\n", limit);
     for (std::size_t i = 0; i < limit; ++i) {
         auto const &t = def.tables()[i];
-        std::printf("  %dD  0x%08zX  %-32s  %s\n", t.dimensions, t.address, t.id.c_str(),
+        std::printf("    %dD  0x%08zX  %-32s  %s\n", t.dimensions, t.address, t.id.c_str(),
                     t.name.c_str());
     }
     if (def.tables().size() > kMaxTables) {
-        std::printf("  ... %zu more not shown\n", def.tables().size() - kMaxTables);
+        std::printf("    ... %zu more not shown\n", def.tables().size() - kMaxTables);
     }
     std::printf("PIDs defined:   %zu\n", def.pids().size());
 }
