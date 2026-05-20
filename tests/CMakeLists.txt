@@ -35,6 +35,7 @@ add_executable(st_unit_tests
     unit/log/test_log.cpp
     unit/log/test_knock_dashboard.cpp
     unit/log/test_adaptive_history.cpp
+    unit/log/test_coldstart.cpp
     unit/can/test_can.cpp
     unit/dbc/test_dbc.cpp
     unit/discover/test_discover.cpp
