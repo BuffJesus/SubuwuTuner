@@ -1,6 +1,7 @@
 add_library(st_log STATIC
     src/log.cpp
     src/knock_dashboard.cpp
+    src/adaptive_history.cpp
 )
 add_library(st::log ALIAS st_log)
 
