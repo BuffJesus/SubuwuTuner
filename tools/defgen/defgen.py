@@ -520,14 +520,31 @@ def _parse_hex_address(s: str | None) -> int:
     return int(s, 16)
 
 
+# Default ROM size when the source XML doesn't declare <filesize>.
+# Subaru: 1MB is by far the most common cal-ROM size across the
+# 2002-2015 fleet (5xx-era and earlier are 512KB; LF7x/LF9x DIT
+# generations are 2-4MB). Falling back to 1MB is right for the
+# majority and surfaces a clean size mismatch at pack-load time
+# for the minority (better than the previous default of 0, which
+# breaks every range-check silently).
+_DEFAULT_ROM_SIZE_BYTES = 1_048_576
+
+
 def _parse_filesize(s: str | None) -> int:
-    """Accepts '1.5MB', '1572864', '1MB', etc."""
+    """Accepts '1.5MB', '1572864', '1MB', etc.
+
+    When the XML omits <filesize> entirely (string None/empty) or
+    contains an unparseable value, returns the Subaru-default of 1MB
+    rather than 0. A 0-size pack still loads but breaks every
+    size-aware code path silently — see commits 0008695 / 085450a /
+    7fa4beb for the regression pattern this default prevents.
+    """
     if s is None or s == "":
-        return 0
+        return _DEFAULT_ROM_SIZE_BYTES
     s = s.strip().upper()
     m = re.match(r"([0-9.]+)\s*(KB|MB)?", s)
     if not m:
-        return 0
+        return _DEFAULT_ROM_SIZE_BYTES
     value = float(m.group(1))
     unit = m.group(2) or ""
     if unit == "MB":

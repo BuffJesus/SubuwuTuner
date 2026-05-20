@@ -211,6 +211,15 @@ class HexAndPrecisionTest(unittest.TestCase):
         self.assertEqual(defgen._parse_filesize("512KB"), 524288)
         self.assertEqual(defgen._parse_filesize("1572864"), 1572864)
 
+    def test_filesize_defaults_to_1mb_when_missing(self):
+        # When the source XML omits <filesize> we fall back to the
+        # Subaru-default 1MB rather than 0. Returning 0 used to cause
+        # silent regressions on every bulk_regen pass — see commit
+        # 0008695 (the regression-fix that motivated this default).
+        self.assertEqual(defgen._parse_filesize(None), 1_048_576)
+        self.assertEqual(defgen._parse_filesize(""), 1_048_576)
+        self.assertEqual(defgen._parse_filesize("not a size"), 1_048_576)
+
     def test_slugify(self):
         self.assertEqual(defgen._slugify("RPM Axis"), "rpm_axis")
         self.assertEqual(defgen._slugify("Boost Target High-Octane"),
