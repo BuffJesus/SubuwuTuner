@@ -17,6 +17,7 @@
 #include "st/log.hpp"
 #include "st/log/knock_dashboard.hpp"
 #include "st/log/adaptive_history.hpp"
+#include "st/log/coldstart.hpp"
 #include "st/policy.hpp"
 #include "st/project.hpp"
 #include "st/rom.hpp"
@@ -227,6 +228,19 @@ constexpr std::string_view kUsage =
     "                            p8→rpm, p11→iat_c, p18→maf_voltage) so the output\n"
     "                            drops into `autotune *` / `project-autotune-*`\n"
     "                            without a rename pass.\n"
+    "    coldstart-analyze --log <CSV> --timestamp-col <name> --ect-col <name> --rpm-col <name>\n"
+    "                      [--iat-col <name>] [--observed-lambda-col <name>]\n"
+    "                      [--commanded-lambda-col <name>] [--timing-col <name>]\n"
+    "                      [--closed-loop-col <name>]\n"
+    "                      [--cold-threshold-c N] [--ect-bin-width-c N]\n"
+    "                      [--min-samples-per-bin N]\n"
+    "                      [--timestamp-unit seconds|millis|micros|rows]\n"
+    "                      [--target ect:lambda,ect:lambda,...]\n"
+    "                            Phase-classify + ECT-bin a cold-start datalog (engine cold-\n"
+    "                            soak → warmup). Reports per-phase sample/time counts, per-\n"
+    "                            ECT-bin observed lambda + deviation from a user-supplied\n"
+    "                            target curve. --target points are linearly interpolated\n"
+    "                            (sorted ascending by ECT). See docs/05-improvements.md §11.\n"
     "    adaptive-history --log <CSV> --timestamp-col <name>\n"
     "                     [--ltft-col <name>] [--dam-col <name>] [--idle-adapt-col <name>]\n"
     "                     [--bucket-seconds N] [--timestamp-unit seconds|millis|micros|rows]\n"
@@ -4592,6 +4606,256 @@ int cmd_adaptive_history(int argc, char *argv[]) {
     return 0;
 }
 
+int cmd_coldstart_analyze(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> log_path;
+    std::optional<std::string>           ts_col;
+    std::optional<std::string>           ect_col;
+    std::optional<std::string>           iat_col;
+    std::optional<std::string>           rpm_col;
+    std::optional<std::string>           obs_col;
+    std::optional<std::string>           cmd_col;
+    std::optional<std::string>           timing_col;
+    std::optional<std::string>           cl_col;
+    std::optional<double>                cold_threshold_c;
+    std::optional<double>                ect_bin_width_c;
+    std::optional<std::size_t>           min_samples_per_bin;
+    std::optional<std::string>           ts_unit_arg;
+    // Methodology target curve as comma-separated "ect:lambda" pairs.
+    // Example: --target "0:0.82,20:0.88,40:0.93,55:1.00"
+    std::optional<std::string>           target_curve_arg;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const             need = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "coldstart-analyze: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if      (a == "--log")             { auto *v = need("--log");             if (!v) return 2; log_path = std::filesystem::path{v}; }
+        else if (a == "--timestamp-col")   { auto *v = need("--timestamp-col");   if (!v) return 2; ts_col     = v; }
+        else if (a == "--ect-col")         { auto *v = need("--ect-col");         if (!v) return 2; ect_col    = v; }
+        else if (a == "--iat-col")         { auto *v = need("--iat-col");         if (!v) return 2; iat_col    = v; }
+        else if (a == "--rpm-col")         { auto *v = need("--rpm-col");         if (!v) return 2; rpm_col    = v; }
+        else if (a == "--observed-lambda-col") { auto *v = need("--observed-lambda-col"); if (!v) return 2; obs_col = v; }
+        else if (a == "--commanded-lambda-col"){ auto *v = need("--commanded-lambda-col"); if (!v) return 2; cmd_col = v; }
+        else if (a == "--timing-col")      { auto *v = need("--timing-col");      if (!v) return 2; timing_col = v; }
+        else if (a == "--closed-loop-col") { auto *v = need("--closed-loop-col"); if (!v) return 2; cl_col     = v; }
+        else if (a == "--cold-threshold-c") {
+            auto *v = need("--cold-threshold-c"); if (!v) return 2;
+            auto const p = parse_decimal(v);
+            if (!p.has_value()) {
+                std::fprintf(stderr, "coldstart-analyze: --cold-threshold-c must "
+                                     "be a number (got '%s')\n", v);
+                return 2;
+            }
+            cold_threshold_c = *p;
+        }
+        else if (a == "--ect-bin-width-c") {
+            auto *v = need("--ect-bin-width-c"); if (!v) return 2;
+            auto const p = parse_decimal(v);
+            if (!p.has_value()) {
+                std::fprintf(stderr, "coldstart-analyze: --ect-bin-width-c must "
+                                     "be a number (got '%s')\n", v);
+                return 2;
+            }
+            ect_bin_width_c = *p;
+        }
+        else if (a == "--min-samples-per-bin") {
+            auto *v = need("--min-samples-per-bin"); if (!v) return 2;
+            char       *end = nullptr;
+            long long const n = std::strtoll(v, &end, 10);
+            if (end == v || *end != '\0' || n < 0) {
+                std::fprintf(stderr, "coldstart-analyze: "
+                                     "--min-samples-per-bin must be a "
+                                     "non-negative integer (got '%s')\n", v);
+                return 2;
+            }
+            min_samples_per_bin = static_cast<std::size_t>(n);
+        }
+        else if (a == "--timestamp-unit") {
+            auto *v = need("--timestamp-unit"); if (!v) return 2;
+            ts_unit_arg = v;
+        }
+        else if (a == "--target") {
+            auto *v = need("--target"); if (!v) return 2;
+            target_curve_arg = v;
+        }
+        else {
+            std::fprintf(stderr,
+                         "coldstart-analyze: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!log_path.has_value() || !ts_col.has_value()
+        || !ect_col.has_value() || !rpm_col.has_value()) {
+        std::fputs(
+            "coldstart-analyze: missing required arguments\n"
+            "Usage: subuwutuner-cli coldstart-analyze --log <CSV>\n"
+            "         --timestamp-col <name> --ect-col <name> --rpm-col <name>\n"
+            "         [--iat-col <name>] [--observed-lambda-col <name>]\n"
+            "         [--commanded-lambda-col <name>] [--timing-col <name>]\n"
+            "         [--closed-loop-col <name>]\n"
+            "         [--cold-threshold-c N] [--ect-bin-width-c N]\n"
+            "         [--min-samples-per-bin N]\n"
+            "         [--timestamp-unit seconds|millis|micros|rows]\n"
+            "         [--target ect:lambda,ect:lambda,...]\n",
+            stderr);
+        return 2;
+    }
+
+    std::vector<std::string> header;
+    {
+        std::string err;
+        if (!read_csv_header(*log_path, header, err)) {
+            std::fprintf(stderr, "%s\n", err.c_str());
+            return 1;
+        }
+    }
+    auto const resolve = [&](std::string_view name,
+                              char const       *flag) -> std::size_t {
+        std::size_t const idx = find_csv_column(header, name);
+        if (idx == std::string_view::npos) {
+            std::fprintf(stderr,
+                         "coldstart-analyze: %s column '%.*s' not in CSV header\n",
+                         flag, static_cast<int>(name.size()), name.data());
+        }
+        return idx;
+    };
+
+    st::log::coldstart::PidMapping mapping;
+    bool bad = false;
+    {
+        std::size_t const idx = resolve(*ts_col, "--timestamp-col");
+        if (idx == std::string_view::npos) bad = true; else mapping.timestamp_idx = idx;
+    }
+    {
+        std::size_t const idx = resolve(*ect_col, "--ect-col");
+        if (idx == std::string_view::npos) bad = true; else mapping.ect_idx = idx;
+    }
+    {
+        std::size_t const idx = resolve(*rpm_col, "--rpm-col");
+        if (idx == std::string_view::npos) bad = true; else mapping.rpm_idx = idx;
+    }
+    auto const opt_resolve = [&](std::optional<std::string> const &c,
+                                  std::size_t                     &slot,
+                                  char const                      *flag) {
+        if (!c.has_value()) return;
+        std::size_t const idx = resolve(*c, flag);
+        if (idx == std::string_view::npos) bad = true; else slot = idx;
+    };
+    opt_resolve(iat_col,    mapping.iat_idx,              "--iat-col");
+    opt_resolve(obs_col,    mapping.observed_lambda_idx,  "--observed-lambda-col");
+    opt_resolve(cmd_col,    mapping.commanded_lambda_idx, "--commanded-lambda-col");
+    opt_resolve(timing_col, mapping.timing_deg_idx,       "--timing-col");
+    opt_resolve(cl_col,     mapping.closed_loop_idx,      "--closed-loop-col");
+    if (bad) return 1;
+
+    st::log::coldstart::WindowConfig cfg;
+    if (cold_threshold_c.has_value())    cfg.cold_threshold_c    = *cold_threshold_c;
+    if (ect_bin_width_c.has_value())     cfg.ect_bin_width_c     = *ect_bin_width_c;
+    if (min_samples_per_bin.has_value()) cfg.min_samples_per_bin =
+        static_cast<std::uint32_t>(*min_samples_per_bin);
+    if (ts_unit_arg.has_value()) {
+        std::string u = *ts_unit_arg;
+        for (auto &c : u) c = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(c)));
+        if      (u == "seconds" || u == "s")   cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixSeconds;
+        else if (u == "millis"  || u == "ms")  cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixMillis;
+        else if (u == "micros"  || u == "us")  cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixMicros;
+        else if (u == "rows"    || u == "row") cfg.timestamp_unit = st::log::coldstart::TimestampUnit::RowIndex;
+        else {
+            std::fprintf(stderr, "coldstart-analyze: --timestamp-unit must be "
+                                 "one of seconds|millis|micros|rows (got '%s')\n",
+                         ts_unit_arg->c_str());
+            return 2;
+        }
+    }
+
+    st::log::coldstart::Methodology methodology;
+    if (target_curve_arg.has_value()) {
+        for (auto const &pair_s : split_csv_list(*target_curve_arg)) {
+            auto const colon = pair_s.find(':');
+            if (colon == std::string::npos) {
+                std::fprintf(stderr, "coldstart-analyze: --target entry '%s' "
+                                     "must be 'ect:lambda'\n", pair_s.c_str());
+                return 2;
+            }
+            auto const ect_p = parse_decimal(std::string_view{pair_s}.substr(0, colon));
+            auto const lam_p = parse_decimal(std::string_view{pair_s}.substr(colon + 1));
+            if (!ect_p.has_value() || !lam_p.has_value()) {
+                std::fprintf(stderr, "coldstart-analyze: --target entry '%s' "
+                                     "has non-numeric component\n", pair_s.c_str());
+                return 2;
+            }
+            methodology.target_lambda_vs_ect.points.emplace_back(*ect_p, *lam_p);
+        }
+        std::sort(methodology.target_lambda_vs_ect.points.begin(),
+                   methodology.target_lambda_vs_ect.points.end(),
+                   [](auto const &a, auto const &b) { return a.first < b.first; });
+    }
+
+    auto const r = st::log::coldstart::snapshot_from_csv(
+        log_path->string(), mapping, cfg, methodology);
+    if (!r.has_value()) {
+        std::fprintf(stderr, "coldstart-analyze: %s\n",
+                     r.error().to_string().c_str());
+        return 1;
+    }
+    auto const &s = *r;
+
+    char const *phase_names[6] = {
+        "PreCrank", "Cranking", "InitialFiring",
+        "HighIdle", "Warmup", "ClosedLoop"};
+
+    std::printf("Cold-Start Analysis\n");
+    std::printf("===================\n");
+    std::printf("Log:                   %s\n", log_path->string().c_str());
+    std::printf("ECT span:              %+.1f .. %+.1f °C\n",
+                s.coldest_ect_c, s.warmest_ect_c);
+    std::printf("Samples considered:    %llu\n",
+                static_cast<unsigned long long>(s.samples_considered));
+    std::printf("Samples gated out:     %llu\n",
+                static_cast<unsigned long long>(s.samples_gated_out));
+    std::printf("Mean lambda deviation: %.4f%s\n",
+                s.mean_lambda_deviation,
+                methodology.target_lambda_vs_ect.points.empty()
+                    ? "  (no target curve set)" : "");
+
+    std::printf("\n");
+    std::printf("Phase           | samples | seconds\n");
+    std::printf("----------------+---------+--------\n");
+    for (std::size_t p = 0; p < st::log::coldstart::kPhaseCount; ++p) {
+        std::printf(" %-14s | %7u | %7.1f\n",
+                    phase_names[p],
+                    static_cast<unsigned>(s.phase_counts[p]),
+                    s.phase_seconds[p]);
+    }
+
+    if (!s.ect_bins.empty()) {
+        std::printf("\n");
+        std::printf("ECT bin (°C) | n  | obs λ mean | obs λ min | obs λ max | dev from target\n");
+        std::printf("-------------+----+------------+-----------+-----------+---------------\n");
+        for (auto const &b : s.ect_bins) {
+            std::printf(" %+11.1f | %2u | %+10.4f | %+9.4f | %+9.4f | %+13.4f\n",
+                        b.ect_center_c,
+                        static_cast<unsigned>(b.count),
+                        b.observed_lambda_mean,
+                        b.observed_lambda_min,
+                        b.observed_lambda_max,
+                        b.deviation_from_target);
+        }
+    } else {
+        std::printf("\n(No ECT bins — log has no cold-regime samples with "
+                    "observed-lambda data above min_samples_per_bin.)\n");
+    }
+
+    return 0;
+}
+
 int cmd_log(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
     std::optional<std::string>           pid_list_arg;
@@ -8406,6 +8670,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "adaptive-history") {
         return cmd_adaptive_history(argc - 2, argv + 2);
+    }
+    if (cmd == "coldstart-analyze") {
+        return cmd_coldstart_analyze(argc - 2, argv + 2);
     }
     if (cmd == "can-replay") {
         return cmd_can_replay(argc - 2, argv + 2);

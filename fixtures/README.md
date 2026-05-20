@@ -77,6 +77,27 @@ Expected: LTFT drift/day ≈ -0.13, IdleAdapt drift/day ≈ +0.06, DAM
 stable near 1.0. Same file works as the GUI panel input via
 **View → Adaptive history (preview) → Browse...**.
 
+## `demo-coldstart-log.csv`
+
+A 34-row synthetic cold-start datalog (2017 WRX, 5 °C ambient,
+key-on through warmup; 5 Hz, ~30 s total) used to smoke-test the
+v1.x cold-start analysis (`docs/05` §11 play 3). Captures
+PreCrank → Cranking → InitialFiring → HighIdle → ClosedLoop
+transitions with realistic open-loop enrichment behavior. Smoke-test:
+
+```bash
+build/win-mingw/bin/subuwutuner-cli.exe coldstart-analyze \
+    --log fixtures/demo-coldstart-log.csv \
+    --timestamp-col ts --ect-col ect --iat-col iat --rpm-col rpm \
+    --observed-lambda-col obs --commanded-lambda-col cmd \
+    --target "0:0.82,20:0.90,40:0.95,55:1.00" --min-samples-per-bin 1
+```
+
+Expected: HighIdle dominates by sample count (~25 samples, ~27 s),
+ECT bins centered every 5 °C from +7.5 to +52.5, mean lambda
+deviation ≈ 0.04. Same file works for the GUI panel via
+**View → Cold-start analysis (preview) → Browse...**.
+
 ## Private fixtures
 
 `fixtures/private/` and `fixtures/roms/` are gitignored. Drop user-owned ROM
