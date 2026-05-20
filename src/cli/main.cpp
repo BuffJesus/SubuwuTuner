@@ -1561,6 +1561,19 @@ int cmd_primitive_list(int argc, char *argv[]) {
         return print_def_load_error("primitive-list", *def_path, def.error());
     }
 
+    // Lowercase the filter once; primitive types in defs are lowercase
+    // by convention ("int", "float", "bool") but tolerate user-typed
+    // "INT" / "Float" without surprises.
+    auto const ascii_lower = [](std::string s) {
+        for (char &c : s) {
+            if (c >= 'A' && c <= 'Z')
+                c = static_cast<char>(c - 'A' + 'a');
+        }
+        return s;
+    };
+    std::string const type_needle =
+        type_filter.has_value() ? ascii_lower(*type_filter) : std::string{};
+
     std::size_t matched = 0;
     std::printf("%-24s %-32s %s\n", "id", "signature", "description");
     for (auto const &p : def->primitives()) {
@@ -1569,10 +1582,10 @@ int cmd_primitive_list(int argc, char *argv[]) {
         // any-match semantics rarely surprises; for multi-output
         // primitives this lists the primitive if any output is the
         // requested type.
-        if (type_filter.has_value()) {
+        if (!type_needle.empty()) {
             bool ok = false;
             for (auto const &o : p.outputs) {
-                if (o.type == *type_filter) {
+                if (ascii_lower(o.type) == type_needle) {
                     ok = true;
                     break;
                 }
