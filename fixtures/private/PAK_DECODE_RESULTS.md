@@ -143,6 +143,29 @@ values will pick up overlays automatically, and the remaining 23 can
 be populated as their ecuids are read off real hardware (or matched
 to a future newer pak dataset).
 
+**2026-05-19 update — v370 is the current ceiling.** Comprehensive
+search of public sources confirms no newer logger XML exists:
+
+  - `romraider.com/forum/viewtopic.php?f=8&t=1642` — official thread,
+    last edited 2020-11-24, latest version is 370 (Nov 2021 release).
+    Cumulative changelog of v1–v370 inline in OP. Stops at FA-DIT
+    early-2018 era: A66/A68/A6A/A62A904007/A62A907007 et al.
+    A629B07507 (LF75600H) and D829B07107 (LF9L000E) are NOT in this
+    set despite being valid SSM ecuids — they were never added to RR.
+  - `github.com/Merp/SubaruDefs` — community canonical defs repo,
+    Stable branch logger.xml is v0.3.5b (2009-10-02), 2,074,495 bytes
+    vs our v370's 2,288,834. Far older. Alpha and MerpMod_dev branches
+    pin to v290, also older. Merp doesn't track RR logger updates.
+  - RomRaider 1.1.0 release (Nov 2025) on GitHub: release notes
+    mention "M42 VANOS query group" addition but no FA-DIT VA/VB.
+    Logger XML still distributed separately via the forum (= v370).
+
+The 2 ecu_part values we populated will simply remain unused until
+either (a) a v371+ release lands, (b) we write our own FA-DIT logger
+XML supplement, or (c) a commercial source's data becomes
+redistributable. (b) is the SubuwuTuner-distinctive path — see
+docs/05 §11 for the broader under-served-coverage thesis.
+
 All 25 packs still ship shared SSM PIDs via the
 `includes = ["../pids.toml"]` line in every pack (235 PIDs + 172
 switches from v370). The gap is in the per-CID extended-PID layer,
