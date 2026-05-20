@@ -481,6 +481,107 @@ std::filesystem::path resolve_def_path(std::filesystem::path const &path) {
     return path;
 }
 
+// Walk `pack_dir` recursively for .toml files that look like pack
+// roots. Returns one path per pack, deterministically ordered.
+//
+// Two supported layouts (docs/11):
+//   - Multi-file:  <dir>/pack.toml + companion fragments
+//     (loaded via from_file -> resolve_includes)
+//   - Single-file: a self-contained `<id>.toml` directly under
+//     <dir> with no companion fragments
+//
+// To distinguish the two: any .toml found alongside a `pack.toml`
+// in the same directory is treated as a fragment of that pack and
+// skipped; standalone .toml files (no pack.toml sibling) are kept
+// as single-file pack candidates. Definition::from_file then
+// validates the candidate by attempting a load — fragments that
+// somehow slipped through (no [pack] section) fail naturally and
+// the caller skips them.
+//
+// Returns the list of candidate paths; the caller invokes from_file
+// on each to materialize Definitions and tally load failures.
+std::vector<std::filesystem::path> discover_pack_paths(std::filesystem::path const &pack_dir,
+                                                       char const *subcmd) {
+    std::vector<std::filesystem::path> paths;
+
+    // First pass: identify directories that contain a pack.toml. Any
+    // other .toml in such a directory is a fragment.
+    std::vector<std::filesystem::path> multi_pack_dirs;
+    try {
+        std::error_code walk_ec;
+        std::filesystem::recursive_directory_iterator it{
+            pack_dir, std::filesystem::directory_options::skip_permission_denied, walk_ec};
+        if (walk_ec) {
+            std::fprintf(stderr, "%s: cannot walk %s: %s\n", subcmd, pack_dir.string().c_str(),
+                         walk_ec.message().c_str());
+            return paths;
+        }
+        for (auto const &e : it) {
+            std::error_code is_file_ec;
+            if (!e.is_regular_file(is_file_ec) || is_file_ec)
+                continue;
+            if (e.path().filename() == "pack.toml") {
+                multi_pack_dirs.push_back(e.path().parent_path());
+            }
+        }
+    } catch (std::filesystem::filesystem_error const &fs_err) {
+        std::fprintf(stderr, "%s: filesystem error walking %s: %s\n", subcmd,
+                     pack_dir.string().c_str(), fs_err.what());
+        return paths;
+    }
+
+    auto const is_under_multi_pack_dir = [&](std::filesystem::path const &file) {
+        // True if `file` is at or under any directory containing a
+        // pack.toml. Walk ancestors up to (but not including) the
+        // top-level pack_dir.
+        std::error_code root_ec;
+        auto const root = std::filesystem::weakly_canonical(pack_dir, root_ec);
+        for (auto p = file.parent_path();; p = p.parent_path()) {
+            if (std::find(multi_pack_dirs.begin(), multi_pack_dirs.end(), p) !=
+                multi_pack_dirs.end()) {
+                return true;
+            }
+            std::error_code cmp_ec;
+            auto const canon = std::filesystem::weakly_canonical(p, cmp_ec);
+            if (canon == root)
+                return false;
+            if (p == p.parent_path()) // filesystem root
+                return false;
+        }
+    };
+
+    // Second pass: collect pack.toml roots + any standalone .toml whose
+    // parent isn't a multi-file pack dir (those are fragments).
+    try {
+        std::error_code walk_ec;
+        std::filesystem::recursive_directory_iterator it{
+            pack_dir, std::filesystem::directory_options::skip_permission_denied, walk_ec};
+        if (walk_ec) {
+            return paths;
+        }
+        for (auto const &e : it) {
+            std::error_code is_file_ec;
+            if (!e.is_regular_file(is_file_ec) || is_file_ec)
+                continue;
+            auto const &p = e.path();
+            if (p.extension() != ".toml")
+                continue;
+            if (p.filename() == "pack.toml") {
+                paths.push_back(p);
+                continue;
+            }
+            if (is_under_multi_pack_dir(p))
+                continue; // companion fragment of a multi-file pack
+            paths.push_back(p);
+        }
+    } catch (std::filesystem::filesystem_error const &) {
+        return paths;
+    }
+
+    std::sort(paths.begin(), paths.end());
+    return paths;
+}
+
 // Print a definition-load failure with a Path-B context hint when the
 // supplied path doesn't exist on disk. SubuwuTuner ships infrastructure
 // only — calibration packs are user-supplied — so a missing path is a
@@ -3636,52 +3737,24 @@ int cmd_pack_list(int argc, char *argv[]) {
         return 2;
     }
 
-    // Recursive walk for pack.toml files — same shape as
-    // rom-identify, deliberately duplicated rather than factored
-    // (two sites, ~25 lines each; a helper would add an indirection
-    // for marginal sharing).
-    std::vector<std::filesystem::path> pack_dirs;
-    try {
-        std::error_code walk_ec;
-        std::filesystem::recursive_directory_iterator it{
-            *pack_dir, std::filesystem::directory_options::skip_permission_denied, walk_ec};
-        if (walk_ec) {
-            std::fprintf(stderr, "pack-list: cannot walk %s: %s\n", pack_dir->string().c_str(),
-                         walk_ec.message().c_str());
-            return 1;
-        }
-        for (auto const &e : it) {
-            std::error_code is_file_ec;
-            if (!e.is_regular_file(is_file_ec) || is_file_ec)
-                continue;
-            if (e.path().filename() != "pack.toml")
-                continue;
-            auto parent = e.path().parent_path();
-            if (std::find(pack_dirs.begin(), pack_dirs.end(), parent) == pack_dirs.end()) {
-                pack_dirs.push_back(std::move(parent));
-            }
-        }
-    } catch (std::filesystem::filesystem_error const &fs_err) {
-        std::fprintf(stderr, "pack-list: filesystem error walking %s: %s\n",
-                     pack_dir->string().c_str(), fs_err.what());
-        return 1;
-    }
-    std::sort(pack_dirs.begin(), pack_dirs.end());
-
-    if (pack_dirs.empty()) {
-        std::fprintf(stderr, "pack-list: no pack.toml files found under %s\n",
+    // Walk pack_dir for both single-file packs (`<id>.toml`) and
+    // multi-file packs (`<dir>/pack.toml` + companion fragments).
+    // See discover_pack_paths() for the layout rules.
+    auto const pack_paths = discover_pack_paths(*pack_dir, "pack-list");
+    if (pack_paths.empty()) {
+        std::fprintf(stderr, "pack-list: no .toml pack files found under %s\n",
                      pack_dir->string().c_str());
         return 1;
     }
 
     std::size_t loaded = 0;
     std::size_t failed = 0;
-    for (auto const &dir : pack_dirs) {
-        auto const def = st::Definition::from_directory(dir);
+    for (auto const &path : pack_paths) {
+        auto const def = st::Definition::from_file(path);
         if (!def.has_value()) {
             ++failed;
             if (!quiet) {
-                std::fprintf(stderr, "  (skip) %s — load failed: %s\n", dir.string().c_str(),
+                std::fprintf(stderr, "  (skip) %s — load failed: %s\n", path.string().c_str(),
                              def.error().to_string().c_str());
             }
             continue;
@@ -3691,15 +3764,15 @@ int cmd_pack_list(int argc, char *argv[]) {
         // One-line summary per pack. Columns: id, display name (or
         // "—" when empty), platform, table count, PID count, hook
         // count. Stable order so a `pack-list dir | sort` is
-        // already sorted by the dir path.
+        // already sorted by the source path.
         std::printf("%-32s  %-40s  %-18s  tables=%-3zu pids=%-3zu hooks=%-3zu  %s\n", p.id.c_str(),
                     p.display_name.empty() ? "—" : p.display_name.c_str(),
                     p.platform.empty() ? "—" : p.platform.c_str(), def->tables().size(),
-                    def->pids().size(), def->hooks().size(), dir.string().c_str());
+                    def->pids().size(), def->hooks().size(), path.string().c_str());
     }
 
-    std::printf("\n%zu pack%s found, %zu loaded\n", pack_dirs.size(),
-                pack_dirs.size() == 1 ? "" : "s", loaded);
+    std::printf("\n%zu pack%s found, %zu loaded\n", pack_paths.size(),
+                pack_paths.size() == 1 ? "" : "s", loaded);
     if (failed != 0) {
         std::printf("(%zu failed to load%s)\n", failed,
                     quiet ? " — rerun without --quiet to see errors" : "");
@@ -3752,46 +3825,11 @@ int cmd_rom_identify(int argc, char *argv[]) {
         return 2;
     }
 
-    // Walk recursively for pack.toml files. Each one names a
-    // directory-pack we can load via from_directory(parent). We
-    // dedupe by parent path so a pack with includes (multiple
-    // pack.toml-named files in sub-fragments) only counts once.
-    //
-    // The error_code overload of recursive_directory_iterator
-    // doesn't throw on individual file-system errors during the
-    // walk; we still guard with try/catch in case the start
-    // directory itself can't be opened (skip_permission_denied
-    // only handles per-entry failures, not the constructor).
-    std::vector<std::filesystem::path> pack_dirs;
-    try {
-        std::error_code walk_ec;
-        std::filesystem::recursive_directory_iterator it{
-            *pack_dir, std::filesystem::directory_options::skip_permission_denied, walk_ec};
-        if (walk_ec) {
-            std::fprintf(stderr, "rom-identify: cannot walk %s: %s\n", pack_dir->string().c_str(),
-                         walk_ec.message().c_str());
-            return 1;
-        }
-        for (auto const &e : it) {
-            std::error_code is_file_ec;
-            if (!e.is_regular_file(is_file_ec) || is_file_ec)
-                continue;
-            if (e.path().filename() != "pack.toml")
-                continue;
-            auto parent = e.path().parent_path();
-            if (std::find(pack_dirs.begin(), pack_dirs.end(), parent) == pack_dirs.end()) {
-                pack_dirs.push_back(std::move(parent));
-            }
-        }
-    } catch (std::filesystem::filesystem_error const &fs_err) {
-        std::fprintf(stderr, "rom-identify: filesystem error walking %s: %s\n",
-                     pack_dir->string().c_str(), fs_err.what());
-        return 1;
-    }
-    std::sort(pack_dirs.begin(), pack_dirs.end());
-
-    if (pack_dirs.empty()) {
-        std::fprintf(stderr, "rom-identify: no pack.toml files found under %s\n",
+    // Walk pack_dir for both single-file packs and multi-file pack.toml
+    // roots — see discover_pack_paths() for the layout rules.
+    auto const pack_paths = discover_pack_paths(*pack_dir, "rom-identify");
+    if (pack_paths.empty()) {
+        std::fprintf(stderr, "rom-identify: no .toml pack files found under %s\n",
                      pack_dir->string().c_str());
         return 1;
     }
@@ -3799,12 +3837,12 @@ int cmd_rom_identify(int argc, char *argv[]) {
     std::size_t loaded = 0;
     std::size_t failed = 0;
     std::size_t matched = 0;
-    for (auto const &dir : pack_dirs) {
-        auto const def = st::Definition::from_directory(dir);
+    for (auto const &path : pack_paths) {
+        auto const def = st::Definition::from_file(path);
         if (!def.has_value()) {
             ++failed;
             if (!quiet) {
-                std::fprintf(stderr, "  (skip) %s — load failed: %s\n", dir.string().c_str(),
+                std::fprintf(stderr, "  (skip) %s — load failed: %s\n", path.string().c_str(),
                              def.error().to_string().c_str());
             }
             continue;
@@ -3813,7 +3851,7 @@ int cmd_rom_identify(int argc, char *argv[]) {
         auto const match = def->matches(*rom);
         if (match.has_value()) {
             ++matched;
-            std::printf("MATCH  %s\n", dir.string().c_str());
+            std::printf("MATCH  %s\n", path.string().c_str());
             std::printf("       (identification: %s)\n", match->c_str());
             if (!def->pack().display_name.empty()) {
                 std::printf("       (display name:   %s)\n", def->pack().display_name.c_str());
@@ -3821,8 +3859,8 @@ int cmd_rom_identify(int argc, char *argv[]) {
         }
     }
 
-    std::printf("\n%zu pack%s scanned, %zu loaded, %zu match%s\n", pack_dirs.size(),
-                pack_dirs.size() == 1 ? "" : "s", loaded, matched, matched == 1 ? "" : "es");
+    std::printf("\n%zu pack%s scanned, %zu loaded, %zu match%s\n", pack_paths.size(),
+                pack_paths.size() == 1 ? "" : "s", loaded, matched, matched == 1 ? "" : "es");
     if (failed != 0) {
         std::printf("(%zu pack%s failed to load%s)\n", failed, failed == 1 ? "" : "s",
                     quiet ? " — rerun without --quiet to see errors" : "");
