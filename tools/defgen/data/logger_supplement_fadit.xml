@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE logger SYSTEM "logger.dtd">
+<!--
+  SUBUWUTUNER FA-DIT LOGGER SUPPLEMENT — VERSION 0001
+
+  Purpose
+  =======
+  RomRaider's public logger XML (v370, last released Nov 2021) does not
+  include `<ecuparam>` entries for any FA-DIT VA / VB WRX ecuid we have
+  encountered, including the ones documented in
+  fixtures/private/PAK_DECODE_RESULTS.md (A629B07507 = LF75600H,
+  D829B07107 = LF9L000E, plus 23 others). The OEM-side commercial tools
+  cover these ECUs but their data is not redistributable.
+
+  This file is the SubuwuTuner-native extension point: a small, additive
+  logger XML that follows the RomRaider DTD so `tools/defgen/loggergen.py`
+  can consume it alongside v370. Hardware-captured RAM addresses for
+  extended parameters land here, with provenance attached per entry.
+
+  Workflow for adding a new entry
+  ================================
+  1. Capture: connect a verified J2534 adapter to the running ECU and
+     run `subuwutuner-cli rom-pull ...` to dump the ROM. The dump's
+     ecuid (printed by `rom-info`) is the value that goes into the
+     <ecu id="..."> attribute.
+  2. Discover: identify the live-RAM address for the parameter of
+     interest. Two paths:
+     a) Side-by-side with an equivalent OEM logger session (legal in
+        most contexts as long as no commercial tool's IP is copied
+        into this file) — note the requested address.
+     b) RAM-watching via a custom feature graph in `st::feature::ir`
+        that exfiltrates a watch list; this is the path that does not
+        depend on any third-party tool.
+  3. Document: add the <ecuparam> entry below with `provenance` set
+     to "hardware" / "side-by-side" / "ram-watch" plus your contact.
+     Never paste an address pulled from a commercial-tool decompile
+     into this file. See `docs/15-clean-room-engineering.md` for the
+     full rules.
+
+  Loggergen integration
+  =====================
+  loggergen.py currently takes one XML at a time. To process the
+  supplement alongside v370, run loggergen twice and union the
+  resulting ecuparams (the loader in `st::defs` handles ecuparam
+  fragments cumulatively). A `merge` flag is on the v1.x roadmap.
+
+  Status
+  ======
+  This file is intentionally near-empty in its initial commit. The
+  shell + a single STUB entry is included to (a) prove the DTD
+  parses, (b) round-trip through loggergen, and (c) give contributors
+  a template. The STUB entry MUST be removed once a real entry lands
+  with verified address + provenance; do not ship the stub.
+-->
+<logger>
+    <protocols>
+        <protocol id="SSM" baud="4800" databits="8" stopbits="1" parity="0" connect_timeout="2000" send_timeout="55">
+            <ecuparams>
+
+                <!--
+                  STUB — replace with real entries.
+                  Demonstrates the structure loggergen expects. Address
+                  0xFFFFFF is a sentinel that defs-loader can reject.
+                -->
+                <ecuparam id="X1" name="STUB - Replace Me" desc="Placeholder to keep loggergen happy until a real ecuparam lands. Address is a sentinel.">
+                    <ecu id="A629B07507,D829B07107">
+                        <address length="1">0xFFFFFF</address>
+                    </ecu>
+                    <conversions>
+                        <conversion units="raw" expr="x" format="0" />
+                    </conversions>
+                </ecuparam>
+
+                <!--
+                  FUTURE ENTRIES go here, one <ecuparam> per logical
+                  signal. Group by signal (fuel, knock, boost, etc.)
+                  and within each group keep entries alphabetically by
+                  ecuid for easy diff review.
+
+                  Suggested initial discovery priorities (per the
+                  under-served-coverage thesis in docs/05 §11):
+
+                    1. Per-cylinder fine knock learn (FLKC) — feeds
+                       the per-cylinder knock dashboard.
+                    2. DAM (Dynamic Advance Multiplier) — drives the
+                       adaptive-learning history visualizer.
+                    3. EBCS / WGDC PID gains (live) — for the
+                       boost-controller PID assistant.
+                    4. ECT-conditioned cold-start state — for the
+                       cold-start tuning workflow.
+                -->
+
+            </ecuparams>
+        </protocol>
+    </protocols>
+</logger>

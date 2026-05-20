@@ -93,11 +93,15 @@ The under-served categories below are present in nearly every per-CID RR pack we
 Four concrete features fall out directly. None require new hardware; all run against existing log + ROM data.
 
 1. **Adaptive-learning history visualizer** — chart LTFT / DAM / idle-adapt drift over weeks. The state arrays are already in the def; the missing piece is a long-cycle UI on top. No IP risk, pure infrastructure win, big diagnostic value (catches dropping injectors, MAF aging, vacuum-leak drift).
-2. **Per-cylinder knock dashboard** — split the cyl-1..4 noise tables into a real cylinder-comparison view with log overlay. Catches uneven fueling, weak coil-pack, knock-sensor placement issues that single-value views hide.
+2. **Per-cylinder knock dashboard** — split the cyl-1..4 noise tables into a real cylinder-comparison view with log overlay. Catches uneven fueling, weak coil-pack, knock-sensor placement issues that single-value views hide. Cylinder-count-aware: H4 (FA / EJ) gets a 2×2 grid, H6 (EZ30 / EZ36) gets 3×2; EG33 (SVX) is supported in degraded mode (no per-cyl FLKC in that firmware era — single-channel knock surface). Domain scaffold at `src/log/include/st/log/knock_dashboard.hpp`.
 3. **Cold-start tuning workflow** — define a methodology (target lambda by ECT, recommended timing pull by ambient) and a GUI mode that gates the cold-start tables behind a checklist. Atlas exposes the maps; nobody ships a workflow around them.
 4. **Boost-controller PID assistant** — fit the EBCS PID gains from a tip-in log. The table exists in every WRX def; the fitting methodology is absent from the community. Closes a real long-standing complaint (boost overshoot / undershoot on tip-in).
 
 Plays 1 and 2 are pure visualization (low risk, ship in OSS). Plays 3 and 4 are tuning-domain features that share infrastructure with the auto-tune kernels in `docs/12`.
+
+### FA-DIT logger XML supplement
+
+All four plays depend on extended SSM PIDs whose RAM addresses are firmware-specific. RomRaider's v370 logger XML (Nov 2021) is the latest public release and predates FA-DIT VA/VB WRX coverage entirely (see `fixtures/private/PAK_DECODE_RESULTS.md`). The SubuwuTuner-native fix is `tools/defgen/data/logger_supplement_fadit.xml` — a small additive logger XML in the RomRaider DTD shape that `loggergen.py` already consumes. Initially empty (except for a stub entry that proves the round-trip), it grows by contribution as community members capture real RAM addresses from hardware. Provenance rules and clean-room boundaries are baked into the file's header comment per `docs/15-clean-room-engineering.md`.
 
 ---
 
