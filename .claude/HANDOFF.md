@@ -1,17 +1,21 @@
-# Handoff — 2026-05-20 (P1 cousin-seed + P2 LF79 audit + localize.py v2 + fake-anchor sweep)
+# Handoff — 2026-05-20 (10 new packs + localize.py v2 with relocator + patch-pack + fake-anchor sweep)
 
-Continuation of the 2026-05-19 handoff (§11 four-play arc, OBDX prep, tooling). This session executed all three deferred items from the prior plan plus the bonus of `localize.py` v2: ran the `cousin_seed.py → localize.py` pipeline against bludgod-corpus CIDs without pack coverage (6 new packs landed, 4 dropped where the cousin distance was too wide); ran the LF79xxx partial-decryption audit (one anchor confirmed, 30 partials catalogued, broader same-pattern problem identified across most FlashWrite buckets); built the pattern-search relocator for `localize.py` with 12 unit tests; swept all 99 anchor entries in `bulk_decrypt_v2.py` for fakes (9 disabled). **HEAD `68c2f02`**, in sync with `origin/main`. **Working tree clean apart from `SubaruTuner.zip`**.
+Continuation of the 2026-05-19 handoff. Long, productive session — executed all three deferred items from the prior plan plus two rounds of follow-on: the `cousin_seed.py → localize.py` bludgod-gap sweep landed 10 new packs across three batches; the LF79xxx partial-decryption audit (one anchor confirmed, 30 partials catalogued, broader same-pattern problem identified across most FlashWrite buckets); the `localize.py` v2 pattern-search relocator with 12 unit tests; the fake-anchor sweep across all 99 anchor entries in `bulk_decrypt_v2.py` (9 disabled); the `--patch-pack` flow that rewrites pack TOMLs in place from relocator output (7 more unit tests); a Windows stdout fix; the family-granularity docstring fix in `bulk_decrypt_v2.py`. **HEAD `b3a5e14`**, in sync with `origin/main`. **Working tree clean apart from `SubaruTuner.zip`**. **definitions/ pack count: 371** (up from 361 at session start = **+10 packs in one session**).
 
 ## What shipped this session (top = newest)
 
 ```
+b3a5e14 defs(packs): cousin-seed 2 more 2006-era e2vg packs via USDM siblings
+897e53b defs(packs): cousin-seed 2 more USDM packs via --patch-pack
+de647ba tools(defgen): localize.py --patch-pack + Win stdout fix + bulk_decrypt docstring
+5098cde docs(handoff): refresh 2026-05-20 handoff after relocator + anchor sweep
 68c2f02 fix(fixtures/private): comment out 9 fake-anchor PAK_* entries
 70773de tools(defgen): localize.py --relocate-low pattern-search relocator
 852198b docs(handoff): land 2026-05-20 session (P1 cousin-seed batch + P2 LF79 audit)
 80a2a0d defs(packs): cousin-seed 6 new USDM packs from bludgod gap
 ```
 
-Four commits on the public side (one is the mid-session handoff). P2 produced a private-side artifact (`fixtures/private/roms_extracted/decrypted/LF79/RECON.md`, gitignored) and a memory entry (`project_lf79_partial_decrypts.md`).
+Seven content commits (plus two handoff snapshots). P2 produced a private-side artifact (`fixtures/private/roms_extracted/decrypted/LF79/RECON.md`, gitignored) and a memory entry (`project_lf79_partial_decrypts.md`).
 
 ## The substantive arc
 
@@ -138,27 +142,44 @@ PAK_LF61803B
 
 All 9 are from the 2026-05-19 70-anchor pak-derived batch. Original 5 forum-anchored entries and the per-family anchors (LF75300, LF78001, LF9C000, LV9N100, LV9N303) are real and stay active. Active anchor count: 99 → 90.
 
+### 6. localize.py --patch-pack flow (`de647ba`)
+
+The relocator from `70773de` only REPORTED candidate addresses in the TSV; users still had to hand-edit the pack TOML. New `--patch-pack` flag writes successful relocations back into the pack's `[[table]]` blocks in place. Line-based rewriter preserves comments, blank lines, indentation, and inline `# ...` comments on the address line. Only `[[table]]` sections are touched — `cid_address` in `[[identification]]` is left alone. Idempotent.
+
+After patching, the pack should be evaluated against the TARGET ROM, not the original sibling — re-running localize with the same sibling+target pair is misleading (the sibling no longer has the table at the patched address, so `classify_pair` compares unrelated bytes). The relocator's per-row HIGH/MED in the TSV is the authoritative signal that each patch landed at a sensible location.
+
+7 more unit tests (single-table patch, multi-table, inline-comment preservation, empty-dict no-op, unknown-id no-op, idempotency, non-table sections untouched). Full defgen suite: **137 tests green**.
+
+Also bundled:
+- **Windows stdout UnicodeEncodeError** — `classify_pair` reasons include Δ; cp1252 stdout couldn't encode it when no `--out-report` was set. `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` at startup.
+- **`bulk_decrypt_v2.py` docstring family-granularity claim** revised from "6-char-prefix family" to "at most 7-8 characters; rely on the bucket report" — per the LF79 audit, LF79100P and LF79101P share the 6-char prefix `LF7910` but only LF79100P fully decrypts under the LF79100_family anchor.
+
+### 7. Two-batch follow-on cousin-seed sweep (`897e53b`, `b3a5e14`)
+
+After `--patch-pack` landed, re-ran the bludgod-gap analysis to find tens/ones-delta candidates skipped in the original sweep. **+4 more packs landed**:
+
+| pack | sibling | pre-patch | post-patch | notes |
+|---|---|---|---|---|
+| ez1g109j | ez1g109k | 88.7% | 92.9% | forester USDM 2009 MT→MT |
+| ez1e401h | ez1e401g | 90.2% | 94.3% | impreza USDM 2008-09 MT→AT |
+| e2vg212d | e2vg211d | 100% | n/a | forester USDM 2006 (no LOW to patch) |
+| e2vg204b | e2vg222b | 100% | n/a | legacy USDM 2006 (cross-platform; outback sibling) |
+
+The two e2vg packs (e2vg212d, e2vg204b) had been mis-paired against ADM siblings in the original 2026-05-20 P1 sweep and came out at 46% / 58% HIGH+MED then. Re-pairing against USDM siblings landed both essentially perfect (96-98% HIGH, no LOW).
+
+Two more candidates from the follow-on sweep dropped (cross-region pairings: e2vg212d, ez1g108k → ADM siblings, 46-58% HIGH+MED). Same lesson keeps reinforcing: cousin_seed wants same-trim same-region siblings with small CID deltas.
+
 ## Status snapshot
 
-- **HEAD `68c2f02`**, in sync with `origin/main`
-- **definitions/ pack count: 367** (up from 361 at session start)
+- **HEAD `b3a5e14`**, in sync with `origin/main`
+- **definitions/ pack count: 371** (up from 361 at session start — **+10 packs**)
 - **Working tree clean** apart from `SubaruTuner.zip` (untracked 114 MB; gitignore-equivalent — never `git add` it, would break GitHub's 100 MB push limit)
 - **CI clang-format gate: required** (no C++ touched this session)
-- **defgen test suite: 130 tests green** (incl. 12 new for the relocator)
+- **defgen test suite: 137 tests green** (12 relocator + 7 patch-pack added this session)
 
 Did not re-run `ctest` this session — no C++ changes, only TOML data + Python tooling + private-side script comments. If asserting C++ test-green is needed before the next code change, run the full suite.
 
 ## Open threads / known issues
-
-### Family-granularity claim in bulk_decrypt_v2.py docstring is loose
-
-The docstring states the recovered keystream decrypts "other ciphers in
-the SAME 6-char-prefix family". Empirically, LF79100P (anchor) does NOT
-fully decrypt LF79101P or LF79120P — both share the 6-char prefix
-`LF7910`/`LF7912` and would be expected to fully decode if the docstring
-were right. The actual family granularity is tighter (at least 7 chars,
-possibly variable). Not a blocker but the docstring should be updated to
-reflect empirical truth from the bucket report.
 
 ### Cross-revision cousin packs still need manual RE for recalibrated tables
 
@@ -207,7 +228,7 @@ clients already tested against MockTransport.
 
 ## Plan for the next session
 
-### Priority 1 (deferred three times now): docs/21-oem-baselines.md
+### Priority 1 (deferred four times now): docs/21-oem-baselines.md
 
 Empirical OEM behavior reference doc derived from the 178+498 ROM
 corpus. Sections per 2026-05-19 plan:
@@ -219,7 +240,7 @@ corpus. Sections per 2026-05-19 plan:
   generations)
 - Catalyst protection thresholds
 
-**Constraint from P2:** Use only ROMs from the `RELIABLE` set when
+**Constraint from P2:** Use only ROMs from the RELIABLE set when
 extracting empirical values. The bludgod corpus is reliable
 (plaintext, community-sourced). The `decrypted/` corpus is mostly
 NOT reliable for cal data — use only families with a high
@@ -230,19 +251,21 @@ requires real RE — loading packs against ROMs and reading the
 median/range of each cal table across the corpus. Deserves a fresh
 session with full focus.
 
-### Priority 2: Re-run cousin_seed batch with the v2 relocator wired in
+### Priority 2: Third-pass bludgod-gap sweep
 
-The relocator currently only REPORTS candidate addresses in the TSV;
-it doesn't patch the pack TOML. To actually multiply the new-packs
-yield, add a `--patch-pack` flag (or a separate `relocate_apply.py`)
-that rewrites each LOW table's `address` field with the relocator's
-suggested new address. Then re-run the bludgod-gap sweep — the 4
-candidates from today won't reach 80% even with patching, but the
-~10-20% relocation rate adds up across a 50+ candidate batch.
+Two passes this session landed 10 packs (the original 6 + 4 from the
+follow-on after `--patch-pack` landed). The gap should be smaller
+now but not empty. Worth one more pass looking for:
 
-Quick-win sweep ahead of this: re-run the gap analysis with the 6
-new packs committed today, find any tens-digit-delta candidates we
-skipped because their sibling-pack count was just below 3.
+1. Cousin candidates that became available after today's 10 new
+   packs entered the sibling pool (e.g., a CID that's a ones-digit
+   delta of a pack we landed today).
+2. Cross-platform USDM-USDM pairings that I might have missed.
+3. Same-family CIDs where bludgod has both target AND a sibling
+   ROM, AND we have a pack for the sibling (the third condition is
+   the one that keeps narrowing).
+
+Probably 2-4 more packs available. Quick session.
 
 ### Priority 3: Pack-format extension for `[[table.role]]`
 
@@ -251,12 +274,22 @@ advisory suggestions but don't apply them to the pack. Documented in
 `docs/05` §11.X as the v1.2 path; gated on adding a `[[table.role]]`
 string-tag schema. Once that lands, panels can route via
 `Definition::find_table_by_role(role_string) -> ByteEdit -> edit::History`
-with the engine-safety linter on the proposed bytes.
+with the engine-safety linter on the proposed bytes. This is
+substantial C++ work — multi-file, schema extension, Definition
+loader change, edit::History routing, lint wiring, UI integration.
 
-### Priority 4: docstring fix in bulk_decrypt_v2.py
+### Priority 4: Pattern-search relocator v3 — axis-fingerprint relocation
 
-Family-granularity claim is loose — should be at least 7 chars, not
-6. Honesty pass, not a blocker.
+The current `--relocate-low` catches address shifts where the bytes
+stayed identical. Cross-revision packs often recalibrate the
+calibration cells but keep AXIS tables (RPM bins, MAP bins, ECT
+bins) byte-identical. An axis-fingerprint matcher (look for
+monotonic windowed runs matching the sibling axis values) could
+relocate those even when the cal cells diverge — then the user
+manually fixes the diverged cal tables.
+
+Would push the recalibration-case packs (az1g701v, az1g710v,
+az1g601r, a2wc400l from today) closer to commitable.
 
 ## House-style notes (carry-over)
 
@@ -281,16 +314,17 @@ New this session:
 
 ## Suggested opener for next session
 
-> "HEAD `68c2f02`, in sync with `origin/main`. 367 packs in `definitions/`. Working tree clean apart from `SubaruTuner.zip`. 130 defgen tests green.
+> "HEAD `b3a5e14`, in sync with `origin/main`. 371 packs in `definitions/` (up +10 from the 2026-05-20 session start). Working tree clean apart from `SubaruTuner.zip`. 137 defgen tests green.
 >
-> Recap from 2026-05-20: shipped P1 (6 new packs), P2 (LF79 audit + RECON.md + memory), bonus P2.5 (localize.py v2 with 12 unit tests, --relocate-low pattern-search relocator), bonus P3 (9 fake-anchor PAK_* entries disabled in bulk_decrypt_v2.py — empirical finding that the relocator's 10-20% hit rate on cross-revision packs isn't enough to push the 4 dropped targets over 80%, so they stay deferred).
+> Recap from the 2026-05-20 marathon: shipped P1 (6+4=10 new packs across three batches), P2 (LF79 audit + RECON.md + memory), localize.py v2 with 19 unit tests (--relocate-low pattern-search relocator AND --patch-pack pack-rewriter), 9 fake-anchor PAK_* entries disabled in bulk_decrypt_v2.py, Windows stdout fix, bulk_decrypt docstring fix.
 >
 > On the deck for this session:
-> **(P1)** `docs/21-oem-baselines.md` — empirical OEM behavior reference doc from the 676-ROM corpus. Deferred three times now. Use only RELIABLE corpus subsets per the LF79 audit findings — bludgod corpus + the high-anchor families in `decrypted/` (EZ1G, EA1{T,U,Y}, DE5M, ZA1J, XH3J).
-> **(P2)** Wire the v2 relocator into a pack-patch flow — currently the relocator only reports candidate addresses in the TSV. A `--patch-pack` flag (or a separate `relocate_apply.py`) would rewrite the LOW table's `address` field with the relocated address, letting the cousin_seed yield rise. Then re-run the bludgod-gap sweep with patching enabled.
-> **(P3)** Pack-format extension for `[[table.role]]` so §11 panels can apply their suggestions via `edit::History`. Documented in `docs/05` §11.X as the v1.2 path.
+> **(P1)** `docs/21-oem-baselines.md` — empirical OEM behavior reference doc from the 676-ROM corpus. Deferred four times now. Use only RELIABLE corpus subsets per the LF79 audit findings — bludgod corpus + the high-anchor families in `decrypted/` (EZ1G, EA1{T,U,Y}, DE5M, ZA1J, XH3J).
+> **(P2)** Third-pass bludgod-gap sweep. The 10 new packs from today add to the sibling pool, opening 2-4 more ones-digit-delta candidates. Quick session.
+> **(P3)** Pack-format extension for `[[table.role]]` so §11 panels can apply their suggestions via `edit::History`. Documented in `docs/05` §11.X as the v1.2 path. Substantial C++ work — schema extension, Definition loader, edit::History routing, lint wiring, UI integration.
+> **(P4)** Pattern-search relocator v3 — axis-fingerprint matching. Would push the recalibration-case packs (az1g701v et al.) closer to commitable. Separate body of work from the byte-identical relocator.
 >
-> Adapter ETA May 22-25. If it lands mid-session, pivot to the first-light `rom-pull --transport obdx` command pre-staged at `c64b717`."
+> Adapter ETA May 22-25 (anytime now). If it lands mid-session, pivot to the first-light `rom-pull --transport obdx` command pre-staged at `c64b717`."
 
 If the user opens with hardware news:
 
