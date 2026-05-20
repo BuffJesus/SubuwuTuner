@@ -134,6 +134,37 @@ Four concrete features fall out directly. None require new hardware; all run aga
 
 Plays 1 and 2 are pure visualization (low risk, ship in OSS). Plays 3 and 4 are tuning-domain features that share infrastructure with the auto-tune kernels in `docs/12`.
 
+### Closing the loop: from suggestion to edit
+
+The four plays currently surface metrics + advisory suggestions. The natural next step is letting users *act* on those suggestions through the existing `st::edit::History` system so the edits get full undo/redo + project-history journaling. This is forward-looking; deliberately not landed in v1.0 because of one structural blocker.
+
+**The blocker: pack-format extension for table roles.** Each panel knows what KIND of table its suggestion targets (cold-start → "Open Loop Fueling Enrichment vs ECT"; EBCS → "Wastegate PID Kp/Ki/Kd"; knock → "Per-Cylinder Knock Noise") but a generic pack has no machine-readable role field on its `[[table]]` entries. Today a user has to cross-reference a suggestion against table names manually.
+
+The fix: extend the pack format with an optional `[[table.role]]` field tagging known tuning roles. The schema would look something like:
+
+```toml
+[[table]]
+id   = "ol_fuel_enrichment_vs_ect"
+name = "Open Loop Fueling Enrichment"
+address = 0x...
+role = "coldstart.open_loop_fuel_vs_ect"   # canonical role string
+```
+
+Role strings are defined in a small enum in `st::defs` (so the GUI / autotune / §11 panels can map them deterministically) and populated by `tools/defgen/` against a small known-mapping table per platform. Existing packs without `role` fields keep working — the suggestion-to-edit affordance just stays inactive on those tables.
+
+**Once that lands, the per-panel "Apply suggestion" path becomes:**
+
+1. Panel computes its `DriftDiagnosis` / cold-start lambda deviation / EBCS gain recommendation
+2. User clicks "Apply suggestion as edit" on a specific cell
+3. The panel queries `Definition::find_table_by_role(role_string)` for the user's loaded pack
+4. Constructs a `ByteEdit` against that table at the appropriate cell
+5. Routes the edit through `edit::History::apply()` — same path as a manual GUI edit, full undo/redo
+6. Engine-safety policy linter runs against the proposed bytes (same posture as any other edit; see `docs/06` and `docs/19` for the policy gate)
+
+**Until that lands**, the §11 panels surface their suggestions as text and link the user to the relevant table category — they can find the table in the sidebar and edit it manually. The path through `edit::History` still applies to whatever they type in.
+
+Roadmap placement: **v1.2** alongside the closed-loop trim integration (which has the same shape — a suggested cell-delta routed through `edit::History`). Likely a single design pass landing both at once. See `docs/12-auto-tuning.md` *Closed-loop trim integration* for the parallel work.
+
 ### FA-DIT logger XML supplement
 
 All four plays depend on extended SSM PIDs whose RAM addresses are firmware-specific. RomRaider's v370 logger XML (Nov 2021) is the latest public release and predates FA-DIT VA/VB WRX coverage entirely (see `fixtures/private/PAK_DECODE_RESULTS.md`). The SubuwuTuner-native fix is `tools/defgen/data/logger_supplement_fadit.xml` — a small additive logger XML in the RomRaider DTD shape that `loggergen.py` already consumes. Initially empty (except for a stub entry that proves the round-trip), it grows by contribution as community members capture real RAM addresses from hardware. Provenance rules and clean-room boundaries are baked into the file's header comment per `docs/15-clean-room-engineering.md`.
