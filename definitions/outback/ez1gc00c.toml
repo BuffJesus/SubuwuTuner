@@ -13,7 +13,7 @@ platform       = "subaru.outback"
 transmission   = "mt"
 years          = [8]
 endianness     = "big"
-rom_size_bytes = 0
+rom_size_bytes = 1048576
 license        = "Apache-2.0"
 includes       = ["../ecuparams/ez1gc00c.toml", "../pids.toml"]
 
