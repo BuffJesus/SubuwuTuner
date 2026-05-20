@@ -329,6 +329,91 @@ address = 0x000C137C
             os.unlink(path)
 
 
+class AxisTrackingTests(unittest.TestCase):
+    """parse_pack must collect [[axis]] blocks alongside [[table]]
+    blocks, and patch_pack_addresses must rewrite axis addresses too.
+    Discovered via empirical dump-table validation on ez1g109j:
+    relocated data tables had correct values but their axes still
+    pointed at sibling-ROM addresses with unrelated bytes in target."""
+
+    _PACK_WITH_AXES = """\
+[pack]
+id = "test"
+
+[[identification]]
+name = "TEST"
+cid_address = 0x00002000
+
+[[axis]]
+id        = "engine_speed"
+address   = 0x000C970C
+length    = 10
+data_type = "float32_be"
+
+[[table]]
+id        = "fuel_main"
+address   = 0x000C9734
+data_type = "uint16_be"
+axis_y    = "engine_speed"
+
+[[axis]]
+id        = "engine_load"
+address   = 0x000C96E0
+length    = 11
+data_type = "float32_be"
+"""
+
+    def _write(self, text: str):
+        import tempfile
+        f = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".toml", delete=False, encoding="utf-8")
+        f.write(text)
+        f.close()
+        return Path(f.name)
+
+    def test_parse_pack_collects_axes(self):
+        path = self._write(self._PACK_WITH_AXES)
+        try:
+            entries = localize.parse_pack(path)
+            kinds = [(e["_kind"], e["id"]) for e in entries]
+            self.assertIn(("axis", "engine_speed"), kinds)
+            self.assertIn(("axis", "engine_load"), kinds)
+            self.assertIn(("table", "fuel_main"), kinds)
+        finally:
+            os.unlink(path)
+
+    def test_patch_pack_rewrites_axis_addresses(self):
+        path = self._write(self._PACK_WITH_AXES)
+        try:
+            n = localize.patch_pack_addresses(path, {
+                "engine_speed": 0xC9744,
+                "fuel_main":    0xC976C,
+            })
+            self.assertEqual(n, 2)
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("address   = 0x000C9744", text)
+            self.assertIn("address   = 0x000C976C", text)
+            # engine_load (not in patches) untouched
+            self.assertIn("address   = 0x000C96E0", text)
+        finally:
+            os.unlink(path)
+
+    def test_patch_doesnt_touch_pack_or_identification_addresses(self):
+        """`cid_address` in [[identification]] and any address-like
+        field in [pack] must NOT be rewritten even if their id
+        collides with a table id in the patches map."""
+        path = self._write(self._PACK_WITH_AXES)
+        try:
+            localize.patch_pack_addresses(path, {
+                "engine_speed": 0xDEAD0,
+            })
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("cid_address = 0x00002000", text)
+            self.assertIn("0x000DEAD0", text)
+        finally:
+            os.unlink(path)
+
+
 class HelperTests(unittest.TestCase):
     """Small unit tests for the helpers."""
 

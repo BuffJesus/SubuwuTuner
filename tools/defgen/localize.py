@@ -189,11 +189,32 @@ def classify_pair(sib_bytes: bytes, tgt_bytes: bytes,
     if sib_bytes == tgt_bytes:
         return ("HIGH", "byte-identical")
 
-    # Monotonicity check (axis-like tables)
+    # Monotonicity check (axis-like tables). Both-monotonic alone
+    # isn't enough — a recalibrated axis can be monotonic with a
+    # totally different range (e.g. RPM axis 2800-6300 vs load axis
+    # 0-1). Two cross-checks before calling HIGH:
+    #   1. value ranges within an order of magnitude (catches scale
+    #      mismatch like load vs RPM)
+    #   2. first-value within an order of magnitude (catches the case
+    #      where both ranges happen to be similar because the target
+    #      bytes are actually a DIFFERENT axis whose tail happens to
+    #      span the same range; e.g. target [0.5..1.3, 2800] still
+    #      passes a span check by coincidence but the first value
+    #      0.5 vs sibling 2800 is a clear mismatch)
     sib_mono = is_monotonic(sib_vals)
     tgt_mono = is_monotonic(tgt_vals)
     if sib_mono and tgt_mono:
-        return ("HIGH", "both monotonic (axis-like)")
+        sib_span = max(abs(sib_min), abs(sib_max), sib_rng, 1e-9)
+        tgt_span = max(abs(tgt_min), abs(tgt_max), tgt_rng, 1e-9)
+        span_ratio = max(sib_span, tgt_span) / min(sib_span, tgt_span)
+        sib_first = max(abs(sib_vals[0]), 1e-9)
+        tgt_first = max(abs(tgt_vals[0]), 1e-9)
+        first_ratio = max(sib_first, tgt_first) / min(sib_first, tgt_first)
+        if span_ratio <= 10.0 and first_ratio <= 10.0:
+            return ("HIGH", "both monotonic (axis-like)")
+        return ("LOW", f"both monotonic but axis values diverge "
+                       f"(sib {sib_vals[0]:.1f}-{sib_max:.1f} vs "
+                       f"tgt {tgt_vals[0]:.1f}-{tgt_max:.1f})")
     if sib_mono and not tgt_mono:
         return ("LOW", "sibling is monotonic axis; target is not")
 
@@ -357,13 +378,14 @@ def relocate_low(sib_bytes: bytes, tgt_bytes: bytes, pack_address: int,
 
 
 def patch_pack_addresses(pack_path: Path, patches: dict[str, int]) -> int:
-    """Rewrite each [[table]] block's `address` field for ids in `patches`.
+    """Rewrite each [[table]] or [[axis]] block's `address` field for
+    ids in `patches`.
 
-    `patches` maps table id (e.g. "target_boost") to the new integer
-    address (e.g. 0xC4F00). Only [[table]] sections are touched —
-    [[scaling]] / [[identification]] / [pack] addresses are left
-    alone even if their id happens to collide. Returns the number of
-    tables actually patched (0 if no ids matched).
+    `patches` maps table/axis id (e.g. "target_boost", "engine_load")
+    to the new integer address. Only [[table]] and [[axis]] sections
+    are touched — [[scaling]] / [[identification]] / [pack] addresses
+    are left alone even if their id happens to collide. Returns the
+    number of entries actually patched (0 if no ids matched).
 
     Format preservation: line-based; comments, blank lines, and
     surrounding whitespace are preserved. Only the value after
@@ -382,26 +404,26 @@ def patch_pack_addresses(pack_path: Path, patches: dict[str, int]) -> int:
 
     text = pack_path.read_text(encoding="utf-8")
     out: list[str] = []
-    in_table = False
+    in_patchable_block = False
     current_id: str | None = None
     patched = 0
 
     for raw_line in text.splitlines(keepends=True):
         s = raw_line.strip()
 
-        if s.startswith("[[table]]"):
-            in_table = True
+        if s.startswith("[[table]]") or s.startswith("[[axis]]"):
+            in_patchable_block = True
             current_id = None
             out.append(raw_line)
             continue
 
         if s.startswith("[[") or s.startswith("["):
-            in_table = False
+            in_patchable_block = False
             current_id = None
             out.append(raw_line)
             continue
 
-        if not in_table or "=" not in s or s.startswith("#"):
+        if not in_patchable_block or "=" not in s or s.startswith("#"):
             out.append(raw_line)
             continue
 
@@ -451,9 +473,20 @@ def patch_pack_addresses(pack_path: Path, patches: dict[str, int]) -> int:
 
 
 def parse_pack(path: Path) -> list[dict]:
-    """Minimal TOML parsing: extract table records as dicts. We
-    don't need a full TOML parser — just enough to walk [[table]]
-    blocks. Avoids adding a dependency."""
+    """Minimal TOML parsing: extract table + axis records as dicts.
+
+    Walks both [[table]] and [[axis]] blocks — axes are referenced
+    from tables by id but live in separate blocks and can drift
+    just like data tables when ROM revisions reshuffle addresses.
+    Each returned dict carries a `_kind` field of "table" or "axis"
+    so callers can distinguish them when needed; the rest of the
+    fields are the literal TOML key/value pairs (stripped of quotes
+    and inline comments).
+
+    Axis blocks usually carry `length` (count of axis points) rather
+    than `dimensions`; for relocation purposes we treat `length` as
+    the sample count when present.
+    """
     text = path.read_text(encoding="utf-8")
     tables: list[dict] = []
     current: dict | None = None
@@ -462,11 +495,16 @@ def parse_pack(path: Path) -> list[dict]:
         if s.startswith("[[table]]"):
             if current is not None:
                 tables.append(current)
-            current = {}
+            current = {"_kind": "table"}
+            continue
+        if s.startswith("[[axis]]"):
+            if current is not None:
+                tables.append(current)
+            current = {"_kind": "axis"}
             continue
         if s.startswith("[[") or s.startswith("["):
-            # Some other section — close the current table block
-            if current is not None and current:
+            # Some other section — close the current block
+            if current is not None and len(current) > 1:
                 tables.append(current)
             current = None
             continue
@@ -483,7 +521,7 @@ def parse_pack(path: Path) -> list[dict]:
         if val.startswith('"') and val.endswith('"'):
             val = val[1:-1]
         current[key] = val
-    if current is not None and current:
+    if current is not None and len(current) > 1:
         tables.append(current)
     return tables
 
@@ -552,7 +590,7 @@ def main():
     if args.max_tables > 0:
         tables = tables[:args.max_tables]
 
-    header = ["id", "address_hex", "data_type", "confidence", "reason"]
+    header = ["kind", "id", "address_hex", "data_type", "confidence", "reason"]
     if args.relocate_low:
         header += ["relocated_to", "relocate_reason"]
     out_rows: list[list[str]] = [header]
@@ -561,12 +599,13 @@ def main():
     reloc_counts = Counter()
     patches: dict[str, int] = {}
     for t in tables:
+        kind = t.get("_kind", "table")
         addr_s = t.get("address", "0x0")
         try:
             addr = int(addr_s, 0) if addr_s.startswith("0x") else int(addr_s)
         except ValueError:
             counts["BAD_ADDRESS"] += 1
-            row = [t.get("id", "?"), addr_s, t.get("data_type", "?"),
+            row = [kind, t.get("id", "?"), addr_s, t.get("data_type", "?"),
                    "ABSENT", "address could not be parsed"]
             if args.relocate_low:
                 row += ["", ""]
@@ -574,25 +613,42 @@ def main():
             continue
         dtype = t.get("data_type", "uint8")
 
+        # For axes, cap sample_count at the declared `length`. Reading
+        # past the axis end into unrelated bytes corrupts the
+        # monotonicity check (axes are strictly monotonic; padding /
+        # neighboring tables typically aren't, but neither is the OOB
+        # remainder we'd otherwise read). is_monotonic on a partial-axis
+        # + tail-junk reads as "not monotonic" and the table falls into
+        # the generic MED branch instead of the LOW we'd want for a
+        # genuinely-moved axis.
+        sample_count = args.sample_count
+        if kind == "axis":
+            try:
+                axis_len = int(t.get("length", "0"))
+                if axis_len > 0:
+                    sample_count = min(sample_count, axis_len)
+            except ValueError:
+                pass
+
         sib_slice = sib_bytes[addr : addr + SAMPLE_BYTES]
         tgt_slice = tgt_bytes[addr : addr + SAMPLE_BYTES]
         confidence, reason = classify_pair(
-            sib_slice, tgt_slice, dtype, args.sample_count)
+            sib_slice, tgt_slice, dtype, sample_count)
         counts[confidence] += 1
-        row = [t.get("id", "?"), addr_s, dtype, confidence, reason]
+        row = [kind, t.get("id", "?"), addr_s, dtype, confidence, reason]
 
         if args.relocate_low and confidence == "LOW":
             reloc = relocate_low(
                 sib_bytes, tgt_bytes, addr, dtype,
-                args.sample_count,
+                sample_count,
                 max_distance=args.relocate_max_distance)
             if reloc is not None:
                 new_addr, new_conf, reloc_reason = reloc
                 row += [f"0x{new_addr:08X}", f"{new_conf}: {reloc_reason}"]
                 reloc_counts[new_conf] += 1
-                table_id = t.get("id", "")
-                if table_id:
-                    patches[table_id] = new_addr
+                entry_id = t.get("id", "")
+                if entry_id:
+                    patches[entry_id] = new_addr
             else:
                 row += ["", "no candidate"]
                 reloc_counts["UNRELOCATED"] += 1
