@@ -5,6 +5,8 @@ Continuation of the 2026-05-19 handoff. Marathon session: cousin_seed + localize
 ## What shipped this session (top = newest)
 
 ```
+8ea6d71 fix(defgen): default rom_size_bytes to 1MB when XML lacks <filesize>
+0008695 fix(defs): restore rom_size_bytes=1048576 on ez1gc00c + ep5g600a
 6a0130c docs(defgen): note axis tracking + end-to-end dump-table validation
 1df935b defs(packs): axis re-patch sweep on 4 more packs from 80a2a0d
 5598683 defs(packs): re-patch ez1g109j + ez1e401h with axis awareness
@@ -222,14 +224,23 @@ Pattern: same-trim same-region pairings (e.g. a2tb001c → a2tb002c, both USDM L
 
 End-to-end: `dump-table primary_open_loop_fueling_a` on every re-patched pack now shows X axis 0.30-1.30 (lambda) + Y axis 2800-6300 (RPM) byte-identical to the sibling reference.
 
+### 11. rom_size_bytes regression sweep (`0008695`, `8ea6d71`)
+
+Full-corpus validation via `subuwutuner-cli pack-list definitions` surfaced an outlier: `ez1gc00c` had only 19 tables (10× smaller than the next pack). Investigation revealed `rom_size_bytes = 0` — the pack was originally created with a manual `rom_size_bytes = 1048576` patch (per commit `085450a`: "rom_size_bytes patched to 1048576 (XML had no <filesize>)"), but the bulk-regen at `2202fc2` silently clobbered it back to 0 by re-running `defgen.parse_rom_xml` on the same XML.
+
+Sweep found a second affected pack: `ep5g600a` (same pattern, originally fixed at `7fa4beb`). Both restored to 1048576 in `0008695`.
+
+Defensive follow-up `8ea6d71`: changed `defgen._parse_filesize` to return 1048576 (Subaru-default) instead of 0 when the XML lacks `<filesize>` or has unparseable size. A pack with rom_size_bytes=0 still loads but breaks every size-aware code path silently; defaulting to 1MB surfaces a clean size-mismatch error against an actual ROM when wrong, which is strictly better. 1 new unit test (141 total).
+
 ## Status snapshot
 
-- **HEAD `6a0130c`**, in sync with `origin/main`
-- **definitions/ pack count: 372** (up from 361 at session start — **+11 packs**, all axis-validated)
+- **HEAD `8ea6d71`**, in sync with `origin/main`
+- **definitions/ pack count: 372** (up from 361 at session start — **+11 packs**, all axis-validated; +2 more rom_size_bytes-fixed)
 - **Working tree clean** apart from `SubaruTuner.zip` (untracked 114 MB; gitignore-equivalent — never `git add` it, would break GitHub's 100 MB push limit)
 - **CI clang-format gate: required** — applied to the CLI edit (clang-format 18.1.8 binary at `C:\Users\Cornelio\AppData\Roaming\Python\Python314\Scripts\clang-format.exe`)
-- **defgen test suite: 140 tests green** (12 relocator + 7 patch-pack + 3 axis-tracking added this session)
+- **defgen test suite: 141 tests green** (12 relocator + 7 patch-pack + 3 axis-tracking + 1 default-filesize added this session)
 - **C++ build: passes** (cli binary built clean; some pre-existing `obdx::Transport` + `dvi::checksum` + checksum-kind test failures exist on main unrelated to this session — verified by stashing my changes and running the same tests on plain `main`)
+- **All 706 .toml files under definitions/ load cleanly** (705 calibration packs + 333 ecuparams + pids.toml — verified via pack-list)
 
 ## Open threads / known issues
 
