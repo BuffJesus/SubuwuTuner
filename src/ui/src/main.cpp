@@ -3885,6 +3885,11 @@ void render_sidebar(AppState &state) {
                               ImGuiSelectableFlags_AllowOverlap)) {
             state.select_table(t.id);
         }
+        // Capture Selectable hover state BEFORE drawing the badge — the
+        // badge becomes the "last item" once it lands, which would
+        // otherwise scope the tooltip to just the tiny S/E letters
+        // instead of the whole row.
+        bool const row_hovered = ImGui::IsItemHovered();
         // Right-aligned policy badges: S (engine-safety-critical, warm
         // amber) and E (emissions-relevant, muted yellow). Drawn AFTER
         // the Selectable so AllowOverlap is needed; reads "tagged" at a
@@ -3905,7 +3910,7 @@ void render_sidebar(AppState &state) {
                 : ImVec4(0.96f, 0.94f, 0.65f, 1.0f);
             ImGui::TextColored(color, "%s", buf);
         }
-        if (ImGui::IsItemHovered()) {
+        if (row_hovered) {
             ImGui::BeginTooltip();
             if (!t.name.empty()) {
                 ImGui::TextUnformatted(t.name.c_str());
