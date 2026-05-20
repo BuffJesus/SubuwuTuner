@@ -117,3 +117,33 @@ Hardware-direct read (OBDX adapter) is the only realistic path for:
 
 For everything else: 178 cleanly decrypted plaintexts available privately
 for RE, comparison, custom-feature derivation, defgen XML cross-validation.
+
+## Per-CID ecuparams gap (2026-05-19)
+
+After landing the 25 new VA/VB WRX packs in `definitions/impreza/`,
+ran `tools/defgen/loggergen.py` against `logger_v370.xml` (RomRaider
+release 2021-11) to generate per-CID ecuparams overlays. Result:
+**0 new ecuparams files** for the 25 new packs.
+
+Root cause: v370 has no FA-DIT VA/VB WRX ecuid coverage. Of 47
+ecuids extracted from OBDTotal pak headers (`pak_cid_to_ecuid.tsv`),
+only 6 appear in v370 — all non-WRX (Forester DE5/EZ1, etc.). The
+FA-DIT VA WRX ecuid prefix `A6XX-BX-XX-07` / `D8XX-BX-XX-07` is
+entirely absent from v370.
+
+What's populated on the new packs:
+  - `lf75600h.toml`: ecu_part = `A629B07507` (from pak header + bin marker, cross-validated)
+  - `lf9l000e.toml`: ecu_part = `D829B07107` (same)
+  - 23 other new packs: ecu_part = `""` (no decoded bin or no pak header for those CIDs)
+
+Future unlock path: a newer-than-v370 RomRaider logger XML release
+that adds FA-DIT VA/VB ecuids. When one lands, re-run loggergen
+against `definitions/impreza/` — the 2 already-populated ecu_part
+values will pick up overlays automatically, and the remaining 23 can
+be populated as their ecuids are read off real hardware (or matched
+to a future newer pak dataset).
+
+All 25 packs still ship shared SSM PIDs via the
+`includes = ["../pids.toml"]` line in every pack (235 PIDs + 172
+switches from v370). The gap is in the per-CID extended-PID layer,
+not the standard PID layer.

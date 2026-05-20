@@ -24,7 +24,7 @@ cid_address = 0x00000000
 cid_length  = 8
 cid_match   = "LF9L000E"
 cid_scan    = true
-ecu_part    = ""
+ecu_part    = "D829B07107"
 
 
 [[table]]
