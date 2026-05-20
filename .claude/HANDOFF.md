@@ -1,10 +1,13 @@
-# Handoff — 2026-05-20 (10 new packs + localize.py v2 with relocator + patch-pack + fake-anchor sweep)
+# Handoff — 2026-05-20 (11 new packs + localize.py v2 + CLI pack-discovery fix)
 
-Continuation of the 2026-05-19 handoff. Long, productive session — executed all three deferred items from the prior plan plus two rounds of follow-on: the `cousin_seed.py → localize.py` bludgod-gap sweep landed 10 new packs across three batches; the LF79xxx partial-decryption audit (one anchor confirmed, 30 partials catalogued, broader same-pattern problem identified across most FlashWrite buckets); the `localize.py` v2 pattern-search relocator with 12 unit tests; the fake-anchor sweep across all 99 anchor entries in `bulk_decrypt_v2.py` (9 disabled); the `--patch-pack` flow that rewrites pack TOMLs in place from relocator output (7 more unit tests); a Windows stdout fix; the family-granularity docstring fix in `bulk_decrypt_v2.py`. **HEAD `b3a5e14`**, in sync with `origin/main`. **Working tree clean apart from `SubaruTuner.zip`**. **definitions/ pack count: 371** (up from 361 at session start = **+10 packs in one session**).
+Continuation of the 2026-05-19 handoff. Long, productive session: the `cousin_seed.py → localize.py` bludgod-gap sweep landed 11 new packs across four batches; the LF79xxx partial-decryption audit (one anchor confirmed, 30 partials catalogued, broader same-pattern problem identified across most FlashWrite buckets); the `localize.py` v2 pattern-search relocator with 12 unit tests; the fake-anchor sweep across all 99 anchor entries in `bulk_decrypt_v2.py` (9 disabled); the `--patch-pack` flow that rewrites pack TOMLs in place from relocator output (7 more unit tests); the Windows stdout fix; the family-granularity docstring fix in `bulk_decrypt_v2.py`; and a real user-facing CLI bug fix where `pack-list` + `rom-identify` couldn't see any of definitions/ because they walked for files literally named `pack.toml` while every shipped pack is a flat `<id>.toml`. **HEAD `261f5f8`**, in sync with `origin/main`. **Working tree clean apart from `SubaruTuner.zip`**. **definitions/ pack count: 372** (up from 361 at session start = **+11 packs in one session**).
 
 ## What shipped this session (top = newest)
 
 ```
+261f5f8 defs(packs): cousin-seed ez1g108k via newly-landed ez1g109k sibling
+21f89c2 fix(cli): pack-list + rom-identify discover single-file packs
+05c439a docs(handoff): final 2026-05-20 refresh (10 new packs + relocator + patch-pack + sweep)
 b3a5e14 defs(packs): cousin-seed 2 more 2006-era e2vg packs via USDM siblings
 897e53b defs(packs): cousin-seed 2 more USDM packs via --patch-pack
 de647ba tools(defgen): localize.py --patch-pack + Win stdout fix + bulk_decrypt docstring
@@ -15,7 +18,7 @@ de647ba tools(defgen): localize.py --patch-pack + Win stdout fix + bulk_decrypt 
 80a2a0d defs(packs): cousin-seed 6 new USDM packs from bludgod gap
 ```
 
-Seven content commits (plus two handoff snapshots). P2 produced a private-side artifact (`fixtures/private/roms_extracted/decrypted/LF79/RECON.md`, gitignored) and a memory entry (`project_lf79_partial_decrypts.md`).
+Nine content commits (plus two handoff snapshots). P2 produced a private-side artifact (`fixtures/private/roms_extracted/decrypted/LF79/RECON.md`, gitignored) and a memory entry (`project_lf79_partial_decrypts.md`).
 
 ## The substantive arc
 
@@ -169,15 +172,36 @@ The two e2vg packs (e2vg212d, e2vg204b) had been mis-paired against ADM siblings
 
 Two more candidates from the follow-on sweep dropped (cross-region pairings: e2vg212d, ez1g108k → ADM siblings, 46-58% HIGH+MED). Same lesson keeps reinforcing: cousin_seed wants same-trim same-region siblings with small CID deltas.
 
+### 8. CLI pack-discovery bug fix (`21f89c2`)
+
+While validating today's new packs end-to-end via `subuwutuner-cli rom-identify`, discovered the command silently returns 0 matches against EVERY pack in `definitions/`. The walk filtered strictly on `filename() == "pack.toml"`, which is the multi-file layout (docs/11). But every shipped pack — all 371 of them — is a flat `<id>.toml` single-file pack. So pack discovery never found anything.
+
+Fix: extracted a shared `discover_pack_paths()` helper that handles both layouts (single-file `<id>.toml` and multi-file `<dir>/pack.toml` + fragments). Companion fragments are filtered out by walking ancestors up to the top-level scan dir for a sibling `pack.toml`. Files that lack a `[pack]` section fail to load naturally and are reported as skips.
+
+End-to-end empirically: `pack-list definitions/legacy` now finds all 72 legacy packs (was 0); `rom-identify` against the A2TB002C target ROM correctly matches `definitions/legacy/a2tb002c.toml` (was 0 matches).
+
+clang-format clean; no test regressions (some pre-existing `obdx::Transport` / `dvi::checksum` failures on main are unrelated to this change).
+
+### 9. Third-pass bludgod-gap sweep — +1 more pack (`261f5f8`)
+
+After the CLI fix landed, re-ran the gap analysis with the now-larger sibling pool. Found one new candidate that opened up because of today's commits:
+
+| pack | sibling | HIGH | MED | LOW | verdict |
+|---|---|---|---|---|---|
+| ez1g108k | ez1g109k | 98.1% | 1.9% | 0% | ✅ same-region tens-delta |
+
+ez1g109k was NOT a viable sibling 24 hours ago. The sibling pool that today's 11 new packs grew opens candidates each pass; this one happens to be a same-region same-platform tens-delta with zero LOW — relocator not even needed.
+
+End-to-end validated via the just-fixed rom-identify against the bludgod target ROM.
+
 ## Status snapshot
 
-- **HEAD `b3a5e14`**, in sync with `origin/main`
-- **definitions/ pack count: 371** (up from 361 at session start — **+10 packs**)
+- **HEAD `261f5f8`**, in sync with `origin/main`
+- **definitions/ pack count: 372** (up from 361 at session start — **+11 packs**)
 - **Working tree clean** apart from `SubaruTuner.zip` (untracked 114 MB; gitignore-equivalent — never `git add` it, would break GitHub's 100 MB push limit)
-- **CI clang-format gate: required** (no C++ touched this session)
+- **CI clang-format gate: required** — applied to the CLI edit (clang-format 18.1.8 binary at `C:\Users\Cornelio\AppData\Roaming\Python\Python314\Scripts\clang-format.exe`)
 - **defgen test suite: 137 tests green** (12 relocator + 7 patch-pack added this session)
-
-Did not re-run `ctest` this session — no C++ changes, only TOML data + Python tooling + private-side script comments. If asserting C++ test-green is needed before the next code change, run the full suite.
+- **C++ build: passes** (cli binary built clean; some pre-existing `obdx::Transport` + `dvi::checksum` + checksum-kind test failures exist on main unrelated to this session)
 
 ## Open threads / known issues
 
@@ -314,9 +338,9 @@ New this session:
 
 ## Suggested opener for next session
 
-> "HEAD `b3a5e14`, in sync with `origin/main`. 371 packs in `definitions/` (up +10 from the 2026-05-20 session start). Working tree clean apart from `SubaruTuner.zip`. 137 defgen tests green.
+> "HEAD `261f5f8`, in sync with `origin/main`. 372 packs in `definitions/` (up +11 from the 2026-05-20 session start). Working tree clean apart from `SubaruTuner.zip`. 137 defgen tests green.
 >
-> Recap from the 2026-05-20 marathon: shipped P1 (6+4=10 new packs across three batches), P2 (LF79 audit + RECON.md + memory), localize.py v2 with 19 unit tests (--relocate-low pattern-search relocator AND --patch-pack pack-rewriter), 9 fake-anchor PAK_* entries disabled in bulk_decrypt_v2.py, Windows stdout fix, bulk_decrypt docstring fix.
+> Recap from the 2026-05-20 marathon: shipped 11 new packs across four batches (6 → 2 → 2 → 1), P2 (LF79 audit + RECON.md + memory), localize.py v2 with 19 unit tests (--relocate-low pattern-search relocator AND --patch-pack pack-rewriter), 9 fake-anchor PAK_* entries disabled in bulk_decrypt_v2.py, Windows stdout fix, bulk_decrypt docstring fix, and one user-facing C++ bug — pack-list + rom-identify couldn't see flat-file packs and now do.
 >
 > On the deck for this session:
 > **(P1)** `docs/21-oem-baselines.md` — empirical OEM behavior reference doc from the 676-ROM corpus. Deferred four times now. Use only RELIABLE corpus subsets per the LF79 audit findings — bludgod corpus + the high-anchor families in `decrypted/` (EZ1G, EA1{T,U,Y}, DE5M, ZA1J, XH3J).
