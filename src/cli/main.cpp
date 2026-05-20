@@ -16,6 +16,7 @@
 #include "st/flash/checksum.hpp"
 #include "st/log.hpp"
 #include "st/log/knock_dashboard.hpp"
+#include "st/log/adaptive_history.hpp"
 #include "st/policy.hpp"
 #include "st/project.hpp"
 #include "st/rom.hpp"
@@ -226,6 +227,17 @@ constexpr std::string_view kUsage =
     "                            p8→rpm, p11→iat_c, p18→maf_voltage) so the output\n"
     "                            drops into `autotune *` / `project-autotune-*`\n"
     "                            without a rename pass.\n"
+    "    adaptive-history --log <CSV> --timestamp-col <name>\n"
+    "                     [--ltft-col <name>] [--dam-col <name>] [--idle-adapt-col <name>]\n"
+    "                     [--bucket-seconds N] [--timestamp-unit seconds|millis|micros|rows]\n"
+    "                     [--min-samples-per-bucket N] [--verbose]\n"
+    "                            Chart adaptive-learning drift (LTFT / DAM / idle-adapt)\n"
+    "                            across days/weeks from a CSV datalog. Buckets samples by\n"
+    "                            time (default 1-day buckets) and reports per-signal mean /\n"
+    "                            min / max + a linear drift/day slope. --verbose adds a\n"
+    "                            per-bucket breakdown. At least one of --ltft-col /\n"
+    "                            --dam-col / --idle-adapt-col is required. See\n"
+    "                            docs/05-improvements.md §11 for the design.\n"
     "    knock-snapshot --log <CSV> --flkc-cols <a,b,c,d>\n"
     "                   [--fbkc-cols <a,b,c,d>] [--rpm-col <name>] [--load-col <name>]\n"
     "                   [--cylinders N] [--window-seconds N] [--sample-rate-hz N]\n"
@@ -4380,6 +4392,206 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
     return 0;
 }
 
+int cmd_adaptive_history(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> log_path;
+    std::optional<std::string>           ts_col;
+    std::optional<std::string>           ltft_col;
+    std::optional<std::string>           dam_col;
+    std::optional<std::string>           iac_col;
+    std::optional<double>                bucket_seconds;
+    std::optional<std::string>           ts_unit_arg;
+    std::optional<std::size_t>           min_samples_per_bucket;
+    bool                                 verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const             need = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "adaptive-history: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if      (a == "--log")            { auto *v = need("--log");            if (!v) return 2; log_path = std::filesystem::path{v}; }
+        else if (a == "--timestamp-col")  { auto *v = need("--timestamp-col");  if (!v) return 2; ts_col   = v; }
+        else if (a == "--ltft-col")       { auto *v = need("--ltft-col");       if (!v) return 2; ltft_col = v; }
+        else if (a == "--dam-col")        { auto *v = need("--dam-col");        if (!v) return 2; dam_col  = v; }
+        else if (a == "--idle-adapt-col") { auto *v = need("--idle-adapt-col"); if (!v) return 2; iac_col  = v; }
+        else if (a == "--bucket-seconds") {
+            auto *v = need("--bucket-seconds"); if (!v) return 2;
+            auto const p = parse_decimal(v);
+            if (!p.has_value()) {
+                std::fprintf(stderr, "adaptive-history: --bucket-seconds must "
+                                     "be a number (got '%s')\n", v);
+                return 2;
+            }
+            bucket_seconds = *p;
+        }
+        else if (a == "--timestamp-unit") {
+            auto *v = need("--timestamp-unit"); if (!v) return 2;
+            ts_unit_arg = v;
+        }
+        else if (a == "--min-samples-per-bucket") {
+            auto *v = need("--min-samples-per-bucket"); if (!v) return 2;
+            char       *end = nullptr;
+            long long const n = std::strtoll(v, &end, 10);
+            if (end == v || *end != '\0' || n < 0) {
+                std::fprintf(stderr, "adaptive-history: "
+                                     "--min-samples-per-bucket must be a "
+                                     "non-negative integer (got '%s')\n", v);
+                return 2;
+            }
+            min_samples_per_bucket = static_cast<std::size_t>(n);
+        }
+        else if (a == "--verbose" || a == "-v") { verbose = true; }
+        else {
+            std::fprintf(stderr,
+                         "adaptive-history: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!log_path.has_value() || !ts_col.has_value()) {
+        std::fputs(
+            "adaptive-history: missing required arguments\n"
+            "Usage: subuwutuner-cli adaptive-history --log <CSV> --timestamp-col <name>\n"
+            "                                        [--ltft-col <name>] [--dam-col <name>]\n"
+            "                                        [--idle-adapt-col <name>] [--bucket-seconds N]\n"
+            "                                        [--timestamp-unit seconds|millis|micros|rows]\n"
+            "                                        [--min-samples-per-bucket N] [--verbose]\n",
+            stderr);
+        return 2;
+    }
+    if (!ltft_col.has_value() && !dam_col.has_value() && !iac_col.has_value()) {
+        std::fputs("adaptive-history: at least one of --ltft-col / "
+                   "--dam-col / --idle-adapt-col is required\n", stderr);
+        return 2;
+    }
+
+    // Read the CSV header to resolve column names → indices.
+    std::vector<std::string> header;
+    {
+        std::string err;
+        if (!read_csv_header(*log_path, header, err)) {
+            std::fprintf(stderr, "%s\n", err.c_str());
+            return 1;
+        }
+    }
+    auto const resolve = [&](std::string_view name,
+                              char const       *flag) -> std::size_t {
+        std::size_t const idx = find_csv_column(header, name);
+        if (idx == std::string_view::npos) {
+            std::fprintf(stderr,
+                         "adaptive-history: %s column '%.*s' not in CSV header\n",
+                         flag, static_cast<int>(name.size()), name.data());
+        }
+        return idx;
+    };
+
+    st::log::adaptive::ColumnMapping mapping;
+    bool bad = false;
+    {
+        std::size_t const idx = resolve(*ts_col, "--timestamp-col");
+        if (idx == std::string_view::npos) bad = true;
+        else mapping.timestamp_idx = idx;
+    }
+    if (ltft_col.has_value()) {
+        std::size_t const idx = resolve(*ltft_col, "--ltft-col");
+        if (idx == std::string_view::npos) bad = true;
+        else mapping.signal_idx[static_cast<std::size_t>(
+            st::log::adaptive::SignalKind::Ltft)] = idx;
+    }
+    if (dam_col.has_value()) {
+        std::size_t const idx = resolve(*dam_col, "--dam-col");
+        if (idx == std::string_view::npos) bad = true;
+        else mapping.signal_idx[static_cast<std::size_t>(
+            st::log::adaptive::SignalKind::Dam)] = idx;
+    }
+    if (iac_col.has_value()) {
+        std::size_t const idx = resolve(*iac_col, "--idle-adapt-col");
+        if (idx == std::string_view::npos) bad = true;
+        else mapping.signal_idx[static_cast<std::size_t>(
+            st::log::adaptive::SignalKind::IdleAdapt)] = idx;
+    }
+    if (bad) return 1;
+
+    st::log::adaptive::BucketConfig cfg;
+    if (bucket_seconds.has_value())         cfg.bucket_seconds         = *bucket_seconds;
+    if (min_samples_per_bucket.has_value()) cfg.min_samples_per_bucket =
+        static_cast<std::uint32_t>(*min_samples_per_bucket);
+    if (ts_unit_arg.has_value()) {
+        std::string u = *ts_unit_arg;
+        for (auto &c : u) c = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(c)));
+        if      (u == "seconds" || u == "s")        cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixSeconds;
+        else if (u == "millis"  || u == "ms")       cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixMillis;
+        else if (u == "micros"  || u == "us")       cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixMicros;
+        else if (u == "rows"    || u == "row")      cfg.timestamp_unit = st::log::adaptive::TimestampUnit::RowIndex;
+        else {
+            std::fprintf(stderr, "adaptive-history: --timestamp-unit must be "
+                                 "one of seconds|millis|micros|rows (got '%s')\n",
+                         ts_unit_arg->c_str());
+            return 2;
+        }
+    }
+
+    auto const r = st::log::adaptive::snapshot_from_csv(
+        log_path->string(), mapping, cfg);
+    if (!r.has_value()) {
+        std::fprintf(stderr, "adaptive-history: %s\n",
+                     r.error().to_string().c_str());
+        return 1;
+    }
+    auto const &s = *r;
+
+    char const *signal_names[3] = {"LTFT", "DAM", "IdleAdapt"};
+    std::printf("Adaptive Learning History\n");
+    std::printf("=========================\n");
+    std::printf("Log:             %s\n",   log_path->string().c_str());
+    std::printf("Bucket width:    %.1f s\n", cfg.bucket_seconds);
+    std::printf("Total samples:   %llu\n",
+                static_cast<unsigned long long>(s.total_samples));
+    if (s.time_span_seconds > 0) {
+        std::printf("Time span:       %.1f s (%.2f days)\n",
+                    s.time_span_seconds, s.time_span_seconds / 86400.0);
+        std::printf("Range:           %.0f .. %.0f\n",
+                    s.earliest_timestamp, s.latest_timestamp);
+    }
+    std::printf("\n");
+    std::printf("Signal     | buckets | mean      | min       | max       | drift/day\n");
+    std::printf("-----------+---------+-----------+-----------+-----------+----------\n");
+    for (std::size_t k = 0; k < st::log::adaptive::kSignalCount; ++k) {
+        auto const &ser = s.series[k];
+        if (!ser.has_data) {
+            std::printf(" %-9s | %7s | %9s | %9s | %9s | %9s\n",
+                        signal_names[k], "-", "-", "-", "-", "-");
+            continue;
+        }
+        std::printf(" %-9s | %7zu | %+9.4f | %+9.4f | %+9.4f | %+9.4f\n",
+                    signal_names[k], ser.points.size(),
+                    ser.overall_mean, ser.overall_min, ser.overall_max,
+                    ser.drift_per_second * 86400.0);
+    }
+
+    if (verbose) {
+        std::printf("\nPer-bucket detail:\n");
+        for (std::size_t k = 0; k < st::log::adaptive::kSignalCount; ++k) {
+            auto const &ser = s.series[k];
+            if (!ser.has_data) continue;
+            std::printf("\n[%s]\n", signal_names[k]);
+            std::printf("  bucket_center   |   mean   |  min   |  max   | n\n");
+            std::printf("  ----------------+----------+--------+--------+----\n");
+            for (auto const &p : ser.points) {
+                std::printf("  %15.1f | %+8.4f | %+6.4f | %+6.4f | %u\n",
+                            p.bucket_center, p.mean, p.min, p.max, p.count);
+            }
+        }
+    }
+
+    return 0;
+}
+
 int cmd_log(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
     std::optional<std::string>           pid_list_arg;
@@ -8191,6 +8403,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "knock-snapshot") {
         return cmd_knock_snapshot(argc - 2, argv + 2);
+    }
+    if (cmd == "adaptive-history") {
+        return cmd_adaptive_history(argc - 2, argv + 2);
     }
     if (cmd == "can-replay") {
         return cmd_can_replay(argc - 2, argv + 2);
