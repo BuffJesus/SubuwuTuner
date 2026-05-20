@@ -6,6 +6,9 @@
 #include "st/core/error.hpp"
 #include "st/transport/j2534.hpp"
 #include "st/transport/j2534_transport.hpp"
+#include "st/transport/native_transport.hpp"
+#include "st/transport/obdx_transport.hpp"
+#include "st/transport/serial_byte_channel.hpp"
 
 #include <memory>
 #include <string>
@@ -56,15 +59,13 @@ Result<std::unique_ptr<ITransport>> open_transport(TransportSpec const &spec) {
                                "e.g. COM5 on Windows, /dev/ttyACM0 on "
                                "Linux).");
             }
-            return failure(ErrorCode::NotImplemented,
-                           "open_transport: platform USB CDC IByteChannel "
-                           "for obdx::Transport is not yet wired. Codec + "
-                           "transport class are tested against an injected "
-                           "byte channel (tests/unit/transport/"
-                           "test_obdx_transport.cpp); libusb (Windows + "
-                           "Linux) / native CDC (macOS) land when the "
-                           "developer's OBDX adapter arrives. Path was: "
-                           + spec.device_path);
+            SerialChannelConfig cfg{};
+            cfg.device_path = spec.device_path;
+            cfg.baud_rate   = 500000;   // OBDX Pro VX default
+            auto ch = make_serial_byte_channel(cfg);
+            if (!ch.has_value()) return failure(ch.error());
+            return std::unique_ptr<ITransport>{
+                new obdx::Transport{std::move(*ch)}};
         }
         case Kind::Native: {
             if (spec.device_path.empty()) {
@@ -74,11 +75,13 @@ Result<std::unique_ptr<ITransport>> open_transport(TransportSpec const &spec) {
                                "e.g. COM5 on Windows, /dev/ttyACM0 on "
                                "Linux).");
             }
-            return failure(ErrorCode::NotImplemented,
-                           "open_transport: platform USB CDC IByteChannel "
-                           "for native::Transport is not yet wired. Same "
-                           "story as obdx — lands with the doc-18 hardware. "
-                           "Path was: " + spec.device_path);
+            SerialChannelConfig cfg{};
+            cfg.device_path = spec.device_path;
+            cfg.baud_rate   = 921600;   // doc-18 handheld default
+            auto ch = make_serial_byte_channel(cfg);
+            if (!ch.has_value()) return failure(ch.error());
+            return std::unique_ptr<ITransport>{
+                new native::Transport{std::move(*ch)}};
         }
     }
     return failure(ErrorCode::InvalidArgument,

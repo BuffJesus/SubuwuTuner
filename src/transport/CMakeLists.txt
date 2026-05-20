@@ -1,4 +1,4 @@
-add_library(st_transport STATIC
+set(_st_transport_sources
     src/mock.cpp
     src/obdx_dvi.cpp
     src/obdx_transport.cpp
@@ -9,6 +9,16 @@ add_library(st_transport STATIC
     src/native_transport.cpp
     src/factory.cpp
 )
+
+# Platform-specific IByteChannel implementations. USB-CDC ACM
+# adapters (OBDX Pro VX et al.) show up as a virtual COM port on
+# every OS — Win32 CreateFile here, POSIX termios when Linux/macOS
+# impls land.
+if(WIN32)
+    list(APPEND _st_transport_sources src/serial_byte_channel_win.cpp)
+endif()
+
+add_library(st_transport STATIC ${_st_transport_sources})
 
 # Win32 registry access for j2534::discover_adapters. advapi32 is
 # normally linked by default but we name it explicitly so MinGW +

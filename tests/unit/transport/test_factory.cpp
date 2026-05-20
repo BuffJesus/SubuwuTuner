@@ -105,24 +105,30 @@ TEST_CASE("open_transport(j2534, valid path) → NotImplemented "
     REQUIRE(m.find("dynamic-load") != std::string::npos);
 }
 
-TEST_CASE("open_transport(obdx, valid path) → NotImplemented "
-          "(platform USB CDC not yet wired)",
+TEST_CASE("open_transport(obdx, nonexistent path) → FileNotFound "
+          "(platform USB CDC wired; this device doesn't exist)",
           "[transport][factory]") {
-    tp::TransportSpec spec{tp::Kind::Obdx, "", "COM5"};
+    tp::TransportSpec spec{tp::Kind::Obdx, "", "COM_NONEXISTENT_TEST"};
     auto r = tp::open_transport(spec);
     REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+    // On Windows, opening a missing COM port → FileNotFound. On other
+    // platforms (where the serial layer is NotImplemented) → NotImplemented.
+    auto const code = r.error().code();
+    REQUIRE((code == st::ErrorCode::FileNotFound
+             || code == st::ErrorCode::NotImplemented));
     auto const m = r.error().message();
-    REQUIRE(m.find("USB CDC") != std::string::npos);
-    REQUIRE(m.find("COM5") != std::string::npos);  // echoes the path
+    REQUIRE(m.find("COM_NONEXISTENT_TEST") != std::string::npos);
 }
 
-TEST_CASE("open_transport(native, valid path) → NotImplemented",
+TEST_CASE("open_transport(native, nonexistent path) → FileNotFound or "
+          "NotImplemented depending on platform",
           "[transport][factory]") {
-    tp::TransportSpec spec{tp::Kind::Native, "", "/dev/ttyACM0"};
+    tp::TransportSpec spec{tp::Kind::Native, "", "COM_NONEXISTENT_NATIVE"};
     auto r = tp::open_transport(spec);
     REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+    auto const code = r.error().code();
+    REQUIRE((code == st::ErrorCode::FileNotFound
+             || code == st::ErrorCode::NotImplemented));
     auto const m = r.error().message();
-    REQUIRE(m.find("/dev/ttyACM0") != std::string::npos);
+    REQUIRE(m.find("COM_NONEXISTENT_NATIVE") != std::string::npos);
 }
