@@ -1,284 +1,234 @@
-# Handoff — 2026-05-18 (long FA-engine session, ROM corpus + decryption + cid_scan)
+# Handoff — 2026-05-19 (§11 four-play arc + OBDX prep + tooling buildout)
 
-Continuation of the earlier 2026-05-17/-18 work. This session broke open the FA-engine ROM situation: encryption cracked (user's parallel `fixtures/private/` pipeline + tooling), 974/1272 ECU IDs decrypted for $60, a coverage matrix built against community RR XML + private master, the SubaruTuner code side extended to handle the variable-offset CID convention these ROMs actually use, and a `rom_diff_localize.py` tool shipped for the harder "no RR XML exists" case. **HEAD `ce202da`**, in sync with `origin/main`. **761 unit tests / 100070 assertions green**, **102 defgen Python tests green**.
+Continuation of the 2026-05-18 FA-engine ROM unlock. This session delivered the entire `docs/05` §11 "under-served-coverage" thesis end-to-end (all four plays — knock dashboard, adaptive history, cold-start workflow, EBCS PID assistant — header → impl → tests → CLI → GUI → demo CSV), shipped the live-tuning + AI-integration design docs, pre-staged the Win32 USB-CDC layer for OBDX arrival (~May 22-25), flipped the clang-format CI gate from advisory to required (full codebase swept), and built the def-pack-acceleration toolchain (`tools/defgen/localize.py` + `tools/checksum_discover.py`). **HEAD `f35b05e`**, in sync with `origin/main`. **807 unit tests / 101k+ assertions green**.
 
-## What shipped this session (23 commits, top = newest)
+## What shipped this session (top = newest)
 
 ```
-ce202da fix(defgen): _table_address accepts bare-hex storageaddress
-7ae1295 docs(defs): document cid_scan mode in docs/11
-34ecba2 feat(cli+defs): surface discovered CID offset in rom-info, scan-mode in pack-info
-df8120c feat(defs): cid_scan mode for variable-offset CID identification
-aad2917 feat(tools): rom_diff_localize.py — locate likely table addresses by ROM diff
-98cadb3 feat(fixtures/private): keystream-recovery pipeline           ← user's work, co-authored
-ce2b1fb feat(fixtures/private): forum-scrape + epifan-decrypt pipeline ← user's work, co-authored
-e072248 feat(samples+demo): map-selector-int.stmod exercises divide_int end-to-end
-3bdf78c fix(ui): features designer subtitle reflects shipped reality
-4ec4c33 feat(cli): primitive-list + hook-list browse a pack's signal surface
-7cfba19 feat(feature_ir): per-primitive cycle costs in estimate_cost
-c7d494d feat(feature_codegen): SH-2A divide_int via FPU bridge
-a330bdf docs(arch+reverse-eng): narrow Path B claim to VA/VB only
-4feffa8 docs(can+legal): CAN toolkit shipped status + drop fictional first-run wizard
-4183c56 docs(overview+defs+autotune): align with shipped reality
-b0e0ed9 docs(build): refresh docs/07 to match actual layout, presets, CI, tooling
-dae1067 docs: drop fictional deps (Lua, FlatBuffers, nlohmann/json…)
-0ad8179 docs(arch+transport): refresh docs/02 module map, fix docs/13 log subtree
-e080f98 style(ui): text_subtle sweep — autotune ledger fallback + shortcuts subtitle
-9a22bc1 style(ui): text_subtle sweep — table-picker tooltips + jurisdiction popup
-655332a fix(cli): propagate pack.toml → directory upgrade to every --def loader
-57e1ba5 fix(cli): pack-info upgrades pack.toml file path to directory load
-31665bc style(ui): text_subtle sweep through flash-policy modal
+f35b05e tools(defgen): map-localization helper — verify sibling pack addresses
+8cd060a tools(flash): checksum byte-location discovery driver
+52757da style: apply clang-format 18 to all src/ and tests/ + flip CI to required
+79a4890 test(flash): mutation-test driver + docs/08 update
+472e153 docs(05): document §11 suggestion → edit::History path (v1.2)
+c64b717 feat(transport): Win32 USB-CDC IByteChannel for OBDX adapter
+1461f3e feat(cli+ui): cold-start CLI + GUI panel + demo fixture
+0af78f5 feat(log+cli+ui): EBCS PID assistant — closes §11 play 4
+f40844d docs(ai-integration): draft design doc for AI as advisory surface (v2.0+)
+7e61462 docs: connect custom features + live tuning + handheld for COBB-style toggles
+045fa75 feat(log): implement st::log::coldstart::snapshot_from_samples + CSV
+ece7509 feat(log): scaffold st::log::coldstart tuning workflow
+7193c94 docs(live-tuning): draft design doc for RAM-shadow live tuning (v1.5+)
+d2692d9 feat(cli): adaptive-history subcommand + demo fixture
+5529978 feat(ui): wire adaptive-history GUI panel
+05951f2 fix(ui): restore sidebar table tooltip after policy-badge regression
+1f31e78 feat(log): implement st::log::adaptive::snapshot_from_samples + CSV
+96ee9d7 feat(log): scaffold st::log::adaptive history visualizer
+6b60afc feat(ui): wire per-cylinder knock dashboard panel into the GUI
+f161bfd feat(cli+log): wire knock-snapshot CLI + CSV reader
+ab24bb1 feat(log): implement st::log::knock::snapshot_from_samples + tests
+7a555c3 docs(fixtures): ship demo-knock-log.csv for the knock dashboard
+2eb12c0 docs(improvements): add §11 under-served definition coverage
+5edd1a7 feat(defs): populate ecu_part for LF75600H + LF9L000E from pak headers
+dd565f9 docs(fixtures/private): lock in v370-is-final logger XML finding
+b9be7b6 feat(log+defgen): scaffold knock dashboard + FA-DIT logger supplement
+a4d59df docs(legal): record FA-DIT WRX shipping reality after 2026-05-19 unlock
+eddce2b refactor(core): factor shared csv helpers; drop 3-way duplication
 ```
 
 ## The substantive arc
 
-Four threads interleaved:
+Five interleaved threads.
 
-1. **Phase 5 closure (SH-2A side).** `divide_int` shipped via FPU bridge (FLOAT → FDIV → FTRC) — sidesteps the DIV1-iterative encoding uncertainty the prior handoff deferred on. Closes the last SH-2A primitive gap. Per-primitive cycle costs in `feature_ir::estimate_cost` (`divide_int = 18`, `add_int = 1`, FPU divides dominate) replace the symbol-blind flat-3 model. New `map-selector-int.stmod` sample exercises the whole stack end-to-end against the demo pack with a new `set_active_map` Int-output hook.
+### 1. The §11 four-play landing
 
-2. **Docs audit (6 commits).** Substantive drift cleared across `docs/00, 01, 02, 03, 05, 06, 07, 08, 11, 12, 13, 14`. Module map in docs/02 had 3 fictional modules (`st::script` Lua, `st::nodegraph`, `st::transport.elm/stn`) and missed 8 real ones; docs/07 build & tooling was aspirational throughout (CI matrix, presets, code-signing); docs/03 deps table listed 11 libraries that aren't linked (Lua + Sol2, FlatBuffers, nlohmann/json, …). Now reflects shipped reality. Path-B claim narrowed: public repo strips VA/VB packs only; older Subarus + SSM PIDs + ecuparams still ship.
+Identified the "under-served-coverage" thesis (tables every Subaru pack exposes but no community workflow tunes) and delivered all four plays end-to-end:
 
-3. **The FA-engine ROM unlock (user-driven, co-authored).** User reverse-engineered EpifanSoft's protection: stream cipher with per-bucket (size, header-length) keystream. Built `decrypt_epifan.py`, `bulk_decrypt.py`, `ecutune_match.py`, `romraider_forum_system.py` etc. under `fixtures/private/` (force-tracked .py only; ROM/keystream/XML data still gitignored). **974/1272 ECU IDs decrypted (76.6%)** by combining recovered keystreams with forum-attachment plaintexts; one $60 ECUTune purchase (`XH3J2D0I`) unlocked 167 ROMs. `FINAL_BUY_DIRECTION.md` ranks remaining clusters by leverage. **298 still locked**: LHB family (VB WRX 2022+) + AE8M family — no known plaintext source, full stop.
+| Play | Header | Impl | Tests | CLI | GUI | Demo CSV |
+|---|---|---|---|---|---|---|
+| Per-cylinder knock dashboard | ✅ | ✅ | 10 cases | ✅ | ✅ | ✅ |
+| Adaptive-learning history | ✅ | ✅ | 12 cases | ✅ | ✅ | ✅ |
+| Cold-start workflow | ✅ | ✅ | 15 cases | ✅ | ✅ | ✅ |
+| EBCS PID assistant | ✅ | ✅ | 9 cases | ✅ | ✅ | ✅ |
 
-4. **Code-side prep for FA-engine packs.** The user's private VA/VB master packs use `cid_address = 0x0` which the loader interpreted as "match bytes at offset 0" and always reported no-match. Empirically, FA-DIT WRX ROMs put the CID descriptor at a **variable per-firmware offset**: LF75300E at `0x0002F7DD`, LF9C000C at `0x00038035`, same surrounding shape (`\x00\x00 [letter] \x00 <CID> \x00\x00\x00\x00 2.0 [engine]`). Added a `cid_scan = true` boolean to the `[[identification]]` schema — when set, loader scans the entire ROM for `cid_match` instead of comparing at `cid_address`. CLI surfaces it: `rom-info --def` prints `Match: NAME @ 0xADDR (scanned)`; `pack-info` shows `(CID 'X', scan)` instead of misleading `@ 0x00000000`. Plus `tools/rom_diff_localize.py` ships — locates candidate table addresses by diffing stock+tuned ROMs; validated on EJ-era A2TB100K where 7 of 23 clusters labeled real tables (boost_limit_fuel_cut, fine_correction_retard, etc.) with 16 unlabeled candidates pointing at RR-XML omissions. Defgen `_table_address` parser bug fixed (accepts bare-hex storageaddress like `dc938` without `0x` prefix).
+All four follow the same shape: `snapshot_from_samples()` pure-domain aggregator + `snapshot_from_csv()` replay path + `subuwutuner-cli <play>-snapshot` text-mode dashboard + `View → <play>` GUI panel + `fixtures/demo-<play>-log.csv` smoke fixture. Each panel surfaces metrics + advisory suggestions; the path through `st::edit::History` is **deferred to v1.2** (design captured in `docs/05` §11.X, gated on a `[[table.role]]` pack-format extension we haven't designed yet).
 
-Plus user-flagged things now persistent in memory:
-- **EpifanSoft `_mod` files = debug patches, not tunes.** 99.5% density rewrites of header + footer regions, no C-segment edits. Don't use `_ori/_mod` pairs as `rom_diff_localize.py` inputs — they fingerprint EpifanSoft's tool, not calibration tunes.
-- **Never `rm -rf` user-content directories.** Lost hours of forum-sourced ROM dumps in `fixtures/private/roms_extracted/` to a careless reflex; `unzip -o` already overwrites, the wipe-and-recreate was unnecessary. Memory saved.
+### 2. Forward-looking design docs (v1.5+ and v2.0+)
 
-## State of play
+Two new docs/ entries capturing the longer-arc design now so future sessions don't re-derive:
 
-- **Branch**: `main` at `ce202da`, in sync with `origin/main`. 23 commits this session beyond the prior `b005c17`.
-- **Tests**: 761 C++ test cases / 100070 assertions on MinGW g++ 15.2. 102 defgen Python tests via `py -m unittest discover -v tests` (pytest not installed on dev box).
-- **Working tree**: clean except the stale `SubaruTuner.zip` carry-over at root. Untouched.
-- **Phase status**: Phases 0–4 done hardware-free. Phase 5 SH-2A backend feature-complete (Int + Bool + control flow + Float + Float compares + select_all + cross-hook flow + fan-out dedup + `divide_int`). `divide_int` was the last codegen gap.
+- **`docs/19-live-tuning.md`** (v1.5) — RAM-shadow live tuning. Atlas-equivalent on-dyno cell editing via UDS WriteDataByIdentifier. Gated on Phase 4 hardware validation. Includes the "feature toggles via live writes" extension and ties to `docs/16` (custom features) + `docs/18` (standalone handheld) for the COBB-AccessPort-style "toggle launch control from the hardware screen" UX. Engine-safety linter runs on every write; advisory output only; no path into auto-flash.
+- **`docs/20-ai-integration.md`** (v2.0+) — AI as advisory surface (interpretation side), never modification side. 8-tier spectrum from rules-based drift classifier (Tier 1) to LLM explanation (Tier 2) through trained models (Tier 7+) and cipher classification (Tier 8). Local-first via Ollama. Strict clean-room rules on training data (commercial-tool decompiles off-limits; cloud-backend output tagged + never auto-committed). Canonical example: LTFT/STFT drift classifier with rules-based diagnosis ("vacuum leak vs injector aging vs MAF aging vs O2 sensor failing") + LLM-prose explanation layer.
 
-## Known caveats and where the surprises hide
+### 3. OBDX adapter pre-staging (time-sensitive — May 22-25 arrival)
 
-1. **The 5 "recovered" VA private CIDs are NOT actually pack-ready.** The user's `_decryption_summary.txt` marked `lf75404s` as OK and the bulk_decrypt cluster dirs contain `lf75404h/s`, `lf9d012h`, `lf9g003t`, `lf9l000e` — but checking the bytes shows entropy ~7.13–7.97 with no `LF[0-9A-Z]{6}` string anywhere in any of the 5 files. The OK threshold the user's pipeline uses is entropy-based, not CID-readable. The keystream that "succeeded" cleans flash-erase 0xFF regions but leaves the calibration descriptor (where the CID lives) still cipher. **End-to-end smoke against private master is BLOCKED until the right keystream anchor is used for these CIDs.** Detail below.
+User's OBDX Pro VX adapter is shipping; arrival expected May 22-25 (memory: `project_obdx_eta.md`). USB-CDC IByteChannel for Windows landed at `c64b717`:
 
-2. **EpifanSoft `_mod` empirically confirmed = debug.** See memory `project_epifan_mod_is_debug.md`. Don't pair `_ori`/`_mod` for table-localization; their diff is 2 dense clusters at file head + foot, zero C-segment edits.
+- `src/transport/include/st/transport/serial_byte_channel.hpp` — cross-platform shape (`make_serial_byte_channel(SerialChannelConfig)`)
+- `src/transport/src/serial_byte_channel_win.cpp` — Win32 implementation. CreateFile + DCB (8N1, no flow control, DTR/RTS enabled) + COMMTIMEOUTS (`ReadIntervalTimeout = MAXDWORD` pattern for return-when-bytes-available semantics) + RAII HandleOwner. Auto-canonicalizes `\\.\` prefix for COM10+.
+- `src/transport/src/factory.cpp` — Obdx + Native paths now wire through `make_serial_byte_channel`. OBDX defaults to 500000 baud; native to 921600.
 
-3. **cid_scan landed but private packs don't use it yet.** All 26 VA/VB private packs still say `cid_address = 0x0`. Mechanical one-line-per-file edit pending: add `cid_scan = true` to each `[[identification]]` block. Per CLAUDE.md the private pack files are off-tree user-maintained content; do not Read them directly, but the user can do the edit themselves or a script-based transformation is safe.
+When the adapter arrives, the first-contact path is:
 
-4. **0 community RR XML coverage for FA engines.** Of Merp's 334 metric ecu_defs.xml CIDs, exactly 1 (`ae5f301d`) is FA-prefix. Generating a pack via `tools/defgen/` from RR XML is NOT a path forward for any LF/LV/LH/AF/AE CID we care about. The path forward for those CIDs is differential analysis or fresh research.
+```bash
+subuwutuner-cli rom-pull --transport obdx --device COM5 \
+    --def definitions/impreza/lf79103p.toml -o my_current_cal.bin
+```
 
-5. **The 298 still-locked CIDs include the LHB family.** All 18 VB private pack CIDs prefix-match LHB clusters in `FINAL_BUY_DIRECTION.md`'s "🔴 UNAVAILABLE — no known source" section. ECUTune doesn't carry them. Forum coverage doesn't reach them. **The VB end-to-end smoke is hardware-gated until OBDX adapter lands and the user can dump their own VB WRX directly.**
+That dumps the user's CURRENT (COBB-tuned) cal unencrypted, bypassing the COBB-encrypted backup in their AppData. The OBDX codec + transport + SSM/UDS clients are all tested against MockTransport already — only the byte-channel wiring was missing.
 
-6. **GUI not smoke-tested today.** All UI work this session was `text_subtle` sweeps + one stale-claim fix in the features-designer subtitle. Build-clean only; user has not visually confirmed. Easy to revert per-commit if a sweep regresses readability.
+### 4. Tooling buildout
 
-7. **The 95-of-96 OK-decrypted EpifanSoft CIDs without packs** are mostly EJ-era CIDs that don't overlap with the user's VA/VB private master (which is FA-only). Useful as a corpus for `tools/defgen/` end-to-end stress-testing once 291 RR-XML-paired EJ packs get generated.
+Three new tools, all hardware-independent and immediately useful:
 
-## How we reverse-engineer the unknown definitions important to us
+- **`tools/mutation_test.py`** (`79a4890`) — Python mutation-testing driver. Applies a focused set of operator swaps (`==↔!=`, `<↔<=`, `>↔>=`, `true↔false`) to a specified line range, rebuilds + retests, reports KILLED/SURVIVED/BUILD_FAIL/TIMEOUT per mutant + overall score. Smoke-tested on `evaluate_plan_policy` (lines 515-544): 1/1 compiling mutant KILLED. Documented in `docs/08` "Mutation testing" with a light/heavy tier split (heavy = future LLVM mull integration).
+- **`tools/checksum_discover.py`** (`8cd060a`) — empirical discovery of Subaru ROM checksum byte locations. Diffs every pair of sibling ROMs per family; bytes that differ in EVERY pair are candidates for either the checksum slot or always-changing calibration cells. Run-length analysis + Subaru-convention zone distance scoring produces a ranked candidate list per family. Scans both `fixtures/private/roms_extracted/decrypted/` (178 pak-decoded ROMs) AND `fixtures/private/plaintext_corpus/bludgod-roms/` (498 additional ROMs across ADM/EDM/JDM/USDM). Output: per-family TSV at `fixtures/private/checksum_discovery/<FAM>_candidates.tsv`. Smoke-ran on LF79 (31 ROMs) — surfaced 20 single-byte candidates around 0x1B00. **Manual byte-pattern review needed to separate CID-string area from true checksum slot** — that's RE work, not automation.
+- **`tools/defgen/localize.py`** (`f35b05e`) — verification half of the def-pack-acceleration pair. `cousin_seed.py` clones a sibling pack and swaps CID-bearing fields without verifying; `localize.py` walks every `[[table]]` and checks each address against a target ROM. Per-table verdict: HIGH (byte-identical or shape matches) / MED (content differs, address probably still valid) / LOW (table likely moved) / ABSENT (target ROM too short). Heuristics: Shannon entropy, range ratio, monotonicity for axis tables, padding-region exemption. Smoke-tested on `definitions/baja/a2wc400k.toml` against bludgod's A2WC400M (MT) and A2WC400H (AT) — 139 of 292 tables HIGH (byte-identical between model-year variants), 153 ABSENT because bludgod ROMs are 512 KB cal-body-only vs the pack's 1 MB full-ROM target. 0 MED + 0 LOW in the in-range subset — clean signal.
 
-Two distinct target sets with different paths:
+### 5. clang-format sweep + CI gate flip
 
-### Target A — VA WRX MT (FA-DIT), 8 private packs
+Installed `clang-format 18.1.8` via `pip install --user clang-format==18.1.8` (matches CI binary). Ran `clang-format -i` on every `src/**/*.{cpp,hpp}` + `tests/**/*.{cpp,hpp}` — 110 files reformatted in one shot. `.github/workflows/ci.yml` flipped: `name: clang-format (advisory)` → `(required)`, removed `continue-on-error: true`, swapped `--dry-run || true` for `--dry-run --Werror`. Full suite still green post-sweep (807 cases / 101,322 assertions).
 
-5 of 8 have matching plaintexts in the corpus once decryption is fixed for them. **Highest-leverage move:**
+## Status snapshot
 
-**A.1 — Fix decryption for the 5 actionable VA CIDs (hours of work, no purchase).** The forum-bin plaintexts already on disk include `LF75300E.1.bin` (lives in the AV9D100E_2098176 bucket, same as `lf75404h`, `lf75404s`) and `LF9C000C.1.bin` (LF9F bucket, same as `lf9d012h`, `lf9g003t`, `lf9l000e`). The correct keystream for each bucket = XOR(known plaintext, matching ciphertext). Confirm in the user's `bulk_decrypt.py` pipeline whether those specific plaintexts were already used as anchors. If they were and the result is still partial, the encryption isn't pure stream cipher across the whole file and there's an additional per-file or position-dependent layer to model. If they weren't (script chose a different anchor heuristically), re-run with LF75300E and LF9C000C as the explicit anchors. **Outcome:** clean LF75404h/s + LF9D012H + LF9G003T + LF9L000E plaintexts. Then add `cid_scan = true` to each of the 5 packs. Then `rom-info --def <pack> <plaintext>` should print `Match: <CID> @ 0x<discovered> (scanned)` and we have end-to-end first-light validation.
+- **HEAD `f35b05e`**, in sync with `origin/main`
+- **807 unit tests / 101,634 assertions green**
+- **CI clang-format gate: required**
+- **Working tree clean** apart from `SubaruTuner.zip` (untracked 114 MB; gitignore-equivalent — never `git add` it, would break GitHub's 100 MB push limit)
 
-**A.2 — Validate each of the 5 packs against its plaintext.** `rom-info --def` for identification. `dump-table --def <pack> --table <id> <plaintext>` for representative tables (boost_target, fuel_main, ignition_main) — confirm values look plausible (monotonic axes, typical fuel/timing/boost ranges). `rom-diff --def` between siblings (e.g. lf75404h vs lf75404s) — should reveal small inter-revision differences, not large structural ones. Any discrepancy (out-of-range cells, mis-aligned columns, scaling errors) → bug in the private pack's address/scaling → patch the pack.
+## Open threads / known issues
 
-**A.3 — `checksum-verify` and `checksum-repair` smoke.** Each pack declares `checksum_type = "subaru_std"` or similar; the IChecksumRepair stubs at `src/flash/src/checksum.cpp` are NotImplemented but cite RomRaider's `ChecksumSTD.java` family. Implement the citations against real stock bytes from the 5 plaintexts. Byte-exact verification per docs/15 clean-room rules — read the RR algorithm, write fresh C++ from the spec, validate byte-for-byte. This is gated by A.1 + A.2 succeeding.
+### LF79101P decryption is suspect (P2 for tomorrow)
 
-**A.4 — `rom_diff_localize.py` against tuned VA variants.** For each of the 5 actionable VA CIDs, locate other community sources (bludgod, forum threads) that ship tuned versions of the same CID. The tool's output (table-address clusters + density) lets the user verify each cluster is in the private pack's `[[table]]` set OR surface clusters the pack doesn't cover (gaps in the Atlas-derived private master).
+Spotted during `localize.py` smoke testing — `fixtures/private/roms_extracted/decrypted/LF79/LF79101P.bin` has random-looking bytes at calibration offsets where structured cal data should be. Compared against `LF79100P.bin` at offset 0x18F92 (fuel_open_loop_avcs_disabled_target_base_tgv_open):
 
-**A.5 — For the 3 locked VA CIDs (`lf75600h`, `lf79103p`, `lf9c102p`).** No corpus source on the user's machine. Options: (a) **broad internet scour for stock dumps** — see "Internet-scour playbook" below; (b) RomRaider forum DMs / trade for stock dumps, (c) hardware-direct read from a matching car (gated on OBDX, only works if the user's own car has one of these CIDs flashed), (d) hand-fabricate by extrapolating from the 5 sibling packs (least reliable). Probably parked until A.1–A.4 land — at that point the user's pack-validation experience tells them whether the 5 working packs are healthy enough to inherit useful structure into the 3 locked ones.
+- LF79100P: `00 00 00 00 00 66 66 66 66 66 66 66 66 66 66 66 ...` (structured fuel map)
+- LF79101P: `5d 38 ca 47 c9 2c 9f 64 21 ad 53 a4 3d d6 a7 88 ...` (random)
 
-### Target B — VB WRX MT (FA-DIT 2022+), 18 private packs
+And at 0x31632 (wastegate-duty maximum):
+- LF79100P: `0a 00 0a 00 0a 00 0a 00 0a 00 0a 00 19 00 23 00 ...` (wgdc map at 10%/25%/35%)
+- LF79101P: `c5 58 78 fe fd a2 d8 b7 c0 14 bf b6 14 a7 cb 19 ...` (random)
 
-**The user does not own a VB.** Owns a VA. So the standard "dump-your-own-car" route doesn't apply to VB at all. Combined with zero corpus alignment (LHB family is fully UNAVAILABLE per `FINAL_BUY_DIRECTION.md`, ECUTune doesn't sell LHB, forum scrapes find no LHB attachments), VB work is **speculative future-state**, not a current research priority.
+Hypothesis: LF79101P went through the EpifanSoft layer-1 decode but retains a per-CID layer-2 encryption (matches the documented FA-DIT pattern from `PAK_DECODE_RESULTS.md` — "newer FA-DIT firmware uses per-CID encryption; one anchor doesn't unlock siblings"). Check `bulk_decrypt_v2.py`'s output log for LF79101P to confirm it shipped through the per-family path only and not a per-CID anchor.
 
-The 18 VB private packs stay in the master as scaffolding for whenever ANY of these unlocks:
-- User eventually acquires a VB and dumps it.
-- Someone in the community shares an LHB plaintext (forum DM, trade for VA work, etc.).
-- A new ECUTune (or similar) listing surfaces with LHB content.
-- A wider-net internet scour turns up an LHB plaintext stashed somewhere outside the indexed-forum corpus — see "Internet-scour playbook" below.
+**Implication:** `decrypted/LF79/LF79101P.bin` is unreliable as RE input until verified. Same risk applies to any LF79xxx that wasn't a direct `PAK_*` anchor in the bulk decrypt — should audit the corpus's provenance per family.
 
-Until one of those: **leave the 18 VB packs alone**, don't spend cycles trying to validate them, don't buy purportedly-VB content sight-unseen. The static-analysis (Ghidra) angle below is the only deterministic backup path and it's a multi-week labor cost — not worth running speculatively against a platform the user doesn't have to test against.
+### §11 panels surface suggestions but don't apply them (by design)
 
-When (if) any LHB plaintext lands, the same workflow as Target A applies: `cid_scan = true` in the pack, `rom-info --def` to identify, `dump-table` to validate, etc.
+`docs/05` §11.X captures the v1.2 path: pack-format extension for `[[table.role]]` strings → `Definition::find_table_by_role(role_string)` → `ByteEdit` proposal routed through `edit::History` with the engine-safety linter on the proposed bytes. Until that lands the user finds the relevant table manually in the sidebar.
 
-Backup paths kept for the record:
-- **Static analysis via Ghidra.** SH-2A code has a canonical table-lookup instruction pattern (`MOV.L/W index`, `MULU`, `ADD base`, `MOV.L @(R0,Rn)`). A Ghidra script that finds all such call sites and back-derives table base addresses gives a complete address map without needing any tunes. Doesn't yield scaling/units (still per-byte research) but the address inventory is deterministic and one-time per firmware family. Labor-heavy (days of script work + per-CID verification), worth considering only if hardware+community both stay dry for an extended period.
-- **`rom_diff_localize.py` against tuned VB variants** — irrelevant until at least one clean LHB plaintext exists.
+### Map-localization is verify-only
 
-#### If sourcing a VB ECU separately to unblock VB pack research
+`localize.py` reports HIGH/MED/LOW/ABSENT but doesn't relocate LOW entries by pattern search. That's a v2 add — particularly useful for axis tables where the values give a unique byte fingerprint.
 
-The user may eventually acquire a VB-spec ECU as a standalone bench item (separate from owning a full VB WRX). Notes for what flavor to aim for:
+### Checksum discovery is candidates-only
 
-**Highest-value targets** — the 4 LHB CID-prefix matches in the private master where pack + would-be-ROM align at 8-char level:
+`checksum_discover.py` produces ranked TSV reports but doesn't identify the algorithm. The bytes that change in every pair are a mix of CID string + always-changing cal cells + the actual checksum slot. Manual review separates them. Once we know the slot location, the algorithm-shape investigation (brute-force-known-algorithms helper) is a separate phase.
 
-| Private pack | Likely ECU part-number prefix to source |
-|---|---|
-| `lhbhb10b00g` | `LHBHB10B` family — JDM, early-mid VB cycle, MT |
-| `lhbhd00b00g` | `LHBHD00B` family — JDM, early VB, MT |
-| `lhbkc40m00g` | `LHBKC40M` family — JDM, mid-cycle revision |
-| `lhbp300d00g` | `LHBP300D` family — JDM, later VB, MT |
+### `D:\Documents\atlas-personal\` reaches a clean-room boundary
 
-The 8-char base CID would identify the ECU; the trailing 3-char suffix (`00g`, etc.) appears to be a market/emissions-cal code. Direct match on the 8-char base = highest probability the existing private pack's table addresses align with the sourced ROM's bytes.
+CLAUDE.md is explicit: `romraider_va_wrx.xml` + `romraider_vb_wrx.xml` in that path are Atlas-derived (instrumentation-transcoded into the RR schema) and **off-limits to direct reading** in implementer-mode sessions. Sanctioned access is via analyst-mode (`docs/analyst-mode-prompt.md`) reading only the wall-clean derivatives `va_wrx.facts.xml` / `vb_wrx.facts.xml` + `*.name-mapping.tsv`, with outputs landing in `D:\Documents\SubuwuTuner-specs\`. We don't need that path — our forum-sourced VA/VB XMLs (per `project_intree_va_vb_xml_provenance.md` memory) are §1201-clean and already produced the 25 packs at `ae090b2`.
 
-**Second-tier targets** — any other CID in the user's 18-pack private VB collection (`lhbh800b/c00g`, `lhbh900b/d00g`, `lhbhe00b/cx0g`, `lhbkc40p00g`, `lhbkc50my0g`, `lhbp301b00g`, `lhbp400bz0g`, `lhbt120ba0g`, `lhbt210ub/vb0g`). Same logic — pack exists, sourcing the matching ECU produces validation bytes.
+## Plan for tomorrow's session
 
-**Sourcing principles:**
-- **JDM market for matching the existing private master.** All 18 private VB packs have `_0g`-tail suffix patterns matching the JDM/EDM convention. USDM VB WRX ECUs historically use *different base 8-char CIDs* (not just different suffix bytes) — they're a separate calibration thread. A USDM VB ECU will almost certainly not 8-char-prefix-match any of the 18 packs, so it doesn't validate the existing master. Source JDM/EDM only when the goal is private-master validation: Japanese auction proxies (`aucnet.jp`, `Goo-net Exchange`, `JDM Auction Watch`), Far-East Russia parts yards (heavy JDM-VB import scene there, see Russian forum scour list), Australian importers (AusSubaru contacts).
-- **USDM as a separate research thread.** If the user eventually owns a USDM VB WRX (more likely in Alberta than importing a JDM): that's a fresh project. The adapter-direct-read path is clean (no decryption needed, ROM reads cannot brick), but the CID will be some `LHB*` USDM-specific code with zero pack coverage. Need to build a USDM VB pack from scratch via `rom_diff_localize.py` against any community USDM VB tunes that surface + Ghidra static table-address extraction. Community FA-era reverse-engineering for USDM VB is even thinner than for JDM (most published work is JDM-focused around the early-2022 launch). The cluster-keystream attack may still pay off if EpifanSoft has USDM LHB ciphers in their catalog and uses the same bucket-keystream scheme — testable once one USDM plaintext is in hand.
-- **Transmission: MT only.** Entire private master is VA/VB MT. CVT ECUs from a CVT-spec VB are a completely different part number and tune surface — won't match anything.
-- **Year: 2022 launch firmware preferred.** Earliest LHB firmware variants (`LHBH*`) have had the most time to accumulate community attention. `LHBT*` are later mid-cycle revisions; `LHBK*` and `LHBP*` are in the middle. The earlier the ECU, the more likely that the bucket-keystream attack (once one LHB plaintext is in hand) decrypts more sibling CIDs in the EpifanSoft LHB clusters too.
-- **Non-runner ECU is fine.** ROM extraction only needs 12V + ground + the OBD-II flash pins exposed on the bench. A wrecked-VB salvage ECU with damaged drivers but intact flash is usable for ROM dumps. Per `docs/13` "open questions: bench-mode protocol" — the exact connect handshake may differ from in-car ECU, design pending until a bench ECU is on the bench.
+User asked for three things on the deck:
 
-**Where to look:**
-- **eBay** — search "Subaru WRX 2022 ECU MT" filtered to JDM listings; sellers occasionally list the CID/part number in the description.
-- **LKQ Pick-Your-Part / similar US salvage yards** — usually USDM only (wrong market for the private master), but check VINs that match JDM imports.
-- **Japanese auction proxies** — `aucnet.jp`, `Goo-net Exchange`, `JDM Auction Watch`. Salvage VB WRX ECUs surface here; part numbers usually visible in photos.
-- **Far-East Russian parts importers** — heavy JDM-VB second-hand market in Vladivostok area. Same Russian forums in the scour playbook above often have parts-trade sub-sections.
-- **AusSubaru / Australian Subaru clubs** — AU also gets JDM-spec imports; classifieds sometimes list bare ECUs.
-- **Forum classifieds** on NASIOC / Subaru-Galleri / scoobynet — occasionally bare-ECU listings, mostly USDM though.
+### Priority 1: Run cousin_seed → localize against bludgod CIDs we don't have packs for
 
-**Periodic check-backs that cost nothing but might land an unlock:**
-- ECUTune (`ecutune.shop`): currently 0 LHB items (verified 2026-05-18 against the local ecutune index — 264 items, 0 lhb-prefix, 0 lh-prefix). If they ever list any LHB CID, even a tuned one, buying it would: (a) yield the underlying stock as the diff baseline (per the user's "stock+tuned" observation about ECUTune packaging), (b) recover the LHB-bucket keystream, (c) potentially unlock all the LHB ciphers in the EpifanSoft batch in one go. **Set a calendar/cron to re-check the ecutune Subaru index every few weeks.**
-- The `romraider_forum_system.py` indexer should also be re-run periodically — new attachments land continuously.
-- Telegram / Discord channels (the Russian tuning groups mentioned in the scour playbook below) get LHB material rarely but occasionally.
+Goal: land 5-10 new packs for previously-uncovered CIDs in one session.
 
-**Provenance bar before bringing a sourced ROM into the pipeline:**
-- Stock dump read from a bench ECU you own: factual data, in bounds.
-- Stock dump from a community member shared on a public forum: same as above.
-- Stock dump from a commercial-tool extraction (output of a vendor flasher): provenance unclear; check the tool's EULA. If it doesn't forbid further use, fine. If it does, leave it.
-- Stock dump from a decompile / extracted-from-flasher-binary route: out of bounds per `docs/15`.
-
-### Target C — public-repo EJ-era packs (Path B carry, non-private)
-
-Already actionable, blocked only on time. **291 triple-play CIDs** identified this session: RR XML coverage exists AND plaintext ROM bytes exist. Defgen-and-validate matrix:
-- Run `tools/defgen/defgen.py` against each XML with `--rom-id <CID>` → generate `<cid>.toml`
-- Run `rom-info --def <pack> <plaintext>` → confirm CID match + table count
-- Generated packs land as `definitions/<model>/<cid>.toml` under the existing EJ-era directory tree
-- Each pair is a regression fixture for the loader, address validator, scaling formula parser
-
-Bulk run would be a focused single-session activity (~hour of CPU + manual spot-check) producing a ~300-pack increase in the public corpus. Strictly additive; doesn't help with VA/VB but meaningfully grows SubaruTuner's day-one usefulness for older Subarus.
-
-### Internet-scour playbook (Target A.5 + Target B)
-
-For CIDs that have no corpus presence — the 3 locked VA CIDs (`lf75600h`, `lf79103p`, `lf9c102p`) and the entire LHB / AE8M family — the user already harvested RomRaider's official forum via `romraider_forum_system.py`. The next-rung sources are broader but messier:
-
-1. **Other Subaru tuning forums.**
-   - **NASIOC** (`forums.nasioc.com`) — biggest English-language Subaru community; large attachment archive going back ~20 years.
-   - **Subaru Forester / Outback / Legacy / Impreza GT forums** — model-specific.
-   - **AusSubaru** (`aussubaru.com`) — JDM-relevant CIDs surface here more than on US-centric forums.
-   - **Subaru-WRX.com** — UK / EDM focus.
-   - **MyG37 / Subaru-Galleri / scoobynet** — regional, occasionally have rare CIDs in attachment threads.
-   - Pattern: most have downloadable attachments behind free registration. A script in the shape of `romraider_forum_system.py` (HTML scrape + attachment fetch) per forum.
-
-2. **Foreign-language tuning communities** (often hold ROMs that have been pulled from English-language sources).
-   - **Russian sources** — major ECU reverse-engineering tradition; Far-East Russia (`drom.ru`, `farpost.ru`) has heavy JDM-import Subaru presence with corresponding tuning threads. Long-tail archives of stuff that's vanished from western forums under legal pressure.
-     - `drive2.ru` — Russian car-enthusiast platform; Subaru sub-communities with tuning threads + attachments.
-     - `4x4club.ru`, `subaru-club.ru`, `subaru-impreza.ru`, `clubsubaru.ru` — Russian Subaru forums (model-specific).
-     - `chiptuner.ru` / `tunes.ru` / `vintunes.ru` — broader ECU-tuning forums; Subaru sections sometimes have stock-dump exchanges.
-     - Telegram channels: search "субару тюнинг", "Subaru ECU", "субару прошивки" — pinned-message archives of community tunes + stock dumps are common.
-     - Sites are typically `phpBB` / `vBulletin` variants — same scrape pattern as the English forums but UTF-8 / Cyrillic. Translation: ROMs and CIDs are still uppercase-ASCII so search by literal CID still works even without translating the surrounding thread.
-   - **Japanese sources** — JDM CIDs (LF7x JDM market, AZ1G JDM) often have more coverage here than on US forums.
-     - `minkara.carview.co.jp` (みんカラ) — huge JP car community; Subaru sub-blogs occasionally include ECU bin attachments.
-     - `5ch.net` (formerly 2ch) — tuning sub-boards; attachments rare directly but external link drops to file hosts are common.
-     - Japanese-language Subaru workshop/tuner blogs — `wedssport.jp`, individual tuning-shop blogs.
-   - **European sources** beyond UK.
-     - `motor-talk.de` — large German auto forum; Subaru sub-community.
-     - `subaruimpreza.pl` — Polish.
-     - `subaruclub.cz` — Czech.
-   - Foreign-source caveats:
-     - **Provenance still matters.** Same clean-room rules apply: forum-shared community dumps are factual data, in bounds. Output from regional commercial-tool clones (CMD, OpenPort regional repackagings) with EULA constraints is not. When uncertain, leave it.
-     - **Registration friction varies.** Some Russian forums require phone-number verification (SMS), some require an inviter, some are wide-open. Lean toward wide-open first.
-     - **Site availability is volatile.** Several historic Russian tuning forums have gone offline since 2022; Wayback Machine captures of those URLs are worth checking even when the live site is unreachable.
-
-3. **Open file hosts and indexed CDNs.**
-   - Google-dork for `<cid>.bin filetype:bin site:*.com` — sometimes turns up developer-published dumps.
-   - GitHub: `<cid>.bin in:path` — occasionally posted in personal tuning research repos.
-   - Internet Archive (`archive.org`): some Subaru community archives have been mirrored. The 2018-2022 RomRaider attachment dumps sometimes appear there.
-   - SourceForge attachments under tuning-tool projects — rare but happens.
-
-4. **Tuning shop / cobb / ecutek "stage" download portals.**
-   - Most lock content behind a vehicle VIN — buying these to enable distribution is not in scope (legal posture), but as a leverage of last resort for the user's own VIN, can produce a stock dump as a byproduct.
-   - **Do not** redistribute commercial-tool output back into the public repo per CLAUDE.md.
-
-5. **Direct community DM.**
-   - The handles `Bludgod`, `jimihimi`, `Merp` (per `plaintext_corpus/` source subdirs) are already in the user's known-contributor list. Worth asking directly via RomRaider PM if they hold any of the 3 locked VA CIDs or any LHB material.
-   - Discord servers (Subaru tuning, NASIOC, Stratified Automotive) sometimes have ad-hoc trade channels.
-
-6. **Wayback Machine** for dead forum threads.
-   - RomRaider has multiple defunct sub-forums whose attachments are gone from the live site but cached at `web.archive.org`. The `romraider_forum_system.py` indexer doesn't see those; a one-off pass using the Wayback API against known dead-thread URLs could surface old stock dumps.
-
-**Cost model.** Each scour-attempt is a few hours of script work + bandwidth, no per-ROM cost. Yield is unpredictable per source but the cumulative coverage of running 3-5 forums plus archive.org plus a Russian-forum sweep is meaningful. Prioritize by CID family:
-- For VA gaps (`lf75600h`, `lf79103p`, `lf9c102p`): NASIOC + AusSubaru + Russian forums most likely. These are bread-and-butter VA CIDs and someone has posted them somewhere; Russian Far-East sites often have JDM-spec VA dumps.
-- For LHB (VB): every source above is a long shot. The platform is too new and the community work is too sparse. Wayback is unlikely to help. Russian forums are the most plausible non-zero source for LHB given the JDM-import scene there; Japanese sources (`minkara`, JDM-shop blogs) are second-most plausible. The realistic LHB unlock if the user eventually acquires a VB remains hardware-direct read.
-
-**Clean-room posture during the scour.** When/if a stock dump is found:
-- Verify the source — forum attachment, archived community repo, etc. **Not** a leak from a commercial tuning tool, **not** a decompile output, **not** behind a circumvented access control.
-- Stock dumps are factual data, not protected expression — they're the bytes Subaru burned into the ECU. Acquisition through public-channel community sharing is in bounds per `docs/15` + `docs/17`.
-- Tuned dumps are also factual but their PROVENANCE matters: a tune by a community member shared on a public forum is fine; output from a commercial tool with a EULA forbidding redistribution is not. Apply common sense; when uncertain, leave it.
-
-**Tracking what's been searched.** Add a column to the user's buy/source matrix recording per-CID scour status: `not-searched | nasioc-checked | aussubaru-checked | found | confirmed-dead-everywhere`. Avoids repeated searches across sessions and makes "give up and move on" a defensible decision.
-
-### The clean-room boundary still applies
-
-Per `docs/15` + CLAUDE.md: when actually authoring or refining a VA/VB pack (e.g. patching `cid_scan = true` into `D:\Documents\SubuwuTuner-defs-private\`), the in-session work touches **fact-only data** (the cid_match string, the cid_scan boolean, address values). No expression from Atlas, RomRaider Java, or commercial-tool source enters the SubuwuTuner repo. The user's existing 26 private packs were already wall-clean derivatives; we'd just be tightening their loader-compatibility metadata, not introducing new content.
-
-The analyst-mode prompt at `docs/analyst-mode-prompt.md` remains the legitimate path if deeper extraction is needed from `D:\Documents\atlas-personal\` — but only in a separate session per the rules, with output isolation to `SubuwuTuner-specs/`.
-
-## Next likely moves (ranked)
-
-1. **Confirm/fix decryption for the 5 VA CIDs.** Hours of work, no purchase, immediate first-light. If the bulk_decrypt pipeline can be re-pointed with LF75300E + LF9C000C as anchors and it produces clean plaintexts, everything in A.1–A.3 cascades. If not — there's a deeper encryption layer to model, and that becomes the bottleneck.
-
-2. **Add `cid_scan = true` to the 26 private VA/VB packs.** Mechanical. Could be done by the user via editor batch-replace or a script that opens each TOML and inserts the line under `[[identification]]`. Once landed, the loader stops reporting false no-matches even before decryption catches up.
-
-3. **Bulk-generate the 291 EJ-era packs.** Single-session productive task: `defgen` per CID, validate, land under `definitions/<model>/`. Public repo growth + regression corpus.
-
-4. **Implement `IChecksumRepair` for `subaru_std`/`alt`/`alt2`.** Gated on (1). Once any single FA-engine stock plaintext is byte-validated, the RomRaider-cited algorithms can be implemented and verified against it. Closes the last `NotImplemented` in `src/flash/`.
-
-5. **OBDX adapter integration when it arrives.** Unblocks VA direct-read (the user's own car) → fresh stock-dump validation against the private VA pack collection + real Phase 4 flash testing. **Not** a VB unlock — the user doesn't own a VB. Wire `obdx::Transport::open` against libusb + DVI handshake — ~1 week. ROM reads are read-only and cannot brick, safe for the daily driver.
-
-6. **Ghidra-based static table-address extraction.** Only if (1) hits a wall (deeper encryption layer than pure stream cipher) AND adapter is delayed AND community appeals don't produce LHB plaintexts. Labor cost is real but it's the last deterministic path.
-
-## Active context, in brief
-
-- v1.0 target: WRX VA/VB MT. Repo at `https://github.com/BuffJesus/SubuwuTuner` (public state: `ce202da`).
-- House style: C++23, `st::Result<T>`, no exceptions in domain. clang-format/clang-tidy clean. MinGW gcc 15.2 on Windows; Python 3.12-3.14 for defgen.
-- **Caveman cadence.** Small focused commits, conventional-commits subject, push direct per commit. Documented and durable.
-- User in Alberta, Canada — no emissions paternalism. Engine-safety refusals still apply.
-- **IP boundary: clean-room.** No Atlas source, no RomRaider Java verbatim. SH-2A encodings from public Renesas refs. The wall lives at `docs/15`; analyst sessions at `docs/analyst-mode-prompt.md`.
-- **Path B distribution live.** Public repo ships infrastructure + EJ-era community packs + SSM PIDs + ecuparams. Does NOT ship VA/VB packs (`docs/17`).
-- User's private master at `D:\Documents\SubuwuTuner-defs-private\` — 8 VA + 18 VB packs. Off-tree. Don't `Read` directly per CLAUDE.md; run CLI tooling against them is fine.
-- User's atlas-personal at `D:\Documents\atlas-personal\` — OFF-LIMITS in main sessions per CLAUDE.md. `*.facts.xml` + `*.name-mapping.tsv` analyst-mode-only.
-- Decryption corpus at `fixtures/private/` — Python tooling is git-tracked (force-added); ROM/keystream/XML data is gitignored. 974/1272 decrypted; full corpus survey + buy direction at `roms_extracted/FINAL_BUY_DIRECTION.md`.
-
-## Working with this user
-
-- Terse. No trailing summaries. They read the diff.
-- "Proceed" / "Continue" / "Keep going" / "Proceed as you see fit" = continue current narrow thing OR pick a next slice yourself.
-- "Next slice" = the next caveman commit.
-- Push per-commit. Caveman-style messages. No bulk caveman-review unless flagged.
-- Modal failure feedback goes **inline** in the modal, not the status bar.
-- UI/UX philosophy: intuitive + non-intimidating + modern + beautiful + functional, all equally weighted.
+```bash
+# Cross-reference what bludgod has vs what definitions/ ships
+ls fixtures/private/plaintext_corpus/bludgod-roms/USDM/Impreza/ | \
+    awk -F'-' '{print tolower($1)}' | sort -u > /tmp/bludgod-usdm-impreza.txt
+ls definitions/impreza/*.toml | xargs -n1 basename | \
+    sed 's/.toml//' | sort -u > /tmp/we-have.txt
+comm -23 /tmp/bludgod-usdm-impreza.txt /tmp/we-have.txt
+# ^ CIDs that bludgod has but definitions/ doesn't
+```
+
+For each gap CID:
+1. Pick a sibling pack from the same family (same 4-char prefix)
+2. `python tools/defgen/cousin_seed.py --base <sibling.toml> --cid <NEW_CID> -o definitions/impreza/<new_cid_lower>.toml`
+3. Identify a decoded sibling ROM (either from `roms_extracted/decrypted/` or another bludgod file)
+4. `python tools/defgen/localize.py --pack <new_pack.toml> --sibling-rom <sib.bin> --target-rom <bludgod.hex> --out-report /tmp/<NEW_CID>_localize.tsv`
+5. If HIGH+MED ≥ 80% of in-range tables: commit the pack
+6. If significant LOW count: defer to manual review
+
+**Likely first targets** (high-value because popular USDM CIDs):
+- USDM Impreza WRX / STI 2002-2007 family
+- USDM Forester XT 2004-2008
+- USDM Legacy GT 2005-2009
+
+Cross-reference `definitions/impreza/*.toml` + `definitions/forester/*.toml` + `definitions/legacy/*.toml` against the bludgod USDM filenames before picking. The bludgod corpus has both 512 KB cal-body and 1 MB full-ROM dumps — if the sibling pack is 1 MB and the bludgod ROM is 512 KB, expect a high ABSENT count (that's fine, it's data-quality signal not an error).
+
+### Priority 2: Investigate LF79101P partial-decryption
+
+Steps:
+1. Inspect `fixtures/private/bulk_decrypt_v2.py`'s anchor list (around the 70-anchor block) — does LF79101P appear as a direct `PAK_*` anchor, or only as a family-share derivation?
+2. If only family-share: that's the layer-2 problem. Check 3-4 other LF79xxx ROMs the same way; tally which are direct-anchor (reliable) vs family-share-only (suspect).
+3. Memory entry capturing which decoded ROMs in the FA-DIT families are reliable RE inputs.
+4. Add a `RECON.md` note to `fixtures/private/roms_extracted/decrypted/LF79/` flagging which siblings shouldn't be used as `localize.py` targets.
+
+This is an honesty pass, not a fix. The data is the data; we just need to label it accurately.
+
+### Priority 3: #39 OEM behavior reference doc
+
+`docs/21-oem-baselines.md` — curated knowledge derived from the 178 + 498 = 676-ROM corpus. Sections:
+
+- Cold-start enrichment shape (typical Subaru cranking enrichment vs ECT — what's the OEM ramp?)
+- Knock-learn rate (how fast does DAM move on a clean tank vs a misfiring engine?)
+- Boost target schedule across model years (WRX vs STI vs Forester XT)
+- Closed-loop entry conditions (ECT / load / throttle thresholds across generations)
+- Catalyst protection thresholds (where Subaru intervenes to save the cats)
+
+Empirical, derived from the corpus, no new tooling. Probably 1500-2500 words, several tables. Becomes a tuning-reference manual nothing else ships.
+
+**Sequencing:** P1 → P2 → P3 in priority order. P1 is the biggest immediate value-add; P2 is a honesty pass that informs P1's input-data choices; P3 is curated-knowledge work. Recommend doing P1 + P2 in one session and deferring P3 if time runs short.
+
+## House-style notes (carry-over + new)
+
+Unchanged from 2026-05-18 handoff:
+- Terse. No trailing summaries.
+- "Proceed" / "Continue" = next narrow thing OR pick a next slice.
+- Push per-commit. Caveman-style messages.
+- Modal failure feedback goes inline in the modal, not the status bar.
+- UI/UX: intuitive + non-intimidating + modern + beautiful + functional, equally weighted.
 - Accent purple `(0.55, 0.35, 0.85)` via `accent_for(Theme)`.
-- Path style: `/` in bash; `\` in Windows-path strings.
-- Force-push to main is NOT standing approval. Ask each time.
-- GUI not smoke-testable by Claude (no display). State explicitly if a sweep ships unverified.
-- **NEVER `rm -rf` directories that may hold user files.** Memory saved as `feedback_no_rm_rf_user_dirs.md`. `unzip -o` already overwrites; the wipe step destroyed forum ROM dumps on 2026-05-18.
-- Edit then `git mv` loses the edit — stage the Edit before any rename.
-- Action buttons must complete the action (Compile/Export/Build/Save produce the full artifact; no preview-then-commit splits).
-- Don't use `git add -A` blindly — the carry-over `SubaruTuner.zip` at the repo root will sweep in and break the push (114MB > GitHub's 100MB limit). Use explicit paths.
+- `/` in bash paths; `\` in Windows-path strings.
+- NEVER `rm -rf` directories that may hold user files.
+- Don't `git add -A` blindly — `SubaruTuner.zip` (114 MB at repo root) will sweep in and break the push.
+- GUI not smoke-testable by Claude (no display). State explicitly when something ships unverified.
+- Action buttons must complete the action.
+
+New this session:
+- **clang-format gate is now required.** Install `pip install --user clang-format==18.1.8` to match CI before editing C++ files. The binary lives at `C:\Users\Cornelio\AppData\Roaming\Python\Python314\Scripts\clang-format.exe` on the user's machine. NOT on PATH by default — invoke by full path.
+- **The bludgod corpus exists at `fixtures/private/plaintext_corpus/bludgod-roms/`** — 498 plaintext `.hex` (raw-binary-content) ROMs across ADM/EDM/JDM/USDM × Forester / Impreza / Legacy / Outback / Tribeca / Exiga / XV. Already integrated into `tools/checksum_discover.py`; use it as a sibling-ROM source for `localize.py`.
+- **COBB-encrypted stock ROM in user's AppData** is the user's local store, not something a tuner sent (clarified mid-session, memory updated). Do not explore `%PROGRAMDATA%\COBB\` for SubuwuTuner data extraction — that's the clean-room red line.
+- **OBDX adapter ETA: May 22-25 2026** (memory `project_obdx_eta.md`) — pre-stage hardware-paired work; expect a "the adapter arrived" pivot any session after that date.
+- **`D:\Documents\atlas-personal\` stays off-limits** for implementer-mode reading. The `.facts.xml` + `.name-mapping.tsv` derivatives are analyst-mode-only inputs (`docs/analyst-mode-prompt.md`). We have a clean forum-sourced VA/VB pipeline; we don't need atlas-personal.
 
 ## Suggested opener for next session
 
-> "HEAD `ce202da`, in sync with `origin/main`. 761 C++ tests / 102 defgen Python tests green. Major unlock arc this session: encryption broken (974/1272 ECU IDs decrypted), `cid_scan` schema + loader + CLI shipped for variable-offset FA-DIT CIDs, `tools/rom_diff_localize.py` ships, defgen parser fixed for bare-hex addresses. **End-to-end first-light validation against private VA master is BLOCKED on a decryption refinement** — the 5 corpus-aligned CIDs (`lf75404h/s`, `lf9d012h`, `lf9g003t`, `lf9l000e`) decrypt to entropy ~7.2 but the CID descriptor region is still cipher; the OK threshold in `bulk_decrypt.py` is entropy-based, not CID-readable. Three reasonable first bundles: (a) re-run bulk_decrypt with `LF75300E.1.bin` + `LF9C000C.1.bin` as explicit keystream anchors — confirms whether the encryption is pure stream cipher or has a deeper per-file layer; (b) bulk-generate the 291 EJ-era packs from RR XML + plaintext pairs already on disk; (c) add `cid_scan = true` to the 26 private VA/VB packs as a mechanical batch edit. Pick?"
+> "HEAD `f35b05e`, in sync with `origin/main`. 807 unit tests / 101,634 assertions green. clang-format CI gate is now required (codebase swept at `52757da`). §11 four-play arc fully shipped end-to-end (header → impl → tests → CLI → GUI → demo CSV). OBDX USB-CDC layer landed at `c64b717` — adapter arrival expected May 22-25.
+>
+> Three things on the deck for this session:
+> **(P1)** Run `cousin_seed.py → localize.py` against bludgod CIDs we don't have packs for — bludgod corpus has 498 ROMs, definitions/ ships 358 packs; the gap is the opportunity. Goal: 5-10 new packs in a single session.
+> **(P2)** Investigate LF79101P partial-decryption. Random-looking bytes at calibration offsets — probably layer-2 (per-CID) encryption wasn't stripped. Audit which other ROMs in `decrypted/LF79/` likely have the same issue. Honesty pass on RE-input quality, not a fix.
+> **(P3)** #39 OEM behavior reference doc — `docs/21-oem-baselines.md`, curated knowledge from the 676-ROM corpus. Cold-start enrichment shape, knock-learn rate, boost schedules across years, closed-loop entry thresholds. Pure-docs, no tooling.
+>
+> Recommend P1 → P2 → P3 in that order. P1 = highest immediate value; P2 = honesty about data quality (informs P1's input choices); P3 = nice-to-have.
+>
+> Adapter not arrived yet — Phase 3/4 hardware work stays blocked. Best hardware-prep moves between now and the 22nd are P1 + P2 (more data → better Phase 4 algorithm targets)."
 
 If the user opens with hardware news:
 
-> "OBDX adapter landed? Minimum path to first VA ROM: implement libusb + DVI handshake inside `obdx::Transport::open` (already a stub in `src/transport/obdx/`). ROM dumps are read-only — first contact with your own VA WRX is safe given healthy battery. The user owns a VA, not a VB, so this unblocks: (a) fresh stock-dump bytes of the user's own car, (b) real-CID identification of their flashed firmware, (c) end-to-end validation against whichever of the 8 private VA packs matches, (d) eventually Phase 4 flash testing on a car they have skin in the game with. ~1 week of focused work. Want to start on the libusb wiring?"
-
-If the user opens with scour news (new ROMs found via internet hunt):
-
-> "Found stock dumps for [CIDs]? Drop them in `fixtures/private/plaintext_corpus/forum-bins/` (or a new subdir). The cid_scan loader path can validate them immediately — `subuwutuner-cli rom-info --def <pack> <plaintext>` should print `Match: <CID> @ 0xADDR (scanned)` if the pack and ROM match. Once any LHB plaintext lands, the VB private packs become validatable too. What did you find?"
-
-If the user opens with decryption news:
-
-> "Decryption refined? The 5 actionable VA CIDs (`lf75404h/s`, `lf9d012h`, `lf9g003t`, `lf9l000e`) now have readable CIDs at their descriptor offsets? Adding `cid_scan = true` to the matching private packs and running `rom-info --def` is the immediate next step — should print `Match: <CID> @ 0xADDR (scanned)` for each. Then `dump-table` on a representative table, `rom-diff` between siblings, and finally implementing `IChecksumRepair` against one of them. The whole Phase 1 ship gate (≥20 maps from a real definition pack on a real ROM, per docs/04) becomes reachable from there."
+> "OBDX landed? First post-arrival command:
+>
+> ```
+> subuwutuner-cli rom-pull --transport obdx --device COM5 \\
+>     --def definitions/impreza/lf79103p.toml -o my_current_cal.bin
+> ```
+>
+> That dumps your CURRENT (COBB-tuned) calibration unencrypted, bypassing the COBB AppData encryption. Win32 USB-CDC layer pre-staged at `c64b717`; the rest of the OBDX path (codec, transport, SSM/UDS clients) is already tested against MockTransport. First-light test should just work.
+>
+> If the device shows up at a different COM port, replace `COM5` with whatever Device Manager reports under Ports (COM & LPT). Battery > 12.0 V before connecting. The dump is read-only — no flash, no write — so this is safe even on a healthy battery with the engine off."
