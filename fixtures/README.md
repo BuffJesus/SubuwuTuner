@@ -39,6 +39,26 @@ build/win-mingw/bin/subuwutuner-cli.exe project-new \
 
 (Or `git checkout fixtures/demo.stune/`, which is the quicker reset.)
 
+## `demo-knock-log.csv`
+
+A small synthetic per-cylinder knock datalog used to smoke-test the v1.x
+knock dashboard (`docs/05-improvements.md` §11). Represents a third-gear
+WOT pull where cyl 1 picks up persistent knock retard and cyls 3-4 stay
+clean. Run against it with:
+
+```bash
+build/win-mingw/bin/subuwutuner-cli.exe knock-snapshot \
+    --log fixtures/demo-knock-log.csv \
+    --rpm-col rpm --load-col load \
+    --flkc-cols flkc1,flkc2,flkc3,flkc4 \
+    --fbkc-cols fbkc1,fbkc2,fbkc3,fbkc4 \
+    --sample-rate-hz 5 --window-seconds 60
+```
+
+Expected output: cyl 1 stands out as the knocker (FLKC mean ≈ -2.88,
+6 events, ≈ -1.78 below all-cyl mean). Same file is a reasonable smoke
+input for the GUI panel under **View → Knock dashboard (preview)**.
+
 ## Private fixtures
 
 `fixtures/private/` and `fixtures/roms/` are gitignored. Drop user-owned ROM

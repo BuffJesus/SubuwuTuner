@@ -93,7 +93,17 @@ The under-served categories below are present in nearly every per-CID RR pack we
 Four concrete features fall out directly. None require new hardware; all run against existing log + ROM data.
 
 1. **Adaptive-learning history visualizer** — chart LTFT / DAM / idle-adapt drift over weeks. The state arrays are already in the def; the missing piece is a long-cycle UI on top. No IP risk, pure infrastructure win, big diagnostic value (catches dropping injectors, MAF aging, vacuum-leak drift).
-2. **Per-cylinder knock dashboard** — split the cyl-1..4 noise tables into a real cylinder-comparison view with log overlay. Catches uneven fueling, weak coil-pack, knock-sensor placement issues that single-value views hide. Cylinder-count-aware: H4 (FA / EJ) gets a 2×2 grid, H6 (EZ30 / EZ36) gets 3×2; EG33 (SVX) is supported in degraded mode (no per-cyl FLKC in that firmware era — single-channel knock surface). Domain scaffold at `src/log/include/st/log/knock_dashboard.hpp`.
+2. **Per-cylinder knock dashboard** — split the cyl-1..4 noise tables into a real cylinder-comparison view with log overlay. Catches uneven fueling, weak coil-pack, knock-sensor placement issues that single-value views hide. Cylinder-count-aware: H4 (FA / EJ) gets a 2×2 grid, H6 (EZ30 / EZ36) gets 3×2; EG33 (SVX) is supported in degraded mode (no per-cyl FLKC in that firmware era — single-channel knock surface). Implementation: `src/log/{include/st/log/knock_dashboard.hpp,src/knock_dashboard.cpp}` (pure-domain types + windowed aggregator + CSV reader), `tests/unit/log/test_knock_dashboard.cpp` (10 cases), `subuwutuner-cli knock-snapshot` (text-mode dashboard), and a GUI panel in `subuwutuner-gui` under **View → Knock dashboard (preview)**. Try it without bringing your own log:
+
+   ```
+   subuwutuner-cli knock-snapshot --log fixtures/demo-knock-log.csv \
+       --rpm-col rpm --load-col load \
+       --flkc-cols flkc1,flkc2,flkc3,flkc4 \
+       --fbkc-cols fbkc1,fbkc2,fbkc3,fbkc4 \
+       --sample-rate-hz 5 --window-seconds 60
+   ```
+
+   The shipped fixture (`fixtures/demo-knock-log.csv`) is a synthetic 3rd-gear pull where cyl 1 picks up persistent knock retard and cyls 3-4 stay clean — the output should clearly flag cyl 1 as the outlier.
 3. **Cold-start tuning workflow** — define a methodology (target lambda by ECT, recommended timing pull by ambient) and a GUI mode that gates the cold-start tables behind a checklist. Atlas exposes the maps; nobody ships a workflow around them.
 4. **Boost-controller PID assistant** — fit the EBCS PID gains from a tip-in log. The table exists in every WRX def; the fitting methodology is absent from the community. Closes a real long-standing complaint (boost overshoot / undershoot on tip-in).
 
