@@ -203,11 +203,18 @@ def _insert_includes_line(pack_text: str, includes_line: str) -> str:
 
 
 def _regen_pack(pack_path: Path, master_cids: set[str],
-                only: set[str] | None) -> tuple[str, str]:
+                only: set[str] | None, *, dry_run: bool = False
+                ) -> tuple[str, str]:
     """Regenerate one pack. Returns (status, detail).
 
     status is one of "regen", "skip", "error", "no-change". Detail is a
     short human-readable explanation for logs.
+
+    `dry_run=True` runs the full pipeline (XML parse, defgen re-emit,
+    includes re-insertion, [pack] field preservation, no-op detection)
+    but skips the final write. The returned (status, detail) is
+    otherwise identical, so dry-run output accurately previews what a
+    live run would do — including preservation reports.
     """
     cid = pack_path.stem.upper()
     if only is not None and cid not in only:
@@ -255,8 +262,12 @@ def _regen_pack(pack_path: Path, master_cids: set[str],
     if new_text == existing_text:
         return ("no-change", "already in sync")
 
-    pack_path.write_text(new_text, encoding="utf-8")
-    detail = f"wrote {len(new_text)} bytes from {xml_path.name}"
+    if not dry_run:
+        pack_path.write_text(new_text, encoding="utf-8")
+        verb = "wrote"
+    else:
+        verb = "would write"
+    detail = f"{verb} {len(new_text)} bytes from {xml_path.name}"
     if preservations:
         preserved_summary = ", ".join(
             f"{field}={kept}" for field, kept, _ in preservations)
@@ -285,34 +296,27 @@ def main(argv: list[str] | None = None) -> int:
         if any(part in SKIP_DIRS for part in rel.parts) or pack.parent == definitions_dir:
             continue
 
-        if args.dry_run:
-            cid = pack.stem.upper()
-            target = (PER_CID_OVERRIDES[cid] if cid in PER_CID_OVERRIDES
-                      else MASTER_XML if cid in master_cids
-                      else None)
-            if target is None:
-                if only and cid not in only:
-                    continue
-                print(f"  [skip] {rel}: no source for {cid}")
-                counts["skip"] += 1
-                continue
-            if only and cid not in only:
-                continue
-            print(f"  [dry]  {rel} <- {target.name}")
-            counts["regen"] += 1
+        status, detail = _regen_pack(pack, master_cids, only,
+                                     dry_run=args.dry_run)
+        # --only filtering happens inside _regen_pack and returns "skip";
+        # don't count those as we'd never have considered them anyway.
+        if status == "skip" and only is not None and detail == "filtered out by --only":
             continue
-
-        status, detail = _regen_pack(pack, master_cids, only)
         counts[status] += 1
+
         if status == "error":
             errors.append((rel, detail))
             print(f"  [ERR]  {rel}: {detail}", file=sys.stderr)
         elif status == "regen":
-            print(f"  [ok]   {rel}: {detail}")
+            tag = "[dry]" if args.dry_run else "[ok] "
+            print(f"  {tag}  {rel}: {detail}")
+        elif status == "skip":
+            print(f"  [skip] {rel}: {detail}")
 
     print()
     print(f"summary: regen={counts['regen']} no-change={counts['no-change']} "
-          f"skip={counts['skip']} error={counts['error']}")
+          f"skip={counts['skip']} error={counts['error']}"
+          f"{' (dry-run, no files written)' if args.dry_run else ''}")
     if errors:
         return 1
     return 0
