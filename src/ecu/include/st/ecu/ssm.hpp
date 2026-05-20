@@ -48,21 +48,21 @@ namespace st::ecu::ssm {
 // Negative responses use RSP = 0x7F with a one-byte NRC; SsmClient maps
 // these to ErrorCode::EcuRejected with the NRC in the message.
 
-inline constexpr std::uint8_t kHeader             = 0x80;
-inline constexpr std::uint8_t kDestEcu            = 0x10;
-inline constexpr std::uint8_t kSrcTool            = 0xF0;
-inline constexpr std::uint8_t kCmdReadByAddress   = 0xA8;
-inline constexpr std::uint8_t kRespReadByAddress  = 0xE8;
-inline constexpr std::uint8_t kCmdWriteByAddress  = 0xB0;
+inline constexpr std::uint8_t kHeader = 0x80;
+inline constexpr std::uint8_t kDestEcu = 0x10;
+inline constexpr std::uint8_t kSrcTool = 0xF0;
+inline constexpr std::uint8_t kCmdReadByAddress = 0xA8;
+inline constexpr std::uint8_t kRespReadByAddress = 0xE8;
+inline constexpr std::uint8_t kCmdWriteByAddress = 0xB0;
 inline constexpr std::uint8_t kRespWriteByAddress = 0xF0;
-inline constexpr std::uint8_t kCmdBlockWrite      = 0xB8;
-inline constexpr std::uint8_t kRespBlockWrite     = 0xF8;
-inline constexpr std::uint8_t kNegativeResponse   = 0x7F;
-inline constexpr std::uint8_t kPadByte            = 0x00;
+inline constexpr std::uint8_t kCmdBlockWrite = 0xB8;
+inline constexpr std::uint8_t kRespBlockWrite = 0xF8;
+inline constexpr std::uint8_t kNegativeResponse = 0x7F;
+inline constexpr std::uint8_t kPadByte = 0x00;
 
 // Maximum number of data bytes in a single block-write frame, bounded by
 // the 8-bit LEN field. LEN = 1 (CMD) + 3 (addr) + N, so N <= 251.
-inline constexpr std::size_t  kMaxBlockWriteBytes = 251;
+inline constexpr std::size_t kMaxBlockWriteBytes = 251;
 
 // Maximum addressable address. SSM uses 24-bit memory addresses.
 inline constexpr std::uint32_t kMaxAddress = 0x00FFFFFFU;
@@ -73,14 +73,14 @@ inline constexpr std::uint32_t kMaxAddress = 0x00FFFFFFU;
 // Build the wire bytes for a multi-address read-by-address request.
 // Returns InvalidArgument if any address exceeds kMaxAddress, or if the
 // resulting payload would exceed what the LEN byte can encode.
-[[nodiscard]] Result<std::vector<std::uint8_t>> build_a8_request(
-    std::span<std::uint32_t const> addresses);
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+build_a8_request(std::span<std::uint32_t const> addresses);
 
 // Parse a response frame from the ECU, expecting `expected_n` data bytes.
 // Verifies the header, source/dest, length, response byte, and checksum.
 // Returns the N data bytes on success.
-[[nodiscard]] Result<std::vector<std::uint8_t>> parse_a8_response(
-    std::span<std::uint8_t const> resp, std::size_t expected_n);
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+parse_a8_response(std::span<std::uint8_t const> resp, std::size_t expected_n);
 
 // Build the wire bytes for a single-byte write-by-address request.
 // Frame: 80 10 F0 [LEN] B0 [addr_hi addr_med addr_low] [data] [CSUM]
@@ -88,8 +88,8 @@ inline constexpr std::uint32_t kMaxAddress = 0x00FFFFFFU;
 //
 // For multi-byte writes at consecutive addresses, use build_b8_request
 // instead.
-[[nodiscard]] Result<std::vector<std::uint8_t>> build_b0_request(
-    std::uint32_t address, std::uint8_t data);
+[[nodiscard]] Result<std::vector<std::uint8_t>> build_b0_request(std::uint32_t address,
+                                                                 std::uint8_t data);
 
 // Parse a write response. The ECU typically echoes the written byte, which
 // we surface to the caller so they can confirm the write took. Negative
@@ -111,29 +111,29 @@ inline constexpr std::uint32_t kMaxAddress = 0x00FFFFFFU;
 // path. Block opcodes are not fully consistent across all Subaru ECU
 // families; this framing matches publicly-documented modern (CAN-era)
 // implementations and needs validation against a real ECU.
-[[nodiscard]] Result<std::vector<std::uint8_t>> build_b8_request(
-    std::uint32_t address, std::span<std::uint8_t const> data);
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+build_b8_request(std::uint32_t address, std::span<std::uint8_t const> data);
 
 // Parse a block-write response. The ECU echoes all N written bytes; we
 // surface them so the caller can verify each one against what it sent.
 // Negative responses (NRC) become EcuRejected like for A8 / B0.
-[[nodiscard]] Result<std::vector<std::uint8_t>> parse_b8_response(
-    std::span<std::uint8_t const> resp, std::size_t expected_n);
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+parse_b8_response(std::span<std::uint8_t const> resp, std::size_t expected_n);
 
 // High-level client that wraps the framing and talks to a transport.
 class SsmClient {
-  public:
+public:
     explicit SsmClient(transport::ITransport &t) noexcept : transport_{&t} {}
 
     // Read one byte per address. The returned vector has size addresses.size().
-    [[nodiscard]] Result<std::vector<std::uint8_t>> read(
-        std::span<std::uint32_t const> addresses,
-        std::chrono::milliseconds      timeout = std::chrono::milliseconds{500});
+    [[nodiscard]] Result<std::vector<std::uint8_t>>
+    read(std::span<std::uint32_t const> addresses,
+         std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
 
     // Read N contiguous bytes starting at base_address. Convenience over read().
-    [[nodiscard]] Result<std::vector<std::uint8_t>> read_block(
-        std::uint32_t base_address, std::size_t length,
-        std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
+    [[nodiscard]] Result<std::vector<std::uint8_t>>
+    read_block(std::uint32_t base_address, std::size_t length,
+               std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
 
     // Write a single byte to the given ECU address. Returns the byte the ECU
     // echoed back; callers should verify it matches what they sent.
@@ -141,21 +141,20 @@ class SsmClient {
     // Important: this is RAM/scratchpad write semantics. Flashing the ECU's
     // program memory is a separate Phase 4 routine with brick-protection and
     // sector-erase steps; do NOT use write() for that.
-    [[nodiscard]] Result<std::uint8_t> write(
-        std::uint32_t address, std::uint8_t data,
-        std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
+    [[nodiscard]] Result<std::uint8_t>
+    write(std::uint32_t address, std::uint8_t data,
+          std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
 
     // Write `data.size()` consecutive bytes starting at `address`. The ECU
     // echoes every written byte; the returned vector is that echo so the
     // caller can verify the write took byte-by-byte. Same RAM-only
     // semantics as write(). For payloads larger than kMaxBlockWriteBytes,
     // the caller should chunk and call write_block() multiple times.
-    [[nodiscard]] Result<std::vector<std::uint8_t>> write_block(
-        std::uint32_t                 address,
-        std::span<std::uint8_t const> data,
-        std::chrono::milliseconds     timeout = std::chrono::milliseconds{1000});
+    [[nodiscard]] Result<std::vector<std::uint8_t>>
+    write_block(std::uint32_t address, std::span<std::uint8_t const> data,
+                std::chrono::milliseconds timeout = std::chrono::milliseconds{1000});
 
-  private:
+private:
     transport::ITransport *transport_;
 };
 

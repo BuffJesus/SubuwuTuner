@@ -20,15 +20,15 @@ namespace {
 struct TempDir {
     std::filesystem::path path;
     TempDir() {
-        path = std::filesystem::temp_directory_path()
-             / ("st_project_test_" + std::to_string(std::random_device{}()));
+        path = std::filesystem::temp_directory_path() /
+               ("st_project_test_" + std::to_string(std::random_device{}()));
         std::filesystem::create_directories(path);
     }
     ~TempDir() {
         std::error_code ec;
         std::filesystem::remove_all(path, ec);
     }
-    TempDir(TempDir const &)            = delete;
+    TempDir(TempDir const &) = delete;
     TempDir &operator=(TempDir const &) = delete;
 };
 
@@ -67,21 +67,24 @@ cid_match   = "AS80U"
 std::vector<std::uint8_t> make_rom_bytes() {
     std::vector<std::uint8_t> bytes(64, 0xFF);
     // CID at offset 0 = "AS80U"
-    bytes[0] = 'A'; bytes[1] = 'S'; bytes[2] = '8'; bytes[3] = '0'; bytes[4] = 'U';
+    bytes[0] = 'A';
+    bytes[1] = 'S';
+    bytes[2] = '8';
+    bytes[3] = '0';
+    bytes[4] = 'U';
     return bytes;
 }
 
 } // namespace
 
-TEST_CASE("Project::create writes source.bin + working.bin + project.toml",
-          "[project][create]") {
+TEST_CASE("Project::create writes source.bin + working.bin + project.toml", "[project][create]") {
     TempDir td;
-    auto const  pack_dir = make_pack(td.path / "pack");
-    auto const  rom_path = td.path / "stock.bin";
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
     write_bytes(rom_path, make_rom_bytes());
 
     auto const proj_dir = td.path / "mytune.stune";
-    auto       p        = st::Project::create(proj_dir, rom_path, pack_dir, "My Tune");
+    auto p = st::Project::create(proj_dir, rom_path, pack_dir, "My Tune");
     REQUIRE(p.has_value());
 
     REQUIRE(std::filesystem::exists(proj_dir / "project.toml"));
@@ -99,11 +102,10 @@ TEST_CASE("Project::create writes source.bin + working.bin + project.toml",
     REQUIRE(p->definition().pack().id == "test-pack");
 }
 
-TEST_CASE("Project::create refuses to populate a non-empty existing dir",
-          "[project][create]") {
+TEST_CASE("Project::create refuses to populate a non-empty existing dir", "[project][create]") {
     TempDir td;
-    auto const  pack_dir = make_pack(td.path / "pack");
-    auto const  rom_path = td.path / "stock.bin";
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
     write_bytes(rom_path, make_rom_bytes());
 
     // Pre-populate target dir.
@@ -116,8 +118,7 @@ TEST_CASE("Project::create refuses to populate a non-empty existing dir",
     REQUIRE(p.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("Project::open round-trips through Project::create",
-          "[project][open]") {
+TEST_CASE("Project::open round-trips through Project::create", "[project][open]") {
     TempDir td;
     auto const pack_dir = make_pack(td.path / "pack");
     auto const rom_path = td.path / "stock.bin";
@@ -137,11 +138,10 @@ TEST_CASE("Project::open round-trips through Project::create",
     REQUIRE(reopened->definition().pack().id == "test-pack");
 }
 
-TEST_CASE("Project::save_working_rom persists in-memory edits to disk",
-          "[project][save]") {
+TEST_CASE("Project::save_working_rom persists in-memory edits to disk", "[project][save]") {
     TempDir td;
-    auto const  pack_dir = make_pack(td.path / "pack");
-    auto const  rom_path = td.path / "stock.bin";
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
     write_bytes(rom_path, make_rom_bytes());
     auto const proj_dir = td.path / "save.stune";
 
@@ -164,19 +164,17 @@ TEST_CASE("Project::save_working_rom persists in-memory edits to disk",
     REQUIRE(p2->source_rom().data()[10] == 0xFF);
 }
 
-TEST_CASE("Project::open refuses a non-project directory",
-          "[project][open]") {
+TEST_CASE("Project::open refuses a non-project directory", "[project][open]") {
     TempDir td;
     auto const p = st::Project::open(td.path);
     REQUIRE_FALSE(p.has_value());
     REQUIRE(p.error().code() == st::ErrorCode::FileNotFound);
 }
 
-TEST_CASE("Project history round-trips through edits.toml",
-          "[project][history]") {
+TEST_CASE("Project history round-trips through edits.toml", "[project][history]") {
     TempDir td;
-    auto const  pack_dir = make_pack(td.path / "pack");
-    auto const  rom_path = td.path / "stock.bin";
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
     write_bytes(rom_path, make_rom_bytes());
     auto const proj_dir = td.path / "h.stune";
 
@@ -188,23 +186,21 @@ TEST_CASE("Project history round-trips through edits.toml",
         // a unit test we forge them so we know exactly what to expect on
         // reload.)
         st::edit::Snapshot before;
-        before.rect   = {0, 0, 0, 1};
+        before.rect = {0, 0, 0, 1};
         before.values = {{1.0, 2.0}};
         st::edit::Snapshot after;
-        after.rect   = {0, 0, 0, 1};
+        after.rect = {0, 0, 0, 1};
         after.values = {{10.0, 20.0}};
 
-        p->history().record(st::edit::Edit::table("fuel_map", before, after,
-                                                  "set 10/20"));
+        p->history().record(st::edit::Edit::table("fuel_map", before, after, "set 10/20"));
 
         st::edit::Snapshot before2;
-        before2.rect   = {1, 1, 0, 1};
+        before2.rect = {1, 1, 0, 1};
         before2.values = {{5.0, 6.0}};
         st::edit::Snapshot after2;
-        after2.rect   = {1, 1, 0, 1};
+        after2.rect = {1, 1, 0, 1};
         after2.values = {{50.0, 60.0}};
-        p->history().record(st::edit::Edit::table("boost_map", before2, after2,
-                                                  "set 50/60"));
+        p->history().record(st::edit::Edit::table("boost_map", before2, after2, "set 50/60"));
 
         REQUIRE(p->save_working_rom().has_value());
         REQUIRE(std::filesystem::exists(proj_dir / "edits.toml"));
@@ -223,17 +219,14 @@ TEST_CASE("Project history round-trips through edits.toml",
         REQUIRE(te0 != nullptr);
         REQUIRE(te0->table_id == "fuel_map");
         REQUIRE(records[0].description == "set 10/20");
-        REQUIRE(te0->before.values
-                == std::vector<std::vector<double>>{{1.0, 2.0}});
-        REQUIRE(te0->after.values
-                == std::vector<std::vector<double>>{{10.0, 20.0}});
+        REQUIRE(te0->before.values == std::vector<std::vector<double>>{{1.0, 2.0}});
+        REQUIRE(te0->after.values == std::vector<std::vector<double>>{{10.0, 20.0}});
     }
     {
         auto const *te1 = records[1].as_table();
         REQUIRE(te1 != nullptr);
         REQUIRE(te1->table_id == "boost_map");
-        REQUIRE(te1->after.values
-                == std::vector<std::vector<double>>{{50.0, 60.0}});
+        REQUIRE(te1->after.values == std::vector<std::vector<double>>{{50.0, 60.0}});
         REQUIRE(te1->after.rect.r_start == 1);
         REQUIRE(te1->after.rect.c_end == 1);
     }
@@ -246,8 +239,8 @@ TEST_CASE("Project history round-trips through edits.toml",
 TEST_CASE("Project history round-trips a ByteEdit through edits.toml",
           "[project][history][byte_edit]") {
     TempDir td;
-    auto const  pack_dir = make_pack(td.path / "pack");
-    auto const  rom_path = td.path / "stock.bin";
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
     write_bytes(rom_path, make_rom_bytes());
     auto const proj_dir = td.path / "byteedit.stune";
 
@@ -259,9 +252,8 @@ TEST_CASE("Project history round-trips a ByteEdit through edits.toml",
         // two adjacent ROM bytes. The Project layer should serialize it
         // through edits.toml without caring about the semantics — that's
         // the contract.
-        p->history().record(st::edit::Edit::bytes(
-            {{0x10, 0xFF, 0xFE}, {0x11, 0x00, 0x01}},
-            "disable DTC P0420, P0430"));
+        p->history().record(st::edit::Edit::bytes({{0x10, 0xFF, 0xFE}, {0x11, 0x00, 0x01}},
+                                                  "disable DTC P0420, P0430"));
 
         REQUIRE(p->save_working_rom().has_value());
         REQUIRE(std::filesystem::exists(proj_dir / "edits.toml"));
@@ -288,8 +280,8 @@ TEST_CASE("Project history round-trips a ByteEdit through edits.toml",
 TEST_CASE("Project history round-trips mixed TableEdit + ByteEdit records",
           "[project][history][byte_edit]") {
     TempDir td;
-    auto const  pack_dir = make_pack(td.path / "pack");
-    auto const  rom_path = td.path / "stock.bin";
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
     write_bytes(rom_path, make_rom_bytes());
     auto const proj_dir = td.path / "mixed.stune";
 
@@ -298,16 +290,14 @@ TEST_CASE("Project history round-trips mixed TableEdit + ByteEdit records",
         REQUIRE(p.has_value());
 
         st::edit::Snapshot before;
-        before.rect   = {0, 0, 0, 1};
+        before.rect = {0, 0, 0, 1};
         before.values = {{1.0, 2.0}};
         st::edit::Snapshot after;
-        after.rect   = {0, 0, 0, 1};
+        after.rect = {0, 0, 0, 1};
         after.values = {{10.0, 20.0}};
-        p->history().record(st::edit::Edit::table(
-            "fuel_map", before, after, "set 10/20"));
+        p->history().record(st::edit::Edit::table("fuel_map", before, after, "set 10/20"));
 
-        p->history().record(st::edit::Edit::bytes(
-            {{0x10, 0xFF, 0xFE}}, "disable DTC P0420"));
+        p->history().record(st::edit::Edit::bytes({{0x10, 0xFF, 0xFE}}, "disable DTC P0420"));
 
         REQUIRE(p->save_working_rom().has_value());
     }
@@ -321,8 +311,7 @@ TEST_CASE("Project history round-trips mixed TableEdit + ByteEdit records",
         auto const *te = records[0].as_table();
         REQUIRE(te != nullptr);
         REQUIRE(te->table_id == "fuel_map");
-        REQUIRE(te->after.values
-                == std::vector<std::vector<double>>{{10.0, 20.0}});
+        REQUIRE(te->after.values == std::vector<std::vector<double>>{{10.0, 20.0}});
     }
     {
         auto const *be = records[1].as_byte();
@@ -335,8 +324,8 @@ TEST_CASE("Project history round-trips mixed TableEdit + ByteEdit records",
 TEST_CASE("Project history loads v1 schema (TableEdit-only) edits.toml unchanged",
           "[project][history][byte_edit][backward_compat]") {
     TempDir td;
-    auto const  pack_dir = make_pack(td.path / "pack");
-    auto const  rom_path = td.path / "stock.bin";
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
     write_bytes(rom_path, make_rom_bytes());
     auto const proj_dir = td.path / "legacy.stune";
 
@@ -375,11 +364,10 @@ cursor = 1
     REQUIRE(te->table_id == "fuel_map");
 }
 
-TEST_CASE("Project::open refuses edits.toml schema_version above 2",
-          "[project][history][schema]") {
+TEST_CASE("Project::open refuses edits.toml schema_version above 2", "[project][history][schema]") {
     TempDir td;
-    auto const  pack_dir = make_pack(td.path / "pack");
-    auto const  rom_path = td.path / "stock.bin";
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
     write_bytes(rom_path, make_rom_bytes());
     auto const proj_dir = td.path / "futureedits.stune";
 
@@ -398,15 +386,14 @@ cursor = 0
     REQUIRE(reopened.error().code() == st::ErrorCode::UnsupportedVersion);
 }
 
-TEST_CASE("Project history empty on a fresh project until edits land",
-          "[project][history]") {
+TEST_CASE("Project history empty on a fresh project until edits land", "[project][history]") {
     TempDir td;
-    auto const  pack_dir = make_pack(td.path / "pack");
-    auto const  rom_path = td.path / "stock.bin";
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
     write_bytes(rom_path, make_rom_bytes());
 
     auto const proj_dir = td.path / "fresh.stune";
-    auto       p        = st::Project::create(proj_dir, rom_path, pack_dir, "fresh");
+    auto p = st::Project::create(proj_dir, rom_path, pack_dir, "fresh");
     REQUIRE(p.has_value());
     REQUIRE(p->history().size() == 0);
 
@@ -415,11 +402,10 @@ TEST_CASE("Project history empty on a fresh project until edits land",
     REQUIRE_FALSE(std::filesystem::exists(proj_dir / "edits.toml"));
 }
 
-TEST_CASE("Project::open refuses a future schema_version",
-          "[project][open][schema]") {
+TEST_CASE("Project::open refuses a future schema_version", "[project][open][schema]") {
     TempDir td;
-    auto const  pack_dir = make_pack(td.path / "pack");
-    auto const  rom_path = td.path / "stock.bin";
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
     write_bytes(rom_path, make_rom_bytes());
 
     auto const proj_dir = td.path / "future.stune";
@@ -451,7 +437,6 @@ path = "../pack"
     REQUIRE(p.error().code() == st::ErrorCode::UnsupportedVersion);
 }
 
-
 // ---- policy_profile ------------------------------------------------------
 
 TEST_CASE("Project defaults policy_profile to MotorsportOnly", "[project][policy]") {
@@ -473,7 +458,7 @@ TEST_CASE("Project::open reads policy_profile from project.toml", "[project][pol
 
     auto const proj_dir = td.path / "with_profile.stune";
     std::filesystem::create_directories(proj_dir);
-    write_bytes(proj_dir / "source.bin",  make_rom_bytes());
+    write_bytes(proj_dir / "source.bin", make_rom_bytes());
     write_bytes(proj_dir / "working.bin", make_rom_bytes());
     write_text(proj_dir / "project.toml", R"toml(
 [project]
@@ -499,13 +484,12 @@ path = "../pack"
     REQUIRE(p->policy_profile() == st::policy::Profile::EuRoadworthy);
 }
 
-TEST_CASE("Project::open rejects unknown policy_profile string",
-          "[project][policy]") {
+TEST_CASE("Project::open rejects unknown policy_profile string", "[project][policy]") {
     TempDir td;
     auto const pack_dir = make_pack(td.path / "pack");
     auto const proj_dir = td.path / "bogus.stune";
     std::filesystem::create_directories(proj_dir);
-    write_bytes(proj_dir / "source.bin",  make_rom_bytes());
+    write_bytes(proj_dir / "source.bin", make_rom_bytes());
     write_bytes(proj_dir / "working.bin", make_rom_bytes());
     write_text(proj_dir / "project.toml", R"toml(
 [project]
@@ -531,15 +515,13 @@ path = "../pack"
     REQUIRE(p.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("Project::save_metadata round-trips policy_profile",
-          "[project][policy]") {
+TEST_CASE("Project::save_metadata round-trips policy_profile", "[project][policy]") {
     TempDir td;
     auto const pack_dir = make_pack(td.path / "pack");
     write_bytes(td.path / "stock.bin", make_rom_bytes());
 
     auto const proj_dir = td.path / "set_profile.stune";
-    auto       r = st::Project::create(proj_dir, td.path / "stock.bin",
-                                        pack_dir, "Set");
+    auto r = st::Project::create(proj_dir, td.path / "stock.bin", pack_dir, "Set");
     REQUIRE(r.has_value());
     r->set_policy_profile(st::policy::Profile::CaliforniaUs);
     REQUIRE(r->save_metadata().has_value());
@@ -555,8 +537,7 @@ TEST_CASE("Project::save_metadata round-trips policy_profile",
 // cover the format invariants both consumers rely on.
 // --------------------------------------------------------------------------
 
-TEST_CASE("parse_edit_csv parses a minimal row,col,value block",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv parses a minimal row,col,value block", "[project][edit_csv]") {
     st::EditCsvParseOptions opts;
     opts.table_rows = 4;
     opts.table_cols = 4;
@@ -570,93 +551,88 @@ TEST_CASE("parse_edit_csv parses a minimal row,col,value block",
     REQUIRE(r->cells[2].value == -1.5);
 }
 
-TEST_CASE("parse_edit_csv tolerates a non-numeric header row",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv tolerates a non-numeric header row", "[project][edit_csv]") {
     st::EditCsvParseOptions opts;
-    opts.table_rows = 2; opts.table_cols = 2;
+    opts.table_rows = 2;
+    opts.table_cols = 2;
     auto r = st::parse_edit_csv("row,col,value\n0,1,3.14\n", opts);
     REQUIRE(r.has_value());
     REQUIRE(r->cells.size() == 1);
     REQUIRE(r->cells[0].value == 3.14);
 }
 
-TEST_CASE("parse_edit_csv skips blank lines and # comments",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv skips blank lines and # comments", "[project][edit_csv]") {
     st::EditCsvParseOptions opts;
-    opts.table_rows = 2; opts.table_cols = 2;
-    auto r = st::parse_edit_csv("\n# a comment\n  \n0,0,1.0\n# trailing\n",
-                                 opts);
+    opts.table_rows = 2;
+    opts.table_cols = 2;
+    auto r = st::parse_edit_csv("\n# a comment\n  \n0,0,1.0\n# trailing\n", opts);
     REQUIRE(r.has_value());
     REQUIRE(r->cells.size() == 1);
     REQUIRE(r->cells[0].value == 1.0);
 }
 
-TEST_CASE("parse_edit_csv tolerates CRLF line endings",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv tolerates CRLF line endings", "[project][edit_csv]") {
     st::EditCsvParseOptions opts;
-    opts.table_rows = 1; opts.table_cols = 2;
+    opts.table_rows = 1;
+    opts.table_cols = 2;
     auto r = st::parse_edit_csv("0,0,1.0\r\n0,1,2.0\r\n", opts);
     REQUIRE(r.has_value());
     REQUIRE(r->cells.size() == 2);
 }
 
-TEST_CASE("parse_edit_csv strips inline `#` comment from a data line",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv strips inline `#` comment from a data line", "[project][edit_csv]") {
     st::EditCsvParseOptions opts;
-    opts.table_rows = 1; opts.table_cols = 1;
+    opts.table_rows = 1;
+    opts.table_cols = 1;
     auto r = st::parse_edit_csv("0,0,5.0 # trailing comment\n", opts);
     REQUIRE(r.has_value());
     REQUIRE(r->cells.size() == 1);
     REQUIRE(r->cells[0].value == 5.0);
 }
 
-TEST_CASE("parse_edit_csv warns on pack_id mismatch but still parses",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv warns on pack_id mismatch but still parses", "[project][edit_csv]") {
     st::EditCsvParseOptions opts;
     opts.expected_pack_id = "current_pack";
-    opts.table_rows = 1; opts.table_cols = 1;
-    auto r = st::parse_edit_csv(
-        "# pack_id = \"some_other_pack\"\n0,0,1.0\n", opts);
+    opts.table_rows = 1;
+    opts.table_cols = 1;
+    auto r = st::parse_edit_csv("# pack_id = \"some_other_pack\"\n0,0,1.0\n", opts);
     REQUIRE(r.has_value());
     REQUIRE(r->warnings.size() == 1);
     REQUIRE(r->warnings[0].message.find("some_other_pack") != std::string::npos);
     REQUIRE(r->cells.size() == 1);
 }
 
-TEST_CASE("parse_edit_csv does NOT warn when pack_id matches",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv does NOT warn when pack_id matches", "[project][edit_csv]") {
     st::EditCsvParseOptions opts;
     opts.expected_pack_id = "pack_xyz";
-    opts.table_rows = 1; opts.table_cols = 1;
+    opts.table_rows = 1;
+    opts.table_cols = 1;
     auto r = st::parse_edit_csv("# pack_id = \"pack_xyz\"\n0,0,1.0\n", opts);
     REQUIRE(r.has_value());
     REQUIRE(r->warnings.empty());
 }
 
-TEST_CASE("parse_edit_csv refuses on table id mismatch",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv refuses on table id mismatch", "[project][edit_csv]") {
     st::EditCsvParseOptions opts;
     opts.expected_table_id = "fuel_map";
-    auto r = st::parse_edit_csv("# table = \"ignition_main\"\n0,0,1.0\n",
-                                 opts);
+    auto r = st::parse_edit_csv("# table = \"ignition_main\"\n0,0,1.0\n", opts);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
     REQUIRE(r.error().to_string().find("ignition_main") != std::string::npos);
 }
 
-TEST_CASE("parse_edit_csv accepts matching table id without warning",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv accepts matching table id without warning", "[project][edit_csv]") {
     st::EditCsvParseOptions opts;
     opts.expected_table_id = "fuel_map";
-    opts.table_rows = 1; opts.table_cols = 1;
+    opts.table_rows = 1;
+    opts.table_cols = 1;
     auto r = st::parse_edit_csv("# table = \"fuel_map\"\n0,0,1.0\n", opts);
     REQUIRE(r.has_value());
     REQUIRE(r->warnings.empty());
     REQUIRE(r->cells.size() == 1);
 }
 
-TEST_CASE("parse_edit_csv errors on cells outside table bounds",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv errors on cells outside table bounds", "[project][edit_csv]") {
     st::EditCsvParseOptions opts;
     opts.table_rows = 2;
     opts.table_cols = 2;
@@ -665,8 +641,7 @@ TEST_CASE("parse_edit_csv errors on cells outside table bounds",
     REQUIRE(r.error().code() == st::ErrorCode::OutOfRange);
 }
 
-TEST_CASE("parse_edit_csv skips bounds check when dims are zero",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv skips bounds check when dims are zero", "[project][edit_csv]") {
     // Both dims zero → bounds disabled. Caller validates separately.
     st::EditCsvParseOptions opts;
     auto r = st::parse_edit_csv("0,0,1.0\n100,200,2.0\n", opts);
@@ -674,38 +649,33 @@ TEST_CASE("parse_edit_csv skips bounds check when dims are zero",
     REQUIRE(r->cells.size() == 2);
 }
 
-TEST_CASE("parse_edit_csv rejects rows with fewer than 3 fields",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv rejects rows with fewer than 3 fields", "[project][edit_csv]") {
     auto r = st::parse_edit_csv("0,0\n", {});
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("parse_edit_csv rejects non-numeric value",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv rejects non-numeric value", "[project][edit_csv]") {
     auto r = st::parse_edit_csv("0,0,abc\n", {});
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("parse_edit_csv rejects mid-stream non-numeric row/col",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv rejects mid-stream non-numeric row/col", "[project][edit_csv]") {
     // First-line header tolerance only applies before any edit is parsed.
     auto r = st::parse_edit_csv("0,0,1.0\nbad,col,2.0\n", {});
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("parse_edit_csv returns empty result for an empty input",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv returns empty result for an empty input", "[project][edit_csv]") {
     auto r = st::parse_edit_csv("", {});
     REQUIRE(r.has_value());
     REQUIRE(r->cells.empty());
     REQUIRE(r->warnings.empty());
 }
 
-TEST_CASE("parse_edit_csv handles file without trailing newline",
-          "[project][edit_csv]") {
+TEST_CASE("parse_edit_csv handles file without trailing newline", "[project][edit_csv]") {
     auto r = st::parse_edit_csv("0,0,1.5", {});
     REQUIRE(r.has_value());
     REQUIRE(r->cells.size() == 1);

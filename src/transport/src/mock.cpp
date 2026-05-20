@@ -42,9 +42,10 @@ void MockTransport::emit_streaming_frame(std::vector<std::uint8_t> data) {
         std::lock_guard const lk{mu_};
         cb = stream_cb_;
     }
-    if (!cb) return;
+    if (!cb)
+        return;
     Frame f;
-    f.data    = std::move(data);
+    f.data = std::move(data);
     f.arrived = std::chrono::steady_clock::now();
     cb(f);
 }
@@ -52,18 +53,18 @@ void MockTransport::emit_streaming_frame(std::vector<std::uint8_t> data) {
 Status MockTransport::open(LinkConfig const &cfg) {
     std::lock_guard const lk{mu_};
     if (pending_error_.has_value()) {
-        auto e         = std::move(*pending_error_);
+        auto e = std::move(*pending_error_);
         pending_error_ = std::nullopt;
         return failure(e.code, std::move(e.message));
     }
     open_ = true;
-    cfg_  = cfg;
+    cfg_ = cfg;
     return ok();
 }
 
 Status MockTransport::close() {
     std::lock_guard const lk{mu_};
-    open_      = false;
+    open_ = false;
     stream_cb_ = {};
     return ok();
 }
@@ -75,7 +76,7 @@ Result<Frame> MockTransport::send_recv(std::span<std::uint8_t const> payload,
         return failure(ErrorCode::TransportUnavailable, "mock is not open");
     }
     if (pending_error_.has_value()) {
-        auto e         = std::move(*pending_error_);
+        auto e = std::move(*pending_error_);
         pending_error_ = std::nullopt;
         return failure(e.code, std::move(e.message));
     }
@@ -90,7 +91,7 @@ Result<Frame> MockTransport::send_recv(std::span<std::uint8_t const> payload,
                        "send_recv payload did not match next queued expectation");
     }
     Frame f;
-    f.data    = std::move(ex.response);
+    f.data = std::move(ex.response);
     f.arrived = std::chrono::steady_clock::now();
     return f;
 }
@@ -101,7 +102,7 @@ Status MockTransport::send(std::span<std::uint8_t const> payload) {
         return failure(ErrorCode::TransportUnavailable, "mock is not open");
     }
     if (pending_error_.has_value()) {
-        auto e         = std::move(*pending_error_);
+        auto e = std::move(*pending_error_);
         pending_error_ = std::nullopt;
         return failure(e.code, std::move(e.message));
     }

@@ -33,8 +33,8 @@ namespace {
 
 std::string iso8601_utc_now() {
     auto const now = std::chrono::system_clock::now();
-    auto const tt  = std::chrono::system_clock::to_time_t(now);
-    std::tm    tm{};
+    auto const tt = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
 #if defined(_WIN32)
     gmtime_s(&tm, &tt);
 #else
@@ -66,7 +66,6 @@ Status copy_bytes(std::filesystem::path const &src, std::filesystem::path const 
     }
     return ok();
 }
-
 
 // ---- History serialization ---------------------------------------------
 // edits.toml schema:
@@ -101,8 +100,7 @@ Status copy_bytes(std::filesystem::path const &src, std::filesystem::path const 
 // `byte_changes` ⇒ ByteEdit. v1 files are pure TableEdit and load
 // unchanged.
 
-void render_snapshot(std::ostringstream &ss, char const *name,
-                     edit::Snapshot const &s) {
+void render_snapshot(std::ostringstream &ss, char const *name, edit::Snapshot const &s) {
     ss << "  [edit." << name << "]\n";
     ss << "  r_start = " << s.rect.r_start << "\n";
     ss << "  r_end   = " << s.rect.r_end << "\n";
@@ -112,7 +110,8 @@ void render_snapshot(std::ostringstream &ss, char const *name,
     for (auto const &row : s.values) {
         ss << "    [";
         for (std::size_t i = 0; i < row.size(); ++i) {
-            if (i > 0) ss << ", ";
+            if (i > 0)
+                ss << ", ";
             ss << row[i];
         }
         ss << "],\n";
@@ -137,10 +136,8 @@ std::string render_history_toml(edit::History const &h) {
             for (auto const &c : b->changes) {
                 ss << "  [[edit.byte_changes]]\n";
                 ss << "    address = " << c.address << "\n";
-                ss << "    before  = "
-                   << static_cast<unsigned>(c.before) << "\n";
-                ss << "    after   = "
-                   << static_cast<unsigned>(c.after) << "\n";
+                ss << "    before  = " << static_cast<unsigned>(c.before) << "\n";
+                ss << "    after   = " << static_cast<unsigned>(c.after) << "\n";
             }
         }
     }
@@ -150,9 +147,9 @@ std::string render_history_toml(edit::History const &h) {
 Result<edit::Snapshot> parse_snapshot(toml::table const &t) {
     edit::Snapshot s;
     s.rect.r_start = static_cast<std::size_t>(t["r_start"].value_or<std::int64_t>(0));
-    s.rect.r_end   = static_cast<std::size_t>(t["r_end"].value_or<std::int64_t>(0));
+    s.rect.r_end = static_cast<std::size_t>(t["r_end"].value_or<std::int64_t>(0));
     s.rect.c_start = static_cast<std::size_t>(t["c_start"].value_or<std::int64_t>(0));
-    s.rect.c_end   = static_cast<std::size_t>(t["c_end"].value_or<std::int64_t>(0));
+    s.rect.c_end = static_cast<std::size_t>(t["c_end"].value_or<std::int64_t>(0));
 
     auto const *rows = t["values"].as_array();
     if (rows == nullptr) {
@@ -194,8 +191,7 @@ Result<edit::History> parse_history_toml(std::string_view text) {
         return failure(ErrorCode::UnsupportedVersion,
                        "edits.toml schema_version " + std::to_string(schema) + " > 2");
     }
-    auto const cursor =
-        static_cast<std::size_t>(tbl["cursor"].value_or<std::int64_t>(0));
+    auto const cursor = static_cast<std::size_t>(tbl["cursor"].value_or<std::int64_t>(0));
 
     std::vector<edit::Edit> edits;
     if (auto const *arr = tbl["edit"].as_array(); arr != nullptr) {
@@ -222,20 +218,16 @@ Result<edit::History> parse_history_toml(std::string_view text) {
                                        "[[edit.byte_changes]] element is not a table");
                     }
                     edit::ByteEdit::Change c{};
-                    c.address = static_cast<std::size_t>(
-                        (*ct)["address"].value_or<std::int64_t>(0));
-                    auto const before_raw =
-                        (*ct)["before"].value_or<std::int64_t>(-1);
-                    auto const after_raw =
-                        (*ct)["after"].value_or<std::int64_t>(-1);
-                    if (before_raw < 0 || before_raw > 255
-                        || after_raw < 0 || after_raw > 255) {
-                        return failure(ErrorCode::ParseError,
-                                       "[[edit.byte_changes]] before/after "
-                                       "must be 0..255");
+                    c.address =
+                        static_cast<std::size_t>((*ct)["address"].value_or<std::int64_t>(0));
+                    auto const before_raw = (*ct)["before"].value_or<std::int64_t>(-1);
+                    auto const after_raw = (*ct)["after"].value_or<std::int64_t>(-1);
+                    if (before_raw < 0 || before_raw > 255 || after_raw < 0 || after_raw > 255) {
+                        return failure(ErrorCode::ParseError, "[[edit.byte_changes]] before/after "
+                                                              "must be 0..255");
                     }
                     c.before = static_cast<std::uint8_t>(before_raw);
-                    c.after  = static_cast<std::uint8_t>(after_raw);
+                    c.after = static_cast<std::uint8_t>(after_raw);
                     b.changes.push_back(c);
                 }
                 e.payload = std::move(b);
@@ -244,17 +236,19 @@ Result<edit::History> parse_history_toml(std::string_view text) {
                 t.table_id = (*et)["table_id"].value_or<std::string>("");
 
                 auto const *before_t = (*et)["before"].as_table();
-                auto const *after_t  = (*et)["after"].as_table();
+                auto const *after_t = (*et)["after"].as_table();
                 if (before_t == nullptr || after_t == nullptr) {
                     return failure(ErrorCode::ParseError,
                                    "[[edit]] missing [edit.before] or [edit.after]");
                 }
                 auto before_r = parse_snapshot(*before_t);
-                if (!before_r.has_value()) return failure(before_r.error());
+                if (!before_r.has_value())
+                    return failure(before_r.error());
                 auto after_r = parse_snapshot(*after_t);
-                if (!after_r.has_value()) return failure(after_r.error());
+                if (!after_r.has_value())
+                    return failure(after_r.error());
                 t.before = std::move(*before_r);
-                t.after  = std::move(*after_r);
+                t.after = std::move(*after_r);
                 e.payload = std::move(t);
             }
             edits.push_back(std::move(e));
@@ -267,13 +261,12 @@ Result<edit::History> parse_history_toml(std::string_view text) {
 }
 
 std::string render_project_toml(Project const &p, std::uint32_t source_crc32,
-                                std::uint32_t              working_crc32,
-                                std::string const &        created,
+                                std::uint32_t working_crc32, std::string const &created,
                                 std::filesystem::path const &source_rel,
                                 std::filesystem::path const &working_rel,
                                 std::filesystem::path const &def_rel) {
     std::ostringstream ss;
-    auto const         emit_string = [&](std::string_view k, std::string_view v) {
+    auto const emit_string = [&](std::string_view k, std::string_view v) {
         ss << k << " = \"";
         for (char c : v) {
             if (c == '"' || c == '\\') {
@@ -309,13 +302,12 @@ std::string render_project_toml(Project const &p, std::uint32_t source_crc32,
 Result<Project> Project::create(std::filesystem::path const &project_dir,
                                 std::filesystem::path const &source_rom_path,
                                 std::filesystem::path const &definition_path,
-                                std::string                  display_name) {
+                                std::string display_name) {
     std::error_code ec;
     if (std::filesystem::exists(project_dir, ec)) {
         if (!std::filesystem::is_directory(project_dir, ec) || ec) {
             return failure(ErrorCode::InvalidArgument,
-                           "project path exists and is not a directory: "
-                               + project_dir.string());
+                           "project path exists and is not a directory: " + project_dir.string());
         }
         if (!std::filesystem::is_empty(project_dir, ec) || ec) {
             return failure(ErrorCode::InvalidArgument,
@@ -330,30 +322,31 @@ Result<Project> Project::create(std::filesystem::path const &project_dir,
     }
 
     auto source_load = Rom::from_file(source_rom_path);
-    if (!source_load.has_value()) return failure(source_load.error());
+    if (!source_load.has_value())
+        return failure(source_load.error());
 
     auto def_load = Definition::from_file(definition_path);
-    if (!def_load.has_value()) return failure(def_load.error());
+    if (!def_load.has_value())
+        return failure(def_load.error());
 
     Project p;
-    p.dir_           = project_dir;
-    p.display_name_  = std::move(display_name);
-    p.notes_         = "";
-    p.created_       = iso8601_utc_now();
-    p.source_        = std::move(*source_load);
-    p.source_crc32_  = p.source_.crc32();
+    p.dir_ = project_dir;
+    p.display_name_ = std::move(display_name);
+    p.notes_ = "";
+    p.created_ = iso8601_utc_now();
+    p.source_ = std::move(*source_load);
+    p.source_crc32_ = p.source_.crc32();
     // Working starts as a byte-for-byte copy of source.
-    p.working_       = Rom::from_bytes(std::vector<std::uint8_t>(p.source_.data().begin(),
-                                                                 p.source_.data().end()));
-    p.def_           = std::move(*def_load);
+    p.working_ = Rom::from_bytes(
+        std::vector<std::uint8_t>(p.source_.data().begin(), p.source_.data().end()));
+    p.def_ = std::move(*def_load);
 
     // Compute a relative path to the definition. If the definition is outside
     // the project dir we store the relative (possibly going up with ..) so
     // the project remains portable as long as the user moves both.
     std::error_code def_ec;
-    auto const      def_abs = std::filesystem::weakly_canonical(definition_path, def_ec);
-    auto const      proj_abs =
-        std::filesystem::weakly_canonical(project_dir, def_ec);
+    auto const def_abs = std::filesystem::weakly_canonical(definition_path, def_ec);
+    auto const proj_abs = std::filesystem::weakly_canonical(project_dir, def_ec);
     auto rel = std::filesystem::relative(def_abs, proj_abs, def_ec);
     if (def_ec || rel.empty()) {
         // Fall back to absolute if we can't compute a relative path.
@@ -369,7 +362,8 @@ Result<Project> Project::create(std::filesystem::path const &project_dir,
         return failure(s.error());
     }
 
-    if (auto s = p.save_metadata(); !s.has_value()) return failure(s.error());
+    if (auto s = p.save_metadata(); !s.has_value())
+        return failure(s.error());
     return p;
 }
 
@@ -381,8 +375,7 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
     }
     auto const manifest = project_dir / "project.toml";
     if (!std::filesystem::exists(manifest, ec) || ec) {
-        return failure(ErrorCode::FileNotFound,
-                       "project.toml missing in: " + project_dir.string());
+        return failure(ErrorCode::FileNotFound, "project.toml missing in: " + project_dir.string());
     }
 
     std::ifstream in{manifest};
@@ -407,25 +400,24 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
     }
     int const schema = static_cast<int>((*project)["schema_version"].value_or<std::int64_t>(0));
     if (schema > kSchemaVersion) {
-        return failure(ErrorCode::UnsupportedVersion,
-                       "project schema_version " + std::to_string(schema)
-                           + " is newer than this build supports ("
-                           + std::to_string(kSchemaVersion) + ")");
+        return failure(ErrorCode::UnsupportedVersion, "project schema_version " +
+                                                          std::to_string(schema) +
+                                                          " is newer than this build supports (" +
+                                                          std::to_string(kSchemaVersion) + ")");
     }
 
     Project p;
-    p.dir_          = project_dir;
+    p.dir_ = project_dir;
     p.display_name_ = (*project)["display_name"].value_or<std::string>("");
-    p.notes_        = (*project)["notes"].value_or<std::string>("");
-    p.created_      = (*project)["created"].value_or<std::string>("");
+    p.notes_ = (*project)["notes"].value_or<std::string>("");
+    p.created_ = (*project)["created"].value_or<std::string>("");
     if (auto const pp = (*project)["policy_profile"].value<std::string>();
-            pp.has_value() && !pp->empty()) {
+        pp.has_value() && !pp->empty()) {
         auto const parsed = policy::parse_profile(*pp);
         if (!parsed.has_value()) {
-            return failure(ErrorCode::ParseError,
-                           "project.policy_profile unknown: '" + *pp
-                               + "' (valid: motorsport-only, alberta-ca, "
-                                 "eu-roadworthy, california-us)");
+            return failure(ErrorCode::ParseError, "project.policy_profile unknown: '" + *pp +
+                                                      "' (valid: motorsport-only, alberta-ca, "
+                                                      "eu-roadworthy, california-us)");
         }
         p.policy_profile_ = *parsed;
     }
@@ -440,39 +432,41 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
     auto const *wrk_tbl = (*project)["working_rom"].as_table();
     auto const *def_tbl = (*project)["definition"].as_table();
     if (src_tbl == nullptr || wrk_tbl == nullptr || def_tbl == nullptr) {
-        return failure(ErrorCode::ParseError,
-                       "[project.source_rom], [project.working_rom], and "
-                       "[project.definition] are all required");
+        return failure(ErrorCode::ParseError, "[project.source_rom], [project.working_rom], and "
+                                              "[project.definition] are all required");
     }
 
-    p.source_rel_  = get_path(*src_tbl, "path");
+    p.source_rel_ = get_path(*src_tbl, "path");
     p.working_rel_ = get_path(*wrk_tbl, "path");
-    p.def_rel_     = get_path(*def_tbl, "path");
-    p.source_crc32_ =
-        static_cast<std::uint32_t>((*src_tbl)["crc32"].value_or<std::int64_t>(0));
+    p.def_rel_ = get_path(*def_tbl, "path");
+    p.source_crc32_ = static_cast<std::uint32_t>((*src_tbl)["crc32"].value_or<std::int64_t>(0));
 
     auto src = Rom::from_file(project_dir / p.source_rel_);
-    if (!src.has_value()) return failure(src.error());
+    if (!src.has_value())
+        return failure(src.error());
     p.source_ = std::move(*src);
 
     auto wrk = Rom::from_file(project_dir / p.working_rel_);
-    if (!wrk.has_value()) return failure(wrk.error());
+    if (!wrk.has_value())
+        return failure(wrk.error());
     p.working_ = std::move(*wrk);
 
     auto const def_resolved = std::filesystem::weakly_canonical(project_dir / p.def_rel_, ec);
     auto def = Definition::from_file(ec ? (project_dir / p.def_rel_) : def_resolved);
-    if (!def.has_value()) return failure(def.error());
+    if (!def.has_value())
+        return failure(def.error());
     p.def_ = std::move(*def);
 
     // edits.toml is optional. If present, restore the edit history so
     // cross-session undo works.
     auto const edits_path = project_dir / "edits.toml";
     if (std::filesystem::exists(edits_path, ec) && !ec) {
-        std::ifstream      ein{edits_path};
+        std::ifstream ein{edits_path};
         std::ostringstream econtents;
         econtents << ein.rdbuf();
         auto hist = parse_history_toml(econtents.str());
-        if (!hist.has_value()) return failure(hist.error());
+        if (!hist.has_value())
+            return failure(hist.error());
         p.history_ = std::move(*hist);
     }
 
@@ -502,9 +496,8 @@ Status Project::save_working_rom() {
 }
 
 Status Project::save_metadata() const {
-    auto const toml_text = render_project_toml(*this, source_crc32_, working_.crc32(),
-                                               created_, source_rel_, working_rel_,
-                                               def_rel_);
+    auto const toml_text = render_project_toml(*this, source_crc32_, working_.crc32(), created_,
+                                               source_rel_, working_rel_, def_rel_);
     return write_file(dir_ / "project.toml", toml_text);
 }
 
@@ -537,9 +530,11 @@ bool is_sep(char c) {
 
 std::string extract_quoted(std::string_view line) {
     auto const eq = line.find('=');
-    if (eq == std::string_view::npos) return {};
+    if (eq == std::string_view::npos)
+        return {};
     auto rest = line.substr(eq + 1);
-    while (!rest.empty() && is_sep(rest.front())) rest.remove_prefix(1);
+    while (!rest.empty() && is_sep(rest.front()))
+        rest.remove_prefix(1);
     if (rest.size() >= 2 && rest.front() == '"') {
         auto const close = rest.find('"', 1);
         if (close != std::string_view::npos) {
@@ -547,18 +542,22 @@ std::string extract_quoted(std::string_view line) {
         }
     }
     // Strip trailing separators so a value like `demo;;` reads as `demo`.
-    while (!rest.empty() && is_sep(rest.back())) rest.remove_suffix(1);
+    while (!rest.empty() && is_sep(rest.back()))
+        rest.remove_suffix(1);
     return std::string{rest};
 }
 
 bool parse_size_field(std::string_view sv, std::size_t &out) {
     char const *first = sv.data();
-    char const *last  = sv.data() + sv.size();
-    while (first < last && std::isspace(static_cast<unsigned char>(*first))) ++first;
-    while (last > first && std::isspace(static_cast<unsigned char>(*(last - 1)))) --last;
-    std::size_t v   = 0;
-    auto const  res = std::from_chars(first, last, v);
-    if (res.ec != std::errc{} || res.ptr != last) return false;
+    char const *last = sv.data() + sv.size();
+    while (first < last && std::isspace(static_cast<unsigned char>(*first)))
+        ++first;
+    while (last > first && std::isspace(static_cast<unsigned char>(*(last - 1))))
+        --last;
+    std::size_t v = 0;
+    auto const res = std::from_chars(first, last, v);
+    if (res.ec != std::errc{} || res.ptr != last)
+        return false;
     out = v;
     return true;
 }
@@ -573,28 +572,29 @@ bool parse_double_field(std::string_view sv, double &out) {
     while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.back()))) {
         sv.remove_suffix(1);
     }
-    if (sv.empty()) return false;
+    if (sv.empty())
+        return false;
     std::string s{sv};
-    char       *end = nullptr;
-    double const d  = std::strtod(s.c_str(), &end);
-    if (end == s.c_str() || end == nullptr || *end != '\0') return false;
+    char *end = nullptr;
+    double const d = std::strtod(s.c_str(), &end);
+    if (end == s.c_str() || end == nullptr || *end != '\0')
+        return false;
     out = d;
     return true;
 }
 
 } // namespace
 
-Result<EditCsvParseResult> parse_edit_csv(std::string_view text,
-                                           EditCsvParseOptions const &opts) {
+Result<EditCsvParseResult> parse_edit_csv(std::string_view text, EditCsvParseOptions const &opts) {
     EditCsvParseResult result;
 
     std::size_t line_no = 0;
-    std::size_t pos     = 0;
+    std::size_t pos = 0;
     while (pos <= text.size()) {
         ++line_no;
         std::size_t const eol = text.find('\n', pos);
         std::size_t const end = (eol == std::string_view::npos) ? text.size() : eol;
-        std::string_view  line = text.substr(pos, end - pos);
+        std::string_view line = text.substr(pos, end - pos);
         pos = (eol == std::string_view::npos) ? text.size() + 1 : eol + 1;
 
         if (!line.empty() && line.back() == '\r') {
@@ -605,28 +605,24 @@ Result<EditCsvParseResult> parse_edit_csv(std::string_view text,
         // and `# table` markers stay inside a CSV comment.
         if (!line.empty() && line.front() == '#') {
             std::string_view rest = line.substr(1);
-            while (!rest.empty() && is_sep(rest.front())) rest.remove_prefix(1);
+            while (!rest.empty() && is_sep(rest.front()))
+                rest.remove_prefix(1);
             if (rest.starts_with("pack_id")) {
                 auto const declared = extract_quoted(rest);
-                if (!opts.expected_pack_id.empty()
-                    && !declared.empty()
-                    && declared != opts.expected_pack_id) {
-                    result.warnings.push_back({
-                        "CSV pack_id=\"" + declared
-                        + "\" differs from project pack=\""
-                        + std::string{opts.expected_pack_id}
-                        + "\"; scaling and addresses may not match"});
+                if (!opts.expected_pack_id.empty() && !declared.empty() &&
+                    declared != opts.expected_pack_id) {
+                    result.warnings.push_back({"CSV pack_id=\"" + declared +
+                                               "\" differs from project pack=\"" +
+                                               std::string{opts.expected_pack_id} +
+                                               "\"; scaling and addresses may not match"});
                 }
             } else if (rest.starts_with("table")) {
                 auto const declared = extract_quoted(rest);
-                if (!opts.expected_table_id.empty()
-                    && !declared.empty()
-                    && declared != opts.expected_table_id) {
+                if (!opts.expected_table_id.empty() && !declared.empty() &&
+                    declared != opts.expected_table_id) {
                     return failure(ErrorCode::InvalidArgument,
-                                    "CSV table=\"" + declared
-                                    + "\" differs from target table \""
-                                    + std::string{opts.expected_table_id}
-                                    + "\"");
+                                   "CSV table=\"" + declared + "\" differs from target table \"" +
+                                       std::string{opts.expected_table_id} + "\"");
                 }
             }
         }
@@ -645,7 +641,8 @@ Result<EditCsvParseResult> parse_edit_csv(std::string_view text,
                 break;
             }
         }
-        if (blank) continue;
+        if (blank)
+            continue;
 
         // Split on commas OR semicolons. Spreadsheet round-trips
         // (Excel / LibreOffice / OpenOffice in non-US locales) rewrite
@@ -660,44 +657,38 @@ Result<EditCsvParseResult> parse_edit_csv(std::string_view text,
             std::size_t start = 0;
             for (std::size_t i = 0; i <= clean.size(); ++i) {
                 if (i == clean.size() || clean[i] == ',' || clean[i] == ';') {
-                    fields.push_back(
-                        std::string_view{clean}.substr(start, i - start));
+                    fields.push_back(std::string_view{clean}.substr(start, i - start));
                     start = i + 1;
                 }
             }
         }
         if (fields.size() < 3) {
-            return failure(ErrorCode::ParseError,
-                            "line " + std::to_string(line_no)
-                            + ": expected 3 fields, got "
-                            + std::to_string(fields.size()));
+            return failure(ErrorCode::ParseError, "line " + std::to_string(line_no) +
+                                                      ": expected 3 fields, got " +
+                                                      std::to_string(fields.size()));
         }
 
         std::size_t r = 0, c = 0;
-        double      v = 0.0;
-        if (!parse_size_field(fields[0], r)
-            || !parse_size_field(fields[1], c)) {
+        double v = 0.0;
+        if (!parse_size_field(fields[0], r) || !parse_size_field(fields[1], c)) {
             // First-line header tolerance — `row,col,value` parses as
             // non-integers and is skipped exactly once at the top.
-            if (result.cells.empty()) continue;
+            if (result.cells.empty())
+                continue;
             return failure(ErrorCode::ParseError,
-                            "line " + std::to_string(line_no)
-                            + ": row/col not integers");
+                           "line " + std::to_string(line_no) + ": row/col not integers");
         }
         if (!parse_double_field(fields[2], v)) {
-            return failure(ErrorCode::ParseError,
-                            "line " + std::to_string(line_no) + ": value '"
-                            + std::string{fields[2]} + "' is not numeric");
+            return failure(ErrorCode::ParseError, "line " + std::to_string(line_no) + ": value '" +
+                                                      std::string{fields[2]} + "' is not numeric");
         }
         if (opts.table_rows > 0 && opts.table_cols > 0) {
             if (r >= opts.table_rows || c >= opts.table_cols) {
                 return failure(ErrorCode::OutOfRange,
-                                "line " + std::to_string(line_no) + ": ("
-                                + std::to_string(r) + "," + std::to_string(c)
-                                + ") is outside table ("
-                                + std::to_string(opts.table_rows)
-                                + " rows x " + std::to_string(opts.table_cols)
-                                + " cols)");
+                               "line " + std::to_string(line_no) + ": (" + std::to_string(r) + "," +
+                                   std::to_string(c) + ") is outside table (" +
+                                   std::to_string(opts.table_rows) + " rows x " +
+                                   std::to_string(opts.table_cols) + " cols)");
             }
         }
         result.cells.push_back({r, c, v});

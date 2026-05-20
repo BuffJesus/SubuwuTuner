@@ -14,8 +14,8 @@
 namespace {
 
 std::span<std::uint8_t const> as_bytes(std::string_view sv) {
-    return std::span<std::uint8_t const>{
-        reinterpret_cast<std::uint8_t const *>(sv.data()), sv.size()};
+    return std::span<std::uint8_t const>{reinterpret_cast<std::uint8_t const *>(sv.data()),
+                                         sv.size()};
 }
 
 } // namespace
@@ -33,11 +33,9 @@ TEST_CASE("CRC32 of single 'a' matches known value", "[core][crc32]") {
     REQUIRE(st::crc32(as_bytes("a")) == 0xE8B7BE43U);
 }
 
-TEST_CASE("CRC32 of 'The quick brown fox jumps over the lazy dog'",
-          "[core][crc32]") {
+TEST_CASE("CRC32 of 'The quick brown fox jumps over the lazy dog'", "[core][crc32]") {
     // Canonical pangram CRC32 = 0x414FA339
-    REQUIRE(st::crc32(as_bytes("The quick brown fox jumps over the lazy dog"))
-            == 0x414FA339U);
+    REQUIRE(st::crc32(as_bytes("The quick brown fox jumps over the lazy dog")) == 0x414FA339U);
 }
 
 TEST_CASE("Streaming Crc32 matches one-shot", "[core][crc32]") {

@@ -47,7 +47,7 @@ enum class Arch : std::uint8_t {
     Rh850,
 };
 
-[[nodiscard]] char const     *arch_name(Arch a) noexcept;
+[[nodiscard]] char const *arch_name(Arch a) noexcept;
 [[nodiscard]] std::string_view arch_name_sv(Arch a) noexcept;
 
 // One absolute-address byte allocation inside a hook's free_ram
@@ -56,8 +56,8 @@ enum class Arch : std::uint8_t {
 // guarantees no two claims overlap and stays within the hook's
 // declared bounds.
 struct RamClaim {
-    std::size_t address{0};  // absolute ROM/RAM address
-    std::size_t size{0};     // bytes
+    std::size_t address{0};   // absolute ROM/RAM address
+    std::size_t size{0};      // bytes
     std::size_t alignment{1}; // bytes the address must be a multiple of
 };
 
@@ -70,7 +70,7 @@ struct RamClaim {
 // custom-feature lifetimes are bounded by one hook invocation so
 // reset() between hooks is enough).
 class RamAllocator {
-  public:
+public:
     // Construct over `[base, base + length)`. `length == 0` is a valid
     // "no scratch RAM available" allocator that refuses every claim.
     RamAllocator(std::size_t base, std::size_t length) noexcept;
@@ -79,21 +79,26 @@ class RamAllocator {
     // two; values <2 are treated as 1). Returns the claim on success,
     // OutOfRange on overflow, InvalidArgument on a non-power-of-two
     // alignment.
-    [[nodiscard]] Result<RamClaim> claim(std::size_t size,
-                                          std::size_t alignment = 1) noexcept;
+    [[nodiscard]] Result<RamClaim> claim(std::size_t size, std::size_t alignment = 1) noexcept;
 
     // Reset the cursor — useful between hook code-gen passes when each
     // hook owns its own RAM region in the same allocator instance.
     void reset() noexcept;
 
-    [[nodiscard]] std::size_t base() const noexcept { return base_; }
-    [[nodiscard]] std::size_t length() const noexcept { return length_; }
-    [[nodiscard]] std::size_t used() const noexcept { return cursor_ - base_; }
+    [[nodiscard]] std::size_t base() const noexcept {
+        return base_;
+    }
+    [[nodiscard]] std::size_t length() const noexcept {
+        return length_;
+    }
+    [[nodiscard]] std::size_t used() const noexcept {
+        return cursor_ - base_;
+    }
     [[nodiscard]] std::size_t remaining() const noexcept {
         return base_ + length_ - cursor_;
     }
 
-  private:
+private:
     std::size_t base_{0};
     std::size_t length_{0};
     std::size_t cursor_{0};
@@ -104,10 +109,10 @@ class RamAllocator {
 // pack-declared id (e.g. "after_fuel_calc") so the patch loader can
 // resolve splice_address out of the current definition pack.
 struct HookPatch {
-    std::string               symbol;
-    std::size_t               splice_address{0};
+    std::string symbol;
+    std::size_t splice_address{0};
     std::vector<std::uint8_t> code;
-    std::vector<RamClaim>     ram_claims;
+    std::vector<RamClaim> ram_claims;
 };
 
 // Output of `IBackend::compile`. One PatchObject per compiled
@@ -117,7 +122,7 @@ struct HookPatch {
 // hook table, vector-table splicing — `src/feature_patch/` once it
 // lands) consumes this without caring which backend produced it.
 struct PatchObject {
-    Arch                   arch{Arch::Unknown};
+    Arch arch{Arch::Unknown};
     std::vector<HookPatch> hooks;
 };
 
@@ -125,12 +130,12 @@ struct PatchObject {
 // Backends are stateless across calls — `compile` reads the IR and
 // produces a PatchObject; any per-call state is local.
 class IBackend {
-  public:
-    IBackend()                                = default;
-    virtual ~IBackend()                       = default;
-    IBackend(IBackend const &)                = delete;
-    IBackend &operator=(IBackend const &)     = delete;
-    IBackend(IBackend &&) noexcept            = delete;
+public:
+    IBackend() = default;
+    virtual ~IBackend() = default;
+    IBackend(IBackend const &) = delete;
+    IBackend &operator=(IBackend const &) = delete;
+    IBackend(IBackend &&) noexcept = delete;
     IBackend &operator=(IBackend &&) noexcept = delete;
 
     [[nodiscard]] virtual Arch arch() const noexcept = 0;
@@ -139,26 +144,28 @@ class IBackend {
     // PatchObject. The Definition supplies hook splice addresses,
     // free_ram regions, and primitive signatures. NotImplemented
     // while backends are stubs.
-    [[nodiscard]] virtual Result<PatchObject>
-    compile(ir::Module const &m, Definition const &def) = 0;
+    [[nodiscard]] virtual Result<PatchObject> compile(ir::Module const &m,
+                                                      Definition const &def) = 0;
 };
 
 // SH-2A backend for VA WRX (et al.). Currently a stub — `compile`
 // always returns NotImplemented. Full implementation: a later bundle.
 class Sh2aBackend final : public IBackend {
-  public:
-    [[nodiscard]] Arch arch() const noexcept override { return Arch::Sh2a; }
-    [[nodiscard]] Result<PatchObject>
-    compile(ir::Module const &m, Definition const &def) override;
+public:
+    [[nodiscard]] Arch arch() const noexcept override {
+        return Arch::Sh2a;
+    }
+    [[nodiscard]] Result<PatchObject> compile(ir::Module const &m, Definition const &def) override;
 };
 
 // RH850 backend for VB WRX (et al.). Currently a stub — `compile`
 // always returns NotImplemented. Full implementation: a later bundle.
 class Rh850Backend final : public IBackend {
-  public:
-    [[nodiscard]] Arch arch() const noexcept override { return Arch::Rh850; }
-    [[nodiscard]] Result<PatchObject>
-    compile(ir::Module const &m, Definition const &def) override;
+public:
+    [[nodiscard]] Arch arch() const noexcept override {
+        return Arch::Rh850;
+    }
+    [[nodiscard]] Result<PatchObject> compile(ir::Module const &m, Definition const &def) override;
 };
 
 // Public layout constants for the SH-2A emission shapes the codegen
@@ -176,13 +183,13 @@ class Rh850Backend final : public IBackend {
 // Both shapes terminate with RTS + NOP (delay slot) and place the
 // 4-byte-aligned literal pool last.
 namespace sh2a {
-inline constexpr std::size_t kStoreSequenceSize       = 20;
-inline constexpr std::size_t kStoreLiteralPoolOffset  = 12;
-inline constexpr std::size_t kStoreLiteralStride      = 4;
+inline constexpr std::size_t kStoreSequenceSize = 20;
+inline constexpr std::size_t kStoreLiteralPoolOffset = 12;
+inline constexpr std::size_t kStoreLiteralStride = 4;
 
-inline constexpr std::size_t kLoadStoreSequenceSize       = 20;
-inline constexpr std::size_t kLoadStoreLiteralPoolOffset  = 12;
-inline constexpr std::size_t kLoadStoreLiteralStride      = 4;
+inline constexpr std::size_t kLoadStoreSequenceSize = 20;
+inline constexpr std::size_t kLoadStoreLiteralPoolOffset = 12;
+inline constexpr std::size_t kLoadStoreLiteralStride = 4;
 } // namespace sh2a
 
 // Pick the right backend by the loaded pack's platform field. v1.0
@@ -190,13 +197,11 @@ inline constexpr std::size_t kLoadStoreLiteralStride      = 4;
 // UnsupportedVersion (it's the closest existing ErrorCode — we're
 // declining the pack, not failing on a malformed one). Returns a
 // fresh heap-allocated backend; ownership transfers to the caller.
-[[nodiscard]] Result<std::unique_ptr<IBackend>>
-select_backend(Definition const &def);
+[[nodiscard]] Result<std::unique_ptr<IBackend>> select_backend(Definition const &def);
 
 // Same as above but driven by the platform string directly. Used by
 // tests and any caller that already has the string in hand.
-[[nodiscard]] Result<std::unique_ptr<IBackend>>
-select_backend(std::string_view platform);
+[[nodiscard]] Result<std::unique_ptr<IBackend>> select_backend(std::string_view platform);
 
 // PatchObject ↔ TOML round-trip. `patch_to_toml` emits a single
 // top-level `[patch]` table plus one `[[patch.hook]]` per hook, each
@@ -212,8 +217,7 @@ select_backend(std::string_view platform);
 // everything outside it. Callers parse both to roundtrip the whole
 // file.
 [[nodiscard]] std::string patch_to_toml(PatchObject const &p);
-[[nodiscard]] Result<std::optional<PatchObject>>
-patch_from_toml(std::string_view text);
+[[nodiscard]] Result<std::optional<PatchObject>> patch_from_toml(std::string_view text);
 
 } // namespace st::feature::codegen
 

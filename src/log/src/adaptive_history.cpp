@@ -29,19 +29,23 @@ inline bool has_col(std::size_t idx) noexcept {
 // Normalize input timestamps to seconds based on the configured unit.
 inline double to_seconds(double raw, TimestampUnit unit) noexcept {
     switch (unit) {
-        case TimestampUnit::UnixSeconds: return raw;
-        case TimestampUnit::UnixMillis:  return raw / 1'000.0;
-        case TimestampUnit::UnixMicros:  return raw / 1'000'000.0;
-        case TimestampUnit::RowIndex:    return raw;  // synthetic 1-Hz clock
+    case TimestampUnit::UnixSeconds:
+        return raw;
+    case TimestampUnit::UnixMillis:
+        return raw / 1'000.0;
+    case TimestampUnit::UnixMicros:
+        return raw / 1'000'000.0;
+    case TimestampUnit::RowIndex:
+        return raw; // synthetic 1-Hz clock
     }
     return raw;
 }
 
 struct BucketAcc {
-    double         sum{0.0};
-    double         min{ std::numeric_limits<double>::infinity()};
-    double         max{-std::numeric_limits<double>::infinity()};
-    std::uint32_t  count{0};
+    double sum{0.0};
+    double min{std::numeric_limits<double>::infinity()};
+    double max{-std::numeric_limits<double>::infinity()};
+    std::uint32_t count{0};
 };
 
 inline std::int64_t bucket_index(double timestamp_s, double bucket_s) noexcept {
@@ -52,30 +56,28 @@ inline std::int64_t bucket_index(double timestamp_s, double bucket_s) noexcept {
 
 std::size_t max_referenced_column(ColumnMapping const &m) noexcept {
     std::size_t lo = 0;
-    auto const  consider = [&](std::size_t v) {
+    auto const consider = [&](std::size_t v) {
         if (v != kNoColumn && v + 1 > lo) {
             lo = v + 1;
         }
     };
     consider(m.timestamp_idx);
-    for (auto v : m.signal_idx) consider(v);
+    for (auto v : m.signal_idx)
+        consider(v);
     return lo;
 }
 
-}  // namespace
+} // namespace
 
-HistorySnapshot snapshot_from_samples(std::span<double const>   samples_row_major,
-                                     std::size_t               pid_count,
-                                     ColumnMapping const      &mapping,
-                                     BucketConfig const       &cfg) {
+HistorySnapshot snapshot_from_samples(std::span<double const> samples_row_major,
+                                      std::size_t pid_count, ColumnMapping const &mapping,
+                                      BucketConfig const &cfg) {
     HistorySnapshot snap{};
     for (std::size_t k = 0; k < kSignalCount; ++k) {
         snap.series[k].kind = static_cast<SignalKind>(k);
     }
 
-    if (pid_count == 0
-        || !has_col(mapping.timestamp_idx)
-        || samples_row_major.empty()) {
+    if (pid_count == 0 || !has_col(mapping.timestamp_idx) || samples_row_major.empty()) {
         return snap;
     }
     std::size_t const n_rows = samples_row_major.size() / pid_count;
@@ -83,43 +85,48 @@ HistorySnapshot snapshot_from_samples(std::span<double const>   samples_row_majo
         return snap;
     }
 
-    double const bucket_s = (cfg.bucket_seconds > 0.0)
-        ? cfg.bucket_seconds
-        : 0.0;  // 0 = one point per sample
+    double const bucket_s =
+        (cfg.bucket_seconds > 0.0) ? cfg.bucket_seconds : 0.0; // 0 = one point per sample
 
     // Per-signal: bucket_index -> accumulator. Ordered map keeps buckets
     // sorted ascending, which is what the output expects.
     std::array<std::map<std::int64_t, BucketAcc>, kSignalCount> buckets{};
 
     double earliest = std::numeric_limits<double>::infinity();
-    double latest   = -std::numeric_limits<double>::infinity();
+    double latest = -std::numeric_limits<double>::infinity();
 
     for (std::size_t row = 0; row < n_rows; ++row) {
-        double const ts_raw = samples_row_major[row * pid_count
-                                                 + mapping.timestamp_idx];
-        if (!std::isfinite(ts_raw)) continue;
+        double const ts_raw = samples_row_major[row * pid_count + mapping.timestamp_idx];
+        if (!std::isfinite(ts_raw))
+            continue;
         double const ts_s = to_seconds(ts_raw, cfg.timestamp_unit);
-        if (!std::isfinite(ts_s)) continue;
+        if (!std::isfinite(ts_s))
+            continue;
 
-        if (ts_s < earliest) earliest = ts_s;
-        if (ts_s > latest)   latest   = ts_s;
+        if (ts_s < earliest)
+            earliest = ts_s;
+        if (ts_s > latest)
+            latest = ts_s;
 
         // For "no bucketing" use a synthetic per-row bucket index so each
         // row becomes its own point.
-        std::int64_t const bidx = (bucket_s > 0.0)
-            ? bucket_index(ts_s, bucket_s)
-            : static_cast<std::int64_t>(row);
+        std::int64_t const bidx =
+            (bucket_s > 0.0) ? bucket_index(ts_s, bucket_s) : static_cast<std::int64_t>(row);
 
         for (std::size_t k = 0; k < kSignalCount; ++k) {
             std::size_t const col = mapping.signal_idx[k];
-            if (!has_col(col)) continue;
+            if (!has_col(col))
+                continue;
             double const v = samples_row_major[row * pid_count + col];
-            if (!std::isfinite(v)) continue;
+            if (!std::isfinite(v))
+                continue;
 
-            auto      &acc = buckets[k][bidx];
-            acc.sum   += v;
-            if (v < acc.min) acc.min = v;
-            if (v > acc.max) acc.max = v;
+            auto &acc = buckets[k][bidx];
+            acc.sum += v;
+            if (v < acc.min)
+                acc.min = v;
+            if (v > acc.max)
+                acc.max = v;
             acc.count++;
             snap.total_samples++;
         }
@@ -127,8 +134,8 @@ HistorySnapshot snapshot_from_samples(std::span<double const>   samples_row_majo
 
     if (earliest != std::numeric_limits<double>::infinity()) {
         snap.earliest_timestamp = earliest;
-        snap.latest_timestamp   = latest;
-        snap.time_span_seconds  = latest - earliest;
+        snap.latest_timestamp = latest;
+        snap.time_span_seconds = latest - earliest;
     }
 
     // Reduce per-signal buckets to TimeSeriesPoints + overall stats +
@@ -136,38 +143,39 @@ HistorySnapshot snapshot_from_samples(std::span<double const>   samples_row_majo
     for (std::size_t k = 0; k < kSignalCount; ++k) {
         SignalSeries &s = snap.series[k];
         s.kind = static_cast<SignalKind>(k);
-        auto   const &per_bidx = buckets[k];
+        auto const &per_bidx = buckets[k];
         if (per_bidx.empty()) {
             continue;
         }
-        s.has_data    = true;
+        s.has_data = true;
         s.overall_min = std::numeric_limits<double>::infinity();
         s.overall_max = -std::numeric_limits<double>::infinity();
 
-        double sum_for_overall   = 0.0;
+        double sum_for_overall = 0.0;
         std::uint64_t count_overall = 0;
 
         s.points.reserve(per_bidx.size());
         for (auto const &[bidx, acc] : per_bidx) {
-            if (acc.count < cfg.min_samples_per_bucket) continue;
+            if (acc.count < cfg.min_samples_per_bucket)
+                continue;
             double const center = (bucket_s > 0.0)
-                ? (static_cast<double>(bidx) * bucket_s
-                   + bucket_s * 0.5)
-                : static_cast<double>(bidx);
+                                      ? (static_cast<double>(bidx) * bucket_s + bucket_s * 0.5)
+                                      : static_cast<double>(bidx);
             double const mean = acc.sum / static_cast<double>(acc.count);
             s.points.push_back({center, mean, acc.min, acc.max, acc.count});
             sum_for_overall += acc.sum;
-            count_overall   += acc.count;
-            if (acc.min < s.overall_min) s.overall_min = acc.min;
-            if (acc.max > s.overall_max) s.overall_max = acc.max;
+            count_overall += acc.count;
+            if (acc.min < s.overall_min)
+                s.overall_min = acc.min;
+            if (acc.max > s.overall_max)
+                s.overall_max = acc.max;
         }
         if (count_overall > 0) {
-            s.overall_mean = sum_for_overall
-                             / static_cast<double>(count_overall);
+            s.overall_mean = sum_for_overall / static_cast<double>(count_overall);
         } else {
             // All buckets failed the min_samples_per_bucket filter; clear
             // has_data so the UI shows a "no data" placeholder.
-            s.has_data    = false;
+            s.has_data = false;
             s.overall_min = 0.0;
             s.overall_max = 0.0;
         }
@@ -176,8 +184,8 @@ HistorySnapshot snapshot_from_samples(std::span<double const>   samples_row_majo
         if (s.points.size() >= 2) {
             double sum_x = 0.0, sum_y = 0.0, sum_xy = 0.0, sum_xx = 0.0;
             for (auto const &p : s.points) {
-                sum_x  += p.bucket_center;
-                sum_y  += p.mean;
+                sum_x += p.bucket_center;
+                sum_y += p.mean;
                 sum_xy += p.bucket_center * p.mean;
                 sum_xx += p.bucket_center * p.bucket_center;
             }
@@ -192,9 +200,9 @@ HistorySnapshot snapshot_from_samples(std::span<double const>   samples_row_majo
     return snap;
 }
 
-st::Result<HistorySnapshot> snapshot_from_csv(std::string_view          csv_path,
-                                              ColumnMapping const      &mapping,
-                                              BucketConfig const       &cfg) {
+st::Result<HistorySnapshot> snapshot_from_csv(std::string_view csv_path,
+                                              ColumnMapping const &mapping,
+                                              BucketConfig const &cfg) {
     if (!has_col(mapping.timestamp_idx)) {
         return st::failure(st::ErrorCode::InvalidArgument,
                            std::string{"adaptive-history: mapping is missing "
@@ -202,7 +210,10 @@ st::Result<HistorySnapshot> snapshot_from_csv(std::string_view          csv_path
     }
     bool any_signal = false;
     for (auto v : mapping.signal_idx) {
-        if (has_col(v)) { any_signal = true; break; }
+        if (has_col(v)) {
+            any_signal = true;
+            break;
+        }
     }
     if (!any_signal) {
         return st::failure(st::ErrorCode::InvalidArgument,
@@ -213,8 +224,8 @@ st::Result<HistorySnapshot> snapshot_from_csv(std::string_view          csv_path
     std::ifstream f{std::string{csv_path}};
     if (!f) {
         return st::failure(st::ErrorCode::FileNotFound,
-                           std::string{"adaptive-history: cannot open '"}
-                               + std::string{csv_path} + "'");
+                           std::string{"adaptive-history: cannot open '"} + std::string{csv_path} +
+                               "'");
     }
     std::ostringstream buf;
     buf << f.rdbuf();
@@ -227,7 +238,7 @@ st::Result<HistorySnapshot> snapshot_from_csv(std::string_view          csv_path
                                        "row and at least one data row"});
     }
 
-    auto const  header_fields = st::core::csv::split_fields(lines[0]);
+    auto const header_fields = st::core::csv::split_fields(lines[0]);
     std::size_t const pid_count = header_fields.size();
     if (pid_count == 0) {
         return st::failure(st::ErrorCode::ParseError,
@@ -237,10 +248,9 @@ st::Result<HistorySnapshot> snapshot_from_csv(std::string_view          csv_path
     if (needed > pid_count) {
         return st::failure(st::ErrorCode::InvalidArgument,
                            std::string{"adaptive-history: mapping references "
-                                       "column index "}
-                               + std::to_string(needed - 1)
-                               + " but CSV has only "
-                               + std::to_string(pid_count) + " columns");
+                                       "column index "} +
+                               std::to_string(needed - 1) + " but CSV has only " +
+                               std::to_string(pid_count) + " columns");
     }
 
     std::vector<double> samples;
@@ -249,20 +259,17 @@ st::Result<HistorySnapshot> snapshot_from_csv(std::string_view          csv_path
         auto const fields = st::core::csv::split_fields(lines[row]);
         if (fields.size() < pid_count) {
             return st::failure(st::ErrorCode::ParseError,
-                               std::string{"adaptive-history: CSV row "}
-                                   + std::to_string(row + 1) + " has "
-                                   + std::to_string(fields.size())
-                                   + " fields, expected "
-                                   + std::to_string(pid_count));
+                               std::string{"adaptive-history: CSV row "} + std::to_string(row + 1) +
+                                   " has " + std::to_string(fields.size()) + " fields, expected " +
+                                   std::to_string(pid_count));
         }
         for (std::size_t col = 0; col < pid_count; ++col) {
             double v = 0.0;
             if (!st::core::csv::parse_double(fields[col], v)) {
                 return st::failure(st::ErrorCode::ParseError,
-                                   std::string{"adaptive-history: CSV row "}
-                                       + std::to_string(row + 1) + " col "
-                                       + std::to_string(col + 1)
-                                       + ": not a number");
+                                   std::string{"adaptive-history: CSV row "} +
+                                       std::to_string(row + 1) + " col " + std::to_string(col + 1) +
+                                       ": not a number");
             }
             samples.push_back(v);
         }
@@ -271,4 +278,4 @@ st::Result<HistorySnapshot> snapshot_from_csv(std::string_view          csv_path
     return snapshot_from_samples(samples, pid_count, mapping, cfg);
 }
 
-}  // namespace st::log::adaptive
+} // namespace st::log::adaptive

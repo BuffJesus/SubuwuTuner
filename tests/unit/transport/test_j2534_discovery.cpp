@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The SubuwuTuner Authors
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "st/transport/j2534_discovery.hpp"
+
+#include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
 #include <string>
@@ -16,10 +16,9 @@ namespace j2534 = st::transport::j2534;
 
 TEST_CASE("j2534::registry_view_name: stable strings for each view",
           "[transport][j2534_discovery]") {
-    REQUIRE(std::string_view{j2534::registry_view_name(j2534::RegistryView::Native64)}
-            == "native64");
-    REQUIRE(std::string_view{j2534::registry_view_name(j2534::RegistryView::Wow6432)}
-            == "wow6432");
+    REQUIRE(std::string_view{j2534::registry_view_name(j2534::RegistryView::Native64)} ==
+            "native64");
+    REQUIRE(std::string_view{j2534::registry_view_name(j2534::RegistryView::Wow6432)} == "wow6432");
 }
 
 // ---- format_protocols_supported ---------------------------------
@@ -29,8 +28,7 @@ TEST_CASE("j2534::format_protocols_supported: zero mask → '(none)'",
     REQUIRE(j2534::format_protocols_supported(0) == "(none)");
 }
 
-TEST_CASE("j2534::format_protocols_supported: single known bit",
-          "[transport][j2534_discovery]") {
+TEST_CASE("j2534::format_protocols_supported: single known bit", "[transport][j2534_discovery]") {
     // J1850VPW is bit 0 per spec (ProtocolId 0x01 → 1 << 0).
     REQUIRE(j2534::format_protocols_supported(1U << 0U) == "J1850VPW");
     REQUIRE(j2534::format_protocols_supported(1U << 1U) == "J1850PWM");
@@ -43,29 +41,26 @@ TEST_CASE("j2534::format_protocols_supported: single known bit",
 TEST_CASE("j2534::format_protocols_supported: ISO9141 + ISO15765 (the "
           "Subaru-only two protocols)",
           "[transport][j2534_discovery]") {
-    REQUIRE(j2534::format_protocols_supported((1U << 2U) | (1U << 5U))
-            == "ISO9141, ISO15765");
+    REQUIRE(j2534::format_protocols_supported((1U << 2U) | (1U << 5U)) == "ISO9141, ISO15765");
 }
 
 TEST_CASE("j2534::format_protocols_supported: all six known bits set",
           "[transport][j2534_discovery]") {
-    REQUIRE(j2534::format_protocols_supported(0x3FU)
-            == "J1850VPW, J1850PWM, ISO9141, ISO14230, CAN, ISO15765");
+    REQUIRE(j2534::format_protocols_supported(0x3FU) ==
+            "J1850VPW, J1850PWM, ISO9141, ISO14230, CAN, ISO15765");
 }
 
 TEST_CASE("j2534::format_protocols_supported: unknown high bit → "
           "hex annotation",
           "[transport][j2534_discovery]") {
-    REQUIRE(j2534::format_protocols_supported(0x80000000U)
-            == "(unknown: 0x80000000)");
+    REQUIRE(j2534::format_protocols_supported(0x80000000U) == "(unknown: 0x80000000)");
 }
 
 TEST_CASE("j2534::format_protocols_supported: mix of known + unknown",
           "[transport][j2534_discovery]") {
     // CAN (bit 4) + a future / unspecified protocol at bit 16.
     std::uint32_t const mask = (1U << 4U) | (1U << 16U);
-    REQUIRE(j2534::format_protocols_supported(mask)
-            == "CAN, (unknown: 0x00010000)");
+    REQUIRE(j2534::format_protocols_supported(mask) == "CAN, (unknown: 0x00010000)");
 }
 
 // ---- discover_adapters (smoke) ----------------------------------
@@ -93,8 +88,8 @@ TEST_CASE("j2534::discover_adapters: runs without crashing + returns a vector "
         // FunctionLibrary shouldn't surface as a usable adapter).
         REQUIRE_FALSE(a.function_library.empty());
         // View must be one of the two defined values.
-        REQUIRE((a.view == j2534::RegistryView::Native64
-                 || a.view == j2534::RegistryView::Wow6432));
+        REQUIRE(
+            (a.view == j2534::RegistryView::Native64 || a.view == j2534::RegistryView::Wow6432));
     }
 }
 

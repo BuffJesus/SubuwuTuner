@@ -36,9 +36,9 @@ enum class DataType {
     Float32Le,
 };
 
-[[nodiscard]] Result<DataType>  parse_data_type(std::string_view s);
-[[nodiscard]] std::string_view  to_string(DataType dt) noexcept;
-[[nodiscard]] std::size_t       byte_size(DataType dt) noexcept;
+[[nodiscard]] Result<DataType> parse_data_type(std::string_view s);
+[[nodiscard]] std::string_view to_string(DataType dt) noexcept;
+[[nodiscard]] std::size_t byte_size(DataType dt) noexcept;
 
 // Read `byte_size(dt)` bytes from `rom` at `offset`, interpret per `dt`, and
 // return the value as a double. The double carries integer values exactly up
@@ -65,19 +65,19 @@ struct Identification {
     std::size_t cid_length{};
     std::string cid_match;
     std::string ecu_part;
-    bool        cid_scan{false};
+    bool cid_scan{false};
 };
 
 // Pack-level metadata.
 struct Pack {
-    int                       schema_version{1};
-    std::string               id;
-    std::string               display_name;
-    std::string               platform;
-    std::string               transmission;
-    std::vector<int>          years;
-    std::string               endianness{"big"};
-    std::size_t               rom_size_bytes{};
+    int schema_version{1};
+    std::string id;
+    std::string display_name;
+    std::string platform;
+    std::string transmission;
+    std::vector<int> years;
+    std::string endianness{"big"};
+    std::size_t rom_size_bytes{};
     // Per-ECU-family checksum selector. Names mirror RomRaider's
     // ChecksumXxx class family (`subaru_std` ↔ ChecksumSTD,
     // `subaru_alt` ↔ ChecksumALT, `subaru_alt2` ↔ ChecksumALT2).
@@ -88,17 +88,17 @@ struct Pack {
     // post-write checksum repair lands; today this field is
     // recorded + surfaced through pack-info so a pack author can
     // declare intent ahead of the implementation.
-    std::string               checksum_type;
-    std::vector<std::string>  authors;
-    std::vector<std::string>  data_sources;
-    std::string               license;
+    std::string checksum_type;
+    std::vector<std::string> authors;
+    std::vector<std::string> data_sources;
+    std::string license;
     std::optional<std::string> extends;
     // Relative paths to sibling fragment TOMLs whose [[scaling]]/[[axis]]/
     // [[table]]/[[pid]]/[[switch]] arrays get merged into this pack at load
     // time. Fragments may themselves carry a [pack] header — it's ignored
     // (only records flow through). Paths are resolved against the pack
     // file's parent directory.
-    std::vector<std::string>  includes;
+    std::vector<std::string> includes;
 };
 
 // Linear: raw -> (raw * factor) + offset.
@@ -117,13 +117,13 @@ struct PiecewiseScaling {
 using ScalingFormula = std::variant<LinearScaling, PiecewiseScaling>;
 
 struct Scaling {
-    std::string    id;
+    std::string id;
     ScalingFormula formula;
-    std::string    unit;
-    double         min{0.0};
-    double         max{0.0};
-    int            precision{0};
-    DataType       data_type{DataType::Uint8};
+    std::string unit;
+    double min{0.0};
+    double max{0.0};
+    int precision{0};
+    DataType data_type{DataType::Uint8};
 };
 
 // Apply a scaling: raw -> engineering units.
@@ -148,25 +148,25 @@ struct Axis {
     std::string type{"static"};
     std::size_t address{};
     std::size_t length{};
-    DataType    data_type{DataType::Uint16Be};
+    DataType data_type{DataType::Uint16Be};
     std::string scaling;
 };
 
 // A calibration table.
 struct Table {
-    std::string                id;
-    std::string                name;
-    std::string                category;
-    int                        dimensions{2};
-    std::size_t                address{};
-    DataType                   data_type{DataType::Uint16Be};
-    std::string                scaling;
+    std::string id;
+    std::string name;
+    std::string category;
+    int dimensions{2};
+    std::size_t address{};
+    DataType data_type{DataType::Uint16Be};
+    std::string scaling;
     std::optional<std::string> axis_x;
     std::optional<std::string> axis_y;
     std::optional<std::string> axis_z;
     std::optional<std::string> notes;
-    bool                       emissions_relevant{false};
-    bool                       engine_safety_critical{false};
+    bool emissions_relevant{false};
+    bool engine_safety_critical{false};
 };
 
 // A datalogger PID — addressed via SSM, scaled the same way as table values.
@@ -175,10 +175,10 @@ struct Pid {
     std::string name;
     std::size_t ssm_address{};
     std::size_t length{};
-    DataType    data_type{DataType::Uint8};
+    DataType data_type{DataType::Uint8};
     std::string scaling;
     std::string unit;
-    bool        default_log{false};
+    bool default_log{false};
 };
 
 // A single-bit status flag in an SSM RAM byte. RomRaider numbers bits with
@@ -187,8 +187,8 @@ struct Switch {
     std::string id;
     std::string name;
     std::size_t ssm_address{};
-    int         bit{};
-    bool        default_log{false};
+    int bit{};
+    bool default_log{false};
 };
 
 // A DTC enable bitmap region in the ROM. Modern ECUs gate each diagnostic
@@ -212,8 +212,8 @@ struct Dtc {
     std::string name;
     std::string bitmap_id;
     std::size_t byte_offset{};
-    int         bit{};
-    bool        emissions_relevant{false};
+    int bit{};
+    bool emissions_relevant{false};
 };
 
 // Read / set the enable bit for `dtc` inside `bitmap` in `rom`. The
@@ -222,18 +222,14 @@ struct Dtc {
 // and the value before/after the change so callers can show a diff, print
 // an audit line, or record the write as a ByteEdit in edit::History.
 struct DtcBitChange {
-    std::size_t  address{};
+    std::size_t address{};
     std::uint8_t before{};
     std::uint8_t after{};
 };
 
-[[nodiscard]] Result<bool>         is_dtc_enabled(Rom const &rom,
-                                                  DtcBitmap const &bitmap,
-                                                  Dtc const &dtc);
-[[nodiscard]] Result<DtcBitChange> set_dtc_enabled(Rom &rom,
-                                                   DtcBitmap const &bitmap,
-                                                   Dtc const &dtc,
-                                                   bool enabled);
+[[nodiscard]] Result<bool> is_dtc_enabled(Rom const &rom, DtcBitmap const &bitmap, Dtc const &dtc);
+[[nodiscard]] Result<DtcBitChange> set_dtc_enabled(Rom &rom, DtcBitmap const &bitmap,
+                                                   Dtc const &dtc, bool enabled);
 
 // One named pin on a hook — typed (Float/Int/Bool) signal that the user's
 // custom-feature graph either reads from the ECU or writes back. `name` is
@@ -246,7 +242,7 @@ struct DtcBitChange {
 struct HookSignal {
     std::string name;
     std::string label;
-    std::string type;   // "float" | "int" | "bool" (matches feature::PinType)
+    std::string type; // "float" | "int" | "bool" (matches feature::PinType)
     std::string unit;
     // Firmware address backing this signal. For a hook's *input* pin
     // (data the ECU offers to user logic), this is where codegen reads
@@ -267,14 +263,14 @@ struct HookSignal {
 // free_ram are codegen metadata — present in the pack for forward use
 // but the editor doesn't read them.
 struct Hook {
-    std::string                 id;
-    std::string                 display_name;   // human label; falls back to id
-    std::string                 description;
-    std::vector<HookSignal>     inputs;
-    std::vector<HookSignal>     outputs;
-    std::optional<std::size_t>  ecu_address;
-    std::optional<std::size_t>  free_ram_base;
-    std::optional<std::size_t>  free_ram_length;
+    std::string id;
+    std::string display_name; // human label; falls back to id
+    std::string description;
+    std::vector<HookSignal> inputs;
+    std::vector<HookSignal> outputs;
+    std::optional<std::size_t> ecu_address;
+    std::optional<std::size_t> free_ram_base;
+    std::optional<std::size_t> free_ram_length;
 };
 
 // A reusable computation node declared by the pack — arithmetic,
@@ -286,16 +282,16 @@ struct Hook {
 // pins (driven to downstream). No ECU-address or RAM-region fields
 // — those make no sense for a pure computation.
 struct Primitive {
-    std::string             id;
-    std::string             display_name;
-    std::string             description;
+    std::string id;
+    std::string display_name;
+    std::string description;
     std::vector<HookSignal> inputs;
     std::vector<HookSignal> outputs;
 };
 
 // A complete definition pack: one Pack header, plus 0..N of each child kind.
 class Definition {
-  public:
+public:
     [[nodiscard]] static Result<Definition> from_toml_string(std::string_view toml);
 
     // Load from a single TOML file (legacy "everything in one file") or from
@@ -312,33 +308,49 @@ class Definition {
     // every violation found (one Error, multi-line message).
     [[nodiscard]] Status validate() const;
 
-    [[nodiscard]] Pack const &                       pack() const noexcept { return pack_; }
+    [[nodiscard]] Pack const &pack() const noexcept {
+        return pack_;
+    }
     [[nodiscard]] std::vector<Identification> const &identifications() const noexcept {
         return ids_;
     }
-    [[nodiscard]] std::vector<Axis> const &    axes() const noexcept { return axes_; }
-    [[nodiscard]] std::vector<Scaling> const & scalings() const noexcept { return scalings_; }
-    [[nodiscard]] std::vector<Table> const &   tables() const noexcept { return tables_; }
-    [[nodiscard]] std::vector<Pid> const &     pids() const noexcept { return pids_; }
-    [[nodiscard]] std::vector<Switch> const &  switches() const noexcept { return switches_; }
+    [[nodiscard]] std::vector<Axis> const &axes() const noexcept {
+        return axes_;
+    }
+    [[nodiscard]] std::vector<Scaling> const &scalings() const noexcept {
+        return scalings_;
+    }
+    [[nodiscard]] std::vector<Table> const &tables() const noexcept {
+        return tables_;
+    }
+    [[nodiscard]] std::vector<Pid> const &pids() const noexcept {
+        return pids_;
+    }
+    [[nodiscard]] std::vector<Switch> const &switches() const noexcept {
+        return switches_;
+    }
     [[nodiscard]] std::vector<DtcBitmap> const &dtc_bitmaps() const noexcept {
         return dtc_bitmaps_;
     }
-    [[nodiscard]] std::vector<Dtc> const &     dtcs() const noexcept { return dtcs_; }
-    [[nodiscard]] std::vector<Hook> const &    hooks() const noexcept { return hooks_; }
+    [[nodiscard]] std::vector<Dtc> const &dtcs() const noexcept {
+        return dtcs_;
+    }
+    [[nodiscard]] std::vector<Hook> const &hooks() const noexcept {
+        return hooks_;
+    }
     [[nodiscard]] std::vector<Primitive> const &primitives() const noexcept {
         return primitives_;
     }
 
-    [[nodiscard]] Axis const *      find_axis(std::string_view id) const noexcept;
-    [[nodiscard]] Scaling const *   find_scaling(std::string_view id) const noexcept;
-    [[nodiscard]] Table const *     find_table(std::string_view id) const noexcept;
-    [[nodiscard]] Pid const *       find_pid(std::string_view id) const noexcept;
-    [[nodiscard]] Switch const *    find_switch(std::string_view id) const noexcept;
-    [[nodiscard]] DtcBitmap const * find_dtc_bitmap(std::string_view id) const noexcept;
-    [[nodiscard]] Dtc const *       find_dtc(std::string_view code) const noexcept;
-    [[nodiscard]] Hook const *      find_hook(std::string_view id) const noexcept;
-    [[nodiscard]] Primitive const * find_primitive(std::string_view id) const noexcept;
+    [[nodiscard]] Axis const *find_axis(std::string_view id) const noexcept;
+    [[nodiscard]] Scaling const *find_scaling(std::string_view id) const noexcept;
+    [[nodiscard]] Table const *find_table(std::string_view id) const noexcept;
+    [[nodiscard]] Pid const *find_pid(std::string_view id) const noexcept;
+    [[nodiscard]] Switch const *find_switch(std::string_view id) const noexcept;
+    [[nodiscard]] DtcBitmap const *find_dtc_bitmap(std::string_view id) const noexcept;
+    [[nodiscard]] Dtc const *find_dtc(std::string_view code) const noexcept;
+    [[nodiscard]] Hook const *find_hook(std::string_view id) const noexcept;
+    [[nodiscard]] Primitive const *find_primitive(std::string_view id) const noexcept;
 
     // If `rom` matches one of the [[identification]] entries, return the
     // entry's `name`. Otherwise nullopt.
@@ -352,7 +364,7 @@ class Definition {
     struct MatchInfo {
         std::string name;
         std::size_t offset{};
-        bool        scanned{false};
+        bool scanned{false};
     };
     [[nodiscard]] std::optional<MatchInfo> match_info(Rom const &rom) const;
 
@@ -373,15 +385,14 @@ class Definition {
     // Subaru convention: row-major outer-to-inner Z/Y/X. The bytes on disk
     // are slice 0's whole y*x grid, then slice 1's, etc.
     struct TableData {
-        std::vector<double>                           axis_x;
-        std::vector<double>                           axis_y;
-        std::vector<double>                           axis_z;
-        std::vector<std::vector<double>>              values;
+        std::vector<double> axis_x;
+        std::vector<double> axis_y;
+        std::vector<double> axis_z;
+        std::vector<std::vector<double>> values;
         std::vector<std::vector<std::vector<double>>> slices;
     };
 
-    [[nodiscard]] Result<TableData> read_table_values(Rom const &  rom,
-                                                      Table const &table) const;
+    [[nodiscard]] Result<TableData> read_table_values(Rom const &rom, Table const &table) const;
 
     // Write `td.values` back to `rom` at `table.address`, inverting the
     // table's scaling and using `table.data_type` for the per-cell byte
@@ -396,30 +407,31 @@ class Definition {
     struct TableDiff {
         std::size_t total_cells{0};
         std::size_t cells_changed{0};
-        double      max_abs_delta{0.0};
-        double      mean_abs_delta{0.0};
+        double max_abs_delta{0.0};
+        double mean_abs_delta{0.0};
 
-        [[nodiscard]] bool changed() const noexcept { return cells_changed > 0; }
+        [[nodiscard]] bool changed() const noexcept {
+            return cells_changed > 0;
+        }
     };
 
     // Compare a single table's scaled values between two ROMs. Both ROMs must
     // contain enough bytes for the table; the call fails OutOfRange otherwise.
-    [[nodiscard]] Result<TableDiff> diff_table(Rom const &  a,
-                                               Rom const &  b,
+    [[nodiscard]] Result<TableDiff> diff_table(Rom const &a, Rom const &b,
                                                Table const &table) const;
 
-  private:
-    Pack                        pack_;
+private:
+    Pack pack_;
     std::vector<Identification> ids_;
-    std::vector<Axis>           axes_;
-    std::vector<Scaling>        scalings_;
-    std::vector<Table>          tables_;
-    std::vector<Pid>            pids_;
-    std::vector<Switch>         switches_;
-    std::vector<DtcBitmap>      dtc_bitmaps_;
-    std::vector<Dtc>            dtcs_;
-    std::vector<Hook>           hooks_;
-    std::vector<Primitive>      primitives_;
+    std::vector<Axis> axes_;
+    std::vector<Scaling> scalings_;
+    std::vector<Table> tables_;
+    std::vector<Pid> pids_;
+    std::vector<Switch> switches_;
+    std::vector<DtcBitmap> dtc_bitmaps_;
+    std::vector<Dtc> dtcs_;
+    std::vector<Hook> hooks_;
+    std::vector<Primitive> primitives_;
 
     friend class DefinitionBuilder;
 };

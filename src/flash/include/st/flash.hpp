@@ -50,7 +50,7 @@ struct Sector {
 // One contiguous write within a plan: which range, and the replacement
 // bytes. `data.size()` must equal `sector.length`.
 struct SectorWrite {
-    Sector                    sector{};
+    Sector sector{};
     std::vector<std::uint8_t> data;
 };
 
@@ -121,23 +121,23 @@ struct FlashPlan {
 // can be diagnosed without re-running the flash.
 struct SectorOutcome {
     Sector sector{};
-    bool   erased{false};
-    bool   downloaded{false};
-    bool   transferred{false};
-    bool   exited{false};
-    bool   check_deps_passed{false};
-    bool   verified{true};  // always true when verify_after_write=false
+    bool erased{false};
+    bool downloaded{false};
+    bool transferred{false};
+    bool exited{false};
+    bool check_deps_passed{false};
+    bool verified{true}; // always true when verify_after_write=false
 };
 
 // Result of `Flasher::execute`. The orchestrator returns this even on
 // partial failures so the caller can see which sector died at which
 // step.
 struct FlashReport {
-    bool                        entered_session{false};
-    bool                        silenced_bus{false};
-    bool                        restored_bus{false};
-    std::vector<SectorOutcome>  sectors;
-    std::size_t                 bytes_transferred{0};
+    bool entered_session{false};
+    bool silenced_bus{false};
+    bool restored_bus{false};
+    std::vector<SectorOutcome> sectors;
+    std::size_t bytes_transferred{0};
 
     [[nodiscard]] bool all_sectors_completed() const noexcept;
     [[nodiscard]] bool all_sectors_verified() const noexcept;
@@ -157,44 +157,43 @@ struct FlashReport {
 // fixes that by guaranteeing in-memory visibility into partial state
 // regardless of where in the sequence the failure occurred.
 struct ExecuteOutcome {
-    FlashReport          report;
+    FlashReport report;
     std::optional<Error> error;
 
-    [[nodiscard]] bool ok() const noexcept { return !error.has_value(); }
+    [[nodiscard]] bool ok() const noexcept {
+        return !error.has_value();
+    }
 };
 
 class Flasher {
-  public:
+public:
     explicit Flasher(transport::ITransport &t) noexcept : client_{t} {}
 
     // Read a contiguous span of ECU memory via ReadMemoryByAddress,
     // chunked into `max_chunk_size`-byte requests. Returns the
     // concatenated bytes in the requested order. Errors at any chunk
     // abort the read and surface through the Result.
-    [[nodiscard]] Result<std::vector<std::uint8_t>> read_full_rom(
-        std::uint32_t             base_address,
-        std::uint32_t             total_length,
-        std::uint32_t             max_chunk_size = 0x100,
-        std::chrono::milliseconds per_chunk_timeout =
-            std::chrono::milliseconds{1000});
+    [[nodiscard]] Result<std::vector<std::uint8_t>>
+    read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
+                  std::uint32_t max_chunk_size = 0x100,
+                  std::chrono::milliseconds per_chunk_timeout = std::chrono::milliseconds{1000});
 
     // Walk `current` and `target` in `sector_size`-aligned chunks; emit
     // a Sector for every chunk whose bytes differ. Both spans must be
     // the same length and a multiple of `sector_size` (the last sector
     // is short if not, and is included whole). Pure function; no
     // transport calls.
-    [[nodiscard]] static std::vector<Sector> compute_delta(
-        std::span<std::uint8_t const> current,
-        std::span<std::uint8_t const> target,
-        std::uint32_t                 sector_size = 0x1000,
-        std::uint32_t                 base_address = 0);
+    [[nodiscard]] static std::vector<Sector> compute_delta(std::span<std::uint8_t const> current,
+                                                           std::span<std::uint8_t const> target,
+                                                           std::uint32_t sector_size = 0x1000,
+                                                           std::uint32_t base_address = 0);
 
     // Execute a plan. Always returns an `ExecuteOutcome` whose `report`
     // reflects in-progress state up to wherever the sequence stopped;
     // `error` is set iff the flash did not complete successfully.
     [[nodiscard]] ExecuteOutcome execute(FlashPlan const &plan);
 
-  private:
+private:
     ecu::uds::UdsClient client_;
 };
 
@@ -234,11 +233,9 @@ struct PolicyDecision {
     policy::Action overall_action{policy::Action::Silent};
 };
 
-[[nodiscard]] PolicyDecision evaluate_plan_policy(
-    FlashPlan                     const &plan,
-    Definition                    const &def,
-    std::span<std::uint8_t const>        source_rom,
-    policy::Profile                      profile) noexcept;
+[[nodiscard]] PolicyDecision evaluate_plan_policy(FlashPlan const &plan, Definition const &def,
+                                                  std::span<std::uint8_t const> source_rom,
+                                                  policy::Profile profile) noexcept;
 
 // =====================================================================
 // FlashPlan TOML persistence
@@ -287,16 +284,14 @@ struct PolicyDecision {
 
 inline constexpr int kPlanSchemaVersion = 1;
 
-[[nodiscard]] Result<FlashPlan> parse_plan(
-    std::string_view             text,
-    std::filesystem::path const &base_dir = {});
+[[nodiscard]] Result<FlashPlan> parse_plan(std::string_view text,
+                                           std::filesystem::path const &base_dir = {});
 
 [[nodiscard]] Result<FlashPlan> read_plan(std::filesystem::path const &path);
 
 [[nodiscard]] std::string format_plan(FlashPlan const &plan);
 
-[[nodiscard]] Status write_plan(std::filesystem::path const &path,
-                                FlashPlan const             &plan);
+[[nodiscard]] Status write_plan(std::filesystem::path const &path, FlashPlan const &plan);
 
 // =====================================================================
 // Manifest — tamper-evident record of an executed flash
@@ -322,25 +317,25 @@ inline constexpr int kPlanSchemaVersion = 1;
 // support incremental persistence during a flash.
 
 struct ManifestEntry {
-    Sector        sector{};
+    Sector sector{};
     std::uint32_t data_crc32{0};
-    bool          transferred{false};
-    bool          verified{false};
+    bool transferred{false};
+    bool verified{false};
 };
 
 struct Manifest {
-    int                        schema_version{1};
+    int schema_version{1};
     // Free-form ISO-8601 UTC timestamp ("2026-05-12T15:30:00Z"). Opaque
     // to the parser; round-tripped as a string.
-    std::string                created_at;
+    std::string created_at;
     // CRC32 of the source plan TOML text, end-to-end. Lets a later
     // verifier confirm the manifest was produced from a specific plan
     // without storing the whole plan.
-    std::uint32_t              plan_crc32{0};
+    std::uint32_t plan_crc32{0};
     // CRC32 of the concatenation of every entry's transferred bytes, in
     // plan order. Independent of the per-entry hashes; both are stored
     // so a tampered single-sector value is detectable two ways.
-    std::uint32_t              overall_crc32{0};
+    std::uint32_t overall_crc32{0};
     // Audit-trail fields populated by the CLI when a policy-gated flash
     // proceeds under a profile that demands `Confirm` / `ConfirmWithReason`
     // (see `docs/06-legal-ethics.md`). `policy_profile` is the active
@@ -348,8 +343,8 @@ struct Manifest {
     // supplied justification for emissions-flagged edits. Both empty when
     // no policy gate was applied (e.g. `flash-apply` without `--profile`
     // on motorsport-only).
-    std::string                policy_profile;
-    std::string                policy_reason;
+    std::string policy_profile;
+    std::string policy_reason;
     std::vector<ManifestEntry> entries;
 };
 
@@ -359,15 +354,13 @@ inline constexpr int kManifestSchemaVersion = 1;
 // flash. `plan_text` should be the exact source TOML the plan was
 // loaded from — passing format_plan(plan) is fine for plans built in
 // memory but loses any user comments / whitespace.
-[[nodiscard]] Manifest build_manifest(FlashPlan        const &plan,
-                                      std::string_view        plan_text,
-                                      FlashReport      const &report);
+[[nodiscard]] Manifest build_manifest(FlashPlan const &plan, std::string_view plan_text,
+                                      FlashReport const &report);
 
 [[nodiscard]] Result<Manifest> parse_manifest(std::string_view text);
 [[nodiscard]] Result<Manifest> read_manifest(std::filesystem::path const &path);
-[[nodiscard]] std::string      format_manifest(Manifest const &m);
-[[nodiscard]] Status           write_manifest(std::filesystem::path const &path,
-                                              Manifest                    const &m);
+[[nodiscard]] std::string format_manifest(Manifest const &m);
+[[nodiscard]] Status write_manifest(std::filesystem::path const &path, Manifest const &m);
 
 // =====================================================================
 // Resume-from-journal
@@ -400,8 +393,7 @@ inline constexpr int kManifestSchemaVersion = 1;
 // block_size_hint, verify_chunk_size, journal_path). Callers typically
 // set a fresh `journal_path` before executing the resumed plan so the
 // original journal stays intact for audit.
-[[nodiscard]] Result<FlashPlan> plan_resume(FlashPlan const &original,
-                                            Manifest  const &journal);
+[[nodiscard]] Result<FlashPlan> plan_resume(FlashPlan const &original, Manifest const &journal);
 
 } // namespace st::flash
 

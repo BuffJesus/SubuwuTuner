@@ -18,31 +18,31 @@ enum class ErrorCode : std::uint16_t {
     Ok = 0,
 
     // 1xx — generic
-    Unknown        = 100,
-    InvalidArgument= 101,
-    OutOfRange     = 102,
+    Unknown = 100,
+    InvalidArgument = 101,
+    OutOfRange = 102,
     NotImplemented = 103,
-    Cancelled      = 104,
+    Cancelled = 104,
 
     // 2xx — I/O
-    IoFailure      = 200,
-    FileNotFound   = 201,
+    IoFailure = 200,
+    FileNotFound = 201,
     PermissionDenied = 202,
-    UnexpectedEof  = 203,
+    UnexpectedEof = 203,
 
     // 3xx — formats (ROM, project, definitions)
-    ParseError     = 300,
-    BadMagic       = 301,
-    BadChecksum    = 302,
+    ParseError = 300,
+    BadMagic = 301,
+    BadChecksum = 302,
     UnsupportedVersion = 303,
 
     // 4xx — transport (reserved for st::transport)
     TransportUnavailable = 400,
-    TransportTimeout     = 401,
-    TransportNack        = 402,
+    TransportTimeout = 401,
+    TransportNack = 402,
 
     // 5xx — ECU protocol (reserved for st::ecu)
-    EcuRejected   = 500,
+    EcuRejected = 500,
     SeedKeyFailed = 501,
 };
 
@@ -53,16 +53,20 @@ enum class ErrorCode : std::uint16_t {
 // pitfalls. Errors are cheap to copy; the small-string optimisation usually
 // keeps allocations out of the hot path.
 class Error {
-  public:
+public:
     Error() = default;
 
     Error(ErrorCode code, std::string message) : code_{code}, message_{std::move(message)} {}
 
     explicit Error(ErrorCode code) : code_{code} {}
 
-    [[nodiscard]] ErrorCode code() const noexcept { return code_; }
+    [[nodiscard]] ErrorCode code() const noexcept {
+        return code_;
+    }
 
-    [[nodiscard]] std::string_view message() const noexcept { return message_; }
+    [[nodiscard]] std::string_view message() const noexcept {
+        return message_;
+    }
 
     [[nodiscard]] std::string to_string() const;
 
@@ -70,8 +74,8 @@ class Error {
         return lhs.code_ == rhs.code_ && lhs.message_ == rhs.message_;
     }
 
-  private:
-    ErrorCode   code_{ErrorCode::Unknown};
+private:
+    ErrorCode code_{ErrorCode::Unknown};
     std::string message_{};
 };
 

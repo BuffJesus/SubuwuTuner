@@ -37,13 +37,13 @@ namespace st {
 // usual; save_working_rom() persists the in-memory bytes back to disk.
 
 class Project {
-  public:
+public:
     static constexpr int kSchemaVersion = 1;
 
     [[nodiscard]] static Result<Project> create(std::filesystem::path const &project_dir,
                                                 std::filesystem::path const &source_rom_path,
                                                 std::filesystem::path const &definition_path,
-                                                std::string                  display_name);
+                                                std::string display_name);
 
     [[nodiscard]] static Result<Project> open(std::filesystem::path const &project_dir);
 
@@ -58,13 +58,19 @@ class Project {
 
     // ---- Accessors -----------------------------------------------------
 
-    [[nodiscard]] std::filesystem::path const &dir() const noexcept { return dir_; }
-    [[nodiscard]] std::string const &          display_name() const noexcept {
+    [[nodiscard]] std::filesystem::path const &dir() const noexcept {
+        return dir_;
+    }
+    [[nodiscard]] std::string const &display_name() const noexcept {
         return display_name_;
     }
-    [[nodiscard]] std::string const &notes() const noexcept { return notes_; }
-    void                             set_notes(std::string n) noexcept { notes_ = std::move(n); }
-    void                             set_display_name(std::string n) noexcept {
+    [[nodiscard]] std::string const &notes() const noexcept {
+        return notes_;
+    }
+    void set_notes(std::string n) noexcept {
+        notes_ = std::move(n);
+    }
+    void set_display_name(std::string n) noexcept {
         display_name_ = std::move(n);
     }
 
@@ -79,35 +85,47 @@ class Project {
         policy_profile_ = p;
     }
 
-    [[nodiscard]] Rom const &       source_rom() const noexcept { return source_; }
-    [[nodiscard]] Rom const &       working_rom() const noexcept { return working_; }
-    [[nodiscard]] Rom &             working_rom() noexcept { return working_; }
-    [[nodiscard]] Definition const &definition() const noexcept { return def_; }
+    [[nodiscard]] Rom const &source_rom() const noexcept {
+        return source_;
+    }
+    [[nodiscard]] Rom const &working_rom() const noexcept {
+        return working_;
+    }
+    [[nodiscard]] Rom &working_rom() noexcept {
+        return working_;
+    }
+    [[nodiscard]] Definition const &definition() const noexcept {
+        return def_;
+    }
 
-    [[nodiscard]] edit::History const &history() const noexcept { return history_; }
-    [[nodiscard]] edit::History &      history() noexcept { return history_; }
+    [[nodiscard]] edit::History const &history() const noexcept {
+        return history_;
+    }
+    [[nodiscard]] edit::History &history() noexcept {
+        return history_;
+    }
 
     [[nodiscard]] std::uint32_t source_crc32_at_create() const noexcept {
         return source_crc32_;
     }
 
-  private:
+private:
     Project() = default;
 
     std::filesystem::path dir_;
-    std::string           display_name_;
-    std::string           notes_;
-    std::string           created_;
-    std::uint32_t         source_crc32_{0};
-    policy::Profile       policy_profile_{policy::Profile::MotorsportOnly};
+    std::string display_name_;
+    std::string notes_;
+    std::string created_;
+    std::uint32_t source_crc32_{0};
+    policy::Profile policy_profile_{policy::Profile::MotorsportOnly};
 
     std::filesystem::path source_rel_{"source.bin"};
     std::filesystem::path working_rel_{"working.bin"};
     std::filesystem::path def_rel_;
 
-    Rom           source_{Rom::from_bytes({})};
-    Rom           working_{Rom::from_bytes({})};
-    Definition    def_;
+    Rom source_{Rom::from_bytes({})};
+    Rom working_{Rom::from_bytes({})};
+    Definition def_;
     edit::History history_;
 };
 
@@ -129,7 +147,7 @@ class Project {
 struct EditCsvCell {
     std::size_t row;
     std::size_t col;
-    double      value;
+    double value;
 };
 
 struct EditCsvWarning {
@@ -137,7 +155,7 @@ struct EditCsvWarning {
 };
 
 struct EditCsvParseResult {
-    std::vector<EditCsvCell>    cells;
+    std::vector<EditCsvCell> cells;
     std::vector<EditCsvWarning> warnings;
 };
 
@@ -155,12 +173,12 @@ struct EditCsvParseOptions {
 
     // Bounds-check parsed (row,col) against the target grid. Zero
     // means "skip the check" (caller validates).
-    std::size_t      table_rows{0};
-    std::size_t      table_cols{0};
+    std::size_t table_rows{0};
+    std::size_t table_cols{0};
 };
 
-[[nodiscard]] Result<EditCsvParseResult> parse_edit_csv(
-    std::string_view text, EditCsvParseOptions const &opts);
+[[nodiscard]] Result<EditCsvParseResult> parse_edit_csv(std::string_view text,
+                                                        EditCsvParseOptions const &opts);
 
 } // namespace st
 

@@ -46,22 +46,25 @@ namespace st::log {
 //
 // Pid count and capacity are immutable after construction.
 class LogStream {
-  public:
+public:
     LogStream(std::size_t pid_count, std::size_t requested_capacity);
 
-    LogStream(LogStream const &)            = delete;
+    LogStream(LogStream const &) = delete;
     LogStream &operator=(LogStream const &) = delete;
-    LogStream(LogStream &&)                 = delete;
-    LogStream &operator=(LogStream &&)      = delete;
+    LogStream(LogStream &&) = delete;
+    LogStream &operator=(LogStream &&) = delete;
 
-    [[nodiscard]] std::size_t pid_count() const noexcept { return pid_count_; }
-    [[nodiscard]] std::size_t capacity()  const noexcept { return capacity_;  }
+    [[nodiscard]] std::size_t pid_count() const noexcept {
+        return pid_count_;
+    }
+    [[nodiscard]] std::size_t capacity() const noexcept {
+        return capacity_;
+    }
 
-    [[nodiscard]] bool try_push(std::int64_t              timestamp_ns,
-                                std::span<double const>   values) noexcept;
+    [[nodiscard]] bool try_push(std::int64_t timestamp_ns, std::span<double const> values) noexcept;
 
-    [[nodiscard]] bool try_pop(std::int64_t       &out_timestamp_ns,
-                               std::span<double>   out_values) noexcept;
+    [[nodiscard]] bool try_pop(std::int64_t &out_timestamp_ns,
+                               std::span<double> out_values) noexcept;
 
     [[nodiscard]] std::uint64_t pushed_count() const noexcept {
         return head_.load(std::memory_order_relaxed);
@@ -80,13 +83,13 @@ class LogStream {
 
     void reset() noexcept;
 
-  private:
+private:
     std::size_t pid_count_;
     std::size_t capacity_;
     std::size_t mask_;
 
     std::vector<std::int64_t> timestamps_;
-    std::vector<double>       values_;
+    std::vector<double> values_;
 
     std::atomic<std::uint64_t> head_{0};
     std::atomic<std::uint64_t> tail_{0};
@@ -98,10 +101,10 @@ class LogStream {
 // they're decoded; `scaling` (if present) converts raw to engineering
 // units before push. `id` is a display-only label.
 struct LogChannel {
-    std::string             id;
-    std::uint32_t           address{0};
-    DataType                data_type{DataType::Uint8};
-    std::optional<Scaling>  scaling;
+    std::string id;
+    std::uint32_t address{0};
+    DataType data_type{DataType::Uint8};
+    std::optional<Scaling> scaling;
 };
 
 // LogSession orchestrates the I/O loop on top of LogStream. Owns a
@@ -121,22 +124,21 @@ struct LogChannel {
 //     it's running. Don't share it with any other thread for that
 //     duration — ITransport's send_recv is not thread-safe.
 class LogSession {
-  public:
-    LogSession(transport::ITransport &transport,
-               std::vector<LogChannel> channels,
-               std::size_t            ring_capacity = 1024);
+public:
+    LogSession(transport::ITransport &transport, std::vector<LogChannel> channels,
+               std::size_t ring_capacity = 1024);
 
-    LogSession(LogSession const &)            = delete;
+    LogSession(LogSession const &) = delete;
     LogSession &operator=(LogSession const &) = delete;
-    LogSession(LogSession &&)                 = delete;
-    LogSession &operator=(LogSession &&)      = delete;
+    LogSession(LogSession &&) = delete;
+    LogSession &operator=(LogSession &&) = delete;
     ~LogSession();
 
     // Spawn the I/O thread. Per-cycle send_recv timeout applies to each
     // request the thread issues. Returns InvalidArgument if there are no
     // channels, or if the session is already running.
-    [[nodiscard]] Status start(
-        std::chrono::milliseconds per_cycle_timeout = std::chrono::milliseconds{500});
+    [[nodiscard]] Status
+    start(std::chrono::milliseconds per_cycle_timeout = std::chrono::milliseconds{500});
 
     // Signal the I/O thread to stop and join it. Safe to call multiple
     // times; safe to call before start; only unsafe to call from inside
@@ -147,8 +149,12 @@ class LogSession {
         return running_.load(std::memory_order_acquire);
     }
 
-    [[nodiscard]] LogStream const &stream() const noexcept { return stream_; }
-    [[nodiscard]] LogStream &      stream()       noexcept { return stream_; }
+    [[nodiscard]] LogStream const &stream() const noexcept {
+        return stream_;
+    }
+    [[nodiscard]] LogStream &stream() noexcept {
+        return stream_;
+    }
 
     // Successful cycles since the most recent start().
     [[nodiscard]] std::uint64_t cycles_completed() const noexcept {
@@ -163,7 +169,7 @@ class LogSession {
         return channels_;
     }
 
-  private:
+private:
     void io_loop(std::chrono::milliseconds timeout) noexcept;
 
     transport::ITransport *transport_;
@@ -172,13 +178,13 @@ class LogSession {
     // Expanded read plan: every byte we need to read in one shot, plus
     // an index into that flat list for each channel's first byte.
     std::vector<std::uint32_t> read_addresses_;
-    std::vector<std::size_t>   channel_byte_offsets_;
+    std::vector<std::size_t> channel_byte_offsets_;
 
     LogStream stream_;
 
-    std::atomic<bool>          running_{false};
-    std::atomic<bool>          stop_requested_{false};
-    std::thread                io_thread_;
+    std::atomic<bool> running_{false};
+    std::atomic<bool> stop_requested_{false};
+    std::thread io_thread_;
 
     std::atomic<std::uint64_t> cycles_completed_{0};
     std::atomic<std::uint64_t> io_errors_{0};
@@ -197,7 +203,7 @@ class LogSession {
 // Thread-safety: not safe for concurrent calls; intended to be driven by
 // the single consumer of a LogStream.
 class CsvSink {
-  public:
+public:
     CsvSink(std::ostream &out, std::vector<LogChannel> channels);
 
     // Write the header row. Call once per session, before any rows.
@@ -210,8 +216,8 @@ class CsvSink {
         return channels_;
     }
 
-  private:
-    std::ostream           &out_;
+private:
+    std::ostream &out_;
     std::vector<LogChannel> channels_;
 };
 

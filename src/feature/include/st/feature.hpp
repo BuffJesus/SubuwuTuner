@@ -70,24 +70,24 @@ enum class PinDirection : std::uint8_t {
 };
 
 struct Pin {
-    PinId        id{};
+    PinId id{};
     // Canonical identifier — must match the pack's HookSignal `name`
     // (snake_case by convention) so the codegen can resolve the pin
     // back to its firmware address. NEVER use the display label here;
     // mismatched name vs canonical = silent codegen lookup failure.
-    std::string  name;
-    PinType      type{PinType::Float};
+    std::string name;
+    PinType type{PinType::Float};
     PinDirection direction{PinDirection::Input};
     // Optional engineering unit ("rpm", "kPa", "°C", "ms", ...). Free-
     // form for now; the unit-checking pass in a later phase will
     // formalize the small set of canonical names a Graph may use.
-    std::string  unit;
+    std::string unit;
     // Human-readable display label ("Throttle %", "Engine RPM").
     // Optional — when empty, displays fall back to `name`. The pack's
     // HookSignal `label` field flows into this on Insert. Decoupling
     // it from `name` lets the canvas show pretty labels while the
     // codegen lookup stays on canonical names.
-    std::string  label;
+    std::string label;
     // Per-instance constant supplied to an Input pin when no edge
     // drives it. Stored as double regardless of PinType (Int casts,
     // Bool reads `value > 0.5`) so the wire format stays uniform.
@@ -101,19 +101,18 @@ struct Pin {
     // sites that pass five args still compile; new code spells out the
     // label explicitly. Default and copy/move stay synthesized.
     Pin() = default;
-    Pin(PinId id_, std::string name_, PinType type_,
-         PinDirection direction_, std::string unit_,
-         std::string label_ = "")
-        : id(id_)
-        , name(std::move(name_))
-        , type(type_)
-        , direction(direction_)
-        , unit(std::move(unit_))
-        , label(std::move(label_)) {}
+    Pin(PinId id_, std::string name_, PinType type_, PinDirection direction_, std::string unit_,
+        std::string label_ = "")
+        : id(id_),
+          name(std::move(name_)),
+          type(type_),
+          direction(direction_),
+          unit(std::move(unit_)),
+          label(std::move(label_)) {}
 };
 
 struct Node {
-    NodeId      id{};
+    NodeId id{};
     // Free-form tag identifying what this node "does". The editor
     // and the eventual compiler use this to look up the node's
     // behavior in the per-platform node library (see docs/16
@@ -125,8 +124,8 @@ struct Node {
     std::string label;
     // 2D position on the editor canvas. Persisted with the graph so a
     // user's hand-laid-out diagram survives a reload.
-    float       x{0.0f};
-    float       y{0.0f};
+    float x{0.0f};
+    float y{0.0f};
     std::vector<Pin> pins;
     // Phase-break flag: true when the node's Input side fires at a
     // strictly later time than its Output side within one ECU loop
@@ -139,18 +138,18 @@ struct Node {
     // and generic debug nodes leave this false: their output is a
     // pure function of their inputs at the same time, so a path
     // from a primitive's output back to its input IS a cycle.
-    bool        is_phase_break{false};
+    bool is_phase_break{false};
 };
 
 struct Edge {
     NodeId from_node{};
-    PinId  from_pin{};
+    PinId from_pin{};
     NodeId to_node{};
-    PinId  to_pin{};
+    PinId to_pin{};
 };
 
 class Graph {
-  public:
+public:
     // Add a node; assigns and returns a fresh NodeId. The node's id
     // field is ignored on input and overwritten.
     NodeId add_node(Node node);
@@ -160,8 +159,7 @@ class Graph {
     // (Output → Input), types match, and the to_pin is not already
     // driven by another edge (single-driver invariant — fan-in into
     // an input is disallowed; fan-out from an output is fine).
-    [[nodiscard]] Status connect(NodeId from_node, PinId from_pin,
-                                  NodeId to_node,   PinId to_pin);
+    [[nodiscard]] Status connect(NodeId from_node, PinId from_pin, NodeId to_node, PinId to_pin);
 
     // Remove a node and every edge touching it. Idempotent on
     // non-existent ids.
@@ -178,8 +176,7 @@ class Graph {
     // click popup. Idempotent on unknown ids. The value is stored
     // as double regardless of pin type — Int truncates, Bool reads
     // `v > 0.5` — keeping the persisted wire format uniform.
-    void set_pin_default(NodeId id, PinId pin_id,
-                          std::optional<double> value);
+    void set_pin_default(NodeId id, PinId pin_id, std::optional<double> value);
 
     // Remove a specific edge. Idempotent.
     void remove_edge(Edge const &edge);
@@ -193,8 +190,12 @@ class Graph {
     [[nodiscard]] Status validate() const;
 
     // Read-only views.
-    [[nodiscard]] std::vector<Node> const &nodes() const noexcept { return nodes_; }
-    [[nodiscard]] std::vector<Edge> const &edges() const noexcept { return edges_; }
+    [[nodiscard]] std::vector<Node> const &nodes() const noexcept {
+        return nodes_;
+    }
+    [[nodiscard]] std::vector<Edge> const &edges() const noexcept {
+        return edges_;
+    }
     [[nodiscard]] Node const *find_node(NodeId id) const noexcept;
 
     // Locate a pin on a node by id. Returns nullptr if either id is
@@ -202,10 +203,10 @@ class Graph {
     // remove_node so external code can't desynchronize edges.
     [[nodiscard]] Pin const *find_pin(NodeId node_id, PinId pin_id) const noexcept;
 
-  private:
+private:
     std::vector<Node> nodes_;
     std::vector<Edge> edges_;
-    NodeId            next_node_id_{1};
+    NodeId next_node_id_{1};
 };
 
 // Canonical short label for a PinType, suitable for tooltips and
@@ -221,8 +222,8 @@ class Graph {
 // graph only, no compiled patch bytes yet). Round-trip stable for
 // every valid graph. Schema-versioned via [graph].schema_version so
 // future-compatible changes can be detected at load time.
-[[nodiscard]] std::string         to_toml(Graph const &g);
-[[nodiscard]] Result<Graph>       from_toml(std::string_view text);
+[[nodiscard]] std::string to_toml(Graph const &g);
+[[nodiscard]] Result<Graph> from_toml(std::string_view text);
 
 // Style / completeness warnings — distinct from validate(), which
 // reports STRUCTURAL violations (cycles, dangling refs) that make a
@@ -231,9 +232,9 @@ class Graph {
 // with no consumer, etc. Editor surfaces them as warnings; codegen
 // later will refuse on those it considers fatal.
 struct LintFinding {
-    std::string             message;
-    std::optional<NodeId>   node;
-    std::optional<PinId>    pin;
+    std::string message;
+    std::optional<NodeId> node;
+    std::optional<PinId> pin;
 };
 
 [[nodiscard]] std::vector<LintFinding> lint(Graph const &g);

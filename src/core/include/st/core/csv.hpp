@@ -31,21 +31,18 @@
 namespace st::core::csv {
 
 [[nodiscard]] inline std::string_view trim(std::string_view s) noexcept {
-    while (!s.empty()
-           && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r')) {
+    while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r')) {
         s.remove_prefix(1);
     }
-    while (!s.empty()
-           && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r')) {
+    while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r')) {
         s.remove_suffix(1);
     }
     return s;
 }
 
-[[nodiscard]] inline std::vector<std::string_view>
-split_fields(std::string_view line) {
+[[nodiscard]] inline std::vector<std::string_view> split_fields(std::string_view line) {
     std::vector<std::string_view> out;
-    std::size_t                   start = 0;
+    std::size_t start = 0;
     for (std::size_t i = 0; i <= line.size(); ++i) {
         if (i == line.size() || line[i] == ',') {
             out.push_back(trim(line.substr(start, i - start)));
@@ -64,8 +61,8 @@ split_fields(std::string_view line) {
         return true;
     }
     std::string copy(s);
-    char       *end = nullptr;
-    double const v  = std::strtod(copy.c_str(), &end);
+    char *end = nullptr;
+    double const v = std::strtod(copy.c_str(), &end);
     if (end == copy.c_str() || end == nullptr || *end != '\0') {
         return false;
     }
@@ -75,10 +72,9 @@ split_fields(std::string_view line) {
 
 // Splits `text` into non-blank, non-'#'-comment lines. Lines retain
 // no trailing CR (handled by trim()).
-[[nodiscard]] inline std::vector<std::string_view>
-split_lines(std::string_view text) {
+[[nodiscard]] inline std::vector<std::string_view> split_lines(std::string_view text) {
     std::vector<std::string_view> out;
-    std::size_t                   i = 0;
+    std::size_t i = 0;
     while (i < text.size()) {
         std::size_t e = i;
         while (e < text.size() && text[e] != '\n') {
@@ -93,6 +89,6 @@ split_lines(std::string_view text) {
     return out;
 }
 
-}  // namespace st::core::csv
+} // namespace st::core::csv
 
-#endif  // ST_CORE_CSV_HPP
+#endif // ST_CORE_CSV_HPP

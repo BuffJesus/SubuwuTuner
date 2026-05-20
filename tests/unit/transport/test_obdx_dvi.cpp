@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The SubuwuTuner Authors
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "st/transport/obdx_dvi.hpp"
+
+#include <catch2/catch_test_macros.hpp>
 
 #include <array>
 #include <cstdint>
@@ -13,34 +13,29 @@ namespace dvi = st::transport::obdx::dvi;
 
 // ---- checksum ----------------------------------------------------
 
-TEST_CASE("dvi::checksum: empty span sums to 0, NOT'd to 0xFF",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::checksum: empty span sums to 0, NOT'd to 0xFF", "[transport][obdx_dvi]") {
     std::vector<std::uint8_t> empty;
     REQUIRE(dvi::checksum(std::span<std::uint8_t const>{empty}) == 0xFFU);
 }
 
-TEST_CASE("dvi::checksum: single 0x00 → 0xFF",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::checksum: single 0x00 → 0xFF", "[transport][obdx_dvi]") {
     std::array<std::uint8_t, 1> one{0x00};
     REQUIRE(dvi::checksum(one) == 0xFFU);
 }
 
-TEST_CASE("dvi::checksum: single 0xFF → 0x00",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::checksum: single 0xFF → 0x00", "[transport][obdx_dvi]") {
     std::array<std::uint8_t, 1> one{0xFFU};
     REQUIRE(dvi::checksum(one) == 0x00U);
 }
 
-TEST_CASE("dvi::checksum: 0x22 0x01 → ~(0x23)=0xDC",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::checksum: 0x22 0x01 → ~(0x23)=0xDC", "[transport][obdx_dvi]") {
     // ScantoolInfo (0x22) + sub-op 0x01 (HW string request payload byte)
     // is a real shape we'll send. Sum = 0x23, NOT = 0xDC.
     std::array<std::uint8_t, 2> bytes{0x22U, 0x01U};
     REQUIRE(dvi::checksum(bytes) == 0xDCU);
 }
 
-TEST_CASE("dvi::checksum: overflows past 8 bits cleanly",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::checksum: overflows past 8 bits cleanly", "[transport][obdx_dvi]") {
     // 0xFF + 0xFF + 0xFF = 0x2FD; the spec truncates to uint8 before
     // NOT, so result = ~(0xFD) = 0x02.
     std::array<std::uint8_t, 3> bytes{0xFFU, 0xFFU, 0xFFU};
@@ -49,13 +44,12 @@ TEST_CASE("dvi::checksum: overflows past 8 bits cleanly",
 
 // ---- encode_request ----------------------------------------------
 
-TEST_CASE("dvi::encode_request: zero-payload ScantoolInfo frame",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::encode_request: zero-payload ScantoolInfo frame", "[transport][obdx_dvi]") {
     auto r = dvi::encode_request(dvi::Opcode::ScantoolInfo, {});
     REQUIRE(r.has_value());
-    REQUIRE(r->size() == 3);  // CMD + LEN + CHK
-    REQUIRE((*r)[0] == 0x22U);  // opcode
-    REQUIRE((*r)[1] == 0x00U);  // length = 0
+    REQUIRE(r->size() == 3);   // CMD + LEN + CHK
+    REQUIRE((*r)[0] == 0x22U); // opcode
+    REQUIRE((*r)[1] == 0x00U); // length = 0
     // checksum of [0x22, 0x00] = ~(0x22) = 0xDD
     REQUIRE((*r)[2] == 0xDDU);
 }
@@ -65,7 +59,7 @@ TEST_CASE("dvi::encode_request: ScantoolInfo + sub-op 0x02 (firmware string)",
     std::array<std::uint8_t, 1> sub{0x02U};
     auto r = dvi::encode_request(dvi::Opcode::ScantoolInfo, sub);
     REQUIRE(r.has_value());
-    REQUIRE(r->size() == 4);  // CMD + LEN + 1 payload + CHK
+    REQUIRE(r->size() == 4); // CMD + LEN + 1 payload + CHK
     REQUIRE((*r)[0] == 0x22U);
     REQUIRE((*r)[1] == 0x01U);
     REQUIRE((*r)[2] == 0x02U);
@@ -73,8 +67,7 @@ TEST_CASE("dvi::encode_request: ScantoolInfo + sub-op 0x02 (firmware string)",
     REQUIRE((*r)[3] == 0xDAU);
 }
 
-TEST_CASE("dvi::encode_request: TxSmall accepts up to 255 B payload",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::encode_request: TxSmall accepts up to 255 B payload", "[transport][obdx_dvi]") {
     std::vector<std::uint8_t> payload(255, 0xABU);
     auto r = dvi::encode_request(dvi::Opcode::TxSmall, payload);
     REQUIRE(r.has_value());
@@ -83,16 +76,14 @@ TEST_CASE("dvi::encode_request: TxSmall accepts up to 255 B payload",
     REQUIRE((*r)[1] == 0xFFU);
 }
 
-TEST_CASE("dvi::encode_request: TxSmall rejects 256 B payload",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::encode_request: TxSmall rejects 256 B payload", "[transport][obdx_dvi]") {
     std::vector<std::uint8_t> payload(256, 0xABU);
     auto r = dvi::encode_request(dvi::Opcode::TxSmall, payload);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("dvi::encode_request: TxLarge accepts up to 12000 B payload",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::encode_request: TxLarge accepts up to 12000 B payload", "[transport][obdx_dvi]") {
     std::vector<std::uint8_t> payload(12000, 0xCDU);
     auto r = dvi::encode_request(dvi::Opcode::TxLarge, payload);
     REQUIRE(r.has_value());
@@ -103,8 +94,7 @@ TEST_CASE("dvi::encode_request: TxLarge accepts up to 12000 B payload",
     REQUIRE((*r)[2] == 0xE0U);
 }
 
-TEST_CASE("dvi::encode_request: TxLarge rejects 12001 B payload",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::encode_request: TxLarge rejects 12001 B payload", "[transport][obdx_dvi]") {
     std::vector<std::uint8_t> payload(12001, 0xCDU);
     auto r = dvi::encode_request(dvi::Opcode::TxLarge, payload);
     REQUIRE_FALSE(r.has_value());
@@ -133,16 +123,14 @@ TEST_CASE("dvi::encode_request: frame round-trips through decode_frame "
 
 // ---- decode_frame ------------------------------------------------
 
-TEST_CASE("dvi::decode_frame: truncated buffer (< 3 bytes) → ParseError",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::decode_frame: truncated buffer (< 3 bytes) → ParseError", "[transport][obdx_dvi]") {
     std::array<std::uint8_t, 2> too_short{0x22U, 0x00U};
     auto r = dvi::decode_frame(too_short);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("dvi::decode_frame: bad checksum → ParseError",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::decode_frame: bad checksum → ParseError", "[transport][obdx_dvi]") {
     // [0x22, 0x00, 0xDD] is valid; [0x22, 0x00, 0xDE] differs by 1.
     std::array<std::uint8_t, 3> bad{0x22U, 0x00U, 0xDEU};
     auto r = dvi::decode_frame(bad);
@@ -159,8 +147,7 @@ TEST_CASE("dvi::decode_frame: declared-length overruns buffer → ParseError",
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("dvi::decode_frame: extra trailing bytes → ParseError",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::decode_frame: extra trailing bytes → ParseError", "[transport][obdx_dvi]") {
     // The decoder requires `bytes` to be exactly one frame.
     // [0x22, 0x00, 0xDD] is a valid 3-byte frame; appending a stray
     // byte should fail (stream reassembly is a higher-layer concern).
@@ -181,34 +168,29 @@ TEST_CASE("dvi::decode_frame: error frame parses out request_op + error_code",
     auto const *ef = std::get_if<dvi::ErrorFrame>(&*r);
     REQUIRE(ef != nullptr);
     REQUIRE(ef->request_opcode == 0x22U);
-    REQUIRE(ef->error_code     == 0x04U);
+    REQUIRE(ef->error_code == 0x04U);
 }
 
-TEST_CASE("dvi::decode_frame: error frame with wrong LEN → ParseError",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::decode_frame: error frame with wrong LEN → ParseError", "[transport][obdx_dvi]") {
     // Error frames must declare LEN=2 (CMD + ERR). LEN=3 is malformed.
     // Build with a payload that satisfies length-field math + checksum
     // so we don't trip the size check first.
     // [0x7F, 0x03, 0x22, 0x04, 0x00] payload + chk.
     // sum = 0x7F + 0x03 + 0x22 + 0x04 + 0x00 = 0xA8; chk = ~0xA8 = 0x57.
-    std::array<std::uint8_t, 6> bad_len{0x7FU, 0x03U, 0x22U, 0x04U,
-                                          0x00U, 0x57U};
+    std::array<std::uint8_t, 6> bad_len{0x7FU, 0x03U, 0x22U, 0x04U, 0x00U, 0x57U};
     auto r = dvi::decode_frame(bad_len);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("dvi::decode_frame: 2-byte-length response for RxLarge",
-          "[transport][obdx_dvi]") {
+TEST_CASE("dvi::decode_frame: 2-byte-length response for RxLarge", "[transport][obdx_dvi]") {
     // Response to RxLarge has opcode = request(0x09) | 0x10 = 0x19,
     // a 2-byte BE length, then payload, then CHK. Build a 4-byte
     // payload to verify length parsing.
     // bytes: [0x19, 0x00, 0x04, 0xAA, 0xBB, 0xCC, 0xDD, CHK]
     // sum = 0x19 + 0x00 + 0x04 + 0xAA + 0xBB + 0xCC + 0xDD = 0x32B
     //     → low byte 0x2B; chk = ~0x2B = 0xD4.
-    std::array<std::uint8_t, 8> frame{0x19U, 0x00U, 0x04U,
-                                        0xAAU, 0xBBU, 0xCCU, 0xDDU,
-                                        0xD4U};
+    std::array<std::uint8_t, 8> frame{0x19U, 0x00U, 0x04U, 0xAAU, 0xBBU, 0xCCU, 0xDDU, 0xD4U};
     auto r = dvi::decode_frame(frame);
     REQUIRE(r.has_value());
     auto const *rf = std::get_if<dvi::ResponseFrame>(&*r);

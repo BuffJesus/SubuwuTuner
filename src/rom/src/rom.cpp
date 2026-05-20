@@ -45,9 +45,8 @@ Result<Rom> Rom::from_file(std::filesystem::path const &path, std::size_t max_by
         return failure(ErrorCode::IoFailure, "could not stat: " + path.string());
     }
     if (size > max_bytes) {
-        return failure(ErrorCode::OutOfRange,
-                       "file exceeds max_bytes (" + std::to_string(size) + " > "
-                           + std::to_string(max_bytes) + ")");
+        return failure(ErrorCode::OutOfRange, "file exceeds max_bytes (" + std::to_string(size) +
+                                                  " > " + std::to_string(max_bytes) + ")");
     }
 
     std::ifstream in{path, std::ios::binary};
@@ -57,11 +56,9 @@ Result<Rom> Rom::from_file(std::filesystem::path const &path, std::size_t max_by
 
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
     if (size > 0) {
-        in.read(reinterpret_cast<char *>(bytes.data()),
-                static_cast<std::streamsize>(bytes.size()));
+        in.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
         if (in.gcount() != static_cast<std::streamsize>(bytes.size())) {
-            return failure(ErrorCode::UnexpectedEof,
-                           "short read on: " + path.string());
+            return failure(ErrorCode::UnexpectedEof, "short read on: " + path.string());
         }
     }
 
@@ -87,36 +84,36 @@ Result<std::uint16_t> Rom::read_u16_be(std::size_t offset) const noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 2) {
         return failure(ErrorCode::OutOfRange);
     }
-    return static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes_[offset]) << 8U)
-                                      | static_cast<std::uint16_t>(bytes_[offset + 1]));
+    return static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes_[offset]) << 8U) |
+                                      static_cast<std::uint16_t>(bytes_[offset + 1]));
 }
 
 Result<std::uint32_t> Rom::read_u32_be(std::size_t offset) const noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 4) {
         return failure(ErrorCode::OutOfRange);
     }
-    return (static_cast<std::uint32_t>(bytes_[offset]) << 24U)
-         | (static_cast<std::uint32_t>(bytes_[offset + 1]) << 16U)
-         | (static_cast<std::uint32_t>(bytes_[offset + 2]) << 8U)
-         | (static_cast<std::uint32_t>(bytes_[offset + 3]));
+    return (static_cast<std::uint32_t>(bytes_[offset]) << 24U) |
+           (static_cast<std::uint32_t>(bytes_[offset + 1]) << 16U) |
+           (static_cast<std::uint32_t>(bytes_[offset + 2]) << 8U) |
+           (static_cast<std::uint32_t>(bytes_[offset + 3]));
 }
 
 Result<std::uint16_t> Rom::read_u16_le(std::size_t offset) const noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 2) {
         return failure(ErrorCode::OutOfRange);
     }
-    return static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes_[offset + 1]) << 8U)
-                                      | static_cast<std::uint16_t>(bytes_[offset]));
+    return static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes_[offset + 1]) << 8U) |
+                                      static_cast<std::uint16_t>(bytes_[offset]));
 }
 
 Result<std::uint32_t> Rom::read_u32_le(std::size_t offset) const noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 4) {
         return failure(ErrorCode::OutOfRange);
     }
-    return (static_cast<std::uint32_t>(bytes_[offset + 3]) << 24U)
-         | (static_cast<std::uint32_t>(bytes_[offset + 2]) << 16U)
-         | (static_cast<std::uint32_t>(bytes_[offset + 1]) << 8U)
-         | (static_cast<std::uint32_t>(bytes_[offset]));
+    return (static_cast<std::uint32_t>(bytes_[offset + 3]) << 24U) |
+           (static_cast<std::uint32_t>(bytes_[offset + 2]) << 16U) |
+           (static_cast<std::uint32_t>(bytes_[offset + 1]) << 8U) |
+           (static_cast<std::uint32_t>(bytes_[offset]));
 }
 
 Result<std::string> Rom::read_ascii(std::size_t offset, std::size_t max_length) const {
@@ -124,7 +121,7 @@ Result<std::string> Rom::read_ascii(std::size_t offset, std::size_t max_length) 
         return failure(ErrorCode::OutOfRange);
     }
     auto const available = bytes_.size() - offset;
-    auto const limit     = max_length < available ? max_length : available;
+    auto const limit = max_length < available ? max_length : available;
 
     std::string out;
     out.reserve(limit);
@@ -154,7 +151,7 @@ Status Rom::write_u16_be(std::size_t offset, std::uint16_t value) noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 2) {
         return failure(ErrorCode::OutOfRange);
     }
-    bytes_[offset]     = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
+    bytes_[offset] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
     bytes_[offset + 1] = static_cast<std::uint8_t>(value & 0xFFU);
     return ok();
 }
@@ -163,7 +160,7 @@ Status Rom::write_u16_le(std::size_t offset, std::uint16_t value) noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 2) {
         return failure(ErrorCode::OutOfRange);
     }
-    bytes_[offset]     = static_cast<std::uint8_t>(value & 0xFFU);
+    bytes_[offset] = static_cast<std::uint8_t>(value & 0xFFU);
     bytes_[offset + 1] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
     return ok();
 }
@@ -172,7 +169,7 @@ Status Rom::write_u32_be(std::size_t offset, std::uint32_t value) noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 4) {
         return failure(ErrorCode::OutOfRange);
     }
-    bytes_[offset]     = static_cast<std::uint8_t>((value >> 24U) & 0xFFU);
+    bytes_[offset] = static_cast<std::uint8_t>((value >> 24U) & 0xFFU);
     bytes_[offset + 1] = static_cast<std::uint8_t>((value >> 16U) & 0xFFU);
     bytes_[offset + 2] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
     bytes_[offset + 3] = static_cast<std::uint8_t>(value & 0xFFU);
@@ -183,7 +180,7 @@ Status Rom::write_u32_le(std::size_t offset, std::uint32_t value) noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 4) {
         return failure(ErrorCode::OutOfRange);
     }
-    bytes_[offset]     = static_cast<std::uint8_t>(value & 0xFFU);
+    bytes_[offset] = static_cast<std::uint8_t>(value & 0xFFU);
     bytes_[offset + 1] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
     bytes_[offset + 2] = static_cast<std::uint8_t>((value >> 16U) & 0xFFU);
     bytes_[offset + 3] = static_cast<std::uint8_t>((value >> 24U) & 0xFFU);
@@ -196,8 +193,8 @@ std::uint32_t Rom::crc32() const noexcept {
 
 std::vector<Rom::AsciiString> Rom::scan_ascii(std::size_t min_length) const {
     std::vector<AsciiString> out;
-    std::size_t              run_start = 0;
-    std::size_t              run_len   = 0;
+    std::size_t run_start = 0;
+    std::size_t run_len = 0;
 
     auto const flush = [&]() {
         if (run_len >= min_length) {

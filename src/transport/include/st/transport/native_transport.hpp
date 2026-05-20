@@ -43,10 +43,10 @@ namespace st::transport::native {
 // LinkConfig → native Connect-opcode payload. Pulled out for
 // testability + so the protocol-byte layout is one specific place.
 struct ConnectPayload {
-    std::uint8_t  protocol_id{0};       // mirror J2534: 0x03 K-Line, 0x06 ISO15765
-    std::uint32_t baud{0};              // big-endian on the wire
-    std::uint16_t can_id_request{0};    // unused for K-Line
-    std::uint16_t can_id_response{0};   // unused for K-Line
+    std::uint8_t protocol_id{0};      // mirror J2534: 0x03 K-Line, 0x06 ISO15765
+    std::uint32_t baud{0};            // big-endian on the wire
+    std::uint16_t can_id_request{0};  // unused for K-Line
+    std::uint16_t can_id_response{0}; // unused for K-Line
 
     [[nodiscard]] std::vector<std::uint8_t> encode() const;
 };
@@ -54,32 +54,29 @@ struct ConnectPayload {
 // Map a LinkConfig to a ConnectPayload. Returns InvalidArgument for
 // CAN-FD (doc-18 hardware is classical-CAN-only) or zero/negative
 // baud.
-[[nodiscard]] Result<ConnectPayload> connect_payload_for(
-    LinkConfig const &cfg) noexcept;
+[[nodiscard]] Result<ConnectPayload> connect_payload_for(LinkConfig const &cfg) noexcept;
 
 // The transport. Owns the byte channel + a per-session sequence
 // counter for the native protocol's seq-matched request/response.
 class Transport : public ITransport {
-  public:
+public:
     explicit Transport(std::unique_ptr<IByteChannel> channel) noexcept;
     ~Transport() override;
 
-    Transport(Transport const &)            = delete;
+    Transport(Transport const &) = delete;
     Transport &operator=(Transport const &) = delete;
-    Transport(Transport &&)                 = delete;
-    Transport &operator=(Transport &&)      = delete;
+    Transport(Transport &&) = delete;
+    Transport &operator=(Transport &&) = delete;
 
     // ---- ITransport -------------------------------------------------
 
     [[nodiscard]] st::Status open(LinkConfig const &cfg) override;
     [[nodiscard]] st::Status close() override;
 
-    [[nodiscard]] Result<Frame> send_recv(
-        std::span<std::uint8_t const> payload,
-        std::chrono::milliseconds      timeout) override;
+    [[nodiscard]] Result<Frame> send_recv(std::span<std::uint8_t const> payload,
+                                          std::chrono::milliseconds timeout) override;
 
-    [[nodiscard]] st::Status send(
-        std::span<std::uint8_t const> payload) override;
+    [[nodiscard]] st::Status send(std::span<std::uint8_t const> payload) override;
 
     [[nodiscard]] st::Status start_streaming(FrameCallback callback) override;
     [[nodiscard]] st::Status stop_streaming() override;
@@ -93,16 +90,18 @@ class Transport : public ITransport {
 
     // ---- Inspection (tests) ----------------------------------------
 
-    [[nodiscard]] bool         is_open() const noexcept { return open_; }
+    [[nodiscard]] bool is_open() const noexcept {
+        return open_;
+    }
     [[nodiscard]] std::uint8_t next_seq_for_test() const noexcept {
         return next_seq_;
     }
 
-  private:
+private:
     std::unique_ptr<IByteChannel> channel_;
-    bool                          open_{false};
-    std::uint8_t                  next_seq_{0};
-    std::string                   firmware_;
+    bool open_{false};
+    std::uint8_t next_seq_{0};
+    std::string firmware_;
 };
 
 } // namespace st::transport::native

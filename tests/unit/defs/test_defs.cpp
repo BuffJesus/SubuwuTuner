@@ -160,8 +160,7 @@ endianness = "weird"
     REQUIRE_FALSE(d.has_value());
 }
 
-TEST_CASE("Definition parses identifications, axes, scalings, tables, pids",
-          "[defs][parse]") {
+TEST_CASE("Definition parses identifications, axes, scalings, tables, pids", "[defs][parse]") {
     auto const dr = st::Definition::from_toml_string(kPackWithEverything);
     REQUIRE(dr.has_value());
     auto const &d = *dr;
@@ -195,16 +194,14 @@ TEST_CASE("Definition parses identifications, axes, scalings, tables, pids",
     REQUIRE(d.find_pid("rpm") != nullptr);
 }
 
-TEST_CASE("Definition::validate accepts a fully consistent pack",
-          "[defs][validate]") {
+TEST_CASE("Definition::validate accepts a fully consistent pack", "[defs][validate]") {
     auto const dr = st::Definition::from_toml_string(kPackWithEverything);
     REQUIRE(dr.has_value());
     auto const v = dr->validate();
     REQUIRE(v.has_value());
 }
 
-TEST_CASE("Definition::validate flags a dangling scaling reference",
-          "[defs][validate]") {
+TEST_CASE("Definition::validate flags a dangling scaling reference", "[defs][validate]") {
     auto const dr = st::Definition::from_toml_string(R"(
 [pack]
 id             = "x"
@@ -224,8 +221,7 @@ scaling   = "missing_scaling"
     REQUIRE(v.error().message().find("missing_scaling") != std::string::npos);
 }
 
-TEST_CASE("Definition::validate flags a dangling axis reference on a table",
-          "[defs][validate]") {
+TEST_CASE("Definition::validate flags a dangling axis reference on a table", "[defs][validate]") {
     auto const dr = st::Definition::from_toml_string(R"(
 [pack]
 id             = "x"
@@ -253,8 +249,7 @@ data_type = "uint16_be"
     REQUIRE(v.error().message().find("load") != std::string::npos);
 }
 
-TEST_CASE("Definition::validate flags addresses past rom_size_bytes",
-          "[defs][validate]") {
+TEST_CASE("Definition::validate flags addresses past rom_size_bytes", "[defs][validate]") {
     auto const dr = st::Definition::from_toml_string(R"(
 [pack]
 id             = "x"
@@ -272,17 +267,16 @@ length    = 16
     REQUIRE_FALSE(v.has_value());
 }
 
-TEST_CASE("Definition::matches finds an identification by CID bytes",
-          "[defs][matches]") {
+TEST_CASE("Definition::matches finds an identification by CID bytes", "[defs][matches]") {
     auto const dr = st::Definition::from_toml_string(kPackWithEverything);
     REQUIRE(dr.has_value());
 
     std::vector<std::uint8_t> bytes(0x3000, 0xFF);
-    std::string const         cid = "AS80U   ";
+    std::string const cid = "AS80U   ";
     for (std::size_t i = 0; i < cid.size(); ++i) {
         bytes[0x2000 + i] = static_cast<std::uint8_t>(cid[i]);
     }
-    auto const rom    = st::Rom::from_bytes(std::move(bytes));
+    auto const rom = st::Rom::from_bytes(std::move(bytes));
     auto const result = dr->matches(rom);
     REQUIRE(result.has_value());
     REQUIRE(*result == "VA-WRX-MT 2019 (AS80U)");
@@ -293,8 +287,8 @@ TEST_CASE("Definition::matches returns nullopt on no match", "[defs][matches]") 
     REQUIRE(dr.has_value());
 
     std::vector<std::uint8_t> bytes(0x3000, 0x00);
-    auto const                rom    = st::Rom::from_bytes(std::move(bytes));
-    auto const                result = dr->matches(rom);
+    auto const rom = st::Rom::from_bytes(std::move(bytes));
+    auto const result = dr->matches(rom);
     REQUIRE_FALSE(result.has_value());
 }
 
@@ -321,11 +315,11 @@ cid_scan  = true
     // Plant the CID at a non-zero, non-0x2000 offset.
     constexpr std::size_t kPlantedOffset = 0x2F7DD;
     std::vector<std::uint8_t> bytes(0x40000, 0xFF);
-    std::string const         cid = "LF75300E";
+    std::string const cid = "LF75300E";
     for (std::size_t i = 0; i < cid.size(); ++i) {
         bytes[kPlantedOffset + i] = static_cast<std::uint8_t>(cid[i]);
     }
-    auto const rom    = st::Rom::from_bytes(std::move(bytes));
+    auto const rom = st::Rom::from_bytes(std::move(bytes));
     auto const result = dr->matches(rom);
     REQUIRE(result.has_value());
     REQUIRE(*result == "LF75300E (scan)");
@@ -355,7 +349,7 @@ cid_scan    = true
     for (std::size_t i = 0; i < cid.size(); ++i) {
         bytes[0x2500 + i] = static_cast<std::uint8_t>(cid[i]);
     }
-    auto const rom    = st::Rom::from_bytes(std::move(bytes));
+    auto const rom = st::Rom::from_bytes(std::move(bytes));
     auto const result = dr->matches(rom);
     REQUIRE(result.has_value());
     REQUIRE(*result == "scan-ignores-addr");
@@ -385,7 +379,7 @@ cid_match   = "FIXED123"
     for (std::size_t i = 0; i < cid.size(); ++i) {
         bytes[0x2500 + i] = static_cast<std::uint8_t>(cid[i]);
     }
-    auto const rom    = st::Rom::from_bytes(std::move(bytes));
+    auto const rom = st::Rom::from_bytes(std::move(bytes));
     auto const result = dr->matches(rom);
     REQUIRE_FALSE(result.has_value());
 }
@@ -430,16 +424,15 @@ TEST_CASE("read_typed interprets signed bytes correctly", "[defs][read_typed]") 
 
 TEST_CASE("read_typed reports OutOfRange on a short ROM", "[defs][read_typed]") {
     auto const rom = st::Rom::from_bytes({0x12});
-    auto const r   = st::read_typed(rom, 0, st::DataType::Uint16Be);
+    auto const r = st::read_typed(rom, 0, st::DataType::Uint16Be);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::OutOfRange);
 }
 
-TEST_CASE("read_typed decodes IEEE 754 float32 (big-endian)",
-          "[defs][read_typed][float]") {
+TEST_CASE("read_typed decodes IEEE 754 float32 (big-endian)", "[defs][read_typed][float]") {
     // 1.0f in IEEE 754 = 0x3F800000 (big-endian bytes: 3F 80 00 00).
     auto const rom = st::Rom::from_bytes({0x3F, 0x80, 0x00, 0x00});
-    auto const r   = st::read_typed(rom, 0, st::DataType::Float32Be);
+    auto const r = st::read_typed(rom, 0, st::DataType::Float32Be);
     REQUIRE(r.has_value());
     REQUIRE(*r == 1.0);
 }
@@ -448,19 +441,18 @@ TEST_CASE("apply_scaling: linear factor and offset", "[defs][apply_scaling]") {
     st::Scaling s;
     s.formula = st::LinearScaling{.factor = 0.5, .offset = 10.0};
     REQUIRE(st::apply_scaling(100.0, s) == 60.0);
-    REQUIRE(st::apply_scaling(0.0,   s) == 10.0);
+    REQUIRE(st::apply_scaling(0.0, s) == 10.0);
     REQUIRE(st::apply_scaling(-20.0, s) == 0.0);
 }
 
-TEST_CASE("apply_scaling: piecewise interpolates between breakpoints",
-          "[defs][apply_scaling]") {
+TEST_CASE("apply_scaling: piecewise interpolates between breakpoints", "[defs][apply_scaling]") {
     st::Scaling s;
     s.formula = st::PiecewiseScaling{
         .breakpoints = {0.0, 100.0, 200.0},
-        .values      = {1.0, 2.0,   3.0},
+        .values = {1.0, 2.0, 3.0},
     };
-    REQUIRE(st::apply_scaling(0.0,   s) == 1.0);
-    REQUIRE(st::apply_scaling(50.0,  s) == 1.5);
+    REQUIRE(st::apply_scaling(0.0, s) == 1.0);
+    REQUIRE(st::apply_scaling(50.0, s) == 1.5);
     REQUIRE(st::apply_scaling(150.0, s) == 2.5);
     REQUIRE(st::apply_scaling(200.0, s) == 3.0);
 
@@ -469,8 +461,7 @@ TEST_CASE("apply_scaling: piecewise interpolates between breakpoints",
     REQUIRE(st::apply_scaling(500.0, s) == 3.0);
 }
 
-TEST_CASE("Definition::read_axis_values reads and scales axis bytes",
-          "[defs][read_axis_values]") {
+TEST_CASE("Definition::read_axis_values reads and scales axis bytes", "[defs][read_axis_values]") {
     auto const def_r = st::Definition::from_toml_string(R"toml(
 [pack]
 id             = "x"
@@ -496,8 +487,8 @@ scaling   = "rpm_x100"
 
     // ROM contains 4 big-endian uint16s: 8, 20, 40, 60. After x100 scaling:
     // 800, 2000, 4000, 6000.
-    auto const rom = st::Rom::from_bytes(
-        {0x00, 0x08, 0x00, 0x14, 0x00, 0x28, 0x00, 0x3C, 0x00, 0x00});
+    auto const rom =
+        st::Rom::from_bytes({0x00, 0x08, 0x00, 0x14, 0x00, 0x28, 0x00, 0x3C, 0x00, 0x00});
 
     auto const axis = def.find_axis("rpm_axis");
     REQUIRE(axis != nullptr);
@@ -527,7 +518,7 @@ data_type = "uint16_be"
 )toml");
     REQUIRE(def_r.has_value());
 
-    auto const rom  = st::Rom::from_bytes({0x00, 0x00, 0x00, 0x00});
+    auto const rom = st::Rom::from_bytes({0x00, 0x00, 0x00, 0x00});
     auto const axis = def_r->find_axis("huge");
     REQUIRE(axis != nullptr);
 
@@ -563,7 +554,7 @@ scaling    = "raw_u8"
     auto const rom = st::Rom::from_bytes({
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x42,                                            // scalar at offset 16
+        0x42, // scalar at offset 16
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     });
 
@@ -597,8 +588,7 @@ data_type  = "uint8"
     REQUIRE_FALSE(def_r.has_value());
 }
 
-TEST_CASE("Definition parses [[switch]] records with bit-position validation",
-          "[defs][switch]") {
+TEST_CASE("Definition parses [[switch]] records with bit-position validation", "[defs][switch]") {
     auto const def_r = st::Definition::from_toml_string(R"toml(
 [pack]
 id             = "x"
@@ -746,8 +736,7 @@ bit         = 0
     REQUIRE(std::string{v.error().message()}.find("unknown bitmap") != std::string::npos);
 }
 
-TEST_CASE("Definition::validate flags dtc byte_offset past bitmap end",
-          "[defs][dtc][validate]") {
+TEST_CASE("Definition::validate flags dtc byte_offset past bitmap end", "[defs][dtc][validate]") {
     auto const def_r = st::Definition::from_toml_string(R"toml(
 [pack]
 id             = "x"
@@ -773,11 +762,13 @@ bit         = 0
 TEST_CASE("set_dtc_enabled toggles the correct bit", "[defs][dtc][bit]") {
     auto rom = st::Rom::from_bytes(std::vector<std::uint8_t>(32, 0xFFU));
 
-    st::DtcBitmap const bm{
-        "bm", "Bitmap", /*address*/ 0, /*length_bytes*/ 32, "big"};
-    st::Dtc const d{
-        "P0401", "EGR Flow Insufficient", "bm",
-        /*byte_offset*/ 4, /*bit*/ 3, /*emissions_relevant*/ true};
+    st::DtcBitmap const bm{"bm", "Bitmap", /*address*/ 0, /*length_bytes*/ 32, "big"};
+    st::Dtc const d{"P0401",
+                    "EGR Flow Insufficient",
+                    "bm",
+                    /*byte_offset*/ 4,
+                    /*bit*/ 3,
+                    /*emissions_relevant*/ true};
 
     // Starts enabled (all-FF bitmap is the factory default).
     auto en1 = st::is_dtc_enabled(rom, bm, d);
@@ -788,7 +779,7 @@ TEST_CASE("set_dtc_enabled toggles the correct bit", "[defs][dtc][bit]") {
     auto disable = st::set_dtc_enabled(rom, bm, d, false);
     REQUIRE(disable.has_value());
     REQUIRE(disable->before == 0xFFU);
-    REQUIRE(disable->after  == 0xF7U);  // 0b1111_0111
+    REQUIRE(disable->after == 0xF7U); // 0b1111_0111
     auto en2 = st::is_dtc_enabled(rom, bm, d);
     REQUIRE(en2.has_value());
     REQUIRE_FALSE(*en2);
@@ -797,11 +788,10 @@ TEST_CASE("set_dtc_enabled toggles the correct bit", "[defs][dtc][bit]") {
     auto enable = st::set_dtc_enabled(rom, bm, d, true);
     REQUIRE(enable.has_value());
     REQUIRE(enable->before == 0xF7U);
-    REQUIRE(enable->after  == 0xFFU);
+    REQUIRE(enable->after == 0xFFU);
 }
 
-TEST_CASE("set_dtc_enabled rejects out-of-range byte_offset",
-          "[defs][dtc][bit]") {
+TEST_CASE("set_dtc_enabled rejects out-of-range byte_offset", "[defs][dtc][bit]") {
     auto rom = st::Rom::from_bytes(std::vector<std::uint8_t>(8, 0xFFU));
     st::DtcBitmap const bm{"bm", "", 0, 4, "big"};
     st::Dtc const d{"P0001", "", "bm", /*byte_offset*/ 4, /*bit*/ 0, false};
@@ -809,8 +799,7 @@ TEST_CASE("set_dtc_enabled rejects out-of-range byte_offset",
     REQUIRE_FALSE(r.has_value());
 }
 
-TEST_CASE("set_dtc_enabled rejects address past end of ROM",
-          "[defs][dtc][bit]") {
+TEST_CASE("set_dtc_enabled rejects address past end of ROM", "[defs][dtc][bit]") {
     auto rom = st::Rom::from_bytes(std::vector<std::uint8_t>(8, 0xFFU));
     st::DtcBitmap const bm{"bm", "", /*address*/ 0x100, /*length_bytes*/ 4, "big"};
     st::Dtc const d{"P0001", "", "bm", 0, 0, false};
@@ -818,8 +807,7 @@ TEST_CASE("set_dtc_enabled rejects address past end of ROM",
     REQUIRE_FALSE(r.has_value());
 }
 
-TEST_CASE("Definition::validate flags dtc_bitmap past rom_size_bytes",
-          "[defs][dtc][validate]") {
+TEST_CASE("Definition::validate flags dtc_bitmap past rom_size_bytes", "[defs][dtc][validate]") {
     auto const def_r = st::Definition::from_toml_string(R"toml(
 [pack]
 id             = "x"
@@ -870,9 +858,8 @@ axis_x     = "rpm_axis"
     // 8 bytes of axis data (4 uint16_be) then 4 raw bytes for the table.
     // Raw values 80, 88, 96, 104; scaled (x0.125): 10.0, 11.0, 12.0, 13.0.
     auto const rom = st::Rom::from_bytes({
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x03,  // axis
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        80, 88, 96, 104,                                  // table
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x03,                  // axis
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 80, 88, 96, 104, // table
         0x00, 0x00, 0x00, 0x00,
     });
 
@@ -922,15 +909,36 @@ axis_y     = "y"
     REQUIRE(def_r.has_value());
 
     auto const rom = st::Rom::from_bytes({
-        1, 2, 3, 0,                              // axis x
-        10, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,    // axis y at offset 4
+        1,
+        2,
+        3,
+        0, // axis x
+        10,
+        20,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0, // axis y at offset 4
         // Table at offset 16: row 0 (y=10): 11, 12, 13
         //                     row 1 (y=20): 21, 22, 23
-        11, 12, 13, 21, 22, 23, 0, 0,
+        11,
+        12,
+        13,
+        21,
+        22,
+        23,
+        0,
+        0,
     });
 
-    auto const *t  = def_r->find_table("grid");
-    auto const  td = def_r->read_table_values(rom, *t);
+    auto const *t = def_r->find_table("grid");
+    auto const td = def_r->read_table_values(rom, *t);
     REQUIRE(td.has_value());
     REQUIRE(td->axis_x == std::vector<double>{1.0, 2.0, 3.0});
     REQUIRE(td->axis_y == std::vector<double>{10.0, 20.0});
@@ -986,13 +994,13 @@ axis_z     = "z"
     //   z0 (slice 0): 11, 12, 13, 14
     //   z1 (slice 1): 21, 22, 23, 24
     auto const rom = st::Rom::from_bytes({
-        1, 2, 0, 0,                               // x at 0..3
-        10, 20, 0, 0,                             // y at 4..7
-        100, 200, 0, 0, 0, 0, 0, 0,               // z at 8..15
-        11, 12, 13, 14, 21, 22, 23, 24,           // table at 16..23
+        1,   2,   0,  0,                  // x at 0..3
+        10,  20,  0,  0,                  // y at 4..7
+        100, 200, 0,  0,  0,  0,  0,  0,  // z at 8..15
+        11,  12,  13, 14, 21, 22, 23, 24, // table at 16..23
     });
 
-    auto const *t  = def_r->find_table("cube");
+    auto const *t = def_r->find_table("cube");
     REQUIRE(t != nullptr);
     auto const td = def_r->read_table_values(rom, *t);
     REQUIRE(td.has_value());
@@ -1047,16 +1055,13 @@ axis_z     = "z"
     REQUIRE(def_r.has_value());
 
     std::vector<std::uint8_t> bytes{
-        1, 2, 0, 0,  10, 20, 0, 0,  100, 200, 0, 0, 0, 0, 0, 0,
-        11, 12, 13, 14, 21, 22, 23, 24,
-        0,  0,  0,  0,  0,  0,  0,  0,
-        0,  0,  0,  0,  0,  0,  0,  0,
-        0,  0,  0,  0,  0,  0,  0,  0,
+        1, 2, 0, 0, 10, 20, 0, 0, 100, 200, 0, 0, 0, 0, 0, 0, 11, 12, 13, 14, 21, 22, 23, 24,
+        0, 0, 0, 0, 0,  0,  0, 0, 0,   0,   0, 0, 0, 0, 0, 0, 0,  0,  0,  0,  0,  0,  0,  0,
     };
     auto rom = st::Rom::from_bytes(std::move(bytes));
 
-    auto const *t   = def_r->find_table("cube");
-    auto       td   = *def_r->read_table_values(rom, *t);
+    auto const *t = def_r->find_table("cube");
+    auto td = *def_r->read_table_values(rom, *t);
     td.slices[1][0][1] = 99.0; // bump one cell in z=1 slice
 
     REQUIRE(def_r->write_table_values(rom, *t, td).has_value());
@@ -1090,8 +1095,8 @@ axis_x     = "x"
 )toml");
     REQUIRE(def_r.has_value());
     auto const rom = st::Rom::from_bytes(std::vector<std::uint8_t>(20, 0));
-    auto const t   = def_r->find_table("out_of_range");
-    auto const td  = def_r->read_table_values(rom, *t);
+    auto const t = def_r->find_table("out_of_range");
+    auto const td = def_r->read_table_values(rom, *t);
     REQUIRE_FALSE(td.has_value());
     REQUIRE(td.error().code() == st::ErrorCode::OutOfRange);
 }
@@ -1099,7 +1104,7 @@ axis_x     = "x"
 TEST_CASE("invert_scaling reverses linear", "[defs][invert_scaling]") {
     st::Scaling s;
     s.formula = st::LinearScaling{.factor = 0.5, .offset = 10.0};
-    auto const r = st::invert_scaling(60.0, s);  // 60 = raw*0.5 + 10 -> raw = 100
+    auto const r = st::invert_scaling(60.0, s); // 60 = raw*0.5 + 10 -> raw = 100
     REQUIRE(r.has_value());
     REQUIRE(*r == 100.0);
 }
@@ -1112,12 +1117,11 @@ TEST_CASE("invert_scaling refuses factor=0", "[defs][invert_scaling]") {
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("invert_scaling reverses ascending piecewise",
-          "[defs][invert_scaling]") {
+TEST_CASE("invert_scaling reverses ascending piecewise", "[defs][invert_scaling]") {
     st::Scaling s;
     s.formula = st::PiecewiseScaling{
         .breakpoints = {0.0, 100.0, 200.0},
-        .values      = {1.0, 2.0,   3.0},
+        .values = {1.0, 2.0, 3.0},
     };
     REQUIRE(*st::invert_scaling(1.0, s) == 0.0);
     REQUIRE(*st::invert_scaling(1.5, s) == 50.0);
@@ -1127,7 +1131,7 @@ TEST_CASE("invert_scaling reverses ascending piecewise",
 
 TEST_CASE("write_typed clamps and rounds correctly", "[defs][write_typed]") {
     std::vector<std::uint8_t> bytes(8, 0);
-    auto                      rom = st::Rom::from_bytes(std::move(bytes));
+    auto rom = st::Rom::from_bytes(std::move(bytes));
 
     REQUIRE(st::write_typed(rom, 0, st::DataType::Uint8, 14.6).has_value());
     REQUIRE(rom.data()[0] == 15); // rounded
@@ -1145,7 +1149,7 @@ TEST_CASE("write_typed clamps and rounds correctly", "[defs][write_typed]") {
 
 TEST_CASE("write_typed round-trips Int16 negatives", "[defs][write_typed]") {
     std::vector<std::uint8_t> bytes(4, 0);
-    auto                      rom = st::Rom::from_bytes(std::move(bytes));
+    auto rom = st::Rom::from_bytes(std::move(bytes));
 
     REQUIRE(st::write_typed(rom, 0, st::DataType::Int16Be, -1.0).has_value());
     auto const r = st::read_typed(rom, 0, st::DataType::Int16Be);
@@ -1155,7 +1159,7 @@ TEST_CASE("write_typed round-trips Int16 negatives", "[defs][write_typed]") {
 
 TEST_CASE("write_typed round-trips Float32", "[defs][write_typed][float]") {
     std::vector<std::uint8_t> bytes(8, 0);
-    auto                      rom = st::Rom::from_bytes(std::move(bytes));
+    auto rom = st::Rom::from_bytes(std::move(bytes));
 
     REQUIRE(st::write_typed(rom, 0, st::DataType::Float32Be, 3.14159f).has_value());
     auto const r = st::read_typed(rom, 0, st::DataType::Float32Be);
@@ -1203,32 +1207,33 @@ axis_y     = "load"
     REQUIRE(def_r.has_value());
 
     std::vector<std::uint8_t> bytes{
-        1, 2, 3, 4,                       // rpm axis (raw)
-        10, 20, 0, 0,                     // load axis (2 values then padding)
-        2, 4, 6, 8, 10, 12, 14, 16,       // 2x4 fuel table raw -> 1,2,3,4 / 5,6,7,8 scaled
+        1,  2,  3, 4,                 // rpm axis (raw)
+        10, 20, 0, 0,                 // load axis (2 values then padding)
+        2,  4,  6, 8, 10, 12, 14, 16, // 2x4 fuel table raw -> 1,2,3,4 / 5,6,7,8 scaled
     };
-    auto                      rom   = st::Rom::from_bytes(std::move(bytes));
-    auto const *              fuel  = def_r->find_table("fuel");
-    auto const                read1 = def_r->read_table_values(rom, *fuel);
+    auto rom = st::Rom::from_bytes(std::move(bytes));
+    auto const *fuel = def_r->find_table("fuel");
+    auto const read1 = def_r->read_table_values(rom, *fuel);
     REQUIRE(read1.has_value());
-    REQUIRE(read1->values == std::vector<std::vector<double>>{{1.0, 2.0, 3.0, 4.0},
-                                                              {5.0, 6.0, 7.0, 8.0}});
+    REQUIRE(read1->values ==
+            std::vector<std::vector<double>>{{1.0, 2.0, 3.0, 4.0}, {5.0, 6.0, 7.0, 8.0}});
 
     // Edit: bump everything by 1 (engineering units).
     auto td = *read1;
     for (auto &row : td.values) {
-        for (auto &v : row) v += 1.0;
+        for (auto &v : row)
+            v += 1.0;
     }
 
     REQUIRE(def_r->write_table_values(rom, *fuel, td).has_value());
 
     auto const read2 = def_r->read_table_values(rom, *fuel);
     REQUIRE(read2.has_value());
-    REQUIRE(read2->values == std::vector<std::vector<double>>{{2.0, 3.0, 4.0, 5.0},
-                                                              {6.0, 7.0, 8.0, 9.0}});
+    REQUIRE(read2->values ==
+            std::vector<std::vector<double>>{{2.0, 3.0, 4.0, 5.0}, {6.0, 7.0, 8.0, 9.0}});
 
     // Underlying raw bytes should be the edited values * 2.
-    REQUIRE(rom.data()[8]  == 4);  // raw for 2.0
+    REQUIRE(rom.data()[8] == 4);   // raw for 2.0
     REQUIRE(rom.data()[15] == 18); // raw for 9.0
 }
 
@@ -1257,7 +1262,7 @@ axis_x     = "x"
     REQUIRE(def_r.has_value());
 
     std::vector<std::uint8_t> bytes(32, 0);
-    auto                      rom = st::Rom::from_bytes(std::move(bytes));
+    auto rom = st::Rom::from_bytes(std::move(bytes));
 
     st::Definition::TableData wrong;
     wrong.values = {{1, 2, 3}}; // 3 cols, expected 4
@@ -1292,8 +1297,8 @@ axis_x     = "x"
     std::vector<std::uint8_t> bytes{1, 2, 3, 4, 0, 0, 0, 0, 10, 20, 30, 40};
     auto const r = st::Rom::from_bytes(bytes);
 
-    auto const *t    = def_r->find_table("t");
-    auto const  diff = def_r->diff_table(r, r, *t);
+    auto const *t = def_r->find_table("t");
+    auto const diff = def_r->diff_table(r, r, *t);
     REQUIRE(diff.has_value());
     REQUIRE(diff->total_cells == 4);
     REQUIRE(diff->cells_changed == 0);
@@ -1332,14 +1337,12 @@ axis_x     = "x"
     REQUIRE(def_r.has_value());
 
     // Stock: 10, 20, 30, 40 raw -> 5, 10, 15, 20 scaled
-    auto const a = st::Rom::from_bytes(
-        {1, 2, 3, 4, 0, 0, 0, 0, 10, 20, 30, 40});
+    auto const a = st::Rom::from_bytes({1, 2, 3, 4, 0, 0, 0, 0, 10, 20, 30, 40});
     // Tuned: 14, 22, 30, 38 raw -> 7, 11, 15, 19 scaled
-    auto const b = st::Rom::from_bytes(
-        {1, 2, 3, 4, 0, 0, 0, 0, 14, 22, 30, 38});
+    auto const b = st::Rom::from_bytes({1, 2, 3, 4, 0, 0, 0, 0, 14, 22, 30, 38});
 
-    auto const *t    = def_r->find_table("t");
-    auto const  diff = def_r->diff_table(a, b, *t);
+    auto const *t = def_r->find_table("t");
+    auto const diff = def_r->diff_table(a, b, *t);
     REQUIRE(diff.has_value());
 
     // Deltas: |7-5|=2, |11-10|=1, |15-15|=0, |19-20|=1
@@ -1358,15 +1361,15 @@ namespace {
 struct TempDir {
     std::filesystem::path path;
     TempDir() {
-        path = std::filesystem::temp_directory_path()
-             / ("st_defs_test_" + std::to_string(std::random_device{}()));
+        path = std::filesystem::temp_directory_path() /
+               ("st_defs_test_" + std::to_string(std::random_device{}()));
         std::filesystem::create_directories(path);
     }
     ~TempDir() {
         std::error_code ec;
         std::filesystem::remove_all(path, ec);
     }
-    TempDir(TempDir const &)            = delete;
+    TempDir(TempDir const &) = delete;
     TempDir &operator=(TempDir const &) = delete;
 };
 
@@ -1378,8 +1381,7 @@ void write_text(std::filesystem::path const &p, std::string_view contents) {
 
 } // namespace
 
-TEST_CASE("Definition::from_directory merges pack.toml + sibling TOMLs",
-          "[defs][from_directory]") {
+TEST_CASE("Definition::from_directory merges pack.toml + sibling TOMLs", "[defs][from_directory]") {
     TempDir td;
 
     write_text(td.path / "pack.toml", R"toml(
@@ -1446,8 +1448,7 @@ axis_x     = "rpm_axis"
     REQUIRE(d->find_table("boost_target") != nullptr);
 }
 
-TEST_CASE("Definition::from_directory fails without pack.toml",
-          "[defs][from_directory]") {
+TEST_CASE("Definition::from_directory fails without pack.toml", "[defs][from_directory]") {
     TempDir td;
     write_text(td.path / "axes.toml", "[[axis]]\nid = \"rpm\"\ndata_type = \"uint8\"\n");
     auto const d = st::Definition::from_directory(td.path);
@@ -1496,8 +1497,7 @@ endianness = "big"
 
 // ----- includes (single-file pack imports records from a sibling) --------
 
-TEST_CASE("from_file resolves `includes` and merges fragment records",
-          "[defs][includes]") {
+TEST_CASE("from_file resolves `includes` and merges fragment records", "[defs][includes]") {
     TempDir td;
     write_text(td.path / "frag.toml", R"toml(
 [pack]
@@ -1536,8 +1536,7 @@ includes   = ["frag.toml"]
     REQUIRE(d->find_pid("e1") != nullptr);
 }
 
-TEST_CASE("from_file resolves a chain of includes depth-first",
-          "[defs][includes]") {
+TEST_CASE("from_file resolves a chain of includes depth-first", "[defs][includes]") {
     TempDir td;
     write_text(td.path / "leaf.toml", R"toml(
 [[pid]]
@@ -1571,8 +1570,7 @@ includes   = ["mid.toml"]
     REQUIRE(d->find_pid("leaf_pid") != nullptr);
 }
 
-TEST_CASE("from_file `includes` reports a missing fragment cleanly",
-          "[defs][includes]") {
+TEST_CASE("from_file `includes` reports a missing fragment cleanly", "[defs][includes]") {
     TempDir td;
     write_text(td.path / "main.toml", R"toml(
 [pack]
@@ -1604,8 +1602,7 @@ includes   = ["a.toml"]
 
 // ----- extends / inheritance ---------------------------------------------
 
-TEST_CASE("from_directory resolves a single 'extends' chain",
-          "[defs][extends]") {
+TEST_CASE("from_directory resolves a single 'extends' chain", "[defs][extends]") {
     TempDir td;
 
     write_text(td.path / "va-wrx-mt-2019" / "pack.toml", R"toml(
@@ -1691,8 +1688,7 @@ axis_x     = "rpm_axis"
     REQUIRE(d->find_table("boost_2020") != nullptr);
 }
 
-TEST_CASE("from_directory appends identifications across inheritance",
-          "[defs][extends]") {
+TEST_CASE("from_directory appends identifications across inheritance", "[defs][extends]") {
     TempDir td;
 
     write_text(td.path / "parent" / "pack.toml", R"toml(
@@ -1727,8 +1723,7 @@ cid_match   = "CHILD   "
     REQUIRE(d->identifications()[1].cid_match == "CHILD   ");
 }
 
-TEST_CASE("from_directory follows multi-level extends chains",
-          "[defs][extends]") {
+TEST_CASE("from_directory follows multi-level extends chains", "[defs][extends]") {
     TempDir td;
 
     write_text(td.path / "grandparent" / "pack.toml", R"toml(
@@ -1778,8 +1773,7 @@ data_type = "uint8"
     REQUIRE(d->find_scaling("from_child") != nullptr);
 }
 
-TEST_CASE("from_directory errors on missing parent pack",
-          "[defs][extends]") {
+TEST_CASE("from_directory errors on missing parent pack", "[defs][extends]") {
     TempDir td;
     write_text(td.path / "orphan" / "pack.toml", R"toml(
 [pack]
@@ -1794,8 +1788,7 @@ extends    = "does-not-exist"
     REQUIRE(d.error().message().find("does-not-exist") != std::string::npos);
 }
 
-TEST_CASE("from_directory detects an extends cycle",
-          "[defs][extends]") {
+TEST_CASE("from_directory detects an extends cycle", "[defs][extends]") {
     TempDir td;
     write_text(td.path / "a" / "pack.toml", R"toml(
 [pack]
@@ -1843,8 +1836,7 @@ TEST_CASE("parse_data_type round-trips known values", "[defs][types]") {
 // Custom-feature splice-point declarations per docs/16. The parser
 // surfaces them on Definition; the editor builds nodes from them.
 
-TEST_CASE("Definition parses a [[hook]] with typed inputs/outputs",
-          "[defs][hooks]") {
+TEST_CASE("Definition parses a [[hook]] with typed inputs/outputs", "[defs][hooks]") {
     auto const d = st::Definition::from_toml_string(R"toml(
 [pack]
 id         = "demo"
@@ -1867,9 +1859,9 @@ outputs = [
     REQUIRE(d.has_value());
     REQUIRE(d->hooks().size() == 1);
     auto const &h = d->hooks().front();
-    REQUIRE(h.id          == "after_fuel_calc");
+    REQUIRE(h.id == "after_fuel_calc");
     REQUIRE(h.description == "After commanded injector PW is computed");
-    REQUIRE(h.inputs.size()  == 3);
+    REQUIRE(h.inputs.size() == 3);
     REQUIRE(h.outputs.size() == 1);
     REQUIRE(h.inputs[0].name == "rpm");
     REQUIRE(h.inputs[0].type == "float");
@@ -1884,8 +1876,7 @@ outputs = [
     REQUIRE(*h.free_ram_length == 256u);
 }
 
-TEST_CASE("Hooks with no inputs/outputs and no codegen metadata still parse",
-          "[defs][hooks]") {
+TEST_CASE("Hooks with no inputs/outputs and no codegen metadata still parse", "[defs][hooks]") {
     auto const d = st::Definition::from_toml_string(R"toml(
 [pack]
 id         = "demo"
@@ -1965,8 +1956,7 @@ inputs = [ "rpm", "load" ]
     REQUIRE(d.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("Hook + signal labels parse, default to empty when omitted",
-          "[defs][hooks]") {
+TEST_CASE("Hook + signal labels parse, default to empty when omitted", "[defs][hooks]") {
     // display_name on the hook, label on signals — both optional. Editor
     // uses them when non-empty; falls back to id/name otherwise.
     auto const d = st::Definition::from_toml_string(R"toml(
@@ -1990,8 +1980,8 @@ outputs = [
     REQUIRE(d->hooks().size() == 1);
     auto const &h = d->hooks().front();
     REQUIRE(h.display_name == "After fuel calc");
-    REQUIRE(h.inputs[0].label  == "Commanded fuel PW");
-    REQUIRE(h.inputs[1].label  == "");  // omitted → empty
+    REQUIRE(h.inputs[0].label == "Commanded fuel PW");
+    REQUIRE(h.inputs[1].label == ""); // omitted → empty
     REQUIRE(h.outputs[0].label == "Override fuel PW");
 }
 
@@ -1999,8 +1989,7 @@ outputs = [
 // Reusable computation nodes (arithmetic, boolean logic) declared
 // in the pack and exposed by the editor's palette alongside hooks.
 
-TEST_CASE("Definition parses a [[primitive]] with typed pins",
-          "[defs][primitives]") {
+TEST_CASE("Definition parses a [[primitive]] with typed pins", "[defs][primitives]") {
     auto const d = st::Definition::from_toml_string(R"toml(
 [pack]
 id         = "demo"
@@ -2041,8 +2030,7 @@ display_name = "no id field"
     REQUIRE(d.error().message().find("missing id") != std::string::npos);
 }
 
-TEST_CASE("Primitive rejects signal with unknown type",
-          "[defs][primitives]") {
+TEST_CASE("Primitive rejects signal with unknown type", "[defs][primitives]") {
     auto const d = st::Definition::from_toml_string(R"toml(
 [pack]
 id         = "demo"
@@ -2056,8 +2044,7 @@ inputs = [ { name = "x", type = "decimal" } ]
     REQUIRE(d.error().message().find("type must be") != std::string::npos);
 }
 
-TEST_CASE("Hooks and primitives co-exist in one pack",
-          "[defs][primitives]") {
+TEST_CASE("Hooks and primitives co-exist in one pack", "[defs][primitives]") {
     auto const d = st::Definition::from_toml_string(R"toml(
 [pack]
 id         = "demo"
@@ -2072,14 +2059,13 @@ id = "p"
     REQUIRE(d.has_value());
     REQUIRE(d->hooks().size() == 1);
     REQUIRE(d->primitives().size() == 1);
-    REQUIRE(d->find_hook("h")       != nullptr);
-    REQUIRE(d->find_primitive("p")  != nullptr);
-    REQUIRE(d->find_hook("p")       == nullptr);
-    REQUIRE(d->find_primitive("h")  == nullptr);
+    REQUIRE(d->find_hook("h") != nullptr);
+    REQUIRE(d->find_primitive("p") != nullptr);
+    REQUIRE(d->find_hook("p") == nullptr);
+    REQUIRE(d->find_primitive("h") == nullptr);
 }
 
-TEST_CASE("Definition::find_hook locates a parsed hook by id",
-          "[defs][hooks]") {
+TEST_CASE("Definition::find_hook locates a parsed hook by id", "[defs][hooks]") {
     auto const d = st::Definition::from_toml_string(R"toml(
 [pack]
 id         = "demo"

@@ -41,15 +41,14 @@ namespace st::transport::j2534 {
 // be accepted?" without opening a device.
 struct ConnectParams {
     ProtocolId protocol{ProtocolId::ISO9141};
-    u32        flags{0};
-    u32        baud{0};
+    u32 flags{0};
+    u32 baud{0};
 };
 
 // Map a LinkConfig to the J2534 protocol id + flags + baud. Returns
 // InvalidArgument when LinkKind has no J2534 mapping (CAN-FD today —
 // not in v04.04).
-[[nodiscard]] Result<ConnectParams> connect_params_for(
-    LinkConfig const &cfg) noexcept;
+[[nodiscard]] Result<ConnectParams> connect_params_for(LinkConfig const &cfg) noexcept;
 
 // Map a J2534 Status to a SubuwuTuner-side ErrorCode. NoError →
 // ok(). Timeout / BufferEmpty → TransportTimeout. NotSupported,
@@ -59,8 +58,7 @@ struct ConnectParams {
 // Everything else (Failed, vendor opaque, etc.) → TransportNack.
 // The message embeds the status's documented description plus any
 // caller-supplied context.
-[[nodiscard]] st::Status to_st_status(
-    Status s, std::string_view context = {}) noexcept;
+[[nodiscard]] st::Status to_st_status(Status s, std::string_view context = {}) noexcept;
 
 // The transport itself. Owns:
 //   - the J2534Library (function table + eventual OS module handle)
@@ -69,26 +67,24 @@ struct ConnectParams {
 //   - a cached firmware-version string (populated on open via
 //     ReadVersion when the DLL supports it).
 class Transport : public ITransport {
-  public:
+public:
     explicit Transport(J2534Library library) noexcept;
     ~Transport() override;
 
-    Transport(Transport const &)            = delete;
+    Transport(Transport const &) = delete;
     Transport &operator=(Transport const &) = delete;
-    Transport(Transport &&)                 = delete;
-    Transport &operator=(Transport &&)      = delete;
+    Transport(Transport &&) = delete;
+    Transport &operator=(Transport &&) = delete;
 
     // ---- ITransport -------------------------------------------------
 
     [[nodiscard]] st::Status open(LinkConfig const &cfg) override;
     [[nodiscard]] st::Status close() override;
 
-    [[nodiscard]] Result<Frame> send_recv(
-        std::span<std::uint8_t const> payload,
-        std::chrono::milliseconds      timeout) override;
+    [[nodiscard]] Result<Frame> send_recv(std::span<std::uint8_t const> payload,
+                                          std::chrono::milliseconds timeout) override;
 
-    [[nodiscard]] st::Status send(
-        std::span<std::uint8_t const> payload) override;
+    [[nodiscard]] st::Status send(std::span<std::uint8_t const> payload) override;
 
     [[nodiscard]] st::Status start_streaming(FrameCallback callback) override;
     [[nodiscard]] st::Status stop_streaming() override;
@@ -102,18 +98,26 @@ class Transport : public ITransport {
 
     // ---- Inspection (tests) ----------------------------------------
 
-    [[nodiscard]] bool       is_open()    const noexcept { return open_; }
-    [[nodiscard]] u32        device_id()  const noexcept { return device_id_; }
-    [[nodiscard]] u32        channel_id() const noexcept { return channel_id_; }
-    [[nodiscard]] ProtocolId protocol()   const noexcept { return protocol_; }
+    [[nodiscard]] bool is_open() const noexcept {
+        return open_;
+    }
+    [[nodiscard]] u32 device_id() const noexcept {
+        return device_id_;
+    }
+    [[nodiscard]] u32 channel_id() const noexcept {
+        return channel_id_;
+    }
+    [[nodiscard]] ProtocolId protocol() const noexcept {
+        return protocol_;
+    }
 
-  private:
+private:
     J2534Library library_;
-    bool         open_{false};
-    u32          device_id_{0};
-    u32          channel_id_{0};
-    ProtocolId   protocol_{ProtocolId::ISO9141};
-    std::string  firmware_;
+    bool open_{false};
+    u32 device_id_{0};
+    u32 channel_id_{0};
+    ProtocolId protocol_{ProtocolId::ISO9141};
+    std::string firmware_;
 };
 
 } // namespace st::transport::j2534

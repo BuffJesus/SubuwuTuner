@@ -40,10 +40,10 @@ std::string hex_addr(std::uint32_t v) {
 // ---------------------------------------------------------------------
 
 bool FlashReport::all_sectors_completed() const noexcept {
-    if (sectors.empty()) return false;
+    if (sectors.empty())
+        return false;
     for (auto const &s : sectors) {
-        if (!s.erased || !s.downloaded || !s.transferred || !s.exited
-            || !s.check_deps_passed) {
+        if (!s.erased || !s.downloaded || !s.transferred || !s.exited || !s.check_deps_passed) {
             return false;
         }
     }
@@ -52,7 +52,8 @@ bool FlashReport::all_sectors_completed() const noexcept {
 
 bool FlashReport::all_sectors_verified() const noexcept {
     for (auto const &s : sectors) {
-        if (!s.verified) return false;
+        if (!s.verified)
+            return false;
     }
     return true;
 }
@@ -61,11 +62,9 @@ bool FlashReport::all_sectors_verified() const noexcept {
 // read_full_rom — chunked ReadMemoryByAddress loop
 // ---------------------------------------------------------------------
 
-Result<std::vector<std::uint8_t>> Flasher::read_full_rom(
-    std::uint32_t             base_address,
-    std::uint32_t             total_length,
-    std::uint32_t             max_chunk_size,
-    std::chrono::milliseconds per_chunk_timeout) {
+Result<std::vector<std::uint8_t>>
+Flasher::read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
+                       std::uint32_t max_chunk_size, std::chrono::milliseconds per_chunk_timeout) {
     if (total_length == 0) {
         return std::vector<std::uint8_t>{};
     }
@@ -75,27 +74,24 @@ Result<std::vector<std::uint8_t>> Flasher::read_full_rom(
     }
     std::vector<std::uint8_t> out;
     out.reserve(total_length);
-    std::uint32_t cursor    = base_address;
+    std::uint32_t cursor = base_address;
     std::uint32_t remaining = total_length;
     while (remaining > 0) {
-        std::uint32_t const this_chunk =
-            remaining < max_chunk_size ? remaining : max_chunk_size;
-        auto chunk = client_.read_memory_by_address(cursor, this_chunk,
-                                                     per_chunk_timeout);
+        std::uint32_t const this_chunk = remaining < max_chunk_size ? remaining : max_chunk_size;
+        auto chunk = client_.read_memory_by_address(cursor, this_chunk, per_chunk_timeout);
         if (!chunk.has_value()) {
-            return failure(chunk.error().code(),
-                           "flash: read_full_rom failed at "
-                           + hex_addr(cursor) + ": "
-                           + std::string{chunk.error().message()});
+            return failure(chunk.error().code(), "flash: read_full_rom failed at " +
+                                                     hex_addr(cursor) + ": " +
+                                                     std::string{chunk.error().message()});
         }
         if (chunk->size() != this_chunk) {
-            return failure(ErrorCode::UnexpectedEof,
-                           "flash: short read at " + hex_addr(cursor)
-                           + " (expected " + std::to_string(this_chunk)
-                           + ", got " + std::to_string(chunk->size()) + ")");
+            return failure(ErrorCode::UnexpectedEof, "flash: short read at " + hex_addr(cursor) +
+                                                         " (expected " +
+                                                         std::to_string(this_chunk) + ", got " +
+                                                         std::to_string(chunk->size()) + ")");
         }
         out.insert(out.end(), chunk->begin(), chunk->end());
-        cursor    += this_chunk;
+        cursor += this_chunk;
         remaining -= this_chunk;
     }
     return out;
@@ -105,17 +101,16 @@ Result<std::vector<std::uint8_t>> Flasher::read_full_rom(
 // compute_delta — sector-aligned byte-diff
 // ---------------------------------------------------------------------
 
-std::vector<Sector> Flasher::compute_delta(
-    std::span<std::uint8_t const> current,
-    std::span<std::uint8_t const> target,
-    std::uint32_t                 sector_size,
-    std::uint32_t                 base_address) {
+std::vector<Sector> Flasher::compute_delta(std::span<std::uint8_t const> current,
+                                           std::span<std::uint8_t const> target,
+                                           std::uint32_t sector_size, std::uint32_t base_address) {
     std::vector<Sector> out;
-    if (sector_size == 0) return out;
+    if (sector_size == 0)
+        return out;
     auto const n = std::min(current.size(), target.size());
     for (std::size_t off = 0; off < n; off += sector_size) {
         std::size_t const end = std::min(off + sector_size, n);
-        bool              differs = false;
+        bool differs = false;
         for (std::size_t i = off; i < end; ++i) {
             if (current[i] != target[i]) {
                 differs = true;
@@ -143,8 +138,7 @@ namespace {
 // where aLFI's high nibble = number of memorySize bytes, low nibble =
 // number of memoryAddress bytes. SubuwuTuner v1 targets 32-bit address
 // space and 32-bit sizes → aLFI = 0x44.
-std::vector<std::uint8_t> build_erase_option_record(
-    std::uint32_t addr, std::uint32_t size) {
+std::vector<std::uint8_t> build_erase_option_record(std::uint32_t addr, std::uint32_t size) {
     std::vector<std::uint8_t> opt;
     opt.reserve(9);
     opt.push_back(0x44);
@@ -163,12 +157,12 @@ std::vector<std::uint8_t> build_erase_option_record(
 // reported maxNumberOfBlockLength and the caller's hint. The reported
 // value counts the SID byte and the block-sequence-counter byte, so
 // the payload is `reported - 2`.
-std::uint32_t choose_block_payload(std::uint32_t reported_max,
-                                    std::uint32_t hint) {
-    std::uint32_t const safe_reported =
-        reported_max > 2 ? reported_max - 2 : 0;
-    if (hint == 0)                         return safe_reported;
-    if (safe_reported == 0)                return hint;
+std::uint32_t choose_block_payload(std::uint32_t reported_max, std::uint32_t hint) {
+    std::uint32_t const safe_reported = reported_max > 2 ? reported_max - 2 : 0;
+    if (hint == 0)
+        return safe_reported;
+    if (safe_reported == 0)
+        return hint;
     return safe_reported < hint ? safe_reported : hint;
 }
 
@@ -185,7 +179,7 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
     auto bail = [&](ErrorCode code, std::string message) {
         ExecuteOutcome out;
         out.report = std::move(report);
-        out.error  = Error{code, std::move(message)};
+        out.error = Error{code, std::move(message)};
         return out;
     };
 
@@ -193,23 +187,18 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
     for (auto const &w : plan.writes) {
         if (w.data.size() != w.sector.length) {
             return bail(ErrorCode::InvalidArgument,
-                        "flash: SectorWrite.data.size() ("
-                        + std::to_string(w.data.size())
-                        + ") != sector.length ("
-                        + std::to_string(w.sector.length) + ")");
+                        "flash: SectorWrite.data.size() (" + std::to_string(w.data.size()) +
+                            ") != sector.length (" + std::to_string(w.sector.length) + ")");
         }
         if (w.sector.length == 0) {
-            return bail(ErrorCode::InvalidArgument,
-                        "flash: SectorWrite.sector.length must be > 0");
+            return bail(ErrorCode::InvalidArgument, "flash: SectorWrite.sector.length must be > 0");
         }
     }
 
     // 1. Enter programming session.
-    if (auto s = client_.diagnostic_session_control(plan.session);
-        !s.has_value()) {
-        return bail(s.error().code(),
-                    "flash: diagnostic_session_control failed: "
-                    + std::string{s.error().message()});
+    if (auto s = client_.diagnostic_session_control(plan.session); !s.has_value()) {
+        return bail(s.error().code(), "flash: diagnostic_session_control failed: " +
+                                          std::string{s.error().message()});
     }
     report.entered_session = true;
 
@@ -226,19 +215,17 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
         report.sectors.push_back(so);
         if (!plan.journal_path.empty()) {
             auto const snapshot = build_manifest(plan, std::string_view{}, report);
-            (void) write_manifest(plan.journal_path, snapshot);
+            (void)write_manifest(plan.journal_path, snapshot);
         }
     };
 
     // 2. Optionally silence non-diagnostic traffic.
     if (plan.silence_bus) {
-        if (auto s = client_.communication_control(
-                ecu::uds::kCcDisableRxAndTx,
-                ecu::uds::kCtNormalAndNetworkManagement);
+        if (auto s = client_.communication_control(ecu::uds::kCcDisableRxAndTx,
+                                                   ecu::uds::kCtNormalAndNetworkManagement);
             !s.has_value()) {
-            return bail(s.error().code(),
-                        "flash: communication_control(off) failed: "
-                        + std::string{s.error().message()});
+            return bail(s.error().code(), "flash: communication_control(off) failed: " +
+                                              std::string{s.error().message()});
         }
         report.silenced_bus = true;
     }
@@ -263,55 +250,47 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
                 build_erase_option_record(w.sector.address, w.sector.length));
             if (!erase.has_value()) {
                 commit_outcome(outcome);
-                return bail(erase.error().code(),
-                            "flash: eraseMemory failed at "
-                            + hex_addr(w.sector.address) + ": "
-                            + std::string{erase.error().message()});
+                return bail(erase.error().code(), "flash: eraseMemory failed at " +
+                                                      hex_addr(w.sector.address) + ": " +
+                                                      std::string{erase.error().message()});
             }
             outcome.erased = true;
 
             // 3b. RequestDownload.
-            auto rdl = client_.request_download(
-                plan.data_format, w.sector.address, w.sector.length);
+            auto rdl =
+                client_.request_download(plan.data_format, w.sector.address, w.sector.length);
             if (!rdl.has_value()) {
                 commit_outcome(outcome);
-                return bail(rdl.error().code(),
-                            "flash: request_download failed at "
-                            + hex_addr(w.sector.address) + ": "
-                            + std::string{rdl.error().message()});
+                return bail(rdl.error().code(), "flash: request_download failed at " +
+                                                    hex_addr(w.sector.address) + ": " +
+                                                    std::string{rdl.error().message()});
             }
             outcome.downloaded = true;
-            std::uint32_t const block_payload =
-                choose_block_payload(*rdl, plan.block_size_hint);
+            std::uint32_t const block_payload = choose_block_payload(*rdl, plan.block_size_hint);
             if (block_payload == 0) {
                 commit_outcome(outcome);
-                return bail(ErrorCode::EcuRejected,
-                            "flash: ECU reported unusable "
-                            "maxNumberOfBlockLength="
-                            + std::to_string(*rdl));
+                return bail(ErrorCode::EcuRejected, "flash: ECU reported unusable "
+                                                    "maxNumberOfBlockLength=" +
+                                                        std::to_string(*rdl));
             }
 
             // 3c. TransferData blocks.
-            std::uint8_t  counter = 1;
-            std::size_t   offset  = 0;
+            std::uint8_t counter = 1;
+            std::size_t offset = 0;
             while (offset < w.data.size()) {
                 std::size_t const remaining = w.data.size() - offset;
                 std::size_t const this_block =
                     remaining < block_payload ? remaining : block_payload;
-                std::span<std::uint8_t const> chunk{w.data.data() + offset,
-                                                     this_block};
-                if (auto s = client_.transfer_data(counter, chunk);
-                    !s.has_value()) {
+                std::span<std::uint8_t const> chunk{w.data.data() + offset, this_block};
+                if (auto s = client_.transfer_data(counter, chunk); !s.has_value()) {
                     report.bytes_transferred += offset;
                     commit_outcome(outcome);
                     return bail(s.error().code(),
-                                "flash: transfer_data counter="
-                                + std::to_string(counter)
-                                + " failed: "
-                                + std::string{s.error().message()});
+                                "flash: transfer_data counter=" + std::to_string(counter) +
+                                    " failed: " + std::string{s.error().message()});
                 }
-                offset  += this_block;
-                counter  = static_cast<std::uint8_t>(counter + 1U);
+                offset += this_block;
+                counter = static_cast<std::uint8_t>(counter + 1U);
                 // counter wraps from 0xFF to 0x00 per ISO 14229.
             }
             report.bytes_transferred += offset;
@@ -320,43 +299,37 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
             // 3d. RequestTransferExit.
             if (auto s = client_.request_transfer_exit(); !s.has_value()) {
                 commit_outcome(outcome);
-                return bail(s.error().code(),
-                            "flash: request_transfer_exit failed at "
-                            + hex_addr(w.sector.address) + ": "
-                            + std::string{s.error().message()});
+                return bail(s.error().code(), "flash: request_transfer_exit failed at " +
+                                                  hex_addr(w.sector.address) + ": " +
+                                                  std::string{s.error().message()});
             }
             outcome.exited = true;
 
             // 3e. checkProgrammingDependencies routine.
-            auto check = client_.routine_control(
-                ecu::uds::kRcStart,
-                ecu::uds::kRidCheckProgrammingDependencies);
+            auto check = client_.routine_control(ecu::uds::kRcStart,
+                                                 ecu::uds::kRidCheckProgrammingDependencies);
             if (!check.has_value()) {
                 commit_outcome(outcome);
-                return bail(check.error().code(),
-                            "flash: checkProgrammingDependencies "
-                            "failed at "
-                            + hex_addr(w.sector.address) + ": "
-                            + std::string{check.error().message()});
+                return bail(check.error().code(), "flash: checkProgrammingDependencies "
+                                                  "failed at " +
+                                                      hex_addr(w.sector.address) + ": " +
+                                                      std::string{check.error().message()});
             }
             outcome.check_deps_passed = true;
 
             // 3f. Optional verify pass.
             if (plan.verify_after_write) {
-                auto readback = read_full_rom(w.sector.address,
-                                              w.sector.length,
-                                              plan.verify_chunk_size);
+                auto readback =
+                    read_full_rom(w.sector.address, w.sector.length, plan.verify_chunk_size);
                 if (!readback.has_value()) {
                     outcome.verified = false;
                     commit_outcome(outcome);
                     return bail(readback.error().code(),
-                                "flash: verify read-back failed: "
-                                + std::string{readback.error().message()});
+                                "flash: verify read-back failed: " +
+                                    std::string{readback.error().message()});
                 }
-                outcome.verified = (readback->size() == w.data.size()
-                                    && std::equal(readback->begin(),
-                                                  readback->end(),
-                                                  w.data.begin()));
+                outcome.verified = (readback->size() == w.data.size() &&
+                                    std::equal(readback->begin(), readback->end(), w.data.begin()));
             }
 
             commit_outcome(outcome);
@@ -366,9 +339,8 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
     // 4. Restore the bus. Best-effort: a failure here is reported but
     // not fatal because the flash itself has already completed.
     if (plan.silence_bus) {
-        if (auto s = client_.communication_control(
-                ecu::uds::kCcEnableRxAndTx,
-                ecu::uds::kCtNormalAndNetworkManagement);
+        if (auto s = client_.communication_control(ecu::uds::kCcEnableRxAndTx,
+                                                   ecu::uds::kCtNormalAndNetworkManagement);
             s.has_value()) {
             report.restored_bus = true;
         }
@@ -390,44 +362,37 @@ namespace {
 // Returns nullopt on any unparseable character.
 Result<std::vector<std::uint8_t>> parse_hex_bytes(std::string_view s) {
     std::vector<std::uint8_t> out;
-    std::size_t               i = 0;
+    std::size_t i = 0;
     while (i < s.size()) {
         // Skip whitespace.
-        while (i < s.size()
-               && std::isspace(static_cast<unsigned char>(s[i]))) {
+        while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) {
             ++i;
         }
-        if (i >= s.size()) break;
+        if (i >= s.size())
+            break;
         // Optional "0x" / "0X" prefix per byte.
-        if (i + 1 < s.size() && s[i] == '0'
-            && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
+        if (i + 1 < s.size() && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
             i += 2;
         }
         if (i + 1 >= s.size()) {
             return failure(ErrorCode::ParseError,
-                           "flash plan: odd hex digit at position "
-                           + std::to_string(i));
+                           "flash plan: odd hex digit at position " + std::to_string(i));
         }
-        unsigned const   first  = static_cast<unsigned char>(s[i]);
-        unsigned const   second = static_cast<unsigned char>(s[i + 1]);
-        auto const       is_hex = [](unsigned c) {
-            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
-                   || (c >= 'A' && c <= 'F');
+        unsigned const first = static_cast<unsigned char>(s[i]);
+        unsigned const second = static_cast<unsigned char>(s[i + 1]);
+        auto const is_hex = [](unsigned c) {
+            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
         };
         if (!is_hex(first) || !is_hex(second)) {
             return failure(ErrorCode::ParseError,
-                           "flash plan: bad hex byte near position "
-                           + std::to_string(i));
+                           "flash plan: bad hex byte near position " + std::to_string(i));
         }
-        unsigned    value = 0;
-        char const  pair[2]{static_cast<char>(first),
-                             static_cast<char>(second)};
-        auto const  res =
-            std::from_chars(pair, pair + 2, value, 16);
+        unsigned value = 0;
+        char const pair[2]{static_cast<char>(first), static_cast<char>(second)};
+        auto const res = std::from_chars(pair, pair + 2, value, 16);
         if (res.ec != std::errc{} || res.ptr != pair + 2) {
             return failure(ErrorCode::ParseError,
-                           "flash plan: bad hex byte near position "
-                           + std::to_string(i));
+                           "flash plan: bad hex byte near position " + std::to_string(i));
         }
         out.push_back(static_cast<std::uint8_t>(value));
         i += 2;
@@ -438,10 +403,11 @@ Result<std::vector<std::uint8_t>> parse_hex_bytes(std::string_view s) {
 // Emit bytes as "DE AD BE EF" — uppercase, space-separated, no prefix,
 // chunked into 32 bytes per line for readability on long payloads.
 std::string format_hex_bytes(std::span<std::uint8_t const> bytes) {
-    if (bytes.empty()) return std::string{};
+    if (bytes.empty())
+        return std::string{};
     constexpr char const *digits = "0123456789ABCDEF";
     constexpr std::size_t per_line = 32;
-    std::string           out;
+    std::string out;
     out.reserve(bytes.size() * 3);
     for (std::size_t i = 0; i < bytes.size(); ++i) {
         if (i > 0) {
@@ -464,7 +430,8 @@ namespace {
 // well-formed pack but the validator could in principle let it through).
 std::size_t table_byte_extent(Table const &t, Definition const &def) noexcept {
     auto const cell_bytes = byte_size(t.data_type);
-    if (cell_bytes == 0) return 0;
+    if (cell_bytes == 0)
+        return 0;
     std::size_t cells = 1;
     if (t.dimensions >= 1 && t.axis_x.has_value()) {
         auto const *ax = def.find_axis(*t.axis_x);
@@ -490,21 +457,22 @@ std::size_t table_byte_extent(Table const &t, Definition const &def) noexcept {
 // True iff `plan` writes any byte in `[start, end)` that differs from
 // `source`. Bytes outside any SectorWrite or past the source's end count
 // as unchanged.
-bool plan_touches_changed_byte_in(FlashPlan                     const &plan,
-                                   std::span<std::uint8_t const>      source,
-                                   std::size_t                        start,
-                                   std::size_t                        end) noexcept {
-    if (start >= end) return false;
+bool plan_touches_changed_byte_in(FlashPlan const &plan, std::span<std::uint8_t const> source,
+                                  std::size_t start, std::size_t end) noexcept {
+    if (start >= end)
+        return false;
     for (auto const &w : plan.writes) {
         auto const sec_start = static_cast<std::size_t>(w.sector.address);
-        auto const sec_end   = sec_start + w.data.size();
+        auto const sec_end = sec_start + w.data.size();
         auto const lo = std::max(start, sec_start);
-        auto const hi = std::min(end,   sec_end);
-        if (lo >= hi) continue;
+        auto const hi = std::min(end, sec_end);
+        if (lo >= hi)
+            continue;
         for (auto off = lo; off < hi; ++off) {
             std::uint8_t const target_byte = w.data[off - sec_start];
             std::uint8_t const source_byte = off < source.size() ? source[off] : 0x00;
-            if (target_byte != source_byte) return true;
+            if (target_byte != source_byte)
+                return true;
         }
     }
     return false;
@@ -512,16 +480,16 @@ bool plan_touches_changed_byte_in(FlashPlan                     const &plan,
 
 } // namespace
 
-PolicyDecision evaluate_plan_policy(FlashPlan                     const &plan,
-                                     Definition                    const &def,
-                                     std::span<std::uint8_t const>        source_rom,
-                                     policy::Profile                      profile) noexcept {
+PolicyDecision evaluate_plan_policy(FlashPlan const &plan, Definition const &def,
+                                    std::span<std::uint8_t const> source_rom,
+                                    policy::Profile profile) noexcept {
     PolicyDecision result;
     for (auto const &t : def.tables()) {
         auto const extent = table_byte_extent(t, def);
-        if (extent == 0) continue;
+        if (extent == 0)
+            continue;
         auto const start = t.address;
-        auto const end   = start + extent;
+        auto const end = start + extent;
         if (!plan_touches_changed_byte_in(plan, source_rom, start, end)) {
             continue;
         }
@@ -535,9 +503,9 @@ PolicyDecision evaluate_plan_policy(FlashPlan                     const &plan,
     // No dedup pass needed — each table appears at most once in the loop.
 
     result.emissions_action = result.emissions_tables.empty()
-                                ? policy::Action::Silent
-                                : policy::emissions_action(profile).on_flash;
-    result.overall_action   = result.engine_safety_tables.empty()
+                                  ? policy::Action::Silent
+                                  : policy::emissions_action(profile).on_flash;
+    result.overall_action = result.engine_safety_tables.empty()
                                 ? result.emissions_action
                                 : policy::engine_safety_on_flash(profile);
     return result;
@@ -547,8 +515,7 @@ namespace {
 
 // Load a binary file into a byte vector. Used by parse_plan when a
 // [[write]] uses `data_file` instead of inline `data`.
-Result<std::vector<std::uint8_t>> read_binary_file(
-    std::filesystem::path const &path) {
+Result<std::vector<std::uint8_t>> read_binary_file(std::filesystem::path const &path) {
     std::ifstream in{path, std::ios::binary};
     if (!in) {
         return failure(ErrorCode::FileNotFound,
@@ -557,18 +524,15 @@ Result<std::vector<std::uint8_t>> read_binary_file(
     in.seekg(0, std::ios::end);
     auto const size = in.tellg();
     if (size < 0) {
-        return failure(ErrorCode::IoFailure,
-                       "flash plan: cannot size data_file: " + path.string());
+        return failure(ErrorCode::IoFailure, "flash plan: cannot size data_file: " + path.string());
     }
     in.seekg(0, std::ios::beg);
     std::vector<std::uint8_t> out(static_cast<std::size_t>(size));
     if (size > 0) {
-        in.read(reinterpret_cast<char *>(out.data()),
-                static_cast<std::streamsize>(size));
+        in.read(reinterpret_cast<char *>(out.data()), static_cast<std::streamsize>(size));
         if (!in) {
             return failure(ErrorCode::IoFailure,
-                           "flash plan: short read on data_file: "
-                           + path.string());
+                           "flash plan: short read on data_file: " + path.string());
         }
     }
     return out;
@@ -576,21 +540,18 @@ Result<std::vector<std::uint8_t>> read_binary_file(
 
 } // namespace
 
-Result<FlashPlan> parse_plan(std::string_view             text,
-                             std::filesystem::path const &base_dir) {
+Result<FlashPlan> parse_plan(std::string_view text, std::filesystem::path const &base_dir) {
     toml::table root;
     try {
         root = toml::parse(text);
     } catch (toml::parse_error const &e) {
         return failure(ErrorCode::ParseError,
-                       std::string{"flash plan: TOML parse: "}
-                       + e.description().data());
+                       std::string{"flash plan: TOML parse: "} + e.description().data());
     }
 
     auto const *plan_tbl = root["plan"].as_table();
     if (plan_tbl == nullptr) {
-        return failure(ErrorCode::ParseError,
-                       "flash plan: missing [plan] table");
+        return failure(ErrorCode::ParseError, "flash plan: missing [plan] table");
     }
 
     int const schema = plan_tbl->get_as<int64_t>("schema_version")
@@ -598,26 +559,28 @@ Result<FlashPlan> parse_plan(std::string_view             text,
                            : 0;
     if (schema != kPlanSchemaVersion) {
         return failure(ErrorCode::UnsupportedVersion,
-                       "flash plan: schema_version "
-                       + std::to_string(schema)
-                       + " not supported (expected "
-                       + std::to_string(kPlanSchemaVersion) + ")");
+                       "flash plan: schema_version " + std::to_string(schema) +
+                           " not supported (expected " + std::to_string(kPlanSchemaVersion) + ")");
     }
 
     FlashPlan plan;
 
     auto opt_u8 = [&](char const *key, std::uint8_t fallback) {
         auto const *v = plan_tbl->get_as<int64_t>(key);
-        if (v == nullptr) return fallback;
+        if (v == nullptr)
+            return fallback;
         auto const raw = v->get();
-        if (raw < 0 || raw > 0xFF) return fallback;
+        if (raw < 0 || raw > 0xFF)
+            return fallback;
         return static_cast<std::uint8_t>(raw);
     };
     auto opt_u32 = [&](char const *key, std::uint32_t fallback) {
         auto const *v = plan_tbl->get_as<int64_t>(key);
-        if (v == nullptr) return fallback;
+        if (v == nullptr)
+            return fallback;
         auto const raw = v->get();
-        if (raw < 0) return fallback;
+        if (raw < 0)
+            return fallback;
         return static_cast<std::uint32_t>(raw);
     };
     auto opt_bool = [&](char const *key, bool fallback) {
@@ -625,15 +588,13 @@ Result<FlashPlan> parse_plan(std::string_view             text,
         return v == nullptr ? fallback : v->get();
     };
 
-    plan.session            = opt_u8("session", plan.session);
-    plan.data_format        = opt_u8("data_format", plan.data_format);
-    plan.silence_bus        = opt_bool("silence_bus", plan.silence_bus);
-    plan.verify_after_write = opt_bool("verify_after_write",
-                                       plan.verify_after_write);
-    plan.dry_run            = opt_bool("dry_run", plan.dry_run);
-    plan.block_size_hint    = opt_u32("block_size_hint", plan.block_size_hint);
-    plan.verify_chunk_size  = opt_u32("verify_chunk_size",
-                                       plan.verify_chunk_size);
+    plan.session = opt_u8("session", plan.session);
+    plan.data_format = opt_u8("data_format", plan.data_format);
+    plan.silence_bus = opt_bool("silence_bus", plan.silence_bus);
+    plan.verify_after_write = opt_bool("verify_after_write", plan.verify_after_write);
+    plan.dry_run = opt_bool("dry_run", plan.dry_run);
+    plan.block_size_hint = opt_u32("block_size_hint", plan.block_size_hint);
+    plan.verify_chunk_size = opt_u32("verify_chunk_size", plan.verify_chunk_size);
 
     auto const *writes = root["write"].as_array();
     if (writes == nullptr) {
@@ -645,40 +606,36 @@ Result<FlashPlan> parse_plan(std::string_view             text,
     for (auto const &node : *writes) {
         auto const *tbl = node.as_table();
         if (tbl == nullptr) {
-            return failure(ErrorCode::ParseError,
-                           "flash plan: [[write]] entry " + std::to_string(idx)
-                           + " is not a table");
+            return failure(ErrorCode::ParseError, "flash plan: [[write]] entry " +
+                                                      std::to_string(idx) + " is not a table");
         }
         SectorWrite sw;
         auto const *addr_node = tbl->get_as<int64_t>("address");
         if (addr_node == nullptr) {
             return failure(ErrorCode::ParseError,
-                           "flash plan: [[write]] " + std::to_string(idx)
-                           + ": missing 'address'");
+                           "flash plan: [[write]] " + std::to_string(idx) + ": missing 'address'");
         }
         auto const addr_val = addr_node->get();
         if (addr_val < 0 || addr_val > 0xFFFFFFFFLL) {
-            return failure(ErrorCode::ParseError,
-                           "flash plan: [[write]] " + std::to_string(idx)
-                           + ": address out of 32-bit range");
+            return failure(ErrorCode::ParseError, "flash plan: [[write]] " + std::to_string(idx) +
+                                                      ": address out of 32-bit range");
         }
         sw.sector.address = static_cast<std::uint32_t>(addr_val);
 
-        auto const *data_node      = tbl->get_as<std::string>("data");
+        auto const *data_node = tbl->get_as<std::string>("data");
         auto const *data_file_node = tbl->get_as<std::string>("data_file");
         if (data_node != nullptr && data_file_node != nullptr) {
-            return failure(ErrorCode::ParseError,
-                           "flash plan: [[write]] " + std::to_string(idx)
-                           + ": both 'data' and 'data_file' present "
-                           "— pick one");
+            return failure(ErrorCode::ParseError, "flash plan: [[write]] " + std::to_string(idx) +
+                                                      ": both 'data' and 'data_file' present "
+                                                      "— pick one");
         }
         std::vector<std::uint8_t> bytes_buf;
         if (data_node != nullptr) {
             auto parsed = parse_hex_bytes(data_node->get());
             if (!parsed.has_value()) {
-                return failure(parsed.error().code(),
-                               "flash plan: [[write]] " + std::to_string(idx)
-                               + ": " + std::string{parsed.error().message()});
+                return failure(parsed.error().code(), "flash plan: [[write]] " +
+                                                          std::to_string(idx) + ": " +
+                                                          std::string{parsed.error().message()});
             }
             bytes_buf = std::move(*parsed);
         } else if (data_file_node != nullptr) {
@@ -686,35 +643,32 @@ Result<FlashPlan> parse_plan(std::string_view             text,
             if (file_path.is_relative()) {
                 if (base_dir.empty()) {
                     return failure(ErrorCode::InvalidArgument,
-                                   "flash plan: [[write]] "
-                                   + std::to_string(idx)
-                                   + ": relative data_file '"
-                                   + file_path.string()
-                                   + "' but no base_dir supplied to "
-                                     "parse_plan");
+                                   "flash plan: [[write]] " + std::to_string(idx) +
+                                       ": relative data_file '" + file_path.string() +
+                                       "' but no base_dir supplied to "
+                                       "parse_plan");
                 }
                 file_path = base_dir / file_path;
             }
             auto loaded = read_binary_file(file_path);
             if (!loaded.has_value()) {
-                return failure(loaded.error().code(),
-                               "flash plan: [[write]] " + std::to_string(idx)
-                               + ": " + std::string{loaded.error().message()});
+                return failure(loaded.error().code(), "flash plan: [[write]] " +
+                                                          std::to_string(idx) + ": " +
+                                                          std::string{loaded.error().message()});
             }
             bytes_buf = std::move(*loaded);
         } else {
             return failure(ErrorCode::ParseError,
-                           "flash plan: [[write]] " + std::to_string(idx)
-                           + ": missing 'data' (hex string) or 'data_file' "
-                             "(path to raw binary)");
+                           "flash plan: [[write]] " + std::to_string(idx) +
+                               ": missing 'data' (hex string) or 'data_file' "
+                               "(path to raw binary)");
         }
         if (bytes_buf.empty()) {
-            return failure(ErrorCode::ParseError,
-                           "flash plan: [[write]] " + std::to_string(idx)
-                           + ": data must contain at least one byte");
+            return failure(ErrorCode::ParseError, "flash plan: [[write]] " + std::to_string(idx) +
+                                                      ": data must contain at least one byte");
         }
         sw.sector.length = static_cast<std::uint32_t>(bytes_buf.size());
-        sw.data          = std::move(bytes_buf);
+        sw.data = std::move(bytes_buf);
 
         plan.writes.push_back(std::move(sw));
         ++idx;
@@ -729,8 +683,7 @@ Result<FlashPlan> parse_plan(std::string_view             text,
 Result<FlashPlan> read_plan(std::filesystem::path const &path) {
     std::ifstream in{path, std::ios::binary};
     if (!in) {
-        return failure(ErrorCode::FileNotFound,
-                       "flash plan: cannot open " + path.string());
+        return failure(ErrorCode::FileNotFound, "flash plan: cannot open " + path.string());
     }
     std::ostringstream ss;
     ss << in.rdbuf();
@@ -742,25 +695,19 @@ std::string format_plan(FlashPlan const &plan) {
     out << "# SubuwuTuner flash plan\n";
     out << "[plan]\n";
     out << "schema_version     = " << kPlanSchemaVersion << "\n";
-    out << "session            = 0x"
-        << std::hex << static_cast<unsigned>(plan.session) << std::dec << "\n";
-    out << "data_format        = 0x"
-        << std::hex << static_cast<unsigned>(plan.data_format) << std::dec
+    out << "session            = 0x" << std::hex << static_cast<unsigned>(plan.session) << std::dec
         << "\n";
-    out << "silence_bus        = " << (plan.silence_bus ? "true" : "false")
-        << "\n";
-    out << "verify_after_write = "
-        << (plan.verify_after_write ? "true" : "false") << "\n";
-    out << "dry_run            = " << (plan.dry_run ? "true" : "false")
-        << "\n";
+    out << "data_format        = 0x" << std::hex << static_cast<unsigned>(plan.data_format)
+        << std::dec << "\n";
+    out << "silence_bus        = " << (plan.silence_bus ? "true" : "false") << "\n";
+    out << "verify_after_write = " << (plan.verify_after_write ? "true" : "false") << "\n";
+    out << "dry_run            = " << (plan.dry_run ? "true" : "false") << "\n";
     out << "block_size_hint    = " << plan.block_size_hint << "\n";
-    out << "verify_chunk_size  = 0x"
-        << std::hex << plan.verify_chunk_size << std::dec << "\n";
+    out << "verify_chunk_size  = 0x" << std::hex << plan.verify_chunk_size << std::dec << "\n";
 
     for (auto const &w : plan.writes) {
         out << "\n[[write]]\n";
-        out << "address = 0x"
-            << std::hex << w.sector.address << std::dec << "\n";
+        out << "address = 0x" << std::hex << w.sector.address << std::dec << "\n";
         // Multi-line basic string (triple-quoted) so the line-wrapped hex
         // output round-trips through TOML. Basic single-line strings
         // can't contain raw newlines.
@@ -772,14 +719,12 @@ std::string format_plan(FlashPlan const &plan) {
 Status write_plan(std::filesystem::path const &path, FlashPlan const &plan) {
     std::ofstream out{path, std::ios::binary};
     if (!out) {
-        return failure(ErrorCode::IoFailure,
-                       "flash plan: cannot open for write: " + path.string());
+        return failure(ErrorCode::IoFailure, "flash plan: cannot open for write: " + path.string());
     }
     auto const text = format_plan(plan);
     out.write(text.data(), static_cast<std::streamsize>(text.size()));
     if (!out) {
-        return failure(ErrorCode::IoFailure,
-                       "flash plan: write failed: " + path.string());
+        return failure(ErrorCode::IoFailure, "flash plan: write failed: " + path.string());
     }
     return ok();
 }
@@ -791,9 +736,9 @@ Status write_plan(std::filesystem::path const &path, FlashPlan const &plan) {
 namespace {
 
 std::string current_iso8601_utc() {
-    auto const  now      = std::chrono::system_clock::now();
-    std::time_t const t  = std::chrono::system_clock::to_time_t(now);
-    std::tm           tm{};
+    auto const now = std::chrono::system_clock::now();
+    std::time_t const t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
 #if defined(_WIN32)
     ::gmtime_s(&tm, &t);
 #else
@@ -805,8 +750,7 @@ std::string current_iso8601_utc() {
 }
 
 std::uint32_t crc32_of(std::string_view text) noexcept {
-    return st::crc32({reinterpret_cast<std::uint8_t const *>(text.data()),
-                      text.size()});
+    return st::crc32({reinterpret_cast<std::uint8_t const *>(text.data()), text.size()});
 }
 
 } // namespace
@@ -815,16 +759,15 @@ Manifest build_manifest(FlashPlan const &plan, std::string_view plan_text,
                         FlashReport const &report) {
     Manifest m;
     m.schema_version = kManifestSchemaVersion;
-    m.created_at     = current_iso8601_utc();
-    m.plan_crc32     = crc32_of(plan_text);
+    m.created_at = current_iso8601_utc();
+    m.plan_crc32 = crc32_of(plan_text);
 
     // Build per-sector entries by matching writes to outcomes positionally.
     // Outcomes that don't have a matching write (or vice versa) shouldn't
     // happen with the current orchestrator, but we tolerate the size mismatch
     // and emit only what aligns.
     auto const n =
-        plan.writes.size() < report.sectors.size() ? plan.writes.size()
-                                                    : report.sectors.size();
+        plan.writes.size() < report.sectors.size() ? plan.writes.size() : report.sectors.size();
     m.entries.reserve(n);
 
     // Overall CRC is computed over the concatenation of every transferred
@@ -833,13 +776,13 @@ Manifest build_manifest(FlashPlan const &plan, std::string_view plan_text,
     // hash — only its per-sector CRC is recorded.
     Crc32 overall;
     for (std::size_t i = 0; i < n; ++i) {
-        auto const &w  = plan.writes[i];
+        auto const &w = plan.writes[i];
         auto const &so = report.sectors[i];
         ManifestEntry e;
-        e.sector       = w.sector;
-        e.data_crc32   = st::crc32(w.data);
-        e.transferred  = so.transferred;
-        e.verified     = so.verified;
+        e.sector = w.sector;
+        e.data_crc32 = st::crc32(w.data);
+        e.transferred = so.transferred;
+        e.verified = so.verified;
         if (e.transferred) {
             overall.update(w.data);
         }
@@ -855,18 +798,16 @@ Result<Manifest> parse_manifest(std::string_view text) {
         root = toml::parse(text);
     } catch (toml::parse_error const &e) {
         return failure(ErrorCode::ParseError,
-                       std::string{"flash manifest: TOML parse: "}
-                       + e.description().data());
+                       std::string{"flash manifest: TOML parse: "} + e.description().data());
     }
 
     auto const *sv = root.get_as<int64_t>("schema_version");
-    int const   schema = (sv != nullptr) ? static_cast<int>(sv->get()) : 0;
+    int const schema = (sv != nullptr) ? static_cast<int>(sv->get()) : 0;
     if (schema != kManifestSchemaVersion) {
         return failure(ErrorCode::UnsupportedVersion,
-                       "flash manifest: schema_version "
-                       + std::to_string(schema)
-                       + " not supported (expected "
-                       + std::to_string(kManifestSchemaVersion) + ")");
+                       "flash manifest: schema_version " + std::to_string(schema) +
+                           " not supported (expected " + std::to_string(kManifestSchemaVersion) +
+                           ")");
     }
 
     Manifest m;
@@ -892,7 +833,8 @@ Result<Manifest> parse_manifest(std::string_view text) {
     if (entries != nullptr) {
         for (auto const &node : *entries) {
             auto const *tbl = node.as_table();
-            if (tbl == nullptr) continue;
+            if (tbl == nullptr)
+                continue;
             ManifestEntry e;
             if (auto const *a = tbl->get_as<int64_t>("address"); a != nullptr) {
                 e.sector.address = static_cast<std::uint32_t>(a->get());
@@ -918,8 +860,7 @@ Result<Manifest> parse_manifest(std::string_view text) {
 Result<Manifest> read_manifest(std::filesystem::path const &path) {
     std::ifstream in{path, std::ios::binary};
     if (!in) {
-        return failure(ErrorCode::FileNotFound,
-                       "flash manifest: cannot open " + path.string());
+        return failure(ErrorCode::FileNotFound, "flash manifest: cannot open " + path.string());
     }
     std::ostringstream ss;
     ss << in.rdbuf();
@@ -931,7 +872,8 @@ std::string format_manifest(Manifest const &m) {
         std::string out;
         out.reserve(s.size());
         for (char c : s) {
-            if (c == '"' || c == '\\') out.push_back('\\');
+            if (c == '"' || c == '\\')
+                out.push_back('\\');
             out.push_back(c);
         }
         return out;
@@ -940,10 +882,8 @@ std::string format_manifest(Manifest const &m) {
     out << "# SubuwuTuner flash manifest\n";
     out << "schema_version = " << kManifestSchemaVersion << "\n";
     out << "created_at     = \"" << m.created_at << "\"\n";
-    out << "plan_crc32     = 0x"
-        << std::hex << m.plan_crc32 << std::dec << "\n";
-    out << "overall_crc32  = 0x"
-        << std::hex << m.overall_crc32 << std::dec << "\n";
+    out << "plan_crc32     = 0x" << std::hex << m.plan_crc32 << std::dec << "\n";
+    out << "overall_crc32  = 0x" << std::hex << m.overall_crc32 << std::dec << "\n";
     if (!m.policy_profile.empty()) {
         out << "policy_profile = \"" << escape(m.policy_profile) << "\"\n";
     }
@@ -952,11 +892,9 @@ std::string format_manifest(Manifest const &m) {
     }
     for (auto const &e : m.entries) {
         out << "\n[[entry]]\n";
-        out << "address     = 0x"
-            << std::hex << e.sector.address << std::dec << "\n";
+        out << "address     = 0x" << std::hex << e.sector.address << std::dec << "\n";
         out << "length      = " << e.sector.length << "\n";
-        out << "data_crc32  = 0x"
-            << std::hex << e.data_crc32 << std::dec << "\n";
+        out << "data_crc32  = 0x" << std::hex << e.data_crc32 << std::dec << "\n";
         out << "transferred = " << (e.transferred ? "true" : "false") << "\n";
         out << "verified    = " << (e.verified ? "true" : "false") << "\n";
     }
@@ -967,14 +905,12 @@ Status write_manifest(std::filesystem::path const &path, Manifest const &m) {
     std::ofstream out{path, std::ios::binary};
     if (!out) {
         return failure(ErrorCode::IoFailure,
-                       "flash manifest: cannot open for write: "
-                       + path.string());
+                       "flash manifest: cannot open for write: " + path.string());
     }
     auto const text = format_manifest(m);
     out.write(text.data(), static_cast<std::streamsize>(text.size()));
     if (!out) {
-        return failure(ErrorCode::IoFailure,
-                       "flash manifest: write failed: " + path.string());
+        return failure(ErrorCode::IoFailure, "flash manifest: write failed: " + path.string());
     }
     return ok();
 }
@@ -983,15 +919,12 @@ Status write_manifest(std::filesystem::path const &path, Manifest const &m) {
 // plan_resume
 // ---------------------------------------------------------------------
 
-Result<FlashPlan> plan_resume(FlashPlan const &original,
-                              Manifest const &journal) {
+Result<FlashPlan> plan_resume(FlashPlan const &original, Manifest const &journal) {
     if (journal.entries.size() > original.writes.size()) {
         return failure(ErrorCode::ParseError,
-                       "flash resume: journal has "
-                       + std::to_string(journal.entries.size())
-                       + " entries but plan has only "
-                       + std::to_string(original.writes.size())
-                       + " writes; mismatched plan/journal pair");
+                       "flash resume: journal has " + std::to_string(journal.entries.size()) +
+                           " entries but plan has only " + std::to_string(original.writes.size()) +
+                           " writes; mismatched plan/journal pair");
     }
 
     FlashPlan resumed = original;
@@ -999,28 +932,25 @@ Result<FlashPlan> plan_resume(FlashPlan const &original,
     resumed.writes.reserve(original.writes.size());
 
     for (std::size_t i = 0; i < original.writes.size(); ++i) {
-        auto const &w     = original.writes[i];
-        bool        done  = false;
+        auto const &w = original.writes[i];
+        bool done = false;
         if (i < journal.entries.size()) {
             auto const &e = journal.entries[i];
             if (e.sector != w.sector) {
                 return failure(ErrorCode::ParseError,
-                               "flash resume: journal entry "
-                               + std::to_string(i)
-                               + " sector mismatch (plan address 0x"
-                               + std::to_string(w.sector.address)
-                               + ", journal address 0x"
-                               + std::to_string(e.sector.address) + ")");
+                               "flash resume: journal entry " + std::to_string(i) +
+                                   " sector mismatch (plan address 0x" +
+                                   std::to_string(w.sector.address) + ", journal address 0x" +
+                                   std::to_string(e.sector.address) + ")");
             }
             if (e.transferred && e.verified) {
                 auto const expected_crc = st::crc32(w.data);
                 if (e.data_crc32 != expected_crc) {
-                    return failure(ErrorCode::BadChecksum,
-                                   "flash resume: journal entry "
-                                   + std::to_string(i)
-                                   + " claims success but data CRC32 "
-                                     "mismatches; plan was modified "
-                                     "between flashes");
+                    return failure(ErrorCode::BadChecksum, "flash resume: journal entry " +
+                                                               std::to_string(i) +
+                                                               " claims success but data CRC32 "
+                                                               "mismatches; plan was modified "
+                                                               "between flashes");
                 }
                 done = true;
             }

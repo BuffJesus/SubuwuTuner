@@ -25,14 +25,21 @@
 namespace st::can {
 
 bool frames_equal(Frame const &a, Frame const &b) noexcept {
-    if (a.timestamp_ns != b.timestamp_ns) return false;
-    if (a.bus != b.bus)                   return false;
-    if (a.id != b.id)                     return false;
-    if (a.extended != b.extended)         return false;
-    if (a.remote != b.remote)             return false;
-    if (a.dlc != b.dlc)                   return false;
+    if (a.timestamp_ns != b.timestamp_ns)
+        return false;
+    if (a.bus != b.bus)
+        return false;
+    if (a.id != b.id)
+        return false;
+    if (a.extended != b.extended)
+        return false;
+    if (a.remote != b.remote)
+        return false;
+    if (a.dlc != b.dlc)
+        return false;
     for (std::size_t i = 0; i < a.dlc; ++i) {
-        if (a.data[i] != b.data[i]) return false;
+        if (a.data[i] != b.data[i])
+            return false;
     }
     return true;
 }
@@ -49,13 +56,11 @@ namespace {
 // empty optional. Whitespace handling is permissive — runs of spaces
 // and tabs are treated identically.
 std::string_view next_token(std::string_view line, std::size_t &pos) {
-    while (pos < line.size()
-           && (line[pos] == ' ' || line[pos] == '\t')) {
+    while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) {
         ++pos;
     }
     auto const start = pos;
-    while (pos < line.size()
-           && line[pos] != ' ' && line[pos] != '\t') {
+    while (pos < line.size() && line[pos] != ' ' && line[pos] != '\t') {
         ++pos;
     }
     return line.substr(start, pos - start);
@@ -63,10 +68,10 @@ std::string_view next_token(std::string_view line, std::size_t &pos) {
 
 // Parse an unsigned integer in hex; returns false on garbage.
 bool parse_hex_u32(std::string_view tok, std::uint32_t &out) {
-    if (tok.empty()) return false;
+    if (tok.empty())
+        return false;
     std::uint32_t v = 0;
-    auto const    r = std::from_chars(tok.data(), tok.data() + tok.size(),
-                                      v, 16);
+    auto const r = std::from_chars(tok.data(), tok.data() + tok.size(), v, 16);
     if (r.ec != std::errc{} || r.ptr != tok.data() + tok.size()) {
         return false;
     }
@@ -76,17 +81,19 @@ bool parse_hex_u32(std::string_view tok, std::uint32_t &out) {
 
 bool parse_hex_u8(std::string_view tok, std::uint8_t &out) {
     std::uint32_t v = 0;
-    if (!parse_hex_u32(tok, v)) return false;
-    if (v > 0xFFU) return false;
+    if (!parse_hex_u32(tok, v))
+        return false;
+    if (v > 0xFFU)
+        return false;
     out = static_cast<std::uint8_t>(v);
     return true;
 }
 
 bool parse_decimal_u32(std::string_view tok, std::uint32_t &out) {
-    if (tok.empty()) return false;
+    if (tok.empty())
+        return false;
     std::uint32_t v = 0;
-    auto const    r = std::from_chars(tok.data(), tok.data() + tok.size(),
-                                      v, 10);
+    auto const r = std::from_chars(tok.data(), tok.data() + tok.size(), v, 10);
     if (r.ec != std::errc{} || r.ptr != tok.data() + tok.size()) {
         return false;
     }
@@ -98,23 +105,21 @@ bool parse_decimal_u32(std::string_view tok, std::uint32_t &out) {
 // uses 6-decimal-place timestamps (microsecond resolution) but some
 // emitters write more; we accept any decimal precision and round to ns.
 bool parse_seconds_to_ns(std::string_view tok, std::int64_t &out) {
-    if (tok.empty()) return false;
+    if (tok.empty())
+        return false;
     auto const dot = tok.find('.');
-    std::int64_t   secs   = 0;
-    std::int64_t   frac_ns = 0;
-    bool           negative = !tok.empty() && tok.front() == '-';
-    std::size_t    int_begin = negative ? 1U : 0U;
+    std::int64_t secs = 0;
+    std::int64_t frac_ns = 0;
+    bool negative = !tok.empty() && tok.front() == '-';
+    std::size_t int_begin = negative ? 1U : 0U;
 
-    auto const int_part = tok.substr(int_begin,
-                                      dot == std::string_view::npos
-                                          ? std::string_view::npos
-                                          : dot - int_begin);
+    auto const int_part = tok.substr(
+        int_begin, dot == std::string_view::npos ? std::string_view::npos : dot - int_begin);
     if (int_part.empty()) {
-        secs = 0;  // leading "." like ".001" — valid; integer part is 0
+        secs = 0; // leading "." like ".001" — valid; integer part is 0
     } else {
-        auto const r = std::from_chars(int_part.data(),
-                                       int_part.data() + int_part.size(),
-                                       secs, 10);
+        auto const r =
+            std::from_chars(int_part.data(), int_part.data() + int_part.size(), secs, 10);
         if (r.ec != std::errc{} || r.ptr != int_part.data() + int_part.size()) {
             return false;
         }
@@ -123,7 +128,7 @@ bool parse_seconds_to_ns(std::string_view tok, std::int64_t &out) {
     if (dot != std::string_view::npos) {
         auto const frac = tok.substr(dot + 1);
         // Convert up to 9 digits of fraction; pad/truncate to exactly 9.
-        char padded[10] = {'0','0','0','0','0','0','0','0','0','\0'};
+        char padded[10] = {'0', '0', '0', '0', '0', '0', '0', '0', '0', '\0'};
         auto const take = std::min<std::size_t>(frac.size(), 9);
         for (std::size_t i = 0; i < take; ++i) {
             if (!std::isdigit(static_cast<unsigned char>(frac[i]))) {
@@ -132,12 +137,14 @@ bool parse_seconds_to_ns(std::string_view tok, std::int64_t &out) {
             padded[i] = frac[i];
         }
         auto const r = std::from_chars(padded, padded + 9, frac_ns, 10);
-        if (r.ec != std::errc{}) return false;
+        if (r.ec != std::errc{})
+            return false;
     }
 
     constexpr std::int64_t kNsPerSec = 1'000'000'000;
     std::int64_t value = secs * kNsPerSec + frac_ns;
-    if (negative) value = -value;
+    if (negative)
+        value = -value;
     out = value;
     return true;
 }
@@ -146,20 +153,20 @@ bool parse_seconds_to_ns(std::string_view tok, std::int64_t &out) {
 // fills `out`. Returns false (without setting `err`) when the line is
 // not a frame line (header, comment, blank); sets `err` and returns
 // false when the line *looks* like a frame line but is malformed.
-bool try_parse_frame_line(std::string_view line, Frame &out,
-                          std::string &err) {
+bool try_parse_frame_line(std::string_view line, Frame &out, std::string &err) {
     std::size_t pos = 0;
-    auto const  ts_tok = next_token(line, pos);
-    if (ts_tok.empty()) return false;
+    auto const ts_tok = next_token(line, pos);
+    if (ts_tok.empty())
+        return false;
     // First token must be a number (seconds) — otherwise it's a header
     // line ("date ...", "base hex ...", "Begin Triggerblock ...").
-    if (!(ts_tok.front() == '-' || std::isdigit(static_cast<unsigned char>(ts_tok.front()))
-          || ts_tok.front() == '.')) {
+    if (!(ts_tok.front() == '-' || std::isdigit(static_cast<unsigned char>(ts_tok.front())) ||
+          ts_tok.front() == '.')) {
         return false;
     }
     std::int64_t ts_ns = 0;
     if (!parse_seconds_to_ns(ts_tok, ts_ns)) {
-        return false;  // unknown header pattern starting with a digit
+        return false; // unknown header pattern starting with a digit
     }
 
     auto const chan_tok = next_token(line, pos);
@@ -193,8 +200,8 @@ bool try_parse_frame_line(std::string_view line, Frame &out,
         return false;
     }
 
-    auto       kind_tok = next_token(line, pos);
-    bool       remote   = false;
+    auto kind_tok = next_token(line, pos);
+    bool remote = false;
     if (kind_tok == "r") {
         remote = true;
     } else if (kind_tok != "d") {
@@ -211,16 +218,16 @@ bool try_parse_frame_line(std::string_view line, Frame &out,
 
     Frame f;
     f.timestamp_ns = ts_ns;
-    f.bus          = static_cast<BusId>(chan - 1);
-    f.id           = can_id;
-    f.extended     = extended;
-    f.remote       = remote;
-    f.dlc          = static_cast<std::uint8_t>(dlc_u);
+    f.bus = static_cast<BusId>(chan - 1);
+    f.id = can_id;
+    f.extended = extended;
+    f.remote = remote;
+    f.dlc = static_cast<std::uint8_t>(dlc_u);
 
     if (!remote) {
         for (std::uint8_t i = 0; i < f.dlc; ++i) {
             auto const tok = next_token(line, pos);
-            std::uint8_t  byte = 0;
+            std::uint8_t byte = 0;
             if (!parse_hex_u8(tok, byte)) {
                 err = "bad data byte '" + std::string{tok} + "'";
                 return false;
@@ -237,13 +244,12 @@ bool try_parse_frame_line(std::string_view line, Frame &out,
 
 Result<std::vector<Frame>> parse_asc(std::string_view text) {
     std::vector<Frame> out;
-    std::size_t        line_no = 0;
-    std::size_t        cursor  = 0;
+    std::size_t line_no = 0;
+    std::size_t cursor = 0;
 
     while (cursor <= text.size()) {
         auto const nl = text.find('\n', cursor);
-        auto const end =
-            nl == std::string_view::npos ? text.size() : nl;
+        auto const end = nl == std::string_view::npos ? text.size() : nl;
         auto line = text.substr(cursor, end - cursor);
         // Strip optional trailing '\r' for CRLF-encoded files.
         if (!line.empty() && line.back() == '\r') {
@@ -251,17 +257,17 @@ Result<std::vector<Frame>> parse_asc(std::string_view text) {
         }
         ++line_no;
 
-        Frame       f;
+        Frame f;
         std::string err;
         if (try_parse_frame_line(line, f, err)) {
             out.push_back(f);
         } else if (!err.empty()) {
             return failure(ErrorCode::ParseError,
-                           "asc: line " + std::to_string(line_no)
-                               + ": " + err);
+                           "asc: line " + std::to_string(line_no) + ": " + err);
         }
 
-        if (nl == std::string_view::npos) break;
+        if (nl == std::string_view::npos)
+            break;
         cursor = nl + 1;
     }
     return out;
@@ -270,8 +276,7 @@ Result<std::vector<Frame>> parse_asc(std::string_view text) {
 Result<std::vector<Frame>> read_asc(std::filesystem::path const &path) {
     std::ifstream in{path, std::ios::binary};
     if (!in) {
-        return failure(ErrorCode::FileNotFound,
-                       "asc: cannot open: " + path.string());
+        return failure(ErrorCode::FileNotFound, "asc: cannot open: " + path.string());
     }
     std::ostringstream ss;
     ss << in.rdbuf();
@@ -289,14 +294,13 @@ namespace {
 // standard .asc precision. Negative values are accepted but unusual.
 void append_seconds_6dp(std::string &out, std::int64_t timestamp_ns) {
     bool const negative = timestamp_ns < 0;
-    if (negative) timestamp_ns = -timestamp_ns;
-    auto const sec  = timestamp_ns / 1'000'000'000;
-    auto const frac = (timestamp_ns % 1'000'000'000) / 1'000;  // µs
+    if (negative)
+        timestamp_ns = -timestamp_ns;
+    auto const sec = timestamp_ns / 1'000'000'000;
+    auto const frac = (timestamp_ns % 1'000'000'000) / 1'000; // µs
     char buf[40];
-    std::snprintf(buf, sizeof(buf), "%s%lld.%06lld",
-                  negative ? "-" : "",
-                  static_cast<long long>(sec),
-                  static_cast<long long>(frac));
+    std::snprintf(buf, sizeof(buf), "%s%lld.%06lld", negative ? "-" : "",
+                  static_cast<long long>(sec), static_cast<long long>(frac));
     out += buf;
 }
 
@@ -339,8 +343,7 @@ std::string format_asc(std::span<Frame const> frames) {
         } else {
             out += "d ";
         }
-        std::snprintf(dlc_buf, sizeof(dlc_buf), "%u",
-                      static_cast<unsigned>(f.dlc));
+        std::snprintf(dlc_buf, sizeof(dlc_buf), "%u", static_cast<unsigned>(f.dlc));
         out += dlc_buf;
         if (!f.remote) {
             char byte_buf[4];
@@ -357,18 +360,15 @@ std::string format_asc(std::span<Frame const> frames) {
     return out;
 }
 
-Status write_asc(std::filesystem::path const &path,
-                  std::span<Frame const>       frames) {
+Status write_asc(std::filesystem::path const &path, std::span<Frame const> frames) {
     std::ofstream out{path, std::ios::binary};
     if (!out) {
-        return failure(ErrorCode::IoFailure,
-                       "asc: cannot open for write: " + path.string());
+        return failure(ErrorCode::IoFailure, "asc: cannot open for write: " + path.string());
     }
     auto const text = format_asc(frames);
     out.write(text.data(), static_cast<std::streamsize>(text.size()));
     if (!out) {
-        return failure(ErrorCode::IoFailure,
-                       "asc: write failed: " + path.string());
+        return failure(ErrorCode::IoFailure, "asc: write failed: " + path.string());
     }
     return ok();
 }

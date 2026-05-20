@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The SubuwuTuner Authors
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "st/transport/obdx_dvi.hpp"
 #include "st/transport/obdx_transport.hpp"
+
+#include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -28,25 +28,22 @@ namespace {
 // timeout elapses (mirrors a real USB endpoint that has nothing
 // pending; the Transport's framing loop polls back).
 class FakeChannel : public obdx::IDeviceChannel {
-  public:
-    [[nodiscard]] st::Status write_bytes(
-        std::span<std::uint8_t const> bytes) override {
+public:
+    [[nodiscard]] st::Status write_bytes(std::span<std::uint8_t const> bytes) override {
         writes_.insert(writes_.end(), bytes.begin(), bytes.end());
         return st::ok();
     }
 
-    [[nodiscard]] st::Result<std::vector<std::uint8_t>> read_bytes(
-        std::size_t max_bytes,
-        milliseconds /*timeout*/) override {
+    [[nodiscard]] st::Result<std::vector<std::uint8_t>>
+    read_bytes(std::size_t max_bytes, milliseconds /*timeout*/) override {
         if (read_queue_.empty()) {
             return std::vector<std::uint8_t>{};
         }
         auto &front = read_queue_.front();
         std::size_t const n = std::min(max_bytes, front.size());
         std::vector<std::uint8_t> out(front.begin(),
-                                       front.begin() + static_cast<std::ptrdiff_t>(n));
-        front.erase(front.begin(),
-                    front.begin() + static_cast<std::ptrdiff_t>(n));
+                                      front.begin() + static_cast<std::ptrdiff_t>(n));
+        front.erase(front.begin(), front.begin() + static_cast<std::ptrdiff_t>(n));
         if (front.empty()) {
             read_queue_.pop_front();
         }
@@ -59,7 +56,8 @@ class FakeChannel : public obdx::IDeviceChannel {
     }
     void queue_read_ascii(std::string_view s) {
         std::vector<std::uint8_t> b;
-        for (char c : s) b.push_back(static_cast<std::uint8_t>(c));
+        for (char c : s)
+            b.push_back(static_cast<std::uint8_t>(c));
         read_queue_.push_back(std::move(b));
     }
     [[nodiscard]] std::vector<std::uint8_t> const &writes() const noexcept {
@@ -69,31 +67,30 @@ class FakeChannel : public obdx::IDeviceChannel {
         return std::string{writes_.begin(), writes_.end()};
     }
 
-  private:
-    std::vector<std::uint8_t>             writes_;
+private:
+    std::vector<std::uint8_t> writes_;
     std::deque<std::vector<std::uint8_t>> read_queue_;
 };
 
 // Build a complete DVI response frame for a given request opcode
 // + payload (response opcode = request | 0x10, then standard
 // CMD/LEN/DATA/CHK).
-std::vector<std::uint8_t> dvi_response_frame(
-    obdx::dvi::Opcode req_op, std::vector<std::uint8_t> payload) {
+std::vector<std::uint8_t> dvi_response_frame(obdx::dvi::Opcode req_op,
+                                             std::vector<std::uint8_t> payload) {
     std::uint8_t const resp_op = static_cast<std::uint8_t>(req_op) | 0x10U;
     std::vector<std::uint8_t> frame;
     frame.push_back(resp_op);
     frame.push_back(static_cast<std::uint8_t>(payload.size()));
     frame.insert(frame.end(), payload.begin(), payload.end());
     // Recompute checksum the same way the codec does.
-    frame.push_back(obdx::dvi::checksum(
-        std::span<std::uint8_t const>{frame.data(), frame.size()}));
+    frame.push_back(obdx::dvi::checksum(std::span<std::uint8_t const>{frame.data(), frame.size()}));
     return frame;
 }
 
 // Owned ptr helper (Transport ctor wants unique_ptr, tests want
 // access to the underlying fake to inspect writes).
 struct ChannelPair {
-    FakeChannel                          *raw;
+    FakeChannel *raw;
     std::unique_ptr<obdx::IDeviceChannel> owner;
 };
 
@@ -110,14 +107,13 @@ struct ChannelPair {
 TEST_CASE("obdx::Transport::open drives ELM probe → DX DP 1 → SetProtocol",
           "[transport][obdx_transport]") {
     auto cp = make_channel();
-    cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");      // probe response
-    cp.raw->queue_read_ascii("OK\r>");                      // DX DP 1 response
-    cp.raw->queue_read(dvi_response_frame(
-        obdx::dvi::Opcode::SetProtocol, {0x00}));          // SetProtocol ack
+    cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>"); // probe response
+    cp.raw->queue_read_ascii("OK\r>");               // DX DP 1 response
+    cp.raw->queue_read(
+        dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x00})); // SetProtocol ack
 
     obdx::Transport t{std::move(cp.owner)};
-    auto const r = t.open({st::transport::LinkKind::CanIso15765, 500000,
-                            0x7E0, 0x7E8});
+    auto const r = t.open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
     REQUIRE(r.has_value());
     REQUIRE(t.is_open());
 
@@ -147,11 +143,10 @@ TEST_CASE("obdx::Transport::open drives ELM probe → DX DP 1 → SetProtocol",
 TEST_CASE("obdx::Transport::open rejects device whose probe doesn't say OBDX",
           "[transport][obdx_transport]") {
     auto cp = make_channel();
-    cp.raw->queue_read_ascii("ELM327 v1.4\r>");  // wrong device on this port
+    cp.raw->queue_read_ascii("ELM327 v1.4\r>"); // wrong device on this port
 
     obdx::Transport t{std::move(cp.owner)};
-    auto const r = t.open({st::transport::LinkKind::CanIso15765, 500000,
-                            0x7E0, 0x7E8});
+    auto const r = t.open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::TransportUnavailable);
     REQUIRE_FALSE(t.is_open());
@@ -196,8 +191,7 @@ TEST_CASE("obdx::Transport::open fails when no ELM prompt arrives "
     // No queued reads → reads return empty vectors until the host-
     // side deadline expires.
     obdx::Transport t{std::move(cp.owner)};
-    auto const r = t.open({st::transport::LinkKind::CanIso15765, 500000,
-                            0x7E0, 0x7E8});
+    auto const r = t.open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::TransportTimeout);
 }
@@ -212,18 +206,16 @@ namespace {
 // queue further reads + inspect writes.
 struct ReadyTransport {
     std::unique_ptr<obdx::Transport> transport;
-    FakeChannel                     *raw;
+    FakeChannel *raw;
 };
 
 [[nodiscard]] ReadyTransport build_open_transport() {
     auto cp = make_channel();
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
     cp.raw->queue_read_ascii("OK\r>");
-    cp.raw->queue_read(dvi_response_frame(
-        obdx::dvi::Opcode::SetProtocol, {0x00}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x00}));
     auto t = std::make_unique<obdx::Transport>(std::move(cp.owner));
-    auto const open_r = t->open({st::transport::LinkKind::CanIso15765,
-                                  500000, 0x7E0, 0x7E8});
+    auto const open_r = t->open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
     REQUIRE(open_r.has_value());
     return {std::move(t), cp.raw};
 }
@@ -234,17 +226,15 @@ TEST_CASE("obdx::Transport::send_recv writes TX request, reads RX response, "
           "returns the RX payload",
           "[transport][obdx_transport]") {
     auto pair = build_open_transport();
-    auto &t   = *pair.transport;
+    auto &t = *pair.transport;
     auto *raw = pair.raw;
 
     // Queue: TX-ack response, then RX-with-payload response.
     raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::TxSmall, {0x00}));
-    raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::RxSmall,
-                                        {0x80, 0xF0, 0x10, 0x05,
-                                         0xE8, 0x12, 0x34}));
+    raw->queue_read(
+        dvi_response_frame(obdx::dvi::Opcode::RxSmall, {0x80, 0xF0, 0x10, 0x05, 0xE8, 0x12, 0x34}));
 
-    std::vector<std::uint8_t> const req{0x80U, 0x10U, 0xF0U, 0x05U,
-                                          0xA8U, 0x00U, 0x12U, 0x34U};
+    std::vector<std::uint8_t> const req{0x80U, 0x10U, 0xF0U, 0x05U, 0xA8U, 0x00U, 0x12U, 0x34U};
     auto r = t.send_recv(req, milliseconds{200});
     REQUIRE(r.has_value());
     REQUIRE(r->data.size() == 7);
@@ -257,13 +247,13 @@ TEST_CASE("obdx::Transport::send_recv writes TX request, reads RX response, "
     std::size_t tx_pos = std::string::npos;
     std::size_t rx_pos = std::string::npos;
     for (std::size_t i = 0; i < writes.size(); ++i) {
-        if (tx_pos == std::string::npos
-            && writes[i] == static_cast<std::uint8_t>(obdx::dvi::Opcode::TxSmall)) {
+        if (tx_pos == std::string::npos &&
+            writes[i] == static_cast<std::uint8_t>(obdx::dvi::Opcode::TxSmall)) {
             tx_pos = i;
         }
-        if (tx_pos != std::string::npos
-            && writes[i] == static_cast<std::uint8_t>(obdx::dvi::Opcode::RxSmall)
-            && rx_pos == std::string::npos) {
+        if (tx_pos != std::string::npos &&
+            writes[i] == static_cast<std::uint8_t>(obdx::dvi::Opcode::RxSmall) &&
+            rx_pos == std::string::npos) {
             rx_pos = i;
         }
     }
@@ -272,8 +262,7 @@ TEST_CASE("obdx::Transport::send_recv writes TX request, reads RX response, "
     REQUIRE(rx_pos > tx_pos);
 }
 
-TEST_CASE("obdx::Transport::send_recv rejects oversized payload",
-          "[transport][obdx_transport]") {
+TEST_CASE("obdx::Transport::send_recv rejects oversized payload", "[transport][obdx_transport]") {
     auto pair = build_open_transport();
     std::vector<std::uint8_t> too_big(300, 0xABU);
     auto r = pair.transport->send_recv(too_big, milliseconds{100});
@@ -302,8 +291,8 @@ TEST_CASE("obdx::Transport::send_recv surfaces a DVI error frame as "
     // code). Checksum over [0x7F, 0x02, 0x08, 0x09].
     raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::TxSmall, {0x00}));
     std::vector<std::uint8_t> err_frame{0x7FU, 0x02U, 0x08U, 0x09U};
-    err_frame.push_back(obdx::dvi::checksum(
-        std::span<std::uint8_t const>{err_frame.data(), err_frame.size()}));
+    err_frame.push_back(
+        obdx::dvi::checksum(std::span<std::uint8_t const>{err_frame.data(), err_frame.size()}));
     raw->queue_read(err_frame);
 
     std::vector<std::uint8_t> const req{0x01U};
@@ -348,7 +337,7 @@ TEST_CASE("obdx::Transport::send before open → TransportUnavailable",
 TEST_CASE("obdx::Transport::close sends a SoftReboot, becomes idempotent",
           "[transport][obdx_transport]") {
     auto pair = build_open_transport();
-    auto &t   = *pair.transport;
+    auto &t = *pair.transport;
     auto *raw = pair.raw;
     // Queue a response for the SoftReboot DVI exchange. close()
     // ignores the result either way, but giving it a real response
@@ -364,8 +353,7 @@ TEST_CASE("obdx::Transport::close sends a SoftReboot, becomes idempotent",
     auto const &writes = raw->writes();
     bool saw_reboot = false;
     for (std::size_t i = writes_before; i < writes.size(); ++i) {
-        if (writes[i]
-            == static_cast<std::uint8_t>(obdx::dvi::Opcode::SoftReboot)) {
+        if (writes[i] == static_cast<std::uint8_t>(obdx::dvi::Opcode::SoftReboot)) {
             saw_reboot = true;
             break;
         }
@@ -390,8 +378,7 @@ TEST_CASE("obdx::Transport::start_streaming returns NotImplemented (stub)",
     REQUIRE_FALSE(t.stop_streaming().has_value());
 }
 
-TEST_CASE("obdx::Transport::name() reports 'OBDX'",
-          "[transport][obdx_transport]") {
+TEST_CASE("obdx::Transport::name() reports 'OBDX'", "[transport][obdx_transport]") {
     auto cp = make_channel();
     obdx::Transport t{std::move(cp.owner)};
     REQUIRE(t.name() == "OBDX");

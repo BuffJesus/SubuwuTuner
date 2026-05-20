@@ -24,33 +24,33 @@
 #include "st/core/result.hpp"
 
 #include <array>
-#include <string_view>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace st::log::knock {
 
 inline constexpr std::uint8_t kMaxCylinders = 6;
-inline constexpr std::size_t  kNoPid        = std::numeric_limits<std::size_t>::max();
+inline constexpr std::size_t kNoPid = std::numeric_limits<std::size_t>::max();
 
 // Maps logical cylinders to PID indices in a LogStream sample row.
 // A `kNoPid` slot means "this signal is not in the current log; metric
 // computed from it stays at its default."
 struct PidMapping {
     // Fine knock learn (FLKC) per cyl — long-term per-cell knock retard.
-    std::array<std::size_t, kMaxCylinders> fine_knock_learn{
-        kNoPid, kNoPid, kNoPid, kNoPid, kNoPid, kNoPid};
+    std::array<std::size_t, kMaxCylinders> fine_knock_learn{kNoPid, kNoPid, kNoPid,
+                                                            kNoPid, kNoPid, kNoPid};
 
     // Feedback knock correction (FBKC) per cyl — short-term knock retard.
-    std::array<std::size_t, kMaxCylinders> feedback_knock{
-        kNoPid, kNoPid, kNoPid, kNoPid, kNoPid, kNoPid};
+    std::array<std::size_t, kMaxCylinders> feedback_knock{kNoPid, kNoPid, kNoPid,
+                                                          kNoPid, kNoPid, kNoPid};
 
     // Raw knock-sensor noise per cyl (if exposed by the logger; rare).
-    std::array<std::size_t, kMaxCylinders> knock_sensor_noise{
-        kNoPid, kNoPid, kNoPid, kNoPid, kNoPid, kNoPid};
+    std::array<std::size_t, kMaxCylinders> knock_sensor_noise{kNoPid, kNoPid, kNoPid,
+                                                              kNoPid, kNoPid, kNoPid};
 
     // RPM and Load PIDs — used to gate the metrics (only count knock
     // when the engine is actually loaded above an idle threshold).
@@ -64,12 +64,12 @@ struct PidMapping {
 // Per-cylinder rolling-window snapshot. The UI renders one of these
 // per cylinder in the dashboard grid (2×2 for H4, 3×2 for H6).
 struct CylinderSnapshot {
-    double        current_flkc{0.0};       // latest fine knock learn   [°]
-    double        current_fbkc{0.0};       // latest feedback knock     [°]
-    double        mean_flkc_window{0.0};   // window mean of FLKC       [°]
-    double        min_flkc_window{0.0};    // window worst (most negative)
-    std::uint32_t event_count_window{0};   // negative-FBKC samples in window
-    double        delta_from_cyl_mean{0.0};// (this_cyl_mean - all_cyl_mean)
+    double current_flkc{0.0};            // latest fine knock learn   [°]
+    double current_fbkc{0.0};            // latest feedback knock     [°]
+    double mean_flkc_window{0.0};        // window mean of FLKC       [°]
+    double min_flkc_window{0.0};         // window worst (most negative)
+    std::uint32_t event_count_window{0}; // negative-FBKC samples in window
+    double delta_from_cyl_mean{0.0};     // (this_cyl_mean - all_cyl_mean)
 
     // Recent samples for the strip chart, oldest-first.
     // Length is at most `KnockSnapshot::strip_capacity`.
@@ -78,42 +78,38 @@ struct CylinderSnapshot {
 };
 
 struct KnockSnapshot {
-    std::uint8_t                                cylinder_count{4};
+    std::uint8_t cylinder_count{4};
     std::array<CylinderSnapshot, kMaxCylinders> per_cyl{};
-    double                                      window_seconds{10.0};
-    std::size_t                                 strip_capacity{600};
-    std::uint64_t                               samples_considered{0};
-    std::uint64_t                               samples_gated_out{0};
+    double window_seconds{10.0};
+    std::size_t strip_capacity{600};
+    std::uint64_t samples_considered{0};
+    std::uint64_t samples_gated_out{0};
 };
 
 struct WindowConfig {
-    double  window_seconds{10.0};
-    double  sample_rate_hz{20.0};
+    double window_seconds{10.0};
+    double sample_rate_hz{20.0};
     // Gate thresholds — only count a sample toward knock metrics when
     // the engine is actually loaded. Default values are conservative;
     // tune per platform when wiring up.
-    double  min_rpm{1500.0};
-    double  min_load{1.5};        // g/rev or whatever the load axis is
-    bool    require_load_gate{true};
+    double min_rpm{1500.0};
+    double min_load{1.5}; // g/rev or whatever the load axis is
+    bool require_load_gate{true};
 };
 
 // Compute a snapshot from a row-major (samples × pids) flat buffer.
 // `pid_count` is the row stride. The caller has already chosen the
 // sample window — this function does the per-cylinder aggregation.
-[[nodiscard]] KnockSnapshot snapshot_from_samples(
-    std::span<double const>  samples_row_major,
-    std::size_t              pid_count,
-    PidMapping const        &mapping,
-    WindowConfig const      &cfg);
+[[nodiscard]] KnockSnapshot snapshot_from_samples(std::span<double const> samples_row_major,
+                                                  std::size_t pid_count, PidMapping const &mapping,
+                                                  WindowConfig const &cfg);
 
 // CSV replay entry point — reads a SubuwuTuner CSV log (per `st::log::CsvSink`
 // format) and returns a snapshot. Returns Err on malformed CSV or missing
 // header columns referenced by `mapping`.
-[[nodiscard]] st::Result<KnockSnapshot> snapshot_from_csv(
-    std::string_view         csv_path,
-    PidMapping const        &mapping,
-    WindowConfig const      &cfg);
+[[nodiscard]] st::Result<KnockSnapshot>
+snapshot_from_csv(std::string_view csv_path, PidMapping const &mapping, WindowConfig const &cfg);
 
-}  // namespace st::log::knock
+} // namespace st::log::knock
 
-#endif  // ST_LOG_KNOCK_DASHBOARD_HPP
+#endif // ST_LOG_KNOCK_DASHBOARD_HPP

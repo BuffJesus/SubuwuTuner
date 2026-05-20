@@ -34,13 +34,13 @@ enum class BusId : std::uint8_t {
 // for the first frame in a trace) — not a wall-clock value. The reader
 // preserves whatever offsets the .asc file declared.
 struct Frame {
-    std::int64_t                timestamp_ns{0};
-    BusId                       bus{BusId::Hs};
-    std::uint32_t               id{0};
-    bool                        extended{false};   // 29-bit when true
-    bool                        remote{false};     // RTR frame (rare)
-    std::uint8_t                dlc{0};            // 0..8 for classic CAN
-    std::array<std::uint8_t, 8> data{};            // first `dlc` bytes used
+    std::int64_t timestamp_ns{0};
+    BusId bus{BusId::Hs};
+    std::uint32_t id{0};
+    bool extended{false};               // 29-bit when true
+    bool remote{false};                 // RTR frame (rare)
+    std::uint8_t dlc{0};                // 0..8 for classic CAN
+    std::array<std::uint8_t, 8> data{}; // first `dlc` bytes used
 
     [[nodiscard]] std::span<std::uint8_t const> payload() const noexcept {
         return {data.data(), dlc};
@@ -78,13 +78,11 @@ struct Frame {
 
 [[nodiscard]] Result<std::vector<Frame>> parse_asc(std::string_view text);
 
-[[nodiscard]] Result<std::vector<Frame>> read_asc(
-    std::filesystem::path const &path);
+[[nodiscard]] Result<std::vector<Frame>> read_asc(std::filesystem::path const &path);
 
 [[nodiscard]] std::string format_asc(std::span<Frame const> frames);
 
-[[nodiscard]] Status write_asc(std::filesystem::path const &path,
-                                std::span<Frame const>       frames);
+[[nodiscard]] Status write_asc(std::filesystem::path const &path, std::span<Frame const> frames);
 
 } // namespace st::can
 

@@ -16,17 +16,23 @@ namespace st::feature {
 
 char const *pin_type_name(PinType t) noexcept {
     switch (t) {
-        case PinType::Float: return "float";
-        case PinType::Int:   return "int";
-        case PinType::Bool:  return "bool";
+    case PinType::Float:
+        return "float";
+    case PinType::Int:
+        return "int";
+    case PinType::Bool:
+        return "bool";
     }
     return "?";
 }
 
 std::optional<PinType> parse_pin_type(std::string_view s) noexcept {
-    if (s == "float") return PinType::Float;
-    if (s == "int")   return PinType::Int;
-    if (s == "bool")  return PinType::Bool;
+    if (s == "float")
+        return PinType::Float;
+    if (s == "int")
+        return PinType::Int;
+    if (s == "bool")
+        return PinType::Bool;
     return std::nullopt;
 }
 
@@ -37,8 +43,10 @@ char const *pin_direction_name(PinDirection d) noexcept {
 }
 
 std::optional<PinDirection> parse_pin_direction(std::string_view s) noexcept {
-    if (s == "input")  return PinDirection::Input;
-    if (s == "output") return PinDirection::Output;
+    if (s == "input")
+        return PinDirection::Input;
+    if (s == "output")
+        return PinDirection::Output;
     return std::nullopt;
 }
 
@@ -51,7 +59,8 @@ std::string toml_quote(std::string_view s) {
     out.reserve(s.size() + 2);
     out.push_back('"');
     for (char c : s) {
-        if (c == '\\' || c == '"') out.push_back('\\');
+        if (c == '\\' || c == '"')
+            out.push_back('\\');
         out.push_back(c);
     }
     out.push_back('"');
@@ -66,19 +75,18 @@ std::string to_toml(Graph const &g) {
     out << "schema_version = 1\n\n";
     for (auto const &n : g.nodes()) {
         out << "[[node]]\n";
-        out << "id    = "  << n.id    << "\n";
-        out << "kind  = "  << toml_quote(n.kind)  << "\n";
-        out << "label = "  << toml_quote(n.label) << "\n";
-        out << "x     = "  << n.x << "\n";
-        out << "y     = "  << n.y << "\n";
+        out << "id    = " << n.id << "\n";
+        out << "kind  = " << toml_quote(n.kind) << "\n";
+        out << "label = " << toml_quote(n.label) << "\n";
+        out << "x     = " << n.x << "\n";
+        out << "y     = " << n.y << "\n";
         if (n.is_phase_break) {
             out << "phase_break = true\n";
         }
         out << "pins  = [\n";
         for (std::size_t i = 0; i < n.pins.size(); ++i) {
             auto const &p = n.pins[i];
-            out << "  { id = " << p.id
-                << ", name = " << toml_quote(p.name)
+            out << "  { id = " << p.id << ", name = " << toml_quote(p.name)
                 << ", type = " << toml_quote(pin_type_name(p.type))
                 << ", direction = " << toml_quote(pin_direction_name(p.direction))
                 << ", unit = " << toml_quote(p.unit);
@@ -89,7 +97,8 @@ std::string to_toml(Graph const &g) {
                 out << ", default = " << *p.default_value;
             }
             out << " }";
-            if (i + 1 < n.pins.size()) out << ",";
+            if (i + 1 < n.pins.size())
+                out << ",";
             out << "\n";
         }
         out << "]\n\n";
@@ -97,9 +106,9 @@ std::string to_toml(Graph const &g) {
     for (auto const &e : g.edges()) {
         out << "[[edge]]\n";
         out << "from_node = " << e.from_node << "\n";
-        out << "from_pin  = " << e.from_pin  << "\n";
-        out << "to_node   = " << e.to_node   << "\n";
-        out << "to_pin    = " << e.to_pin    << "\n\n";
+        out << "from_pin  = " << e.from_pin << "\n";
+        out << "to_node   = " << e.to_node << "\n";
+        out << "to_pin    = " << e.to_pin << "\n\n";
     }
     return out.str();
 }
@@ -115,14 +124,11 @@ Result<Graph> from_toml(std::string_view text) {
     }
     auto const *gtbl = tbl["graph"].as_table();
     if (gtbl == nullptr) {
-        return failure(ErrorCode::ParseError,
-                       "feature TOML: missing [graph] section");
+        return failure(ErrorCode::ParseError, "feature TOML: missing [graph] section");
     }
-    int const schema = static_cast<int>(
-        (*gtbl)["schema_version"].value_or<std::int64_t>(0));
+    int const schema = static_cast<int>((*gtbl)["schema_version"].value_or<std::int64_t>(0));
     if (schema < 1) {
-        return failure(ErrorCode::ParseError,
-                       "feature TOML: [graph].schema_version must be >= 1");
+        return failure(ErrorCode::ParseError, "feature TOML: [graph].schema_version must be >= 1");
     }
 
     Graph g;
@@ -135,15 +141,12 @@ Result<Graph> from_toml(std::string_view text) {
         for (auto const &elem : *nodes) {
             auto const *ntbl = elem.as_table();
             if (ntbl == nullptr) {
-                return failure(ErrorCode::ParseError,
-                               "feature TOML: [[node]] not a table");
+                return failure(ErrorCode::ParseError, "feature TOML: [[node]] not a table");
             }
             Node n;
-            auto const persisted_id = static_cast<NodeId>(
-                (*ntbl)["id"].value_or<std::int64_t>(0));
+            auto const persisted_id = static_cast<NodeId>((*ntbl)["id"].value_or<std::int64_t>(0));
             if (persisted_id == 0) {
-                return failure(ErrorCode::ParseError,
-                               "feature TOML: [[node]] missing id");
+                return failure(ErrorCode::ParseError, "feature TOML: [[node]] missing id");
             }
             // Required fields. value_or returns the default for both
             // "key missing" and "key present but wrong type", so an
@@ -151,76 +154,61 @@ Result<Graph> from_toml(std::string_view text) {
             n.kind = (*ntbl)["kind"].value_or<std::string>("");
             if (n.kind.empty()) {
                 return failure(ErrorCode::ParseError,
-                               "feature TOML: [[node]] id="
-                                   + std::to_string(persisted_id)
-                                   + " missing required `kind`");
+                               "feature TOML: [[node]] id=" + std::to_string(persisted_id) +
+                                   " missing required `kind`");
             }
             // Duplicate-id detection — id_map's invariant doubles as
             // a uniqueness check.
             if (id_map.contains(persisted_id)) {
                 return failure(ErrorCode::ParseError,
-                               "feature TOML: duplicate node id "
-                                   + std::to_string(persisted_id));
+                               "feature TOML: duplicate node id " + std::to_string(persisted_id));
             }
-            n.label          = (*ntbl)["label"].value_or<std::string>("");
-            n.x              = static_cast<float>(
-                (*ntbl)["x"].value_or<double>(0.0));
-            n.y              = static_cast<float>(
-                (*ntbl)["y"].value_or<double>(0.0));
-            n.is_phase_break =
-                (*ntbl)["phase_break"].value_or<bool>(false);
+            n.label = (*ntbl)["label"].value_or<std::string>("");
+            n.x = static_cast<float>((*ntbl)["x"].value_or<double>(0.0));
+            n.y = static_cast<float>((*ntbl)["y"].value_or<double>(0.0));
+            n.is_phase_break = (*ntbl)["phase_break"].value_or<bool>(false);
             auto const *pins = (*ntbl)["pins"].as_array();
             if (pins != nullptr) {
                 for (auto const &pe : *pins) {
                     auto const *ptbl = pe.as_table();
                     if (ptbl == nullptr) {
-                        return failure(ErrorCode::ParseError,
-                                       "feature TOML: pin not a table");
+                        return failure(ErrorCode::ParseError, "feature TOML: pin not a table");
                     }
                     Pin p;
-                    p.id   = static_cast<PinId>(
-                        (*ptbl)["id"].value_or<std::int64_t>(0));
+                    p.id = static_cast<PinId>((*ptbl)["id"].value_or<std::int64_t>(0));
                     p.name = (*ptbl)["name"].value_or<std::string>("");
                     if (p.name.empty()) {
                         return failure(ErrorCode::ParseError,
-                                       "feature TOML: node id="
-                                           + std::to_string(persisted_id)
-                                           + " has a pin with no `name`");
+                                       "feature TOML: node id=" + std::to_string(persisted_id) +
+                                           " has a pin with no `name`");
                     }
                     auto const type_s = (*ptbl)["type"].value_or<std::string>("");
-                    auto const dir_s  = (*ptbl)["direction"].value_or<std::string>("");
-                    p.unit  = (*ptbl)["unit"].value_or<std::string>("");
+                    auto const dir_s = (*ptbl)["direction"].value_or<std::string>("");
+                    p.unit = (*ptbl)["unit"].value_or<std::string>("");
                     p.label = (*ptbl)["label"].value_or<std::string>("");
                     auto const t = parse_pin_type(type_s);
                     auto const d = parse_pin_direction(dir_s);
                     if (!t.has_value() || !d.has_value()) {
-                        return failure(ErrorCode::ParseError,
-                                       "feature TOML: unknown pin type / "
-                                       "direction on node id="
-                                           + std::to_string(persisted_id));
+                        return failure(ErrorCode::ParseError, "feature TOML: unknown pin type / "
+                                                              "direction on node id=" +
+                                                                  std::to_string(persisted_id));
                     }
-                    p.type      = *t;
+                    p.type = *t;
                     p.direction = *d;
-                    if (auto const dv = (*ptbl)["default"].value<double>();
-                        dv.has_value()) {
+                    if (auto const dv = (*ptbl)["default"].value<double>(); dv.has_value()) {
                         p.default_value = *dv;
-                    } else if (auto const di =
-                                   (*ptbl)["default"].value<std::int64_t>();
+                    } else if (auto const di = (*ptbl)["default"].value<std::int64_t>();
                                di.has_value()) {
                         p.default_value = static_cast<double>(*di);
-                    } else if (auto const db =
-                                   (*ptbl)["default"].value<bool>();
-                               db.has_value()) {
+                    } else if (auto const db = (*ptbl)["default"].value<bool>(); db.has_value()) {
                         p.default_value = *db ? 1.0 : 0.0;
                     }
                     // Pin-id uniqueness within a node.
                     for (auto const &existing : n.pins) {
                         if (existing.id == p.id) {
                             return failure(ErrorCode::ParseError,
-                                           "feature TOML: node id="
-                                               + std::to_string(persisted_id)
-                                               + " has duplicate pin id "
-                                               + std::to_string(p.id));
+                                           "feature TOML: node id=" + std::to_string(persisted_id) +
+                                               " has duplicate pin id " + std::to_string(p.id));
                         }
                     }
                     n.pins.push_back(std::move(p));
@@ -236,29 +224,22 @@ Result<Graph> from_toml(std::string_view text) {
         for (auto const &elem : *edges) {
             auto const *etbl = elem.as_table();
             if (etbl == nullptr) {
-                return failure(ErrorCode::ParseError,
-                               "feature TOML: [[edge]] not a table");
+                return failure(ErrorCode::ParseError, "feature TOML: [[edge]] not a table");
             }
-            auto const from_persisted = static_cast<NodeId>(
-                (*etbl)["from_node"].value_or<std::int64_t>(0));
-            auto const to_persisted = static_cast<NodeId>(
-                (*etbl)["to_node"].value_or<std::int64_t>(0));
+            auto const from_persisted =
+                static_cast<NodeId>((*etbl)["from_node"].value_or<std::int64_t>(0));
+            auto const to_persisted =
+                static_cast<NodeId>((*etbl)["to_node"].value_or<std::int64_t>(0));
             auto const fit = id_map.find(from_persisted);
             auto const tit = id_map.find(to_persisted);
             if (fit == id_map.end() || tit == id_map.end()) {
-                return failure(ErrorCode::ParseError,
-                               "feature TOML: edge references unknown node");
+                return failure(ErrorCode::ParseError, "feature TOML: edge references unknown node");
             }
-            auto const from_pin = static_cast<PinId>(
-                (*etbl)["from_pin"].value_or<std::int64_t>(0));
-            auto const to_pin = static_cast<PinId>(
-                (*etbl)["to_pin"].value_or<std::int64_t>(0));
-            if (auto r = g.connect(fit->second, from_pin,
-                                    tit->second, to_pin);
-                !r.has_value()) {
+            auto const from_pin = static_cast<PinId>((*etbl)["from_pin"].value_or<std::int64_t>(0));
+            auto const to_pin = static_cast<PinId>((*etbl)["to_pin"].value_or<std::int64_t>(0));
+            if (auto r = g.connect(fit->second, from_pin, tit->second, to_pin); !r.has_value()) {
                 return failure(ErrorCode::ParseError,
-                               "feature TOML: connect rejected: "
-                                   + r.error().to_string());
+                               "feature TOML: connect rejected: " + r.error().to_string());
             }
         }
     }
@@ -274,63 +255,57 @@ NodeId Graph::add_node(Node node) {
 
 Node const *Graph::find_node(NodeId id) const noexcept {
     for (auto const &n : nodes_) {
-        if (n.id == id) return &n;
+        if (n.id == id)
+            return &n;
     }
     return nullptr;
 }
 
 Pin const *Graph::find_pin(NodeId node_id, PinId pin_id) const noexcept {
     auto const *n = find_node(node_id);
-    if (n == nullptr) return nullptr;
+    if (n == nullptr)
+        return nullptr;
     for (auto const &p : n->pins) {
-        if (p.id == pin_id) return &p;
+        if (p.id == pin_id)
+            return &p;
     }
     return nullptr;
 }
 
-Status Graph::connect(NodeId from_node, PinId from_pin,
-                       NodeId to_node,   PinId to_pin) {
+Status Graph::connect(NodeId from_node, PinId from_pin, NodeId to_node, PinId to_pin) {
     auto const *from_p = find_pin(from_node, from_pin);
     if (from_p == nullptr) {
-        return failure(ErrorCode::InvalidArgument,
-                       "connect: source pin not found");
+        return failure(ErrorCode::InvalidArgument, "connect: source pin not found");
     }
     auto const *to_p = find_pin(to_node, to_pin);
     if (to_p == nullptr) {
-        return failure(ErrorCode::InvalidArgument,
-                       "connect: dest pin not found");
+        return failure(ErrorCode::InvalidArgument, "connect: dest pin not found");
     }
     if (from_p->direction != PinDirection::Output) {
-        return failure(ErrorCode::InvalidArgument,
-                       "connect: source pin is not an output");
+        return failure(ErrorCode::InvalidArgument, "connect: source pin is not an output");
     }
     if (to_p->direction != PinDirection::Input) {
-        return failure(ErrorCode::InvalidArgument,
-                       "connect: dest pin is not an input");
+        return failure(ErrorCode::InvalidArgument, "connect: dest pin is not an input");
     }
     if (from_p->type != to_p->type) {
-        return failure(ErrorCode::InvalidArgument,
-                       std::string{"connect: type mismatch ("}
-                           + pin_type_name(from_p->type) + " -> "
-                           + pin_type_name(to_p->type) + ")");
+        return failure(ErrorCode::InvalidArgument, std::string{"connect: type mismatch ("} +
+                                                       pin_type_name(from_p->type) + " -> " +
+                                                       pin_type_name(to_p->type) + ")");
     }
     // Unit check — both pins must agree when both declare a unit.
     // An empty unit on either side means "unit-agnostic" (generic
     // math nodes, etc.) and connects to anything compatible by type.
     // Pack-declared hook signals always carry a unit so dimensional
     // mistakes (rpm into %, ms into °C) are caught at wire time.
-    if (!from_p->unit.empty() && !to_p->unit.empty()
-        && from_p->unit != to_p->unit) {
-        return failure(ErrorCode::InvalidArgument,
-                       std::string{"connect: unit mismatch ("}
-                           + from_p->unit + " -> " + to_p->unit + ")");
+    if (!from_p->unit.empty() && !to_p->unit.empty() && from_p->unit != to_p->unit) {
+        return failure(ErrorCode::InvalidArgument, std::string{"connect: unit mismatch ("} +
+                                                       from_p->unit + " -> " + to_p->unit + ")");
     }
     // Single-driver invariant: an input is driven by at most one edge.
     // Outputs can fan out without limit.
     for (auto const &e : edges_) {
         if (e.to_node == to_node && e.to_pin == to_pin) {
-            return failure(ErrorCode::InvalidArgument,
-                           "connect: dest input is already driven");
+            return failure(ErrorCode::InvalidArgument, "connect: dest input is already driven");
         }
     }
     edges_.push_back(Edge{from_node, from_pin, to_node, to_pin});
@@ -338,14 +313,13 @@ Status Graph::connect(NodeId from_node, PinId from_pin,
 }
 
 void Graph::remove_node(NodeId id) {
-    nodes_.erase(std::remove_if(nodes_.begin(), nodes_.end(),
-                                 [id](Node const &n) { return n.id == id; }),
-                  nodes_.end());
-    edges_.erase(std::remove_if(edges_.begin(), edges_.end(),
-                                 [id](Edge const &e) {
-                                     return e.from_node == id || e.to_node == id;
-                                 }),
-                  edges_.end());
+    nodes_.erase(
+        std::remove_if(nodes_.begin(), nodes_.end(), [id](Node const &n) { return n.id == id; }),
+        nodes_.end());
+    edges_.erase(
+        std::remove_if(edges_.begin(), edges_.end(),
+                       [id](Edge const &e) { return e.from_node == id || e.to_node == id; }),
+        edges_.end());
 }
 
 void Graph::set_node_position(NodeId id, float x, float y) {
@@ -358,12 +332,13 @@ void Graph::set_node_position(NodeId id, float x, float y) {
     }
 }
 
-void Graph::set_pin_default(NodeId id, PinId pin_id,
-                             std::optional<double> value) {
+void Graph::set_pin_default(NodeId id, PinId pin_id, std::optional<double> value) {
     for (auto &n : nodes_) {
-        if (n.id != id) continue;
+        if (n.id != id)
+            continue;
         for (auto &p : n.pins) {
-            if (p.id != pin_id) continue;
+            if (p.id != pin_id)
+                continue;
             p.default_value = value;
             return;
         }
@@ -373,13 +348,12 @@ void Graph::set_pin_default(NodeId id, PinId pin_id,
 
 void Graph::remove_edge(Edge const &target) {
     edges_.erase(std::remove_if(edges_.begin(), edges_.end(),
-                                 [&](Edge const &e) {
-                                     return e.from_node == target.from_node
-                                         && e.from_pin  == target.from_pin
-                                         && e.to_node   == target.to_node
-                                         && e.to_pin    == target.to_pin;
-                                 }),
-                  edges_.end());
+                                [&](Edge const &e) {
+                                    return e.from_node == target.from_node &&
+                                           e.from_pin == target.from_pin &&
+                                           e.to_node == target.to_node && e.to_pin == target.to_pin;
+                                }),
+                 edges_.end());
 }
 
 Status Graph::validate() const {
@@ -388,19 +362,15 @@ Status Graph::validate() const {
     // (currently no such API exists, but defensive).
     for (auto const &e : edges_) {
         auto const *fp = find_pin(e.from_node, e.from_pin);
-        auto const *tp = find_pin(e.to_node,   e.to_pin);
+        auto const *tp = find_pin(e.to_node, e.to_pin);
         if (fp == nullptr || tp == nullptr) {
-            return failure(ErrorCode::ParseError,
-                           "validate: edge references a missing pin");
+            return failure(ErrorCode::ParseError, "validate: edge references a missing pin");
         }
-        if (fp->direction != PinDirection::Output
-            || tp->direction != PinDirection::Input) {
-            return failure(ErrorCode::ParseError,
-                           "validate: edge direction wrong");
+        if (fp->direction != PinDirection::Output || tp->direction != PinDirection::Input) {
+            return failure(ErrorCode::ParseError, "validate: edge direction wrong");
         }
         if (fp->type != tp->type) {
-            return failure(ErrorCode::ParseError,
-                           "validate: edge type mismatch");
+            return failure(ErrorCode::ParseError, "validate: edge type mismatch");
         }
     }
     // Cycle detection. Each Node expands into two vertices in the
@@ -418,23 +388,26 @@ Status Graph::validate() const {
     enum class Mark : std::uint8_t { Unvisited, OnStack, Done };
     std::vector<NodeId> ids;
     ids.reserve(nodes_.size());
-    for (auto const &n : nodes_) ids.push_back(n.id);
+    for (auto const &n : nodes_)
+        ids.push_back(n.id);
     auto const index_of = [&](NodeId id) -> std::size_t {
         for (std::size_t i = 0; i < ids.size(); ++i) {
-            if (ids[i] == id) return i;
+            if (ids[i] == id)
+                return i;
         }
         return ids.size();
     };
     // Side encoding: 0 = input side, 1 = output side. Vertex index
     // for (node i, side s) is 2*i + s.
-    std::size_t const   nv = ids.size() * 2;
+    std::size_t const nv = ids.size() * 2;
     std::vector<std::vector<std::size_t>> adj(nv);
-    auto const input_v  = [](std::size_t i) { return i * 2; };
+    auto const input_v = [](std::size_t i) { return i * 2; };
     auto const output_v = [](std::size_t i) { return i * 2 + 1; };
     for (auto const &e : edges_) {
         auto const a = index_of(e.from_node);
         auto const b = index_of(e.to_node);
-        if (a >= ids.size() || b >= ids.size()) continue;
+        if (a >= ids.size() || b >= ids.size())
+            continue;
         adj[output_v(a)].push_back(input_v(b));
     }
     for (std::size_t i = 0; i < ids.size(); ++i) {
@@ -446,16 +419,17 @@ Status Graph::validate() const {
     auto visit = [&](auto &&self, std::size_t u) -> bool {
         mark[u] = Mark::OnStack;
         for (auto v : adj[u]) {
-            if (mark[v] == Mark::OnStack) return true;
-            if (mark[v] == Mark::Unvisited && self(self, v)) return true;
+            if (mark[v] == Mark::OnStack)
+                return true;
+            if (mark[v] == Mark::Unvisited && self(self, v))
+                return true;
         }
         mark[u] = Mark::Done;
         return false;
     };
     for (std::size_t i = 0; i < nv; ++i) {
         if (mark[i] == Mark::Unvisited && visit(visit, i)) {
-            return failure(ErrorCode::ParseError,
-                           "validate: graph has a cycle");
+            return failure(ErrorCode::ParseError, "validate: graph has a cycle");
         }
     }
     return ok();
@@ -468,13 +442,15 @@ std::vector<LintFinding> lint(Graph const &g) {
 
     auto const driven = [&](NodeId nid, PinId pid) {
         for (auto const &e : edges) {
-            if (e.to_node == nid && e.to_pin == pid) return true;
+            if (e.to_node == nid && e.to_pin == pid)
+                return true;
         }
         return false;
     };
     auto const has_any_edge = [&](NodeId nid) {
         for (auto const &e : edges) {
-            if (e.from_node == nid || e.to_node == nid) return true;
+            if (e.from_node == nid || e.to_node == nid)
+                return true;
         }
         return false;
     };
@@ -497,19 +473,19 @@ std::vector<LintFinding> lint(Graph const &g) {
             }
         }
         if (has_input && !has_any_edge(n.id)) {
-            findings.push_back({
-                "node '" + node_display(n)
-                    + "' has no connections",
-                n.id, std::nullopt});
+            findings.push_back(
+                {"node '" + node_display(n) + "' has no connections", n.id, std::nullopt});
             continue;
         }
         for (auto const &p : n.pins) {
-            if (p.direction != PinDirection::Input) continue;
-            if (driven(n.id, p.id)) continue;
-            if (p.default_value.has_value()) continue;
-            std::string msg = "input pin '" + p.name
-                              + "' on node '" + node_display(n)
-                              + "' is not driven";
+            if (p.direction != PinDirection::Input)
+                continue;
+            if (driven(n.id, p.id))
+                continue;
+            if (p.default_value.has_value())
+                continue;
+            std::string msg =
+                "input pin '" + p.name + "' on node '" + node_display(n) + "' is not driven";
             findings.push_back({std::move(msg), n.id, p.id});
         }
     }

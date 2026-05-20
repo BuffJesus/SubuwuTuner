@@ -68,7 +68,7 @@ struct PassThruMsg {
     u32 protocol_id{0};
     u32 rx_status{0};
     u32 tx_flags{0};
-    u32 timestamp{0};       // adapter-side µs since some epoch
+    u32 timestamp{0}; // adapter-side µs since some epoch
     u32 data_size{0};
     u32 extra_data_index{0};
     std::array<std::uint8_t, 4128> data{};
@@ -85,7 +85,7 @@ struct SConfig {
 };
 
 struct SConfigList {
-    u32      num_of_params{0};
+    u32 num_of_params{0};
     SConfig *config_ptr{nullptr};
 };
 
@@ -98,72 +98,72 @@ struct SConfigList {
 enum class ProtocolId : u32 {
     J1850VPW = 0x01,
     J1850PWM = 0x02,
-    ISO9141  = 0x03,  // SSM-over-K-Line (Subaru VA)
-    ISO14230 = 0x04,  // KWP2000 (Nissan + some non-Subaru)
-    Can      = 0x05,
-    ISO15765 = 0x06,  // SSM-over-CAN / UDS-over-CAN (Subaru VB)
+    ISO9141 = 0x03,  // SSM-over-K-Line (Subaru VA)
+    ISO14230 = 0x04, // KWP2000 (Nissan + some non-Subaru)
+    Can = 0x05,
+    ISO15765 = 0x06, // SSM-over-CAN / UDS-over-CAN (Subaru VB)
 };
 
 // J2534 v04.04 status codes. `StatusNoError == 0` per spec so any
 // non-zero return from a PassThru* call is a failure. Decoded to
 // human-readable text by `status_message()`.
 enum class Status : u32 {
-    NoError                = 0x00,
-    NotSupported           = 0x01,
-    InvalidChannelId       = 0x02,
-    InvalidProtocolId      = 0x03,
-    NullParameter          = 0x04,
-    InvalidIoctlValue      = 0x05,
-    InvalidFlags           = 0x06,
-    Failed                 = 0x07,
-    DeviceNotConnected     = 0x08,
-    Timeout                = 0x09,
-    InvalidMsg             = 0x0A,
-    InvalidTimeInterval    = 0x0B,
-    ExceededLimit          = 0x0C,
-    InvalidMsgId           = 0x0D,
-    DeviceInUse            = 0x0E,
-    InvalidIoctlId         = 0x0F,
-    BufferEmpty            = 0x10,
-    BufferFull             = 0x11,
-    BufferOverflow         = 0x12,
-    PinInvalid             = 0x13,
-    ChannelInUse           = 0x14,
-    MsgProtocolId          = 0x15,
-    InvalidFilterId        = 0x16,
-    NoFlowControl          = 0x17,
-    NotUnique              = 0x18,
-    InvalidBaudrate        = 0x19,
-    InvalidDeviceId        = 0x1A,
+    NoError = 0x00,
+    NotSupported = 0x01,
+    InvalidChannelId = 0x02,
+    InvalidProtocolId = 0x03,
+    NullParameter = 0x04,
+    InvalidIoctlValue = 0x05,
+    InvalidFlags = 0x06,
+    Failed = 0x07,
+    DeviceNotConnected = 0x08,
+    Timeout = 0x09,
+    InvalidMsg = 0x0A,
+    InvalidTimeInterval = 0x0B,
+    ExceededLimit = 0x0C,
+    InvalidMsgId = 0x0D,
+    DeviceInUse = 0x0E,
+    InvalidIoctlId = 0x0F,
+    BufferEmpty = 0x10,
+    BufferFull = 0x11,
+    BufferOverflow = 0x12,
+    PinInvalid = 0x13,
+    ChannelInUse = 0x14,
+    MsgProtocolId = 0x15,
+    InvalidFilterId = 0x16,
+    NoFlowControl = 0x17,
+    NotUnique = 0x18,
+    InvalidBaudrate = 0x19,
+    InvalidDeviceId = 0x1A,
 };
 
 // J2534 v04.04 ioctl IDs. Trimmed to the subset we'll actually use
 // in v1.x — full list is in the SAE spec.
 enum class IoctlId : u32 {
-    GetConfig    = 0x01,
-    SetConfig    = 0x02,
-    ReadVbatt    = 0x03,  // battery voltage on DLC pin 16
+    GetConfig = 0x01,
+    SetConfig = 0x02,
+    ReadVbatt = 0x03, // battery voltage on DLC pin 16
     FiveBaudInit = 0x04,
-    FastInit     = 0x05,
-    ClearTxBuffer       = 0x07,
-    ClearRxBuffer       = 0x08,
-    ClearPeriodicMsgs   = 0x09,
-    ClearMsgFilters     = 0x0A,
-    ReadProgVoltage     = 0x0E,
+    FastInit = 0x05,
+    ClearTxBuffer = 0x07,
+    ClearRxBuffer = 0x08,
+    ClearPeriodicMsgs = 0x09,
+    ClearMsgFilters = 0x0A,
+    ReadProgVoltage = 0x0E,
 };
 
 // SCONFIG parameter IDs we'll set. K-Line SSM needs DataRate=4800,
 // DataBits=8, Parity=0; CAN ISO-15765 needs ISO15765_BS and
 // ISO15765_STmin for flow control.
 enum class ConfigParam : u32 {
-    DataRate         = 0x01,
-    Loopback         = 0x03,
-    Parity           = 0x16,
-    BitSamplePoint   = 0x17,
-    SyncJumpWidth    = 0x18,
-    DataBits         = 0x20,
-    Iso15765BS       = 0x1E,
-    Iso15765StMin    = 0x1F,
+    DataRate = 0x01,
+    Loopback = 0x03,
+    Parity = 0x16,
+    BitSamplePoint = 0x17,
+    SyncJumpWidth = 0x18,
+    DataBits = 0x20,
+    Iso15765BS = 0x1E,
+    Iso15765StMin = 0x1F,
 };
 
 // Decode a status code to a stable, short human-readable string.
@@ -189,21 +189,16 @@ enum class ConfigParam : u32 {
 
 extern "C" {
 
-using PtOpen_t           = Status (*)(void *device_name, u32 *device_id);
-using PtClose_t          = Status (*)(u32 device_id);
-using PtConnect_t        = Status (*)(u32 device_id, u32 protocol_id,
-                                       u32 flags, u32 baud,
-                                       u32 *channel_id);
-using PtDisconnect_t     = Status (*)(u32 channel_id);
-using PtReadMsgs_t       = Status (*)(u32 channel_id, PassThruMsg *msgs,
-                                       u32 *num_msgs, u32 timeout_ms);
-using PtWriteMsgs_t      = Status (*)(u32 channel_id, PassThruMsg *msgs,
-                                       u32 *num_msgs, u32 timeout_ms);
-using PtIoctl_t          = Status (*)(u32 channel_id, u32 ioctl_id,
-                                       void *input, void *output);
-using PtReadVersion_t    = Status (*)(u32 device_id, char *firmware_ver,
-                                       char *dll_ver, char *api_ver);
-using PtGetLastError_t   = Status (*)(char *error_description);
+using PtOpen_t = Status (*)(void *device_name, u32 *device_id);
+using PtClose_t = Status (*)(u32 device_id);
+using PtConnect_t = Status (*)(u32 device_id, u32 protocol_id, u32 flags, u32 baud,
+                               u32 *channel_id);
+using PtDisconnect_t = Status (*)(u32 channel_id);
+using PtReadMsgs_t = Status (*)(u32 channel_id, PassThruMsg *msgs, u32 *num_msgs, u32 timeout_ms);
+using PtWriteMsgs_t = Status (*)(u32 channel_id, PassThruMsg *msgs, u32 *num_msgs, u32 timeout_ms);
+using PtIoctl_t = Status (*)(u32 channel_id, u32 ioctl_id, void *input, void *output);
+using PtReadVersion_t = Status (*)(u32 device_id, char *firmware_ver, char *dll_ver, char *api_ver);
+using PtGetLastError_t = Status (*)(char *error_description);
 
 } // extern "C"
 
@@ -228,17 +223,17 @@ using PtGetLastError_t   = Status (*)(char *error_description);
 // J2534Transport class (not in this slice) will own the call-site
 // ergonomics.
 class J2534Library {
-  public:
+public:
     struct FunctionTable {
-        PtOpen_t           open{nullptr};
-        PtClose_t          close{nullptr};
-        PtConnect_t        connect{nullptr};
-        PtDisconnect_t     disconnect{nullptr};
-        PtReadMsgs_t       read_msgs{nullptr};
-        PtWriteMsgs_t      write_msgs{nullptr};
-        PtIoctl_t          ioctl{nullptr};
-        PtReadVersion_t    read_version{nullptr};
-        PtGetLastError_t   get_last_error{nullptr};
+        PtOpen_t open{nullptr};
+        PtClose_t close{nullptr};
+        PtConnect_t connect{nullptr};
+        PtDisconnect_t disconnect{nullptr};
+        PtReadMsgs_t read_msgs{nullptr};
+        PtWriteMsgs_t write_msgs{nullptr};
+        PtIoctl_t ioctl{nullptr};
+        PtReadVersion_t read_version{nullptr};
+        PtGetLastError_t get_last_error{nullptr};
 
         // True iff every entry point we currently use is non-null.
         // ReadVersion + GetLastError are diagnostics-only and not
@@ -256,7 +251,7 @@ class J2534Library {
 
     // Move-only — owning an OS module handle requires single-owner
     // semantics. Copies would either leak the handle or double-unload.
-    J2534Library(J2534Library const &)            = delete;
+    J2534Library(J2534Library const &) = delete;
     J2534Library &operator=(J2534Library const &) = delete;
     J2534Library(J2534Library &&) noexcept;
     J2534Library &operator=(J2534Library &&) noexcept;
@@ -266,14 +261,13 @@ class J2534Library {
     // table from its exported symbols. NotImplemented in this slice
     // — lands when the developer's adapter arrives and there's a
     // real `op20pt32.dll` to point at.
-    [[nodiscard]] static Result<J2534Library> load(
-        std::filesystem::path const &dll_path);
+    [[nodiscard]] static Result<J2534Library> load(std::filesystem::path const &dll_path);
 
     [[nodiscard]] FunctionTable const &functions() const noexcept {
         return table_;
     }
 
-  private:
+private:
     FunctionTable table_{};
     // Opaque handle to the loaded OS module. `nullptr` when the
     // library was constructed from an explicit FunctionTable (test

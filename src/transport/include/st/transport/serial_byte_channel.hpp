@@ -39,16 +39,16 @@ namespace st::transport {
 struct SerialChannelConfig {
     // Device path the OS exposes. Format is per-platform (see header
     // comment); the factory takes it verbatim.
-    std::string_view  device_path;
+    std::string_view device_path;
     // Baud rate. Most modern OBD adapters speak at 500000 or 921600;
     // OBDX Pro VX defaults to 500000. SSM K-line default is 4800.
-    std::uint32_t     baud_rate{500000};
+    std::uint32_t baud_rate{500000};
     // Read timeout (per read_bytes call). Matches the IByteChannel
     // semantics: empty-vector return on timeout, NOT an error.
-    std::uint32_t     read_timeout_ms{1000};
+    std::uint32_t read_timeout_ms{1000};
     // Write timeout (per full write_bytes call). Timeouts during
     // write surface as TransportUnavailable.
-    std::uint32_t     write_timeout_ms{1000};
+    std::uint32_t write_timeout_ms{1000};
 };
 
 // Construct a platform-appropriate serial-port IByteChannel.

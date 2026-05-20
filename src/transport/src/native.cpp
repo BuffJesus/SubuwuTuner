@@ -40,17 +40,15 @@ namespace {
 // The CRC itself sits in the last 2 bytes and is not included in
 // its own computation. Pulled into a helper so encode/decode use
 // the same span boundary.
-[[nodiscard]] std::uint16_t crc_over_frame(
-    std::span<std::uint8_t const> frame_without_crc) noexcept {
+[[nodiscard]] std::uint16_t
+crc_over_frame(std::span<std::uint8_t const> frame_without_crc) noexcept {
     return crc16_ccitt_false(frame_without_crc);
 }
 
 } // namespace
 
-Result<std::vector<std::uint8_t>> encode_request(
-    std::uint8_t                  seq,
-    Opcode                        op,
-    std::span<std::uint8_t const> payload) {
+Result<std::vector<std::uint8_t>> encode_request(std::uint8_t seq, Opcode op,
+                                                 std::span<std::uint8_t const> payload) {
     if (payload.size() > kMaxPayloadBytes) {
         std::string msg{"native::encode_request: payload size "};
         msg.append(std::to_string(payload.size()));
@@ -68,8 +66,7 @@ Result<std::vector<std::uint8_t>> encode_request(
     frame.push_back(static_cast<std::uint8_t>(payload.size() >> 8U));
     frame.push_back(static_cast<std::uint8_t>(payload.size() & 0xFFU));
     frame.insert(frame.end(), payload.begin(), payload.end());
-    auto const crc = crc_over_frame(
-        std::span{frame.data(), frame.size()});
+    auto const crc = crc_over_frame(std::span{frame.data(), frame.size()});
     frame.push_back(static_cast<std::uint8_t>(crc >> 8U));
     frame.push_back(static_cast<std::uint8_t>(crc & 0xFFU));
     return frame;
@@ -79,9 +76,8 @@ Result<DecodedFrame> decode_frame(std::span<std::uint8_t const> bytes) {
     // Minimum frame: SOF + seq + op + 2-byte len + 2-byte CRC = 7 B
     // (payload may be zero).
     if (bytes.size() < 7) {
-        return failure(ErrorCode::ParseError,
-                       "native::decode_frame: buffer too short "
-                       "(need at least 7 bytes for SOF+seq+op+len+CRC)");
+        return failure(ErrorCode::ParseError, "native::decode_frame: buffer too short "
+                                              "(need at least 7 bytes for SOF+seq+op+len+CRC)");
     }
     if (bytes[0] != kStartOfFrame) {
         char buf[80];
@@ -92,16 +88,13 @@ Result<DecodedFrame> decode_frame(std::span<std::uint8_t const> bytes) {
         return failure(ErrorCode::ParseError, std::string{buf});
     }
 
-    std::uint8_t const seq          = bytes[1];
-    std::uint8_t const raw_op       = bytes[2];
-    std::size_t const  declared_len =
-        (static_cast<std::size_t>(bytes[3]) << 8U)
-        | static_cast<std::size_t>(bytes[4]);
-    std::size_t const expected =
-        5 + declared_len + 2;  // header + payload + CRC
+    std::uint8_t const seq = bytes[1];
+    std::uint8_t const raw_op = bytes[2];
+    std::size_t const declared_len =
+        (static_cast<std::size_t>(bytes[3]) << 8U) | static_cast<std::size_t>(bytes[4]);
+    std::size_t const expected = 5 + declared_len + 2; // header + payload + CRC
     if (bytes.size() != expected) {
-        std::string msg{
-            "native::decode_frame: frame size mismatch (declared payload "};
+        std::string msg{"native::decode_frame: frame size mismatch (declared payload "};
         msg.append(std::to_string(declared_len));
         msg.append(" → expected ");
         msg.append(std::to_string(expected));
@@ -111,11 +104,9 @@ Result<DecodedFrame> decode_frame(std::span<std::uint8_t const> bytes) {
         return failure(ErrorCode::ParseError, std::move(msg));
     }
 
-    std::uint16_t const expected_crc = crc_over_frame(
-        bytes.subspan(0, bytes.size() - 2));
-    std::uint16_t const actual_crc =
-        (static_cast<std::uint16_t>(bytes[bytes.size() - 2]) << 8U)
-        | static_cast<std::uint16_t>(bytes[bytes.size() - 1]);
+    std::uint16_t const expected_crc = crc_over_frame(bytes.subspan(0, bytes.size() - 2));
+    std::uint16_t const actual_crc = (static_cast<std::uint16_t>(bytes[bytes.size() - 2]) << 8U) |
+                                     static_cast<std::uint16_t>(bytes[bytes.size() - 1]);
     if (expected_crc != actual_crc) {
         char buf[96];
         std::snprintf(buf, sizeof buf,
@@ -128,20 +119,19 @@ Result<DecodedFrame> decode_frame(std::span<std::uint8_t const> bytes) {
     // Now dispatch on the opcode-marker bits.
     std::size_t const payload_off = 5;
     auto payload_begin = bytes.begin() + static_cast<std::ptrdiff_t>(payload_off);
-    auto payload_end   = bytes.begin() + static_cast<std::ptrdiff_t>(payload_off + declared_len);
+    auto payload_end = bytes.begin() + static_cast<std::ptrdiff_t>(payload_off + declared_len);
 
     if (raw_op == kErrorOpcode) {
         if (declared_len != 3) {
-            std::string msg{
-                "native::decode_frame: error frame must declare "
-                "exactly 3 payload bytes (seq+request_op+err), got "};
+            std::string msg{"native::decode_frame: error frame must declare "
+                            "exactly 3 payload bytes (seq+request_op+err), got "};
             msg.append(std::to_string(declared_len));
             return failure(ErrorCode::ParseError, std::move(msg));
         }
         ErrorFrame ef;
         // The async-error frame's seq slot duplicates the request's
         // seq for ergonomic matching (PC can ignore the outer seq).
-        ef.seq        = bytes[payload_off];
+        ef.seq = bytes[payload_off];
         ef.request_op = static_cast<Opcode>(bytes[payload_off + 1]);
         ef.error_code = bytes[payload_off + 2];
         return DecodedFrame{ef};
@@ -149,9 +139,8 @@ Result<DecodedFrame> decode_frame(std::span<std::uint8_t const> bytes) {
 
     if (raw_op == kEventOpcode) {
         if (declared_len == 0) {
-            return failure(ErrorCode::ParseError,
-                           "native::decode_frame: event frame must "
-                           "carry at least one byte (event_code)");
+            return failure(ErrorCode::ParseError, "native::decode_frame: event frame must "
+                                                  "carry at least one byte (event_code)");
         }
         Event ev;
         ev.event_code = bytes[payload_off];
@@ -175,7 +164,7 @@ Result<DecodedFrame> decode_frame(std::span<std::uint8_t const> bytes) {
     }
 
     Response rf;
-    rf.seq        = seq;
+    rf.seq = seq;
     rf.request_op = static_cast<Opcode>(raw_op & 0x7FU);
     rf.payload.assign(payload_begin, payload_end);
     return DecodedFrame{std::move(rf)};

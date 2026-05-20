@@ -21,21 +21,25 @@ using namespace std::chrono_literals;
 
 namespace log_ns = st::log;
 
-TEST_CASE("LogStream rounds capacity up to next power of two",
-          "[log][construct]") {
-    log_ns::LogStream a{4, 1};   REQUIRE(a.capacity() == 2);
-    log_ns::LogStream b{4, 2};   REQUIRE(b.capacity() == 2);
-    log_ns::LogStream c{4, 3};   REQUIRE(c.capacity() == 4);
-    log_ns::LogStream d{4, 9};   REQUIRE(d.capacity() == 16);
-    log_ns::LogStream e{4, 64};  REQUIRE(e.capacity() == 64);
+TEST_CASE("LogStream rounds capacity up to next power of two", "[log][construct]") {
+    log_ns::LogStream a{4, 1};
+    REQUIRE(a.capacity() == 2);
+    log_ns::LogStream b{4, 2};
+    REQUIRE(b.capacity() == 2);
+    log_ns::LogStream c{4, 3};
+    REQUIRE(c.capacity() == 4);
+    log_ns::LogStream d{4, 9};
+    REQUIRE(d.capacity() == 16);
+    log_ns::LogStream e{4, 64};
+    REQUIRE(e.capacity() == 64);
     REQUIRE(a.pid_count() == 4);
 }
 
 TEST_CASE("LogStream starts empty with zero counters", "[log][construct]") {
     log_ns::LogStream s{3, 8};
     REQUIRE(s.approximate_size() == 0);
-    REQUIRE(s.pushed_count()  == 0);
-    REQUIRE(s.popped_count()  == 0);
+    REQUIRE(s.pushed_count() == 0);
+    REQUIRE(s.popped_count() == 0);
     REQUIRE(s.dropped_count() == 0);
 }
 
@@ -47,7 +51,7 @@ TEST_CASE("LogStream round-trips one sample", "[log][push_pop]") {
     REQUIRE(s.approximate_size() == 1);
     REQUIRE(s.pushed_count() == 1);
 
-    std::int64_t        ts  = 0;
+    std::int64_t ts = 0;
     std::vector<double> out(3, 0.0);
     REQUIRE(s.try_pop(ts, out));
     REQUIRE(ts == 123);
@@ -58,8 +62,8 @@ TEST_CASE("LogStream round-trips one sample", "[log][push_pop]") {
 }
 
 TEST_CASE("LogStream try_pop on empty returns false", "[log][push_pop]") {
-    log_ns::LogStream   s{2, 4};
-    std::int64_t        ts = 0;
+    log_ns::LogStream s{2, 4};
+    std::int64_t ts = 0;
     std::vector<double> out(2, 0.0);
     REQUIRE_FALSE(s.try_pop(ts, out));
     REQUIRE(s.popped_count() == 0);
@@ -68,8 +72,8 @@ TEST_CASE("LogStream try_pop on empty returns false", "[log][push_pop]") {
 TEST_CASE("LogStream wraps the ring index correctly", "[log][push_pop]") {
     // Capacity 4 (power of two). Push, pop, push, pop … 12 times so the
     // ring index wraps three times.
-    log_ns::LogStream   s{1, 4};
-    std::int64_t        ts = 0;
+    log_ns::LogStream s{1, 4};
+    std::int64_t ts = 0;
     std::vector<double> out(1, 0.0);
     for (int i = 0; i < 12; ++i) {
         std::vector<double> in{static_cast<double>(i)};
@@ -81,9 +85,8 @@ TEST_CASE("LogStream wraps the ring index correctly", "[log][push_pop]") {
     REQUIRE(s.dropped_count() == 0);
 }
 
-TEST_CASE("LogStream drops when full and counts the drops",
-          "[log][drop]") {
-    log_ns::LogStream s{1, 4};  // capacity 4
+TEST_CASE("LogStream drops when full and counts the drops", "[log][drop]") {
+    log_ns::LogStream s{1, 4}; // capacity 4
     for (int i = 0; i < 4; ++i) {
         std::vector<double> in{static_cast<double>(i)};
         REQUIRE(s.try_push(i, in));
@@ -96,35 +99,33 @@ TEST_CASE("LogStream drops when full and counts the drops",
         REQUIRE_FALSE(s.try_push(100 + i, in));
     }
     REQUIRE(s.dropped_count() == 3);
-    REQUIRE(s.pushed_count()  == 4);
+    REQUIRE(s.pushed_count() == 4);
 
     // Drain one slot, push must then succeed again.
-    std::int64_t        ts = 0;
+    std::int64_t ts = 0;
     std::vector<double> out(1, 0.0);
     REQUIRE(s.try_pop(ts, out));
     REQUIRE(ts == 0);
 
     std::vector<double> in{42.0};
     REQUIRE(s.try_push(200, in));
-    REQUIRE(s.dropped_count() == 3);  // unchanged
+    REQUIRE(s.dropped_count() == 3); // unchanged
 }
 
-TEST_CASE("LogStream::reset clears counters and the ring",
-          "[log][reset]") {
+TEST_CASE("LogStream::reset clears counters and the ring", "[log][reset]") {
     log_ns::LogStream s{2, 4};
     for (int i = 0; i < 3; ++i) {
-        std::vector<double> in{static_cast<double>(i),
-                               static_cast<double>(i) * 2};
+        std::vector<double> in{static_cast<double>(i), static_cast<double>(i) * 2};
         REQUIRE(s.try_push(i, in));
     }
     s.reset();
 
     REQUIRE(s.approximate_size() == 0);
-    REQUIRE(s.pushed_count()  == 0);
-    REQUIRE(s.popped_count()  == 0);
+    REQUIRE(s.pushed_count() == 0);
+    REQUIRE(s.popped_count() == 0);
     REQUIRE(s.dropped_count() == 0);
 
-    std::int64_t        ts = 0;
+    std::int64_t ts = 0;
     std::vector<double> out(2, 0.0);
     REQUIRE_FALSE(s.try_pop(ts, out));
 }
@@ -137,8 +138,7 @@ namespace {
 
 // Build the SSM A8 request the session is going to emit for a given list
 // of channels. Tests use this to seed MockTransport expectations.
-std::vector<std::uint8_t> a8_request_for(
-    std::vector<log_ns::LogChannel> const &channels) {
+std::vector<std::uint8_t> a8_request_for(std::vector<log_ns::LogChannel> const &channels) {
     std::vector<std::uint32_t> addrs;
     for (auto const &ch : channels) {
         auto const bytes = st::byte_size(ch.data_type);
@@ -168,11 +168,12 @@ std::vector<std::uint8_t> a8_response(std::vector<std::uint8_t> data_bytes) {
 
 // Block the caller until `pred()` becomes true or the deadline passes.
 // Returns whether the predicate fired.
-template <typename Pred>
+template<typename Pred>
 bool wait_until(std::chrono::milliseconds budget, Pred pred) {
     auto const deadline = std::chrono::steady_clock::now() + budget;
     while (std::chrono::steady_clock::now() < deadline) {
-        if (pred()) return true;
+        if (pred())
+            return true;
         std::this_thread::sleep_for(1ms);
     }
     return pred();
@@ -180,8 +181,7 @@ bool wait_until(std::chrono::milliseconds budget, Pred pred) {
 
 } // namespace
 
-TEST_CASE("LogSession refuses to start with no channels",
-          "[log][session]") {
+TEST_CASE("LogSession refuses to start with no channels", "[log][session]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
     log_ns::LogSession session{t, {}, 16};
@@ -191,8 +191,7 @@ TEST_CASE("LogSession refuses to start with no channels",
     REQUIRE_FALSE(session.is_running());
 }
 
-TEST_CASE("LogSession reads a single-byte channel and pushes samples",
-          "[log][session]") {
+TEST_CASE("LogSession reads a single-byte channel and pushes samples", "[log][session]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
@@ -216,8 +215,7 @@ TEST_CASE("LogSession reads a single-byte channel and pushes samples",
     REQUIRE(wait_until(1000ms, [&] { return t.remaining() == 0; }));
     // Let one error cycle land so we can verify io_errors() increments
     // separately from cycles_completed().
-    REQUIRE(wait_until(200ms,
-                       [&] { return session.io_errors() > 0; }));
+    REQUIRE(wait_until(200ms, [&] { return session.io_errors() > 0; }));
 
     session.stop();
     REQUIRE_FALSE(session.is_running());
@@ -225,7 +223,7 @@ TEST_CASE("LogSession reads a single-byte channel and pushes samples",
     REQUIRE(session.cycles_completed() == 3);
     REQUIRE(session.io_errors() >= 1);
 
-    std::int64_t        ts = 0;
+    std::int64_t ts = 0;
     std::vector<double> out(1, 0.0);
     std::vector<double> seen;
     while (session.stream().try_pop(ts, out)) {
@@ -234,8 +232,7 @@ TEST_CASE("LogSession reads a single-byte channel and pushes samples",
     REQUIRE(seen == std::vector<double>{0x42, 0x55, 0x77});
 }
 
-TEST_CASE("LogSession decodes a multi-byte big-endian channel",
-          "[log][session]") {
+TEST_CASE("LogSession decodes a multi-byte big-endian channel", "[log][session]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
@@ -255,23 +252,22 @@ TEST_CASE("LogSession decodes a multi-byte big-endian channel",
     REQUIRE(wait_until(500ms, [&] { return session.cycles_completed() >= 1; }));
     session.stop();
 
-    std::int64_t        ts = 0;
+    std::int64_t ts = 0;
     std::vector<double> out(1, 0.0);
     REQUIRE(session.stream().try_pop(ts, out));
     REQUIRE(out[0] == 6789.0);
 }
 
-TEST_CASE("LogSession applies per-channel scaling on the I/O thread",
-          "[log][session]") {
+TEST_CASE("LogSession applies per-channel scaling on the I/O thread", "[log][session]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
     // PID at 0x300, uint8, scaling = raw * 0.5 - 40 (a typical Subaru
     // intake-air-temperature scaling). Raw 0x90 = 144 → 144*0.5 - 40 = 32.
     st::Scaling scaling;
-    scaling.id        = "iat_c";
-    scaling.formula   = st::LinearScaling{0.5, -40.0};
-    scaling.unit      = "C";
+    scaling.id = "iat_c";
+    scaling.formula = st::LinearScaling{0.5, -40.0};
+    scaling.unit = "C";
     scaling.precision = 1;
     scaling.data_type = st::DataType::Uint8;
 
@@ -286,14 +282,13 @@ TEST_CASE("LogSession applies per-channel scaling on the I/O thread",
     REQUIRE(wait_until(500ms, [&] { return session.cycles_completed() >= 1; }));
     session.stop();
 
-    std::int64_t        ts = 0;
+    std::int64_t ts = 0;
     std::vector<double> out(1, 0.0);
     REQUIRE(session.stream().try_pop(ts, out));
     REQUIRE(out[0] == 32.0);
 }
 
-TEST_CASE("LogSession reads multiple heterogeneous channels per cycle",
-          "[log][session]") {
+TEST_CASE("LogSession reads multiple heterogeneous channels per cycle", "[log][session]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
@@ -303,20 +298,19 @@ TEST_CASE("LogSession reads multiple heterogeneous channels per cycle",
     //   ch2 maf    uint16_be @ 0x0220 -> bytes [0x0220, 0x0221]
     std::vector<log_ns::LogChannel> const channels{
         {"rpm", 0x0200, st::DataType::Uint16Be, std::nullopt},
-        {"iat", 0x0210, st::DataType::Uint8,    std::nullopt},
+        {"iat", 0x0210, st::DataType::Uint8, std::nullopt},
         {"maf", 0x0220, st::DataType::Uint16Be, std::nullopt},
     };
     auto const req = a8_request_for(channels);
     // 5 data bytes: 0x1A 0x85, 0x32, 0x07 0xD0  ->  6789, 50, 2000.
-    t.expect_send_recv(req,
-                       a8_response({0x1A, 0x85, 0x32, 0x07, 0xD0}));
+    t.expect_send_recv(req, a8_response({0x1A, 0x85, 0x32, 0x07, 0xD0}));
 
     log_ns::LogSession session{t, channels, 16};
     REQUIRE(session.start().has_value());
     REQUIRE(wait_until(500ms, [&] { return session.cycles_completed() >= 1; }));
     session.stop();
 
-    std::int64_t        ts = 0;
+    std::int64_t ts = 0;
     std::vector<double> out(3, 0.0);
     REQUIRE(session.stream().try_pop(ts, out));
     REQUIRE(out[0] == 6789.0);
@@ -324,8 +318,7 @@ TEST_CASE("LogSession reads multiple heterogeneous channels per cycle",
     REQUIRE(out[2] == 2000.0);
 }
 
-TEST_CASE("LogSession::stop is idempotent and safe on a never-started session",
-          "[log][session]") {
+TEST_CASE("LogSession::stop is idempotent and safe on a never-started session", "[log][session]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
     std::vector<log_ns::LogChannel> const channels{
@@ -336,14 +329,13 @@ TEST_CASE("LogSession::stop is idempotent and safe on a never-started session",
     session.stop();
     // Stop after a no-op start failure — must also not deadlock.
     log_ns::LogSession nochans{t, {}, 16};
-    (void) nochans.start();
+    (void)nochans.start();
     nochans.stop();
     nochans.stop();
     REQUIRE_FALSE(nochans.is_running());
 }
 
-TEST_CASE("LogSession refuses to start twice",
-          "[log][session]") {
+TEST_CASE("LogSession refuses to start twice", "[log][session]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
     std::vector<log_ns::LogChannel> const channels{
@@ -373,9 +365,9 @@ namespace {
 
 st::Scaling make_scaling(std::string id, std::string unit, int precision) {
     st::Scaling s;
-    s.id        = std::move(id);
-    s.formula   = st::LinearScaling{1.0, 0.0};
-    s.unit      = std::move(unit);
+    s.id = std::move(id);
+    s.formula = st::LinearScaling{1.0, 0.0};
+    s.unit = std::move(unit);
     s.precision = precision;
     s.data_type = st::DataType::Uint8;
     return s;
@@ -383,13 +375,12 @@ st::Scaling make_scaling(std::string id, std::string unit, int precision) {
 
 } // namespace
 
-TEST_CASE("CsvSink emits a header derived from channel ids + units",
-          "[log][csv]") {
+TEST_CASE("CsvSink emits a header derived from channel ids + units", "[log][csv]") {
     std::vector<log_ns::LogChannel> channels{
         {"rpm", 0x0200, st::DataType::Uint16Be, make_scaling("rpm_x1", "rpm", 0)},
-        {"iat", 0x0210, st::DataType::Uint8,    make_scaling("iat_c",  "C",   1)},
+        {"iat", 0x0210, st::DataType::Uint8, make_scaling("iat_c", "C", 1)},
         // Channel with no scaling: header label falls back to bare id.
-        {"raw", 0x0220, st::DataType::Uint8,    std::nullopt},
+        {"raw", 0x0220, st::DataType::Uint8, std::nullopt},
     };
 
     std::stringstream out;
@@ -399,12 +390,11 @@ TEST_CASE("CsvSink emits a header derived from channel ids + units",
     REQUIRE(out.str() == "timestamp_ms,rpm [rpm],iat [C],raw\n");
 }
 
-TEST_CASE("CsvSink formats values with per-channel precision",
-          "[log][csv]") {
+TEST_CASE("CsvSink formats values with per-channel precision", "[log][csv]") {
     std::vector<log_ns::LogChannel> channels{
         {"rpm", 0x0200, st::DataType::Uint16Be, make_scaling("rpm_x1", "rpm", 0)},
-        {"iat", 0x0210, st::DataType::Uint8,    make_scaling("iat_c",  "C",   1)},
-        {"raw", 0x0220, st::DataType::Uint8,    std::nullopt},
+        {"iat", 0x0210, st::DataType::Uint8, make_scaling("iat_c", "C", 1)},
+        {"raw", 0x0220, st::DataType::Uint8, std::nullopt},
     };
 
     std::stringstream out;
@@ -419,46 +409,43 @@ TEST_CASE("CsvSink formats values with per-channel precision",
     REQUIRE(out.str() == "1234.567,6789,50.3,42\n");
 }
 
-TEST_CASE("CsvSink reports timestamps to millisecond precision",
-          "[log][csv]") {
+TEST_CASE("CsvSink reports timestamps to millisecond precision", "[log][csv]") {
     std::vector<log_ns::LogChannel> channels{
         {"x", 0x0001, st::DataType::Uint8, std::nullopt},
     };
     std::stringstream out;
     log_ns::CsvSink sink{out, channels};
 
-    sink.write_row(0,             std::vector<double>{1.0});  // 0
-    sink.write_row(500'000,       std::vector<double>{2.0});  // 0.500 ms
-    sink.write_row(1'500'000,     std::vector<double>{3.0});  // 1.500 ms
-    sink.write_row(1'234'567'000, std::vector<double>{4.0});  // 1234.567 ms
+    sink.write_row(0, std::vector<double>{1.0});             // 0
+    sink.write_row(500'000, std::vector<double>{2.0});       // 0.500 ms
+    sink.write_row(1'500'000, std::vector<double>{3.0});     // 1.500 ms
+    sink.write_row(1'234'567'000, std::vector<double>{4.0}); // 1234.567 ms
 
-    REQUIRE(out.str()
-            == "0.000,1\n0.500,2\n1.500,3\n1234.567,4\n");
+    REQUIRE(out.str() == "0.000,1\n0.500,2\n1.500,3\n1234.567,4\n");
 }
 
-TEST_CASE("CsvSink end-to-end against LogSession",
-          "[log][csv][session]") {
+TEST_CASE("CsvSink end-to-end against LogSession", "[log][csv][session]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
     std::vector<log_ns::LogChannel> channels{
         {"rpm", 0x0200, st::DataType::Uint16Be, make_scaling("rpm_x1", "rpm", 0)},
-        {"iat", 0x0210, st::DataType::Uint8,    make_scaling("iat_c",  "C",   0)},
+        {"iat", 0x0210, st::DataType::Uint8, make_scaling("iat_c", "C", 0)},
     };
     auto const req = a8_request_for(channels);
-    t.expect_send_recv(req, a8_response({0x1A, 0x85, 0x32}));  // 6789, 50
-    t.expect_send_recv(req, a8_response({0x1A, 0x86, 0x33}));  // 6790, 51
+    t.expect_send_recv(req, a8_response({0x1A, 0x85, 0x32})); // 6789, 50
+    t.expect_send_recv(req, a8_response({0x1A, 0x86, 0x33})); // 6790, 51
 
     log_ns::LogSession session{t, channels, 16};
     REQUIRE(session.start().has_value());
     REQUIRE(wait_until(500ms, [&] { return session.cycles_completed() >= 2; }));
     session.stop();
 
-    std::stringstream  out;
-    log_ns::CsvSink    sink{out, channels};
+    std::stringstream out;
+    log_ns::CsvSink sink{out, channels};
     sink.write_header();
 
-    std::int64_t        ts = 0;
+    std::int64_t ts = 0;
     std::vector<double> values(channels.size(), 0.0);
     while (session.stream().try_pop(ts, values)) {
         sink.write_row(ts, values);
@@ -478,25 +465,24 @@ TEST_CASE("LogStream SPSC stress: producer + consumer agree on totals",
     // consumer pops on its own thread, slightly slower, so the ring fills
     // and we exercise the drop path. We then verify that the counts add
     // up and that consumed samples arrive in strictly-monotonic order.
-    constexpr int N        = 50'000;
+    constexpr int N = 50'000;
     constexpr int kPidCount = 2;
     log_ns::LogStream s{kPidCount, 128};
 
-    std::atomic<bool>             producer_done{false};
-    std::vector<std::int64_t>     consumed_ts;
+    std::atomic<bool> producer_done{false};
+    std::vector<std::int64_t> consumed_ts;
     consumed_ts.reserve(static_cast<std::size_t>(N));
 
     std::thread producer{[&] {
         for (int i = 0; i < N; ++i) {
-            std::vector<double> v{static_cast<double>(i),
-                                  -static_cast<double>(i)};
-            (void) s.try_push(i, v);
+            std::vector<double> v{static_cast<double>(i), -static_cast<double>(i)};
+            (void)s.try_push(i, v);
         }
         producer_done.store(true, std::memory_order_release);
     }};
 
     std::thread consumer{[&] {
-        std::int64_t        ts = 0;
+        std::int64_t ts = 0;
         std::vector<double> out(kPidCount, 0.0);
         while (true) {
             if (s.try_pop(ts, out)) {
@@ -507,8 +493,7 @@ TEST_CASE("LogStream SPSC stress: producer + consumer agree on totals",
             }
             // Empty for now — if the producer is done and we've drained,
             // we're finished.
-            if (producer_done.load(std::memory_order_acquire)
-                && s.approximate_size() == 0) {
+            if (producer_done.load(std::memory_order_acquire) && s.approximate_size() == 0) {
                 break;
             }
             std::this_thread::yield();

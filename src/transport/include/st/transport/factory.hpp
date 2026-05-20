@@ -41,9 +41,9 @@ namespace st::transport {
 // enum — it has no spec, lives in tests only, and consumers that
 // want a MockTransport construct one directly.
 enum class Kind : std::uint8_t {
-    J2534,    // Tactrix OpenPort 2.0 + any other J2534 v04.04 adapter
-    Obdx,     // OBDX Pro VX over USB CDC ACM, DVI binary protocol
-    Native,   // doc-18 handheld over USB CDC ACM, native protocol
+    J2534,  // Tactrix OpenPort 2.0 + any other J2534 v04.04 adapter
+    Obdx,   // OBDX Pro VX over USB CDC ACM, DVI binary protocol
+    Native, // doc-18 handheld over USB CDC ACM, native protocol
 };
 
 // Stable lowercase name for each Kind. Used for the CLI flag,
@@ -61,7 +61,7 @@ enum class Kind : std::uint8_t {
 //   Obdx   → reads device_path
 //   Native → reads device_path
 struct TransportSpec {
-    Kind        kind{Kind::J2534};
+    Kind kind{Kind::J2534};
     // Vendor DLL path (J2534 only). Typical Windows value:
     // "C:\Program Files\OpenPort 2.0\op20pt32.dll" or whichever
     // PassThruSupport.04.04 DLL the user wants. Resolved by
@@ -89,8 +89,7 @@ struct TransportSpec {
 // Validation errors (unknown kind, missing dll_path for J2534,
 // missing device_path for OBDX/Native) surface as InvalidArgument
 // before any platform call.
-[[nodiscard]] Result<std::unique_ptr<ITransport>> open_transport(
-    TransportSpec const &spec);
+[[nodiscard]] Result<std::unique_ptr<ITransport>> open_transport(TransportSpec const &spec);
 
 } // namespace st::transport
 

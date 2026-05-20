@@ -61,26 +61,24 @@ using IDeviceChannel = st::transport::IByteChannel;
 // OBDX Transport. Owns the byte channel; serializes every
 // send/recv internally (no concurrent DVI exchanges).
 class Transport : public ITransport {
-  public:
+public:
     explicit Transport(std::unique_ptr<IDeviceChannel> channel) noexcept;
     ~Transport() override;
 
-    Transport(Transport const &)            = delete;
+    Transport(Transport const &) = delete;
     Transport &operator=(Transport const &) = delete;
-    Transport(Transport &&)                 = delete;
-    Transport &operator=(Transport &&)      = delete;
+    Transport(Transport &&) = delete;
+    Transport &operator=(Transport &&) = delete;
 
     // ---- ITransport -------------------------------------------------
 
     [[nodiscard]] st::Status open(LinkConfig const &cfg) override;
     [[nodiscard]] st::Status close() override;
 
-    [[nodiscard]] Result<Frame> send_recv(
-        std::span<std::uint8_t const> payload,
-        std::chrono::milliseconds      timeout) override;
+    [[nodiscard]] Result<Frame> send_recv(std::span<std::uint8_t const> payload,
+                                          std::chrono::milliseconds timeout) override;
 
-    [[nodiscard]] st::Status send(
-        std::span<std::uint8_t const> payload) override;
+    [[nodiscard]] st::Status send(std::span<std::uint8_t const> payload) override;
 
     [[nodiscard]] st::Status start_streaming(FrameCallback callback) override;
     [[nodiscard]] st::Status stop_streaming() override;
@@ -94,12 +92,14 @@ class Transport : public ITransport {
 
     // ---- Inspection (tests) ----------------------------------------
 
-    [[nodiscard]] bool is_open() const noexcept { return open_; }
+    [[nodiscard]] bool is_open() const noexcept {
+        return open_;
+    }
 
-  private:
+private:
     std::unique_ptr<IDeviceChannel> channel_;
-    bool                            open_{false};
-    std::string                     firmware_;
+    bool open_{false};
+    std::string firmware_;
 };
 
 } // namespace st::transport::obdx

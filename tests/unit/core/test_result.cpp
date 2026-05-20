@@ -33,8 +33,7 @@ TEST_CASE("Result<int> happy path holds a value", "[core][result]") {
     REQUIRE(*r == 5);
 }
 
-TEST_CASE("Result<int> error path holds an Error with code and message",
-          "[core][result]") {
+TEST_CASE("Result<int> error path holds an Error with code and message", "[core][result]") {
     auto const r = divide(10, 0);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
@@ -49,8 +48,7 @@ TEST_CASE("Status models void-returning operations", "[core][result]") {
     REQUIRE(r.error().code() == st::ErrorCode::OutOfRange);
 }
 
-TEST_CASE("failure(code) builds an unexpected with default message",
-          "[core][result]") {
+TEST_CASE("failure(code) builds an unexpected with default message", "[core][result]") {
     st::Result<std::string> const r = st::failure(st::ErrorCode::NotImplemented);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
@@ -68,7 +66,7 @@ TEST_CASE("failure preserves a moved Error", "[core][result]") {
 #ifdef __GNUC__
 TEST_CASE("ST_TRY unwraps a value", "[core][result][st_try]") {
     auto compute = []() -> st::Result<int> {
-        auto a = ST_TRY(divide(20, 4));   // 5
+        auto a = ST_TRY(divide(20, 4));    // 5
         auto b = ST_TRY(divide(a + 5, 2)); // 5
         return a + b;
     };
@@ -79,8 +77,8 @@ TEST_CASE("ST_TRY unwraps a value", "[core][result][st_try]") {
 
 TEST_CASE("ST_TRY short-circuits on error", "[core][result][st_try]") {
     auto compute = []() -> st::Result<int> {
-        auto a = ST_TRY(divide(10, 0));   // bails here
-        return a + 1;                     // unreachable
+        auto a = ST_TRY(divide(10, 0)); // bails here
+        return a + 1;                   // unreachable
     };
     auto const r = compute();
     REQUIRE_FALSE(r.has_value());

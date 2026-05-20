@@ -39,8 +39,8 @@ namespace st::transport::j2534 {
 // but bit-width-mismatch with the host process produces
 // ERROR_BAD_EXE_FORMAT — worth surfacing in the error message).
 enum class RegistryView : std::uint8_t {
-    Native64,  // HKLM\Software\PassThruSupport.04.04 (read via KEY_WOW64_64KEY)
-    Wow6432,   // HKLM\Software\Wow6432Node\PassThruSupport.04.04 (KEY_WOW64_32KEY)
+    Native64, // HKLM\Software\PassThruSupport.04.04 (read via KEY_WOW64_64KEY)
+    Wow6432,  // HKLM\Software\Wow6432Node\PassThruSupport.04.04 (KEY_WOW64_32KEY)
 };
 
 [[nodiscard]] char const *registry_view_name(RegistryView v) noexcept;
@@ -53,15 +53,15 @@ struct AdapterInfo {
     // Subkey name under PassThruSupport.04.04. Stable across runs;
     // useful as a key in user-config remembering "last chosen
     // adapter."
-    std::string  subkey;
+    std::string subkey;
     // Display name from the DLL's `Name` registry value. Falls
     // back to the subkey when missing.
-    std::string  name;
+    std::string name;
     // Filesystem path to the vendor DLL (`FunctionLibrary` value).
     // This is what J2534Library::load() will eventually take.
-    std::string  function_library;
+    std::string function_library;
     // Vendor / manufacturer string (`Vendor` value, optional).
-    std::string  vendor;
+    std::string vendor;
     // ProtocolsSupported bitmask (per the spec — bit per
     // ProtocolId). Zero when the value isn't present in the
     // registry, which is allowed by the spec and surprisingly
@@ -105,8 +105,7 @@ struct AdapterInfo {
 //     → "(unknown: 0x80000000)"
 //
 // Returns "(none)" for a zero mask.
-[[nodiscard]] std::string format_protocols_supported(
-    std::uint32_t mask);
+[[nodiscard]] std::string format_protocols_supported(std::uint32_t mask);
 
 } // namespace st::transport::j2534
 

@@ -27,63 +27,65 @@ inline bool has_col(std::size_t idx) noexcept {
 
 inline double to_seconds(double raw, TimestampUnit unit) noexcept {
     switch (unit) {
-        case TimestampUnit::UnixSeconds: return raw;
-        case TimestampUnit::UnixMillis:  return raw / 1'000.0;
-        case TimestampUnit::UnixMicros:  return raw / 1'000'000.0;
-        case TimestampUnit::RowIndex:    return raw;
+    case TimestampUnit::UnixSeconds:
+        return raw;
+    case TimestampUnit::UnixMillis:
+        return raw / 1'000.0;
+    case TimestampUnit::UnixMicros:
+        return raw / 1'000'000.0;
+    case TimestampUnit::RowIndex:
+        return raw;
     }
     return raw;
 }
 
-inline double row_val(std::span<double const> samples,
-                      std::size_t              pid_count,
-                      std::size_t              row,
-                      std::size_t              col) noexcept {
+inline double row_val(std::span<double const> samples, std::size_t pid_count, std::size_t row,
+                      std::size_t col) noexcept {
     return samples[row * pid_count + col];
 }
 
 double median_of(std::vector<double> v) {
-    if (v.empty()) return 0.0;
+    if (v.empty())
+        return 0.0;
     auto const mid = v.size() / 2;
     std::nth_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(mid), v.end());
     double const m = v[mid];
-    if (v.size() % 2 == 1) return m;
+    if (v.size() % 2 == 1)
+        return m;
     // For even-sized vectors, average the two central values.
-    auto const lower_max = *std::max_element(
-        v.begin(), v.begin() + static_cast<std::ptrdiff_t>(mid));
+    auto const lower_max =
+        *std::max_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(mid));
     return (m + lower_max) * 0.5;
 }
 
 // Build per-row scratch with derived signals so the rest of the
 // detector reads simple arrays.
 struct Row {
-    double  t{0.0};
-    double  target{0.0};
-    double  actual{0.0};
-    double  throttle{0.0};
-    double  rpm{0.0};
+    double t{0.0};
+    double target{0.0};
+    double actual{0.0};
+    double throttle{0.0};
+    double rpm{0.0};
 };
 
-std::vector<Row> materialize(std::span<double const> samples,
-                             std::size_t              pid_count,
-                             PidMapping const        &m,
-                             TimestampUnit            unit) {
+std::vector<Row> materialize(std::span<double const> samples, std::size_t pid_count,
+                             PidMapping const &m, TimestampUnit unit) {
     std::size_t const n = samples.size() / pid_count;
     std::vector<Row> out;
     out.reserve(n);
     for (std::size_t r = 0; r < n; ++r) {
         Row x{};
         double const ts_raw = row_val(samples, pid_count, r, m.timestamp_idx);
-        x.t        = to_seconds(ts_raw, unit);
-        x.target   = row_val(samples, pid_count, r, m.target_boost_idx);
-        x.actual   = row_val(samples, pid_count, r, m.actual_boost_idx);
+        x.t = to_seconds(ts_raw, unit);
+        x.target = row_val(samples, pid_count, r, m.target_boost_idx);
+        x.actual = row_val(samples, pid_count, r, m.actual_boost_idx);
         x.throttle = row_val(samples, pid_count, r, m.throttle_idx);
         if (has_col(m.rpm_idx)) {
             x.rpm = row_val(samples, pid_count, r, m.rpm_idx);
         }
         // Skip rows with non-finite values; the detector treats them as gaps.
-        if (!std::isfinite(x.t) || !std::isfinite(x.target)
-            || !std::isfinite(x.actual) || !std::isfinite(x.throttle)) {
+        if (!std::isfinite(x.t) || !std::isfinite(x.target) || !std::isfinite(x.actual) ||
+            !std::isfinite(x.throttle)) {
             continue;
         }
         out.push_back(x);
@@ -101,10 +103,10 @@ TipInEvent characterize(std::span<Row const> window, DetectorConfig const &cfg) 
         return ev;
     }
     ev.start_timestamp = window.front().t;
-    ev.end_timestamp   = window.back().t;
-    ev.initial_boost   = window.front().actual;
-    ev.target_boost    = window.front().target;
-    ev.initial_rpm     = window.front().rpm;
+    ev.end_timestamp = window.back().t;
+    ev.initial_boost = window.front().actual;
+    ev.target_boost = window.front().target;
+    ev.initial_rpm = window.front().rpm;
 
     // Take target as the median of the last 25% of the window — handles
     // the case where target itself drifts during the event.
@@ -122,7 +124,8 @@ TipInEvent characterize(std::span<Row const> window, DetectorConfig const &cfg) 
     // Peak and steady-state actual boost.
     double peak = window.front().actual;
     for (auto const &r : window) {
-        if (r.actual > peak) peak = r.actual;
+        if (r.actual > peak)
+            peak = r.actual;
     }
     ev.peak_boost = peak;
 
@@ -138,15 +141,15 @@ TipInEvent characterize(std::span<Row const> window, DetectorConfig const &cfg) 
     }
     ev.steady_state_error = ev.steady_state_boost - ev.target_boost;
 
-    double const step_size =
-        std::max(ev.target_boost - ev.initial_boost, 1e-6);
+    double const step_size = std::max(ev.target_boost - ev.initial_boost, 1e-6);
 
     // Rise time: time from when actual crosses 10% to 90% of the step.
-    double const ten_pct    = ev.initial_boost + 0.10 * step_size;
+    double const ten_pct = ev.initial_boost + 0.10 * step_size;
     double const ninety_pct = ev.initial_boost + 0.90 * step_size;
     double t_10 = -1.0, t_90 = -1.0;
     for (auto const &r : window) {
-        if (t_10 < 0.0 && r.actual >= ten_pct)    t_10 = r.t;
+        if (t_10 < 0.0 && r.actual >= ten_pct)
+            t_10 = r.t;
         if (t_10 >= 0.0 && r.actual >= ninety_pct) {
             t_90 = r.t;
             break;
@@ -166,8 +169,7 @@ TipInEvent characterize(std::span<Row const> window, DetectorConfig const &cfg) 
     double const settle_band = 0.05 * step_size;
     double settling_start = -1.0;
     for (std::size_t i = 0; i < window.size(); ++i) {
-        bool const within = std::abs(window[i].actual - ev.target_boost)
-                            <= settle_band;
+        bool const within = std::abs(window[i].actual - ev.target_boost) <= settle_band;
         if (within && settling_start < 0.0) {
             settling_start = window[i].t;
         } else if (!within) {
@@ -188,15 +190,13 @@ TipInEvent characterize(std::span<Row const> window, DetectorConfig const &cfg) 
     for (std::size_t i = tail_start; i < window.size(); ++i) {
         sum += window[i].actual;
     }
-    double const mean = (tail_count > 0)
-        ? sum / static_cast<double>(tail_count) : 0.0;
+    double const mean = (tail_count > 0) ? sum / static_cast<double>(tail_count) : 0.0;
     double var = 0.0;
     for (std::size_t i = tail_start; i < window.size(); ++i) {
         double const d = window[i].actual - mean;
         var += d * d;
     }
-    double const stddev = (tail_count > 0)
-        ? std::sqrt(var / static_cast<double>(tail_count)) : 0.0;
+    double const stddev = (tail_count > 0) ? std::sqrt(var / static_cast<double>(tail_count)) : 0.0;
     double const cv = (std::abs(mean) > 1e-6) ? (stddev / std::abs(mean)) : 0.0;
 
     if (window.front().throttle - window.back().throttle > 30.0) {
@@ -206,9 +206,8 @@ TipInEvent characterize(std::span<Row const> window, DetectorConfig const &cfg) 
         ev.quality = StepQuality::Spiked;
     } else if (cv > cfg.noise_cv_threshold) {
         ev.quality = StepQuality::Choppy;
-    } else if (t_90 < 0.0
-               || (ev.end_timestamp - ev.start_timestamp)
-                  >= cfg.max_event_duration_s - 1e-3) {
+    } else if (t_90 < 0.0 ||
+               (ev.end_timestamp - ev.start_timestamp) >= cfg.max_event_duration_s - 1e-3) {
         ev.quality = StepQuality::Slow;
     } else {
         ev.quality = StepQuality::Good;
@@ -219,28 +218,24 @@ TipInEvent characterize(std::span<Row const> window, DetectorConfig const &cfg) 
 
 void make_suggestions(BoostSnapshot &snap, DetectorConfig const &cfg) {
     if (snap.good_event_count == 0) {
-        snap.gain_suggestions.emplace_back(
-            "No good-quality tip-in events detected — collect more "
-            "clean WOT logs before evaluating PID gains.");
+        snap.gain_suggestions.emplace_back("No good-quality tip-in events detected — collect more "
+                                           "clean WOT logs before evaluating PID gains.");
         return;
     }
     if (snap.median_overshoot_pct > cfg.overshoot_warn_pct) {
         snap.gain_suggestions.emplace_back(
-            "Overshoot is high (median " +
-            std::to_string(snap.median_overshoot_pct).substr(0, 5) +
+            "Overshoot is high (median " + std::to_string(snap.median_overshoot_pct).substr(0, 5) +
             " %). Consider reducing proportional gain (Kp) by 10-15%, "
             "or increasing derivative gain (Kd) if the response is "
             "already fast enough.");
     }
     if (snap.median_rise_time_s > cfg.slow_rise_threshold_s) {
-        snap.gain_suggestions.emplace_back(
-            "Rise time is slow (median " +
-            std::to_string(snap.median_rise_time_s).substr(0, 5) +
-            " s). Consider increasing proportional gain (Kp); watch "
-            "for added overshoot on the next pass.");
+        snap.gain_suggestions.emplace_back("Rise time is slow (median " +
+                                           std::to_string(snap.median_rise_time_s).substr(0, 5) +
+                                           " s). Consider increasing proportional gain (Kp); watch "
+                                           "for added overshoot on the next pass.");
     }
-    if (std::abs(snap.mean_steady_state_error)
-        > cfg.steady_state_error_threshold) {
+    if (std::abs(snap.mean_steady_state_error) > cfg.steady_state_error_threshold) {
         if (snap.mean_steady_state_error < 0.0) {
             snap.gain_suggestions.emplace_back(
                 "Steady-state undershoot (mean " +
@@ -256,19 +251,18 @@ void make_suggestions(BoostSnapshot &snap, DetectorConfig const &cfg) {
         }
     }
     if (snap.gain_suggestions.empty()) {
-        snap.gain_suggestions.emplace_back(
-            "Boost response is within configured thresholds. No "
-            "immediate gain-table adjustments suggested.");
+        snap.gain_suggestions.emplace_back("Boost response is within configured thresholds. No "
+                                           "immediate gain-table adjustments suggested.");
     }
-    snap.gain_suggestions.emplace_back(
-        "These are starting points — verify on a dyno or controlled "
-        "road test before driving aggressively.");
+    snap.gain_suggestions.emplace_back("These are starting points — verify on a dyno or controlled "
+                                       "road test before driving aggressively.");
 }
 
 std::size_t max_referenced_column(PidMapping const &m) noexcept {
     std::size_t lo = 0;
-    auto const  consider = [&](std::size_t v) {
-        if (v != kNoColumn && v + 1 > lo) lo = v + 1;
+    auto const consider = [&](std::size_t v) {
+        if (v != kNoColumn && v + 1 > lo)
+            lo = v + 1;
     };
     consider(m.timestamp_idx);
     consider(m.target_boost_idx);
@@ -279,23 +273,18 @@ std::size_t max_referenced_column(PidMapping const &m) noexcept {
     return lo;
 }
 
-}  // namespace
+} // namespace
 
-BoostSnapshot snapshot_from_samples(std::span<double const>  samples_row_major,
-                                    std::size_t              pid_count,
-                                    PidMapping const        &mapping,
-                                    DetectorConfig const    &cfg) {
+BoostSnapshot snapshot_from_samples(std::span<double const> samples_row_major,
+                                    std::size_t pid_count, PidMapping const &mapping,
+                                    DetectorConfig const &cfg) {
     BoostSnapshot snap{};
-    if (pid_count == 0
-        || samples_row_major.empty()
-        || !has_col(mapping.timestamp_idx)
-        || !has_col(mapping.target_boost_idx)
-        || !has_col(mapping.actual_boost_idx)
-        || !has_col(mapping.throttle_idx)) {
+    if (pid_count == 0 || samples_row_major.empty() || !has_col(mapping.timestamp_idx) ||
+        !has_col(mapping.target_boost_idx) || !has_col(mapping.actual_boost_idx) ||
+        !has_col(mapping.throttle_idx)) {
         return snap;
     }
-    auto const rows = materialize(samples_row_major, pid_count, mapping,
-                                   cfg.timestamp_unit);
+    auto const rows = materialize(samples_row_major, pid_count, mapping, cfg.timestamp_unit);
     snap.samples_considered = rows.size();
     if (rows.size() < 4) {
         return snap;
@@ -309,17 +298,19 @@ BoostSnapshot snapshot_from_samples(std::span<double const>  samples_row_major,
     // max_event_duration_s elapses or the next tip-in begins.
     for (std::size_t i = 1; i < rows.size(); ++i) {
         std::size_t lookback = i;
-        while (lookback > 0
-               && rows[i].t - rows[lookback].t < 0.5) {
+        while (lookback > 0 && rows[i].t - rows[lookback].t < 0.5) {
             --lookback;
         }
-        if (lookback == i) continue;  // sample cadence too coarse here
+        if (lookback == i)
+            continue; // sample cadence too coarse here
 
         double const throttle_rise = rows[i].throttle - rows[lookback].throttle;
-        if (throttle_rise < cfg.throttle_step_threshold_pct) continue;
+        if (throttle_rise < cfg.throttle_step_threshold_pct)
+            continue;
 
         double const target_rise = rows[i].target - rows[lookback].target;
-        if (target_rise < cfg.target_boost_step_threshold) continue;
+        if (target_rise < cfg.target_boost_step_threshold)
+            continue;
 
         // Walk forward until max_event_duration_s elapses OR the user
         // lifts off (throttle drops 30+ pts below the post-step level).
@@ -328,9 +319,9 @@ BoostSnapshot snapshot_from_samples(std::span<double const>  samples_row_major,
         // have low throttle.
         double const peak_throttle = rows[i].throttle;
         std::size_t end = lookback;
-        while (end < rows.size()
-               && rows[end].t - rows[lookback].t < cfg.max_event_duration_s) {
-            if (end > i && rows[end].throttle < peak_throttle - 30.0) break;
+        while (end < rows.size() && rows[end].t - rows[lookback].t < cfg.max_event_duration_s) {
+            if (end > i && rows[end].throttle < peak_throttle - 30.0)
+                break;
             ++end;
         }
         if (end <= lookback + 2) {
@@ -342,9 +333,8 @@ BoostSnapshot snapshot_from_samples(std::span<double const>  samples_row_major,
             continue;
         }
 
-        TipInEvent const ev = characterize(
-            std::span<Row const>{rows.data() + lookback, rows.data() + end},
-            cfg);
+        TipInEvent const ev =
+            characterize(std::span<Row const>{rows.data() + lookback, rows.data() + end}, cfg);
         snap.events.push_back(ev);
         snap.total_event_count++;
         if (ev.quality == StepQuality::Good) {
@@ -358,30 +348,30 @@ BoostSnapshot snapshot_from_samples(std::span<double const>  samples_row_major,
     double sse_sum = 0.0;
     std::uint32_t sse_count = 0;
     for (auto const &ev : snap.events) {
-        if (ev.quality != StepQuality::Good) continue;
-        if (ev.rise_time_s > 0.0)       rise_times.push_back(ev.rise_time_s);
-        if (ev.overshoot_pct > 0.0)     overshoots.push_back(ev.overshoot_pct);
-        if (ev.settling_time_s > 0.0)   settling_times.push_back(ev.settling_time_s);
+        if (ev.quality != StepQuality::Good)
+            continue;
+        if (ev.rise_time_s > 0.0)
+            rise_times.push_back(ev.rise_time_s);
+        if (ev.overshoot_pct > 0.0)
+            overshoots.push_back(ev.overshoot_pct);
+        if (ev.settling_time_s > 0.0)
+            settling_times.push_back(ev.settling_time_s);
         sse_sum += ev.steady_state_error;
         sse_count++;
     }
-    snap.median_rise_time_s     = median_of(rise_times);
-    snap.median_overshoot_pct   = median_of(overshoots);
+    snap.median_rise_time_s = median_of(rise_times);
+    snap.median_overshoot_pct = median_of(overshoots);
     snap.median_settling_time_s = median_of(settling_times);
-    snap.mean_steady_state_error =
-        (sse_count > 0) ? sse_sum / static_cast<double>(sse_count) : 0.0;
+    snap.mean_steady_state_error = (sse_count > 0) ? sse_sum / static_cast<double>(sse_count) : 0.0;
 
     make_suggestions(snap, cfg);
     return snap;
 }
 
-st::Result<BoostSnapshot> snapshot_from_csv(std::string_view        csv_path,
-                                            PidMapping const       &mapping,
-                                            DetectorConfig const   &cfg) {
-    if (!has_col(mapping.timestamp_idx)
-        || !has_col(mapping.target_boost_idx)
-        || !has_col(mapping.actual_boost_idx)
-        || !has_col(mapping.throttle_idx)) {
+st::Result<BoostSnapshot> snapshot_from_csv(std::string_view csv_path, PidMapping const &mapping,
+                                            DetectorConfig const &cfg) {
+    if (!has_col(mapping.timestamp_idx) || !has_col(mapping.target_boost_idx) ||
+        !has_col(mapping.actual_boost_idx) || !has_col(mapping.throttle_idx)) {
         return st::failure(st::ErrorCode::InvalidArgument,
                            std::string{"ebcs: mapping requires timestamp, "
                                        "target_boost, actual_boost, and "
@@ -391,8 +381,7 @@ st::Result<BoostSnapshot> snapshot_from_csv(std::string_view        csv_path,
     std::ifstream f{std::string{csv_path}};
     if (!f) {
         return st::failure(st::ErrorCode::FileNotFound,
-                           std::string{"ebcs: cannot open '"}
-                               + std::string{csv_path} + "'");
+                           std::string{"ebcs: cannot open '"} + std::string{csv_path} + "'");
     }
     std::ostringstream buf;
     buf << f.rdbuf();
@@ -404,20 +393,18 @@ st::Result<BoostSnapshot> snapshot_from_csv(std::string_view        csv_path,
                            std::string{"ebcs: CSV needs a header row and at "
                                        "least one data row"});
     }
-    auto const  header_fields = st::core::csv::split_fields(lines[0]);
+    auto const header_fields = st::core::csv::split_fields(lines[0]);
     std::size_t const pid_count = header_fields.size();
     if (pid_count == 0) {
-        return st::failure(st::ErrorCode::ParseError,
-                           std::string{"ebcs: CSV header is empty"});
+        return st::failure(st::ErrorCode::ParseError, std::string{"ebcs: CSV header is empty"});
     }
     std::size_t const needed = max_referenced_column(mapping);
     if (needed > pid_count) {
         return st::failure(st::ErrorCode::InvalidArgument,
                            std::string{"ebcs: mapping references column "
-                                       "index "}
-                               + std::to_string(needed - 1)
-                               + " but CSV has only "
-                               + std::to_string(pid_count) + " columns");
+                                       "index "} +
+                               std::to_string(needed - 1) + " but CSV has only " +
+                               std::to_string(pid_count) + " columns");
     }
 
     std::vector<double> samples;
@@ -426,20 +413,16 @@ st::Result<BoostSnapshot> snapshot_from_csv(std::string_view        csv_path,
         auto const fields = st::core::csv::split_fields(lines[row]);
         if (fields.size() < pid_count) {
             return st::failure(st::ErrorCode::ParseError,
-                               std::string{"ebcs: CSV row "}
-                                   + std::to_string(row + 1) + " has "
-                                   + std::to_string(fields.size())
-                                   + " fields, expected "
-                                   + std::to_string(pid_count));
+                               std::string{"ebcs: CSV row "} + std::to_string(row + 1) + " has " +
+                                   std::to_string(fields.size()) + " fields, expected " +
+                                   std::to_string(pid_count));
         }
         for (std::size_t col = 0; col < pid_count; ++col) {
             double v = 0.0;
             if (!st::core::csv::parse_double(fields[col], v)) {
                 return st::failure(st::ErrorCode::ParseError,
-                                   std::string{"ebcs: CSV row "}
-                                       + std::to_string(row + 1) + " col "
-                                       + std::to_string(col + 1)
-                                       + ": not a number");
+                                   std::string{"ebcs: CSV row "} + std::to_string(row + 1) +
+                                       " col " + std::to_string(col + 1) + ": not a number");
             }
             samples.push_back(v);
         }
@@ -448,4 +431,4 @@ st::Result<BoostSnapshot> snapshot_from_csv(std::string_view        csv_path,
     return snapshot_from_samples(samples, pid_count, mapping, cfg);
 }
 
-}  // namespace st::log::ebcs
+} // namespace st::log::ebcs

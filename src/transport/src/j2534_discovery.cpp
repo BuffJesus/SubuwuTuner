@@ -11,16 +11,18 @@
 #include <vector>
 
 #ifdef _WIN32
-#  define WIN32_LEAN_AND_MEAN
-#  include <windows.h>
+#    define WIN32_LEAN_AND_MEAN
+#    include <windows.h>
 #endif
 
 namespace st::transport::j2534 {
 
 char const *registry_view_name(RegistryView v) noexcept {
     switch (v) {
-        case RegistryView::Native64: return "native64";
-        case RegistryView::Wow6432:  return "wow6432";
+    case RegistryView::Native64:
+        return "native64";
+    case RegistryView::Wow6432:
+        return "wow6432";
     }
     return "unknown";
 }
@@ -37,7 +39,7 @@ namespace {
 // "1 if any protocol" sentinel which we surface verbatim.
 struct ProtoEntry {
     std::uint32_t mask;
-    char const   *name;
+    char const *name;
 };
 constexpr std::array<ProtoEntry, 6> kProtocolNames{{
     {1U << 0U, "J1850VPW"},
@@ -58,14 +60,16 @@ std::string format_protocols_supported(std::uint32_t mask) {
     std::uint32_t consumed = 0;
     for (auto const &e : kProtocolNames) {
         if ((mask & e.mask) != 0) {
-            if (!out.empty()) out.append(", ");
+            if (!out.empty())
+                out.append(", ");
             out.append(e.name);
             consumed |= e.mask;
         }
     }
     std::uint32_t const leftover = mask & ~consumed;
     if (leftover != 0) {
-        if (!out.empty()) out.append(", ");
+        if (!out.empty())
+            out.append(", ");
         char buf[32];
         std::snprintf(buf, sizeof buf, "(unknown: 0x%08X)", leftover);
         out.append(buf);
@@ -83,13 +87,9 @@ namespace {
 // LSTATUS — "no such key" is the normal case for one of the two
 // views on most installs.
 [[nodiscard]] HKEY open_root(REGSAM view_flag) noexcept {
-    HKEY     hkey         = nullptr;
-    LSTATUS  status       = RegOpenKeyExA(
-        HKEY_LOCAL_MACHINE,
-        "SOFTWARE\\PassThruSupport.04.04",
-        0,
-        KEY_READ | view_flag,
-        &hkey);
+    HKEY hkey = nullptr;
+    LSTATUS status = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\PassThruSupport.04.04", 0,
+                                   KEY_READ | view_flag, &hkey);
     if (status != ERROR_SUCCESS) {
         return nullptr;
     }
@@ -100,38 +100,29 @@ namespace {
 // empty if the value is missing / wrong type / too large for our
 // buffer. We cap at 1 KiB per value (J2534 names + paths are
 // short).
-[[nodiscard]] std::string read_string_value(HKEY hkey,
-                                              char const *value_name) noexcept {
-    char    buf[1024]{};
-    DWORD   buf_size = static_cast<DWORD>(sizeof(buf) - 1);
-    DWORD   type     = 0;
-    LSTATUS status   = RegQueryValueExA(
-        hkey,
-        value_name,
-        nullptr,
-        &type,
-        reinterpret_cast<LPBYTE>(buf),
-        &buf_size);
-    if (status != ERROR_SUCCESS) return {};
-    if (type != REG_SZ && type != REG_EXPAND_SZ) return {};
+[[nodiscard]] std::string read_string_value(HKEY hkey, char const *value_name) noexcept {
+    char buf[1024]{};
+    DWORD buf_size = static_cast<DWORD>(sizeof(buf) - 1);
+    DWORD type = 0;
+    LSTATUS status = RegQueryValueExA(hkey, value_name, nullptr, &type,
+                                      reinterpret_cast<LPBYTE>(buf), &buf_size);
+    if (status != ERROR_SUCCESS)
+        return {};
+    if (type != REG_SZ && type != REG_EXPAND_SZ)
+        return {};
     // RegQueryValueEx returns size in bytes including the NUL on
     // success; clamp + trim.
-    if (buf_size > 0 && buf[buf_size - 1] == '\0') --buf_size;
+    if (buf_size > 0 && buf[buf_size - 1] == '\0')
+        --buf_size;
     return std::string{buf, buf_size};
 }
 
-[[nodiscard]] std::uint32_t read_dword_value(HKEY hkey,
-                                               char const *value_name) noexcept {
-    DWORD   value    = 0;
-    DWORD   value_sz = sizeof(value);
-    DWORD   type     = 0;
-    LSTATUS status   = RegQueryValueExA(
-        hkey,
-        value_name,
-        nullptr,
-        &type,
-        reinterpret_cast<LPBYTE>(&value),
-        &value_sz);
+[[nodiscard]] std::uint32_t read_dword_value(HKEY hkey, char const *value_name) noexcept {
+    DWORD value = 0;
+    DWORD value_sz = sizeof(value);
+    DWORD type = 0;
+    LSTATUS status = RegQueryValueExA(hkey, value_name, nullptr, &type,
+                                      reinterpret_cast<LPBYTE>(&value), &value_sz);
     if (status != ERROR_SUCCESS || type != REG_DWORD) {
         return 0;
     }
@@ -141,37 +132,37 @@ namespace {
 // Walk one registry view and append every adapter subkey we find
 // to `out`. `view_flag` is KEY_WOW64_64KEY or KEY_WOW64_32KEY;
 // `view_tag` records which view in the AdapterInfo.
-void walk_view(REGSAM view_flag, RegistryView view_tag,
-               std::vector<AdapterInfo> &out) {
+void walk_view(REGSAM view_flag, RegistryView view_tag, std::vector<AdapterInfo> &out) {
     HKEY root = open_root(view_flag);
-    if (root == nullptr) return;
+    if (root == nullptr)
+        return;
 
     DWORD index = 0;
     for (;;) {
-        char    subkey_name[256]{};
-        DWORD   subkey_size = static_cast<DWORD>(sizeof(subkey_name));
-        LSTATUS status      = RegEnumKeyExA(
-            root, index, subkey_name, &subkey_size,
-            nullptr, nullptr, nullptr, nullptr);
-        if (status == ERROR_NO_MORE_ITEMS) break;
-        if (status != ERROR_SUCCESS) break;  // be conservative on weird errors
+        char subkey_name[256]{};
+        DWORD subkey_size = static_cast<DWORD>(sizeof(subkey_name));
+        LSTATUS status = RegEnumKeyExA(root, index, subkey_name, &subkey_size, nullptr, nullptr,
+                                       nullptr, nullptr);
+        if (status == ERROR_NO_MORE_ITEMS)
+            break;
+        if (status != ERROR_SUCCESS)
+            break; // be conservative on weird errors
         ++index;
 
-        HKEY    sub      = nullptr;
-        LSTATUS open_sub = RegOpenKeyExA(
-            root, subkey_name, 0,
-            KEY_READ | view_flag, &sub);
-        if (open_sub != ERROR_SUCCESS) continue;
+        HKEY sub = nullptr;
+        LSTATUS open_sub = RegOpenKeyExA(root, subkey_name, 0, KEY_READ | view_flag, &sub);
+        if (open_sub != ERROR_SUCCESS)
+            continue;
 
         AdapterInfo info;
-        info.subkey            = subkey_name;
-        info.name              = read_string_value(sub, "Name");
-        if (info.name.empty()) info.name = info.subkey;
-        info.function_library  = read_string_value(sub, "FunctionLibrary");
-        info.vendor            = read_string_value(sub, "Vendor");
-        info.protocols_supported =
-            read_dword_value(sub, "ProtocolsSupported");
-        info.view              = view_tag;
+        info.subkey = subkey_name;
+        info.name = read_string_value(sub, "Name");
+        if (info.name.empty())
+            info.name = info.subkey;
+        info.function_library = read_string_value(sub, "FunctionLibrary");
+        info.vendor = read_string_value(sub, "Vendor");
+        info.protocols_supported = read_dword_value(sub, "ProtocolsSupported");
+        info.view = view_tag;
 
         RegCloseKey(sub);
         // Only include entries that name an actual DLL — empty
@@ -190,11 +181,11 @@ void walk_view(REGSAM view_flag, RegistryView view_tag,
 std::vector<AdapterInfo> discover_adapters() {
     std::vector<AdapterInfo> out;
     walk_view(KEY_WOW64_64KEY, RegistryView::Native64, out);
-    walk_view(KEY_WOW64_32KEY, RegistryView::Wow6432,  out);
+    walk_view(KEY_WOW64_32KEY, RegistryView::Wow6432, out);
     return out;
 }
 
-#else  // !_WIN32
+#else // !_WIN32
 
 std::vector<AdapterInfo> discover_adapters() {
     // J2534 vendor DLLs are a Windows registration mechanism;

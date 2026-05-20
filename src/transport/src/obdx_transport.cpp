@@ -27,23 +27,23 @@ using std::chrono::steady_clock;
 // multiple read_bytes calls until `n` bytes are collected or the
 // deadline passes. The byte-channel contract says read_bytes
 // returns "what's available, up to max"; we re-poll until full.
-[[nodiscard]] Result<std::vector<std::uint8_t>> read_exactly(
-    IDeviceChannel &chan, std::size_t n, milliseconds timeout) {
+[[nodiscard]] Result<std::vector<std::uint8_t>> read_exactly(IDeviceChannel &chan, std::size_t n,
+                                                             milliseconds timeout) {
     std::vector<std::uint8_t> out;
     out.reserve(n);
     auto const deadline = steady_clock::now() + timeout;
     while (out.size() < n) {
         auto const remaining_ms =
-            std::chrono::duration_cast<milliseconds>(
-                deadline - steady_clock::now());
+            std::chrono::duration_cast<milliseconds>(deadline - steady_clock::now());
         if (remaining_ms.count() <= 0) {
             return failure(ErrorCode::TransportTimeout,
-                           "obdx::read_exactly: deadline expired with "
-                           + std::to_string(out.size()) + "/" +
-                           std::to_string(n) + " bytes accumulated");
+                           "obdx::read_exactly: deadline expired with " +
+                               std::to_string(out.size()) + "/" + std::to_string(n) +
+                               " bytes accumulated");
         }
         auto chunk = chan.read_bytes(n - out.size(), remaining_ms);
-        if (!chunk.has_value()) return failure(chunk.error());
+        if (!chunk.has_value())
+            return failure(chunk.error());
         if (!chunk->empty()) {
             out.insert(out.end(), chunk->begin(), chunk->end());
         }
@@ -59,22 +59,20 @@ using std::chrono::steady_clock;
 // deadline passes. Returns the response content (without the
 // trailing '>'). ELM responses are CR-terminated ASCII; the prompt
 // signals the adapter is ready for the next command.
-[[nodiscard]] Result<std::string> read_until_prompt(
-    IDeviceChannel &chan, milliseconds timeout) {
+[[nodiscard]] Result<std::string> read_until_prompt(IDeviceChannel &chan, milliseconds timeout) {
     std::string out;
     auto const deadline = steady_clock::now() + timeout;
     while (true) {
         auto const remaining_ms =
-            std::chrono::duration_cast<milliseconds>(
-                deadline - steady_clock::now());
+            std::chrono::duration_cast<milliseconds>(deadline - steady_clock::now());
         if (remaining_ms.count() <= 0) {
-            return failure(ErrorCode::TransportTimeout,
-                           "obdx::read_until_prompt: no '>' before "
-                           "deadline (got "
-                           + std::to_string(out.size()) + " bytes)");
+            return failure(ErrorCode::TransportTimeout, "obdx::read_until_prompt: no '>' before "
+                                                        "deadline (got " +
+                                                            std::to_string(out.size()) + " bytes)");
         }
         auto chunk = chan.read_bytes(64, remaining_ms);
-        if (!chunk.has_value()) return failure(chunk.error());
+        if (!chunk.has_value())
+            return failure(chunk.error());
         for (auto b : *chunk) {
             if (b == '>') {
                 return out;
@@ -89,11 +87,12 @@ using std::chrono::steady_clock;
 // the next '>' prompt. The returned string contains the adapter's
 // raw response (typically a few lines of ASCII echoed back from the
 // device).
-[[nodiscard]] Result<std::string> elm_exchange(
-    IDeviceChannel &chan, std::string_view cmd, milliseconds timeout) {
+[[nodiscard]] Result<std::string> elm_exchange(IDeviceChannel &chan, std::string_view cmd,
+                                               milliseconds timeout) {
     std::vector<std::uint8_t> tx;
     tx.reserve(cmd.size() + 1);
-    for (char c : cmd) tx.push_back(static_cast<std::uint8_t>(c));
+    for (char c : cmd)
+        tx.push_back(static_cast<std::uint8_t>(c));
     tx.push_back('\r');
     if (auto s = chan.write_bytes(tx); !s.has_value()) {
         return failure(s.error());
@@ -107,17 +106,16 @@ using std::chrono::steady_clock;
 // applies, read the rest of the LEN field if so, then read
 // declared_len payload bytes + 1 CRC byte. Assembled buffer goes
 // to the codec for CRC + structural validation.
-[[nodiscard]] Result<dvi::DecodedFrame> read_dvi_frame(
-    IDeviceChannel &chan, milliseconds timeout) {
+[[nodiscard]] Result<dvi::DecodedFrame> read_dvi_frame(IDeviceChannel &chan, milliseconds timeout) {
     auto const deadline = steady_clock::now() + timeout;
     auto const remaining = [deadline]() {
         return std::max(milliseconds{0},
-                        std::chrono::duration_cast<milliseconds>(
-                            deadline - steady_clock::now()));
+                        std::chrono::duration_cast<milliseconds>(deadline - steady_clock::now()));
     };
 
     auto head = read_exactly(chan, 2, remaining());
-    if (!head.has_value()) return failure(head.error());
+    if (!head.has_value())
+        return failure(head.error());
     std::vector<std::uint8_t> frame = std::move(*head);
 
     // Is this a 2-byte-length opcode? Only RxLarge (request 0x09)
@@ -127,23 +125,25 @@ using std::chrono::steady_clock;
     bool wide_length = false;
     if (opcode != dvi::kErrorOpcode) {
         std::uint8_t const req = opcode & 0xEFU;
-        if (req == static_cast<std::uint8_t>(dvi::Opcode::RxLarge)
-            || req == static_cast<std::uint8_t>(dvi::Opcode::TxLarge)) {
+        if (req == static_cast<std::uint8_t>(dvi::Opcode::RxLarge) ||
+            req == static_cast<std::uint8_t>(dvi::Opcode::TxLarge)) {
             wide_length = true;
         }
     }
     std::size_t declared_len = 0;
     if (wide_length) {
         auto lo = read_exactly(chan, 1, remaining());
-        if (!lo.has_value()) return failure(lo.error());
+        if (!lo.has_value())
+            return failure(lo.error());
         frame.push_back((*lo)[0]);
-        declared_len = (static_cast<std::size_t>(frame[1]) << 8U)
-                     | static_cast<std::size_t>(frame[2]);
+        declared_len =
+            (static_cast<std::size_t>(frame[1]) << 8U) | static_cast<std::size_t>(frame[2]);
     } else {
         declared_len = frame[1];
     }
     auto rest = read_exactly(chan, declared_len + 1, remaining());
-    if (!rest.has_value()) return failure(rest.error());
+    if (!rest.has_value())
+        return failure(rest.error());
     frame.insert(frame.end(), rest->begin(), rest->end());
     return dvi::decode_frame(frame);
 }
@@ -151,16 +151,18 @@ using std::chrono::steady_clock;
 // Send a DVI request, read the response frame, return the payload
 // (for normal responses) or surface an error (for error frames /
 // CRC failures).
-[[nodiscard]] Result<std::vector<std::uint8_t>> dvi_exchange(
-    IDeviceChannel &chan, dvi::Opcode op,
-    std::span<std::uint8_t const> payload, milliseconds timeout) {
+[[nodiscard]] Result<std::vector<std::uint8_t>> dvi_exchange(IDeviceChannel &chan, dvi::Opcode op,
+                                                             std::span<std::uint8_t const> payload,
+                                                             milliseconds timeout) {
     auto enc = dvi::encode_request(op, payload);
-    if (!enc.has_value()) return failure(enc.error());
+    if (!enc.has_value())
+        return failure(enc.error());
     if (auto s = chan.write_bytes(*enc); !s.has_value()) {
         return failure(s.error());
     }
     auto resp = read_dvi_frame(chan, timeout);
-    if (!resp.has_value()) return failure(resp.error());
+    if (!resp.has_value())
+        return failure(resp.error());
     if (auto const *ef = std::get_if<dvi::ErrorFrame>(&*resp)) {
         char buf[96];
         std::snprintf(buf, sizeof buf,
@@ -176,9 +178,8 @@ using std::chrono::steady_clock;
     // Unreachable per the DVI decoder's variant shape (Response or
     // Error are the only alternatives). Belt-and-suspenders for the
     // null-deref analyzer.
-    return failure(ErrorCode::Unknown,
-                   "obdx::dvi_exchange: decoded frame matched no known "
-                   "variant");
+    return failure(ErrorCode::Unknown, "obdx::dvi_exchange: decoded frame matched no known "
+                                       "variant");
 }
 
 // Map a LinkConfig to the bytes we'd hand the SetProtocol opcode.
@@ -198,45 +199,41 @@ using std::chrono::steady_clock;
 //
 // Returns a payload byte vector or an InvalidArgument when
 // LinkConfig requests a protocol the VX can't do.
-[[nodiscard]] Result<std::vector<std::uint8_t>> set_protocol_payload(
-    LinkConfig const &cfg) {
+[[nodiscard]] Result<std::vector<std::uint8_t>> set_protocol_payload(LinkConfig const &cfg) {
     switch (cfg.kind) {
-        case LinkKind::KLine:
-            return failure(ErrorCode::InvalidArgument,
-                           "obdx::Transport: OBDX VX doesn't support "
-                           "K-Line / ISO9141. Subaru VA WRX needs "
-                           "Tactrix OpenPort. (Supported protocols: "
-                           "HSCAN, J1850 VPW, GM UART ALDL.)");
-        case LinkKind::CanFd:
-            return failure(ErrorCode::InvalidArgument,
-                           "obdx::Transport: OBDX VX doesn't support "
-                           "CAN-FD (the STN2120 silicon is classical-"
-                           "CAN-only).");
-        case LinkKind::CanIso15765: {
-            // TODO(transport_obdx): final byte layout pending VT
-            // v1.06 PDF cross-check on real hardware. Current shape:
-            // [protocol = 0x06 (ISO15765-ish)] [flags lo / hi]
-            // [baud BE bytes] [request id BE] [response id BE].
-            // Real adapter will confirm or correct this.
-            std::vector<std::uint8_t> bytes;
-            bytes.reserve(12);
-            bytes.push_back(0x06U);
-            bytes.push_back(0x00U);
-            bytes.push_back(0x00U);
-            auto const baud = static_cast<std::uint32_t>(cfg.baud);
-            bytes.push_back(static_cast<std::uint8_t>(baud >> 24U));
-            bytes.push_back(static_cast<std::uint8_t>(baud >> 16U));
-            bytes.push_back(static_cast<std::uint8_t>(baud >> 8U));
-            bytes.push_back(static_cast<std::uint8_t>(baud));
-            bytes.push_back(static_cast<std::uint8_t>(cfg.can_id_request >> 8U));
-            bytes.push_back(static_cast<std::uint8_t>(cfg.can_id_request));
-            bytes.push_back(static_cast<std::uint8_t>(cfg.can_id_response >> 8U));
-            bytes.push_back(static_cast<std::uint8_t>(cfg.can_id_response));
-            return bytes;
-        }
+    case LinkKind::KLine:
+        return failure(ErrorCode::InvalidArgument, "obdx::Transport: OBDX VX doesn't support "
+                                                   "K-Line / ISO9141. Subaru VA WRX needs "
+                                                   "Tactrix OpenPort. (Supported protocols: "
+                                                   "HSCAN, J1850 VPW, GM UART ALDL.)");
+    case LinkKind::CanFd:
+        return failure(ErrorCode::InvalidArgument, "obdx::Transport: OBDX VX doesn't support "
+                                                   "CAN-FD (the STN2120 silicon is classical-"
+                                                   "CAN-only).");
+    case LinkKind::CanIso15765: {
+        // TODO(transport_obdx): final byte layout pending VT
+        // v1.06 PDF cross-check on real hardware. Current shape:
+        // [protocol = 0x06 (ISO15765-ish)] [flags lo / hi]
+        // [baud BE bytes] [request id BE] [response id BE].
+        // Real adapter will confirm or correct this.
+        std::vector<std::uint8_t> bytes;
+        bytes.reserve(12);
+        bytes.push_back(0x06U);
+        bytes.push_back(0x00U);
+        bytes.push_back(0x00U);
+        auto const baud = static_cast<std::uint32_t>(cfg.baud);
+        bytes.push_back(static_cast<std::uint8_t>(baud >> 24U));
+        bytes.push_back(static_cast<std::uint8_t>(baud >> 16U));
+        bytes.push_back(static_cast<std::uint8_t>(baud >> 8U));
+        bytes.push_back(static_cast<std::uint8_t>(baud));
+        bytes.push_back(static_cast<std::uint8_t>(cfg.can_id_request >> 8U));
+        bytes.push_back(static_cast<std::uint8_t>(cfg.can_id_request));
+        bytes.push_back(static_cast<std::uint8_t>(cfg.can_id_response >> 8U));
+        bytes.push_back(static_cast<std::uint8_t>(cfg.can_id_response));
+        return bytes;
     }
-    return failure(ErrorCode::InvalidArgument,
-                   "obdx::Transport: unknown LinkKind");
+    }
+    return failure(ErrorCode::InvalidArgument, "obdx::Transport: unknown LinkKind");
 }
 
 // Sniff an ELM-mode response for a string that suggests we're
@@ -251,10 +248,10 @@ using std::chrono::steady_clock;
     return has("OBDX") || has("obdx");
 }
 
-constexpr milliseconds kElmProbeTimeout    {500};
-constexpr milliseconds kDviSwitchTimeout   {500};
-constexpr milliseconds kSetProtocolTimeout {500};
-constexpr milliseconds kCloseTimeout       {200};
+constexpr milliseconds kElmProbeTimeout{500};
+constexpr milliseconds kDviSwitchTimeout{500};
+constexpr milliseconds kSetProtocolTimeout{500};
+constexpr milliseconds kCloseTimeout{200};
 
 } // namespace
 
@@ -263,7 +260,7 @@ Transport::Transport(std::unique_ptr<IDeviceChannel> channel) noexcept
 
 Transport::~Transport() {
     if (open_) {
-        (void) close();
+        (void)close();
     }
 }
 
@@ -285,9 +282,8 @@ st::Status Transport::open(LinkConfig const &cfg) {
         return failure(probe.error());
     }
     if (!looks_like_obdx(*probe)) {
-        std::string msg{
-            "obdx::Transport::open: device did not identify as OBDX "
-            "(probe response: '"};
+        std::string msg{"obdx::Transport::open: device did not identify as OBDX "
+                        "(probe response: '"};
         msg.append(*probe);
         msg.append("'). Wrong adapter on this port?");
         return failure(ErrorCode::TransportUnavailable, std::move(msg));
@@ -306,8 +302,7 @@ st::Status Transport::open(LinkConfig const &cfg) {
     if (!sp.has_value()) {
         return failure(sp.error());
     }
-    auto setp = dvi_exchange(*channel_, dvi::Opcode::SetProtocol,
-                              *sp, kSetProtocolTimeout);
+    auto setp = dvi_exchange(*channel_, dvi::Opcode::SetProtocol, *sp, kSetProtocolTimeout);
     if (!setp.has_value()) {
         return failure(setp.error());
     }
@@ -320,19 +315,19 @@ st::Status Transport::close() {
     if (!open_) {
         return ok();
     }
-    open_ = false;  // mark closed up front so a failing reboot
-                    // doesn't trap us in a re-close loop
+    open_ = false; // mark closed up front so a failing reboot
+                   // doesn't trap us in a re-close loop
     // Best-effort SoftReboot — returns the adapter to ELM mode
     // for the next consumer. Ignore the result; the channel may
     // already be gone (USB unplugged), which is fine for close().
-    (void) dvi_exchange(*channel_, dvi::Opcode::SoftReboot,
-                         std::span<std::uint8_t const>{}, kCloseTimeout);
+    (void)dvi_exchange(*channel_, dvi::Opcode::SoftReboot, std::span<std::uint8_t const>{},
+                       kCloseTimeout);
     firmware_.clear();
     return ok();
 }
 
 Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
-                                     std::chrono::milliseconds      timeout) {
+                                   std::chrono::milliseconds timeout) {
     if (!open_) {
         return failure(ErrorCode::TransportUnavailable,
                        "obdx::Transport::send_recv: transport not open");
@@ -348,8 +343,7 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
     // passes a tiny budget the split may both round to 0; in that
     // case we still attempt each exchange with at least 1ms so a
     // local fake doesn't dead-loop.
-    auto const tx_budget = std::max(
-        milliseconds{1}, milliseconds{timeout.count() / 4});
+    auto const tx_budget = std::max(milliseconds{1}, milliseconds{timeout.count() / 4});
     auto const rx_budget = std::max(milliseconds{1}, timeout - tx_budget);
 
     // Phase 1: TX the ECU payload onto the bus via DVI TxSmall.
@@ -358,12 +352,10 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
         // for payloads > 255 B. Not relevant for ITransport's normal
         // request shape (SSM/UDS payloads are well under 100 B) but
         // worth surfacing as a clean error until implemented.
-        return failure(ErrorCode::InvalidArgument,
-                       "obdx::Transport::send_recv: payload > 255 B "
-                       "needs DVI TxLarge — not yet wired");
+        return failure(ErrorCode::InvalidArgument, "obdx::Transport::send_recv: payload > 255 B "
+                                                   "needs DVI TxLarge — not yet wired");
     }
-    auto tx = dvi_exchange(*channel_, dvi::Opcode::TxSmall,
-                            payload, tx_budget);
+    auto tx = dvi_exchange(*channel_, dvi::Opcode::TxSmall, payload, tx_budget);
     if (!tx.has_value()) {
         return failure(tx.error());
     }
@@ -373,14 +365,13 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
     // simplicity we let the adapter wait for the full remaining
     // budget. Exact byte format pending PDF verification on real
     // hardware — for the codec-only slice this stays a TODO.
-    std::array<std::uint8_t, 0> rx_args{};  // TODO: timeout argument bytes
-    auto rx = dvi_exchange(*channel_, dvi::Opcode::RxSmall,
-                            rx_args, rx_budget);
+    std::array<std::uint8_t, 0> rx_args{}; // TODO: timeout argument bytes
+    auto rx = dvi_exchange(*channel_, dvi::Opcode::RxSmall, rx_args, rx_budget);
     if (!rx.has_value()) {
         return failure(rx.error());
     }
     Frame f;
-    f.data    = std::move(*rx);
+    f.data = std::move(*rx);
     f.arrived = steady_clock::now();
     return f;
 }
@@ -391,25 +382,22 @@ st::Status Transport::send(std::span<std::uint8_t const> payload) {
                        "obdx::Transport::send: transport not open");
     }
     if (channel_ == nullptr) {
-        return failure(ErrorCode::TransportUnavailable,
-                       "obdx::Transport::send: no byte channel");
+        return failure(ErrorCode::TransportUnavailable, "obdx::Transport::send: no byte channel");
     }
     if (payload.size() > 255) {
-        return failure(ErrorCode::InvalidArgument,
-                       "obdx::Transport::send: payload > 255 B "
-                       "needs DVI TxLarge — not yet wired");
+        return failure(ErrorCode::InvalidArgument, "obdx::Transport::send: payload > 255 B "
+                                                   "needs DVI TxLarge — not yet wired");
     }
-    auto tx = dvi_exchange(*channel_, dvi::Opcode::TxSmall,
-                            payload, milliseconds{100});
-    if (!tx.has_value()) return failure(tx.error());
+    auto tx = dvi_exchange(*channel_, dvi::Opcode::TxSmall, payload, milliseconds{100});
+    if (!tx.has_value())
+        return failure(tx.error());
     return ok();
 }
 
 st::Status Transport::start_streaming(FrameCallback /*callback*/) {
-    return failure(ErrorCode::NotImplemented,
-                   "obdx::Transport::start_streaming: streaming lands "
-                   "with the datalogger I/O thread + ring buffer "
-                   "(Phase 3 follow-up).");
+    return failure(ErrorCode::NotImplemented, "obdx::Transport::start_streaming: streaming lands "
+                                              "with the datalogger I/O thread + ring buffer "
+                                              "(Phase 3 follow-up).");
 }
 
 st::Status Transport::stop_streaming() {

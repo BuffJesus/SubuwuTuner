@@ -31,14 +31,13 @@ namespace st::transport {
 //   auto r = ssm.read(0x1234, 4, 100ms);
 //   t.close();
 class MockTransport : public ITransport {
-  public:
+public:
     // Queue a (request, response) pair. When the system-under-test calls
     // send_recv with a matching payload, the response frame is returned.
-    void expect_send_recv(std::vector<std::uint8_t> request,
-                          std::vector<std::uint8_t> response);
+    void expect_send_recv(std::vector<std::uint8_t> request, std::vector<std::uint8_t> response);
 
     // True if every queued exchange has been consumed.
-    [[nodiscard]] bool        exhausted() const;
+    [[nodiscard]] bool exhausted() const;
     [[nodiscard]] std::size_t remaining() const;
 
     // Force the next operation to return this error code. Test the
@@ -56,41 +55,49 @@ class MockTransport : public ITransport {
     [[nodiscard]] Status close() override;
 
     [[nodiscard]] Result<Frame> send_recv(std::span<std::uint8_t const> payload,
-                                           std::chrono::milliseconds timeout) override;
+                                          std::chrono::milliseconds timeout) override;
 
     [[nodiscard]] Status send(std::span<std::uint8_t const> payload) override;
 
     [[nodiscard]] Status start_streaming(FrameCallback callback) override;
     [[nodiscard]] Status stop_streaming() override;
 
-    [[nodiscard]] std::string_view name() const noexcept override { return "MockTransport"; }
-    [[nodiscard]] std::string_view firmware() const noexcept override { return "mock"; }
+    [[nodiscard]] std::string_view name() const noexcept override {
+        return "MockTransport";
+    }
+    [[nodiscard]] std::string_view firmware() const noexcept override {
+        return "mock";
+    }
 
     // Inspection helpers for tests.
-    [[nodiscard]] bool                              is_open() const noexcept { return open_; }
-    [[nodiscard]] LinkConfig const &                config() const noexcept { return cfg_; }
+    [[nodiscard]] bool is_open() const noexcept {
+        return open_;
+    }
+    [[nodiscard]] LinkConfig const &config() const noexcept {
+        return cfg_;
+    }
     [[nodiscard]] std::vector<std::vector<std::uint8_t>> const &send_log() const noexcept {
         return send_log_;
     }
 
-  private:
+private:
     struct Exchange {
         std::vector<std::uint8_t> request;
         std::vector<std::uint8_t> response;
     };
 
     struct InjectedError {
-        ErrorCode   code;
+        ErrorCode code;
         std::string message;
     };
 
-    mutable std::mutex                   mu_;
-    bool                                 open_{false};
-    LinkConfig                           cfg_{};
-    std::deque<Exchange>                 expectations_;
+    mutable std::mutex mu_;
+    bool open_{false};
+    LinkConfig cfg_{};
+    std::deque<Exchange> expectations_;
     std::vector<std::vector<std::uint8_t>> send_log_;
-    std::optional<InjectedError>         pending_error_;
-    FrameCallback                        stream_cb_;
+    std::optional<InjectedError> pending_error_;
+    FrameCallback stream_cb_;
 };
 
 } // namespace st::transport

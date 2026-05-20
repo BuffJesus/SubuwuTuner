@@ -38,20 +38,18 @@
 namespace st::transport {
 
 class IByteChannel {
-  public:
-    IByteChannel()                                = default;
-    virtual ~IByteChannel()                       = default;
-    IByteChannel(IByteChannel const &)            = delete;
+public:
+    IByteChannel() = default;
+    virtual ~IByteChannel() = default;
+    IByteChannel(IByteChannel const &) = delete;
     IByteChannel &operator=(IByteChannel const &) = delete;
-    IByteChannel(IByteChannel &&) noexcept        = default;
+    IByteChannel(IByteChannel &&) noexcept = default;
     IByteChannel &operator=(IByteChannel &&) noexcept = default;
 
-    [[nodiscard]] virtual st::Status write_bytes(
-        std::span<std::uint8_t const> bytes) = 0;
+    [[nodiscard]] virtual st::Status write_bytes(std::span<std::uint8_t const> bytes) = 0;
 
-    [[nodiscard]] virtual Result<std::vector<std::uint8_t>> read_bytes(
-        std::size_t max_bytes,
-        std::chrono::milliseconds timeout) = 0;
+    [[nodiscard]] virtual Result<std::vector<std::uint8_t>>
+    read_bytes(std::size_t max_bytes, std::chrono::milliseconds timeout) = 0;
 };
 
 } // namespace st::transport

@@ -23,8 +23,7 @@ namespace st::autotune {
 // Helpers
 // ---------------------------------------------------------------------
 
-bool sample_passes_gates(MafSample const     &s,
-                         MafTuneOptions const &opts) noexcept {
+bool sample_passes_gates(MafSample const &s, MafTuneOptions const &opts) noexcept {
     // Reject anything that would make the ratio degenerate first —
     // those samples are useless to the algorithm regardless of the
     // engine-state gates below.
@@ -39,54 +38,65 @@ bool sample_passes_gates(MafSample const     &s,
     }
 
     // Engine-state gates.
-    if (s.coolant_c < opts.min_coolant_c)                   return false;
-    if (s.iat_c < opts.min_iat_c || s.iat_c > opts.max_iat_c) return false;
-    if (std::fabs(s.rpm_rate) > opts.max_rpm_rate)          return false;
-    if (std::fabs(s.throttle_rate) > opts.max_throttle_rate) return false;
-    if (opts.reject_knock_window && s.knock_in_window)      return false;
-    if (opts.reject_limp_mode && s.limp_mode)               return false;
-    if (opts.require_open_loop && s.closed_loop)            return false;
+    if (s.coolant_c < opts.min_coolant_c)
+        return false;
+    if (s.iat_c < opts.min_iat_c || s.iat_c > opts.max_iat_c)
+        return false;
+    if (std::fabs(s.rpm_rate) > opts.max_rpm_rate)
+        return false;
+    if (std::fabs(s.throttle_rate) > opts.max_throttle_rate)
+        return false;
+    if (opts.reject_knock_window && s.knock_in_window)
+        return false;
+    if (opts.reject_limp_mode && s.limp_mode)
+        return false;
+    if (opts.require_open_loop && s.closed_loop)
+        return false;
 
     return true;
 }
 
-std::size_t nearest_cell(double                  voltage,
-                         std::span<double const> axis) noexcept {
-    if (axis.empty()) return 0;
-    std::size_t best  = 0;
-    double      best_d = std::fabs(axis[0] - voltage);
+std::size_t nearest_cell(double voltage, std::span<double const> axis) noexcept {
+    if (axis.empty())
+        return 0;
+    std::size_t best = 0;
+    double best_d = std::fabs(axis[0] - voltage);
     for (std::size_t i = 1; i < axis.size(); ++i) {
         double const d = std::fabs(axis[i] - voltage);
         if (d < best_d) {
             best_d = d;
-            best   = i;
+            best = i;
         }
     }
     return best;
 }
 
 double trimmed_mean(std::span<double const> values, double trim_fraction) {
-    if (values.empty()) return 0.0;
-    if (trim_fraction < 0.0) trim_fraction = 0.0;
-    if (trim_fraction > 0.5) trim_fraction = 0.5;
+    if (values.empty())
+        return 0.0;
+    if (trim_fraction < 0.0)
+        trim_fraction = 0.0;
+    if (trim_fraction > 0.5)
+        trim_fraction = 0.5;
 
     std::vector<double> sorted(values.begin(), values.end());
     std::sort(sorted.begin(), sorted.end());
 
-    std::size_t const n    = sorted.size();
-    std::size_t const drop = static_cast<std::size_t>(
-        std::floor(static_cast<double>(n) * trim_fraction));
+    std::size_t const n = sorted.size();
+    std::size_t const drop =
+        static_cast<std::size_t>(std::floor(static_cast<double>(n) * trim_fraction));
     // Always retain at least one value: with trim=0.10 on n=5 we'd
     // drop 0 from each side; with n=10 we'd drop 1 from each side.
     std::size_t const begin = drop;
-    std::size_t const end   = n > drop ? n - drop : drop;
+    std::size_t const end = n > drop ? n - drop : drop;
     if (end <= begin) {
         // Should not happen given the clamp above; defensive bail.
         double sum = 0.0;
-        for (auto v : sorted) sum += v;
+        for (auto v : sorted)
+            sum += v;
         return sum / static_cast<double>(n);
     }
-    double      sum     = 0.0;
+    double sum = 0.0;
     std::size_t counted = 0;
     for (std::size_t i = begin; i < end; ++i) {
         sum += sorted[i];
@@ -100,12 +110,12 @@ namespace {
 // Confidence ramps linearly from 0 at min_samples to 1.0 at
 // 3 × min_samples, then stays at 1.0. Simple, monotonic, and easy to
 // explain in CLI output ("47 samples, confidence 0.31").
-double confidence_score(std::size_t samples,
-                        std::size_t min_samples) noexcept {
-    if (min_samples == 0) return 1.0;
-    if (samples < min_samples) return 0.0;
-    double const ratio = static_cast<double>(samples)
-                         / static_cast<double>(3 * min_samples);
+double confidence_score(std::size_t samples, std::size_t min_samples) noexcept {
+    if (min_samples == 0)
+        return 1.0;
+    if (samples < min_samples)
+        return 0.0;
+    double const ratio = static_cast<double>(samples) / static_cast<double>(3 * min_samples);
     return std::min(1.0, ratio);
 }
 
@@ -115,28 +125,24 @@ double confidence_score(std::size_t samples,
 // tune_maf
 // ---------------------------------------------------------------------
 
-Result<MafTuneResult> tune_maf(std::span<double const>    axis,
-                                std::span<double const>    current_scaling,
-                                std::span<MafSample const> samples,
-                                MafTuneOptions const      &opts) {
+Result<MafTuneResult> tune_maf(std::span<double const> axis,
+                               std::span<double const> current_scaling,
+                               std::span<MafSample const> samples, MafTuneOptions const &opts) {
     if (axis.empty()) {
-        return failure(ErrorCode::InvalidArgument,
-                       "autotune: MAF axis must be non-empty");
+        return failure(ErrorCode::InvalidArgument, "autotune: MAF axis must be non-empty");
     }
     if (axis.size() != current_scaling.size()) {
         return failure(ErrorCode::InvalidArgument,
-                       "autotune: axis (" + std::to_string(axis.size())
-                       + ") and current_scaling ("
-                       + std::to_string(current_scaling.size())
-                       + ") must have the same length");
+                       "autotune: axis (" + std::to_string(axis.size()) +
+                           ") and current_scaling (" + std::to_string(current_scaling.size()) +
+                           ") must have the same length");
     }
     if (opts.gain < 0.0 || !std::isfinite(opts.gain)) {
         return failure(ErrorCode::InvalidArgument,
                        "autotune: gain must be a non-negative finite number");
     }
     if (opts.max_delta_pct < 0.0 || !std::isfinite(opts.max_delta_pct)) {
-        return failure(ErrorCode::InvalidArgument,
-                       "autotune: max_delta_pct must be non-negative");
+        return failure(ErrorCode::InvalidArgument, "autotune: max_delta_pct must be non-negative");
     }
     // Verify the axis is sorted ascending; the nearest-cell routine
     // does not require it, but downstream consumers (linter,
@@ -145,8 +151,8 @@ Result<MafTuneResult> tune_maf(std::span<double const>    axis,
         if (!(axis[i - 1] <= axis[i])) {
             return failure(ErrorCode::InvalidArgument,
                            "autotune: MAF axis must be sorted ascending; "
-                           "index " + std::to_string(i)
-                           + " breaks the order");
+                           "index " +
+                               std::to_string(i) + " breaks the order");
         }
     }
 
@@ -154,43 +160,44 @@ Result<MafTuneResult> tune_maf(std::span<double const>    axis,
     // error ratio. Each cell collects its samples in a vector for the
     // trimmed-mean pass.
     std::vector<std::vector<double>> per_cell(axis.size());
-    std::size_t                      kept = 0;
+    std::size_t kept = 0;
     for (auto const &s : samples) {
-        if (!sample_passes_gates(s, opts)) continue;
+        if (!sample_passes_gates(s, opts))
+            continue;
         auto const cell = nearest_cell(s.maf_voltage, axis);
         per_cell[cell].push_back(s.actual_afr / s.commanded_afr);
         ++kept;
     }
 
     MafTuneResult result;
-    result.total_samples       = samples.size();
+    result.total_samples = samples.size();
     result.samples_after_gates = kept;
     result.cells.reserve(axis.size());
 
     for (std::size_t i = 0; i < axis.size(); ++i) {
         CellProposal cp;
-        cp.cell_index    = i;
+        cp.cell_index = i;
         cp.current_value = current_scaling[i];
-        cp.samples_used  = per_cell[i].size();
+        cp.samples_used = per_cell[i].size();
 
         if (per_cell[i].size() < opts.min_samples_per_cell) {
-            cp.mean_error     = 1.0;
+            cp.mean_error = 1.0;
             cp.proposed_value = current_scaling[i];
-            cp.confidence     = 0.0;
+            cp.confidence = 0.0;
             result.cells.push_back(cp);
             continue;
         }
 
-        double const mean_error =
-            trimmed_mean(per_cell[i], opts.trim_fraction);
+        double const mean_error = trimmed_mean(per_cell[i], opts.trim_fraction);
         double delta_pct = (mean_error - 1.0) * opts.gain;
-        if (delta_pct > opts.max_delta_pct)  delta_pct = opts.max_delta_pct;
-        if (delta_pct < -opts.max_delta_pct) delta_pct = -opts.max_delta_pct;
+        if (delta_pct > opts.max_delta_pct)
+            delta_pct = opts.max_delta_pct;
+        if (delta_pct < -opts.max_delta_pct)
+            delta_pct = -opts.max_delta_pct;
 
-        cp.mean_error     = mean_error;
+        cp.mean_error = mean_error;
         cp.proposed_value = current_scaling[i] * (1.0 + delta_pct);
-        cp.confidence     =
-            confidence_score(per_cell[i].size(), opts.min_samples_per_cell);
+        cp.confidence = confidence_score(per_cell[i].size(), opts.min_samples_per_cell);
         result.cells.push_back(cp);
     }
 
@@ -201,24 +208,26 @@ Result<MafTuneResult> tune_maf(std::span<double const>    axis,
 // smooth_proposals
 // ---------------------------------------------------------------------
 
-MafTuneResult smooth_proposals(MafTuneResult const &input,
-                                double               max_delta_pct,
-                                double               neighbor_weight) {
+MafTuneResult smooth_proposals(MafTuneResult const &input, double max_delta_pct,
+                               double neighbor_weight) {
     MafTuneResult out;
-    out.total_samples       = input.total_samples;
+    out.total_samples = input.total_samples;
     out.samples_after_gates = input.samples_after_gates;
-    out.cells               = input.cells;
-    if (input.cells.size() <= 1) return out;
-    if (max_delta_pct < 0.0)     max_delta_pct = 0.0;
-    if (neighbor_weight < 0.0)   neighbor_weight = 0.0;
+    out.cells = input.cells;
+    if (input.cells.size() <= 1)
+        return out;
+    if (max_delta_pct < 0.0)
+        max_delta_pct = 0.0;
+    if (neighbor_weight < 0.0)
+        neighbor_weight = 0.0;
 
     auto const &in = input.cells;
     std::size_t const n = in.size();
 
     for (std::size_t i = 0; i < n; ++i) {
-        double const self_w   = in[i].confidence;
-        double       num      = self_w * in[i].proposed_value;
-        double       den      = self_w;
+        double const self_w = in[i].confidence;
+        double num = self_w * in[i].proposed_value;
+        double den = self_w;
 
         if (i > 0) {
             double const w = neighbor_weight * in[i - 1].confidence;
@@ -241,11 +250,13 @@ MafTuneResult smooth_proposals(MafTuneResult const &input,
 
         // Re-clamp to ±max_delta_pct of current_value so neighbor pull
         // can't break the per-pass safety bound the first pass enforced.
-        double const cur     = in[i].current_value;
-        double const lo      = cur * (1.0 - max_delta_pct);
-        double const hi      = cur * (1.0 + max_delta_pct);
-        if (smoothed < lo) smoothed = lo;
-        if (smoothed > hi) smoothed = hi;
+        double const cur = in[i].current_value;
+        double const lo = cur * (1.0 - max_delta_pct);
+        double const hi = cur * (1.0 + max_delta_pct);
+        if (smoothed < lo)
+            smoothed = lo;
+        if (smoothed > hi)
+            smoothed = hi;
 
         out.cells[i].proposed_value = smoothed;
     }
@@ -257,58 +268,53 @@ MafTuneResult smooth_proposals(MafTuneResult const &input,
 // Knock-based ignition pull
 // ---------------------------------------------------------------------
 
-bool knock_sample_passes_gates(KnockSample const     &s,
-                                KnockPullOptions const &opts) noexcept {
-    if (!std::isfinite(s.feedback_knock) || !std::isfinite(s.rpm)
-        || !std::isfinite(s.load)) {
+bool knock_sample_passes_gates(KnockSample const &s, KnockPullOptions const &opts) noexcept {
+    if (!std::isfinite(s.feedback_knock) || !std::isfinite(s.rpm) || !std::isfinite(s.load)) {
         return false;
     }
-    if (s.rpm < 0.0 || s.load < 0.0) return false;
-    if (s.coolant_c < opts.min_coolant_c)                   return false;
-    if (s.iat_c < opts.min_iat_c || s.iat_c > opts.max_iat_c) return false;
-    if (opts.reject_limp_mode && s.limp_mode)               return false;
+    if (s.rpm < 0.0 || s.load < 0.0)
+        return false;
+    if (s.coolant_c < opts.min_coolant_c)
+        return false;
+    if (s.iat_c < opts.min_iat_c || s.iat_c > opts.max_iat_c)
+        return false;
+    if (opts.reject_limp_mode && s.limp_mode)
+        return false;
     return true;
 }
 
-std::size_t nearest_cell_2d(double                  rpm,
-                             double                  load,
-                             std::span<double const> rpm_axis,
-                             std::span<double const> load_axis) noexcept {
-    if (rpm_axis.empty() || load_axis.empty()) return 0;
+std::size_t nearest_cell_2d(double rpm, double load, std::span<double const> rpm_axis,
+                            std::span<double const> load_axis) noexcept {
+    if (rpm_axis.empty() || load_axis.empty())
+        return 0;
     auto const col = nearest_cell(rpm, rpm_axis);
     auto const row = nearest_cell(load, load_axis);
     return row * rpm_axis.size() + col;
 }
 
-Result<KnockPullResult> tune_knock_pull(
-    std::span<double const>      rpm_axis,
-    std::span<double const>      load_axis,
-    std::span<double const>      current_timing,
-    std::span<KnockSample const> samples,
-    KnockPullOptions const      &opts) {
+Result<KnockPullResult> tune_knock_pull(std::span<double const> rpm_axis,
+                                        std::span<double const> load_axis,
+                                        std::span<double const> current_timing,
+                                        std::span<KnockSample const> samples,
+                                        KnockPullOptions const &opts) {
     if (rpm_axis.empty()) {
-        return failure(ErrorCode::InvalidArgument,
-                       "autotune: RPM axis must be non-empty");
+        return failure(ErrorCode::InvalidArgument, "autotune: RPM axis must be non-empty");
     }
     if (load_axis.empty()) {
-        return failure(ErrorCode::InvalidArgument,
-                       "autotune: load axis must be non-empty");
+        return failure(ErrorCode::InvalidArgument, "autotune: load axis must be non-empty");
     }
     std::size_t const expected = rpm_axis.size() * load_axis.size();
     if (current_timing.size() != expected) {
         return failure(ErrorCode::InvalidArgument,
-                       "autotune: current_timing length ("
-                       + std::to_string(current_timing.size())
-                       + ") must equal rpm_axis.size() * load_axis.size() ("
-                       + std::to_string(expected) + ")");
+                       "autotune: current_timing length (" + std::to_string(current_timing.size()) +
+                           ") must equal rpm_axis.size() * load_axis.size() (" +
+                           std::to_string(expected) + ")");
     }
-    if (opts.pull_step_degrees < 0.0
-        || !std::isfinite(opts.pull_step_degrees)) {
+    if (opts.pull_step_degrees < 0.0 || !std::isfinite(opts.pull_step_degrees)) {
         return failure(ErrorCode::InvalidArgument,
                        "autotune: pull_step_degrees must be non-negative");
     }
-    if (opts.trigger_degrees < 0.0
-        || !std::isfinite(opts.trigger_degrees)) {
+    if (opts.trigger_degrees < 0.0 || !std::isfinite(opts.trigger_degrees)) {
         return failure(ErrorCode::InvalidArgument,
                        "autotune: trigger_degrees must be non-negative");
     }
@@ -326,47 +332,48 @@ Result<KnockPullResult> tune_knock_pull(
     }
 
     std::vector<std::vector<double>> per_cell(expected);
-    std::size_t                      kept = 0;
+    std::size_t kept = 0;
     for (auto const &s : samples) {
-        if (!knock_sample_passes_gates(s, opts)) continue;
+        if (!knock_sample_passes_gates(s, opts))
+            continue;
         auto const idx = nearest_cell_2d(s.rpm, s.load, rpm_axis, load_axis);
         per_cell[idx].push_back(s.feedback_knock);
         ++kept;
     }
 
     KnockPullResult result;
-    result.rows                = load_axis.size();
-    result.cols                = rpm_axis.size();
-    result.total_samples       = samples.size();
+    result.rows = load_axis.size();
+    result.cols = rpm_axis.size();
+    result.total_samples = samples.size();
     result.samples_after_gates = kept;
     result.cells.reserve(expected);
 
     for (std::size_t i = 0; i < expected; ++i) {
         KnockCellProposal kp;
-        kp.cell_index    = i;
+        kp.cell_index = i;
         kp.current_value = current_timing[i];
-        kp.samples_used  = per_cell[i].size();
+        kp.samples_used = per_cell[i].size();
 
         if (per_cell[i].size() < opts.min_samples_per_cell) {
-            kp.proposed_value      = current_timing[i];
+            kp.proposed_value = current_timing[i];
             kp.mean_feedback_knock = 0.0;
-            kp.pulled              = false;
+            kp.pulled = false;
             result.cells.push_back(kp);
             continue;
         }
 
         double sum = 0.0;
-        for (auto v : per_cell[i]) sum += v;
-        double const mean =
-            sum / static_cast<double>(per_cell[i].size());
+        for (auto v : per_cell[i])
+            sum += v;
+        double const mean = sum / static_cast<double>(per_cell[i].size());
         kp.mean_feedback_knock = mean;
 
         if (mean < -opts.trigger_degrees) {
             kp.proposed_value = current_timing[i] - opts.pull_step_degrees;
-            kp.pulled         = true;
+            kp.pulled = true;
         } else {
             kp.proposed_value = current_timing[i];
-            kp.pulled         = false;
+            kp.pulled = false;
         }
         result.cells.push_back(kp);
     }
@@ -381,12 +388,10 @@ Result<KnockPullResult> tune_knock_pull(
 namespace {
 
 std::string_view trim_view(std::string_view s) noexcept {
-    while (!s.empty()
-           && std::isspace(static_cast<unsigned char>(s.front()))) {
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) {
         s.remove_prefix(1);
     }
-    while (!s.empty()
-           && std::isspace(static_cast<unsigned char>(s.back()))) {
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) {
         s.remove_suffix(1);
     }
     return s;
@@ -395,15 +400,14 @@ std::string_view trim_view(std::string_view s) noexcept {
 std::string to_lower_str(std::string_view s) {
     std::string out(s);
     for (auto &c : out) {
-        c = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(c)));
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
     return out;
 }
 
 std::vector<std::string_view> split_csv_fields(std::string_view line) {
     std::vector<std::string_view> out;
-    std::size_t                   start = 0;
+    std::size_t start = 0;
     for (std::size_t i = 0; i <= line.size(); ++i) {
         if (i == line.size() || line[i] == ',') {
             out.push_back(line.substr(start, i - start));
@@ -419,8 +423,8 @@ std::optional<double> parse_double_field(std::string_view s) {
         return std::nullopt;
     }
     std::string copy(t);
-    char       *end = nullptr;
-    double const v  = std::strtod(copy.c_str(), &end);
+    char *end = nullptr;
+    double const v = std::strtod(copy.c_str(), &end);
     if (end == copy.c_str() || end == nullptr || *end != '\0') {
         return std::nullopt;
     }
@@ -435,12 +439,10 @@ std::optional<bool> parse_bool_field(std::string_view s) {
     if (lower.empty()) {
         return false;
     }
-    if (lower == "1" || lower == "true" || lower == "yes"
-        || lower == "on") {
+    if (lower == "1" || lower == "true" || lower == "yes" || lower == "on") {
         return true;
     }
-    if (lower == "0" || lower == "false" || lower == "no"
-        || lower == "off") {
+    if (lower == "0" || lower == "false" || lower == "no" || lower == "off") {
         return false;
     }
     return std::nullopt;
@@ -450,7 +452,7 @@ std::optional<bool> parse_bool_field(std::string_view s) {
 // every CSV reader in this file.
 std::vector<std::string_view> non_blank_lines(std::string_view text) {
     std::vector<std::string_view> out;
-    std::size_t                   i = 0;
+    std::size_t i = 0;
     while (i < text.size()) {
         std::size_t e = i;
         while (e < text.size() && text[e] != '\n' && text[e] != '\r') {
@@ -480,11 +482,11 @@ Result<std::vector<MafSample>> read_maf_samples_csv(std::string_view text) {
     // trailing " [unit]" annotation that the log subcommand's CsvSink
     // adds (e.g. `coolant_c [C]` -> `coolant_c`) so a `log` CSV drops
     // directly into autotune without a rename pass.
-    auto const                         header = split_csv_fields(lines[0]);
+    auto const header = split_csv_fields(lines[0]);
     std::map<std::string, std::size_t> col_idx;
     for (std::size_t i = 0; i < header.size(); ++i) {
-        auto       name      = to_lower_str(trim_view(header[i]));
-        auto const bracket   = name.find(" [");
+        auto name = to_lower_str(trim_view(header[i]));
+        auto const bracket = name.find(" [");
         if (bracket != std::string::npos) {
             name.resize(bracket);
         }
@@ -495,16 +497,14 @@ Result<std::vector<MafSample>> read_maf_samples_csv(std::string_view text) {
         auto it = col_idx.find(name);
         if (it == col_idx.end()) {
             return failure(ErrorCode::InvalidArgument,
-                           std::string{"autotune: CSV missing required column '"}
-                               + name + "'");
+                           std::string{"autotune: CSV missing required column '"} + name + "'");
         }
         return it->second;
     };
     auto find_opt_col = [&](char const *name) -> std::optional<std::size_t> {
         auto it = col_idx.find(name);
-        return (it == col_idx.end())
-                   ? std::optional<std::size_t>{}
-                   : std::optional<std::size_t>{it->second};
+        return (it == col_idx.end()) ? std::optional<std::size_t>{}
+                                     : std::optional<std::size_t>{it->second};
     };
 
     auto const idx_maf = require_col("maf_voltage");
@@ -537,41 +537,36 @@ Result<std::vector<MafSample>> read_maf_samples_csv(std::string_view text) {
     }
 
     auto const idx_time = find_opt_col("time_ms");
-    auto const idx_cl   = find_opt_col("closed_loop");
-    auto const idx_kn   = find_opt_col("knock");
-    auto const idx_lm   = find_opt_col("limp_mode");
+    auto const idx_cl = find_opt_col("closed_loop");
+    auto const idx_kn = find_opt_col("knock");
+    auto const idx_lm = find_opt_col("limp_mode");
 
-    constexpr double kDefaultPeriodMs  = 50.0;
-    constexpr double kKnockWindowMs    = 250.0;
+    constexpr double kDefaultPeriodMs = 50.0;
+    constexpr double kKnockWindowMs = 250.0;
 
     std::vector<MafSample> samples;
-    std::vector<double>    time_ms;
-    std::vector<bool>      knock_flag;
+    std::vector<double> time_ms;
+    std::vector<bool> knock_flag;
     if (lines.size() > 1) {
         samples.reserve(lines.size() - 1);
         time_ms.reserve(lines.size() - 1);
         knock_flag.reserve(lines.size() - 1);
     }
 
-    auto row_error = [](std::size_t row, char const *col,
-                         char const *what, std::string_view raw) {
-        return failure(
-            ErrorCode::InvalidArgument,
-            std::string{"autotune: CSV row "} + std::to_string(row + 1)
-                + " column '" + col + "' has " + what + " value '"
-                + std::string{trim_view(raw)} + "'");
+    auto row_error = [](std::size_t row, char const *col, char const *what, std::string_view raw) {
+        return failure(ErrorCode::InvalidArgument,
+                       std::string{"autotune: CSV row "} + std::to_string(row + 1) + " column '" +
+                           col + "' has " + what + " value '" + std::string{trim_view(raw)} + "'");
     };
 
     for (std::size_t row = 1; row < lines.size(); ++row) {
         auto const fields = split_csv_fields(lines[row]);
 
-        auto get_double = [&](std::size_t i,
-                              char const *col) -> Result<double> {
+        auto get_double = [&](std::size_t i, char const *col) -> Result<double> {
             if (i >= fields.size()) {
-                return failure(
-                    ErrorCode::InvalidArgument,
-                    std::string{"autotune: CSV row "} + std::to_string(row + 1)
-                        + " is missing field for column '" + col + "'");
+                return failure(ErrorCode::InvalidArgument,
+                               std::string{"autotune: CSV row "} + std::to_string(row + 1) +
+                                   " is missing field for column '" + col + "'");
             }
             auto v = parse_double_field(fields[i]);
             if (!v.has_value()) {
@@ -631,8 +626,7 @@ Result<std::vector<MafSample>> read_maf_samples_csv(std::string_view text) {
         if (idx_kn.has_value() && *idx_kn < fields.size()) {
             auto b = parse_bool_field(fields[*idx_kn]);
             if (!b.has_value()) {
-                return row_error(row, "knock", "non-boolean",
-                                  fields[*idx_kn]);
+                return row_error(row, "knock", "non-boolean", fields[*idx_kn]);
             }
             kf = *b;
         }
@@ -641,16 +635,14 @@ Result<std::vector<MafSample>> read_maf_samples_csv(std::string_view text) {
         if (idx_cl.has_value() && *idx_cl < fields.size()) {
             auto b = parse_bool_field(fields[*idx_cl]);
             if (!b.has_value()) {
-                return row_error(row, "closed_loop", "non-boolean",
-                                  fields[*idx_cl]);
+                return row_error(row, "closed_loop", "non-boolean", fields[*idx_cl]);
             }
             s.closed_loop = *b;
         }
         if (idx_lm.has_value() && *idx_lm < fields.size()) {
             auto b = parse_bool_field(fields[*idx_lm]);
             if (!b.has_value()) {
-                return row_error(row, "limp_mode", "non-boolean",
-                                  fields[*idx_lm]);
+                return row_error(row, "limp_mode", "non-boolean", fields[*idx_lm]);
             }
             s.limp_mode = *b;
         }
@@ -665,14 +657,12 @@ Result<std::vector<MafSample>> read_maf_samples_csv(std::string_view text) {
     for (std::size_t i = 1; i < samples.size(); ++i) {
         double const dt_s = (time_ms[i] - time_ms[i - 1]) / 1000.0;
         if (dt_s <= 0.0 || !std::isfinite(dt_s)) {
-            samples[i].rpm_rate      = 0.0;
+            samples[i].rpm_rate = 0.0;
             samples[i].throttle_rate = 0.0;
             continue;
         }
-        samples[i].rpm_rate =
-            (samples[i].rpm - samples[i - 1].rpm) / dt_s;
-        samples[i].throttle_rate =
-            (samples[i].throttle_pct - samples[i - 1].throttle_pct) / dt_s;
+        samples[i].rpm_rate = (samples[i].rpm - samples[i - 1].rpm) / dt_s;
+        samples[i].throttle_rate = (samples[i].throttle_pct - samples[i - 1].throttle_pct) / dt_s;
     }
 
     // Derive knock_in_window from the row-level `knock` flag using a
@@ -681,7 +671,7 @@ Result<std::vector<MafSample>> read_maf_samples_csv(std::string_view text) {
     // outer iterator advances right, the inner `lo` advances right when
     // entries fall off the back, so each sample is touched twice and
     // the whole pass is genuinely O(n) regardless of window depth.
-    std::size_t lo               = 0;
+    std::size_t lo = 0;
     std::size_t knocks_in_window = 0;
     for (std::size_t i = 0; i < samples.size(); ++i) {
         if (knock_flag[i]) {
@@ -699,8 +689,8 @@ Result<std::vector<MafSample>> read_maf_samples_csv(std::string_view text) {
     return samples;
 }
 
-KnockPullResult apply_knock_add_back(KnockPullResult const     &pull_result,
-                                      KnockAddBackOptions const &opts) {
+KnockPullResult apply_knock_add_back(KnockPullResult const &pull_result,
+                                     KnockAddBackOptions const &opts) {
     if (!opts.enabled) {
         return pull_result;
     }
@@ -729,8 +719,7 @@ KnockPullResult apply_knock_add_back(KnockPullResult const     &pull_result,
 // CSV → KnockSample reader
 // ---------------------------------------------------------------------
 
-Result<std::vector<KnockSample>> read_knock_samples_csv(
-    std::string_view text) {
+Result<std::vector<KnockSample>> read_knock_samples_csv(std::string_view text) {
     auto const lines = non_blank_lines(text);
     if (lines.empty()) {
         return std::vector<KnockSample>{};
@@ -738,10 +727,10 @@ Result<std::vector<KnockSample>> read_knock_samples_csv(
 
     // Same " [unit]" stripping as in read_maf_samples_csv so a `log`-
     // emitted CSV matches the knock reader's expected column names.
-    auto const                         header = split_csv_fields(lines[0]);
+    auto const header = split_csv_fields(lines[0]);
     std::map<std::string, std::size_t> col_idx;
     for (std::size_t i = 0; i < header.size(); ++i) {
-        auto       name    = to_lower_str(trim_view(header[i]));
+        auto name = to_lower_str(trim_view(header[i]));
         auto const bracket = name.find(" [");
         if (bracket != std::string::npos) {
             name.resize(bracket);
@@ -753,16 +742,14 @@ Result<std::vector<KnockSample>> read_knock_samples_csv(
         auto it = col_idx.find(name);
         if (it == col_idx.end()) {
             return failure(ErrorCode::InvalidArgument,
-                           std::string{"autotune: CSV missing required column '"}
-                               + name + "'");
+                           std::string{"autotune: CSV missing required column '"} + name + "'");
         }
         return it->second;
     };
     auto find_opt_col = [&](char const *name) -> std::optional<std::size_t> {
         auto it = col_idx.find(name);
-        return (it == col_idx.end())
-                   ? std::optional<std::size_t>{}
-                   : std::optional<std::size_t>{it->second};
+        return (it == col_idx.end()) ? std::optional<std::size_t>{}
+                                     : std::optional<std::size_t>{it->second};
     };
 
     auto const idx_rpm = require_col("rpm");
@@ -792,25 +779,20 @@ Result<std::vector<KnockSample>> read_knock_samples_csv(
         samples.reserve(lines.size() - 1);
     }
 
-    auto row_error = [](std::size_t row, char const *col,
-                         char const *what, std::string_view raw) {
-        return failure(
-            ErrorCode::InvalidArgument,
-            std::string{"autotune: CSV row "} + std::to_string(row + 1)
-                + " column '" + col + "' has " + what + " value '"
-                + std::string{trim_view(raw)} + "'");
+    auto row_error = [](std::size_t row, char const *col, char const *what, std::string_view raw) {
+        return failure(ErrorCode::InvalidArgument,
+                       std::string{"autotune: CSV row "} + std::to_string(row + 1) + " column '" +
+                           col + "' has " + what + " value '" + std::string{trim_view(raw)} + "'");
     };
 
     for (std::size_t row = 1; row < lines.size(); ++row) {
         auto const fields = split_csv_fields(lines[row]);
 
-        auto get_double = [&](std::size_t i,
-                              char const *col) -> Result<double> {
+        auto get_double = [&](std::size_t i, char const *col) -> Result<double> {
             if (i >= fields.size()) {
-                return failure(
-                    ErrorCode::InvalidArgument,
-                    std::string{"autotune: CSV row "} + std::to_string(row + 1)
-                        + " is missing field for column '" + col + "'");
+                return failure(ErrorCode::InvalidArgument,
+                               std::string{"autotune: CSV row "} + std::to_string(row + 1) +
+                                   " is missing field for column '" + col + "'");
             }
             auto v = parse_double_field(fields[i]);
             if (!v.has_value()) {
@@ -849,8 +831,7 @@ Result<std::vector<KnockSample>> read_knock_samples_csv(
         if (idx_lm.has_value() && *idx_lm < fields.size()) {
             auto b = parse_bool_field(fields[*idx_lm]);
             if (!b.has_value()) {
-                return row_error(row, "limp_mode", "non-boolean",
-                                  fields[*idx_lm]);
+                return row_error(row, "limp_mode", "non-boolean", fields[*idx_lm]);
             }
             s.limp_mode = *b;
         }
@@ -867,8 +848,10 @@ Result<std::vector<KnockSample>> read_knock_samples_csv(
 
 char const *lint_kind_name(LintViolationKind kind) noexcept {
     switch (kind) {
-        case LintViolationKind::NonMonotonic:      return "non-monotonic";
-        case LintViolationKind::StepDiscontinuity: return "step discontinuity";
+    case LintViolationKind::NonMonotonic:
+        return "non-monotonic";
+    case LintViolationKind::StepDiscontinuity:
+        return "step discontinuity";
     }
     // Unreachable when every enumerator is handled, but `-Werror` +
     // `-Wreturn-type` flags a missing return on some compilers if we
@@ -889,11 +872,9 @@ std::string format_lint_value(double v) {
 
 } // namespace
 
-std::vector<LintViolation> lint_maf_proposal(
-    std::span<double const> axis,
-    std::span<double const> current_scaling,
-    MafTuneResult const    &result,
-    LintOptions const      &opts) {
+std::vector<LintViolation> lint_maf_proposal(std::span<double const> axis,
+                                             std::span<double const> current_scaling,
+                                             MafTuneResult const &result, LintOptions const &opts) {
     std::vector<LintViolation> violations;
 
     auto const n = result.cells.size();
@@ -904,8 +885,8 @@ std::vector<LintViolation> lint_maf_proposal(
     // Floating-point tolerance for "strictly equal" comparisons on the
     // monotonic check — proposals that round-trip through smoothing can
     // pick up sub-bit noise.
-    constexpr double kMonoEps      = 1e-9;
-    constexpr double kRelDenomEps  = 1e-9;
+    constexpr double kMonoEps = 1e-9;
+    constexpr double kRelDenomEps = 1e-9;
 
     for (std::size_t i = 0; i + 1 < n; ++i) {
         double const prev_v = result.cells[i].proposed_value;
@@ -914,50 +895,42 @@ std::vector<LintViolation> lint_maf_proposal(
         if (opts.enforce_monotonic && next_v + kMonoEps < prev_v) {
             std::string axis_clause;
             if (i + 1 < axis.size()) {
-                axis_clause = " (v=" + format_lint_value(axis[i]) + " → v="
-                              + format_lint_value(axis[i + 1]) + ")";
+                axis_clause = " (v=" + format_lint_value(axis[i]) +
+                              " → v=" + format_lint_value(axis[i + 1]) + ")";
             }
             violations.push_back(LintViolation{
                 LintViolationKind::NonMonotonic,
                 i,
-                "MAF proposed value falls between cells " + std::to_string(i)
-                    + " and " + std::to_string(i + 1) + axis_clause
-                    + ": " + format_lint_value(prev_v) + " → "
-                    + format_lint_value(next_v),
+                "MAF proposed value falls between cells " + std::to_string(i) + " and " +
+                    std::to_string(i + 1) + axis_clause + ": " + format_lint_value(prev_v) + " → " +
+                    format_lint_value(next_v),
             });
         }
 
-        if (opts.enforce_smoothness
-            && i + 1 < current_scaling.size()) {
-            double const orig_step =
-                current_scaling[i + 1] - current_scaling[i];
+        if (opts.enforce_smoothness && i + 1 < current_scaling.size()) {
+            double const orig_step = current_scaling[i + 1] - current_scaling[i];
             double const prop_step = next_v - prev_v;
             // Noise floor scaled to the cell's magnitude: a flat
             // region with a sub-1%-of-cell-value movement is not a
             // discontinuity. Otherwise tiny proposed steps in flat
             // regions get amplified by the relative ratio and flag.
-            double const ref_magnitude = std::max(
-                std::abs(current_scaling[i]),
-                std::abs(current_scaling[i + 1]));
+            double const ref_magnitude =
+                std::max(std::abs(current_scaling[i]), std::abs(current_scaling[i + 1]));
             double const abs_floor = 0.01 * ref_magnitude;
-            if (std::abs(orig_step) < abs_floor
-                && std::abs(prop_step) < abs_floor) {
+            if (std::abs(orig_step) < abs_floor && std::abs(prop_step) < abs_floor) {
                 continue;
             }
-            double const denom = std::max(
-                {std::abs(orig_step), std::abs(prop_step),
-                 abs_floor, kRelDenomEps});
+            double const denom =
+                std::max({std::abs(orig_step), std::abs(prop_step), abs_floor, kRelDenomEps});
             double const ratio = std::abs(prop_step - orig_step) / denom;
             if (ratio > opts.max_step_change_ratio) {
                 violations.push_back(LintViolation{
                     LintViolationKind::StepDiscontinuity,
                     i,
-                    "MAF step between cells " + std::to_string(i) + " and "
-                        + std::to_string(i + 1)
-                        + " deviates by " + format_lint_value(100.0 * ratio)
-                        + "% from the original (step was "
-                        + format_lint_value(orig_step) + ", proposed "
-                        + format_lint_value(prop_step) + ")",
+                    "MAF step between cells " + std::to_string(i) + " and " +
+                        std::to_string(i + 1) + " deviates by " + format_lint_value(100.0 * ratio) +
+                        "% from the original (step was " + format_lint_value(orig_step) +
+                        ", proposed " + format_lint_value(prop_step) + ")",
                 });
             }
         }
@@ -966,11 +939,10 @@ std::vector<LintViolation> lint_maf_proposal(
     return violations;
 }
 
-std::vector<LintViolation> lint_knock_proposal(
-    std::span<double const>    rpm_axis,
-    std::span<double const>    load_axis,
-    KnockPullResult const     &result,
-    KnockLintOptions const    &opts) {
+std::vector<LintViolation> lint_knock_proposal(std::span<double const> rpm_axis,
+                                               std::span<double const> load_axis,
+                                               KnockPullResult const &result,
+                                               KnockLintOptions const &opts) {
     std::vector<LintViolation> violations;
 
     if (!opts.enforce_neighbor_smoothness) {
@@ -988,37 +960,29 @@ std::vector<LintViolation> lint_knock_proposal(
         violations.push_back(LintViolation{
             LintViolationKind::StepDiscontinuity,
             0,
-            "Knock proposal malformed: cells="
-                + std::to_string(result.cells.size())
-                + ", rows×cols=" + std::to_string(rows * cols),
+            "Knock proposal malformed: cells=" + std::to_string(result.cells.size()) +
+                ", rows×cols=" + std::to_string(rows * cols),
         });
         return violations;
     }
 
-    auto axis_label = [&](std::span<double const> axis,
-                          std::size_t              idx) -> std::string {
+    auto axis_label = [&](std::span<double const> axis, std::size_t idx) -> std::string {
         if (idx < axis.size()) {
             return format_lint_value(axis[idx]);
         }
         return std::to_string(idx);
     };
 
-    auto record = [&](char const  *direction,
-                      std::size_t  flat_idx,
-                      std::size_t  a_row, std::size_t a_col,
-                      std::size_t  b_row, std::size_t b_col,
-                      double       diff) {
+    auto record = [&](char const *direction, std::size_t flat_idx, std::size_t a_row,
+                      std::size_t a_col, std::size_t b_row, std::size_t b_col, double diff) {
         violations.push_back(LintViolation{
             LintViolationKind::StepDiscontinuity,
             flat_idx,
-            std::string{"Knock timing step in "} + direction
-                + " direction between (load=" + axis_label(load_axis, a_row)
-                + ", rpm=" + axis_label(rpm_axis, a_col)
-                + ") and (load=" + axis_label(load_axis, b_row)
-                + ", rpm=" + axis_label(rpm_axis, b_col)
-                + ") is " + format_lint_value(diff) + "° (> "
-                + format_lint_value(opts.max_neighbor_step_degrees)
-                + "° threshold)",
+            std::string{"Knock timing step in "} + direction + " direction between (load=" +
+                axis_label(load_axis, a_row) + ", rpm=" + axis_label(rpm_axis, a_col) +
+                ") and (load=" + axis_label(load_axis, b_row) +
+                ", rpm=" + axis_label(rpm_axis, b_col) + ") is " + format_lint_value(diff) +
+                "° (> " + format_lint_value(opts.max_neighbor_step_degrees) + "° threshold)",
         });
     };
 
@@ -1027,9 +991,8 @@ std::vector<LintViolation> lint_knock_proposal(
         for (std::size_t c = 0; c + 1 < cols; ++c) {
             std::size_t const idx_a = r * cols + c;
             std::size_t const idx_b = idx_a + 1;
-            double const      diff  = std::abs(
-                result.cells[idx_a].proposed_value
-                - result.cells[idx_b].proposed_value);
+            double const diff =
+                std::abs(result.cells[idx_a].proposed_value - result.cells[idx_b].proposed_value);
             if (diff > opts.max_neighbor_step_degrees) {
                 record("RPM", idx_a, r, c, r, c + 1, diff);
             }
@@ -1040,9 +1003,8 @@ std::vector<LintViolation> lint_knock_proposal(
         for (std::size_t c = 0; c < cols; ++c) {
             std::size_t const idx_a = r * cols + c;
             std::size_t const idx_b = idx_a + cols;
-            double const      diff  = std::abs(
-                result.cells[idx_a].proposed_value
-                - result.cells[idx_b].proposed_value);
+            double const diff =
+                std::abs(result.cells[idx_a].proposed_value - result.cells[idx_b].proposed_value);
             if (diff > opts.max_neighbor_step_degrees) {
                 record("load", idx_a, r, c, r + 1, c, diff);
             }

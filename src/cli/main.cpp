@@ -6,19 +6,19 @@
 #include "st/core/version.hpp"
 #include "st/dbc.hpp"
 #include "st/defs.hpp"
-#include "st/feature.hpp"
-#include "st/feature_codegen.hpp"
-#include "st/feature_ir.hpp"
 #include "st/discover.hpp"
 #include "st/ecu/ssm.hpp"
 #include "st/edit.hpp"
+#include "st/feature.hpp"
+#include "st/feature_codegen.hpp"
+#include "st/feature_ir.hpp"
 #include "st/flash.hpp"
 #include "st/flash/checksum.hpp"
 #include "st/log.hpp"
-#include "st/log/knock_dashboard.hpp"
 #include "st/log/adaptive_history.hpp"
 #include "st/log/coldstart.hpp"
 #include "st/log/ebcs.hpp"
+#include "st/log/knock_dashboard.hpp"
 #include "st/policy.hpp"
 #include "st/project.hpp"
 #include "st/rom.hpp"
@@ -29,7 +29,6 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
-#include <numeric>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -38,9 +37,10 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <ios>
+#include <iostream>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -442,12 +442,14 @@ constexpr std::string_view kUsage =
     "                            pack without leaving artifacts behind.\n";
 
 void print_version() {
-    std::printf("%.*s %.*s\n",
-                static_cast<int>(st::Version::name().size()), st::Version::name().data(),
-                static_cast<int>(st::Version::string().size()), st::Version::string().data());
+    std::printf("%.*s %.*s\n", static_cast<int>(st::Version::name().size()),
+                st::Version::name().data(), static_cast<int>(st::Version::string().size()),
+                st::Version::string().data());
 }
 
-void print_usage() { std::fputs(kUsage.data(), stdout); }
+void print_usage() {
+    std::fputs(kUsage.data(), stdout);
+}
 
 // Upgrade a `<dir>/pack.toml` path to its parent directory whenever
 // the parent contains other *.toml files — the multi-file pack shape
@@ -459,15 +461,18 @@ void print_usage() { std::fputs(kUsage.data(), stdout); }
 // the legacy single-file pack flow.
 std::filesystem::path resolve_def_path(std::filesystem::path const &path) {
     std::error_code ec;
-    if (!std::filesystem::is_regular_file(path, ec) || ec) return path;
-    if (path.filename() != "pack.toml") return path;
-    auto const      parent = path.parent_path();
+    if (!std::filesystem::is_regular_file(path, ec) || ec)
+        return path;
+    if (path.filename() != "pack.toml")
+        return path;
+    auto const parent = path.parent_path();
     std::error_code walk_ec;
-    for (auto const &entry :
-         std::filesystem::directory_iterator{parent, walk_ec}) {
-        if (walk_ec) break;
+    for (auto const &entry : std::filesystem::directory_iterator{parent, walk_ec}) {
+        if (walk_ec)
+            break;
         std::error_code is_file_ec;
-        if (!entry.is_regular_file(is_file_ec) || is_file_ec) continue;
+        if (!entry.is_regular_file(is_file_ec) || is_file_ec)
+            continue;
         auto const &p = entry.path();
         if (p.extension() == ".toml" && p.filename() != "pack.toml") {
             return parent;
@@ -480,18 +485,16 @@ std::filesystem::path resolve_def_path(std::filesystem::path const &path) {
 // supplied path doesn't exist on disk. SubuwuTuner ships infrastructure
 // only — calibration packs are user-supplied — so a missing path is a
 // "where do I get a pack" moment, not just a generic I/O error.
-int print_def_load_error(char const                    *subcmd,
-                         std::filesystem::path const &path,
-                         st::Error const               &err) {
+int print_def_load_error(char const *subcmd, std::filesystem::path const &path,
+                         st::Error const &err) {
     std::fprintf(stderr, "%s: %s\n", subcmd, err.to_string().c_str());
     std::error_code ec;
     if (!std::filesystem::exists(path, ec) || ec) {
-        std::fputs(
-            "\n  No definition pack found at the path above.\n"
-            "  SubuwuTuner does not ship with bundled calibration packs;\n"
-            "  generate one with tools/defgen/defgen.py from a public\n"
-            "  RomRaider XML, or use fixtures/demo-pack/ as an example.\n",
-            stderr);
+        std::fputs("\n  No definition pack found at the path above.\n"
+                   "  SubuwuTuner does not ship with bundled calibration packs;\n"
+                   "  generate one with tools/defgen/defgen.py from a public\n"
+                   "  RomRaider XML, or use fixtures/demo-pack/ as an example.\n",
+                   stderr);
     }
     return 1;
 }
@@ -520,13 +523,14 @@ inline constexpr std::size_t kSubaruCidLength = 8;
 void print_subaru_cid(st::Rom const &rom) {
     if (rom.size() < kSubaruCidOffset + kSubaruCidLength) {
         std::printf("Subaru CID:     (ROM too short to hold a CID at "
-                    "0x%08zX)\n", kSubaruCidOffset);
+                    "0x%08zX)\n",
+                    kSubaruCidOffset);
         return;
     }
-    auto const  data = rom.data();
-    bool        all_printable = true;
-    bool        in_trailing_nul = false;
-    char        cid[kSubaruCidLength + 1] = {};
+    auto const data = rom.data();
+    bool all_printable = true;
+    bool in_trailing_nul = false;
+    char cid[kSubaruCidLength + 1] = {};
     for (std::size_t i = 0; i < kSubaruCidLength; ++i) {
         auto const b = data[kSubaruCidOffset + i];
         // Printable ASCII range 0x20..0x7E. Trailing 0x00 padding
@@ -535,7 +539,10 @@ void print_subaru_cid(st::Rom const &rom) {
         // NUL followed by non-NUL bytes is garbage and rejected
         // so we don't print a misleading prefix.
         if (in_trailing_nul) {
-            if (b != 0) { all_printable = false; break; }
+            if (b != 0) {
+                all_printable = false;
+                break;
+            }
             continue;
         }
         if (b == 0 && i > 0) {
@@ -550,8 +557,7 @@ void print_subaru_cid(st::Rom const &rom) {
         cid[i] = static_cast<char>(b);
     }
     if (all_printable) {
-        std::printf("Subaru CID:     '%s'  (8 bytes @ 0x%08zX)\n",
-                    cid, kSubaruCidOffset);
+        std::printf("Subaru CID:     '%s'  (8 bytes @ 0x%08zX)\n", cid, kSubaruCidOffset);
     } else {
         std::printf("Subaru CID:     (no printable signature at "
                     "0x%08zX — not a Subaru-format ROM at this "
@@ -571,7 +577,7 @@ void print_rom_summary(std::filesystem::path const &path, st::Rom const &rom) {
     std::printf("Embedded ASCII: %zu strings (>=5 chars)\n", strings.size());
 
     constexpr std::size_t kMaxToPrint = 32;
-    auto const            limit       = strings.size() < kMaxToPrint ? strings.size() : kMaxToPrint;
+    auto const limit = strings.size() < kMaxToPrint ? strings.size() : kMaxToPrint;
     for (std::size_t i = 0; i < limit; ++i) {
         auto const &s = strings[i];
         std::printf("  0x%08zX  (%2zu chars)  %s\n", s.offset, s.text.size(), s.text.c_str());
@@ -603,11 +609,10 @@ void print_def_summary(st::Definition const &def, st::Rom const &rom) {
     auto const info = def.match_info(rom);
     if (info.has_value()) {
         if (info->scanned) {
-            std::printf("  Match:         %s @ 0x%08zX (scanned)\n",
-                        info->name.c_str(), info->offset);
+            std::printf("  Match:         %s @ 0x%08zX (scanned)\n", info->name.c_str(),
+                        info->offset);
         } else {
-            std::printf("  Match:         %s @ 0x%08zX\n",
-                        info->name.c_str(), info->offset);
+            std::printf("  Match:         %s @ 0x%08zX\n", info->name.c_str(), info->offset);
         }
     } else {
         // Distinguish "no scan-mode CID anywhere" from "fixed-offset
@@ -615,7 +620,10 @@ void print_def_summary(st::Definition const &def, st::Rom const &rom) {
         // diagnostic phrasing differs.
         bool any_scan = false;
         for (auto const &id : def.identifications()) {
-            if (id.cid_scan) { any_scan = true; break; }
+            if (id.cid_scan) {
+                any_scan = true;
+                break;
+            }
         }
         if (any_scan) {
             std::printf("  Match:         (none — CID not found by scan; "
@@ -641,9 +649,9 @@ void print_def_summary(st::Definition const &def, st::Rom const &rom) {
 
 int cmd_dump_axis(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
-    std::optional<std::string>           axis_id;
+    std::optional<std::string> axis_id;
     std::optional<std::filesystem::path> rom_path;
-    bool                                 csv = false;
+    bool csv = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -707,13 +715,13 @@ int cmd_dump_axis(int argc, char *argv[]) {
     }
 
     auto const *scaling = def->find_scaling(axis->scaling);
-    auto const  unit    = (scaling != nullptr ? scaling->unit : axis->unit);
-    auto const  precision =
-        scaling != nullptr ? scaling->precision : 0;
+    auto const unit = (scaling != nullptr ? scaling->unit : axis->unit);
+    auto const precision = scaling != nullptr ? scaling->precision : 0;
 
     if (csv) {
         for (std::size_t i = 0; i < values->size(); ++i) {
-            if (i > 0) std::printf(",");
+            if (i > 0)
+                std::printf(",");
             std::printf("%.*f", precision, (*values)[i]);
         }
         std::printf("\n");
@@ -729,9 +737,9 @@ int cmd_dump_axis(int argc, char *argv[]) {
 
 int cmd_dump_table(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
-    std::optional<std::string>           table_id;
+    std::optional<std::string> table_id;
     std::optional<std::filesystem::path> rom_path;
-    bool                                 csv = false;
+    bool csv = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -761,10 +769,9 @@ int cmd_dump_table(int argc, char *argv[]) {
     }
 
     if (!def_path.has_value() || !table_id.has_value() || !rom_path.has_value()) {
-        std::fputs(
-            "dump-table: missing required arguments\n"
-            "Usage: subuwutuner-cli dump-table --def <pack.toml> --table <id> <FILE>\n",
-            stderr);
+        std::fputs("dump-table: missing required arguments\n"
+                   "Usage: subuwutuner-cli dump-table --def <pack.toml> --table <id> <FILE>\n",
+                   stderr);
         return 2;
     }
 
@@ -794,9 +801,9 @@ int cmd_dump_table(int argc, char *argv[]) {
         return 1;
     }
 
-    auto const *scal      = def->find_scaling(table->scaling);
-    auto const  precision = scal != nullptr ? scal->precision : 0;
-    auto const  unit      = scal != nullptr ? scal->unit : std::string{};
+    auto const *scal = def->find_scaling(table->scaling);
+    auto const precision = scal != nullptr ? scal->precision : 0;
+    auto const unit = scal != nullptr ? scal->unit : std::string{};
 
     auto const &xs = td->axis_x;
     auto const &ys = td->axis_y;
@@ -809,28 +816,33 @@ int cmd_dump_table(int argc, char *argv[]) {
             std::printf("%.*f\n", precision, grid[0][0]);
             return;
         }
-        for (auto const x : xs) std::printf(",%.*f", precision, x);
+        for (auto const x : xs)
+            std::printf(",%.*f", precision, x);
         std::printf("\n");
         for (std::size_t r = 0; r < grid.size(); ++r) {
-            if (!ys.empty()) std::printf("%.*f", precision, ys[r]);
-            for (auto const v : grid[r]) std::printf(",%.*f", precision, v);
+            if (!ys.empty())
+                std::printf("%.*f", precision, ys[r]);
+            for (auto const v : grid[r])
+                std::printf(",%.*f", precision, v);
             std::printf("\n");
         }
     };
 
     constexpr int kColWidth = 10;
-    auto const    print_slice_pretty =
-        [&](std::vector<std::vector<double>> const &grid) {
+    auto const print_slice_pretty = [&](std::vector<std::vector<double>> const &grid) {
         if (xs.empty() && ys.empty() && grid.size() == 1 && grid[0].size() == 1) {
             std::printf("%.*f\n", precision, grid[0][0]);
             return;
         }
         std::printf("%*s", kColWidth, "");
-        for (auto const x : xs) std::printf(" %*.*f", kColWidth - 1, precision, x);
+        for (auto const x : xs)
+            std::printf(" %*.*f", kColWidth - 1, precision, x);
         std::printf("\n");
         for (std::size_t r = 0; r < grid.size(); ++r) {
-            if (!ys.empty()) std::printf("%*.*f", kColWidth, precision, ys[r]);
-            else             std::printf("%*s", kColWidth, "");
+            if (!ys.empty())
+                std::printf("%*.*f", kColWidth, precision, ys[r]);
+            else
+                std::printf("%*s", kColWidth, "");
             for (auto const v : grid[r])
                 std::printf(" %*.*f", kColWidth - 1, precision, v);
             std::printf("\n");
@@ -850,14 +862,15 @@ int cmd_dump_table(int argc, char *argv[]) {
     }
 
     std::printf("# %s  (%dD", table->id.c_str(), table->dimensions);
-    if (!table->name.empty()) std::printf(", %s", table->name.c_str());
-    if (!unit.empty())        std::printf(", unit=%s", unit.c_str());
+    if (!table->name.empty())
+        std::printf(", %s", table->name.c_str());
+    if (!unit.empty())
+        std::printf(", unit=%s", unit.c_str());
     std::printf(")\n");
 
     if (table->dimensions == 3) {
         for (std::size_t z = 0; z < td->slices.size(); ++z) {
-            std::printf("\n--- z = %.*f ---\n",
-                        precision, zs.empty() ? 0.0 : zs[z]);
+            std::printf("\n--- z = %.*f ---\n", precision, zs.empty() ? 0.0 : zs[z]);
             print_slice_pretty(td->slices[z]);
         }
     } else {
@@ -881,11 +894,9 @@ int cmd_project_step(int argc, char *argv[], bool forward) {
         return 1;
     }
 
-    st::edit::Edit const *edit_record =
-        forward ? proj->history().redo() : proj->history().undo();
+    st::edit::Edit const *edit_record = forward ? proj->history().redo() : proj->history().undo();
     if (edit_record == nullptr) {
-        std::fprintf(stderr, "%s: no edit to %s\n", cmd_name,
-                     forward ? "redo" : "undo");
+        std::fprintf(stderr, "%s: no edit to %s\n", cmd_name, forward ? "redo" : "undo");
         return 1;
     }
 
@@ -913,15 +924,12 @@ int cmd_project_step(int argc, char *argv[], bool forward) {
 
         auto wb = proj->definition().write_table_values(proj->working_rom(), *table, *td);
         if (!wb.has_value()) {
-            std::fprintf(stderr, "%s: writeback: %s\n", cmd_name,
-                         wb.error().to_string().c_str());
+            std::fprintf(stderr, "%s: writeback: %s\n", cmd_name, wb.error().to_string().c_str());
             return 1;
         }
 
-        std::printf("%s applied edit: %s on %s\n",
-                    forward ? "Redo" : "Undo",
-                    edit_record->description.c_str(),
-                    te->table_id.c_str());
+        std::printf("%s applied edit: %s on %s\n", forward ? "Redo" : "Undo",
+                    edit_record->description.c_str(), te->table_id.c_str());
     } else if (auto const *be = edit_record->as_byte(); be != nullptr) {
         // ByteEdit: walk the per-byte changes and write the appropriate side
         // directly to the working ROM. No definition indirection — works
@@ -931,15 +939,13 @@ int cmd_project_step(int argc, char *argv[], bool forward) {
         for (auto const &c : be->changes) {
             auto const v = forward ? c.after : c.before;
             if (auto s = rom.write_u8(c.address, v); !s.has_value()) {
-                std::fprintf(stderr, "%s: byte writeback @0x%zX: %s\n",
-                             cmd_name, c.address, s.error().to_string().c_str());
+                std::fprintf(stderr, "%s: byte writeback @0x%zX: %s\n", cmd_name, c.address,
+                             s.error().to_string().c_str());
                 return 1;
             }
         }
-        std::printf("%s applied edit: %s (%zu byte%s)\n",
-                    forward ? "Redo" : "Undo",
-                    edit_record->description.c_str(),
-                    be->changes.size(),
+        std::printf("%s applied edit: %s (%zu byte%s)\n", forward ? "Redo" : "Undo",
+                    edit_record->description.c_str(), be->changes.size(),
                     be->changes.size() == 1 ? "" : "s");
     }
 
@@ -949,8 +955,7 @@ int cmd_project_step(int argc, char *argv[], bool forward) {
     }
 
     std::printf("Working CRC32: 0x%08X\n", proj->working_rom().crc32());
-    std::printf("History cursor: %zu / %zu\n", proj->history().cursor(),
-                proj->history().size());
+    std::printf("History cursor: %zu / %zu\n", proj->history().cursor(), proj->history().size());
     return 0;
 }
 
@@ -961,8 +966,7 @@ int cmd_pack_info(int argc, char *argv[]) {
         return 2;
     }
     std::filesystem::path const path{argv[0]};
-    auto const                  def =
-        st::Definition::from_file(resolve_def_path(path));
+    auto const def = st::Definition::from_file(resolve_def_path(path));
     if (!def.has_value()) {
         return print_def_load_error("pack-info", path, def.error());
     }
@@ -981,7 +985,8 @@ int cmd_pack_info(int argc, char *argv[]) {
     }
     if (!pack.years.empty()) {
         std::printf("Years:         ");
-        for (int y : pack.years) std::printf(" %d", y);
+        for (int y : pack.years)
+            std::printf(" %d", y);
         std::printf("\n");
     }
     std::printf("Endianness:     %s\n", pack.endianness.c_str());
@@ -1005,7 +1010,8 @@ int cmd_pack_info(int argc, char *argv[]) {
     }
     if (!pack.includes.empty()) {
         std::printf("Includes:      ");
-        for (auto const &inc : pack.includes) std::printf(" %s", inc.c_str());
+        for (auto const &inc : pack.includes)
+            std::printf(" %s", inc.c_str());
         std::printf("\n");
     }
     std::printf("\n");
@@ -1015,11 +1021,10 @@ int cmd_pack_info(int argc, char *argv[]) {
             // Scan-mode identifications don't carry a meaningful
             // cid_address — the loader searches the whole ROM for
             // cid_match. Show "scan" instead of the misleading 0x0.
-            std::printf("  - %s  (CID '%s', scan)\n", id.name.c_str(),
-                        id.cid_match.c_str());
+            std::printf("  - %s  (CID '%s', scan)\n", id.name.c_str(), id.cid_match.c_str());
         } else {
-            std::printf("  - %s  (CID '%s' @ 0x%08zX)\n", id.name.c_str(),
-                        id.cid_match.c_str(), id.cid_address);
+            std::printf("  - %s  (CID '%s' @ 0x%08zX)\n", id.name.c_str(), id.cid_match.c_str(),
+                        id.cid_address);
         }
     }
     std::printf("Axes:            %zu\n", def->axes().size());
@@ -1027,10 +1032,12 @@ int cmd_pack_info(int argc, char *argv[]) {
     std::printf("Tables:          %zu\n", def->tables().size());
     {
         std::size_t emissions = 0;
-        std::size_t safety    = 0;
+        std::size_t safety = 0;
         for (auto const &t : def->tables()) {
-            if (t.emissions_relevant)     ++emissions;
-            if (t.engine_safety_critical) ++safety;
+            if (t.emissions_relevant)
+                ++emissions;
+            if (t.engine_safety_critical)
+                ++safety;
         }
         if (emissions > 0) {
             std::printf("  emissions:     %zu\n", emissions);
@@ -1046,7 +1053,8 @@ int cmd_pack_info(int argc, char *argv[]) {
     {
         std::size_t emissions = 0;
         for (auto const &d : def->dtcs()) {
-            if (d.emissions_relevant) ++emissions;
+            if (d.emissions_relevant)
+                ++emissions;
         }
         if (emissions > 0) {
             std::printf("  emissions:     %zu\n", emissions);
@@ -1069,23 +1077,27 @@ namespace {
 char const *action_name(st::policy::Action a) noexcept {
     using A = st::policy::Action;
     switch (a) {
-        case A::Silent:            return "silent";
-        case A::Badge:             return "badge";
-        case A::Warn:              return "warn";
-        case A::Confirm:           return "confirm";
-        case A::ConfirmWithReason: return "confirm+reason";
-        case A::Block:             return "block";
+    case A::Silent:
+        return "silent";
+    case A::Badge:
+        return "badge";
+    case A::Warn:
+        return "warn";
+    case A::Confirm:
+        return "confirm";
+    case A::ConfirmWithReason:
+        return "confirm+reason";
+    case A::Block:
+        return "block";
     }
     return "?";
 }
 
 void print_policy_row(st::policy::Profile p) {
-    auto const  emissions = st::policy::emissions_action(p);
-    auto const  safety    = st::policy::engine_safety_on_flash(p);
-    std::printf("%-18s  %-16s  %-16s  %-16s\n",
-                std::string{st::policy::profile_name(p)}.c_str(),
-                action_name(emissions.on_save),
-                action_name(emissions.on_flash),
+    auto const emissions = st::policy::emissions_action(p);
+    auto const safety = st::policy::engine_safety_on_flash(p);
+    std::printf("%-18s  %-16s  %-16s  %-16s\n", std::string{st::policy::profile_name(p)}.c_str(),
+                action_name(emissions.on_save), action_name(emissions.on_flash),
                 action_name(safety));
 }
 } // namespace
@@ -1114,25 +1126,23 @@ int cmd_policy(int argc, char *argv[]) {
         only = st::policy::parse_profile(*profile_name);
         if (!only.has_value()) {
             std::fprintf(stderr,
-                "policy: unknown profile '%s'. Known: motorsport-only, "
-                "alberta-ca, eu-roadworthy, california-us\n",
-                profile_name->c_str());
+                         "policy: unknown profile '%s'. Known: motorsport-only, "
+                         "alberta-ca, eu-roadworthy, california-us\n",
+                         profile_name->c_str());
             return 1;
         }
     }
 
-    std::printf("%-18s  %-16s  %-16s  %-16s\n",
-                "profile", "emissions-save", "emissions-flash", "safety-flash");
-    std::printf("%-18s  %-16s  %-16s  %-16s\n",
-                "------", "--------------", "---------------", "------------");
+    std::printf("%-18s  %-16s  %-16s  %-16s\n", "profile", "emissions-save", "emissions-flash",
+                "safety-flash");
+    std::printf("%-18s  %-16s  %-16s  %-16s\n", "------", "--------------", "---------------",
+                "------------");
 
     if (only.has_value()) {
         print_policy_row(*only);
     } else {
-        for (auto p : {st::policy::Profile::MotorsportOnly,
-                       st::policy::Profile::AlbertaCa,
-                       st::policy::Profile::EuRoadworthy,
-                       st::policy::Profile::CaliforniaUs}) {
+        for (auto p : {st::policy::Profile::MotorsportOnly, st::policy::Profile::AlbertaCa,
+                       st::policy::Profile::EuRoadworthy, st::policy::Profile::CaliforniaUs}) {
             print_policy_row(p);
         }
     }
@@ -1141,13 +1151,13 @@ int cmd_policy(int argc, char *argv[]) {
 
 int cmd_table_list(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
-    std::optional<std::string>           category_filter;
-    bool                                 emissions_only       = false;
-    bool                                 safety_critical_only = false;
+    std::optional<std::string> category_filter;
+    bool emissions_only = false;
+    bool safety_critical_only = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require = [&](char const *name) -> char const * {
+        auto const require = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "table-list: %s requires a value\n", name);
                 return nullptr;
@@ -1155,8 +1165,10 @@ int cmd_table_list(int argc, char *argv[]) {
             return argv[++i];
         };
         if (a == "--category") {
-            if (auto const *v = require("--category"); v) category_filter = std::string{v};
-            else return 2;
+            if (auto const *v = require("--category"); v)
+                category_filter = std::string{v};
+            else
+                return 2;
         } else if (a == "--emissions") {
             emissions_only = true;
         } else if (a == "--safety-critical") {
@@ -1186,18 +1198,19 @@ int cmd_table_list(int argc, char *argv[]) {
     }
 
     std::size_t matched = 0;
-    std::printf("%-3s %-3s %-10s %-32s %-18s %s\n",
-                "D", "F", "address", "id", "category", "name");
+    std::printf("%-3s %-3s %-10s %-32s %-18s %s\n", "D", "F", "address", "id", "category", "name");
     for (auto const &t : def->tables()) {
-        if (category_filter.has_value() && t.category != *category_filter) continue;
-        if (emissions_only && !t.emissions_relevant) continue;
-        if (safety_critical_only && !t.engine_safety_critical) continue;
+        if (category_filter.has_value() && t.category != *category_filter)
+            continue;
+        if (emissions_only && !t.emissions_relevant)
+            continue;
+        if (safety_critical_only && !t.engine_safety_critical)
+            continue;
         char flags[3];
-        flags[0] = t.emissions_relevant     ? 'E' : '-';
+        flags[0] = t.emissions_relevant ? 'E' : '-';
         flags[1] = t.engine_safety_critical ? 'S' : '-';
         flags[2] = '\0';
-        std::printf("%dD  %-3s 0x%08zX %-32s %-18s %s\n",
-                    t.dimensions, flags, t.address,
+        std::printf("%dD  %-3s 0x%08zX %-32s %-18s %s\n", t.dimensions, flags, t.address,
                     t.id.c_str(), t.category.c_str(), t.name.c_str());
         ++matched;
     }
@@ -1213,12 +1226,14 @@ int cmd_table_list(int argc, char *argv[]) {
 // present so the direction is unambiguous (no chance of reading a
 // bare `float` as "takes a float" when the hook actually emits one).
 std::string format_signature(std::vector<st::HookSignal> const &consumed,
-                              std::vector<st::HookSignal> const &produced) {
+                             std::vector<st::HookSignal> const &produced) {
     auto join = [](std::vector<st::HookSignal> const &xs) {
-        if (xs.empty()) return std::string{"()"};
+        if (xs.empty())
+            return std::string{"()"};
         std::string s;
         for (std::size_t i = 0; i < xs.size(); ++i) {
-            if (i > 0) s += ',';
+            if (i > 0)
+                s += ',';
             s += xs[i].type.empty() ? "?" : xs[i].type;
         }
         return s;
@@ -1228,7 +1243,7 @@ std::string format_signature(std::vector<st::HookSignal> const &consumed,
 
 int cmd_primitive_list(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
-    std::optional<std::string>           type_filter;
+    std::optional<std::string> type_filter;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -1273,27 +1288,31 @@ int cmd_primitive_list(int argc, char *argv[]) {
         if (type_filter.has_value()) {
             bool ok = false;
             for (auto const &o : p.outputs) {
-                if (o.type == *type_filter) { ok = true; break; }
+                if (o.type == *type_filter) {
+                    ok = true;
+                    break;
+                }
             }
-            if (!ok) continue;
+            if (!ok)
+                continue;
         }
         auto const sig = format_signature(p.inputs, p.outputs);
         // Truncate description for column fit; the user can re-read
         // the pack's primitives.toml for full text.
         std::string desc = p.description;
-        if (desc.size() > 64) desc = desc.substr(0, 61) + "...";
+        if (desc.size() > 64)
+            desc = desc.substr(0, 61) + "...";
         std::printf("%-24s %-32s %s\n", p.id.c_str(), sig.c_str(), desc.c_str());
         ++matched;
     }
-    std::printf("\n%zu primitives shown (of %zu in pack).\n",
-                matched, def->primitives().size());
+    std::printf("\n%zu primitives shown (of %zu in pack).\n", matched, def->primitives().size());
     return 0;
 }
 
 int cmd_hook_list(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
-    bool                                 only_sensor = false;
-    bool                                 only_action = false;
+    bool only_sensor = false;
+    bool only_action = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -1326,8 +1345,7 @@ int cmd_hook_list(int argc, char *argv[]) {
     }
 
     std::size_t matched = 0;
-    std::printf("%-24s %-10s %-32s %s\n",
-                "id", "addr", "signature", "description");
+    std::printf("%-24s %-10s %-32s %s\n", "id", "addr", "signature", "description");
     for (auto const &h : def->hooks()) {
         // Sensor hooks expose data to user logic (inputs from the
         // ECU); action hooks consume user-written values (outputs
@@ -1336,13 +1354,14 @@ int cmd_hook_list(int argc, char *argv[]) {
         // splices like after_fuel_calc) have both.
         bool const sensor = !h.inputs.empty() && h.outputs.empty();
         bool const action = h.inputs.empty() && !h.outputs.empty();
-        if (only_sensor && !sensor) continue;
-        if (only_action && !action) continue;
+        if (only_sensor && !sensor)
+            continue;
+        if (only_action && !action)
+            continue;
 
         char addr_buf[16];
         if (h.ecu_address.has_value()) {
-            std::snprintf(addr_buf, sizeof addr_buf, "0x%06zX",
-                          *h.ecu_address);
+            std::snprintf(addr_buf, sizeof addr_buf, "0x%06zX", *h.ecu_address);
         } else {
             std::snprintf(addr_buf, sizeof addr_buf, "%s", "-");
         }
@@ -1354,25 +1373,24 @@ int cmd_hook_list(int argc, char *argv[]) {
         // direction ("what the hook consumes -> what it produces").
         auto const sig = format_signature(h.outputs, h.inputs);
         std::string desc = h.description;
-        if (desc.size() > 48) desc = desc.substr(0, 45) + "...";
-        std::printf("%-24s %-10s %-32s %s\n",
-                    h.id.c_str(), addr_buf, sig.c_str(), desc.c_str());
+        if (desc.size() > 48)
+            desc = desc.substr(0, 45) + "...";
+        std::printf("%-24s %-10s %-32s %s\n", h.id.c_str(), addr_buf, sig.c_str(), desc.c_str());
         ++matched;
     }
-    std::printf("\n%zu hooks shown (of %zu in pack).\n",
-                matched, def->hooks().size());
+    std::printf("\n%zu hooks shown (of %zu in pack).\n", matched, def->hooks().size());
     return 0;
 }
 
 int cmd_pack_dtcs(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
     std::optional<std::filesystem::path> rom_path;
-    std::optional<std::string>           bitmap_filter;
-    bool                                 emissions_only = false;
+    std::optional<std::string> bitmap_filter;
+    bool emissions_only = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require = [&](char const *name) -> char const * {
+        auto const require = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "pack-dtcs: %s requires a value\n", name);
                 return nullptr;
@@ -1380,14 +1398,17 @@ int cmd_pack_dtcs(int argc, char *argv[]) {
             return argv[++i];
         };
         if (a == "--bitmap") {
-            if (auto const *v = require("--bitmap"); v) bitmap_filter = std::string{v};
-            else return 2;
+            if (auto const *v = require("--bitmap"); v)
+                bitmap_filter = std::string{v};
+            else
+                return 2;
         } else if (a == "--emissions") {
             emissions_only = true;
         } else if (a == "--show-state") {
             if (auto const *v = require("--show-state"); v)
                 rom_path = std::filesystem::path{v};
-            else return 2;
+            else
+                return 2;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "pack-dtcs: unknown option: %s\n", argv[i]);
             return 2;
@@ -1433,45 +1454,41 @@ int cmd_pack_dtcs(int argc, char *argv[]) {
     if (!def->dtc_bitmaps().empty()) {
         std::printf("Bitmaps:\n");
         for (auto const &b : def->dtc_bitmaps()) {
-            std::printf("  %-24s @ 0x%08zX  %zu bytes\n",
-                        b.id.c_str(), b.address, b.length_bytes);
+            std::printf("  %-24s @ 0x%08zX  %zu bytes\n", b.id.c_str(), b.address, b.length_bytes);
         }
         std::printf("\n");
     }
 
-    std::size_t matched      = 0;
+    std::size_t matched = 0;
     std::size_t disabled_cnt = 0;
     if (rom.has_value()) {
-        std::printf("%-6s %-2s %-1s %-32s %s\n",
-                    "code", "On", "F", "location", "name");
+        std::printf("%-6s %-2s %-1s %-32s %s\n", "code", "On", "F", "location", "name");
     } else {
         std::printf("%-6s %-1s %-32s %s\n", "code", "F", "location", "name");
     }
     for (auto const &d : def->dtcs()) {
-        if (emissions_only && !d.emissions_relevant) continue;
-        if (bitmap_filter.has_value() && d.bitmap_id != *bitmap_filter) continue;
+        if (emissions_only && !d.emissions_relevant)
+            continue;
+        if (bitmap_filter.has_value() && d.bitmap_id != *bitmap_filter)
+            continue;
         char location[64];
-        std::snprintf(location, sizeof(location), "%s:%zu.%d",
-                      d.bitmap_id.c_str(), d.byte_offset, d.bit);
+        std::snprintf(location, sizeof(location), "%s:%zu.%d", d.bitmap_id.c_str(), d.byte_offset,
+                      d.bit);
         if (rom.has_value()) {
             auto const *bm = def->find_dtc_bitmap(d.bitmap_id);
-            char        on_glyph = '?';
+            char on_glyph = '?';
             if (bm != nullptr) {
                 auto const en = st::is_dtc_enabled(*rom, *bm, d);
                 if (en.has_value()) {
                     on_glyph = *en ? 'Y' : 'n';
-                    if (!*en) ++disabled_cnt;
+                    if (!*en)
+                        ++disabled_cnt;
                 }
             }
-            std::printf("%-6s %c  %c %-32s %s\n",
-                        d.code.c_str(),
-                        on_glyph,
-                        d.emissions_relevant ? 'E' : '-',
-                        location, d.name.c_str());
+            std::printf("%-6s %c  %c %-32s %s\n", d.code.c_str(), on_glyph,
+                        d.emissions_relevant ? 'E' : '-', location, d.name.c_str());
         } else {
-            std::printf("%-6s %c %-32s %s\n",
-                        d.code.c_str(),
-                        d.emissions_relevant ? 'E' : '-',
+            std::printf("%-6s %c %-32s %s\n", d.code.c_str(), d.emissions_relevant ? 'E' : '-',
                         location, d.name.c_str());
         }
         ++matched;
@@ -1496,12 +1513,12 @@ int cmd_pack_dtcs(int argc, char *argv[]) {
 // project-flash.
 int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
     char const *cmd_name = enable ? "project-enable-dtc" : "project-disable-dtc";
-    std::optional<std::string>           codes_arg;
+    std::optional<std::string> codes_arg;
     std::optional<std::filesystem::path> proj_path;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require = [&](char const *name) -> char const * {
+        auto const require = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "%s: %s requires a value\n", cmd_name, name);
                 return nullptr;
@@ -1509,8 +1526,10 @@ int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
             return argv[++i];
         };
         if (a == "--code") {
-            if (auto const *v = require("--code"); v) codes_arg = std::string{v};
-            else return 2;
+            if (auto const *v = require("--code"); v)
+                codes_arg = std::string{v};
+            else
+                return 2;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "%s: unknown option: %s\n", cmd_name, argv[i]);
             return 2;
@@ -1524,8 +1543,7 @@ int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
 
     if (!codes_arg.has_value() || !proj_path.has_value()) {
         std::fprintf(stderr, "%s: missing required arguments\n", cmd_name);
-        std::fprintf(stderr,
-                     "Usage: subuwutuner-cli %s --code P0401[,P0420,...] <dir>\n",
+        std::fprintf(stderr, "Usage: subuwutuner-cli %s --code P0401[,P0420,...] <dir>\n",
                      cmd_name);
         return 2;
     }
@@ -1537,8 +1555,10 @@ int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
         while (!rest.empty()) {
             auto const comma = rest.find(',');
             auto const token = rest.substr(0, comma);
-            if (!token.empty()) codes.emplace_back(token);
-            if (comma == std::string_view::npos) break;
+            if (!token.empty())
+                codes.emplace_back(token);
+            if (comma == std::string_view::npos)
+                break;
             rest = rest.substr(comma + 1);
         }
     }
@@ -1554,7 +1574,7 @@ int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
     }
 
     auto const &def = proj->definition();
-    auto       &rom = proj->working_rom();
+    auto &rom = proj->working_rom();
 
     // We collect ByteEdit::Change entries during the toggle loop and
     // commit them as one undoable Edit. Two DTCs sharing the same byte
@@ -1563,34 +1583,30 @@ int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
     // appending a new entry, so the recorded delta matches the ROM's
     // final state and an undo restores the original byte.
     std::vector<st::edit::ByteEdit::Change> changes;
-    std::size_t                             emissions_count = 0;
-    std::vector<std::string>                touched_codes;
+    std::size_t emissions_count = 0;
+    std::vector<std::string> touched_codes;
     for (auto const &code : codes) {
         auto const *dtc = def.find_dtc(code);
         if (dtc == nullptr) {
-            std::fprintf(stderr, "%s: code '%s' not found in pack\n",
-                         cmd_name, code.c_str());
+            std::fprintf(stderr, "%s: code '%s' not found in pack\n", cmd_name, code.c_str());
             return 1;
         }
         auto const *bm = def.find_dtc_bitmap(dtc->bitmap_id);
         if (bm == nullptr) {
-            std::fprintf(stderr, "%s: code '%s' references unknown bitmap '%s'\n",
-                         cmd_name, code.c_str(), dtc->bitmap_id.c_str());
+            std::fprintf(stderr, "%s: code '%s' references unknown bitmap '%s'\n", cmd_name,
+                         code.c_str(), dtc->bitmap_id.c_str());
             return 1;
         }
         auto result = st::set_dtc_enabled(rom, *bm, *dtc, enable);
         if (!result.has_value()) {
-            std::fprintf(stderr, "%s: %s\n", cmd_name,
-                         result.error().to_string().c_str());
+            std::fprintf(stderr, "%s: %s\n", cmd_name, result.error().to_string().c_str());
             return 1;
         }
         bool const byte_changed = result->before != result->after;
         if (byte_changed) {
             auto it = std::find_if(
                 changes.begin(), changes.end(),
-                [&](st::edit::ByteEdit::Change const &c) {
-                    return c.address == result->address;
-                });
+                [&](st::edit::ByteEdit::Change const &c) { return c.address == result->address; });
             if (it == changes.end()) {
                 changes.push_back({result->address, result->before, result->after});
             } else {
@@ -1598,13 +1614,11 @@ int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
             }
             touched_codes.push_back(dtc->code);
         }
-        if (dtc->emissions_relevant) ++emissions_count;
-        std::printf("  %s %-6s %s  (byte 0x%02X -> 0x%02X)%s\n",
-                    enable ? "ENABLE " : "DISABLE",
-                    dtc->code.c_str(),
-                    byte_changed ? "changed" : "no-op  ",
-                    result->before, result->after,
-                    dtc->emissions_relevant ? "  [emissions]" : "");
+        if (dtc->emissions_relevant)
+            ++emissions_count;
+        std::printf("  %s %-6s %s  (byte 0x%02X -> 0x%02X)%s\n", enable ? "ENABLE " : "DISABLE",
+                    dtc->code.c_str(), byte_changed ? "changed" : "no-op  ", result->before,
+                    result->after, dtc->emissions_relevant ? "  [emissions]" : "");
     }
 
     if (!changes.empty()) {
@@ -1612,14 +1626,13 @@ int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
         desc.reserve(64);
         desc.append(enable ? "enable DTC " : "disable DTC ");
         for (std::size_t i = 0; i < touched_codes.size(); ++i) {
-            if (i > 0) desc.append(", ");
+            if (i > 0)
+                desc.append(", ");
             desc.append(touched_codes[i]);
         }
-        proj->history().record(
-            st::edit::Edit::bytes(std::move(changes), std::move(desc)));
+        proj->history().record(st::edit::Edit::bytes(std::move(changes), std::move(desc)));
         if (auto s = proj->save_working_rom(); !s.has_value()) {
-            std::fprintf(stderr, "%s: save: %s\n", cmd_name,
-                         s.error().to_string().c_str());
+            std::fprintf(stderr, "%s: save: %s\n", cmd_name, s.error().to_string().c_str());
             return 1;
         }
         std::printf("\nWorking ROM saved. New CRC32: 0x%08X\n", rom.crc32());
@@ -1636,16 +1649,16 @@ int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
 }
 
 int cmd_project_edit(int argc, char *argv[]) {
-    std::optional<std::string>           table_id;
-    std::optional<std::string>           rows_arg;
-    std::optional<std::string>           cols_arg;
-    std::optional<std::string>           op;
-    std::optional<double>                value;
+    std::optional<std::string> table_id;
+    std::optional<std::string> rows_arg;
+    std::optional<std::string> cols_arg;
+    std::optional<std::string> op;
+    std::optional<double> value;
     std::optional<std::filesystem::path> proj_path;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require = [&](char const *name) -> char const * {
+        auto const require = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "project-edit: %s requires a value\n", name);
                 return nullptr;
@@ -1653,21 +1666,27 @@ int cmd_project_edit(int argc, char *argv[]) {
             return argv[++i];
         };
         if (a == "--table") {
-            if (auto const *v = require("--table"); v) table_id = std::string{v};
-            else return 2;
+            if (auto const *v = require("--table"); v)
+                table_id = std::string{v};
+            else
+                return 2;
         } else if (a == "--rows") {
-            if (auto const *v = require("--rows"); v) rows_arg = std::string{v};
-            else return 2;
+            if (auto const *v = require("--rows"); v)
+                rows_arg = std::string{v};
+            else
+                return 2;
         } else if (a == "--cols") {
-            if (auto const *v = require("--cols"); v) cols_arg = std::string{v};
-            else return 2;
+            if (auto const *v = require("--cols"); v)
+                cols_arg = std::string{v};
+            else
+                return 2;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "project-edit: unknown option: %s\n", argv[i]);
             return 2;
         } else if (!op.has_value()) {
             op = std::string{a};
         } else if (!value.has_value() && op != "smooth" && op != "interpolate") {
-            double     d   = 0.0;
+            double d = 0.0;
             auto const res = std::from_chars(a.data(), a.data() + a.size(), d);
             if (res.ec == std::errc{} && res.ptr == a.data() + a.size()) {
                 value = d;
@@ -1686,19 +1705,17 @@ int cmd_project_edit(int argc, char *argv[]) {
     }
 
     if (!table_id.has_value() || !op.has_value() || !proj_path.has_value()) {
-        std::fputs(
-            "project-edit: missing required arguments\n"
-            "Usage: subuwutuner-cli project-edit --table <id> [--rows A:B] "
-            "[--cols A:B] OP [VALUE] <dir>\n",
-            stderr);
+        std::fputs("project-edit: missing required arguments\n"
+                   "Usage: subuwutuner-cli project-edit --table <id> [--rows A:B] "
+                   "[--cols A:B] OP [VALUE] <dir>\n",
+                   stderr);
         return 2;
     }
 
     bool const op_needs_value =
         *op == "set" || *op == "add" || *op == "multiply" || *op == "percent";
     if (op_needs_value && !value.has_value()) {
-        std::fprintf(stderr, "project-edit: op '%s' requires a numeric value\n",
-                     op->c_str());
+        std::fprintf(stderr, "project-edit: op '%s' requires a numeric value\n", op->c_str());
         return 2;
     }
 
@@ -1710,8 +1727,7 @@ int cmd_project_edit(int argc, char *argv[]) {
 
     auto const *table = proj->definition().find_table(*table_id);
     if (table == nullptr) {
-        std::fprintf(stderr, "project-edit: table '%s' not found in pack\n",
-                     table_id->c_str());
+        std::fprintf(stderr, "project-edit: table '%s' not found in pack\n", table_id->c_str());
         return 1;
     }
 
@@ -1739,12 +1755,18 @@ int cmd_project_edit(int argc, char *argv[]) {
     }
 
     st::Status status = st::ok();
-    if (*op == "set")              status = st::edit::set_cells(*td, rect, *value);
-    else if (*op == "add")         status = st::edit::add_cells(*td, rect, *value);
-    else if (*op == "multiply")    status = st::edit::multiply_cells(*td, rect, *value);
-    else if (*op == "percent")     status = st::edit::percent_scale_cells(*td, rect, *value);
-    else if (*op == "smooth")      status = st::edit::smooth_cells(*td, rect, 1);
-    else if (*op == "interpolate") status = st::edit::interpolate_cells(*td, rect);
+    if (*op == "set")
+        status = st::edit::set_cells(*td, rect, *value);
+    else if (*op == "add")
+        status = st::edit::add_cells(*td, rect, *value);
+    else if (*op == "multiply")
+        status = st::edit::multiply_cells(*td, rect, *value);
+    else if (*op == "percent")
+        status = st::edit::percent_scale_cells(*td, rect, *value);
+    else if (*op == "smooth")
+        status = st::edit::smooth_cells(*td, rect, 1);
+    else if (*op == "interpolate")
+        status = st::edit::interpolate_cells(*td, rect);
     else {
         std::fprintf(stderr, "project-edit: unknown op '%s'\n", op->c_str());
         return 2;
@@ -1773,8 +1795,8 @@ int cmd_project_edit(int argc, char *argv[]) {
         std::snprintf(buf, sizeof(buf), " %g", *value);
         desc.append(buf);
     }
-    proj->history().record(st::edit::Edit::table(
-        table->id, std::move(*before), std::move(*after), std::move(desc)));
+    proj->history().record(
+        st::edit::Edit::table(table->id, std::move(*before), std::move(*after), std::move(desc)));
 
     if (auto s = proj->save_working_rom(); !s.has_value()) {
         std::fprintf(stderr, "project-edit: save: %s\n", s.error().to_string().c_str());
@@ -1783,11 +1805,11 @@ int cmd_project_edit(int argc, char *argv[]) {
 
     std::printf("Table:      %s\n", table->id.c_str());
     std::printf("Op:         %s", op->c_str());
-    if (op_needs_value) std::printf(" %g", *value);
+    if (op_needs_value)
+        std::printf(" %g", *value);
     std::printf("\n");
-    std::printf("Selection:  rows %zu..%zu, cols %zu..%zu (%zu cells)\n",
-                rect.r_start, rect.r_end, rect.c_start, rect.c_end,
-                rect.rows() * rect.cols());
+    std::printf("Selection:  rows %zu..%zu, cols %zu..%zu (%zu cells)\n", rect.r_start, rect.r_end,
+                rect.c_start, rect.c_end, rect.rows() * rect.cols());
     std::printf("Saved to:   %s\n", proj_path->string().c_str());
     std::printf("New CRC32:  0x%08X\n", proj->working_rom().crc32());
     return 0;
@@ -1795,9 +1817,9 @@ int cmd_project_edit(int argc, char *argv[]) {
 
 int cmd_project_edit_csv(int argc, char *argv[]) {
     std::optional<std::filesystem::path> proj_path;
-    std::optional<std::string>           table_id;
+    std::optional<std::string> table_id;
     std::optional<std::filesystem::path> csv_path;
-    bool                                 dry_run = false;
+    bool dry_run = false;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         auto const require = [&](char const *name) -> char const * {
@@ -1808,11 +1830,15 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
             return argv[++i];
         };
         if (a == "--table") {
-            if (auto const *v = require("--table"); v) table_id = std::string{v};
-            else return 2;
+            if (auto const *v = require("--table"); v)
+                table_id = std::string{v};
+            else
+                return 2;
         } else if (a == "--from") {
-            if (auto const *v = require("--from"); v) csv_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require("--from"); v)
+                csv_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--dry-run") {
             dry_run = true;
         } else if (a.starts_with("--")) {
@@ -1842,20 +1868,17 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
 
     auto proj = st::Project::open(*proj_path);
     if (!proj.has_value()) {
-        std::fprintf(stderr, "project-edit-csv: %s\n",
-                     proj.error().to_string().c_str());
+        std::fprintf(stderr, "project-edit-csv: %s\n", proj.error().to_string().c_str());
         return 1;
     }
     auto const *table = proj->definition().find_table(*table_id);
     if (table == nullptr) {
-        std::fprintf(stderr, "project-edit-csv: table '%s' not found in pack\n",
-                     table_id->c_str());
+        std::fprintf(stderr, "project-edit-csv: table '%s' not found in pack\n", table_id->c_str());
         return 1;
     }
     auto td = proj->definition().read_table_values(proj->working_rom(), *table);
     if (!td.has_value()) {
-        std::fprintf(stderr, "project-edit-csv: %s\n",
-                     td.error().to_string().c_str());
+        std::fprintf(stderr, "project-edit-csv: %s\n", td.error().to_string().c_str());
         return 1;
     }
     std::size_t const rows = td->values.size();
@@ -1867,8 +1890,7 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
     // goes through the same code.
     std::ifstream in{*csv_path, std::ios::binary};
     if (!in) {
-        std::fprintf(stderr, "project-edit-csv: cannot open %s\n",
-                     csv_path->string().c_str());
+        std::fprintf(stderr, "project-edit-csv: cannot open %s\n", csv_path->string().c_str());
         return 1;
     }
     std::stringstream buf;
@@ -1876,24 +1898,21 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
     std::string const text = std::move(buf).str();
 
     st::EditCsvParseOptions opts;
-    opts.expected_pack_id  = proj->definition().pack().id;
+    opts.expected_pack_id = proj->definition().pack().id;
     opts.expected_table_id = table->id;
-    opts.table_rows        = rows;
-    opts.table_cols        = cols;
+    opts.table_rows = rows;
+    opts.table_cols = cols;
     auto parsed = st::parse_edit_csv(text, opts);
     if (!parsed.has_value()) {
-        std::fprintf(stderr, "project-edit-csv: %s\n",
-                     parsed.error().to_string().c_str());
+        std::fprintf(stderr, "project-edit-csv: %s\n", parsed.error().to_string().c_str());
         return 1;
     }
     for (auto const &w : parsed->warnings) {
-        std::fprintf(stderr, "project-edit-csv: WARNING: %s\n",
-                     w.message.c_str());
+        std::fprintf(stderr, "project-edit-csv: WARNING: %s\n", w.message.c_str());
     }
     auto const &edits = parsed->cells;
     if (edits.empty()) {
-        std::fputs("project-edit-csv: no edit rows parsed; nothing to do.\n",
-                   stderr);
+        std::fputs("project-edit-csv: no edit rows parsed; nothing to do.\n", stderr);
         return 0;
     }
 
@@ -1901,25 +1920,25 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
     std::size_t r_min = edits[0].row, r_max = edits[0].row;
     std::size_t c_min = edits[0].col, c_max = edits[0].col;
     for (auto const &e : edits) {
-        r_min = std::min(r_min, e.row); r_max = std::max(r_max, e.row);
-        c_min = std::min(c_min, e.col); c_max = std::max(c_max, e.col);
+        r_min = std::min(r_min, e.row);
+        r_max = std::max(r_max, e.row);
+        c_min = std::min(c_min, e.col);
+        c_max = std::max(c_max, e.col);
     }
     if (dry_run) {
         auto const *scaling = proj->definition().find_scaling(table->scaling);
-        int const   prec    = scaling != nullptr ? scaling->precision : 6;
+        int const prec = scaling != nullptr ? scaling->precision : 6;
         std::printf("Table:      %s\n", table->id.c_str());
-        std::printf("Cells:      %zu  (dry-run; no edits applied)\n",
-                    edits.size());
-        std::printf("Bounding:   rows %zu..%zu, cols %zu..%zu\n",
-                    r_min, r_max, c_min, c_max);
+        std::printf("Cells:      %zu  (dry-run; no edits applied)\n", edits.size());
+        std::printf("Bounding:   rows %zu..%zu, cols %zu..%zu\n", r_min, r_max, c_min, c_max);
         constexpr std::size_t kPreviewLimit = 10;
-        std::size_t const     shown = std::min(kPreviewLimit, edits.size());
-        std::printf("Preview:    %zu of %zu edits (row,col: before -> after)\n",
-                    shown, edits.size());
+        std::size_t const shown = std::min(kPreviewLimit, edits.size());
+        std::printf("Preview:    %zu of %zu edits (row,col: before -> after)\n", shown,
+                    edits.size());
         for (std::size_t i = 0; i < shown; ++i) {
             auto const &e = edits[i];
-            std::printf("  (%zu,%zu): %.*f -> %.*f\n", e.row, e.col,
-                        prec, td->values[e.row][e.col], prec, e.value);
+            std::printf("  (%zu,%zu): %.*f -> %.*f\n", e.row, e.col, prec, td->values[e.row][e.col],
+                        prec, e.value);
         }
         if (edits.size() > shown) {
             std::printf("  ... %zu more not shown\n", edits.size() - shown);
@@ -1929,47 +1948,42 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
     st::edit::Rect const rect{r_min, r_max, c_min, c_max};
     auto before = st::edit::snapshot(*td, rect);
     if (!before.has_value()) {
-        std::fprintf(stderr, "project-edit-csv: %s\n",
-                     before.error().to_string().c_str());
+        std::fprintf(stderr, "project-edit-csv: %s\n", before.error().to_string().c_str());
         return 1;
     }
-    for (auto const &e : edits) td->values[e.row][e.col] = e.value;
+    for (auto const &e : edits)
+        td->values[e.row][e.col] = e.value;
     auto after = st::edit::snapshot(*td, rect);
     if (!after.has_value()) {
-        std::fprintf(stderr, "project-edit-csv: %s\n",
-                     after.error().to_string().c_str());
+        std::fprintf(stderr, "project-edit-csv: %s\n", after.error().to_string().c_str());
         return 1;
     }
-    if (auto wb = proj->definition().write_table_values(
-            proj->working_rom(), *table, *td);
+    if (auto wb = proj->definition().write_table_values(proj->working_rom(), *table, *td);
         !wb.has_value()) {
-        std::fprintf(stderr, "project-edit-csv: writeback: %s\n",
-                     wb.error().to_string().c_str());
+        std::fprintf(stderr, "project-edit-csv: writeback: %s\n", wb.error().to_string().c_str());
         return 1;
     }
     char descbuf[64];
-    std::snprintf(descbuf, sizeof descbuf, "csv import (%zu cell%s)",
-                  edits.size(), edits.size() == 1 ? "" : "s");
-    proj->history().record(st::edit::Edit::table(
-        table->id, std::move(*before), std::move(*after), std::string{descbuf}));
+    std::snprintf(descbuf, sizeof descbuf, "csv import (%zu cell%s)", edits.size(),
+                  edits.size() == 1 ? "" : "s");
+    proj->history().record(st::edit::Edit::table(table->id, std::move(*before), std::move(*after),
+                                                 std::string{descbuf}));
     if (auto s = proj->save_working_rom(); !s.has_value()) {
-        std::fprintf(stderr, "project-edit-csv: save: %s\n",
-                     s.error().to_string().c_str());
+        std::fprintf(stderr, "project-edit-csv: save: %s\n", s.error().to_string().c_str());
         return 1;
     }
     std::printf("Table:      %s\n", table->id.c_str());
     std::printf("Cells:      %zu\n", edits.size());
-    std::printf("Bounding:   rows %zu..%zu, cols %zu..%zu\n",
-                r_min, r_max, c_min, c_max);
+    std::printf("Bounding:   rows %zu..%zu, cols %zu..%zu\n", r_min, r_max, c_min, c_max);
     std::printf("New CRC32:  0x%08X\n", proj->working_rom().crc32());
     return 0;
 }
 
 int cmd_project_export_csv(int argc, char *argv[]) {
     std::optional<std::filesystem::path> proj_path;
-    std::optional<std::string>           table_id;
+    std::optional<std::string> table_id;
     std::optional<std::filesystem::path> output_path;
-    bool                                 diff_only = false;
+    bool diff_only = false;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         auto const require = [&](char const *name) -> char const * {
@@ -1980,11 +1994,15 @@ int cmd_project_export_csv(int argc, char *argv[]) {
             return argv[++i];
         };
         if (a == "--table") {
-            if (auto const *v = require("--table"); v) table_id = std::string{v};
-            else return 2;
+            if (auto const *v = require("--table"); v)
+                table_id = std::string{v};
+            else
+                return 2;
         } else if (a == "--output" || a == "-o") {
-            if (auto const *v = require("--output"); v) output_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require("--output"); v)
+                output_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--diff-only") {
             diff_only = true;
         } else if (a.starts_with("--")) {
@@ -2011,28 +2029,23 @@ int cmd_project_export_csv(int argc, char *argv[]) {
     }
     auto proj = st::Project::open(*proj_path);
     if (!proj.has_value()) {
-        std::fprintf(stderr, "project-export-csv: %s\n",
-                     proj.error().to_string().c_str());
+        std::fprintf(stderr, "project-export-csv: %s\n", proj.error().to_string().c_str());
         return 1;
     }
     auto const *table = proj->definition().find_table(*table_id);
     if (table == nullptr) {
-        std::fprintf(stderr,
-            "project-export-csv: table '%s' not found in pack\n",
-            table_id->c_str());
+        std::fprintf(stderr, "project-export-csv: table '%s' not found in pack\n",
+                     table_id->c_str());
         return 1;
     }
-    auto const working_td = proj->definition().read_table_values(
-        proj->working_rom(), *table);
+    auto const working_td = proj->definition().read_table_values(proj->working_rom(), *table);
     if (!working_td.has_value()) {
-        std::fprintf(stderr, "project-export-csv: %s\n",
-                     working_td.error().to_string().c_str());
+        std::fprintf(stderr, "project-export-csv: %s\n", working_td.error().to_string().c_str());
         return 1;
     }
     std::optional<st::Definition::TableData> source_td;
     if (diff_only) {
-        auto s = proj->definition().read_table_values(
-            proj->source_rom(), *table);
+        auto s = proj->definition().read_table_values(proj->source_rom(), *table);
         if (!s.has_value()) {
             std::fprintf(stderr, "project-export-csv: source read: %s\n",
                          s.error().to_string().c_str());
@@ -2042,11 +2055,11 @@ int cmd_project_export_csv(int argc, char *argv[]) {
     }
 
     auto const *scaling = proj->definition().find_scaling(table->scaling);
-    auto const  prec    = scaling != nullptr ? scaling->precision : 6;
+    auto const prec = scaling != nullptr ? scaling->precision : 6;
 
     // Open output (default stdout).
-    std::ofstream  file;
-    std::ostream  *out = &std::cout;
+    std::ofstream file;
+    std::ostream *out = &std::cout;
     if (output_path.has_value()) {
         file.open(*output_path, std::ios::trunc);
         if (!file) {
@@ -2069,20 +2082,19 @@ int cmd_project_export_csv(int argc, char *argv[]) {
         for (std::size_t c = 0; c < working_td->values[r].size(); ++c) {
             double const v = working_td->values[r][c];
             if (diff_only) {
-                if (r >= source_td->values.size()
-                    || c >= source_td->values[r].size()) continue;
-                if (v == source_td->values[r][c]) continue;
+                if (r >= source_td->values.size() || c >= source_td->values[r].size())
+                    continue;
+                if (v == source_td->values[r][c])
+                    continue;
             }
-            std::snprintf(buf, sizeof buf, "%zu,%zu,%.*f\n",
-                          r, c, prec, v);
+            std::snprintf(buf, sizeof buf, "%zu,%zu,%.*f\n", r, c, prec, v);
             *out << buf;
             ++emitted;
         }
     }
     if (output_path.has_value()) {
-        std::fprintf(stderr, "project-export-csv: wrote %zu cell%s to %s\n",
-                     emitted, emitted == 1 ? "" : "s",
-                     output_path->string().c_str());
+        std::fprintf(stderr, "project-export-csv: wrote %zu cell%s to %s\n", emitted,
+                     emitted == 1 ? "" : "s", output_path->string().c_str());
     }
     return 0;
 }
@@ -2091,7 +2103,7 @@ int cmd_project_new(int argc, char *argv[]) {
     std::optional<std::filesystem::path> source_path;
     std::optional<std::filesystem::path> def_path;
     std::optional<std::filesystem::path> proj_path;
-    std::string                          display_name;
+    std::string display_name;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -2103,14 +2115,20 @@ int cmd_project_new(int argc, char *argv[]) {
             return argv[++i];
         };
         if (a == "--source") {
-            if (auto const *v = require("--source"); v) source_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require("--source"); v)
+                source_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--def") {
-            if (auto const *v = require("--def"); v) def_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require("--def"); v)
+                def_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--name") {
-            if (auto const *v = require("--name"); v) display_name = std::string{v};
-            else return 2;
+            if (auto const *v = require("--name"); v)
+                display_name = std::string{v};
+            else
+                return 2;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "project-new: unknown option: %s\n", argv[i]);
             return 2;
@@ -2123,11 +2141,10 @@ int cmd_project_new(int argc, char *argv[]) {
     }
 
     if (!source_path.has_value() || !def_path.has_value() || !proj_path.has_value()) {
-        std::fputs(
-            "project-new: missing required arguments\n"
-            "Usage: subuwutuner-cli project-new --source <rom> --def <pack> "
-            "[--name <name>] <dir>\n",
-            stderr);
+        std::fputs("project-new: missing required arguments\n"
+                   "Usage: subuwutuner-cli project-new --source <rom> --def <pack> "
+                   "[--name <name>] <dir>\n",
+                   stderr);
         return 2;
     }
     if (display_name.empty()) {
@@ -2141,8 +2158,8 @@ int cmd_project_new(int argc, char *argv[]) {
 
     std::printf("Created project: %s\n", proj_path->string().c_str());
     std::printf("  Name:       %s\n", p->display_name().c_str());
-    std::printf("  Source:     %s  (CRC32=0x%08X, %zu bytes)\n",
-                source_path->string().c_str(), p->source_rom().crc32(), p->source_rom().size());
+    std::printf("  Source:     %s  (CRC32=0x%08X, %zu bytes)\n", source_path->string().c_str(),
+                p->source_rom().crc32(), p->source_rom().size());
     std::printf("  Definition: %s  (pack id: %s)\n", def_path->string().c_str(),
                 p->definition().pack().id.c_str());
     auto const cid = p->definition().matches(p->source_rom());
@@ -2169,23 +2186,20 @@ int cmd_project_info(int argc, char *argv[]) {
     if (!p->notes().empty()) {
         std::printf("Notes:      %s\n", p->notes().c_str());
     }
-    std::printf("Source ROM: %zu bytes, CRC32=0x%08X (recorded: 0x%08X)\n",
-                p->source_rom().size(), p->source_rom().crc32(),
-                p->source_crc32_at_create());
+    std::printf("Source ROM: %zu bytes, CRC32=0x%08X (recorded: 0x%08X)\n", p->source_rom().size(),
+                p->source_rom().crc32(), p->source_crc32_at_create());
     if (p->source_rom().crc32() != p->source_crc32_at_create()) {
         std::printf("  ! source.bin has changed since project creation\n");
     }
-    std::printf("Working ROM: %zu bytes, CRC32=0x%08X\n",
-                p->working_rom().size(), p->working_rom().crc32());
+    std::printf("Working ROM: %zu bytes, CRC32=0x%08X\n", p->working_rom().size(),
+                p->working_rom().crc32());
     if (p->source_rom().crc32() == p->working_rom().crc32()) {
         std::printf("  (working matches source — no edits yet)\n");
     } else {
         std::printf("  (working differs from source — edits applied)\n");
     }
-    std::printf("Definition: pack id %s (%zu table%s)\n",
-                p->definition().pack().id.c_str(),
-                p->definition().tables().size(),
-                p->definition().tables().size() == 1 ? "" : "s");
+    std::printf("Definition: pack id %s (%zu table%s)\n", p->definition().pack().id.c_str(),
+                p->definition().tables().size(), p->definition().tables().size() == 1 ? "" : "s");
     auto const cid = p->definition().matches(p->source_rom());
     std::printf("CID match:  %s\n", cid.has_value() ? cid->c_str() : "(no match)");
     std::printf("Profile:    %s\n",
@@ -2195,15 +2209,13 @@ int cmd_project_info(int argc, char *argv[]) {
     // the user sees at-a-glance which tables have been touched + whether
     // any of them carry E/S flags that the policy gate will pick up.
     auto const &records = p->history().records();
-    auto const  cursor  = p->history().cursor();
+    auto const cursor = p->history().cursor();
     if (records.empty()) {
         std::printf("Edits:      0\n");
     } else {
-        std::printf("Edits:      %zu (cursor at %zu",
-                    records.size(), cursor);
+        std::printf("Edits:      %zu (cursor at %zu", records.size(), cursor);
         if (cursor < records.size()) {
-            std::printf(", %zu redo step%s available",
-                        records.size() - cursor,
+            std::printf(", %zu redo step%s available", records.size() - cursor,
                         records.size() - cursor == 1 ? "" : "s");
         }
         std::printf(")\n");
@@ -2211,11 +2223,11 @@ int cmd_project_info(int argc, char *argv[]) {
         struct TableTouch {
             std::string id;
             std::size_t count{};
-            bool        emissions{};
-            bool        safety{};
+            bool emissions{};
+            bool safety{};
         };
         std::vector<TableTouch> touched;
-        std::size_t             byte_edit_count = 0;
+        std::size_t byte_edit_count = 0;
         for (auto const &e : records) {
             auto const *te = e.as_table();
             if (te == nullptr) {
@@ -2223,12 +2235,11 @@ int cmd_project_info(int argc, char *argv[]) {
                 continue;
             }
             auto it = std::find_if(touched.begin(), touched.end(),
-                [&](TableTouch const &t) { return t.id == te->table_id; });
+                                   [&](TableTouch const &t) { return t.id == te->table_id; });
             if (it == touched.end()) {
                 auto const *table = p->definition().find_table(te->table_id);
-                touched.push_back({te->table_id, 1,
-                    table != nullptr && table->emissions_relevant,
-                    table != nullptr && table->engine_safety_critical});
+                touched.push_back({te->table_id, 1, table != nullptr && table->emissions_relevant,
+                                   table != nullptr && table->engine_safety_critical});
             } else {
                 ++it->count;
             }
@@ -2236,16 +2247,17 @@ int cmd_project_info(int argc, char *argv[]) {
         std::printf("Tables touched: %zu\n", touched.size());
         for (auto const &t : touched) {
             std::string flags;
-            if (t.emissions) flags += "E";
-            if (t.safety)    flags += "S";
-            if (flags.empty()) flags = "-";
-            std::printf("  %-30s %zu edit%s  [%s]\n",
-                        t.id.c_str(), t.count,
+            if (t.emissions)
+                flags += "E";
+            if (t.safety)
+                flags += "S";
+            if (flags.empty())
+                flags = "-";
+            std::printf("  %-30s %zu edit%s  [%s]\n", t.id.c_str(), t.count,
                         t.count == 1 ? "" : "s", flags.c_str());
         }
         if (byte_edit_count > 0) {
-            std::printf("Byte edits:     %zu (e.g. DTC enable-bit toggles)\n",
-                        byte_edit_count);
+            std::printf("Byte edits:     %zu (e.g. DTC enable-bit toggles)\n", byte_edit_count);
         }
     }
     return 0;
@@ -2261,73 +2273,71 @@ int cmd_project_set_profile(int argc, char *argv[]) {
         return 2;
     }
     std::filesystem::path const dir{argv[0]};
-    std::string_view      const profile_arg{argv[1]};
+    std::string_view const profile_arg{argv[1]};
 
     auto const parsed = st::policy::parse_profile(profile_arg);
     if (!parsed.has_value()) {
         std::fprintf(stderr,
-            "project-set-profile: unknown profile '%.*s' "
-            "(valid: motorsport-only, alberta-ca, eu-roadworthy, "
-            "california-us)\n",
-            static_cast<int>(profile_arg.size()), profile_arg.data());
+                     "project-set-profile: unknown profile '%.*s' "
+                     "(valid: motorsport-only, alberta-ca, eu-roadworthy, "
+                     "california-us)\n",
+                     static_cast<int>(profile_arg.size()), profile_arg.data());
         return 2;
     }
 
     auto p = st::Project::open(dir);
     if (!p.has_value()) {
-        std::fprintf(stderr, "project-set-profile: %s\n",
-                     p.error().to_string().c_str());
+        std::fprintf(stderr, "project-set-profile: %s\n", p.error().to_string().c_str());
         return 1;
     }
     p->set_policy_profile(*parsed);
     if (auto s = p->save_metadata(); !s.has_value()) {
-        std::fprintf(stderr, "project-set-profile: %s\n",
-                     s.error().to_string().c_str());
+        std::fprintf(stderr, "project-set-profile: %s\n", s.error().to_string().c_str());
         return 1;
     }
-    std::printf("Profile set to: %s\n",
-                std::string{st::policy::profile_name(*parsed)}.c_str());
+    std::printf("Profile set to: %s\n", std::string{st::policy::profile_name(*parsed)}.c_str());
     return 0;
 }
 
 int cmd_project_history(int argc, char *argv[]) {
     std::optional<std::filesystem::path> proj_path;
-    std::optional<std::string>           table_filter;
-    std::optional<std::size_t>           limit;
+    std::optional<std::string> table_filter;
+    std::optional<std::size_t> limit;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         auto const require = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
-                std::fprintf(stderr, "project-history: %s requires a value\n",
-                             name);
+                std::fprintf(stderr, "project-history: %s requires a value\n", name);
                 return nullptr;
             }
             return argv[++i];
         };
         if (a == "--table") {
-            if (auto const *v = require("--table"); v) table_filter = std::string{v};
-            else return 2;
+            if (auto const *v = require("--table"); v)
+                table_filter = std::string{v};
+            else
+                return 2;
         } else if (a == "--limit") {
             if (auto const *v = require("--limit"); v) {
                 std::size_t n = 0;
-                auto const  res = std::from_chars(v, v + std::strlen(v), n);
+                auto const res = std::from_chars(v, v + std::strlen(v), n);
                 if (res.ec != std::errc{} || *res.ptr != '\0' || n == 0) {
                     std::fprintf(stderr,
-                        "project-history: --limit expects a positive integer, "
-                        "got '%s'\n", v);
+                                 "project-history: --limit expects a positive integer, "
+                                 "got '%s'\n",
+                                 v);
                     return 2;
                 }
                 limit = n;
-            } else return 2;
+            } else
+                return 2;
         } else if (a.starts_with("--")) {
-            std::fprintf(stderr, "project-history: unknown option: %s\n",
-                         argv[i]);
+            std::fprintf(stderr, "project-history: unknown option: %s\n", argv[i]);
             return 2;
         } else if (!proj_path.has_value()) {
             proj_path = std::filesystem::path{a};
         } else {
-            std::fprintf(stderr, "project-history: extra positional: %s\n",
-                         argv[i]);
+            std::fprintf(stderr, "project-history: extra positional: %s\n", argv[i]);
             return 2;
         }
     }
@@ -2344,23 +2354,19 @@ int cmd_project_history(int argc, char *argv[]) {
 
     auto const proj = st::Project::open(*proj_path);
     if (!proj.has_value()) {
-        std::fprintf(stderr, "project-history: %s\n",
-                     proj.error().to_string().c_str());
+        std::fprintf(stderr, "project-history: %s\n", proj.error().to_string().c_str());
         return 1;
     }
     auto const &history = proj->history();
     auto const &records = history.records();
-    auto const  cursor  = history.cursor();
+    auto const cursor = history.cursor();
 
     std::printf("Project:  %s\n", proj_path->string().c_str());
     std::printf("Profile:  %s\n",
-                std::string{st::policy::profile_name(
-                    proj->policy_profile())}.c_str());
-    std::printf("History:  %zu edit(s), cursor at %zu",
-                records.size(), cursor);
+                std::string{st::policy::profile_name(proj->policy_profile())}.c_str());
+    std::printf("History:  %zu edit(s), cursor at %zu", records.size(), cursor);
     if (cursor < records.size()) {
-        std::printf("  (%zu redo step(s) available)",
-                    records.size() - cursor);
+        std::printf("  (%zu redo step(s) available)", records.size() - cursor);
     }
     std::printf("\n");
 
@@ -2382,48 +2388,44 @@ int cmd_project_history(int argc, char *argv[]) {
     }
 
     if (table_filter.has_value()) {
-        std::printf("Filter:   --table %s (%zu match%s)\n",
-                    table_filter->c_str(), filtered.size(),
+        std::printf("Filter:   --table %s (%zu match%s)\n", table_filter->c_str(), filtered.size(),
                     filtered.size() == 1 ? "" : "es");
     }
     std::printf("\n");
 
     if (filtered.empty()) {
-        std::printf("(no edits%s)\n",
-                    table_filter.has_value() ? " matching --table" : "");
+        std::printf("(no edits%s)\n", table_filter.has_value() ? " matching --table" : "");
         return 0;
     }
 
     std::size_t start_at = 0;
     if (limit.has_value() && *limit < filtered.size()) {
         start_at = filtered.size() - *limit;
-        std::printf("(showing most recent %zu of %zu)\n\n",
-                    *limit, filtered.size());
+        std::printf("(showing most recent %zu of %zu)\n\n", *limit, filtered.size());
     }
 
-    std::printf("%-4s %-30s %-22s %-25s %s\n",
-                "#", "table_id", "rect", "description", "flags");
-    std::printf("%-4s %-30s %-22s %-25s %s\n",
-                "----", "------------------------------",
-                "----------------------",
-                "-------------------------", "-----");
+    std::printf("%-4s %-30s %-22s %-25s %s\n", "#", "table_id", "rect", "description", "flags");
+    std::printf("%-4s %-30s %-22s %-25s %s\n", "----", "------------------------------",
+                "----------------------", "-------------------------", "-----");
     for (std::size_t k = start_at; k < filtered.size(); ++k) {
         std::size_t const i = filtered[k];
-        auto const       &e = records[i];
+        auto const &e = records[i];
 
         // Marker: '>' for the entry the cursor sits AT (next to undo),
         // '.' for entries already undone past, ' ' for active entries.
         char marker = ' ';
-        if (i + 1 == cursor)      marker = '>';   // most-recent committed
-        else if (i >= cursor)     marker = '.';   // redo-pending
+        if (i + 1 == cursor)
+            marker = '>'; // most-recent committed
+        else if (i >= cursor)
+            marker = '.'; // redo-pending
 
-        char        rect_buf[32]{};
+        char rect_buf[32]{};
         std::string id_str;
         std::string flags;
         if (auto const *te = e.as_table(); te != nullptr) {
             auto const rec = te->before.rect;
-            std::snprintf(rect_buf, sizeof(rect_buf), "[%zu:%zu, %zu:%zu]",
-                          rec.r_start, rec.r_end, rec.c_start, rec.c_end);
+            std::snprintf(rect_buf, sizeof(rect_buf), "[%zu:%zu, %zu:%zu]", rec.r_start, rec.r_end,
+                          rec.c_start, rec.c_end);
             id_str = te->table_id;
 
             // Pull emissions/safety flags from the table being edited so
@@ -2431,26 +2433,24 @@ int cmd_project_history(int argc, char *argv[]) {
             // trip the policy gate at flash time.
             auto const *table = proj->definition().find_table(te->table_id);
             if (table != nullptr) {
-                if (table->emissions_relevant)     flags += "E";
-                if (table->engine_safety_critical) flags += "S";
+                if (table->emissions_relevant)
+                    flags += "E";
+                if (table->engine_safety_critical)
+                    flags += "S";
             }
         } else if (auto const *be = e.as_byte(); be != nullptr) {
-            std::snprintf(rect_buf, sizeof(rect_buf), "%zu byte%s",
-                          be->changes.size(),
+            std::snprintf(rect_buf, sizeof(rect_buf), "%zu byte%s", be->changes.size(),
                           be->changes.size() == 1 ? "" : "s");
             id_str = "(byte-edit)";
         }
-        if (flags.empty()) flags = "-";
+        if (flags.empty())
+            flags = "-";
 
         char idx_buf[8]{};
         std::snprintf(idx_buf, sizeof(idx_buf), "%c%zu", marker, i);
 
-        std::printf("%-4s %-30s %-22s %-25s %s\n",
-                    idx_buf,
-                    id_str.c_str(),
-                    rect_buf,
-                    e.description.empty() ? "(no description)"
-                                          : e.description.c_str(),
+        std::printf("%-4s %-30s %-22s %-25s %s\n", idx_buf, id_str.c_str(), rect_buf,
+                    e.description.empty() ? "(no description)" : e.description.c_str(),
                     flags.c_str());
     }
     std::printf("\nFlags: E=emissions-relevant, S=engine-safety-critical, "
@@ -2460,58 +2460,68 @@ int cmd_project_history(int argc, char *argv[]) {
 
 int cmd_project_autotune_maf(int argc, char *argv[]) {
     std::optional<std::filesystem::path> project_dir;
-    std::optional<std::string>           table_id;
+    std::optional<std::string> table_id;
     std::optional<std::filesystem::path> log_path;
-    std::optional<double>                gain;
-    std::optional<double>                max_delta_pct;
-    std::optional<std::size_t>           min_samples;
-    bool                                 require_open_loop = false;
-    bool                                 skip_smooth       = false;
-    bool                                 strict_lint       = false;
-    bool                                 apply             = false;
+    std::optional<double> gain;
+    std::optional<double> max_delta_pct;
+    std::optional<std::size_t> min_samples;
+    bool require_open_loop = false;
+    bool skip_smooth = false;
+    bool strict_lint = false;
+    bool apply = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         auto const require_arg = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
-                std::fprintf(stderr,
-                             "project-autotune-maf: %s requires a value\n", name);
+                std::fprintf(stderr, "project-autotune-maf: %s requires a value\n", name);
                 return nullptr;
             }
             return argv[++i];
         };
         if (a == "--table") {
-            if (auto const *v = require_arg("--table"); v) table_id = std::string{v};
-            else return 2;
+            if (auto const *v = require_arg("--table"); v)
+                table_id = std::string{v};
+            else
+                return 2;
         } else if (a == "--log") {
-            if (auto const *v = require_arg("--log"); v) log_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--log"); v)
+                log_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--gain") {
-            auto const *v = require_arg("--gain"); if (!v) return 2;
+            auto const *v = require_arg("--gain");
+            if (!v)
+                return 2;
             auto const parsed = parse_fraction_or_percent(v);
             if (!parsed.has_value()) {
-                std::fprintf(stderr,
-                    "project-autotune-maf: --gain must be a number (got '%s')\n", v);
+                std::fprintf(stderr, "project-autotune-maf: --gain must be a number (got '%s')\n",
+                             v);
                 return 2;
             }
             gain = *parsed;
         } else if (a == "--max-delta" || a == "--max-delta-pct") {
-            auto const *v = require_arg("--max-delta"); if (!v) return 2;
+            auto const *v = require_arg("--max-delta");
+            if (!v)
+                return 2;
             auto const parsed = parse_fraction_or_percent(v);
             if (!parsed.has_value()) {
                 std::fprintf(stderr,
-                    "project-autotune-maf: --max-delta must be a number (got '%s')\n", v);
+                             "project-autotune-maf: --max-delta must be a number (got '%s')\n", v);
                 return 2;
             }
             max_delta_pct = *parsed;
         } else if (a == "--min-samples-per-cell") {
-            auto const *v = require_arg("--min-samples-per-cell"); if (!v) return 2;
+            auto const *v = require_arg("--min-samples-per-cell");
+            if (!v)
+                return 2;
             std::size_t val = 0;
-            auto const  res = std::from_chars(v, v + std::strlen(v), val);
+            auto const res = std::from_chars(v, v + std::strlen(v), val);
             if (res.ec != std::errc{}) {
                 std::fprintf(stderr,
-                    "project-autotune-maf: --min-samples-per-cell must be a "
-                    "non-negative integer (got '%s')\n", v);
+                             "project-autotune-maf: --min-samples-per-cell must be a "
+                             "non-negative integer (got '%s')\n",
+                             v);
                 return 2;
             }
             min_samples = val;
@@ -2524,14 +2534,12 @@ int cmd_project_autotune_maf(int argc, char *argv[]) {
         } else if (a == "--apply") {
             apply = true;
         } else if (a.starts_with("--")) {
-            std::fprintf(stderr,
-                "project-autotune-maf: unknown option: %s\n", argv[i]);
+            std::fprintf(stderr, "project-autotune-maf: unknown option: %s\n", argv[i]);
             return 2;
         } else if (!project_dir.has_value()) {
             project_dir = std::filesystem::path{argv[i]};
         } else {
-            std::fprintf(stderr,
-                "project-autotune-maf: extra positional argument: %s\n", argv[i]);
+            std::fprintf(stderr, "project-autotune-maf: extra positional argument: %s\n", argv[i]);
             return 2;
         }
     }
@@ -2552,57 +2560,52 @@ int cmd_project_autotune_maf(int argc, char *argv[]) {
 
     auto proj = st::Project::open(*project_dir);
     if (!proj.has_value()) {
-        std::fprintf(stderr, "project-autotune-maf: %s\n",
-                     proj.error().to_string().c_str());
+        std::fprintf(stderr, "project-autotune-maf: %s\n", proj.error().to_string().c_str());
         return 1;
     }
     auto const *table = proj->definition().find_table(*table_id);
     if (table == nullptr) {
-        std::fprintf(stderr,
-            "project-autotune-maf: table '%s' not found in pack\n",
-            table_id->c_str());
+        std::fprintf(stderr, "project-autotune-maf: table '%s' not found in pack\n",
+                     table_id->c_str());
         return 1;
     }
     if (table->dimensions != 1) {
         std::fprintf(stderr,
-            "project-autotune-maf: table '%s' has dimensions=%d; MAF scaling "
-            "must be 1D\n", table->id.c_str(), table->dimensions);
+                     "project-autotune-maf: table '%s' has dimensions=%d; MAF scaling "
+                     "must be 1D\n",
+                     table->id.c_str(), table->dimensions);
         return 1;
     }
     if (!table->axis_x.has_value() || table->axis_x->empty()) {
-        std::fprintf(stderr,
-            "project-autotune-maf: table '%s' has no axis_x\n",
-            table->id.c_str());
+        std::fprintf(stderr, "project-autotune-maf: table '%s' has no axis_x\n", table->id.c_str());
         return 1;
     }
     auto const *axis = proj->definition().find_axis(*table->axis_x);
     if (axis == nullptr) {
-        std::fprintf(stderr,
-            "project-autotune-maf: axis '%s' (referenced by '%s') not found\n",
-            table->axis_x->c_str(), table->id.c_str());
+        std::fprintf(stderr, "project-autotune-maf: axis '%s' (referenced by '%s') not found\n",
+                     table->axis_x->c_str(), table->id.c_str());
         return 1;
     }
 
     auto td = proj->definition().read_table_values(proj->working_rom(), *table);
     if (!td.has_value()) {
-        std::fprintf(stderr, "project-autotune-maf: %s\n",
-                     td.error().to_string().c_str());
+        std::fprintf(stderr, "project-autotune-maf: %s\n", td.error().to_string().c_str());
         return 1;
     }
     if (td->values.empty() || td->values[0].empty()) {
-        std::fprintf(stderr,
-            "project-autotune-maf: table '%s' is empty\n", table->id.c_str());
+        std::fprintf(stderr, "project-autotune-maf: table '%s' is empty\n", table->id.c_str());
         return 1;
     }
 
     // Axis values come from `td->axis_x` (already scaled). Current cell
     // values are `td->values[0][i]` for the 1D row.
-    auto const                 &axis_values = td->axis_x;
-    std::vector<double> const   current(td->values[0].begin(), td->values[0].end());
+    auto const &axis_values = td->axis_x;
+    std::vector<double> const current(td->values[0].begin(), td->values[0].end());
     if (axis_values.size() != current.size()) {
         std::fprintf(stderr,
-            "project-autotune-maf: axis length %zu doesn't match current "
-            "row length %zu\n", axis_values.size(), current.size());
+                     "project-autotune-maf: axis length %zu doesn't match current "
+                     "row length %zu\n",
+                     axis_values.size(), current.size());
         return 1;
     }
 
@@ -2617,22 +2620,22 @@ int cmd_project_autotune_maf(int argc, char *argv[]) {
     log_ss << log_in.rdbuf();
     auto samples = st::autotune::read_maf_samples_csv(log_ss.str());
     if (!samples.has_value()) {
-        std::fprintf(stderr, "project-autotune-maf: %s\n",
-                     samples.error().to_string().c_str());
+        std::fprintf(stderr, "project-autotune-maf: %s\n", samples.error().to_string().c_str());
         return 1;
     }
 
     st::autotune::MafTuneOptions opts;
-    if (gain.has_value())          opts.gain                 = *gain;
-    if (max_delta_pct.has_value()) opts.max_delta_pct        = *max_delta_pct;
-    if (min_samples.has_value())   opts.min_samples_per_cell = *min_samples;
-    opts.require_open_loop         = require_open_loop;
+    if (gain.has_value())
+        opts.gain = *gain;
+    if (max_delta_pct.has_value())
+        opts.max_delta_pct = *max_delta_pct;
+    if (min_samples.has_value())
+        opts.min_samples_per_cell = *min_samples;
+    opts.require_open_loop = require_open_loop;
 
-    auto result = st::autotune::tune_maf(
-        axis_values, current, *samples, opts);
+    auto result = st::autotune::tune_maf(axis_values, current, *samples, opts);
     if (!result.has_value()) {
-        std::fprintf(stderr, "project-autotune-maf: %s\n",
-                     result.error().to_string().c_str());
+        std::fprintf(stderr, "project-autotune-maf: %s\n", result.error().to_string().c_str());
         return 1;
     }
     if (!skip_smooth) {
@@ -2646,8 +2649,8 @@ int cmd_project_autotune_maf(int argc, char *argv[]) {
                 std::string{st::policy::profile_name(proj->policy_profile())}.c_str());
     std::printf("Samples (raw):       %zu\n", result->total_samples);
     std::printf("Samples after gates: %zu\n", result->samples_after_gates);
-    std::printf("\n%-4s %-9s %-9s %-9s %-8s %-7s\n",
-                "#", "axis", "current", "proposed", "samples", "conf");
+    std::printf("\n%-4s %-9s %-9s %-9s %-8s %-7s\n", "#", "axis", "current", "proposed", "samples",
+                "conf");
     std::size_t modified = 0;
     std::size_t underpowered = 0;
     for (auto const &c : result->cells) {
@@ -2659,25 +2662,21 @@ int cmd_project_autotune_maf(int argc, char *argv[]) {
             ++modified;
             marker = '>';
         }
-        std::printf("%c%-3zu %-9.4f %-9.4f %-9.4f %-8zu %.2f\n",
-                    marker, c.cell_index,
-                    axis_values[c.cell_index],
-                    c.current_value, c.proposed_value,
-                    c.samples_used, c.confidence);
+        std::printf("%c%-3zu %-9.4f %-9.4f %-9.4f %-8zu %.2f\n", marker, c.cell_index,
+                    axis_values[c.cell_index], c.current_value, c.proposed_value, c.samples_used,
+                    c.confidence);
     }
-    std::printf("\nmodified: %zu / %zu cells; underpowered (samples < %zu): %zu\n",
-                modified, result->cells.size(),
-                opts.min_samples_per_cell, underpowered);
+    std::printf("\nmodified: %zu / %zu cells; underpowered (samples < %zu): %zu\n", modified,
+                result->cells.size(), opts.min_samples_per_cell, underpowered);
     if (!lints.empty()) {
         std::printf("\nLint findings (%zu):\n", lints.size());
         for (auto const &v : lints) {
-            std::printf("  - cells %zu..%zu: %s (%s)\n",
-                        v.cell_index, v.cell_index + 1,
-                        v.message.c_str(),
-                        st::autotune::lint_kind_name(v.kind));
+            std::printf("  - cells %zu..%zu: %s (%s)\n", v.cell_index, v.cell_index + 1,
+                        v.message.c_str(), st::autotune::lint_kind_name(v.kind));
         }
         if (strict_lint) {
-            std::fprintf(stderr, "project-autotune-maf: --strict-lint set; "
+            std::fprintf(stderr,
+                         "project-autotune-maf: --strict-lint set; "
                          "refusing to apply with %zu lint violation(s)\n",
                          lints.size());
             return 3;
@@ -2698,8 +2697,7 @@ int cmd_project_autotune_maf(int argc, char *argv[]) {
     st::edit::Rect const rect{0, 0, 0, result->cells.size() - 1};
     auto before = st::edit::snapshot(*td, rect);
     if (!before.has_value()) {
-        std::fprintf(stderr, "project-autotune-maf: %s\n",
-                     before.error().to_string().c_str());
+        std::fprintf(stderr, "project-autotune-maf: %s\n", before.error().to_string().c_str());
         return 1;
     }
     for (auto const &c : result->cells) {
@@ -2707,12 +2705,10 @@ int cmd_project_autotune_maf(int argc, char *argv[]) {
     }
     auto after = st::edit::snapshot(*td, rect);
     if (!after.has_value()) {
-        std::fprintf(stderr, "project-autotune-maf: %s\n",
-                     after.error().to_string().c_str());
+        std::fprintf(stderr, "project-autotune-maf: %s\n", after.error().to_string().c_str());
         return 1;
     }
-    if (auto wb = proj->definition().write_table_values(
-            proj->working_rom(), *table, *td);
+    if (auto wb = proj->definition().write_table_values(proj->working_rom(), *table, *td);
         !wb.has_value()) {
         std::fprintf(stderr, "project-autotune-maf: writeback: %s\n",
                      wb.error().to_string().c_str());
@@ -2720,46 +2716,41 @@ int cmd_project_autotune_maf(int argc, char *argv[]) {
     }
     {
         char descbuf[64];
-        std::snprintf(descbuf, sizeof descbuf,
-                      "autotune maf (%zu cell%s)",
-                      modified, modified == 1 ? "" : "s");
-        proj->history().record(st::edit::Edit::table(
-            table->id, std::move(*before), std::move(*after),
-            std::string{descbuf}));
+        std::snprintf(descbuf, sizeof descbuf, "autotune maf (%zu cell%s)", modified,
+                      modified == 1 ? "" : "s");
+        proj->history().record(st::edit::Edit::table(table->id, std::move(*before),
+                                                     std::move(*after), std::string{descbuf}));
     }
     if (auto s = proj->save_working_rom(); !s.has_value()) {
-        std::fprintf(stderr, "project-autotune-maf: save: %s\n",
-                     s.error().to_string().c_str());
+        std::fprintf(stderr, "project-autotune-maf: save: %s\n", s.error().to_string().c_str());
         return 1;
     }
-    std::printf("\nApplied. New CRC32: 0x%08X\n",
-                proj->working_rom().crc32());
+    std::printf("\nApplied. New CRC32: 0x%08X\n", proj->working_rom().crc32());
     return 0;
 }
 
 int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
     std::optional<std::filesystem::path> project_dir;
-    std::optional<std::string>           table_id;
+    std::optional<std::string> table_id;
     std::optional<std::filesystem::path> log_path;
-    std::optional<double>                trigger_degrees;
-    std::optional<double>                pull_step_degrees;
-    std::optional<std::size_t>           min_samples;
-    bool                                 strict_lint     = false;
-    bool                                 enable_add_back = false;
-    std::optional<double>                add_step_degrees;
-    std::optional<std::size_t>           add_back_min_clean;
-    std::optional<double>                clean_threshold;
-    bool                                 apply           = false;
+    std::optional<double> trigger_degrees;
+    std::optional<double> pull_step_degrees;
+    std::optional<std::size_t> min_samples;
+    bool strict_lint = false;
+    bool enable_add_back = false;
+    std::optional<double> add_step_degrees;
+    std::optional<std::size_t> add_back_min_clean;
+    std::optional<double> clean_threshold;
+    bool apply = false;
     // Which of the pack's two axes is the RPM axis. Default 'y' matches
     // the common Subaru convention (axis_x = load, axis_y = engine speed).
-    char                                 rpm_axis_kind   = 'y';
+    char rpm_axis_kind = 'y';
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         auto const require_arg = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
-                std::fprintf(stderr,
-                    "project-autotune-knock-pull: %s requires a value\n", name);
+                std::fprintf(stderr, "project-autotune-knock-pull: %s requires a value\n", name);
                 return nullptr;
             }
             return argv[++i];
@@ -2768,69 +2759,99 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
             char *end = nullptr;
             double const d = std::strtod(v, &end);
             if (end == v || *end != '\0') {
-                std::fprintf(stderr,
-                    "project-autotune-knock-pull: %s must be numeric (got '%s')\n",
-                    label, v);
+                std::fprintf(stderr, "project-autotune-knock-pull: %s must be numeric (got '%s')\n",
+                             label, v);
                 return false;
             }
             out = d;
             return true;
         };
         if (a == "--table") {
-            if (auto const *v = require_arg("--table"); v) table_id = std::string{v};
-            else return 2;
+            if (auto const *v = require_arg("--table"); v)
+                table_id = std::string{v};
+            else
+                return 2;
         } else if (a == "--log") {
-            if (auto const *v = require_arg("--log"); v) log_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--log"); v)
+                log_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--trigger-degrees") {
-            auto const *v = require_arg("--trigger-degrees"); if (!v) return 2;
-            double d = 0.0; if (!parse_double(v, d, "--trigger-degrees")) return 2;
+            auto const *v = require_arg("--trigger-degrees");
+            if (!v)
+                return 2;
+            double d = 0.0;
+            if (!parse_double(v, d, "--trigger-degrees"))
+                return 2;
             trigger_degrees = d;
         } else if (a == "--pull-step-degrees") {
-            auto const *v = require_arg("--pull-step-degrees"); if (!v) return 2;
-            double d = 0.0; if (!parse_double(v, d, "--pull-step-degrees")) return 2;
+            auto const *v = require_arg("--pull-step-degrees");
+            if (!v)
+                return 2;
+            double d = 0.0;
+            if (!parse_double(v, d, "--pull-step-degrees"))
+                return 2;
             pull_step_degrees = d;
         } else if (a == "--min-samples-per-cell") {
-            auto const *v = require_arg("--min-samples-per-cell"); if (!v) return 2;
+            auto const *v = require_arg("--min-samples-per-cell");
+            if (!v)
+                return 2;
             std::size_t val = 0;
             auto const res = std::from_chars(v, v + std::strlen(v), val);
             if (res.ec != std::errc{}) {
                 std::fprintf(stderr,
-                    "project-autotune-knock-pull: --min-samples-per-cell must be a "
-                    "non-negative integer (got '%s')\n", v);
+                             "project-autotune-knock-pull: --min-samples-per-cell must be a "
+                             "non-negative integer (got '%s')\n",
+                             v);
                 return 2;
             }
             min_samples = val;
         } else if (a == "--enable-add-back") {
             enable_add_back = true;
         } else if (a == "--add-back-step-degrees") {
-            auto const *v = require_arg("--add-back-step-degrees"); if (!v) return 2;
-            double d = 0.0; if (!parse_double(v, d, "--add-back-step-degrees")) return 2;
+            auto const *v = require_arg("--add-back-step-degrees");
+            if (!v)
+                return 2;
+            double d = 0.0;
+            if (!parse_double(v, d, "--add-back-step-degrees"))
+                return 2;
             add_step_degrees = d;
         } else if (a == "--add-back-min-clean-samples") {
-            auto const *v = require_arg("--add-back-min-clean-samples"); if (!v) return 2;
+            auto const *v = require_arg("--add-back-min-clean-samples");
+            if (!v)
+                return 2;
             std::size_t val = 0;
             auto const res = std::from_chars(v, v + std::strlen(v), val);
             if (res.ec != std::errc{}) {
                 std::fprintf(stderr,
-                    "project-autotune-knock-pull: --add-back-min-clean-samples must be a "
-                    "non-negative integer (got '%s')\n", v);
+                             "project-autotune-knock-pull: --add-back-min-clean-samples must be a "
+                             "non-negative integer (got '%s')\n",
+                             v);
                 return 2;
             }
             add_back_min_clean = val;
         } else if (a == "--add-back-clean-threshold-degrees") {
-            auto const *v = require_arg("--add-back-clean-threshold-degrees"); if (!v) return 2;
-            double d = 0.0; if (!parse_double(v, d, "--add-back-clean-threshold-degrees")) return 2;
+            auto const *v = require_arg("--add-back-clean-threshold-degrees");
+            if (!v)
+                return 2;
+            double d = 0.0;
+            if (!parse_double(v, d, "--add-back-clean-threshold-degrees"))
+                return 2;
             clean_threshold = d;
         } else if (a == "--rpm-axis") {
-            auto const *v = require_arg("--rpm-axis"); if (!v) return 2;
+            auto const *v = require_arg("--rpm-axis");
+            if (!v)
+                return 2;
             std::string_view const sv{v};
-            if (sv == "x" || sv == "X")      rpm_axis_kind = 'x';
-            else if (sv == "y" || sv == "Y") rpm_axis_kind = 'y';
+            if (sv == "x" || sv == "X")
+                rpm_axis_kind = 'x';
+            else if (sv == "y" || sv == "Y")
+                rpm_axis_kind = 'y';
             else {
                 std::fprintf(stderr,
-                    "project-autotune-knock-pull: --rpm-axis must be 'x' or 'y' "
-                    "(got '%s')\n", v);
+                             "project-autotune-knock-pull: --rpm-axis must be 'x' or 'y' "
+                             "(got '%s')\n",
+                             v);
                 return 2;
             }
         } else if (a == "--strict-lint") {
@@ -2838,14 +2859,13 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
         } else if (a == "--apply") {
             apply = true;
         } else if (a.starts_with("--")) {
-            std::fprintf(stderr,
-                "project-autotune-knock-pull: unknown option: %s\n", argv[i]);
+            std::fprintf(stderr, "project-autotune-knock-pull: unknown option: %s\n", argv[i]);
             return 2;
         } else if (!project_dir.has_value()) {
             project_dir = std::filesystem::path{argv[i]};
         } else {
-            std::fprintf(stderr,
-                "project-autotune-knock-pull: extra positional argument: %s\n", argv[i]);
+            std::fprintf(stderr, "project-autotune-knock-pull: extra positional argument: %s\n",
+                         argv[i]);
             return 2;
         }
     }
@@ -2869,28 +2889,25 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
 
     auto proj = st::Project::open(*project_dir);
     if (!proj.has_value()) {
-        std::fprintf(stderr, "project-autotune-knock-pull: %s\n",
-                     proj.error().to_string().c_str());
+        std::fprintf(stderr, "project-autotune-knock-pull: %s\n", proj.error().to_string().c_str());
         return 1;
     }
     auto const *table = proj->definition().find_table(*table_id);
     if (table == nullptr) {
-        std::fprintf(stderr,
-            "project-autotune-knock-pull: table '%s' not found in pack\n",
-            table_id->c_str());
+        std::fprintf(stderr, "project-autotune-knock-pull: table '%s' not found in pack\n",
+                     table_id->c_str());
         return 1;
     }
     if (table->dimensions != 2) {
         std::fprintf(stderr,
-            "project-autotune-knock-pull: table '%s' has dimensions=%d; "
-            "knock-pull needs a 2D timing table (load × RPM)\n",
-            table->id.c_str(), table->dimensions);
+                     "project-autotune-knock-pull: table '%s' has dimensions=%d; "
+                     "knock-pull needs a 2D timing table (load × RPM)\n",
+                     table->id.c_str(), table->dimensions);
         return 1;
     }
     auto td = proj->definition().read_table_values(proj->working_rom(), *table);
     if (!td.has_value()) {
-        std::fprintf(stderr, "project-autotune-knock-pull: %s\n",
-                     td.error().to_string().c_str());
+        std::fprintf(stderr, "project-autotune-knock-pull: %s\n", td.error().to_string().c_str());
         return 1;
     }
 
@@ -2899,9 +2916,9 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
     // The kernel wants `current_timing` flattened as
     // `cell_index = load_row * rpm_count + rpm_col`, i.e. load on the
     // outer axis and rpm on the inner axis.
-    bool const          rpm_is_y    = (rpm_axis_kind == 'y');
-    auto const         &rpm_axis    = rpm_is_y ? td->axis_y : td->axis_x;
-    auto const         &load_axis   = rpm_is_y ? td->axis_x : td->axis_y;
+    bool const rpm_is_y = (rpm_axis_kind == 'y');
+    auto const &rpm_axis = rpm_is_y ? td->axis_y : td->axis_x;
+    auto const &load_axis = rpm_is_y ? td->axis_x : td->axis_y;
     std::vector<double> current_timing;
     current_timing.reserve(load_axis.size() * rpm_axis.size());
     for (std::size_t li = 0; li < load_axis.size(); ++li) {
@@ -2928,12 +2945,15 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
     }
 
     st::autotune::KnockPullOptions opts;
-    if (trigger_degrees.has_value())   opts.trigger_degrees      = *trigger_degrees;
-    if (pull_step_degrees.has_value()) opts.pull_step_degrees    = *pull_step_degrees;
-    if (min_samples.has_value())       opts.min_samples_per_cell = *min_samples;
+    if (trigger_degrees.has_value())
+        opts.trigger_degrees = *trigger_degrees;
+    if (pull_step_degrees.has_value())
+        opts.pull_step_degrees = *pull_step_degrees;
+    if (min_samples.has_value())
+        opts.min_samples_per_cell = *min_samples;
 
-    auto result = st::autotune::tune_knock_pull(
-        rpm_axis, load_axis, current_timing, *samples, opts);
+    auto result =
+        st::autotune::tune_knock_pull(rpm_axis, load_axis, current_timing, *samples, opts);
     if (!result.has_value()) {
         std::fprintf(stderr, "project-autotune-knock-pull: %s\n",
                      result.error().to_string().c_str());
@@ -2942,27 +2962,31 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
     if (enable_add_back) {
         st::autotune::KnockAddBackOptions abo;
         abo.enabled = true;
-        if (add_step_degrees.has_value())    abo.add_step_degrees           = *add_step_degrees;
-        if (add_back_min_clean.has_value())  abo.min_clean_samples_per_cell = *add_back_min_clean;
-        if (clean_threshold.has_value())     abo.clean_threshold_degrees    = *clean_threshold;
+        if (add_step_degrees.has_value())
+            abo.add_step_degrees = *add_step_degrees;
+        if (add_back_min_clean.has_value())
+            abo.min_clean_samples_per_cell = *add_back_min_clean;
+        if (clean_threshold.has_value())
+            abo.clean_threshold_degrees = *clean_threshold;
         *result = st::autotune::apply_knock_add_back(*result, abo);
     }
-    auto const lints = st::autotune::lint_knock_proposal(
-        rpm_axis, load_axis, *result);
+    auto const lints = st::autotune::lint_knock_proposal(rpm_axis, load_axis, *result);
 
     std::printf("Table:               %s\n", table->id.c_str());
     std::printf("Profile:             %s\n",
                 std::string{st::policy::profile_name(proj->policy_profile())}.c_str());
-    std::printf("Grid:                %zu rows × %zu cols (load × RPM)\n",
-                result->rows, result->cols);
+    std::printf("Grid:                %zu rows × %zu cols (load × RPM)\n", result->rows,
+                result->cols);
     std::printf("Samples (raw):       %zu\n", result->total_samples);
     std::printf("Samples after gates: %zu\n", result->samples_after_gates);
 
     std::size_t pulled = 0;
-    std::size_t added  = 0;
+    std::size_t added = 0;
     for (auto const &c : result->cells) {
-        if (c.pulled) ++pulled;
-        else if (c.proposed_value > c.current_value) ++added;
+        if (c.pulled)
+            ++pulled;
+        else if (c.proposed_value > c.current_value)
+            ++added;
     }
     std::printf("Cells pulled:        %zu\n", pulled);
     if (enable_add_back) {
@@ -2972,7 +2996,8 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
     // 2D ledger: rows are load breakpoints, columns are RPM breakpoints.
     // For each cell where the value changed, print the delta.
     std::printf("\n%-9s", "load\\rpm");
-    for (auto rpm : rpm_axis) std::printf(" %8.0f", rpm);
+    for (auto rpm : rpm_axis)
+        std::printf(" %8.0f", rpm);
     std::printf("\n");
     for (std::size_t r = 0; r < result->rows; ++r) {
         std::printf("%-9.2f", load_axis[r]);
@@ -2991,14 +3016,14 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
     if (!lints.empty()) {
         std::printf("\nLint findings (%zu):\n", lints.size());
         for (auto const &v : lints) {
-            std::printf("  - cell %zu: %s (%s)\n",
-                        v.cell_index, v.message.c_str(),
+            std::printf("  - cell %zu: %s (%s)\n", v.cell_index, v.message.c_str(),
                         st::autotune::lint_kind_name(v.kind));
         }
         if (strict_lint) {
             std::fprintf(stderr,
-                "project-autotune-knock-pull: --strict-lint set; refusing to "
-                "apply with %zu lint violation(s)\n", lints.size());
+                         "project-autotune-knock-pull: --strict-lint set; refusing to "
+                         "apply with %zu lint violation(s)\n",
+                         lints.size());
             return 3;
         }
     }
@@ -3015,8 +3040,8 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
     // accordingly. Edit rect covers the whole table.
     std::size_t const grid_rows = td->values.size();
     std::size_t const grid_cols = grid_rows > 0 ? td->values[0].size() : 0;
-    st::edit::Rect const rect{0, grid_rows > 0 ? grid_rows - 1 : 0,
-                              0, grid_cols > 0 ? grid_cols - 1 : 0};
+    st::edit::Rect const rect{0, grid_rows > 0 ? grid_rows - 1 : 0, 0,
+                              grid_cols > 0 ? grid_cols - 1 : 0};
     auto before = st::edit::snapshot(*td, rect);
     if (!before.has_value()) {
         std::fprintf(stderr, "project-autotune-knock-pull: %s\n",
@@ -3027,8 +3052,7 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
         for (std::size_t ri = 0; ri < result->cols; ++ri) {
             std::size_t td_r = rpm_is_y ? ri : li;
             std::size_t td_c = rpm_is_y ? li : ri;
-            td->values[td_r][td_c] =
-                result->cells[li * result->cols + ri].proposed_value;
+            td->values[td_r][td_c] = result->cells[li * result->cols + ri].proposed_value;
         }
     }
     auto after = st::edit::snapshot(*td, rect);
@@ -3037,8 +3061,7 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
                      after.error().to_string().c_str());
         return 1;
     }
-    if (auto wb = proj->definition().write_table_values(
-            proj->working_rom(), *table, *td);
+    if (auto wb = proj->definition().write_table_values(proj->working_rom(), *table, *td);
         !wb.has_value()) {
         std::fprintf(stderr, "project-autotune-knock-pull: writeback: %s\n",
                      wb.error().to_string().c_str());
@@ -3046,31 +3069,27 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
     }
     {
         char descbuf[80];
-        std::snprintf(descbuf, sizeof descbuf,
-                      "autotune knock-pull (%zu pulled%s%s)",
-                      pulled,
+        std::snprintf(descbuf, sizeof descbuf, "autotune knock-pull (%zu pulled%s%s)", pulled,
                       added > 0 ? ", " : "",
                       added > 0 ? (std::to_string(added) + " added-back").c_str() : "");
-        proj->history().record(st::edit::Edit::table(
-            table->id, std::move(*before), std::move(*after),
-            std::string{descbuf}));
+        proj->history().record(st::edit::Edit::table(table->id, std::move(*before),
+                                                     std::move(*after), std::string{descbuf}));
     }
     if (auto s = proj->save_working_rom(); !s.has_value()) {
         std::fprintf(stderr, "project-autotune-knock-pull: save: %s\n",
                      s.error().to_string().c_str());
         return 1;
     }
-    std::printf("\nApplied. New CRC32: 0x%08X\n",
-                proj->working_rom().crc32());
+    std::printf("\nApplied. New CRC32: 0x%08X\n", proj->working_rom().crc32());
     return 0;
 }
 
 // Parse "A:B" or "A" into [lo, hi]. Returns false on malformed input.
 bool parse_range(std::string_view s, std::size_t &lo, std::size_t &hi) {
     auto const colon = s.find(':');
-    auto       parse = [](std::string_view sv, std::size_t &out) {
+    auto parse = [](std::string_view sv, std::size_t &out) {
         std::size_t value = 0;
-        auto const  res   = std::from_chars(sv.data(), sv.data() + sv.size(), value);
+        auto const res = std::from_chars(sv.data(), sv.data() + sv.size(), value);
         if (res.ec != std::errc{} || res.ptr != sv.data() + sv.size()) {
             return false;
         }
@@ -3079,7 +3098,8 @@ bool parse_range(std::string_view s, std::size_t &lo, std::size_t &hi) {
     };
     if (colon == std::string_view::npos) {
         std::size_t v = 0;
-        if (!parse(s, v)) return false;
+        if (!parse(s, v))
+            return false;
         lo = hi = v;
         return true;
     }
@@ -3088,17 +3108,17 @@ bool parse_range(std::string_view s, std::size_t &lo, std::size_t &hi) {
 
 int cmd_table_edit(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
-    std::optional<std::string>           table_id;
-    std::optional<std::string>           rows_arg;
-    std::optional<std::string>           cols_arg;
-    std::optional<std::string>           op;
-    std::optional<double>                value;
+    std::optional<std::string> table_id;
+    std::optional<std::string> rows_arg;
+    std::optional<std::string> cols_arg;
+    std::optional<std::string> op;
+    std::optional<double> value;
     std::optional<std::filesystem::path> rom_path;
     std::optional<std::filesystem::path> output_path;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require_arg = [&](char const *name) -> char const * {
+        auto const require_arg = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "table-edit: %s requires a value\n", name);
                 return nullptr;
@@ -3107,20 +3127,30 @@ int cmd_table_edit(int argc, char *argv[]) {
         };
 
         if (a == "--def") {
-            if (auto const *v = require_arg("--def"); v) def_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--def"); v)
+                def_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--table") {
-            if (auto const *v = require_arg("--table"); v) table_id = std::string{v};
-            else return 2;
+            if (auto const *v = require_arg("--table"); v)
+                table_id = std::string{v};
+            else
+                return 2;
         } else if (a == "--rows") {
-            if (auto const *v = require_arg("--rows"); v) rows_arg = std::string{v};
-            else return 2;
+            if (auto const *v = require_arg("--rows"); v)
+                rows_arg = std::string{v};
+            else
+                return 2;
         } else if (a == "--cols") {
-            if (auto const *v = require_arg("--cols"); v) cols_arg = std::string{v};
-            else return 2;
+            if (auto const *v = require_arg("--cols"); v)
+                cols_arg = std::string{v};
+            else
+                return 2;
         } else if (a == "--output" || a == "-o") {
-            if (auto const *v = require_arg("--output"); v) output_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--output"); v)
+                output_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "table-edit: unknown option: %s\n", argv[i]);
             return 2;
@@ -3128,8 +3158,8 @@ int cmd_table_edit(int argc, char *argv[]) {
             op = std::string{a};
         } else if (!value.has_value() && op != "smooth" && op != "interpolate") {
             // Try parsing as a double; if it doesn't parse, treat as the ROM path.
-            double      d = 0.0;
-            auto const  res = std::from_chars(a.data(), a.data() + a.size(), d);
+            double d = 0.0;
+            auto const res = std::from_chars(a.data(), a.data() + a.size(), d);
             if (res.ec == std::errc{} && res.ptr == a.data() + a.size()) {
                 value = d;
             } else if (!rom_path.has_value()) {
@@ -3146,8 +3176,8 @@ int cmd_table_edit(int argc, char *argv[]) {
         }
     }
 
-    if (!def_path.has_value() || !table_id.has_value() || !op.has_value()
-        || !rom_path.has_value() || !output_path.has_value()) {
+    if (!def_path.has_value() || !table_id.has_value() || !op.has_value() ||
+        !rom_path.has_value() || !output_path.has_value()) {
         std::fputs("table-edit: missing required arguments\n", stderr);
         std::fputs("Usage: subuwutuner-cli table-edit --def <pack.toml> --table <id>\n"
                    "       [--rows A:B] [--cols A:B] OP [VALUE] <FILE> --output <OUT>\n",
@@ -3228,8 +3258,7 @@ int cmd_table_edit(int argc, char *argv[]) {
 
     std::ofstream out{*output_path, std::ios::binary};
     if (!out) {
-        std::fprintf(stderr, "table-edit: cannot open output: %s\n",
-                     output_path->string().c_str());
+        std::fprintf(stderr, "table-edit: cannot open output: %s\n", output_path->string().c_str());
         return 1;
     }
     out.write(reinterpret_cast<char const *>(rom->data().data()),
@@ -3241,11 +3270,11 @@ int cmd_table_edit(int argc, char *argv[]) {
 
     std::printf("Table:     %s\n", table->id.c_str());
     std::printf("Op:        %s", op->c_str());
-    if (op_needs_value) std::printf(" %g", *value);
+    if (op_needs_value)
+        std::printf(" %g", *value);
     std::printf("\n");
-    std::printf("Selection: rows %zu..%zu, cols %zu..%zu (%zu cells)\n",
-                rect.r_start, rect.r_end, rect.c_start, rect.c_end,
-                rect.rows() * rect.cols());
+    std::printf("Selection: rows %zu..%zu, cols %zu..%zu (%zu cells)\n", rect.r_start, rect.r_end,
+                rect.c_start, rect.c_end, rect.rows() * rect.cols());
     std::printf("Output:    %s\n", output_path->string().c_str());
     return 0;
 }
@@ -3254,7 +3283,7 @@ int cmd_rom_diff(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
     std::optional<std::filesystem::path> rom_a;
     std::optional<std::filesystem::path> rom_b;
-    bool                                 verbose = false;
+    bool verbose = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -3280,10 +3309,9 @@ int cmd_rom_diff(int argc, char *argv[]) {
     }
 
     if (!def_path.has_value() || !rom_a.has_value() || !rom_b.has_value()) {
-        std::fputs(
-            "rom-diff: missing required arguments\n"
-            "Usage: subuwutuner-cli rom-diff --def <pack.toml> <A.bin> <B.bin>\n",
-            stderr);
+        std::fputs("rom-diff: missing required arguments\n"
+                   "Usage: subuwutuner-cli rom-diff --def <pack.toml> <A.bin> <B.bin>\n",
+                   stderr);
         return 2;
     }
 
@@ -3302,10 +3330,10 @@ int cmd_rom_diff(int argc, char *argv[]) {
         return 1;
     }
 
-    std::printf("ROM A: %s  (CRC32=0x%08X, %zu bytes)\n", rom_a->string().c_str(),
-                a->crc32(), a->size());
-    std::printf("ROM B: %s  (CRC32=0x%08X, %zu bytes)\n", rom_b->string().c_str(),
-                b->crc32(), b->size());
+    std::printf("ROM A: %s  (CRC32=0x%08X, %zu bytes)\n", rom_a->string().c_str(), a->crc32(),
+                a->size());
+    std::printf("ROM B: %s  (CRC32=0x%08X, %zu bytes)\n", rom_b->string().c_str(), b->crc32(),
+                b->size());
     std::printf("Pack:  %s\n", def->pack().id.c_str());
 
     auto const id_a = def->matches(*a);
@@ -3313,14 +3341,14 @@ int cmd_rom_diff(int argc, char *argv[]) {
     std::printf("Match A: %s\n", id_a.has_value() ? id_a->c_str() : "(no match)");
     std::printf("Match B: %s\n", id_b.has_value() ? id_b->c_str() : "(no match)");
 
-    std::size_t                changed_count = 0;
-    std::size_t                skipped       = 0;
+    std::size_t changed_count = 0;
+    std::size_t skipped = 0;
     struct Row {
         std::string id;
         std::size_t total{};
         std::size_t changed{};
-        double      max{};
-        double      mean{};
+        double max{};
+        double mean{};
         std::string unit;
     };
     std::vector<Row> rows;
@@ -3345,8 +3373,8 @@ int cmd_rom_diff(int argc, char *argv[]) {
                         d->mean_abs_delta, scal != nullptr ? scal->unit : std::string{}});
     }
 
-    std::printf("\nTables compared: %zu  changed: %zu  skipped: %zu\n",
-                def->tables().size(), changed_count, skipped);
+    std::printf("\nTables compared: %zu  changed: %zu  skipped: %zu\n", def->tables().size(),
+                changed_count, skipped);
 
     if (rows.empty()) {
         std::printf("\nNo tables differ.\n");
@@ -3369,9 +3397,9 @@ int cmd_rom_diff(int argc, char *argv[]) {
 int cmd_project_diff(int argc, char *argv[]) {
     std::optional<std::filesystem::path> proj_a;
     std::optional<std::filesystem::path> proj_b;
-    std::optional<std::string>           profile_arg;
-    std::optional<std::string>           table_filter;
-    bool                                 verbose = false;
+    std::optional<std::string> profile_arg;
+    std::optional<std::string> table_filter;
+    bool verbose = false;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         auto const require_arg = [&](char const *name) -> char const * {
@@ -3382,11 +3410,15 @@ int cmd_project_diff(int argc, char *argv[]) {
             return argv[++i];
         };
         if (a == "--profile") {
-            if (auto const *v = require_arg("--profile"); v) profile_arg = std::string{v};
-            else return 2;
+            if (auto const *v = require_arg("--profile"); v)
+                profile_arg = std::string{v};
+            else
+                return 2;
         } else if (a == "--table") {
-            if (auto const *v = require_arg("--table"); v) table_filter = std::string{v};
-            else return 2;
+            if (auto const *v = require_arg("--table"); v)
+                table_filter = std::string{v};
+            else
+                return 2;
         } else if (a == "--verbose" || a == "-v") {
             verbose = true;
         } else if (a.starts_with("--")) {
@@ -3424,31 +3456,26 @@ int cmd_project_diff(int argc, char *argv[]) {
         return 1;
     }
     if (a->definition().pack().id != b->definition().pack().id) {
-        std::fprintf(stderr,
-            "project-diff: A and B reference different packs ('%s' vs '%s')\n",
-            a->definition().pack().id.c_str(),
-            b->definition().pack().id.c_str());
+        std::fprintf(stderr, "project-diff: A and B reference different packs ('%s' vs '%s')\n",
+                     a->definition().pack().id.c_str(), b->definition().pack().id.c_str());
         return 1;
     }
     if (a->working_rom().size() != b->working_rom().size()) {
-        std::fprintf(stderr,
-            "project-diff: ROM sizes differ (%zu vs %zu)\n",
-            a->working_rom().size(), b->working_rom().size());
+        std::fprintf(stderr, "project-diff: ROM sizes differ (%zu vs %zu)\n",
+                     a->working_rom().size(), b->working_rom().size());
         return 1;
     }
 
-    if (table_filter.has_value()
-        && a->definition().find_table(*table_filter) == nullptr) {
-        std::fprintf(stderr,
-            "project-diff: table '%s' not found in pack '%s'\n",
-            table_filter->c_str(), a->definition().pack().id.c_str());
+    if (table_filter.has_value() && a->definition().find_table(*table_filter) == nullptr) {
+        std::fprintf(stderr, "project-diff: table '%s' not found in pack '%s'\n",
+                     table_filter->c_str(), a->definition().pack().id.c_str());
         return 1;
     }
 
-    std::printf("A:    %s  (working CRC32=0x%08X)\n",
-                proj_a->string().c_str(), a->working_rom().crc32());
-    std::printf("B:    %s  (working CRC32=0x%08X)\n",
-                proj_b->string().c_str(), b->working_rom().crc32());
+    std::printf("A:    %s  (working CRC32=0x%08X)\n", proj_a->string().c_str(),
+                a->working_rom().crc32());
+    std::printf("B:    %s  (working CRC32=0x%08X)\n", proj_b->string().c_str(),
+                b->working_rom().crc32());
     std::printf("Pack: %s\n", a->definition().pack().id.c_str());
     if (table_filter.has_value()) {
         std::printf("Filter: --table %s\n", table_filter->c_str());
@@ -3458,21 +3485,21 @@ int cmd_project_diff(int argc, char *argv[]) {
         std::string id;
         std::size_t total{};
         std::size_t changed{};
-        double      max{};
-        double      mean{};
+        double max{};
+        double mean{};
         std::string unit;
-        bool        emissions{};
-        bool        safety{};
+        bool emissions{};
+        bool safety{};
     };
     std::vector<Row> rows;
-    std::size_t      changed_count = 0;
-    std::size_t      skipped       = 0;
-    std::size_t      considered    = 0;
+    std::size_t changed_count = 0;
+    std::size_t skipped = 0;
+    std::size_t considered = 0;
     for (auto const &table : a->definition().tables()) {
-        if (table_filter.has_value() && table.id != *table_filter) continue;
+        if (table_filter.has_value() && table.id != *table_filter)
+            continue;
         ++considered;
-        auto const d = a->definition().diff_table(
-            a->working_rom(), b->working_rom(), table);
+        auto const d = a->definition().diff_table(a->working_rom(), b->working_rom(), table);
         if (!d.has_value()) {
             ++skipped;
             if (verbose) {
@@ -3481,33 +3508,36 @@ int cmd_project_diff(int argc, char *argv[]) {
             }
             continue;
         }
-        if (!d->changed()) continue;
+        if (!d->changed())
+            continue;
         ++changed_count;
         auto const *scal = a->definition().find_scaling(table.scaling);
-        rows.push_back({table.id, d->total_cells, d->cells_changed,
-                        d->max_abs_delta, d->mean_abs_delta,
-                        scal != nullptr ? scal->unit : std::string{},
-                        table.emissions_relevant,
-                        table.engine_safety_critical});
+        rows.push_back({table.id, d->total_cells, d->cells_changed, d->max_abs_delta,
+                        d->mean_abs_delta, scal != nullptr ? scal->unit : std::string{},
+                        table.emissions_relevant, table.engine_safety_critical});
     }
 
-    std::printf("\nTables compared: %zu  changed: %zu  skipped: %zu\n",
-                considered, changed_count, skipped);
+    std::printf("\nTables compared: %zu  changed: %zu  skipped: %zu\n", considered, changed_count,
+                skipped);
     if (rows.empty()) {
         std::printf("\nNo tables differ.\n");
     } else {
-        std::printf("\n%-40s %10s %12s %12s %s\n",
-                    "table", "cells", "max |Δ|", "mean |Δ|", "flags");
+        std::printf("\n%-40s %10s %12s %12s %s\n", "table", "cells", "max |Δ|", "mean |Δ|",
+                    "flags");
         for (auto const &r : rows) {
             char cell_buf[32];
             std::snprintf(cell_buf, sizeof(cell_buf), "%zu/%zu", r.changed, r.total);
             std::string flags;
-            if (r.emissions) flags += "E";
-            if (r.safety)    flags += "S";
-            if (flags.empty()) flags = "-";
-            std::printf("%-40s %10s %12.3f %12.3f %s",
-                        r.id.c_str(), cell_buf, r.max, r.mean, flags.c_str());
-            if (!r.unit.empty()) std::printf(" %s", r.unit.c_str());
+            if (r.emissions)
+                flags += "E";
+            if (r.safety)
+                flags += "S";
+            if (flags.empty())
+                flags = "-";
+            std::printf("%-40s %10s %12.3f %12.3f %s", r.id.c_str(), cell_buf, r.max, r.mean,
+                        flags.c_str());
+            if (!r.unit.empty())
+                std::printf(" %s", r.unit.c_str());
             std::printf("\n");
         }
     }
@@ -3518,48 +3548,58 @@ int cmd_project_diff(int argc, char *argv[]) {
         auto const profile = st::policy::parse_profile(*profile_arg);
         if (!profile.has_value()) {
             std::fprintf(stderr,
-                "project-diff: unknown profile '%s'. Known: motorsport-only, "
-                "alberta-ca, eu-roadworthy, california-us\n",
-                profile_arg->c_str());
+                         "project-diff: unknown profile '%s'. Known: motorsport-only, "
+                         "alberta-ca, eu-roadworthy, california-us\n",
+                         profile_arg->c_str());
             return 2;
         }
-        auto const sectors = st::flash::Flasher::compute_delta(
-            a->working_rom().data(), b->working_rom().data(),
-            /*sector_size=*/0x1000, /*base_address=*/0);
+        auto const sectors =
+            st::flash::Flasher::compute_delta(a->working_rom().data(), b->working_rom().data(),
+                                              /*sector_size=*/0x1000, /*base_address=*/0);
         st::flash::FlashPlan plan;
         plan.writes.reserve(sectors.size());
         for (auto const &s : sectors) {
             st::flash::SectorWrite sw;
             sw.sector = s;
             std::size_t const off = static_cast<std::size_t>(s.address);
-            sw.data.assign(
-                b->working_rom().data().begin() + static_cast<std::ptrdiff_t>(off),
-                b->working_rom().data().begin()
-                    + static_cast<std::ptrdiff_t>(off + s.length));
+            sw.data.assign(b->working_rom().data().begin() + static_cast<std::ptrdiff_t>(off),
+                           b->working_rom().data().begin() +
+                               static_cast<std::ptrdiff_t>(off + s.length));
             plan.writes.push_back(std::move(sw));
         }
-        auto const d = st::flash::evaluate_plan_policy(
-            plan, a->definition(), a->working_rom().data(), *profile);
-        std::printf("\nPolicy preview (profile=%s, A->B):\n",
-                    profile_arg->c_str());
+        auto const d = st::flash::evaluate_plan_policy(plan, a->definition(),
+                                                       a->working_rom().data(), *profile);
+        std::printf("\nPolicy preview (profile=%s, A->B):\n", profile_arg->c_str());
         if (table_filter.has_value()) {
             std::printf("  (note: --table filters the diff display only; the\n"
                         "   policy gate still covers ALL bytes that would flash)\n");
         }
-        std::printf("  engine_safety_tables = %zu",
-                    d.engine_safety_tables.size());
-        for (auto const &id : d.engine_safety_tables) std::printf(" %s", id.c_str());
-        std::printf("\n  emissions_tables     = %zu",
-                    d.emissions_tables.size());
-        for (auto const &id : d.emissions_tables)     std::printf(" %s", id.c_str());
+        std::printf("  engine_safety_tables = %zu", d.engine_safety_tables.size());
+        for (auto const &id : d.engine_safety_tables)
+            std::printf(" %s", id.c_str());
+        std::printf("\n  emissions_tables     = %zu", d.emissions_tables.size());
+        for (auto const &id : d.emissions_tables)
+            std::printf(" %s", id.c_str());
         char const *action = "?";
         switch (d.overall_action) {
-            case st::policy::Action::Silent:            action = "silent"; break;
-            case st::policy::Action::Badge:             action = "badge"; break;
-            case st::policy::Action::Warn:              action = "warn"; break;
-            case st::policy::Action::Confirm:           action = "confirm"; break;
-            case st::policy::Action::ConfirmWithReason: action = "confirm+reason"; break;
-            case st::policy::Action::Block:             action = "block"; break;
+        case st::policy::Action::Silent:
+            action = "silent";
+            break;
+        case st::policy::Action::Badge:
+            action = "badge";
+            break;
+        case st::policy::Action::Warn:
+            action = "warn";
+            break;
+        case st::policy::Action::Confirm:
+            action = "confirm";
+            break;
+        case st::policy::Action::ConfirmWithReason:
+            action = "confirm+reason";
+            break;
+        case st::policy::Action::Block:
+            action = "block";
+            break;
         }
         std::printf("\n  overall_action       = %s\n", action);
     }
@@ -3568,7 +3608,7 @@ int cmd_project_diff(int argc, char *argv[]) {
 
 int cmd_pack_list(int argc, char *argv[]) {
     std::optional<std::filesystem::path> pack_dir;
-    bool                                 quiet = false;
+    bool quiet = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -3580,8 +3620,7 @@ int cmd_pack_list(int argc, char *argv[]) {
         } else if (!pack_dir.has_value()) {
             pack_dir = std::filesystem::path{argv[i]};
         } else {
-            std::fprintf(stderr, "pack-list: extra positional argument: %s\n",
-                         argv[i]);
+            std::fprintf(stderr, "pack-list: extra positional argument: %s\n", argv[i]);
             return 2;
         }
     }
@@ -3593,9 +3632,7 @@ int cmd_pack_list(int argc, char *argv[]) {
     }
     std::error_code ec;
     if (!std::filesystem::is_directory(*pack_dir, ec) || ec) {
-        std::fprintf(stderr,
-                     "pack-list: not a directory: %s\n",
-                     pack_dir->string().c_str());
+        std::fprintf(stderr, "pack-list: not a directory: %s\n", pack_dir->string().c_str());
         return 2;
     }
 
@@ -3607,37 +3644,32 @@ int cmd_pack_list(int argc, char *argv[]) {
     try {
         std::error_code walk_ec;
         std::filesystem::recursive_directory_iterator it{
-            *pack_dir,
-            std::filesystem::directory_options::skip_permission_denied,
-            walk_ec};
+            *pack_dir, std::filesystem::directory_options::skip_permission_denied, walk_ec};
         if (walk_ec) {
-            std::fprintf(stderr,
-                         "pack-list: cannot walk %s: %s\n",
-                         pack_dir->string().c_str(),
+            std::fprintf(stderr, "pack-list: cannot walk %s: %s\n", pack_dir->string().c_str(),
                          walk_ec.message().c_str());
             return 1;
         }
         for (auto const &e : it) {
             std::error_code is_file_ec;
-            if (!e.is_regular_file(is_file_ec) || is_file_ec) continue;
-            if (e.path().filename() != "pack.toml") continue;
+            if (!e.is_regular_file(is_file_ec) || is_file_ec)
+                continue;
+            if (e.path().filename() != "pack.toml")
+                continue;
             auto parent = e.path().parent_path();
-            if (std::find(pack_dirs.begin(), pack_dirs.end(), parent)
-                == pack_dirs.end()) {
+            if (std::find(pack_dirs.begin(), pack_dirs.end(), parent) == pack_dirs.end()) {
                 pack_dirs.push_back(std::move(parent));
             }
         }
     } catch (std::filesystem::filesystem_error const &fs_err) {
-        std::fprintf(stderr,
-                     "pack-list: filesystem error walking %s: %s\n",
+        std::fprintf(stderr, "pack-list: filesystem error walking %s: %s\n",
                      pack_dir->string().c_str(), fs_err.what());
         return 1;
     }
     std::sort(pack_dirs.begin(), pack_dirs.end());
 
     if (pack_dirs.empty()) {
-        std::fprintf(stderr,
-                     "pack-list: no pack.toml files found under %s\n",
+        std::fprintf(stderr, "pack-list: no pack.toml files found under %s\n",
                      pack_dir->string().c_str());
         return 1;
     }
@@ -3649,8 +3681,7 @@ int cmd_pack_list(int argc, char *argv[]) {
         if (!def.has_value()) {
             ++failed;
             if (!quiet) {
-                std::fprintf(stderr, "  (skip) %s — load failed: %s\n",
-                             dir.string().c_str(),
+                std::fprintf(stderr, "  (skip) %s — load failed: %s\n", dir.string().c_str(),
                              def.error().to_string().c_str());
             }
             continue;
@@ -3661,22 +3692,17 @@ int cmd_pack_list(int argc, char *argv[]) {
         // "—" when empty), platform, table count, PID count, hook
         // count. Stable order so a `pack-list dir | sort` is
         // already sorted by the dir path.
-        std::printf("%-32s  %-40s  %-18s  tables=%-3zu pids=%-3zu hooks=%-3zu  %s\n",
-                    p.id.c_str(),
+        std::printf("%-32s  %-40s  %-18s  tables=%-3zu pids=%-3zu hooks=%-3zu  %s\n", p.id.c_str(),
                     p.display_name.empty() ? "—" : p.display_name.c_str(),
-                    p.platform.empty() ? "—" : p.platform.c_str(),
-                    def->tables().size(),
-                    def->pids().size(),
-                    def->hooks().size(),
-                    dir.string().c_str());
+                    p.platform.empty() ? "—" : p.platform.c_str(), def->tables().size(),
+                    def->pids().size(), def->hooks().size(), dir.string().c_str());
     }
 
-    std::printf("\n%zu pack%s found, %zu loaded\n",
-                 pack_dirs.size(), pack_dirs.size() == 1 ? "" : "s", loaded);
+    std::printf("\n%zu pack%s found, %zu loaded\n", pack_dirs.size(),
+                pack_dirs.size() == 1 ? "" : "s", loaded);
     if (failed != 0) {
-        std::printf("(%zu failed to load%s)\n",
-                     failed,
-                     quiet ? " — rerun without --quiet to see errors" : "");
+        std::printf("(%zu failed to load%s)\n", failed,
+                    quiet ? " — rerun without --quiet to see errors" : "");
     }
     return loaded == 0 ? 1 : 0;
 }
@@ -3684,7 +3710,7 @@ int cmd_pack_list(int argc, char *argv[]) {
 int cmd_rom_identify(int argc, char *argv[]) {
     std::optional<std::filesystem::path> rom_path;
     std::optional<std::filesystem::path> pack_dir;
-    bool                                 quiet = false;
+    bool quiet = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -3702,9 +3728,7 @@ int cmd_rom_identify(int argc, char *argv[]) {
         } else if (!rom_path.has_value()) {
             rom_path = std::filesystem::path{argv[i]};
         } else {
-            std::fprintf(stderr,
-                         "rom-identify: extra positional argument: %s\n",
-                         argv[i]);
+            std::fprintf(stderr, "rom-identify: extra positional argument: %s\n", argv[i]);
             return 2;
         }
     }
@@ -3718,14 +3742,12 @@ int cmd_rom_identify(int argc, char *argv[]) {
 
     auto const rom = st::Rom::from_file(*rom_path);
     if (!rom.has_value()) {
-        std::fprintf(stderr, "rom-identify: %s\n",
-                     rom.error().to_string().c_str());
+        std::fprintf(stderr, "rom-identify: %s\n", rom.error().to_string().c_str());
         return 1;
     }
     std::error_code ec;
     if (!std::filesystem::is_directory(*pack_dir, ec) || ec) {
-        std::fprintf(stderr,
-                     "rom-identify: --pack-dir is not a directory: %s\n",
+        std::fprintf(stderr, "rom-identify: --pack-dir is not a directory: %s\n",
                      pack_dir->string().c_str());
         return 2;
     }
@@ -3744,51 +3766,45 @@ int cmd_rom_identify(int argc, char *argv[]) {
     try {
         std::error_code walk_ec;
         std::filesystem::recursive_directory_iterator it{
-            *pack_dir,
-            std::filesystem::directory_options::skip_permission_denied,
-            walk_ec};
+            *pack_dir, std::filesystem::directory_options::skip_permission_denied, walk_ec};
         if (walk_ec) {
-            std::fprintf(stderr,
-                         "rom-identify: cannot walk %s: %s\n",
-                         pack_dir->string().c_str(),
+            std::fprintf(stderr, "rom-identify: cannot walk %s: %s\n", pack_dir->string().c_str(),
                          walk_ec.message().c_str());
             return 1;
         }
         for (auto const &e : it) {
             std::error_code is_file_ec;
-            if (!e.is_regular_file(is_file_ec) || is_file_ec) continue;
-            if (e.path().filename() != "pack.toml") continue;
+            if (!e.is_regular_file(is_file_ec) || is_file_ec)
+                continue;
+            if (e.path().filename() != "pack.toml")
+                continue;
             auto parent = e.path().parent_path();
-            if (std::find(pack_dirs.begin(), pack_dirs.end(), parent)
-                == pack_dirs.end()) {
+            if (std::find(pack_dirs.begin(), pack_dirs.end(), parent) == pack_dirs.end()) {
                 pack_dirs.push_back(std::move(parent));
             }
         }
     } catch (std::filesystem::filesystem_error const &fs_err) {
-        std::fprintf(stderr,
-                     "rom-identify: filesystem error walking %s: %s\n",
+        std::fprintf(stderr, "rom-identify: filesystem error walking %s: %s\n",
                      pack_dir->string().c_str(), fs_err.what());
         return 1;
     }
     std::sort(pack_dirs.begin(), pack_dirs.end());
 
     if (pack_dirs.empty()) {
-        std::fprintf(stderr,
-                     "rom-identify: no pack.toml files found under %s\n",
+        std::fprintf(stderr, "rom-identify: no pack.toml files found under %s\n",
                      pack_dir->string().c_str());
         return 1;
     }
 
-    std::size_t loaded   = 0;
-    std::size_t failed   = 0;
-    std::size_t matched  = 0;
+    std::size_t loaded = 0;
+    std::size_t failed = 0;
+    std::size_t matched = 0;
     for (auto const &dir : pack_dirs) {
         auto const def = st::Definition::from_directory(dir);
         if (!def.has_value()) {
             ++failed;
             if (!quiet) {
-                std::fprintf(stderr, "  (skip) %s — load failed: %s\n",
-                             dir.string().c_str(),
+                std::fprintf(stderr, "  (skip) %s — load failed: %s\n", dir.string().c_str(),
                              def.error().to_string().c_str());
             }
             continue;
@@ -3800,19 +3816,16 @@ int cmd_rom_identify(int argc, char *argv[]) {
             std::printf("MATCH  %s\n", dir.string().c_str());
             std::printf("       (identification: %s)\n", match->c_str());
             if (!def->pack().display_name.empty()) {
-                std::printf("       (display name:   %s)\n",
-                            def->pack().display_name.c_str());
+                std::printf("       (display name:   %s)\n", def->pack().display_name.c_str());
             }
         }
     }
 
-    std::printf("\n%zu pack%s scanned, %zu loaded, %zu match%s\n",
-                 pack_dirs.size(), pack_dirs.size() == 1 ? "" : "s",
-                 loaded, matched, matched == 1 ? "" : "es");
+    std::printf("\n%zu pack%s scanned, %zu loaded, %zu match%s\n", pack_dirs.size(),
+                pack_dirs.size() == 1 ? "" : "s", loaded, matched, matched == 1 ? "" : "es");
     if (failed != 0) {
-        std::printf("(%zu pack%s failed to load%s)\n",
-                     failed, failed == 1 ? "" : "s",
-                     quiet ? " — rerun without --quiet to see errors" : "");
+        std::printf("(%zu pack%s failed to load%s)\n", failed, failed == 1 ? "" : "s",
+                    quiet ? " — rerun without --quiet to see errors" : "");
     }
     return matched == 0 ? 1 : 0;
 }
@@ -3832,26 +3845,21 @@ int cmd_checksum_repair(int argc, char *argv[]) {
             def_path = std::filesystem::path{argv[++i]};
         } else if (a == "--output" || a == "-o") {
             if (i + 1 >= argc) {
-                std::fputs("checksum-repair: --output requires a path\n",
-                           stderr);
+                std::fputs("checksum-repair: --output requires a path\n", stderr);
                 return 2;
             }
             output_path = std::filesystem::path{argv[++i]};
         } else if (a.starts_with("--")) {
-            std::fprintf(stderr, "checksum-repair: unknown option: %s\n",
-                         argv[i]);
+            std::fprintf(stderr, "checksum-repair: unknown option: %s\n", argv[i]);
             return 2;
         } else if (!rom_path.has_value()) {
             rom_path = std::filesystem::path{argv[i]};
         } else {
-            std::fprintf(stderr,
-                         "checksum-repair: extra positional argument: %s\n",
-                         argv[i]);
+            std::fprintf(stderr, "checksum-repair: extra positional argument: %s\n", argv[i]);
             return 2;
         }
     }
-    if (!rom_path.has_value() || !def_path.has_value()
-        || !output_path.has_value()) {
+    if (!rom_path.has_value() || !def_path.has_value() || !output_path.has_value()) {
         std::fputs("checksum-repair: missing ROM path, --def, or --output\n"
                    "Usage: subuwutuner-cli checksum-repair <FILE.bin> "
                    "--def <pack> --output <FILE.bin>\n",
@@ -3861,8 +3869,7 @@ int cmd_checksum_repair(int argc, char *argv[]) {
 
     auto const rom = st::Rom::from_file(*rom_path);
     if (!rom.has_value()) {
-        std::fprintf(stderr, "checksum-repair: %s\n",
-                     rom.error().to_string().c_str());
+        std::fprintf(stderr, "checksum-repair: %s\n", rom.error().to_string().c_str());
         return 1;
     }
     auto const def = st::Definition::from_file(resolve_def_path(*def_path));
@@ -3879,20 +3886,17 @@ int cmd_checksum_repair(int argc, char *argv[]) {
     if (!status.has_value()) {
         if (status.error().code() == st::ErrorCode::NotImplemented) {
             auto const msg = status.error().message();
-            std::fprintf(stderr,
-                         "checksum-repair: not implemented — %.*s\n",
+            std::fprintf(stderr, "checksum-repair: not implemented — %.*s\n",
                          static_cast<int>(msg.size()), msg.data());
             return 3;
         }
-        std::fprintf(stderr, "checksum-repair: %s\n",
-                     status.error().to_string().c_str());
+        std::fprintf(stderr, "checksum-repair: %s\n", status.error().to_string().c_str());
         return 1;
     }
 
     std::ofstream ofs{*output_path, std::ios::binary | std::ios::trunc};
     if (!ofs) {
-        std::fprintf(stderr,
-                     "checksum-repair: cannot open output: %s\n",
+        std::fprintf(stderr, "checksum-repair: cannot open output: %s\n",
                      output_path->string().c_str());
         return 1;
     }
@@ -3904,11 +3908,11 @@ int cmd_checksum_repair(int argc, char *argv[]) {
         return 1;
     }
 
-    auto const  field = def->pack().checksum_type;
-    auto const *kind_name = st::flash::checksum_kind_name(
-        st::flash::checksum_kind_from_pack(field));
-    std::printf("checksum-repair: wrote %zu bytes to %s (kind: %s)\n",
-                bytes.size(), output_path->string().c_str(), kind_name);
+    auto const field = def->pack().checksum_type;
+    auto const *kind_name =
+        st::flash::checksum_kind_name(st::flash::checksum_kind_from_pack(field));
+    std::printf("checksum-repair: wrote %zu bytes to %s (kind: %s)\n", bytes.size(),
+                output_path->string().c_str(), kind_name);
     return 0;
 }
 
@@ -3925,15 +3929,12 @@ int cmd_checksum_verify(int argc, char *argv[]) {
             }
             def_path = std::filesystem::path{argv[++i]};
         } else if (a.starts_with("--")) {
-            std::fprintf(stderr, "checksum-verify: unknown option: %s\n",
-                         argv[i]);
+            std::fprintf(stderr, "checksum-verify: unknown option: %s\n", argv[i]);
             return 2;
         } else if (!rom_path.has_value()) {
             rom_path = std::filesystem::path{argv[i]};
         } else {
-            std::fprintf(stderr,
-                         "checksum-verify: extra positional argument: %s\n",
-                         argv[i]);
+            std::fprintf(stderr, "checksum-verify: extra positional argument: %s\n", argv[i]);
             return 2;
         }
     }
@@ -3947,8 +3948,7 @@ int cmd_checksum_verify(int argc, char *argv[]) {
 
     auto const rom = st::Rom::from_file(*rom_path);
     if (!rom.has_value()) {
-        std::fprintf(stderr, "checksum-verify: %s\n",
-                     rom.error().to_string().c_str());
+        std::fprintf(stderr, "checksum-verify: %s\n", rom.error().to_string().c_str());
         return 1;
     }
     auto const def = st::Definition::from_file(resolve_def_path(*def_path));
@@ -3956,14 +3956,13 @@ int cmd_checksum_verify(int argc, char *argv[]) {
         return print_def_load_error("checksum-verify", *def_path, def.error());
     }
 
-    auto const  field = def->pack().checksum_type;
-    auto const  kind  = st::flash::checksum_kind_from_pack(field);
+    auto const field = def->pack().checksum_type;
+    auto const kind = st::flash::checksum_kind_from_pack(field);
     auto const *kind_name = st::flash::checksum_kind_name(kind);
 
     std::printf("ROM:              %s\n", rom_path->string().c_str());
     std::printf("Pack:             %s\n", def->pack().id.c_str());
-    std::printf("checksum_type:    %s%s\n",
-                field.empty() ? "(unset)" : field.c_str(),
+    std::printf("checksum_type:    %s%s\n", field.empty() ? "(unset)" : field.c_str(),
                 field.empty() ? "  → defaulting to 'none'" : "");
     std::printf("Resolved kind:    %s\n", kind_name);
 
@@ -3977,20 +3976,17 @@ int cmd_checksum_verify(int argc, char *argv[]) {
         if (status.error().code() == st::ErrorCode::NotImplemented) {
             std::printf("\nResult: NOT IMPLEMENTED\n");
             auto const msg = status.error().message();
-            std::printf("  %.*s\n",
-                        static_cast<int>(msg.size()), msg.data());
+            std::printf("  %.*s\n", static_cast<int>(msg.size()), msg.data());
             return 3;
         }
-        std::fprintf(stderr, "\nchecksum-verify: %s\n",
-                     status.error().to_string().c_str());
+        std::fprintf(stderr, "\nchecksum-verify: %s\n", status.error().to_string().c_str());
         return 1;
     }
 
     // Compare bytes. Equal → existing checksum was already correct
     // (or the pack declared "none" so no work was needed); unequal
     // → repair would have rewritten some bytes.
-    if (copy == std::vector<std::uint8_t>{rom->data().begin(),
-                                            rom->data().end()}) {
+    if (copy == std::vector<std::uint8_t>{rom->data().begin(), rom->data().end()}) {
         std::printf("\nResult: VALID (no bytes would change)\n");
         return 0;
     }
@@ -4001,11 +3997,12 @@ int cmd_checksum_verify(int argc, char *argv[]) {
     for (std::size_t i = 0; i < rom->size(); ++i) {
         if (rom->data()[i] != copy[i]) {
             ++diff_bytes;
-            if (first_diff == SIZE_MAX) first_diff = i;
+            if (first_diff == SIZE_MAX)
+                first_diff = i;
         }
     }
-    std::printf("\nResult: INVALID (%zu byte%s would be rewritten",
-                diff_bytes, diff_bytes == 1 ? "" : "s");
+    std::printf("\nResult: INVALID (%zu byte%s would be rewritten", diff_bytes,
+                diff_bytes == 1 ? "" : "s");
     if (first_diff != SIZE_MAX) {
         std::printf(", first at 0x%08zX", first_diff);
     }
@@ -4073,15 +4070,14 @@ int cmd_rom_info(int argc, char *argv[]) {
 // end-of-line; blank lines are skipped. Returns the parsed frames in file
 // order, or an error string in `err` and false on parse failure.
 bool load_trace_file(std::filesystem::path const &path,
-                     std::vector<std::vector<std::uint8_t>> &out_frames,
-                     std::string &err) {
+                     std::vector<std::vector<std::uint8_t>> &out_frames, std::string &err) {
     std::ifstream in{path};
     if (!in) {
         err = "log: cannot open trace file: " + path.string();
         return false;
     }
     std::string line;
-    int         line_no = 0;
+    int line_no = 0;
     while (std::getline(in, line)) {
         ++line_no;
         if (auto const hash = line.find('#'); hash != std::string::npos) {
@@ -4089,15 +4085,14 @@ bool load_trace_file(std::filesystem::path const &path,
         }
         std::istringstream iss{line};
         std::vector<std::uint8_t> frame;
-        std::string               tok;
+        std::string tok;
         while (iss >> tok) {
-            unsigned             value = 0;
-            auto const           first = tok.data();
-            auto const           last  = tok.data() + tok.size();
-            auto const           res   = std::from_chars(first, last, value, 16);
+            unsigned value = 0;
+            auto const first = tok.data();
+            auto const last = tok.data() + tok.size();
+            auto const res = std::from_chars(first, last, value, 16);
             if (res.ec != std::errc{} || res.ptr != last || value > 0xFFU) {
-                err = "log: bad hex byte '" + tok + "' on line "
-                      + std::to_string(line_no);
+                err = "log: bad hex byte '" + tok + "' on line " + std::to_string(line_no);
                 return false;
             }
             frame.push_back(static_cast<std::uint8_t>(value));
@@ -4116,22 +4111,23 @@ bool load_trace_file(std::filesystem::path const &path,
 // Split a comma-separated list into trimmed, non-empty tokens.
 std::vector<std::string> split_csv_list(std::string_view s) {
     std::vector<std::string> out;
-    std::size_t              start = 0;
+    std::size_t start = 0;
     while (start <= s.size()) {
         auto const end = s.find(',', start);
         auto const piece =
-            s.substr(start,
-                     end == std::string_view::npos ? std::string_view::npos
-                                                   : end - start);
+            s.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start);
         // Trim whitespace.
         std::size_t a = 0;
-        while (a < piece.size() && std::isspace(static_cast<unsigned char>(piece[a]))) ++a;
+        while (a < piece.size() && std::isspace(static_cast<unsigned char>(piece[a])))
+            ++a;
         std::size_t b = piece.size();
-        while (b > a && std::isspace(static_cast<unsigned char>(piece[b - 1]))) --b;
+        while (b > a && std::isspace(static_cast<unsigned char>(piece[b - 1])))
+            --b;
         if (b > a) {
             out.emplace_back(piece.substr(a, b - a));
         }
-        if (end == std::string_view::npos) break;
+        if (end == std::string_view::npos)
+            break;
         start = end + 1;
     }
     return out;
@@ -4144,20 +4140,21 @@ std::optional<double> parse_decimal(std::string_view raw);
 // Look up a column name in a CSV header; returns the index, or
 // std::string_view::npos if not found. Comparison is case-insensitive
 // because RomRaider log column names are inconsistently cased.
-std::size_t find_csv_column(std::vector<std::string> const &header,
-                            std::string_view                name) {
-    auto const  to_lower = [](char c) -> char {
-        return static_cast<char>(
-            std::tolower(static_cast<unsigned char>(c)));
+std::size_t find_csv_column(std::vector<std::string> const &header, std::string_view name) {
+    auto const to_lower = [](char c) -> char {
+        return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     };
     std::string want;
     want.reserve(name.size());
-    for (char c : name) want.push_back(to_lower(c));
+    for (char c : name)
+        want.push_back(to_lower(c));
     for (std::size_t i = 0; i < header.size(); ++i) {
         std::string have;
         have.reserve(header[i].size());
-        for (char c : header[i]) have.push_back(to_lower(c));
-        if (have == want) return i;
+        for (char c : header[i])
+            have.push_back(to_lower(c));
+        if (have == want)
+            return i;
     }
     return std::string_view::npos;
 }
@@ -4165,9 +4162,8 @@ std::size_t find_csv_column(std::vector<std::string> const &header,
 // Read just the header row (first non-blank, non-# line) so the CLI
 // can resolve column names to indices before handing off to the snapshot
 // CSV reader (which addresses columns by index).
-bool read_csv_header(std::filesystem::path const &path,
-                     std::vector<std::string>    &out,
-                     std::string                  &err) {
+bool read_csv_header(std::filesystem::path const &path, std::vector<std::string> &out,
+                     std::string &err) {
     std::ifstream f{path};
     if (!f) {
         err = "knock-snapshot: cannot open " + path.string();
@@ -4175,12 +4171,14 @@ bool read_csv_header(std::filesystem::path const &path,
     }
     std::string line;
     while (std::getline(f, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
         // Trim leading whitespace
         std::size_t a = 0;
-        while (a < line.size()
-               && std::isspace(static_cast<unsigned char>(line[a]))) ++a;
-        if (a >= line.size() || line[a] == '#') continue;
+        while (a < line.size() && std::isspace(static_cast<unsigned char>(line[a])))
+            ++a;
+        if (a >= line.size() || line[a] == '#')
+            continue;
         // Split on commas
         std::size_t start = a;
         for (std::size_t i = a; i <= line.size(); ++i) {
@@ -4188,10 +4186,10 @@ bool read_csv_header(std::filesystem::path const &path,
                 // Trim each field
                 std::size_t f0 = start;
                 std::size_t f1 = i;
-                while (f0 < f1
-                       && std::isspace(static_cast<unsigned char>(line[f0]))) ++f0;
-                while (f1 > f0
-                       && std::isspace(static_cast<unsigned char>(line[f1 - 1]))) --f1;
+                while (f0 < f1 && std::isspace(static_cast<unsigned char>(line[f0])))
+                    ++f0;
+                while (f1 > f0 && std::isspace(static_cast<unsigned char>(line[f1 - 1])))
+                    --f1;
                 out.emplace_back(line.substr(f0, f1 - f0));
                 start = i + 1;
             }
@@ -4204,45 +4202,66 @@ bool read_csv_header(std::filesystem::path const &path,
 
 int cmd_knock_snapshot(int argc, char *argv[]) {
     std::optional<std::filesystem::path> log_path;
-    std::optional<std::string>           rpm_col;
-    std::optional<std::string>           load_col;
-    std::optional<std::string>           flkc_cols_arg;
-    std::optional<std::string>           fbkc_cols_arg;
-    std::optional<std::size_t>           cylinders_override;
-    std::optional<double>                window_seconds;
-    std::optional<double>                sample_rate_hz;
-    std::optional<double>                min_rpm_arg;
-    std::optional<double>                min_load_arg;
-    bool                                 no_gate = false;
+    std::optional<std::string> rpm_col;
+    std::optional<std::string> load_col;
+    std::optional<std::string> flkc_cols_arg;
+    std::optional<std::string> fbkc_cols_arg;
+    std::optional<std::size_t> cylinders_override;
+    std::optional<double> window_seconds;
+    std::optional<double> sample_rate_hz;
+    std::optional<double> min_rpm_arg;
+    std::optional<double> min_load_arg;
+    bool no_gate = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             need = [&](char const *name) -> char const * {
+        auto const need = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
-                std::fprintf(stderr,
-                             "knock-snapshot: %s requires a value\n", name);
+                std::fprintf(stderr, "knock-snapshot: %s requires a value\n", name);
                 return nullptr;
             }
             return argv[++i];
         };
-        if      (a == "--log")           { auto *v = need("--log");           if (!v) return 2; log_path = std::filesystem::path{v}; }
-        else if (a == "--rpm-col")       { auto *v = need("--rpm-col");       if (!v) return 2; rpm_col       = v; }
-        else if (a == "--load-col")      { auto *v = need("--load-col");      if (!v) return 2; load_col      = v; }
-        else if (a == "--flkc-cols")     { auto *v = need("--flkc-cols");     if (!v) return 2; flkc_cols_arg = v; }
-        else if (a == "--fbkc-cols")     { auto *v = need("--fbkc-cols");     if (!v) return 2; fbkc_cols_arg = v; }
-        else if (a == "--cylinders")     {
-            auto *v = need("--cylinders"); if (!v) return 2;
+        if (a == "--log") {
+            auto *v = need("--log");
+            if (!v)
+                return 2;
+            log_path = std::filesystem::path{v};
+        } else if (a == "--rpm-col") {
+            auto *v = need("--rpm-col");
+            if (!v)
+                return 2;
+            rpm_col = v;
+        } else if (a == "--load-col") {
+            auto *v = need("--load-col");
+            if (!v)
+                return 2;
+            load_col = v;
+        } else if (a == "--flkc-cols") {
+            auto *v = need("--flkc-cols");
+            if (!v)
+                return 2;
+            flkc_cols_arg = v;
+        } else if (a == "--fbkc-cols") {
+            auto *v = need("--fbkc-cols");
+            if (!v)
+                return 2;
+            fbkc_cols_arg = v;
+        } else if (a == "--cylinders") {
+            auto *v = need("--cylinders");
+            if (!v)
+                return 2;
             char *end = nullptr;
             long long const n = std::strtoll(v, &end, 10);
             if (end == v || *end != '\0' || n < 1 || n > 6) {
-                std::fprintf(stderr,
-                             "knock-snapshot: --cylinders must be 1..6 (got '%s')\n", v);
+                std::fprintf(stderr, "knock-snapshot: --cylinders must be 1..6 (got '%s')\n", v);
                 return 2;
             }
             cylinders_override = static_cast<std::size_t>(n);
-        }
-        else if (a == "--window-seconds") {
-            auto *v = need("--window-seconds"); if (!v) return 2;
+        } else if (a == "--window-seconds") {
+            auto *v = need("--window-seconds");
+            if (!v)
+                return 2;
             auto const p = parse_decimal(v);
             if (!p.has_value()) {
                 std::fprintf(stderr,
@@ -4250,9 +4269,10 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
                 return 2;
             }
             window_seconds = *p;
-        }
-        else if (a == "--sample-rate-hz") {
-            auto *v = need("--sample-rate-hz"); if (!v) return 2;
+        } else if (a == "--sample-rate-hz") {
+            auto *v = need("--sample-rate-hz");
+            if (!v)
+                return 2;
             auto const p = parse_decimal(v);
             if (!p.has_value()) {
                 std::fprintf(stderr,
@@ -4260,31 +4280,30 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
                 return 2;
             }
             sample_rate_hz = *p;
-        }
-        else if (a == "--min-rpm") {
-            auto *v = need("--min-rpm"); if (!v) return 2;
+        } else if (a == "--min-rpm") {
+            auto *v = need("--min-rpm");
+            if (!v)
+                return 2;
             auto const p = parse_decimal(v);
             if (!p.has_value()) {
-                std::fprintf(stderr,
-                             "knock-snapshot: --min-rpm must be a number (got '%s')\n", v);
+                std::fprintf(stderr, "knock-snapshot: --min-rpm must be a number (got '%s')\n", v);
                 return 2;
             }
             min_rpm_arg = *p;
-        }
-        else if (a == "--min-load") {
-            auto *v = need("--min-load"); if (!v) return 2;
+        } else if (a == "--min-load") {
+            auto *v = need("--min-load");
+            if (!v)
+                return 2;
             auto const p = parse_decimal(v);
             if (!p.has_value()) {
-                std::fprintf(stderr,
-                             "knock-snapshot: --min-load must be a number (got '%s')\n", v);
+                std::fprintf(stderr, "knock-snapshot: --min-load must be a number (got '%s')\n", v);
                 return 2;
             }
             min_load_arg = *p;
-        }
-        else if (a == "--no-gate") { no_gate = true; }
-        else {
-            std::fprintf(stderr,
-                         "knock-snapshot: unknown option: %s\n", argv[i]);
+        } else if (a == "--no-gate") {
+            no_gate = true;
+        } else {
+            std::fprintf(stderr, "knock-snapshot: unknown option: %s\n", argv[i]);
             return 2;
         }
     }
@@ -4315,10 +4334,8 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
         return 2;
     }
     if (flkc_names.size() > st::log::knock::kMaxCylinders) {
-        std::fprintf(stderr,
-                     "knock-snapshot: too many cylinders (%zu); max %u\n",
-                     flkc_names.size(),
-                     static_cast<unsigned>(st::log::knock::kMaxCylinders));
+        std::fprintf(stderr, "knock-snapshot: too many cylinders (%zu); max %u\n",
+                     flkc_names.size(), static_cast<unsigned>(st::log::knock::kMaxCylinders));
         return 2;
     }
     std::vector<std::string> fbkc_names;
@@ -4335,15 +4352,14 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
 
     st::log::knock::PidMapping mapping;
     mapping.cylinder_count = cylinders_override.has_value()
-        ? static_cast<std::uint8_t>(*cylinders_override)
-        : static_cast<std::uint8_t>(flkc_names.size());
+                                 ? static_cast<std::uint8_t>(*cylinders_override)
+                                 : static_cast<std::uint8_t>(flkc_names.size());
 
     auto const resolve = [&](std::string_view name, char const *flag) -> std::size_t {
         std::size_t const idx = find_csv_column(header, name);
         if (idx == std::string_view::npos) {
-            std::fprintf(stderr,
-                         "knock-snapshot: %s column '%.*s' not in CSV header\n",
-                         flag, static_cast<int>(name.size()), name.data());
+            std::fprintf(stderr, "knock-snapshot: %s column '%.*s' not in CSV header\n", flag,
+                         static_cast<int>(name.size()), name.data());
         }
         return idx;
     };
@@ -4351,38 +4367,51 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
     bool bad = false;
     if (rpm_col.has_value()) {
         std::size_t const idx = resolve(*rpm_col, "--rpm-col");
-        if (idx == std::string_view::npos) bad = true;
-        else mapping.rpm_idx = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.rpm_idx = idx;
     }
     if (load_col.has_value()) {
         std::size_t const idx = resolve(*load_col, "--load-col");
-        if (idx == std::string_view::npos) bad = true;
-        else mapping.load_idx = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.load_idx = idx;
     }
     for (std::size_t c = 0; c < flkc_names.size(); ++c) {
         std::size_t const idx = resolve(flkc_names[c], "--flkc-cols");
-        if (idx == std::string_view::npos) { bad = true; continue; }
+        if (idx == std::string_view::npos) {
+            bad = true;
+            continue;
+        }
         mapping.fine_knock_learn[c] = idx;
     }
     for (std::size_t c = 0; c < fbkc_names.size(); ++c) {
         std::size_t const idx = resolve(fbkc_names[c], "--fbkc-cols");
-        if (idx == std::string_view::npos) { bad = true; continue; }
+        if (idx == std::string_view::npos) {
+            bad = true;
+            continue;
+        }
         mapping.feedback_knock[c] = idx;
     }
-    if (bad) return 1;
+    if (bad)
+        return 1;
 
     st::log::knock::WindowConfig cfg;
-    if (window_seconds.has_value())    cfg.window_seconds    = *window_seconds;
-    if (sample_rate_hz.has_value())    cfg.sample_rate_hz    = *sample_rate_hz;
-    if (min_rpm_arg.has_value())       cfg.min_rpm           = *min_rpm_arg;
-    if (min_load_arg.has_value())      cfg.min_load          = *min_load_arg;
+    if (window_seconds.has_value())
+        cfg.window_seconds = *window_seconds;
+    if (sample_rate_hz.has_value())
+        cfg.sample_rate_hz = *sample_rate_hz;
+    if (min_rpm_arg.has_value())
+        cfg.min_rpm = *min_rpm_arg;
+    if (min_load_arg.has_value())
+        cfg.min_load = *min_load_arg;
     cfg.require_load_gate = !no_gate;
 
-    auto const r = st::log::knock::snapshot_from_csv(
-        log_path->string(), mapping, cfg);
+    auto const r = st::log::knock::snapshot_from_csv(log_path->string(), mapping, cfg);
     if (!r.has_value()) {
-        std::fprintf(stderr, "knock-snapshot: %s\n",
-                     r.error().to_string().c_str());
+        std::fprintf(stderr, "knock-snapshot: %s\n", r.error().to_string().c_str());
         return 1;
     }
     auto const &s = *r;
@@ -4390,8 +4419,7 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
     std::printf("Per-Cylinder Knock Dashboard\n");
     std::printf("============================\n");
     std::printf("Log:                %s\n", log_path->string().c_str());
-    std::printf("Window:             %.1fs @ %.1f Hz\n",
-                cfg.window_seconds, cfg.sample_rate_hz);
+    std::printf("Window:             %.1fs @ %.1f Hz\n", cfg.window_seconds, cfg.sample_rate_hz);
     std::printf("Samples considered: %llu\n",
                 static_cast<unsigned long long>(s.samples_considered));
     std::printf("Samples gated out:  %llu  (gate: %s)\n",
@@ -4402,17 +4430,12 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
     std::printf("----+--------------+-----------+----------+--------------+--------+-------\n");
     for (std::uint8_t c = 0; c < s.cylinder_count; ++c) {
         auto const &p = s.per_cyl[c];
-        bool const  has_flkc = mapping.fine_knock_learn[c]
-                               != st::log::knock::kNoPid;
-        bool const  has_fbkc = mapping.feedback_knock[c]
-                               != st::log::knock::kNoPid;
+        bool const has_flkc = mapping.fine_knock_learn[c] != st::log::knock::kNoPid;
+        bool const has_fbkc = mapping.feedback_knock[c] != st::log::knock::kNoPid;
         std::printf(" %2u | %+12.3f | %+9.3f | %+8.3f | %+12.3f | %6u | %+5.2f%s\n",
-                    static_cast<unsigned>(c + 1),
-                    has_flkc ? p.current_flkc : 0.0,
-                    has_flkc ? p.mean_flkc_window : 0.0,
-                    has_flkc ? p.min_flkc_window : 0.0,
-                    has_fbkc ? p.current_fbkc : 0.0,
-                    static_cast<unsigned>(p.event_count_window),
+                    static_cast<unsigned>(c + 1), has_flkc ? p.current_flkc : 0.0,
+                    has_flkc ? p.mean_flkc_window : 0.0, has_flkc ? p.min_flkc_window : 0.0,
+                    has_fbkc ? p.current_fbkc : 0.0, static_cast<unsigned>(p.event_count_window),
                     has_flkc ? p.delta_from_cyl_mean : 0.0,
                     (!has_flkc && !has_fbkc) ? "  (no per-cyl signal)" : "");
     }
@@ -4422,60 +4445,86 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
 
 int cmd_adaptive_history(int argc, char *argv[]) {
     std::optional<std::filesystem::path> log_path;
-    std::optional<std::string>           ts_col;
-    std::optional<std::string>           ltft_col;
-    std::optional<std::string>           dam_col;
-    std::optional<std::string>           iac_col;
-    std::optional<double>                bucket_seconds;
-    std::optional<std::string>           ts_unit_arg;
-    std::optional<std::size_t>           min_samples_per_bucket;
-    bool                                 verbose = false;
+    std::optional<std::string> ts_col;
+    std::optional<std::string> ltft_col;
+    std::optional<std::string> dam_col;
+    std::optional<std::string> iac_col;
+    std::optional<double> bucket_seconds;
+    std::optional<std::string> ts_unit_arg;
+    std::optional<std::size_t> min_samples_per_bucket;
+    bool verbose = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             need = [&](char const *name) -> char const * {
+        auto const need = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
-                std::fprintf(stderr,
-                             "adaptive-history: %s requires a value\n", name);
+                std::fprintf(stderr, "adaptive-history: %s requires a value\n", name);
                 return nullptr;
             }
             return argv[++i];
         };
-        if      (a == "--log")            { auto *v = need("--log");            if (!v) return 2; log_path = std::filesystem::path{v}; }
-        else if (a == "--timestamp-col")  { auto *v = need("--timestamp-col");  if (!v) return 2; ts_col   = v; }
-        else if (a == "--ltft-col")       { auto *v = need("--ltft-col");       if (!v) return 2; ltft_col = v; }
-        else if (a == "--dam-col")        { auto *v = need("--dam-col");        if (!v) return 2; dam_col  = v; }
-        else if (a == "--idle-adapt-col") { auto *v = need("--idle-adapt-col"); if (!v) return 2; iac_col  = v; }
-        else if (a == "--bucket-seconds") {
-            auto *v = need("--bucket-seconds"); if (!v) return 2;
+        if (a == "--log") {
+            auto *v = need("--log");
+            if (!v)
+                return 2;
+            log_path = std::filesystem::path{v};
+        } else if (a == "--timestamp-col") {
+            auto *v = need("--timestamp-col");
+            if (!v)
+                return 2;
+            ts_col = v;
+        } else if (a == "--ltft-col") {
+            auto *v = need("--ltft-col");
+            if (!v)
+                return 2;
+            ltft_col = v;
+        } else if (a == "--dam-col") {
+            auto *v = need("--dam-col");
+            if (!v)
+                return 2;
+            dam_col = v;
+        } else if (a == "--idle-adapt-col") {
+            auto *v = need("--idle-adapt-col");
+            if (!v)
+                return 2;
+            iac_col = v;
+        } else if (a == "--bucket-seconds") {
+            auto *v = need("--bucket-seconds");
+            if (!v)
+                return 2;
             auto const p = parse_decimal(v);
             if (!p.has_value()) {
-                std::fprintf(stderr, "adaptive-history: --bucket-seconds must "
-                                     "be a number (got '%s')\n", v);
+                std::fprintf(stderr,
+                             "adaptive-history: --bucket-seconds must "
+                             "be a number (got '%s')\n",
+                             v);
                 return 2;
             }
             bucket_seconds = *p;
-        }
-        else if (a == "--timestamp-unit") {
-            auto *v = need("--timestamp-unit"); if (!v) return 2;
+        } else if (a == "--timestamp-unit") {
+            auto *v = need("--timestamp-unit");
+            if (!v)
+                return 2;
             ts_unit_arg = v;
-        }
-        else if (a == "--min-samples-per-bucket") {
-            auto *v = need("--min-samples-per-bucket"); if (!v) return 2;
-            char       *end = nullptr;
+        } else if (a == "--min-samples-per-bucket") {
+            auto *v = need("--min-samples-per-bucket");
+            if (!v)
+                return 2;
+            char *end = nullptr;
             long long const n = std::strtoll(v, &end, 10);
             if (end == v || *end != '\0' || n < 0) {
-                std::fprintf(stderr, "adaptive-history: "
-                                     "--min-samples-per-bucket must be a "
-                                     "non-negative integer (got '%s')\n", v);
+                std::fprintf(stderr,
+                             "adaptive-history: "
+                             "--min-samples-per-bucket must be a "
+                             "non-negative integer (got '%s')\n",
+                             v);
                 return 2;
             }
             min_samples_per_bucket = static_cast<std::size_t>(n);
-        }
-        else if (a == "--verbose" || a == "-v") { verbose = true; }
-        else {
-            std::fprintf(stderr,
-                         "adaptive-history: unknown option: %s\n", argv[i]);
+        } else if (a == "--verbose" || a == "-v") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "adaptive-history: unknown option: %s\n", argv[i]);
             return 2;
         }
     }
@@ -4485,15 +4534,18 @@ int cmd_adaptive_history(int argc, char *argv[]) {
             "adaptive-history: missing required arguments\n"
             "Usage: subuwutuner-cli adaptive-history --log <CSV> --timestamp-col <name>\n"
             "                                        [--ltft-col <name>] [--dam-col <name>]\n"
-            "                                        [--idle-adapt-col <name>] [--bucket-seconds N]\n"
-            "                                        [--timestamp-unit seconds|millis|micros|rows]\n"
+            "                                        [--idle-adapt-col <name>] [--bucket-seconds "
+            "N]\n"
+            "                                        [--timestamp-unit "
+            "seconds|millis|micros|rows]\n"
             "                                        [--min-samples-per-bucket N] [--verbose]\n",
             stderr);
         return 2;
     }
     if (!ltft_col.has_value() && !dam_col.has_value() && !iac_col.has_value()) {
         std::fputs("adaptive-history: at least one of --ltft-col / "
-                   "--dam-col / --idle-adapt-col is required\n", stderr);
+                   "--dam-col / --idle-adapt-col is required\n",
+                   stderr);
         return 2;
     }
 
@@ -4506,13 +4558,11 @@ int cmd_adaptive_history(int argc, char *argv[]) {
             return 1;
         }
     }
-    auto const resolve = [&](std::string_view name,
-                              char const       *flag) -> std::size_t {
+    auto const resolve = [&](std::string_view name, char const *flag) -> std::size_t {
         std::size_t const idx = find_csv_column(header, name);
         if (idx == std::string_view::npos) {
-            std::fprintf(stderr,
-                         "adaptive-history: %s column '%.*s' not in CSV header\n",
-                         flag, static_cast<int>(name.size()), name.data());
+            std::fprintf(stderr, "adaptive-history: %s column '%.*s' not in CSV header\n", flag,
+                         static_cast<int>(name.size()), name.data());
         }
         return idx;
     };
@@ -4521,54 +4571,65 @@ int cmd_adaptive_history(int argc, char *argv[]) {
     bool bad = false;
     {
         std::size_t const idx = resolve(*ts_col, "--timestamp-col");
-        if (idx == std::string_view::npos) bad = true;
-        else mapping.timestamp_idx = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.timestamp_idx = idx;
     }
     if (ltft_col.has_value()) {
         std::size_t const idx = resolve(*ltft_col, "--ltft-col");
-        if (idx == std::string_view::npos) bad = true;
-        else mapping.signal_idx[static_cast<std::size_t>(
-            st::log::adaptive::SignalKind::Ltft)] = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.signal_idx[static_cast<std::size_t>(st::log::adaptive::SignalKind::Ltft)] = idx;
     }
     if (dam_col.has_value()) {
         std::size_t const idx = resolve(*dam_col, "--dam-col");
-        if (idx == std::string_view::npos) bad = true;
-        else mapping.signal_idx[static_cast<std::size_t>(
-            st::log::adaptive::SignalKind::Dam)] = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.signal_idx[static_cast<std::size_t>(st::log::adaptive::SignalKind::Dam)] = idx;
     }
     if (iac_col.has_value()) {
         std::size_t const idx = resolve(*iac_col, "--idle-adapt-col");
-        if (idx == std::string_view::npos) bad = true;
-        else mapping.signal_idx[static_cast<std::size_t>(
-            st::log::adaptive::SignalKind::IdleAdapt)] = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.signal_idx[static_cast<std::size_t>(st::log::adaptive::SignalKind::IdleAdapt)] =
+                idx;
     }
-    if (bad) return 1;
+    if (bad)
+        return 1;
 
     st::log::adaptive::BucketConfig cfg;
-    if (bucket_seconds.has_value())         cfg.bucket_seconds         = *bucket_seconds;
-    if (min_samples_per_bucket.has_value()) cfg.min_samples_per_bucket =
-        static_cast<std::uint32_t>(*min_samples_per_bucket);
+    if (bucket_seconds.has_value())
+        cfg.bucket_seconds = *bucket_seconds;
+    if (min_samples_per_bucket.has_value())
+        cfg.min_samples_per_bucket = static_cast<std::uint32_t>(*min_samples_per_bucket);
     if (ts_unit_arg.has_value()) {
         std::string u = *ts_unit_arg;
-        for (auto &c : u) c = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(c)));
-        if      (u == "seconds" || u == "s")        cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixSeconds;
-        else if (u == "millis"  || u == "ms")       cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixMillis;
-        else if (u == "micros"  || u == "us")       cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixMicros;
-        else if (u == "rows"    || u == "row")      cfg.timestamp_unit = st::log::adaptive::TimestampUnit::RowIndex;
+        for (auto &c : u)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (u == "seconds" || u == "s")
+            cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixSeconds;
+        else if (u == "millis" || u == "ms")
+            cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixMillis;
+        else if (u == "micros" || u == "us")
+            cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixMicros;
+        else if (u == "rows" || u == "row")
+            cfg.timestamp_unit = st::log::adaptive::TimestampUnit::RowIndex;
         else {
-            std::fprintf(stderr, "adaptive-history: --timestamp-unit must be "
-                                 "one of seconds|millis|micros|rows (got '%s')\n",
+            std::fprintf(stderr,
+                         "adaptive-history: --timestamp-unit must be "
+                         "one of seconds|millis|micros|rows (got '%s')\n",
                          ts_unit_arg->c_str());
             return 2;
         }
     }
 
-    auto const r = st::log::adaptive::snapshot_from_csv(
-        log_path->string(), mapping, cfg);
+    auto const r = st::log::adaptive::snapshot_from_csv(log_path->string(), mapping, cfg);
     if (!r.has_value()) {
-        std::fprintf(stderr, "adaptive-history: %s\n",
-                     r.error().to_string().c_str());
+        std::fprintf(stderr, "adaptive-history: %s\n", r.error().to_string().c_str());
         return 1;
     }
     auto const &s = *r;
@@ -4576,15 +4637,13 @@ int cmd_adaptive_history(int argc, char *argv[]) {
     char const *signal_names[3] = {"LTFT", "DAM", "IdleAdapt"};
     std::printf("Adaptive Learning History\n");
     std::printf("=========================\n");
-    std::printf("Log:             %s\n",   log_path->string().c_str());
+    std::printf("Log:             %s\n", log_path->string().c_str());
     std::printf("Bucket width:    %.1f s\n", cfg.bucket_seconds);
-    std::printf("Total samples:   %llu\n",
-                static_cast<unsigned long long>(s.total_samples));
+    std::printf("Total samples:   %llu\n", static_cast<unsigned long long>(s.total_samples));
     if (s.time_span_seconds > 0) {
-        std::printf("Time span:       %.1f s (%.2f days)\n",
-                    s.time_span_seconds, s.time_span_seconds / 86400.0);
-        std::printf("Range:           %.0f .. %.0f\n",
-                    s.earliest_timestamp, s.latest_timestamp);
+        std::printf("Time span:       %.1f s (%.2f days)\n", s.time_span_seconds,
+                    s.time_span_seconds / 86400.0);
+        std::printf("Range:           %.0f .. %.0f\n", s.earliest_timestamp, s.latest_timestamp);
     }
     std::printf("\n");
     std::printf("Signal     | buckets | mean      | min       | max       | drift/day\n");
@@ -4592,13 +4651,12 @@ int cmd_adaptive_history(int argc, char *argv[]) {
     for (std::size_t k = 0; k < st::log::adaptive::kSignalCount; ++k) {
         auto const &ser = s.series[k];
         if (!ser.has_data) {
-            std::printf(" %-9s | %7s | %9s | %9s | %9s | %9s\n",
-                        signal_names[k], "-", "-", "-", "-", "-");
+            std::printf(" %-9s | %7s | %9s | %9s | %9s | %9s\n", signal_names[k], "-", "-", "-",
+                        "-", "-");
             continue;
         }
-        std::printf(" %-9s | %7zu | %+9.4f | %+9.4f | %+9.4f | %+9.4f\n",
-                    signal_names[k], ser.points.size(),
-                    ser.overall_mean, ser.overall_min, ser.overall_max,
+        std::printf(" %-9s | %7zu | %+9.4f | %+9.4f | %+9.4f | %+9.4f\n", signal_names[k],
+                    ser.points.size(), ser.overall_mean, ser.overall_min, ser.overall_max,
                     ser.drift_per_second * 86400.0);
     }
 
@@ -4606,13 +4664,14 @@ int cmd_adaptive_history(int argc, char *argv[]) {
         std::printf("\nPer-bucket detail:\n");
         for (std::size_t k = 0; k < st::log::adaptive::kSignalCount; ++k) {
             auto const &ser = s.series[k];
-            if (!ser.has_data) continue;
+            if (!ser.has_data)
+                continue;
             std::printf("\n[%s]\n", signal_names[k]);
             std::printf("  bucket_center   |   mean   |  min   |  max   | n\n");
             std::printf("  ----------------+----------+--------+--------+----\n");
             for (auto const &p : ser.points) {
-                std::printf("  %15.1f | %+8.4f | %+6.4f | %+6.4f | %u\n",
-                            p.bucket_center, p.mean, p.min, p.max, p.count);
+                std::printf("  %15.1f | %+8.4f | %+6.4f | %+6.4f | %u\n", p.bucket_center, p.mean,
+                            p.min, p.max, p.count);
             }
         }
     }
@@ -4622,102 +4681,146 @@ int cmd_adaptive_history(int argc, char *argv[]) {
 
 int cmd_coldstart_analyze(int argc, char *argv[]) {
     std::optional<std::filesystem::path> log_path;
-    std::optional<std::string>           ts_col;
-    std::optional<std::string>           ect_col;
-    std::optional<std::string>           iat_col;
-    std::optional<std::string>           rpm_col;
-    std::optional<std::string>           obs_col;
-    std::optional<std::string>           cmd_col;
-    std::optional<std::string>           timing_col;
-    std::optional<std::string>           cl_col;
-    std::optional<double>                cold_threshold_c;
-    std::optional<double>                ect_bin_width_c;
-    std::optional<std::size_t>           min_samples_per_bin;
-    std::optional<std::string>           ts_unit_arg;
+    std::optional<std::string> ts_col;
+    std::optional<std::string> ect_col;
+    std::optional<std::string> iat_col;
+    std::optional<std::string> rpm_col;
+    std::optional<std::string> obs_col;
+    std::optional<std::string> cmd_col;
+    std::optional<std::string> timing_col;
+    std::optional<std::string> cl_col;
+    std::optional<double> cold_threshold_c;
+    std::optional<double> ect_bin_width_c;
+    std::optional<std::size_t> min_samples_per_bin;
+    std::optional<std::string> ts_unit_arg;
     // Methodology target curve as comma-separated "ect:lambda" pairs.
     // Example: --target "0:0.82,20:0.88,40:0.93,55:1.00"
-    std::optional<std::string>           target_curve_arg;
+    std::optional<std::string> target_curve_arg;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             need = [&](char const *name) -> char const * {
+        auto const need = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
-                std::fprintf(stderr,
-                             "coldstart-analyze: %s requires a value\n", name);
+                std::fprintf(stderr, "coldstart-analyze: %s requires a value\n", name);
                 return nullptr;
             }
             return argv[++i];
         };
-        if      (a == "--log")             { auto *v = need("--log");             if (!v) return 2; log_path = std::filesystem::path{v}; }
-        else if (a == "--timestamp-col")   { auto *v = need("--timestamp-col");   if (!v) return 2; ts_col     = v; }
-        else if (a == "--ect-col")         { auto *v = need("--ect-col");         if (!v) return 2; ect_col    = v; }
-        else if (a == "--iat-col")         { auto *v = need("--iat-col");         if (!v) return 2; iat_col    = v; }
-        else if (a == "--rpm-col")         { auto *v = need("--rpm-col");         if (!v) return 2; rpm_col    = v; }
-        else if (a == "--observed-lambda-col") { auto *v = need("--observed-lambda-col"); if (!v) return 2; obs_col = v; }
-        else if (a == "--commanded-lambda-col"){ auto *v = need("--commanded-lambda-col"); if (!v) return 2; cmd_col = v; }
-        else if (a == "--timing-col")      { auto *v = need("--timing-col");      if (!v) return 2; timing_col = v; }
-        else if (a == "--closed-loop-col") { auto *v = need("--closed-loop-col"); if (!v) return 2; cl_col     = v; }
-        else if (a == "--cold-threshold-c") {
-            auto *v = need("--cold-threshold-c"); if (!v) return 2;
+        if (a == "--log") {
+            auto *v = need("--log");
+            if (!v)
+                return 2;
+            log_path = std::filesystem::path{v};
+        } else if (a == "--timestamp-col") {
+            auto *v = need("--timestamp-col");
+            if (!v)
+                return 2;
+            ts_col = v;
+        } else if (a == "--ect-col") {
+            auto *v = need("--ect-col");
+            if (!v)
+                return 2;
+            ect_col = v;
+        } else if (a == "--iat-col") {
+            auto *v = need("--iat-col");
+            if (!v)
+                return 2;
+            iat_col = v;
+        } else if (a == "--rpm-col") {
+            auto *v = need("--rpm-col");
+            if (!v)
+                return 2;
+            rpm_col = v;
+        } else if (a == "--observed-lambda-col") {
+            auto *v = need("--observed-lambda-col");
+            if (!v)
+                return 2;
+            obs_col = v;
+        } else if (a == "--commanded-lambda-col") {
+            auto *v = need("--commanded-lambda-col");
+            if (!v)
+                return 2;
+            cmd_col = v;
+        } else if (a == "--timing-col") {
+            auto *v = need("--timing-col");
+            if (!v)
+                return 2;
+            timing_col = v;
+        } else if (a == "--closed-loop-col") {
+            auto *v = need("--closed-loop-col");
+            if (!v)
+                return 2;
+            cl_col = v;
+        } else if (a == "--cold-threshold-c") {
+            auto *v = need("--cold-threshold-c");
+            if (!v)
+                return 2;
             auto const p = parse_decimal(v);
             if (!p.has_value()) {
-                std::fprintf(stderr, "coldstart-analyze: --cold-threshold-c must "
-                                     "be a number (got '%s')\n", v);
+                std::fprintf(stderr,
+                             "coldstart-analyze: --cold-threshold-c must "
+                             "be a number (got '%s')\n",
+                             v);
                 return 2;
             }
             cold_threshold_c = *p;
-        }
-        else if (a == "--ect-bin-width-c") {
-            auto *v = need("--ect-bin-width-c"); if (!v) return 2;
+        } else if (a == "--ect-bin-width-c") {
+            auto *v = need("--ect-bin-width-c");
+            if (!v)
+                return 2;
             auto const p = parse_decimal(v);
             if (!p.has_value()) {
-                std::fprintf(stderr, "coldstart-analyze: --ect-bin-width-c must "
-                                     "be a number (got '%s')\n", v);
+                std::fprintf(stderr,
+                             "coldstart-analyze: --ect-bin-width-c must "
+                             "be a number (got '%s')\n",
+                             v);
                 return 2;
             }
             ect_bin_width_c = *p;
-        }
-        else if (a == "--min-samples-per-bin") {
-            auto *v = need("--min-samples-per-bin"); if (!v) return 2;
-            char       *end = nullptr;
+        } else if (a == "--min-samples-per-bin") {
+            auto *v = need("--min-samples-per-bin");
+            if (!v)
+                return 2;
+            char *end = nullptr;
             long long const n = std::strtoll(v, &end, 10);
             if (end == v || *end != '\0' || n < 0) {
-                std::fprintf(stderr, "coldstart-analyze: "
-                                     "--min-samples-per-bin must be a "
-                                     "non-negative integer (got '%s')\n", v);
+                std::fprintf(stderr,
+                             "coldstart-analyze: "
+                             "--min-samples-per-bin must be a "
+                             "non-negative integer (got '%s')\n",
+                             v);
                 return 2;
             }
             min_samples_per_bin = static_cast<std::size_t>(n);
-        }
-        else if (a == "--timestamp-unit") {
-            auto *v = need("--timestamp-unit"); if (!v) return 2;
+        } else if (a == "--timestamp-unit") {
+            auto *v = need("--timestamp-unit");
+            if (!v)
+                return 2;
             ts_unit_arg = v;
-        }
-        else if (a == "--target") {
-            auto *v = need("--target"); if (!v) return 2;
+        } else if (a == "--target") {
+            auto *v = need("--target");
+            if (!v)
+                return 2;
             target_curve_arg = v;
-        }
-        else {
-            std::fprintf(stderr,
-                         "coldstart-analyze: unknown option: %s\n", argv[i]);
+        } else {
+            std::fprintf(stderr, "coldstart-analyze: unknown option: %s\n", argv[i]);
             return 2;
         }
     }
 
-    if (!log_path.has_value() || !ts_col.has_value()
-        || !ect_col.has_value() || !rpm_col.has_value()) {
-        std::fputs(
-            "coldstart-analyze: missing required arguments\n"
-            "Usage: subuwutuner-cli coldstart-analyze --log <CSV>\n"
-            "         --timestamp-col <name> --ect-col <name> --rpm-col <name>\n"
-            "         [--iat-col <name>] [--observed-lambda-col <name>]\n"
-            "         [--commanded-lambda-col <name>] [--timing-col <name>]\n"
-            "         [--closed-loop-col <name>]\n"
-            "         [--cold-threshold-c N] [--ect-bin-width-c N]\n"
-            "         [--min-samples-per-bin N]\n"
-            "         [--timestamp-unit seconds|millis|micros|rows]\n"
-            "         [--target ect:lambda,ect:lambda,...]\n",
-            stderr);
+    if (!log_path.has_value() || !ts_col.has_value() || !ect_col.has_value() ||
+        !rpm_col.has_value()) {
+        std::fputs("coldstart-analyze: missing required arguments\n"
+                   "Usage: subuwutuner-cli coldstart-analyze --log <CSV>\n"
+                   "         --timestamp-col <name> --ect-col <name> --rpm-col <name>\n"
+                   "         [--iat-col <name>] [--observed-lambda-col <name>]\n"
+                   "         [--commanded-lambda-col <name>] [--timing-col <name>]\n"
+                   "         [--closed-loop-col <name>]\n"
+                   "         [--cold-threshold-c N] [--ect-bin-width-c N]\n"
+                   "         [--min-samples-per-bin N]\n"
+                   "         [--timestamp-unit seconds|millis|micros|rows]\n"
+                   "         [--target ect:lambda,ect:lambda,...]\n",
+                   stderr);
         return 2;
     }
 
@@ -4729,13 +4832,11 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
             return 1;
         }
     }
-    auto const resolve = [&](std::string_view name,
-                              char const       *flag) -> std::size_t {
+    auto const resolve = [&](std::string_view name, char const *flag) -> std::size_t {
         std::size_t const idx = find_csv_column(header, name);
         if (idx == std::string_view::npos) {
-            std::fprintf(stderr,
-                         "coldstart-analyze: %s column '%.*s' not in CSV header\n",
-                         flag, static_cast<int>(name.size()), name.data());
+            std::fprintf(stderr, "coldstart-analyze: %s column '%.*s' not in CSV header\n", flag,
+                         static_cast<int>(name.size()), name.data());
         }
         return idx;
     };
@@ -4744,46 +4845,66 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
     bool bad = false;
     {
         std::size_t const idx = resolve(*ts_col, "--timestamp-col");
-        if (idx == std::string_view::npos) bad = true; else mapping.timestamp_idx = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.timestamp_idx = idx;
     }
     {
         std::size_t const idx = resolve(*ect_col, "--ect-col");
-        if (idx == std::string_view::npos) bad = true; else mapping.ect_idx = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.ect_idx = idx;
     }
     {
         std::size_t const idx = resolve(*rpm_col, "--rpm-col");
-        if (idx == std::string_view::npos) bad = true; else mapping.rpm_idx = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.rpm_idx = idx;
     }
-    auto const opt_resolve = [&](std::optional<std::string> const &c,
-                                  std::size_t                     &slot,
-                                  char const                      *flag) {
-        if (!c.has_value()) return;
+    auto const opt_resolve = [&](std::optional<std::string> const &c, std::size_t &slot,
+                                 char const *flag) {
+        if (!c.has_value())
+            return;
         std::size_t const idx = resolve(*c, flag);
-        if (idx == std::string_view::npos) bad = true; else slot = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            slot = idx;
     };
-    opt_resolve(iat_col,    mapping.iat_idx,              "--iat-col");
-    opt_resolve(obs_col,    mapping.observed_lambda_idx,  "--observed-lambda-col");
-    opt_resolve(cmd_col,    mapping.commanded_lambda_idx, "--commanded-lambda-col");
-    opt_resolve(timing_col, mapping.timing_deg_idx,       "--timing-col");
-    opt_resolve(cl_col,     mapping.closed_loop_idx,      "--closed-loop-col");
-    if (bad) return 1;
+    opt_resolve(iat_col, mapping.iat_idx, "--iat-col");
+    opt_resolve(obs_col, mapping.observed_lambda_idx, "--observed-lambda-col");
+    opt_resolve(cmd_col, mapping.commanded_lambda_idx, "--commanded-lambda-col");
+    opt_resolve(timing_col, mapping.timing_deg_idx, "--timing-col");
+    opt_resolve(cl_col, mapping.closed_loop_idx, "--closed-loop-col");
+    if (bad)
+        return 1;
 
     st::log::coldstart::WindowConfig cfg;
-    if (cold_threshold_c.has_value())    cfg.cold_threshold_c    = *cold_threshold_c;
-    if (ect_bin_width_c.has_value())     cfg.ect_bin_width_c     = *ect_bin_width_c;
-    if (min_samples_per_bin.has_value()) cfg.min_samples_per_bin =
-        static_cast<std::uint32_t>(*min_samples_per_bin);
+    if (cold_threshold_c.has_value())
+        cfg.cold_threshold_c = *cold_threshold_c;
+    if (ect_bin_width_c.has_value())
+        cfg.ect_bin_width_c = *ect_bin_width_c;
+    if (min_samples_per_bin.has_value())
+        cfg.min_samples_per_bin = static_cast<std::uint32_t>(*min_samples_per_bin);
     if (ts_unit_arg.has_value()) {
         std::string u = *ts_unit_arg;
-        for (auto &c : u) c = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(c)));
-        if      (u == "seconds" || u == "s")   cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixSeconds;
-        else if (u == "millis"  || u == "ms")  cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixMillis;
-        else if (u == "micros"  || u == "us")  cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixMicros;
-        else if (u == "rows"    || u == "row") cfg.timestamp_unit = st::log::coldstart::TimestampUnit::RowIndex;
+        for (auto &c : u)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (u == "seconds" || u == "s")
+            cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixSeconds;
+        else if (u == "millis" || u == "ms")
+            cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixMillis;
+        else if (u == "micros" || u == "us")
+            cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixMicros;
+        else if (u == "rows" || u == "row")
+            cfg.timestamp_unit = st::log::coldstart::TimestampUnit::RowIndex;
         else {
-            std::fprintf(stderr, "coldstart-analyze: --timestamp-unit must be "
-                                 "one of seconds|millis|micros|rows (got '%s')\n",
+            std::fprintf(stderr,
+                         "coldstart-analyze: --timestamp-unit must be "
+                         "one of seconds|millis|micros|rows (got '%s')\n",
                          ts_unit_arg->c_str());
             return 2;
         }
@@ -4794,59 +4915,56 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
         for (auto const &pair_s : split_csv_list(*target_curve_arg)) {
             auto const colon = pair_s.find(':');
             if (colon == std::string::npos) {
-                std::fprintf(stderr, "coldstart-analyze: --target entry '%s' "
-                                     "must be 'ect:lambda'\n", pair_s.c_str());
+                std::fprintf(stderr,
+                             "coldstart-analyze: --target entry '%s' "
+                             "must be 'ect:lambda'\n",
+                             pair_s.c_str());
                 return 2;
             }
             auto const ect_p = parse_decimal(std::string_view{pair_s}.substr(0, colon));
             auto const lam_p = parse_decimal(std::string_view{pair_s}.substr(colon + 1));
             if (!ect_p.has_value() || !lam_p.has_value()) {
-                std::fprintf(stderr, "coldstart-analyze: --target entry '%s' "
-                                     "has non-numeric component\n", pair_s.c_str());
+                std::fprintf(stderr,
+                             "coldstart-analyze: --target entry '%s' "
+                             "has non-numeric component\n",
+                             pair_s.c_str());
                 return 2;
             }
             methodology.target_lambda_vs_ect.points.emplace_back(*ect_p, *lam_p);
         }
         std::sort(methodology.target_lambda_vs_ect.points.begin(),
-                   methodology.target_lambda_vs_ect.points.end(),
-                   [](auto const &a, auto const &b) { return a.first < b.first; });
+                  methodology.target_lambda_vs_ect.points.end(),
+                  [](auto const &a, auto const &b) { return a.first < b.first; });
     }
 
-    auto const r = st::log::coldstart::snapshot_from_csv(
-        log_path->string(), mapping, cfg, methodology);
+    auto const r =
+        st::log::coldstart::snapshot_from_csv(log_path->string(), mapping, cfg, methodology);
     if (!r.has_value()) {
-        std::fprintf(stderr, "coldstart-analyze: %s\n",
-                     r.error().to_string().c_str());
+        std::fprintf(stderr, "coldstart-analyze: %s\n", r.error().to_string().c_str());
         return 1;
     }
     auto const &s = *r;
 
-    char const *phase_names[6] = {
-        "PreCrank", "Cranking", "InitialFiring",
-        "HighIdle", "Warmup", "ClosedLoop"};
+    char const *phase_names[6] = {"PreCrank", "Cranking", "InitialFiring",
+                                  "HighIdle", "Warmup",   "ClosedLoop"};
 
     std::printf("Cold-Start Analysis\n");
     std::printf("===================\n");
     std::printf("Log:                   %s\n", log_path->string().c_str());
-    std::printf("ECT span:              %+.1f .. %+.1f °C\n",
-                s.coldest_ect_c, s.warmest_ect_c);
+    std::printf("ECT span:              %+.1f .. %+.1f °C\n", s.coldest_ect_c, s.warmest_ect_c);
     std::printf("Samples considered:    %llu\n",
                 static_cast<unsigned long long>(s.samples_considered));
     std::printf("Samples gated out:     %llu\n",
                 static_cast<unsigned long long>(s.samples_gated_out));
-    std::printf("Mean lambda deviation: %.4f%s\n",
-                s.mean_lambda_deviation,
-                methodology.target_lambda_vs_ect.points.empty()
-                    ? "  (no target curve set)" : "");
+    std::printf("Mean lambda deviation: %.4f%s\n", s.mean_lambda_deviation,
+                methodology.target_lambda_vs_ect.points.empty() ? "  (no target curve set)" : "");
 
     std::printf("\n");
     std::printf("Phase           | samples | seconds\n");
     std::printf("----------------+---------+--------\n");
     for (std::size_t p = 0; p < st::log::coldstart::kPhaseCount; ++p) {
-        std::printf(" %-14s | %7u | %7.1f\n",
-                    phase_names[p],
-                    static_cast<unsigned>(s.phase_counts[p]),
-                    s.phase_seconds[p]);
+        std::printf(" %-14s | %7u | %7.1f\n", phase_names[p],
+                    static_cast<unsigned>(s.phase_counts[p]), s.phase_seconds[p]);
     }
 
     if (!s.ect_bins.empty()) {
@@ -4854,13 +4972,9 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
         std::printf("ECT bin (°C) | n  | obs λ mean | obs λ min | obs λ max | dev from target\n");
         std::printf("-------------+----+------------+-----------+-----------+---------------\n");
         for (auto const &b : s.ect_bins) {
-            std::printf(" %+11.1f | %2u | %+10.4f | %+9.4f | %+9.4f | %+13.4f\n",
-                        b.ect_center_c,
-                        static_cast<unsigned>(b.count),
-                        b.observed_lambda_mean,
-                        b.observed_lambda_min,
-                        b.observed_lambda_max,
-                        b.deviation_from_target);
+            std::printf(" %+11.1f | %2u | %+10.4f | %+9.4f | %+9.4f | %+13.4f\n", b.ect_center_c,
+                        static_cast<unsigned>(b.count), b.observed_lambda_mean,
+                        b.observed_lambda_min, b.observed_lambda_max, b.deviation_from_target);
         }
     } else {
         std::printf("\n(No ECT bins — log has no cold-regime samples with "
@@ -4872,101 +4986,139 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
 
 int cmd_ebcs_analyze(int argc, char *argv[]) {
     std::optional<std::filesystem::path> log_path;
-    std::optional<std::string>           ts_col;
-    std::optional<std::string>           target_col;
-    std::optional<std::string>           actual_col;
-    std::optional<std::string>           wgdc_col;
-    std::optional<std::string>           throttle_col;
-    std::optional<std::string>           rpm_col;
-    std::optional<double>                throttle_step_pct;
-    std::optional<double>                target_step;
-    std::optional<double>                max_event_duration_s;
-    std::optional<double>                overshoot_warn_pct;
-    std::optional<std::string>           ts_unit_arg;
-    bool                                 verbose = false;
+    std::optional<std::string> ts_col;
+    std::optional<std::string> target_col;
+    std::optional<std::string> actual_col;
+    std::optional<std::string> wgdc_col;
+    std::optional<std::string> throttle_col;
+    std::optional<std::string> rpm_col;
+    std::optional<double> throttle_step_pct;
+    std::optional<double> target_step;
+    std::optional<double> max_event_duration_s;
+    std::optional<double> overshoot_warn_pct;
+    std::optional<std::string> ts_unit_arg;
+    bool verbose = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             need = [&](char const *name) -> char const * {
+        auto const need = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
-                std::fprintf(stderr,
-                             "ebcs-analyze: %s requires a value\n", name);
+                std::fprintf(stderr, "ebcs-analyze: %s requires a value\n", name);
                 return nullptr;
             }
             return argv[++i];
         };
-        if      (a == "--log")            { auto *v = need("--log");            if (!v) return 2; log_path = std::filesystem::path{v}; }
-        else if (a == "--timestamp-col")  { auto *v = need("--timestamp-col");  if (!v) return 2; ts_col       = v; }
-        else if (a == "--target-boost-col"){ auto *v = need("--target-boost-col"); if (!v) return 2; target_col = v; }
-        else if (a == "--actual-boost-col"){ auto *v = need("--actual-boost-col"); if (!v) return 2; actual_col = v; }
-        else if (a == "--wgdc-col")       { auto *v = need("--wgdc-col");       if (!v) return 2; wgdc_col     = v; }
-        else if (a == "--throttle-col")   { auto *v = need("--throttle-col");   if (!v) return 2; throttle_col = v; }
-        else if (a == "--rpm-col")        { auto *v = need("--rpm-col");        if (!v) return 2; rpm_col      = v; }
-        else if (a == "--throttle-step-pct") {
-            auto *v = need("--throttle-step-pct"); if (!v) return 2;
+        if (a == "--log") {
+            auto *v = need("--log");
+            if (!v)
+                return 2;
+            log_path = std::filesystem::path{v};
+        } else if (a == "--timestamp-col") {
+            auto *v = need("--timestamp-col");
+            if (!v)
+                return 2;
+            ts_col = v;
+        } else if (a == "--target-boost-col") {
+            auto *v = need("--target-boost-col");
+            if (!v)
+                return 2;
+            target_col = v;
+        } else if (a == "--actual-boost-col") {
+            auto *v = need("--actual-boost-col");
+            if (!v)
+                return 2;
+            actual_col = v;
+        } else if (a == "--wgdc-col") {
+            auto *v = need("--wgdc-col");
+            if (!v)
+                return 2;
+            wgdc_col = v;
+        } else if (a == "--throttle-col") {
+            auto *v = need("--throttle-col");
+            if (!v)
+                return 2;
+            throttle_col = v;
+        } else if (a == "--rpm-col") {
+            auto *v = need("--rpm-col");
+            if (!v)
+                return 2;
+            rpm_col = v;
+        } else if (a == "--throttle-step-pct") {
+            auto *v = need("--throttle-step-pct");
+            if (!v)
+                return 2;
             auto const p = parse_decimal(v);
             if (!p.has_value()) {
-                std::fprintf(stderr, "ebcs-analyze: --throttle-step-pct must "
-                                     "be a number (got '%s')\n", v);
+                std::fprintf(stderr,
+                             "ebcs-analyze: --throttle-step-pct must "
+                             "be a number (got '%s')\n",
+                             v);
                 return 2;
             }
             throttle_step_pct = *p;
-        }
-        else if (a == "--target-step") {
-            auto *v = need("--target-step"); if (!v) return 2;
+        } else if (a == "--target-step") {
+            auto *v = need("--target-step");
+            if (!v)
+                return 2;
             auto const p = parse_decimal(v);
             if (!p.has_value()) {
-                std::fprintf(stderr, "ebcs-analyze: --target-step must be a "
-                                     "number (got '%s')\n", v);
+                std::fprintf(stderr,
+                             "ebcs-analyze: --target-step must be a "
+                             "number (got '%s')\n",
+                             v);
                 return 2;
             }
             target_step = *p;
-        }
-        else if (a == "--max-event-duration") {
-            auto *v = need("--max-event-duration"); if (!v) return 2;
+        } else if (a == "--max-event-duration") {
+            auto *v = need("--max-event-duration");
+            if (!v)
+                return 2;
             auto const p = parse_decimal(v);
             if (!p.has_value()) {
-                std::fprintf(stderr, "ebcs-analyze: --max-event-duration must "
-                                     "be a number (got '%s')\n", v);
+                std::fprintf(stderr,
+                             "ebcs-analyze: --max-event-duration must "
+                             "be a number (got '%s')\n",
+                             v);
                 return 2;
             }
             max_event_duration_s = *p;
-        }
-        else if (a == "--overshoot-warn-pct") {
-            auto *v = need("--overshoot-warn-pct"); if (!v) return 2;
+        } else if (a == "--overshoot-warn-pct") {
+            auto *v = need("--overshoot-warn-pct");
+            if (!v)
+                return 2;
             auto const p = parse_decimal(v);
             if (!p.has_value()) {
-                std::fprintf(stderr, "ebcs-analyze: --overshoot-warn-pct must "
-                                     "be a number (got '%s')\n", v);
+                std::fprintf(stderr,
+                             "ebcs-analyze: --overshoot-warn-pct must "
+                             "be a number (got '%s')\n",
+                             v);
                 return 2;
             }
             overshoot_warn_pct = *p;
-        }
-        else if (a == "--timestamp-unit") {
-            auto *v = need("--timestamp-unit"); if (!v) return 2;
+        } else if (a == "--timestamp-unit") {
+            auto *v = need("--timestamp-unit");
+            if (!v)
+                return 2;
             ts_unit_arg = v;
-        }
-        else if (a == "--verbose" || a == "-v") { verbose = true; }
-        else {
-            std::fprintf(stderr,
-                         "ebcs-analyze: unknown option: %s\n", argv[i]);
+        } else if (a == "--verbose" || a == "-v") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "ebcs-analyze: unknown option: %s\n", argv[i]);
             return 2;
         }
     }
 
-    if (!log_path.has_value() || !ts_col.has_value()
-        || !target_col.has_value() || !actual_col.has_value()
-        || !throttle_col.has_value()) {
-        std::fputs(
-            "ebcs-analyze: missing required arguments\n"
-            "Usage: subuwutuner-cli ebcs-analyze --log <CSV>\n"
-            "         --timestamp-col <name> --target-boost-col <name>\n"
-            "         --actual-boost-col <name> --throttle-col <name>\n"
-            "         [--wgdc-col <name>] [--rpm-col <name>]\n"
-            "         [--throttle-step-pct N] [--target-step N]\n"
-            "         [--max-event-duration N] [--overshoot-warn-pct N]\n"
-            "         [--timestamp-unit seconds|millis|micros|rows] [--verbose]\n",
-            stderr);
+    if (!log_path.has_value() || !ts_col.has_value() || !target_col.has_value() ||
+        !actual_col.has_value() || !throttle_col.has_value()) {
+        std::fputs("ebcs-analyze: missing required arguments\n"
+                   "Usage: subuwutuner-cli ebcs-analyze --log <CSV>\n"
+                   "         --timestamp-col <name> --target-boost-col <name>\n"
+                   "         --actual-boost-col <name> --throttle-col <name>\n"
+                   "         [--wgdc-col <name>] [--rpm-col <name>]\n"
+                   "         [--throttle-step-pct N] [--target-step N]\n"
+                   "         [--max-event-duration N] [--overshoot-warn-pct N]\n"
+                   "         [--timestamp-unit seconds|millis|micros|rows] [--verbose]\n",
+                   stderr);
         return 2;
     }
 
@@ -4978,13 +5130,11 @@ int cmd_ebcs_analyze(int argc, char *argv[]) {
             return 1;
         }
     }
-    auto const resolve = [&](std::string_view name,
-                              char const       *flag) -> std::size_t {
+    auto const resolve = [&](std::string_view name, char const *flag) -> std::size_t {
         std::size_t const idx = find_csv_column(header, name);
         if (idx == std::string_view::npos) {
-            std::fprintf(stderr,
-                         "ebcs-analyze: %s column '%.*s' not in CSV header\n",
-                         flag, static_cast<int>(name.size()), name.data());
+            std::fprintf(stderr, "ebcs-analyze: %s column '%.*s' not in CSV header\n", flag,
+                         static_cast<int>(name.size()), name.data());
         }
         return idx;
     };
@@ -4993,62 +5143,87 @@ int cmd_ebcs_analyze(int argc, char *argv[]) {
     bool bad = false;
     {
         std::size_t const idx = resolve(*ts_col, "--timestamp-col");
-        if (idx == std::string_view::npos) bad = true; else mapping.timestamp_idx = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.timestamp_idx = idx;
     }
     {
         std::size_t const idx = resolve(*target_col, "--target-boost-col");
-        if (idx == std::string_view::npos) bad = true; else mapping.target_boost_idx = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.target_boost_idx = idx;
     }
     {
         std::size_t const idx = resolve(*actual_col, "--actual-boost-col");
-        if (idx == std::string_view::npos) bad = true; else mapping.actual_boost_idx = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.actual_boost_idx = idx;
     }
     {
         std::size_t const idx = resolve(*throttle_col, "--throttle-col");
-        if (idx == std::string_view::npos) bad = true; else mapping.throttle_idx = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.throttle_idx = idx;
     }
     if (wgdc_col.has_value()) {
         std::size_t const idx = resolve(*wgdc_col, "--wgdc-col");
-        if (idx == std::string_view::npos) bad = true; else mapping.wgdc_idx = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.wgdc_idx = idx;
     }
     if (rpm_col.has_value()) {
         std::size_t const idx = resolve(*rpm_col, "--rpm-col");
-        if (idx == std::string_view::npos) bad = true; else mapping.rpm_idx = idx;
+        if (idx == std::string_view::npos)
+            bad = true;
+        else
+            mapping.rpm_idx = idx;
     }
-    if (bad) return 1;
+    if (bad)
+        return 1;
 
     st::log::ebcs::DetectorConfig cfg;
-    if (throttle_step_pct.has_value())   cfg.throttle_step_threshold_pct = *throttle_step_pct;
-    if (target_step.has_value())         cfg.target_boost_step_threshold = *target_step;
-    if (max_event_duration_s.has_value())cfg.max_event_duration_s        = *max_event_duration_s;
-    if (overshoot_warn_pct.has_value())  cfg.overshoot_warn_pct          = *overshoot_warn_pct;
+    if (throttle_step_pct.has_value())
+        cfg.throttle_step_threshold_pct = *throttle_step_pct;
+    if (target_step.has_value())
+        cfg.target_boost_step_threshold = *target_step;
+    if (max_event_duration_s.has_value())
+        cfg.max_event_duration_s = *max_event_duration_s;
+    if (overshoot_warn_pct.has_value())
+        cfg.overshoot_warn_pct = *overshoot_warn_pct;
     if (ts_unit_arg.has_value()) {
         std::string u = *ts_unit_arg;
-        for (auto &c : u) c = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(c)));
-        if      (u == "seconds" || u == "s")   cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixSeconds;
-        else if (u == "millis"  || u == "ms")  cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixMillis;
-        else if (u == "micros"  || u == "us")  cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixMicros;
-        else if (u == "rows"    || u == "row") cfg.timestamp_unit = st::log::ebcs::TimestampUnit::RowIndex;
+        for (auto &c : u)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (u == "seconds" || u == "s")
+            cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixSeconds;
+        else if (u == "millis" || u == "ms")
+            cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixMillis;
+        else if (u == "micros" || u == "us")
+            cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixMicros;
+        else if (u == "rows" || u == "row")
+            cfg.timestamp_unit = st::log::ebcs::TimestampUnit::RowIndex;
         else {
-            std::fprintf(stderr, "ebcs-analyze: --timestamp-unit must be one "
-                                 "of seconds|millis|micros|rows (got '%s')\n",
+            std::fprintf(stderr,
+                         "ebcs-analyze: --timestamp-unit must be one "
+                         "of seconds|millis|micros|rows (got '%s')\n",
                          ts_unit_arg->c_str());
             return 2;
         }
     }
 
-    auto const r = st::log::ebcs::snapshot_from_csv(
-        log_path->string(), mapping, cfg);
+    auto const r = st::log::ebcs::snapshot_from_csv(log_path->string(), mapping, cfg);
     if (!r.has_value()) {
-        std::fprintf(stderr, "ebcs-analyze: %s\n",
-                     r.error().to_string().c_str());
+        std::fprintf(stderr, "ebcs-analyze: %s\n", r.error().to_string().c_str());
         return 1;
     }
     auto const &s = *r;
 
-    char const *quality_names[5] = {
-        "Good", "Choppy", "Slow", "Spiked", "Aborted"};
+    char const *quality_names[5] = {"Good", "Choppy", "Slow", "Spiked", "Aborted"};
 
     std::printf("EBCS PID Assistant\n");
     std::printf("==================\n");
@@ -5072,17 +5247,17 @@ int cmd_ebcs_analyze(int argc, char *argv[]) {
 
     if (verbose && !s.events.empty()) {
         std::printf("\nPer-event detail:\n");
-        std::printf(" #  | t_start | t_end  | tgt  | peak | ss_boost | rise  | os%%  | settle | sse    | quality\n");
-        std::printf("----+---------+--------+------+------+----------+-------+-------+--------+--------+--------\n");
+        std::printf(" #  | t_start | t_end  | tgt  | peak | ss_boost | rise  | os%%  | settle | "
+                    "sse    | quality\n");
+        std::printf("----+---------+--------+------+------+----------+-------+-------+--------+----"
+                    "----+--------\n");
         std::size_t n = 0;
         for (auto const &ev : s.events) {
-            std::printf(" %2zu | %7.2f | %6.2f | %+4.1f | %+4.1f | %+8.2f | %5.2f | %5.1f | %6.2f | %+6.2f | %s\n",
-                        ++n,
-                        ev.start_timestamp, ev.end_timestamp,
-                        ev.target_boost, ev.peak_boost, ev.steady_state_boost,
-                        ev.rise_time_s, ev.overshoot_pct,
-                        ev.settling_time_s, ev.steady_state_error,
-                        quality_names[static_cast<std::size_t>(ev.quality)]);
+            std::printf(" %2zu | %7.2f | %6.2f | %+4.1f | %+4.1f | %+8.2f | %5.2f | %5.1f | %6.2f "
+                        "| %+6.2f | %s\n",
+                        ++n, ev.start_timestamp, ev.end_timestamp, ev.target_boost, ev.peak_boost,
+                        ev.steady_state_boost, ev.rise_time_s, ev.overshoot_pct, ev.settling_time_s,
+                        ev.steady_state_error, quality_names[static_cast<std::size_t>(ev.quality)]);
         }
     }
 
@@ -5091,14 +5266,14 @@ int cmd_ebcs_analyze(int argc, char *argv[]) {
 
 int cmd_log(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
-    std::optional<std::string>           pid_list_arg;
+    std::optional<std::string> pid_list_arg;
     std::optional<std::filesystem::path> trace_path;
     std::optional<std::filesystem::path> output_path;
-    bool                                 canonical_columns = false;
+    bool canonical_columns = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require_arg = [&](char const *name) -> char const * {
+        auto const require_arg = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "log: %s requires a value\n", name);
                 return nullptr;
@@ -5107,17 +5282,25 @@ int cmd_log(int argc, char *argv[]) {
         };
 
         if (a == "--def") {
-            if (auto const *v = require_arg("--def"); v) def_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--def"); v)
+                def_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--pid") {
-            if (auto const *v = require_arg("--pid"); v) pid_list_arg = std::string{v};
-            else return 2;
+            if (auto const *v = require_arg("--pid"); v)
+                pid_list_arg = std::string{v};
+            else
+                return 2;
         } else if (a == "--trace") {
-            if (auto const *v = require_arg("--trace"); v) trace_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--trace"); v)
+                trace_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--output" || a == "-o") {
-            if (auto const *v = require_arg("--output"); v) output_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--output"); v)
+                output_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--canonical-columns") {
             canonical_columns = true;
         } else {
@@ -5130,11 +5313,16 @@ int cmd_log(int argc, char *argv[]) {
     // mapping per Merp's logger.xml. Anything not in this table keeps its
     // original PID id as the column header.
     auto const canonical_for = [](std::string_view pid_id) -> std::string_view {
-        if (pid_id == "p2")  return "coolant_c";
-        if (pid_id == "p7")  return "throttle_pct";
-        if (pid_id == "p8")  return "rpm";
-        if (pid_id == "p11") return "iat_c";
-        if (pid_id == "p18") return "maf_voltage";
+        if (pid_id == "p2")
+            return "coolant_c";
+        if (pid_id == "p7")
+            return "throttle_pct";
+        if (pid_id == "p8")
+            return "rpm";
+        if (pid_id == "p11")
+            return "iat_c";
+        if (pid_id == "p18")
+            return "maf_voltage";
         return {};
     };
 
@@ -5169,22 +5357,23 @@ int cmd_log(int argc, char *argv[]) {
         std::string channel_name = pid->id;
         if (canonical_columns) {
             auto const canon = canonical_for(pid->id);
-            if (!canon.empty()) channel_name = std::string{canon};
+            if (!canon.empty())
+                channel_name = std::string{canon};
         }
         channels.push_back(st::log::LogChannel{
             std::move(channel_name),
             static_cast<std::uint32_t>(pid->ssm_address),
             pid->data_type,
-            scaling != nullptr ? std::optional<st::Scaling>{*scaling}
-                               : std::nullopt,
+            scaling != nullptr ? std::optional<st::Scaling>{*scaling} : std::nullopt,
         });
     }
 
     // Load the trace and seed a MockTransport with one response per cycle.
     std::vector<std::vector<std::uint8_t>> frames;
-    std::string                            err;
+    std::string err;
     if (!load_trace_file(*trace_path, frames, err)) {
-        std::fputs(err.c_str(), stderr); std::fputc('\n', stderr);
+        std::fputs(err.c_str(), stderr);
+        std::fputc('\n', stderr);
         return 1;
     }
 
@@ -5215,13 +5404,12 @@ int cmd_log(int argc, char *argv[]) {
     }
 
     // Resolve where the CSV goes.
-    std::ofstream  file_out;
-    std::ostream  *out_stream = &std::cout;
+    std::ofstream file_out;
+    std::ostream *out_stream = &std::cout;
     if (output_path.has_value()) {
         file_out.open(*output_path);
         if (!file_out) {
-            std::fprintf(stderr, "log: cannot open output: %s\n",
-                         output_path->string().c_str());
+            std::fprintf(stderr, "log: cannot open output: %s\n", output_path->string().c_str());
             return 1;
         }
         out_stream = &file_out;
@@ -5238,11 +5426,10 @@ int cmd_log(int argc, char *argv[]) {
         return 1;
     }
 
-    std::int64_t        ts = 0;
+    std::int64_t ts = 0;
     std::vector<double> values(channels.size(), 0.0);
     std::uint64_t const target = frames.size();
-    auto const          deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
     while (session.cycles_completed() < target) {
         while (session.stream().try_pop(ts, values)) {
             sink.write_row(ts, values);
@@ -5259,11 +5446,8 @@ int cmd_log(int argc, char *argv[]) {
     session.stop();
     out_stream->flush();
 
-    std::fprintf(stderr,
-                 "log: cycles=%llu  drops=%llu  io_errors=%llu  channels=%zu\n",
-                 session.cycles_completed(),
-                 session.stream().dropped_count(),
-                 session.io_errors(),
+    std::fprintf(stderr, "log: cycles=%llu  drops=%llu  io_errors=%llu  channels=%zu\n",
+                 session.cycles_completed(), session.stream().dropped_count(), session.io_errors(),
                  channels.size());
     return 0;
 }
@@ -5290,10 +5474,9 @@ std::optional<double> parse_fraction_or_percent(std::string_view raw) {
         s.pop_back();
         trim(s);
     }
-    char        *end = nullptr;
-    double const v   = std::strtod(s.c_str(), &end);
-    if (end == s.c_str() || end == nullptr || *end != '\0'
-        || !std::isfinite(v)) {
+    char *end = nullptr;
+    double const v = std::strtod(s.c_str(), &end);
+    if (end == s.c_str() || end == nullptr || *end != '\0' || !std::isfinite(v)) {
         return std::nullopt;
     }
     return percent ? v / 100.0 : v;
@@ -5304,20 +5487,15 @@ std::optional<double> parse_fraction_or_percent(std::string_view raw) {
 // present so the caller can use it as its exit code; returns 0
 // otherwise. Centralising this keeps the cosmetic formatting and the
 // strict-lint exit code in one place as more autotune commands land.
-int print_lint_section(std::span<st::autotune::LintViolation const> violations,
-                       bool strict) {
+int print_lint_section(std::span<st::autotune::LintViolation const> violations, bool strict) {
     std::printf("\nLint:\n");
     if (violations.empty()) {
         std::printf("  No violations.\n");
         return 0;
     }
-    std::printf("  %zu violation%s:\n",
-                violations.size(),
-                violations.size() == 1 ? "" : "s");
+    std::printf("  %zu violation%s:\n", violations.size(), violations.size() == 1 ? "" : "s");
     for (auto const &v : violations) {
-        std::printf("  - [%s] %s\n",
-                    st::autotune::lint_kind_name(v.kind),
-                    v.message.c_str());
+        std::printf("  - [%s] %s\n", st::autotune::lint_kind_name(v.kind), v.message.c_str());
     }
     return strict ? 3 : 0;
 }
@@ -5339,10 +5517,9 @@ std::optional<double> parse_decimal(std::string_view raw) {
     if (s.empty()) {
         return std::nullopt;
     }
-    char        *end = nullptr;
-    double const v   = std::strtod(s.c_str(), &end);
-    if (end == s.c_str() || end == nullptr || *end != '\0'
-        || !std::isfinite(v)) {
+    char *end = nullptr;
+    double const v = std::strtod(s.c_str(), &end);
+    if (end == s.c_str() || end == nullptr || *end != '\0' || !std::isfinite(v)) {
         return std::nullopt;
     }
     return v;
@@ -5355,23 +5532,21 @@ std::optional<double> parse_decimal(std::string_view raw) {
 // whitespace). Empty file → empty vector. Used for `--axis-file`,
 // `--current-file`, etc. so real-world tables (a 32-breakpoint MAF
 // axis isn't fun to inline on the command line) can live in a file.
-std::optional<std::vector<double>> read_decimal_list_file(
-    std::filesystem::path const &path) {
+std::optional<std::vector<double>> read_decimal_list_file(std::filesystem::path const &path) {
     std::ifstream in{path, std::ios::binary};
     if (!in) {
         return std::nullopt;
     }
     std::ostringstream buf;
     buf << in.rdbuf();
-    std::string const  text = buf.str();
+    std::string const text = buf.str();
     std::vector<double> out;
 
     std::size_t i = 0;
     while (i < text.size()) {
         // Skip whitespace and commas.
-        while (i < text.size()
-               && (std::isspace(static_cast<unsigned char>(text[i]))
-                   || text[i] == ',')) {
+        while (i < text.size() &&
+               (std::isspace(static_cast<unsigned char>(text[i])) || text[i] == ',')) {
             ++i;
         }
         if (i >= text.size()) {
@@ -5386,16 +5561,14 @@ std::optional<std::vector<double>> read_decimal_list_file(
         }
         // Parse a numeric token: read up to the next separator.
         std::size_t const start = i;
-        while (i < text.size()
-               && !std::isspace(static_cast<unsigned char>(text[i]))
-               && text[i] != ',' && text[i] != '#') {
+        while (i < text.size() && !std::isspace(static_cast<unsigned char>(text[i])) &&
+               text[i] != ',' && text[i] != '#') {
             ++i;
         }
         std::string const token{text.data() + start, i - start};
-        char             *end = nullptr;
-        double const      v   = std::strtod(token.c_str(), &end);
-        if (end == token.c_str() || end == nullptr || *end != '\0'
-            || !std::isfinite(v)) {
+        char *end = nullptr;
+        double const v = std::strtod(token.c_str(), &end);
+        if (end == token.c_str() || end == nullptr || *end != '\0' || !std::isfinite(v)) {
             return std::nullopt;
         }
         out.push_back(v);
@@ -5408,13 +5581,12 @@ std::optional<std::vector<double>> read_decimal_list_file(
 // vector (the caller decides if that's an error).
 std::optional<std::vector<double>> parse_double_list(std::string_view s) {
     std::vector<double> out;
-    auto const          fields = split_csv_list(s);
+    auto const fields = split_csv_list(s);
     out.reserve(fields.size());
     for (auto const &f : fields) {
-        char        *end = nullptr;
-        double const v   = std::strtod(f.c_str(), &end);
-        if (end == f.c_str() || end == nullptr || *end != '\0'
-            || !std::isfinite(v)) {
+        char *end = nullptr;
+        double const v = std::strtod(f.c_str(), &end);
+        if (end == f.c_str() || end == nullptr || *end != '\0' || !std::isfinite(v)) {
             return std::nullopt;
         }
         out.push_back(v);
@@ -5424,20 +5596,20 @@ std::optional<std::vector<double>> parse_double_list(std::string_view s) {
 
 int cmd_autotune_maf(int argc, char *argv[]) {
     std::optional<std::filesystem::path> log_path;
-    std::optional<std::string>           axis_arg;
+    std::optional<std::string> axis_arg;
     std::optional<std::filesystem::path> axis_file;
-    std::optional<std::string>           current_arg;
+    std::optional<std::string> current_arg;
     std::optional<std::filesystem::path> current_file;
-    std::optional<double>                gain;
-    std::optional<double>                max_delta_pct;
-    std::optional<std::size_t>           min_samples;
-    bool                                 require_open_loop = false;
-    bool                                 skip_smooth       = false;
-    bool                                 strict_lint       = false;
+    std::optional<double> gain;
+    std::optional<double> max_delta_pct;
+    std::optional<std::size_t> min_samples;
+    bool require_open_loop = false;
+    bool skip_smooth = false;
+    bool strict_lint = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require_arg = [&](char const *name) -> char const * {
+        auto const require_arg = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "autotune maf: %s requires a value\n", name);
                 return nullptr;
@@ -5481,7 +5653,8 @@ int cmd_autotune_maf(int argc, char *argv[]) {
                 if (!parsed.has_value()) {
                     std::fprintf(stderr,
                                  "autotune maf: --gain must be a number "
-                                 "(got '%s')\n", v);
+                                 "(got '%s')\n",
+                                 v);
                     return 2;
                 }
                 gain = *parsed;
@@ -5494,7 +5667,8 @@ int cmd_autotune_maf(int argc, char *argv[]) {
                 if (!parsed.has_value()) {
                     std::fprintf(stderr,
                                  "autotune maf: --max-delta must be a "
-                                 "number (got '%s')\n", v);
+                                 "number (got '%s')\n",
+                                 v);
                     return 2;
                 }
                 max_delta_pct = *parsed;
@@ -5503,7 +5677,7 @@ int cmd_autotune_maf(int argc, char *argv[]) {
             }
         } else if (a == "--min-samples-per-cell" || a == "--min-samples") {
             if (auto const *v = require_arg("--min-samples-per-cell"); v) {
-                char       *end  = nullptr;
+                char *end = nullptr;
                 long long const n = std::strtoll(v, &end, 10);
                 if (end == v || end == nullptr || *end != '\0' || n < 0) {
                     std::fprintf(stderr,
@@ -5528,7 +5702,7 @@ int cmd_autotune_maf(int argc, char *argv[]) {
         }
     }
 
-    bool const axis_given    = axis_arg.has_value()    || axis_file.has_value();
+    bool const axis_given = axis_arg.has_value() || axis_file.has_value();
     bool const current_given = current_arg.has_value() || current_file.has_value();
     if (!log_path.has_value() || !axis_given || !current_given) {
         std::fputs("autotune maf: missing required arguments\n", stderr);
@@ -5543,8 +5717,7 @@ int cmd_autotune_maf(int argc, char *argv[]) {
         return 2;
     }
     if (axis_arg.has_value() && axis_file.has_value()) {
-        std::fputs("autotune maf: --axis and --axis-file are mutually exclusive\n",
-                   stderr);
+        std::fputs("autotune maf: --axis and --axis-file are mutually exclusive\n", stderr);
         return 2;
     }
     if (current_arg.has_value() && current_file.has_value()) {
@@ -5570,7 +5743,8 @@ int cmd_autotune_maf(int argc, char *argv[]) {
     }
     if (!axis.has_value() || axis->empty()) {
         std::fputs("autotune maf: --axis / --axis-file must yield a non-empty "
-                   "list of numbers\n", stderr);
+                   "list of numbers\n",
+                   stderr);
         return 2;
     }
     std::optional<std::vector<double>> current;
@@ -5589,7 +5763,8 @@ int cmd_autotune_maf(int argc, char *argv[]) {
     }
     if (!current.has_value() || current->empty()) {
         std::fputs("autotune maf: --current / --current-file must yield a "
-                   "non-empty list of numbers\n", stderr);
+                   "non-empty list of numbers\n",
+                   stderr);
         return 2;
     }
     if (axis->size() != current->size()) {
@@ -5602,51 +5777,48 @@ int cmd_autotune_maf(int argc, char *argv[]) {
 
     std::ifstream in{*log_path, std::ios::binary};
     if (!in) {
-        std::fprintf(stderr, "autotune maf: cannot open --log '%s'\n",
-                     log_path->string().c_str());
+        std::fprintf(stderr, "autotune maf: cannot open --log '%s'\n", log_path->string().c_str());
         return 1;
     }
     std::ostringstream buf;
     buf << in.rdbuf();
     auto const samples = st::autotune::read_maf_samples_csv(buf.str());
     if (!samples.has_value()) {
-        std::fprintf(stderr, "autotune maf: %s\n",
-                     samples.error().to_string().c_str());
+        std::fprintf(stderr, "autotune maf: %s\n", samples.error().to_string().c_str());
         return 1;
     }
 
     st::autotune::MafTuneOptions opts;
-    if (gain.has_value())          { opts.gain                 = *gain; }
-    if (max_delta_pct.has_value()) { opts.max_delta_pct        = *max_delta_pct; }
-    if (min_samples.has_value())   { opts.min_samples_per_cell = *min_samples; }
+    if (gain.has_value()) {
+        opts.gain = *gain;
+    }
+    if (max_delta_pct.has_value()) {
+        opts.max_delta_pct = *max_delta_pct;
+    }
+    if (min_samples.has_value()) {
+        opts.min_samples_per_cell = *min_samples;
+    }
     opts.require_open_loop = require_open_loop;
 
-    auto const result =
-        st::autotune::tune_maf(*axis, *current, *samples, opts);
+    auto const result = st::autotune::tune_maf(*axis, *current, *samples, opts);
     if (!result.has_value()) {
-        std::fprintf(stderr, "autotune maf: %s\n",
-                     result.error().to_string().c_str());
+        std::fprintf(stderr, "autotune maf: %s\n", result.error().to_string().c_str());
         return 1;
     }
 
     auto const &final_result =
-        skip_smooth
-            ? *result
-            : st::autotune::smooth_proposals(*result, opts.max_delta_pct);
+        skip_smooth ? *result : st::autotune::smooth_proposals(*result, opts.max_delta_pct);
 
     // Summary header — mirrors docs/12 §"Output".
-    std::printf("Loaded %zu samples from %s\n",
-                final_result.total_samples,
+    std::printf("Loaded %zu samples from %s\n", final_result.total_samples,
                 log_path->string().c_str());
-    double const retained_pct =
-        final_result.total_samples == 0
-            ? 0.0
-            : 100.0
-                  * static_cast<double>(final_result.samples_after_gates)
-                  / static_cast<double>(final_result.total_samples);
+    double const retained_pct = final_result.total_samples == 0
+                                    ? 0.0
+                                    : 100.0 *
+                                          static_cast<double>(final_result.samples_after_gates) /
+                                          static_cast<double>(final_result.total_samples);
     std::printf("After quality gates: %zu samples (%.1f%% retained)\n\n",
-                final_result.samples_after_gates,
-                retained_pct);
+                final_result.samples_after_gates, retained_pct);
 
     // Aggregate stats. After smoothing, a cell can have a non-zero
     // post-smooth delta from neighbor pull even when its own
@@ -5654,38 +5826,35 @@ int cmd_autotune_maf(int argc, char *argv[]) {
     // cell that moved (regardless of why), and `underpowered` reports
     // separately how many cells lacked direct data of their own.
     constexpr double kModifiedEpsilon = 1e-9;
-    std::size_t modified         = 0;
-    std::size_t underpowered     = 0;
-    double      sum_delta_pct    = 0.0;
-    double      max_delta_signed = 0.0;
-    double      min_delta_signed = 0.0;
-    std::size_t max_cell_idx     = 0;
-    std::size_t min_cell_idx     = 0;
+    std::size_t modified = 0;
+    std::size_t underpowered = 0;
+    double sum_delta_pct = 0.0;
+    double max_delta_signed = 0.0;
+    double min_delta_signed = 0.0;
+    std::size_t max_cell_idx = 0;
+    std::size_t min_cell_idx = 0;
     for (auto const &c : final_result.cells) {
         if (c.samples_used < opts.min_samples_per_cell) {
             ++underpowered;
         }
-        double const delta_pct = c.current_value == 0.0
-                                     ? 0.0
-                                     : (c.proposed_value / c.current_value)
-                                         - 1.0;
+        double const delta_pct =
+            c.current_value == 0.0 ? 0.0 : (c.proposed_value / c.current_value) - 1.0;
         if (std::abs(delta_pct) > kModifiedEpsilon) {
             ++modified;
             sum_delta_pct += delta_pct;
         }
         if (delta_pct > max_delta_signed) {
             max_delta_signed = delta_pct;
-            max_cell_idx     = c.cell_index;
+            max_cell_idx = c.cell_index;
         }
         if (delta_pct < min_delta_signed) {
             min_delta_signed = delta_pct;
-            min_cell_idx     = c.cell_index;
+            min_cell_idx = c.cell_index;
         }
     }
 
     std::printf("MAF scaling proposal:\n");
-    std::printf("  Cells modified:        %zu / %zu\n",
-                modified, final_result.cells.size());
+    std::printf("  Cells modified:        %zu / %zu\n", modified, final_result.cells.size());
     std::printf("  Underpowered cells:    %zu (<%zu direct samples; any "
                 "delta is from neighbor smoothing)\n",
                 underpowered, opts.min_samples_per_cell);
@@ -5696,16 +5865,12 @@ int cmd_autotune_maf(int argc, char *argv[]) {
     if (max_delta_signed > 0.0) {
         auto const &c = final_result.cells[max_cell_idx];
         std::printf("  Max delta:             %+.2f%% at v=%.2f (n=%zu)\n",
-                    100.0 * max_delta_signed,
-                    (*axis)[max_cell_idx],
-                    c.samples_used);
+                    100.0 * max_delta_signed, (*axis)[max_cell_idx], c.samples_used);
     }
     if (min_delta_signed < 0.0) {
         auto const &c = final_result.cells[min_cell_idx];
         std::printf("  Min delta:             %+.2f%% at v=%.2f (n=%zu)\n",
-                    100.0 * min_delta_signed,
-                    (*axis)[min_cell_idx],
-                    c.samples_used);
+                    100.0 * min_delta_signed, (*axis)[min_cell_idx], c.samples_used);
     }
     std::printf("\n");
 
@@ -5715,16 +5880,10 @@ int cmd_autotune_maf(int argc, char *argv[]) {
     std::printf("  ------+-----------+-----------+-----------+-------+-----------\n");
     for (std::size_t i = 0; i < final_result.cells.size(); ++i) {
         auto const &c = final_result.cells[i];
-        double const delta_pct = c.current_value == 0.0
-                                     ? 0.0
-                                     : (c.proposed_value / c.current_value)
-                                         - 1.0;
-        std::printf("  %5.2f | %9.4f | %9.4f | %+8.2f%% | %5zu | %6.2f\n",
-                    (*axis)[i],
-                    c.current_value,
-                    c.proposed_value,
-                    100.0 * delta_pct,
-                    c.samples_used,
+        double const delta_pct =
+            c.current_value == 0.0 ? 0.0 : (c.proposed_value / c.current_value) - 1.0;
+        std::printf("  %5.2f | %9.4f | %9.4f | %+8.2f%% | %5zu | %6.2f\n", (*axis)[i],
+                    c.current_value, c.proposed_value, 100.0 * delta_pct, c.samples_used,
                     c.confidence);
     }
 
@@ -5733,36 +5892,33 @@ int cmd_autotune_maf(int argc, char *argv[]) {
     // findings and decides. With --strict-lint, exit non-zero when any
     // violation is present so this command can gate a downstream
     // --apply (when that lands in the project-integration slice).
-    auto const violations =
-        st::autotune::lint_maf_proposal(*axis, *current, final_result);
+    auto const violations = st::autotune::lint_maf_proposal(*axis, *current, final_result);
     return print_lint_section(violations, strict_lint);
 }
 
 int cmd_autotune_knock_pull(int argc, char *argv[]) {
     std::optional<std::filesystem::path> log_path;
-    std::optional<std::string>           rpm_axis_arg;
+    std::optional<std::string> rpm_axis_arg;
     std::optional<std::filesystem::path> rpm_axis_file;
-    std::optional<std::string>           load_axis_arg;
+    std::optional<std::string> load_axis_arg;
     std::optional<std::filesystem::path> load_axis_file;
-    std::optional<std::string>           current_arg;
+    std::optional<std::string> current_arg;
     std::optional<std::filesystem::path> current_file;
-    std::optional<double>                trigger_deg;
-    std::optional<double>                pull_step_deg;
-    std::optional<std::size_t>           min_samples;
-    std::optional<double>                max_neighbor_step;
-    bool                                 strict_lint        = false;
-    bool                                 enable_add_back    = false;
-    std::optional<double>                add_back_step;
-    std::optional<std::size_t>           add_back_min_clean;
-    std::optional<double>                add_back_threshold;
+    std::optional<double> trigger_deg;
+    std::optional<double> pull_step_deg;
+    std::optional<std::size_t> min_samples;
+    std::optional<double> max_neighbor_step;
+    bool strict_lint = false;
+    bool enable_add_back = false;
+    std::optional<double> add_back_step;
+    std::optional<std::size_t> add_back_min_clean;
+    std::optional<double> add_back_threshold;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require_arg = [&](char const *name) -> char const * {
+        auto const require_arg = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
-                std::fprintf(stderr,
-                             "autotune knock-pull: %s requires a value\n",
-                             name);
+                std::fprintf(stderr, "autotune knock-pull: %s requires a value\n", name);
                 return nullptr;
             }
             return argv[++i];
@@ -5771,32 +5927,45 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
         if (a == "--log") {
             if (auto const *v = require_arg("--log"); v) {
                 log_path = std::filesystem::path{v};
-            } else { return 2; }
+            } else {
+                return 2;
+            }
         } else if (a == "--rpm-axis") {
             if (auto const *v = require_arg("--rpm-axis"); v) {
                 rpm_axis_arg = std::string{v};
-            } else { return 2; }
+            } else {
+                return 2;
+            }
         } else if (a == "--rpm-axis-file") {
             if (auto const *v = require_arg("--rpm-axis-file"); v) {
                 rpm_axis_file = std::filesystem::path{v};
-            } else { return 2; }
+            } else {
+                return 2;
+            }
         } else if (a == "--load-axis") {
             if (auto const *v = require_arg("--load-axis"); v) {
                 load_axis_arg = std::string{v};
-            } else { return 2; }
+            } else {
+                return 2;
+            }
         } else if (a == "--load-axis-file") {
             if (auto const *v = require_arg("--load-axis-file"); v) {
                 load_axis_file = std::filesystem::path{v};
-            } else { return 2; }
+            } else {
+                return 2;
+            }
         } else if (a == "--current-timing" || a == "--current") {
             if (auto const *v = require_arg("--current-timing"); v) {
                 current_arg = std::string{v};
-            } else { return 2; }
-        } else if (a == "--current-timing-file"
-                   || a == "--current-file") {
+            } else {
+                return 2;
+            }
+        } else if (a == "--current-timing-file" || a == "--current-file") {
             if (auto const *v = require_arg("--current-timing-file"); v) {
                 current_file = std::filesystem::path{v};
-            } else { return 2; }
+            } else {
+                return 2;
+            }
         } else if (a == "--trigger-degrees" || a == "--trigger") {
             if (auto const *v = require_arg("--trigger-degrees"); v) {
                 auto const parsed = parse_decimal(v);
@@ -5808,7 +5977,9 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
                     return 2;
                 }
                 trigger_deg = *parsed;
-            } else { return 2; }
+            } else {
+                return 2;
+            }
         } else if (a == "--pull-step-degrees" || a == "--pull-step") {
             if (auto const *v = require_arg("--pull-step-degrees"); v) {
                 auto const parsed = parse_decimal(v);
@@ -5816,14 +5987,17 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
                     std::fprintf(stderr,
                                  "autotune knock-pull: --pull-step-degrees "
                                  "must be a decimal number in degrees "
-                                 "(got '%s')\n", v);
+                                 "(got '%s')\n",
+                                 v);
                     return 2;
                 }
                 pull_step_deg = *parsed;
-            } else { return 2; }
+            } else {
+                return 2;
+            }
         } else if (a == "--min-samples-per-cell" || a == "--min-samples") {
             if (auto const *v = require_arg("--min-samples-per-cell"); v) {
-                char       *end  = nullptr;
+                char *end = nullptr;
                 long long const n = std::strtoll(v, &end, 10);
                 if (end == v || end == nullptr || *end != '\0' || n < 0) {
                     std::fprintf(stderr,
@@ -5833,79 +6007,85 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
                     return 2;
                 }
                 min_samples = static_cast<std::size_t>(n);
-            } else { return 2; }
-        } else if (a == "--max-neighbor-step-degrees"
-                   || a == "--max-neighbor-step") {
+            } else {
+                return 2;
+            }
+        } else if (a == "--max-neighbor-step-degrees" || a == "--max-neighbor-step") {
             if (auto const *v = require_arg("--max-neighbor-step-degrees"); v) {
                 auto const parsed = parse_decimal(v);
                 if (!parsed.has_value() || *parsed < 0.0) {
                     std::fprintf(stderr,
                                  "autotune knock-pull: "
                                  "--max-neighbor-step-degrees must be a "
-                                 "non-negative decimal (got '%s')\n", v);
+                                 "non-negative decimal (got '%s')\n",
+                                 v);
                     return 2;
                 }
                 max_neighbor_step = *parsed;
-            } else { return 2; }
+            } else {
+                return 2;
+            }
         } else if (a == "--strict-lint") {
             strict_lint = true;
         } else if (a == "--enable-add-back") {
             enable_add_back = true;
-        } else if (a == "--add-back-step-degrees"
-                   || a == "--add-back-step") {
+        } else if (a == "--add-back-step-degrees" || a == "--add-back-step") {
             if (auto const *v = require_arg("--add-back-step-degrees"); v) {
                 auto const parsed = parse_decimal(v);
                 if (!parsed.has_value() || *parsed < 0.0) {
                     std::fprintf(stderr,
                                  "autotune knock-pull: "
                                  "--add-back-step-degrees must be a "
-                                 "non-negative decimal (got '%s')\n", v);
+                                 "non-negative decimal (got '%s')\n",
+                                 v);
                     return 2;
                 }
                 add_back_step = *parsed;
-            } else { return 2; }
-        } else if (a == "--add-back-min-clean-samples"
-                   || a == "--add-back-min-samples") {
+            } else {
+                return 2;
+            }
+        } else if (a == "--add-back-min-clean-samples" || a == "--add-back-min-samples") {
             if (auto const *v = require_arg("--add-back-min-clean-samples"); v) {
-                char       *end  = nullptr;
+                char *end = nullptr;
                 long long const n = std::strtoll(v, &end, 10);
                 if (end == v || end == nullptr || *end != '\0' || n < 0) {
                     std::fprintf(stderr,
                                  "autotune knock-pull: "
                                  "--add-back-min-clean-samples must be a "
-                                 "non-negative integer (got '%s')\n", v);
+                                 "non-negative integer (got '%s')\n",
+                                 v);
                     return 2;
                 }
                 add_back_min_clean = static_cast<std::size_t>(n);
-            } else { return 2; }
-        } else if (a == "--add-back-clean-threshold-degrees"
-                   || a == "--add-back-threshold") {
-            if (auto const *v =
-                    require_arg("--add-back-clean-threshold-degrees"); v) {
+            } else {
+                return 2;
+            }
+        } else if (a == "--add-back-clean-threshold-degrees" || a == "--add-back-threshold") {
+            if (auto const *v = require_arg("--add-back-clean-threshold-degrees"); v) {
                 auto const parsed = parse_decimal(v);
                 if (!parsed.has_value() || *parsed < 0.0) {
                     std::fprintf(stderr,
                                  "autotune knock-pull: "
                                  "--add-back-clean-threshold-degrees must "
-                                 "be a non-negative decimal (got '%s')\n", v);
+                                 "be a non-negative decimal (got '%s')\n",
+                                 v);
                     return 2;
                 }
                 add_back_threshold = *parsed;
-            } else { return 2; }
+            } else {
+                return 2;
+            }
         } else {
-            std::fprintf(stderr,
-                         "autotune knock-pull: unknown argument: %s\n",
-                         argv[i]);
+            std::fprintf(stderr, "autotune knock-pull: unknown argument: %s\n", argv[i]);
             return 2;
         }
     }
 
-    bool const rpm_given     = rpm_axis_arg.has_value()  || rpm_axis_file.has_value();
-    bool const load_given    = load_axis_arg.has_value() || load_axis_file.has_value();
-    bool const current_given = current_arg.has_value()   || current_file.has_value();
+    bool const rpm_given = rpm_axis_arg.has_value() || rpm_axis_file.has_value();
+    bool const load_given = load_axis_arg.has_value() || load_axis_file.has_value();
+    bool const current_given = current_arg.has_value() || current_file.has_value();
     if (!log_path.has_value() || !rpm_given || !load_given || !current_given) {
-        std::fputs("autotune knock-pull: missing required arguments\n",
-                   stderr);
+        std::fputs("autotune knock-pull: missing required arguments\n", stderr);
         std::fputs("Usage: subuwutuner-cli autotune knock-pull "
                    "--log <csv>\n"
                    "       (--rpm-axis <r,r,…> | --rpm-axis-file <path>)\n"
@@ -5919,31 +6099,25 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
                    stderr);
         return 2;
     }
-    auto inline_and_file_exclusive = [](char const *flag_inline,
-                                         char const *flag_file,
-                                         bool        has_inline,
-                                         bool        has_file) {
+    auto inline_and_file_exclusive = [](char const *flag_inline, char const *flag_file,
+                                        bool has_inline, bool has_file) {
         if (has_inline && has_file) {
-            std::fprintf(stderr,
-                         "autotune knock-pull: %s and %s are mutually exclusive\n",
+            std::fprintf(stderr, "autotune knock-pull: %s and %s are mutually exclusive\n",
                          flag_inline, flag_file);
             return true;
         }
         return false;
     };
-    if (inline_and_file_exclusive("--rpm-axis", "--rpm-axis-file",
-                                   rpm_axis_arg.has_value(),
-                                   rpm_axis_file.has_value())) {
+    if (inline_and_file_exclusive("--rpm-axis", "--rpm-axis-file", rpm_axis_arg.has_value(),
+                                  rpm_axis_file.has_value())) {
         return 2;
     }
-    if (inline_and_file_exclusive("--load-axis", "--load-axis-file",
-                                   load_axis_arg.has_value(),
-                                   load_axis_file.has_value())) {
+    if (inline_and_file_exclusive("--load-axis", "--load-axis-file", load_axis_arg.has_value(),
+                                  load_axis_file.has_value())) {
         return 2;
     }
     if (inline_and_file_exclusive("--current-timing", "--current-timing-file",
-                                   current_arg.has_value(),
-                                   current_file.has_value())) {
+                                  current_arg.has_value(), current_file.has_value())) {
         return 2;
     }
 
@@ -5952,11 +6126,10 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
     // mirrors MAF's "I/O failed" exit code); returns 2 if the list was
     // empty or the inline parser rejected the input (rc=2 mirrors MAF's
     // "argument was malformed" exit code).
-    auto load_list = [](char const                                 *flag_file,
-                         char const                                 *list_label,
-                         std::optional<std::string> const           &inline_arg,
-                         std::optional<std::filesystem::path> const &file_arg,
-                         std::vector<double>                        &out) -> int {
+    auto load_list = [](char const *flag_file, char const *list_label,
+                        std::optional<std::string> const &inline_arg,
+                        std::optional<std::filesystem::path> const &file_arg,
+                        std::vector<double> &out) -> int {
         std::optional<std::vector<double>> v;
         if (file_arg.has_value()) {
             v = read_decimal_list_file(*file_arg);
@@ -5974,7 +6147,8 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
         if (!v.has_value() || v->empty()) {
             std::fprintf(stderr,
                          "autotune knock-pull: %s must yield a non-empty "
-                         "list of numbers\n", list_label);
+                         "list of numbers\n",
+                         list_label);
             return 2;
         }
         out = std::move(*v);
@@ -5982,20 +6156,20 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
     };
 
     std::vector<double> rpm_axis;
-    if (int const rc = load_list("--rpm-axis-file", "rpm-axis",
-                                 rpm_axis_arg, rpm_axis_file, rpm_axis);
+    if (int const rc =
+            load_list("--rpm-axis-file", "rpm-axis", rpm_axis_arg, rpm_axis_file, rpm_axis);
         rc != 0) {
         return rc;
     }
     std::vector<double> load_axis;
-    if (int const rc = load_list("--load-axis-file", "load-axis",
-                                 load_axis_arg, load_axis_file, load_axis);
+    if (int const rc =
+            load_list("--load-axis-file", "load-axis", load_axis_arg, load_axis_file, load_axis);
         rc != 0) {
         return rc;
     }
     std::vector<double> current;
-    if (int const rc = load_list("--current-timing-file", "current-timing",
-                                 current_arg, current_file, current);
+    if (int const rc = load_list("--current-timing-file", "current-timing", current_arg,
+                                 current_file, current);
         rc != 0) {
         return rc;
     }
@@ -6018,21 +6192,25 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
     buf << in.rdbuf();
     auto const samples = st::autotune::read_knock_samples_csv(buf.str());
     if (!samples.has_value()) {
-        std::fprintf(stderr, "autotune knock-pull: %s\n",
-                     samples.error().to_string().c_str());
+        std::fprintf(stderr, "autotune knock-pull: %s\n", samples.error().to_string().c_str());
         return 1;
     }
 
     st::autotune::KnockPullOptions opts;
-    if (trigger_deg.has_value())   { opts.trigger_degrees      = *trigger_deg; }
-    if (pull_step_deg.has_value()) { opts.pull_step_degrees    = *pull_step_deg; }
-    if (min_samples.has_value())   { opts.min_samples_per_cell = *min_samples; }
+    if (trigger_deg.has_value()) {
+        opts.trigger_degrees = *trigger_deg;
+    }
+    if (pull_step_deg.has_value()) {
+        opts.pull_step_degrees = *pull_step_deg;
+    }
+    if (min_samples.has_value()) {
+        opts.min_samples_per_cell = *min_samples;
+    }
 
-    auto const pull_result = st::autotune::tune_knock_pull(
-        rpm_axis, load_axis, current, *samples, opts);
+    auto const pull_result =
+        st::autotune::tune_knock_pull(rpm_axis, load_axis, current, *samples, opts);
     if (!pull_result.has_value()) {
-        std::fprintf(stderr, "autotune knock-pull: %s\n",
-                     pull_result.error().to_string().c_str());
+        std::fprintf(stderr, "autotune knock-pull: %s\n", pull_result.error().to_string().c_str());
         return 1;
     }
 
@@ -6053,50 +6231,44 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
     if (add_back_threshold.has_value()) {
         add_opts.clean_threshold_degrees = *add_back_threshold;
     }
-    auto const result =
-        st::autotune::apply_knock_add_back(*pull_result, add_opts);
+    auto const result = st::autotune::apply_knock_add_back(*pull_result, add_opts);
 
-    std::printf("Loaded %zu samples from %s\n",
-                result.total_samples,
-                log_path->string().c_str());
-    double const retained_pct =
-        result.total_samples == 0
-            ? 0.0
-            : 100.0
-                  * static_cast<double>(result.samples_after_gates)
-                  / static_cast<double>(result.total_samples);
+    std::printf("Loaded %zu samples from %s\n", result.total_samples, log_path->string().c_str());
+    double const retained_pct = result.total_samples == 0
+                                    ? 0.0
+                                    : 100.0 * static_cast<double>(result.samples_after_gates) /
+                                          static_cast<double>(result.total_samples);
     std::printf("After quality gates: %zu samples (%.1f%% retained)\n\n",
                 result.samples_after_gates, retained_pct);
 
     // Count pulled vs added-back cells. A cell is "added back" when it
     // wasn't pulled but its proposed_value differs from current_value
     // — that's the post-pass marker apply_knock_add_back leaves.
-    std::size_t pulled       = 0;
-    std::size_t added_back   = 0;
-    double      max_pull_deg = 0.0;
+    std::size_t pulled = 0;
+    std::size_t added_back = 0;
+    double max_pull_deg = 0.0;
     std::size_t max_pull_cell = 0;
-    double      max_add_deg  = 0.0;
+    double max_add_deg = 0.0;
     std::size_t max_add_cell = 0;
     for (auto const &c : result.cells) {
         if (c.pulled) {
             ++pulled;
             double const drop = c.current_value - c.proposed_value;
             if (drop > max_pull_deg) {
-                max_pull_deg  = drop;
+                max_pull_deg = drop;
                 max_pull_cell = c.cell_index;
             }
         } else if (c.proposed_value > c.current_value) {
             ++added_back;
             double const gain = c.proposed_value - c.current_value;
             if (gain > max_add_deg) {
-                max_add_deg  = gain;
+                max_add_deg = gain;
                 max_add_cell = c.cell_index;
             }
         }
     }
     std::printf("Knock pull proposal:\n");
-    std::printf("  Cells pulled:          %zu / %zu\n",
-                pulled, result.cells.size());
+    std::printf("  Cells pulled:          %zu / %zu\n", pulled, result.cells.size());
     std::printf("  Pull step:             %.2f°\n", opts.pull_step_degrees);
     std::printf("  Trigger threshold:     mean feedback knock < -%.2f° "
                 "(over ≥ %zu samples)\n",
@@ -6109,8 +6281,8 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
                     load_axis[row], rpm_axis[col], max_pull_deg);
     }
     if (enable_add_back) {
-        std::printf("  Cells added back:      %zu (clean cells, +%.2f°)\n",
-                    added_back, add_opts.add_step_degrees);
+        std::printf("  Cells added back:      %zu (clean cells, +%.2f°)\n", added_back,
+                    add_opts.add_step_degrees);
         if (added_back > 0) {
             std::size_t const row = max_add_cell / rpm_axis.size();
             std::size_t const col = max_add_cell % rpm_axis.size();
@@ -6156,20 +6328,17 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
     if (max_neighbor_step.has_value()) {
         lint_opts.max_neighbor_step_degrees = *max_neighbor_step;
     }
-    auto const violations = st::autotune::lint_knock_proposal(
-        rpm_axis, load_axis, result, lint_opts);
+    auto const violations =
+        st::autotune::lint_knock_proposal(rpm_axis, load_axis, result, lint_opts);
     return print_lint_section(violations, strict_lint);
 }
 
 // Helper for `can-*`: emit one column-aligned line for a (bus, id) summary.
-void print_id_row(st::can::BusId bus, std::uint32_t can_id, bool extended,
-                  std::size_t count, double rate_hz, double avg_dlc) {
+void print_id_row(st::can::BusId bus, std::uint32_t can_id, bool extended, std::size_t count,
+                  double rate_hz, double avg_dlc) {
     std::printf("  bus=%u  id=0x%0*X%s  frames=%6zu  rate=%8.2f Hz  dlc~%.1f\n",
-                static_cast<unsigned>(bus),
-                extended ? 8 : 3,
-                can_id,
-                extended ? "" : "  ",
-                count, rate_hz, avg_dlc);
+                static_cast<unsigned>(bus), extended ? 8 : 3, can_id, extended ? "" : "  ", count,
+                rate_hz, avg_dlc);
 }
 
 int cmd_can_replay(int argc, char *argv[]) {
@@ -6188,7 +6357,8 @@ int cmd_can_replay(int argc, char *argv[]) {
     }
     if (!trace_path.has_value()) {
         std::fputs("can-replay: missing required argument\n"
-                   "Usage: subuwutuner-cli can-replay <FILE.asc>\n", stderr);
+                   "Usage: subuwutuner-cli can-replay <FILE.asc>\n",
+                   stderr);
         return 2;
     }
 
@@ -6206,26 +6376,25 @@ int cmd_can_replay(int argc, char *argv[]) {
     // for stable output via a parallel vector of keys.
     struct Agg {
         st::can::BusId bus{st::can::BusId::Hs};
-        std::uint32_t  id{0};
-        bool           extended{false};
-        std::size_t    count{0};
-        std::uint64_t  dlc_sum{0};
+        std::uint32_t id{0};
+        bool extended{false};
+        std::size_t count{0};
+        std::uint64_t dlc_sum{0};
         std::array<std::size_t, 256> byte0_hist{};
-        std::int64_t   first_ts_ns{0};
-        std::int64_t   last_ts_ns{0};
+        std::int64_t first_ts_ns{0};
+        std::int64_t last_ts_ns{0};
     };
     std::unordered_map<std::uint64_t, Agg> aggs;
-    std::vector<std::uint64_t>             order;
+    std::vector<std::uint64_t> order;
 
     std::int64_t global_first = frames->front().timestamp_ns;
-    std::int64_t global_last  = frames->front().timestamp_ns;
+    std::int64_t global_last = frames->front().timestamp_ns;
     for (auto const &f : *frames) {
-        std::uint64_t const key =
-            (static_cast<std::uint64_t>(f.bus) << 32) | f.id;
+        std::uint64_t const key = (static_cast<std::uint64_t>(f.bus) << 32) | f.id;
         auto [it, inserted] = aggs.try_emplace(key);
         if (inserted) {
             it->second.bus = f.bus;
-            it->second.id  = f.id;
+            it->second.id = f.id;
             it->second.extended = f.extended;
             it->second.first_ts_ns = f.timestamp_ns;
             order.push_back(key);
@@ -6237,48 +6406,42 @@ int cmd_can_replay(int argc, char *argv[]) {
         if (f.dlc > 0) {
             ++agg.byte0_hist[f.data[0]];
         }
-        if (f.timestamp_ns < global_first) global_first = f.timestamp_ns;
-        if (f.timestamp_ns > global_last)  global_last  = f.timestamp_ns;
+        if (f.timestamp_ns < global_first)
+            global_first = f.timestamp_ns;
+        if (f.timestamp_ns > global_last)
+            global_last = f.timestamp_ns;
     }
 
-    double const duration_s =
-        static_cast<double>(global_last - global_first) / 1e9;
+    double const duration_s = static_cast<double>(global_last - global_first) / 1e9;
 
     std::printf("File: %s\n", trace_path->string().c_str());
-    std::printf("Frames: %zu   unique ids: %zu   duration: %.3f s\n",
-                frames->size(), aggs.size(), duration_s);
+    std::printf("Frames: %zu   unique ids: %zu   duration: %.3f s\n", frames->size(), aggs.size(),
+                duration_s);
 
     // Sort keys by descending frame count for readability.
     std::sort(order.begin(), order.end(),
-              [&](std::uint64_t a, std::uint64_t b) {
-                  return aggs[a].count > aggs[b].count;
-              });
+              [&](std::uint64_t a, std::uint64_t b) { return aggs[a].count > aggs[b].count; });
 
     std::printf("\nPer-id summary (sorted by count):\n");
     for (auto const key : order) {
         auto const &a = aggs[key];
-        double const rate =
-            duration_s > 0.0 ? static_cast<double>(a.count) / duration_s : 0.0;
+        double const rate = duration_s > 0.0 ? static_cast<double>(a.count) / duration_s : 0.0;
         double const avg_dlc =
-            a.count > 0
-                ? static_cast<double>(a.dlc_sum) / static_cast<double>(a.count)
-                : 0.0;
+            a.count > 0 ? static_cast<double>(a.dlc_sum) / static_cast<double>(a.count) : 0.0;
         print_id_row(a.bus, a.id, a.extended, a.count, rate, avg_dlc);
 
         // Modal first-byte value, if any payload was seen.
-        std::size_t  mode_count = 0;
-        unsigned     mode_byte  = 0;
+        std::size_t mode_count = 0;
+        unsigned mode_byte = 0;
         for (std::size_t v = 0; v < 256; ++v) {
             if (a.byte0_hist[v] > mode_count) {
                 mode_count = a.byte0_hist[v];
-                mode_byte  = static_cast<unsigned>(v);
+                mode_byte = static_cast<unsigned>(v);
             }
         }
         if (mode_count > 0) {
-            double const share =
-                static_cast<double>(mode_count) / static_cast<double>(a.count);
-            std::printf("        byte0 mode=0x%02X (%.0f%% of frames)\n",
-                        mode_byte, share * 100.0);
+            double const share = static_cast<double>(mode_count) / static_cast<double>(a.count);
+            std::printf("        byte0 mode=0x%02X (%.0f%% of frames)\n", mode_byte, share * 100.0);
         }
     }
     return 0;
@@ -6303,38 +6466,38 @@ int cmd_can_diff(int argc, char *argv[]) {
     }
     if (!a_path.has_value() || !b_path.has_value()) {
         std::fputs("can-diff: missing required arguments\n"
-                   "Usage: subuwutuner-cli can-diff <A.asc> <B.asc>\n", stderr);
+                   "Usage: subuwutuner-cli can-diff <A.asc> <B.asc>\n",
+                   stderr);
         return 2;
     }
 
     auto const fa = st::can::read_asc(*a_path);
     if (!fa.has_value()) {
-        std::fprintf(stderr, "can-diff: %s: %s\n",
-                     a_path->string().c_str(), fa.error().to_string().c_str());
+        std::fprintf(stderr, "can-diff: %s: %s\n", a_path->string().c_str(),
+                     fa.error().to_string().c_str());
         return 1;
     }
     auto const fb = st::can::read_asc(*b_path);
     if (!fb.has_value()) {
-        std::fprintf(stderr, "can-diff: %s: %s\n",
-                     b_path->string().c_str(), fb.error().to_string().c_str());
+        std::fprintf(stderr, "can-diff: %s: %s\n", b_path->string().c_str(),
+                     fb.error().to_string().c_str());
         return 1;
     }
 
     struct Entry {
         st::can::BusId bus{st::can::BusId::Hs};
-        std::uint32_t  id{0};
-        bool           extended{false};
-        std::size_t    count{0};
+        std::uint32_t id{0};
+        bool extended{false};
+        std::size_t count{0};
     };
     auto tally = [](std::vector<st::can::Frame> const &frames) {
         std::unordered_map<std::uint64_t, Entry> m;
         for (auto const &f : frames) {
-            std::uint64_t const key =
-                (static_cast<std::uint64_t>(f.bus) << 32) | f.id;
+            std::uint64_t const key = (static_cast<std::uint64_t>(f.bus) << 32) | f.id;
             auto [it, inserted] = m.try_emplace(key);
             if (inserted) {
                 it->second.bus = f.bus;
-                it->second.id  = f.id;
+                it->second.id = f.id;
                 it->second.extended = f.extended;
             }
             ++it->second.count;
@@ -6345,15 +6508,14 @@ int cmd_can_diff(int argc, char *argv[]) {
     auto const ma = tally(*fa);
     auto const mb = tally(*fb);
 
-    std::printf("A: %s   (%zu frames, %zu ids)\n",
-                a_path->string().c_str(), fa->size(), ma.size());
-    std::printf("B: %s   (%zu frames, %zu ids)\n",
-                b_path->string().c_str(), fb->size(), mb.size());
+    std::printf("A: %s   (%zu frames, %zu ids)\n", a_path->string().c_str(), fa->size(), ma.size());
+    std::printf("B: %s   (%zu frames, %zu ids)\n", b_path->string().c_str(), fb->size(), mb.size());
 
     auto sorted_keys = [](auto const &m) {
         std::vector<std::uint64_t> keys;
         keys.reserve(m.size());
-        for (auto const &kv : m) keys.push_back(kv.first);
+        for (auto const &kv : m)
+            keys.push_back(kv.first);
         std::sort(keys.begin(), keys.end());
         return keys;
     };
@@ -6362,43 +6524,45 @@ int cmd_can_diff(int argc, char *argv[]) {
     std::vector<std::uint64_t> only_b;
     std::vector<std::uint64_t> shared;
     for (auto const key : sorted_keys(ma)) {
-        if (mb.find(key) == mb.end()) only_a.push_back(key);
-        else                          shared.push_back(key);
+        if (mb.find(key) == mb.end())
+            only_a.push_back(key);
+        else
+            shared.push_back(key);
     }
     for (auto const key : sorted_keys(mb)) {
-        if (ma.find(key) == ma.end()) only_b.push_back(key);
+        if (ma.find(key) == ma.end())
+            only_b.push_back(key);
     }
 
     std::printf("\nIds only in A (%zu):\n", only_a.size());
     for (auto const key : only_a) {
         auto const &e = ma.at(key);
-        std::printf("  bus=%u  id=0x%0*X  count=%zu\n",
-                    static_cast<unsigned>(e.bus),
+        std::printf("  bus=%u  id=0x%0*X  count=%zu\n", static_cast<unsigned>(e.bus),
                     e.extended ? 8 : 3, e.id, e.count);
     }
     std::printf("\nIds only in B (%zu):\n", only_b.size());
     for (auto const key : only_b) {
         auto const &e = mb.at(key);
-        std::printf("  bus=%u  id=0x%0*X  count=%zu\n",
-                    static_cast<unsigned>(e.bus),
+        std::printf("  bus=%u  id=0x%0*X  count=%zu\n", static_cast<unsigned>(e.bus),
                     e.extended ? 8 : 3, e.id, e.count);
     }
 
     std::size_t shared_changed = 0;
     for (auto const key : shared) {
-        if (ma.at(key).count != mb.at(key).count) ++shared_changed;
+        if (ma.at(key).count != mb.at(key).count)
+            ++shared_changed;
     }
-    std::printf("\nShared ids with count delta (%zu of %zu shared):\n",
-                shared_changed, shared.size());
+    std::printf("\nShared ids with count delta (%zu of %zu shared):\n", shared_changed,
+                shared.size());
     for (auto const key : shared) {
         auto const &ea = ma.at(key);
         auto const &eb = mb.at(key);
-        if (ea.count == eb.count) continue;
+        if (ea.count == eb.count)
+            continue;
         long long const delta = static_cast<long long>(eb.count) - static_cast<long long>(ea.count);
         std::printf("  bus=%u  id=0x%0*X  A=%zu  B=%zu  delta=%+lld\n",
-                    static_cast<unsigned>(ea.bus),
-                    ea.extended ? 8 : 3, ea.id,
-                    ea.count, eb.count, delta);
+                    static_cast<unsigned>(ea.bus), ea.extended ? 8 : 3, ea.id, ea.count, eb.count,
+                    delta);
     }
     return 0;
 }
@@ -6406,12 +6570,12 @@ int cmd_can_diff(int argc, char *argv[]) {
 int cmd_can_discover(int argc, char *argv[]) {
     std::optional<std::filesystem::path> trace_path;
     std::optional<std::filesystem::path> output_path;
-    double                               baseline_secs = 10.0;
-    std::optional<unsigned>              bus_filter;
+    double baseline_secs = 10.0;
+    std::optional<unsigned> bus_filter;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require_arg = [&](char const *name) -> char const * {
+        auto const require_arg = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "can-discover: %s requires a value\n", name);
                 return nullptr;
@@ -6419,38 +6583,45 @@ int cmd_can_discover(int argc, char *argv[]) {
             return argv[++i];
         };
         if (a == "--from") {
-            if (auto const *v = require_arg("--from"); v) trace_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--from"); v)
+                trace_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--baseline") {
             auto const *v = require_arg("--baseline");
-            if (v == nullptr) return 2;
+            if (v == nullptr)
+                return 2;
             std::string_view sv{v};
             // Accept "10", "10s" — strip trailing 's' for ergonomics.
             if (!sv.empty() && (sv.back() == 's' || sv.back() == 'S')) {
                 sv.remove_suffix(1);
             }
-            double           secs = 0.0;
-            char            *end  = nullptr;
-            std::string      tmp{sv};
+            double secs = 0.0;
+            char *end = nullptr;
+            std::string tmp{sv};
             secs = std::strtod(tmp.c_str(), &end);
             if (end == tmp.c_str() || secs <= 0.0) {
-                std::fprintf(stderr, "can-discover: --baseline must be a positive number of seconds\n");
+                std::fprintf(stderr,
+                             "can-discover: --baseline must be a positive number of seconds\n");
                 return 2;
             }
             baseline_secs = secs;
         } else if (a == "--bus") {
             auto const *v = require_arg("--bus");
-            if (v == nullptr) return 2;
-            unsigned    value = 0;
-            auto const  res   = std::from_chars(v, v + std::strlen(v), value);
+            if (v == nullptr)
+                return 2;
+            unsigned value = 0;
+            auto const res = std::from_chars(v, v + std::strlen(v), value);
             if (res.ec != std::errc{} || value > 3) {
                 std::fprintf(stderr, "can-discover: --bus must be 0..3\n");
                 return 2;
             }
             bus_filter = value;
         } else if (a == "--output" || a == "-o") {
-            if (auto const *v = require_arg("--output"); v) output_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--output"); v)
+                output_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "can-discover: unknown option: %s\n", argv[i]);
             return 2;
@@ -6462,14 +6633,14 @@ int cmd_can_discover(int argc, char *argv[]) {
     if (!trace_path.has_value()) {
         std::fputs("can-discover: missing required argument\n"
                    "Usage: subuwutuner-cli can-discover --from <FILE.asc> [--baseline <secs>]\n"
-                   "       [--bus <0..3>] [--output <session.cdb>]\n", stderr);
+                   "       [--bus <0..3>] [--output <session.cdb>]\n",
+                   stderr);
         return 2;
     }
 
     auto const all_frames = st::can::read_asc(*trace_path);
     if (!all_frames.has_value()) {
-        std::fprintf(stderr, "can-discover: %s\n",
-                     all_frames.error().to_string().c_str());
+        std::fprintf(stderr, "can-discover: %s\n", all_frames.error().to_string().c_str());
         return 1;
     }
     if (all_frames->empty()) {
@@ -6483,7 +6654,8 @@ int cmd_can_discover(int argc, char *argv[]) {
     if (bus_filter.has_value()) {
         auto const want = static_cast<st::can::BusId>(*bus_filter);
         for (auto const &f : *all_frames) {
-            if (f.bus == want) frames.push_back(f);
+            if (f.bus == want)
+                frames.push_back(f);
         }
         if (frames.empty()) {
             std::fprintf(stderr, "can-discover: no frames on bus %u\n", *bus_filter);
@@ -6493,17 +6665,19 @@ int cmd_can_discover(int argc, char *argv[]) {
         frames = *all_frames;
     }
 
-    std::int64_t const t0          = frames.front().timestamp_ns;
+    std::int64_t const t0 = frames.front().timestamp_ns;
     std::int64_t const baseline_ns = static_cast<std::int64_t>(baseline_secs * 1e9);
-    std::int64_t const split_ns    = t0 + baseline_ns;
+    std::int64_t const split_ns = t0 + baseline_ns;
 
     // Partition into baseline (timestamp < split) and watch (>= split).
     std::vector<st::can::Frame> baseline_frames;
     std::vector<st::can::Frame> watch_frames;
     baseline_frames.reserve(frames.size());
     for (auto const &f : frames) {
-        if (f.timestamp_ns < split_ns) baseline_frames.push_back(f);
-        else                           watch_frames.push_back(f);
+        if (f.timestamp_ns < split_ns)
+            baseline_frames.push_back(f);
+        else
+            watch_frames.push_back(f);
     }
     if (baseline_frames.empty()) {
         std::fputs("can-discover: baseline window is empty (trace shorter than --baseline?)\n",
@@ -6511,31 +6685,26 @@ int cmd_can_discover(int argc, char *argv[]) {
         return 1;
     }
 
-    st::discover::BaselineModel model =
-        st::discover::build_baseline(baseline_frames);
+    st::discover::BaselineModel model = st::discover::build_baseline(baseline_frames);
 
-    auto const events =
-        st::discover::detect_changes(model, watch_frames);
+    auto const events = st::discover::detect_changes(model, watch_frames);
 
     st::discover::Bundle bundle;
-    bundle.schema_version   = 1;
-    bundle.captured_at      = "";
-    bundle.bus_label        = bus_filter.has_value()
-                                  ? std::string{"bus"} + std::to_string(*bus_filter)
-                                  : std::string{};
-    bundle.baseline_ns      = baseline_ns;
+    bundle.schema_version = 1;
+    bundle.captured_at = "";
+    bundle.bus_label =
+        bus_filter.has_value() ? std::string{"bus"} + std::to_string(*bus_filter) : std::string{};
+    bundle.baseline_ns = baseline_ns;
     bundle.baseline_entries = model.entries();
-    bundle.events           = events;
+    bundle.events = events;
 
     if (output_path.has_value()) {
         if (auto s = st::discover::write_cdb(*output_path, bundle); !s.has_value()) {
             std::fprintf(stderr, "can-discover: %s\n", s.error().to_string().c_str());
             return 1;
         }
-        std::fprintf(stderr,
-                     "can-discover: baseline ids=%zu  events=%zu  wrote %s\n",
-                     bundle.baseline_entries.size(),
-                     bundle.events.size(),
+        std::fprintf(stderr, "can-discover: baseline ids=%zu  events=%zu  wrote %s\n",
+                     bundle.baseline_entries.size(), bundle.events.size(),
                      output_path->string().c_str());
     } else {
         auto const text = st::discover::write_cdb_string(bundle);
@@ -6544,10 +6713,8 @@ int cmd_can_discover(int argc, char *argv[]) {
             return 1;
         }
         std::fputs(text->c_str(), stdout);
-        std::fprintf(stderr,
-                     "can-discover: baseline ids=%zu  events=%zu\n",
-                     bundle.baseline_entries.size(),
-                     bundle.events.size());
+        std::fprintf(stderr, "can-discover: baseline ids=%zu  events=%zu\n",
+                     bundle.baseline_entries.size(), bundle.events.size());
     }
     return 0;
 }
@@ -6565,12 +6732,16 @@ std::string slugify(std::string_view text) {
         } else if (u >= 'A' && u <= 'Z') {
             out.push_back(static_cast<char>(u - 'A' + 'a'));
         } else {
-            if (!out.empty() && out.back() != '_') out.push_back('_');
+            if (!out.empty() && out.back() != '_')
+                out.push_back('_');
         }
     }
-    while (!out.empty() && out.back() == '_') out.pop_back();
-    if (out.empty()) out = "signal";
-    if (out.front() >= '0' && out.front() <= '9') out.insert(out.begin(), '_');
+    while (!out.empty() && out.back() == '_')
+        out.pop_back();
+    if (out.empty())
+        out = "signal";
+    if (out.front() >= '0' && out.front() <= '9')
+        out.insert(out.begin(), '_');
     return out;
 }
 
@@ -6605,8 +6776,7 @@ int cmd_can_export_dbc(int argc, char *argv[]) {
 
     auto const bundle = st::discover::read_cdb(*cdb_path);
     if (!bundle.has_value()) {
-        std::fprintf(stderr, "can-export-dbc: %s\n",
-                     bundle.error().to_string().c_str());
+        std::fprintf(stderr, "can-export-dbc: %s\n", bundle.error().to_string().c_str());
         return 1;
     }
 
@@ -6618,14 +6788,13 @@ int cmd_can_export_dbc(int argc, char *argv[]) {
     // 64-bit key so signals can be attached to the right Message later.
     std::unordered_map<std::uint64_t, std::size_t> idx_by_key;
     for (auto const &b : bundle->baseline_entries) {
-        std::uint64_t const key =
-            (static_cast<std::uint64_t>(b.bus) << 32) | b.can_id;
+        std::uint64_t const key = (static_cast<std::uint64_t>(b.bus) << 32) | b.can_id;
         st::dbc::Message m;
-        m.id       = b.can_id;
+        m.id = b.can_id;
         m.extended = b.extended;
         char buf[32];
         std::snprintf(buf, sizeof buf, "MSG_%X", b.can_id);
-        m.name   = buf;
+        m.name = buf;
         m.length = b.dlc;
         m.sender = "Vector__XXX";
         idx_by_key[key] = db.messages.size();
@@ -6636,10 +6805,10 @@ int cmd_can_export_dbc(int argc, char *argv[]) {
     // Conventions per docs/14: identity scaling, Motorola/big-endian,
     // unsigned. Bit position = first changed byte * 8; length covers
     // the contiguous run min..max byte index.
-    std::size_t signals_added       = 0;
-    std::size_t orphan_signals      = 0;   // event on an id missing from baseline
-    std::size_t skipped_unlabeled   = 0;
-    std::size_t skipped_new_id      = 0;
+    std::size_t signals_added = 0;
+    std::size_t orphan_signals = 0; // event on an id missing from baseline
+    std::size_t skipped_unlabeled = 0;
+    std::size_t skipped_new_id = 0;
     std::unordered_map<std::size_t, std::unordered_map<std::string, int>> name_dedup;
 
     for (auto const &ev : bundle->events) {
@@ -6651,8 +6820,7 @@ int cmd_can_export_dbc(int argc, char *argv[]) {
             ++skipped_unlabeled;
             continue;
         }
-        std::uint64_t const key =
-            (static_cast<std::uint64_t>(ev.bus) << 32) | ev.can_id;
+        std::uint64_t const key = (static_cast<std::uint64_t>(ev.bus) << 32) | ev.can_id;
         auto const it = idx_by_key.find(key);
         if (it == idx_by_key.end()) {
             ++orphan_signals;
@@ -6663,29 +6831,31 @@ int cmd_can_export_dbc(int argc, char *argv[]) {
         std::uint8_t lo = ev.changed_byte_indices.front();
         std::uint8_t hi = lo;
         for (auto const b : ev.changed_byte_indices) {
-            if (b < lo) lo = b;
-            if (b > hi) hi = b;
+            if (b < lo)
+                lo = b;
+            if (b > hi)
+                hi = b;
         }
 
         st::dbc::Signal sig;
-        std::string     base = slugify(ev.description);
+        std::string base = slugify(ev.description);
         // Disambiguate signals that slugify to the same identifier
         // within the same message.
         auto &seen = name_dedup[it->second];
-        int  &n    = seen[base];
-        sig.name   = (n == 0) ? base : base + "_" + std::to_string(n + 1);
+        int &n = seen[base];
+        sig.name = (n == 0) ? base : base + "_" + std::to_string(n + 1);
         ++n;
-        sig.start_bit   = static_cast<std::size_t>(lo) * 8U;
+        sig.start_bit = static_cast<std::size_t>(lo) * 8U;
         sig.length_bits = static_cast<std::size_t>(hi - lo + 1) * 8U;
-        sig.byte_order  = st::dbc::ByteOrder::Motorola;
-        sig.sign        = st::dbc::SignKind::Unsigned;
-        sig.factor      = 1.0;
-        sig.offset      = 0.0;
-        sig.min_value   = 0.0;
-        sig.max_value   = sig.length_bits >= 64
-                              ? static_cast<double>(std::numeric_limits<std::uint64_t>::max())
-                              : static_cast<double>((1ULL << sig.length_bits) - 1);
-        sig.unit        = "";
+        sig.byte_order = st::dbc::ByteOrder::Motorola;
+        sig.sign = st::dbc::SignKind::Unsigned;
+        sig.factor = 1.0;
+        sig.offset = 0.0;
+        sig.min_value = 0.0;
+        sig.max_value = sig.length_bits >= 64
+                            ? static_cast<double>(std::numeric_limits<std::uint64_t>::max())
+                            : static_cast<double>((1ULL << sig.length_bits) - 1);
+        sig.unit = "";
         sig.receivers.push_back("Vector__XXX");
         msg.signals.push_back(std::move(sig));
         ++signals_added;
@@ -6694,23 +6864,18 @@ int cmd_can_export_dbc(int argc, char *argv[]) {
     auto const text = st::dbc::format_dbc(db);
     if (output_path.has_value()) {
         if (auto s = st::dbc::write_dbc(*output_path, db); !s.has_value()) {
-            std::fprintf(stderr, "can-export-dbc: %s\n",
-                         s.error().to_string().c_str());
+            std::fprintf(stderr, "can-export-dbc: %s\n", s.error().to_string().c_str());
             return 1;
         }
-        std::fprintf(stderr,
-                     "can-export-dbc: messages=%zu  signals=%zu  wrote %s\n",
-                     db.messages.size(), signals_added,
-                     output_path->string().c_str());
+        std::fprintf(stderr, "can-export-dbc: messages=%zu  signals=%zu  wrote %s\n",
+                     db.messages.size(), signals_added, output_path->string().c_str());
     } else {
         std::fputs(text.c_str(), stdout);
-        std::fprintf(stderr,
-                     "can-export-dbc: messages=%zu  signals=%zu\n",
-                     db.messages.size(), signals_added);
+        std::fprintf(stderr, "can-export-dbc: messages=%zu  signals=%zu\n", db.messages.size(),
+                     signals_added);
     }
     if (skipped_unlabeled > 0 || orphan_signals > 0 || skipped_new_id > 0) {
-        std::fprintf(stderr,
-                     "can-export-dbc: skipped unlabeled=%zu  new-id=%zu  orphan=%zu\n",
+        std::fprintf(stderr, "can-export-dbc: skipped unlabeled=%zu  new-id=%zu  orphan=%zu\n",
                      skipped_unlabeled, skipped_new_id, orphan_signals);
     }
     return 0;
@@ -6722,15 +6887,18 @@ std::string csv_cell(std::string_view s) {
     bool needs_quotes = false;
     for (auto const c : s) {
         if (c == ',' || c == '"' || c == '\r' || c == '\n') {
-            needs_quotes = true; break;
+            needs_quotes = true;
+            break;
         }
     }
-    if (!needs_quotes) return std::string{s};
+    if (!needs_quotes)
+        return std::string{s};
     std::string out;
     out.reserve(s.size() + 2);
     out.push_back('"');
     for (auto const c : s) {
-        if (c == '"') out.push_back('"');
+        if (c == '"')
+            out.push_back('"');
         out.push_back(c);
     }
     out.push_back('"');
@@ -6744,7 +6912,7 @@ int cmd_can_decode(int argc, char *argv[]) {
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require_arg = [&](char const *name) -> char const * {
+        auto const require_arg = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "can-decode: %s requires a value\n", name);
                 return nullptr;
@@ -6752,11 +6920,15 @@ int cmd_can_decode(int argc, char *argv[]) {
             return argv[++i];
         };
         if (a == "--dbc") {
-            if (auto const *v = require_arg("--dbc"); v) dbc_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--dbc"); v)
+                dbc_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--output" || a == "-o") {
-            if (auto const *v = require_arg("--output"); v) output_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--output"); v)
+                output_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "can-decode: unknown option: %s\n", argv[i]);
             return 2;
@@ -6768,9 +6940,10 @@ int cmd_can_decode(int argc, char *argv[]) {
         }
     }
     if (!dbc_path.has_value() || !asc_path.has_value()) {
-        std::fputs("can-decode: missing required arguments\n"
-                   "Usage: subuwutuner-cli can-decode --dbc <FILE.dbc> <FILE.asc> [--output <csv>]\n",
-                   stderr);
+        std::fputs(
+            "can-decode: missing required arguments\n"
+            "Usage: subuwutuner-cli can-decode --dbc <FILE.dbc> <FILE.asc> [--output <csv>]\n",
+            stderr);
         return 2;
     }
 
@@ -6785,8 +6958,8 @@ int cmd_can_decode(int argc, char *argv[]) {
         return 1;
     }
 
-    std::ofstream  file_out;
-    std::ostream  *out_stream = &std::cout;
+    std::ofstream file_out;
+    std::ostream *out_stream = &std::cout;
     if (output_path.has_value()) {
         file_out.open(*output_path);
         if (!file_out) {
@@ -6799,8 +6972,8 @@ int cmd_can_decode(int argc, char *argv[]) {
 
     (*out_stream) << "timestamp_ns,bus,can_id,signal,value,unit\n";
 
-    std::size_t decoded_rows  = 0;
-    std::size_t missing_id    = 0;
+    std::size_t decoded_rows = 0;
+    std::size_t missing_id = 0;
     for (auto const &f : *frames) {
         auto const *msg = db->find_message(f.id);
         if (msg == nullptr || msg->extended != f.extended) {
@@ -6811,19 +6984,15 @@ int cmd_can_decode(int argc, char *argv[]) {
             double const value = st::dbc::decode_signal(f.payload(), sig);
             char buf[64];
             std::snprintf(buf, sizeof buf, "%g", value);
-            (*out_stream) << f.timestamp_ns << ','
-                          << static_cast<unsigned>(f.bus) << ','
-                          << f.id << ','
-                          << csv_cell(sig.name) << ','
-                          << buf << ','
-                          << csv_cell(sig.unit) << '\n';
+            (*out_stream) << f.timestamp_ns << ',' << static_cast<unsigned>(f.bus) << ',' << f.id
+                          << ',' << csv_cell(sig.name) << ',' << buf << ',' << csv_cell(sig.unit)
+                          << '\n';
             ++decoded_rows;
         }
     }
     out_stream->flush();
 
-    std::fprintf(stderr,
-                 "can-decode: frames=%zu  rows=%zu  unknown-id-frames=%zu\n",
+    std::fprintf(stderr, "can-decode: frames=%zu  rows=%zu  unknown-id-frames=%zu\n",
                  frames->size(), decoded_rows, missing_id);
     return 0;
 }
@@ -6832,10 +7001,10 @@ int cmd_flash_plan_info(int argc, char *argv[]) {
     std::optional<std::filesystem::path> plan_path;
     std::optional<std::filesystem::path> def_path;
     std::optional<std::filesystem::path> source_path;
-    std::optional<std::string>           profile_arg;
+    std::optional<std::string> profile_arg;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require_arg = [&](char const *name) -> char const * {
+        auto const require_arg = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "flash-plan-info: %s requires a value\n", name);
                 return nullptr;
@@ -6843,14 +7012,20 @@ int cmd_flash_plan_info(int argc, char *argv[]) {
             return argv[++i];
         };
         if (a == "--def") {
-            if (auto const *v = require_arg("--def"); v) def_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--def"); v)
+                def_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--source") {
-            if (auto const *v = require_arg("--source"); v) source_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--source"); v)
+                source_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--profile") {
-            if (auto const *v = require_arg("--profile"); v) profile_arg = std::string{v};
-            else return 2;
+            if (auto const *v = require_arg("--profile"); v)
+                profile_arg = std::string{v};
+            else
+                return 2;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "flash-plan-info: unknown option: %s\n", argv[i]);
             return 2;
@@ -6875,34 +7050,24 @@ int cmd_flash_plan_info(int argc, char *argv[]) {
     }
     auto const r = st::flash::read_plan(*plan_path);
     if (!r.has_value()) {
-        std::fprintf(stderr, "flash-plan-info: %s\n",
-                     r.error().to_string().c_str());
+        std::fprintf(stderr, "flash-plan-info: %s\n", r.error().to_string().c_str());
         return 1;
     }
     auto const &p = *r;
     std::printf("Plan: %s\n", plan_path->string().c_str());
-    std::printf("  session            = 0x%02X\n",
-                static_cast<unsigned>(p.session));
-    std::printf("  data_format        = 0x%02X\n",
-                static_cast<unsigned>(p.data_format));
-    std::printf("  silence_bus        = %s\n",
-                p.silence_bus ? "true" : "false");
-    std::printf("  verify_after_write = %s\n",
-                p.verify_after_write ? "true" : "false");
-    std::printf("  dry_run            = %s\n",
-                p.dry_run ? "true" : "false");
-    std::printf("  block_size_hint    = %u\n",
-                static_cast<unsigned>(p.block_size_hint));
-    std::printf("  verify_chunk_size  = 0x%X\n",
-                static_cast<unsigned>(p.verify_chunk_size));
+    std::printf("  session            = 0x%02X\n", static_cast<unsigned>(p.session));
+    std::printf("  data_format        = 0x%02X\n", static_cast<unsigned>(p.data_format));
+    std::printf("  silence_bus        = %s\n", p.silence_bus ? "true" : "false");
+    std::printf("  verify_after_write = %s\n", p.verify_after_write ? "true" : "false");
+    std::printf("  dry_run            = %s\n", p.dry_run ? "true" : "false");
+    std::printf("  block_size_hint    = %u\n", static_cast<unsigned>(p.block_size_hint));
+    std::printf("  verify_chunk_size  = 0x%X\n", static_cast<unsigned>(p.verify_chunk_size));
     std::size_t total_bytes = 0;
     std::printf("\nSector writes (%zu):\n", p.writes.size());
     for (std::size_t i = 0; i < p.writes.size(); ++i) {
         auto const &w = p.writes[i];
-        std::printf("  [%zu] 0x%08X .. 0x%08X  (%u bytes)\n",
-                    i, w.sector.address,
-                    w.sector.address + w.sector.length,
-                    static_cast<unsigned>(w.sector.length));
+        std::printf("  [%zu] 0x%08X .. 0x%08X  (%u bytes)\n", i, w.sector.address,
+                    w.sector.address + w.sector.length, static_cast<unsigned>(w.sector.length));
         total_bytes += w.sector.length;
     }
     std::printf("  total              = %zu bytes\n", total_bytes);
@@ -6913,7 +7078,8 @@ int cmd_flash_plan_info(int argc, char *argv[]) {
     if (def_path.has_value() || source_path.has_value() || profile_arg.has_value()) {
         if (!def_path.has_value() || !source_path.has_value()) {
             std::fputs("\nflash-plan-info: policy preview requires both "
-                       "--def and --source\n", stderr);
+                       "--def and --source\n",
+                       stderr);
             return 2;
         }
         auto profile = st::policy::Profile::MotorsportOnly;
@@ -6921,10 +7087,10 @@ int cmd_flash_plan_info(int argc, char *argv[]) {
             auto const parsed = st::policy::parse_profile(*profile_arg);
             if (!parsed.has_value()) {
                 std::fprintf(stderr,
-                    "flash-plan-info: unknown profile '%s' (valid: "
-                    "motorsport-only, alberta-ca, eu-roadworthy, "
-                    "california-us)\n",
-                    profile_arg->c_str());
+                             "flash-plan-info: unknown profile '%s' (valid: "
+                             "motorsport-only, alberta-ca, eu-roadworthy, "
+                             "california-us)\n",
+                             profile_arg->c_str());
                 return 2;
             }
             profile = *parsed;
@@ -6935,25 +7101,38 @@ int cmd_flash_plan_info(int argc, char *argv[]) {
         }
         auto const src = st::Rom::from_file(*source_path);
         if (!src.has_value()) {
-            std::fprintf(stderr, "flash-plan-info: %s\n",
-                         src.error().to_string().c_str());
+            std::fprintf(stderr, "flash-plan-info: %s\n", src.error().to_string().c_str());
             return 1;
         }
         auto const d = st::flash::evaluate_plan_policy(p, *def, src->data(), profile);
         std::printf("\nPolicy preview (profile=%s):\n",
                     std::string{st::policy::profile_name(profile)}.c_str());
         std::printf("  engine_safety_tables = %zu", d.engine_safety_tables.size());
-        for (auto const &id : d.engine_safety_tables) std::printf(" %s", id.c_str());
+        for (auto const &id : d.engine_safety_tables)
+            std::printf(" %s", id.c_str());
         std::printf("\n  emissions_tables     = %zu", d.emissions_tables.size());
-        for (auto const &id : d.emissions_tables)     std::printf(" %s", id.c_str());
+        for (auto const &id : d.emissions_tables)
+            std::printf(" %s", id.c_str());
         char const *action = "?";
         switch (d.overall_action) {
-            case st::policy::Action::Silent:            action = "silent"; break;
-            case st::policy::Action::Badge:             action = "badge"; break;
-            case st::policy::Action::Warn:              action = "warn"; break;
-            case st::policy::Action::Confirm:           action = "confirm"; break;
-            case st::policy::Action::ConfirmWithReason: action = "confirm+reason"; break;
-            case st::policy::Action::Block:             action = "block"; break;
+        case st::policy::Action::Silent:
+            action = "silent";
+            break;
+        case st::policy::Action::Badge:
+            action = "badge";
+            break;
+        case st::policy::Action::Warn:
+            action = "warn";
+            break;
+        case st::policy::Action::Confirm:
+            action = "confirm";
+            break;
+        case st::policy::Action::ConfirmWithReason:
+            action = "confirm+reason";
+            break;
+        case st::policy::Action::Block:
+            action = "block";
+            break;
         }
         std::printf("\n  overall_action       = %s\n", action);
     }
@@ -6970,8 +7149,7 @@ int cmd_flash_manifest_info(int argc, char *argv[]) {
         } else if (!manifest_path.has_value()) {
             manifest_path = std::filesystem::path{argv[i]};
         } else {
-            std::fprintf(stderr,
-                "flash-manifest-info: extra positional argument: %s\n", argv[i]);
+            std::fprintf(stderr, "flash-manifest-info: extra positional argument: %s\n", argv[i]);
             return 2;
         }
     }
@@ -6983,8 +7161,7 @@ int cmd_flash_manifest_info(int argc, char *argv[]) {
     }
     auto const r = st::flash::read_manifest(*manifest_path);
     if (!r.has_value()) {
-        std::fprintf(stderr, "flash-manifest-info: %s\n",
-                     r.error().to_string().c_str());
+        std::fprintf(stderr, "flash-manifest-info: %s\n", r.error().to_string().c_str());
         return 1;
     }
     auto const &m = *r;
@@ -7002,23 +7179,22 @@ int cmd_flash_manifest_info(int argc, char *argv[]) {
         std::printf("  policy_reason     = %s\n", m.policy_reason.c_str());
     }
     std::size_t transferred = 0;
-    std::size_t verified    = 0;
-    std::size_t bytes       = 0;
+    std::size_t verified = 0;
+    std::size_t bytes = 0;
     for (auto const &e : m.entries) {
-        if (e.transferred) ++transferred;
-        if (e.verified)    ++verified;
+        if (e.transferred)
+            ++transferred;
+        if (e.verified)
+            ++verified;
         bytes += e.sector.length;
     }
-    std::printf("\nEntries: %zu  (transferred %zu, verified %zu, %zu bytes)\n",
-                m.entries.size(), transferred, verified, bytes);
+    std::printf("\nEntries: %zu  (transferred %zu, verified %zu, %zu bytes)\n", m.entries.size(),
+                transferred, verified, bytes);
     for (std::size_t i = 0; i < m.entries.size(); ++i) {
         auto const &e = m.entries[i];
-        std::printf("  [%zu] 0x%08X..0x%08X  crc=0x%08X  transferred=%s  verified=%s\n",
-                    i, e.sector.address,
-                    e.sector.address + e.sector.length,
-                    e.data_crc32,
-                    e.transferred ? "true" : "false",
-                    e.verified    ? "true" : "false");
+        std::printf("  [%zu] 0x%08X..0x%08X  crc=0x%08X  transferred=%s  verified=%s\n", i,
+                    e.sector.address, e.sector.address + e.sector.length, e.data_crc32,
+                    e.transferred ? "true" : "false", e.verified ? "true" : "false");
     }
     return 0;
 }
@@ -7027,12 +7203,12 @@ int cmd_flash_delta(int argc, char *argv[]) {
     std::optional<std::filesystem::path> source_path;
     std::optional<std::filesystem::path> target_path;
     std::optional<std::filesystem::path> output_path;
-    std::uint32_t                        sector_size  = 0x1000;
-    std::uint32_t                        base_address = 0;
+    std::uint32_t sector_size = 0x1000;
+    std::uint32_t base_address = 0;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require_arg = [&](char const *name) -> char const * {
+        auto const require_arg = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "flash-delta: %s requires a value\n", name);
                 return nullptr;
@@ -7041,7 +7217,8 @@ int cmd_flash_delta(int argc, char *argv[]) {
         };
         if (a == "--sector-size") {
             auto const *v = require_arg("--sector-size");
-            if (v == nullptr) return 2;
+            if (v == nullptr)
+                return 2;
             std::uint32_t val = 0;
             std::string_view sv{v};
             int base = 10;
@@ -7049,8 +7226,7 @@ int cmd_flash_delta(int argc, char *argv[]) {
                 sv.remove_prefix(2);
                 base = 16;
             }
-            auto const res = std::from_chars(sv.data(), sv.data() + sv.size(),
-                                              val, base);
+            auto const res = std::from_chars(sv.data(), sv.data() + sv.size(), val, base);
             if (res.ec != std::errc{} || val == 0) {
                 std::fprintf(stderr, "flash-delta: --sector-size must be a positive integer\n");
                 return 2;
@@ -7058,7 +7234,8 @@ int cmd_flash_delta(int argc, char *argv[]) {
             sector_size = val;
         } else if (a == "--base-address") {
             auto const *v = require_arg("--base-address");
-            if (v == nullptr) return 2;
+            if (v == nullptr)
+                return 2;
             std::uint32_t val = 0;
             std::string_view sv{v};
             int base = 10;
@@ -7066,8 +7243,7 @@ int cmd_flash_delta(int argc, char *argv[]) {
                 sv.remove_prefix(2);
                 base = 16;
             }
-            auto const res = std::from_chars(sv.data(), sv.data() + sv.size(),
-                                              val, base);
+            auto const res = std::from_chars(sv.data(), sv.data() + sv.size(), val, base);
             if (res.ec != std::errc{}) {
                 std::fprintf(stderr, "flash-delta: --base-address must be an integer\n");
                 return 2;
@@ -7109,57 +7285,46 @@ int cmd_flash_delta(int argc, char *argv[]) {
         return 1;
     }
     if (src->size() != tgt->size()) {
-        std::fprintf(stderr,
-                     "flash-delta: source size (%zu) != target size (%zu)\n",
-                     src->size(), tgt->size());
+        std::fprintf(stderr, "flash-delta: source size (%zu) != target size (%zu)\n", src->size(),
+                     tgt->size());
         return 1;
     }
-    auto const sectors = st::flash::Flasher::compute_delta(
-        src->data(), tgt->data(), sector_size, base_address);
+    auto const sectors =
+        st::flash::Flasher::compute_delta(src->data(), tgt->data(), sector_size, base_address);
 
     st::flash::FlashPlan plan;
     plan.writes.reserve(sectors.size());
     for (auto const &s : sectors) {
         st::flash::SectorWrite sw;
         sw.sector = s;
-        std::size_t const off =
-            static_cast<std::size_t>(s.address - base_address);
+        std::size_t const off = static_cast<std::size_t>(s.address - base_address);
         sw.data.assign(tgt->data().begin() + static_cast<std::ptrdiff_t>(off),
-                       tgt->data().begin()
-                           + static_cast<std::ptrdiff_t>(off + s.length));
+                       tgt->data().begin() + static_cast<std::ptrdiff_t>(off + s.length));
         plan.writes.push_back(std::move(sw));
     }
 
     if (output_path.has_value()) {
         if (plan.writes.empty()) {
             std::fputs("flash-delta: source and target are identical; "
-                       "no plan written\n", stderr);
+                       "no plan written\n",
+                       stderr);
             return 0;
         }
         if (auto s = st::flash::write_plan(*output_path, plan); !s.has_value()) {
-            std::fprintf(stderr, "flash-delta: %s\n",
-                         s.error().to_string().c_str());
+            std::fprintf(stderr, "flash-delta: %s\n", s.error().to_string().c_str());
             return 1;
         }
-        std::fprintf(stderr,
-                     "flash-delta: %zu sector(s), %zu bytes, wrote %s\n",
-                     plan.writes.size(),
-                     std::accumulate(plan.writes.begin(), plan.writes.end(),
-                                     std::size_t{0},
-                                     [](std::size_t acc, auto const &w) {
-                                         return acc + w.sector.length;
-                                     }),
-                     output_path->string().c_str());
+        std::fprintf(
+            stderr, "flash-delta: %zu sector(s), %zu bytes, wrote %s\n", plan.writes.size(),
+            std::accumulate(plan.writes.begin(), plan.writes.end(), std::size_t{0},
+                            [](std::size_t acc, auto const &w) { return acc + w.sector.length; }),
+            output_path->string().c_str());
     } else {
         std::fputs(st::flash::format_plan(plan).c_str(), stdout);
-        std::fprintf(stderr,
-                     "flash-delta: %zu sector(s), %zu bytes\n",
-                     plan.writes.size(),
-                     std::accumulate(plan.writes.begin(), plan.writes.end(),
-                                     std::size_t{0},
-                                     [](std::size_t acc, auto const &w) {
-                                         return acc + w.sector.length;
-                                     }));
+        std::fprintf(
+            stderr, "flash-delta: %zu sector(s), %zu bytes\n", plan.writes.size(),
+            std::accumulate(plan.writes.begin(), plan.writes.end(), std::size_t{0},
+                            [](std::size_t acc, auto const &w) { return acc + w.sector.length; }));
     }
     return 0;
 }
@@ -7185,8 +7350,7 @@ int cmd_flash_resume(int argc, char *argv[]) {
         } else if (!journal_path.has_value()) {
             journal_path = std::filesystem::path{argv[i]};
         } else {
-            std::fprintf(stderr, "flash-resume: extra positional argument: %s\n",
-                         argv[i]);
+            std::fprintf(stderr, "flash-resume: extra positional argument: %s\n", argv[i]);
             return 2;
         }
     }
@@ -7200,27 +7364,25 @@ int cmd_flash_resume(int argc, char *argv[]) {
 
     auto const original = st::flash::read_plan(*plan_path);
     if (!original.has_value()) {
-        std::fprintf(stderr, "flash-resume: %s\n",
-                     original.error().to_string().c_str());
+        std::fprintf(stderr, "flash-resume: %s\n", original.error().to_string().c_str());
         return 1;
     }
     auto const journal = st::flash::read_manifest(*journal_path);
     if (!journal.has_value()) {
-        std::fprintf(stderr, "flash-resume: %s\n",
-                     journal.error().to_string().c_str());
+        std::fprintf(stderr, "flash-resume: %s\n", journal.error().to_string().c_str());
         return 1;
     }
 
     auto resumed = st::flash::plan_resume(*original, *journal);
     if (!resumed.has_value()) {
-        std::fprintf(stderr, "flash-resume: %s\n",
-                     resumed.error().to_string().c_str());
+        std::fprintf(stderr, "flash-resume: %s\n", resumed.error().to_string().c_str());
         return 1;
     }
 
     if (resumed->writes.empty()) {
         std::fputs("flash-resume: every sector in the original plan is already "
-                   "transferred and verified; no resume needed\n", stderr);
+                   "transferred and verified; no resume needed\n",
+                   stderr);
         return 0;
     }
 
@@ -7231,28 +7393,20 @@ int cmd_flash_resume(int argc, char *argv[]) {
     resumed->journal_path.clear();
 
     std::size_t const bytes =
-        std::accumulate(resumed->writes.begin(), resumed->writes.end(),
-                        std::size_t{0},
-                        [](std::size_t acc, auto const &w) {
-                            return acc + w.sector.length;
-                        });
+        std::accumulate(resumed->writes.begin(), resumed->writes.end(), std::size_t{0},
+                        [](std::size_t acc, auto const &w) { return acc + w.sector.length; });
 
     if (output_path.has_value()) {
-        if (auto s = st::flash::write_plan(*output_path, *resumed);
-            !s.has_value()) {
-            std::fprintf(stderr, "flash-resume: %s\n",
-                         s.error().to_string().c_str());
+        if (auto s = st::flash::write_plan(*output_path, *resumed); !s.has_value()) {
+            std::fprintf(stderr, "flash-resume: %s\n", s.error().to_string().c_str());
             return 1;
         }
-        std::fprintf(stderr,
-                     "flash-resume: %zu sector(s), %zu bytes, wrote %s\n",
-                     resumed->writes.size(), bytes,
-                     output_path->string().c_str());
+        std::fprintf(stderr, "flash-resume: %zu sector(s), %zu bytes, wrote %s\n",
+                     resumed->writes.size(), bytes, output_path->string().c_str());
     } else {
         std::fputs(st::flash::format_plan(*resumed).c_str(), stdout);
-        std::fprintf(stderr,
-                     "flash-resume: %zu sector(s), %zu bytes\n",
-                     resumed->writes.size(), bytes);
+        std::fprintf(stderr, "flash-resume: %zu sector(s), %zu bytes\n", resumed->writes.size(),
+                     bytes);
     }
     return 0;
 }
@@ -7271,38 +7425,30 @@ struct UdsTracePair {
     std::vector<std::uint8_t> response;
 };
 
-bool parse_uds_trace(std::filesystem::path const &path,
-                     std::vector<UdsTracePair>   &out_pairs,
-                     std::string                 &err) {
+bool parse_uds_trace(std::filesystem::path const &path, std::vector<UdsTracePair> &out_pairs,
+                     std::string &err) {
     std::ifstream in{path};
     if (!in) {
         err = "flash-apply: cannot open trace file: " + path.string();
         return false;
     }
-    auto const parse_hex_line = [&](std::string_view body,
-                                     std::vector<std::uint8_t> &dst,
-                                     int line_no) -> bool {
+    auto const parse_hex_line = [&](std::string_view body, std::vector<std::uint8_t> &dst,
+                                    int line_no) -> bool {
         std::istringstream iss{std::string{body}};
-        std::string        tok;
+        std::string tok;
         while (iss >> tok) {
             std::string_view sv{tok};
             if (sv.starts_with("0x") || sv.starts_with("0X")) {
                 sv.remove_prefix(2);
             }
             if (sv.size() != 2) {
-                err = "flash-apply: bad hex byte '" + tok + "' on line "
-                      + std::to_string(line_no);
+                err = "flash-apply: bad hex byte '" + tok + "' on line " + std::to_string(line_no);
                 return false;
             }
-            unsigned   value = 0;
-            auto const res   = std::from_chars(sv.data(),
-                                                sv.data() + sv.size(),
-                                                value, 16);
-            if (res.ec != std::errc{}
-                || res.ptr != sv.data() + sv.size()
-                || value > 0xFFU) {
-                err = "flash-apply: bad hex byte '" + tok + "' on line "
-                      + std::to_string(line_no);
+            unsigned value = 0;
+            auto const res = std::from_chars(sv.data(), sv.data() + sv.size(), value, 16);
+            if (res.ec != std::errc{} || res.ptr != sv.data() + sv.size() || value > 0xFFU) {
+                err = "flash-apply: bad hex byte '" + tok + "' on line " + std::to_string(line_no);
                 return false;
             }
             dst.push_back(static_cast<std::uint8_t>(value));
@@ -7311,8 +7457,8 @@ bool parse_uds_trace(std::filesystem::path const &path,
     };
 
     std::string line;
-    int         line_no  = 0;
-    bool        expect_request = true;
+    int line_no = 0;
+    bool expect_request = true;
     UdsTracePair pending;
     while (std::getline(in, line)) {
         ++line_no;
@@ -7321,42 +7467,44 @@ bool parse_uds_trace(std::filesystem::path const &path,
         }
         // Trim leading whitespace.
         std::size_t i = 0;
-        while (i < line.size()
-               && std::isspace(static_cast<unsigned char>(line[i]))) {
+        while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) {
             ++i;
         }
-        if (i >= line.size()) continue;  // blank
+        if (i >= line.size())
+            continue; // blank
         char const dir = line[i];
         if (dir != '>' && dir != '<') {
-            err = "flash-apply: line " + std::to_string(line_no)
-                  + " must start with '>' or '<' after any whitespace";
+            err = "flash-apply: line " + std::to_string(line_no) +
+                  " must start with '>' or '<' after any whitespace";
             return false;
         }
         std::string_view const body{line.data() + i + 1, line.size() - i - 1};
         if (dir == '>') {
             if (!expect_request) {
-                err = "flash-apply: line " + std::to_string(line_no)
-                      + ": two requests in a row (expected '<')";
+                err = "flash-apply: line " + std::to_string(line_no) +
+                      ": two requests in a row (expected '<')";
                 return false;
             }
             pending = UdsTracePair{};
-            if (!parse_hex_line(body, pending.request, line_no)) return false;
+            if (!parse_hex_line(body, pending.request, line_no))
+                return false;
             if (pending.request.empty()) {
-                err = "flash-apply: line " + std::to_string(line_no)
-                      + ": request must have at least one byte";
+                err = "flash-apply: line " + std::to_string(line_no) +
+                      ": request must have at least one byte";
                 return false;
             }
             expect_request = false;
         } else {
             if (expect_request) {
-                err = "flash-apply: line " + std::to_string(line_no)
-                      + ": response with no preceding request";
+                err = "flash-apply: line " + std::to_string(line_no) +
+                      ": response with no preceding request";
                 return false;
             }
-            if (!parse_hex_line(body, pending.response, line_no)) return false;
+            if (!parse_hex_line(body, pending.response, line_no))
+                return false;
             if (pending.response.empty()) {
-                err = "flash-apply: line " + std::to_string(line_no)
-                      + ": response must have at least one byte";
+                err = "flash-apply: line " + std::to_string(line_no) +
+                      ": response must have at least one byte";
                 return false;
             }
             out_pairs.push_back(std::move(pending));
@@ -7369,8 +7517,7 @@ bool parse_uds_trace(std::filesystem::path const &path,
         return false;
     }
     if (out_pairs.empty()) {
-        err = "flash-apply: trace file contains no exchanges: "
-              + path.string();
+        err = "flash-apply: trace file contains no exchanges: " + path.string();
         return false;
     }
     return true;
@@ -7380,34 +7527,25 @@ namespace {
 // Print the FlashReport from a successful or failed ExecuteOutcome. Shared
 // between flash-apply and project-flash so the summary format stays
 // identical across both entry points.
-void print_flash_report(char const                       *cmd,
-                        st::flash::ExecuteOutcome const  &outcome) {
+void print_flash_report(char const *cmd, st::flash::ExecuteOutcome const &outcome) {
     auto const &report = outcome.report;
     std::printf("%s: %s\n", cmd, outcome.ok() ? "SUCCESS" : "FAILED");
-    std::printf("  entered_session    = %s\n",
-                report.entered_session ? "true" : "false");
-    std::printf("  silenced_bus       = %s\n",
-                report.silenced_bus ? "true" : "false");
-    std::printf("  restored_bus       = %s\n",
-                report.restored_bus ? "true" : "false");
+    std::printf("  entered_session    = %s\n", report.entered_session ? "true" : "false");
+    std::printf("  silenced_bus       = %s\n", report.silenced_bus ? "true" : "false");
+    std::printf("  restored_bus       = %s\n", report.restored_bus ? "true" : "false");
     std::printf("  bytes_transferred  = %zu\n", report.bytes_transferred);
     std::printf("  sectors            = %zu\n", report.sectors.size());
     for (std::size_t i = 0; i < report.sectors.size(); ++i) {
         auto const &so = report.sectors[i];
         std::printf("    [%zu] 0x%08X .. 0x%08X  erased=%d downloaded=%d "
                     "transferred=%d exited=%d check_deps=%d verified=%d\n",
-                    i, so.sector.address,
-                    so.sector.address + so.sector.length,
-                    static_cast<int>(so.erased),
-                    static_cast<int>(so.downloaded),
-                    static_cast<int>(so.transferred),
-                    static_cast<int>(so.exited),
-                    static_cast<int>(so.check_deps_passed),
-                    static_cast<int>(so.verified));
+                    i, so.sector.address, so.sector.address + so.sector.length,
+                    static_cast<int>(so.erased), static_cast<int>(so.downloaded),
+                    static_cast<int>(so.transferred), static_cast<int>(so.exited),
+                    static_cast<int>(so.check_deps_passed), static_cast<int>(so.verified));
     }
     if (!outcome.ok()) {
-        std::fprintf(stderr, "%s: %s\n", cmd,
-                     outcome.error->to_string().c_str());
+        std::fprintf(stderr, "%s: %s\n", cmd, outcome.error->to_string().c_str());
     }
 }
 
@@ -7416,51 +7554,44 @@ void print_flash_report(char const                       *cmd,
 // exit code if the plan is REFUSED by the active policy. `confirm` and
 // `reason` are user-supplied: the linter checks they match what the
 // profile demands (Confirm → --confirm; ConfirmWithReason → both).
-int run_policy_gate(char const                          *cmd,
-                    st::flash::FlashPlan const          &plan,
-                    st::Definition const                &def,
-                    std::span<std::uint8_t const>        source_rom,
-                    st::policy::Profile                  profile,
-                    bool                                 confirm,
-                    std::optional<std::string> const    &reason) {
+int run_policy_gate(char const *cmd, st::flash::FlashPlan const &plan, st::Definition const &def,
+                    std::span<std::uint8_t const> source_rom, st::policy::Profile profile,
+                    bool confirm, std::optional<std::string> const &reason) {
     auto const d = st::flash::evaluate_plan_policy(plan, def, source_rom, profile);
 
     if (!d.engine_safety_tables.empty()) {
-        std::fprintf(stderr,
-            "%s: REFUSED: plan changes engine-safety-critical tables: ",
-            cmd);
+        std::fprintf(stderr, "%s: REFUSED: plan changes engine-safety-critical tables: ", cmd);
         for (auto const &id : d.engine_safety_tables) {
             std::fprintf(stderr, "%s ", id.c_str());
         }
-        std::fprintf(stderr,
-            "\nEngine-safety violations block in every profile (see "
-            "docs/06-legal-ethics.md).\n");
+        std::fprintf(stderr, "\nEngine-safety violations block in every profile (see "
+                             "docs/06-legal-ethics.md).\n");
         return 3;
     }
     using A = st::policy::Action;
     auto const profile_str = std::string{st::policy::profile_name(profile)};
     if (d.overall_action == A::Block) {
-        std::fprintf(stderr, "%s: REFUSED by policy under profile '%s'.\n",
-                     cmd, profile_str.c_str());
+        std::fprintf(stderr, "%s: REFUSED by policy under profile '%s'.\n", cmd,
+                     profile_str.c_str());
         return 3;
     }
     if (d.overall_action == A::Confirm && !confirm) {
         std::fprintf(stderr,
-            "%s: profile '%s' requires --confirm to flash a plan that "
-            "changes emissions-relevant tables: ",
-            cmd, profile_str.c_str());
+                     "%s: profile '%s' requires --confirm to flash a plan that "
+                     "changes emissions-relevant tables: ",
+                     cmd, profile_str.c_str());
         for (auto const &id : d.emissions_tables) {
             std::fprintf(stderr, "%s ", id.c_str());
         }
         std::fputc('\n', stderr);
         return 3;
     }
-    if (d.overall_action == A::ConfirmWithReason
-            && (!confirm || !reason.has_value() || reason->empty())) {
+    if (d.overall_action == A::ConfirmWithReason &&
+        (!confirm || !reason.has_value() || reason->empty())) {
         std::fprintf(stderr,
-            "%s: profile '%s' requires --confirm AND a non-empty --reason "
-            "to flash a plan that changes emissions-relevant tables: ",
-            cmd, profile_str.c_str());
+                     "%s: profile '%s' requires --confirm AND a non-empty --reason "
+                     "to flash a plan that changes emissions-relevant tables: ",
+                     cmd, profile_str.c_str());
         for (auto const &id : d.emissions_tables) {
             std::fprintf(stderr, "%s ", id.c_str());
         }
@@ -7468,17 +7599,15 @@ int run_policy_gate(char const                          *cmd,
         return 3;
     }
     if (!d.emissions_tables.empty()) {
-        std::fprintf(stderr,
+        std::fprintf(
+            stderr,
             "%s: policy(%s) flagged emissions-relevant edits in %zu "
             "table(s); proceeding (%s)%s%s.\n",
             cmd, profile_str.c_str(), d.emissions_tables.size(),
             d.overall_action == A::ConfirmWithReason
                 ? "confirmed + reason"
-                : (d.overall_action == A::Confirm
-                      ? "confirmed"
-                      : "no confirmation required"),
-            reason.has_value() ? ", reason=" : "",
-            reason.has_value() ? reason->c_str() : "");
+                : (d.overall_action == A::Confirm ? "confirmed" : "no confirmation required"),
+            reason.has_value() ? ", reason=" : "", reason.has_value() ? reason->c_str() : "");
     }
     return 0;
 }
@@ -7489,11 +7618,11 @@ int cmd_project_flash(int argc, char *argv[]) {
     std::optional<std::filesystem::path> trace_path;
     std::optional<std::filesystem::path> manifest_path;
     std::optional<std::filesystem::path> journal_path;
-    bool                                 confirm = false;
-    bool                                 dry_run = false;
-    std::optional<std::string>           reason;
-    std::uint32_t                        sector_size  = 0x1000;
-    std::uint32_t                        base_address = 0;
+    bool confirm = false;
+    bool dry_run = false;
+    std::optional<std::string> reason;
+    std::uint32_t sector_size = 0x1000;
+    std::uint32_t base_address = 0;
 
     auto const parse_uint = [](char const *raw, std::uint32_t &out) -> bool {
         std::string_view sv{raw};
@@ -7502,8 +7631,7 @@ int cmd_project_flash(int argc, char *argv[]) {
             sv.remove_prefix(2);
             base = 16;
         }
-        auto const res = std::from_chars(sv.data(), sv.data() + sv.size(),
-                                          out, base);
+        auto const res = std::from_chars(sv.data(), sv.data() + sv.size(), out, base);
         return res.ec == std::errc{} && res.ptr == sv.data() + sv.size();
     };
 
@@ -7517,24 +7645,33 @@ int cmd_project_flash(int argc, char *argv[]) {
             return argv[++i];
         };
         if (a == "--trace") {
-            if (auto const *v = require_arg("--trace"); v) trace_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--trace"); v)
+                trace_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--manifest") {
-            if (auto const *v = require_arg("--manifest"); v) manifest_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--manifest"); v)
+                manifest_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--journal") {
-            if (auto const *v = require_arg("--journal"); v) journal_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--journal"); v)
+                journal_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--reason") {
-            if (auto const *v = require_arg("--reason"); v) reason = std::string{v};
-            else return 2;
+            if (auto const *v = require_arg("--reason"); v)
+                reason = std::string{v};
+            else
+                return 2;
         } else if (a == "--confirm") {
             confirm = true;
         } else if (a == "--dry-run") {
             dry_run = true;
         } else if (a == "--sector-size") {
             auto const *v = require_arg("--sector-size");
-            if (v == nullptr) return 2;
+            if (v == nullptr)
+                return 2;
             std::uint32_t val = 0;
             if (!parse_uint(v, val) || val == 0) {
                 std::fprintf(stderr, "project-flash: --sector-size must be a positive integer\n");
@@ -7543,7 +7680,8 @@ int cmd_project_flash(int argc, char *argv[]) {
             sector_size = val;
         } else if (a == "--base-address") {
             auto const *v = require_arg("--base-address");
-            if (v == nullptr) return 2;
+            if (v == nullptr)
+                return 2;
             if (!parse_uint(v, base_address)) {
                 std::fprintf(stderr, "project-flash: --base-address must be an integer\n");
                 return 2;
@@ -7573,8 +7711,7 @@ int cmd_project_flash(int argc, char *argv[]) {
 
     auto project = st::Project::open(*project_dir);
     if (!project.has_value()) {
-        std::fprintf(stderr, "project-flash: %s\n",
-                     project.error().to_string().c_str());
+        std::fprintf(stderr, "project-flash: %s\n", project.error().to_string().c_str());
         return 1;
     }
 
@@ -7582,15 +7719,13 @@ int cmd_project_flash(int argc, char *argv[]) {
     // -> nothing to flash; treat as no-op success.
     if (project->source_rom().size() != project->working_rom().size()) {
         std::fprintf(stderr,
-            "project-flash: source/working size mismatch (%zu vs %zu); "
-            "abort\n",
-            project->source_rom().size(), project->working_rom().size());
+                     "project-flash: source/working size mismatch (%zu vs %zu); "
+                     "abort\n",
+                     project->source_rom().size(), project->working_rom().size());
         return 1;
     }
     auto const sectors = st::flash::Flasher::compute_delta(
-        project->source_rom().data(),
-        project->working_rom().data(),
-        sector_size, base_address);
+        project->source_rom().data(), project->working_rom().data(), sector_size, base_address);
     if (sectors.empty()) {
         std::printf("project-flash: working ROM matches source — nothing "
                     "to flash.\n");
@@ -7603,12 +7738,10 @@ int cmd_project_flash(int argc, char *argv[]) {
     for (auto const &s : sectors) {
         st::flash::SectorWrite sw;
         sw.sector = s;
-        std::size_t const off =
-            static_cast<std::size_t>(s.address - base_address);
-        sw.data.assign(
-            project->working_rom().data().begin() + static_cast<std::ptrdiff_t>(off),
-            project->working_rom().data().begin()
-                + static_cast<std::ptrdiff_t>(off + s.length));
+        std::size_t const off = static_cast<std::size_t>(s.address - base_address);
+        sw.data.assign(project->working_rom().data().begin() + static_cast<std::ptrdiff_t>(off),
+                       project->working_rom().data().begin() +
+                           static_cast<std::ptrdiff_t>(off + s.length));
         plan.writes.push_back(std::move(sw));
     }
     if (journal_path.has_value()) {
@@ -7617,29 +7750,26 @@ int cmd_project_flash(int argc, char *argv[]) {
 
     // Policy gate uses the profile baked into the project.
     if (auto rc = run_policy_gate("project-flash", plan, project->definition(),
-                                  project->source_rom().data(),
-                                  project->policy_profile(),
-                                  confirm, reason);
+                                  project->source_rom().data(), project->policy_profile(), confirm,
+                                  reason);
         rc != 0) {
         return rc;
     }
 
     if (preview_only) {
-        std::printf("project-flash: preview only (no --trace supplied); "
-                    "policy gate cleared %zu sector(s), %zu bytes. No "
-                    "transport contacted.\n",
-                    plan.writes.size(),
-                    std::accumulate(plan.writes.begin(), plan.writes.end(),
-                                    std::size_t{0},
-                                    [](std::size_t a, auto const &w) {
-                                        return a + w.data.size();
-                                    }));
+        std::printf(
+            "project-flash: preview only (no --trace supplied); "
+            "policy gate cleared %zu sector(s), %zu bytes. No "
+            "transport contacted.\n",
+            plan.writes.size(),
+            std::accumulate(plan.writes.begin(), plan.writes.end(), std::size_t{0},
+                            [](std::size_t a, auto const &w) { return a + w.data.size(); }));
         return 0;
     }
 
     // Replay trace through MockTransport, exactly like flash-apply.
     std::vector<UdsTracePair> pairs;
-    std::string               err;
+    std::string err;
     if (!parse_uds_trace(*trace_path, pairs, err)) {
         std::fputs(err.c_str(), stderr);
         std::fputc('\n', stderr);
@@ -7656,36 +7786,30 @@ int cmd_project_flash(int argc, char *argv[]) {
     }
 
     st::flash::Flasher flasher{mock};
-    auto const         outcome = flasher.execute(plan);
+    auto const outcome = flasher.execute(plan);
     print_flash_report("project-flash", outcome);
     if (!mock.exhausted()) {
-        std::fprintf(stderr,
-                     "project-flash: warning: %zu trace entries unused\n",
+        std::fprintf(stderr, "project-flash: warning: %zu trace entries unused\n",
                      mock.remaining());
     }
 
     // Optional manifest. plan_text is the rendered plan TOML so plan_crc32
     // is meaningful even though the plan was built in-memory.
     if (manifest_path.has_value()) {
-        auto const  plan_text = st::flash::format_plan(plan);
-        auto        manifest  =
-            st::flash::build_manifest(plan, plan_text, outcome.report);
+        auto const plan_text = st::flash::format_plan(plan);
+        auto manifest = st::flash::build_manifest(plan, plan_text, outcome.report);
         // Persist the audit trail: which profile gated this flash + the
         // operator-supplied justification (only set when --reason was given,
         // typically under california-us / EU ConfirmWithReason).
-        manifest.policy_profile = std::string{
-            st::policy::profile_name(project->policy_profile())};
+        manifest.policy_profile = std::string{st::policy::profile_name(project->policy_profile())};
         if (reason.has_value()) {
             manifest.policy_reason = *reason;
         }
-        if (auto s = st::flash::write_manifest(*manifest_path, manifest);
-            !s.has_value()) {
-            std::fprintf(stderr, "project-flash: %s\n",
-                         s.error().to_string().c_str());
+        if (auto s = st::flash::write_manifest(*manifest_path, manifest); !s.has_value()) {
+            std::fprintf(stderr, "project-flash: %s\n", s.error().to_string().c_str());
             return 1;
         }
-        std::fprintf(stderr, "project-flash: wrote manifest %s\n",
-                     manifest_path->string().c_str());
+        std::fprintf(stderr, "project-flash: wrote manifest %s\n", manifest_path->string().c_str());
     }
 
     return outcome.ok() ? 0 : 1;
@@ -7698,13 +7822,13 @@ int cmd_flash_apply(int argc, char *argv[]) {
     std::optional<std::filesystem::path> journal_path;
     std::optional<std::filesystem::path> def_path;
     std::optional<std::filesystem::path> source_path;
-    std::optional<std::string>           profile_arg;
-    bool                                 confirm  = false;
-    std::optional<std::string>           reason;
+    std::optional<std::string> profile_arg;
+    bool confirm = false;
+    std::optional<std::string> reason;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require_arg = [&](char const *name) -> char const * {
+        auto const require_arg = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "flash-apply: %s requires a value\n", name);
                 return nullptr;
@@ -7712,37 +7836,52 @@ int cmd_flash_apply(int argc, char *argv[]) {
             return argv[++i];
         };
         if (a == "--plan") {
-            if (auto const *v = require_arg("--plan"); v) plan_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--plan"); v)
+                plan_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--trace") {
-            if (auto const *v = require_arg("--trace"); v) trace_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--trace"); v)
+                trace_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--manifest") {
-            if (auto const *v = require_arg("--manifest"); v) manifest_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--manifest"); v)
+                manifest_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--journal") {
-            if (auto const *v = require_arg("--journal"); v) journal_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--journal"); v)
+                journal_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--def") {
-            if (auto const *v = require_arg("--def"); v) def_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--def"); v)
+                def_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--source") {
-            if (auto const *v = require_arg("--source"); v) source_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--source"); v)
+                source_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--profile") {
-            if (auto const *v = require_arg("--profile"); v) profile_arg = std::string{v};
-            else return 2;
+            if (auto const *v = require_arg("--profile"); v)
+                profile_arg = std::string{v};
+            else
+                return 2;
         } else if (a == "--confirm") {
             confirm = true;
         } else if (a == "--reason") {
-            if (auto const *v = require_arg("--reason"); v) reason = std::string{v};
-            else return 2;
+            if (auto const *v = require_arg("--reason"); v)
+                reason = std::string{v};
+            else
+                return 2;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "flash-apply: unknown option: %s\n", argv[i]);
             return 2;
         } else {
-            std::fprintf(stderr, "flash-apply: extra positional argument: %s\n",
-                         argv[i]);
+            std::fprintf(stderr, "flash-apply: extra positional argument: %s\n", argv[i]);
             return 2;
         }
     }
@@ -7759,8 +7898,7 @@ int cmd_flash_apply(int argc, char *argv[]) {
 
     auto plan = st::flash::read_plan(*plan_path);
     if (!plan.has_value()) {
-        std::fprintf(stderr, "flash-apply: %s\n",
-                     plan.error().to_string().c_str());
+        std::fprintf(stderr, "flash-apply: %s\n", plan.error().to_string().c_str());
         return 1;
     }
     if (journal_path.has_value()) {
@@ -7773,16 +7911,15 @@ int cmd_flash_apply(int argc, char *argv[]) {
     // the project instead of from a flag.
     if (profile_arg.has_value()) {
         if (!def_path.has_value() || !source_path.has_value()) {
-            std::fputs("flash-apply: --profile requires --def AND --source\n",
-                       stderr);
+            std::fputs("flash-apply: --profile requires --def AND --source\n", stderr);
             return 2;
         }
         auto const profile = st::policy::parse_profile(*profile_arg);
         if (!profile.has_value()) {
             std::fprintf(stderr,
-                "flash-apply: unknown profile '%s'. Known: motorsport-only, "
-                "alberta-ca, eu-roadworthy, california-us\n",
-                profile_arg->c_str());
+                         "flash-apply: unknown profile '%s'. Known: motorsport-only, "
+                         "alberta-ca, eu-roadworthy, california-us\n",
+                         profile_arg->c_str());
             return 2;
         }
         auto const def = st::Definition::from_file(resolve_def_path(*def_path));
@@ -7794,15 +7931,15 @@ int cmd_flash_apply(int argc, char *argv[]) {
             std::fprintf(stderr, "flash-apply: %s\n", src.error().to_string().c_str());
             return 1;
         }
-        if (auto rc = run_policy_gate("flash-apply", *plan, *def, src->data(),
-                                      *profile, confirm, reason);
+        if (auto rc =
+                run_policy_gate("flash-apply", *plan, *def, src->data(), *profile, confirm, reason);
             rc != 0) {
             return rc;
         }
     }
 
     std::vector<UdsTracePair> pairs;
-    std::string               err;
+    std::string err;
     if (!parse_uds_trace(*trace_path, pairs, err)) {
         std::fputs(err.c_str(), stderr);
         std::fputc('\n', stderr);
@@ -7811,8 +7948,7 @@ int cmd_flash_apply(int argc, char *argv[]) {
 
     st::transport::MockTransport mock;
     if (auto s = mock.open({}); !s.has_value()) {
-        std::fprintf(stderr, "flash-apply: mock open failed: %s\n",
-                     s.error().to_string().c_str());
+        std::fprintf(stderr, "flash-apply: mock open failed: %s\n", s.error().to_string().c_str());
         return 1;
     }
     for (auto &p : pairs) {
@@ -7820,13 +7956,11 @@ int cmd_flash_apply(int argc, char *argv[]) {
     }
 
     st::flash::Flasher flasher{mock};
-    auto const         outcome = flasher.execute(*plan);
+    auto const outcome = flasher.execute(*plan);
     print_flash_report("flash-apply", outcome);
     auto const &report = outcome.report;
     if (!mock.exhausted()) {
-        std::fprintf(stderr,
-                     "flash-apply: warning: %zu trace entries unused\n",
-                     mock.remaining());
+        std::fprintf(stderr, "flash-apply: warning: %zu trace entries unused\n", mock.remaining());
     }
 
     // Build a manifest of the run if requested. plan_text is the source
@@ -7835,8 +7969,7 @@ int cmd_flash_apply(int argc, char *argv[]) {
         std::ifstream pin{*plan_path, std::ios::binary};
         std::ostringstream pss;
         pss << pin.rdbuf();
-        auto manifest =
-            st::flash::build_manifest(*plan, pss.str(), report);
+        auto manifest = st::flash::build_manifest(*plan, pss.str(), report);
         // Persist the audit trail when a profile gated this flash. We only
         // populate `policy_profile` if --profile was supplied (so motorsport-
         // only ungated runs leave the manifest field blank, which means
@@ -7847,14 +7980,11 @@ int cmd_flash_apply(int argc, char *argv[]) {
                 manifest.policy_reason = *reason;
             }
         }
-        if (auto s = st::flash::write_manifest(*manifest_path, manifest);
-            !s.has_value()) {
-            std::fprintf(stderr, "flash-apply: %s\n",
-                         s.error().to_string().c_str());
+        if (auto s = st::flash::write_manifest(*manifest_path, manifest); !s.has_value()) {
+            std::fprintf(stderr, "flash-apply: %s\n", s.error().to_string().c_str());
             return 1;
         }
-        std::fprintf(stderr, "flash-apply: wrote manifest %s\n",
-                     manifest_path->string().c_str());
+        std::fprintf(stderr, "flash-apply: wrote manifest %s\n", manifest_path->string().c_str());
     }
 
     return outcome.ok() ? 0 : 1;
@@ -7870,8 +8000,7 @@ bool parse_uint32_arg(std::string_view sv, std::uint32_t &out) {
         sv.remove_prefix(2);
         base = 16;
     }
-    auto const res = std::from_chars(sv.data(), sv.data() + sv.size(),
-                                      out, base);
+    auto const res = std::from_chars(sv.data(), sv.data() + sv.size(), out, base);
     return res.ec == std::errc{} && res.ptr == sv.data() + sv.size();
 }
 
@@ -7882,7 +8011,8 @@ std::string hex_bytes_line(std::span<std::uint8_t const> bytes) {
     std::string out;
     out.reserve(bytes.size() * 3);
     for (std::size_t i = 0; i < bytes.size(); ++i) {
-        if (i > 0) out.push_back(' ');
+        if (i > 0)
+            out.push_back(' ');
         char buf[3];
         std::snprintf(buf, sizeof buf, "%02X", static_cast<unsigned>(bytes[i]));
         out.append(buf, 2);
@@ -7897,15 +8027,14 @@ std::string hex_bytes_line(std::span<std::uint8_t const> bytes) {
 // chunking matches whatever choose_block_payload() picks given the
 // plan's block_size_hint — same formula the orchestrator uses, so the
 // generated trace lines up exactly with what the orchestrator sends.
-void emit_happy_path_trace(st::flash::FlashPlan const &plan,
-                            std::ostream                &out) {
+void emit_happy_path_trace(st::flash::FlashPlan const &plan, std::ostream &out) {
     constexpr std::uint32_t kReportedMaxBlockLength = 0x1000;
-    constexpr std::uint32_t kReportedPayloadCap     = kReportedMaxBlockLength - 2U;
+    constexpr std::uint32_t kReportedPayloadCap = kReportedMaxBlockLength - 2U;
 
     auto const write_pair = [&](std::vector<std::uint8_t> const &req,
-                                 std::vector<std::uint8_t> const &resp,
-                                 char const *label) {
-        if (label != nullptr) out << "# " << label << "\n";
+                                std::vector<std::uint8_t> const &resp, char const *label) {
+        if (label != nullptr)
+            out << "# " << label << "\n";
         out << "> " << hex_bytes_line(req) << "\n";
         out << "< " << hex_bytes_line(resp) << "\n";
     };
@@ -7915,8 +8044,7 @@ void emit_happy_path_trace(st::flash::FlashPlan const &plan,
 
     // 1. DSC programming.
     write_pair(st::ecu::uds::build_dsc_request(plan.session),
-               {static_cast<std::uint8_t>(0x50),
-                static_cast<std::uint8_t>(plan.session)},
+               {static_cast<std::uint8_t>(0x50), static_cast<std::uint8_t>(plan.session)},
                "DSC programming");
 
     // 2. CC off.
@@ -7934,80 +8062,65 @@ void emit_happy_path_trace(st::flash::FlashPlan const &plan,
             opt.reserve(9);
             opt.push_back(0x44);
             for (int shift : {24, 16, 8, 0}) {
-                opt.push_back(static_cast<std::uint8_t>(
-                    (w.sector.address >> shift) & 0xFFU));
+                opt.push_back(static_cast<std::uint8_t>((w.sector.address >> shift) & 0xFFU));
             }
             for (int shift : {24, 16, 8, 0}) {
-                opt.push_back(static_cast<std::uint8_t>(
-                    (w.sector.length >> shift) & 0xFFU));
+                opt.push_back(static_cast<std::uint8_t>((w.sector.length >> shift) & 0xFFU));
             }
-            write_pair(st::ecu::uds::build_routine_control(
-                           st::ecu::uds::kRcStart,
-                           st::ecu::uds::kRidEraseMemory, opt),
-                       {0x71, 0x01, 0xFF, 0x00},
-                       "eraseMemory");
+            write_pair(st::ecu::uds::build_routine_control(st::ecu::uds::kRcStart,
+                                                           st::ecu::uds::kRidEraseMemory, opt),
+                       {0x71, 0x01, 0xFF, 0x00}, "eraseMemory");
 
             // 3b. RequestDownload. Reported max_block_length = 0x1000.
-            write_pair(st::ecu::uds::build_request_download(
-                           plan.data_format, w.sector.address, w.sector.length),
-                       {0x74, 0x20, 0x10, 0x00},
-                       "RequestDownload (max_block_length=0x1000)");
+            write_pair(st::ecu::uds::build_request_download(plan.data_format, w.sector.address,
+                                                            w.sector.length),
+                       {0x74, 0x20, 0x10, 0x00}, "RequestDownload (max_block_length=0x1000)");
 
             // 3c. Chunked TransferData. block_payload =
             //     min(reported - 2, block_size_hint), or just reported - 2
             //     when block_size_hint == 0. Matches choose_block_payload.
             std::uint32_t const block_payload =
-                (plan.block_size_hint == 0
-                    || kReportedPayloadCap < plan.block_size_hint)
+                (plan.block_size_hint == 0 || kReportedPayloadCap < plan.block_size_hint)
                     ? kReportedPayloadCap
                     : plan.block_size_hint;
             std::uint8_t counter = 1;
-            std::size_t  offset  = 0;
+            std::size_t offset = 0;
             while (offset < w.data.size()) {
                 std::size_t const remaining = w.data.size() - offset;
                 std::size_t const this_block =
                     remaining < block_payload ? remaining : block_payload;
-                std::span<std::uint8_t const> chunk{w.data.data() + offset,
-                                                     this_block};
-                write_pair(st::ecu::uds::build_transfer_data(counter, chunk),
-                           {0x76, counter},
+                std::span<std::uint8_t const> chunk{w.data.data() + offset, this_block};
+                write_pair(st::ecu::uds::build_transfer_data(counter, chunk), {0x76, counter},
                            offset == 0 ? "TransferData" : nullptr);
                 offset += this_block;
                 counter = static_cast<std::uint8_t>(counter + 1U);
             }
 
             // 3d. RequestTransferExit.
-            write_pair(st::ecu::uds::build_request_transfer_exit(),
-                       {0x77},
-                       "RequestTransferExit");
+            write_pair(st::ecu::uds::build_request_transfer_exit(), {0x77}, "RequestTransferExit");
 
             // 3e. checkProgrammingDependencies.
             write_pair(st::ecu::uds::build_routine_control(
-                           st::ecu::uds::kRcStart,
-                           st::ecu::uds::kRidCheckProgrammingDependencies),
-                       {0x71, 0x01, 0xFF, 0x01},
-                       "checkProgrammingDependencies");
+                           st::ecu::uds::kRcStart, st::ecu::uds::kRidCheckProgrammingDependencies),
+                       {0x71, 0x01, 0xFF, 0x01}, "checkProgrammingDependencies");
 
             // 3f. Verify readback (only when verify_after_write).
             if (plan.verify_after_write) {
                 std::uint32_t const chunk_size = plan.verify_chunk_size == 0
-                    ? static_cast<std::uint32_t>(w.data.size())
-                    : plan.verify_chunk_size;
+                                                     ? static_cast<std::uint32_t>(w.data.size())
+                                                     : plan.verify_chunk_size;
                 std::size_t off = 0;
                 while (off < w.data.size()) {
                     std::size_t const remaining = w.data.size() - off;
-                    std::size_t const this_chunk =
-                        remaining < chunk_size ? remaining : chunk_size;
+                    std::size_t const this_chunk = remaining < chunk_size ? remaining : chunk_size;
                     auto const req = st::ecu::uds::build_read_memory_by_address(
                         w.sector.address + static_cast<std::uint32_t>(off),
                         static_cast<std::uint32_t>(this_chunk));
                     std::vector<std::uint8_t> resp;
                     resp.reserve(1 + this_chunk);
                     resp.push_back(0x63);
-                    resp.insert(resp.end(),
-                                w.data.begin() + static_cast<std::ptrdiff_t>(off),
-                                w.data.begin()
-                                    + static_cast<std::ptrdiff_t>(off + this_chunk));
+                    resp.insert(resp.end(), w.data.begin() + static_cast<std::ptrdiff_t>(off),
+                                w.data.begin() + static_cast<std::ptrdiff_t>(off + this_chunk));
                     write_pair(req, resp, off == 0 ? "verify readback" : nullptr);
                     off += this_chunk;
                 }
@@ -8017,8 +8130,7 @@ void emit_happy_path_trace(st::flash::FlashPlan const &plan,
 
     // 4. CC on.
     if (plan.silence_bus) {
-        write_pair({0x28, 0x00, 0x03}, {0x68, 0x00},
-                   "CommunicationControl: re-enable RX+TX");
+        write_pair({0x28, 0x00, 0x03}, {0x68, 0x00}, "CommunicationControl: re-enable RX+TX");
     }
 }
 
@@ -8027,7 +8139,7 @@ int cmd_flash_trace(int argc, char *argv[]) {
     std::optional<std::filesystem::path> output_path;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require_arg = [&](char const *name) -> char const * {
+        auto const require_arg = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "flash-trace: %s requires a value\n", name);
                 return nullptr;
@@ -8035,17 +8147,20 @@ int cmd_flash_trace(int argc, char *argv[]) {
             return argv[++i];
         };
         if (a == "--plan") {
-            if (auto const *v = require_arg("--plan"); v) plan_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--plan"); v)
+                plan_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--output" || a == "-o") {
-            if (auto const *v = require_arg("--output"); v) output_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--output"); v)
+                output_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "flash-trace: unknown option: %s\n", argv[i]);
             return 2;
         } else {
-            std::fprintf(stderr, "flash-trace: extra positional argument: %s\n",
-                         argv[i]);
+            std::fprintf(stderr, "flash-trace: extra positional argument: %s\n", argv[i]);
             return 2;
         }
     }
@@ -8058,8 +8173,7 @@ int cmd_flash_trace(int argc, char *argv[]) {
     }
     auto const plan = st::flash::read_plan(*plan_path);
     if (!plan.has_value()) {
-        std::fprintf(stderr, "flash-trace: %s\n",
-                     plan.error().to_string().c_str());
+        std::fprintf(stderr, "flash-trace: %s\n", plan.error().to_string().c_str());
         return 1;
     }
     std::ofstream out{*output_path};
@@ -8070,17 +8184,15 @@ int cmd_flash_trace(int argc, char *argv[]) {
     }
     emit_happy_path_trace(*plan, out);
     if (!out) {
-        std::fprintf(stderr, "flash-trace: write failed: %s\n",
-                     output_path->string().c_str());
+        std::fprintf(stderr, "flash-trace: write failed: %s\n", output_path->string().c_str());
         return 1;
     }
-    std::fprintf(stderr, "flash-trace: wrote %s\n",
-                 output_path->string().c_str());
+    std::fprintf(stderr, "flash-trace: wrote %s\n", output_path->string().c_str());
     return 0;
 }
 
 int cmd_transport_list(int argc, char *argv[]) {
-    (void) argv;
+    (void)argv;
     if (argc != 0) {
         std::fputs("transport-list: takes no arguments\n", stderr);
         return 2;
@@ -8098,8 +8210,7 @@ int cmd_transport_list(int argc, char *argv[]) {
         std::puts("  command.");
 #endif
     } else {
-        std::printf("J2534 v04.04 adapters: %zu registered\n",
-                    adapters.size());
+        std::printf("J2534 v04.04 adapters: %zu registered\n", adapters.size());
         std::size_t i = 1;
         for (auto const &a : adapters) {
             std::printf("\n  [%zu] %s\n", i++, a.name.c_str());
@@ -8108,12 +8219,10 @@ int cmd_transport_list(int argc, char *argv[]) {
                 std::printf("      Vendor:     %s\n", a.vendor.c_str());
             }
             std::string const protos =
-                st::transport::j2534::format_protocols_supported(
-                    a.protocols_supported);
+                st::transport::j2534::format_protocols_supported(a.protocols_supported);
             std::printf("      Protocols:  %s\n", protos.c_str());
             std::printf("      Registry:   %s (subkey: %s)\n",
-                        st::transport::j2534::registry_view_name(a.view),
-                        a.subkey.c_str());
+                        st::transport::j2534::registry_view_name(a.view), a.subkey.c_str());
         }
         std::printf("\nTo use one, eventually:\n");
         std::printf("  subuwutuner-cli rom-pull --transport j2534 "
@@ -8132,18 +8241,18 @@ int cmd_transport_list(int argc, char *argv[]) {
 }
 
 int cmd_rom_pull(int argc, char *argv[]) {
-    std::optional<std::uint32_t>         addr;
-    std::optional<std::uint32_t>         size;
-    std::uint32_t                        max_chunk = 0x100;
+    std::optional<std::uint32_t> addr;
+    std::optional<std::uint32_t> size;
+    std::uint32_t max_chunk = 0x100;
     std::optional<std::filesystem::path> trace_path;
     std::optional<std::filesystem::path> output_path;
-    std::optional<std::string>           transport_kind;
-    std::string                          dll_path;
-    std::string                          device_path;
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
-        auto const             require_arg = [&](char const *name) -> char const * {
+        auto const require_arg = [&](char const *name) -> char const * {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "rom-pull: %s requires a value\n", name);
                 return nullptr;
@@ -8152,55 +8261,67 @@ int cmd_rom_pull(int argc, char *argv[]) {
         };
         if (a == "--addr") {
             auto const *v = require_arg("--addr");
-            if (v == nullptr) return 2;
+            if (v == nullptr)
+                return 2;
             std::uint32_t val = 0;
             if (!parse_uint32_arg(v, val)) {
                 std::fprintf(stderr, "rom-pull: --addr must be a hex or decimal "
-                             "integer\n");
+                                     "integer\n");
                 return 2;
             }
             addr = val;
         } else if (a == "--size") {
             auto const *v = require_arg("--size");
-            if (v == nullptr) return 2;
+            if (v == nullptr)
+                return 2;
             std::uint32_t val = 0;
             if (!parse_uint32_arg(v, val) || val == 0) {
                 std::fprintf(stderr, "rom-pull: --size must be a positive "
-                             "hex or decimal integer\n");
+                                     "hex or decimal integer\n");
                 return 2;
             }
             size = val;
         } else if (a == "--max-chunk") {
             auto const *v = require_arg("--max-chunk");
-            if (v == nullptr) return 2;
+            if (v == nullptr)
+                return 2;
             std::uint32_t val = 0;
             if (!parse_uint32_arg(v, val) || val == 0) {
                 std::fprintf(stderr, "rom-pull: --max-chunk must be a positive "
-                             "hex or decimal integer\n");
+                                     "hex or decimal integer\n");
                 return 2;
             }
             max_chunk = val;
         } else if (a == "--trace") {
-            if (auto const *v = require_arg("--trace"); v) trace_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--trace"); v)
+                trace_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a == "--transport") {
-            if (auto const *v = require_arg("--transport"); v) transport_kind = std::string{v};
-            else return 2;
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
         } else if (a == "--dll") {
-            if (auto const *v = require_arg("--dll"); v) dll_path = v;
-            else return 2;
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
         } else if (a == "--device") {
-            if (auto const *v = require_arg("--device"); v) device_path = v;
-            else return 2;
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
         } else if (a == "--output" || a == "-o") {
-            if (auto const *v = require_arg("--output"); v) output_path = std::filesystem::path{v};
-            else return 2;
+            if (auto const *v = require_arg("--output"); v)
+                output_path = std::filesystem::path{v};
+            else
+                return 2;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "rom-pull: unknown option: %s\n", argv[i]);
             return 2;
         } else {
-            std::fprintf(stderr, "rom-pull: extra positional argument: %s\n",
-                         argv[i]);
+            std::fprintf(stderr, "rom-pull: extra positional argument: %s\n", argv[i]);
             return 2;
         }
     }
@@ -8214,7 +8335,7 @@ int cmd_rom_pull(int argc, char *argv[]) {
                    stderr);
         return 2;
     }
-    bool const have_trace     = trace_path.has_value();
+    bool const have_trace = trace_path.has_value();
     bool const have_transport = transport_kind.has_value();
     if (have_trace == have_transport) {
         std::fputs("rom-pull: must pass exactly one of --trace or "
@@ -8229,21 +8350,20 @@ int cmd_rom_pull(int argc, char *argv[]) {
     // path stays as a stack object below; the factory path stashes
     // its unique_ptr here. `chosen` is the non-owning pointer the
     // rest of the function uses regardless.
-    st::transport::MockTransport                  mock;
-    std::unique_ptr<st::transport::ITransport>    owned;
-    st::transport::ITransport                    *chosen = nullptr;
+    st::transport::MockTransport mock;
+    std::unique_ptr<st::transport::ITransport> owned;
+    st::transport::ITransport *chosen = nullptr;
 
     if (have_trace) {
         std::vector<UdsTracePair> pairs;
-        std::string               err;
+        std::string err;
         if (!parse_uds_trace(*trace_path, pairs, err)) {
             std::fputs(err.c_str(), stderr);
             std::fputc('\n', stderr);
             return 1;
         }
         if (auto s = mock.open({}); !s.has_value()) {
-            std::fprintf(stderr, "rom-pull: mock open failed: %s\n",
-                         s.error().to_string().c_str());
+            std::fprintf(stderr, "rom-pull: mock open failed: %s\n", s.error().to_string().c_str());
             return 1;
         }
         for (auto &p : pairs) {
@@ -8264,12 +8384,10 @@ int cmd_rom_pull(int argc, char *argv[]) {
                          transport_kind->c_str());
             return 2;
         }
-        st::transport::TransportSpec const spec{
-            *kind, dll_path, device_path};
+        st::transport::TransportSpec const spec{*kind, dll_path, device_path};
         auto t = st::transport::open_transport(spec);
         if (!t.has_value()) {
-            std::fprintf(stderr, "rom-pull: %s\n",
-                         t.error().to_string().c_str());
+            std::fprintf(stderr, "rom-pull: %s\n", t.error().to_string().c_str());
             return 1;
         }
         // Default LinkConfig: assume UDS-over-CAN with the standard
@@ -8278,20 +8396,19 @@ int cmd_rom_pull(int argc, char *argv[]) {
         // off the command line. For VB WRX this is the right shape;
         // for VA WRX you'd use --trace today (and --link kline once
         // K-Line is plumbed end-to-end).
-        st::transport::LinkConfig const link{
-            st::transport::LinkKind::CanIso15765,
-            500000, 0x000007E0, 0x000007E8};
+        st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765, 500000,
+                                             0x000007E0, 0x000007E8};
         if (auto s = (*t)->open(link); !s.has_value()) {
             std::fprintf(stderr, "rom-pull: transport open failed: %s\n",
                          s.error().to_string().c_str());
             return 1;
         }
-        owned  = std::move(*t);
+        owned = std::move(*t);
         chosen = owned.get();
     }
 
     st::flash::Flasher flasher{*chosen};
-    auto const         r = flasher.read_full_rom(*addr, *size, max_chunk);
+    auto const r = flasher.read_full_rom(*addr, *size, max_chunk);
     if (!r.has_value()) {
         std::fprintf(stderr, "rom-pull: %s\n", r.error().to_string().c_str());
         return 1;
@@ -8299,15 +8416,12 @@ int cmd_rom_pull(int argc, char *argv[]) {
 
     std::ofstream out{*output_path, std::ios::binary};
     if (!out) {
-        std::fprintf(stderr, "rom-pull: cannot open output: %s\n",
-                     output_path->string().c_str());
+        std::fprintf(stderr, "rom-pull: cannot open output: %s\n", output_path->string().c_str());
         return 1;
     }
-    out.write(reinterpret_cast<char const *>(r->data()),
-              static_cast<std::streamsize>(r->size()));
+    out.write(reinterpret_cast<char const *>(r->data()), static_cast<std::streamsize>(r->size()));
     if (!out) {
-        std::fprintf(stderr, "rom-pull: write failed: %s\n",
-                     output_path->string().c_str());
+        std::fprintf(stderr, "rom-pull: write failed: %s\n", output_path->string().c_str());
         return 1;
     }
 
@@ -8316,15 +8430,12 @@ int cmd_rom_pull(int argc, char *argv[]) {
     // For the --transport path the underlying ITransport doesn't
     // have an "exhausted" notion, so skip the warning there.
     if (have_trace && !mock.exhausted()) {
-        std::fprintf(stderr,
-                     "rom-pull: warning: %zu trace entries unused\n",
-                     mock.remaining());
+        std::fprintf(stderr, "rom-pull: warning: %zu trace entries unused\n", mock.remaining());
     }
     std::fprintf(stderr,
                  "rom-pull: read %u bytes from 0x%08X in chunks of %u; "
                  "wrote %s\n",
-                 static_cast<unsigned>(*size), *addr,
-                 static_cast<unsigned>(max_chunk),
+                 static_cast<unsigned>(*size), *addr, static_cast<unsigned>(max_chunk),
                  output_path->string().c_str());
     return 0;
 }
@@ -8332,18 +8443,20 @@ int cmd_rom_pull(int argc, char *argv[]) {
 int cmd_lint_graph(int argc, char *argv[]) {
     if (argc < 1) {
         std::fputs("lint-graph: missing path\n", stderr);
-        std::fputs("Usage: subuwutuner-cli lint-graph <FILE.stmod> [--strict]\n",
-                   stderr);
+        std::fputs("Usage: subuwutuner-cli lint-graph <FILE.stmod> [--strict]\n", stderr);
         return 2;
     }
     bool strict = false;
     std::optional<std::filesystem::path> path;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a = argv[i];
-        if (a == "--strict") { strict = true; continue; }
+        if (a == "--strict") {
+            strict = true;
+            continue;
+        }
         if (!a.empty() && a.front() == '-') {
-            std::fprintf(stderr, "lint-graph: unknown flag '%.*s'\n",
-                         static_cast<int>(a.size()), a.data());
+            std::fprintf(stderr, "lint-graph: unknown flag '%.*s'\n", static_cast<int>(a.size()),
+                         a.data());
             return 2;
         }
         if (path.has_value()) {
@@ -8359,34 +8472,28 @@ int cmd_lint_graph(int argc, char *argv[]) {
     }
     std::ifstream ifs{*path, std::ios::binary};
     if (!ifs) {
-        std::fprintf(stderr, "lint-graph: cannot open '%s'\n",
-                     path->string().c_str());
+        std::fprintf(stderr, "lint-graph: cannot open '%s'\n", path->string().c_str());
         return 1;
     }
     std::stringstream buf;
     buf << ifs.rdbuf();
     auto g = st::feature::from_toml(buf.str());
     if (!g.has_value()) {
-        std::fprintf(stderr, "lint-graph: parse failed: %s\n",
-                     g.error().to_string().c_str());
+        std::fprintf(stderr, "lint-graph: parse failed: %s\n", g.error().to_string().c_str());
         return 1;
     }
     if (auto v = g->validate(); !v.has_value()) {
-        std::fprintf(stderr, "lint-graph: structural error: %s\n",
-                     v.error().to_string().c_str());
+        std::fprintf(stderr, "lint-graph: structural error: %s\n", v.error().to_string().c_str());
         return 1;
     }
     auto const findings = st::feature::lint(*g);
     if (findings.empty()) {
-        std::printf("OK (%zu node%s, %zu edge%s)\n",
-                     g->nodes().size(),
-                     g->nodes().size() == 1 ? "" : "s",
-                     g->edges().size(),
-                     g->edges().size() == 1 ? "" : "s");
+        std::printf("OK (%zu node%s, %zu edge%s)\n", g->nodes().size(),
+                    g->nodes().size() == 1 ? "" : "s", g->edges().size(),
+                    g->edges().size() == 1 ? "" : "s");
         return 0;
     }
-    std::printf("%zu warning%s:\n",
-                 findings.size(), findings.size() == 1 ? "" : "s");
+    std::printf("%zu warning%s:\n", findings.size(), findings.size() == 1 ? "" : "s");
     for (auto const &f : findings) {
         std::printf("  - %s\n", f.message.c_str());
     }
@@ -8402,22 +8509,19 @@ int cmd_dump_ir(int argc, char *argv[]) {
     std::filesystem::path const path{argv[0]};
     std::ifstream ifs{path, std::ios::binary};
     if (!ifs) {
-        std::fprintf(stderr, "dump-ir: cannot open '%s'\n",
-                     path.string().c_str());
+        std::fprintf(stderr, "dump-ir: cannot open '%s'\n", path.string().c_str());
         return 1;
     }
     std::stringstream buf;
     buf << ifs.rdbuf();
     auto g = st::feature::from_toml(buf.str());
     if (!g.has_value()) {
-        std::fprintf(stderr, "dump-ir: parse failed: %s\n",
-                     g.error().to_string().c_str());
+        std::fprintf(stderr, "dump-ir: parse failed: %s\n", g.error().to_string().c_str());
         return 1;
     }
     auto m = st::feature::ir::lower(*g);
     if (!m.has_value()) {
-        std::fprintf(stderr, "dump-ir: lowering failed: %s\n",
-                     m.error().to_string().c_str());
+        std::fprintf(stderr, "dump-ir: lowering failed: %s\n", m.error().to_string().c_str());
         return 1;
     }
     std::fputs(st::feature::ir::dump(*m).c_str(), stdout);
@@ -8433,8 +8537,8 @@ int cmd_lint_ir(int argc, char *argv[]) {
         return 2;
     }
     std::filesystem::path path;
-    bool                  strict = false;
-    std::size_t           budget = 200;
+    bool strict = false;
+    std::size_t budget = 200;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         if (a == "--strict") {
@@ -8444,8 +8548,8 @@ int cmd_lint_ir(int argc, char *argv[]) {
                 std::fputs("lint-ir: --budget needs a value\n", stderr);
                 return 2;
             }
-            char       *end = nullptr;
-            auto const  v   = std::strtoull(argv[i + 1], &end, 10);
+            char *end = nullptr;
+            auto const v = std::strtoull(argv[i + 1], &end, 10);
             if (end == argv[i + 1] || *end != '\0') {
                 std::fprintf(stderr,
                              "lint-ir: --budget '%s' not a non-negative "
@@ -8456,14 +8560,13 @@ int cmd_lint_ir(int argc, char *argv[]) {
             budget = static_cast<std::size_t>(v);
             ++i;
         } else if (!a.empty() && a[0] == '-') {
-            std::fprintf(stderr, "lint-ir: unknown flag '%.*s'\n",
-                         static_cast<int>(a.size()), a.data());
+            std::fprintf(stderr, "lint-ir: unknown flag '%.*s'\n", static_cast<int>(a.size()),
+                         a.data());
             return 2;
         } else if (path.empty()) {
             path = argv[i];
         } else {
-            std::fprintf(stderr,
-                         "lint-ir: unexpected positional '%.*s'\n",
+            std::fprintf(stderr, "lint-ir: unexpected positional '%.*s'\n",
                          static_cast<int>(a.size()), a.data());
             return 2;
         }
@@ -8474,38 +8577,31 @@ int cmd_lint_ir(int argc, char *argv[]) {
     }
     std::ifstream ifs{path, std::ios::binary};
     if (!ifs) {
-        std::fprintf(stderr, "lint-ir: cannot open '%s'\n",
-                     path.string().c_str());
+        std::fprintf(stderr, "lint-ir: cannot open '%s'\n", path.string().c_str());
         return 1;
     }
     std::stringstream buf;
     buf << ifs.rdbuf();
     auto g = st::feature::from_toml(buf.str());
     if (!g.has_value()) {
-        std::fprintf(stderr, "lint-ir: parse failed: %s\n",
-                     g.error().to_string().c_str());
+        std::fprintf(stderr, "lint-ir: parse failed: %s\n", g.error().to_string().c_str());
         return 1;
     }
     auto m = st::feature::ir::lower(*g);
     if (!m.has_value()) {
-        std::fprintf(stderr, "lint-ir: lowering failed: %s\n",
-                     m.error().to_string().c_str());
+        std::fprintf(stderr, "lint-ir: lowering failed: %s\n", m.error().to_string().c_str());
         return 1;
     }
-    auto const findings = st::feature::ir::lint(
-        *m, st::feature::ir::LintOptions{budget});
+    auto const findings = st::feature::ir::lint(*m, st::feature::ir::LintOptions{budget});
     if (findings.empty()) {
         std::printf("lint-ir: clean (cost %zu cycles, budget %zu)\n",
                     st::feature::ir::estimate_cost(*m), budget);
         return 0;
     }
-    std::printf("lint-ir: %zu finding%s\n",
-                findings.size(),
-                findings.size() == 1 ? "" : "s");
+    std::printf("lint-ir: %zu finding%s\n", findings.size(), findings.size() == 1 ? "" : "s");
     for (auto const &f : findings) {
         if (f.instruction_index.has_value()) {
-            std::printf("  - [%zu] %s\n",
-                        *f.instruction_index, f.message.c_str());
+            std::printf("  - [%zu] %s\n", *f.instruction_index, f.message.c_str());
         } else {
             std::printf("  - %s\n", f.message.c_str());
         }
@@ -8522,33 +8618,29 @@ std::string render_patch_hex(st::feature::codegen::PatchObject const &p) {
     std::string out;
     out.reserve(256 + 80 * p.hooks.size());
     char buf[96];
-    std::snprintf(buf, sizeof(buf), "# arch: %s\n",
-                  st::feature::codegen::arch_name(p.arch));
+    std::snprintf(buf, sizeof(buf), "# arch: %s\n", st::feature::codegen::arch_name(p.arch));
     out.append(buf);
     if (p.hooks.empty()) {
         out.append("# (no hooks)\n");
         return out;
     }
     for (auto const &h : p.hooks) {
-        std::snprintf(buf, sizeof(buf),
-                      "# hook: %s @ 0x%zX (%zu bytes)\n",
-                      h.symbol.c_str(), h.splice_address, h.code.size());
+        std::snprintf(buf, sizeof(buf), "# hook: %s @ 0x%zX (%zu bytes)\n", h.symbol.c_str(),
+                      h.splice_address, h.code.size());
         out.append(buf);
         for (std::size_t i = 0; i < h.code.size(); i += 16) {
             std::snprintf(buf, sizeof(buf), "%04zX:", i);
             out.append(buf);
             std::size_t const end = std::min(i + 16, h.code.size());
             for (std::size_t j = i; j < end; ++j) {
-                std::snprintf(buf, sizeof(buf), " %02X",
-                              static_cast<unsigned>(h.code[j]));
+                std::snprintf(buf, sizeof(buf), " %02X", static_cast<unsigned>(h.code[j]));
                 out.append(buf);
             }
             out.append("\n");
         }
         for (auto const &rc : h.ram_claims) {
-            std::snprintf(buf, sizeof(buf),
-                          "# ram_claim: 0x%zX size=%zu align=%zu\n",
-                          rc.address, rc.size, rc.alignment);
+            std::snprintf(buf, sizeof(buf), "# ram_claim: 0x%zX size=%zu align=%zu\n", rc.address,
+                          rc.size, rc.alignment);
             out.append(buf);
         }
     }
@@ -8561,9 +8653,9 @@ int cmd_feature_compile(int argc, char *argv[]) {
     std::optional<std::filesystem::path> stmod_path;
     std::optional<std::filesystem::path> def_path;
     std::optional<std::filesystem::path> output_path;
-    std::optional<std::string>           arch_override;
-    std::string                          format = "hex";
-    bool                                 validate_only = false;
+    std::optional<std::string> arch_override;
+    std::string format = "hex";
+    bool validate_only = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -8575,27 +8667,23 @@ int cmd_feature_compile(int argc, char *argv[]) {
             def_path = std::filesystem::path{argv[++i]};
         } else if (a == "--output") {
             if (i + 1 >= argc) {
-                std::fputs("feature-compile: --output requires a path\n",
-                           stderr);
+                std::fputs("feature-compile: --output requires a path\n", stderr);
                 return 2;
             }
             output_path = std::filesystem::path{argv[++i]};
         } else if (a == "--arch") {
             if (i + 1 >= argc) {
-                std::fputs("feature-compile: --arch requires a value\n",
-                           stderr);
+                std::fputs("feature-compile: --arch requires a value\n", stderr);
                 return 2;
             }
             arch_override = std::string{argv[++i]};
         } else if (a == "--format") {
             if (i + 1 >= argc) {
-                std::fputs("feature-compile: --format requires a value\n",
-                           stderr);
+                std::fputs("feature-compile: --format requires a value\n", stderr);
                 return 2;
             }
             format = std::string{argv[++i]};
-            if (format != "hex" && format != "toml" && format != "raw"
-                && format != "stmod") {
+            if (format != "hex" && format != "toml" && format != "raw" && format != "stmod") {
                 std::fprintf(stderr,
                              "feature-compile: --format must be one of "
                              "hex|toml|raw|stmod (got '%s')\n",
@@ -8617,9 +8705,7 @@ int cmd_feature_compile(int argc, char *argv[]) {
         } else if (!stmod_path.has_value()) {
             stmod_path = std::filesystem::path{argv[i]};
         } else {
-            std::fprintf(stderr,
-                         "feature-compile: unexpected positional '%s'\n",
-                         argv[i]);
+            std::fprintf(stderr, "feature-compile: unexpected positional '%s'\n", argv[i]);
             return 2;
         }
     }
@@ -8657,16 +8743,14 @@ int cmd_feature_compile(int argc, char *argv[]) {
 
     std::ifstream ifs{*stmod_path, std::ios::binary};
     if (!ifs) {
-        std::fprintf(stderr, "feature-compile: cannot open '%s'\n",
-                     stmod_path->string().c_str());
+        std::fprintf(stderr, "feature-compile: cannot open '%s'\n", stmod_path->string().c_str());
         return 1;
     }
     std::stringstream buf;
     buf << ifs.rdbuf();
     auto g = st::feature::from_toml(buf.str());
     if (!g.has_value()) {
-        std::fprintf(stderr, "feature-compile: parse failed: %s\n",
-                     g.error().to_string().c_str());
+        std::fprintf(stderr, "feature-compile: parse failed: %s\n", g.error().to_string().c_str());
         return 1;
     }
     auto m = st::feature::ir::lower(*g);
@@ -8698,8 +8782,7 @@ int cmd_feature_compile(int argc, char *argv[]) {
     } else {
         auto sel = st::feature::codegen::select_backend(*def);
         if (!sel.has_value()) {
-            std::fprintf(stderr, "feature-compile: %s\n",
-                         sel.error().to_string().c_str());
+            std::fprintf(stderr, "feature-compile: %s\n", sel.error().to_string().c_str());
             std::fputs("(pass --arch sh2a|rh850 to override platform "
                        "detection)\n",
                        stderr);
@@ -8731,8 +8814,9 @@ int cmd_feature_compile(int argc, char *argv[]) {
         }
         std::ofstream ofs{*output_path, std::ios::binary | std::ios::trunc};
         if (!ofs) {
-            std::fprintf(stderr, "feature-compile: cannot open '%s' for "
-                                 "writing\n",
+            std::fprintf(stderr,
+                         "feature-compile: cannot open '%s' for "
+                         "writing\n",
                          output_path->string().c_str());
             return 1;
         }
@@ -8772,8 +8856,9 @@ int cmd_feature_compile(int argc, char *argv[]) {
     if (output_path.has_value()) {
         std::ofstream ofs{*output_path, std::ios::binary | std::ios::trunc};
         if (!ofs) {
-            std::fprintf(stderr, "feature-compile: cannot open '%s' for "
-                                 "writing\n",
+            std::fprintf(stderr,
+                         "feature-compile: cannot open '%s' for "
+                         "writing\n",
                          output_path->string().c_str());
             return 1;
         }
@@ -8963,8 +9048,7 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "autotune") {
         if (argc < 3) {
-            std::fputs("autotune: missing subcommand. Try 'autotune maf'.\n",
-                       stderr);
+            std::fputs("autotune: missing subcommand. Try 'autotune maf'.\n", stderr);
             return 2;
         }
         std::string_view const sub{argv[2]};

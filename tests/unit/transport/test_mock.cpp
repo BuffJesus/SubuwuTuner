@@ -22,8 +22,7 @@ TEST_CASE("MockTransport rejects calls before open()", "[transport][mock]") {
     REQUIRE(r.error().code() == st::ErrorCode::TransportUnavailable);
 }
 
-TEST_CASE("MockTransport open + send_recv matches queued expectation",
-          "[transport][mock]") {
+TEST_CASE("MockTransport open + send_recv matches queued expectation", "[transport][mock]") {
     st::transport::MockTransport t;
     t.expect_send_recv({0x01, 0x02, 0x03}, {0x10, 0x20});
 
@@ -32,7 +31,7 @@ TEST_CASE("MockTransport open + send_recv matches queued expectation",
     REQUIRE(t.config().baud == 10400);
 
     std::array<std::uint8_t, 3> const req{0x01, 0x02, 0x03};
-    auto const                        r = t.send_recv(req, 10ms);
+    auto const r = t.send_recv(req, 10ms);
     REQUIRE(r.has_value());
     REQUIRE(r->data == std::vector<std::uint8_t>{0x10, 0x20});
     REQUIRE(t.exhausted());
@@ -44,23 +43,21 @@ TEST_CASE("MockTransport flags a request mismatch", "[transport][mock]") {
     t.expect_send_recv({0x01, 0x02}, {0xAA});
     REQUIRE(t.open({}).has_value());
     std::array<std::uint8_t, 2> const bad{0x99, 0x88};
-    auto const                        r = t.send_recv(bad, 10ms);
+    auto const r = t.send_recv(bad, 10ms);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("MockTransport returns Unknown when no expectation is queued",
-          "[transport][mock]") {
+TEST_CASE("MockTransport returns Unknown when no expectation is queued", "[transport][mock]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
     std::array<std::uint8_t, 1> const req{0};
-    auto const                        r = t.send_recv(req, 10ms);
+    auto const r = t.send_recv(req, 10ms);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::Unknown);
 }
 
-TEST_CASE("MockTransport replays multiple queued exchanges in order",
-          "[transport][mock]") {
+TEST_CASE("MockTransport replays multiple queued exchanges in order", "[transport][mock]") {
     st::transport::MockTransport t;
     t.expect_send_recv({0x01}, {0xA});
     t.expect_send_recv({0x02}, {0xB});
@@ -70,21 +67,20 @@ TEST_CASE("MockTransport replays multiple queued exchanges in order",
 
     for (std::uint8_t i = 1; i <= 3; ++i) {
         std::array<std::uint8_t, 1> const req{i};
-        auto const                        r = t.send_recv(req, 10ms);
+        auto const r = t.send_recv(req, 10ms);
         REQUIRE(r.has_value());
         REQUIRE(r->data.size() == 1);
     }
     REQUIRE(t.exhausted());
 }
 
-TEST_CASE("MockTransport::inject_error fires on the next call",
-          "[transport][mock]") {
+TEST_CASE("MockTransport::inject_error fires on the next call", "[transport][mock]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
     t.inject_error(st::ErrorCode::TransportTimeout, "fake timeout");
 
     std::array<std::uint8_t, 1> const req{0};
-    auto const                        r = t.send_recv(req, 10ms);
+    auto const r = t.send_recv(req, 10ms);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::TransportTimeout);
 
@@ -99,12 +95,12 @@ TEST_CASE("MockTransport streaming callback delivers emitted frames",
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
-    std::atomic<int>          frames_received{0};
+    std::atomic<int> frames_received{0};
     std::vector<std::uint8_t> last_payload;
     REQUIRE(t.start_streaming([&](st::transport::Frame const &f) {
-                ++frames_received;
-                last_payload = f.data;
-            }).has_value());
+                 ++frames_received;
+                 last_payload = f.data;
+             }).has_value());
 
     t.emit_streaming_frame({0xDE, 0xAD, 0xBE, 0xEF});
     REQUIRE(frames_received == 1);
@@ -118,8 +114,7 @@ TEST_CASE("MockTransport streaming callback delivers emitted frames",
     REQUIRE(frames_received == 2); // no-op after stop
 }
 
-TEST_CASE("MockTransport::close clears streaming and open state",
-          "[transport][mock]") {
+TEST_CASE("MockTransport::close clears streaming and open state", "[transport][mock]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
     REQUIRE(t.start_streaming([](auto const &) {}).has_value());
@@ -127,7 +122,7 @@ TEST_CASE("MockTransport::close clears streaming and open state",
     REQUIRE_FALSE(t.is_open());
 
     std::array<std::uint8_t, 1> const req{0};
-    auto const                        r = t.send_recv(req, 10ms);
+    auto const r = t.send_recv(req, 10ms);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::TransportUnavailable);
 }

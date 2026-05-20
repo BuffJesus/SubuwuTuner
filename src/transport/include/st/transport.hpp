@@ -24,7 +24,7 @@ enum class LinkKind {
 };
 
 struct LinkConfig {
-    LinkKind     kind{LinkKind::KLine};
+    LinkKind kind{LinkKind::KLine};
     // Subaru SSM K-Line is 4800 baud (not the 10400 baud you'd see
     // for KWP2000-on-K-Line on other vendors' platforms). Subaru
     // CAN-ISO15765 is 500000 baud. The default reflects the
@@ -32,15 +32,15 @@ struct LinkConfig {
     // forgets to set baud gets the right Subaru-default rather
     // than a silently-wrong KWP2000 default. Concrete transports
     // (j2534, native) validate baud > 0; baud == 0 → InvalidArgument.
-    int          baud{4800};
-    std::uint32_t can_id_request{0};   // for CAN protocols only
-    std::uint32_t can_id_response{0};  // for CAN protocols only
+    int baud{4800};
+    std::uint32_t can_id_request{0};  // for CAN protocols only
+    std::uint32_t can_id_response{0}; // for CAN protocols only
 };
 
 // One frame on the wire. `data` is the application-layer payload — the
 // transport implementation handles ISO-TP fragmentation/reassembly on CAN.
 struct Frame {
-    std::vector<std::uint8_t>             data;
+    std::vector<std::uint8_t> data;
     std::chrono::steady_clock::time_point arrived{};
 };
 
@@ -62,22 +62,21 @@ using FrameCallback = std::function<void(Frame const &)>;
 //   * All methods are safe to call from any thread, but the transport will
 //     serialize them internally — there's no concurrent send_recv.
 class ITransport {
-  public:
+public:
     virtual ~ITransport() = default;
 
-    [[nodiscard]] virtual Status open(LinkConfig const &cfg)  = 0;
-    [[nodiscard]] virtual Status close()                       = 0;
+    [[nodiscard]] virtual Status open(LinkConfig const &cfg) = 0;
+    [[nodiscard]] virtual Status close() = 0;
 
-    [[nodiscard]] virtual Result<Frame> send_recv(
-        std::span<std::uint8_t const> payload,
-        std::chrono::milliseconds      timeout) = 0;
+    [[nodiscard]] virtual Result<Frame> send_recv(std::span<std::uint8_t const> payload,
+                                                  std::chrono::milliseconds timeout) = 0;
 
     [[nodiscard]] virtual Status send(std::span<std::uint8_t const> payload) = 0;
 
     [[nodiscard]] virtual Status start_streaming(FrameCallback callback) = 0;
-    [[nodiscard]] virtual Status stop_streaming()                          = 0;
+    [[nodiscard]] virtual Status stop_streaming() = 0;
 
-    [[nodiscard]] virtual std::string_view name() const noexcept     = 0;
+    [[nodiscard]] virtual std::string_view name() const noexcept = 0;
     [[nodiscard]] virtual std::string_view firmware() const noexcept = 0;
 };
 

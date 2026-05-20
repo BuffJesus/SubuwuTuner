@@ -26,7 +26,7 @@ namespace st {
 // a bad offset. This keeps fuzz harnesses simple — pass random data, the worst
 // outcome is an Error.
 class Rom {
-  public:
+public:
     // Default maximum size accepted by `from_file`. Subaru WRX ROMs are ~1.5 MB;
     // 64 MB is a generous ceiling that still rejects clearly-garbage inputs.
     static constexpr std::size_t kDefaultMaxBytes = 64ULL * 1024ULL * 1024ULL;
@@ -38,15 +38,23 @@ class Rom {
         return Rom{std::move(bytes)};
     }
 
-    [[nodiscard]] std::span<std::uint8_t const> data() const noexcept { return bytes_; }
-    [[nodiscard]] std::span<std::uint8_t>       data_mut() noexcept { return bytes_; }
-    [[nodiscard]] std::size_t                   size() const noexcept { return bytes_.size(); }
-    [[nodiscard]] bool                          empty() const noexcept { return bytes_.empty(); }
+    [[nodiscard]] std::span<std::uint8_t const> data() const noexcept {
+        return bytes_;
+    }
+    [[nodiscard]] std::span<std::uint8_t> data_mut() noexcept {
+        return bytes_;
+    }
+    [[nodiscard]] std::size_t size() const noexcept {
+        return bytes_.size();
+    }
+    [[nodiscard]] bool empty() const noexcept {
+        return bytes_.empty();
+    }
 
-    [[nodiscard]] Result<std::span<std::uint8_t const>> slice(
-        std::size_t offset, std::size_t length) const noexcept;
+    [[nodiscard]] Result<std::span<std::uint8_t const>> slice(std::size_t offset,
+                                                              std::size_t length) const noexcept;
 
-    [[nodiscard]] Result<std::uint8_t>  read_u8(std::size_t offset) const noexcept;
+    [[nodiscard]] Result<std::uint8_t> read_u8(std::size_t offset) const noexcept;
     [[nodiscard]] Result<std::uint16_t> read_u16_be(std::size_t offset) const noexcept;
     [[nodiscard]] Result<std::uint32_t> read_u32_be(std::size_t offset) const noexcept;
     [[nodiscard]] Result<std::uint16_t> read_u16_le(std::size_t offset) const noexcept;
@@ -76,7 +84,7 @@ class Rom {
     };
     [[nodiscard]] std::vector<AsciiString> scan_ascii(std::size_t min_length = 4) const;
 
-  private:
+private:
     explicit Rom(std::vector<std::uint8_t> bytes) : bytes_{std::move(bytes)} {}
 
     std::vector<std::uint8_t> bytes_;

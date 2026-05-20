@@ -39,7 +39,8 @@ Rect whole_table(Definition::TableData const &td) noexcept {
 }
 
 Status set_cells(Definition::TableData &td, Rect r, double value) {
-    if (auto vr = validate_rect(td, r); !vr.has_value()) return vr;
+    if (auto vr = validate_rect(td, r); !vr.has_value())
+        return vr;
     for (std::size_t row = r.r_start; row <= r.r_end; ++row) {
         for (std::size_t col = r.c_start; col <= r.c_end; ++col) {
             td.values[row][col] = value;
@@ -49,7 +50,8 @@ Status set_cells(Definition::TableData &td, Rect r, double value) {
 }
 
 Status add_cells(Definition::TableData &td, Rect r, double delta) {
-    if (auto vr = validate_rect(td, r); !vr.has_value()) return vr;
+    if (auto vr = validate_rect(td, r); !vr.has_value())
+        return vr;
     for (std::size_t row = r.r_start; row <= r.r_end; ++row) {
         for (std::size_t col = r.c_start; col <= r.c_end; ++col) {
             td.values[row][col] += delta;
@@ -59,7 +61,8 @@ Status add_cells(Definition::TableData &td, Rect r, double delta) {
 }
 
 Status multiply_cells(Definition::TableData &td, Rect r, double factor) {
-    if (auto vr = validate_rect(td, r); !vr.has_value()) return vr;
+    if (auto vr = validate_rect(td, r); !vr.has_value())
+        return vr;
     for (std::size_t row = r.r_start; row <= r.r_end; ++row) {
         for (std::size_t col = r.c_start; col <= r.c_end; ++col) {
             td.values[row][col] *= factor;
@@ -73,8 +76,10 @@ Status percent_scale_cells(Definition::TableData &td, Rect r, double pct) {
 }
 
 Status smooth_cells(Definition::TableData &td, Rect r, int iterations) {
-    if (auto vr = validate_rect(td, r); !vr.has_value()) return vr;
-    if (iterations <= 0) return ok();
+    if (auto vr = validate_rect(td, r); !vr.has_value())
+        return vr;
+    if (iterations <= 0)
+        return ok();
 
     auto const rows = r.rows();
     auto const cols = r.cols();
@@ -82,7 +87,7 @@ Status smooth_cells(Definition::TableData &td, Rect r, int iterations) {
     // Work on a local copy so neighbour reads aren't contaminated by writes
     // within the same iteration. The copy holds only the selection.
     std::vector<std::vector<double>> work(rows, std::vector<double>(cols, 0.0));
-    auto const                       snapshot = [&]() {
+    auto const snapshot = [&]() {
         for (std::size_t i = 0; i < rows; ++i) {
             for (std::size_t j = 0; j < cols; ++j) {
                 work[i][j] = td.values[r.r_start + i][r.c_start + j];
@@ -94,8 +99,8 @@ Status smooth_cells(Definition::TableData &td, Rect r, int iterations) {
         snapshot();
         for (std::size_t i = 0; i < rows; ++i) {
             for (std::size_t j = 0; j < cols; ++j) {
-                double      sum = 0.0;
-                std::size_t n   = 0;
+                double sum = 0.0;
+                std::size_t n = 0;
                 std::size_t const i_lo = i == 0 ? 0 : i - 1;
                 std::size_t const i_hi = i + 1 < rows ? i + 1 : i;
                 std::size_t const j_lo = j == 0 ? 0 : j - 1;
@@ -114,11 +119,13 @@ Status smooth_cells(Definition::TableData &td, Rect r, int iterations) {
 }
 
 Status interpolate_cells(Definition::TableData &td, Rect r) {
-    if (auto vr = validate_rect(td, r); !vr.has_value()) return vr;
+    if (auto vr = validate_rect(td, r); !vr.has_value())
+        return vr;
 
     auto const rows = r.rows();
     auto const cols = r.cols();
-    if (rows == 1 && cols == 1) return ok();
+    if (rows == 1 && cols == 1)
+        return ok();
 
     auto const &grid = td.values;
     double const v00 = grid[r.r_start][r.c_start];
@@ -134,9 +141,9 @@ Status interpolate_cells(Definition::TableData &td, Rect r) {
         for (std::size_t j = 0; j < cols; ++j) {
             double const tx = cols > 1 ? static_cast<double>(j) / col_denom : 0.0;
 
-            double const top    = v00 + tx * (v01 - v00);
+            double const top = v00 + tx * (v01 - v00);
             double const bottom = v10 + tx * (v11 - v10);
-            double const out    = top + ty * (bottom - top);
+            double const out = top + ty * (bottom - top);
 
             td.values[r.r_start + i][r.c_start + j] = out;
         }
@@ -147,7 +154,8 @@ Status interpolate_cells(Definition::TableData &td, Rect r) {
 // ---- Snapshots & undo/redo ----------------------------------------------
 
 Result<Snapshot> snapshot(Definition::TableData const &td, Rect r) {
-    if (auto vr = validate_rect(td, r); !vr.has_value()) return failure(vr.error());
+    if (auto vr = validate_rect(td, r); !vr.has_value())
+        return failure(vr.error());
 
     Snapshot s;
     s.rect = r;
@@ -161,10 +169,10 @@ Result<Snapshot> snapshot(Definition::TableData const &td, Rect r) {
 }
 
 Status restore(Definition::TableData &td, Snapshot const &s) {
-    if (auto vr = validate_rect(td, s.rect); !vr.has_value()) return vr;
+    if (auto vr = validate_rect(td, s.rect); !vr.has_value())
+        return vr;
     if (s.values.size() != s.rect.rows()) {
-        return failure(ErrorCode::InvalidArgument,
-                       "snapshot row count does not match its rect");
+        return failure(ErrorCode::InvalidArgument, "snapshot row count does not match its rect");
     }
     for (std::size_t i = 0; i < s.rect.rows(); ++i) {
         if (s.values[i].size() != s.rect.cols()) {
@@ -188,13 +196,15 @@ void History::record(Edit e) {
 }
 
 Edit const *History::undo() noexcept {
-    if (!can_undo()) return nullptr;
+    if (!can_undo())
+        return nullptr;
     --cursor_;
     return &edits_[cursor_];
 }
 
 Edit const *History::redo() noexcept {
-    if (!can_redo()) return nullptr;
+    if (!can_redo())
+        return nullptr;
     auto const *e = &edits_[cursor_];
     ++cursor_;
     return e;
@@ -206,7 +216,7 @@ void History::clear() noexcept {
 }
 
 void History::load(std::vector<Edit> edits, std::size_t cursor) noexcept {
-    edits_  = std::move(edits);
+    edits_ = std::move(edits);
     cursor_ = cursor > edits_.size() ? edits_.size() : cursor;
 }
 

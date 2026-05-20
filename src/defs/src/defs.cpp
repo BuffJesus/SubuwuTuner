@@ -39,11 +39,10 @@ std::string read_file(std::filesystem::path const &path, std::error_code &ec) {
     return std::move(ss).str();
 }
 
-template <typename T>
+template<typename T>
 Result<T> require(toml::node const *node, std::string_view path) {
     if (node == nullptr) {
-        return failure(ErrorCode::ParseError,
-                       "missing required field: " + std::string{path});
+        return failure(ErrorCode::ParseError, "missing required field: " + std::string{path});
     }
     auto const opt = node->value<T>();
     if (!opt.has_value()) {
@@ -52,7 +51,7 @@ Result<T> require(toml::node const *node, std::string_view path) {
     return *opt;
 }
 
-template <typename T>
+template<typename T>
 T optional_value(toml::table const &t, std::string_view key, T fallback) {
     if (auto const opt = t[key].value<T>(); opt.has_value()) {
         return *opt;
@@ -129,17 +128,17 @@ Result<Pack> parse_pack(toml::node const &node) {
     } else {
         return failure(ErrorCode::ParseError, "[pack].id is required");
     }
-    p.display_name   = optional_value<std::string>(*t, "display_name", {});
-    p.platform       = optional_value<std::string>(*t, "platform", {});
-    p.transmission   = optional_value<std::string>(*t, "transmission", {});
-    p.years          = int_array(*t, "years");
-    p.endianness     = optional_value<std::string>(*t, "endianness", "big");
-    p.rom_size_bytes = static_cast<std::size_t>(
-        optional_value<std::int64_t>(*t, "rom_size_bytes", 0));
-    p.checksum_type  = optional_value<std::string>(*t, "checksum_type", {});
-    p.authors      = string_array(*t, "authors");
+    p.display_name = optional_value<std::string>(*t, "display_name", {});
+    p.platform = optional_value<std::string>(*t, "platform", {});
+    p.transmission = optional_value<std::string>(*t, "transmission", {});
+    p.years = int_array(*t, "years");
+    p.endianness = optional_value<std::string>(*t, "endianness", "big");
+    p.rom_size_bytes =
+        static_cast<std::size_t>(optional_value<std::int64_t>(*t, "rom_size_bytes", 0));
+    p.checksum_type = optional_value<std::string>(*t, "checksum_type", {});
+    p.authors = string_array(*t, "authors");
     p.data_sources = string_array(*t, "data_sources");
-    p.license      = optional_value<std::string>(*t, "license", {});
+    p.license = optional_value<std::string>(*t, "license", {});
     if (auto const v = t->at_path("extends").value<std::string>(); v.has_value()) {
         p.extends = *v;
     }
@@ -153,13 +152,12 @@ Result<Pack> parse_pack(toml::node const &node) {
 
 Result<Identification> parse_identification(toml::table const &t) {
     Identification id;
-    id.name        = optional_value<std::string>(t, "name", {});
-    id.cid_address = static_cast<std::size_t>(
-        optional_value<std::int64_t>(t, "cid_address", -1));
-    id.cid_length  = static_cast<std::size_t>(optional_value<std::int64_t>(t, "cid_length", 0));
-    id.cid_match   = optional_value<std::string>(t, "cid_match", {});
-    id.ecu_part    = optional_value<std::string>(t, "ecu_part", {});
-    id.cid_scan    = optional_value<bool>(t, "cid_scan", false);
+    id.name = optional_value<std::string>(t, "name", {});
+    id.cid_address = static_cast<std::size_t>(optional_value<std::int64_t>(t, "cid_address", -1));
+    id.cid_length = static_cast<std::size_t>(optional_value<std::int64_t>(t, "cid_length", 0));
+    id.cid_match = optional_value<std::string>(t, "cid_match", {});
+    id.ecu_part = optional_value<std::string>(t, "ecu_part", {});
+    id.cid_scan = optional_value<bool>(t, "cid_scan", false);
     if (id.cid_match.empty()) {
         return failure(ErrorCode::ParseError,
                        "[[identification]] cid_match is required (name: " + id.name + ")");
@@ -177,17 +175,17 @@ Result<Axis> parse_axis(toml::table const &t) {
     } else {
         return failure(ErrorCode::ParseError, "[[axis]] missing id");
     }
-    a.name    = optional_value<std::string>(t, "name", {});
-    a.unit    = optional_value<std::string>(t, "unit", {});
-    a.type    = optional_value<std::string>(t, "type", "static");
+    a.name = optional_value<std::string>(t, "name", {});
+    a.unit = optional_value<std::string>(t, "unit", {});
+    a.type = optional_value<std::string>(t, "type", "static");
     a.address = static_cast<std::size_t>(optional_value<std::int64_t>(t, "address", 0));
-    a.length  = static_cast<std::size_t>(optional_value<std::int64_t>(t, "length", 0));
+    a.length = static_cast<std::size_t>(optional_value<std::int64_t>(t, "length", 0));
     auto const dt = parse_data_type_from(t, "data_type");
     if (!dt.has_value()) {
         return failure(dt.error());
     }
     a.data_type = *dt;
-    a.scaling   = optional_value<std::string>(t, "scaling", {});
+    a.scaling = optional_value<std::string>(t, "scaling", {});
     return a;
 }
 
@@ -203,29 +201,27 @@ Result<Scaling> parse_scaling(toml::table const &t) {
         LinearScaling lin;
         lin.factor = optional_value<double>(t, "factor", 1.0);
         lin.offset = optional_value<double>(t, "offset", 0.0);
-        s.formula  = lin;
+        s.formula = lin;
     } else if (formula == "piecewise") {
         PiecewiseScaling pw;
         pw.breakpoints = double_array(t, "breakpoints");
-        pw.values      = double_array(t, "values");
+        pw.values = double_array(t, "values");
         if (pw.breakpoints.empty() || pw.values.empty()) {
             return failure(ErrorCode::ParseError,
-                           "piecewise scaling '" + s.id
-                               + "' requires non-empty breakpoints and values");
+                           "piecewise scaling '" + s.id +
+                               "' requires non-empty breakpoints and values");
         }
         if (pw.breakpoints.size() != pw.values.size()) {
-            return failure(ErrorCode::ParseError,
-                           "piecewise scaling '" + s.id
-                               + "' breakpoints/values must be same length");
+            return failure(ErrorCode::ParseError, "piecewise scaling '" + s.id +
+                                                      "' breakpoints/values must be same length");
         }
         s.formula = std::move(pw);
     } else {
-        return failure(ErrorCode::ParseError,
-                       "scaling '" + s.id + "' unknown formula: " + formula);
+        return failure(ErrorCode::ParseError, "scaling '" + s.id + "' unknown formula: " + formula);
     }
-    s.unit      = optional_value<std::string>(t, "unit", {});
-    s.min       = optional_value<double>(t, "min", 0.0);
-    s.max       = optional_value<double>(t, "max", 0.0);
+    s.unit = optional_value<std::string>(t, "unit", {});
+    s.min = optional_value<double>(t, "min", 0.0);
+    s.max = optional_value<double>(t, "max", 0.0);
     s.precision = static_cast<int>(optional_value<std::int64_t>(t, "precision", 0));
 
     auto const dt = parse_data_type_from(t, "data_type");
@@ -243,16 +239,16 @@ Result<Table> parse_table(toml::table const &t) {
     } else {
         return failure(ErrorCode::ParseError, "[[table]] missing id");
     }
-    tab.name       = optional_value<std::string>(t, "name", {});
-    tab.category   = optional_value<std::string>(t, "category", {});
+    tab.name = optional_value<std::string>(t, "name", {});
+    tab.category = optional_value<std::string>(t, "category", {});
     tab.dimensions = static_cast<int>(optional_value<std::int64_t>(t, "dimensions", 2));
-    tab.address    = static_cast<std::size_t>(optional_value<std::int64_t>(t, "address", 0));
-    auto const dt  = parse_data_type_from(t, "data_type");
+    tab.address = static_cast<std::size_t>(optional_value<std::int64_t>(t, "address", 0));
+    auto const dt = parse_data_type_from(t, "data_type");
     if (!dt.has_value()) {
         return failure(dt.error());
     }
     tab.data_type = *dt;
-    tab.scaling   = optional_value<std::string>(t, "scaling", {});
+    tab.scaling = optional_value<std::string>(t, "scaling", {});
 
     if (auto const v = t["axis_x"].value<std::string>(); v.has_value()) {
         tab.axis_x = *v;
@@ -266,7 +262,7 @@ Result<Table> parse_table(toml::table const &t) {
     if (auto const v = t["notes"].value<std::string>(); v.has_value()) {
         tab.notes = *v;
     }
-    tab.emissions_relevant     = optional_value<bool>(t, "emissions_relevant", false);
+    tab.emissions_relevant = optional_value<bool>(t, "emissions_relevant", false);
     tab.engine_safety_critical = optional_value<bool>(t, "engine_safety_critical", false);
 
     if (tab.dimensions < 0 || tab.dimensions > 3) {
@@ -283,16 +279,16 @@ Result<Pid> parse_pid(toml::table const &t) {
     } else {
         return failure(ErrorCode::ParseError, "[[pid]] missing id");
     }
-    p.name        = optional_value<std::string>(t, "name", {});
+    p.name = optional_value<std::string>(t, "name", {});
     p.ssm_address = static_cast<std::size_t>(optional_value<std::int64_t>(t, "ssm_address", 0));
-    p.length      = static_cast<std::size_t>(optional_value<std::int64_t>(t, "length", 0));
+    p.length = static_cast<std::size_t>(optional_value<std::int64_t>(t, "length", 0));
     auto const dt = parse_data_type_from(t, "data_type");
     if (!dt.has_value()) {
         return failure(dt.error());
     }
-    p.data_type   = *dt;
-    p.scaling     = optional_value<std::string>(t, "scaling", {});
-    p.unit        = optional_value<std::string>(t, "unit", {});
+    p.data_type = *dt;
+    p.scaling = optional_value<std::string>(t, "scaling", {});
+    p.unit = optional_value<std::string>(t, "unit", {});
     p.default_log = optional_value<bool>(t, "default_log", false);
     return p;
 }
@@ -304,12 +300,11 @@ Result<Switch> parse_switch(toml::table const &t) {
     } else {
         return failure(ErrorCode::ParseError, "[[switch]] missing id");
     }
-    s.name        = optional_value<std::string>(t, "name", {});
+    s.name = optional_value<std::string>(t, "name", {});
     s.ssm_address = static_cast<std::size_t>(optional_value<std::int64_t>(t, "ssm_address", 0));
-    s.bit         = static_cast<int>(optional_value<std::int64_t>(t, "bit", 0));
+    s.bit = static_cast<int>(optional_value<std::int64_t>(t, "bit", 0));
     if (s.bit < 0 || s.bit > 7) {
-        return failure(ErrorCode::ParseError,
-                       "[[switch]] '" + s.id + "' bit must be 0..7");
+        return failure(ErrorCode::ParseError, "[[switch]] '" + s.id + "' bit must be 0..7");
     }
     s.default_log = optional_value<bool>(t, "default_log", false);
     return s;
@@ -322,8 +317,8 @@ Result<DtcBitmap> parse_dtc_bitmap(toml::table const &t) {
     } else {
         return failure(ErrorCode::ParseError, "[[dtc_bitmap]] missing id");
     }
-    b.name         = optional_value<std::string>(t, "name", {});
-    b.address      = static_cast<std::size_t>(optional_value<std::int64_t>(t, "address", 0));
+    b.name = optional_value<std::string>(t, "name", {});
+    b.address = static_cast<std::size_t>(optional_value<std::int64_t>(t, "address", 0));
     b.length_bytes = static_cast<std::size_t>(optional_value<std::int64_t>(t, "length_bytes", 0));
     if (b.length_bytes == 0) {
         return failure(ErrorCode::ParseError,
@@ -340,56 +335,46 @@ Result<Dtc> parse_dtc(toml::table const &t) {
     } else {
         return failure(ErrorCode::ParseError, "[[dtc]] missing code");
     }
-    d.name        = optional_value<std::string>(t, "name", {});
+    d.name = optional_value<std::string>(t, "name", {});
     if (auto const v = t["bitmap_id"].value<std::string>(); v.has_value()) {
         d.bitmap_id = *v;
     } else {
-        return failure(ErrorCode::ParseError,
-                       "[[dtc]] '" + d.code + "' missing bitmap_id");
+        return failure(ErrorCode::ParseError, "[[dtc]] '" + d.code + "' missing bitmap_id");
     }
     d.byte_offset = static_cast<std::size_t>(optional_value<std::int64_t>(t, "byte_offset", 0));
-    d.bit         = static_cast<int>(optional_value<std::int64_t>(t, "bit", 0));
+    d.bit = static_cast<int>(optional_value<std::int64_t>(t, "bit", 0));
     if (d.bit < 0 || d.bit > 7) {
-        return failure(ErrorCode::ParseError,
-                       "[[dtc]] '" + d.code + "' bit must be 0..7");
+        return failure(ErrorCode::ParseError, "[[dtc]] '" + d.code + "' bit must be 0..7");
     }
     d.emissions_relevant = optional_value<bool>(t, "emissions_relevant", false);
     return d;
 }
 
-Result<HookSignal> parse_signal(toml::node const &n,
-                                 std::string_view kind,
-                                 std::string_view owner_id,
-                                 std::string_view side) {
+Result<HookSignal> parse_signal(toml::node const &n, std::string_view kind,
+                                std::string_view owner_id, std::string_view side) {
     auto const *t = n.as_table();
-    auto const  prefix =
-        "[[" + std::string{kind} + "]] '" + std::string{owner_id}
-        + "' " + std::string{side};
+    auto const prefix =
+        "[[" + std::string{kind} + "]] '" + std::string{owner_id} + "' " + std::string{side};
     if (t == nullptr) {
-        return failure(ErrorCode::ParseError,
-                       prefix + " entry is not a table (expected "
-                                 "{ name = ..., type = ..., ... })");
+        return failure(ErrorCode::ParseError, prefix + " entry is not a table (expected "
+                                                       "{ name = ..., type = ..., ... })");
     }
     HookSignal s;
-    if (auto const v = (*t)["name"].value<std::string>();
-        v.has_value() && !v->empty()) {
+    if (auto const v = (*t)["name"].value<std::string>(); v.has_value() && !v->empty()) {
         s.name = *v;
     } else {
-        return failure(ErrorCode::ParseError,
-                       prefix + " entry missing name");
+        return failure(ErrorCode::ParseError, prefix + " entry missing name");
     }
     s.label = optional_value<std::string>(*t, "label", {});
     if (auto const v = (*t)["type"].value<std::string>(); v.has_value()) {
         s.type = *v;
     } else {
-        return failure(ErrorCode::ParseError,
-                       prefix + " entry '" + s.name + "' missing type");
+        return failure(ErrorCode::ParseError, prefix + " entry '" + s.name + "' missing type");
     }
     if (s.type != "float" && s.type != "int" && s.type != "bool") {
-        return failure(ErrorCode::ParseError,
-                       prefix + " entry '" + s.name
-                           + "' type must be float|int|bool, got '"
-                           + s.type + "'");
+        return failure(ErrorCode::ParseError, prefix + " entry '" + s.name +
+                                                  "' type must be float|int|bool, got '" + s.type +
+                                                  "'");
     }
     s.unit = optional_value<std::string>(*t, "unit", {});
     if (auto const v = (*t)["address"].value<std::int64_t>(); v.has_value()) {
@@ -400,28 +385,30 @@ Result<HookSignal> parse_signal(toml::node const &n,
 
 Result<Hook> parse_hook(toml::table const &t) {
     Hook h;
-    if (auto const v = t["id"].value<std::string>();
-        v.has_value() && !v->empty()) {
+    if (auto const v = t["id"].value<std::string>(); v.has_value() && !v->empty()) {
         h.id = *v;
     } else {
         return failure(ErrorCode::ParseError, "[[hook]] missing id");
     }
     h.display_name = optional_value<std::string>(t, "display_name", {});
-    h.description  = optional_value<std::string>(t, "description", {});
+    h.description = optional_value<std::string>(t, "description", {});
 
-    auto const parse_side = [&](char const *key,
-                                 std::vector<HookSignal> &out) -> Status {
+    auto const parse_side = [&](char const *key, std::vector<HookSignal> &out) -> Status {
         auto const *arr = t[key].as_array();
-        if (arr == nullptr) return ok();   // omitted side is just empty
+        if (arr == nullptr)
+            return ok(); // omitted side is just empty
         for (auto const &el : *arr) {
             auto sig = parse_signal(el, "hook", h.id, key);
-            if (!sig.has_value()) return failure(sig.error());
+            if (!sig.has_value())
+                return failure(sig.error());
             out.push_back(std::move(*sig));
         }
         return ok();
     };
-    if (auto r = parse_side("inputs",  h.inputs);  !r.has_value()) return failure(r.error());
-    if (auto r = parse_side("outputs", h.outputs); !r.has_value()) return failure(r.error());
+    if (auto r = parse_side("inputs", h.inputs); !r.has_value())
+        return failure(r.error());
+    if (auto r = parse_side("outputs", h.outputs); !r.has_value())
+        return failure(r.error());
 
     if (auto const v = t["ecu_address"].value<std::int64_t>(); v.has_value()) {
         h.ecu_address = static_cast<std::size_t>(*v);
@@ -439,27 +426,29 @@ Result<Hook> parse_hook(toml::table const &t) {
 
 Result<Primitive> parse_primitive(toml::table const &t) {
     Primitive p;
-    if (auto const v = t["id"].value<std::string>();
-        v.has_value() && !v->empty()) {
+    if (auto const v = t["id"].value<std::string>(); v.has_value() && !v->empty()) {
         p.id = *v;
     } else {
         return failure(ErrorCode::ParseError, "[[primitive]] missing id");
     }
     p.display_name = optional_value<std::string>(t, "display_name", {});
-    p.description  = optional_value<std::string>(t, "description", {});
-    auto const parse_side = [&](char const *key,
-                                 std::vector<HookSignal> &out) -> Status {
+    p.description = optional_value<std::string>(t, "description", {});
+    auto const parse_side = [&](char const *key, std::vector<HookSignal> &out) -> Status {
         auto const *arr = t[key].as_array();
-        if (arr == nullptr) return ok();
+        if (arr == nullptr)
+            return ok();
         for (auto const &el : *arr) {
             auto sig = parse_signal(el, "primitive", p.id, key);
-            if (!sig.has_value()) return failure(sig.error());
+            if (!sig.has_value())
+                return failure(sig.error());
             out.push_back(std::move(*sig));
         }
         return ok();
     };
-    if (auto r = parse_side("inputs",  p.inputs);  !r.has_value()) return failure(r.error());
-    if (auto r = parse_side("outputs", p.outputs); !r.has_value()) return failure(r.error());
+    if (auto r = parse_side("inputs", p.inputs); !r.has_value())
+        return failure(r.error());
+    if (auto r = parse_side("outputs", p.outputs); !r.has_value())
+        return failure(r.error());
     return p;
 }
 
@@ -468,53 +457,80 @@ Result<Primitive> parse_primitive(toml::table const &t) {
 // ---- DataType helpers ----------------------------------------------------
 
 Result<DataType> parse_data_type(std::string_view s) {
-    if (s == "uint8")      return DataType::Uint8;
-    if (s == "int8")       return DataType::Int8;
-    if (s == "uint16_be")  return DataType::Uint16Be;
-    if (s == "uint16_le")  return DataType::Uint16Le;
-    if (s == "int16_be")   return DataType::Int16Be;
-    if (s == "int16_le")   return DataType::Int16Le;
-    if (s == "uint32_be")  return DataType::Uint32Be;
-    if (s == "uint32_le")  return DataType::Uint32Le;
-    if (s == "int32_be")   return DataType::Int32Be;
-    if (s == "int32_le")   return DataType::Int32Le;
-    if (s == "float32_be") return DataType::Float32Be;
-    if (s == "float32_le") return DataType::Float32Le;
+    if (s == "uint8")
+        return DataType::Uint8;
+    if (s == "int8")
+        return DataType::Int8;
+    if (s == "uint16_be")
+        return DataType::Uint16Be;
+    if (s == "uint16_le")
+        return DataType::Uint16Le;
+    if (s == "int16_be")
+        return DataType::Int16Be;
+    if (s == "int16_le")
+        return DataType::Int16Le;
+    if (s == "uint32_be")
+        return DataType::Uint32Be;
+    if (s == "uint32_le")
+        return DataType::Uint32Le;
+    if (s == "int32_be")
+        return DataType::Int32Be;
+    if (s == "int32_le")
+        return DataType::Int32Le;
+    if (s == "float32_be")
+        return DataType::Float32Be;
+    if (s == "float32_le")
+        return DataType::Float32Le;
     return failure(ErrorCode::ParseError, "unknown data_type: " + std::string{s});
 }
 
 std::string_view to_string(DataType dt) noexcept {
     switch (dt) {
-        case DataType::Uint8:      return "uint8";
-        case DataType::Int8:       return "int8";
-        case DataType::Uint16Be:   return "uint16_be";
-        case DataType::Uint16Le:   return "uint16_le";
-        case DataType::Int16Be:    return "int16_be";
-        case DataType::Int16Le:    return "int16_le";
-        case DataType::Uint32Be:   return "uint32_be";
-        case DataType::Uint32Le:   return "uint32_le";
-        case DataType::Int32Be:    return "int32_be";
-        case DataType::Int32Le:    return "int32_le";
-        case DataType::Float32Be:  return "float32_be";
-        case DataType::Float32Le:  return "float32_le";
+    case DataType::Uint8:
+        return "uint8";
+    case DataType::Int8:
+        return "int8";
+    case DataType::Uint16Be:
+        return "uint16_be";
+    case DataType::Uint16Le:
+        return "uint16_le";
+    case DataType::Int16Be:
+        return "int16_be";
+    case DataType::Int16Le:
+        return "int16_le";
+    case DataType::Uint32Be:
+        return "uint32_be";
+    case DataType::Uint32Le:
+        return "uint32_le";
+    case DataType::Int32Be:
+        return "int32_be";
+    case DataType::Int32Le:
+        return "int32_le";
+    case DataType::Float32Be:
+        return "float32_be";
+    case DataType::Float32Le:
+        return "float32_le";
     }
     return "?";
 }
 
 std::size_t byte_size(DataType dt) noexcept {
     switch (dt) {
-        case DataType::Uint8:
-        case DataType::Int8:       return 1;
-        case DataType::Uint16Be:
-        case DataType::Uint16Le:
-        case DataType::Int16Be:
-        case DataType::Int16Le:    return 2;
-        case DataType::Uint32Be:
-        case DataType::Uint32Le:
-        case DataType::Int32Be:
-        case DataType::Int32Le:
-        case DataType::Float32Be:
-        case DataType::Float32Le:  return 4;
+    case DataType::Uint8:
+    case DataType::Int8:
+        return 1;
+    case DataType::Uint16Be:
+    case DataType::Uint16Le:
+    case DataType::Int16Be:
+    case DataType::Int16Le:
+        return 2;
+    case DataType::Uint32Be:
+    case DataType::Uint32Le:
+    case DataType::Int32Be:
+    case DataType::Int32Le:
+    case DataType::Float32Be:
+    case DataType::Float32Le:
+        return 4;
     }
     return 0;
 }
@@ -532,66 +548,78 @@ float bits_to_float(std::uint32_t bits) noexcept {
 
 Result<double> read_typed(Rom const &rom, std::size_t offset, DataType dt) {
     switch (dt) {
-        case DataType::Uint8: {
-            auto const r = rom.read_u8(offset);
-            if (!r.has_value()) return failure(r.error());
-            return static_cast<double>(*r);
-        }
-        case DataType::Int8: {
-            auto const r = rom.read_u8(offset);
-            if (!r.has_value()) return failure(r.error());
-            return static_cast<double>(static_cast<std::int8_t>(*r));
-        }
-        case DataType::Uint16Be: {
-            auto const r = rom.read_u16_be(offset);
-            if (!r.has_value()) return failure(r.error());
-            return static_cast<double>(*r);
-        }
-        case DataType::Uint16Le: {
-            auto const r = rom.read_u16_le(offset);
-            if (!r.has_value()) return failure(r.error());
-            return static_cast<double>(*r);
-        }
-        case DataType::Int16Be: {
-            auto const r = rom.read_u16_be(offset);
-            if (!r.has_value()) return failure(r.error());
-            return static_cast<double>(static_cast<std::int16_t>(*r));
-        }
-        case DataType::Int16Le: {
-            auto const r = rom.read_u16_le(offset);
-            if (!r.has_value()) return failure(r.error());
-            return static_cast<double>(static_cast<std::int16_t>(*r));
-        }
-        case DataType::Uint32Be: {
-            auto const r = rom.read_u32_be(offset);
-            if (!r.has_value()) return failure(r.error());
-            return static_cast<double>(*r);
-        }
-        case DataType::Uint32Le: {
-            auto const r = rom.read_u32_le(offset);
-            if (!r.has_value()) return failure(r.error());
-            return static_cast<double>(*r);
-        }
-        case DataType::Int32Be: {
-            auto const r = rom.read_u32_be(offset);
-            if (!r.has_value()) return failure(r.error());
-            return static_cast<double>(static_cast<std::int32_t>(*r));
-        }
-        case DataType::Int32Le: {
-            auto const r = rom.read_u32_le(offset);
-            if (!r.has_value()) return failure(r.error());
-            return static_cast<double>(static_cast<std::int32_t>(*r));
-        }
-        case DataType::Float32Be: {
-            auto const r = rom.read_u32_be(offset);
-            if (!r.has_value()) return failure(r.error());
-            return static_cast<double>(bits_to_float(*r));
-        }
-        case DataType::Float32Le: {
-            auto const r = rom.read_u32_le(offset);
-            if (!r.has_value()) return failure(r.error());
-            return static_cast<double>(bits_to_float(*r));
-        }
+    case DataType::Uint8: {
+        auto const r = rom.read_u8(offset);
+        if (!r.has_value())
+            return failure(r.error());
+        return static_cast<double>(*r);
+    }
+    case DataType::Int8: {
+        auto const r = rom.read_u8(offset);
+        if (!r.has_value())
+            return failure(r.error());
+        return static_cast<double>(static_cast<std::int8_t>(*r));
+    }
+    case DataType::Uint16Be: {
+        auto const r = rom.read_u16_be(offset);
+        if (!r.has_value())
+            return failure(r.error());
+        return static_cast<double>(*r);
+    }
+    case DataType::Uint16Le: {
+        auto const r = rom.read_u16_le(offset);
+        if (!r.has_value())
+            return failure(r.error());
+        return static_cast<double>(*r);
+    }
+    case DataType::Int16Be: {
+        auto const r = rom.read_u16_be(offset);
+        if (!r.has_value())
+            return failure(r.error());
+        return static_cast<double>(static_cast<std::int16_t>(*r));
+    }
+    case DataType::Int16Le: {
+        auto const r = rom.read_u16_le(offset);
+        if (!r.has_value())
+            return failure(r.error());
+        return static_cast<double>(static_cast<std::int16_t>(*r));
+    }
+    case DataType::Uint32Be: {
+        auto const r = rom.read_u32_be(offset);
+        if (!r.has_value())
+            return failure(r.error());
+        return static_cast<double>(*r);
+    }
+    case DataType::Uint32Le: {
+        auto const r = rom.read_u32_le(offset);
+        if (!r.has_value())
+            return failure(r.error());
+        return static_cast<double>(*r);
+    }
+    case DataType::Int32Be: {
+        auto const r = rom.read_u32_be(offset);
+        if (!r.has_value())
+            return failure(r.error());
+        return static_cast<double>(static_cast<std::int32_t>(*r));
+    }
+    case DataType::Int32Le: {
+        auto const r = rom.read_u32_le(offset);
+        if (!r.has_value())
+            return failure(r.error());
+        return static_cast<double>(static_cast<std::int32_t>(*r));
+    }
+    case DataType::Float32Be: {
+        auto const r = rom.read_u32_be(offset);
+        if (!r.has_value())
+            return failure(r.error());
+        return static_cast<double>(bits_to_float(*r));
+    }
+    case DataType::Float32Le: {
+        auto const r = rom.read_u32_le(offset);
+        if (!r.has_value())
+            return failure(r.error());
+        return static_cast<double>(bits_to_float(*r));
+    }
     }
     return failure(ErrorCode::InvalidArgument, "unknown DataType");
 }
@@ -606,9 +634,11 @@ double apply_scaling(double raw, Scaling const &s) noexcept {
     }
     // Linear interpolation between the (breakpoints[i], values[i]) pairs.
     auto const &bp = pw->breakpoints;
-    auto const &v  = pw->values;
-    if (raw <= bp.front()) return v.front();
-    if (raw >= bp.back())  return v.back();
+    auto const &v = pw->values;
+    if (raw <= bp.front())
+        return v.front();
+    if (raw >= bp.back())
+        return v.back();
     for (std::size_t i = 1; i < bp.size(); ++i) {
         if (raw <= bp[i]) {
             double const t = (raw - bp[i - 1]) / (bp[i] - bp[i - 1]);
@@ -635,15 +665,18 @@ Result<double> invert_scaling(double engineering, Scaling const &s) {
     // and interpolate back to the breakpoint axis. Assumes a monotonic
     // values[] (otherwise the inverse is not a function).
     auto const &bp = pw->breakpoints;
-    auto const &v  = pw->values;
-    bool const  ascending = v.back() >= v.front();
+    auto const &v = pw->values;
+    bool const ascending = v.back() >= v.front();
     if (ascending) {
-        if (engineering <= v.front()) return bp.front();
-        if (engineering >= v.back())  return bp.back();
+        if (engineering <= v.front())
+            return bp.front();
+        if (engineering >= v.back())
+            return bp.back();
         for (std::size_t i = 1; i < v.size(); ++i) {
             if (engineering <= v[i]) {
                 double const span = v[i] - v[i - 1];
-                if (span == 0.0) return bp[i - 1];
+                if (span == 0.0)
+                    return bp[i - 1];
                 double const t = (engineering - v[i - 1]) / span;
                 return bp[i - 1] + t * (bp[i] - bp[i - 1]);
             }
@@ -651,12 +684,15 @@ Result<double> invert_scaling(double engineering, Scaling const &s) {
         return bp.back();
     }
     // Descending: mirror the loop direction.
-    if (engineering >= v.front()) return bp.front();
-    if (engineering <= v.back())  return bp.back();
+    if (engineering >= v.front())
+        return bp.front();
+    if (engineering <= v.back())
+        return bp.back();
     for (std::size_t i = 1; i < v.size(); ++i) {
         if (engineering >= v[i]) {
             double const span = v[i] - v[i - 1];
-            if (span == 0.0) return bp[i - 1];
+            if (span == 0.0)
+                return bp[i - 1];
             double const t = (engineering - v[i - 1]) / span;
             return bp[i - 1] + t * (bp[i] - bp[i - 1]);
         }
@@ -667,10 +703,12 @@ Result<double> invert_scaling(double engineering, Scaling const &s) {
 namespace {
 
 // Clamp `value` to the inclusive integer range [lo, hi] and round to nearest.
-template <typename T>
+template<typename T>
 T clamp_round(double value, double lo, double hi) noexcept {
-    if (value < lo) value = lo;
-    if (value > hi) value = hi;
+    if (value < lo)
+        value = lo;
+    if (value > hi)
+        value = hi;
     // Round half away from zero, which matches what most calibrators expect.
     double const rounded = value >= 0 ? value + 0.5 : value - 0.5;
     return static_cast<T>(rounded);
@@ -680,52 +718,48 @@ T clamp_round(double value, double lo, double hi) noexcept {
 
 Status write_typed(Rom &rom, std::size_t offset, DataType dt, double value) {
     switch (dt) {
-        case DataType::Uint8:
-            return rom.write_u8(offset, clamp_round<std::uint8_t>(value, 0.0, 255.0));
-        case DataType::Int8: {
-            auto const v = clamp_round<std::int8_t>(value, -128.0, 127.0);
-            return rom.write_u8(offset, static_cast<std::uint8_t>(v));
-        }
-        case DataType::Uint16Be:
-            return rom.write_u16_be(offset, clamp_round<std::uint16_t>(value, 0.0, 65535.0));
-        case DataType::Uint16Le:
-            return rom.write_u16_le(offset, clamp_round<std::uint16_t>(value, 0.0, 65535.0));
-        case DataType::Int16Be: {
-            auto const v = clamp_round<std::int16_t>(value, -32768.0, 32767.0);
-            return rom.write_u16_be(offset, static_cast<std::uint16_t>(v));
-        }
-        case DataType::Int16Le: {
-            auto const v = clamp_round<std::int16_t>(value, -32768.0, 32767.0);
-            return rom.write_u16_le(offset, static_cast<std::uint16_t>(v));
-        }
-        case DataType::Uint32Be:
-            return rom.write_u32_be(offset,
-                                    clamp_round<std::uint32_t>(value, 0.0, 4294967295.0));
-        case DataType::Uint32Le:
-            return rom.write_u32_le(offset,
-                                    clamp_round<std::uint32_t>(value, 0.0, 4294967295.0));
-        case DataType::Int32Be: {
-            auto const v =
-                clamp_round<std::int32_t>(value, -2147483648.0, 2147483647.0);
-            return rom.write_u32_be(offset, static_cast<std::uint32_t>(v));
-        }
-        case DataType::Int32Le: {
-            auto const v =
-                clamp_round<std::int32_t>(value, -2147483648.0, 2147483647.0);
-            return rom.write_u32_le(offset, static_cast<std::uint32_t>(v));
-        }
-        case DataType::Float32Be: {
-            std::uint32_t bits = 0;
-            float const   f    = static_cast<float>(value);
-            std::memcpy(&bits, &f, sizeof(bits));
-            return rom.write_u32_be(offset, bits);
-        }
-        case DataType::Float32Le: {
-            std::uint32_t bits = 0;
-            float const   f    = static_cast<float>(value);
-            std::memcpy(&bits, &f, sizeof(bits));
-            return rom.write_u32_le(offset, bits);
-        }
+    case DataType::Uint8:
+        return rom.write_u8(offset, clamp_round<std::uint8_t>(value, 0.0, 255.0));
+    case DataType::Int8: {
+        auto const v = clamp_round<std::int8_t>(value, -128.0, 127.0);
+        return rom.write_u8(offset, static_cast<std::uint8_t>(v));
+    }
+    case DataType::Uint16Be:
+        return rom.write_u16_be(offset, clamp_round<std::uint16_t>(value, 0.0, 65535.0));
+    case DataType::Uint16Le:
+        return rom.write_u16_le(offset, clamp_round<std::uint16_t>(value, 0.0, 65535.0));
+    case DataType::Int16Be: {
+        auto const v = clamp_round<std::int16_t>(value, -32768.0, 32767.0);
+        return rom.write_u16_be(offset, static_cast<std::uint16_t>(v));
+    }
+    case DataType::Int16Le: {
+        auto const v = clamp_round<std::int16_t>(value, -32768.0, 32767.0);
+        return rom.write_u16_le(offset, static_cast<std::uint16_t>(v));
+    }
+    case DataType::Uint32Be:
+        return rom.write_u32_be(offset, clamp_round<std::uint32_t>(value, 0.0, 4294967295.0));
+    case DataType::Uint32Le:
+        return rom.write_u32_le(offset, clamp_round<std::uint32_t>(value, 0.0, 4294967295.0));
+    case DataType::Int32Be: {
+        auto const v = clamp_round<std::int32_t>(value, -2147483648.0, 2147483647.0);
+        return rom.write_u32_be(offset, static_cast<std::uint32_t>(v));
+    }
+    case DataType::Int32Le: {
+        auto const v = clamp_round<std::int32_t>(value, -2147483648.0, 2147483647.0);
+        return rom.write_u32_le(offset, static_cast<std::uint32_t>(v));
+    }
+    case DataType::Float32Be: {
+        std::uint32_t bits = 0;
+        float const f = static_cast<float>(value);
+        std::memcpy(&bits, &f, sizeof(bits));
+        return rom.write_u32_be(offset, bits);
+    }
+    case DataType::Float32Le: {
+        std::uint32_t bits = 0;
+        float const f = static_cast<float>(value);
+        std::memcpy(&bits, &f, sizeof(bits));
+        return rom.write_u32_le(offset, bits);
+    }
     }
     return failure(ErrorCode::InvalidArgument, "unknown DataType");
 }
@@ -736,7 +770,7 @@ Status write_typed(Rom &rom, std::size_t offset, DataType dt, double value) {
 // in this TU and Definition's private state. Members are static so callers
 // don't have to thread instances around.
 class DefinitionBuilder {
-  public:
+public:
     // Parse a single TOML table and merge its arrays into `def`. If
     // accept_pack is true, also reads a top-level [pack] section; otherwise
     // [pack] in the table is silently ignored (so secondary files in a
@@ -746,25 +780,26 @@ class DefinitionBuilder {
         auto const *pack_node = tbl.get("pack");
         if (pack_node != nullptr && accept_pack) {
             auto pack_r = parse_pack(*pack_node);
-            if (!pack_r.has_value()) return failure(pack_r.error());
+            if (!pack_r.has_value())
+                return failure(pack_r.error());
             def.pack_ = std::move(*pack_r);
         } else if (accept_pack && require_pack && pack_node == nullptr) {
             return failure(ErrorCode::ParseError, "missing [pack] section");
         }
 
-        auto const visit_array = [&](std::string_view key, auto parse_one,
-                                     auto &dst) -> Status {
+        auto const visit_array = [&](std::string_view key, auto parse_one, auto &dst) -> Status {
             auto const *arr = tbl[key].as_array();
-            if (arr == nullptr) return ok();
+            if (arr == nullptr)
+                return ok();
             for (auto const &el : *arr) {
                 auto const *t = el.as_table();
                 if (t == nullptr) {
                     return failure(ErrorCode::ParseError,
-                                   "element of " + std::string{key}
-                                       + " is not a table");
+                                   "element of " + std::string{key} + " is not a table");
                 }
                 auto r = parse_one(*t);
-                if (!r.has_value()) return failure(r.error());
+                if (!r.has_value())
+                    return failure(r.error());
                 dst.push_back(std::move(*r));
             }
             return ok();
@@ -777,8 +812,7 @@ class DefinitionBuilder {
         if (auto r = visit_array("axis", parse_axis, def.axes_); !r.has_value()) {
             return failure(r.error());
         }
-        if (auto r = visit_array("scaling", parse_scaling, def.scalings_);
-            !r.has_value()) {
+        if (auto r = visit_array("scaling", parse_scaling, def.scalings_); !r.has_value()) {
             return failure(r.error());
         }
         if (auto r = visit_array("table", parse_table, def.tables_); !r.has_value()) {
@@ -800,8 +834,7 @@ class DefinitionBuilder {
         if (auto r = visit_array("hook", parse_hook, def.hooks_); !r.has_value()) {
             return failure(r.error());
         }
-        if (auto r = visit_array("primitive", parse_primitive, def.primitives_);
-            !r.has_value()) {
+        if (auto r = visit_array("primitive", parse_primitive, def.primitives_); !r.has_value()) {
             return failure(r.error());
         }
         return ok();
@@ -831,13 +864,13 @@ class DefinitionBuilder {
                 }
             }
         };
-        upsert(parent.axes_,     child.axes_);
+        upsert(parent.axes_, child.axes_);
         upsert(parent.scalings_, child.scalings_);
-        upsert(parent.tables_,   child.tables_);
-        upsert(parent.pids_,     child.pids_);
+        upsert(parent.tables_, child.tables_);
+        upsert(parent.pids_, child.pids_);
         upsert(parent.switches_, child.switches_);
         upsert(parent.dtc_bitmaps_, child.dtc_bitmaps_);
-        upsert(parent.hooks_,    child.hooks_);
+        upsert(parent.hooks_, child.hooks_);
         upsert(parent.primitives_, child.primitives_);
         // DTCs are keyed by `code` rather than `id`; same upsert semantics
         // but a different key field.
@@ -856,75 +889,73 @@ class DefinitionBuilder {
     // Scan sibling directories of `child_dir` for one whose pack.toml
     // declares `[pack].id == target_id`. Returns its path or an error.
     static Result<std::filesystem::path>
-    find_sibling_pack_dir(std::filesystem::path const &child_dir,
-                          std::string_view              target_id) {
+    find_sibling_pack_dir(std::filesystem::path const &child_dir, std::string_view target_id) {
         auto const parent = child_dir.parent_path();
         if (parent.empty()) {
             return failure(ErrorCode::FileNotFound,
-                           "cannot resolve 'extends = " + std::string{target_id}
-                               + "': no parent directory of "
-                               + child_dir.string());
+                           "cannot resolve 'extends = " + std::string{target_id} +
+                               "': no parent directory of " + child_dir.string());
         }
         std::error_code ec;
         if (!std::filesystem::is_directory(parent, ec) || ec) {
             return failure(ErrorCode::FileNotFound,
-                           "cannot resolve 'extends = " + std::string{target_id}
-                               + "': search root is not a directory: "
-                               + parent.string());
+                           "cannot resolve 'extends = " + std::string{target_id} +
+                               "': search root is not a directory: " + parent.string());
         }
 
-        for (auto const &entry :
-             std::filesystem::directory_iterator{parent, ec}) {
-            if (ec) break;
-            if (!entry.is_directory(ec) || ec) continue;
+        for (auto const &entry : std::filesystem::directory_iterator{parent, ec}) {
+            if (ec)
+                break;
+            if (!entry.is_directory(ec) || ec)
+                continue;
             auto const candidate_manifest = entry.path() / "pack.toml";
-            if (!std::filesystem::exists(candidate_manifest, ec) || ec) continue;
+            if (!std::filesystem::exists(candidate_manifest, ec) || ec)
+                continue;
 
-            std::error_code   read_ec;
+            std::error_code read_ec;
             std::string const contents = read_file(candidate_manifest, read_ec);
-            if (read_ec) continue;
+            if (read_ec)
+                continue;
 
             auto tbl = parse_toml(contents);
-            if (!tbl.has_value()) continue;
+            if (!tbl.has_value())
+                continue;
             auto const id_node = (*tbl)["pack"]["id"].value<std::string>();
             if (id_node.has_value() && *id_node == target_id) {
                 return entry.path();
             }
         }
         return failure(ErrorCode::FileNotFound,
-                       "cannot resolve 'extends = " + std::string{target_id}
-                           + "': no sibling pack with that id");
+                       "cannot resolve 'extends = " + std::string{target_id} +
+                           "': no sibling pack with that id");
     }
 
     // Load a definition directory with cycle-protected `extends` resolution.
     // `visited` tracks pack ids reached so far in the inheritance chain.
-    static Result<Definition>
-    load_chain(std::filesystem::path const &path,
-               std::vector<std::string>    &visited) {
+    static Result<Definition> load_chain(std::filesystem::path const &path,
+                                         std::vector<std::string> &visited) {
         std::error_code ec;
         if (!std::filesystem::is_directory(path, ec) || ec) {
-            return failure(ErrorCode::InvalidArgument,
-                           "not a directory: " + path.string());
+            return failure(ErrorCode::InvalidArgument, "not a directory: " + path.string());
         }
 
         auto const manifest = path / "pack.toml";
         if (!std::filesystem::exists(manifest, ec) || ec) {
-            return failure(ErrorCode::FileNotFound,
-                           "pack.toml missing in: " + path.string());
+            return failure(ErrorCode::FileNotFound, "pack.toml missing in: " + path.string());
         }
 
         Definition def;
 
-        auto const ingest = [&](std::filesystem::path const &p,
-                                bool accept_pack, bool require_pack) -> Status {
-            std::error_code   read_ec;
+        auto const ingest = [&](std::filesystem::path const &p, bool accept_pack,
+                                bool require_pack) -> Status {
+            std::error_code read_ec;
             std::string const contents = read_file(p, read_ec);
             if (read_ec) {
-                return failure(ErrorCode::IoFailure,
-                               "cannot read " + p.string());
+                return failure(ErrorCode::IoFailure, "cannot read " + p.string());
             }
             auto tbl = parse_toml(contents);
-            if (!tbl.has_value()) return failure(tbl.error());
+            if (!tbl.has_value())
+                return failure(tbl.error());
             return merge(*tbl, def, accept_pack, require_pack);
         };
 
@@ -934,22 +965,22 @@ class DefinitionBuilder {
         }
 
         std::vector<std::filesystem::path> others;
-        for (auto const &entry :
-             std::filesystem::recursive_directory_iterator{path, ec}) {
+        for (auto const &entry : std::filesystem::recursive_directory_iterator{path, ec}) {
             if (ec) {
-                return failure(ErrorCode::IoFailure,
-                               "walk failed in: " + path.string());
+                return failure(ErrorCode::IoFailure, "walk failed in: " + path.string());
             }
-            if (!entry.is_regular_file(ec) || ec) continue;
+            if (!entry.is_regular_file(ec) || ec)
+                continue;
             auto const ep = entry.path();
-            if (ep.extension() != ".toml") continue;
-            if (std::filesystem::equivalent(ep, manifest, ec)) continue;
+            if (ep.extension() != ".toml")
+                continue;
+            if (std::filesystem::equivalent(ep, manifest, ec))
+                continue;
             others.push_back(ep);
         }
         std::sort(others.begin(), others.end());
         for (auto const &p : others) {
-            if (auto r = ingest(p, /*accept_pack=*/false, /*require_pack=*/false);
-                !r.has_value()) {
+            if (auto r = ingest(p, /*accept_pack=*/false, /*require_pack=*/false); !r.has_value()) {
                 return failure(r.error());
             }
         }
@@ -959,20 +990,20 @@ class DefinitionBuilder {
         }
 
         auto const &parent_id = *def.pack_.extends;
-        if (std::find(visited.begin(), visited.end(), parent_id)
-            != visited.end()) {
-            return failure(ErrorCode::ParseError,
-                           "'extends' cycle detected: pack '" + def.pack_.id
-                               + "' extends already-visited '" + parent_id
-                               + "'");
+        if (std::find(visited.begin(), visited.end(), parent_id) != visited.end()) {
+            return failure(ErrorCode::ParseError, "'extends' cycle detected: pack '" +
+                                                      def.pack_.id + "' extends already-visited '" +
+                                                      parent_id + "'");
         }
         auto parent_path = find_sibling_pack_dir(path, parent_id);
-        if (!parent_path.has_value()) return failure(parent_path.error());
+        if (!parent_path.has_value())
+            return failure(parent_path.error());
 
         visited.push_back(def.pack_.id);
         auto parent_def = load_chain(*parent_path, visited);
         visited.pop_back();
-        if (!parent_def.has_value()) return failure(parent_def.error());
+        if (!parent_def.has_value())
+            return failure(parent_def.error());
 
         return merge_over(std::move(*parent_def), std::move(def));
     }
@@ -980,7 +1011,8 @@ class DefinitionBuilder {
 
 Result<Definition> Definition::from_toml_string(std::string_view toml) {
     auto tbl = parse_toml(toml);
-    if (!tbl.has_value()) return failure(tbl.error());
+    if (!tbl.has_value())
+        return failure(tbl.error());
 
     Definition def;
     if (auto r = DefinitionBuilder::merge(*tbl, def, /*accept_pack=*/true,
@@ -996,15 +1028,14 @@ namespace {
 // records-only into `def`. `visited` carries the canonical paths reached so
 // far in the recursion; revisits raise ParseError. Fragments may themselves
 // declare `includes` and we walk those depth-first.
-Status resolve_includes(Definition                                  &def,
-                        std::vector<std::string> const              &includes,
-                        std::filesystem::path const                 &base_dir,
-                        std::vector<std::filesystem::path>          &visited) {
+Status resolve_includes(Definition &def, std::vector<std::string> const &includes,
+                        std::filesystem::path const &base_dir,
+                        std::vector<std::filesystem::path> &visited) {
     for (auto const &rel : includes) {
         std::error_code ec;
         auto const candidate = base_dir / rel;
-        auto const canon     = std::filesystem::weakly_canonical(candidate, ec);
-        auto const resolved  = ec ? candidate : canon;
+        auto const canon = std::filesystem::weakly_canonical(candidate, ec);
+        auto const resolved = ec ? candidate : canon;
         if (std::find(visited.begin(), visited.end(), resolved) != visited.end()) {
             return failure(ErrorCode::ParseError,
                            "include cycle detected at: " + resolved.string());
@@ -1012,14 +1043,12 @@ Status resolve_includes(Definition                                  &def,
         std::error_code read_ec;
         std::string const contents = read_file(resolved, read_ec);
         if (read_ec) {
-            return failure(ErrorCode::FileNotFound,
-                           "include not found: " + resolved.string());
+            return failure(ErrorCode::FileNotFound, "include not found: " + resolved.string());
         }
         auto tbl = parse_toml(contents);
         if (!tbl.has_value()) {
-            return failure(ErrorCode::ParseError,
-                           "include parse: " + resolved.string() + ": "
-                               + std::string{tbl.error().message()});
+            return failure(ErrorCode::ParseError, "include parse: " + resolved.string() + ": " +
+                                                      std::string{tbl.error().message()});
         }
         // Record-level merge only — the fragment's own [pack] is informational
         // (gives the file a loadable id for stand-alone `pack-info`) but does
@@ -1030,9 +1059,8 @@ Status resolve_includes(Definition                                  &def,
         if (auto const *pack_node = tbl->get("pack"); pack_node != nullptr) {
             auto r = parse_pack(*pack_node);
             if (!r.has_value()) {
-                return failure(ErrorCode::ParseError,
-                               "include " + resolved.string() + ": "
-                                   + std::string{r.error().message()});
+                return failure(ErrorCode::ParseError, "include " + resolved.string() + ": " +
+                                                          std::string{r.error().message()});
             }
             frag_pack = std::move(*r);
             has_frag_includes = !frag_pack.includes.empty();
@@ -1044,10 +1072,11 @@ Status resolve_includes(Definition                                  &def,
         }
         if (has_frag_includes) {
             visited.push_back(resolved);
-            auto status = resolve_includes(def, frag_pack.includes,
-                                           resolved.parent_path(), visited);
+            auto status =
+                resolve_includes(def, frag_pack.includes, resolved.parent_path(), visited);
             visited.pop_back();
-            if (!status.has_value()) return failure(status.error());
+            if (!status.has_value())
+                return failure(status.error());
         }
     }
     return ok();
@@ -1064,14 +1093,14 @@ Result<Definition> Definition::from_file(std::filesystem::path const &path) {
         return failure(ErrorCode::FileNotFound, path.string());
     }
     auto def_r = from_toml_string(contents);
-    if (!def_r.has_value()) return def_r;
+    if (!def_r.has_value())
+        return def_r;
     auto def = std::move(*def_r);
     if (!def.pack_.includes.empty()) {
         auto const canon = std::filesystem::weakly_canonical(path, ec);
-        auto const self  = ec ? path : canon;
+        auto const self = ec ? path : canon;
         std::vector<std::filesystem::path> visited{self};
-        if (auto status = resolve_includes(def, def.pack_.includes,
-                                           self.parent_path(), visited);
+        if (auto status = resolve_includes(def, def.pack_.includes, self.parent_path(), visited);
             !status.has_value()) {
             return failure(status.error());
         }
@@ -1086,7 +1115,7 @@ Result<Definition> Definition::from_directory(std::filesystem::path const &path)
 
 Status Definition::validate() const {
     std::string violations;
-    auto const  note = [&](std::string s) {
+    auto const note = [&](std::string s) {
         if (!violations.empty()) {
             violations.push_back('\n');
         }
@@ -1094,7 +1123,7 @@ Status Definition::validate() const {
     };
 
     auto const rom_size = pack_.rom_size_bytes;
-    auto const fits     = [rom_size](std::size_t addr, std::size_t bytes) {
+    auto const fits = [rom_size](std::size_t addr, std::size_t bytes) {
         if (rom_size == 0) {
             return true; // unspecified ROM size; defer the check
         }
@@ -1115,8 +1144,8 @@ Status Definition::validate() const {
         }
         auto const check_axis = [&](char which, std::optional<std::string> const &ax) {
             if (ax.has_value() && !ax->empty() && find_axis(*ax) == nullptr) {
-                note(std::string{"table '"} + t.id + "' axis_" + which + " references unknown axis '"
-                     + *ax + "'");
+                note(std::string{"table '"} + t.id + "' axis_" + which +
+                     " references unknown axis '" + *ax + "'");
             }
         };
         check_axis('x', t.axis_x);
@@ -1124,13 +1153,16 @@ Status Definition::validate() const {
         check_axis('z', t.axis_z);
 
         if (t.dimensions >= 1 && !t.axis_x.has_value()) {
-            note("table '" + t.id + "' requires axis_x for dimensions=" + std::to_string(t.dimensions));
+            note("table '" + t.id +
+                 "' requires axis_x for dimensions=" + std::to_string(t.dimensions));
         }
         if (t.dimensions >= 2 && !t.axis_y.has_value()) {
-            note("table '" + t.id + "' requires axis_y for dimensions=" + std::to_string(t.dimensions));
+            note("table '" + t.id +
+                 "' requires axis_y for dimensions=" + std::to_string(t.dimensions));
         }
         if (t.dimensions >= 3 && !t.axis_z.has_value()) {
-            note("table '" + t.id + "' requires axis_z for dimensions=" + std::to_string(t.dimensions));
+            note("table '" + t.id +
+                 "' requires axis_z for dimensions=" + std::to_string(t.dimensions));
         }
         // We can't compute table extent without resolved axes; bounds-check
         // the base address only.
@@ -1146,8 +1178,7 @@ Status Definition::validate() const {
     for (auto const &id : ids_) {
         // cid_scan mode searches the whole ROM, so cid_address is
         // ignored and the fixed-offset bounds check doesn't apply.
-        if (!id.cid_scan && rom_size != 0
-            && !fits(id.cid_address, id.cid_length)) {
+        if (!id.cid_scan && rom_size != 0 && !fits(id.cid_address, id.cid_length)) {
             note("identification '" + id.name + "' cid_address extends past rom_size_bytes");
         }
     }
@@ -1163,9 +1194,9 @@ Status Definition::validate() const {
             continue;
         }
         if (d.byte_offset >= bm->length_bytes) {
-            note("dtc '" + d.code + "' byte_offset " + std::to_string(d.byte_offset)
-                 + " is outside bitmap '" + bm->id + "' (length_bytes="
-                 + std::to_string(bm->length_bytes) + ")");
+            note("dtc '" + d.code + "' byte_offset " + std::to_string(d.byte_offset) +
+                 " is outside bitmap '" + bm->id +
+                 "' (length_bytes=" + std::to_string(bm->length_bytes) + ")");
         }
     }
 
@@ -1176,8 +1207,7 @@ Status Definition::validate() const {
 }
 
 Axis const *Definition::find_axis(std::string_view id) const noexcept {
-    auto it = std::find_if(axes_.begin(), axes_.end(),
-                           [&](Axis const &a) { return a.id == id; });
+    auto it = std::find_if(axes_.begin(), axes_.end(), [&](Axis const &a) { return a.id == id; });
     return it == axes_.end() ? nullptr : &*it;
 }
 
@@ -1188,14 +1218,13 @@ Scaling const *Definition::find_scaling(std::string_view id) const noexcept {
 }
 
 Table const *Definition::find_table(std::string_view id) const noexcept {
-    auto it = std::find_if(tables_.begin(), tables_.end(),
-                           [&](Table const &t) { return t.id == id; });
+    auto it =
+        std::find_if(tables_.begin(), tables_.end(), [&](Table const &t) { return t.id == id; });
     return it == tables_.end() ? nullptr : &*it;
 }
 
 Pid const *Definition::find_pid(std::string_view id) const noexcept {
-    auto it = std::find_if(pids_.begin(), pids_.end(),
-                           [&](Pid const &p) { return p.id == id; });
+    auto it = std::find_if(pids_.begin(), pids_.end(), [&](Pid const &p) { return p.id == id; });
     return it == pids_.end() ? nullptr : &*it;
 }
 
@@ -1212,14 +1241,13 @@ DtcBitmap const *Definition::find_dtc_bitmap(std::string_view id) const noexcept
 }
 
 Dtc const *Definition::find_dtc(std::string_view code) const noexcept {
-    auto it = std::find_if(dtcs_.begin(), dtcs_.end(),
-                           [&](Dtc const &d) { return d.code == code; });
+    auto it =
+        std::find_if(dtcs_.begin(), dtcs_.end(), [&](Dtc const &d) { return d.code == code; });
     return it == dtcs_.end() ? nullptr : &*it;
 }
 
 Hook const *Definition::find_hook(std::string_view id) const noexcept {
-    auto it = std::find_if(hooks_.begin(), hooks_.end(),
-                           [&](Hook const &h) { return h.id == id; });
+    auto it = std::find_if(hooks_.begin(), hooks_.end(), [&](Hook const &h) { return h.id == id; });
     return it == hooks_.end() ? nullptr : &*it;
 }
 
@@ -1230,9 +1258,7 @@ Primitive const *Definition::find_primitive(std::string_view id) const noexcept 
 }
 
 namespace {
-Result<std::size_t> dtc_byte_offset(Rom const &rom,
-                                    DtcBitmap const &bitmap,
-                                    Dtc const &dtc) {
+Result<std::size_t> dtc_byte_offset(Rom const &rom, DtcBitmap const &bitmap, Dtc const &dtc) {
     if (dtc.byte_offset >= bitmap.length_bytes) {
         return failure(ErrorCode::OutOfRange,
                        "dtc '" + dtc.code + "' byte_offset is outside its bitmap");
@@ -1248,37 +1274,39 @@ Result<std::size_t> dtc_byte_offset(Rom const &rom,
 
 Result<bool> is_dtc_enabled(Rom const &rom, DtcBitmap const &bitmap, Dtc const &dtc) {
     auto const off = dtc_byte_offset(rom, bitmap, dtc);
-    if (!off.has_value()) return failure(off.error());
+    if (!off.has_value())
+        return failure(off.error());
     auto const byte = rom.read_u8(*off);
-    if (!byte.has_value()) return failure(byte.error());
+    if (!byte.has_value())
+        return failure(byte.error());
     return ((*byte >> dtc.bit) & 1U) != 0U;
 }
 
-Result<DtcBitChange> set_dtc_enabled(Rom &rom, DtcBitmap const &bitmap,
-                                      Dtc const &dtc, bool enabled) {
+Result<DtcBitChange> set_dtc_enabled(Rom &rom, DtcBitmap const &bitmap, Dtc const &dtc,
+                                     bool enabled) {
     auto const off = dtc_byte_offset(rom, bitmap, dtc);
-    if (!off.has_value()) return failure(off.error());
+    if (!off.has_value())
+        return failure(off.error());
     auto const cur = rom.read_u8(*off);
-    if (!cur.has_value()) return failure(cur.error());
+    if (!cur.has_value())
+        return failure(cur.error());
     DtcBitChange ch{};
-    ch.address         = *off;
-    ch.before          = *cur;
-    auto const mask    = static_cast<std::uint8_t>(1U << dtc.bit);
-    ch.after           = enabled
-                             ? static_cast<std::uint8_t>(ch.before | mask)
-                             : static_cast<std::uint8_t>(ch.before & ~mask);
+    ch.address = *off;
+    ch.before = *cur;
+    auto const mask = static_cast<std::uint8_t>(1U << dtc.bit);
+    ch.after = enabled ? static_cast<std::uint8_t>(ch.before | mask)
+                       : static_cast<std::uint8_t>(ch.before & ~mask);
     if (auto s = rom.write_u8(*off, ch.after); !s.has_value()) {
         return failure(s.error());
     }
     return ch;
 }
 
-Result<std::vector<double>> Definition::read_axis_values(Rom const &rom,
-                                                          Axis const &axis) const {
+Result<std::vector<double>> Definition::read_axis_values(Rom const &rom, Axis const &axis) const {
     std::vector<double> out;
     out.reserve(axis.length);
 
-    auto const step    = byte_size(axis.data_type);
+    auto const step = byte_size(axis.data_type);
     auto const scaling = find_scaling(axis.scaling);
 
     for (std::size_t i = 0; i < axis.length; ++i) {
@@ -1291,36 +1319,40 @@ Result<std::vector<double>> Definition::read_axis_values(Rom const &rom,
     return out;
 }
 
-Result<Definition::TableData> Definition::read_table_values(Rom const &  rom,
+Result<Definition::TableData> Definition::read_table_values(Rom const &rom,
                                                             Table const &table) const {
     TableData td;
 
     // Resolve axes that this table actually uses.
     auto const resolve_axis = [&](std::optional<std::string> const &name,
                                   char ch) -> Result<std::vector<double>> {
-        if (!name.has_value() || name->empty()) return std::vector<double>{};
+        if (!name.has_value() || name->empty())
+            return std::vector<double>{};
         auto const *a = find_axis(*name);
         if (a == nullptr) {
-            return failure(ErrorCode::ParseError,
-                           std::string{"table '"} + table.id + "' references unknown axis_"
-                               + ch + " '" + *name + "'");
+            return failure(ErrorCode::ParseError, std::string{"table '"} + table.id +
+                                                      "' references unknown axis_" + ch + " '" +
+                                                      *name + "'");
         }
         return read_axis_values(rom, *a);
     };
 
     if (table.dimensions >= 1) {
         auto xs = resolve_axis(table.axis_x, 'x');
-        if (!xs.has_value()) return failure(xs.error());
+        if (!xs.has_value())
+            return failure(xs.error());
         td.axis_x = std::move(*xs);
     }
     if (table.dimensions >= 2) {
         auto ys = resolve_axis(table.axis_y, 'y');
-        if (!ys.has_value()) return failure(ys.error());
+        if (!ys.has_value())
+            return failure(ys.error());
         td.axis_y = std::move(*ys);
     }
     if (table.dimensions >= 3) {
         auto zs = resolve_axis(table.axis_z, 'z');
-        if (!zs.has_value()) return failure(zs.error());
+        if (!zs.has_value())
+            return failure(zs.error());
         td.axis_z = std::move(*zs);
     }
 
@@ -1331,7 +1363,8 @@ Result<Definition::TableData> Definition::read_table_values(Rom const &  rom,
 
     auto const read_cell = [&](std::size_t off, double &out) -> Status {
         auto const raw = read_typed(rom, off, table.data_type);
-        if (!raw.has_value()) return failure(raw.error());
+        if (!raw.has_value())
+            return failure(raw.error());
         out = (scal != nullptr) ? apply_scaling(*raw, *scal) : *raw;
         return ok();
     };
@@ -1365,44 +1398,54 @@ Result<Definition::TableData> Definition::read_table_values(Rom const &  rom,
     return td;
 }
 
-Status Definition::write_table_values(Rom &rom, Table const &table,
-                                       TableData const &td) const {
+Status Definition::write_table_values(Rom &rom, Table const &table, TableData const &td) const {
     Axis const *ax = nullptr;
     Axis const *ay = nullptr;
     Axis const *az = nullptr;
-    auto const  resolve = [&](std::optional<std::string> const &name,
-                              char ch) -> Result<Axis const *> {
-        if (!name.has_value() || name->empty()) return static_cast<Axis const *>(nullptr);
+    auto const resolve = [&](std::optional<std::string> const &name,
+                             char ch) -> Result<Axis const *> {
+        if (!name.has_value() || name->empty())
+            return static_cast<Axis const *>(nullptr);
         auto const *a = find_axis(*name);
         if (a == nullptr) {
-            return failure(ErrorCode::ParseError,
-                           std::string{"table '"} + table.id + "' references unknown axis_"
-                               + ch + " '" + *name + "'");
+            return failure(ErrorCode::ParseError, std::string{"table '"} + table.id +
+                                                      "' references unknown axis_" + ch + " '" +
+                                                      *name + "'");
         }
         return a;
     };
     if (table.dimensions >= 1) {
-        auto r = resolve(table.axis_x, 'x'); if (!r.has_value()) return failure(r.error()); ax = *r;
+        auto r = resolve(table.axis_x, 'x');
+        if (!r.has_value())
+            return failure(r.error());
+        ax = *r;
     }
     if (table.dimensions >= 2) {
-        auto r = resolve(table.axis_y, 'y'); if (!r.has_value()) return failure(r.error()); ay = *r;
+        auto r = resolve(table.axis_y, 'y');
+        if (!r.has_value())
+            return failure(r.error());
+        ay = *r;
     }
     if (table.dimensions >= 3) {
-        auto r = resolve(table.axis_z, 'z'); if (!r.has_value()) return failure(r.error()); az = *r;
+        auto r = resolve(table.axis_z, 'z');
+        if (!r.has_value())
+            return failure(r.error());
+        az = *r;
     }
 
-    auto const cols  = ax == nullptr ? std::size_t{1} : ax->length;
-    auto const rows  = ay == nullptr ? std::size_t{1} : ay->length;
+    auto const cols = ax == nullptr ? std::size_t{1} : ax->length;
+    auto const rows = ay == nullptr ? std::size_t{1} : ay->length;
     auto const depth = az == nullptr ? std::size_t{1} : az->length;
 
-    auto const  step = byte_size(table.data_type);
+    auto const step = byte_size(table.data_type);
     auto const *scal = find_scaling(table.scaling);
 
     auto const write_cell = [&](std::size_t off, double eng) -> Status {
         double raw = eng;
         if (scal != nullptr) {
             auto const inv = invert_scaling(eng, *scal);
-            if (!inv.has_value()) return failure(inv.error());
+            if (!inv.has_value())
+                return failure(inv.error());
             raw = *inv;
         }
         return write_typed(rom, off, table.data_type, raw);
@@ -1411,28 +1454,26 @@ Status Definition::write_table_values(Rom &rom, Table const &table,
     if (table.dimensions == 3) {
         if (td.slices.size() != depth) {
             return failure(ErrorCode::InvalidArgument,
-                           "TableData has " + std::to_string(td.slices.size())
-                               + " slices but table expects " + std::to_string(depth));
+                           "TableData has " + std::to_string(td.slices.size()) +
+                               " slices but table expects " + std::to_string(depth));
         }
         for (std::size_t z = 0; z < depth; ++z) {
             if (td.slices[z].size() != rows) {
                 return failure(ErrorCode::InvalidArgument,
-                               "TableData slice " + std::to_string(z) + " has "
-                                   + std::to_string(td.slices[z].size())
-                                   + " rows but table expects " + std::to_string(rows));
+                               "TableData slice " + std::to_string(z) + " has " +
+                                   std::to_string(td.slices[z].size()) +
+                                   " rows but table expects " + std::to_string(rows));
             }
             for (std::size_t r = 0; r < rows; ++r) {
                 if (td.slices[z][r].size() != cols) {
                     return failure(ErrorCode::InvalidArgument,
-                                   "TableData slice " + std::to_string(z) + " row "
-                                       + std::to_string(r) + " has "
-                                       + std::to_string(td.slices[z][r].size())
-                                       + " cols but table expects "
-                                       + std::to_string(cols));
+                                   "TableData slice " + std::to_string(z) + " row " +
+                                       std::to_string(r) + " has " +
+                                       std::to_string(td.slices[z][r].size()) +
+                                       " cols but table expects " + std::to_string(cols));
                 }
                 for (std::size_t c = 0; c < cols; ++c) {
-                    auto const off =
-                        table.address + ((z * rows + r) * cols + c) * step;
+                    auto const off = table.address + ((z * rows + r) * cols + c) * step;
                     if (auto s = write_cell(off, td.slices[z][r][c]); !s.has_value()) {
                         return s;
                     }
@@ -1444,15 +1485,15 @@ Status Definition::write_table_values(Rom &rom, Table const &table,
 
     if (td.values.size() != rows) {
         return failure(ErrorCode::InvalidArgument,
-                       "TableData has " + std::to_string(td.values.size())
-                           + " rows but table expects " + std::to_string(rows));
+                       "TableData has " + std::to_string(td.values.size()) +
+                           " rows but table expects " + std::to_string(rows));
     }
     for (std::size_t r = 0; r < rows; ++r) {
         if (td.values[r].size() != cols) {
             return failure(ErrorCode::InvalidArgument,
-                           "TableData row " + std::to_string(r) + " has "
-                               + std::to_string(td.values[r].size())
-                               + " cols but table expects " + std::to_string(cols));
+                           "TableData row " + std::to_string(r) + " has " +
+                               std::to_string(td.values[r].size()) + " cols but table expects " +
+                               std::to_string(cols));
         }
         for (std::size_t c = 0; c < cols; ++c) {
             auto const off = table.address + (r * cols + c) * step;
@@ -1464,25 +1505,26 @@ Status Definition::write_table_values(Rom &rom, Table const &table,
     return ok();
 }
 
-Result<Definition::TableDiff> Definition::diff_table(Rom const &  a,
-                                                     Rom const &  b,
+Result<Definition::TableDiff> Definition::diff_table(Rom const &a, Rom const &b,
                                                      Table const &table) const {
     auto ta = read_table_values(a, table);
-    if (!ta.has_value()) return failure(ta.error());
+    if (!ta.has_value())
+        return failure(ta.error());
     auto tb = read_table_values(b, table);
-    if (!tb.has_value()) return failure(tb.error());
+    if (!tb.has_value())
+        return failure(tb.error());
 
     if (ta->values.size() != tb->values.size()) {
         return failure(ErrorCode::Unknown, "table '" + table.id + "': row count mismatch");
     }
 
     TableDiff diff;
-    double    abs_sum = 0.0;
+    double abs_sum = 0.0;
     for (std::size_t r = 0; r < ta->values.size(); ++r) {
         if (ta->values[r].size() != tb->values[r].size()) {
-            return failure(ErrorCode::Unknown,
-                           "table '" + table.id + "': column count mismatch on row "
-                               + std::to_string(r));
+            return failure(ErrorCode::Unknown, "table '" + table.id +
+                                                   "': column count mismatch on row " +
+                                                   std::to_string(r));
         }
         for (std::size_t c = 0; c < ta->values[r].size(); ++c) {
             ++diff.total_cells;
@@ -1491,7 +1533,8 @@ Result<Definition::TableDiff> Definition::diff_table(Rom const &  a,
                 ++diff.cells_changed;
                 double const ad = d < 0 ? -d : d;
                 abs_sum += ad;
-                if (ad > diff.max_abs_delta) diff.max_abs_delta = ad;
+                if (ad > diff.max_abs_delta)
+                    diff.max_abs_delta = ad;
             }
         }
     }
@@ -1511,9 +1554,9 @@ std::optional<Definition::MatchInfo> Definition::match_info(Rom const &rom) cons
             // the ROM bytes counts as a match; the offset is reported
             // so callers can show where it was found.
             auto const haystack = rom.slice(0, rom.size());
-            if (!haystack.has_value() || id.cid_match.empty()) continue;
-            std::string_view const hay{reinterpret_cast<char const *>(
-                                            haystack->data()),
+            if (!haystack.has_value() || id.cid_match.empty())
+                continue;
+            std::string_view const hay{reinterpret_cast<char const *>(haystack->data()),
                                        haystack->size()};
             auto const pos = hay.find(id.cid_match);
             if (pos != std::string_view::npos) {
@@ -1525,8 +1568,7 @@ std::optional<Definition::MatchInfo> Definition::match_info(Rom const &rom) cons
         if (!slice.has_value()) {
             continue;
         }
-        std::string_view const got{reinterpret_cast<char const *>(slice->data()),
-                                   slice->size()};
+        std::string_view const got{reinterpret_cast<char const *>(slice->data()), slice->size()};
         if (got == id.cid_match) {
             return MatchInfo{id.name, id.cid_address, /*scanned=*/false};
         }

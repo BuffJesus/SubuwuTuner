@@ -64,22 +64,22 @@ enum class Op : std::uint8_t {
 [[nodiscard]] char const *op_name(Op op) noexcept;
 
 struct Instruction {
-    Op                       op{Op::LoadConstant};
-    PinType                  result_type{PinType::Float};
-    ValueId                  result_id{0};
+    Op op{Op::LoadConstant};
+    PinType result_type{PinType::Float};
+    ValueId result_id{0};
     // Pack-symbol identifier for LoadHookInput / CallPrimitive /
     // StoreHookOutput. The lowerer strips the "hook." / "primitive."
     // kind prefix when storing — so this is the bare id ("multiply_
     // float", not "primitive.multiply_float"). Codegen resolves the
     // symbol back against the loaded Definition.
-    std::string              symbol;
+    std::string symbol;
     // Pin name on the symbol. For CallPrimitive it identifies the
     // specific output pin (a primitive with multiple outputs would
     // emit one Instruction per output, sharing the operand list).
     // For LoadHookInput / StoreHookOutput it identifies the read /
     // write port.
-    std::string              pin_name;
-    std::vector<ValueId>     operands;
+    std::string pin_name;
+    std::vector<ValueId> operands;
     // Symbolic names of the input pins corresponding 1:1 with
     // `operands`. Populated for CallPrimitive only — codegen uses
     // this to map operand[k] back to the primitive's declared input
@@ -88,7 +88,7 @@ struct Instruction {
     // LoadHookInput / StoreHookOutput (operands trivially correspond
     // to the single port named in `pin_name`).
     std::vector<std::string> operand_pin_names;
-    std::optional<double>    constant_value;  // only for LoadConstant
+    std::optional<double> constant_value; // only for LoadConstant
 };
 
 struct Module {
@@ -106,7 +106,7 @@ struct Module {
 // subcommand and for golden-file tests. Format: one Instruction per
 // line, `[%result_id =] OP operands... [@symbol.pin]`. Trailing
 // "; estimated cost: N cycles" line per `estimate_cost`.
-[[nodiscard]] std::string    dump(Module const &m);
+[[nodiscard]] std::string dump(Module const &m);
 
 // Rough cost estimate for the whole Module. Intended as the lint-
 // side RT-budget heuristic per docs/16 §"Safety considerations" so
@@ -117,14 +117,14 @@ struct Module {
 //   LoadHookInput    2
 //   CallPrimitive    3
 //   StoreHookOutput  2
-[[nodiscard]] std::size_t    estimate_cost(Module const &m) noexcept;
+[[nodiscard]] std::size_t estimate_cost(Module const &m) noexcept;
 
 // One IR-level lint finding. `instruction_index` is the position in
 // `Module.instructions` of the offending instruction when the
 // finding is local to a specific op; absent when the finding is
 // whole-module (e.g. an RT-budget overrun).
 struct LintFinding {
-    std::string                message;
+    std::string message;
     std::optional<std::size_t> instruction_index;
 };
 
@@ -145,9 +145,7 @@ struct LintOptions {
 // surface in the lowered form — duplicate hook overrides, RT-budget
 // overruns. Codegen consumes the same findings and refuses on any
 // the project's policy treats as fatal.
-[[nodiscard]] std::vector<LintFinding>
-                              lint(Module const &m,
-                                    LintOptions opts = {});
+[[nodiscard]] std::vector<LintFinding> lint(Module const &m, LintOptions opts = {});
 
 } // namespace st::feature::ir
 

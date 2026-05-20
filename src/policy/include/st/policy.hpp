@@ -22,9 +22,9 @@ namespace st::policy {
 // default (least restrictive) per docs/06.
 enum class Profile {
     MotorsportOnly = 0,
-    AlbertaCa      = 1,
-    EuRoadworthy   = 2,
-    CaliforniaUs   = 3,
+    AlbertaCa = 1,
+    EuRoadworthy = 2,
+    CaliforniaUs = 3,
 };
 
 // What the linter wants the host to do when a flagged edit is saved or
@@ -32,12 +32,12 @@ enum class Profile {
 // can compare with `<` to escalate a per-flag decision under a stricter
 // profile.
 enum class Action {
-    Silent             = 0,  // do nothing
-    Badge              = 1,  // show a passive indicator (yellow corner)
-    Warn               = 2,  // emit a warning message, no confirmation
-    Confirm            = 3,  // require a one-click confirmation
-    ConfirmWithReason  = 4,  // require confirmation + free-text reason
-    Block              = 5,  // refuse the action outright
+    Silent = 0,            // do nothing
+    Badge = 1,             // show a passive indicator (yellow corner)
+    Warn = 2,              // emit a warning message, no confirmation
+    Confirm = 3,           // require a one-click confirmation
+    ConfirmWithReason = 4, // require confirmation + free-text reason
+    Block = 5,             // refuse the action outright
 };
 
 // Decision for a single concern, split by lifecycle stage.
@@ -59,8 +59,8 @@ struct Decision {
 
 // Stable string IDs used in config persistence (project.toml /
 // settings.toml). Round-trip: `parse_profile(profile_name(p)) == p`.
-[[nodiscard]] std::string_view              profile_name(Profile p) noexcept;
-[[nodiscard]] std::optional<Profile>        parse_profile(std::string_view s) noexcept;
+[[nodiscard]] std::string_view profile_name(Profile p) noexcept;
+[[nodiscard]] std::optional<Profile> parse_profile(std::string_view s) noexcept;
 
 } // namespace st::policy
 

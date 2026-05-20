@@ -31,7 +31,7 @@ inline constexpr auto kCrc32Table = []() {
 // 0xFFFFFFFF, which is the convention used by zlib, gzip, PNG, and the canonical
 // "123456789" → 0xCBF43926 test vector.
 class Crc32 {
-  public:
+public:
     constexpr void update(std::span<std::uint8_t const> data) noexcept {
         std::uint32_t c = state_;
         for (auto const b : data) {
@@ -44,9 +44,11 @@ class Crc32 {
         return state_ ^ 0xFFFFFFFFU;
     }
 
-    constexpr void reset() noexcept { state_ = 0xFFFFFFFFU; }
+    constexpr void reset() noexcept {
+        state_ = 0xFFFFFFFFU;
+    }
 
-  private:
+private:
     std::uint32_t state_{0xFFFFFFFFU};
 };
 

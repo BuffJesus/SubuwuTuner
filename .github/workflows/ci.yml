@@ -136,12 +136,13 @@ jobs:
           python -c "import tomllib; tomllib.loads(open('/tmp/syn.toml').read())"
 
   formatting:
-    name: clang-format (advisory)
+    name: clang-format (required)
     runs-on: ubuntu-24.04
-    # Advisory in Phase 0/1: format diffs are reported as a warning, not a
-    # merge blocker. We'll flip this to required once a pre-commit hook is in
-    # place so contributors get formatting feedback before pushing.
-    continue-on-error: true
+    # Required gate: every src/**/*.{cpp,hpp} + tests/**/*.{cpp,hpp}
+    # file must pass `clang-format --dry-run --Werror`. The codebase was
+    # swept clean in the same commit that flipped this from advisory to
+    # required. Contributors who don't have clang-format-18 locally can
+    # `pip install --user clang-format==18.1.8` to match the CI binary.
     steps:
       - uses: actions/checkout@v4
 
@@ -156,8 +157,7 @@ jobs:
           shopt -s globstar nullglob
           files=(src/**/*.cpp src/**/*.hpp tests/**/*.cpp tests/**/*.hpp)
           if [ ${#files[@]} -eq 0 ]; then
-            echo "No source files to check yet."
+            echo "No source files to check."
             exit 0
           fi
-          # Report diffs but don't fail the job.
-          clang-format --dry-run "${files[@]}" || true
+          clang-format --dry-run --Werror "${files[@]}"

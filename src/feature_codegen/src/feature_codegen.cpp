@@ -3,8 +3,9 @@
 
 #include "st/feature_codegen.hpp"
 
-#include "sh2a.hpp"
 #include "st/core/error.hpp"
+
+#include "sh2a.hpp"
 
 #include <toml++/toml.hpp>
 
@@ -36,25 +37,28 @@ namespace {
 
 char const *arch_name(Arch a) noexcept {
     switch (a) {
-        case Arch::Sh2a:    return "sh2a";
-        case Arch::Rh850:   return "rh850";
-        case Arch::Unknown: return "unknown";
+    case Arch::Sh2a:
+        return "sh2a";
+    case Arch::Rh850:
+        return "rh850";
+    case Arch::Unknown:
+        return "unknown";
     }
     return "unknown";
 }
 
-std::string_view arch_name_sv(Arch a) noexcept { return arch_name(a); }
+std::string_view arch_name_sv(Arch a) noexcept {
+    return arch_name(a);
+}
 
 // ---- RamAllocator -------------------------------------------------------
 
 RamAllocator::RamAllocator(std::size_t base, std::size_t length) noexcept
     : base_(base), length_(length), cursor_(base) {}
 
-Result<RamClaim> RamAllocator::claim(std::size_t size,
-                                      std::size_t alignment) noexcept {
+Result<RamClaim> RamAllocator::claim(std::size_t size, std::size_t alignment) noexcept {
     if (size == 0) {
-        return failure(ErrorCode::InvalidArgument,
-                       "RamAllocator::claim: size must be > 0");
+        return failure(ErrorCode::InvalidArgument, "RamAllocator::claim: size must be > 0");
     }
     // Normalize alignment: <2 means "no alignment" → 1. Otherwise it
     // must be a power of two so cursor rounding has a single-step
@@ -67,33 +71,32 @@ Result<RamClaim> RamAllocator::claim(std::size_t size,
 
     // Round cursor up to `align`. Overflow-guarded — if cursor + (align - 1)
     // would wrap past length_, refuse before we compute the masked address.
-    std::size_t const mask     = align - 1U;
-    std::size_t const slack    = (align - (cursor_ & mask)) & mask;
+    std::size_t const mask = align - 1U;
+    std::size_t const slack = (align - (cursor_ & mask)) & mask;
     if (slack > length_ || cursor_ + slack < cursor_) {
-        return failure(ErrorCode::OutOfRange,
-                       "RamAllocator::claim: alignment overflow");
+        return failure(ErrorCode::OutOfRange, "RamAllocator::claim: alignment overflow");
     }
     std::size_t const aligned = cursor_ + slack;
 
     // Bounds check the claim itself.
     if (aligned + size < aligned) {
-        return failure(ErrorCode::OutOfRange,
-                       "RamAllocator::claim: size overflow");
+        return failure(ErrorCode::OutOfRange, "RamAllocator::claim: size overflow");
     }
     if (aligned + size > base_ + length_) {
-        return failure(ErrorCode::OutOfRange,
-                       "RamAllocator::claim: region exhausted");
+        return failure(ErrorCode::OutOfRange, "RamAllocator::claim: region exhausted");
     }
 
     RamClaim out{};
-    out.address   = aligned;
-    out.size      = size;
+    out.address = aligned;
+    out.size = size;
     out.alignment = align;
-    cursor_       = aligned + size;
+    cursor_ = aligned + size;
     return out;
 }
 
-void RamAllocator::reset() noexcept { cursor_ = base_; }
+void RamAllocator::reset() noexcept {
+    cursor_ = base_;
+}
 
 // ---- Backend stubs ------------------------------------------------------
 
@@ -132,7 +135,7 @@ void emit_be32(std::vector<std::uint8_t> &code, std::uint32_t v) {
 // disp values manually. select uses BT/BRA backpatching for its
 // then/else control flow.
 class FragmentEmitter {
-  public:
+public:
     // Opaque label token for forward-reference branches. Returned by
     // create_label(), placed via place_label(), referenced by bt() /
     // bra(). Multiple branches may target the same label.
@@ -198,18 +201,18 @@ class FragmentEmitter {
     // BT label — branch if T=1. Placeholder bytes emitted now; disp
     // back-patched at finalize() once the label is known.
     void bt(Label const &target) {
-        branch_backpatches_.push_back(
-            {body_.size(), target.id, BranchKind::Bt});
+        branch_backpatches_.push_back({body_.size(), target.id, BranchKind::Bt});
         emit_be16(body_, sh2a::enc_bt(0));
     }
     // BRA label — unconditional branch (delay slot follows). Same
     // backpatch semantics as bt().
     void bra(Label const &target) {
-        branch_backpatches_.push_back(
-            {body_.size(), target.id, BranchKind::Bra});
+        branch_backpatches_.push_back({body_.size(), target.id, BranchKind::Bra});
         emit_be16(body_, sh2a::enc_bra(0));
     }
-    void nop() { emit_be16(body_, sh2a::enc_nop()); }
+    void nop() {
+        emit_be16(body_, sh2a::enc_nop());
+    }
     void fadd(sh2a::FReg frm, sh2a::FReg frn) {
         emit_be16(body_, sh2a::enc_fadd(frm, frn));
     }
@@ -264,31 +267,28 @@ class FragmentEmitter {
             std::size_t const target = target_opt.value();
             // PC-relative formula: target = (this_pc + 4) + disp*2.
             // disp_words = (target - this_pc - 4) / 2.
-            std::int32_t const disp_words =
-                (static_cast<std::int32_t>(target)
-                 - static_cast<std::int32_t>(bp.body_offset) - 4)
-                / 2;
+            std::int32_t const disp_words = (static_cast<std::int32_t>(target) -
+                                             static_cast<std::int32_t>(bp.body_offset) - 4) /
+                                            2;
             std::uint16_t enc = 0;
             if (bp.kind == BranchKind::Bt) {
                 enc = sh2a::enc_bt(static_cast<std::int8_t>(disp_words));
             } else {
                 enc = sh2a::enc_bra(static_cast<std::int16_t>(disp_words));
             }
-            body_[bp.body_offset]     = static_cast<std::uint8_t>(enc >> 8);
+            body_[bp.body_offset] = static_cast<std::uint8_t>(enc >> 8);
             body_[bp.body_offset + 1] = static_cast<std::uint8_t>(enc & 0xFF);
         }
 
         emit_be16(body_, sh2a::enc_rts());
-        emit_be16(body_, sh2a::enc_nop());  // delay slot
+        emit_be16(body_, sh2a::enc_nop()); // delay slot
         while (body_.size() % 4 != 0) {
-            emit_be16(body_, sh2a::enc_nop());  // pool-alignment pad
+            emit_be16(body_, sh2a::enc_nop()); // pool-alignment pad
         }
         std::size_t const pool_start = body_.size();
         for (auto const &bp : backpatches_) {
-            std::size_t const literal_offset =
-                pool_start + bp.pool_index * 4;
-            std::size_t const aligned =
-                (bp.body_offset + 4) & ~std::size_t{3};
+            std::size_t const literal_offset = pool_start + bp.pool_index * 4;
+            std::size_t const aligned = (bp.body_offset + 4) & ~std::size_t{3};
             std::size_t const disp = (literal_offset - aligned) / 4;
             // The disp lives in the low byte of the 16-bit MOV.L
             // instruction; body_[bp.body_offset] is the high byte
@@ -305,22 +305,22 @@ class FragmentEmitter {
         return body_.size();
     }
 
-  private:
+private:
     struct Backpatch {
-        std::size_t body_offset;  // byte offset of the MOV.L instruction
-        std::size_t pool_index;   // index into `pool_`
+        std::size_t body_offset; // byte offset of the MOV.L instruction
+        std::size_t pool_index;  // index into `pool_`
     };
     enum class BranchKind : std::uint8_t { Bt, Bra };
     struct BranchBackpatch {
-        std::size_t body_offset;  // byte offset of the branch instruction
-        std::size_t label_id;     // index into `labels_`
-        BranchKind  kind;
+        std::size_t body_offset; // byte offset of the branch instruction
+        std::size_t label_id;    // index into `labels_`
+        BranchKind kind;
     };
-    std::vector<std::uint8_t>                 body_;
-    std::vector<std::uint32_t>                pool_;
-    std::vector<Backpatch>                    backpatches_;
-    std::vector<std::optional<std::size_t>>   labels_;
-    std::vector<BranchBackpatch>              branch_backpatches_;
+    std::vector<std::uint8_t> body_;
+    std::vector<std::uint32_t> pool_;
+    std::vector<Backpatch> backpatches_;
+    std::vector<std::optional<std::size_t>> labels_;
+    std::vector<BranchBackpatch> branch_backpatches_;
 };
 
 // Emit the canonical "load constant, store to RAM slot" sequence per
@@ -342,9 +342,8 @@ class FragmentEmitter {
 //   target = ((this_pc + 4) & ~3) + disp*4
 // At PC=0: (4 & ~3) = 4; for target 12, disp = (12-4)/4 = 2.
 // At PC=2: (6 & ~3) = 4; for target 16, disp = (16-4)/4 = 3.
-void emit_load_const_store_sequence(std::vector<std::uint8_t> &code,
-                                     std::uint32_t constant_value,
-                                     std::uint32_t destination_address) {
+void emit_load_const_store_sequence(std::vector<std::uint8_t> &code, std::uint32_t constant_value,
+                                    std::uint32_t destination_address) {
     FragmentEmitter fe;
     fe.mov_l_disp_pc(sh2a::Reg::R0, constant_value);
     fe.mov_l_disp_pc(sh2a::Reg::R1, destination_address);
@@ -374,9 +373,8 @@ void emit_load_const_store_sequence(std::vector<std::uint8_t> &code,
 // PC-relative formula: target = ((this_pc + 4) & ~3) + disp*4.
 //   PC=0: (4 & ~3) = 4; for target 12, disp = (12-4)/4 = 2.
 //   PC=4: (8 & ~3) = 8; for target 16, disp = (16-8)/4 = 2.
-void emit_load_hook_store_sequence(std::vector<std::uint8_t> &code,
-                                    std::uint32_t source_address,
-                                    std::uint32_t destination_address) {
+void emit_load_hook_store_sequence(std::vector<std::uint8_t> &code, std::uint32_t source_address,
+                                   std::uint32_t destination_address) {
     FragmentEmitter fe;
     fe.mov_l_disp_pc(sh2a::Reg::R0, source_address);
     fe.mov_l_at_reg_reg(sh2a::Reg::R0, sh2a::Reg::R0);
@@ -391,8 +389,8 @@ void emit_load_hook_store_sequence(std::vector<std::uint8_t> &code,
 // LoadHookInput. The emitter dereferences the latter inline.
 struct PrimitiveOperand {
     enum class Kind : std::uint8_t { Constant, HookInputPointer };
-    Kind          kind{Kind::Constant};
-    std::uint32_t value{0};  // constant value, or pin address
+    Kind kind{Kind::Constant};
+    std::uint32_t value{0}; // constant value, or pin address
 };
 
 // Emit a self-contained "compute add, store result" patch. The
@@ -416,8 +414,7 @@ struct PrimitiveOperand {
 // Load an operand into the given register, dereferencing through a
 // pointer if the operand is a HookInputPointer (or SSA RAM slot).
 // Shared by all binary-primitive fragment emitters.
-void load_operand_into(FragmentEmitter &fe, PrimitiveOperand op,
-                        sh2a::Reg reg) {
+void load_operand_into(FragmentEmitter &fe, PrimitiveOperand op, sh2a::Reg reg) {
     fe.mov_l_disp_pc(reg, op.value);
     if (op.kind == PrimitiveOperand::Kind::HookInputPointer) {
         fe.mov_l_at_reg_reg(reg, reg);
@@ -426,8 +423,7 @@ void load_operand_into(FragmentEmitter &fe, PrimitiveOperand op,
 
 // Store the convention-result register (R1) to `destination_address`.
 // Used as the tail of every binary-primitive fragment.
-void emit_store_r1_to(FragmentEmitter &fe,
-                       std::uint32_t destination_address) {
+void emit_store_r1_to(FragmentEmitter &fe, std::uint32_t destination_address) {
     fe.mov_l_disp_pc(sh2a::Reg::R2, destination_address);
     fe.mov_l_reg_at_reg(sh2a::Reg::R1, sh2a::Reg::R2);
 }
@@ -439,8 +435,7 @@ void emit_store_r1_to(FragmentEmitter &fe,
 //
 // Three instructions per Constant operand, four per HookInput /
 // SSA-slot operand. Mirrors `load_operand_into` for Int + Bool.
-void load_operand_into_fr(FragmentEmitter &fe, PrimitiveOperand op,
-                            sh2a::FReg frn) {
+void load_operand_into_fr(FragmentEmitter &fe, PrimitiveOperand op, sh2a::FReg frn) {
     fe.mov_l_disp_pc(sh2a::Reg::R0, op.value);
     if (op.kind == PrimitiveOperand::Kind::HookInputPointer) {
         fe.mov_l_at_reg_reg(sh2a::Reg::R0, sh2a::Reg::R0);
@@ -453,8 +448,7 @@ void load_operand_into_fr(FragmentEmitter &fe, PrimitiveOperand op,
 // pattern out via FPUL into R1, then take the existing int store
 // tail. The destination-pointer pool entry lands at the same place
 // regardless of int/float — the bits in memory are byte-identical.
-void emit_store_fr_to(FragmentEmitter &fe, sh2a::FReg frm,
-                       std::uint32_t destination_address) {
+void emit_store_fr_to(FragmentEmitter &fe, sh2a::FReg frm, std::uint32_t destination_address) {
     fe.flds_freg_fpul(frm);
     fe.sts_fpul_r(sh2a::Reg::R1);
     emit_store_r1_to(fe, destination_address);
@@ -473,8 +467,7 @@ void emit_store_fr_to(FragmentEmitter &fe, sh2a::FReg frm,
 // range ±32768 or ±2^16) this is well within precision; flag the
 // hazard at the primitive level if the user authors an integer
 // table whose range exceeds 2^24.
-void load_int_operand_into_fr_via_float(
-    FragmentEmitter &fe, PrimitiveOperand op, sh2a::FReg frn) {
+void load_int_operand_into_fr_via_float(FragmentEmitter &fe, PrimitiveOperand op, sh2a::FReg frn) {
     fe.mov_l_disp_pc(sh2a::Reg::R0, op.value);
     if (op.kind == PrimitiveOperand::Kind::HookInputPointer) {
         fe.mov_l_at_reg_reg(sh2a::Reg::R0, sh2a::Reg::R0);
@@ -492,9 +485,8 @@ void load_int_operand_into_fr_via_float(
 // Overflow: FTRC saturates to INT_MIN / INT_MAX on out-of-range
 // float values, no trap. This differs from C UB (e.g. INT_MIN / -1
 // would be UB in C; here it lands as INT_MAX).
-void emit_store_fr_truncated_to_int(
-    FragmentEmitter &fe, sh2a::FReg frm,
-    std::uint32_t destination_address) {
+void emit_store_fr_truncated_to_int(FragmentEmitter &fe, sh2a::FReg frm,
+                                    std::uint32_t destination_address) {
     fe.ftrc_freg_fpul(frm);
     fe.sts_fpul_r(sh2a::Reg::R1);
     emit_store_r1_to(fe, destination_address);
@@ -503,10 +495,8 @@ void emit_store_fr_truncated_to_int(
 // Body fragment for `add_int(op1, op2)` → store. ADD is commutative
 // so the operand-to-register mapping is the natural one (op1 → R0,
 // op2 → R1; ADD R0, R1 leaves the sum in R1).
-void emit_add_fragment(FragmentEmitter &fe,
-                        PrimitiveOperand op1,
-                        PrimitiveOperand op2,
-                        std::uint32_t    destination_address) {
+void emit_add_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                       std::uint32_t destination_address) {
     load_operand_into(fe, op1, sh2a::Reg::R0);
     load_operand_into(fe, op2, sh2a::Reg::R1);
     fe.add(sh2a::Reg::R0, sh2a::Reg::R1);
@@ -517,13 +507,11 @@ void emit_add_fragment(FragmentEmitter &fe,
 // commutative — the user expects `op1 - op2`. SH-2A `SUB Rm, Rn`
 // computes Rn = Rn - Rm, so we put the minuend (op1) in R1 and the
 // subtrahend (op2) in R0; the result lands in R1 by convention.
-void emit_sub_fragment(FragmentEmitter &fe,
-                        PrimitiveOperand op1,
-                        PrimitiveOperand op2,
-                        std::uint32_t    destination_address) {
-    load_operand_into(fe, op2, sh2a::Reg::R0);  // subtrahend
-    load_operand_into(fe, op1, sh2a::Reg::R1);  // minuend
-    fe.sub(sh2a::Reg::R0, sh2a::Reg::R1);       // R1 = R1 - R0 = op1 - op2
+void emit_sub_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                       std::uint32_t destination_address) {
+    load_operand_into(fe, op2, sh2a::Reg::R0); // subtrahend
+    load_operand_into(fe, op1, sh2a::Reg::R1); // minuend
+    fe.sub(sh2a::Reg::R0, sh2a::Reg::R1);      // R1 = R1 - R0 = op1 - op2
     emit_store_r1_to(fe, destination_address);
 }
 
@@ -533,14 +521,12 @@ void emit_sub_fragment(FragmentEmitter &fe,
 // STS MACL, R1 to extract the low 32 bits. Truncating to int32
 // (matching int32 + int32 → int32 semantics; high 32 bits in MACH
 // are discarded — overflow wraps two's-complement, same as add).
-void emit_mul_fragment(FragmentEmitter &fe,
-                        PrimitiveOperand op1,
-                        PrimitiveOperand op2,
-                        std::uint32_t    destination_address) {
+void emit_mul_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                       std::uint32_t destination_address) {
     load_operand_into(fe, op1, sh2a::Reg::R0);
     load_operand_into(fe, op2, sh2a::Reg::R1);
-    fe.mul_l(sh2a::Reg::R0, sh2a::Reg::R1);     // MACL = R0 * R1
-    fe.sts_macl(sh2a::Reg::R1);                  // R1 = MACL
+    fe.mul_l(sh2a::Reg::R0, sh2a::Reg::R1); // MACL = R0 * R1
+    fe.sts_macl(sh2a::Reg::R1);             // R1 = MACL
     emit_store_r1_to(fe, destination_address);
 }
 
@@ -548,8 +534,8 @@ void emit_mul_fragment(FragmentEmitter &fe,
 // so the natural mapping works (op1 → R0, op2 → R1; AND R0, R1
 // leaves the bitwise-AND in R1). On canonical 0/1 operands the bits
 // align so the result is canonical 0/1 logical AND.
-void emit_and_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
-                        PrimitiveOperand op2, std::uint32_t dst) {
+void emit_and_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                       std::uint32_t dst) {
     load_operand_into(fe, op1, sh2a::Reg::R0);
     load_operand_into(fe, op2, sh2a::Reg::R1);
     fe.and_(sh2a::Reg::R0, sh2a::Reg::R1);
@@ -558,8 +544,8 @@ void emit_and_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
 
 // Body fragment for `or_bool(op1, op2)` → store. Same shape as
 // and_bool with the OR opcode.
-void emit_or_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
-                       PrimitiveOperand op2, std::uint32_t dst) {
+void emit_or_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                      std::uint32_t dst) {
     load_operand_into(fe, op1, sh2a::Reg::R0);
     load_operand_into(fe, op2, sh2a::Reg::R1);
     fe.or_(sh2a::Reg::R0, sh2a::Reg::R1);
@@ -570,8 +556,7 @@ void emit_or_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
 // one operand. TST Rn, Rn sets T iff Rn==0; MOVT R1 then materializes
 // that as 1 (when op was 0) or 0 (when op was non-zero). One
 // instruction shorter than going through a constant + XOR.
-void emit_not_fragment(FragmentEmitter &fe, PrimitiveOperand op,
-                        std::uint32_t dst) {
+void emit_not_fragment(FragmentEmitter &fe, PrimitiveOperand op, std::uint32_t dst) {
     load_operand_into(fe, op, sh2a::Reg::R0);
     fe.tst(sh2a::Reg::R0, sh2a::Reg::R0);
     fe.movt(sh2a::Reg::R1);
@@ -606,20 +591,17 @@ void emit_not_fragment(FragmentEmitter &fe, PrimitiveOperand op,
 // through the FPU here because there's no arithmetic — we're just
 // shuffling a 32-bit word from a literal/RAM source to a RAM
 // destination.
-void emit_select_fragment(FragmentEmitter &fe,
-                           PrimitiveOperand cond,
-                           PrimitiveOperand true_val,
-                           PrimitiveOperand false_val,
-                           std::uint32_t    dst) {
+void emit_select_fragment(FragmentEmitter &fe, PrimitiveOperand cond, PrimitiveOperand true_val,
+                          PrimitiveOperand false_val, std::uint32_t dst) {
     auto use_false = fe.create_label();
-    auto done      = fe.create_label();
+    auto done = fe.create_label();
 
     load_operand_into(fe, cond, sh2a::Reg::R0);
     fe.tst(sh2a::Reg::R0, sh2a::Reg::R0);
     fe.bt(use_false);
     load_operand_into(fe, true_val, sh2a::Reg::R1);
     fe.bra(done);
-    fe.nop();                                  // BRA delay slot
+    fe.nop(); // BRA delay slot
     fe.place_label(use_false);
     load_operand_into(fe, false_val, sh2a::Reg::R1);
     fe.place_label(done);
@@ -631,8 +613,8 @@ void emit_select_fragment(FragmentEmitter &fe,
 // load operands → CMP/X (sets T-bit) → MOVT R1 (R1 = T as 0/1) →
 // store R1. The only thing that differs is the CMP opcode + the
 // operand-to-register mapping. Bool widening = canonical 0/1.
-void emit_cmp_lt_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
-                           PrimitiveOperand op2, std::uint32_t dst) {
+void emit_cmp_lt_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                          std::uint32_t dst) {
     // T = (op1 < op2) = (op2 > op1) = (R1 > R0) ⇒ CMP/GT R0, R1.
     load_operand_into(fe, op1, sh2a::Reg::R0);
     load_operand_into(fe, op2, sh2a::Reg::R1);
@@ -641,8 +623,8 @@ void emit_cmp_lt_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
     emit_store_r1_to(fe, dst);
 }
 
-void emit_cmp_gt_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
-                           PrimitiveOperand op2, std::uint32_t dst) {
+void emit_cmp_gt_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                          std::uint32_t dst) {
     // T = (op1 > op2) = (R0 > R1) ⇒ CMP/GT R1, R0.
     load_operand_into(fe, op1, sh2a::Reg::R0);
     load_operand_into(fe, op2, sh2a::Reg::R1);
@@ -651,8 +633,8 @@ void emit_cmp_gt_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
     emit_store_r1_to(fe, dst);
 }
 
-void emit_cmp_eq_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
-                           PrimitiveOperand op2, std::uint32_t dst) {
+void emit_cmp_eq_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                          std::uint32_t dst) {
     // T = (op1 == op2). CMP/EQ is commutative; load order doesn't
     // affect correctness, only the operand-naming consistency.
     load_operand_into(fe, op1, sh2a::Reg::R0);
@@ -679,40 +661,40 @@ void emit_cmp_eq_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
 // load op1 → FR1 and op2 → FR0 so `FSUB FR0, FR1` yields op1 − op2.
 // Identical reordering for `FDIV FR0, FR1` → op1 ÷ op2.
 
-void emit_add_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
-                              PrimitiveOperand op2, std::uint32_t dst) {
+void emit_add_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                             std::uint32_t dst) {
     load_operand_into_fr(fe, op1, sh2a::FReg::FR0);
     load_operand_into_fr(fe, op2, sh2a::FReg::FR1);
-    fe.fadd(sh2a::FReg::FR0, sh2a::FReg::FR1);   // FR1 = FR1 + FR0
+    fe.fadd(sh2a::FReg::FR0, sh2a::FReg::FR1); // FR1 = FR1 + FR0
     emit_store_fr_to(fe, sh2a::FReg::FR1, dst);
 }
 
-void emit_sub_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
-                              PrimitiveOperand op2, std::uint32_t dst) {
+void emit_sub_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                             std::uint32_t dst) {
     // FSUB FRm, FRn ⇒ FRn = FRn − FRm. Put minuend (op1) in FR1.
-    load_operand_into_fr(fe, op2, sh2a::FReg::FR0);  // subtrahend
-    load_operand_into_fr(fe, op1, sh2a::FReg::FR1);  // minuend
-    fe.fsub(sh2a::FReg::FR0, sh2a::FReg::FR1);       // FR1 = FR1 − FR0
+    load_operand_into_fr(fe, op2, sh2a::FReg::FR0); // subtrahend
+    load_operand_into_fr(fe, op1, sh2a::FReg::FR1); // minuend
+    fe.fsub(sh2a::FReg::FR0, sh2a::FReg::FR1);      // FR1 = FR1 − FR0
     emit_store_fr_to(fe, sh2a::FReg::FR1, dst);
 }
 
-void emit_mul_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
-                              PrimitiveOperand op2, std::uint32_t dst) {
+void emit_mul_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                             std::uint32_t dst) {
     load_operand_into_fr(fe, op1, sh2a::FReg::FR0);
     load_operand_into_fr(fe, op2, sh2a::FReg::FR1);
-    fe.fmul(sh2a::FReg::FR0, sh2a::FReg::FR1);   // FR1 = FR1 * FR0
+    fe.fmul(sh2a::FReg::FR0, sh2a::FReg::FR1); // FR1 = FR1 * FR0
     emit_store_fr_to(fe, sh2a::FReg::FR1, dst);
 }
 
-void emit_div_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
-                              PrimitiveOperand op2, std::uint32_t dst) {
+void emit_div_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                             std::uint32_t dst) {
     // FDIV FRm, FRn ⇒ FRn = FRn / FRm. Put dividend (op1) in FR1.
     // Divide-by-zero produces a FPU exception per the SH-2A spec;
     // when authoring features that may divide by user-supplied values,
     // gate with a compare → select. v1.x doesn't insert a guard.
-    load_operand_into_fr(fe, op2, sh2a::FReg::FR0);  // divisor
-    load_operand_into_fr(fe, op1, sh2a::FReg::FR1);  // dividend
-    fe.fdiv(sh2a::FReg::FR0, sh2a::FReg::FR1);       // FR1 = FR1 / FR0
+    load_operand_into_fr(fe, op2, sh2a::FReg::FR0); // divisor
+    load_operand_into_fr(fe, op1, sh2a::FReg::FR1); // dividend
+    fe.fdiv(sh2a::FReg::FR0, sh2a::FReg::FR1);      // FR1 = FR1 / FR0
     emit_store_fr_to(fe, sh2a::FReg::FR1, dst);
 }
 
@@ -740,11 +722,11 @@ void emit_div_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
 //     assumption the existing Float arithmetic primitives make.
 //
 // FDIV FRm, FRn ⇒ FRn = FRn / FRm — put dividend (op1) in FR1.
-void emit_div_int_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
-                            PrimitiveOperand op2, std::uint32_t dst) {
-    load_int_operand_into_fr_via_float(fe, op2, sh2a::FReg::FR0);  // divisor
-    load_int_operand_into_fr_via_float(fe, op1, sh2a::FReg::FR1);  // dividend
-    fe.fdiv(sh2a::FReg::FR0, sh2a::FReg::FR1);                     // FR1 /= FR0
+void emit_div_int_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                           std::uint32_t dst) {
+    load_int_operand_into_fr_via_float(fe, op2, sh2a::FReg::FR0); // divisor
+    load_int_operand_into_fr_via_float(fe, op1, sh2a::FReg::FR1); // dividend
+    fe.fdiv(sh2a::FReg::FR0, sh2a::FReg::FR1);                    // FR1 /= FR0
     emit_store_fr_truncated_to_int(fe, sh2a::FReg::FR1, dst);
 }
 
@@ -756,8 +738,8 @@ void emit_div_int_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
 // produce T=0. compare_lt uses FCMP/GT with the operand mapping
 // inverted relative to compare_gt.
 
-void emit_cmp_lt_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
-                                  PrimitiveOperand op2, std::uint32_t dst) {
+void emit_cmp_lt_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                                std::uint32_t dst) {
     // T = (op1 < op2) ⇔ (op2 > op1). Load op1→FR0, op2→FR1;
     // FCMP/GT FR0, FR1 ⇒ T = (FR1 > FR0).
     load_operand_into_fr(fe, op1, sh2a::FReg::FR0);
@@ -767,8 +749,8 @@ void emit_cmp_lt_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
     emit_store_r1_to(fe, dst);
 }
 
-void emit_cmp_gt_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
-                                  PrimitiveOperand op2, std::uint32_t dst) {
+void emit_cmp_gt_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                                std::uint32_t dst) {
     // T = (op1 > op2). Mirror the int convention: load op1→FR0,
     // op2→FR1; FCMP/GT FR1, FR0 ⇒ T = (FR0 > FR1) = (op1 > op2).
     load_operand_into_fr(fe, op1, sh2a::FReg::FR0);
@@ -778,8 +760,8 @@ void emit_cmp_gt_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
     emit_store_r1_to(fe, dst);
 }
 
-void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
-                                  PrimitiveOperand op2, std::uint32_t dst) {
+void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, PrimitiveOperand op2,
+                                std::uint32_t dst) {
     // T = (op1 == op2). FCMP/EQ is commutative; load order
     // arbitrary. IEEE 754 quirk: -0.0 == 0.0, NaN compares
     // unequal to itself.
@@ -796,9 +778,9 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
 // emit_X_fragment plus a clause here. Operand count is validated by
 // validate_call_primitive before we get here, so each branch can
 // index `operands` confidently.
-[[nodiscard]] Status emit_primitive_fragment(
-    FragmentEmitter &fe, std::string_view symbol,
-    std::vector<PrimitiveOperand> const &operands, std::uint32_t dst) {
+[[nodiscard]] Status emit_primitive_fragment(FragmentEmitter &fe, std::string_view symbol,
+                                             std::vector<PrimitiveOperand> const &operands,
+                                             std::uint32_t dst) {
     if (symbol == "add_int") {
         emit_add_fragment(fe, operands[0], operands[1], dst);
         return ok();
@@ -839,11 +821,8 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
         emit_not_fragment(fe, operands[0], dst);
         return ok();
     }
-    if (symbol == "select_int"
-        || symbol == "select_bool"
-        || symbol == "select_float") {
-        emit_select_fragment(fe, operands[0], operands[1],
-                              operands[2], dst);
+    if (symbol == "select_int" || symbol == "select_bool" || symbol == "select_float") {
+        emit_select_fragment(fe, operands[0], operands[1], operands[2], dst);
         return ok();
     }
     if (symbol == "add_float") {
@@ -887,13 +866,12 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
     return failure(ErrorCode::NotImplemented, std::move(msg));
 }
 
-
 // Look up a hook by id in the loaded definition. Linear scan — pack
 // hook counts are small (<<100 in practice).
-[[nodiscard]] Hook const *find_hook(Definition const &def,
-                                     std::string_view id) noexcept {
+[[nodiscard]] Hook const *find_hook(Definition const &def, std::string_view id) noexcept {
     for (auto const &h : def.hooks()) {
-        if (h.id == id) return &h;
+        if (h.id == id)
+            return &h;
     }
     return nullptr;
 }
@@ -902,10 +880,10 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
 // hook's `inputs` array — the data-out-from-ECU side; not the
 // graph-side "input pin" of the user's logic). Returns nullptr if
 // the hook doesn't declare that pin.
-[[nodiscard]] HookSignal const *find_hook_input(Hook const &h,
-                                                 std::string_view name) noexcept {
+[[nodiscard]] HookSignal const *find_hook_input(Hook const &h, std::string_view name) noexcept {
     for (auto const &s : h.inputs) {
-        if (s.name == name) return &s;
+        if (s.name == name)
+            return &s;
     }
     return nullptr;
 }
@@ -926,9 +904,9 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
 // a sensor pin is updated AFTER the splice point's PC, which would
 // make the read produce a stale value within a single ECU loop
 // iteration). v1.x accepts any source-hook.
-[[nodiscard]] Status resolve_hook_input_address(
-    Definition const &def, ir::Instruction const &load_ins,
-    Hook const * /*target_hook*/, std::uint32_t &out) {
+[[nodiscard]] Status resolve_hook_input_address(Definition const &def,
+                                                ir::Instruction const &load_ins,
+                                                Hook const * /*target_hook*/, std::uint32_t &out) {
     Hook const *src_hook = find_hook(def, load_ins.symbol);
     if (src_hook == nullptr) {
         std::string msg{"SH-2A backend: LoadHookInput hook '"};
@@ -969,50 +947,48 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
 //           authoring a float pin.
 //   Bool  — NotImplemented; widening (0/1 vs other booleans) is a
 //           policy decision that lands with a future bundle.
-[[nodiscard]] Result<std::uint32_t> coerce_constant_to_u32(
-    ir::Instruction const &load_ins) {
+[[nodiscard]] Result<std::uint32_t> coerce_constant_to_u32(ir::Instruction const &load_ins) {
     if (!load_ins.constant_value.has_value()) {
-        return failure(ErrorCode::ParseError,
-                       "SH-2A backend: LoadConstant has no "
-                       "constant_value (lower() invariant violation)");
+        return failure(ErrorCode::ParseError, "SH-2A backend: LoadConstant has no "
+                                              "constant_value (lower() invariant violation)");
     }
     double const v = *load_ins.constant_value;
     switch (load_ins.result_type) {
-        case PinType::Int: {
-            if (v < -2147483648.0 || v > 2147483647.0) {
-                std::string msg{"SH-2A backend: LoadConstant value "};
-                msg.append(std::to_string(v));
-                msg.append(" out of int32 range");
-                return failure(ErrorCode::ParseError, std::move(msg));
-            }
-            auto const i32 = static_cast<std::int32_t>(v);
-            std::uint32_t u32 = 0;
-            std::memcpy(&u32, &i32, sizeof u32);
-            return u32;
+    case PinType::Int: {
+        if (v < -2147483648.0 || v > 2147483647.0) {
+            std::string msg{"SH-2A backend: LoadConstant value "};
+            msg.append(std::to_string(v));
+            msg.append(" out of int32 range");
+            return failure(ErrorCode::ParseError, std::move(msg));
         }
-        case PinType::Float: {
-            auto const f = static_cast<float>(v);
-            return std::bit_cast<std::uint32_t>(f);
-        }
-        case PinType::Bool:
-            // Canonical Bool widening: 0 = false, 1 = true in a
-            // 32-bit word. Matches the MOVT output of comparison
-            // primitives, so a Bool value flowing through registers
-            // / memory keeps a uniform representation regardless of
-            // whether it came from a LoadConstant or a compare_*.
-            return v > 0.5 ? std::uint32_t{1} : std::uint32_t{0};
+        auto const i32 = static_cast<std::int32_t>(v);
+        std::uint32_t u32 = 0;
+        std::memcpy(&u32, &i32, sizeof u32);
+        return u32;
     }
-    return failure(ErrorCode::NotImplemented,
-                   "SH-2A backend: unknown PinType for LoadConstant");
+    case PinType::Float: {
+        auto const f = static_cast<float>(v);
+        return std::bit_cast<std::uint32_t>(f);
+    }
+    case PinType::Bool:
+        // Canonical Bool widening: 0 = false, 1 = true in a
+        // 32-bit word. Matches the MOVT output of comparison
+        // primitives, so a Bool value flowing through registers
+        // / memory keeps a uniform representation regardless of
+        // whether it came from a LoadConstant or a compare_*.
+        return v > 0.5 ? std::uint32_t{1} : std::uint32_t{0};
+    }
+    return failure(ErrorCode::NotImplemented, "SH-2A backend: unknown PinType for LoadConstant");
 }
 
 // Locate the producing Instruction for `value_id`. Returns nullptr
 // if no instruction in the module produces it. Caller is responsible
 // for verifying the op kind is one the slice supports.
 [[nodiscard]] ir::Instruction const *find_producer(ir::Module const &m,
-                                                    ir::ValueId value_id) noexcept {
+                                                   ir::ValueId value_id) noexcept {
     for (auto const &ins : m.instructions) {
-        if (ins.result_id == value_id) return &ins;
+        if (ins.result_id == value_id)
+            return &ins;
     }
     return nullptr;
 }
@@ -1022,15 +998,14 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
 // operand_type (e.g. add_int requires Int operands, and_bool requires
 // Bool operands); cross-hook flow rejected; pre-allocated SSA RAM
 // slots for nested CallPrimitive results read from `slots`.
-[[nodiscard]] Result<PrimitiveOperand> operand_from_producer(
-    Definition const &def, ir::Module const &m, ir::ValueId value_id,
-    Hook const *target_hook, PinType expected_operand_type,
-    std::unordered_map<ir::ValueId, std::uint32_t> const &slots) {
+[[nodiscard]] Result<PrimitiveOperand>
+operand_from_producer(Definition const &def, ir::Module const &m, ir::ValueId value_id,
+                      Hook const *target_hook, PinType expected_operand_type,
+                      std::unordered_map<ir::ValueId, std::uint32_t> const &slots) {
     ir::Instruction const *prod = find_producer(m, value_id);
     if (prod == nullptr) {
-        return failure(ErrorCode::ParseError,
-                       "SH-2A backend: primitive operand does not "
-                       "resolve to any producing instruction");
+        return failure(ErrorCode::ParseError, "SH-2A backend: primitive operand does not "
+                                              "resolve to any producing instruction");
     }
     if (prod->result_type != expected_operand_type) {
         std::string msg{"SH-2A backend: primitive operand of type "};
@@ -1041,17 +1016,16 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
     }
     if (prod->op == ir::Op::LoadConstant) {
         auto r = coerce_constant_to_u32(*prod);
-        if (!r.has_value()) return failure(r.error());
+        if (!r.has_value())
+            return failure(r.error());
         return PrimitiveOperand{PrimitiveOperand::Kind::Constant, *r};
     }
     if (prod->op == ir::Op::LoadHookInput) {
         std::uint32_t addr = 0;
-        if (auto s = resolve_hook_input_address(def, *prod, target_hook, addr);
-            !s.has_value()) {
+        if (auto s = resolve_hook_input_address(def, *prod, target_hook, addr); !s.has_value()) {
             return failure(s.error());
         }
-        return PrimitiveOperand{PrimitiveOperand::Kind::HookInputPointer,
-                                  addr};
+        return PrimitiveOperand{PrimitiveOperand::Kind::HookInputPointer, addr};
     }
     if (prod->op == ir::Op::CallPrimitive) {
         // Read the operand value from the slot allocated for this
@@ -1060,16 +1034,13 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
         // semantically distinct (firmware variable vs scratch RAM slot).
         auto it = slots.find(value_id);
         if (it == slots.end()) {
-            return failure(ErrorCode::ParseError,
-                           "SH-2A backend: nested primitive operand has "
-                           "no RAM slot (walk should have allocated one)");
+            return failure(ErrorCode::ParseError, "SH-2A backend: nested primitive operand has "
+                                                  "no RAM slot (walk should have allocated one)");
         }
-        return PrimitiveOperand{PrimitiveOperand::Kind::HookInputPointer,
-                                  it->second};
+        return PrimitiveOperand{PrimitiveOperand::Kind::HookInputPointer, it->second};
     }
-    return failure(ErrorCode::NotImplemented,
-                   "SH-2A backend: primitive operand has unsupported "
-                   "producer op");
+    return failure(ErrorCode::NotImplemented, "SH-2A backend: primitive operand has unsupported "
+                                              "producer op");
 }
 
 // Per-primitive shape: how many operands it takes, what type each
@@ -1080,13 +1051,12 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1,
 // (select), so adding new ternary primitives doesn't require
 // growing the array.
 struct PrimitiveShape {
-    std::size_t            arity;
+    std::size_t arity;
     std::array<PinType, 3> operand_types;
-    PinType                result_type;
+    PinType result_type;
 };
 
-[[nodiscard]] PrimitiveShape const *primitive_shape(
-    std::string_view symbol) noexcept {
+[[nodiscard]] PrimitiveShape const *primitive_shape(std::string_view symbol) noexcept {
     // Arithmetic:    2 Int → Int.
     // Comparison:    2 Int → Bool.
     // Boolean logic: 2 (or 1) Bool → Bool.
@@ -1096,31 +1066,32 @@ struct PrimitiveShape {
     // they're never read at arity-checked dispatch time.
     static constexpr struct Entry {
         std::string_view name;
-        PrimitiveShape   shape;
+        PrimitiveShape shape;
     } kTable[] = {
-        {"add_int",      {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Int}},
-        {"subtract_int", {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Int}},
-        {"multiply_int", {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Int}},
-        {"divide_int",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Int}},
-        {"compare_lt_int",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
-        {"compare_gt_int",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
-        {"compare_eq_int",   {2, {PinType::Int,  PinType::Int,  PinType::Int},  PinType::Bool}},
-        {"and_bool",     {2, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
-        {"or_bool",      {2, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
-        {"not_bool",     {1, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
-        {"select_int",   {3, {PinType::Bool, PinType::Int,  PinType::Int},  PinType::Int}},
-        {"select_bool",  {3, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
-        {"add_float",        {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
-        {"subtract_float",   {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
-        {"multiply_float",   {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
-        {"divide_float",     {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
+        {"add_int", {2, {PinType::Int, PinType::Int, PinType::Int}, PinType::Int}},
+        {"subtract_int", {2, {PinType::Int, PinType::Int, PinType::Int}, PinType::Int}},
+        {"multiply_int", {2, {PinType::Int, PinType::Int, PinType::Int}, PinType::Int}},
+        {"divide_int", {2, {PinType::Int, PinType::Int, PinType::Int}, PinType::Int}},
+        {"compare_lt_int", {2, {PinType::Int, PinType::Int, PinType::Int}, PinType::Bool}},
+        {"compare_gt_int", {2, {PinType::Int, PinType::Int, PinType::Int}, PinType::Bool}},
+        {"compare_eq_int", {2, {PinType::Int, PinType::Int, PinType::Int}, PinType::Bool}},
+        {"and_bool", {2, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
+        {"or_bool", {2, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
+        {"not_bool", {1, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
+        {"select_int", {3, {PinType::Bool, PinType::Int, PinType::Int}, PinType::Int}},
+        {"select_bool", {3, {PinType::Bool, PinType::Bool, PinType::Bool}, PinType::Bool}},
+        {"add_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
+        {"subtract_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
+        {"multiply_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
+        {"divide_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
         {"compare_lt_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},
         {"compare_gt_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},
         {"compare_eq_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},
         {"select_float", {3, {PinType::Bool, PinType::Float, PinType::Float}, PinType::Float}},
     };
     for (auto const &e : kTable) {
-        if (e.name == symbol) return &e.shape;
+        if (e.name == symbol)
+            return &e.shape;
     }
     return nullptr;
 }
@@ -1176,11 +1147,11 @@ struct PrimitiveShape {
 // Supports arbitrary depth as long as every interior node is a
 // recognized CallPrimitive (add_int in this slice). Leaves are
 // LoadConstant or LoadHookInput, validated by operand_from_producer.
-[[nodiscard]] Status emit_nested_call_primitive(
-    Definition const &def, ir::Module const &m,
-    ir::Instruction const &root_prim, Hook const *hook,
-    RamAllocator &ram, std::vector<RamClaim> &claims,
-    std::vector<std::uint8_t> &out_code, std::uint32_t dst_addr) {
+[[nodiscard]] Status emit_nested_call_primitive(Definition const &def, ir::Module const &m,
+                                                ir::Instruction const &root_prim, Hook const *hook,
+                                                RamAllocator &ram, std::vector<RamClaim> &claims,
+                                                std::vector<std::uint8_t> &out_code,
+                                                std::uint32_t dst_addr) {
 
     // Topological walk: recurse into CallPrimitive operands first so
     // intermediate slots exist by the time the consumer emits.
@@ -1192,12 +1163,10 @@ struct PrimitiveShape {
     // by result_id so each producer fragment is materialized exactly
     // once and all consumers share its single slot.
     std::unordered_map<ir::ValueId, std::uint32_t> slots;
-    std::unordered_set<ir::ValueId>                visited;
-    std::vector<ir::Instruction const *>           emit_order;
+    std::unordered_set<ir::ValueId> visited;
+    std::vector<ir::Instruction const *> emit_order;
 
-    auto const walk = [&](auto &self_ref,
-                           ir::Instruction const *prim,
-                           bool is_root) -> Status {
+    auto const walk = [&](auto &self_ref, ir::Instruction const *prim, bool is_root) -> Status {
         // Already walked? (Only happens on shared SSA values, since
         // root primitives are entered exactly once from the caller.)
         if (!is_root && visited.find(prim->result_id) != visited.end()) {
@@ -1209,13 +1178,11 @@ struct PrimitiveShape {
         for (auto operand_id : prim->operands) {
             ir::Instruction const *prod = find_producer(m, operand_id);
             if (prod == nullptr) {
-                return failure(ErrorCode::ParseError,
-                               "SH-2A backend: nested operand does not "
-                               "resolve to any producing instruction");
+                return failure(ErrorCode::ParseError, "SH-2A backend: nested operand does not "
+                                                      "resolve to any producing instruction");
             }
             if (prod->op == ir::Op::CallPrimitive) {
-                if (auto s = self_ref(self_ref, prod, /*is_root=*/false);
-                    !s.has_value()) {
+                if (auto s = self_ref(self_ref, prod, /*is_root=*/false); !s.has_value()) {
                     return failure(s.error());
                 }
             }
@@ -1229,8 +1196,7 @@ struct PrimitiveShape {
                            "for nested primitive result");
                 return failure(ErrorCode::OutOfRange, std::move(msg));
             }
-            slots[prim->result_id] =
-                static_cast<std::uint32_t>(claim_r->address);
+            slots[prim->result_id] = static_cast<std::uint32_t>(claim_r->address);
             claims.push_back(*claim_r);
             visited.insert(prim->result_id);
         }
@@ -1246,23 +1212,20 @@ struct PrimitiveShape {
         PrimitiveShape const *shape = primitive_shape(prim->symbol);
         if (shape == nullptr) {
             // Unreachable — validate_call_primitive checked earlier.
-            return failure(ErrorCode::ParseError,
-                           "SH-2A backend: primitive symbol lookup "
-                           "regressed after validation");
+            return failure(ErrorCode::ParseError, "SH-2A backend: primitive symbol lookup "
+                                                  "regressed after validation");
         }
         std::vector<PrimitiveOperand> operands;
         operands.reserve(shape->arity);
         for (std::size_t i = 0; i < shape->arity; ++i) {
-            auto op = operand_from_producer(
-                def, m, prim->operands[i], hook,
-                shape->operand_types[i], slots);
-            if (!op.has_value()) return failure(op.error());
+            auto op = operand_from_producer(def, m, prim->operands[i], hook,
+                                            shape->operand_types[i], slots);
+            if (!op.has_value())
+                return failure(op.error());
             operands.push_back(*op);
         }
-        std::uint32_t const this_dest =
-            (prim == &root_prim) ? dst_addr : slots.at(prim->result_id);
-        if (auto s = emit_primitive_fragment(fe, prim->symbol, operands,
-                                              this_dest);
+        std::uint32_t const this_dest = (prim == &root_prim) ? dst_addr : slots.at(prim->result_id);
+        if (auto s = emit_primitive_fragment(fe, prim->symbol, operands, this_dest);
             !s.has_value()) {
             return failure(s.error());
         }
@@ -1277,10 +1240,10 @@ struct PrimitiveShape {
 // to, even if a Module touches several hooks (e.g. a launch-control
 // .stmod writing both ignition-cut and rev-limit hooks).
 struct HookWork {
-    Hook const               *hook{nullptr};
-    RamAllocator              ram{0, 0};
+    Hook const *hook{nullptr};
+    RamAllocator ram{0, 0};
     std::vector<std::uint8_t> code;
-    std::vector<RamClaim>     claims;
+    std::vector<RamClaim> claims;
     // (output_pin_name) → claim address. One slot per output pin
     // referenced by Store instructions in this module — repeated
     // writes to the same pin share the slot so the firmware reads a
@@ -1290,19 +1253,18 @@ struct HookWork {
 
 } // namespace
 
-Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
-                                          Definition const &def) {
+Result<PatchObject> Sh2aBackend::compile(ir::Module const &m, Definition const &def) {
     // First pass: every Op is now structurally supported (each one
     // has at least one emission path that goes through it). Per-op
     // semantic checks — supported primitive id, operand sources,
     // type compatibility — happen below at Store-emit time.
     for (auto const &ins : m.instructions) {
         switch (ins.op) {
-            case ir::Op::LoadConstant:
-            case ir::Op::LoadHookInput:
-            case ir::Op::CallPrimitive:
-            case ir::Op::StoreHookOutput:
-                break;
+        case ir::Op::LoadConstant:
+        case ir::Op::LoadHookInput:
+        case ir::Op::CallPrimitive:
+        case ir::Op::StoreHookOutput:
+            break;
         }
     }
 
@@ -1314,38 +1276,35 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
     // `ordered_hooks` keeps the iteration order deterministic
     // (first-touch order in the Module's instruction list) so test
     // expectations are stable.
-    std::map<std::string, HookWork>             works;
-    std::vector<std::string>                    ordered_hooks;
+    std::map<std::string, HookWork> works;
+    std::vector<std::string> ordered_hooks;
 
     for (auto const &ins : m.instructions) {
-        if (ins.op != ir::Op::StoreHookOutput) continue;
+        if (ins.op != ir::Op::StoreHookOutput)
+            continue;
 
         if (ins.operands.size() != 1) {
-            return failure(ErrorCode::ParseError,
-                           "SH-2A backend: StoreHookOutput must have "
-                           "exactly one operand");
+            return failure(ErrorCode::ParseError, "SH-2A backend: StoreHookOutput must have "
+                                                  "exactly one operand");
         }
         // Find the source instruction. A Store consuming a
         // non-existent ValueId is an IR invariant violation.
         ir::Instruction const *src = find_producer(m, ins.operands[0]);
         if (src == nullptr) {
-            return failure(ErrorCode::ParseError,
-                           "SH-2A backend: StoreHookOutput operand "
-                           "does not resolve to any producing instruction "
-                           "(invariant: lower() should assign result_id "
-                           "to every value-producing op)");
+            return failure(ErrorCode::ParseError, "SH-2A backend: StoreHookOutput operand "
+                                                  "does not resolve to any producing instruction "
+                                                  "(invariant: lower() should assign result_id "
+                                                  "to every value-producing op)");
         }
 
         // Slice rule: Store source must be LoadConstant, LoadHookInput,
         // or a supported CallPrimitive. Anything else (deeper nesting,
         // unsupported primitive kind) gets a specific NotImplemented.
-        if (src->op != ir::Op::LoadConstant
-            && src->op != ir::Op::LoadHookInput
-            && src->op != ir::Op::CallPrimitive) {
-            return failure(ErrorCode::NotImplemented,
-                           "SH-2A backend: StoreHookOutput source must "
-                           "be a LoadConstant, LoadHookInput, or "
-                           "CallPrimitive in this slice");
+        if (src->op != ir::Op::LoadConstant && src->op != ir::Op::LoadHookInput &&
+            src->op != ir::Op::CallPrimitive) {
+            return failure(ErrorCode::NotImplemented, "SH-2A backend: StoreHookOutput source must "
+                                                      "be a LoadConstant, LoadHookInput, or "
+                                                      "CallPrimitive in this slice");
         }
 
         // All three PinTypes (Int, Float, Bool) flow through the
@@ -1354,11 +1313,9 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
         // canonical) happens inside coerce_constant_to_u32 and is
         // produced by MOVT after comparison primitives, keeping the
         // representation uniform.
-        if (src->op == ir::Op::LoadConstant
-            && !src->constant_value.has_value()) {
-            return failure(ErrorCode::ParseError,
-                           "SH-2A backend: LoadConstant has no "
-                           "constant_value (lower() invariant violation)");
+        if (src->op == ir::Op::LoadConstant && !src->constant_value.has_value()) {
+            return failure(ErrorCode::ParseError, "SH-2A backend: LoadConstant has no "
+                                                  "constant_value (lower() invariant violation)");
         }
 
         // Resolve the target hook from the Store's symbol.
@@ -1376,9 +1333,8 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
                        "splice point for codegen");
             return failure(ErrorCode::InvalidArgument, std::move(msg));
         }
-        if (!hook->free_ram_base.has_value()
-            || !hook->free_ram_length.has_value()
-            || *hook->free_ram_length == 0) {
+        if (!hook->free_ram_base.has_value() || !hook->free_ram_length.has_value() ||
+            *hook->free_ram_length == 0) {
             std::string msg{"SH-2A backend: hook '"};
             msg.append(ins.symbol);
             msg.append("' has no free_ram region — pack must declare "
@@ -1392,7 +1348,7 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
         if (it == works.end()) {
             HookWork w{};
             w.hook = hook;
-            w.ram  = RamAllocator{*hook->free_ram_base, *hook->free_ram_length};
+            w.ram = RamAllocator{*hook->free_ram_base, *hook->free_ram_length};
             ordered_hooks.push_back(hook->id);
             it = works.emplace(hook->id, std::move(w)).first;
         }
@@ -1404,7 +1360,7 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
         auto slot_it = work.pin_slots.find(ins.pin_name);
         std::uint32_t dst_addr = 0;
         if (slot_it == work.pin_slots.end()) {
-            auto claim_r = work.ram.claim(4, 4);   // 4-byte longword
+            auto claim_r = work.ram.claim(4, 4); // 4-byte longword
             if (!claim_r.has_value()) {
                 std::string msg{"SH-2A backend: hook '"};
                 msg.append(hook->id);
@@ -1423,12 +1379,12 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
 
         if (src->op == ir::Op::LoadConstant) {
             auto u32 = coerce_constant_to_u32(*src);
-            if (!u32.has_value()) return failure(u32.error());
+            if (!u32.has_value())
+                return failure(u32.error());
             emit_load_const_store_sequence(work.code, *u32, dst_addr);
         } else if (src->op == ir::Op::LoadHookInput) {
             std::uint32_t pin_addr = 0;
-            if (auto s = resolve_hook_input_address(def, *src, hook, pin_addr);
-                !s.has_value()) {
+            if (auto s = resolve_hook_input_address(def, *src, hook, pin_addr); !s.has_value()) {
                 return failure(s.error());
             }
             emit_load_hook_store_sequence(work.code, pin_addr, dst_addr);
@@ -1457,9 +1413,8 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
                 }
             }
             if (nested) {
-                if (auto s = emit_nested_call_primitive(
-                        def, m, *src, hook, work.ram,
-                        work.claims, work.code, dst_addr);
+                if (auto s = emit_nested_call_primitive(def, m, *src, hook, work.ram, work.claims,
+                                                        work.code, dst_addr);
                     !s.has_value()) {
                     return failure(s.error());
                 }
@@ -1468,22 +1423,20 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
                 PrimitiveShape const *shape = primitive_shape(src->symbol);
                 if (shape == nullptr) {
                     // Unreachable — validate_call_primitive checked earlier.
-                    return failure(ErrorCode::ParseError,
-                                   "SH-2A backend: primitive symbol "
-                                   "lookup regressed after validation");
+                    return failure(ErrorCode::ParseError, "SH-2A backend: primitive symbol "
+                                                          "lookup regressed after validation");
                 }
                 std::vector<PrimitiveOperand> operands;
                 operands.reserve(shape->arity);
                 for (std::size_t i = 0; i < shape->arity; ++i) {
-                    auto op = operand_from_producer(
-                        def, m, src->operands[i], hook,
-                        shape->operand_types[i], empty_slots);
-                    if (!op.has_value()) return failure(op.error());
+                    auto op = operand_from_producer(def, m, src->operands[i], hook,
+                                                    shape->operand_types[i], empty_slots);
+                    if (!op.has_value())
+                        return failure(op.error());
                     operands.push_back(*op);
                 }
                 FragmentEmitter fe;
-                if (auto s = emit_primitive_fragment(fe, src->symbol,
-                                                      operands, dst_addr);
+                if (auto s = emit_primitive_fragment(fe, src->symbol, operands, dst_addr);
                     !s.has_value()) {
                     return failure(s.error());
                 }
@@ -1501,18 +1454,17 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m,
     obj.hooks.reserve(ordered_hooks.size());
     for (auto const &id : ordered_hooks) {
         auto const &w = works.at(id);
-        HookPatch   hp{};
-        hp.symbol         = w.hook->id;
+        HookPatch hp{};
+        hp.symbol = w.hook->id;
         hp.splice_address = *w.hook->ecu_address;
-        hp.code           = w.code;
-        hp.ram_claims     = w.claims;
+        hp.code = w.code;
+        hp.ram_claims = w.claims;
         obj.hooks.push_back(std::move(hp));
     }
     return obj;
 }
 
-Result<PatchObject> Rh850Backend::compile(ir::Module const & /*m*/,
-                                           Definition const & /*def*/) {
+Result<PatchObject> Rh850Backend::compile(ir::Module const & /*m*/, Definition const & /*def*/) {
     return failure(ErrorCode::NotImplemented,
                    "RH850 backend: instruction emission not yet implemented");
 }
@@ -1522,15 +1474,13 @@ Result<PatchObject> Rh850Backend::compile(ir::Module const & /*m*/,
 namespace {
 
 [[nodiscard]] bool ieq(std::string_view a, std::string_view b) noexcept {
-    if (a.size() != b.size()) return false;
+    if (a.size() != b.size())
+        return false;
     for (std::size_t i = 0; i < a.size(); ++i) {
-        char const ca = a[i] >= 'a' && a[i] <= 'z'
-                            ? static_cast<char>(a[i] - 32)
-                            : a[i];
-        char const cb = b[i] >= 'a' && b[i] <= 'z'
-                            ? static_cast<char>(b[i] - 32)
-                            : b[i];
-        if (ca != cb) return false;
+        char const ca = a[i] >= 'a' && a[i] <= 'z' ? static_cast<char>(a[i] - 32) : a[i];
+        char const cb = b[i] >= 'a' && b[i] <= 'z' ? static_cast<char>(b[i] - 32) : b[i];
+        if (ca != cb)
+            return false;
     }
     return true;
 }
@@ -1559,35 +1509,38 @@ Result<std::unique_ptr<IBackend>> select_backend(Definition const &def) {
 namespace {
 
 [[nodiscard]] std::optional<Arch> parse_arch(std::string_view s) noexcept {
-    if (s == "sh2a")    return Arch::Sh2a;
-    if (s == "rh850")   return Arch::Rh850;
-    if (s == "unknown") return Arch::Unknown;
+    if (s == "sh2a")
+        return Arch::Sh2a;
+    if (s == "rh850")
+        return Arch::Rh850;
+    if (s == "unknown")
+        return Arch::Unknown;
     return std::nullopt;
 }
 
 // Parse an even-length, all-hex string into bytes. Tolerant of leading
 // 0x and embedded whitespace would complicate the diff story, so this
 // function requires a contiguous run of [0-9A-Fa-f] of even length.
-[[nodiscard]] Result<std::vector<std::uint8_t>> parse_hex_bytes(
-    std::string_view s) {
+[[nodiscard]] Result<std::vector<std::uint8_t>> parse_hex_bytes(std::string_view s) {
     if (s.size() % 2 != 0) {
-        return failure(ErrorCode::ParseError,
-                       "patch TOML: code hex string has odd length");
+        return failure(ErrorCode::ParseError, "patch TOML: code hex string has odd length");
     }
     std::vector<std::uint8_t> out;
     out.reserve(s.size() / 2);
     auto const nibble = [](char c) -> int {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        if (c >= '0' && c <= '9')
+            return c - '0';
+        if (c >= 'a' && c <= 'f')
+            return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F')
+            return c - 'A' + 10;
         return -1;
     };
     for (std::size_t i = 0; i < s.size(); i += 2) {
         int const hi = nibble(s[i]);
         int const lo = nibble(s[i + 1]);
         if (hi < 0 || lo < 0) {
-            return failure(ErrorCode::ParseError,
-                           "patch TOML: code hex string has non-hex chars");
+            return failure(ErrorCode::ParseError, "patch TOML: code hex string has non-hex chars");
         }
         out.push_back(static_cast<std::uint8_t>((hi << 4) | lo));
     }
@@ -1607,24 +1560,24 @@ std::string patch_to_toml(PatchObject const &p) {
         // toml_quote in src/feature/src/feature.cpp.
         out << "symbol = \"";
         for (char c : h.symbol) {
-            if (c == '\\' || c == '"') out << '\\';
+            if (c == '\\' || c == '"')
+                out << '\\';
             out << c;
         }
         out << "\"\n";
-        out << "splice_address = 0x" << std::hex << std::uppercase
-            << h.splice_address << std::dec << std::nouppercase << "\n";
+        out << "splice_address = 0x" << std::hex << std::uppercase << h.splice_address << std::dec
+            << std::nouppercase << "\n";
         out << "code = \"";
         char buf[3];
         for (auto const b : h.code) {
-            std::snprintf(buf, sizeof(buf), "%02X",
-                          static_cast<unsigned>(b));
+            std::snprintf(buf, sizeof(buf), "%02X", static_cast<unsigned>(b));
             out << buf;
         }
         out << "\"\n";
         for (auto const &rc : h.ram_claims) {
             out << "\n[[patch.hook.ram_claim]]\n";
-            out << "address = 0x" << std::hex << std::uppercase
-                << rc.address << std::dec << std::nouppercase << "\n";
+            out << "address = 0x" << std::hex << std::uppercase << rc.address << std::dec
+                << std::nouppercase << "\n";
             out << "size = " << rc.size << "\n";
             out << "alignment = " << rc.alignment << "\n";
         }
@@ -1649,8 +1602,7 @@ Result<std::optional<PatchObject>> patch_from_toml(std::string_view text) {
     PatchObject p;
     auto const arch_s = (*ptbl)["arch"].value_or<std::string>("");
     if (arch_s.empty()) {
-        return failure(ErrorCode::ParseError,
-                       "patch TOML: [patch] missing `arch`");
+        return failure(ErrorCode::ParseError, "patch TOML: [patch] missing `arch`");
     }
     auto const arch = parse_arch(arch_s);
     if (!arch.has_value()) {
@@ -1665,8 +1617,7 @@ Result<std::optional<PatchObject>> patch_from_toml(std::string_view text) {
         for (auto const &elem : *hooks) {
             auto const *htbl = elem.as_table();
             if (htbl == nullptr) {
-                return failure(ErrorCode::ParseError,
-                               "patch TOML: [[patch.hook]] not a table");
+                return failure(ErrorCode::ParseError, "patch TOML: [[patch.hook]] not a table");
             }
             HookPatch hp;
             hp.symbol = (*htbl)["symbol"].value_or<std::string>("");
@@ -1674,12 +1625,10 @@ Result<std::optional<PatchObject>> patch_from_toml(std::string_view text) {
                 return failure(ErrorCode::ParseError,
                                "patch TOML: [[patch.hook]] missing `symbol`");
             }
-            auto const splice = (*htbl)["splice_address"]
-                                    .value<std::int64_t>();
+            auto const splice = (*htbl)["splice_address"].value<std::int64_t>();
             if (!splice.has_value()) {
-                return failure(ErrorCode::ParseError,
-                               "patch TOML: [[patch.hook]] '" + hp.symbol
-                                   + "' missing `splice_address`");
+                return failure(ErrorCode::ParseError, "patch TOML: [[patch.hook]] '" + hp.symbol +
+                                                          "' missing `splice_address`");
             }
             hp.splice_address = static_cast<std::size_t>(*splice);
             auto const code_s = (*htbl)["code"].value_or<std::string>("");
@@ -1697,22 +1646,19 @@ Result<std::optional<PatchObject>> patch_from_toml(std::string_view text) {
                 for (auto const &ce : *claims) {
                     auto const *ctbl = ce.as_table();
                     if (ctbl == nullptr) {
-                        return failure(ErrorCode::ParseError,
-                                       "patch TOML: [[patch.hook.ram_claim]]"
-                                       " not a table");
+                        return failure(ErrorCode::ParseError, "patch TOML: [[patch.hook.ram_claim]]"
+                                                              " not a table");
                     }
                     RamClaim rc;
                     auto const ad = (*ctbl)["address"].value<std::int64_t>();
                     auto const sz = (*ctbl)["size"].value<std::int64_t>();
                     auto const al = (*ctbl)["alignment"].value<std::int64_t>();
-                    if (!ad.has_value() || !sz.has_value()
-                        || !al.has_value()) {
-                        return failure(ErrorCode::ParseError,
-                                       "patch TOML: ram_claim missing "
-                                       "address/size/alignment");
+                    if (!ad.has_value() || !sz.has_value() || !al.has_value()) {
+                        return failure(ErrorCode::ParseError, "patch TOML: ram_claim missing "
+                                                              "address/size/alignment");
                     }
-                    rc.address   = static_cast<std::size_t>(*ad);
-                    rc.size      = static_cast<std::size_t>(*sz);
+                    rc.address = static_cast<std::size_t>(*ad);
+                    rc.size = static_cast<std::size_t>(*sz);
                     rc.alignment = static_cast<std::size_t>(*al);
                     hp.ram_claims.push_back(rc);
                 }

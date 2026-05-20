@@ -43,38 +43,38 @@ namespace st::autotune {
 // caller computes them from successive samples. The boolean flags are
 // the data-quality flags the algorithm uses to reject samples.
 struct MafSample {
-    double maf_voltage{0.0};       // V — the table's independent axis
-    double actual_afr{0.0};        // wideband AFR
-    double commanded_afr{0.0};     // ECU's AFR target
+    double maf_voltage{0.0};   // V — the table's independent axis
+    double actual_afr{0.0};    // wideband AFR
+    double commanded_afr{0.0}; // ECU's AFR target
     double rpm{0.0};
-    double rpm_rate{0.0};          // RPM/s
+    double rpm_rate{0.0}; // RPM/s
     double throttle_pct{0.0};
-    double throttle_rate{0.0};     // %/s
+    double throttle_rate{0.0}; // %/s
     double coolant_c{0.0};
     double iat_c{0.0};
-    bool   closed_loop{false};
-    bool   knock_in_window{false}; // any knock event in the last 250 ms
-    bool   limp_mode{false};       // ECU in fail / limp mode
+    bool closed_loop{false};
+    bool knock_in_window{false}; // any knock event in the last 250 ms
+    bool limp_mode{false};       // ECU in fail / limp mode
 };
 
 // Tunable knobs for MAF auto-tune. Defaults are deliberately
 // conservative — see docs/12 §"Data-quality gates".
 struct MafTuneOptions {
     // Algorithm shape.
-    double      gain                 = 0.5;    // multiplies the observed error
-    double      max_delta_pct        = 0.08;   // ±8% per pass
+    double gain = 0.5;           // multiplies the observed error
+    double max_delta_pct = 0.08; // ±8% per pass
     std::size_t min_samples_per_cell = 50;
-    double      trim_fraction        = 0.10;   // trimmed-mean tail to drop
+    double trim_fraction = 0.10; // trimmed-mean tail to drop
 
     // Data-quality gates.
-    double      min_coolant_c        = 80.0;
-    double      min_iat_c            = -20.0;
-    double      max_iat_c            = 80.0;
-    double      max_rpm_rate         = 500.0;  // RPM/s
-    double      max_throttle_rate    = 25.0;   // %/s
-    bool        reject_knock_window  = true;
-    bool        reject_limp_mode     = true;
-    bool        require_open_loop    = false;  // include both modes by default
+    double min_coolant_c = 80.0;
+    double min_iat_c = -20.0;
+    double max_iat_c = 80.0;
+    double max_rpm_rate = 500.0;     // RPM/s
+    double max_throttle_rate = 25.0; // %/s
+    bool reject_knock_window = true;
+    bool reject_limp_mode = true;
+    bool require_open_loop = false; // include both modes by default
 };
 
 // One cell's worth of result. `samples_used` is the count after gates
@@ -83,37 +83,34 @@ struct MafTuneOptions {
 // with sample count.
 struct CellProposal {
     std::size_t cell_index{0};
-    double      current_value{0.0};
-    double      proposed_value{0.0};
-    double      mean_error{1.0};     // trimmed mean of (actual/commanded)
+    double current_value{0.0};
+    double proposed_value{0.0};
+    double mean_error{1.0}; // trimmed mean of (actual/commanded)
     std::size_t samples_used{0};
-    double      confidence{0.0};
+    double confidence{0.0};
 };
 
 struct MafTuneResult {
-    std::vector<CellProposal> cells;             // one per axis breakpoint
-    std::size_t               total_samples{0};
-    std::size_t               samples_after_gates{0};
+    std::vector<CellProposal> cells; // one per axis breakpoint
+    std::size_t total_samples{0};
+    std::size_t samples_after_gates{0};
 };
 
 // Check whether a sample passes the configured gates. Exposed so tests
 // (and a future CLI summary) can show which samples were rejected and
 // why without having to re-implement the logic.
-[[nodiscard]] bool sample_passes_gates(MafSample const     &s,
-                                       MafTuneOptions const &opts) noexcept;
+[[nodiscard]] bool sample_passes_gates(MafSample const &s, MafTuneOptions const &opts) noexcept;
 
 // Pick the cell-index whose axis breakpoint is closest to `voltage`.
 // Ties go to the lower index. The axis is assumed to be sorted
 // ascending; an empty axis returns 0.
-[[nodiscard]] std::size_t nearest_cell(double                  voltage,
-                                       std::span<double const> axis) noexcept;
+[[nodiscard]] std::size_t nearest_cell(double voltage, std::span<double const> axis) noexcept;
 
 // Trimmed mean: discard `trim_fraction` of the lowest and the highest
 // values, then average the rest. With `trim_fraction = 0` reduces to
 // the arithmetic mean. With an empty span returns 0.0. Allocates a
 // sorted scratch copy internally; takes the span by value.
-[[nodiscard]] double trimmed_mean(std::span<double const> values,
-                                  double                  trim_fraction);
+[[nodiscard]] double trimmed_mean(std::span<double const> values, double trim_fraction);
 
 // The canonical MAF auto-tune entry point. Walks every sample, gates,
 // buckets to the nearest axis cell, computes a trimmed-mean error
@@ -124,11 +121,10 @@ struct MafTuneResult {
 //
 // `axis` and `current_scaling` must have the same length. The result
 // has one CellProposal per axis breakpoint, in order.
-[[nodiscard]] Result<MafTuneResult> tune_maf(
-    std::span<double const>    axis,
-    std::span<double const>    current_scaling,
-    std::span<MafSample const> samples,
-    MafTuneOptions const      &opts = {});
+[[nodiscard]] Result<MafTuneResult> tune_maf(std::span<double const> axis,
+                                             std::span<double const> current_scaling,
+                                             std::span<MafSample const> samples,
+                                             MafTuneOptions const &opts = {});
 
 // Confidence-weighted neighbor smoothing pass per docs/12 §"MAF
 // auto-tune". Each cell's smoothed proposal is the weighted average of
@@ -150,10 +146,8 @@ struct MafTuneResult {
 // `mean_error`, `cell_index`, and `confidence` are carried over from
 // the input; only `proposed_value` changes. Total-samples and
 // samples-after-gates fields pass through unchanged.
-[[nodiscard]] MafTuneResult smooth_proposals(
-    MafTuneResult const &input,
-    double               max_delta_pct,
-    double               neighbor_weight = 0.25);
+[[nodiscard]] MafTuneResult smooth_proposals(MafTuneResult const &input, double max_delta_pct,
+                                             double neighbor_weight = 0.25);
 
 // =====================================================================
 // Knock-based ignition pull
@@ -188,49 +182,45 @@ struct KnockSample {
     double feedback_knock{0.0};
     double coolant_c{0.0};
     double iat_c{0.0};
-    bool   limp_mode{false};
+    bool limp_mode{false};
 };
 
 struct KnockPullOptions {
-    double      trigger_degrees      = 1.5;   // mean below -trigger fires
-    double      pull_step_degrees    = 0.75;  // subtracted from cell on fire
+    double trigger_degrees = 1.5;    // mean below -trigger fires
+    double pull_step_degrees = 0.75; // subtracted from cell on fire
     std::size_t min_samples_per_cell = 30;
 
     // Data-quality gates.
-    double      min_coolant_c       = 80.0;
-    double      min_iat_c           = -20.0;
-    double      max_iat_c           = 80.0;
-    bool        reject_limp_mode    = true;
+    double min_coolant_c = 80.0;
+    double min_iat_c = -20.0;
+    double max_iat_c = 80.0;
+    bool reject_limp_mode = true;
 };
 
 struct KnockCellProposal {
-    std::size_t cell_index{0};     // flat row-major index
-    double      current_value{0.0};
-    double      proposed_value{0.0};
-    double      mean_feedback_knock{0.0};
+    std::size_t cell_index{0}; // flat row-major index
+    double current_value{0.0};
+    double proposed_value{0.0};
+    double mean_feedback_knock{0.0};
     std::size_t samples_used{0};
-    bool        pulled{false};
+    bool pulled{false};
 };
 
 struct KnockPullResult {
     std::vector<KnockCellProposal> cells;
-    std::size_t                    rows{0};   // = load_axis.size()
-    std::size_t                    cols{0};   // = rpm_axis.size()
-    std::size_t                    total_samples{0};
-    std::size_t                    samples_after_gates{0};
+    std::size_t rows{0}; // = load_axis.size()
+    std::size_t cols{0}; // = rpm_axis.size()
+    std::size_t total_samples{0};
+    std::size_t samples_after_gates{0};
 };
 
-[[nodiscard]] bool knock_sample_passes_gates(
-    KnockSample const     &s,
-    KnockPullOptions const &opts) noexcept;
+[[nodiscard]] bool knock_sample_passes_gates(KnockSample const &s,
+                                             KnockPullOptions const &opts) noexcept;
 
 // Locate (row, col) for a given (rpm, load) pair. Returns flat index
 // row * rpm_axis.size() + col. Either axis empty returns 0.
-[[nodiscard]] std::size_t nearest_cell_2d(
-    double                  rpm,
-    double                  load,
-    std::span<double const> rpm_axis,
-    std::span<double const> load_axis) noexcept;
+[[nodiscard]] std::size_t nearest_cell_2d(double rpm, double load, std::span<double const> rpm_axis,
+                                          std::span<double const> load_axis) noexcept;
 
 // The canonical knock-pull entry point. `current_timing` is a flat
 // row-major vector of size `rpm_axis.size() * load_axis.size()`.
@@ -238,12 +228,11 @@ struct KnockPullResult {
 // or whose mean feedback knock isn't worse than `-trigger_degrees`,
 // stay at their current_value with `pulled=false`. Triggered cells get
 // `current_value - pull_step_degrees`.
-[[nodiscard]] Result<KnockPullResult> tune_knock_pull(
-    std::span<double const>      rpm_axis,
-    std::span<double const>      load_axis,
-    std::span<double const>      current_timing,
-    std::span<KnockSample const> samples,
-    KnockPullOptions const      &opts = {});
+[[nodiscard]] Result<KnockPullResult> tune_knock_pull(std::span<double const> rpm_axis,
+                                                      std::span<double const> load_axis,
+                                                      std::span<double const> current_timing,
+                                                      std::span<KnockSample const> samples,
+                                                      KnockPullOptions const &opts = {});
 
 // Opt-in add-back pass per docs/12 §"Knock-based ignition pull". After
 // `tune_knock_pull` has subtracted timing from cells with sustained
@@ -257,18 +246,18 @@ struct KnockPullResult {
 // dangerous direction.
 struct KnockAddBackOptions {
     // Master switch. Default off so callers must explicitly opt in.
-    bool        enabled                     = false;
+    bool enabled = false;
     // Degrees added per cell when the criterion fires.
-    double      add_step_degrees            = 0.5;
+    double add_step_degrees = 0.5;
     // Cells with fewer than this many retained samples don't get
     // added — we want real evidence of cleanness, not absence of data.
-    std::size_t min_clean_samples_per_cell  = 50;
+    std::size_t min_clean_samples_per_cell = 50;
     // A cell counts as "clean" when its mean Feedback Knock Correction
     // is greater than `-clean_threshold_degrees` (i.e. effectively
     // zero or positive — the ECU did not need to pull). Default
     // tolerates sub-bit FP noise on a value the ECU reports at coarse
     // resolution.
-    double      clean_threshold_degrees     = 0.05;
+    double clean_threshold_degrees = 0.05;
 };
 
 // Apply the add-back pass to an existing `tune_knock_pull` result.
@@ -281,9 +270,8 @@ struct KnockAddBackOptions {
 // modified in the prior pass and remain modified; clean cells with
 // proposed != current are add-back targets. With `opts.enabled` false
 // the input is returned unchanged.
-[[nodiscard]] KnockPullResult apply_knock_add_back(
-    KnockPullResult const     &pull_result,
-    KnockAddBackOptions const &opts);
+[[nodiscard]] KnockPullResult apply_knock_add_back(KnockPullResult const &pull_result,
+                                                   KnockAddBackOptions const &opts);
 
 // =====================================================================
 // CSV → MafSample reader
@@ -322,8 +310,7 @@ struct KnockAddBackOptions {
 // column → InvalidArgument. Non-numeric value in a numeric column or
 // non-boolean value in a boolean column → InvalidArgument with the
 // row/column flagged.
-[[nodiscard]] Result<std::vector<MafSample>> read_maf_samples_csv(
-    std::string_view text);
+[[nodiscard]] Result<std::vector<MafSample>> read_maf_samples_csv(std::string_view text);
 
 // =====================================================================
 // CSV → KnockSample reader
@@ -345,8 +332,7 @@ struct KnockAddBackOptions {
 // docs/12, not rate-of-change driven); a `time_ms` column, if
 // present, is silently ignored. Blank lines and '#' comments
 // tolerated.
-[[nodiscard]] Result<std::vector<KnockSample>> read_knock_samples_csv(
-    std::string_view text);
+[[nodiscard]] Result<std::vector<KnockSample>> read_knock_samples_csv(std::string_view text);
 
 // =====================================================================
 // Engine-safety lint (docs/12 §"Engine-safety linting")
@@ -367,8 +353,8 @@ struct KnockAddBackOptions {
 // own tuning.
 
 enum class LintViolationKind {
-    NonMonotonic,        // proposed[i+1] < proposed[i] in voltage order
-    StepDiscontinuity,   // proposed step deviates wildly from original
+    NonMonotonic,      // proposed[i+1] < proposed[i] in voltage order
+    StepDiscontinuity, // proposed step deviates wildly from original
 };
 
 struct LintViolation {
@@ -376,13 +362,13 @@ struct LintViolation {
     // First of the two adjacent cells the violation spans. For
     // NonMonotonic and StepDiscontinuity the relevant pair is
     // (cell_index, cell_index + 1).
-    std::size_t       cell_index{0};
-    std::string       message;
+    std::size_t cell_index{0};
+    std::string message;
 };
 
 struct LintOptions {
-    bool   enforce_monotonic     = true;
-    bool   enforce_smoothness    = true;
+    bool enforce_monotonic = true;
+    bool enforce_smoothness = true;
     // Relative threshold on the per-step change between proposed and
     // original. The check compares
     //     |prop_step - orig_step| / max(|orig_step|, |prop_step|, eps)
@@ -410,11 +396,10 @@ struct LintOptions {
 // absolute value): a flat region with sub-floor proposed movement
 // does not fire the smoothness check. Returns an empty vector when
 // the proposal is clean.
-[[nodiscard]] std::vector<LintViolation> lint_maf_proposal(
-    std::span<double const> axis,
-    std::span<double const> current_scaling,
-    MafTuneResult const    &result,
-    LintOptions const      &opts = {});
+[[nodiscard]] std::vector<LintViolation> lint_maf_proposal(std::span<double const> axis,
+                                                           std::span<double const> current_scaling,
+                                                           MafTuneResult const &result,
+                                                           LintOptions const &opts = {});
 
 // Knock-pull lint options. The check looks for cell-to-cell jumps in
 // the proposed 2D timing surface that exceed an absolute degree
@@ -422,13 +407,13 @@ struct LintOptions {
 // concern is a cluster of pulls compounding into a "valley" deeper
 // than physically reasonable, not the per-cell pull itself.
 struct KnockLintOptions {
-    bool   enforce_neighbor_smoothness = true;
+    bool enforce_neighbor_smoothness = true;
     // Maximum absolute degree difference between adjacent cells in
     // either the RPM (row-major) or load direction. The default 3.0°
     // accommodates normal timing-map gradients while flagging stacked
     // pulls that put the proposed map well outside the original's
     // smoothness envelope.
-    double max_neighbor_step_degrees   = 3.0;
+    double max_neighbor_step_degrees = 3.0;
 };
 
 // Lint a knock-pull proposal. Returns `StepDiscontinuity` violations
@@ -443,11 +428,10 @@ struct KnockLintOptions {
 // mismatched result emits a single synthetic `StepDiscontinuity`
 // violation flagging the shape rather than silently passing — a
 // buggy kernel shouldn't disappear into a "no violations" report.
-[[nodiscard]] std::vector<LintViolation> lint_knock_proposal(
-    std::span<double const>     rpm_axis,
-    std::span<double const>     load_axis,
-    KnockPullResult const      &result,
-    KnockLintOptions const     &opts = {});
+[[nodiscard]] std::vector<LintViolation> lint_knock_proposal(std::span<double const> rpm_axis,
+                                                             std::span<double const> load_axis,
+                                                             KnockPullResult const &result,
+                                                             KnockLintOptions const &opts = {});
 
 } // namespace st::autotune
 

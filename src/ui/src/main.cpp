@@ -14,22 +14,15 @@
 #include "st/edit.hpp"
 #include "st/feature.hpp"
 #include "st/flash.hpp"
-#include "st/log/knock_dashboard.hpp"
 #include "st/log/adaptive_history.hpp"
 #include "st/log/coldstart.hpp"
 #include "st/log/ebcs.hpp"
+#include "st/log/knock_dashboard.hpp"
 #include "st/policy.hpp"
 #include "st/project.hpp"
 
 // ImGui + backends.
-#include <imgui.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
-#include <imgui_internal.h> // DockBuilder*
-#include <implot.h>
-
 #include <GLFW/glfw3.h>
-#include <nfd.hpp>
 
 #include <algorithm>
 #include <array>
@@ -42,8 +35,14 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
+#include <imgui_internal.h> // DockBuilder*
+#include <implot.h>
 #include <ios>
 #include <limits>
+#include <nfd.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -63,7 +62,7 @@ namespace {
 void text_subtle(char const *fmt, ...);
 
 struct Fonts {
-    ImFont *ui   = nullptr; // Sans for UI chrome (menus, labels, panels)
+    ImFont *ui = nullptr;   // Sans for UI chrome (menus, labels, panels)
     ImFont *mono = nullptr; // Monospace for grids, hex, log output
 };
 
@@ -81,7 +80,7 @@ struct Fonts {
 // ---------------------------------------------------------------------
 
 struct RecentEntry {
-    std::string opened_at;   // ISO 8601 UTC, e.g. "2026-05-12T15:30:00Z"
+    std::string opened_at; // ISO 8601 UTC, e.g. "2026-05-12T15:30:00Z"
     std::filesystem::path path;
 };
 
@@ -90,23 +89,26 @@ constexpr std::size_t kRecentsCap = 8;
 std::filesystem::path config_dir_root() {
     auto const env = [](char const *name) -> std::filesystem::path {
         auto const *v = std::getenv(name);
-        return v != nullptr ? std::filesystem::path{v}
-                            : std::filesystem::path{};
+        return v != nullptr ? std::filesystem::path{v} : std::filesystem::path{};
     };
 #if defined(_WIN32)
     auto base = env("LOCALAPPDATA");
-    if (base.empty()) base = env("USERPROFILE");
-    if (base.empty()) base = std::filesystem::current_path();
+    if (base.empty())
+        base = env("USERPROFILE");
+    if (base.empty())
+        base = std::filesystem::current_path();
     return base / "SubuwuTuner";
 #elif defined(__APPLE__)
     auto base = env("HOME");
-    if (base.empty()) base = std::filesystem::current_path();
+    if (base.empty())
+        base = std::filesystem::current_path();
     return base / "Library" / "Application Support" / "SubuwuTuner";
 #else
     auto base = env("XDG_CONFIG_HOME");
     if (base.empty()) {
         auto home = env("HOME");
-        if (home.empty()) home = std::filesystem::current_path();
+        if (home.empty())
+            home = std::filesystem::current_path();
         base = home / ".config";
     }
     return base / "subuwutuner";
@@ -122,9 +124,9 @@ std::filesystem::path settings_config_path() {
 }
 
 std::string iso8601_utc_now() {
-    auto const  now = std::chrono::system_clock::now();
-    auto const  t   = std::chrono::system_clock::to_time_t(now);
-    std::tm     tm{};
+    auto const now = std::chrono::system_clock::now();
+    auto const t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
 #if defined(_WIN32)
     ::gmtime_s(&tm, &t);
 #else
@@ -145,17 +147,16 @@ std::string format_relative_time(std::string const &iso) {
     int h = 0;
     int m = 0;
     int s = 0;
-    if (std::sscanf(iso.c_str(), "%4d-%2d-%2dT%2d:%2d:%2dZ",
-                    &Y, &M, &D, &h, &m, &s) != 6) {
+    if (std::sscanf(iso.c_str(), "%4d-%2d-%2dT%2d:%2d:%2dZ", &Y, &M, &D, &h, &m, &s) != 6) {
         return {};
     }
     std::tm tm{};
     tm.tm_year = Y - 1900;
-    tm.tm_mon  = M - 1;
+    tm.tm_mon = M - 1;
     tm.tm_mday = D;
     tm.tm_hour = h;
-    tm.tm_min  = m;
-    tm.tm_sec  = s;
+    tm.tm_min = m;
+    tm.tm_sec = s;
 #if defined(_WIN32)
     std::time_t const then = ::_mkgmtime(&tm);
 #else
@@ -164,8 +165,7 @@ std::string format_relative_time(std::string const &iso) {
     if (then == static_cast<std::time_t>(-1)) {
         return {};
     }
-    auto const now = std::chrono::system_clock::to_time_t(
-        std::chrono::system_clock::now());
+    auto const now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     auto const diff = static_cast<long long>(std::difftime(now, then));
     if (diff < 60) {
         return "just now";
@@ -196,8 +196,9 @@ std::string format_relative_time(std::string const &iso) {
 
 std::vector<RecentEntry> load_recents() {
     std::vector<RecentEntry> out;
-    std::ifstream            in{recents_config_path()};
-    if (!in) return out;
+    std::ifstream in{recents_config_path()};
+    if (!in)
+        return out;
     std::string line;
     while (std::getline(in, line) && out.size() < kRecentsCap) {
         auto const tab = line.find('\t');
@@ -206,20 +207,21 @@ std::vector<RecentEntry> load_recents() {
         }
         RecentEntry e;
         e.opened_at = line.substr(0, tab);
-        e.path      = std::filesystem::path{line.substr(tab + 1)};
+        e.path = std::filesystem::path{line.substr(tab + 1)};
         out.push_back(std::move(e));
     }
     return out;
 }
 
 void save_recents(std::vector<RecentEntry> const &recents) {
-    auto const  path = recents_config_path();
+    auto const path = recents_config_path();
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
     // Failure to create the directory is non-fatal — recents is best-
     // effort. The next save attempt will retry.
     std::ofstream out{path, std::ios::trunc};
-    if (!out) return;
+    if (!out)
+        return;
     for (auto const &e : recents) {
         out << e.opened_at << '\t' << e.path.generic_string() << '\n';
     }
@@ -234,15 +236,19 @@ enum class Theme { Dark, Light };
 
 char const *theme_name(Theme t) noexcept {
     switch (t) {
-        case Theme::Dark:  return "dark";
-        case Theme::Light: return "light";
+    case Theme::Dark:
+        return "dark";
+    case Theme::Light:
+        return "light";
     }
     return "dark";
 }
 
 std::optional<Theme> parse_theme(std::string_view s) noexcept {
-    if (s == "dark")  return Theme::Dark;
-    if (s == "light") return Theme::Light;
+    if (s == "dark")
+        return Theme::Dark;
+    if (s == "light")
+        return Theme::Light;
     return std::nullopt;
 }
 
@@ -252,14 +258,13 @@ std::optional<Theme> parse_theme(std::string_view s) noexcept {
 // useful for debug/CLI output but jargon-y for tuners. This wrapper
 // produces a short fix-oriented phrase that explains the problem
 // without requiring familiarity with the underlying enum.
-[[nodiscard]] char const *
-pretty_lint_kind(st::autotune::LintViolationKind kind) noexcept {
+[[nodiscard]] char const *pretty_lint_kind(st::autotune::LintViolationKind kind) noexcept {
     using K = st::autotune::LintViolationKind;
     switch (kind) {
-        case K::NonMonotonic:
-            return "neighbor cells out of expected order";
-        case K::StepDiscontinuity:
-            return "neighbor-cell jump exceeds smoothness threshold";
+    case K::NonMonotonic:
+        return "neighbor cells out of expected order";
+    case K::StepDiscontinuity:
+        return "neighbor-cell jump exceeds smoothness threshold";
     }
     return "lint violation";
 }
@@ -269,37 +274,40 @@ pretty_lint_kind(st::autotune::LintViolationKind kind) noexcept {
 // HeaderActive, SliderGrabActive, etc.). Per-theme so contrast with
 // the surrounding palette stays right (hover/active go LIGHTER on
 // dark backgrounds, DARKER on light ones).
-struct AccentTriple { ImVec4 base; ImVec4 hover; ImVec4 active; };
+struct AccentTriple {
+    ImVec4 base;
+    ImVec4 hover;
+    ImVec4 active;
+};
 
 inline AccentTriple accent_for(Theme t) noexcept {
     constexpr ImVec4 accent_purple(0.55f, 0.35f, 0.85f, 1.00f);
     if (t == Theme::Light) {
-        return { accent_purple,
-                 ImVec4(0.48f, 0.28f, 0.78f, 1.00f),
-                 ImVec4(0.40f, 0.20f, 0.70f, 1.00f) };
+        return {accent_purple, ImVec4(0.48f, 0.28f, 0.78f, 1.00f),
+                ImVec4(0.40f, 0.20f, 0.70f, 1.00f)};
     }
-    return { accent_purple,
-             ImVec4(0.62f, 0.45f, 0.90f, 1.00f),
-             ImVec4(0.70f, 0.55f, 0.95f, 1.00f) };
+    return {accent_purple, ImVec4(0.62f, 0.45f, 0.90f, 1.00f), ImVec4(0.70f, 0.55f, 0.95f, 1.00f)};
 }
 
 struct Settings {
     st::policy::Profile default_policy_profile{st::policy::Profile::MotorsportOnly};
-    Theme               theme{Theme::Dark};
+    Theme theme{Theme::Dark};
 };
 
 Settings load_settings() {
     Settings s;
     std::ifstream in{settings_config_path()};
-    if (!in) return s;
+    if (!in)
+        return s;
     std::string line;
     while (std::getline(in, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
         auto const eq = line.find('=');
-        if (eq == std::string::npos) continue;
+        if (eq == std::string::npos)
+            continue;
         std::string_view const key{line.data(), eq};
-        std::string_view const val{line.data() + eq + 1,
-                                    line.size() - eq - 1};
+        std::string_view const val{line.data() + eq + 1, line.size() - eq - 1};
         if (key == "default_policy_profile") {
             if (auto p = st::policy::parse_profile(val); p.has_value()) {
                 s.default_policy_profile = *p;
@@ -314,48 +322,45 @@ Settings load_settings() {
 }
 
 void save_settings(Settings const &s) {
-    auto const  path = settings_config_path();
+    auto const path = settings_config_path();
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
     std::ofstream out{path, std::ios::trunc};
-    if (!out) return;
-    out << "default_policy_profile="
-        << st::policy::profile_name(s.default_policy_profile) << '\n';
+    if (!out)
+        return;
+    out << "default_policy_profile=" << st::policy::profile_name(s.default_policy_profile) << '\n';
     out << "theme=" << theme_name(s.theme) << '\n';
 }
 
 // Move `path` to the front of `recents`, deduplicating by canonical
 // path comparison and capping the list at `kRecentsCap`. Idempotent.
-void push_recent(std::vector<RecentEntry>     &recents,
-                 std::filesystem::path const &path) {
+void push_recent(std::vector<RecentEntry> &recents, std::filesystem::path const &path) {
     std::error_code ec;
-    auto const      canon =
-        std::filesystem::weakly_canonical(path, ec);
+    auto const canon = std::filesystem::weakly_canonical(path, ec);
     auto const compare_to = canon.empty() ? path : canon;
     // Remove any existing entry pointing at the same canonical path.
     recents.erase(std::remove_if(recents.begin(), recents.end(),
                                  [&](RecentEntry const &e) {
                                      std::error_code ec2;
                                      auto const ec_path =
-                                         std::filesystem::weakly_canonical(
-                                             e.path, ec2);
-                                     return (ec_path.empty() ? e.path : ec_path)
-                                            == compare_to;
+                                         std::filesystem::weakly_canonical(e.path, ec2);
+                                     return (ec_path.empty() ? e.path : ec_path) == compare_to;
                                  }),
                   recents.end());
     // Insert at the front.
     RecentEntry e;
     e.opened_at = iso8601_utc_now();
-    e.path      = compare_to;
+    e.path = compare_to;
     recents.insert(recents.begin(), std::move(e));
-    if (recents.size() > kRecentsCap) recents.resize(kRecentsCap);
+    if (recents.size() > kRecentsCap)
+        recents.resize(kRecentsCap);
 }
 
 // Anchor + cursor selection model. Click sets both; shift-click moves only
 // the cursor — the cell rect runs between anchor and cursor inclusively.
 // `enabled` distinguishes "nothing selected" from "single cell at (0,0)".
 struct Selection {
-    bool        enabled{false};
+    bool enabled{false};
     std::size_t r_anchor{0};
     std::size_t c_anchor{0};
     std::size_t r_cursor{0};
@@ -391,11 +396,13 @@ struct Selection {
         } else {
             r_anchor = r_cursor = r;
             c_anchor = c_cursor = c;
-            enabled  = true;
+            enabled = true;
         }
     }
 
-    void reset() noexcept { enabled = false; }
+    void reset() noexcept {
+        enabled = false;
+    }
 };
 
 enum class TableViewMode {
@@ -415,179 +422,177 @@ enum class ConfirmAction {
 };
 
 struct AppState {
-    std::optional<st::Project>               project;
+    std::optional<st::Project> project;
     // Transient status line shown in the status bar's middle cluster.
     // Set whenever an action wants to surface a confirmation or a non-
     // fatal error ("Saved.", "Open dialog error: …"). Auto-clears
     // after ~5 s so stale messages don't sit indefinitely — the
     // tick_status_msg() pass in the render loop manages this; call
     // sites just write the string.
-    std::string                              status_msg;
+    std::string status_msg;
     // Change-detection shadow + first-seen timestamp for the auto-
     // clear pass. Touched only by tick_status_msg(). Internal — no
     // call site reads or writes these directly.
-    std::string                              status_msg_prev;
-    double                                   status_msg_seen_at{0.0};
-    std::string                              selected_table_id;
+    std::string status_msg_prev;
+    double status_msg_seen_at{0.0};
+    std::string selected_table_id;
     std::optional<st::Definition::TableData> current_table_data;
-    Selection                                selection;
-    TableViewMode                            view_mode{TableViewMode::Grid};
-    std::size_t                              selected_z{0};
-    bool                                     show_imgui_demo{false};
-    bool                                     show_shortcuts_modal{false};
+    Selection selection;
+    TableViewMode view_mode{TableViewMode::Grid};
+    std::size_t selected_z{0};
+    bool show_imgui_demo{false};
+    bool show_shortcuts_modal{false};
     // Phase 5 custom-features designer. Hidden behind View → Debug.
     // Graph data model lives in st::feature; the wiring fields below
     // are transient editor state (only meaningful while the user is
     // mid-drag on a pin) and reset on completion or escape.
-    bool                                     show_features_designer{false};
-    st::feature::Graph                       features_graph;
-    bool                                     features_wiring_active{false};
-    st::feature::NodeId                      features_wiring_from_node{0};
-    st::feature::PinId                       features_wiring_from_pin{0};
+    bool show_features_designer{false};
+    st::feature::Graph features_graph;
+    bool features_wiring_active{false};
+    st::feature::NodeId features_wiring_from_node{0};
+    st::feature::PinId features_wiring_from_pin{0};
     // Set true when Esc / right-click cancels a wire; blocks the
     // pin-drag handler from spawning a fresh wire while the mouse
     // is still held over the source pin. Cleared when the mouse
     // button is released.
-    bool                                     features_wiring_blocked{false};
+    bool features_wiring_blocked{false};
     // Last connect-attempt error. Surfaced under the canvas when a
     // wire is rejected (type mismatch, fan-in, etc.); cleared on the
     // next successful connect or when a drag starts.
-    std::string                              features_wire_error;
+    std::string features_wire_error;
     // Currently-selected nodes on the designer canvas. Plain click
     // replaces with {id}; Shift+click toggles a node in the set;
     // box-select via left-drag from empty canvas replaces with every
     // node whose body intersects the rubber-band rectangle. Cleared
     // on click of empty canvas, on graph clear/load, and when any
     // selected node is removed.
-    std::vector<st::feature::NodeId>         features_selected_nodes;
+    std::vector<st::feature::NodeId> features_selected_nodes;
     // Rubber-band selection state. While `band_active` is true the
     // user is dragging out a rectangle from `band_start` (screen
     // coords) — selection is recomputed each frame from the
     // rectangle until release.
-    bool                                     features_band_active{false};
-    ImVec2                                   features_band_start{0.0f, 0.0f};
+    bool features_band_active{false};
+    ImVec2 features_band_start{0.0f, 0.0f};
     // Transient buffer for the pin-default-value editor opened from
     // the pin context menu. Pre-filled with the pin's current
     // default_value (or 0) when the popup is opened. The popup
     // commits on Apply / clears on Clear via pending_default below.
-    float                                    features_pin_edit_buf{0.0f};
+    float features_pin_edit_buf{0.0f};
     // Currently-selected edge on the designer canvas. Mutually
     // exclusive with the selected node — selecting either clears
     // the other. Cleared on graph clear/load, when the edge is
     // removed, or when either endpoint node is removed.
-    std::optional<st::feature::Edge>         features_selected_edge;
+    std::optional<st::feature::Edge> features_selected_edge;
     // Edge captured by the most recent right-click, used only as a
     // reference for the edge context-menu popup. Independent of
     // `features_selected_edge` — dismissing the menu without acting
     // should leave the selection state unchanged.
-    std::optional<st::feature::Edge>         features_context_edge;
+    std::optional<st::feature::Edge> features_context_edge;
     // Canvas pan + zoom. `view_offset` translates graph-space
     // coords to screen-space (post-canvas-origin), `view_scale`
     // multiplies them. Defaults are identity. Middle-mouse drag
     // updates the offset; the mouse wheel updates the scale and
     // re-anchors the offset around the cursor.
-    ImVec2                                   features_view_offset{0.0f, 0.0f};
-    float                                    features_view_scale{1.0f};
+    ImVec2 features_view_offset{0.0f, 0.0f};
+    float features_view_scale{1.0f};
     // Loaded once at startup, persisted on every successful open. See
     // recents_config_path() for the on-disk location.
-    std::vector<RecentEntry>                 recents;
-    Settings                                 settings;
+    std::vector<RecentEntry> recents;
+    Settings settings;
 
     // Sidebar filter. Substring-matched (case-insensitive) against table
     // name + id. 128 chars is generous — table identifiers in real packs
     // top out around 40. `focus_table_filter` is the Ctrl+F handoff: set
     // by the main-loop shortcut, consumed by the sidebar's next render.
-    char                                     table_filter[128]{};
-    bool                                     focus_table_filter{false};
+    char table_filter[128]{};
+    bool focus_table_filter{false};
 
     // DTC-panel filter buffer. Same shape as table_filter; matched against
     // DTC code (P0401) or name.
-    char                                     dtc_filter[128]{};
+    char dtc_filter[128]{};
 
     // Visibility toggles for the secondary panels. The Sidebar and Table
     // panels are always-on (closing them would orphan the user); these
     // are as-needed and are exposed via View menu checkboxes + the
     // standard dock tab-close X.
-    bool                                     show_stats_panel{true};
-    bool                                     show_dtcs_panel{true};
-    bool                                     show_history_panel{true};
+    bool show_stats_panel{true};
+    bool show_dtcs_panel{true};
+    bool show_history_panel{true};
     // Per-cylinder knock dashboard — v1.x feature, docs/05 §11. Hidden by
     // default (analysis tool, not always-on). State is fully self-contained:
     // a CSV log + column-name mapping + a cached snapshot. None of it
     // depends on having an open project.
-    bool                                     show_knock_dashboard_panel{false};
-    char                                     knock_log_path[1024]{};
-    std::string                              knock_load_error;
-    char                                     knock_rpm_col[64]{"rpm"};
-    char                                     knock_load_col[64]{"load"};
-    char                                     knock_flkc_cols[6][64]{
-        "flkc1", "flkc2", "flkc3", "flkc4", "flkc5", "flkc6"};
-    char                                     knock_fbkc_cols[6][64]{
-        "fbkc1", "fbkc2", "fbkc3", "fbkc4", "fbkc5", "fbkc6"};
-    int                                      knock_cylinder_count{4};
-    float                                    knock_window_seconds{10.0f};
-    float                                    knock_sample_rate_hz{20.0f};
-    float                                    knock_min_rpm{1500.0f};
-    float                                    knock_min_load{1.5f};
-    bool                                     knock_gate_enabled{true};
+    bool show_knock_dashboard_panel{false};
+    char knock_log_path[1024]{};
+    std::string knock_load_error;
+    char knock_rpm_col[64]{"rpm"};
+    char knock_load_col[64]{"load"};
+    char knock_flkc_cols[6][64]{"flkc1", "flkc2", "flkc3", "flkc4", "flkc5", "flkc6"};
+    char knock_fbkc_cols[6][64]{"fbkc1", "fbkc2", "fbkc3", "fbkc4", "fbkc5", "fbkc6"};
+    int knock_cylinder_count{4};
+    float knock_window_seconds{10.0f};
+    float knock_sample_rate_hz{20.0f};
+    float knock_min_rpm{1500.0f};
+    float knock_min_load{1.5f};
+    bool knock_gate_enabled{true};
     std::optional<st::log::knock::KnockSnapshot> knock_snapshot;
-    std::string                              knock_compute_msg;
+    std::string knock_compute_msg;
     // Adaptive-learning history panel — docs/05 §11 play 1. Same shape as
     // knock_*: CSV + column mapping + cached snapshot, fully self-contained.
-    bool                                     show_adaptive_history_panel{false};
-    char                                     ah_log_path[1024]{};
-    std::string                              ah_load_error;
-    char                                     ah_ts_col[64]{"ts"};
-    char                                     ah_ltft_col[64]{"ltft"};
-    char                                     ah_dam_col[64]{"dam"};
-    char                                     ah_iac_col[64]{"iac"};
-    float                                    ah_bucket_seconds{86400.0f};
-    int                                      ah_ts_unit{0};   // 0=s,1=ms,2=us,3=rows
-    int                                      ah_min_samples_per_bucket{0};
+    bool show_adaptive_history_panel{false};
+    char ah_log_path[1024]{};
+    std::string ah_load_error;
+    char ah_ts_col[64]{"ts"};
+    char ah_ltft_col[64]{"ltft"};
+    char ah_dam_col[64]{"dam"};
+    char ah_iac_col[64]{"iac"};
+    float ah_bucket_seconds{86400.0f};
+    int ah_ts_unit{0}; // 0=s,1=ms,2=us,3=rows
+    int ah_min_samples_per_bucket{0};
     std::optional<st::log::adaptive::HistorySnapshot> ah_snapshot;
-    std::string                              ah_compute_msg;
+    std::string ah_compute_msg;
     // Cold-start analysis panel — docs/05 §11 play 3.
-    bool                                     show_coldstart_panel{false};
-    char                                     cs_log_path[1024]{};
-    std::string                              cs_load_error;
-    char                                     cs_ts_col[64]{"ts"};
-    char                                     cs_ect_col[64]{"ect"};
-    char                                     cs_iat_col[64]{"iat"};
-    char                                     cs_rpm_col[64]{"rpm"};
-    char                                     cs_obs_col[64]{"obs"};
-    char                                     cs_cmd_col[64]{"cmd"};
-    float                                    cs_cold_threshold_c{55.0f};
-    float                                    cs_ect_bin_width_c{5.0f};
-    int                                      cs_min_samples_per_bin{2};
-    int                                      cs_ts_unit{0};
+    bool show_coldstart_panel{false};
+    char cs_log_path[1024]{};
+    std::string cs_load_error;
+    char cs_ts_col[64]{"ts"};
+    char cs_ect_col[64]{"ect"};
+    char cs_iat_col[64]{"iat"};
+    char cs_rpm_col[64]{"rpm"};
+    char cs_obs_col[64]{"obs"};
+    char cs_cmd_col[64]{"cmd"};
+    float cs_cold_threshold_c{55.0f};
+    float cs_ect_bin_width_c{5.0f};
+    int cs_min_samples_per_bin{2};
+    int cs_ts_unit{0};
     // Target curve as a free-form text buffer; parsed on Compute.
     // Example: "0:0.82,20:0.88,40:0.95,55:1.00"
-    char                                     cs_target_curve[256]{"0:0.82,20:0.88,40:0.95,55:1.00"};
+    char cs_target_curve[256]{"0:0.82,20:0.88,40:0.95,55:1.00"};
     std::optional<st::log::coldstart::ColdStartSnapshot> cs_snapshot;
-    std::vector<std::pair<double,double>>    cs_target_curve_parsed;
-    std::string                              cs_compute_msg;
+    std::vector<std::pair<double, double>> cs_target_curve_parsed;
+    std::string cs_compute_msg;
     // EBCS PID assistant panel — docs/05 §11 play 4.
-    bool                                     show_ebcs_panel{false};
-    char                                     ebcs_log_path[1024]{};
-    std::string                              ebcs_load_error;
-    char                                     ebcs_ts_col[64]{"ts"};
-    char                                     ebcs_target_col[64]{"target_boost"};
-    char                                     ebcs_actual_col[64]{"actual_boost"};
-    char                                     ebcs_wgdc_col[64]{"wgdc"};
-    char                                     ebcs_throttle_col[64]{"throttle"};
-    char                                     ebcs_rpm_col[64]{"rpm"};
-    float                                    ebcs_throttle_step_pct{30.0f};
-    float                                    ebcs_target_step{2.0f};
-    float                                    ebcs_max_event_duration{6.0f};
-    float                                    ebcs_overshoot_warn_pct{15.0f};
-    int                                      ebcs_ts_unit{0};
+    bool show_ebcs_panel{false};
+    char ebcs_log_path[1024]{};
+    std::string ebcs_load_error;
+    char ebcs_ts_col[64]{"ts"};
+    char ebcs_target_col[64]{"target_boost"};
+    char ebcs_actual_col[64]{"actual_boost"};
+    char ebcs_wgdc_col[64]{"wgdc"};
+    char ebcs_throttle_col[64]{"throttle"};
+    char ebcs_rpm_col[64]{"rpm"};
+    float ebcs_throttle_step_pct{30.0f};
+    float ebcs_target_step{2.0f};
+    float ebcs_max_event_duration{6.0f};
+    float ebcs_overshoot_warn_pct{15.0f};
+    int ebcs_ts_unit{0};
     std::optional<st::log::ebcs::BoostSnapshot> ebcs_snapshot;
-    std::string                              ebcs_compute_msg;
+    std::string ebcs_compute_msg;
 
     // History-panel filter buffer. Substring-matched (case-insensitive)
     // against the edit's table_id; mirrors the CLI's project-history
     // --table flag at the GUI surface.
-    char                                     history_filter[128]{};
+    char history_filter[128]{};
 
     // Inline cell-value editor state. Active iff `editing_cell` is true;
     // the cell being edited is identified by selection.r_cursor /
@@ -595,40 +600,40 @@ struct AppState {
     // arrow-key nav block reads `editing_cell` and skips its movement
     // logic). `editor_just_opened` is a one-frame handoff so the new
     // InputText gets SetKeyboardFocusHere on its first render.
-    bool                                     editing_cell{false};
-    bool                                     editor_just_opened{false};
-    char                                     edit_buf[64]{};
+    bool editing_cell{false};
+    bool editor_just_opened{false};
+    char edit_buf[64]{};
 
     // Unsaved-changes tracking. `dirty` is conservative: any edit flips
     // it true, save flips it false. An undo-back-to-clean leaves dirty
     // true, which is harmless because the resulting save is a no-op
     // against an already-correct file. Switching projects via the
     // modal's Discard option also clears dirty.
-    bool                                     dirty{false};
-    ConfirmAction                            next_action{ConfirmAction::None};
-    std::filesystem::path                    next_recent{};
-    bool                                     show_unsaved_modal{false};
+    bool dirty{false};
+    ConfirmAction next_action{ConfirmAction::None};
+    std::filesystem::path next_recent{};
+    bool show_unsaved_modal{false};
     // Set when the user has confirmed (or there was nothing to confirm)
     // that they want to quit. Main loop reads this AFTER rendering each
     // frame and breaks when true.
-    bool                                     user_confirmed_quit{false};
+    bool user_confirmed_quit{false};
 
     // Flash-flow modal state. `show_flash_modal` opens the popup on the
     // next frame; the rest are buffers for the confirm / reason UI bound
     // to the active project's profile. Fixed-size char buffer keeps the
     // ImGui call free of the `imgui_stdlib` std::string helper.
-    bool                                     show_flash_modal{false};
-    bool                                     flash_confirm_checked{false};
-    char                                     flash_reason[512]{};
+    bool show_flash_modal{false};
+    bool flash_confirm_checked{false};
+    char flash_reason[512]{};
 
     // CSV import preview modal. Populated by the Import dialog after a
     // successful parse; the modal renders a before->after preview and
     // applies the edit only on explicit user confirmation. Mirrors the
     // CLI's `project-edit-csv --dry-run` safety net for share-able CSVs.
-    bool                                     show_csv_import_modal{false};
-    st::EditCsvParseResult                   csv_import_parsed;
-    std::string                              csv_import_table_id;
-    std::filesystem::path                    csv_import_source_path;
+    bool show_csv_import_modal{false};
+    st::EditCsvParseResult csv_import_parsed;
+    std::string csv_import_table_id;
+    std::filesystem::path csv_import_source_path;
     // Working-ROM values at parse time, kept so the preview can show
     // "before -> after" without re-reading per frame.
     std::optional<st::Definition::TableData> csv_import_before_values;
@@ -638,79 +643,79 @@ struct AppState {
     // the modal so the user sees the cause without losing the parsed
     // preview state — keeps the modal "non-intimidating" instead of
     // bouncing them out to the status bar.
-    std::string                              csv_import_apply_error;
+    std::string csv_import_apply_error;
 
     // New-project modal. GUI front for `subuwutuner-cli project-new`.
     // Three path fields (source ROM, def pack folder OR single-file
     // pack, target project dir) and an optional display name. NFD
     // pickers populate the fields; Create runs Project::create +
     // try_open_project.
-    bool                                     show_new_project_modal{false};
-    char                                     np_source_path[1024]{};
-    char                                     np_def_path[1024]{};
-    char                                     np_dir_path[1024]{};
-    char                                     np_display_name[256]{};
+    bool show_new_project_modal{false};
+    char np_source_path[1024]{};
+    char np_def_path[1024]{};
+    char np_dir_path[1024]{};
+    char np_display_name[256]{};
     // Inline ROM/def match check. Recomputed only when either path
     // changes (cached_* mirrors the last-checked paths). Status drives
     // the colored line under the Definition row; load failure also
     // disables Create.
     enum class NpMatchStatus { None, Match, NoMatch, LoadFailed };
-    NpMatchStatus                            np_match_status{NpMatchStatus::None};
-    std::string                              np_match_message;
-    std::string                              np_cached_source_path;
-    std::string                              np_cached_def_path;
+    NpMatchStatus np_match_status{NpMatchStatus::None};
+    std::string np_match_message;
+    std::string np_cached_source_path;
+    std::string np_cached_def_path;
     // Surface Project::create's error inline — the bottom status bar
     // is hidden behind the modal, so the user otherwise sees nothing.
-    std::string                              np_create_error;
+    std::string np_create_error;
 
     // MAF autotune modal. GUI front for `subuwutuner-cli
     // project-autotune-maf`. Inputs (table id, log path, tuning
     // params) live alongside the cached preview result so the modal
     // can show a per-cell ledger between Preview and Apply.
-    bool                                     show_maf_autotune_modal{false};
-    char                                     maf_at_table_id[128]{};
-    char                                     maf_at_log_path[1024]{};
-    float                                    maf_at_gain{0.5f};
-    float                                    maf_at_max_delta_pct{0.08f};
-    int                                      maf_at_min_samples{50};
-    bool                                     maf_at_apply_smooth{true};
-    bool                                     maf_at_require_open_loop{false};
+    bool show_maf_autotune_modal{false};
+    char maf_at_table_id[128]{};
+    char maf_at_log_path[1024]{};
+    float maf_at_gain{0.5f};
+    float maf_at_max_delta_pct{0.08f};
+    int maf_at_min_samples{50};
+    bool maf_at_apply_smooth{true};
+    bool maf_at_require_open_loop{false};
     // Preview output. Populated by the Preview button; consumed by
     // the ledger display and by Apply. Cleared on Cancel or Apply.
     std::optional<st::autotune::MafTuneResult> maf_at_result;
-    std::vector<st::autotune::LintViolation>   maf_at_lints;
-    std::optional<st::Definition::TableData>   maf_at_table_data;
-    std::string                                maf_at_status_msg;
+    std::vector<st::autotune::LintViolation> maf_at_lints;
+    std::optional<st::Definition::TableData> maf_at_table_data;
+    std::string maf_at_status_msg;
 
     // Knock-pull autotune modal. GUI front for `subuwutuner-cli
     // project-autotune-knock-pull`. Mirrors the MAF modal's lifecycle:
     // table-id + log path + kernel params → Preview → 2D ledger →
     // Apply commits the proposal as a single undoable edit.
-    bool                                       show_kp_autotune_modal{false};
-    char                                       kp_at_table_id[128]{};
-    char                                       kp_at_log_path[1024]{};
+    bool show_kp_autotune_modal{false};
+    char kp_at_table_id[128]{};
+    char kp_at_log_path[1024]{};
     // Which of the pack's two table axes is RPM. Default 'y' matches
     // the common Subaru convention (axis_x = load, axis_y = engine
     // speed); the combo lets the user flip it for packs with the
     // opposite orientation. Backed by an int because ImGui::Combo wants
     // one — 0 = 'y', 1 = 'x'.
-    int                                        kp_at_rpm_axis_kind{0};
-    float                                      kp_at_trigger_degrees{1.5f};
-    float                                      kp_at_pull_step_degrees{0.75f};
-    int                                        kp_at_min_samples{30};
-    bool                                       kp_at_enable_add_back{false};
-    float                                      kp_at_add_step_degrees{0.5f};
-    int                                        kp_at_add_back_min_clean{50};
-    float                                      kp_at_clean_threshold{0.05f};
+    int kp_at_rpm_axis_kind{0};
+    float kp_at_trigger_degrees{1.5f};
+    float kp_at_pull_step_degrees{0.75f};
+    int kp_at_min_samples{30};
+    bool kp_at_enable_add_back{false};
+    float kp_at_add_step_degrees{0.5f};
+    int kp_at_add_back_min_clean{50};
+    float kp_at_clean_threshold{0.05f};
     std::optional<st::autotune::KnockPullResult> kp_at_result;
-    std::vector<st::autotune::LintViolation>     kp_at_lints;
-    std::optional<st::Definition::TableData>     kp_at_table_data;
+    std::vector<st::autotune::LintViolation> kp_at_lints;
+    std::optional<st::Definition::TableData> kp_at_table_data;
     // Mirrors the rpm/load axis values used at preview time so the
     // ledger can label rows + columns without re-deriving the axis
     // orientation from the pack on each frame.
-    std::vector<double>                          kp_at_rpm_axis_values;
-    std::vector<double>                          kp_at_load_axis_values;
-    std::string                                  kp_at_status_msg;
+    std::vector<double> kp_at_rpm_axis_values;
+    std::vector<double> kp_at_load_axis_values;
+    std::string kp_at_status_msg;
 
     void try_open_project(std::filesystem::path const &path) {
         auto r = st::Project::open(path);
@@ -794,7 +799,7 @@ void save_project(AppState &state) {
         return;
     }
     state.status_msg = "Saved.";
-    state.dirty      = false;
+    state.dirty = false;
 }
 
 // Writes the currently-selected table to `path` as a CSV in the same
@@ -803,9 +808,8 @@ void save_project(AppState &state) {
 // whose working value differs from the source — the share-a-tune-diff
 // shape. Returns nullopt on success or an error message for the
 // status bar.
-std::optional<std::string> write_current_table_csv(AppState const &state,
-                                                    std::filesystem::path const &path,
-                                                    bool diff_only) {
+std::optional<std::string>
+write_current_table_csv(AppState const &state, std::filesystem::path const &path, bool diff_only) {
     if (!state.project.has_value()) {
         return std::string{"No project loaded."};
     }
@@ -816,22 +820,21 @@ std::optional<std::string> write_current_table_csv(AppState const &state,
     if (table == nullptr) {
         return "Table '" + state.selected_table_id + "' not found in pack.";
     }
-    auto const working_td = state.project->definition().read_table_values(
-        state.project->working_rom(), *table);
+    auto const working_td =
+        state.project->definition().read_table_values(state.project->working_rom(), *table);
     if (!working_td.has_value()) {
         return "read working: " + working_td.error().to_string();
     }
     std::optional<st::Definition::TableData> source_td;
     if (diff_only) {
-        auto s = state.project->definition().read_table_values(
-            state.project->source_rom(), *table);
+        auto s = state.project->definition().read_table_values(state.project->source_rom(), *table);
         if (!s.has_value()) {
             return "read source: " + s.error().to_string();
         }
         source_td = std::move(*s);
     }
     auto const *scaling = state.project->definition().find_scaling(table->scaling);
-    int const   prec    = scaling != nullptr ? scaling->precision : 6;
+    int const prec = scaling != nullptr ? scaling->precision : 6;
 
     std::ofstream out{path, std::ios::trunc};
     if (!out) {
@@ -841,14 +844,15 @@ std::optional<std::string> write_current_table_csv(AppState const &state,
     out << "# table   = \"" << table->id << "\"\n";
     out << "row,col,value\n";
     std::size_t emitted = 0;
-    char        buf[64];
+    char buf[64];
     for (std::size_t r = 0; r < working_td->values.size(); ++r) {
         for (std::size_t c = 0; c < working_td->values[r].size(); ++c) {
             double const v = working_td->values[r][c];
             if (diff_only) {
-                if (r >= source_td->values.size()
-                    || c >= source_td->values[r].size()) continue;
-                if (v == source_td->values[r][c]) continue;
+                if (r >= source_td->values.size() || c >= source_td->values[r].size())
+                    continue;
+                if (v == source_td->values[r][c])
+                    continue;
             }
             std::snprintf(buf, sizeof buf, "%zu,%zu,%.*f\n", r, c, prec, v);
             out << buf;
@@ -871,13 +875,13 @@ void export_current_table_csv_dialog(AppState &state, bool diff_only) {
         return;
     }
     std::string default_name = state.selected_table_id;
-    if (diff_only) default_name += ".diff";
+    if (diff_only)
+        default_name += ".diff";
     default_name += ".csv";
 
-    nfdu8filteritem_t       filters[1] = {{"CSV", "csv"}};
-    NFD::UniquePathU8       out_path;
-    nfdresult_t const       r = NFD::SaveDialog(out_path, filters, 1,
-                                                 nullptr, default_name.c_str());
+    nfdu8filteritem_t filters[1] = {{"CSV", "csv"}};
+    NFD::UniquePathU8 out_path;
+    nfdresult_t const r = NFD::SaveDialog(out_path, filters, 1, nullptr, default_name.c_str());
     if (r == NFD_CANCEL) {
         return;
     }
@@ -886,14 +890,12 @@ void export_current_table_csv_dialog(AppState &state, bool diff_only) {
         return;
     }
     std::filesystem::path const path{out_path.get()};
-    if (auto err = write_current_table_csv(state, path, diff_only);
-        err.has_value()) {
+    if (auto err = write_current_table_csv(state, path, diff_only); err.has_value()) {
         state.status_msg = "Export failed: " + *err;
         return;
     }
-    state.status_msg = "Exported " + state.selected_table_id
-                       + (diff_only ? " (diff) " : " ") + "to "
-                       + path.filename().string() + ".";
+    state.status_msg = "Exported " + state.selected_table_id + (diff_only ? " (diff) " : " ") +
+                       "to " + path.filename().string() + ".";
 }
 
 // Applies a previously-parsed CSV cell list to the currently-selected
@@ -901,8 +903,8 @@ void export_current_table_csv_dialog(AppState &state, bool diff_only) {
 // both the import-preview modal's Apply button and any non-interactive
 // caller. Returns nullopt on success or an error message.
 std::optional<std::string> apply_parsed_csv_edits(AppState &state,
-                                                   std::string const &target_table_id,
-                                                   st::EditCsvParseResult const &parsed) {
+                                                  std::string const &target_table_id,
+                                                  st::EditCsvParseResult const &parsed) {
     if (!state.project.has_value()) {
         return std::string{"No project loaded."};
     }
@@ -913,8 +915,7 @@ std::optional<std::string> apply_parsed_csv_edits(AppState &state,
     if (parsed.cells.empty()) {
         return std::string{"Nothing to apply."};
     }
-    auto td = state.project->definition().read_table_values(
-        state.project->working_rom(), *table);
+    auto td = state.project->definition().read_table_values(state.project->working_rom(), *table);
     if (!td.has_value()) {
         return "read working: " + td.error().to_string();
     }
@@ -922,43 +923,43 @@ std::optional<std::string> apply_parsed_csv_edits(AppState &state,
     std::size_t r_min = parsed.cells[0].row, r_max = parsed.cells[0].row;
     std::size_t c_min = parsed.cells[0].col, c_max = parsed.cells[0].col;
     for (auto const &e : parsed.cells) {
-        r_min = std::min(r_min, e.row); r_max = std::max(r_max, e.row);
-        c_min = std::min(c_min, e.col); c_max = std::max(c_max, e.col);
+        r_min = std::min(r_min, e.row);
+        r_max = std::max(r_max, e.row);
+        c_min = std::min(c_min, e.col);
+        c_max = std::max(c_max, e.col);
     }
     st::edit::Rect const rect{r_min, r_max, c_min, c_max};
     auto before = st::edit::snapshot(*td, rect);
     if (!before.has_value()) {
         return "snapshot before: " + before.error().to_string();
     }
-    for (auto const &e : parsed.cells) td->values[e.row][e.col] = e.value;
+    for (auto const &e : parsed.cells)
+        td->values[e.row][e.col] = e.value;
     auto after = st::edit::snapshot(*td, rect);
     if (!after.has_value()) {
         return "snapshot after: " + after.error().to_string();
     }
-    if (auto wb = state.project->definition().write_table_values(
-            state.project->working_rom(), *table, *td);
+    if (auto wb = state.project->definition().write_table_values(state.project->working_rom(),
+                                                                 *table, *td);
         !wb.has_value()) {
         return "writeback: " + wb.error().to_string();
     }
     char descbuf[64];
-    std::snprintf(descbuf, sizeof descbuf, "csv import (%zu cell%s)",
-                   parsed.cells.size(), parsed.cells.size() == 1 ? "" : "s");
-    state.project->history().record(st::edit::Edit::table(
-        table->id, std::move(*before), std::move(*after),
-        std::string{descbuf}));
+    std::snprintf(descbuf, sizeof descbuf, "csv import (%zu cell%s)", parsed.cells.size(),
+                  parsed.cells.size() == 1 ? "" : "s");
+    state.project->history().record(st::edit::Edit::table(table->id, std::move(*before),
+                                                          std::move(*after), std::string{descbuf}));
     if (table->id == state.selected_table_id) {
         state.current_table_data = std::move(*td);
     }
     state.dirty = true;
 
-    std::string status = "Imported " + std::to_string(parsed.cells.size())
-                          + " cell" + (parsed.cells.size() == 1 ? "" : "s")
-                          + " into " + table->id + ".";
+    std::string status = "Imported " + std::to_string(parsed.cells.size()) + " cell" +
+                         (parsed.cells.size() == 1 ? "" : "s") + " into " + table->id + ".";
     if (!parsed.warnings.empty()) {
         status += "  Warning: " + parsed.warnings.front().message;
         if (parsed.warnings.size() > 1) {
-            status += "  (+" + std::to_string(parsed.warnings.size() - 1)
-                       + " more)";
+            status += "  (+" + std::to_string(parsed.warnings.size() - 1) + " more)";
         }
     }
     state.status_msg = std::move(status);
@@ -975,17 +976,14 @@ void import_csv_into_current_table_dialog(AppState &state) {
         state.status_msg = "Select a table first.";
         return;
     }
-    auto const *table = state.project->definition().find_table(
-        state.selected_table_id);
+    auto const *table = state.project->definition().find_table(state.selected_table_id);
     if (table == nullptr) {
         state.status_msg = "Table not in pack.";
         return;
     }
-    auto td = state.project->definition().read_table_values(
-        state.project->working_rom(), *table);
+    auto td = state.project->definition().read_table_values(state.project->working_rom(), *table);
     if (!td.has_value()) {
-        state.status_msg = "Import failed: read working: "
-                            + td.error().to_string();
+        state.status_msg = "Import failed: read working: " + td.error().to_string();
         return;
     }
     std::size_t const rows = td->values.size();
@@ -1018,10 +1016,10 @@ void import_csv_into_current_table_dialog(AppState &state) {
     std::string const text = std::move(buf).str();
 
     st::EditCsvParseOptions opts;
-    opts.expected_pack_id  = state.project->definition().pack().id;
+    opts.expected_pack_id = state.project->definition().pack().id;
     opts.expected_table_id = table->id;
-    opts.table_rows        = rows;
-    opts.table_cols        = cols;
+    opts.table_rows = rows;
+    opts.table_cols = cols;
     auto parsed = st::parse_edit_csv(text, opts);
     if (!parsed.has_value()) {
         state.status_msg = "Import failed: " + parsed.error().to_string();
@@ -1033,20 +1031,20 @@ void import_csv_into_current_table_dialog(AppState &state) {
     }
 
     // Stash the parse + the current values for the modal preview.
-    state.csv_import_parsed        = std::move(*parsed);
-    state.csv_import_table_id      = table->id;
-    state.csv_import_source_path   = path;
+    state.csv_import_parsed = std::move(*parsed);
+    state.csv_import_table_id = table->id;
+    state.csv_import_source_path = path;
     state.csv_import_before_values = std::move(*td);
-    state.show_csv_import_modal    = true;
+    state.show_csv_import_modal = true;
 }
 
 // Snapshot, mutate, snapshot, writeback, record. If the writeback fails we
 // restore the in-memory TableData so the rendered grid stays consistent with
 // the ROM bytes — better than silently diverging.
-template <typename Op>
+template<typename Op>
 void apply_op(AppState &state, std::string label, Op &&op) {
-    if (!state.project.has_value() || !state.current_table_data.has_value()
-        || !state.selection.enabled) {
+    if (!state.project.has_value() || !state.current_table_data.has_value() ||
+        !state.selection.enabled) {
         return;
     }
     auto &td = *state.current_table_data;
@@ -1067,31 +1065,28 @@ void apply_op(AppState &state, std::string label, Op &&op) {
     if (!after.has_value()) {
         // op succeeded but post-snapshot failed — try to roll back td so the
         // view matches what's still on disk.
-        (void) st::edit::restore(td, *before);
+        (void)st::edit::restore(td, *before);
         state.status_msg = label + ": snapshot: " + after.error().to_string();
         return;
     }
 
     auto const *tbl = state.project->definition().find_table(state.selected_table_id);
     if (tbl == nullptr) {
-        (void) st::edit::restore(td, *before);
+        (void)st::edit::restore(td, *before);
         state.status_msg = label + ": table missing from pack";
         return;
     }
 
-    auto wb = state.project->definition().write_table_values(
-        state.project->working_rom(), *tbl, td);
+    auto wb =
+        state.project->definition().write_table_values(state.project->working_rom(), *tbl, td);
     if (!wb.has_value()) {
-        (void) st::edit::restore(td, *before);
+        (void)st::edit::restore(td, *before);
         state.status_msg = label + ": writeback: " + wb.error().to_string();
         return;
     }
 
     state.project->history().record(st::edit::Edit::table(
-        state.selected_table_id,
-        std::move(*before),
-        std::move(*after),
-        std::move(label)));
+        state.selected_table_id, std::move(*before), std::move(*after), std::move(label)));
     state.status_msg.clear();
     state.dirty = true;
 }
@@ -1104,9 +1099,9 @@ void apply_op(AppState &state, std::string label, Op &&op) {
 void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forward) {
     auto const rollback_cursor = [&] {
         if (forward) {
-            (void) state.project->history().undo();
+            (void)state.project->history().undo();
         } else {
-            (void) state.project->history().redo();
+            (void)state.project->history().redo();
         }
     };
 
@@ -1118,8 +1113,7 @@ void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forwar
             return;
         }
 
-        auto td = state.project->definition().read_table_values(
-            state.project->working_rom(), *tbl);
+        auto td = state.project->definition().read_table_values(state.project->working_rom(), *tbl);
         if (!td.has_value()) {
             state.status_msg = "history re-read: " + td.error().to_string();
             rollback_cursor();
@@ -1133,8 +1127,8 @@ void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forwar
             return;
         }
 
-        auto wb = state.project->definition().write_table_values(
-            state.project->working_rom(), *tbl, *td);
+        auto wb =
+            state.project->definition().write_table_values(state.project->working_rom(), *tbl, *td);
         if (!wb.has_value()) {
             state.status_msg = "history writeback: " + wb.error().to_string();
             rollback_cursor();
@@ -1150,8 +1144,7 @@ void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forwar
             auto const v = forward ? c.after : c.before;
             if (auto s = rom.write_u8(c.address, v); !s.has_value()) {
                 char buf[80];
-                std::snprintf(buf, sizeof buf,
-                              "history byte writeback @0x%zX: ", c.address);
+                std::snprintf(buf, sizeof buf, "history byte writeback @0x%zX: ", c.address);
                 state.status_msg = std::string{buf} + s.error().to_string();
                 rollback_cursor();
                 return;
@@ -1174,32 +1167,34 @@ std::vector<std::vector<double>> parse_tsv(std::string_view text);
 // destination first (clipped to table bounds) so apply_op's single
 // history record covers exactly the cells that changed.
 void paste_clipboard_at_cursor(AppState &state) {
-    if (!state.project.has_value() || !state.current_table_data.has_value()
-        || !state.selection.enabled) {
+    if (!state.project.has_value() || !state.current_table_data.has_value() ||
+        !state.selection.enabled) {
         return;
     }
     char const *clip = ImGui::GetClipboardText();
-    if (clip == nullptr || *clip == '\0') return;
+    if (clip == nullptr || *clip == '\0')
+        return;
     auto grid = parse_tsv(std::string_view{clip});
-    if (grid.empty() || grid.front().empty()) return;
+    if (grid.empty() || grid.front().empty())
+        return;
 
     auto &td = *state.current_table_data;
     std::size_t const cur_r = state.selection.r_cursor;
     std::size_t const cur_c = state.selection.c_cursor;
-    if (cur_r >= td.values.size() || td.values[cur_r].empty()) return;
+    if (cur_r >= td.values.size() || td.values[cur_r].empty())
+        return;
 
     // Clip the paste rect to actual table bounds (Excel-style truncate,
     // not wrap).
     std::size_t const grid_rows = grid.size();
-    std::size_t       grid_cols = 0;
+    std::size_t grid_cols = 0;
     for (auto const &row : grid) {
-        if (row.size() > grid_cols) grid_cols = row.size();
+        if (row.size() > grid_cols)
+            grid_cols = row.size();
     }
-    std::size_t const r1 =
-        std::min<std::size_t>(cur_r + grid_rows - 1, td.values.size() - 1);
+    std::size_t const r1 = std::min<std::size_t>(cur_r + grid_rows - 1, td.values.size() - 1);
     std::size_t const c1 =
-        std::min<std::size_t>(cur_c + grid_cols - 1,
-                               td.values[cur_r].size() - 1);
+        std::min<std::size_t>(cur_c + grid_cols - 1, td.values[cur_r].size() - 1);
 
     // Snap selection to the paste destination so apply_op picks the
     // right rect.
@@ -1208,23 +1203,19 @@ void paste_clipboard_at_cursor(AppState &state) {
     state.selection.c_anchor = cur_c;
     state.selection.c_cursor = c1;
 
-    apply_op(state, "paste",
-             [&grid, cur_r, cur_c](auto &t, auto rect) -> st::Status {
-                 for (std::size_t dr = 0;
-                      dr < grid.size()
-                      && cur_r + dr < t.values.size()
-                      && cur_r + dr <= rect.r_end; ++dr) {
-                     auto       &tt_row = t.values[cur_r + dr];
-                     auto const &g_row  = grid[dr];
-                     for (std::size_t dc = 0;
-                          dc < g_row.size()
-                          && cur_c + dc < tt_row.size()
-                          && cur_c + dc <= rect.c_end; ++dc) {
-                         tt_row[cur_c + dc] = g_row[dc];
-                     }
-                 }
-                 return st::ok();
-             });
+    apply_op(state, "paste", [&grid, cur_r, cur_c](auto &t, auto rect) -> st::Status {
+        for (std::size_t dr = 0;
+             dr < grid.size() && cur_r + dr < t.values.size() && cur_r + dr <= rect.r_end; ++dr) {
+            auto &tt_row = t.values[cur_r + dr];
+            auto const &g_row = grid[dr];
+            for (std::size_t dc = 0;
+                 dc < g_row.size() && cur_c + dc < tt_row.size() && cur_c + dc <= rect.c_end;
+                 ++dc) {
+                tt_row[cur_c + dc] = g_row[dc];
+            }
+        }
+        return st::ok();
+    });
 }
 
 // Read the source ROM's values for the selection and copy them onto
@@ -1233,12 +1224,11 @@ void paste_clipboard_at_cursor(AppState &state) {
 // "I edited a corner of this map and don't like it — revert just
 // those cells, not the whole table."
 void reset_selection_to_source(AppState &state) {
-    if (!state.project.has_value() || !state.current_table_data.has_value()
-        || !state.selection.enabled) {
+    if (!state.project.has_value() || !state.current_table_data.has_value() ||
+        !state.selection.enabled) {
         return;
     }
-    auto const *tbl = state.project->definition().find_table(
-        state.selected_table_id);
+    auto const *tbl = state.project->definition().find_table(state.selected_table_id);
     if (tbl == nullptr) {
         state.status_msg = "Reset: table missing from pack";
         return;
@@ -1246,28 +1236,24 @@ void reset_selection_to_source(AppState &state) {
     // Read the source ROM through the same scaling pipeline as the
     // working ROM — so what we copy back is the exact value a fresh
     // open of the source would show, not raw bytes.
-    auto src_td = state.project->definition().read_table_values(
-        state.project->source_rom(), *tbl);
+    auto src_td = state.project->definition().read_table_values(state.project->source_rom(), *tbl);
     if (!src_td.has_value()) {
-        state.status_msg =
-            "Reset: read source: " + src_td.error().to_string();
+        state.status_msg = "Reset: read source: " + src_td.error().to_string();
         return;
     }
     auto const rect = state.selection.as_rect();
-    apply_op(state, "reset to source",
-             [&src = *src_td, rect](auto &t, auto r) -> st::Status {
-                 for (std::size_t row = r.r_start;
-                      row <= r.r_end && row < t.values.size()
-                      && row < src.values.size(); ++row) {
-                     for (std::size_t col = r.c_start;
-                          col <= r.c_end && col < t.values[row].size()
-                          && col < src.values[row].size(); ++col) {
-                         t.values[row][col] = src.values[row][col];
-                     }
-                 }
-                 (void) rect;  // rect == r when apply_op fires
-                 return st::ok();
-             });
+    apply_op(state, "reset to source", [&src = *src_td, rect](auto &t, auto r) -> st::Status {
+        for (std::size_t row = r.r_start;
+             row <= r.r_end && row < t.values.size() && row < src.values.size(); ++row) {
+            for (std::size_t col = r.c_start;
+                 col <= r.c_end && col < t.values[row].size() && col < src.values[row].size();
+                 ++col) {
+                t.values[row][col] = src.values[row][col];
+            }
+        }
+        (void)rect; // rect == r when apply_op fires
+        return st::ok();
+    });
 }
 
 void do_undo(AppState &state) {
@@ -1301,36 +1287,35 @@ void do_redo(AppState &state) {
 // the action runs immediately. `execute_action` performs the action.
 // ---------------------------------------------------------------------
 
-void execute_action(AppState &state, ConfirmAction action,
-                    std::filesystem::path const &path) {
+void execute_action(AppState &state, ConfirmAction action, std::filesystem::path const &path) {
     switch (action) {
-        case ConfirmAction::None:
-            break;
-        case ConfirmAction::OpenDialog:
-            open_project_dialog(state);
-            break;
-        case ConfirmAction::OpenRecent:
-            state.try_open_project(path);
-            break;
-        case ConfirmAction::NewProject:
-            state.show_new_project_modal = true;
-            break;
-        case ConfirmAction::Close:
-            state.close_project();
-            break;
-        case ConfirmAction::Quit:
-            state.user_confirmed_quit = true;
-            break;
+    case ConfirmAction::None:
+        break;
+    case ConfirmAction::OpenDialog:
+        open_project_dialog(state);
+        break;
+    case ConfirmAction::OpenRecent:
+        state.try_open_project(path);
+        break;
+    case ConfirmAction::NewProject:
+        state.show_new_project_modal = true;
+        break;
+    case ConfirmAction::Close:
+        state.close_project();
+        break;
+    case ConfirmAction::Quit:
+        state.user_confirmed_quit = true;
+        break;
     }
 }
 
-void request_action(AppState &state, ConfirmAction action,
-                    std::filesystem::path path = {}) {
-    if (action == ConfirmAction::None) return;
+void request_action(AppState &state, ConfirmAction action, std::filesystem::path path = {}) {
+    if (action == ConfirmAction::None)
+        return;
     bool const need_confirm = state.dirty && state.project.has_value();
     if (need_confirm) {
-        state.next_action       = action;
-        state.next_recent       = std::move(path);
+        state.next_action = action;
+        state.next_recent = std::move(path);
         state.show_unsaved_modal = true;
     } else {
         execute_action(state, action, path);
@@ -1342,41 +1327,51 @@ void request_action(AppState &state, ConfirmAction action,
 // general "open / close / quit" handlers elsewhere.
 char const *modal_save_label(ConfirmAction a) noexcept {
     switch (a) {
-        case ConfirmAction::OpenDialog:
-        case ConfirmAction::OpenRecent: return "Save and open";
-        case ConfirmAction::NewProject: return "Save and create new";
-        case ConfirmAction::Close:      return "Save and close";
-        case ConfirmAction::Quit:       return "Save and quit";
-        case ConfirmAction::None:       break;
+    case ConfirmAction::OpenDialog:
+    case ConfirmAction::OpenRecent:
+        return "Save and open";
+    case ConfirmAction::NewProject:
+        return "Save and create new";
+    case ConfirmAction::Close:
+        return "Save and close";
+    case ConfirmAction::Quit:
+        return "Save and quit";
+    case ConfirmAction::None:
+        break;
     }
     return "Save and continue";
 }
 
 char const *modal_discard_label(ConfirmAction a) noexcept {
     switch (a) {
-        case ConfirmAction::OpenDialog:
-        case ConfirmAction::OpenRecent: return "Discard and open";
-        case ConfirmAction::NewProject: return "Discard and create new";
-        case ConfirmAction::Close:      return "Discard and close";
-        case ConfirmAction::Quit:       return "Discard and quit";
-        case ConfirmAction::None:       break;
+    case ConfirmAction::OpenDialog:
+    case ConfirmAction::OpenRecent:
+        return "Discard and open";
+    case ConfirmAction::NewProject:
+        return "Discard and create new";
+    case ConfirmAction::Close:
+        return "Discard and close";
+    case ConfirmAction::Quit:
+        return "Discard and quit";
+    case ConfirmAction::None:
+        break;
     }
     return "Discard changes";
 }
 
 char const *modal_subtitle(ConfirmAction a) noexcept {
     switch (a) {
-        case ConfirmAction::OpenDialog:
-        case ConfirmAction::OpenRecent:
-            return "Opening another project will replace this one.";
-        case ConfirmAction::NewProject:
-            return "Creating a new project will replace this one.";
-        case ConfirmAction::Close:
-            return "Closing this project will reset the editor.";
-        case ConfirmAction::Quit:
-            return "Quitting will exit SubuwuTuner.";
-        case ConfirmAction::None:
-            break;
+    case ConfirmAction::OpenDialog:
+    case ConfirmAction::OpenRecent:
+        return "Opening another project will replace this one.";
+    case ConfirmAction::NewProject:
+        return "Creating a new project will replace this one.";
+    case ConfirmAction::Close:
+        return "Closing this project will reset the editor.";
+    case ConfirmAction::Quit:
+        return "Quitting will exit SubuwuTuner.";
+    case ConfirmAction::None:
+        break;
     }
     return "Continuing without saving will discard them.";
 }
@@ -1386,12 +1381,10 @@ void render_unsaved_modal(AppState &state) {
         ImGui::OpenPopup("Unsaved changes##unsaved");
         state.show_unsaved_modal = false;
     }
-    ImVec2 const center =
-        ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing,
-                             ImVec2(0.5f, 0.5f));
+    ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopupModal("Unsaved changes##unsaved", nullptr,
-                                ImGuiWindowFlags_AlwaysAutoResize)) {
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
         ConfirmAction const what = state.next_action;
 
         ImGui::TextUnformatted("You have unsaved edits in this project.");
@@ -1402,36 +1395,31 @@ void render_unsaved_modal(AppState &state) {
         // Keyboard shortcuts: Enter = the safe default (Save).
         // Esc = the safe undo (Cancel). Destructive Discard
         // requires an explicit click — no accelerator on purpose.
-        bool const want_save =
-            ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false)
-            || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, /*repeat=*/false);
-        bool const want_cancel =
-            ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+        bool const want_save = ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false) ||
+                               ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, /*repeat=*/false);
+        bool const want_cancel = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
 
         constexpr float kBtnW = 180.0f;
         // Save is the default action (Enter) and the safe path — give it
         // accent fill so the eye lands on it first.
         auto const a_save = accent_for(state.settings.theme);
-        ImGui::PushStyleColor(ImGuiCol_Button,        a_save.base);
+        ImGui::PushStyleColor(ImGuiCol_Button, a_save.base);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_save.hover);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  a_save.active);
-        bool const save_clicked =
-            ImGui::Button(modal_save_label(what), ImVec2(kBtnW, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_save.active);
+        bool const save_clicked = ImGui::Button(modal_save_label(what), ImVec2(kBtnW, 0.0f));
         ImGui::PopStyleColor(3);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Write the working ROM + edits to disk, "
                               "then proceed.  (Enter)");
         }
         ImGui::SameLine();
-        bool const discard_clicked =
-            ImGui::Button(modal_discard_label(what), ImVec2(kBtnW, 0.0f));
+        bool const discard_clicked = ImGui::Button(modal_discard_label(what), ImVec2(kBtnW, 0.0f));
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Throw away every edit since the last save "
                               "and proceed.");
         }
         ImGui::SameLine();
-        bool const cancel_clicked =
-            ImGui::Button("Cancel", ImVec2(kBtnW * 0.7f, 0.0f));
+        bool const cancel_clicked = ImGui::Button("Cancel", ImVec2(kBtnW * 0.7f, 0.0f));
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Stay here. Don't open, close, or quit.  "
                               "(Esc)");
@@ -1444,7 +1432,7 @@ void render_unsaved_modal(AppState &state) {
             state.next_recent.clear();
             ImGui::CloseCurrentPopup();
         } else if (discard_clicked) {
-            state.dirty       = false;
+            state.dirty = false;
             execute_action(state, state.next_action, state.next_recent);
             state.next_action = ConfirmAction::None;
             state.next_recent.clear();
@@ -1461,22 +1449,24 @@ void render_unsaved_modal(AppState &state) {
 // Build the FlashPlan + PolicyDecision for the currently-loaded project.
 // Returns nullopt if there's no project, no delta, or a size mismatch.
 struct PendingFlash {
-    st::flash::FlashPlan       plan;
-    st::flash::PolicyDecision  decision;
-    std::size_t                total_bytes;
+    st::flash::FlashPlan plan;
+    st::flash::PolicyDecision decision;
+    std::size_t total_bytes;
 };
 
 std::optional<PendingFlash> build_pending_flash(AppState const &state) {
-    if (!state.project.has_value()) return std::nullopt;
+    if (!state.project.has_value())
+        return std::nullopt;
     auto const &proj = *state.project;
-    if (proj.source_rom().size() != proj.working_rom().size()) return std::nullopt;
+    if (proj.source_rom().size() != proj.working_rom().size())
+        return std::nullopt;
 
-    constexpr std::uint32_t kSectorSize  = 0x1000;
+    constexpr std::uint32_t kSectorSize = 0x1000;
     constexpr std::uint32_t kBaseAddress = 0;
     auto const sectors = st::flash::Flasher::compute_delta(
-        proj.source_rom().data(), proj.working_rom().data(),
-        kSectorSize, kBaseAddress);
-    if (sectors.empty()) return std::nullopt;
+        proj.source_rom().data(), proj.working_rom().data(), kSectorSize, kBaseAddress);
+    if (sectors.empty())
+        return std::nullopt;
 
     PendingFlash pf;
     pf.total_bytes = 0;
@@ -1485,16 +1475,14 @@ std::optional<PendingFlash> build_pending_flash(AppState const &state) {
         st::flash::SectorWrite sw;
         sw.sector = s;
         std::size_t const off = static_cast<std::size_t>(s.address - kBaseAddress);
-        sw.data.assign(
-            proj.working_rom().data().begin() + static_cast<std::ptrdiff_t>(off),
-            proj.working_rom().data().begin()
-                + static_cast<std::ptrdiff_t>(off + s.length));
+        sw.data.assign(proj.working_rom().data().begin() + static_cast<std::ptrdiff_t>(off),
+                       proj.working_rom().data().begin() +
+                           static_cast<std::ptrdiff_t>(off + s.length));
         pf.total_bytes += s.length;
         pf.plan.writes.push_back(std::move(sw));
     }
-    pf.decision = st::flash::evaluate_plan_policy(
-        pf.plan, proj.definition(), proj.source_rom().data(),
-        proj.policy_profile());
+    pf.decision = st::flash::evaluate_plan_policy(pf.plan, proj.definition(),
+                                                  proj.source_rom().data(), proj.policy_profile());
     return pf;
 }
 
@@ -1508,18 +1496,16 @@ void render_csv_import_modal(AppState &state) {
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(560.0f, 320.0f),
-                                         ImVec2(900.0f, 700.0f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(560.0f, 320.0f), ImVec2(900.0f, 700.0f));
     if (!ImGui::BeginPopupModal("Import CSV##csv_import_modal", nullptr,
-                                  ImGuiWindowFlags_AlwaysAutoResize)) {
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }
 
     auto const &parsed = state.csv_import_parsed;
     auto const &before_td = state.csv_import_before_values;
 
-    ImGui::Text("Importing: %s",
-                 state.csv_import_source_path.filename().string().c_str());
+    ImGui::Text("Importing: %s", state.csv_import_source_path.filename().string().c_str());
     ImGui::Text("Target:    %s", state.csv_import_table_id.c_str());
     ImGui::Text("Cells:     %zu", parsed.cells.size());
 
@@ -1527,19 +1513,19 @@ void render_csv_import_modal(AppState &state) {
         std::size_t r_min = parsed.cells[0].row, r_max = parsed.cells[0].row;
         std::size_t c_min = parsed.cells[0].col, c_max = parsed.cells[0].col;
         for (auto const &e : parsed.cells) {
-            r_min = std::min(r_min, e.row); r_max = std::max(r_max, e.row);
-            c_min = std::min(c_min, e.col); c_max = std::max(c_max, e.col);
+            r_min = std::min(r_min, e.row);
+            r_max = std::max(r_max, e.row);
+            c_min = std::min(c_min, e.col);
+            c_max = std::max(c_max, e.col);
         }
-        ImGui::Text("Bounds:    rows %zu..%zu, cols %zu..%zu",
-                     r_min, r_max, c_min, c_max);
+        ImGui::Text("Bounds:    rows %zu..%zu, cols %zu..%zu", r_min, r_max, c_min, c_max);
     }
 
     // Warnings (yellow chip). pack_id mismatch is the common one.
     if (!parsed.warnings.empty()) {
         ImGui::Spacing();
         for (auto const &w : parsed.warnings) {
-            ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f),
-                                "warning: %s", w.message.c_str());
+            ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f), "warning: %s", w.message.c_str());
         }
     }
 
@@ -1550,37 +1536,35 @@ void render_csv_import_modal(AppState &state) {
     // Before/after preview. Pull precision from the table's scaling so
     // the diff reads consistently with the grid view.
     auto const *table = state.project.has_value()
-                         ? state.project->definition().find_table(
-                               state.csv_import_table_id)
-                         : nullptr;
+                            ? state.project->definition().find_table(state.csv_import_table_id)
+                            : nullptr;
     auto const *scaling = (table != nullptr && state.project.has_value())
-                           ? state.project->definition().find_scaling(table->scaling)
-                           : nullptr;
+                              ? state.project->definition().find_scaling(table->scaling)
+                              : nullptr;
     int const prec = scaling != nullptr ? scaling->precision : 4;
 
     constexpr std::size_t kPreviewLimit = 12;
-    std::size_t const     shown =
-        std::min(kPreviewLimit, parsed.cells.size());
-    text_subtle("Preview (first %zu of %zu):", shown,
-                 parsed.cells.size());
+    std::size_t const shown = std::min(kPreviewLimit, parsed.cells.size());
+    text_subtle("Preview (first %zu of %zu):", shown, parsed.cells.size());
     if (ImGui::BeginTable("##csv_preview", 4,
-                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH
-                           | ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("row",    ImGuiTableColumnFlags_WidthFixed, 48.0f);
-        ImGui::TableSetupColumn("col",    ImGuiTableColumnFlags_WidthFixed, 48.0f);
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                              ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("row", ImGuiTableColumnFlags_WidthFixed, 48.0f);
+        ImGui::TableSetupColumn("col", ImGuiTableColumnFlags_WidthFixed, 48.0f);
         ImGui::TableSetupColumn("before", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("after",  ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("after", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
         for (std::size_t i = 0; i < shown; ++i) {
             auto const &e = parsed.cells[i];
             ImGui::TableNextRow();
-            ImGui::TableSetColumnIndex(0); ImGui::Text("%zu", e.row);
-            ImGui::TableSetColumnIndex(1); ImGui::Text("%zu", e.col);
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%zu", e.row);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%zu", e.col);
 
             ImGui::TableSetColumnIndex(2);
-            if (before_td.has_value()
-                && e.row < before_td->values.size()
-                && e.col < before_td->values[e.row].size()) {
+            if (before_td.has_value() && e.row < before_td->values.size() &&
+                e.col < before_td->values[e.row].size()) {
                 double const b = before_td->values[e.row][e.col];
                 ImGui::Text("%.*f", prec, b);
             } else {
@@ -1595,48 +1579,44 @@ void render_csv_import_modal(AppState &state) {
             // round-trips through the CSV (`%.*f` write → strtod read)
             // doesn't get flagged as a "decrease" by 1e-15 of FP noise.
             ImVec4 color = ImGui::GetStyleColorVec4(ImGuiCol_Text);
-            if (before_td.has_value()
-                && e.row < before_td->values.size()
-                && e.col < before_td->values[e.row].size()) {
-                double const b   = before_td->values[e.row][e.col];
+            if (before_td.has_value() && e.row < before_td->values.size() &&
+                e.col < before_td->values[e.row].size()) {
+                double const b = before_td->values[e.row][e.col];
                 double const eps = 0.5 * std::pow(10.0, -prec);
-                if (e.value > b + eps)      color = ImVec4(0.5f, 0.95f, 0.5f, 1.0f);
-                else if (e.value < b - eps) color = ImVec4(0.95f, 0.55f, 0.55f, 1.0f);
+                if (e.value > b + eps)
+                    color = ImVec4(0.5f, 0.95f, 0.5f, 1.0f);
+                else if (e.value < b - eps)
+                    color = ImVec4(0.95f, 0.55f, 0.55f, 1.0f);
             }
             ImGui::TextColored(color, "%.*f", prec, e.value);
         }
         ImGui::EndTable();
     }
     if (parsed.cells.size() > shown) {
-        text_subtle("... %zu more not shown",
-                     parsed.cells.size() - shown);
+        text_subtle("... %zu more not shown", parsed.cells.size() - shown);
     }
 
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
 
-    bool const want_apply  =
-        ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false)
-        || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, /*repeat=*/false);
-    bool const want_cancel =
-        ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+    bool const want_apply = ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false) ||
+                            ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, /*repeat=*/false);
+    bool const want_cancel = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
 
     constexpr float kBtnW = 160.0f;
     auto const a_csv = accent_for(state.settings.theme);
-    ImGui::PushStyleColor(ImGuiCol_Button,        a_csv.base);
+    ImGui::PushStyleColor(ImGuiCol_Button, a_csv.base);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_csv.hover);
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  a_csv.active);
-    bool const apply_clicked =
-        ImGui::Button("Apply edits", ImVec2(kBtnW, 0.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_csv.active);
+    bool const apply_clicked = ImGui::Button("Apply edits", ImVec2(kBtnW, 0.0f));
     ImGui::PopStyleColor(3);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Apply the CSV as a single bulk edit. "
                           "Undoable via Ctrl+Z.  (Enter)");
     }
     ImGui::SameLine();
-    bool const cancel_clicked =
-        ImGui::Button("Cancel", ImVec2(kBtnW * 0.7f, 0.0f));
+    bool const cancel_clicked = ImGui::Button("Cancel", ImVec2(kBtnW * 0.7f, 0.0f));
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Discard the preview. Nothing is written. "
                           "(Esc)");
@@ -1648,17 +1628,15 @@ void render_csv_import_modal(AppState &state) {
     // popup on apply failure — only on success or explicit cancel.
     if (!state.csv_import_apply_error.empty()) {
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.94f, 0.40f, 0.40f, 1.00f),
-                            "Apply failed:  %s",
-                            state.csv_import_apply_error.c_str());
-        text_subtle(
-            "The preview is preserved — fix the underlying issue and "
-            "click Apply again, or Cancel to discard.");
+        ImGui::TextColored(ImVec4(0.94f, 0.40f, 0.40f, 1.00f), "Apply failed:  %s",
+                           state.csv_import_apply_error.c_str());
+        text_subtle("The preview is preserved — fix the underlying issue and "
+                    "click Apply again, or Cancel to discard.");
     }
 
     if (apply_clicked || want_apply) {
-        if (auto err = apply_parsed_csv_edits(
-                state, state.csv_import_table_id, state.csv_import_parsed);
+        if (auto err =
+                apply_parsed_csv_edits(state, state.csv_import_table_id, state.csv_import_parsed);
             err.has_value()) {
             // Stay in the modal; show the error inline. Don't touch
             // status_msg — failure feedback belongs in the modal.
@@ -1704,15 +1682,14 @@ std::optional<std::string> run_maf_autotune_preview(AppState &state) {
         return "Table '" + target_table_id + "' not found in pack.";
     }
     if (table->dimensions != 1) {
-        return "Table '" + target_table_id + "' has dimensions="
-               + std::to_string(table->dimensions)
-               + "; MAF scaling must be 1D.";
+        return "Table '" + target_table_id +
+               "' has dimensions=" + std::to_string(table->dimensions) +
+               "; MAF scaling must be 1D.";
     }
     if (!table->axis_x.has_value() || table->axis_x->empty()) {
         return "Table '" + target_table_id + "' has no axis_x.";
     }
-    auto td = state.project->definition().read_table_values(
-        state.project->working_rom(), *table);
+    auto td = state.project->definition().read_table_values(state.project->working_rom(), *table);
     if (!td.has_value()) {
         return "read table: " + td.error().to_string();
     }
@@ -1738,11 +1715,10 @@ std::optional<std::string> run_maf_autotune_preview(AppState &state) {
     }
 
     st::autotune::MafTuneOptions opts;
-    opts.gain                 = static_cast<double>(state.maf_at_gain);
-    opts.max_delta_pct        = static_cast<double>(state.maf_at_max_delta_pct);
-    opts.min_samples_per_cell = static_cast<std::size_t>(
-        std::max(0, state.maf_at_min_samples));
-    opts.require_open_loop    = state.maf_at_require_open_loop;
+    opts.gain = static_cast<double>(state.maf_at_gain);
+    opts.max_delta_pct = static_cast<double>(state.maf_at_max_delta_pct);
+    opts.min_samples_per_cell = static_cast<std::size_t>(std::max(0, state.maf_at_min_samples));
+    opts.require_open_loop = state.maf_at_require_open_loop;
 
     auto result = st::autotune::tune_maf(axis_values, current, *samples, opts);
     if (!result.has_value()) {
@@ -1754,8 +1730,8 @@ std::optional<std::string> run_maf_autotune_preview(AppState &state) {
     auto lints = st::autotune::lint_maf_proposal(axis_values, current, *result);
 
     // Stash for the modal preview + Apply.
-    state.maf_at_result     = std::move(*result);
-    state.maf_at_lints      = std::move(lints);
+    state.maf_at_result = std::move(*result);
+    state.maf_at_lints = std::move(lints);
     state.maf_at_table_data = std::move(*td);
     return std::nullopt;
 }
@@ -1790,32 +1766,30 @@ std::optional<std::string> apply_maf_autotune_proposal(AppState &state) {
     }
     std::size_t modified = 0;
     for (auto const &c : result.cells) {
-        if (c.proposed_value != c.current_value) ++modified;
+        if (c.proposed_value != c.current_value)
+            ++modified;
         td.values[0][c.cell_index] = c.proposed_value;
     }
     auto after = st::edit::snapshot(td, rect);
     if (!after.has_value()) {
         return "snapshot after: " + after.error().to_string();
     }
-    if (auto wb = state.project->definition().write_table_values(
-            state.project->working_rom(), *table, td);
+    if (auto wb = state.project->definition().write_table_values(state.project->working_rom(),
+                                                                 *table, td);
         !wb.has_value()) {
         return "writeback: " + wb.error().to_string();
     }
     char descbuf[64];
-    std::snprintf(descbuf, sizeof descbuf,
-                   "autotune maf (%zu cell%s)",
-                   modified, modified == 1 ? "" : "s");
-    state.project->history().record(st::edit::Edit::table(
-        table->id, std::move(*before), std::move(*after),
-        std::string{descbuf}));
+    std::snprintf(descbuf, sizeof descbuf, "autotune maf (%zu cell%s)", modified,
+                  modified == 1 ? "" : "s");
+    state.project->history().record(st::edit::Edit::table(table->id, std::move(*before),
+                                                          std::move(*after), std::string{descbuf}));
     if (table->id == state.selected_table_id) {
         state.current_table_data = std::move(td);
     }
     state.dirty = true;
-    state.status_msg = "Autotune MAF applied: " + std::to_string(modified)
-                        + " cell" + (modified == 1 ? "" : "s")
-                        + " changed on " + table->id + ".";
+    state.status_msg = "Autotune MAF applied: " + std::to_string(modified) + " cell" +
+                       (modified == 1 ? "" : "s") + " changed on " + table->id + ".";
     return std::nullopt;
 }
 
@@ -1840,20 +1814,19 @@ std::optional<std::string> run_knock_pull_preview(AppState &state) {
         return "Table '" + target_table_id + "' not found in pack.";
     }
     if (table->dimensions != 2) {
-        return "Table '" + target_table_id + "' has dimensions="
-               + std::to_string(table->dimensions)
-               + "; knock-pull needs a 2D timing table.";
+        return "Table '" + target_table_id +
+               "' has dimensions=" + std::to_string(table->dimensions) +
+               "; knock-pull needs a 2D timing table.";
     }
-    auto td = state.project->definition().read_table_values(
-        state.project->working_rom(), *table);
+    auto td = state.project->definition().read_table_values(state.project->working_rom(), *table);
     if (!td.has_value()) {
         return "read table: " + td.error().to_string();
     }
 
     // Map (axis_x, axis_y) onto (rpm_axis, load_axis). Combo: 0=y, 1=x.
-    bool const  rpm_is_y    = (state.kp_at_rpm_axis_kind == 0);
-    auto const &rpm_axis    = rpm_is_y ? td->axis_y : td->axis_x;
-    auto const &load_axis   = rpm_is_y ? td->axis_x : td->axis_y;
+    bool const rpm_is_y = (state.kp_at_rpm_axis_kind == 0);
+    auto const &rpm_axis = rpm_is_y ? td->axis_y : td->axis_x;
+    auto const &load_axis = rpm_is_y ? td->axis_x : td->axis_y;
     if (rpm_axis.empty() || load_axis.empty()) {
         return std::string{"Table axes are empty."};
     }
@@ -1879,30 +1852,29 @@ std::optional<std::string> run_knock_pull_preview(AppState &state) {
     }
 
     st::autotune::KnockPullOptions opts;
-    opts.trigger_degrees      = static_cast<double>(state.kp_at_trigger_degrees);
-    opts.pull_step_degrees    = static_cast<double>(state.kp_at_pull_step_degrees);
-    opts.min_samples_per_cell = static_cast<std::size_t>(
-        std::max(0, state.kp_at_min_samples));
+    opts.trigger_degrees = static_cast<double>(state.kp_at_trigger_degrees);
+    opts.pull_step_degrees = static_cast<double>(state.kp_at_pull_step_degrees);
+    opts.min_samples_per_cell = static_cast<std::size_t>(std::max(0, state.kp_at_min_samples));
 
-    auto result = st::autotune::tune_knock_pull(
-        rpm_axis, load_axis, current_timing, *samples, opts);
+    auto result =
+        st::autotune::tune_knock_pull(rpm_axis, load_axis, current_timing, *samples, opts);
     if (!result.has_value()) {
         return "tune_knock_pull: " + result.error().to_string();
     }
     if (state.kp_at_enable_add_back) {
         st::autotune::KnockAddBackOptions abo;
-        abo.enabled                    = true;
-        abo.add_step_degrees           = static_cast<double>(state.kp_at_add_step_degrees);
-        abo.min_clean_samples_per_cell = static_cast<std::size_t>(
-            std::max(0, state.kp_at_add_back_min_clean));
-        abo.clean_threshold_degrees    = static_cast<double>(state.kp_at_clean_threshold);
+        abo.enabled = true;
+        abo.add_step_degrees = static_cast<double>(state.kp_at_add_step_degrees);
+        abo.min_clean_samples_per_cell =
+            static_cast<std::size_t>(std::max(0, state.kp_at_add_back_min_clean));
+        abo.clean_threshold_degrees = static_cast<double>(state.kp_at_clean_threshold);
         *result = st::autotune::apply_knock_add_back(*result, abo);
     }
     auto lints = st::autotune::lint_knock_proposal(rpm_axis, load_axis, *result);
 
-    state.kp_at_result            = std::move(*result);
-    state.kp_at_lints             = std::move(lints);
-    state.kp_at_table_data        = std::move(*td);
+    state.kp_at_result = std::move(*result);
+    state.kp_at_lints = std::move(lints);
+    state.kp_at_table_data = std::move(*td);
     state.kp_at_rpm_axis_values.assign(rpm_axis.begin(), rpm_axis.end());
     state.kp_at_load_axis_values.assign(load_axis.begin(), load_axis.end());
     return std::nullopt;
@@ -1930,7 +1902,7 @@ std::optional<std::string> apply_knock_pull_proposal(AppState &state) {
         return std::string{"Empty proposal — nothing to apply."};
     }
 
-    bool const rpm_is_y    = (state.kp_at_rpm_axis_kind == 0);
+    bool const rpm_is_y = (state.kp_at_rpm_axis_kind == 0);
     std::size_t const grid_rows = td.values.size();
     std::size_t const grid_cols = grid_rows > 0 ? td.values[0].size() : 0;
     if (grid_rows == 0 || grid_cols == 0) {
@@ -1942,43 +1914,41 @@ std::optional<std::string> apply_knock_pull_proposal(AppState &state) {
         return "snapshot before: " + before.error().to_string();
     }
     std::size_t pulled = 0;
-    std::size_t added  = 0;
+    std::size_t added = 0;
     for (std::size_t li = 0; li < result.rows; ++li) {
         for (std::size_t ri = 0; ri < result.cols; ++ri) {
             std::size_t const td_r = rpm_is_y ? ri : li;
             std::size_t const td_c = rpm_is_y ? li : ri;
             auto const &cell = result.cells[li * result.cols + ri];
             td.values[td_r][td_c] = cell.proposed_value;
-            if (cell.pulled) ++pulled;
-            else if (cell.proposed_value > cell.current_value) ++added;
+            if (cell.pulled)
+                ++pulled;
+            else if (cell.proposed_value > cell.current_value)
+                ++added;
         }
     }
     auto after = st::edit::snapshot(td, rect);
     if (!after.has_value()) {
         return "snapshot after: " + after.error().to_string();
     }
-    if (auto wb = state.project->definition().write_table_values(
-            state.project->working_rom(), *table, td);
+    if (auto wb = state.project->definition().write_table_values(state.project->working_rom(),
+                                                                 *table, td);
         !wb.has_value()) {
         return "writeback: " + wb.error().to_string();
     }
     char descbuf[80];
-    std::snprintf(descbuf, sizeof descbuf,
-                   "autotune knock-pull (%zu pulled%s%s)",
-                   pulled,
-                   added > 0 ? ", " : "",
-                   added > 0 ? (std::to_string(added) + " added-back").c_str() : "");
-    state.project->history().record(st::edit::Edit::table(
-        table->id, std::move(*before), std::move(*after),
-        std::string{descbuf}));
+    std::snprintf(descbuf, sizeof descbuf, "autotune knock-pull (%zu pulled%s%s)", pulled,
+                  added > 0 ? ", " : "",
+                  added > 0 ? (std::to_string(added) + " added-back").c_str() : "");
+    state.project->history().record(st::edit::Edit::table(table->id, std::move(*before),
+                                                          std::move(*after), std::string{descbuf}));
     if (table->id == state.selected_table_id) {
         state.current_table_data = std::move(td);
     }
     state.dirty = true;
-    state.status_msg = "Autotune knock-pull applied: " + std::to_string(pulled)
-                        + " pulled"
-                        + (added > 0 ? (", " + std::to_string(added) + " added-back") : "")
-                        + " on " + table->id + ".";
+    state.status_msg = "Autotune knock-pull applied: " + std::to_string(pulled) + " pulled" +
+                       (added > 0 ? (", " + std::to_string(added) + " added-back") : "") + " on " +
+                       table->id + ".";
     return std::nullopt;
 }
 
@@ -1994,40 +1964,34 @@ void render_kp_autotune_modal(AppState &state) {
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(680.0f, 420.0f),
-                                         ImVec2(1200.0f, 900.0f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(680.0f, 420.0f), ImVec2(1200.0f, 900.0f));
     if (!ImGui::BeginPopupModal("Autotune knock pull##kp_autotune_modal", nullptr,
-                                  ImGuiWindowFlags_AlwaysAutoResize)) {
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }
 
     // ---- Inputs ------------------------------------------------------
     ImGui::TextUnformatted("Target table");
     ImGui::SetNextItemWidth(-FLT_MIN);
-    ImGui::InputTextWithHint("##kp_at_table",
-                              "snake_case id of the 2D ignition timing table",
-                              state.kp_at_table_id,
-                              sizeof state.kp_at_table_id);
+    ImGui::InputTextWithHint("##kp_at_table", "snake_case id of the 2D ignition timing table",
+                             state.kp_at_table_id, sizeof state.kp_at_table_id);
 
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
     ImGui::TextUnformatted("Log CSV");
     {
-        float const avail   = ImGui::GetContentRegionAvail().x;
-        float const btn_w   = 96.0f;
+        float const avail = ImGui::GetContentRegionAvail().x;
+        float const btn_w = 96.0f;
         float const input_w = std::max(120.0f, avail - btn_w - 8.0f);
         ImGui::SetNextItemWidth(input_w);
-        ImGui::InputText("##kp_at_log",
-                          state.kp_at_log_path, sizeof state.kp_at_log_path,
-                          ImGuiInputTextFlags_ReadOnly);
+        ImGui::InputText("##kp_at_log", state.kp_at_log_path, sizeof state.kp_at_log_path,
+                         ImGuiInputTextFlags_ReadOnly);
         ImGui::SameLine();
         if (ImGui::Button("Browse…##kp_at_log")) {
             nfdu8filteritem_t filters[1] = {{"CSV", "csv"}};
             NFD::UniquePathU8 out;
             nfdresult_t const r = NFD::OpenDialog(out, filters, 1);
             if (r == NFD_OKAY) {
-                std::snprintf(state.kp_at_log_path,
-                               sizeof state.kp_at_log_path,
-                               "%s", out.get());
+                std::snprintf(state.kp_at_log_path, sizeof state.kp_at_log_path, "%s", out.get());
                 state.kp_at_result.reset();
                 state.kp_at_lints.clear();
                 state.kp_at_table_data.reset();
@@ -2051,22 +2015,19 @@ void render_kp_autotune_modal(AppState &state) {
     ImGui::SeparatorText("Tuning");
 
     ImGui::PushItemWidth(180.0f);
-    ImGui::SliderFloat("trigger degrees", &state.kp_at_trigger_degrees,
-                        0.1f, 5.0f, "%.2f");
+    ImGui::SliderFloat("trigger degrees", &state.kp_at_trigger_degrees, 0.1f, 5.0f, "%.2f");
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("A cell fires a pull when its mean Feedback Knock\n"
                           "Correction is below -trigger (more negative = ECU\n"
                           "pulling harder). Default 1.5° per docs/12.");
     }
-    ImGui::SliderFloat("pull step degrees", &state.kp_at_pull_step_degrees,
-                        0.10f, 3.0f, "%.2f");
+    ImGui::SliderFloat("pull step degrees", &state.kp_at_pull_step_degrees, 0.10f, 3.0f, "%.2f");
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Degrees subtracted from a triggered cell per pass.\n"
                           "Default 0.75°. Monotonic-subtract — this pass only\n"
                           "ever lowers timing.");
     }
-    ImGui::DragInt("min samples / cell", &state.kp_at_min_samples,
-                    1.0f, 1, 10000);
+    ImGui::DragInt("min samples / cell", &state.kp_at_min_samples, 1.0f, 1, 10000);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Cells with fewer than this many gated samples\n"
                           "stay at their current value. Default 30.");
@@ -2074,8 +2035,7 @@ void render_kp_autotune_modal(AppState &state) {
     ImGui::PopItemWidth();
 
     ImGui::Dummy(ImVec2(0.0f, 4.0f));
-    ImGui::Checkbox("enable add-back pass (opt-in)",
-                     &state.kp_at_enable_add_back);
+    ImGui::Checkbox("enable add-back pass (opt-in)", &state.kp_at_enable_add_back);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("docs/12 §Knock-based ignition pull add-back: raise\n"
                           "timing on cells whose mean knock stayed clean over\n"
@@ -2085,12 +2045,9 @@ void render_kp_autotune_modal(AppState &state) {
     if (state.kp_at_enable_add_back) {
         ImGui::Indent();
         ImGui::PushItemWidth(180.0f);
-        ImGui::SliderFloat("add step degrees", &state.kp_at_add_step_degrees,
-                            0.05f, 2.0f, "%.2f");
-        ImGui::DragInt("min clean samples", &state.kp_at_add_back_min_clean,
-                        1.0f, 1, 10000);
-        ImGui::SliderFloat("clean threshold (°)", &state.kp_at_clean_threshold,
-                            0.0f, 1.0f, "%.2f");
+        ImGui::SliderFloat("add step degrees", &state.kp_at_add_step_degrees, 0.05f, 2.0f, "%.2f");
+        ImGui::DragInt("min clean samples", &state.kp_at_add_back_min_clean, 1.0f, 1, 10000);
+        ImGui::SliderFloat("clean threshold (°)", &state.kp_at_clean_threshold, 0.0f, 1.0f, "%.2f");
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Mean knock must be greater than -threshold for a\n"
                               "cell to count as clean. Default 0.05°.");
@@ -2103,9 +2060,8 @@ void render_kp_autotune_modal(AppState &state) {
     ImGui::Separator();
     ImGui::Spacing();
 
-    bool const have_inputs = state.kp_at_table_id[0] != '\0'
-                             && state.kp_at_log_path[0] != '\0';
-    bool       run_clicked = false;
+    bool const have_inputs = state.kp_at_table_id[0] != '\0' && state.kp_at_log_path[0] != '\0';
+    bool run_clicked = false;
     {
         ImGui::BeginDisabled(!have_inputs);
         run_clicked = ImGui::Button("Run preview", ImVec2(160.0f, 0.0f));
@@ -2133,9 +2089,8 @@ void render_kp_autotune_modal(AppState &state) {
 
     if (!state.kp_at_status_msg.empty()) {
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
-                            "Preview failed: %s",
-                            state.kp_at_status_msg.c_str());
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "Preview failed: %s",
+                           state.kp_at_status_msg.c_str());
     }
 
     // ---- Result -----------------------------------------------------
@@ -2143,20 +2098,21 @@ void render_kp_autotune_modal(AppState &state) {
         auto const &result = *state.kp_at_result;
         ImGui::Spacing();
         ImGui::SeparatorText("Preview");
-        ImGui::Text("Samples: %zu (after gates: %zu)",
-                     result.total_samples, result.samples_after_gates);
+        ImGui::Text("Samples: %zu (after gates: %zu)", result.total_samples,
+                    result.samples_after_gates);
 
         std::size_t pulled = 0;
-        std::size_t added  = 0;
+        std::size_t added = 0;
         for (auto const &c : result.cells) {
-            if (c.pulled) ++pulled;
-            else if (c.proposed_value > c.current_value) ++added;
+            if (c.pulled)
+                ++pulled;
+            else if (c.proposed_value > c.current_value)
+                ++added;
         }
-        ImGui::Text("Grid: %zu rows × %zu cols (load × RPM) — pulled: %zu%s",
-                     result.rows, result.cols, pulled,
-                     state.kp_at_enable_add_back
-                         ? (", added-back: " + std::to_string(added)).c_str()
-                         : "");
+        ImGui::Text("Grid: %zu rows × %zu cols (load × RPM) — pulled: %zu%s", result.rows,
+                    result.cols, pulled,
+                    state.kp_at_enable_add_back ? (", added-back: " + std::to_string(added)).c_str()
+                                                : "");
 
         // 2D delta ledger. Columns: row-load label + one per RPM
         // breakpoint. Cells show the proposed - current delta; zero =
@@ -2168,23 +2124,20 @@ void render_kp_autotune_modal(AppState &state) {
         // RPM axis is somehow huge. Subaru factory tables max ~16.
         if (n_cols_total > 64) {
             text_subtle("(RPM axis has %zu cells; ledger requires "
-                        "≤63. Use the CLI for this table.)", cols);
-        } else if (ImGui::BeginTable("##kp_at_ledger",
-                                      static_cast<int>(n_cols_total),
-                                      ImGuiTableFlags_RowBg
-                                      | ImGuiTableFlags_BordersInnerH
-                                      | ImGuiTableFlags_BordersInnerV
-                                      | ImGuiTableFlags_SizingFixedFit
-                                      | ImGuiTableFlags_ScrollY
-                                      | ImGuiTableFlags_ScrollX,
-                                      ImVec2(0.0f, 260.0f))) {
-            ImGui::TableSetupColumn("load\\rpm",
-                                     ImGuiTableColumnFlags_WidthFixed, 88.0f);
+                        "≤63. Use the CLI for this table.)",
+                        cols);
+        } else if (ImGui::BeginTable("##kp_at_ledger", static_cast<int>(n_cols_total),
+                                     ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                         ImGuiTableFlags_BordersInnerV |
+                                         ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_ScrollY |
+                                         ImGuiTableFlags_ScrollX,
+                                     ImVec2(0.0f, 260.0f))) {
+            ImGui::TableSetupColumn("load\\rpm", ImGuiTableColumnFlags_WidthFixed, 88.0f);
             for (std::size_t c = 0; c < cols; ++c) {
                 char buf[24];
-                std::snprintf(buf, sizeof buf, "%.0f",
-                               c < state.kp_at_rpm_axis_values.size()
-                                   ? state.kp_at_rpm_axis_values[c] : 0.0);
+                std::snprintf(
+                    buf, sizeof buf, "%.0f",
+                    c < state.kp_at_rpm_axis_values.size() ? state.kp_at_rpm_axis_values[c] : 0.0);
                 ImGui::TableSetupColumn(buf, ImGuiTableColumnFlags_WidthFixed, 56.0f);
             }
             ImGui::TableSetupScrollFreeze(1, 1);
@@ -2205,11 +2158,9 @@ void render_kp_autotune_modal(AppState &state) {
                     if (std::abs(delta) < 0.0001) {
                         ImGui::TextDisabled(".");
                     } else if (delta < 0.0) {
-                        ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.55f, 1.0f),
-                                            "%+.2f", delta);
+                        ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.55f, 1.0f), "%+.2f", delta);
                     } else {
-                        ImGui::TextColored(ImVec4(0.5f, 0.95f, 0.5f, 1.0f),
-                                            "%+.2f", delta);
+                        ImGui::TextColored(ImVec4(0.5f, 0.95f, 0.5f, 1.0f), "%+.2f", delta);
                     }
                 }
             }
@@ -2220,13 +2171,10 @@ void render_kp_autotune_modal(AppState &state) {
         if (!state.kp_at_lints.empty()) {
             ImGui::Spacing();
             ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f),
-                                "Lint findings (%zu):",
-                                state.kp_at_lints.size());
+                               "Lint findings (%zu):", state.kp_at_lints.size());
             for (auto const &v : state.kp_at_lints) {
-                ImGui::BulletText("cell %zu — %s\n    %s",
-                                   v.cell_index,
-                                   pretty_lint_kind(v.kind),
-                                   v.message.c_str());
+                ImGui::BulletText("cell %zu — %s\n    %s", v.cell_index, pretty_lint_kind(v.kind),
+                                  v.message.c_str());
             }
         }
     }
@@ -2237,14 +2185,13 @@ void render_kp_autotune_modal(AppState &state) {
     ImGui::Spacing();
 
     bool const have_preview = state.kp_at_result.has_value();
-    bool const want_cancel  =
-        ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+    bool const want_cancel = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
     bool apply_clicked = false;
     {
         auto const a_btn = accent_for(state.settings.theme);
-        ImGui::PushStyleColor(ImGuiCol_Button,        a_btn.base);
+        ImGui::PushStyleColor(ImGuiCol_Button, a_btn.base);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_btn.hover);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  a_btn.active);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_btn.active);
         ImGui::BeginDisabled(!have_preview);
         apply_clicked = ImGui::Button("Apply proposal", ImVec2(160.0f, 0.0f));
         ImGui::EndDisabled();
@@ -2299,40 +2246,34 @@ void render_maf_autotune_modal(AppState &state) {
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(640.0f, 380.0f),
-                                         ImVec2(1100.0f, 800.0f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(640.0f, 380.0f), ImVec2(1100.0f, 800.0f));
     if (!ImGui::BeginPopupModal("Autotune MAF##maf_autotune_modal", nullptr,
-                                  ImGuiWindowFlags_AlwaysAutoResize)) {
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }
 
     // ---- Inputs ------------------------------------------------------
     ImGui::TextUnformatted("Target table");
     ImGui::SetNextItemWidth(-FLT_MIN);
-    ImGui::InputTextWithHint("##maf_at_table",
-                              "snake_case id of the 1D MAF scaling table",
-                              state.maf_at_table_id,
-                              sizeof state.maf_at_table_id);
+    ImGui::InputTextWithHint("##maf_at_table", "snake_case id of the 1D MAF scaling table",
+                             state.maf_at_table_id, sizeof state.maf_at_table_id);
 
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
     ImGui::TextUnformatted("Log CSV");
     {
-        float const avail   = ImGui::GetContentRegionAvail().x;
-        float const btn_w   = 96.0f;
+        float const avail = ImGui::GetContentRegionAvail().x;
+        float const btn_w = 96.0f;
         float const input_w = std::max(120.0f, avail - btn_w - 8.0f);
         ImGui::SetNextItemWidth(input_w);
-        ImGui::InputText("##maf_at_log",
-                          state.maf_at_log_path, sizeof state.maf_at_log_path,
-                          ImGuiInputTextFlags_ReadOnly);
+        ImGui::InputText("##maf_at_log", state.maf_at_log_path, sizeof state.maf_at_log_path,
+                         ImGuiInputTextFlags_ReadOnly);
         ImGui::SameLine();
         if (ImGui::Button("Browse…##maf_at_log")) {
             nfdu8filteritem_t filters[1] = {{"CSV", "csv"}};
             NFD::UniquePathU8 out;
             nfdresult_t const r = NFD::OpenDialog(out, filters, 1);
             if (r == NFD_OKAY) {
-                std::snprintf(state.maf_at_log_path,
-                               sizeof state.maf_at_log_path,
-                               "%s", out.get());
+                std::snprintf(state.maf_at_log_path, sizeof state.maf_at_log_path, "%s", out.get());
                 // Path changed — drop any stale preview.
                 state.maf_at_result.reset();
                 state.maf_at_lints.clear();
@@ -2352,15 +2293,13 @@ void render_maf_autotune_modal(AppState &state) {
                           "full observed delta. Lower = more passes,\n"
                           "less risk per pass.");
     }
-    ImGui::SliderFloat("max delta", &state.maf_at_max_delta_pct, 0.0f, 0.50f,
-                        "±%.0f%%",
-                        ImGuiSliderFlags_AlwaysClamp);
+    ImGui::SliderFloat("max delta", &state.maf_at_max_delta_pct, 0.0f, 0.50f, "±%.0f%%",
+                       ImGuiSliderFlags_AlwaysClamp);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Per-cell clamp on the proposed change. Caps\n"
                           "runaway moves on noisy or outlier-rich logs.");
     }
-    ImGui::DragInt("min samples / cell", &state.maf_at_min_samples,
-                    1.0f, 1, 10000);
+    ImGui::DragInt("min samples / cell", &state.maf_at_min_samples, 1.0f, 1, 10000);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Cells with fewer than this many samples after\n"
                           "data-quality gates stay at their current value\n"
@@ -2368,15 +2307,13 @@ void render_maf_autotune_modal(AppState &state) {
     }
     ImGui::PopItemWidth();
 
-    ImGui::Checkbox("smooth pass (neighbor weight 0.25)",
-                     &state.maf_at_apply_smooth);
+    ImGui::Checkbox("smooth pass (neighbor weight 0.25)", &state.maf_at_apply_smooth);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Confidence-weighted neighbor smoothing per\n"
                           "docs/12 §MAF auto-tune. Disabled = raw per-cell\n"
                           "proposals; smooth re-clamps to ±max-delta.");
     }
-    ImGui::Checkbox("require open-loop fueling",
-                     &state.maf_at_require_open_loop);
+    ImGui::Checkbox("require open-loop fueling", &state.maf_at_require_open_loop);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Drop samples taken in closed-loop. Useful if\n"
                           "your log straddles both modes and you want to\n"
@@ -2387,9 +2324,8 @@ void render_maf_autotune_modal(AppState &state) {
     ImGui::Separator();
     ImGui::Spacing();
 
-    bool const have_inputs = state.maf_at_table_id[0] != '\0'
-                             && state.maf_at_log_path[0] != '\0';
-    bool       run_clicked = false;
+    bool const have_inputs = state.maf_at_table_id[0] != '\0' && state.maf_at_log_path[0] != '\0';
+    bool run_clicked = false;
     {
         ImGui::BeginDisabled(!have_inputs);
         run_clicked = ImGui::Button("Run preview", ImVec2(160.0f, 0.0f));
@@ -2416,9 +2352,8 @@ void render_maf_autotune_modal(AppState &state) {
 
     if (!state.maf_at_status_msg.empty()) {
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
-                            "Preview failed: %s",
-                            state.maf_at_status_msg.c_str());
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "Preview failed: %s",
+                           state.maf_at_status_msg.c_str());
     }
 
     // ---- Result -----------------------------------------------------
@@ -2426,38 +2361,39 @@ void render_maf_autotune_modal(AppState &state) {
         auto const &result = *state.maf_at_result;
         ImGui::Spacing();
         ImGui::SeparatorText("Preview");
-        ImGui::Text("Samples: %zu (after gates: %zu)",
-                     result.total_samples, result.samples_after_gates);
+        ImGui::Text("Samples: %zu (after gates: %zu)", result.total_samples,
+                    result.samples_after_gates);
 
-        std::size_t modified     = 0;
+        std::size_t modified = 0;
         std::size_t underpowered = 0;
         for (auto const &c : result.cells) {
-            if (c.confidence == 0.0) ++underpowered;
-            else if (c.proposed_value != c.current_value) ++modified;
+            if (c.confidence == 0.0)
+                ++underpowered;
+            else if (c.proposed_value != c.current_value)
+                ++modified;
         }
-        ImGui::Text("Modified: %zu / %zu cells, underpowered: %zu",
-                     modified, result.cells.size(), underpowered);
+        ImGui::Text("Modified: %zu / %zu cells, underpowered: %zu", modified, result.cells.size(),
+                    underpowered);
 
         // Per-cell ledger.
         if (ImGui::BeginTable("##maf_at_ledger", 6,
-                               ImGuiTableFlags_RowBg
-                               | ImGuiTableFlags_BordersInnerH
-                               | ImGuiTableFlags_SizingStretchProp
-                               | ImGuiTableFlags_ScrollY,
-                               ImVec2(0.0f, 240.0f))) {
-            ImGui::TableSetupColumn("#",        ImGuiTableColumnFlags_WidthFixed, 32.0f);
-            ImGui::TableSetupColumn("axis",     ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("current",  ImGuiTableColumnFlags_WidthStretch);
+                              ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                  ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY,
+                              ImVec2(0.0f, 240.0f))) {
+            ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, 32.0f);
+            ImGui::TableSetupColumn("axis", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("current", ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn("proposed", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("samples",  ImGuiTableColumnFlags_WidthFixed, 72.0f);
-            ImGui::TableSetupColumn("conf",     ImGuiTableColumnFlags_WidthFixed, 56.0f);
+            ImGui::TableSetupColumn("samples", ImGuiTableColumnFlags_WidthFixed, 72.0f);
+            ImGui::TableSetupColumn("conf", ImGuiTableColumnFlags_WidthFixed, 56.0f);
             ImGui::TableSetupScrollFreeze(0, 1);
             ImGui::TableHeadersRow();
 
             auto const &axis = state.maf_at_table_data->axis_x;
             for (auto const &c : result.cells) {
                 ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0); ImGui::Text("%zu", c.cell_index);
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Text("%zu", c.cell_index);
                 ImGui::TableSetColumnIndex(1);
                 if (c.cell_index < axis.size()) {
                     ImGui::Text("%.3f", axis[c.cell_index]);
@@ -2494,13 +2430,10 @@ void render_maf_autotune_modal(AppState &state) {
         if (!state.maf_at_lints.empty()) {
             ImGui::Spacing();
             ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f),
-                                "Lint findings (%zu):",
-                                state.maf_at_lints.size());
+                               "Lint findings (%zu):", state.maf_at_lints.size());
             for (auto const &v : state.maf_at_lints) {
-                ImGui::BulletText("cells %zu..%zu — %s\n    %s",
-                                   v.cell_index, v.cell_index + 1,
-                                   pretty_lint_kind(v.kind),
-                                   v.message.c_str());
+                ImGui::BulletText("cells %zu..%zu — %s\n    %s", v.cell_index, v.cell_index + 1,
+                                  pretty_lint_kind(v.kind), v.message.c_str());
             }
         }
     }
@@ -2511,14 +2444,13 @@ void render_maf_autotune_modal(AppState &state) {
     ImGui::Spacing();
 
     bool const have_preview = state.maf_at_result.has_value();
-    bool const want_cancel  =
-        ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+    bool const want_cancel = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
     bool apply_clicked = false;
     {
         auto const a_btn = accent_for(state.settings.theme);
-        ImGui::PushStyleColor(ImGuiCol_Button,        a_btn.base);
+        ImGui::PushStyleColor(ImGuiCol_Button, a_btn.base);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_btn.hover);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  a_btn.active);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_btn.active);
         ImGui::BeginDisabled(!have_preview);
         apply_clicked = ImGui::Button("Apply proposal", ImVec2(160.0f, 0.0f));
         ImGui::EndDisabled();
@@ -2563,57 +2495,66 @@ void render_maf_autotune_modal(AppState &state) {
 // Static help reference. Lists every binding the GUI listens for,
 // grouped by context. Single source of truth — when a new shortcut
 // lands, add a row here.
-struct ShortcutRow { char const *binding; char const *description; };
-struct ShortcutGroup { char const *heading; std::vector<ShortcutRow> rows; };
+struct ShortcutRow {
+    char const *binding;
+    char const *description;
+};
+struct ShortcutGroup {
+    char const *heading;
+    std::vector<ShortcutRow> rows;
+};
 
 std::vector<ShortcutGroup> const &shortcuts_reference() {
     static std::vector<ShortcutGroup> const groups = {
-        { "Global", {
-            { "Ctrl+O",       "Open project…"                       },
-            { "Ctrl+S",       "Save project"                        },
-            { "Ctrl+Q",       "Quit (with unsaved-changes guard)"   },
-            { "Ctrl+F",       "Focus the sidebar table filter"      },
-            { "Ctrl+Z",       "Undo last edit"                      },
-            { "Ctrl+Shift+Z", "Redo (alt: Ctrl+Y)"                  },
-        }},
-        { "Table grid", {
-            { "Arrows",       "Move cursor cell"                    },
-            { "Shift+Arrows", "Extend selection from cursor"        },
-            { "Click",        "Select cell"                         },
-            { "Shift+Click",  "Extend selection to clicked cell"    },
-            { "F2",           "Start editing the cursor cell"       },
-            { "Enter",        "Commit value (or Ctrl+Enter to "
-                              "fill every selected cell)"           },
-            { "Esc",          "Cancel the in-cell editor"           },
-            { "Ctrl+C",       "Copy selection as tab-separated "
-                              "values"                              },
-            { "Ctrl+V",       "Paste tab-separated values at "
-                              "cursor"                              },
-        }},
-        { "Modals", {
-            { "Enter",        "Primary action (Save / Apply / "
-                              "Create — whatever is the "
-                              "highlighted button)"                 },
-            { "Esc",          "Close / cancel without applying"     },
-        }},
-        { "Designer canvas", {
-            { "Click",        "Select a node or edge"               },
-            { "Shift+Click",  "Toggle a node in the selection"      },
-            { "Click (empty)","Clear selection"                     },
-            { "Drag (empty)", "Box-select nodes inside the "
-                              "rectangle (Shift to add)"            },
-            { "Delete",       "Remove the selected nodes / edge"    },
-            { "Drag body",    "Move the selected nodes as a group "
-                              "(snaps to grid on release)"          },
-            { "Drag pin → pin","Wire two pins"                      },
-            { "Middle-drag",  "Pan the canvas"                      },
-            { "Mouse wheel",  "Zoom in/out (anchored to cursor)"    },
-            { "Reset view",   "Toolbar button — reset pan + zoom"   },
-            { "Esc / Right-click",
-                              "Cancel an in-progress wire"          },
-            { "Right-click",  "Context menu (delete node, "
-                              "disconnect edge / pin)"              },
-        }},
+        {"Global",
+         {
+             {"Ctrl+O", "Open project…"},
+             {"Ctrl+S", "Save project"},
+             {"Ctrl+Q", "Quit (with unsaved-changes guard)"},
+             {"Ctrl+F", "Focus the sidebar table filter"},
+             {"Ctrl+Z", "Undo last edit"},
+             {"Ctrl+Shift+Z", "Redo (alt: Ctrl+Y)"},
+         }},
+        {"Table grid",
+         {
+             {"Arrows", "Move cursor cell"},
+             {"Shift+Arrows", "Extend selection from cursor"},
+             {"Click", "Select cell"},
+             {"Shift+Click", "Extend selection to clicked cell"},
+             {"F2", "Start editing the cursor cell"},
+             {"Enter", "Commit value (or Ctrl+Enter to "
+                       "fill every selected cell)"},
+             {"Esc", "Cancel the in-cell editor"},
+             {"Ctrl+C", "Copy selection as tab-separated "
+                        "values"},
+             {"Ctrl+V", "Paste tab-separated values at "
+                        "cursor"},
+         }},
+        {"Modals",
+         {
+             {"Enter", "Primary action (Save / Apply / "
+                       "Create — whatever is the "
+                       "highlighted button)"},
+             {"Esc", "Close / cancel without applying"},
+         }},
+        {"Designer canvas",
+         {
+             {"Click", "Select a node or edge"},
+             {"Shift+Click", "Toggle a node in the selection"},
+             {"Click (empty)", "Clear selection"},
+             {"Drag (empty)", "Box-select nodes inside the "
+                              "rectangle (Shift to add)"},
+             {"Delete", "Remove the selected nodes / edge"},
+             {"Drag body", "Move the selected nodes as a group "
+                           "(snaps to grid on release)"},
+             {"Drag pin → pin", "Wire two pins"},
+             {"Middle-drag", "Pan the canvas"},
+             {"Mouse wheel", "Zoom in/out (anchored to cursor)"},
+             {"Reset view", "Toolbar button — reset pan + zoom"},
+             {"Esc / Right-click", "Cancel an in-progress wire"},
+             {"Right-click", "Context menu (delete node, "
+                             "disconnect edge / pin)"},
+         }},
     };
     return groups;
 }
@@ -2627,10 +2568,9 @@ void render_shortcuts_modal(AppState &state) {
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(560.0f, 380.0f),
-                                         ImVec2(900.0f, 720.0f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(560.0f, 380.0f), ImVec2(900.0f, 720.0f));
     if (!ImGui::BeginPopupModal("Keyboard shortcuts##shortcuts_modal", nullptr,
-                                  ImGuiWindowFlags_AlwaysAutoResize)) {
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }
 
@@ -2641,13 +2581,10 @@ void render_shortcuts_modal(AppState &state) {
     for (auto const &group : shortcuts_reference()) {
         ImGui::SeparatorText(group.heading);
         if (ImGui::BeginTable(group.heading, 2,
-                               ImGuiTableFlags_RowBg
-                               | ImGuiTableFlags_BordersInnerH
-                               | ImGuiTableFlags_SizingStretchProp)) {
-            ImGui::TableSetupColumn("binding",
-                                     ImGuiTableColumnFlags_WidthFixed, 180.0f);
-            ImGui::TableSetupColumn("description",
-                                     ImGuiTableColumnFlags_WidthStretch);
+                              ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                  ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("binding", ImGuiTableColumnFlags_WidthFixed, 180.0f);
+            ImGui::TableSetupColumn("description", ImGuiTableColumnFlags_WidthStretch);
             for (auto const &row : group.rows) {
                 ImGui::TableNextRow();
                 ImGui::TableSetColumnIndex(0);
@@ -2663,8 +2600,7 @@ void render_shortcuts_modal(AppState &state) {
     ImGui::Separator();
     ImGui::Spacing();
     bool const close_clicked = ImGui::Button("Close", ImVec2(120.0f, 0.0f));
-    bool const want_close    =
-        ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+    bool const want_close = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
     if (close_clicked || want_close) {
         ImGui::CloseCurrentPopup();
     }
@@ -2684,10 +2620,9 @@ void render_new_project_modal(AppState &state) {
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(520.0f, 280.0f),
-                                         ImVec2(900.0f, 600.0f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(520.0f, 280.0f), ImVec2(900.0f, 600.0f));
     if (!ImGui::BeginPopupModal("New project##new_project_modal", nullptr,
-                                  ImGuiWindowFlags_AlwaysAutoResize)) {
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }
 
@@ -2695,41 +2630,33 @@ void render_new_project_modal(AppState &state) {
     // a Browse... button. ImGui::Begin/EndDisabled wraps the text input
     // to keep it read-only — the canonical-path constraint is "use
     // Browse..."; typing in random paths invites mistakes.
-    auto const path_row =
-        [](char const *label, char *buf, std::size_t buf_size,
-            char const *btn_id, char const *tooltip) -> bool {
-            ImGui::TextUnformatted(label);
-            float const  avail   = ImGui::GetContentRegionAvail().x;
-            float const  btn_w   = 96.0f;
-            float const  input_w = std::max(120.0f, avail - btn_w - 8.0f);
-            ImGui::SetNextItemWidth(input_w);
-            ImGui::InputText((std::string{"##"} + btn_id).c_str(),
-                              buf, buf_size,
-                              ImGuiInputTextFlags_ReadOnly);
-            ImGui::SameLine();
-            bool const clicked = ImGui::Button(
-                (std::string{"Browse…##"} + btn_id).c_str(),
-                ImVec2(btn_w, 0.0f));
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", tooltip);
-            }
-            return clicked;
-        };
+    auto const path_row = [](char const *label, char *buf, std::size_t buf_size, char const *btn_id,
+                             char const *tooltip) -> bool {
+        ImGui::TextUnformatted(label);
+        float const avail = ImGui::GetContentRegionAvail().x;
+        float const btn_w = 96.0f;
+        float const input_w = std::max(120.0f, avail - btn_w - 8.0f);
+        ImGui::SetNextItemWidth(input_w);
+        ImGui::InputText((std::string{"##"} + btn_id).c_str(), buf, buf_size,
+                         ImGuiInputTextFlags_ReadOnly);
+        ImGui::SameLine();
+        bool const clicked =
+            ImGui::Button((std::string{"Browse…##"} + btn_id).c_str(), ImVec2(btn_w, 0.0f));
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", tooltip);
+        }
+        return clicked;
+    };
 
-    if (path_row("Source ROM",
-                  state.np_source_path, sizeof state.np_source_path,
-                  "src",
-                  "Pick the stock ROM dump (.bin). Copied into the\n"
-                  "project as source.bin and never modified.")) {
+    if (path_row("Source ROM", state.np_source_path, sizeof state.np_source_path, "src",
+                 "Pick the stock ROM dump (.bin). Copied into the\n"
+                 "project as source.bin and never modified.")) {
         NFD::UniquePathU8 out;
         nfdresult_t const r = NFD::OpenDialog(out);
         if (r == NFD_OKAY) {
-            std::snprintf(state.np_source_path,
-                           sizeof state.np_source_path,
-                           "%s", out.get());
+            std::snprintf(state.np_source_path, sizeof state.np_source_path, "%s", out.get());
         } else if (r == NFD_ERROR) {
-            state.status_msg = std::string{"Source dialog error: "}
-                                + NFD::GetError();
+            state.status_msg = std::string{"Source dialog error: "} + NFD::GetError();
         }
     }
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
@@ -2738,23 +2665,20 @@ void render_new_project_modal(AppState &state) {
     // (multi-file directory layout vs. single-file pack).
     {
         ImGui::TextUnformatted("Definition pack");
-        float const avail   = ImGui::GetContentRegionAvail().x;
-        float const btn_w   = 96.0f;
+        float const avail = ImGui::GetContentRegionAvail().x;
+        float const btn_w = 96.0f;
         float const input_w = std::max(120.0f, avail - btn_w * 2.0f - 16.0f);
         ImGui::SetNextItemWidth(input_w);
-        ImGui::InputText("##def_path", state.np_def_path,
-                          sizeof state.np_def_path,
-                          ImGuiInputTextFlags_ReadOnly);
+        ImGui::InputText("##def_path", state.np_def_path, sizeof state.np_def_path,
+                         ImGuiInputTextFlags_ReadOnly);
         ImGui::SameLine();
         if (ImGui::Button("Folder…##def_folder", ImVec2(btn_w, 0.0f))) {
             NFD::UniquePathU8 out;
             nfdresult_t const r = NFD::PickFolder(out);
             if (r == NFD_OKAY) {
-                std::snprintf(state.np_def_path, sizeof state.np_def_path,
-                               "%s", out.get());
+                std::snprintf(state.np_def_path, sizeof state.np_def_path, "%s", out.get());
             } else if (r == NFD_ERROR) {
-                state.status_msg = std::string{"Def dialog error: "}
-                                    + NFD::GetError();
+                state.status_msg = std::string{"Def dialog error: "} + NFD::GetError();
             }
         }
         if (ImGui::IsItemHovered()) {
@@ -2767,11 +2691,9 @@ void render_new_project_modal(AppState &state) {
             NFD::UniquePathU8 out;
             nfdresult_t const r = NFD::OpenDialog(out, filters, 1);
             if (r == NFD_OKAY) {
-                std::snprintf(state.np_def_path, sizeof state.np_def_path,
-                               "%s", out.get());
+                std::snprintf(state.np_def_path, sizeof state.np_def_path, "%s", out.get());
             } else if (r == NFD_ERROR) {
-                state.status_msg = std::string{"Def dialog error: "}
-                                    + NFD::GetError();
+                state.status_msg = std::string{"Def dialog error: "} + NFD::GetError();
             }
         }
         if (ImGui::IsItemHovered()) {
@@ -2784,10 +2706,9 @@ void render_new_project_modal(AppState &state) {
         // muted (text_subtle, not TextDisabled — this is a hint,
         // not an inactive control) so it doesn't compete with the
         // inputs.
-        text_subtle(
-            "Don't have a pack? Try the bundled "
-            "fixtures/demo-pack/ to explore the UI, or see "
-            "docs/11-definition-format.md to author one.");
+        text_subtle("Don't have a pack? Try the bundled "
+                    "fixtures/demo-pack/ to explore the UI, or see "
+                    "docs/11-definition-format.md to author one.");
     }
 
     // Inline ROM/def match check. Recompute only when either path has
@@ -2795,31 +2716,28 @@ void render_new_project_modal(AppState &state) {
     // modal would otherwise re-load every frame.
     if (state.np_source_path[0] != '\0' && state.np_def_path[0] != '\0') {
         std::string const cur_source = state.np_source_path;
-        std::string const cur_def    = state.np_def_path;
-        if (cur_source != state.np_cached_source_path
-            || cur_def != state.np_cached_def_path) {
+        std::string const cur_def = state.np_def_path;
+        if (cur_source != state.np_cached_source_path || cur_def != state.np_cached_def_path) {
             state.np_cached_source_path = cur_source;
-            state.np_cached_def_path    = cur_def;
+            state.np_cached_def_path = cur_def;
             // Path changed — last create attempt's error is stale.
             state.np_create_error.clear();
             auto rom_r = st::Rom::from_file(cur_source);
             if (!rom_r.has_value()) {
-                state.np_match_status  = AppState::NpMatchStatus::LoadFailed;
-                state.np_match_message = "ROM load failed: "
-                                         + rom_r.error().to_string();
+                state.np_match_status = AppState::NpMatchStatus::LoadFailed;
+                state.np_match_message = "ROM load failed: " + rom_r.error().to_string();
             } else {
                 auto def_r = st::Definition::from_file(cur_def);
                 if (!def_r.has_value()) {
-                    state.np_match_status  = AppState::NpMatchStatus::LoadFailed;
-                    state.np_match_message = "Pack load failed: "
-                                             + def_r.error().to_string();
+                    state.np_match_status = AppState::NpMatchStatus::LoadFailed;
+                    state.np_match_message = "Pack load failed: " + def_r.error().to_string();
                 } else {
                     auto const name = def_r->matches(*rom_r);
                     if (name.has_value()) {
-                        state.np_match_status  = AppState::NpMatchStatus::Match;
+                        state.np_match_status = AppState::NpMatchStatus::Match;
                         state.np_match_message = "Matches \"" + *name + "\"";
                     } else {
-                        state.np_match_status  = AppState::NpMatchStatus::NoMatch;
+                        state.np_match_status = AppState::NpMatchStatus::NoMatch;
                         state.np_match_message = "No matching identification "
                                                  "in this pack — Create still "
                                                  "allowed.";
@@ -2837,49 +2755,42 @@ void render_new_project_modal(AppState &state) {
         ImVec4 color{1, 1, 1, 1};
         char const *prefix = "";
         switch (state.np_match_status) {
-            case AppState::NpMatchStatus::Match:
-                color = ImVec4(0.40f, 0.82f, 0.45f, 1.0f);
-                prefix = "\xE2\x9C\x93 "; // ✓
-                break;
-            case AppState::NpMatchStatus::NoMatch:
-                color = ImVec4(0.95f, 0.78f, 0.30f, 1.0f);
-                prefix = "\xE2\x9A\xA0 "; // ⚠
-                break;
-            case AppState::NpMatchStatus::LoadFailed:
-                color = ImVec4(0.92f, 0.45f, 0.45f, 1.0f);
-                prefix = "\xE2\x9C\x97 "; // ✗
-                break;
-            case AppState::NpMatchStatus::None:
-                break;
+        case AppState::NpMatchStatus::Match:
+            color = ImVec4(0.40f, 0.82f, 0.45f, 1.0f);
+            prefix = "\xE2\x9C\x93 "; // ✓
+            break;
+        case AppState::NpMatchStatus::NoMatch:
+            color = ImVec4(0.95f, 0.78f, 0.30f, 1.0f);
+            prefix = "\xE2\x9A\xA0 "; // ⚠
+            break;
+        case AppState::NpMatchStatus::LoadFailed:
+            color = ImVec4(0.92f, 0.45f, 0.45f, 1.0f);
+            prefix = "\xE2\x9C\x97 "; // ✗
+            break;
+        case AppState::NpMatchStatus::None:
+            break;
         }
-        ImGui::TextColored(color, "%s%s", prefix,
-                            state.np_match_message.c_str());
+        ImGui::TextColored(color, "%s%s", prefix, state.np_match_message.c_str());
     }
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
 
-    if (path_row("Project directory",
-                  state.np_dir_path, sizeof state.np_dir_path,
-                  "dir",
-                  "Pick the empty target directory. project.toml,\n"
-                  "source.bin, and working.bin land here.")) {
+    if (path_row("Project directory", state.np_dir_path, sizeof state.np_dir_path, "dir",
+                 "Pick the empty target directory. project.toml,\n"
+                 "source.bin, and working.bin land here.")) {
         NFD::UniquePathU8 out;
         nfdresult_t const r = NFD::PickFolder(out);
         if (r == NFD_OKAY) {
-            std::snprintf(state.np_dir_path, sizeof state.np_dir_path,
-                           "%s", out.get());
+            std::snprintf(state.np_dir_path, sizeof state.np_dir_path, "%s", out.get());
         } else if (r == NFD_ERROR) {
-            state.status_msg = std::string{"Dir dialog error: "}
-                                + NFD::GetError();
+            state.status_msg = std::string{"Dir dialog error: "} + NFD::GetError();
         }
     }
     ImGui::Dummy(ImVec2(0.0f, 12.0f));
 
     ImGui::TextUnformatted("Display name (optional)");
     ImGui::SetNextItemWidth(-FLT_MIN);
-    ImGui::InputTextWithHint("##np_name",
-                              "Defaults to the project directory's basename.",
-                              state.np_display_name,
-                              sizeof state.np_display_name);
+    ImGui::InputTextWithHint("##np_name", "Defaults to the project directory's basename.",
+                             state.np_display_name, sizeof state.np_display_name);
 
     ImGui::Spacing();
     ImGui::Separator();
@@ -2890,28 +2801,24 @@ void render_new_project_modal(AppState &state) {
     // bottom of the modal. Kept compact (one red line) — detailed
     // diagnostics go in tooltips on the offending field.
     if (!state.np_create_error.empty()) {
-        ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
-                            "\xE2\x9C\x97 Create failed: %s",
-                            state.np_create_error.c_str());
+        ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f), "\xE2\x9C\x97 Create failed: %s",
+                           state.np_create_error.c_str());
         ImGui::Spacing();
     }
 
     bool const have_source = state.np_source_path[0] != '\0';
-    bool const have_def    = state.np_def_path[0]    != '\0';
-    bool const have_dir    = state.np_dir_path[0]    != '\0';
-    bool const load_failed =
-        state.np_match_status == AppState::NpMatchStatus::LoadFailed;
-    bool const can_create  =
-        have_source && have_def && have_dir && !load_failed;
+    bool const have_def = state.np_def_path[0] != '\0';
+    bool const have_dir = state.np_dir_path[0] != '\0';
+    bool const load_failed = state.np_match_status == AppState::NpMatchStatus::LoadFailed;
+    bool const can_create = have_source && have_def && have_dir && !load_failed;
 
-    bool const want_cancel =
-        ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+    bool const want_cancel = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
     bool create_clicked = false;
     {
         auto const a_btn = accent_for(state.settings.theme);
-        ImGui::PushStyleColor(ImGuiCol_Button,        a_btn.base);
+        ImGui::PushStyleColor(ImGuiCol_Button, a_btn.base);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_btn.hover);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  a_btn.active);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_btn.active);
         ImGui::BeginDisabled(!can_create);
         create_clicked = ImGui::Button("Create", ImVec2(160.0f, 0.0f));
         ImGui::EndDisabled();
@@ -2929,18 +2836,17 @@ void render_new_project_modal(AppState &state) {
         }
     }
     ImGui::SameLine();
-    bool const cancel_clicked =
-        ImGui::Button("Cancel", ImVec2(110.0f, 0.0f));
+    bool const cancel_clicked = ImGui::Button("Cancel", ImVec2(110.0f, 0.0f));
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Close without creating.  (Esc)");
     }
 
     auto const reset_fields = [&]() {
-        state.np_source_path[0]   = '\0';
-        state.np_def_path[0]      = '\0';
-        state.np_dir_path[0]      = '\0';
-        state.np_display_name[0]  = '\0';
-        state.np_match_status     = AppState::NpMatchStatus::None;
+        state.np_source_path[0] = '\0';
+        state.np_def_path[0] = '\0';
+        state.np_dir_path[0] = '\0';
+        state.np_display_name[0] = '\0';
+        state.np_match_status = AppState::NpMatchStatus::None;
         state.np_match_message.clear();
         state.np_cached_source_path.clear();
         state.np_cached_def_path.clear();
@@ -2949,15 +2855,14 @@ void render_new_project_modal(AppState &state) {
 
     if (create_clicked && can_create) {
         std::filesystem::path const dir{state.np_dir_path};
-        std::string                 name{state.np_display_name};
+        std::string name{state.np_display_name};
         if (name.empty()) {
             name = dir.filename().string();
-            if (name.empty()) name = "Untitled";
+            if (name.empty())
+                name = "Untitled";
         }
-        auto r = st::Project::create(dir,
-                                      std::filesystem::path{state.np_source_path},
-                                      std::filesystem::path{state.np_def_path},
-                                      name);
+        auto r = st::Project::create(dir, std::filesystem::path{state.np_source_path},
+                                     std::filesystem::path{state.np_def_path}, name);
         if (!r.has_value()) {
             // Inline error only — status_msg would compete with the
             // modal's own surface. The error renders above the
@@ -2983,8 +2888,7 @@ void render_flash_modal(AppState &state) {
         state.show_flash_modal = false;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing,
-                             ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(560.0f, 0.0f), ImGuiCond_Appearing);
     if (!ImGui::BeginPopupModal("Flash...##flash_modal", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -2995,8 +2899,8 @@ void render_flash_modal(AppState &state) {
 
     if (!state.project.has_value()) {
         ImGui::TextUnformatted("No project loaded.");
-        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f))
-                || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f)) ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -3005,22 +2909,21 @@ void render_flash_modal(AppState &state) {
     if (!pending.has_value()) {
         ImGui::TextUnformatted("Working ROM matches source — nothing to flash.");
         ImGui::Dummy(ImVec2(0.0f, 12.0f));
-        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f))
-                || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f)) ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
         return;
     }
 
-    auto const &d        = pending->decision;
-    auto const  profile  = state.project->policy_profile();
-    auto const  pname    = std::string{st::policy::profile_name(profile)};
-    using A              = st::policy::Action;
+    auto const &d = pending->decision;
+    auto const profile = state.project->policy_profile();
+    auto const pname = std::string{st::policy::profile_name(profile)};
+    using A = st::policy::Action;
 
     // Header: plan stats.
-    ImGui::Text("Sectors: %zu   Bytes: %zu   Profile: %s",
-                pending->plan.writes.size(),
+    ImGui::Text("Sectors: %zu   Bytes: %zu   Profile: %s", pending->plan.writes.size(),
                 pending->total_bytes, pname.c_str());
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
@@ -3035,11 +2938,10 @@ void render_flash_modal(AppState &state) {
             ImGui::BulletText("%s", id.c_str());
         }
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
-        text_subtle(
-            "Engine-safety violations block in every profile (docs/06).");
+        text_subtle("Engine-safety violations block in every profile (docs/06).");
         ImGui::Dummy(ImVec2(0.0f, 12.0f));
-        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f))
-                || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        if (ImGui::Button("Close", ImVec2(120.0f, 0.0f)) ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -3064,41 +2966,33 @@ void render_flash_modal(AppState &state) {
     // Action-specific UI: silent / confirm / confirm+reason.
     bool ready_to_send = true;
     switch (d.overall_action) {
-        case A::Silent:
-        case A::Badge:
-            // The profile demands no user interaction — just go.
-            text_subtle(
-                "Profile '%s' raises no gate for this plan.", pname.c_str());
-            break;
-        case A::Warn:
-            text_subtle(
-                "Profile '%s' would flag this on save; no flash-time gate.",
-                pname.c_str());
-            break;
-        case A::Confirm:
-            ImGui::Checkbox("I confirm flashing these emissions edits",
-                             &state.flash_confirm_checked);
-            ready_to_send = state.flash_confirm_checked;
-            break;
-        case A::ConfirmWithReason:
-            ImGui::Checkbox("I confirm flashing these emissions edits",
-                             &state.flash_confirm_checked);
-            ImGui::TextUnformatted("Reason (required):");
-            ImGui::InputTextMultiline("##flash_reason",
-                                       state.flash_reason,
-                                       sizeof state.flash_reason,
-                                       ImVec2(-FLT_MIN, 60.0f));
-            ready_to_send = state.flash_confirm_checked
-                            && state.flash_reason[0] != '\0';
-            break;
-        case A::Block:
-            // Distinct from the engine-safety branch above: profile-level
-            // Block, e.g. a hypothetical future strict profile.
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.55f, 1.0f));
-            ImGui::TextUnformatted("REFUSED by policy.");
-            ImGui::PopStyleColor();
-            ready_to_send = false;
-            break;
+    case A::Silent:
+    case A::Badge:
+        // The profile demands no user interaction — just go.
+        text_subtle("Profile '%s' raises no gate for this plan.", pname.c_str());
+        break;
+    case A::Warn:
+        text_subtle("Profile '%s' would flag this on save; no flash-time gate.", pname.c_str());
+        break;
+    case A::Confirm:
+        ImGui::Checkbox("I confirm flashing these emissions edits", &state.flash_confirm_checked);
+        ready_to_send = state.flash_confirm_checked;
+        break;
+    case A::ConfirmWithReason:
+        ImGui::Checkbox("I confirm flashing these emissions edits", &state.flash_confirm_checked);
+        ImGui::TextUnformatted("Reason (required):");
+        ImGui::InputTextMultiline("##flash_reason", state.flash_reason, sizeof state.flash_reason,
+                                  ImVec2(-FLT_MIN, 60.0f));
+        ready_to_send = state.flash_confirm_checked && state.flash_reason[0] != '\0';
+        break;
+    case A::Block:
+        // Distinct from the engine-safety branch above: profile-level
+        // Block, e.g. a hypothetical future strict profile.
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.55f, 1.0f));
+        ImGui::TextUnformatted("REFUSED by policy.");
+        ImGui::PopStyleColor();
+        ready_to_send = false;
+        break;
     }
 
     ImGui::Dummy(ImVec2(0.0f, 14.0f));
@@ -3108,19 +3002,16 @@ void render_flash_modal(AppState &state) {
     // button completes the gate workflow without contacting hardware.
     ImGui::BeginDisabled(!ready_to_send);
     if (ImGui::Button("Verify policy", ImVec2(140.0f, 0.0f))) {
-        state.status_msg = "Flash plan cleared policy gate ("
-                         + pname + ").";
+        state.status_msg = "Flash plan cleared policy gate (" + pname + ").";
         ImGui::CloseCurrentPopup();
     }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         if (ready_to_send) {
-            ImGui::SetTooltip(
-                "Acknowledge that the plan cleared the policy gate.\n"
-                "No bytes are sent to any ECU.");
+            ImGui::SetTooltip("Acknowledge that the plan cleared the policy gate.\n"
+                              "No bytes are sent to any ECU.");
         } else {
-            ImGui::SetTooltip(
-                "Tick the confirm box (and fill the reason) first.");
+            ImGui::SetTooltip("Tick the confirm box (and fill the reason) first.");
         }
     }
     // "Send to ECU" stays hidden until a real transport binding lands
@@ -3129,15 +3020,14 @@ void render_flash_modal(AppState &state) {
     // broken." Replacing it with an explicit inline note (below)
     // tells the user the same fact without the dead-button surface.
     ImGui::SameLine();
-    if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))
-            || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+    if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) ||
+        ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
         ImGui::CloseCurrentPopup();
     }
 
     ImGui::Spacing();
-    ImGui::TextDisabled(
-        "ECU send is CLI-only in this build (no in-app transport "
-        "binding yet). After Verify, drive the flash from:");
+    ImGui::TextDisabled("ECU send is CLI-only in this build (no in-app transport "
+                        "binding yet). After Verify, drive the flash from:");
     ImGui::Indent();
     ImGui::TextDisabled("subuwutuner-cli project-flash <dir> --trace …");
     ImGui::Unindent();
@@ -3153,17 +3043,15 @@ void glfw_error_callback(int err, char const *desc) {
 // and put it on the system clipboard via ImGui's clipboard helper.
 // Format matches Excel/Sheets clipboard convention so pasted values
 // round-trip cleanly to a spreadsheet for batch analysis.
-void copy_rect_to_clipboard(st::Definition::TableData const &td,
-                             st::edit::Rect const             &rect,
-                             int                              precision) {
+void copy_rect_to_clipboard(st::Definition::TableData const &td, st::edit::Rect const &rect,
+                            int precision) {
     std::string out;
-    char        buf[32];
-    for (std::size_t r = rect.r_start;
-         r <= rect.r_end && r < td.values.size(); ++r) {
+    char buf[32];
+    for (std::size_t r = rect.r_start; r <= rect.r_end && r < td.values.size(); ++r) {
         bool first = true;
-        for (std::size_t c = rect.c_start;
-             c <= rect.c_end && c < td.values[r].size(); ++c) {
-            if (!first) out.push_back('\t');
+        for (std::size_t c = rect.c_start; c <= rect.c_end && c < td.values[r].size(); ++c) {
+            if (!first)
+                out.push_back('\t');
             first = false;
             std::snprintf(buf, sizeof buf, "%.*f", precision, td.values[r][c]);
             out += buf;
@@ -3177,23 +3065,19 @@ void copy_rect_to_clipboard(st::Definition::TableData const &td,
 // off the current selected table so the clipboard formatting matches the
 // grid. Edit menu and Ctrl+C both route through here.
 void do_copy_selection(AppState &state) {
-    if (!state.project.has_value() || !state.current_table_data.has_value()
-        || !state.selection.enabled) {
+    if (!state.project.has_value() || !state.current_table_data.has_value() ||
+        !state.selection.enabled) {
         return;
     }
-    int         precision = 0;
-    auto const *tbl       = state.project->definition().find_table(
-        state.selected_table_id);
+    int precision = 0;
+    auto const *tbl = state.project->definition().find_table(state.selected_table_id);
     if (tbl != nullptr) {
-        auto const *scal =
-            state.project->definition().find_scaling(tbl->scaling);
+        auto const *scal = state.project->definition().find_scaling(tbl->scaling);
         if (scal != nullptr) {
             precision = scal->precision;
         }
     }
-    copy_rect_to_clipboard(*state.current_table_data,
-                           state.selection.as_rect(),
-                           precision);
+    copy_rect_to_clipboard(*state.current_table_data, state.selection.as_rect(), precision);
 }
 
 // Parse a TSV-ish payload (Excel/Sheets clipboard format) into a 2D
@@ -3205,8 +3089,7 @@ std::vector<std::vector<double>> parse_tsv(std::string_view text) {
     std::size_t i = 0;
     while (i < text.size()) {
         std::size_t line_end = i;
-        while (line_end < text.size()
-               && text[line_end] != '\n' && text[line_end] != '\r') {
+        while (line_end < text.size() && text[line_end] != '\n' && text[line_end] != '\r') {
             ++line_end;
         }
         std::string_view line{text.data() + i, line_end - i};
@@ -3214,34 +3097,34 @@ std::vector<std::vector<double>> parse_tsv(std::string_view text) {
         std::size_t cs = 0;
         while (cs <= line.size()) {
             std::size_t ce = cs;
-            while (ce < line.size() && line[ce] != '\t') ++ce;
+            while (ce < line.size() && line[ce] != '\t')
+                ++ce;
             std::string_view cell{line.data() + cs, ce - cs};
             // Trim whitespace at both ends.
-            while (!cell.empty()
-                   && std::isspace(static_cast<unsigned char>(cell.front()))) {
+            while (!cell.empty() && std::isspace(static_cast<unsigned char>(cell.front()))) {
                 cell.remove_prefix(1);
             }
-            while (!cell.empty()
-                   && std::isspace(static_cast<unsigned char>(cell.back()))) {
+            while (!cell.empty() && std::isspace(static_cast<unsigned char>(cell.back()))) {
                 cell.remove_suffix(1);
             }
             double v = 0.0;
             if (!cell.empty()) {
                 std::string tmp{cell};
-                (void) std::sscanf(tmp.c_str(), "%lf", &v);
+                (void)std::sscanf(tmp.c_str(), "%lf", &v);
                 // sscanf failure leaves v at 0; tolerate so a stray
                 // empty cell doesn't fail the whole paste.
             }
             row.push_back(v);
-            if (ce >= line.size()) break;
+            if (ce >= line.size())
+                break;
             cs = ce + 1;
         }
-        if (!row.empty()) grid.push_back(std::move(row));
+        if (!row.empty())
+            grid.push_back(std::move(row));
         // Advance past the newline (handle both CRLF and LF).
         if (line_end < text.size()) {
-            if (text[line_end] == '\r'
-                && line_end + 1 < text.size()
-                && text[line_end + 1] == '\n') {
+            if (text[line_end] == '\r' && line_end + 1 < text.size() &&
+                text[line_end + 1] == '\n') {
                 line_end += 2;
             } else {
                 line_end += 1;
@@ -3257,8 +3140,10 @@ std::vector<std::vector<double>> parse_tsv(std::string_view text) {
 // Empty needle matches everything (so an empty filter shows the full
 // list). ASCII-only — calibration table names use ASCII identifiers.
 bool icontains(std::string_view hay, std::string_view needle) noexcept {
-    if (needle.empty()) return true;
-    if (hay.size() < needle.size()) return false;
+    if (needle.empty())
+        return true;
+    if (hay.size() < needle.size())
+        return false;
     auto const eq = [](unsigned char a, unsigned char b) {
         return std::tolower(a) == std::tolower(b);
     };
@@ -3271,15 +3156,15 @@ bool icontains(std::string_view hay, std::string_view needle) noexcept {
                 break;
             }
         }
-        if (match) return true;
+        if (match)
+            return true;
     }
     return false;
 }
 
 // Probe a few candidate paths and load the first one that exists. Returns
 // nullptr if none was loadable, in which case ImGui's default font is used.
-ImFont *load_first_existing(std::initializer_list<char const *> candidates,
-                            float                               size_px) {
+ImFont *load_first_existing(std::initializer_list<char const *> candidates, float size_px) {
     auto &io = ImGui::GetIO();
     for (auto const *path : candidates) {
         if (path == nullptr) {
@@ -3301,22 +3186,24 @@ Fonts load_fonts() {
     // UI font — sans for menus, panels, labels. Tries Inter from a bundled
     // assets/ dir first (drop in to get the polished look), then a sane
     // system font per platform, finally falls back to ImGui's default.
-    f.ui = load_first_existing({
-                                   "assets/fonts/Inter-Regular.ttf",
-                                   "C:/Windows/Fonts/segoeui.ttf",
-                                   "/System/Library/Fonts/Helvetica.ttc",
-                                   "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                               },
-                               15.0f);
+    f.ui = load_first_existing(
+        {
+            "assets/fonts/Inter-Regular.ttf",
+            "C:/Windows/Fonts/segoeui.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        },
+        15.0f);
 
     // Mono — for grids, hex dumps, log output where alignment matters.
-    f.mono = load_first_existing({
-                                     "assets/fonts/JetBrainsMono-Regular.ttf",
-                                     "C:/Windows/Fonts/consola.ttf",
-                                     "/System/Library/Fonts/Menlo.ttc",
-                                     "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-                                 },
-                                 14.0f);
+    f.mono = load_first_existing(
+        {
+            "assets/fonts/JetBrainsMono-Regular.ttf",
+            "C:/Windows/Fonts/consola.ttf",
+            "/System/Library/Fonts/Menlo.ttc",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        },
+        14.0f);
 
     if (f.ui == nullptr) {
         ImGui::GetIO().Fonts->AddFontDefault();
@@ -3331,27 +3218,27 @@ Fonts load_fonts() {
 // differs; pulling these out keeps apply_theme() short and avoids
 // re-stating the layout twice.
 void apply_style_shape(ImGuiStyle &s) {
-    s.WindowPadding        = ImVec2(10.0f, 10.0f);
-    s.FramePadding         = ImVec2(8.0f, 5.0f);
-    s.CellPadding          = ImVec2(6.0f, 4.0f);
-    s.ItemSpacing          = ImVec2(8.0f, 6.0f);
-    s.ItemInnerSpacing     = ImVec2(6.0f, 6.0f);
-    s.IndentSpacing        = 20.0f;
-    s.ScrollbarSize        = 14.0f;
-    s.GrabMinSize          = 12.0f;
-    s.WindowBorderSize     = 1.0f;
-    s.ChildBorderSize      = 1.0f;
-    s.PopupBorderSize      = 1.0f;
-    s.FrameBorderSize      = 0.0f;
-    s.TabBorderSize        = 0.0f;
-    s.WindowRounding       = 4.0f;
-    s.ChildRounding        = 4.0f;
-    s.FrameRounding        = 3.0f;
-    s.PopupRounding        = 4.0f;
-    s.GrabRounding         = 3.0f;
-    s.TabRounding          = 3.0f;
-    s.ScrollbarRounding    = 8.0f;
-    s.WindowTitleAlign     = ImVec2(0.0f, 0.5f);
+    s.WindowPadding = ImVec2(10.0f, 10.0f);
+    s.FramePadding = ImVec2(8.0f, 5.0f);
+    s.CellPadding = ImVec2(6.0f, 4.0f);
+    s.ItemSpacing = ImVec2(8.0f, 6.0f);
+    s.ItemInnerSpacing = ImVec2(6.0f, 6.0f);
+    s.IndentSpacing = 20.0f;
+    s.ScrollbarSize = 14.0f;
+    s.GrabMinSize = 12.0f;
+    s.WindowBorderSize = 1.0f;
+    s.ChildBorderSize = 1.0f;
+    s.PopupBorderSize = 1.0f;
+    s.FrameBorderSize = 0.0f;
+    s.TabBorderSize = 0.0f;
+    s.WindowRounding = 4.0f;
+    s.ChildRounding = 4.0f;
+    s.FrameRounding = 3.0f;
+    s.PopupRounding = 4.0f;
+    s.GrabRounding = 3.0f;
+    s.TabRounding = 3.0f;
+    s.ScrollbarRounding = 8.0f;
+    s.WindowTitleAlign = ImVec2(0.0f, 0.5f);
     s.DockingSeparatorSize = 1.0f;
 }
 
@@ -3359,72 +3246,72 @@ void apply_palette_dark(ImGuiStyle &s) {
     auto const [accent, accent_hover, accent_active] = accent_for(Theme::Dark);
 
     auto &c = s.Colors;
-    c[ImGuiCol_WindowBg]              = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
-    c[ImGuiCol_ChildBg]               = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
-    c[ImGuiCol_PopupBg]               = ImVec4(0.13f, 0.14f, 0.16f, 0.98f);
-    c[ImGuiCol_MenuBarBg]             = ImVec4(0.13f, 0.14f, 0.16f, 1.00f);
-    c[ImGuiCol_Border]                = ImVec4(0.23f, 0.25f, 0.29f, 1.00f);
-    c[ImGuiCol_BorderShadow]          = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    c[ImGuiCol_WindowBg] = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
+    c[ImGuiCol_ChildBg] = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
+    c[ImGuiCol_PopupBg] = ImVec4(0.13f, 0.14f, 0.16f, 0.98f);
+    c[ImGuiCol_MenuBarBg] = ImVec4(0.13f, 0.14f, 0.16f, 1.00f);
+    c[ImGuiCol_Border] = ImVec4(0.23f, 0.25f, 0.29f, 1.00f);
+    c[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
 
-    c[ImGuiCol_Text]                  = ImVec4(0.90f, 0.92f, 0.95f, 1.00f);
-    c[ImGuiCol_TextDisabled]          = ImVec4(0.50f, 0.53f, 0.58f, 1.00f);
-    c[ImGuiCol_TextSelectedBg]        = ImVec4(0.28f, 0.45f, 0.71f, 0.45f);
+    c[ImGuiCol_Text] = ImVec4(0.90f, 0.92f, 0.95f, 1.00f);
+    c[ImGuiCol_TextDisabled] = ImVec4(0.50f, 0.53f, 0.58f, 1.00f);
+    c[ImGuiCol_TextSelectedBg] = ImVec4(0.28f, 0.45f, 0.71f, 0.45f);
 
-    c[ImGuiCol_FrameBg]               = ImVec4(0.17f, 0.18f, 0.21f, 1.00f);
-    c[ImGuiCol_FrameBgHovered]        = ImVec4(0.22f, 0.24f, 0.28f, 1.00f);
-    c[ImGuiCol_FrameBgActive]         = ImVec4(0.27f, 0.30f, 0.35f, 1.00f);
+    c[ImGuiCol_FrameBg] = ImVec4(0.17f, 0.18f, 0.21f, 1.00f);
+    c[ImGuiCol_FrameBgHovered] = ImVec4(0.22f, 0.24f, 0.28f, 1.00f);
+    c[ImGuiCol_FrameBgActive] = ImVec4(0.27f, 0.30f, 0.35f, 1.00f);
 
-    c[ImGuiCol_TitleBg]               = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
-    c[ImGuiCol_TitleBgActive]         = ImVec4(0.13f, 0.14f, 0.17f, 1.00f);
-    c[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.08f, 0.09f, 0.11f, 1.00f);
+    c[ImGuiCol_TitleBg] = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
+    c[ImGuiCol_TitleBgActive] = ImVec4(0.13f, 0.14f, 0.17f, 1.00f);
+    c[ImGuiCol_TitleBgCollapsed] = ImVec4(0.08f, 0.09f, 0.11f, 1.00f);
 
-    c[ImGuiCol_ScrollbarBg]           = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
-    c[ImGuiCol_ScrollbarGrab]         = ImVec4(0.24f, 0.26f, 0.30f, 1.00f);
-    c[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(0.31f, 0.34f, 0.39f, 1.00f);
-    c[ImGuiCol_ScrollbarGrabActive]   = ImVec4(0.38f, 0.42f, 0.49f, 1.00f);
+    c[ImGuiCol_ScrollbarBg] = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
+    c[ImGuiCol_ScrollbarGrab] = ImVec4(0.24f, 0.26f, 0.30f, 1.00f);
+    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.31f, 0.34f, 0.39f, 1.00f);
+    c[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.38f, 0.42f, 0.49f, 1.00f);
 
-    c[ImGuiCol_CheckMark]             = accent_active;
-    c[ImGuiCol_SliderGrab]            = accent;
-    c[ImGuiCol_SliderGrabActive]      = accent_active;
+    c[ImGuiCol_CheckMark] = accent_active;
+    c[ImGuiCol_SliderGrab] = accent;
+    c[ImGuiCol_SliderGrabActive] = accent_active;
 
-    c[ImGuiCol_Button]                = ImVec4(0.18f, 0.20f, 0.24f, 1.00f);
-    c[ImGuiCol_ButtonHovered]         = ImVec4(0.24f, 0.26f, 0.32f, 1.00f);
-    c[ImGuiCol_ButtonActive]          = accent;
-    c[ImGuiCol_Header]                = ImVec4(0.18f, 0.20f, 0.24f, 1.00f);
-    c[ImGuiCol_HeaderHovered]         = ImVec4(0.24f, 0.26f, 0.32f, 1.00f);
-    c[ImGuiCol_HeaderActive]          = accent;
-    c[ImGuiCol_Separator]             = ImVec4(0.23f, 0.25f, 0.29f, 1.00f);
-    c[ImGuiCol_SeparatorHovered]      = accent_hover;
-    c[ImGuiCol_SeparatorActive]       = accent_active;
-    c[ImGuiCol_ResizeGrip]            = ImVec4(0.23f, 0.25f, 0.29f, 1.00f);
-    c[ImGuiCol_ResizeGripHovered]     = accent_hover;
-    c[ImGuiCol_ResizeGripActive]      = accent_active;
+    c[ImGuiCol_Button] = ImVec4(0.18f, 0.20f, 0.24f, 1.00f);
+    c[ImGuiCol_ButtonHovered] = ImVec4(0.24f, 0.26f, 0.32f, 1.00f);
+    c[ImGuiCol_ButtonActive] = accent;
+    c[ImGuiCol_Header] = ImVec4(0.18f, 0.20f, 0.24f, 1.00f);
+    c[ImGuiCol_HeaderHovered] = ImVec4(0.24f, 0.26f, 0.32f, 1.00f);
+    c[ImGuiCol_HeaderActive] = accent;
+    c[ImGuiCol_Separator] = ImVec4(0.23f, 0.25f, 0.29f, 1.00f);
+    c[ImGuiCol_SeparatorHovered] = accent_hover;
+    c[ImGuiCol_SeparatorActive] = accent_active;
+    c[ImGuiCol_ResizeGrip] = ImVec4(0.23f, 0.25f, 0.29f, 1.00f);
+    c[ImGuiCol_ResizeGripHovered] = accent_hover;
+    c[ImGuiCol_ResizeGripActive] = accent_active;
 
-    c[ImGuiCol_Tab]                   = ImVec4(0.13f, 0.14f, 0.17f, 1.00f);
-    c[ImGuiCol_TabHovered]            = accent_hover;
-    c[ImGuiCol_TabSelected]           = ImVec4(0.17f, 0.19f, 0.23f, 1.00f);
-    c[ImGuiCol_TabSelectedOverline]   = accent;
-    c[ImGuiCol_TabDimmed]             = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
-    c[ImGuiCol_TabDimmedSelected]     = ImVec4(0.13f, 0.14f, 0.17f, 1.00f);
+    c[ImGuiCol_Tab] = ImVec4(0.13f, 0.14f, 0.17f, 1.00f);
+    c[ImGuiCol_TabHovered] = accent_hover;
+    c[ImGuiCol_TabSelected] = ImVec4(0.17f, 0.19f, 0.23f, 1.00f);
+    c[ImGuiCol_TabSelectedOverline] = accent;
+    c[ImGuiCol_TabDimmed] = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
+    c[ImGuiCol_TabDimmedSelected] = ImVec4(0.13f, 0.14f, 0.17f, 1.00f);
 
-    c[ImGuiCol_DockingPreview]        = ImVec4(accent.x, accent.y, accent.z, 0.70f);
-    c[ImGuiCol_DockingEmptyBg]        = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
+    c[ImGuiCol_DockingPreview] = ImVec4(accent.x, accent.y, accent.z, 0.70f);
+    c[ImGuiCol_DockingEmptyBg] = ImVec4(0.10f, 0.11f, 0.13f, 1.00f);
 
-    c[ImGuiCol_PlotLines]             = ImVec4(0.61f, 0.61f, 0.61f, 1.00f);
-    c[ImGuiCol_PlotLinesHovered]      = accent_hover;
-    c[ImGuiCol_PlotHistogram]         = accent;
-    c[ImGuiCol_PlotHistogramHovered]  = accent_hover;
+    c[ImGuiCol_PlotLines] = ImVec4(0.61f, 0.61f, 0.61f, 1.00f);
+    c[ImGuiCol_PlotLinesHovered] = accent_hover;
+    c[ImGuiCol_PlotHistogram] = accent;
+    c[ImGuiCol_PlotHistogramHovered] = accent_hover;
 
-    c[ImGuiCol_TableHeaderBg]         = ImVec4(0.20f, 0.22f, 0.28f, 1.00f);
-    c[ImGuiCol_TableBorderStrong]     = ImVec4(0.23f, 0.25f, 0.29f, 1.00f);
-    c[ImGuiCol_TableBorderLight]      = ImVec4(0.17f, 0.18f, 0.21f, 1.00f);
-    c[ImGuiCol_TableRowBg]            = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    c[ImGuiCol_TableRowBgAlt]         = ImVec4(1.00f, 1.00f, 1.00f, 0.03f);
+    c[ImGuiCol_TableHeaderBg] = ImVec4(0.20f, 0.22f, 0.28f, 1.00f);
+    c[ImGuiCol_TableBorderStrong] = ImVec4(0.23f, 0.25f, 0.29f, 1.00f);
+    c[ImGuiCol_TableBorderLight] = ImVec4(0.17f, 0.18f, 0.21f, 1.00f);
+    c[ImGuiCol_TableRowBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    c[ImGuiCol_TableRowBgAlt] = ImVec4(1.00f, 1.00f, 1.00f, 0.03f);
 
-    c[ImGuiCol_NavCursor]             = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+    c[ImGuiCol_NavCursor] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
     c[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
-    c[ImGuiCol_NavWindowingDimBg]     = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
-    c[ImGuiCol_ModalWindowDimBg]      = ImVec4(0.80f, 0.80f, 0.80f, 0.35f);
+    c[ImGuiCol_NavWindowingDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.35f);
 }
 
 void apply_palette_light(ImGuiStyle &s) {
@@ -3435,72 +3322,72 @@ void apply_palette_light(ImGuiStyle &s) {
     auto const [accent, accent_hover, accent_active] = accent_for(Theme::Light);
 
     auto &c = s.Colors;
-    c[ImGuiCol_WindowBg]              = ImVec4(0.96f, 0.97f, 0.98f, 1.00f);
-    c[ImGuiCol_ChildBg]               = ImVec4(0.96f, 0.97f, 0.98f, 1.00f);
-    c[ImGuiCol_PopupBg]               = ImVec4(0.93f, 0.94f, 0.96f, 0.98f);
-    c[ImGuiCol_MenuBarBg]             = ImVec4(0.91f, 0.92f, 0.94f, 1.00f);
-    c[ImGuiCol_Border]                = ImVec4(0.78f, 0.80f, 0.83f, 1.00f);
-    c[ImGuiCol_BorderShadow]          = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    c[ImGuiCol_WindowBg] = ImVec4(0.96f, 0.97f, 0.98f, 1.00f);
+    c[ImGuiCol_ChildBg] = ImVec4(0.96f, 0.97f, 0.98f, 1.00f);
+    c[ImGuiCol_PopupBg] = ImVec4(0.93f, 0.94f, 0.96f, 0.98f);
+    c[ImGuiCol_MenuBarBg] = ImVec4(0.91f, 0.92f, 0.94f, 1.00f);
+    c[ImGuiCol_Border] = ImVec4(0.78f, 0.80f, 0.83f, 1.00f);
+    c[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
 
-    c[ImGuiCol_Text]                  = ImVec4(0.13f, 0.15f, 0.18f, 1.00f);
-    c[ImGuiCol_TextDisabled]          = ImVec4(0.55f, 0.58f, 0.62f, 1.00f);
-    c[ImGuiCol_TextSelectedBg]        = ImVec4(0.42f, 0.62f, 0.83f, 0.45f);
+    c[ImGuiCol_Text] = ImVec4(0.13f, 0.15f, 0.18f, 1.00f);
+    c[ImGuiCol_TextDisabled] = ImVec4(0.55f, 0.58f, 0.62f, 1.00f);
+    c[ImGuiCol_TextSelectedBg] = ImVec4(0.42f, 0.62f, 0.83f, 0.45f);
 
-    c[ImGuiCol_FrameBg]               = ImVec4(0.88f, 0.90f, 0.93f, 1.00f);
-    c[ImGuiCol_FrameBgHovered]        = ImVec4(0.83f, 0.86f, 0.90f, 1.00f);
-    c[ImGuiCol_FrameBgActive]         = ImVec4(0.78f, 0.81f, 0.86f, 1.00f);
+    c[ImGuiCol_FrameBg] = ImVec4(0.88f, 0.90f, 0.93f, 1.00f);
+    c[ImGuiCol_FrameBgHovered] = ImVec4(0.83f, 0.86f, 0.90f, 1.00f);
+    c[ImGuiCol_FrameBgActive] = ImVec4(0.78f, 0.81f, 0.86f, 1.00f);
 
-    c[ImGuiCol_TitleBg]               = ImVec4(0.91f, 0.92f, 0.94f, 1.00f);
-    c[ImGuiCol_TitleBgActive]         = ImVec4(0.86f, 0.88f, 0.91f, 1.00f);
-    c[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.94f, 0.95f, 0.96f, 1.00f);
+    c[ImGuiCol_TitleBg] = ImVec4(0.91f, 0.92f, 0.94f, 1.00f);
+    c[ImGuiCol_TitleBgActive] = ImVec4(0.86f, 0.88f, 0.91f, 1.00f);
+    c[ImGuiCol_TitleBgCollapsed] = ImVec4(0.94f, 0.95f, 0.96f, 1.00f);
 
-    c[ImGuiCol_ScrollbarBg]           = ImVec4(0.94f, 0.95f, 0.96f, 1.00f);
-    c[ImGuiCol_ScrollbarGrab]         = ImVec4(0.74f, 0.76f, 0.80f, 1.00f);
-    c[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(0.66f, 0.69f, 0.73f, 1.00f);
-    c[ImGuiCol_ScrollbarGrabActive]   = ImVec4(0.58f, 0.62f, 0.67f, 1.00f);
+    c[ImGuiCol_ScrollbarBg] = ImVec4(0.94f, 0.95f, 0.96f, 1.00f);
+    c[ImGuiCol_ScrollbarGrab] = ImVec4(0.74f, 0.76f, 0.80f, 1.00f);
+    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.66f, 0.69f, 0.73f, 1.00f);
+    c[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.58f, 0.62f, 0.67f, 1.00f);
 
-    c[ImGuiCol_CheckMark]             = accent_active;
-    c[ImGuiCol_SliderGrab]            = accent;
-    c[ImGuiCol_SliderGrabActive]      = accent_active;
+    c[ImGuiCol_CheckMark] = accent_active;
+    c[ImGuiCol_SliderGrab] = accent;
+    c[ImGuiCol_SliderGrabActive] = accent_active;
 
-    c[ImGuiCol_Button]                = ImVec4(0.88f, 0.90f, 0.93f, 1.00f);
-    c[ImGuiCol_ButtonHovered]         = ImVec4(0.83f, 0.86f, 0.90f, 1.00f);
-    c[ImGuiCol_ButtonActive]          = accent;
-    c[ImGuiCol_Header]                = ImVec4(0.88f, 0.90f, 0.93f, 1.00f);
-    c[ImGuiCol_HeaderHovered]         = ImVec4(0.83f, 0.86f, 0.90f, 1.00f);
-    c[ImGuiCol_HeaderActive]          = accent;
-    c[ImGuiCol_Separator]             = ImVec4(0.78f, 0.80f, 0.83f, 1.00f);
-    c[ImGuiCol_SeparatorHovered]      = accent_hover;
-    c[ImGuiCol_SeparatorActive]       = accent_active;
-    c[ImGuiCol_ResizeGrip]            = ImVec4(0.78f, 0.80f, 0.83f, 1.00f);
-    c[ImGuiCol_ResizeGripHovered]     = accent_hover;
-    c[ImGuiCol_ResizeGripActive]      = accent_active;
+    c[ImGuiCol_Button] = ImVec4(0.88f, 0.90f, 0.93f, 1.00f);
+    c[ImGuiCol_ButtonHovered] = ImVec4(0.83f, 0.86f, 0.90f, 1.00f);
+    c[ImGuiCol_ButtonActive] = accent;
+    c[ImGuiCol_Header] = ImVec4(0.88f, 0.90f, 0.93f, 1.00f);
+    c[ImGuiCol_HeaderHovered] = ImVec4(0.83f, 0.86f, 0.90f, 1.00f);
+    c[ImGuiCol_HeaderActive] = accent;
+    c[ImGuiCol_Separator] = ImVec4(0.78f, 0.80f, 0.83f, 1.00f);
+    c[ImGuiCol_SeparatorHovered] = accent_hover;
+    c[ImGuiCol_SeparatorActive] = accent_active;
+    c[ImGuiCol_ResizeGrip] = ImVec4(0.78f, 0.80f, 0.83f, 1.00f);
+    c[ImGuiCol_ResizeGripHovered] = accent_hover;
+    c[ImGuiCol_ResizeGripActive] = accent_active;
 
-    c[ImGuiCol_Tab]                   = ImVec4(0.91f, 0.92f, 0.94f, 1.00f);
-    c[ImGuiCol_TabHovered]            = ImVec4(0.83f, 0.86f, 0.90f, 1.00f);
-    c[ImGuiCol_TabSelected]           = ImVec4(0.86f, 0.88f, 0.91f, 1.00f);
-    c[ImGuiCol_TabSelectedOverline]   = accent;
-    c[ImGuiCol_TabDimmed]             = ImVec4(0.91f, 0.92f, 0.94f, 1.00f);
-    c[ImGuiCol_TabDimmedSelected]     = ImVec4(0.86f, 0.88f, 0.91f, 1.00f);
+    c[ImGuiCol_Tab] = ImVec4(0.91f, 0.92f, 0.94f, 1.00f);
+    c[ImGuiCol_TabHovered] = ImVec4(0.83f, 0.86f, 0.90f, 1.00f);
+    c[ImGuiCol_TabSelected] = ImVec4(0.86f, 0.88f, 0.91f, 1.00f);
+    c[ImGuiCol_TabSelectedOverline] = accent;
+    c[ImGuiCol_TabDimmed] = ImVec4(0.91f, 0.92f, 0.94f, 1.00f);
+    c[ImGuiCol_TabDimmedSelected] = ImVec4(0.86f, 0.88f, 0.91f, 1.00f);
 
-    c[ImGuiCol_DockingPreview]        = ImVec4(accent.x, accent.y, accent.z, 0.70f);
-    c[ImGuiCol_DockingEmptyBg]        = ImVec4(0.96f, 0.97f, 0.98f, 1.00f);
+    c[ImGuiCol_DockingPreview] = ImVec4(accent.x, accent.y, accent.z, 0.70f);
+    c[ImGuiCol_DockingEmptyBg] = ImVec4(0.96f, 0.97f, 0.98f, 1.00f);
 
-    c[ImGuiCol_PlotLines]             = ImVec4(0.40f, 0.42f, 0.46f, 1.00f);
-    c[ImGuiCol_PlotLinesHovered]      = accent_hover;
-    c[ImGuiCol_PlotHistogram]         = accent;
-    c[ImGuiCol_PlotHistogramHovered]  = accent_hover;
+    c[ImGuiCol_PlotLines] = ImVec4(0.40f, 0.42f, 0.46f, 1.00f);
+    c[ImGuiCol_PlotLinesHovered] = accent_hover;
+    c[ImGuiCol_PlotHistogram] = accent;
+    c[ImGuiCol_PlotHistogramHovered] = accent_hover;
 
-    c[ImGuiCol_TableHeaderBg]         = ImVec4(0.84f, 0.87f, 0.92f, 1.00f);
-    c[ImGuiCol_TableBorderStrong]     = ImVec4(0.78f, 0.80f, 0.83f, 1.00f);
-    c[ImGuiCol_TableBorderLight]      = ImVec4(0.88f, 0.90f, 0.93f, 1.00f);
-    c[ImGuiCol_TableRowBg]            = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    c[ImGuiCol_TableRowBgAlt]         = ImVec4(0.00f, 0.00f, 0.00f, 0.04f);
+    c[ImGuiCol_TableHeaderBg] = ImVec4(0.84f, 0.87f, 0.92f, 1.00f);
+    c[ImGuiCol_TableBorderStrong] = ImVec4(0.78f, 0.80f, 0.83f, 1.00f);
+    c[ImGuiCol_TableBorderLight] = ImVec4(0.88f, 0.90f, 0.93f, 1.00f);
+    c[ImGuiCol_TableRowBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    c[ImGuiCol_TableRowBgAlt] = ImVec4(0.00f, 0.00f, 0.00f, 0.04f);
 
-    c[ImGuiCol_NavCursor]             = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+    c[ImGuiCol_NavCursor] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
     c[ImGuiCol_NavWindowingHighlight] = ImVec4(0.20f, 0.20f, 0.20f, 0.70f);
-    c[ImGuiCol_NavWindowingDimBg]     = ImVec4(0.20f, 0.20f, 0.20f, 0.20f);
-    c[ImGuiCol_ModalWindowDimBg]      = ImVec4(0.20f, 0.20f, 0.20f, 0.35f);
+    c[ImGuiCol_NavWindowingDimBg] = ImVec4(0.20f, 0.20f, 0.20f, 0.20f);
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.20f, 0.20f, 0.20f, 0.35f);
 }
 
 // NavCursor was previously `accent`, which made it render as a bright
@@ -3517,8 +3404,10 @@ void apply_palette_light(ImGuiStyle &s) {
 void apply_theme(Theme t) {
     auto &s = ImGui::GetStyle();
     apply_style_shape(s);
-    if (t == Theme::Light) apply_palette_light(s);
-    else                   apply_palette_dark(s);
+    if (t == Theme::Light)
+        apply_palette_light(s);
+    else
+        apply_palette_dark(s);
     if ((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0) {
         s.Colors[ImGuiCol_WindowBg].w = 1.0f;
     }
@@ -3532,20 +3421,17 @@ constexpr float kStatusBarHeight = 26.0f;
 void render_dockspace_host() {
     auto const *vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->WorkPos);
-    ImGui::SetNextWindowSize(
-        ImVec2(vp->WorkSize.x, vp->WorkSize.y - kStatusBarHeight));
+    ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x, vp->WorkSize.y - kStatusBarHeight));
     ImGui::SetNextWindowViewport(vp->ID);
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
 
-    auto const flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse
-                     | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove
-                     | ImGuiWindowFlags_NoBringToFrontOnFocus
-                     | ImGuiWindowFlags_NoNavFocus
-                     | ImGuiWindowFlags_NoBackground
-                     | ImGuiWindowFlags_NoDocking;
+    auto const flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
+                       ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                       ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
+                       ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDocking;
     ImGui::Begin("##dockspace_host", nullptr, flags);
     ImGui::PopStyleVar(3);
 
@@ -3558,30 +3444,29 @@ void render_dockspace_host() {
         ImGui::DockBuilderAddNode(id, ImGuiDockNodeFlags_DockSpace);
         ImGui::DockBuilderSetNodeSize(id, vp->WorkSize);
 
-        ImGuiID left  = 0;
+        ImGuiID left = 0;
         ImGuiID middle = 0;
         ImGui::DockBuilderSplitNode(id, ImGuiDir_Left, 0.22f, &left, &middle);
         ImGuiID right = 0;
         ImGuiID center = 0;
         ImGui::DockBuilderSplitNode(middle, ImGuiDir_Right, 0.25f, &right, &center);
 
-        ImGui::DockBuilderDockWindow("Tables",  left);
-        ImGui::DockBuilderDockWindow("Table",   center);
-        ImGui::DockBuilderDockWindow("Stats",   right);
+        ImGui::DockBuilderDockWindow("Tables", left);
+        ImGui::DockBuilderDockWindow("Table", center);
+        ImGui::DockBuilderDockWindow("Stats", right);
         ImGui::DockBuilderDockWindow("History", right);
 
         ImGui::DockBuilderFinish(id);
     }
 
-    ImGui::DockSpace(id, ImVec2(0.0f, 0.0f),
-                     ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::DockSpace(id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
     ImGui::End();
 }
 
 void render_menubar(AppState &state) {
     bool const has_project = state.project.has_value();
-    bool const can_undo    = has_project && state.project->history().can_undo();
-    bool const can_redo    = has_project && state.project->history().can_redo();
+    bool const can_undo = has_project && state.project->history().can_undo();
+    bool const can_redo = has_project && state.project->history().can_redo();
 
     // Tooltip on a menu item even when it's disabled — so the user
     // understands WHY it's grayed out rather than just seeing the
@@ -3620,8 +3505,7 @@ void render_menubar(AppState &state) {
             // and same parser, so the two surfaces round-trip with each
             // other.
             bool const can_csv = has_project && !state.selected_table_id.empty();
-            if (ImGui::MenuItem("Import CSV into table...", nullptr, false,
-                                 can_csv)) {
+            if (ImGui::MenuItem("Import CSV into table...", nullptr, false, can_csv)) {
                 import_csv_into_current_table_dialog(state);
             }
             if (!can_csv) {
@@ -3629,15 +3513,13 @@ void render_menubar(AppState &state) {
                              "Imports a row,col,value CSV as a single bulk edit\n"
                              "(undoable via Ctrl+Z).");
             }
-            if (ImGui::MenuItem("Export table as CSV...", nullptr, false,
-                                 can_csv)) {
+            if (ImGui::MenuItem("Export table as CSV...", nullptr, false, can_csv)) {
                 export_current_table_csv_dialog(state, /*diff_only=*/false);
             }
             if (!can_csv) {
                 disabled_tip("Select a table first.");
             }
-            if (ImGui::MenuItem("Export table edits as CSV...", nullptr, false,
-                                 can_csv)) {
+            if (ImGui::MenuItem("Export table edits as CSV...", nullptr, false, can_csv)) {
                 export_current_table_csv_dialog(state, /*diff_only=*/true);
             }
             if (!can_csv) {
@@ -3681,8 +3563,7 @@ void render_menubar(AppState &state) {
                              "clipboard at the cursor.");
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Reset to source", nullptr, false,
-                                 has_selection)) {
+            if (ImGui::MenuItem("Reset to source", nullptr, false, has_selection)) {
                 reset_selection_to_source(state);
             }
             if (has_project && !has_selection) {
@@ -3690,14 +3571,12 @@ void render_menubar(AppState &state) {
                              "values (undoable).");
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Autotune MAF...", nullptr, false,
-                                 has_project)) {
+            if (ImGui::MenuItem("Autotune MAF...", nullptr, false, has_project)) {
                 // Default the target table to whatever the user has open
                 // — saves a step when they're already looking at the MAF
                 // scaling. They can still type a different id.
-                std::snprintf(state.maf_at_table_id,
-                               sizeof state.maf_at_table_id, "%s",
-                               state.selected_table_id.c_str());
+                std::snprintf(state.maf_at_table_id, sizeof state.maf_at_table_id, "%s",
+                              state.selected_table_id.c_str());
                 state.maf_at_status_msg.clear();
                 state.maf_at_result.reset();
                 state.maf_at_lints.clear();
@@ -3710,11 +3589,9 @@ void render_menubar(AppState &state) {
                              "a CSV datalog and applies the proposal as a\n"
                              "single undoable edit.");
             }
-            if (ImGui::MenuItem("Autotune knock pull...", nullptr, false,
-                                 has_project)) {
-                std::snprintf(state.kp_at_table_id,
-                               sizeof state.kp_at_table_id, "%s",
-                               state.selected_table_id.c_str());
+            if (ImGui::MenuItem("Autotune knock pull...", nullptr, false, has_project)) {
+                std::snprintf(state.kp_at_table_id, sizeof state.kp_at_table_id, "%s",
+                              state.selected_table_id.c_str());
                 state.kp_at_status_msg.clear();
                 state.kp_at_result.reset();
                 state.kp_at_lints.clear();
@@ -3731,8 +3608,7 @@ void render_menubar(AppState &state) {
             }
             ImGui::EndMenu();
         }
-        if (!has_project
-            && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        if (!has_project && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             // Edit menu itself is disabled (BeginMenu second arg = false).
             ImGui::SetTooltip("No project open — open one to enable editing.");
         }
@@ -3749,49 +3625,43 @@ void render_menubar(AppState &state) {
             // Panel visibility. Sidebar + Table are always-on (primary
             // navigation); Stats and DTCs are secondary panels the user
             // may want hidden when working in the table grid full-screen.
-            ImGui::MenuItem("Stats panel",   nullptr, &state.show_stats_panel);
-            ImGui::MenuItem("DTCs panel",    nullptr, &state.show_dtcs_panel);
+            ImGui::MenuItem("Stats panel", nullptr, &state.show_stats_panel);
+            ImGui::MenuItem("DTCs panel", nullptr, &state.show_dtcs_panel);
             ImGui::MenuItem("History panel", nullptr, &state.show_history_panel);
             ImGui::MenuItem("Knock dashboard (preview)", nullptr,
                             &state.show_knock_dashboard_panel);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Per-cylinder knock dashboard. Load a CSV datalog,\n"
-                    "map RPM / load / per-cyl FLKC + FBKC columns,\n"
-                    "compute a windowed snapshot, view strip charts.\n"
-                    "See docs/05-improvements.md §11.");
+                ImGui::SetTooltip("Per-cylinder knock dashboard. Load a CSV datalog,\n"
+                                  "map RPM / load / per-cyl FLKC + FBKC columns,\n"
+                                  "compute a windowed snapshot, view strip charts.\n"
+                                  "See docs/05-improvements.md §11.");
             }
             ImGui::MenuItem("Adaptive history (preview)", nullptr,
                             &state.show_adaptive_history_panel);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Long-cycle LTFT / DAM / idle-adapt drift charts.\n"
-                    "Load a CSV with timestamps + per-signal columns,\n"
-                    "bucket by time (day default), view drift slope.\n"
-                    "See docs/05-improvements.md §11.");
+                ImGui::SetTooltip("Long-cycle LTFT / DAM / idle-adapt drift charts.\n"
+                                  "Load a CSV with timestamps + per-signal columns,\n"
+                                  "bucket by time (day default), view drift slope.\n"
+                                  "See docs/05-improvements.md §11.");
             }
-            ImGui::MenuItem("Cold-start analysis (preview)", nullptr,
-                            &state.show_coldstart_panel);
+            ImGui::MenuItem("Cold-start analysis (preview)", nullptr, &state.show_coldstart_panel);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Phase-classify + ECT-bin a cold-start datalog.\n"
-                    "Compares observed lambda to a user-defined target\n"
-                    "curve at each ECT bucket. See docs/05 §11.");
+                ImGui::SetTooltip("Phase-classify + ECT-bin a cold-start datalog.\n"
+                                  "Compares observed lambda to a user-defined target\n"
+                                  "curve at each ECT bucket. See docs/05 §11.");
             }
-            ImGui::MenuItem("EBCS PID assistant (preview)", nullptr,
-                            &state.show_ebcs_panel);
+            ImGui::MenuItem("EBCS PID assistant (preview)", nullptr, &state.show_ebcs_panel);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Detect tip-in events in a boost log; characterize each\n"
-                    "step response (rise / overshoot / settling); produce\n"
-                    "heuristic Kp/Ki/Kd gain-adjustment suggestions.\n"
-                    "Advisory only — verify on a dyno. See docs/05 §11.");
+                ImGui::SetTooltip("Detect tip-in events in a boost log; characterize each\n"
+                                  "step response (rise / overshoot / settling); produce\n"
+                                  "heuristic Kp/Ki/Kd gain-adjustment suggestions.\n"
+                                  "Advisory only — verify on a dyno. See docs/05 §11.");
             }
             ImGui::Separator();
             if (ImGui::BeginMenu("Theme")) {
-                bool const is_dark  = state.settings.theme == Theme::Dark;
+                bool const is_dark = state.settings.theme == Theme::Dark;
                 bool const is_light = state.settings.theme == Theme::Light;
-                if (ImGui::MenuItem("Dark",  nullptr, is_dark)  && !is_dark) {
+                if (ImGui::MenuItem("Dark", nullptr, is_dark) && !is_dark) {
                     state.settings.theme = Theme::Dark;
                     apply_theme(Theme::Dark);
                     save_settings(state.settings);
@@ -3809,27 +3679,24 @@ void render_menubar(AppState &state) {
             // discover it; the audit flagged that hiding it next to
             // the ImGui demo made it read as a developer escape hatch.
             ImGui::MenuItem("Custom features designer (preview)", nullptr,
-                             &state.show_features_designer);
+                            &state.show_features_designer);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Phase 5 node-graph editor for authoring custom\n"
-                    "features (rev limiters, flat-foot shift, etc.).\n"
-                    "Graph + IR + SH-2A codegen are implemented;\n"
-                    "wire-up to flash lands in Phase 5 patch insertion.");
+                ImGui::SetTooltip("Phase 5 node-graph editor for authoring custom\n"
+                                  "features (rev limiters, flat-foot shift, etc.).\n"
+                                  "Graph + IR + SH-2A codegen are implemented;\n"
+                                  "wire-up to flash lands in Phase 5 patch insertion.");
             }
             ImGui::Separator();
             // Dev-only escape hatch. Tucked one level deeper so the
             // ImGui example isn't a peer of the user-facing view modes.
             if (ImGui::BeginMenu("Debug")) {
-                ImGui::MenuItem("ImGui demo window", nullptr,
-                                 &state.show_imgui_demo);
+                ImGui::MenuItem("ImGui demo window", nullptr, &state.show_imgui_demo);
                 ImGui::EndMenu();
             }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help")) {
-            ImGui::Text("SubuwuTuner %.*s",
-                        static_cast<int>(st::Version::string().size()),
+            ImGui::Text("SubuwuTuner %.*s", static_cast<int>(st::Version::string().size()),
                         st::Version::string().data());
             ImGui::Separator();
             if (ImGui::MenuItem("Keyboard shortcuts...")) {
@@ -3837,17 +3704,22 @@ void render_menubar(AppState &state) {
             }
             ImGui::Separator();
             text_subtle("Getting started");
-            ImGui::BulletText("File \xE2\x86\x92 Open Project\xE2\x80\xA6 (Ctrl+O) to pick a .stune directory.");
+            ImGui::BulletText(
+                "File \xE2\x86\x92 Open Project\xE2\x80\xA6 (Ctrl+O) to pick a .stune directory.");
             ImGui::BulletText("Or pass one on the command line: subuwutuner-gui my.stune");
             ImGui::Separator();
             text_subtle("Editing");
             ImGui::BulletText("Click cells to select; Shift-click to extend.");
             ImGui::BulletText("Arrow keys move the cursor; Shift+arrows extend.");
-            ImGui::BulletText("F2 or double-click a cell to type a new value.  Enter commits, Esc cancels.");
-            ImGui::BulletText("Ctrl+Enter while editing fills every selected cell with the typed value.");
-            ImGui::BulletText("Ctrl+C / Ctrl+V copy and paste the selection as tab-separated values.");
+            ImGui::BulletText(
+                "F2 or double-click a cell to type a new value.  Enter commits, Esc cancels.");
+            ImGui::BulletText(
+                "Ctrl+Enter while editing fills every selected cell with the typed value.");
+            ImGui::BulletText(
+                "Ctrl+C / Ctrl+V copy and paste the selection as tab-separated values.");
             ImGui::BulletText("Right-click any cell for Copy / Paste / Reset to source.");
-            ImGui::BulletText("Toolbar buttons (+5%%, -5%%, Smooth, Interpolate) act on the selection.");
+            ImGui::BulletText(
+                "Toolbar buttons (+5%%, -5%%, Smooth, Interpolate) act on the selection.");
             ImGui::BulletText("Ctrl+Z / Ctrl+Shift+Z to undo / redo.  Ctrl+S to save.");
             ImGui::Separator();
             text_subtle("Navigation");
@@ -3860,7 +3732,8 @@ void render_menubar(AppState &state) {
             ImGui::Separator();
             text_subtle("Documentation");
             ImGui::BulletText("Repo:    https://github.com/BuffJesus/SubuwuTuner");
-            ImGui::BulletText("Design:  docs/00-overview.md \xE2\x80\xA6 docs/16-custom-features.md");
+            ImGui::BulletText(
+                "Design:  docs/00-overview.md \xE2\x80\xA6 docs/16-custom-features.md");
             ImGui::BulletText("License: Apache 2.0 (see LICENSE in the repo root)");
             ImGui::EndMenu();
         }
@@ -3892,9 +3765,8 @@ void render_sidebar(AppState &state) {
         state.focus_table_filter = false;
     }
     ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputTextWithHint("##table_filter", "Filter tables…  (Ctrl+F)",
-                              state.table_filter, sizeof state.table_filter,
-                              ImGuiInputTextFlags_EscapeClearsAll);
+    ImGui::InputTextWithHint("##table_filter", "Filter tables…  (Ctrl+F)", state.table_filter,
+                             sizeof state.table_filter, ImGuiInputTextFlags_EscapeClearsAll);
 
     std::string_view const filter{state.table_filter};
     // Count matches once so the active-filter header line can report
@@ -3902,24 +3774,21 @@ void render_sidebar(AppState &state) {
     // below already conveys "how many tables" at a glance.
     std::size_t matched = 0;
     for (auto const &t : def.tables()) {
-        if (filter.empty()
-            || icontains(t.name, filter) || icontains(t.id, filter)) {
+        if (filter.empty() || icontains(t.name, filter) || icontains(t.id, filter)) {
             ++matched;
         }
     }
     if (!filter.empty()) {
-        text_subtle("%zu of %zu tables", matched,
-                     def.tables().size());
+        text_subtle("%zu of %zu tables", matched, def.tables().size());
         ImGui::Separator();
     }
 
     if (!filter.empty() && matched == 0) {
         ImGui::Dummy(ImVec2(0.0f, 8.0f));
-        ImGui::TextWrapped("No tables match \"%s\".",
-                            state.table_filter);
+        ImGui::TextWrapped("No tables match \"%s\".", state.table_filter);
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
         text_subtle("Try a shorter prefix, or clear the filter "
-                     "(Esc).");
+                    "(Esc).");
         ImGui::End();
         return;
     }
@@ -3930,13 +3799,14 @@ void render_sidebar(AppState &state) {
     // uncategorized table appears (predictable, not magic-sorted).
     struct Group {
         std::string_view name;
-        std::vector<std::size_t> indices;  // into def.tables()
+        std::vector<std::size_t> indices; // into def.tables()
     };
     std::vector<Group> groups;
     groups.reserve(8);
     auto const find_or_make = [&](std::string_view cat) -> Group & {
         for (auto &g : groups) {
-            if (g.name == cat) return g;
+            if (g.name == cat)
+                return g;
         }
         groups.push_back({cat, {}});
         return groups.back();
@@ -3944,14 +3814,12 @@ void render_sidebar(AppState &state) {
     for (std::size_t i = 0; i < def.tables().size(); ++i) {
         auto const &t = def.tables()[i];
         std::string_view const cat =
-            t.category.empty() ? std::string_view{"Other"}
-                                : std::string_view{t.category};
+            t.category.empty() ? std::string_view{"Other"} : std::string_view{t.category};
         find_or_make(cat).indices.push_back(i);
     }
 
     auto const table_matches = [&](st::Table const &t) {
-        return filter.empty()
-               || icontains(t.name, filter) || icontains(t.id, filter);
+        return filter.empty() || icontains(t.name, filter) || icontains(t.id, filter);
     };
 
     auto const render_table_row = [&](st::Table const &t) {
@@ -3961,8 +3829,7 @@ void render_sidebar(AppState &state) {
         // tooltip instead.
         char const *label = t.name.empty() ? t.id.c_str() : t.name.c_str();
         ImGui::PushID(t.id.c_str());
-        if (ImGui::Selectable(label, selected,
-                              ImGuiSelectableFlags_AllowOverlap)) {
+        if (ImGui::Selectable(label, selected, ImGuiSelectableFlags_AllowOverlap)) {
             state.select_table(t.id);
         }
         // Capture Selectable hover state BEFORE drawing the badge — the
@@ -3977,17 +3844,17 @@ void render_sidebar(AppState &state) {
         if (t.engine_safety_critical || t.emissions_relevant) {
             char buf[4]{};
             std::size_t bi = 0;
-            if (t.engine_safety_critical) buf[bi++] = 'S';
-            if (t.emissions_relevant)     buf[bi++] = 'E';
+            if (t.engine_safety_critical)
+                buf[bi++] = 'S';
+            if (t.emissions_relevant)
+                buf[bi++] = 'E';
             float const w = ImGui::CalcTextSize(buf).x;
             float const right_x =
-                ImGui::GetWindowContentRegionMax().x - w
-                - ImGui::GetStyle().FramePadding.x;
+                ImGui::GetWindowContentRegionMax().x - w - ImGui::GetStyle().FramePadding.x;
             ImGui::SameLine();
             ImGui::SetCursorPosX(right_x);
-            ImVec4 const color = t.engine_safety_critical
-                ? ImVec4(1.00f, 0.86f, 0.55f, 1.0f)
-                : ImVec4(0.96f, 0.94f, 0.65f, 1.0f);
+            ImVec4 const color = t.engine_safety_critical ? ImVec4(1.00f, 0.86f, 0.55f, 1.0f)
+                                                          : ImVec4(0.96f, 0.94f, 0.65f, 1.0f);
             ImGui::TextColored(color, "%s", buf);
         }
         if (row_hovered) {
@@ -4004,11 +3871,9 @@ void render_sidebar(AppState &state) {
                 text_subtle("category: %s", t.category.c_str());
             }
             if (t.engine_safety_critical) {
-                ImGui::TextColored(ImVec4(1.00f, 0.86f, 0.55f, 1.0f),
-                                   "engine safety critical");
+                ImGui::TextColored(ImVec4(1.00f, 0.86f, 0.55f, 1.0f), "engine safety critical");
             } else if (t.emissions_relevant) {
-                ImGui::TextColored(ImVec4(0.96f, 0.94f, 0.65f, 1.0f),
-                                   "emissions-relevant");
+                ImGui::TextColored(ImVec4(0.96f, 0.94f, 0.65f, 1.0f), "emissions-relevant");
             }
             ImGui::EndTooltip();
         }
@@ -4025,17 +3890,17 @@ void render_sidebar(AppState &state) {
                 ++group_matched;
             }
         }
-        if (group_matched == 0) continue;
+        if (group_matched == 0)
+            continue;
 
         char header[96];
         if (filter.empty()) {
-            std::snprintf(header, sizeof header, "%.*s (%zu)",
-                          static_cast<int>(g.name.size()), g.name.data(),
-                          g.indices.size());
+            std::snprintf(header, sizeof header, "%.*s (%zu)", static_cast<int>(g.name.size()),
+                          g.name.data(), g.indices.size());
         } else {
             std::snprintf(header, sizeof header, "%.*s (%zu of %zu)",
-                          static_cast<int>(g.name.size()), g.name.data(),
-                          group_matched, g.indices.size());
+                          static_cast<int>(g.name.size()), g.name.data(), group_matched,
+                          g.indices.size());
         }
 
         // When filtering, force the group open so matches are always
@@ -4045,12 +3910,12 @@ void render_sidebar(AppState &state) {
             ImGui::SetNextItemOpen(true, ImGuiCond_Always);
         }
         ImGuiTreeNodeFlags const tn_flags =
-            ImGuiTreeNodeFlags_DefaultOpen
-            | ImGuiTreeNodeFlags_SpanAvailWidth;
+            ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
         if (ImGui::TreeNodeEx(header, tn_flags)) {
             for (auto idx : g.indices) {
                 auto const &t = def.tables()[idx];
-                if (!table_matches(t)) continue;
+                if (!table_matches(t))
+                    continue;
                 render_table_row(t);
             }
             ImGui::TreePop();
@@ -4060,18 +3925,18 @@ void render_sidebar(AppState &state) {
 }
 
 struct GridStats {
-    double      min{0.0};
-    double      max{0.0};
-    double      mean{0.0};
+    double min{0.0};
+    double max{0.0};
+    double mean{0.0};
     std::size_t count{0};
 };
 
 GridStats compute_stats(st::Definition::TableData const &td) {
-    GridStats   s;
-    double      lo  = std::numeric_limits<double>::infinity();
-    double      hi  = -std::numeric_limits<double>::infinity();
-    double      sum = 0.0;
-    std::size_t n   = 0;
+    GridStats s;
+    double lo = std::numeric_limits<double>::infinity();
+    double hi = -std::numeric_limits<double>::infinity();
+    double sum = 0.0;
+    std::size_t n = 0;
     for (auto const &row : td.values) {
         for (auto const v : row) {
             lo = std::min(lo, v);
@@ -4081,9 +3946,9 @@ GridStats compute_stats(st::Definition::TableData const &td) {
         }
     }
     if (n > 0) {
-        s.min   = lo;
-        s.max   = hi;
-        s.mean  = sum / static_cast<double>(n);
+        s.min = lo;
+        s.max = hi;
+        s.mean = sum / static_cast<double>(n);
         s.count = n;
     }
     return s;
@@ -4104,11 +3969,9 @@ ImU32 heatmap_color(double v, double min_v, double max_v) {
         return 0; // flat table: skip shading
     }
     double t = (v - min_v) / (max_v - min_v);
-    t        = std::clamp(t, 0.0, 1.0);
+    t = std::clamp(t, 0.0, 1.0);
 
-    auto const lerp = [](double a, double b, double f) {
-        return a + (b - a) * f;
-    };
+    auto const lerp = [](double a, double b, double f) { return a + (b - a) * f; };
     double r = 0.0;
     double g = 0.0;
     double b = 0.0;
@@ -4118,22 +3981,22 @@ ImU32 heatmap_color(double v, double min_v, double max_v) {
         r = lerp(45.0, 20.0, s);
         g = lerp(80.0, 22.0, s);
         b = lerp(140.0, 26.0, s);
-        a = lerp(70.0, 0.0, s);  // cold end max ~28%, halved from prior 55%
+        a = lerp(70.0, 0.0, s); // cold end max ~28%, halved from prior 55%
     } else {
         double const s = (t - 0.5) * 2.0;
         r = lerp(20.0, 180.0, s);
         g = lerp(22.0, 90.0, s);
         b = lerp(26.0, 50.0, s);
-        a = lerp(0.0, 140.0, s);  // warm end unchanged
+        a = lerp(0.0, 140.0, s); // warm end unchanged
     }
-    return IM_COL32(static_cast<int>(r), static_cast<int>(g),
-                    static_cast<int>(b), static_cast<int>(a));
+    return IM_COL32(static_cast<int>(r), static_cast<int>(g), static_cast<int>(b),
+                    static_cast<int>(a));
 }
 
 // ImGui table cells default to left-aligned text. For numerical grids,
 // right-alignment so decimal points line up across rows is more legible.
 void text_right_aligned(char const *text) {
-    float const w     = ImGui::CalcTextSize(text).x;
+    float const w = ImGui::CalcTextSize(text).x;
     float const avail = ImGui::GetContentRegionAvail().x;
     if (w < avail) {
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + avail - w);
@@ -4145,10 +4008,8 @@ void text_right_aligned(char const *text) {
 // caller is expected to pass a TableData whose `values` is the currently
 // selected slice (built upstream in render_table_view); this function does
 // not look at `td.slices`.
-void render_table_heatmap(st::Definition::TableData const &td,
-                          st::Table const *                tbl,
-                          st::Scaling const *              scal,
-                          GridStats const &                stats) {
+void render_table_heatmap(st::Definition::TableData const &td, st::Table const *tbl,
+                          st::Scaling const *scal, GridStats const &stats) {
     if (td.values.empty() || td.values.front().empty()) {
         ImGui::TextDisabled("(no values)");
         return;
@@ -4169,8 +4030,7 @@ void render_table_heatmap(st::Definition::TableData const &td,
     // Build tick storage at function scope — ImPlot keeps pointers, so the
     // strings must outlive EndPlot.
     auto const build_ticks = [](std::vector<double> const &axis_vals,
-                                std::vector<double>       &positions,
-                                std::vector<std::string>  &labels,
+                                std::vector<double> &positions, std::vector<std::string> &labels,
                                 std::vector<char const *> &label_ptrs) {
         positions.reserve(axis_vals.size());
         labels.reserve(axis_vals.size());
@@ -4185,18 +4045,18 @@ void render_table_heatmap(st::Definition::TableData const &td,
             label_ptrs.push_back(s.c_str());
         }
     };
-    std::vector<double>       x_pos, y_pos;
-    std::vector<std::string>  x_lbl, y_lbl;
+    std::vector<double> x_pos, y_pos;
+    std::vector<std::string> x_lbl, y_lbl;
     std::vector<char const *> x_ptrs, y_ptrs;
     build_ticks(td.axis_x, x_pos, x_lbl, x_ptrs);
     build_ticks(td.axis_y, y_pos, y_lbl, y_ptrs);
 
-    double const   min_v  = stats.min;
-    double const   max_v  = (stats.max > stats.min) ? stats.max : stats.min + 1.0;
-    int const      n_cells = static_cast<int>(rows * cols);
-    char const    *fmt    = (n_cells <= 256) ? "%.1f" : nullptr;
-    int const      prec   = scal != nullptr ? scal->precision : 1;
-    char           fmt_buf[8];
+    double const min_v = stats.min;
+    double const max_v = (stats.max > stats.min) ? stats.max : stats.min + 1.0;
+    int const n_cells = static_cast<int>(rows * cols);
+    char const *fmt = (n_cells <= 256) ? "%.1f" : nullptr;
+    int const prec = scal != nullptr ? scal->precision : 1;
+    char fmt_buf[8];
     if (fmt != nullptr) {
         std::snprintf(fmt_buf, sizeof(fmt_buf), "%%.%df", std::clamp(prec, 0, 3));
         fmt = fmt_buf;
@@ -4209,36 +4069,30 @@ void render_table_heatmap(st::Definition::TableData const &td,
 
     // Reserve room on the right for the colormap scale.
     constexpr float kScaleWidth = 64.0f;
-    ImVec2 const    avail       = ImGui::GetContentRegionAvail();
-    ImVec2 const    plot_size   = ImVec2(avail.x - kScaleWidth - 8.0f, avail.y);
+    ImVec2 const avail = ImGui::GetContentRegionAvail();
+    ImVec2 const plot_size = ImVec2(avail.x - kScaleWidth - 8.0f, avail.y);
 
     if (ImPlot::BeginPlot("##table_heatmap", plot_size,
-                          ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText
-                              | ImPlotFlags_NoTitle)) {
+                          ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText | ImPlotFlags_NoTitle)) {
         auto const x_flags = ImPlotAxisFlags_NoGridLines;
         auto const y_flags = ImPlotAxisFlags_NoGridLines | ImPlotAxisFlags_Invert;
         ImPlot::SetupAxes(
             (tbl != nullptr && tbl->axis_x.has_value()) ? tbl->axis_x->c_str() : nullptr,
-            (tbl != nullptr && tbl->axis_y.has_value()) ? tbl->axis_y->c_str() : nullptr,
-            x_flags, y_flags);
+            (tbl != nullptr && tbl->axis_y.has_value()) ? tbl->axis_y->c_str() : nullptr, x_flags,
+            y_flags);
 
         if (!x_pos.empty()) {
-            ImPlot::SetupAxisTicks(ImAxis_X1, x_pos.data(),
-                                   static_cast<int>(x_pos.size()), x_ptrs.data(),
-                                   false);
+            ImPlot::SetupAxisTicks(ImAxis_X1, x_pos.data(), static_cast<int>(x_pos.size()),
+                                   x_ptrs.data(), false);
         }
         if (!y_pos.empty()) {
-            ImPlot::SetupAxisTicks(ImAxis_Y1, y_pos.data(),
-                                   static_cast<int>(y_pos.size()), y_ptrs.data(),
-                                   false);
+            ImPlot::SetupAxisTicks(ImAxis_Y1, y_pos.data(), static_cast<int>(y_pos.size()),
+                                   y_ptrs.data(), false);
         }
 
-        ImPlot::PlotHeatmap("##h", flat.data(),
-                            static_cast<int>(rows), static_cast<int>(cols),
-                            min_v, max_v, fmt,
-                            ImPlotPoint(0, 0),
-                            ImPlotPoint(static_cast<double>(cols),
-                                        static_cast<double>(rows)));
+        ImPlot::PlotHeatmap("##h", flat.data(), static_cast<int>(rows), static_cast<int>(cols),
+                            min_v, max_v, fmt, ImPlotPoint(0, 0),
+                            ImPlotPoint(static_cast<double>(cols), static_cast<double>(rows)));
         ImPlot::EndPlot();
     }
 
@@ -4247,23 +4101,18 @@ void render_table_heatmap(st::Definition::TableData const &td,
     ImPlot::PopColormap();
 }
 
-void render_table_grid(st::Definition::TableData const &td,
-                       st::Scaling const *             scal,
-                       GridStats const &               stats,
-                       Selection &                     selection,
-                       Fonts const &                   fonts,
-                       AppState &                      state,
-                       std::vector<std::vector<bool>> const &edited_mask) {
-    int const  precision = scal != nullptr ? scal->precision : 0;
-    auto const cols      = static_cast<int>(td.axis_x.size()) + 1;
+void render_table_grid(st::Definition::TableData const &td, st::Scaling const *scal,
+                       GridStats const &stats, Selection &selection, Fonts const &fonts,
+                       AppState &state, std::vector<std::vector<bool>> const &edited_mask) {
+    int const precision = scal != nullptr ? scal->precision : 0;
+    auto const cols = static_cast<int>(td.axis_x.size()) + 1;
     if (cols < 2) {
         ImGui::TextDisabled("(table has no X axis)");
         return;
     }
 
     auto const grid_rows = td.values.size();
-    auto const grid_cols_count = grid_rows == 0 ? std::size_t{0}
-                                                 : td.values.front().size();
+    auto const grid_cols_count = grid_rows == 0 ? std::size_t{0} : td.values.front().size();
 
     // ---- Keyboard navigation ----
     // Arrow keys move the cursor (collapsing the selection to a single
@@ -4277,11 +4126,10 @@ void render_table_grid(st::Definition::TableData const &td,
     // not-editing AND Table-window-focused. While the cell editor is
     // active, InputText absorbs arrows for text cursor motion and F2
     // would re-trigger edit mode mid-edit.
-    if (!state.editing_cell && selection.enabled
-        && grid_rows > 0 && grid_cols_count > 0
-        && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
+    if (!state.editing_cell && selection.enabled && grid_rows > 0 && grid_cols_count > 0 &&
+        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
         bool const shift = ImGui::GetIO().KeyShift;
-        bool       moved = false;
+        bool moved = false;
         if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
             if (selection.r_cursor > 0) {
                 --selection.r_cursor;
@@ -4319,13 +4167,12 @@ void render_table_grid(st::Definition::TableData const &td,
         // F2 enters cell edit mode on the cursor cell. Excel's
         // canonical "edit this cell" shortcut.
         if (ImGui::IsKeyPressed(ImGuiKey_F2, /*repeat=*/false)) {
-            std::snprintf(state.edit_buf, sizeof state.edit_buf, "%.*f",
-                          precision,
-                          (selection.r_cursor < td.values.size()
-                           && selection.c_cursor < td.values[selection.r_cursor].size())
+            std::snprintf(state.edit_buf, sizeof state.edit_buf, "%.*f", precision,
+                          (selection.r_cursor < td.values.size() &&
+                           selection.c_cursor < td.values[selection.r_cursor].size())
                               ? td.values[selection.r_cursor][selection.c_cursor]
                               : 0.0);
-            state.editing_cell       = true;
+            state.editing_cell = true;
             state.editor_just_opened = true;
         }
         // Ctrl+C / Ctrl+V — TSV clipboard interop. Same gating as
@@ -4340,9 +4187,8 @@ void render_table_grid(st::Definition::TableData const &td,
         }
     }
 
-    auto const flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
-                     | ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY
-                     | ImGuiTableFlags_SizingFixedFit;
+    auto const flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollX |
+                       ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit;
 
     // Grids are numerical — push monospace so column alignment is honest.
     // Right-align Selectable text so cells read like a calculator pad.
@@ -4354,9 +4200,11 @@ void render_table_grid(st::Definition::TableData const &td,
     }
     ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(1.0f, 0.5f));
     auto const a_hdr = accent_for(state.settings.theme);
-    ImGui::PushStyleColor(ImGuiCol_Header,        ImVec4(a_hdr.base.x,   a_hdr.base.y,   a_hdr.base.z,   0.55f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(a_hdr.hover.x,  a_hdr.hover.y,  a_hdr.hover.z,  0.40f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive,  ImVec4(a_hdr.active.x, a_hdr.active.y, a_hdr.active.z, 0.65f));
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(a_hdr.base.x, a_hdr.base.y, a_hdr.base.z, 0.55f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
+                          ImVec4(a_hdr.hover.x, a_hdr.hover.y, a_hdr.hover.z, 0.40f));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive,
+                          ImVec4(a_hdr.active.x, a_hdr.active.y, a_hdr.active.z, 0.65f));
 
     auto const pop_style = [&]() {
         ImGui::PopStyleColor(3);
@@ -4393,7 +4241,7 @@ void render_table_grid(st::Definition::TableData const &td,
     }
 
     auto const grid_cols = td.values.empty() ? std::size_t{0} : td.values.front().size();
-    char       buf[32];
+    char buf[32];
     for (std::size_t r = 0; r < td.values.size(); ++r) {
         ImGui::TableNextRow();
         // Leftmost axis-Y label column: right-aligned dimmed text on a
@@ -4401,12 +4249,10 @@ void render_table_grid(st::Definition::TableData const &td,
         // the column header row) rather than another data cell.
         ImGui::TableNextColumn();
         ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
-                                ImGui::GetColorU32(ImGuiCol_TableHeaderBg));
+                               ImGui::GetColorU32(ImGuiCol_TableHeaderBg));
         if (!td.axis_y.empty() && r < td.axis_y.size()) {
             std::snprintf(buf, sizeof(buf), "%.*f", precision, td.axis_y[r]);
-            ImGui::PushStyleColor(
-                ImGuiCol_Text,
-                ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
             text_right_aligned(buf);
             ImGui::PopStyleColor();
         }
@@ -4420,10 +4266,9 @@ void render_table_grid(st::Definition::TableData const &td,
             std::snprintf(buf, sizeof(buf), "%.*f", precision, v);
 
             ImGui::PushID(static_cast<int>(r * grid_cols + c));
-            bool const is_sel    = selection.contains(r, c);
-            bool const is_cursor = selection.enabled
-                                   && r == selection.r_cursor
-                                   && c == selection.c_cursor;
+            bool const is_sel = selection.contains(r, c);
+            bool const is_cursor =
+                selection.enabled && r == selection.r_cursor && c == selection.c_cursor;
 
             if (state.editing_cell && is_cursor) {
                 // Render the InputText in place of the Selectable for
@@ -4437,17 +4282,14 @@ void render_table_grid(st::Definition::TableData const &td,
                 }
                 ImGui::SetNextItemWidth(-1.0f);
                 bool const enter = ImGui::InputText(
-                    "##cell_editor", state.edit_buf,
-                    sizeof state.edit_buf,
-                    ImGuiInputTextFlags_EnterReturnsTrue
-                    | ImGuiInputTextFlags_AutoSelectAll
-                    | ImGuiInputTextFlags_CharsScientific);
+                    "##cell_editor", state.edit_buf, sizeof state.edit_buf,
+                    ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll |
+                        ImGuiInputTextFlags_CharsScientific);
                 bool const deactivated = ImGui::IsItemDeactivated();
-                bool const escaped =
-                    ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+                bool const escaped = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
                 auto const exit_edit = [&] {
-                    state.editing_cell       = false;
+                    state.editing_cell = false;
                     state.editor_just_opened = false;
                 };
                 // `whole_selection = true` writes the value to every
@@ -4487,18 +4329,15 @@ void render_table_grid(st::Definition::TableData const &td,
                     commit(/*whole_selection=*/false);
                 }
             } else {
-                if (ImGui::Selectable(buf, is_sel,
-                                      ImGuiSelectableFlags_AllowDoubleClick)) {
+                if (ImGui::Selectable(buf, is_sel, ImGuiSelectableFlags_AllowDoubleClick)) {
                     selection.click(r, c, ImGui::GetIO().KeyShift);
                     // Double-click promotes the click into edit mode,
                     // mirroring Excel/Sheets. AllowDoubleClick on the
                     // Selectable above is what lets us see the second
                     // click here.
                     if (ImGui::IsMouseDoubleClicked(0)) {
-                        std::snprintf(state.edit_buf,
-                                      sizeof state.edit_buf,
-                                      "%.*f", precision, v);
-                        state.editing_cell       = true;
+                        std::snprintf(state.edit_buf, sizeof state.edit_buf, "%.*f", precision, v);
+                        state.editing_cell = true;
                         state.editor_just_opened = true;
                     }
                 }
@@ -4508,30 +4347,25 @@ void render_table_grid(st::Definition::TableData const &td,
                 // cell outside the current selection makes that cell
                 // the new scope of the operation, rather than
                 // silently using the previous selection.
-                if (ImGui::IsItemClicked(ImGuiMouseButton_Right)
-                    && !selection.contains(r, c)) {
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !selection.contains(r, c)) {
                     selection.click(r, c, /*shift=*/false);
                 }
                 if (ImGui::BeginPopupContextItem("##cell_ctx")) {
                     bool const has_sel = selection.enabled;
                     if (ImGui::MenuItem("Copy", "Ctrl+C", false, has_sel)) {
-                        copy_rect_to_clipboard(td, selection.as_rect(),
-                                                precision);
+                        copy_rect_to_clipboard(td, selection.as_rect(), precision);
                     }
                     if (ImGui::MenuItem("Paste", "Ctrl+V", false, has_sel)) {
                         paste_clipboard_at_cursor(state);
                     }
                     ImGui::Separator();
-                    if (ImGui::MenuItem("Reset to source", nullptr,
-                                         false, has_sel)) {
+                    if (ImGui::MenuItem("Reset to source", nullptr, false, has_sel)) {
                         reset_selection_to_source(state);
                     }
-                    if (ImGui::IsItemHovered(
-                            ImGuiHoveredFlags_AllowWhenDisabled)) {
-                        ImGui::SetTooltip(
-                            "Set the selected cells back to the values "
-                            "in the source ROM\n(undoable; safer than "
-                            "Close → reopen).");
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                        ImGui::SetTooltip("Set the selected cells back to the values "
+                                          "in the source ROM\n(undoable; safer than "
+                                          "Close → reopen).");
                     }
                     ImGui::EndPopup();
                 }
@@ -4544,20 +4378,16 @@ void render_table_grid(st::Definition::TableData const &td,
             // the window draw list so it overlays the heatmap shading
             // and the selection tint without competing with the value.
             bool const edited =
-                r < edited_mask.size()
-                && c < edited_mask[r].size()
-                && edited_mask[r][c];
+                r < edited_mask.size() && c < edited_mask[r].size() && edited_mask[r][c];
             if (edited) {
                 ImVec2 const a = ImGui::GetItemRectMin();
                 ImVec2 const b = ImGui::GetItemRectMax();
                 if (b.x > a.x && b.y > a.y) {
-                    auto * const dl = ImGui::GetWindowDrawList();
-                    constexpr float pad   = 3.0f;
+                    auto *const dl = ImGui::GetWindowDrawList();
+                    constexpr float pad = 3.0f;
                     constexpr float r_dot = 2.5f;
-                    ImVec2 const center(a.x + pad + r_dot,
-                                         a.y + pad + r_dot);
-                    dl->AddCircleFilled(center, r_dot,
-                                         IM_COL32(190, 215, 255, 235));
+                    ImVec2 const center(a.x + pad + r_dot, a.y + pad + r_dot);
+                    dl->AddCircleFilled(center, r_dot, IM_COL32(190, 215, 255, 235));
                 }
             }
 
@@ -4570,12 +4400,8 @@ void render_table_grid(st::Definition::TableData const &td,
                 ImVec2 const a = ImGui::GetItemRectMin();
                 ImVec2 const b = ImGui::GetItemRectMax();
                 if (b.x > a.x && b.y > a.y) {
-                    auto * const dl = ImGui::GetWindowDrawList();
-                    dl->AddRect(a, b,
-                                 IM_COL32(120, 180, 250, 255),
-                                 0.0f,
-                                 0,
-                                 2.0f);
+                    auto *const dl = ImGui::GetWindowDrawList();
+                    dl->AddRect(a, b, IM_COL32(120, 180, 250, 255), 0.0f, 0, 2.0f);
                 }
             }
 
@@ -4640,8 +4466,7 @@ void text_centered_disabled(char const *text) {
 #endif
 void text_subtle(char const *fmt, ...) {
     auto const c = ImGui::GetStyleColorVec4(ImGuiCol_Text);
-    ImGui::PushStyleColor(ImGuiCol_Text,
-                           ImVec4(c.x, c.y, c.z, c.w * 0.65f));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(c.x, c.y, c.z, c.w * 0.65f));
     va_list args;
     va_start(args, fmt);
     ImGui::TextV(fmt, args);
@@ -4659,31 +4484,55 @@ void text_centered_subtle(char const *text) {
 // stays purely visual: the return value is ignored and the hover/active
 // states match the resting state.
 void chip(char const *text, ImVec4 fg, ImVec4 bg) {
-    ImGui::PushStyleColor(ImGuiCol_Button,        bg);
+    ImGui::PushStyleColor(ImGuiCol_Button, bg);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, bg);
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  bg);
-    ImGui::PushStyleColor(ImGuiCol_Text,          fg);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, bg);
+    ImGui::PushStyleColor(ImGuiCol_Text, fg);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,  ImVec2(8.0f, 2.0f));
-    (void) ImGui::SmallButton(text);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 2.0f));
+    (void)ImGui::SmallButton(text);
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor(4);
 }
 
 // Common chip palettes — kept centrally so future flags pick from a small,
 // coherent set rather than each call site rolling its own RGB.
-inline ImVec4 chip_fg_accent()    { return ImVec4(0.79f, 0.88f, 1.00f, 1.0f); }
-inline ImVec4 chip_bg_accent()    { return ImVec4(0.16f, 0.28f, 0.48f, 0.55f); }
-inline ImVec4 chip_fg_warn()      { return ImVec4(1.00f, 0.86f, 0.55f, 1.0f); }
-inline ImVec4 chip_bg_warn()      { return ImVec4(0.42f, 0.30f, 0.08f, 0.60f); }
-inline ImVec4 chip_fg_caution()   { return ImVec4(0.96f, 0.94f, 0.65f, 1.0f); }
-inline ImVec4 chip_bg_caution()   { return ImVec4(0.34f, 0.32f, 0.08f, 0.55f); }
-inline ImVec4 chip_fg_muted()     { return ImVec4(0.78f, 0.80f, 0.82f, 1.0f); }
-inline ImVec4 chip_bg_muted()     { return ImVec4(0.22f, 0.24f, 0.28f, 0.55f); }
-inline ImVec4 chip_fg_ok()        { return ImVec4(0.70f, 0.94f, 0.72f, 1.0f); }
-inline ImVec4 chip_bg_ok()        { return ImVec4(0.14f, 0.34f, 0.18f, 0.55f); }
-inline ImVec4 chip_fg_danger()    { return ImVec4(1.00f, 0.75f, 0.72f, 1.0f); }
-inline ImVec4 chip_bg_danger()    { return ImVec4(0.46f, 0.18f, 0.18f, 0.60f); }
+inline ImVec4 chip_fg_accent() {
+    return ImVec4(0.79f, 0.88f, 1.00f, 1.0f);
+}
+inline ImVec4 chip_bg_accent() {
+    return ImVec4(0.16f, 0.28f, 0.48f, 0.55f);
+}
+inline ImVec4 chip_fg_warn() {
+    return ImVec4(1.00f, 0.86f, 0.55f, 1.0f);
+}
+inline ImVec4 chip_bg_warn() {
+    return ImVec4(0.42f, 0.30f, 0.08f, 0.60f);
+}
+inline ImVec4 chip_fg_caution() {
+    return ImVec4(0.96f, 0.94f, 0.65f, 1.0f);
+}
+inline ImVec4 chip_bg_caution() {
+    return ImVec4(0.34f, 0.32f, 0.08f, 0.55f);
+}
+inline ImVec4 chip_fg_muted() {
+    return ImVec4(0.78f, 0.80f, 0.82f, 1.0f);
+}
+inline ImVec4 chip_bg_muted() {
+    return ImVec4(0.22f, 0.24f, 0.28f, 0.55f);
+}
+inline ImVec4 chip_fg_ok() {
+    return ImVec4(0.70f, 0.94f, 0.72f, 1.0f);
+}
+inline ImVec4 chip_bg_ok() {
+    return ImVec4(0.14f, 0.34f, 0.18f, 0.55f);
+}
+inline ImVec4 chip_fg_danger() {
+    return ImVec4(1.00f, 0.75f, 0.72f, 1.0f);
+}
+inline ImVec4 chip_bg_danger() {
+    return ImVec4(0.46f, 0.18f, 0.18f, 0.60f);
+}
 
 // Cold-start panel — what the user sees before any project is loaded. The
 // goal is welcoming, not utilitarian: clean type hierarchy, one obvious
@@ -4701,10 +4550,10 @@ void render_welcome_panel(AppState &state) {
     // calculation scaled at 40% of the remainder. This keeps the
     // default-window layout unchanged but pushes content meaningfully
     // lower on a 1300+px panel.
-    bool const  has_recents = !state.recents.empty();
-    float const min_pad     = avail.y * (has_recents ? 0.10f : 0.22f);
+    bool const has_recents = !state.recents.empty();
+    float const min_pad = avail.y * (has_recents ? 0.10f : 0.22f);
     float const center_bias = (avail.y - 320.0f) * 0.40f;
-    float const top_pad     = std::max(min_pad, center_bias);
+    float const top_pad = std::max(min_pad, center_bias);
     ImGui::Dummy(ImVec2(0.0f, top_pad));
 
     text_centered("SubuwuTuner", 2.4f);
@@ -4749,10 +4598,8 @@ void render_welcome_panel(AppState &state) {
     // clearly figured out the flow by then.
     if (!has_recents) {
         ImGui::Dummy(ImVec2(0.0f, 18.0f));
-        text_centered_subtle(
-            "First time? You'll need an ECU ROM dump + a definition pack.");
-        text_centered_subtle(
-            "The repo ships fixtures/demo-pack/ to explore the UI.");
+        text_centered_subtle("First time? You'll need an ECU ROM dump + a definition pack.");
+        text_centered_subtle("The repo ships fixtures/demo-pack/ to explore the UI.");
     }
 
     // Recents block. Empty list → render nothing here; first-run users
@@ -4772,11 +4619,10 @@ void render_welcome_panel(AppState &state) {
         // whole panel, which looked broken on a maximized window.
         ImGui::TextUnformatted("Recent projects");
         {
-            ImVec2 const p   = ImGui::GetCursorScreenPos();
-            auto * const dl  = ImGui::GetWindowDrawList();
-            ImU32 const  col = ImGui::GetColorU32(ImGuiCol_Separator);
-            dl->AddLine(ImVec2(p.x, p.y + 2.0f),
-                        ImVec2(p.x + kRowW, p.y + 2.0f), col);
+            ImVec2 const p = ImGui::GetCursorScreenPos();
+            auto *const dl = ImGui::GetWindowDrawList();
+            ImU32 const col = ImGui::GetColorU32(ImGuiCol_Separator);
+            dl->AddLine(ImVec2(p.x, p.y + 2.0f), ImVec2(p.x + kRowW, p.y + 2.0f), col);
             ImGui::Dummy(ImVec2(kRowW, 4.0f));
         }
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
@@ -4785,13 +4631,11 @@ void render_welcome_panel(AppState &state) {
         // iteration (via try_open_project) would invalidate iterators.
         std::optional<std::size_t> clicked_idx;
         for (std::size_t i = 0; i < state.recents.size(); ++i) {
-            auto const     &e         = state.recents[i];
-            auto const      basename  = e.path.filename().empty()
-                                            ? e.path.string()
-                                            : e.path.filename().string();
+            auto const &e = state.recents[i];
+            auto const basename =
+                e.path.filename().empty() ? e.path.string() : e.path.filename().string();
             std::error_code ec;
-            bool const      exists =
-                std::filesystem::exists(e.path, ec);
+            bool const exists = std::filesystem::exists(e.path, ec);
 
             ImGui::PushID(static_cast<int>(i));
             // Each row is a button with two-line content (basename on
@@ -4807,14 +4651,12 @@ void render_welcome_panel(AppState &state) {
 
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                 if (exists) {
-                    ImGui::SetTooltip("%s\nOpened %s",
-                                      e.path.string().c_str(),
+                    ImGui::SetTooltip("%s\nOpened %s", e.path.string().c_str(),
                                       e.opened_at.c_str());
                 } else {
-                    ImGui::SetTooltip(
-                        "%s\n\nPath no longer exists — the project may "
-                        "have moved.\nOpen Project… to locate it manually.",
-                        e.path.string().c_str());
+                    ImGui::SetTooltip("%s\n\nPath no longer exists — the project may "
+                                      "have moved.\nOpen Project… to locate it manually.",
+                                      e.path.string().c_str());
                 }
             }
             // Subtitle: dimmed full path + relative time, aligned under
@@ -4875,11 +4717,10 @@ void render_welcome_panel(AppState &state) {
         ImGui::BeginGroup();
         ImGui::TextUnformatted("What's new");
         {
-            ImVec2 const p   = ImGui::GetCursorScreenPos();
-            auto * const dl  = ImGui::GetWindowDrawList();
-            ImU32 const  col = ImGui::GetColorU32(ImGuiCol_Separator);
-            dl->AddLine(ImVec2(p.x, p.y + 2.0f),
-                        ImVec2(p.x + kRowW, p.y + 2.0f), col);
+            ImVec2 const p = ImGui::GetCursorScreenPos();
+            auto *const dl = ImGui::GetWindowDrawList();
+            ImU32 const col = ImGui::GetColorU32(ImGuiCol_Separator);
+            dl->AddLine(ImVec2(p.x, p.y + 2.0f), ImVec2(p.x + kRowW, p.y + 2.0f), col);
             ImGui::Dummy(ImVec2(kRowW, 4.0f));
         }
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
@@ -4896,11 +4737,9 @@ void render_welcome_panel(AppState &state) {
     {
         char buf[64];
         std::snprintf(buf, sizeof buf, "SubuwuTuner %.*s",
-                       static_cast<int>(st::Version::string().size()),
-                       st::Version::string().data());
-        float const text_w = ImGui::CalcTextSize(buf).x
-                              + ImGui::CalcTextSize(" \xC2\xB7 ").x
-                              + ImGui::CalcTextSize("Keyboard shortcuts").x;
+                      static_cast<int>(st::Version::string().size()), st::Version::string().data());
+        float const text_w = ImGui::CalcTextSize(buf).x + ImGui::CalcTextSize(" \xC2\xB7 ").x +
+                             ImGui::CalcTextSize("Keyboard shortcuts").x;
         center_cursor_x(text_w);
         text_subtle("%s", buf);
         ImGui::SameLine();
@@ -4909,11 +4748,10 @@ void render_welcome_panel(AppState &state) {
         // Render as a button styled to look like a link — TextDisabled
         // color, no frame. Reduces visual weight while keeping it
         // clickable and tab-reachable.
-        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0,0,0,0));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0,0,0,0));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0,0,0,0));
-        ImGui::PushStyleColor(ImGuiCol_Text,
-                               ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
         if (ImGui::Button("Keyboard shortcuts")) {
             state.show_shortcuts_modal = true;
@@ -4958,7 +4796,8 @@ void render_stats_panel(AppState &state) {
     std::vector<float> cells;
     cells.reserve(td.values.size() * (td.values.empty() ? 0 : td.values[0].size()));
     for (auto const &row : td.values) {
-        for (auto v : row) cells.push_back(static_cast<float>(v));
+        for (auto v : row)
+            cells.push_back(static_cast<float>(v));
     }
     if (cells.empty() || (cells.size() == 1 && table->dimensions == 0)) {
         text_subtle("Scalar table — stats N/A.");
@@ -4973,8 +4812,10 @@ void render_stats_panel(AppState &state) {
     float min = cells[0], max = cells[0];
     double sum = 0.0;
     for (auto v : cells) {
-        if (v < min) min = v;
-        if (v > max) max = v;
+        if (v < min)
+            min = v;
+        if (v > max)
+            max = v;
         sum += static_cast<double>(v);
     }
     double const mean = sum / static_cast<double>(cells.size());
@@ -4990,33 +4831,34 @@ void render_stats_panel(AppState &state) {
     // table data once per frame. For 1D / 2D tables of moderate size this
     // is well under a millisecond.
     std::size_t edited = 0;
-    auto const  source_td = state.project->definition().read_table_values(
-        state.project->source_rom(), *table);
-    if (source_td.has_value()
-        && source_td->values.size() == td.values.size()) {
+    auto const source_td =
+        state.project->definition().read_table_values(state.project->source_rom(), *table);
+    if (source_td.has_value() && source_td->values.size() == td.values.size()) {
         for (std::size_t r = 0; r < td.values.size(); ++r) {
-            if (source_td->values[r].size() != td.values[r].size()) continue;
+            if (source_td->values[r].size() != td.values[r].size())
+                continue;
             for (std::size_t c = 0; c < td.values[r].size(); ++c) {
-                if (td.values[r][c] != source_td->values[r][c]) ++edited;
+                if (td.values[r][c] != source_td->values[r][c])
+                    ++edited;
             }
         }
     }
 
     auto const *scal = state.project->definition().find_scaling(table->scaling);
-    auto const  unit = (scal != nullptr) ? scal->unit : std::string{};
-    auto const  prec = (scal != nullptr) ? scal->precision : 2;
+    auto const unit = (scal != nullptr) ? scal->unit : std::string{};
+    auto const prec = (scal != nullptr) ? scal->precision : 2;
 
     ImGui::Text("%s", table->id.c_str());
-    if (!unit.empty()) text_subtle("unit: %s", unit.c_str());
+    if (!unit.empty())
+        text_subtle("unit: %s", unit.c_str());
     ImGui::Separator();
 
     auto stat_row = [&](char const *label, double v) {
-        ImGui::Text("%-7s %.*f%s%s", label, prec, v,
-                    unit.empty() ? "" : " ", unit.c_str());
+        ImGui::Text("%-7s %.*f%s%s", label, prec, v, unit.empty() ? "" : " ", unit.c_str());
     };
-    stat_row("min",    static_cast<double>(min));
-    stat_row("max",    static_cast<double>(max));
-    stat_row("mean",   mean);
+    stat_row("min", static_cast<double>(min));
+    stat_row("max", static_cast<double>(max));
+    stat_row("mean", mean);
     stat_row("stddev", stddev);
     ImGui::Text("cells:  %zu", cells.size());
     ImGui::Text("edited: %zu", edited);
@@ -5024,16 +4866,13 @@ void render_stats_panel(AppState &state) {
     ImGui::Separator();
     text_subtle("histogram");
     if (ImPlot::BeginPlot("##stats_hist", ImVec2(-FLT_MIN, 160.0f),
-                          ImPlotFlags_NoMouseText | ImPlotFlags_NoLegend
-                          | ImPlotFlags_NoTitle | ImPlotFlags_NoMenus
-                          | ImPlotFlags_NoBoxSelect)) {
-        ImPlot::SetupAxes(nullptr, nullptr,
-                          ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoMenus,
+                          ImPlotFlags_NoMouseText | ImPlotFlags_NoLegend | ImPlotFlags_NoTitle |
+                              ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect)) {
+        ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoMenus,
                           ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoMenus);
         // Pick a reasonable bin count; ImPlot::PlotHistogram chooses
         // smart defaults when bins=ImPlotBin_Sturges.
-        ImPlot::PlotHistogram("##bins", cells.data(),
-                              static_cast<int>(cells.size()),
+        ImPlot::PlotHistogram("##bins", cells.data(), static_cast<int>(cells.size()),
                               ImPlotBin_Sturges);
         ImPlot::EndPlot();
     }
@@ -5051,8 +4890,7 @@ void render_knock_dashboard_panel(AppState &state) {
     if (!state.show_knock_dashboard_panel) {
         return;
     }
-    if (!ImGui::Begin("Knock dashboard (preview)",
-                       &state.show_knock_dashboard_panel)) {
+    if (!ImGui::Begin("Knock dashboard (preview)", &state.show_knock_dashboard_panel)) {
         ImGui::End();
         return;
     }
@@ -5064,20 +4902,17 @@ void render_knock_dashboard_panel(AppState &state) {
     // ---- Log + Browse -------------------------------------------------
     ImGui::Text("Log:");
     ImGui::SetNextItemWidth(-120.0f);
-    ImGui::InputText("##knock_log_path", state.knock_log_path,
-                      sizeof state.knock_log_path);
+    ImGui::InputText("##knock_log_path", state.knock_log_path, sizeof state.knock_log_path);
     ImGui::SameLine();
     if (ImGui::Button("Browse…##knock_log")) {
-        nfdu8filteritem_t       filters[1] = {{"CSV", "csv"}};
-        NFD::UniquePathU8       out_path;
-        nfdresult_t const       r = NFD::OpenDialog(out_path, filters, 1);
+        nfdu8filteritem_t filters[1] = {{"CSV", "csv"}};
+        NFD::UniquePathU8 out_path;
+        nfdresult_t const r = NFD::OpenDialog(out_path, filters, 1);
         if (r == NFD_OKAY) {
-            std::snprintf(state.knock_log_path, sizeof state.knock_log_path,
-                           "%s", out_path.get());
+            std::snprintf(state.knock_log_path, sizeof state.knock_log_path, "%s", out_path.get());
             state.knock_load_error.clear();
         } else if (r == NFD_ERROR) {
-            state.knock_load_error = std::string{"Open dialog error: "}
-                                      + NFD::GetError();
+            state.knock_load_error = std::string{"Open dialog error: "} + NFD::GetError();
         }
     }
     if (!state.knock_load_error.empty()) {
@@ -5092,7 +4927,7 @@ void render_knock_dashboard_panel(AppState &state) {
         ImGui::SetNextItemWidth(160.0f);
         ImGui::SliderInt("Cylinders", &state.knock_cylinder_count, 1, 6);
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("RPM column",  state.knock_rpm_col,  sizeof state.knock_rpm_col);
+        ImGui::InputText("RPM column", state.knock_rpm_col, sizeof state.knock_rpm_col);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(160.0f);
         ImGui::InputText("Load column", state.knock_load_col, sizeof state.knock_load_col);
@@ -5103,12 +4938,10 @@ void render_knock_dashboard_panel(AppState &state) {
             char label_fbkc[32];
             std::snprintf(label_fbkc, sizeof label_fbkc, "FBKC cyl %d", c + 1);
             ImGui::SetNextItemWidth(160.0f);
-            ImGui::InputText(label_flkc, state.knock_flkc_cols[c],
-                              sizeof state.knock_flkc_cols[c]);
+            ImGui::InputText(label_flkc, state.knock_flkc_cols[c], sizeof state.knock_flkc_cols[c]);
             ImGui::SameLine();
             ImGui::SetNextItemWidth(160.0f);
-            ImGui::InputText(label_fbkc, state.knock_fbkc_cols[c],
-                              sizeof state.knock_fbkc_cols[c]);
+            ImGui::InputText(label_fbkc, state.knock_fbkc_cols[c], sizeof state.knock_fbkc_cols[c]);
             ImGui::PopID();
         }
     }
@@ -5116,21 +4949,17 @@ void render_knock_dashboard_panel(AppState &state) {
     // ---- Window config -----------------------------------------------
     if (ImGui::CollapsingHeader("Window")) {
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputFloat("Window seconds", &state.knock_window_seconds,
-                           0.5f, 5.0f, "%.1f");
+        ImGui::InputFloat("Window seconds", &state.knock_window_seconds, 0.5f, 5.0f, "%.1f");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputFloat("Sample rate Hz", &state.knock_sample_rate_hz,
-                           1.0f, 5.0f, "%.1f");
-        ImGui::Checkbox("Load gate",   &state.knock_gate_enabled);
+        ImGui::InputFloat("Sample rate Hz", &state.knock_sample_rate_hz, 1.0f, 5.0f, "%.1f");
+        ImGui::Checkbox("Load gate", &state.knock_gate_enabled);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(120.0f);
-        ImGui::InputFloat("min RPM",  &state.knock_min_rpm,
-                           100.0f, 500.0f, "%.0f");
+        ImGui::InputFloat("min RPM", &state.knock_min_rpm, 100.0f, 500.0f, "%.0f");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(120.0f);
-        ImGui::InputFloat("min load", &state.knock_min_load,
-                           0.1f, 0.5f, "%.2f");
+        ImGui::InputFloat("min load", &state.knock_min_load, 0.1f, 0.5f, "%.2f");
     }
 
     ImGui::Spacing();
@@ -5141,38 +4970,39 @@ void render_knock_dashboard_panel(AppState &state) {
             state.knock_load_error = "Pick a CSV log first.";
         } else {
             st::log::knock::PidMapping mapping;
-            mapping.cylinder_count = static_cast<std::uint8_t>(
-                state.knock_cylinder_count);
+            mapping.cylinder_count = static_cast<std::uint8_t>(state.knock_cylinder_count);
 
             // Load + parse header to resolve column names → indices.
             std::ifstream f{state.knock_log_path};
             if (!f) {
-                state.knock_load_error = std::string{"Cannot open '"}
-                                          + state.knock_log_path + "'";
+                state.knock_load_error = std::string{"Cannot open '"} + state.knock_log_path + "'";
             } else {
                 std::string header_line;
-                bool        got = false;
+                bool got = false;
                 while (std::getline(f, header_line)) {
-                    while (!header_line.empty()
-                           && header_line.back() == '\r') {
+                    while (!header_line.empty() && header_line.back() == '\r') {
                         header_line.pop_back();
                     }
-                    if (header_line.empty() || header_line.front() == '#') continue;
-                    got = true; break;
+                    if (header_line.empty() || header_line.front() == '#')
+                        continue;
+                    got = true;
+                    break;
                 }
                 if (!got) {
                     state.knock_load_error = "CSV has no header.";
                 } else {
                     std::vector<std::string> header_cols;
-                    std::size_t              start = 0;
+                    std::size_t start = 0;
                     for (std::size_t i = 0; i <= header_line.size(); ++i) {
                         if (i == header_line.size() || header_line[i] == ',') {
                             std::size_t a = start;
                             std::size_t b = i;
-                            while (a < b
-                                   && std::isspace(static_cast<unsigned char>(header_line[a]))) ++a;
-                            while (b > a
-                                   && std::isspace(static_cast<unsigned char>(header_line[b - 1]))) --b;
+                            while (a < b &&
+                                   std::isspace(static_cast<unsigned char>(header_line[a])))
+                                ++a;
+                            while (b > a &&
+                                   std::isspace(static_cast<unsigned char>(header_line[b - 1])))
+                                --b;
                             header_cols.emplace_back(header_line.substr(a, b - a));
                             start = i + 1;
                         }
@@ -5183,20 +5013,20 @@ void render_knock_dashboard_panel(AppState &state) {
                         }
                         std::string want{name};
                         for (auto &cc : want) {
-                            cc = static_cast<char>(
-                                std::tolower(static_cast<unsigned char>(cc)));
+                            cc = static_cast<char>(std::tolower(static_cast<unsigned char>(cc)));
                         }
                         for (std::size_t i = 0; i < header_cols.size(); ++i) {
                             std::string have = header_cols[i];
                             for (auto &cc : have) {
-                                cc = static_cast<char>(
-                                    std::tolower(static_cast<unsigned char>(cc)));
+                                cc =
+                                    static_cast<char>(std::tolower(static_cast<unsigned char>(cc)));
                             }
-                            if (have == want) return i;
+                            if (have == want)
+                                return i;
                         }
                         return st::log::knock::kNoPid;
                     };
-                    mapping.rpm_idx  = resolve(state.knock_rpm_col);
+                    mapping.rpm_idx = resolve(state.knock_rpm_col);
                     mapping.load_idx = resolve(state.knock_load_col);
                     bool any_unresolved = false;
                     for (int c = 0; c < state.knock_cylinder_count; ++c) {
@@ -5204,11 +5034,11 @@ void render_knock_dashboard_panel(AppState &state) {
                         std::size_t const f_idx = resolve(state.knock_flkc_cols[c]);
                         std::size_t const b_idx = resolve(state.knock_fbkc_cols[c]);
                         mapping.fine_knock_learn[cs] = f_idx;
-                        mapping.feedback_knock[cs]   = b_idx;
-                        if (state.knock_flkc_cols[c][0] != '\0'
-                            && f_idx == st::log::knock::kNoPid) any_unresolved = true;
-                        if (state.knock_fbkc_cols[c][0] != '\0'
-                            && b_idx == st::log::knock::kNoPid) any_unresolved = true;
+                        mapping.feedback_knock[cs] = b_idx;
+                        if (state.knock_flkc_cols[c][0] != '\0' && f_idx == st::log::knock::kNoPid)
+                            any_unresolved = true;
+                        if (state.knock_fbkc_cols[c][0] != '\0' && b_idx == st::log::knock::kNoPid)
+                            any_unresolved = true;
                     }
                     if (any_unresolved) {
                         state.knock_load_error =
@@ -5216,22 +5046,21 @@ void render_knock_dashboard_panel(AppState &state) {
                             "header. Mappings without a match will be ignored.";
                     }
                     st::log::knock::WindowConfig cfg;
-                    cfg.window_seconds    = state.knock_window_seconds;
-                    cfg.sample_rate_hz    = state.knock_sample_rate_hz;
-                    cfg.min_rpm           = state.knock_min_rpm;
-                    cfg.min_load          = state.knock_min_load;
+                    cfg.window_seconds = state.knock_window_seconds;
+                    cfg.sample_rate_hz = state.knock_sample_rate_hz;
+                    cfg.min_rpm = state.knock_min_rpm;
+                    cfg.min_load = state.knock_min_load;
                     cfg.require_load_gate = state.knock_gate_enabled;
-                    auto const r = st::log::knock::snapshot_from_csv(
-                        state.knock_log_path, mapping, cfg);
+                    auto const r =
+                        st::log::knock::snapshot_from_csv(state.knock_log_path, mapping, cfg);
                     if (!r.has_value()) {
                         state.knock_load_error = r.error().to_string();
                         state.knock_snapshot.reset();
                     } else {
                         state.knock_snapshot = *r;
                         state.knock_compute_msg =
-                            "Considered " + std::to_string(r->samples_considered)
-                            + " samples (gated out " + std::to_string(r->samples_gated_out)
-                            + ").";
+                            "Considered " + std::to_string(r->samples_considered) +
+                            " samples (gated out " + std::to_string(r->samples_gated_out) + ").";
                     }
                 }
             }
@@ -5248,13 +5077,13 @@ void render_knock_dashboard_panel(AppState &state) {
         ImGui::Separator();
         int const cyls = static_cast<int>(snap.cylinder_count);
         int const cols = (cyls <= 4) ? 2 : 3;
-        ImVec2 const avail     = ImGui::GetContentRegionAvail();
-        float  const cell_w    = (avail.x - static_cast<float>(cols - 1) * 8.0f)
-                                 / static_cast<float>(cols);
-        float  const cell_h    = 180.0f;
+        ImVec2 const avail = ImGui::GetContentRegionAvail();
+        float const cell_w =
+            (avail.x - static_cast<float>(cols - 1) * 8.0f) / static_cast<float>(cols);
+        float const cell_h = 180.0f;
         for (int c = 0; c < cyls; ++c) {
-            auto const &p        = snap.per_cyl[static_cast<std::size_t>(c)];
-            bool const  no_data  = p.strip_flkc.empty() && p.strip_fbkc.empty();
+            auto const &p = snap.per_cyl[static_cast<std::size_t>(c)];
+            bool const no_data = p.strip_flkc.empty() && p.strip_fbkc.empty();
             ImGui::BeginGroup();
             ImGui::Text("Cyl %d", c + 1);
             if (no_data) {
@@ -5264,26 +5093,21 @@ void render_knock_dashboard_panel(AppState &state) {
             } else {
                 ImGui::Text("FLKC cur: %+.2f  mean: %+.2f  min: %+.2f  "
                             "FBKC cur: %+.2f  events: %u  dMean: %+.2f",
-                            p.current_flkc, p.mean_flkc_window,
-                            p.min_flkc_window,
-                            p.current_fbkc, p.event_count_window,
-                            p.delta_from_cyl_mean);
+                            p.current_flkc, p.mean_flkc_window, p.min_flkc_window, p.current_fbkc,
+                            p.event_count_window, p.delta_from_cyl_mean);
                 char plot_id[32];
                 std::snprintf(plot_id, sizeof plot_id, "##knock_cyl_%d", c);
                 if (ImPlot::BeginPlot(plot_id, ImVec2(cell_w, cell_h),
-                                      ImPlotFlags_NoTitle | ImPlotFlags_NoMenus
-                                      | ImPlotFlags_NoMouseText)) {
-                    ImPlot::SetupAxes(nullptr, nullptr,
-                                      ImPlotAxisFlags_AutoFit,
+                                      ImPlotFlags_NoTitle | ImPlotFlags_NoMenus |
+                                          ImPlotFlags_NoMouseText)) {
+                    ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_AutoFit,
                                       ImPlotAxisFlags_AutoFit);
                     if (!p.strip_flkc.empty()) {
-                        ImPlot::PlotLine("FLKC",
-                                         p.strip_flkc.data(),
+                        ImPlot::PlotLine("FLKC", p.strip_flkc.data(),
                                          static_cast<int>(p.strip_flkc.size()));
                     }
                     if (!p.strip_fbkc.empty()) {
-                        ImPlot::PlotLine("FBKC",
-                                         p.strip_fbkc.data(),
+                        ImPlot::PlotLine("FBKC", p.strip_fbkc.data(),
                                          static_cast<int>(p.strip_fbkc.size()));
                     }
                     ImPlot::EndPlot();
@@ -5311,8 +5135,7 @@ void render_adaptive_history_panel(AppState &state) {
     if (!state.show_adaptive_history_panel) {
         return;
     }
-    if (!ImGui::Begin("Adaptive history (preview)",
-                      &state.show_adaptive_history_panel)) {
+    if (!ImGui::Begin("Adaptive history (preview)", &state.show_adaptive_history_panel)) {
         ImGui::End();
         return;
     }
@@ -5323,20 +5146,17 @@ void render_adaptive_history_panel(AppState &state) {
 
     ImGui::Text("Log:");
     ImGui::SetNextItemWidth(-120.0f);
-    ImGui::InputText("##ah_log_path", state.ah_log_path,
-                     sizeof state.ah_log_path);
+    ImGui::InputText("##ah_log_path", state.ah_log_path, sizeof state.ah_log_path);
     ImGui::SameLine();
     if (ImGui::Button("Browse…##ah_log")) {
-        nfdu8filteritem_t       filters[1] = {{"CSV", "csv"}};
-        NFD::UniquePathU8       out_path;
-        nfdresult_t const       r = NFD::OpenDialog(out_path, filters, 1);
+        nfdu8filteritem_t filters[1] = {{"CSV", "csv"}};
+        NFD::UniquePathU8 out_path;
+        nfdresult_t const r = NFD::OpenDialog(out_path, filters, 1);
         if (r == NFD_OKAY) {
-            std::snprintf(state.ah_log_path, sizeof state.ah_log_path,
-                          "%s", out_path.get());
+            std::snprintf(state.ah_log_path, sizeof state.ah_log_path, "%s", out_path.get());
             state.ah_load_error.clear();
         } else if (r == NFD_ERROR) {
-            state.ah_load_error = std::string{"Open dialog error: "}
-                                   + NFD::GetError();
+            state.ah_load_error = std::string{"Open dialog error: "} + NFD::GetError();
         }
     }
     if (!state.ah_load_error.empty()) {
@@ -5347,22 +5167,21 @@ void render_adaptive_history_panel(AppState &state) {
 
     if (ImGui::CollapsingHeader("Column mapping", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("Timestamp col",  state.ah_ts_col,   sizeof state.ah_ts_col);
+        ImGui::InputText("Timestamp col", state.ah_ts_col, sizeof state.ah_ts_col);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("LTFT col",       state.ah_ltft_col, sizeof state.ah_ltft_col);
+        ImGui::InputText("LTFT col", state.ah_ltft_col, sizeof state.ah_ltft_col);
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("DAM col",        state.ah_dam_col,  sizeof state.ah_dam_col);
+        ImGui::InputText("DAM col", state.ah_dam_col, sizeof state.ah_dam_col);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("IdleAdapt col",  state.ah_iac_col,  sizeof state.ah_iac_col);
+        ImGui::InputText("IdleAdapt col", state.ah_iac_col, sizeof state.ah_iac_col);
         text_subtle("Leave a column name blank to skip that signal.");
     }
 
     if (ImGui::CollapsingHeader("Bucketing")) {
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputFloat("Bucket seconds", &state.ah_bucket_seconds,
-                          60.0f, 3600.0f, "%.1f");
+        ImGui::InputFloat("Bucket seconds", &state.ah_bucket_seconds, 60.0f, 3600.0f, "%.1f");
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("86400 = 1 day  ·  3600 = 1 hour  ·  0 = no bucketing");
         }
@@ -5371,8 +5190,7 @@ void render_adaptive_history_panel(AppState &state) {
         char const *ts_units[] = {"seconds", "millis", "micros", "rows"};
         ImGui::Combo("Timestamp unit", &state.ah_ts_unit, ts_units, 4);
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputInt("Min samples / bucket",
-                        &state.ah_min_samples_per_bucket, 1, 5);
+        ImGui::InputInt("Min samples / bucket", &state.ah_min_samples_per_bucket, 1, 5);
         if (state.ah_min_samples_per_bucket < 0)
             state.ah_min_samples_per_bucket = 0;
     }
@@ -5386,32 +5204,34 @@ void render_adaptive_history_panel(AppState &state) {
             // Read header to resolve column names → indices.
             std::ifstream f{state.ah_log_path};
             if (!f) {
-                state.ah_load_error = std::string{"Cannot open '"}
-                                       + state.ah_log_path + "'";
+                state.ah_load_error = std::string{"Cannot open '"} + state.ah_log_path + "'";
             } else {
                 std::string header_line;
-                bool        got = false;
+                bool got = false;
                 while (std::getline(f, header_line)) {
-                    while (!header_line.empty()
-                           && header_line.back() == '\r') {
+                    while (!header_line.empty() && header_line.back() == '\r') {
                         header_line.pop_back();
                     }
-                    if (header_line.empty() || header_line.front() == '#') continue;
-                    got = true; break;
+                    if (header_line.empty() || header_line.front() == '#')
+                        continue;
+                    got = true;
+                    break;
                 }
                 if (!got) {
                     state.ah_load_error = "CSV has no header.";
                 } else {
                     std::vector<std::string> header_cols;
-                    std::size_t              start = 0;
+                    std::size_t start = 0;
                     for (std::size_t i = 0; i <= header_line.size(); ++i) {
                         if (i == header_line.size() || header_line[i] == ',') {
                             std::size_t a = start;
                             std::size_t b = i;
-                            while (a < b
-                                   && std::isspace(static_cast<unsigned char>(header_line[a]))) ++a;
-                            while (b > a
-                                   && std::isspace(static_cast<unsigned char>(header_line[b - 1]))) --b;
+                            while (a < b &&
+                                   std::isspace(static_cast<unsigned char>(header_line[a])))
+                                ++a;
+                            while (b > a &&
+                                   std::isspace(static_cast<unsigned char>(header_line[b - 1])))
+                                --b;
                             header_cols.emplace_back(header_line.substr(a, b - a));
                             start = i + 1;
                         }
@@ -5422,49 +5242,58 @@ void render_adaptive_history_panel(AppState &state) {
                         }
                         std::string want{name};
                         for (auto &cc : want) {
-                            cc = static_cast<char>(
-                                std::tolower(static_cast<unsigned char>(cc)));
+                            cc = static_cast<char>(std::tolower(static_cast<unsigned char>(cc)));
                         }
                         for (std::size_t i = 0; i < header_cols.size(); ++i) {
                             std::string have = header_cols[i];
                             for (auto &cc : have) {
-                                cc = static_cast<char>(
-                                    std::tolower(static_cast<unsigned char>(cc)));
+                                cc =
+                                    static_cast<char>(std::tolower(static_cast<unsigned char>(cc)));
                             }
-                            if (have == want) return i;
+                            if (have == want)
+                                return i;
                         }
                         return st::log::adaptive::kNoColumn;
                     };
                     st::log::adaptive::ColumnMapping mapping;
                     mapping.timestamp_idx = resolve(state.ah_ts_col);
-                    mapping.signal_idx[static_cast<std::size_t>(
-                        st::log::adaptive::SignalKind::Ltft)]      = resolve(state.ah_ltft_col);
-                    mapping.signal_idx[static_cast<std::size_t>(
-                        st::log::adaptive::SignalKind::Dam)]       = resolve(state.ah_dam_col);
+                    mapping
+                        .signal_idx[static_cast<std::size_t>(st::log::adaptive::SignalKind::Ltft)] =
+                        resolve(state.ah_ltft_col);
+                    mapping
+                        .signal_idx[static_cast<std::size_t>(st::log::adaptive::SignalKind::Dam)] =
+                        resolve(state.ah_dam_col);
                     mapping.signal_idx[static_cast<std::size_t>(
                         st::log::adaptive::SignalKind::IdleAdapt)] = resolve(state.ah_iac_col);
 
                     st::log::adaptive::BucketConfig cfg;
-                    cfg.bucket_seconds         = state.ah_bucket_seconds;
+                    cfg.bucket_seconds = state.ah_bucket_seconds;
                     cfg.min_samples_per_bucket =
                         static_cast<std::uint32_t>(state.ah_min_samples_per_bucket);
                     switch (state.ah_ts_unit) {
-                        case 1: cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixMillis;  break;
-                        case 2: cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixMicros;  break;
-                        case 3: cfg.timestamp_unit = st::log::adaptive::TimestampUnit::RowIndex;    break;
-                        default:cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixSeconds; break;
+                    case 1:
+                        cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixMillis;
+                        break;
+                    case 2:
+                        cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixMicros;
+                        break;
+                    case 3:
+                        cfg.timestamp_unit = st::log::adaptive::TimestampUnit::RowIndex;
+                        break;
+                    default:
+                        cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixSeconds;
+                        break;
                     }
-                    auto const r = st::log::adaptive::snapshot_from_csv(
-                        state.ah_log_path, mapping, cfg);
+                    auto const r =
+                        st::log::adaptive::snapshot_from_csv(state.ah_log_path, mapping, cfg);
                     if (!r.has_value()) {
                         state.ah_load_error = r.error().to_string();
                         state.ah_snapshot.reset();
                     } else {
                         state.ah_snapshot = *r;
                         state.ah_compute_msg =
-                            std::to_string(r->total_samples) + " samples across "
-                            + std::to_string(r->time_span_seconds / 86400.0).substr(0, 5)
-                            + " days.";
+                            std::to_string(r->total_samples) + " samples across " +
+                            std::to_string(r->time_span_seconds / 86400.0).substr(0, 5) + " days.";
                     }
                 }
             }
@@ -5482,8 +5311,8 @@ void render_adaptive_history_panel(AppState &state) {
         char const *signal_names[3] = {"LTFT", "DAM", "IdleAdapt"};
         // Summary table
         if (ImGui::BeginTable("##ah_summary", 6,
-                              ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
-                              | ImGuiTableFlags_SizingStretchProp)) {
+                              ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                  ImGuiTableFlags_SizingStretchProp)) {
             ImGui::TableSetupColumn("Signal");
             ImGui::TableSetupColumn("Buckets");
             ImGui::TableSetupColumn("Mean");
@@ -5494,7 +5323,8 @@ void render_adaptive_history_panel(AppState &state) {
             for (std::size_t k = 0; k < st::log::adaptive::kSignalCount; ++k) {
                 auto const &ser = snap.series[k];
                 ImGui::TableNextRow();
-                ImGui::TableNextColumn(); ImGui::TextUnformatted(signal_names[k]);
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(signal_names[k]);
                 if (!ser.has_data) {
                     for (int c = 0; c < 5; ++c) {
                         ImGui::TableNextColumn();
@@ -5502,24 +5332,29 @@ void render_adaptive_history_panel(AppState &state) {
                     }
                     continue;
                 }
-                ImGui::TableNextColumn(); ImGui::Text("%zu", ser.points.size());
-                ImGui::TableNextColumn(); ImGui::Text("%+.4f", ser.overall_mean);
-                ImGui::TableNextColumn(); ImGui::Text("%+.4f", ser.overall_min);
-                ImGui::TableNextColumn(); ImGui::Text("%+.4f", ser.overall_max);
-                ImGui::TableNextColumn(); ImGui::Text("%+.4f",
-                    ser.drift_per_second * 86400.0);
+                ImGui::TableNextColumn();
+                ImGui::Text("%zu", ser.points.size());
+                ImGui::TableNextColumn();
+                ImGui::Text("%+.4f", ser.overall_mean);
+                ImGui::TableNextColumn();
+                ImGui::Text("%+.4f", ser.overall_min);
+                ImGui::TableNextColumn();
+                ImGui::Text("%+.4f", ser.overall_max);
+                ImGui::TableNextColumn();
+                ImGui::Text("%+.4f", ser.drift_per_second * 86400.0);
             }
             ImGui::EndTable();
         }
         ImGui::Spacing();
 
         // One time-series plot per signal that has data.
-        ImVec2 const avail   = ImGui::GetContentRegionAvail();
-        float  const plot_w  = avail.x;
-        float  const plot_h  = 140.0f;
+        ImVec2 const avail = ImGui::GetContentRegionAvail();
+        float const plot_w = avail.x;
+        float const plot_h = 140.0f;
         for (std::size_t k = 0; k < st::log::adaptive::kSignalCount; ++k) {
             auto const &ser = snap.series[k];
-            if (!ser.has_data || ser.points.empty()) continue;
+            if (!ser.has_data || ser.points.empty())
+                continue;
             ImGui::Text("%s", signal_names[k]);
             // Build parallel x/y arrays (ImPlot doesn't take struct
             // arrays without explicit stride/offset; this is cleaner).
@@ -5534,10 +5369,9 @@ void render_adaptive_history_panel(AppState &state) {
             char plot_id[32];
             std::snprintf(plot_id, sizeof plot_id, "##ah_plot_%zu", k);
             if (ImPlot::BeginPlot(plot_id, ImVec2(plot_w, plot_h),
-                                  ImPlotFlags_NoTitle | ImPlotFlags_NoMenus
-                                  | ImPlotFlags_NoMouseText)) {
-                ImPlot::SetupAxes(nullptr, nullptr,
-                                  ImPlotAxisFlags_AutoFit,
+                                  ImPlotFlags_NoTitle | ImPlotFlags_NoMenus |
+                                      ImPlotFlags_NoMouseText)) {
+                ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_AutoFit,
                                   ImPlotAxisFlags_AutoFit);
                 ImPlot::PlotLine(signal_names[k], xs.data(), ys.data(),
                                  static_cast<int>(xs.size()));
@@ -5560,8 +5394,7 @@ void render_coldstart_panel(AppState &state) {
     if (!state.show_coldstart_panel) {
         return;
     }
-    if (!ImGui::Begin("Cold-start analysis (preview)",
-                      &state.show_coldstart_panel)) {
+    if (!ImGui::Begin("Cold-start analysis (preview)", &state.show_coldstart_panel)) {
         ImGui::End();
         return;
     }
@@ -5572,20 +5405,17 @@ void render_coldstart_panel(AppState &state) {
 
     ImGui::Text("Log:");
     ImGui::SetNextItemWidth(-120.0f);
-    ImGui::InputText("##cs_log_path", state.cs_log_path,
-                     sizeof state.cs_log_path);
+    ImGui::InputText("##cs_log_path", state.cs_log_path, sizeof state.cs_log_path);
     ImGui::SameLine();
     if (ImGui::Button("Browse…##cs_log")) {
-        nfdu8filteritem_t       filters[1] = {{"CSV", "csv"}};
-        NFD::UniquePathU8       out_path;
-        nfdresult_t const       r = NFD::OpenDialog(out_path, filters, 1);
+        nfdu8filteritem_t filters[1] = {{"CSV", "csv"}};
+        NFD::UniquePathU8 out_path;
+        nfdresult_t const r = NFD::OpenDialog(out_path, filters, 1);
         if (r == NFD_OKAY) {
-            std::snprintf(state.cs_log_path, sizeof state.cs_log_path,
-                          "%s", out_path.get());
+            std::snprintf(state.cs_log_path, sizeof state.cs_log_path, "%s", out_path.get());
             state.cs_load_error.clear();
         } else if (r == NFD_ERROR) {
-            state.cs_load_error = std::string{"Open dialog error: "}
-                                   + NFD::GetError();
+            state.cs_load_error = std::string{"Open dialog error: "} + NFD::GetError();
         }
     }
     if (!state.cs_load_error.empty()) {
@@ -5599,43 +5429,39 @@ void render_coldstart_panel(AppState &state) {
         ImGui::InputText("Timestamp col", state.cs_ts_col, sizeof state.cs_ts_col);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("ECT col",       state.cs_ect_col, sizeof state.cs_ect_col);
+        ImGui::InputText("ECT col", state.cs_ect_col, sizeof state.cs_ect_col);
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("IAT col",       state.cs_iat_col, sizeof state.cs_iat_col);
+        ImGui::InputText("IAT col", state.cs_iat_col, sizeof state.cs_iat_col);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("RPM col",       state.cs_rpm_col, sizeof state.cs_rpm_col);
+        ImGui::InputText("RPM col", state.cs_rpm_col, sizeof state.cs_rpm_col);
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("Obs λ col",     state.cs_obs_col, sizeof state.cs_obs_col);
+        ImGui::InputText("Obs λ col", state.cs_obs_col, sizeof state.cs_obs_col);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("Cmd λ col",     state.cs_cmd_col, sizeof state.cs_cmd_col);
+        ImGui::InputText("Cmd λ col", state.cs_cmd_col, sizeof state.cs_cmd_col);
         text_subtle("ECT and RPM are mandatory. Others are optional.");
     }
 
     if (ImGui::CollapsingHeader("Window")) {
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputFloat("Cold threshold °C", &state.cs_cold_threshold_c,
-                          1.0f, 5.0f, "%.1f");
+        ImGui::InputFloat("Cold threshold °C", &state.cs_cold_threshold_c, 1.0f, 5.0f, "%.1f");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputFloat("ECT bin width °C",  &state.cs_ect_bin_width_c,
-                          0.5f, 2.5f, "%.1f");
+        ImGui::InputFloat("ECT bin width °C", &state.cs_ect_bin_width_c, 0.5f, 2.5f, "%.1f");
         ImGui::SetNextItemWidth(160.0f);
         ImGui::InputInt("Min samples/bin", &state.cs_min_samples_per_bin, 1, 5);
-        if (state.cs_min_samples_per_bin < 0) state.cs_min_samples_per_bin = 0;
+        if (state.cs_min_samples_per_bin < 0)
+            state.cs_min_samples_per_bin = 0;
         ImGui::SameLine();
         ImGui::SetNextItemWidth(140.0f);
         char const *ts_units[] = {"seconds", "millis", "micros", "rows"};
         ImGui::Combo("Timestamp unit", &state.cs_ts_unit, ts_units, 4);
     }
 
-    if (ImGui::CollapsingHeader("Target lambda curve",
-                                 ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("Target lambda curve", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::SetNextItemWidth(-1.0f);
-        ImGui::InputText("##cs_target_curve",
-                         state.cs_target_curve,
-                         sizeof state.cs_target_curve);
+        ImGui::InputText("##cs_target_curve", state.cs_target_curve, sizeof state.cs_target_curve);
         text_subtle("Format: ect:lambda,ect:lambda,...  (linear interp).");
     }
 
@@ -5647,19 +5473,19 @@ void render_coldstart_panel(AppState &state) {
         bool curve_ok = true;
         {
             std::string buf{state.cs_target_curve};
-            std::size_t   start = 0;
+            std::size_t start = 0;
             for (std::size_t i = 0; i <= buf.size(); ++i) {
                 if (i == buf.size() || buf[i] == ',') {
                     std::string_view pair{buf.data() + start, i - start};
-                    while (!pair.empty()
-                           && std::isspace(static_cast<unsigned char>(pair.front()))) pair.remove_prefix(1);
-                    while (!pair.empty()
-                           && std::isspace(static_cast<unsigned char>(pair.back()))) pair.remove_suffix(1);
+                    while (!pair.empty() && std::isspace(static_cast<unsigned char>(pair.front())))
+                        pair.remove_prefix(1);
+                    while (!pair.empty() && std::isspace(static_cast<unsigned char>(pair.back())))
+                        pair.remove_suffix(1);
                     if (!pair.empty()) {
                         auto const colon = pair.find(':');
                         if (colon == std::string_view::npos) {
-                            state.cs_load_error = "Target curve entry '"
-                                + std::string{pair} + "' must be ect:lambda";
+                            state.cs_load_error =
+                                "Target curve entry '" + std::string{pair} + "' must be ect:lambda";
                             curve_ok = false;
                             break;
                         }
@@ -5668,8 +5494,8 @@ void render_coldstart_panel(AppState &state) {
                             double const lam = std::stod(std::string{pair.substr(colon + 1)});
                             state.cs_target_curve_parsed.emplace_back(ect, lam);
                         } catch (...) {
-                            state.cs_load_error = "Target curve entry '"
-                                + std::string{pair} + "' has non-numeric component";
+                            state.cs_load_error = "Target curve entry '" + std::string{pair} +
+                                                  "' has non-numeric component";
                             curve_ok = false;
                             break;
                         }
@@ -5677,9 +5503,8 @@ void render_coldstart_panel(AppState &state) {
                     start = i + 1;
                 }
             }
-            std::sort(state.cs_target_curve_parsed.begin(),
-                       state.cs_target_curve_parsed.end(),
-                       [](auto const &a, auto const &b) { return a.first < b.first; });
+            std::sort(state.cs_target_curve_parsed.begin(), state.cs_target_curve_parsed.end(),
+                      [](auto const &a, auto const &b) { return a.first < b.first; });
         }
         if (!curve_ok) {
             // Error already set; skip the rest.
@@ -5688,31 +5513,34 @@ void render_coldstart_panel(AppState &state) {
         } else {
             std::ifstream f{state.cs_log_path};
             if (!f) {
-                state.cs_load_error = std::string{"Cannot open '"}
-                                       + state.cs_log_path + "'";
+                state.cs_load_error = std::string{"Cannot open '"} + state.cs_log_path + "'";
             } else {
                 std::string header_line;
-                bool        got = false;
+                bool got = false;
                 while (std::getline(f, header_line)) {
                     while (!header_line.empty() && header_line.back() == '\r') {
                         header_line.pop_back();
                     }
-                    if (header_line.empty() || header_line.front() == '#') continue;
-                    got = true; break;
+                    if (header_line.empty() || header_line.front() == '#')
+                        continue;
+                    got = true;
+                    break;
                 }
                 if (!got) {
                     state.cs_load_error = "CSV has no header.";
                 } else {
                     std::vector<std::string> header_cols;
-                    std::size_t              start = 0;
+                    std::size_t start = 0;
                     for (std::size_t i = 0; i <= header_line.size(); ++i) {
                         if (i == header_line.size() || header_line[i] == ',') {
                             std::size_t a = start;
                             std::size_t b = i;
-                            while (a < b
-                                   && std::isspace(static_cast<unsigned char>(header_line[a]))) ++a;
-                            while (b > a
-                                   && std::isspace(static_cast<unsigned char>(header_line[b - 1]))) --b;
+                            while (a < b &&
+                                   std::isspace(static_cast<unsigned char>(header_line[a])))
+                                ++a;
+                            while (b > a &&
+                                   std::isspace(static_cast<unsigned char>(header_line[b - 1])))
+                                --b;
                             header_cols.emplace_back(header_line.substr(a, b - a));
                             start = i + 1;
                         }
@@ -5723,53 +5551,60 @@ void render_coldstart_panel(AppState &state) {
                         }
                         std::string want{name};
                         for (auto &cc : want) {
-                            cc = static_cast<char>(
-                                std::tolower(static_cast<unsigned char>(cc)));
+                            cc = static_cast<char>(std::tolower(static_cast<unsigned char>(cc)));
                         }
                         for (std::size_t i = 0; i < header_cols.size(); ++i) {
                             std::string have = header_cols[i];
                             for (auto &cc : have) {
-                                cc = static_cast<char>(
-                                    std::tolower(static_cast<unsigned char>(cc)));
+                                cc =
+                                    static_cast<char>(std::tolower(static_cast<unsigned char>(cc)));
                             }
-                            if (have == want) return i;
+                            if (have == want)
+                                return i;
                         }
                         return st::log::coldstart::kNoColumn;
                     };
                     st::log::coldstart::PidMapping mapping;
-                    mapping.timestamp_idx        = resolve(state.cs_ts_col);
-                    mapping.ect_idx              = resolve(state.cs_ect_col);
-                    mapping.iat_idx              = resolve(state.cs_iat_col);
-                    mapping.rpm_idx              = resolve(state.cs_rpm_col);
-                    mapping.observed_lambda_idx  = resolve(state.cs_obs_col);
+                    mapping.timestamp_idx = resolve(state.cs_ts_col);
+                    mapping.ect_idx = resolve(state.cs_ect_col);
+                    mapping.iat_idx = resolve(state.cs_iat_col);
+                    mapping.rpm_idx = resolve(state.cs_rpm_col);
+                    mapping.observed_lambda_idx = resolve(state.cs_obs_col);
                     mapping.commanded_lambda_idx = resolve(state.cs_cmd_col);
 
                     st::log::coldstart::WindowConfig cfg;
-                    cfg.cold_threshold_c    = state.cs_cold_threshold_c;
-                    cfg.ect_bin_width_c     = state.cs_ect_bin_width_c;
-                    cfg.min_samples_per_bin = static_cast<std::uint32_t>(
-                        state.cs_min_samples_per_bin);
+                    cfg.cold_threshold_c = state.cs_cold_threshold_c;
+                    cfg.ect_bin_width_c = state.cs_ect_bin_width_c;
+                    cfg.min_samples_per_bin =
+                        static_cast<std::uint32_t>(state.cs_min_samples_per_bin);
                     switch (state.cs_ts_unit) {
-                        case 1: cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixMillis;  break;
-                        case 2: cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixMicros;  break;
-                        case 3: cfg.timestamp_unit = st::log::coldstart::TimestampUnit::RowIndex;    break;
-                        default:cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixSeconds; break;
+                    case 1:
+                        cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixMillis;
+                        break;
+                    case 2:
+                        cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixMicros;
+                        break;
+                    case 3:
+                        cfg.timestamp_unit = st::log::coldstart::TimestampUnit::RowIndex;
+                        break;
+                    default:
+                        cfg.timestamp_unit = st::log::coldstart::TimestampUnit::UnixSeconds;
+                        break;
                     }
 
                     st::log::coldstart::Methodology methodology;
                     methodology.target_lambda_vs_ect.points = state.cs_target_curve_parsed;
 
-                    auto const r = st::log::coldstart::snapshot_from_csv(
-                        state.cs_log_path, mapping, cfg, methodology);
+                    auto const r = st::log::coldstart::snapshot_from_csv(state.cs_log_path, mapping,
+                                                                         cfg, methodology);
                     if (!r.has_value()) {
                         state.cs_load_error = r.error().to_string();
                         state.cs_snapshot.reset();
                     } else {
                         state.cs_snapshot = *r;
                         state.cs_compute_msg =
-                            std::to_string(r->samples_considered)
-                            + " samples; mean lambda dev "
-                            + (std::to_string(r->mean_lambda_deviation).substr(0, 6));
+                            std::to_string(r->samples_considered) + " samples; mean lambda dev " +
+                            (std::to_string(r->mean_lambda_deviation).substr(0, 6));
                     }
                 }
             }
@@ -5783,9 +5618,8 @@ void render_coldstart_panel(AppState &state) {
     if (state.cs_snapshot.has_value()) {
         auto const &snap = *state.cs_snapshot;
         ImGui::Separator();
-        char const *phase_names[6] = {
-            "PreCrank", "Cranking", "InitialFiring",
-            "HighIdle", "Warmup", "ClosedLoop"};
+        char const *phase_names[6] = {"PreCrank", "Cranking", "InitialFiring",
+                                      "HighIdle", "Warmup",   "ClosedLoop"};
 
         ImGui::Text("ECT span: %+.1f°C .. %+.1f°C  ·  considered %llu, gated %llu",
                     snap.coldest_ect_c, snap.warmest_ect_c,
@@ -5795,18 +5629,20 @@ void render_coldstart_panel(AppState &state) {
 
         // Phase summary table
         if (ImGui::BeginTable("##cs_phase", 3,
-                              ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
-                              | ImGuiTableFlags_SizingStretchProp)) {
+                              ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                  ImGuiTableFlags_SizingStretchProp)) {
             ImGui::TableSetupColumn("Phase");
             ImGui::TableSetupColumn("Samples");
             ImGui::TableSetupColumn("Seconds");
             ImGui::TableHeadersRow();
             for (std::size_t p = 0; p < st::log::coldstart::kPhaseCount; ++p) {
                 ImGui::TableNextRow();
-                ImGui::TableNextColumn(); ImGui::TextUnformatted(phase_names[p]);
-                ImGui::TableNextColumn(); ImGui::Text("%u",
-                    static_cast<unsigned>(snap.phase_counts[p]));
-                ImGui::TableNextColumn(); ImGui::Text("%.1f", snap.phase_seconds[p]);
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(phase_names[p]);
+                ImGui::TableNextColumn();
+                ImGui::Text("%u", static_cast<unsigned>(snap.phase_counts[p]));
+                ImGui::TableNextColumn();
+                ImGui::Text("%.1f", snap.phase_seconds[p]);
             }
             ImGui::EndTable();
         }
@@ -5825,16 +5661,14 @@ void render_coldstart_panel(AppState &state) {
                 bin_target.push_back(b.observed_lambda_mean - b.deviation_from_target);
             }
             ImVec2 const avail = ImGui::GetContentRegionAvail();
-            if (ImPlot::BeginPlot("##cs_lambda_plot",
-                                  ImVec2(avail.x, 200.0f),
+            if (ImPlot::BeginPlot("##cs_lambda_plot", ImVec2(avail.x, 200.0f),
                                   ImPlotFlags_NoTitle | ImPlotFlags_NoMenus)) {
-                ImPlot::SetupAxes("ECT (°C)", "lambda",
-                                  ImPlotAxisFlags_AutoFit,
+                ImPlot::SetupAxes("ECT (°C)", "lambda", ImPlotAxisFlags_AutoFit,
                                   ImPlotAxisFlags_AutoFit);
                 ImPlot::PlotLine("observed", bin_ect.data(), bin_obs.data(),
                                  static_cast<int>(bin_ect.size()));
                 if (!state.cs_target_curve_parsed.empty()) {
-                    ImPlot::PlotLine("target",  bin_ect.data(), bin_target.data(),
+                    ImPlot::PlotLine("target", bin_ect.data(), bin_target.data(),
                                      static_cast<int>(bin_ect.size()));
                 }
                 ImPlot::EndPlot();
@@ -5842,9 +5676,8 @@ void render_coldstart_panel(AppState &state) {
             ImGui::Spacing();
 
             if (ImGui::BeginTable("##cs_bins", 6,
-                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
-                                  | ImGuiTableFlags_SizingStretchProp
-                                  | ImGuiTableFlags_ScrollY,
+                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                      ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY,
                                   ImVec2(0, 200.0f))) {
                 ImGui::TableSetupColumn("ECT °C");
                 ImGui::TableSetupColumn("n");
@@ -5855,13 +5688,18 @@ void render_coldstart_panel(AppState &state) {
                 ImGui::TableHeadersRow();
                 for (auto const &b : snap.ect_bins) {
                     ImGui::TableNextRow();
-                    ImGui::TableNextColumn(); ImGui::Text("%+.1f", b.ect_center_c);
-                    ImGui::TableNextColumn(); ImGui::Text("%u",
-                        static_cast<unsigned>(b.count));
-                    ImGui::TableNextColumn(); ImGui::Text("%+.4f", b.observed_lambda_mean);
-                    ImGui::TableNextColumn(); ImGui::Text("%+.4f", b.observed_lambda_min);
-                    ImGui::TableNextColumn(); ImGui::Text("%+.4f", b.observed_lambda_max);
-                    ImGui::TableNextColumn(); ImGui::Text("%+.4f", b.deviation_from_target);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%+.1f", b.ect_center_c);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%u", static_cast<unsigned>(b.count));
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%+.4f", b.observed_lambda_mean);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%+.4f", b.observed_lambda_min);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%+.4f", b.observed_lambda_max);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%+.4f", b.deviation_from_target);
                 }
                 ImGui::EndTable();
             }
@@ -5883,8 +5721,7 @@ void render_ebcs_panel(AppState &state) {
     if (!state.show_ebcs_panel) {
         return;
     }
-    if (!ImGui::Begin("EBCS PID assistant (preview)",
-                      &state.show_ebcs_panel)) {
+    if (!ImGui::Begin("EBCS PID assistant (preview)", &state.show_ebcs_panel)) {
         ImGui::End();
         return;
     }
@@ -5896,20 +5733,17 @@ void render_ebcs_panel(AppState &state) {
 
     ImGui::Text("Log:");
     ImGui::SetNextItemWidth(-120.0f);
-    ImGui::InputText("##ebcs_log_path", state.ebcs_log_path,
-                     sizeof state.ebcs_log_path);
+    ImGui::InputText("##ebcs_log_path", state.ebcs_log_path, sizeof state.ebcs_log_path);
     ImGui::SameLine();
     if (ImGui::Button("Browse…##ebcs_log")) {
-        nfdu8filteritem_t       filters[1] = {{"CSV", "csv"}};
-        NFD::UniquePathU8       out_path;
-        nfdresult_t const       r = NFD::OpenDialog(out_path, filters, 1);
+        nfdu8filteritem_t filters[1] = {{"CSV", "csv"}};
+        NFD::UniquePathU8 out_path;
+        nfdresult_t const r = NFD::OpenDialog(out_path, filters, 1);
         if (r == NFD_OKAY) {
-            std::snprintf(state.ebcs_log_path, sizeof state.ebcs_log_path,
-                          "%s", out_path.get());
+            std::snprintf(state.ebcs_log_path, sizeof state.ebcs_log_path, "%s", out_path.get());
             state.ebcs_load_error.clear();
         } else if (r == NFD_ERROR) {
-            state.ebcs_load_error = std::string{"Open dialog error: "}
-                                     + NFD::GetError();
+            state.ebcs_load_error = std::string{"Open dialog error: "} + NFD::GetError();
         }
     }
     if (!state.ebcs_load_error.empty()) {
@@ -5920,38 +5754,35 @@ void render_ebcs_panel(AppState &state) {
 
     if (ImGui::CollapsingHeader("Column mapping", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("Timestamp col",     state.ebcs_ts_col,       sizeof state.ebcs_ts_col);
+        ImGui::InputText("Timestamp col", state.ebcs_ts_col, sizeof state.ebcs_ts_col);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("Target boost col",  state.ebcs_target_col,   sizeof state.ebcs_target_col);
+        ImGui::InputText("Target boost col", state.ebcs_target_col, sizeof state.ebcs_target_col);
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("Actual boost col",  state.ebcs_actual_col,   sizeof state.ebcs_actual_col);
+        ImGui::InputText("Actual boost col", state.ebcs_actual_col, sizeof state.ebcs_actual_col);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("Throttle col",      state.ebcs_throttle_col, sizeof state.ebcs_throttle_col);
+        ImGui::InputText("Throttle col", state.ebcs_throttle_col, sizeof state.ebcs_throttle_col);
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("WGDC col",          state.ebcs_wgdc_col,     sizeof state.ebcs_wgdc_col);
+        ImGui::InputText("WGDC col", state.ebcs_wgdc_col, sizeof state.ebcs_wgdc_col);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputText("RPM col",           state.ebcs_rpm_col,      sizeof state.ebcs_rpm_col);
+        ImGui::InputText("RPM col", state.ebcs_rpm_col, sizeof state.ebcs_rpm_col);
         text_subtle("Timestamp, target boost, actual boost, and throttle are mandatory.");
     }
 
     if (ImGui::CollapsingHeader("Detection")) {
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputFloat("Throttle step %",     &state.ebcs_throttle_step_pct,
-                          1.0f, 5.0f, "%.1f");
+        ImGui::InputFloat("Throttle step %", &state.ebcs_throttle_step_pct, 1.0f, 5.0f, "%.1f");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputFloat("Target boost step",   &state.ebcs_target_step,
-                          0.5f, 1.0f, "%.2f");
+        ImGui::InputFloat("Target boost step", &state.ebcs_target_step, 0.5f, 1.0f, "%.2f");
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputFloat("Max event duration s",&state.ebcs_max_event_duration,
-                          0.5f, 1.0f, "%.1f");
+        ImGui::InputFloat("Max event duration s", &state.ebcs_max_event_duration, 0.5f, 1.0f,
+                          "%.1f");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(160.0f);
-        ImGui::InputFloat("Overshoot warn %",    &state.ebcs_overshoot_warn_pct,
-                          1.0f, 5.0f, "%.1f");
+        ImGui::InputFloat("Overshoot warn %", &state.ebcs_overshoot_warn_pct, 1.0f, 5.0f, "%.1f");
         ImGui::SetNextItemWidth(140.0f);
         char const *ts_units[] = {"seconds", "millis", "micros", "rows"};
         ImGui::Combo("Timestamp unit", &state.ebcs_ts_unit, ts_units, 4);
@@ -5965,31 +5796,34 @@ void render_ebcs_panel(AppState &state) {
         } else {
             std::ifstream f{state.ebcs_log_path};
             if (!f) {
-                state.ebcs_load_error = std::string{"Cannot open '"}
-                                         + state.ebcs_log_path + "'";
+                state.ebcs_load_error = std::string{"Cannot open '"} + state.ebcs_log_path + "'";
             } else {
                 std::string header_line;
-                bool        got = false;
+                bool got = false;
                 while (std::getline(f, header_line)) {
                     while (!header_line.empty() && header_line.back() == '\r') {
                         header_line.pop_back();
                     }
-                    if (header_line.empty() || header_line.front() == '#') continue;
-                    got = true; break;
+                    if (header_line.empty() || header_line.front() == '#')
+                        continue;
+                    got = true;
+                    break;
                 }
                 if (!got) {
                     state.ebcs_load_error = "CSV has no header.";
                 } else {
                     std::vector<std::string> header_cols;
-                    std::size_t              start = 0;
+                    std::size_t start = 0;
                     for (std::size_t i = 0; i <= header_line.size(); ++i) {
                         if (i == header_line.size() || header_line[i] == ',') {
                             std::size_t a = start;
                             std::size_t b = i;
-                            while (a < b
-                                   && std::isspace(static_cast<unsigned char>(header_line[a]))) ++a;
-                            while (b > a
-                                   && std::isspace(static_cast<unsigned char>(header_line[b - 1]))) --b;
+                            while (a < b &&
+                                   std::isspace(static_cast<unsigned char>(header_line[a])))
+                                ++a;
+                            while (b > a &&
+                                   std::isspace(static_cast<unsigned char>(header_line[b - 1])))
+                                --b;
                             header_cols.emplace_back(header_line.substr(a, b - a));
                             start = i + 1;
                         }
@@ -6000,48 +5834,55 @@ void render_ebcs_panel(AppState &state) {
                         }
                         std::string want{name};
                         for (auto &cc : want) {
-                            cc = static_cast<char>(
-                                std::tolower(static_cast<unsigned char>(cc)));
+                            cc = static_cast<char>(std::tolower(static_cast<unsigned char>(cc)));
                         }
                         for (std::size_t i = 0; i < header_cols.size(); ++i) {
                             std::string have = header_cols[i];
                             for (auto &cc : have) {
-                                cc = static_cast<char>(
-                                    std::tolower(static_cast<unsigned char>(cc)));
+                                cc =
+                                    static_cast<char>(std::tolower(static_cast<unsigned char>(cc)));
                             }
-                            if (have == want) return i;
+                            if (have == want)
+                                return i;
                         }
                         return st::log::ebcs::kNoColumn;
                     };
                     st::log::ebcs::PidMapping mapping;
-                    mapping.timestamp_idx    = resolve(state.ebcs_ts_col);
+                    mapping.timestamp_idx = resolve(state.ebcs_ts_col);
                     mapping.target_boost_idx = resolve(state.ebcs_target_col);
                     mapping.actual_boost_idx = resolve(state.ebcs_actual_col);
-                    mapping.throttle_idx     = resolve(state.ebcs_throttle_col);
-                    mapping.wgdc_idx         = resolve(state.ebcs_wgdc_col);
-                    mapping.rpm_idx          = resolve(state.ebcs_rpm_col);
+                    mapping.throttle_idx = resolve(state.ebcs_throttle_col);
+                    mapping.wgdc_idx = resolve(state.ebcs_wgdc_col);
+                    mapping.rpm_idx = resolve(state.ebcs_rpm_col);
 
                     st::log::ebcs::DetectorConfig cfg;
                     cfg.throttle_step_threshold_pct = state.ebcs_throttle_step_pct;
                     cfg.target_boost_step_threshold = state.ebcs_target_step;
-                    cfg.max_event_duration_s        = state.ebcs_max_event_duration;
-                    cfg.overshoot_warn_pct          = state.ebcs_overshoot_warn_pct;
+                    cfg.max_event_duration_s = state.ebcs_max_event_duration;
+                    cfg.overshoot_warn_pct = state.ebcs_overshoot_warn_pct;
                     switch (state.ebcs_ts_unit) {
-                        case 1: cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixMillis;  break;
-                        case 2: cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixMicros;  break;
-                        case 3: cfg.timestamp_unit = st::log::ebcs::TimestampUnit::RowIndex;    break;
-                        default:cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixSeconds; break;
+                    case 1:
+                        cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixMillis;
+                        break;
+                    case 2:
+                        cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixMicros;
+                        break;
+                    case 3:
+                        cfg.timestamp_unit = st::log::ebcs::TimestampUnit::RowIndex;
+                        break;
+                    default:
+                        cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixSeconds;
+                        break;
                     }
-                    auto const r = st::log::ebcs::snapshot_from_csv(
-                        state.ebcs_log_path, mapping, cfg);
+                    auto const r =
+                        st::log::ebcs::snapshot_from_csv(state.ebcs_log_path, mapping, cfg);
                     if (!r.has_value()) {
                         state.ebcs_load_error = r.error().to_string();
                         state.ebcs_snapshot.reset();
                     } else {
                         state.ebcs_snapshot = *r;
-                        state.ebcs_compute_msg =
-                            std::to_string(r->good_event_count) + " good of "
-                            + std::to_string(r->total_event_count) + " events";
+                        state.ebcs_compute_msg = std::to_string(r->good_event_count) + " good of " +
+                                                 std::to_string(r->total_event_count) + " events";
                     }
                 }
             }
@@ -6055,14 +5896,13 @@ void render_ebcs_panel(AppState &state) {
     if (state.ebcs_snapshot.has_value()) {
         auto const &snap = *state.ebcs_snapshot;
         ImGui::Separator();
-        char const *quality_names[5] = {
-            "Good", "Choppy", "Slow", "Spiked", "Aborted"};
+        char const *quality_names[5] = {"Good", "Choppy", "Slow", "Spiked", "Aborted"};
 
         if (snap.good_event_count > 0) {
             ImGui::Text("Median rise time:        %.3f s", snap.median_rise_time_s);
             ImGui::Text("Median overshoot:        %.2f %%", snap.median_overshoot_pct);
             ImGui::Text("Median settling time:    %.3f s", snap.median_settling_time_s);
-            ImGui::Text("Mean steady-state error: %+.3f",  snap.mean_steady_state_error);
+            ImGui::Text("Mean steady-state error: %+.3f", snap.mean_steady_state_error);
         }
 
         ImGui::Spacing();
@@ -6076,9 +5916,8 @@ void render_ebcs_panel(AppState &state) {
             ImGui::Spacing();
             ImGui::Text("Tip-in events:");
             if (ImGui::BeginTable("##ebcs_events", 8,
-                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
-                                  | ImGuiTableFlags_SizingStretchProp
-                                  | ImGuiTableFlags_ScrollY,
+                                  ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                      ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY,
                                   ImVec2(0, 180.0f))) {
                 ImGui::TableSetupColumn("start s");
                 ImGui::TableSetupColumn("target");
@@ -6091,13 +5930,20 @@ void render_ebcs_panel(AppState &state) {
                 ImGui::TableHeadersRow();
                 for (auto const &ev : snap.events) {
                     ImGui::TableNextRow();
-                    ImGui::TableNextColumn(); ImGui::Text("%.2f", ev.start_timestamp);
-                    ImGui::TableNextColumn(); ImGui::Text("%+.2f", ev.target_boost);
-                    ImGui::TableNextColumn(); ImGui::Text("%+.2f", ev.peak_boost);
-                    ImGui::TableNextColumn(); ImGui::Text("%+.2f", ev.steady_state_boost);
-                    ImGui::TableNextColumn(); ImGui::Text("%.3f",  ev.rise_time_s);
-                    ImGui::TableNextColumn(); ImGui::Text("%.1f",  ev.overshoot_pct);
-                    ImGui::TableNextColumn(); ImGui::Text("%.3f",  ev.settling_time_s);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%.2f", ev.start_timestamp);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%+.2f", ev.target_boost);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%+.2f", ev.peak_boost);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%+.2f", ev.steady_state_boost);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%.3f", ev.rise_time_s);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%.1f", ev.overshoot_pct);
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%.3f", ev.settling_time_s);
                     ImGui::TableNextColumn();
                     ImGui::TextUnformatted(quality_names[static_cast<std::size_t>(ev.quality)]);
                 }
@@ -6138,25 +5984,24 @@ void render_dtcs_panel(AppState &state) {
 
     std::size_t emissions_total = 0;
     for (auto const &d : def.dtcs()) {
-        if (d.emissions_relevant) ++emissions_total;
+        if (d.emissions_relevant)
+            ++emissions_total;
     }
-    text_subtle("%zu DTC(s), %zu emissions-flagged",
-                         def.dtcs().size(), emissions_total);
+    text_subtle("%zu DTC(s), %zu emissions-flagged", def.dtcs().size(), emissions_total);
     ImGui::Separator();
 
     // Filter input — substring against the code or name. Same shape as the
     // sidebar's table filter but no global Ctrl+F focus binding (DTCs are
     // a secondary surface).
     ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputTextWithHint("##dtc_filter", "Filter DTCs…",
-                              state.dtc_filter, sizeof state.dtc_filter,
-                              ImGuiInputTextFlags_EscapeClearsAll);
+    ImGui::InputTextWithHint("##dtc_filter", "Filter DTCs…", state.dtc_filter,
+                             sizeof state.dtc_filter, ImGuiInputTextFlags_EscapeClearsAll);
     std::string_view const filter{state.dtc_filter};
 
     auto const &rom = state.project->working_rom();
     if (ImGui::BeginTable("dtc_table", 3,
-                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH
-                          | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit)) {
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                              ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit)) {
         ImGui::TableSetupColumn("On", ImGuiTableColumnFlags_WidthFixed, 28.0f);
         ImGui::TableSetupColumn("Code", ImGuiTableColumnFlags_WidthFixed, 56.0f);
         ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
@@ -6165,8 +6010,7 @@ void render_dtcs_panel(AppState &state) {
 
         std::size_t shown = 0;
         for (auto const &d : def.dtcs()) {
-            if (!filter.empty() && !icontains(d.code, filter)
-                && !icontains(d.name, filter)) {
+            if (!filter.empty() && !icontains(d.code, filter) && !icontains(d.name, filter)) {
                 continue;
             }
             ++shown;
@@ -6179,8 +6023,7 @@ void render_dtcs_panel(AppState &state) {
                 ImGui::TableSetColumnIndex(1);
                 ImGui::TextDisabled("%s", d.code.c_str());
                 ImGui::TableSetColumnIndex(2);
-                ImGui::TextDisabled("(broken bitmap reference '%s')",
-                                     d.bitmap_id.c_str());
+                ImGui::TextDisabled("(broken bitmap reference '%s')", d.bitmap_id.c_str());
                 continue;
             }
             auto const enabled_r = st::is_dtc_enabled(rom, *bm, d);
@@ -6191,11 +6034,9 @@ void render_dtcs_panel(AppState &state) {
             ImGui::PushID(d.code.c_str());
             bool toggled = enabled;
             if (ImGui::Checkbox("##en", &toggled) && toggled != enabled) {
-                auto change = st::set_dtc_enabled(state.project->working_rom(),
-                                                   *bm, d, toggled);
+                auto change = st::set_dtc_enabled(state.project->working_rom(), *bm, d, toggled);
                 if (!change.has_value()) {
-                    state.status_msg = "DTC toggle failed: "
-                                       + change.error().to_string();
+                    state.status_msg = "DTC toggle failed: " + change.error().to_string();
                 } else if (change->before != change->after) {
                     // Record one ByteEdit per toggle so Ctrl+Z reverses
                     // each gesture individually. Coalescing into a batch
@@ -6203,15 +6044,11 @@ void render_dtcs_panel(AppState &state) {
                     // need a debounce and surface less clearly in the
                     // history panel — one bit per click is the GUI
                     // semantic users expect.
-                    std::string desc = (toggled ? "enable DTC "
-                                                : "disable DTC ")
-                                       + d.code;
+                    std::string desc = (toggled ? "enable DTC " : "disable DTC ") + d.code;
                     state.project->history().record(st::edit::Edit::bytes(
-                        {{change->address, change->before, change->after}},
-                        std::move(desc)));
+                        {{change->address, change->before, change->after}}, std::move(desc)));
                     state.dirty = true;
-                    state.status_msg = (toggled ? "Enabled " : "Disabled ")
-                                       + d.code;
+                    state.status_msg = (toggled ? "Enabled " : "Disabled ") + d.code;
                 }
             }
             ImGui::PopID();
@@ -6237,12 +6074,10 @@ void render_dtcs_panel(AppState &state) {
                 }
                 ImGui::Separator();
                 ImGui::Text("Bitmap:    %s", d.bitmap_id.c_str());
-                ImGui::Text("Address:   0x%08zX + %zu",
-                             bm->address, d.byte_offset);
+                ImGui::Text("Address:   0x%08zX + %zu", bm->address, d.byte_offset);
                 ImGui::Text("Bit:       %d", d.bit);
                 if (d.emissions_relevant) {
-                    ImGui::TextColored(ImVec4(0.96f, 0.94f, 0.65f, 1.0f),
-                                       "emissions-relevant");
+                    ImGui::TextColored(ImVec4(0.96f, 0.94f, 0.65f, 1.0f), "emissions-relevant");
                 }
                 ImGui::EndTooltip();
             }
@@ -6279,18 +6114,17 @@ void render_history_panel(AppState &state) {
         return;
     }
     auto const &records = state.project->history().records();
-    auto const  cursor  = state.project->history().cursor();
+    auto const cursor = state.project->history().cursor();
 
     ImGui::Text("%zu edit(s), cursor at %zu", records.size(), cursor);
     if (cursor < records.size()) {
         ImGui::SameLine();
-        text_subtle("(%zu redo step%s)",
-                     records.size() - cursor,
-                     records.size() - cursor == 1 ? "" : "s");
+        text_subtle("(%zu redo step%s)", records.size() - cursor,
+                    records.size() - cursor == 1 ? "" : "s");
     }
 
-    ImGui::InputTextWithHint("##history_filter", "Filter by table id or op…",
-                              state.history_filter, sizeof state.history_filter);
+    ImGui::InputTextWithHint("##history_filter", "Filter by table id or op…", state.history_filter,
+                             sizeof state.history_filter);
     std::string_view const filter{state.history_filter};
 
     if (records.empty()) {
@@ -6302,7 +6136,7 @@ void render_history_panel(AppState &state) {
 
     ImGui::Separator();
     // Quick-action row: walk the cursor all the way down or up.
-    bool wants_revert_all  = false;
+    bool wants_revert_all = false;
     bool wants_reapply_all = false;
     // "Revert all" is destructive (walks the cursor to 0). Use a
     // two-click arm pattern so a fat-finger doesn't wipe 100+ edits.
@@ -6312,24 +6146,19 @@ void render_history_panel(AppState &state) {
     constexpr double kRevertArmTtl = 2.0;
     static double s_revert_armed_at = -1.0;
     double const now = ImGui::GetTime();
-    bool const armed =
-        s_revert_armed_at >= 0.0
-        && (now - s_revert_armed_at) < kRevertArmTtl;
-    char const *revert_label =
-        armed ? "Click again to confirm" : "Revert all";
+    bool const armed = s_revert_armed_at >= 0.0 && (now - s_revert_armed_at) < kRevertArmTtl;
+    char const *revert_label = armed ? "Click again to confirm" : "Revert all";
     if (armed) {
-        ImGui::PushStyleColor(ImGuiCol_Button,
-                               ImVec4(0.62f, 0.30f, 0.30f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
-                               ImVec4(0.74f, 0.36f, 0.36f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,
-                               ImVec4(0.82f, 0.40f, 0.40f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.30f, 0.30f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.74f, 0.36f, 0.36f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.82f, 0.40f, 0.40f, 1.0f));
     }
     bool const revert_clicked = ImGui::SmallButton(revert_label);
-    if (armed) ImGui::PopStyleColor(3);
+    if (armed)
+        ImGui::PopStyleColor(3);
     if (revert_clicked) {
         if (armed) {
-            wants_revert_all  = true;
+            wants_revert_all = true;
             s_revert_armed_at = -1.0;
         } else {
             s_revert_armed_at = now;
@@ -6337,23 +6166,23 @@ void render_history_panel(AppState &state) {
     }
     if (ImGui::IsItemHovered()) {
         if (armed) {
-            ImGui::SetTooltip(
-                "About to walk the cursor back through every edit "
-                "(redo stays available — new edits clear it).");
+            ImGui::SetTooltip("About to walk the cursor back through every edit "
+                              "(redo stays available — new edits clear it).");
         } else {
-            ImGui::SetTooltip(
-                "Undo every edit — cursor returns to 0 (ignores filter). "
-                "Click twice to confirm. Redo stays available until you "
-                "make a new edit.");
+            ImGui::SetTooltip("Undo every edit — cursor returns to 0 (ignores filter). "
+                              "Click twice to confirm. Redo stays available until you "
+                              "make a new edit.");
         }
     }
     ImGui::SameLine();
     bool const can_reapply = cursor < records.size();
-    if (!can_reapply) ImGui::BeginDisabled();
+    if (!can_reapply)
+        ImGui::BeginDisabled();
     if (ImGui::SmallButton("Re-apply all")) {
         wants_reapply_all = true;
     }
-    if (!can_reapply) ImGui::EndDisabled();
+    if (!can_reapply)
+        ImGui::EndDisabled();
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Redo every undone edit — cursor returns to the end "
                           "(ignores filter).");
@@ -6368,31 +6197,29 @@ void render_history_panel(AppState &state) {
     // keeps the control flow honest). `has_jump` is the only gate;
     // jump_target is only read when has_jump is true.
     std::size_t jump_target = 0;
-    bool        has_jump    = false;
+    bool has_jump = false;
 
     if (ImGui::BeginTable("##history_tbl", 5,
-                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH
-                          | ImGuiTableFlags_SizingStretchProp
-                          | ImGuiTableFlags_ScrollY)) {
-        ImGui::TableSetupColumn("#",     ImGuiTableColumnFlags_WidthFixed, 36.0f);
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                              ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY)) {
+        ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, 36.0f);
         ImGui::TableSetupColumn("table", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-        ImGui::TableSetupColumn("op",    ImGuiTableColumnFlags_WidthStretch, 1.5f);
+        ImGui::TableSetupColumn("op", ImGuiTableColumnFlags_WidthStretch, 1.5f);
         ImGui::TableSetupColumn("flags", ImGuiTableColumnFlags_WidthFixed, 40.0f);
-        ImGui::TableSetupColumn("",      ImGuiTableColumnFlags_WidthFixed, 56.0f);
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 56.0f);
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableHeadersRow();
 
         std::size_t matched = 0;
         for (std::size_t i = 0; i < records.size(); ++i) {
-            auto const &e  = records[i];
+            auto const &e = records[i];
             auto const *te = e.as_table();
             auto const *be = e.as_byte();
             // Per-row display strings differ between TableEdit (table id +
             // rect from the snapshot) and ByteEdit (synthetic label + byte
             // count). Pre-compute here so the column loops below don't
             // have to branch.
-            std::string id_str = te != nullptr ? te->table_id
-                                                : std::string{"(byte-edit)"};
+            std::string id_str = te != nullptr ? te->table_id : std::string{"(byte-edit)"};
             std::string rect_str;
             if (te != nullptr) {
                 char rectbuf[32]{};
@@ -6402,20 +6229,18 @@ void render_history_panel(AppState &state) {
                 rect_str = rectbuf;
             } else if (be != nullptr) {
                 char rectbuf[32]{};
-                std::snprintf(rectbuf, sizeof rectbuf, "%zu byte%s",
-                              be->changes.size(),
+                std::snprintf(rectbuf, sizeof rectbuf, "%zu byte%s", be->changes.size(),
                               be->changes.size() == 1 ? "" : "s");
                 rect_str = rectbuf;
             }
-            if (!filter.empty()
-                && !icontains(id_str, filter)
-                && !icontains(e.description, filter)) {
+            if (!filter.empty() && !icontains(id_str, filter) &&
+                !icontains(e.description, filter)) {
                 continue;
             }
             ++matched;
 
             bool const is_undone = i >= cursor;
-            bool const is_top    = (i + 1 == cursor); // most-recent applied
+            bool const is_top = (i + 1 == cursor); // most-recent applied
 
             ImGui::TableNextRow();
 
@@ -6436,7 +6261,7 @@ void render_history_panel(AppState &state) {
             ImGui::TableSetColumnIndex(1);
             if (is_undone) {
                 ImGui::PushStyleColor(ImGuiCol_Text,
-                                       ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                                      ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
             }
             if (te != nullptr) {
                 bool const is_selected = (te->table_id == state.selected_table_id);
@@ -6445,8 +6270,7 @@ void render_history_panel(AppState &state) {
                     state.select_table(te->table_id);
                 }
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Click to open %s in the table view.",
-                                       te->table_id.c_str());
+                    ImGui::SetTooltip("Click to open %s in the table view.", te->table_id.c_str());
                 }
                 ImGui::PopID();
             } else {
@@ -6460,9 +6284,8 @@ void render_history_panel(AppState &state) {
             ImGui::TableSetColumnIndex(2);
             char opbuf[160]{};
             std::snprintf(opbuf, sizeof opbuf, "%s  %s",
-                           e.description.empty() ? "(no description)"
-                                                  : e.description.c_str(),
-                           rect_str.c_str());
+                          e.description.empty() ? "(no description)" : e.description.c_str(),
+                          rect_str.c_str());
             if (is_undone) {
                 ImGui::TextDisabled("%s", opbuf);
             } else {
@@ -6474,34 +6297,37 @@ void render_history_panel(AppState &state) {
             // pack swap re-classifies without rewriting history.
             // ByteEdits don't bind to a table, so '-'.
             ImGui::TableSetColumnIndex(3);
-            bool        had_flag = false;
+            bool had_flag = false;
             if (te != nullptr) {
-                auto const *table =
-                    state.project->definition().find_table(te->table_id);
+                auto const *table = state.project->definition().find_table(te->table_id);
                 if (table != nullptr) {
                     if (table->engine_safety_critical) {
                         ImGui::TextColored(ImVec4(1.00f, 0.40f, 0.40f, 1.0f), "S");
                         had_flag = true;
                     }
                     if (table->emissions_relevant) {
-                        if (had_flag) ImGui::SameLine();
+                        if (had_flag)
+                            ImGui::SameLine();
                         ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f), "E");
                         had_flag = true;
                     }
                 }
             }
-            if (!had_flag) ImGui::TextDisabled("-");
+            if (!had_flag)
+                ImGui::TextDisabled("-");
 
             // Action column: Jump → make this edit the cursor (cursor = i + 1).
             // No-op when already at top: disable to remove the temptation.
             ImGui::TableSetColumnIndex(4);
             ImGui::PushID(static_cast<int>(i));
-            if (is_top) ImGui::BeginDisabled();
+            if (is_top)
+                ImGui::BeginDisabled();
             if (ImGui::SmallButton("Jump")) {
                 jump_target = i + 1;
-                has_jump    = true;
+                has_jump = true;
             }
-            if (is_top) ImGui::EndDisabled();
+            if (is_top)
+                ImGui::EndDisabled();
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Walk the cursor to make this edit the "
                                   "most-recently-applied. Reversible.");
@@ -6524,18 +6350,28 @@ void render_history_panel(AppState &state) {
     // coherent. If a step fails (apply_history_step's rollback re-bumps
     // the cursor back to where it started), the loop detects the lack
     // of progress and bails — no infinite spin.
-    if (wants_revert_all)   { jump_target = 0; has_jump = true; }
-    if (wants_reapply_all)  { jump_target = records.size(); has_jump = true; }
+    if (wants_revert_all) {
+        jump_target = 0;
+        has_jump = true;
+    }
+    if (wants_reapply_all) {
+        jump_target = records.size();
+        has_jump = true;
+    }
 
     if (has_jump) {
         std::size_t prev = static_cast<std::size_t>(-1);
         while (true) {
             std::size_t const c = state.project->history().cursor();
-            if (c == jump_target) break;
-            if (c == prev)        break; // step didn't move the cursor → stop.
+            if (c == jump_target)
+                break;
+            if (c == prev)
+                break; // step didn't move the cursor → stop.
             prev = c;
-            if (c > jump_target) do_undo(state);
-            else                  do_redo(state);
+            if (c > jump_target)
+                do_undo(state);
+            else
+                do_redo(state);
         }
     }
 
@@ -6553,8 +6389,7 @@ void render_features_designer(AppState &state) {
         return;
     }
     ImGui::SetNextWindowSize(ImVec2(720.0f, 480.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Custom features designer (WIP)",
-                       &state.show_features_designer)) {
+    if (!ImGui::Begin("Custom features designer (WIP)", &state.show_features_designer)) {
         ImGui::End();
         return;
     }
@@ -6566,31 +6401,27 @@ void render_features_designer(AppState &state) {
     // pin. Latch suppresses re-spawn until the mouse button is
     // released.
     bool const was_wiring_at_start = state.features_wiring_active;
-    if (was_wiring_at_start
-        && (ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false)
-            || ImGui::IsMouseClicked(ImGuiMouseButton_Right))) {
-        state.features_wiring_active  = false;
+    if (was_wiring_at_start && (ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false) ||
+                                ImGui::IsMouseClicked(ImGuiMouseButton_Right))) {
+        state.features_wiring_active = false;
         state.features_wiring_blocked = true;
     }
     if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
         state.features_wiring_blocked = false;
     }
 
-    ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f),
-                        "\xE2\x9A\xA0 Phase 5 preview.");
+    ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f), "\xE2\x9A\xA0 Phase 5 preview.");
     text_subtle("Editor, IR, SH-2A codegen, and .stmod persistence "
                 "all shipped. Patch insertion + flashing wait on the "
                 "bench rig — see docs/16.");
 
     ImGui::Spacing();
-    ImGui::Text("Nodes: %zu     Edges: %zu",
-                 state.features_graph.nodes().size(),
-                 state.features_graph.edges().size());
+    ImGui::Text("Nodes: %zu     Edges: %zu", state.features_graph.nodes().size(),
+                state.features_graph.edges().size());
 
     // Helper-lambda for spawning nodes at a free-ish slot.
     auto const next_slot_y = [&]() {
-        return 40.0f + 80.0f * static_cast<float>(
-                              state.features_graph.nodes().size());
+        return 40.0f + 80.0f * static_cast<float>(state.features_graph.nodes().size());
     };
 
     // Pack-driven node palette. Two groups in one popup:
@@ -6606,74 +6437,63 @@ void render_features_designer(AppState &state) {
     // Without a loaded project, fall back to the generic debug
     // buttons so an empty workspace can still be exercised.
     bool const have_palette =
-        state.project.has_value()
-        && (!state.project->definition().hooks().empty()
-            || !state.project->definition().primitives().empty());
+        state.project.has_value() && (!state.project->definition().hooks().empty() ||
+                                      !state.project->definition().primitives().empty());
     if (have_palette) {
         if (ImGui::Button("Insert \xE2\x96\xBE")) {
             ImGui::OpenPopup("##features_palette");
         }
         if (ImGui::BeginPopup("##features_palette")) {
-            auto const   &hooks =
-                state.project->definition().hooks();
-            auto const   &prims =
-                state.project->definition().primitives();
+            auto const &hooks = state.project->definition().hooks();
+            auto const &prims = state.project->definition().primitives();
             // Spawn helper — shared between the two groups. The pin-
             // direction lambda decides what `inputs`/`outputs` mean on
             // a given kind of node.
-            auto const spawn_node =
-                [&](std::string const &kind_prefix,
-                    std::string const &id,
-                    std::string const &display_name,
-                    std::vector<st::HookSignal> const &decl_inputs,
-                    std::vector<st::HookSignal> const &decl_outputs,
-                    st::feature::PinDirection in_dir,
-                    st::feature::PinDirection out_dir,
-                    bool phase_break) {
-                    st::feature::Node n;
-                    n.kind            = kind_prefix + id;
-                    n.label           = !display_name.empty() ? display_name : id;
-                    n.x               = 40.0f;
-                    n.y               = next_slot_y();
-                    n.is_phase_break  = phase_break;
-                    st::feature::PinId next_pin = 0;
-                    auto const push_pin =
-                        [&](st::HookSignal const &s,
-                            st::feature::PinDirection d) {
-                            auto pt = st::feature::parse_pin_type(s.type);
-                            // Canonical `name` goes into Pin.name so
-                            // codegen can resolve it back to the pack's
-                            // HookSignal; pretty `label` (if any)
-                            // populates Pin.label for display only.
-                            // Before this fix Pin.name held the label,
-                            // which silently broke compilation.
-                            n.pins.push_back(st::feature::Pin{
-                                next_pin++,
-                                s.name,
-                                pt.value_or(st::feature::PinType::Float),
-                                d, s.unit, s.label});
-                        };
-                    for (auto const &s : decl_inputs)  push_pin(s, in_dir);
-                    for (auto const &s : decl_outputs) push_pin(s, out_dir);
-                    state.features_graph.add_node(std::move(n));
+            auto const spawn_node = [&](std::string const &kind_prefix, std::string const &id,
+                                        std::string const &display_name,
+                                        std::vector<st::HookSignal> const &decl_inputs,
+                                        std::vector<st::HookSignal> const &decl_outputs,
+                                        st::feature::PinDirection in_dir,
+                                        st::feature::PinDirection out_dir, bool phase_break) {
+                st::feature::Node n;
+                n.kind = kind_prefix + id;
+                n.label = !display_name.empty() ? display_name : id;
+                n.x = 40.0f;
+                n.y = next_slot_y();
+                n.is_phase_break = phase_break;
+                st::feature::PinId next_pin = 0;
+                auto const push_pin = [&](st::HookSignal const &s, st::feature::PinDirection d) {
+                    auto pt = st::feature::parse_pin_type(s.type);
+                    // Canonical `name` goes into Pin.name so
+                    // codegen can resolve it back to the pack's
+                    // HookSignal; pretty `label` (if any)
+                    // populates Pin.label for display only.
+                    // Before this fix Pin.name held the label,
+                    // which silently broke compilation.
+                    n.pins.push_back(st::feature::Pin{next_pin++, s.name,
+                                                      pt.value_or(st::feature::PinType::Float), d,
+                                                      s.unit, s.label});
                 };
+                for (auto const &s : decl_inputs)
+                    push_pin(s, in_dir);
+                for (auto const &s : decl_outputs)
+                    push_pin(s, out_dir);
+                state.features_graph.add_node(std::move(n));
+            };
 
             if (!hooks.empty()) {
                 text_subtle("Hooks");
                 ImGui::Separator();
                 for (auto const &h : hooks) {
                     char const *human =
-                        !h.display_name.empty() ? h.display_name.c_str()
-                                                 : h.id.c_str();
+                        !h.display_name.empty() ? h.display_name.c_str() : h.id.c_str();
                     char label[200];
-                    std::snprintf(label, sizeof label, "%s##hook_%s",
-                                   human, h.id.c_str());
+                    std::snprintf(label, sizeof label, "%s##hook_%s", human, h.id.c_str());
                     if (ImGui::MenuItem(label)) {
-                        spawn_node("hook.", h.id, h.display_name,
-                                    h.inputs, h.outputs,
-                                    /*in_dir =*/st::feature::PinDirection::Output,
-                                    /*out_dir=*/st::feature::PinDirection::Input,
-                                    /*phase_break=*/true);
+                        spawn_node("hook.", h.id, h.display_name, h.inputs, h.outputs,
+                                   /*in_dir =*/st::feature::PinDirection::Output,
+                                   /*out_dir=*/st::feature::PinDirection::Input,
+                                   /*phase_break=*/true);
                     }
                     if (!h.description.empty() && ImGui::IsItemHovered()) {
                         ImGui::SetTooltip("%s", h.description.c_str());
@@ -6688,17 +6508,14 @@ void render_features_designer(AppState &state) {
                 ImGui::Separator();
                 for (auto const &p : prims) {
                     char const *human =
-                        !p.display_name.empty() ? p.display_name.c_str()
-                                                 : p.id.c_str();
+                        !p.display_name.empty() ? p.display_name.c_str() : p.id.c_str();
                     char label[200];
-                    std::snprintf(label, sizeof label, "%s##prim_%s",
-                                   human, p.id.c_str());
+                    std::snprintf(label, sizeof label, "%s##prim_%s", human, p.id.c_str());
                     if (ImGui::MenuItem(label)) {
-                        spawn_node("primitive.", p.id, p.display_name,
-                                    p.inputs, p.outputs,
-                                    /*in_dir =*/st::feature::PinDirection::Input,
-                                    /*out_dir=*/st::feature::PinDirection::Output,
-                                    /*phase_break=*/false);
+                        spawn_node("primitive.", p.id, p.display_name, p.inputs, p.outputs,
+                                   /*in_dir =*/st::feature::PinDirection::Input,
+                                   /*out_dir=*/st::feature::PinDirection::Output,
+                                   /*phase_break=*/false);
                     }
                     if (!p.description.empty() && ImGui::IsItemHovered()) {
                         ImGui::SetTooltip("%s", p.description.c_str());
@@ -6710,43 +6527,38 @@ void render_features_designer(AppState &state) {
     } else {
         if (ImGui::Button("Add source (Float out)")) {
             st::feature::Node n;
-            n.kind  = "sensor.float";
+            n.kind = "sensor.float";
             n.label = "Source";
-            n.x     = 40.0f;
-            n.y     = next_slot_y();
-            n.pins.push_back(st::feature::Pin{
-                0, "out", st::feature::PinType::Float,
-                st::feature::PinDirection::Output, ""});
+            n.x = 40.0f;
+            n.y = next_slot_y();
+            n.pins.push_back(st::feature::Pin{0, "out", st::feature::PinType::Float,
+                                              st::feature::PinDirection::Output, ""});
             state.features_graph.add_node(std::move(n));
         }
         ImGui::SameLine();
         if (ImGui::Button("Add sink (Float in)")) {
             st::feature::Node n;
-            n.kind  = "output.float";
+            n.kind = "output.float";
             n.label = "Sink";
-            n.x     = 320.0f;
-            n.y     = next_slot_y();
-            n.pins.push_back(st::feature::Pin{
-                0, "in", st::feature::PinType::Float,
-                st::feature::PinDirection::Input, ""});
+            n.x = 320.0f;
+            n.y = next_slot_y();
+            n.pins.push_back(st::feature::Pin{0, "in", st::feature::PinType::Float,
+                                              st::feature::PinDirection::Input, ""});
             state.features_graph.add_node(std::move(n));
         }
         ImGui::SameLine();
         if (ImGui::Button("Add 2-in/1-out (Float)")) {
             st::feature::Node n;
-            n.kind  = "math.add";
+            n.kind = "math.add";
             n.label = "Add";
-            n.x     = 180.0f;
-            n.y     = next_slot_y();
-            n.pins.push_back(st::feature::Pin{
-                0, "a",   st::feature::PinType::Float,
-                st::feature::PinDirection::Input,  ""});
-            n.pins.push_back(st::feature::Pin{
-                1, "b",   st::feature::PinType::Float,
-                st::feature::PinDirection::Input,  ""});
-            n.pins.push_back(st::feature::Pin{
-                2, "out", st::feature::PinType::Float,
-                st::feature::PinDirection::Output, ""});
+            n.x = 180.0f;
+            n.y = next_slot_y();
+            n.pins.push_back(st::feature::Pin{0, "a", st::feature::PinType::Float,
+                                              st::feature::PinDirection::Input, ""});
+            n.pins.push_back(st::feature::Pin{1, "b", st::feature::PinType::Float,
+                                              st::feature::PinDirection::Input, ""});
+            n.pins.push_back(st::feature::Pin{2, "out", st::feature::PinType::Float,
+                                              st::feature::PinDirection::Output, ""});
             state.features_graph.add_node(std::move(n));
         }
     }
@@ -6763,19 +6575,17 @@ void render_features_designer(AppState &state) {
     ImGui::SameLine();
     if (ImGui::Button("Reset view")) {
         state.features_view_offset = ImVec2(0.0f, 0.0f);
-        state.features_view_scale  = 1.0f;
+        state.features_view_scale = 1.0f;
     }
     ImGui::SameLine();
     if (ImGui::Button("Save…")) {
         nfdu8filteritem_t filters[1] = {{"SubuwuTuner mod (TOML)", "stmod"}};
         NFD::UniquePathU8 out;
-        nfdresult_t const r = NFD::SaveDialog(out, filters, 1, nullptr,
-                                                "graph.stmod");
+        nfdresult_t const r = NFD::SaveDialog(out, filters, 1, nullptr, "graph.stmod");
         if (r == NFD_OKAY) {
             std::ofstream ofs{out.get(), std::ios::trunc};
             if (!ofs) {
-                state.features_wire_error =
-                    std::string{"save: cannot open "} + out.get();
+                state.features_wire_error = std::string{"save: cannot open "} + out.get();
             } else {
                 ofs << st::feature::to_toml(state.features_graph);
                 state.features_wire_error.clear();
@@ -6790,17 +6600,15 @@ void render_features_designer(AppState &state) {
         if (r == NFD_OKAY) {
             std::ifstream ifs{out.get(), std::ios::binary};
             if (!ifs) {
-                state.features_wire_error =
-                    std::string{"load: cannot open "} + out.get();
+                state.features_wire_error = std::string{"load: cannot open "} + out.get();
             } else {
                 std::stringstream buf;
                 buf << ifs.rdbuf();
                 auto loaded = st::feature::from_toml(buf.str());
                 if (!loaded.has_value()) {
-                    state.features_wire_error =
-                        "load: " + loaded.error().to_string();
+                    state.features_wire_error = "load: " + loaded.error().to_string();
                 } else {
-                    state.features_graph         = std::move(*loaded);
+                    state.features_graph = std::move(*loaded);
                     state.features_wiring_active = false;
                     state.features_wire_error.clear();
                     state.features_selected_nodes.clear();
@@ -6816,26 +6624,25 @@ void render_features_designer(AppState &state) {
     // chip so the editor's quality signal lives at the eye-line of
     // the toolbar rather than in muted body text below it. Click
     // opens a popup with the actionable detail.
-    auto const         validate_result = state.features_graph.validate();
-    auto const         lint_findings   = st::feature::lint(state.features_graph);
-    char const *       chip_label;
-    ImVec4             chip_fg, chip_bg;
-    char               chip_buf[48];
+    auto const validate_result = state.features_graph.validate();
+    auto const lint_findings = st::feature::lint(state.features_graph);
+    char const *chip_label;
+    ImVec4 chip_fg, chip_bg;
+    char chip_buf[48];
     if (!validate_result.has_value()) {
         chip_label = "Invalid";
-        chip_fg    = chip_fg_danger();
-        chip_bg    = chip_bg_danger();
+        chip_fg = chip_fg_danger();
+        chip_bg = chip_bg_danger();
     } else if (!lint_findings.empty()) {
-        std::snprintf(chip_buf, sizeof chip_buf, "%zu warning%s",
-                       lint_findings.size(),
-                       lint_findings.size() == 1 ? "" : "s");
+        std::snprintf(chip_buf, sizeof chip_buf, "%zu warning%s", lint_findings.size(),
+                      lint_findings.size() == 1 ? "" : "s");
         chip_label = chip_buf;
-        chip_fg    = chip_fg_warn();
-        chip_bg    = chip_bg_warn();
+        chip_fg = chip_fg_warn();
+        chip_bg = chip_bg_warn();
     } else {
         chip_label = "OK";
-        chip_fg    = chip_fg_ok();
-        chip_bg    = chip_bg_ok();
+        chip_fg = chip_fg_ok();
+        chip_bg = chip_bg_ok();
     }
     chip(chip_label, chip_fg, chip_bg);
     if (ImGui::IsItemClicked()) {
@@ -6846,11 +6653,9 @@ void render_features_designer(AppState &state) {
     }
     if (ImGui::BeginPopup("##features_status_popup")) {
         if (!validate_result.has_value()) {
-            ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
-                                "Structural error");
+            ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f), "Structural error");
             ImGui::Separator();
-            ImGui::TextWrapped("%s",
-                                validate_result.error().to_string().c_str());
+            ImGui::TextWrapped("%s", validate_result.error().to_string().c_str());
         } else if (!lint_findings.empty()) {
             text_subtle("Completeness warnings");
             ImGui::Separator();
@@ -6859,14 +6664,14 @@ void render_features_designer(AppState &state) {
             }
         } else {
             text_subtle("Graph passes structural validation "
-                         "and has no completeness warnings.");
+                        "and has no completeness warnings.");
         }
         ImGui::EndPopup();
     }
 
     if (!state.features_wire_error.empty()) {
-        ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f),
-                            "wire: %s", state.features_wire_error.c_str());
+        ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f), "wire: %s",
+                           state.features_wire_error.c_str());
     }
     text_subtle("Click a node or edge to select; Shift+click "
                 "to multi-select. Drag from empty canvas to "
@@ -6884,40 +6689,35 @@ void render_features_designer(AppState &state) {
     // that converts a graph-space measurement to screen pixels has
     // to multiply by `scale`. Snap-to-grid stays in graph space —
     // the grid drawing scales but the snap step doesn't.
-    constexpr float kNodeWidth      = 150.0f;
-    constexpr float kHeaderHeight   = 24.0f;
-    constexpr float kPinRowHeight   = 20.0f;
-    constexpr float kPinRadius      =  5.0f;
-    constexpr float kPinHitRadius   = 10.0f;
-    constexpr float kFooterPadding  =  8.0f;
-    constexpr float kGridStep       = 24.0f;
+    constexpr float kNodeWidth = 150.0f;
+    constexpr float kHeaderHeight = 24.0f;
+    constexpr float kPinRowHeight = 20.0f;
+    constexpr float kPinRadius = 5.0f;
+    constexpr float kPinHitRadius = 10.0f;
+    constexpr float kFooterPadding = 8.0f;
+    constexpr float kGridStep = 24.0f;
 
-    ImVec2 const canvas_p  = ImGui::GetCursorScreenPos();
-    ImVec2 const canvas_sz = ImVec2(
-        std::max(120.0f, ImGui::GetContentRegionAvail().x),
-        std::max(240.0f, ImGui::GetContentRegionAvail().y - 8.0f));
-    ImVec2 const canvas_end(canvas_p.x + canvas_sz.x,
-                             canvas_p.y + canvas_sz.y);
+    ImVec2 const canvas_p = ImGui::GetCursorScreenPos();
+    ImVec2 const canvas_sz = ImVec2(std::max(120.0f, ImGui::GetContentRegionAvail().x),
+                                    std::max(240.0f, ImGui::GetContentRegionAvail().y - 8.0f));
+    ImVec2 const canvas_end(canvas_p.x + canvas_sz.x, canvas_p.y + canvas_sz.y);
 
     // View transform. Lambdas take graph-space, return screen-space
     // (and back). Kept as locals so the rest of the function can
     // read `scale` directly when it's the cleaner expression.
-    float const  scale  = state.features_view_scale;
+    float const scale = state.features_view_scale;
     ImVec2 const offset = state.features_view_offset;
-    auto const   to_screen = [&](float gx, float gy) {
-        return ImVec2(canvas_p.x + offset.x + gx * scale,
-                       canvas_p.y + offset.y + gy * scale);
+    auto const to_screen = [&](float gx, float gy) {
+        return ImVec2(canvas_p.x + offset.x + gx * scale, canvas_p.y + offset.y + gy * scale);
     };
 
     // Pan + zoom input. Middle-mouse drag pans; mouse wheel zooms
     // anchored to the cursor (the graph point under the cursor stays
     // put as the scale changes). Both gated on canvas hover so they
     // don't fight with toolbar / context menus elsewhere in the panel.
-    bool const canvas_hovered =
-        ImGui::IsMouseHoveringRect(canvas_p, canvas_end)
-        && ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup);
-    if (canvas_hovered
-        && ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.0f)) {
+    bool const canvas_hovered = ImGui::IsMouseHoveringRect(canvas_p, canvas_end) &&
+                                ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup);
+    if (canvas_hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.0f)) {
         ImVec2 const d = ImGui::GetIO().MouseDelta;
         state.features_view_offset.x += d.x;
         state.features_view_offset.y += d.y;
@@ -6926,26 +6726,23 @@ void render_features_designer(AppState &state) {
         float const wheel = ImGui::GetIO().MouseWheel;
         if (wheel != 0.0f) {
             float const old_scale = state.features_view_scale;
-            float const factor    = wheel > 0.0f ? 1.1f : 1.0f / 1.1f;
-            float const new_scale = std::clamp(old_scale * factor,
-                                                 0.25f, 3.0f);
+            float const factor = wheel > 0.0f ? 1.1f : 1.0f / 1.1f;
+            float const new_scale = std::clamp(old_scale * factor, 0.25f, 3.0f);
             if (new_scale != old_scale) {
                 ImVec2 const m = ImGui::GetIO().MousePos;
                 // Graph-space point under the cursor at the old scale.
-                float const gx = (m.x - canvas_p.x - state.features_view_offset.x)
-                                  / old_scale;
-                float const gy = (m.y - canvas_p.y - state.features_view_offset.y)
-                                  / old_scale;
+                float const gx = (m.x - canvas_p.x - state.features_view_offset.x) / old_scale;
+                float const gy = (m.y - canvas_p.y - state.features_view_offset.y) / old_scale;
                 state.features_view_offset.x = m.x - canvas_p.x - gx * new_scale;
                 state.features_view_offset.y = m.y - canvas_p.y - gy * new_scale;
-                state.features_view_scale    = new_scale;
+                state.features_view_scale = new_scale;
             }
         }
     }
 
-    auto * const dl       = ImGui::GetWindowDrawList();
-    ImU32 const grid_col  = ImGui::GetColorU32(ImGuiCol_Separator);
-    ImU32 const bg_col    = ImGui::GetColorU32(ImGuiCol_ChildBg);
+    auto *const dl = ImGui::GetWindowDrawList();
+    ImU32 const grid_col = ImGui::GetColorU32(ImGuiCol_Separator);
+    ImU32 const bg_col = ImGui::GetColorU32(ImGuiCol_ChildBg);
     dl->AddRectFilled(canvas_p, canvas_end, bg_col);
     // Grid lines: drawn in graph-aligned screen positions. Hidden
     // when the on-screen step would be too dense to be useful.
@@ -6953,20 +6750,22 @@ void render_features_designer(AppState &state) {
         float const step_s = kGridStep * scale;
         if (step_s >= 4.0f) {
             float start_x = std::fmod(state.features_view_offset.x, step_s);
-            if (start_x > 0.0f) start_x -= step_s;
+            if (start_x > 0.0f)
+                start_x -= step_s;
             for (float x = start_x; x < canvas_sz.x; x += step_s) {
-                if (x < 0.0f) continue;
+                if (x < 0.0f)
+                    continue;
                 dl->AddLine(ImVec2(canvas_p.x + x, canvas_p.y),
-                             ImVec2(canvas_p.x + x, canvas_p.y + canvas_sz.y),
-                             grid_col);
+                            ImVec2(canvas_p.x + x, canvas_p.y + canvas_sz.y), grid_col);
             }
             float start_y = std::fmod(state.features_view_offset.y, step_s);
-            if (start_y > 0.0f) start_y -= step_s;
+            if (start_y > 0.0f)
+                start_y -= step_s;
             for (float y = start_y; y < canvas_sz.y; y += step_s) {
-                if (y < 0.0f) continue;
-                dl->AddLine(ImVec2(canvas_p.x,                canvas_p.y + y),
-                             ImVec2(canvas_p.x + canvas_sz.x, canvas_p.y + y),
-                             grid_col);
+                if (y < 0.0f)
+                    continue;
+                dl->AddLine(ImVec2(canvas_p.x, canvas_p.y + y),
+                            ImVec2(canvas_p.x + canvas_sz.x, canvas_p.y + y), grid_col);
             }
         }
     }
@@ -6975,11 +6774,11 @@ void render_features_designer(AppState &state) {
     // Per-pin screen-position cache. Built while drawing nodes and
     // read when rendering edges + during wiring hit-tests.
     struct PinPos {
-        st::feature::NodeId       node_id;
-        st::feature::PinId        pin_id;
+        st::feature::NodeId node_id;
+        st::feature::PinId pin_id;
         st::feature::PinDirection direction;
-        st::feature::PinType      type;
-        ImVec2                    pos;
+        st::feature::PinType type;
+        ImVec2 pos;
     };
     std::vector<PinPos> pin_positions;
     pin_positions.reserve(state.features_graph.nodes().size() * 3);
@@ -6989,76 +6788,66 @@ void render_features_designer(AppState &state) {
     // unconnected-but-defaulted pins and to gate the default-value
     // editor (only shows on undriven inputs). Pre-computed once so
     // the per-pin path doesn't redo it.
-    auto const pin_key = [](st::feature::NodeId nid,
-                             st::feature::PinId  pid) {
-        return (static_cast<std::uint64_t>(nid) << 32)
-             | static_cast<std::uint64_t>(pid);
+    auto const pin_key = [](st::feature::NodeId nid, st::feature::PinId pid) {
+        return (static_cast<std::uint64_t>(nid) << 32) | static_cast<std::uint64_t>(pid);
     };
     std::unordered_set<std::uint64_t> driven_inputs;
     for (auto const &e : state.features_graph.edges()) {
         driven_inputs.insert(pin_key(e.to_node, e.to_pin));
     }
-    auto const is_pin_driven =
-        [&](st::feature::NodeId nid, st::feature::PinId pid) {
-            return driven_inputs.find(pin_key(nid, pid))
-                != driven_inputs.end();
-        };
+    auto const is_pin_driven = [&](st::feature::NodeId nid, st::feature::PinId pid) {
+        return driven_inputs.find(pin_key(nid, pid)) != driven_inputs.end();
+    };
 
     // Helper: what text the editor renders for a pin's label. For
     // unconnected Input pins with a default_value set, the suffix
     // "= value" is appended so the constant is visible inline.
     // Bool prints true/false; Int truncates; Float uses %g.
-    auto const pin_display_text =
-        [&](st::feature::Node const &node,
-            st::feature::Pin const &p) -> std::string {
-            // Display prefers `label` (the pretty name from the pack);
-            // falls back to `name` (the snake_case canonical) when no
-            // label was supplied. Codegen lookups still use `name`.
-            std::string const &disp =
-                !p.label.empty() ? p.label : p.name;
-            if (p.direction == st::feature::PinDirection::Input
-                && !is_pin_driven(node.id, p.id)
-                && p.default_value.has_value()) {
-                char buf[96];
-                if (p.type == st::feature::PinType::Bool) {
-                    std::snprintf(buf, sizeof buf, "%s = %s",
-                                   disp.c_str(),
-                                   *p.default_value > 0.5 ? "true" : "false");
-                } else if (p.type == st::feature::PinType::Int) {
-                    std::snprintf(buf, sizeof buf, "%s = %lld",
-                                   disp.c_str(),
-                                   static_cast<long long>(*p.default_value));
-                } else {
-                    std::snprintf(buf, sizeof buf, "%s = %g",
-                                   disp.c_str(), *p.default_value);
-                }
-                return buf;
+    auto const pin_display_text = [&](st::feature::Node const &node,
+                                      st::feature::Pin const &p) -> std::string {
+        // Display prefers `label` (the pretty name from the pack);
+        // falls back to `name` (the snake_case canonical) when no
+        // label was supplied. Codegen lookups still use `name`.
+        std::string const &disp = !p.label.empty() ? p.label : p.name;
+        if (p.direction == st::feature::PinDirection::Input && !is_pin_driven(node.id, p.id) &&
+            p.default_value.has_value()) {
+            char buf[96];
+            if (p.type == st::feature::PinType::Bool) {
+                std::snprintf(buf, sizeof buf, "%s = %s", disp.c_str(),
+                              *p.default_value > 0.5 ? "true" : "false");
+            } else if (p.type == st::feature::PinType::Int) {
+                std::snprintf(buf, sizeof buf, "%s = %lld", disp.c_str(),
+                              static_cast<long long>(*p.default_value));
+            } else {
+                std::snprintf(buf, sizeof buf, "%s = %g", disp.c_str(), *p.default_value);
             }
-            return disp;
-        };
+            return buf;
+        }
+        return disp;
+    };
 
     // Pending default-value mutation, applied after the loop. Empty
     // value clears the default; populated value sets it. Captured
     // by the pin context menu's editor.
     struct PendingDefault {
-        st::feature::NodeId    node_id;
-        st::feature::PinId     pin_id;
-        std::optional<double>  value;
+        st::feature::NodeId node_id;
+        st::feature::PinId pin_id;
+        std::optional<double> value;
     };
     std::optional<PendingDefault> pending_default;
 
     // Pin appearance constants — derived from the active accent. The
     // pin fill matches the type's category (today only Float/Int/Bool
     // share one color; future work could vary).
-    auto const          accent     = accent_for(state.settings.theme);
-    ImU32 const         pin_fill   = ImGui::GetColorU32(accent.base);
-    ImU32 const         pin_brd    = ImGui::GetColorU32(ImGuiCol_Border);
-    ImU32 const         node_bg    = ImGui::GetColorU32(ImGuiCol_FrameBg);
-    ImU32 const         node_brd   = ImGui::GetColorU32(ImGuiCol_Border);
-    ImU32 const         hdr_bg     = ImGui::GetColorU32(ImGuiCol_TitleBgActive);
-    ImU32 const         txt_col    = ImGui::GetColorU32(ImGuiCol_Text);
-    ImU32 const         disabled_t = ImGui::GetColorU32(ImGuiCol_TextDisabled);
-    (void)disabled_t;  // reserved for future pin labels in disabled state
+    auto const accent = accent_for(state.settings.theme);
+    ImU32 const pin_fill = ImGui::GetColorU32(accent.base);
+    ImU32 const pin_brd = ImGui::GetColorU32(ImGuiCol_Border);
+    ImU32 const node_bg = ImGui::GetColorU32(ImGuiCol_FrameBg);
+    ImU32 const node_brd = ImGui::GetColorU32(ImGuiCol_Border);
+    ImU32 const hdr_bg = ImGui::GetColorU32(ImGuiCol_TitleBgActive);
+    ImU32 const txt_col = ImGui::GetColorU32(ImGuiCol_Text);
+    ImU32 const disabled_t = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    (void)disabled_t; // reserved for future pin labels in disabled state
 
     // Snapshot the nodes by id so we can iterate stably while issuing
     // ImGui::InvisibleButton hit-tests (the node positions get
@@ -7069,7 +6858,11 @@ void render_features_designer(AppState &state) {
     // consumed by the rubber-band hit-test below. Saves recomputing
     // the per-node width measurement (which involves CalcTextSizeA
     // on every pin label).
-    struct NodeRect { st::feature::NodeId id; ImVec2 tl; ImVec2 br; };
+    struct NodeRect {
+        st::feature::NodeId id;
+        ImVec2 tl;
+        ImVec2 br;
+    };
     std::vector<NodeRect> node_rects;
     node_rects.reserve(nodes.size());
 
@@ -7077,17 +6870,15 @@ void render_features_designer(AppState &state) {
     // after the loop so we don't invalidate iteration / pin caches.
     // Nodes are batched for the multi-select Delete-key path; the
     // edge variant stays singular (no edge multi-select yet).
-    std::vector<st::feature::NodeId>   pending_delete_nodes;
-    std::optional<st::feature::Edge>   pending_delete_edge;
+    std::vector<st::feature::NodeId> pending_delete_nodes;
+    std::optional<st::feature::Edge> pending_delete_edge;
 
     // Delete key removes the current selection — every selected
     // node, or the selected edge, depending on which one is set.
     // Gated on window focus so deletes elsewhere (table-cell editing,
     // etc.) don't blow away the designer's selection by accident.
-    bool const designer_focused =
-        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-    if (designer_focused
-        && ImGui::IsKeyPressed(ImGuiKey_Delete, /*repeat=*/false)) {
+    bool const designer_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+    if (designer_focused && ImGui::IsKeyPressed(ImGuiKey_Delete, /*repeat=*/false)) {
         if (!state.features_selected_nodes.empty()) {
             pending_delete_nodes = state.features_selected_nodes;
         } else if (state.features_selected_edge.has_value()) {
@@ -7095,14 +6886,14 @@ void render_features_designer(AppState &state) {
         }
     }
 
-    ImFont * const fnt      = ImGui::GetFont();
-    float const    fnt_sz_s = ImGui::GetFontSize() * scale;
-    float const    hdr_h_s  = kHeaderHeight   * scale;
-    float const    row_h_s  = kPinRowHeight   * scale;
-    float const    foot_s   = kFooterPadding  * scale;
-    float const    width_s  = kNodeWidth      * scale;
-    float const    pin_r_s  = kPinRadius      * scale;
-    float const    pin_hr_s = kPinHitRadius   * scale;
+    ImFont *const fnt = ImGui::GetFont();
+    float const fnt_sz_s = ImGui::GetFontSize() * scale;
+    float const hdr_h_s = kHeaderHeight * scale;
+    float const row_h_s = kPinRowHeight * scale;
+    float const foot_s = kFooterPadding * scale;
+    float const width_s = kNodeWidth * scale;
+    float const pin_r_s = kPinRadius * scale;
+    float const pin_hr_s = kPinHitRadius * scale;
 
     // Tracks whether any per-node body or pin InvisibleButton ended
     // up hovered this frame. Edge hit-test consumes this to decide
@@ -7114,52 +6905,43 @@ void render_features_designer(AppState &state) {
     bool any_node_pin_hovered = false;
 
     for (auto const &n : nodes) {
-        std::size_t const inputs  = static_cast<std::size_t>(std::count_if(
-            n.pins.begin(), n.pins.end(),
-            [](st::feature::Pin const &p) {
+        std::size_t const inputs = static_cast<std::size_t>(
+            std::count_if(n.pins.begin(), n.pins.end(), [](st::feature::Pin const &p) {
                 return p.direction == st::feature::PinDirection::Input;
             }));
-        std::size_t const outputs = static_cast<std::size_t>(std::count_if(
-            n.pins.begin(), n.pins.end(),
-            [](st::feature::Pin const &p) {
+        std::size_t const outputs = static_cast<std::size_t>(
+            std::count_if(n.pins.begin(), n.pins.end(), [](st::feature::Pin const &p) {
                 return p.direction == st::feature::PinDirection::Output;
             }));
-        std::size_t const rows    = std::max<std::size_t>(1, std::max(inputs, outputs));
-        float const node_h_s = hdr_h_s
-                               + static_cast<float>(rows) * row_h_s
-                               + foot_s;
+        std::size_t const rows = std::max<std::size_t>(1, std::max(inputs, outputs));
+        float const node_h_s = hdr_h_s + static_cast<float>(rows) * row_h_s + foot_s;
 
         // Per-node body width — fits the longest input-name +
         // longest output-name on any row, plus the header label,
         // so pack-driven hooks with verbose signal names (e.g.
         // `commanded_pw_override`) don't overflow the 150 px
         // default. Falls back to the default when labels are short.
-        char const *header_text =
-            n.label.empty() ? n.kind.c_str() : n.label.c_str();
-        float const header_w =
-            fnt->CalcTextSizeA(fnt_sz_s, FLT_MAX, 0.0f, header_text).x;
-        float max_in_w  = 0.0f;
+        char const *header_text = n.label.empty() ? n.kind.c_str() : n.label.c_str();
+        float const header_w = fnt->CalcTextSizeA(fnt_sz_s, FLT_MAX, 0.0f, header_text).x;
+        float max_in_w = 0.0f;
         float max_out_w = 0.0f;
         for (auto const &p : n.pins) {
             std::string const txt = pin_display_text(n, p);
-            float const w = fnt->CalcTextSizeA(
-                fnt_sz_s, FLT_MAX, 0.0f, txt.c_str()).x;
+            float const w = fnt->CalcTextSizeA(fnt_sz_s, FLT_MAX, 0.0f, txt.c_str()).x;
             if (p.direction == st::feature::PinDirection::Input) {
-                max_in_w  = std::max(max_in_w,  w);
+                max_in_w = std::max(max_in_w, w);
             } else {
                 max_out_w = std::max(max_out_w, w);
             }
         }
         // Pin row: [circle][6px gap][in_name] … [out_name][6px gap][circle]
-        float const pad_s        = 6.0f * scale;
-        float const inner_gap_s  = 12.0f * scale;  // visible gutter
-                                                    // between the two
-                                                    // text columns
-        float const pins_w =
-            pin_r_s + pad_s + max_in_w + inner_gap_s
-            + max_out_w + pad_s + pin_r_s;
+        float const pad_s = 6.0f * scale;
+        float const inner_gap_s = 12.0f * scale; // visible gutter
+                                                 // between the two
+                                                 // text columns
+        float const pins_w = pin_r_s + pad_s + max_in_w + inner_gap_s + max_out_w + pad_s + pin_r_s;
         float const header_w_total = header_w + 16.0f * scale;
-        float const node_w_s = std::max({ width_s, pins_w, header_w_total });
+        float const node_w_s = std::max({width_s, pins_w, header_w_total});
 
         ImVec2 const node_tl = to_screen(n.x, n.y);
         ImVec2 const node_br(node_tl.x + node_w_s, node_tl.y + node_h_s);
@@ -7169,52 +6951,44 @@ void render_features_designer(AppState &state) {
         // ImGui's IsItemActive + drag-delta machinery handles the
         // move logic without needing manual click bookkeeping.
         char body_id[24];
-        std::snprintf(body_id, sizeof body_id, "##fnode_%u",
-                       static_cast<unsigned>(n.id));
+        std::snprintf(body_id, sizeof body_id, "##fnode_%u", static_cast<unsigned>(n.id));
         ImGui::SetCursorScreenPos(node_tl);
         ImGui::InvisibleButton(body_id, ImVec2(node_w_s, node_h_s));
-        bool const body_hovered       = ImGui::IsItemHovered();
-        if (body_hovered) any_node_pin_hovered = true;
-        bool const body_active        = ImGui::IsItemActive();
-        bool const body_deactivated   = ImGui::IsItemDeactivated();
-        bool const body_left_clicked  =
-            ImGui::IsItemClicked(ImGuiMouseButton_Left);
-        bool const body_right_clicked =
-            ImGui::IsItemClicked(ImGuiMouseButton_Right);
+        bool const body_hovered = ImGui::IsItemHovered();
+        if (body_hovered)
+            any_node_pin_hovered = true;
+        bool const body_active = ImGui::IsItemActive();
+        bool const body_deactivated = ImGui::IsItemDeactivated();
+        bool const body_left_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+        bool const body_right_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
 
         // Hover tooltip — surfaces the human-friendly description
         // from the pack-declared hook or primitive (or just the
         // kind for generic debug nodes). Suppressed during drag so
         // it doesn't track the cursor mid-move. Suppressed while
         // wiring so the user can read the in-flight target instead.
-        if (body_hovered && !body_active
-            && !state.features_wiring_active) {
+        if (body_hovered && !body_active && !state.features_wiring_active) {
             char const *node_kind = n.kind.c_str();
             std::string description;
-            bool        is_pack_node = false;
+            bool is_pack_node = false;
             if (state.project.has_value()) {
                 auto const &def = state.project->definition();
                 if (n.kind.starts_with("hook.")) {
                     is_pack_node = true;
-                    std::string_view const id{
-                        n.kind.data() + 5, n.kind.size() - 5};
-                    if (auto const *h = def.find_hook(id);
-                        h != nullptr) {
+                    std::string_view const id{n.kind.data() + 5, n.kind.size() - 5};
+                    if (auto const *h = def.find_hook(id); h != nullptr) {
                         description = h->description;
                     }
                 } else if (n.kind.starts_with("primitive.")) {
                     is_pack_node = true;
-                    std::string_view const id{
-                        n.kind.data() + 10, n.kind.size() - 10};
-                    if (auto const *p = def.find_primitive(id);
-                        p != nullptr) {
+                    std::string_view const id{n.kind.data() + 10, n.kind.size() - 10};
+                    if (auto const *p = def.find_primitive(id); p != nullptr) {
                         description = p->description;
                     }
                 }
             }
             ImGui::BeginTooltip();
-            char const *title_str =
-                !n.label.empty() ? n.label.c_str() : node_kind;
+            char const *title_str = !n.label.empty() ? n.label.c_str() : node_kind;
             ImGui::TextUnformatted(title_str);
             text_subtle("%s", node_kind);
             if (!description.empty()) {
@@ -7224,9 +6998,8 @@ void render_features_designer(AppState &state) {
                 ImGui::PopTextWrapPos();
             } else if (!is_pack_node) {
                 ImGui::Separator();
-                text_subtle(
-                    "Generic debug node. Load a project with hooks "
-                    "to insert pack-declared nodes from the palette.");
+                text_subtle("Generic debug node. Load a project with hooks "
+                            "to insert pack-declared nodes from the palette.");
             }
             ImGui::EndTooltip();
         }
@@ -7238,20 +7011,21 @@ void render_features_designer(AppState &state) {
             // selected node together (file-manager / Sketch / Figma
             // style group-drag). Edge selection always clears — only
             // one kind of thing highlighted at a time.
-            bool const shift      = ImGui::GetIO().KeyShift;
-            auto      &sel        = state.features_selected_nodes;
-            auto       it         = std::find(sel.begin(), sel.end(), n.id);
+            bool const shift = ImGui::GetIO().KeyShift;
+            auto &sel = state.features_selected_nodes;
+            auto it = std::find(sel.begin(), sel.end(), n.id);
             bool const was_in_sel = (it != sel.end());
             if (shift) {
-                if (was_in_sel) sel.erase(it);
-                else            sel.push_back(n.id);
+                if (was_in_sel)
+                    sel.erase(it);
+                else
+                    sel.push_back(n.id);
             } else if (!was_in_sel) {
                 sel.assign({n.id});
             }
             state.features_selected_edge.reset();
         }
-        if (body_active
-            && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
+        if (body_active && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
             // Mouse delta is in screen pixels; convert back to graph
             // space before storing — otherwise a zoomed-in canvas
             // would over-shoot moves and a zoomed-out one would lag.
@@ -7260,20 +7034,18 @@ void render_features_designer(AppState &state) {
             // somehow isn't in the selection (shouldn't happen given
             // the click handler above, but the cost is one set
             // membership check).
-            ImVec2 const  d   = ImGui::GetIO().MouseDelta;
-            auto const   &sel = state.features_selected_nodes;
-            bool const    active_in_sel =
-                std::find(sel.begin(), sel.end(), n.id) != sel.end();
+            ImVec2 const d = ImGui::GetIO().MouseDelta;
+            auto const &sel = state.features_selected_nodes;
+            bool const active_in_sel = std::find(sel.begin(), sel.end(), n.id) != sel.end();
             if (active_in_sel) {
                 for (auto id : sel) {
                     if (auto const *nn = state.features_graph.find_node(id)) {
-                        state.features_graph.set_node_position(
-                            id, nn->x + d.x / scale, nn->y + d.y / scale);
+                        state.features_graph.set_node_position(id, nn->x + d.x / scale,
+                                                               nn->y + d.y / scale);
                     }
                 }
             } else {
-                state.features_graph.set_node_position(
-                    n.id, n.x + d.x / scale, n.y + d.y / scale);
+                state.features_graph.set_node_position(n.id, n.x + d.x / scale, n.y + d.y / scale);
             }
         }
         // Snap-to-grid on drag release. IsItemDeactivated fires once
@@ -7284,9 +7056,8 @@ void render_features_designer(AppState &state) {
         // group drag, snap every selected node so the whole group
         // lands on the grid.
         if (body_deactivated) {
-            auto const   &sel = state.features_selected_nodes;
-            bool const    active_in_sel =
-                std::find(sel.begin(), sel.end(), n.id) != sel.end();
+            auto const &sel = state.features_selected_nodes;
+            bool const active_in_sel = std::find(sel.begin(), sel.end(), n.id) != sel.end();
             auto const snap_one = [&](st::feature::NodeId id) {
                 if (auto const *nn = state.features_graph.find_node(id)) {
                     float const sx = std::round(nn->x / kGridStep) * kGridStep;
@@ -7295,7 +7066,8 @@ void render_features_designer(AppState &state) {
                 }
             };
             if (active_in_sel) {
-                for (auto id : sel) snap_one(id);
+                for (auto id : sel)
+                    snap_one(id);
             } else {
                 snap_one(n.id);
             }
@@ -7306,15 +7078,13 @@ void render_features_designer(AppState &state) {
         // because by this point in the frame, features_wiring_active
         // has already been cleared.
         char node_popup_id[28];
-        std::snprintf(node_popup_id, sizeof node_popup_id,
-                       "##nctx_%u", static_cast<unsigned>(n.id));
+        std::snprintf(node_popup_id, sizeof node_popup_id, "##nctx_%u",
+                      static_cast<unsigned>(n.id));
         if (body_right_clicked && !was_wiring_at_start) {
             ImGui::OpenPopup(node_popup_id);
         }
         if (ImGui::BeginPopup(node_popup_id)) {
-            text_subtle("%s",
-                        n.label.empty() ? n.kind.c_str()
-                                         : n.label.c_str());
+            text_subtle("%s", n.label.empty() ? n.kind.c_str() : n.label.c_str());
             ImGui::Separator();
             if (ImGui::MenuItem("Delete node")) {
                 pending_delete_nodes.push_back(n.id);
@@ -7325,16 +7095,12 @@ void render_features_designer(AppState &state) {
         // Draw chrome. Selected nodes get a thicker accent-coloured
         // border so the active selection reads at a glance.
         bool const is_selected =
-            std::find(state.features_selected_nodes.begin(),
-                       state.features_selected_nodes.end(), n.id)
-            != state.features_selected_nodes.end();
+            std::find(state.features_selected_nodes.begin(), state.features_selected_nodes.end(),
+                      n.id) != state.features_selected_nodes.end();
         dl->AddRectFilled(node_tl, node_br, node_bg, 6.0f);
-        dl->AddRectFilled(
-            node_tl,
-            ImVec2(node_br.x, node_tl.y + hdr_h_s),
-            hdr_bg, 6.0f, ImDrawFlags_RoundCornersTop);
-        ImU32 const this_brd =
-            is_selected ? ImGui::GetColorU32(accent.base) : node_brd;
+        dl->AddRectFilled(node_tl, ImVec2(node_br.x, node_tl.y + hdr_h_s), hdr_bg, 6.0f,
+                          ImDrawFlags_RoundCornersTop);
+        ImU32 const this_brd = is_selected ? ImGui::GetColorU32(accent.base) : node_brd;
         float const this_thick = is_selected ? 2.5f : 1.0f;
         dl->AddRect(node_tl, node_br, this_brd, 6.0f, 0, this_thick);
         // Header label. Drawn at the scaled font size so it tracks
@@ -7342,26 +7108,24 @@ void render_features_designer(AppState &state) {
         // active font size, which is wrong here.
         char const *label = n.label.empty() ? n.kind.c_str() : n.label.c_str();
         dl->AddText(fnt, fnt_sz_s,
-                     ImVec2(node_tl.x + 8.0f * scale,
-                             node_tl.y + (hdr_h_s - fnt_sz_s) * 0.5f),
-                     txt_col, label);
+                    ImVec2(node_tl.x + 8.0f * scale, node_tl.y + (hdr_h_s - fnt_sz_s) * 0.5f),
+                    txt_col, label);
 
         // Lay pins out by direction. Inputs sit on the left edge,
         // outputs on the right; both vertically distributed within
         // the pin-row band.
-        std::size_t in_idx  = 0;
+        std::size_t in_idx = 0;
         std::size_t out_idx = 0;
         for (auto const &p : n.pins) {
             bool const is_input = p.direction == st::feature::PinDirection::Input;
             std::size_t const row_idx = is_input ? in_idx++ : out_idx++;
             float const row_center_y =
-                node_tl.y + hdr_h_s
-                + (static_cast<float>(row_idx) + 0.5f) * row_h_s;
+                node_tl.y + hdr_h_s + (static_cast<float>(row_idx) + 0.5f) * row_h_s;
             float const pin_x = is_input ? node_tl.x : node_br.x;
             ImVec2 const pin_center(pin_x, row_center_y);
 
             dl->AddCircleFilled(pin_center, pin_r_s, pin_fill);
-            dl->AddCircle      (pin_center, pin_r_s, pin_brd);
+            dl->AddCircle(pin_center, pin_r_s, pin_brd);
             // Pin name beside the circle, on the inside edge. Text
             // width measured at the scaled font size so the trailing
             // offset for output pins stays correct under zoom. The
@@ -7370,20 +7134,16 @@ void render_features_designer(AppState &state) {
             // constant editor populates this and the renderer
             // surfaces it inline.
             std::string const display_text = pin_display_text(n, p);
-            ImVec2 const text_size = fnt->CalcTextSizeA(
-                fnt_sz_s, FLT_MAX, 0.0f, display_text.c_str());
+            ImVec2 const text_size =
+                fnt->CalcTextSizeA(fnt_sz_s, FLT_MAX, 0.0f, display_text.c_str());
             ImVec2 const text_pos =
                 is_input
-                    ? ImVec2(pin_center.x + pin_r_s + 6.0f * scale,
-                              row_center_y - fnt_sz_s * 0.5f)
-                    : ImVec2(pin_center.x - pin_r_s - 6.0f * scale
-                                - text_size.x,
-                              row_center_y - fnt_sz_s * 0.5f);
-            dl->AddText(fnt, fnt_sz_s, text_pos, txt_col,
-                         display_text.c_str());
+                    ? ImVec2(pin_center.x + pin_r_s + 6.0f * scale, row_center_y - fnt_sz_s * 0.5f)
+                    : ImVec2(pin_center.x - pin_r_s - 6.0f * scale - text_size.x,
+                             row_center_y - fnt_sz_s * 0.5f);
+            dl->AddText(fnt, fnt_sz_s, text_pos, txt_col, display_text.c_str());
 
-            pin_positions.push_back(PinPos{n.id, p.id, p.direction,
-                                            p.type, pin_center});
+            pin_positions.push_back(PinPos{n.id, p.id, p.direction, p.type, pin_center});
 
             // Pin hit zone — slightly larger than the visible circle
             // so the pin is easy to grab. Tracked by InvisibleButton
@@ -7393,37 +7153,27 @@ void render_features_designer(AppState &state) {
             // so issuing the pin zone AFTER the body means the pin
             // takes precedence in the overlap region).
             char pin_id_buf[40];
-            std::snprintf(pin_id_buf, sizeof pin_id_buf,
-                           "##fpin_%u_%u",
-                           static_cast<unsigned>(n.id),
-                           static_cast<unsigned>(p.id));
-            ImGui::SetCursorScreenPos(
-                ImVec2(pin_center.x - pin_hr_s,
-                        pin_center.y - pin_hr_s));
-            ImGui::InvisibleButton(pin_id_buf,
-                                    ImVec2(pin_hr_s * 2.0f,
-                                           pin_hr_s * 2.0f));
+            std::snprintf(pin_id_buf, sizeof pin_id_buf, "##fpin_%u_%u",
+                          static_cast<unsigned>(n.id), static_cast<unsigned>(p.id));
+            ImGui::SetCursorScreenPos(ImVec2(pin_center.x - pin_hr_s, pin_center.y - pin_hr_s));
+            ImGui::InvisibleButton(pin_id_buf, ImVec2(pin_hr_s * 2.0f, pin_hr_s * 2.0f));
             bool const pin_hovered = ImGui::IsItemHovered();
-            bool const pin_active  = ImGui::IsItemActive();
-            if (pin_hovered) any_node_pin_hovered = true;
+            bool const pin_active = ImGui::IsItemActive();
+            if (pin_hovered)
+                any_node_pin_hovered = true;
             // Tooltip: prefers the pretty label, parenthesizes the
             // canonical name when both are present (so users can see
             // the snake_case id needed for hand-authoring .stmod
             // files or for codegen error messages).
             if (pin_hovered) {
                 if (!p.label.empty() && p.label != p.name) {
-                    ImGui::SetTooltip("%s (%s) : %s%s%s",
-                                       p.label.c_str(),
-                                       p.name.c_str(),
-                                       st::feature::pin_type_name(p.type),
-                                       p.unit.empty() ? "" : "  ",
-                                       p.unit.c_str());
+                    ImGui::SetTooltip("%s (%s) : %s%s%s", p.label.c_str(), p.name.c_str(),
+                                      st::feature::pin_type_name(p.type),
+                                      p.unit.empty() ? "" : "  ", p.unit.c_str());
                 } else {
-                    ImGui::SetTooltip("%s : %s%s%s",
-                                       p.name.c_str(),
-                                       st::feature::pin_type_name(p.type),
-                                       p.unit.empty() ? "" : "  ",
-                                       p.unit.c_str());
+                    ImGui::SetTooltip("%s : %s%s%s", p.name.c_str(),
+                                      st::feature::pin_type_name(p.type),
+                                      p.unit.empty() ? "" : "  ", p.unit.c_str());
                 }
             }
             // Start wiring on drag-out from a pin. The wiring is
@@ -7432,71 +7182,55 @@ void render_features_designer(AppState &state) {
             // starts a wire heading toward an output. We resolve the
             // direction on drop so the user doesn't have to think
             // about pin polarity.
-            bool const pin_right_clicked =
-                ImGui::IsItemClicked(ImGuiMouseButton_Right);
-            if (pin_active
-                && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 4.0f)
-                && !state.features_wiring_active
-                && !state.features_wiring_blocked) {
-                state.features_wiring_active     = true;
-                state.features_wiring_from_node  = n.id;
-                state.features_wiring_from_pin   = p.id;
+            bool const pin_right_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
+            if (pin_active && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 4.0f) &&
+                !state.features_wiring_active && !state.features_wiring_blocked) {
+                state.features_wiring_active = true;
+                state.features_wiring_from_node = n.id;
+                state.features_wiring_from_pin = p.id;
                 state.features_wire_error.clear();
             }
             // Right-click on a pin opens a context menu listing every
             // edge touching it (typically 0 or 1, more on output fan-
             // out). Each row deletes that edge.
             char pin_popup_id[40];
-            std::snprintf(pin_popup_id, sizeof pin_popup_id,
-                           "##pctx_%u_%u",
-                           static_cast<unsigned>(n.id),
-                           static_cast<unsigned>(p.id));
+            std::snprintf(pin_popup_id, sizeof pin_popup_id, "##pctx_%u_%u",
+                          static_cast<unsigned>(n.id), static_cast<unsigned>(p.id));
             if (pin_right_clicked && !was_wiring_at_start) {
                 ImGui::OpenPopup(pin_popup_id);
                 // Pre-fill the constant editor with the pin's
                 // current value (or 0 when none), so the InputFloat
                 // inside the popup starts on the right number.
                 state.features_pin_edit_buf =
-                    p.default_value.has_value()
-                        ? static_cast<float>(*p.default_value)
-                        : 0.0f;
+                    p.default_value.has_value() ? static_cast<float>(*p.default_value) : 0.0f;
             }
             if (ImGui::BeginPopup(pin_popup_id)) {
                 if (!p.label.empty() && p.label != p.name) {
-                    text_subtle("%s (%s) : %s",
-                                p.label.c_str(),
-                                p.name.c_str(),
+                    text_subtle("%s (%s) : %s", p.label.c_str(), p.name.c_str(),
                                 st::feature::pin_type_name(p.type));
                 } else {
-                    text_subtle("%s : %s",
-                                p.name.c_str(),
-                                st::feature::pin_type_name(p.type));
+                    text_subtle("%s : %s", p.name.c_str(), st::feature::pin_type_name(p.type));
                 }
                 ImGui::Separator();
                 bool any_edge = false;
                 for (auto const &e : state.features_graph.edges()) {
-                    bool const touches =
-                        (e.from_node == n.id && e.from_pin == p.id)
-                        || (e.to_node == n.id && e.to_pin == p.id);
-                    if (!touches) continue;
+                    bool const touches = (e.from_node == n.id && e.from_pin == p.id) ||
+                                         (e.to_node == n.id && e.to_pin == p.id);
+                    if (!touches)
+                        continue;
                     any_edge = true;
                     // Label the other end so the user knows what
                     // they're disconnecting on a fan-out.
-                    st::feature::NodeId other_n =
-                        (e.from_node == n.id) ? e.to_node : e.from_node;
-                    st::feature::PinId  other_p =
-                        (e.from_node == n.id) ? e.to_pin  : e.from_pin;
+                    st::feature::NodeId other_n = (e.from_node == n.id) ? e.to_node : e.from_node;
+                    st::feature::PinId other_p = (e.from_node == n.id) ? e.to_pin : e.from_pin;
                     auto const *on = state.features_graph.find_node(other_n);
                     auto const *op = state.features_graph.find_pin(other_n, other_p);
                     char item_label[96];
-                    std::snprintf(item_label, sizeof item_label,
-                                   "Disconnect from %s.%s",
-                                   on != nullptr
-                                       ? (on->label.empty()
-                                              ? on->kind.c_str()
-                                              : on->label.c_str())
-                                       : "?",
-                                   op != nullptr ? op->name.c_str() : "?");
+                    std::snprintf(item_label, sizeof item_label, "Disconnect from %s.%s",
+                                  on != nullptr
+                                      ? (on->label.empty() ? on->kind.c_str() : on->label.c_str())
+                                      : "?",
+                                  op != nullptr ? op->name.c_str() : "?");
                     if (ImGui::MenuItem(item_label)) {
                         pending_delete_edge = e;
                     }
@@ -7507,16 +7241,15 @@ void render_features_designer(AppState &state) {
                 // the default; surfacing the editor for a wired
                 // input would be misleading).
                 bool const editor_eligible =
-                    p.direction == st::feature::PinDirection::Input
-                    && !is_pin_driven(n.id, p.id);
+                    p.direction == st::feature::PinDirection::Input && !is_pin_driven(n.id, p.id);
                 if (editor_eligible) {
-                    if (any_edge) ImGui::Separator();
+                    if (any_edge)
+                        ImGui::Separator();
                     text_subtle("Constant value");
                     ImGui::SetNextItemWidth(120.0f);
                     bool commit = false;
                     if (p.type == st::feature::PinType::Bool) {
-                        bool b =
-                            state.features_pin_edit_buf > 0.5f;
+                        bool b = state.features_pin_edit_buf > 0.5f;
                         if (ImGui::Checkbox("##pin_def_bool", &b)) {
                             state.features_pin_edit_buf = b ? 1.0f : 0.0f;
                             commit = true;
@@ -7524,29 +7257,24 @@ void render_features_designer(AppState &state) {
                     } else if (p.type == st::feature::PinType::Int) {
                         int v = static_cast<int>(state.features_pin_edit_buf);
                         if (ImGui::InputInt("##pin_def_int", &v, 0, 0,
-                                              ImGuiInputTextFlags_EnterReturnsTrue)) {
-                            state.features_pin_edit_buf =
-                                static_cast<float>(v);
+                                            ImGuiInputTextFlags_EnterReturnsTrue)) {
+                            state.features_pin_edit_buf = static_cast<float>(v);
                             commit = true;
                         }
                     } else {
-                        if (ImGui::InputFloat("##pin_def_float",
-                                                &state.features_pin_edit_buf,
-                                                0.0f, 0.0f, "%.4g",
-                                                ImGuiInputTextFlags_EnterReturnsTrue)) {
+                        if (ImGui::InputFloat("##pin_def_float", &state.features_pin_edit_buf, 0.0f,
+                                              0.0f, "%.4g", ImGuiInputTextFlags_EnterReturnsTrue)) {
                             commit = true;
                         }
                     }
                     if (commit) {
                         pending_default = PendingDefault{
-                            n.id, p.id,
-                            static_cast<double>(state.features_pin_edit_buf)};
+                            n.id, p.id, static_cast<double>(state.features_pin_edit_buf)};
                         ImGui::CloseCurrentPopup();
                     }
                     if (p.default_value.has_value()) {
                         if (ImGui::MenuItem("Clear value")) {
-                            pending_default = PendingDefault{
-                                n.id, p.id, std::nullopt};
+                            pending_default = PendingDefault{n.id, p.id, std::nullopt};
                         }
                     }
                 }
@@ -7556,17 +7284,12 @@ void render_features_designer(AppState &state) {
                 ImGui::EndPopup();
             }
             // Highlight pins that would accept the in-flight wire.
-            if (state.features_wiring_active
-                && (state.features_wiring_from_node != n.id
-                    || state.features_wiring_from_pin != p.id)) {
-                auto const *from = state.features_graph.find_pin(
-                    state.features_wiring_from_node,
-                    state.features_wiring_from_pin);
-                if (from != nullptr
-                    && from->direction != p.direction
-                    && from->type      == p.type) {
-                    dl->AddCircle(pin_center, pin_r_s + 3.0f * scale,
-                                   pin_fill, 0, 2.0f);
+            if (state.features_wiring_active && (state.features_wiring_from_node != n.id ||
+                                                 state.features_wiring_from_pin != p.id)) {
+                auto const *from = state.features_graph.find_pin(state.features_wiring_from_node,
+                                                                 state.features_wiring_from_pin);
+                if (from != nullptr && from->direction != p.direction && from->type == p.type) {
+                    dl->AddCircle(pin_center, pin_r_s + 3.0f * scale, pin_fill, 0, 2.0f);
                 }
             }
         }
@@ -7579,29 +7302,27 @@ void render_features_designer(AppState &state) {
     // edge to the cursor under an 8px threshold. Skip while any
     // node/pin is hovered (those win in overlap) and while a wire
     // is in flight (the in-flight bezier would self-hit otherwise).
-    ImU32 const edge_col          = ImGui::GetColorU32(accent.base);
-    ImU32 const edge_sel_col      = ImGui::GetColorU32(accent.hover);
-    auto const find_pos = [&](st::feature::NodeId nid,
-                               st::feature::PinId pid) -> ImVec2 const * {
+    ImU32 const edge_col = ImGui::GetColorU32(accent.base);
+    ImU32 const edge_sel_col = ImGui::GetColorU32(accent.hover);
+    auto const find_pos = [&](st::feature::NodeId nid, st::feature::PinId pid) -> ImVec2 const * {
         for (auto const &pp : pin_positions) {
-            if (pp.node_id == nid && pp.pin_id == pid) return &pp.pos;
+            if (pp.node_id == nid && pp.pin_id == pid)
+                return &pp.pos;
         }
         return nullptr;
     };
-    auto const edge_eq = [](st::feature::Edge const &a,
-                             st::feature::Edge const &b) {
-        return a.from_node == b.from_node && a.from_pin == b.from_pin
-            && a.to_node   == b.to_node   && a.to_pin   == b.to_pin;
+    auto const edge_eq = [](st::feature::Edge const &a, st::feature::Edge const &b) {
+        return a.from_node == b.from_node && a.from_pin == b.from_pin && a.to_node == b.to_node &&
+               a.to_pin == b.to_pin;
     };
-    auto const cubic_at = [](ImVec2 p0, ImVec2 p1, ImVec2 p2, ImVec2 p3,
-                              float t) {
-        float const u  = 1.0f - t;
+    auto const cubic_at = [](ImVec2 p0, ImVec2 p1, ImVec2 p2, ImVec2 p3, float t) {
+        float const u = 1.0f - t;
         float const w0 = u * u * u;
         float const w1 = 3.0f * u * u * t;
         float const w2 = 3.0f * u * t * t;
         float const w3 = t * t * t;
         return ImVec2(w0 * p0.x + w1 * p1.x + w2 * p2.x + w3 * p3.x,
-                       w0 * p0.y + w1 * p1.y + w2 * p2.y + w3 * p3.y);
+                      w0 * p0.y + w1 * p1.y + w2 * p2.y + w3 * p3.y);
     };
 
     auto const &edges = state.features_graph.edges();
@@ -7610,25 +7331,24 @@ void render_features_designer(AppState &state) {
     // range or hit-test suppressed this frame.
     std::optional<std::size_t> hovered_edge_idx;
     {
-        bool const can_hit =
-            !state.features_wiring_active
-            && !any_node_pin_hovered
-            && ImGui::IsMouseHoveringRect(canvas_p, canvas_end);
+        bool const can_hit = !state.features_wiring_active && !any_node_pin_hovered &&
+                             ImGui::IsMouseHoveringRect(canvas_p, canvas_end);
         if (can_hit) {
             ImVec2 const mouse = ImGui::GetIO().MousePos;
             // 14 px screen-space threshold — wide enough that the
             // user doesn't need to land precisely on the 2.5-3 px
             // stroke. Tightening this past ~10 makes the curve
             // genuinely fiddly to click on a moving cursor.
-            float const  thresh_px = 14.0f;
-            float        best_d2   = thresh_px * thresh_px;
-            constexpr int   kSamples = 24;
+            float const thresh_px = 14.0f;
+            float best_d2 = thresh_px * thresh_px;
+            constexpr int kSamples = 24;
             for (std::size_t i = 0; i < edges.size(); ++i) {
-                auto const &e  = edges[i];
-                auto const *a  = find_pos(e.from_node, e.from_pin);
-                auto const *b  = find_pos(e.to_node,   e.to_pin);
-                if (a == nullptr || b == nullptr) continue;
-                float const d  = std::max(40.0f, std::abs(b->x - a->x) * 0.5f);
+                auto const &e = edges[i];
+                auto const *a = find_pos(e.from_node, e.from_pin);
+                auto const *b = find_pos(e.to_node, e.to_pin);
+                if (a == nullptr || b == nullptr)
+                    continue;
+                float const d = std::max(40.0f, std::abs(b->x - a->x) * 0.5f);
                 ImVec2 const c1(a->x + d, a->y);
                 ImVec2 const c2(b->x - d, b->y);
                 for (int s = 0; s <= kSamples; ++s) {
@@ -7638,7 +7358,7 @@ void render_features_designer(AppState &state) {
                     float const dy = pt.y - mouse.y;
                     float const d2 = dx * dx + dy * dy;
                     if (d2 < best_d2) {
-                        best_d2          = d2;
+                        best_d2 = d2;
                         hovered_edge_idx = i;
                     }
                 }
@@ -7652,15 +7372,13 @@ void render_features_designer(AppState &state) {
     // features_context_edge instead, so dismissing the menu leaves
     // the prior selection alone (matches typical desktop UX).
     bool edge_consumed_left_click = false;
-    if (hovered_edge_idx.has_value()
-        && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    if (hovered_edge_idx.has_value() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         state.features_selected_edge = edges[*hovered_edge_idx];
         state.features_selected_nodes.clear();
         edge_consumed_left_click = true;
     }
-    if (hovered_edge_idx.has_value()
-        && ImGui::IsMouseClicked(ImGuiMouseButton_Right)
-        && !was_wiring_at_start) {
+    if (hovered_edge_idx.has_value() && ImGui::IsMouseClicked(ImGuiMouseButton_Right) &&
+        !was_wiring_at_start) {
         state.features_context_edge = edges[*hovered_edge_idx];
         ImGui::OpenPopup("##fectx");
     }
@@ -7672,17 +7390,12 @@ void render_features_designer(AppState &state) {
             auto const *tn = state.features_graph.find_node(se.to_node);
             auto const *tp = state.features_graph.find_pin(se.to_node, se.to_pin);
             char label[128];
-            std::snprintf(label, sizeof label, "%s.%s → %s.%s",
-                           fn != nullptr
-                               ? (fn->label.empty() ? fn->kind.c_str()
-                                                     : fn->label.c_str())
-                               : "?",
-                           fp != nullptr ? fp->name.c_str() : "?",
-                           tn != nullptr
-                               ? (tn->label.empty() ? tn->kind.c_str()
-                                                     : tn->label.c_str())
-                               : "?",
-                           tp != nullptr ? tp->name.c_str() : "?");
+            std::snprintf(
+                label, sizeof label, "%s.%s → %s.%s",
+                fn != nullptr ? (fn->label.empty() ? fn->kind.c_str() : fn->label.c_str()) : "?",
+                fp != nullptr ? fp->name.c_str() : "?",
+                tn != nullptr ? (tn->label.empty() ? tn->kind.c_str() : tn->label.c_str()) : "?",
+                tp != nullptr ? tp->name.c_str() : "?");
             text_subtle("%s", label);
             ImGui::Separator();
             if (ImGui::MenuItem("Disconnect")) {
@@ -7696,41 +7409,37 @@ void render_features_designer(AppState &state) {
     // exaggerated — at 2.5 px default stroke a one-pixel difference
     // doesn't read on a moving cursor.
     for (std::size_t i = 0; i < edges.size(); ++i) {
-        auto const &e  = edges[i];
+        auto const &e = edges[i];
         auto const *p1 = find_pos(e.from_node, e.from_pin);
-        auto const *p2 = find_pos(e.to_node,   e.to_pin);
-        if (p1 == nullptr || p2 == nullptr) continue;
+        auto const *p2 = find_pos(e.to_node, e.to_pin);
+        if (p1 == nullptr || p2 == nullptr)
+            continue;
         float const dist = std::max(40.0f, std::abs(p2->x - p1->x) * 0.5f);
         ImVec2 const c1(p1->x + dist, p1->y);
         ImVec2 const c2(p2->x - dist, p2->y);
-        bool const is_sel = state.features_selected_edge.has_value()
-                             && edge_eq(*state.features_selected_edge, e);
-        bool const is_hov = hovered_edge_idx.has_value()
-                             && *hovered_edge_idx == i;
-        ImU32 const col   = (is_sel || is_hov) ? edge_sel_col : edge_col;
+        bool const is_sel =
+            state.features_selected_edge.has_value() && edge_eq(*state.features_selected_edge, e);
+        bool const is_hov = hovered_edge_idx.has_value() && *hovered_edge_idx == i;
+        ImU32 const col = (is_sel || is_hov) ? edge_sel_col : edge_col;
         float const thick = is_sel ? 5.0f : (is_hov ? 4.0f : 2.5f);
         dl->AddBezierCubic(*p1, c1, c2, *p2, col, thick);
     }
 
     // ---- In-progress wire ------------------------------------------
     if (state.features_wiring_active) {
-        auto const *from_pos = find_pos(state.features_wiring_from_node,
-                                          state.features_wiring_from_pin);
+        auto const *from_pos =
+            find_pos(state.features_wiring_from_node, state.features_wiring_from_pin);
         if (from_pos != nullptr) {
             ImVec2 const mouse = ImGui::GetIO().MousePos;
             float const dist = std::max(40.0f, std::abs(mouse.x - from_pos->x) * 0.5f);
-            auto const *from = state.features_graph.find_pin(
-                state.features_wiring_from_node,
-                state.features_wiring_from_pin);
+            auto const *from = state.features_graph.find_pin(state.features_wiring_from_node,
+                                                             state.features_wiring_from_pin);
             bool const from_is_output =
-                from != nullptr
-                && from->direction == st::feature::PinDirection::Output;
-            ImVec2 const c1 = from_is_output
-                ? ImVec2(from_pos->x + dist, from_pos->y)
-                : ImVec2(from_pos->x - dist, from_pos->y);
-            ImVec2 const c2 = from_is_output
-                ? ImVec2(mouse.x - dist, mouse.y)
-                : ImVec2(mouse.x + dist, mouse.y);
+                from != nullptr && from->direction == st::feature::PinDirection::Output;
+            ImVec2 const c1 = from_is_output ? ImVec2(from_pos->x + dist, from_pos->y)
+                                             : ImVec2(from_pos->x - dist, from_pos->y);
+            ImVec2 const c2 =
+                from_is_output ? ImVec2(mouse.x - dist, mouse.y) : ImVec2(mouse.x + dist, mouse.y);
             dl->AddBezierCubic(*from_pos, c1, c2, mouse, edge_col, 2.0f);
         }
 
@@ -7740,8 +7449,8 @@ void render_features_designer(AppState &state) {
             ImVec2 const mouse = ImGui::GetIO().MousePos;
             PinPos const *target = nullptr;
             for (auto const &pp : pin_positions) {
-                if (pp.node_id == state.features_wiring_from_node
-                    && pp.pin_id == state.features_wiring_from_pin) {
+                if (pp.node_id == state.features_wiring_from_node &&
+                    pp.pin_id == state.features_wiring_from_pin) {
                     continue;
                 }
                 float const dx = pp.pos.x - mouse.x;
@@ -7752,22 +7461,20 @@ void render_features_designer(AppState &state) {
                 }
             }
             if (target != nullptr) {
-                auto const *from = state.features_graph.find_pin(
-                    state.features_wiring_from_node,
-                    state.features_wiring_from_pin);
+                auto const *from = state.features_graph.find_pin(state.features_wiring_from_node,
+                                                                 state.features_wiring_from_pin);
                 if (from != nullptr) {
                     // Normalize endpoints to (output → input) regardless
                     // of which pin the user grabbed first.
                     st::feature::NodeId src_n = state.features_wiring_from_node;
-                    st::feature::PinId  src_p = state.features_wiring_from_pin;
+                    st::feature::PinId src_p = state.features_wiring_from_pin;
                     st::feature::NodeId dst_n = target->node_id;
-                    st::feature::PinId  dst_p = target->pin_id;
+                    st::feature::PinId dst_p = target->pin_id;
                     if (from->direction == st::feature::PinDirection::Input) {
                         std::swap(src_n, dst_n);
                         std::swap(src_p, dst_p);
                     }
-                    auto r = state.features_graph.connect(src_n, src_p,
-                                                           dst_n, dst_p);
+                    auto r = state.features_graph.connect(src_n, src_p, dst_n, dst_p);
                     if (!r.has_value()) {
                         state.features_wire_error = r.error().to_string();
                     } else {
@@ -7789,14 +7496,13 @@ void render_features_designer(AppState &state) {
     // empty-click deselect.
     ImGui::SetCursorScreenPos(canvas_p);
     ImGui::InvisibleButton("##fcanvas_bg", canvas_sz);
-    bool const canvas_empty_clicked =
-        ImGui::IsItemClicked(ImGuiMouseButton_Left);
+    bool const canvas_empty_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
 
     // Rubber-band start. Suppressed while wiring so the wire-cancel
     // path stays on the empty-release branch.
     if (ImGui::IsItemActivated() && !state.features_wiring_active) {
         state.features_band_active = true;
-        state.features_band_start  = ImGui::GetIO().MousePos;
+        state.features_band_start = ImGui::GetIO().MousePos;
     }
     // Rubber-band drag — recompute selection live each frame from
     // the rectangle. Without Shift, every drag starts from a clean
@@ -7805,12 +7511,12 @@ void render_features_designer(AppState &state) {
     // to it (toggling individual nodes already works via
     // Shift+click on a body).
     if (state.features_band_active && ImGui::IsItemActive()) {
-        ImVec2 const m  = ImGui::GetIO().MousePos;
-        float const  x0 = std::min(state.features_band_start.x, m.x);
-        float const  x1 = std::max(state.features_band_start.x, m.x);
-        float const  y0 = std::min(state.features_band_start.y, m.y);
-        float const  y1 = std::max(state.features_band_start.y, m.y);
-        bool const   additive = ImGui::GetIO().KeyShift;
+        ImVec2 const m = ImGui::GetIO().MousePos;
+        float const x0 = std::min(state.features_band_start.x, m.x);
+        float const x1 = std::max(state.features_band_start.x, m.x);
+        float const y0 = std::min(state.features_band_start.y, m.y);
+        float const y1 = std::max(state.features_band_start.y, m.y);
+        bool const additive = ImGui::GetIO().KeyShift;
         // Cache the additive set on the first frame so re-sweeps
         // don't double-count already-toggled nodes. Stored as a
         // function-local static via `state` isn't needed — we
@@ -7818,14 +7524,13 @@ void render_features_designer(AppState &state) {
         // node positions. With additive=true, start from whatever
         // was selected when the band started; without, start empty.
         std::vector<st::feature::NodeId> result;
-        if (additive) result = state.features_selected_nodes;
+        if (additive)
+            result = state.features_selected_nodes;
         for (auto const &nr : node_rects) {
-            bool const intersects =
-                !(nr.br.x < x0 || nr.tl.x > x1
-                  || nr.br.y < y0 || nr.tl.y > y1);
-            if (!intersects) continue;
-            if (std::find(result.begin(), result.end(), nr.id)
-                == result.end()) {
+            bool const intersects = !(nr.br.x < x0 || nr.tl.x > x1 || nr.br.y < y0 || nr.tl.y > y1);
+            if (!intersects)
+                continue;
+            if (std::find(result.begin(), result.end(), nr.id) == result.end()) {
                 result.push_back(nr.id);
             }
         }
@@ -7836,12 +7541,10 @@ void render_features_designer(AppState &state) {
         // border for the edge. Cheap to compute, redrawn every
         // frame so it tracks the cursor without lag.
         ImU32 const fill =
-            ImGui::GetColorU32(ImVec4(accent.base.x, accent.base.y,
-                                       accent.base.z, 0.20f));
-        ImU32 const brd  = ImGui::GetColorU32(accent.base);
+            ImGui::GetColorU32(ImVec4(accent.base.x, accent.base.y, accent.base.z, 0.20f));
+        ImU32 const brd = ImGui::GetColorU32(accent.base);
         dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), fill);
-        dl->AddRect      (ImVec2(x0, y0), ImVec2(x1, y1), brd,
-                           0.0f, 0, 1.5f);
+        dl->AddRect(ImVec2(x0, y0), ImVec2(x1, y1), brd, 0.0f, 0, 1.5f);
     }
     if (state.features_band_active && ImGui::IsItemDeactivated()) {
         state.features_band_active = false;
@@ -7853,14 +7556,13 @@ void render_features_designer(AppState &state) {
     // every reference into `nodes` / `pin_positions` has been
     // consumed, so we never touch invalidated state.
     if (pending_default.has_value()) {
-        state.features_graph.set_pin_default(
-            pending_default->node_id, pending_default->pin_id,
-            pending_default->value);
+        state.features_graph.set_pin_default(pending_default->node_id, pending_default->pin_id,
+                                             pending_default->value);
     }
     if (pending_delete_edge.has_value()) {
         state.features_graph.remove_edge(*pending_delete_edge);
-        if (state.features_selected_edge.has_value()
-            && edge_eq(*state.features_selected_edge, *pending_delete_edge)) {
+        if (state.features_selected_edge.has_value() &&
+            edge_eq(*state.features_selected_edge, *pending_delete_edge)) {
             state.features_selected_edge.reset();
         }
     }
@@ -7868,17 +7570,16 @@ void render_features_designer(AppState &state) {
         state.features_graph.remove_node(id);
         // If the user was about to wire FROM this node, drop the
         // wiring state so we don't reference a vanished pin.
-        if (state.features_wiring_active
-            && state.features_wiring_from_node == id) {
+        if (state.features_wiring_active && state.features_wiring_from_node == id) {
             state.features_wiring_active = false;
         }
         auto &sel = state.features_selected_nodes;
         sel.erase(std::remove(sel.begin(), sel.end(), id), sel.end());
         // remove_node cascades to edges touching the removed node —
         // drop the selected edge if it referenced either endpoint.
-        if (state.features_selected_edge.has_value()
-            && (state.features_selected_edge->from_node == id
-                || state.features_selected_edge->to_node == id)) {
+        if (state.features_selected_edge.has_value() &&
+            (state.features_selected_edge->from_node == id ||
+             state.features_selected_edge->to_node == id)) {
             state.features_selected_edge.reset();
         }
     }
@@ -7890,9 +7591,7 @@ void render_features_designer(AppState &state) {
     //   followed by a deselect-on-empty.
     // - Shift: Shift+empty-click is additive (no-op), to match the
     //   Shift+band-drag and Shift+body-click semantics.
-    if (canvas_empty_clicked
-        && !edge_consumed_left_click
-        && !ImGui::GetIO().KeyShift) {
+    if (canvas_empty_clicked && !edge_consumed_left_click && !ImGui::GetIO().KeyShift) {
         state.features_selected_nodes.clear();
         state.features_selected_edge.reset();
     }
@@ -7930,19 +7629,17 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         return;
     }
 
-    auto const *tbl  = state.project->definition().find_table(state.selected_table_id);
-    auto const *scal = tbl != nullptr
-                           ? state.project->definition().find_scaling(tbl->scaling)
-                           : nullptr;
-    int const   precision = scal != nullptr ? scal->precision : 0;
+    auto const *tbl = state.project->definition().find_table(state.selected_table_id);
+    auto const *scal =
+        tbl != nullptr ? state.project->definition().find_scaling(tbl->scaling) : nullptr;
+    int const precision = scal != nullptr ? scal->precision : 0;
 
     // Header: human-readable name as the title; id/dim/address/category
     // tucked into a subtitle. Chips on the right of the title carry the
     // unit and the safety/emissions flags so they catch the eye without
     // shouting.
     bool const have_name = (tbl != nullptr && !tbl->name.empty());
-    char const *title    = have_name ? tbl->name.c_str()
-                                     : state.selected_table_id.c_str();
+    char const *title = have_name ? tbl->name.c_str() : state.selected_table_id.c_str();
 
     ImGui::SetWindowFontScale(1.25f);
     ImGui::TextUnformatted(title);
@@ -7951,12 +7648,11 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     // Place a chip on the heading row, wrapping to a new line when it
     // would overflow the panel's right edge. Without this, narrow
     // window widths push chips off-screen instead of stacking them.
-    auto place_chip = [](char const *text, ImVec4 fg, ImVec4 bg,
-                         char const *tooltip = nullptr) {
-        constexpr float kChipPad = 16.0f;  // FramePadding.x * 2 from chip()
-        float const     w     = ImGui::CalcTextSize(text).x + kChipPad;
+    auto place_chip = [](char const *text, ImVec4 fg, ImVec4 bg, char const *tooltip = nullptr) {
+        constexpr float kChipPad = 16.0f; // FramePadding.x * 2 from chip()
+        float const w = ImGui::CalcTextSize(text).x + kChipPad;
         ImGui::SameLine();
-        float const cx    = ImGui::GetCursorPosX();
+        float const cx = ImGui::GetCursorPosX();
         float const max_x = ImGui::GetWindowContentRegionMax().x;
         if (cx + w > max_x) {
             ImGui::NewLine();
@@ -7988,20 +7684,16 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         // disabled gray, separators chosen to read as a path.
         if (have_name && !tbl->category.empty()) {
             text_subtle("%s  \xC2\xB7  %dD  \xC2\xB7  0x%08zX  \xC2\xB7  %s",
-                        state.selected_table_id.c_str(),
-                        tbl->dimensions, tbl->address,
+                        state.selected_table_id.c_str(), tbl->dimensions, tbl->address,
                         tbl->category.c_str());
         } else if (have_name) {
-            text_subtle("%s  \xC2\xB7  %dD  \xC2\xB7  0x%08zX",
-                        state.selected_table_id.c_str(),
+            text_subtle("%s  \xC2\xB7  %dD  \xC2\xB7  0x%08zX", state.selected_table_id.c_str(),
                         tbl->dimensions, tbl->address);
         } else if (!tbl->category.empty()) {
-            text_subtle("%dD  \xC2\xB7  0x%08zX  \xC2\xB7  %s",
-                        tbl->dimensions, tbl->address,
+            text_subtle("%dD  \xC2\xB7  0x%08zX  \xC2\xB7  %s", tbl->dimensions, tbl->address,
                         tbl->category.c_str());
         } else {
-            text_subtle("%dD  \xC2\xB7  0x%08zX",
-                        tbl->dimensions, tbl->address);
+            text_subtle("%dD  \xC2\xB7  0x%08zX", tbl->dimensions, tbl->address);
         }
     }
 
@@ -8010,8 +7702,7 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     // (Rect / Snapshot / History) is 2D-only, so editing is gated off for
     // 3D below — slice-aware edits are a follow-up.
     auto const &td_orig = *state.current_table_data;
-    bool const  is_3d   = (tbl != nullptr && tbl->dimensions == 3
-                          && !td_orig.slices.empty());
+    bool const is_3d = (tbl != nullptr && tbl->dimensions == 3 && !td_orig.slices.empty());
     if (is_3d && state.selected_z >= td_orig.slices.size()) {
         state.selected_z = 0;
     }
@@ -8032,8 +7723,7 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     std::vector<std::vector<bool>> edited_mask;
     if (tbl != nullptr) {
         if (auto td_src_res =
-                state.project->definition().read_table_values(
-                    state.project->source_rom(), *tbl);
+                state.project->definition().read_table_values(state.project->source_rom(), *tbl);
             td_src_res.has_value()) {
             auto const &td_src = *td_src_res;
             std::vector<std::vector<double>> const *src_2d = nullptr;
@@ -8052,8 +7742,7 @@ void render_table_view(AppState &state, Fonts const &fonts) {
                 }
                 for (std::size_t c = 0; c < td_view.values[r].size(); ++c) {
                     if (r < src_2d->size() && c < (*src_2d)[r].size()) {
-                        edited_mask[r][c] =
-                            (td_view.values[r][c] != (*src_2d)[r][c]);
+                        edited_mask[r][c] = (td_view.values[r][c] != (*src_2d)[r][c]);
                     }
                 }
             }
@@ -8063,11 +7752,9 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     if (is_3d) {
         char preview[64];
         if (state.selected_z < td_orig.axis_z.size()) {
-            std::snprintf(preview, sizeof(preview), "z = %g",
-                          td_orig.axis_z[state.selected_z]);
+            std::snprintf(preview, sizeof(preview), "z = %g", td_orig.axis_z[state.selected_z]);
         } else {
-            std::snprintf(preview, sizeof(preview), "slice %zu",
-                          state.selected_z);
+            std::snprintf(preview, sizeof(preview), "slice %zu", state.selected_z);
         }
         ImGui::TextUnformatted("Z slice:");
         ImGui::SameLine();
@@ -8076,8 +7763,7 @@ void render_table_view(AppState &state, Fonts const &fonts) {
             for (std::size_t i = 0; i < td_orig.slices.size(); ++i) {
                 char label[64];
                 if (i < td_orig.axis_z.size()) {
-                    std::snprintf(label, sizeof(label), "z = %g",
-                                  td_orig.axis_z[i]);
+                    std::snprintf(label, sizeof(label), "z = %g", td_orig.axis_z[i]);
                 } else {
                     std::snprintf(label, sizeof(label), "slice %zu", i);
                 }
@@ -8095,8 +7781,7 @@ void render_table_view(AppState &state, Fonts const &fonts) {
             ImGui::EndCombo();
         }
         ImGui::SameLine();
-        text_subtle("(%zu slices · 3D editing TBD)",
-                    td_orig.slices.size());
+        text_subtle("(%zu slices · 3D editing TBD)", td_orig.slices.size());
     }
 
     GridStats const stats = compute_stats(td_view);
@@ -8108,11 +7793,8 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         // and is useful regardless of selection.
         bool const show_table_stats = !state.selection.enabled;
         if (show_table_stats) {
-            text_subtle("min %.*f  ·  max %.*f  ·  mean %.*f  ·  %zu cells",
-                        precision, stats.min,
-                        precision, stats.max,
-                        precision, stats.mean,
-                        stats.count);
+            text_subtle("min %.*f  ·  max %.*f  ·  mean %.*f  ·  %zu cells", precision, stats.min,
+                        precision, stats.max, precision, stats.mean, stats.count);
         }
         // Heatmap legend — only meaningful in Grid view (Heatmap view
         // already has a vertical ColormapScale on the right via ImPlot).
@@ -8121,11 +7803,10 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         // gives the mid-range alpha-zero region somewhere to sit —
         // otherwise the legend's middle is invisible against the
         // panel background, defeating the purpose.
-        if (state.view_mode == TableViewMode::Grid
-            && stats.max > stats.min) {
+        if (state.view_mode == TableViewMode::Grid && stats.max > stats.min) {
             constexpr float kBarW = 220.0f;
             constexpr float kBarH = 12.0f;
-            constexpr int   kSegs = 64;
+            constexpr int kSegs = 64;
             if (show_table_stats) {
                 ImGui::SameLine(0.0f, 24.0f);
             }
@@ -8137,7 +7818,7 @@ void render_table_view(AppState &state, Fonts const &fonts) {
             ImGui::SameLine();
             ImVec2 const p0 = ImGui::GetCursorScreenPos();
             ImVec2 const p1 = ImVec2(p0.x + kBarW, p0.y + kBarH);
-            auto * const dl = ImGui::GetWindowDrawList();
+            auto *const dl = ImGui::GetWindowDrawList();
             // Backing rect: subtle dark base so the transparent middle
             // of the heatmap ramp has something to be transparent
             // against. ~10% white over the table row bg matches the
@@ -8146,20 +7827,14 @@ void render_table_view(AppState &state, Fonts const &fonts) {
             // N small filled rects sample the ramp evenly. 64 segments
             // is more than enough to look smooth at 220 px wide.
             for (int i = 0; i < kSegs; ++i) {
-                double const t0 = static_cast<double>(i)
-                                  / static_cast<double>(kSegs);
-                double const t1 = static_cast<double>(i + 1)
-                                  / static_cast<double>(kSegs);
-                double const v_mid = stats.min
-                                     + 0.5 * (t0 + t1)
-                                       * (stats.max - stats.min);
-                ImU32 const  col   =
-                    heatmap_color(v_mid, stats.min, stats.max);
+                double const t0 = static_cast<double>(i) / static_cast<double>(kSegs);
+                double const t1 = static_cast<double>(i + 1) / static_cast<double>(kSegs);
+                double const v_mid = stats.min + 0.5 * (t0 + t1) * (stats.max - stats.min);
+                ImU32 const col = heatmap_color(v_mid, stats.min, stats.max);
                 if (col != 0u) {
                     float const x0 = p0.x + kBarW * static_cast<float>(t0);
                     float const x1 = p0.x + kBarW * static_cast<float>(t1);
-                    dl->AddRectFilled(ImVec2(x0, p0.y),
-                                       ImVec2(x1, p1.y), col);
+                    dl->AddRectFilled(ImVec2(x0, p0.y), ImVec2(x1, p1.y), col);
                 }
             }
             // Reserve the layout space the draw-list calls consumed so
@@ -8176,42 +7851,35 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         // to apply +5% / Smooth / Interpolate to before they click.
         // Parallels the table-wide stats line above so the eye can
         // compare scope-to-scope at a glance.
-        double      smin = std::numeric_limits<double>::infinity();
-        double      smax = -std::numeric_limits<double>::infinity();
-        double      ssum = 0.0;
+        double smin = std::numeric_limits<double>::infinity();
+        double smax = -std::numeric_limits<double>::infinity();
+        double ssum = 0.0;
         std::size_t scount = 0;
-        for (std::size_t r = rect.r_start;
-             r <= rect.r_end && r < td_view.values.size(); ++r) {
+        for (std::size_t r = rect.r_start; r <= rect.r_end && r < td_view.values.size(); ++r) {
             auto const &row = td_view.values[r];
-            for (std::size_t c = rect.c_start;
-                 c <= rect.c_end && c < row.size(); ++c) {
+            for (std::size_t c = rect.c_start; c <= rect.c_end && c < row.size(); ++c) {
                 double const v = row[c];
-                if (v < smin) smin = v;
-                if (v > smax) smax = v;
+                if (v < smin)
+                    smin = v;
+                if (v > smax)
+                    smax = v;
                 ssum += v;
                 ++scount;
             }
         }
         if (scount > 0) {
             double const smean = ssum / static_cast<double>(scount);
-            text_subtle(
-                "selection: rows %zu:%zu × cols %zu:%zu  ·  "
-                "min %.*f  ·  max %.*f  ·  mean %.*f  ·  %zu cells",
-                rect.r_start, rect.r_end,
-                rect.c_start, rect.c_end,
-                precision, smin,
-                precision, smax,
-                precision, smean,
-                scount);
+            text_subtle("selection: rows %zu:%zu × cols %zu:%zu  ·  "
+                        "min %.*f  ·  max %.*f  ·  mean %.*f  ·  %zu cells",
+                        rect.r_start, rect.r_end, rect.c_start, rect.c_end, precision, smin,
+                        precision, smax, precision, smean, scount);
         } else {
             // Selection rect lies outside the visible data (e.g.,
             // mid-3D-slice change with a stale selection). Fall back
             // to the previous shape so the user still sees the rect.
-            text_subtle(
-                "selection: rows %zu:%zu × cols %zu:%zu  (%zu cells)",
-                rect.r_start, rect.r_end,
-                rect.c_start, rect.c_end,
-                state.selection.rows() * state.selection.cols());
+            text_subtle("selection: rows %zu:%zu × cols %zu:%zu  (%zu cells)", rect.r_start,
+                        rect.r_end, rect.c_start, rect.c_end,
+                        state.selection.rows() * state.selection.cols());
         }
     }
 
@@ -8238,32 +7906,27 @@ void render_table_view(AppState &state, Fonts const &fonts) {
 
     ImGui::BeginDisabled(!can_edit);
     if (ImGui::Button("+5%")) {
-        apply_op(state, "+5%", [](auto &t, auto r) {
-            return st::edit::percent_scale_cells(t, r, 5.0);
-        });
+        apply_op(state, "+5%",
+                 [](auto &t, auto r) { return st::edit::percent_scale_cells(t, r, 5.0); });
     }
     tip("Increase each selected cell by 5% of its current value.", kNoSelMsg);
     ImGui::SameLine();
     if (ImGui::Button("-5%")) {
-        apply_op(state, "-5%", [](auto &t, auto r) {
-            return st::edit::percent_scale_cells(t, r, -5.0);
-        });
+        apply_op(state, "-5%",
+                 [](auto &t, auto r) { return st::edit::percent_scale_cells(t, r, -5.0); });
     }
     tip("Decrease each selected cell by 5% of its current value.", kNoSelMsg);
     ImGui::SameLine();
     if (ImGui::Button("Smooth")) {
-        apply_op(state, "smooth", [](auto &t, auto r) {
-            return st::edit::smooth_cells(t, r, 1);
-        });
+        apply_op(state, "smooth", [](auto &t, auto r) { return st::edit::smooth_cells(t, r, 1); });
     }
     tip("Replace each selected cell with the average of its neighbors.\n"
         "Stays inside the selection; useful for evening out spikes.",
         kNoSelMsg);
     ImGui::SameLine();
     if (ImGui::Button("Interpolate")) {
-        apply_op(state, "interpolate", [](auto &t, auto r) {
-            return st::edit::interpolate_cells(t, r);
-        });
+        apply_op(state, "interpolate",
+                 [](auto &t, auto r) { return st::edit::interpolate_cells(t, r); });
     }
     tip("Bilinear interpolation across the selection from its four corners.\n"
         "Fades edits smoothly between known anchor cells.",
@@ -8297,11 +7960,9 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         if (state.dirty) {
-            ImGui::SetTooltip(
-                "Write the working ROM + edits to disk.  (Ctrl+S)");
+            ImGui::SetTooltip("Write the working ROM + edits to disk.  (Ctrl+S)");
         } else {
-            ImGui::SetTooltip(
-                "No unsaved edits.  (Ctrl+S)");
+            ImGui::SetTooltip("No unsaved edits.  (Ctrl+S)");
         }
     }
     ImGui::EndDisabled();
@@ -8312,16 +7973,15 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     ImGui::SameLine();
     ImGui::BeginDisabled(!state.project.has_value());
     if (ImGui::Button("Flash...")) {
-        state.show_flash_modal       = true;
-        state.flash_confirm_checked  = false;
-        state.flash_reason[0]        = '\0';
+        state.show_flash_modal = true;
+        state.flash_confirm_checked = false;
+        state.flash_reason[0] = '\0';
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip(
-            "Preview the flash plan (source -> working) and run the\n"
-            "EmissionsLinter under the project's jurisdiction profile.\n"
-            "Real transport not yet wired — the modal shows what would\n"
-            "happen without sending bytes to an ECU.");
+        ImGui::SetTooltip("Preview the flash plan (source -> working) and run the\n"
+                          "EmissionsLinter under the project's jurisdiction profile.\n"
+                          "Real transport not yet wired — the modal shows what would\n"
+                          "happen without sending bytes to an ECU.");
     }
     ImGui::EndDisabled();
 
@@ -8351,13 +8011,12 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     if (state.view_mode == TableViewMode::Heatmap) {
         render_table_heatmap(td_view, tbl, scal, stats);
     } else {
-        render_table_grid(td_view, scal, stats, state.selection, fonts, state,
-                          edited_mask);
+        render_table_grid(td_view, scal, stats, state.selection, fonts, state, edited_mask);
     }
 
     // Escape clears the current selection when the Table panel has focus.
-    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
-        && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+        ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
         state.selection.reset();
     }
     ImGui::End();
@@ -8380,12 +8039,11 @@ constexpr double kStatusMsgTtlSeconds = 5.0;
 void tick_status_msg(AppState &state) {
     double const now = ImGui::GetTime();
     if (state.status_msg != state.status_msg_prev) {
-        state.status_msg_prev   = state.status_msg;
+        state.status_msg_prev = state.status_msg;
         state.status_msg_seen_at = now;
         return;
     }
-    if (!state.status_msg.empty()
-        && now - state.status_msg_seen_at >= kStatusMsgTtlSeconds) {
+    if (!state.status_msg.empty() && now - state.status_msg_seen_at >= kStatusMsgTtlSeconds) {
         state.status_msg.clear();
         state.status_msg_prev.clear();
     }
@@ -8401,10 +8059,9 @@ void render_status_bar(AppState &state) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::Begin("##status", nullptr,
-                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize
-                     | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings
-                     | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoDocking
-                     | ImGuiWindowFlags_NoBringToFrontOnFocus);
+                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar |
+                     ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoBringToFrontOnFocus);
     ImGui::PopStyleVar(2);
 
     if (state.project.has_value()) {
@@ -8418,10 +8075,8 @@ void render_status_bar(AppState &state) {
         // name line; the path is the unambiguous handle, and the pack
         // disambiguates ECU variant.
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(
-                "%s\nPack: %s",
-                state.project->dir().string().c_str(),
-                state.project->definition().pack().id.c_str());
+            ImGui::SetTooltip("%s\nPack: %s", state.project->dir().string().c_str(),
+                              state.project->definition().pack().id.c_str());
         }
 
         ImGui::SameLine();
@@ -8444,28 +8099,25 @@ void render_status_bar(AppState &state) {
         // to open a chooser. See docs/06-legal-ethics.md.
         ImGui::SameLine();
         {
-            auto const  profile     = state.project->policy_profile();
-            auto const  profile_str = std::string{
-                st::policy::profile_name(profile)};
-            bool const  is_default  =
-                profile == st::policy::Profile::MotorsportOnly;
+            auto const profile = state.project->policy_profile();
+            auto const profile_str = std::string{st::policy::profile_name(profile)};
+            bool const is_default = profile == st::policy::Profile::MotorsportOnly;
             // Appended "▾" makes the chip read as a menu trigger
             // without needing a hover. The chip helper renders text
             // verbatim, so the glyph is part of the label.
-            auto const  chip_label  = profile_str + "  \xE2\x96\xBE";
+            auto const chip_label = profile_str + "  \xE2\x96\xBE";
             if (is_default) {
                 chip(chip_label.c_str(), chip_fg_muted(), chip_bg_muted());
             } else {
                 chip(chip_label.c_str(), chip_fg_accent(), chip_bg_accent());
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Active jurisdiction profile (project.toml).\n"
-                    "Drives the EmissionsLinter at flash time — emissions-\n"
-                    "flagged edits may require Confirm / Confirm+Reason\n"
-                    "under stricter profiles. Engine-safety violations\n"
-                    "always block, every profile.\n"
-                    "Click to change.");
+                ImGui::SetTooltip("Active jurisdiction profile (project.toml).\n"
+                                  "Drives the EmissionsLinter at flash time — emissions-\n"
+                                  "flagged edits may require Confirm / Confirm+Reason\n"
+                                  "under stricter profiles. Engine-safety violations\n"
+                                  "always block, every profile.\n"
+                                  "Click to change.");
                 ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
             }
             if (ImGui::IsItemClicked()) {
@@ -8474,11 +8126,9 @@ void render_status_bar(AppState &state) {
             if (ImGui::BeginPopup("##profile_chooser")) {
                 text_subtle("Jurisdiction profile (this project)");
                 ImGui::Separator();
-                auto pick = [&](st::policy::Profile p, char const *label,
-                                char const *desc) {
-                    bool const is_current        = (profile == p);
-                    bool const is_saved_default =
-                        (state.settings.default_policy_profile == p);
+                auto pick = [&](st::policy::Profile p, char const *label, char const *desc) {
+                    bool const is_current = (profile == p);
+                    bool const is_saved_default = (state.settings.default_policy_profile == p);
                     char row[64];
                     if (is_saved_default) {
                         std::snprintf(row, sizeof row, "%s  (default)", label);
@@ -8487,10 +8137,8 @@ void render_status_bar(AppState &state) {
                     }
                     if (ImGui::Selectable(row, is_current)) {
                         state.project->set_policy_profile(p);
-                        if (auto s = state.project->save_metadata();
-                            !s.has_value()) {
-                            state.status_msg = "Profile save failed: "
-                                + s.error().to_string();
+                        if (auto s = state.project->save_metadata(); !s.has_value()) {
+                            state.status_msg = "Profile save failed: " + s.error().to_string();
                         } else {
                             state.status_msg = std::string{"Profile: "} + label;
                         }
@@ -8513,20 +8161,18 @@ void render_status_bar(AppState &state) {
                      "Confirm + free-text reason on save AND on flash for\n"
                      "emissions edits. Engine-safety still blocks.");
                 ImGui::Separator();
-                if (ImGui::MenuItem(
-                        "Save current as default for new projects")) {
+                if (ImGui::MenuItem("Save current as default for new projects")) {
                     state.settings.default_policy_profile = profile;
                     save_settings(state.settings);
-                    state.status_msg = std::string{"Default profile: "}
-                        + std::string{st::policy::profile_name(profile)};
+                    state.status_msg = std::string{"Default profile: "} +
+                                       std::string{st::policy::profile_name(profile)};
                     ImGui::CloseCurrentPopup();
                 }
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip(
-                        "Persist the project's current profile in\n"
-                        "settings.txt as the default for future projects.\n"
-                        "The CLI's `project-new` still defaults to\n"
-                        "motorsport-only — this setting is GUI-only for now.");
+                    ImGui::SetTooltip("Persist the project's current profile in\n"
+                                      "settings.txt as the default for future projects.\n"
+                                      "The CLI's `project-new` still defaults to\n"
+                                      "motorsport-only — this setting is GUI-only for now.");
                 }
                 ImGui::EndPopup();
             }
@@ -8540,15 +8186,17 @@ void render_status_bar(AppState &state) {
             auto const &def = state.project->definition();
             if (!def.dtcs().empty()) {
                 auto const &rom = state.project->working_rom();
-                std::size_t disabled         = 0;
-                std::size_t emissions_off    = 0;
+                std::size_t disabled = 0;
+                std::size_t emissions_off = 0;
                 for (auto const &d : def.dtcs()) {
                     auto const *bm = def.find_dtc_bitmap(d.bitmap_id);
-                    if (bm == nullptr) continue;
+                    if (bm == nullptr)
+                        continue;
                     auto const en = st::is_dtc_enabled(rom, *bm, d);
                     if (en.has_value() && !*en) {
                         ++disabled;
-                        if (d.emissions_relevant) ++emissions_off;
+                        if (d.emissions_relevant)
+                            ++emissions_off;
                     }
                 }
                 if (disabled > 0) {
@@ -8558,16 +8206,14 @@ void render_status_bar(AppState &state) {
                     chip(buf, chip_fg_muted(), chip_bg_muted());
                     if (ImGui::IsItemHovered()) {
                         if (emissions_off > 0) {
-                            ImGui::SetTooltip(
-                                "%zu DTC(s) disabled in this working ROM\n"
-                                "(%zu emissions-flagged).\n"
-                                "See the DTCs panel to toggle.",
-                                disabled, emissions_off);
+                            ImGui::SetTooltip("%zu DTC(s) disabled in this working ROM\n"
+                                              "(%zu emissions-flagged).\n"
+                                              "See the DTCs panel to toggle.",
+                                              disabled, emissions_off);
                         } else {
-                            ImGui::SetTooltip(
-                                "%zu DTC(s) disabled in this working ROM.\n"
-                                "See the DTCs panel to toggle.",
-                                disabled);
+                            ImGui::SetTooltip("%zu DTC(s) disabled in this working ROM.\n"
+                                              "See the DTCs panel to toggle.",
+                                              disabled);
                         }
                     }
                 }
@@ -8575,9 +8221,8 @@ void render_status_bar(AppState &state) {
         }
 
         ImGui::SameLine();
-        text_subtle("edits %zu / %zu",
-                     state.project->history().cursor(),
-                     state.project->history().size());
+        text_subtle("edits %zu / %zu", state.project->history().cursor(),
+                    state.project->history().size());
 
         // Middle cluster: transient status message. save_project sets
         // this to "Saved."; edit-op errors land here too. Previously
@@ -8591,27 +8236,24 @@ void render_status_bar(AppState &state) {
         // Right cluster: source / working CRCs, right-aligned. Compute the
         // text width up front so we can place the cursor cleanly.
         char crc_buf[80];
-        std::snprintf(crc_buf, sizeof(crc_buf),
-                      "source 0x%08X  \xC2\xB7  working 0x%08X",
+        std::snprintf(crc_buf, sizeof(crc_buf), "source 0x%08X  \xC2\xB7  working 0x%08X",
                       state.project->source_crc32_at_create(),
                       state.project->working_rom().crc32());
         float const crc_w = ImGui::CalcTextSize(crc_buf).x;
         float const right_x =
-            ImGui::GetWindowContentRegionMax().x - crc_w
-            - ImGui::GetStyle().FramePadding.x;
+            ImGui::GetWindowContentRegionMax().x - crc_w - ImGui::GetStyle().FramePadding.x;
         if (right_x > ImGui::GetCursorPosX()) {
             ImGui::SameLine();
             ImGui::SetCursorPosX(right_x);
             text_subtle("%s", crc_buf);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "CRC32 of the source ROM (immutable) and the current\n"
-                    "working ROM. Any change in working bytes shifts the CRC.");
+                ImGui::SetTooltip("CRC32 of the source ROM (immutable) and the current\n"
+                                  "working ROM. Any change in working bytes shifts the CRC.");
             }
         }
     } else {
         text_subtle("No project loaded. %s",
-                     state.status_msg.empty() ? "" : state.status_msg.c_str());
+                    state.status_msg.empty() ? "" : state.status_msg.c_str());
     }
     ImGui::End();
 }
@@ -8637,8 +8279,7 @@ int main(int argc, char *argv[]) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
 
-    GLFWwindow *window =
-        glfwCreateWindow(1400, 880, "SubuwuTuner", nullptr, nullptr);
+    GLFWwindow *window = glfwCreateWindow(1400, 880, "SubuwuTuner", nullptr, nullptr);
     if (window == nullptr) {
         std::fprintf(stderr, "subuwutuner-gui: glfwCreateWindow failed\n");
         glfwTerminate();
@@ -8677,7 +8318,7 @@ int main(int argc, char *argv[]) {
     NFD::Guard nfd_guard;
 
     AppState state;
-    state.recents  = load_recents();
+    state.recents = load_recents();
     state.settings = load_settings();
     // Apply the persisted theme before any user-visible frame renders.
     apply_theme(state.settings.theme);
@@ -8789,7 +8430,7 @@ int main(int argc, char *argv[]) {
         // every frame.
         {
             static std::string last_title;
-            std::string        desired;
+            std::string desired;
             if (state.project.has_value()) {
                 if (state.dirty) {
                     desired = "\xE2\x97\x8F ";

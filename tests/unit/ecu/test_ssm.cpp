@@ -26,18 +26,17 @@ TEST_CASE("ssm_checksum wraps at 256", "[ssm][framing]") {
     REQUIRE(ssm::ssm_checksum(bytes) == static_cast<std::uint8_t>(0xFC));
 }
 
-TEST_CASE("build_a8_request constructs the canonical single-address frame",
-          "[ssm][framing]") {
-    std::uint32_t const             addr{0x012345};
+TEST_CASE("build_a8_request constructs the canonical single-address frame", "[ssm][framing]") {
+    std::uint32_t const addr{0x012345};
     std::vector<std::uint32_t> const addrs{addr};
-    auto const                       r = ssm::build_a8_request(addrs);
+    auto const r = ssm::build_a8_request(addrs);
     REQUIRE(r.has_value());
 
     // Expected frame:
     //   80 10 F0 05 A8 00 01 23 45 [csum]
     //   LEN = 1(cmd) + 1(pad) + 3(addr) = 5
-    std::vector<std::uint8_t> const expect_no_csum{
-        0x80, 0x10, 0xF0, 0x05, 0xA8, 0x00, 0x01, 0x23, 0x45};
+    std::vector<std::uint8_t> const expect_no_csum{0x80, 0x10, 0xF0, 0x05, 0xA8,
+                                                   0x00, 0x01, 0x23, 0x45};
     REQUIRE(std::vector<std::uint8_t>(r->begin(), r->end() - 1) == expect_no_csum);
 
     std::uint8_t const expected_csum = ssm::ssm_checksum(expect_no_csum);
@@ -46,7 +45,7 @@ TEST_CASE("build_a8_request constructs the canonical single-address frame",
 
 TEST_CASE("build_a8_request handles multiple addresses", "[ssm][framing]") {
     std::vector<std::uint32_t> const addrs{0x000000, 0x000001, 0x000002};
-    auto const                       r = ssm::build_a8_request(addrs);
+    auto const r = ssm::build_a8_request(addrs);
     REQUIRE(r.has_value());
     // LEN = 1 + 1 + 3*3 = 11
     REQUIRE(r->at(3) == 0x0B);
@@ -56,30 +55,27 @@ TEST_CASE("build_a8_request handles multiple addresses", "[ssm][framing]") {
 
 TEST_CASE("build_a8_request rejects empty input", "[ssm][framing][error]") {
     std::vector<std::uint32_t> const addrs;
-    auto const                       r = ssm::build_a8_request(addrs);
+    auto const r = ssm::build_a8_request(addrs);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("build_a8_request rejects addresses past 24-bit",
-          "[ssm][framing][error]") {
+TEST_CASE("build_a8_request rejects addresses past 24-bit", "[ssm][framing][error]") {
     std::vector<std::uint32_t> const addrs{0x01000000};
-    auto const                       r = ssm::build_a8_request(addrs);
+    auto const r = ssm::build_a8_request(addrs);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("build_a8_request rejects payload that overflows LEN byte",
-          "[ssm][framing][error]") {
+TEST_CASE("build_a8_request rejects payload that overflows LEN byte", "[ssm][framing][error]") {
     // (LEN_max - 2) / 3 = (255 - 2) / 3 = 84 addresses is the cap.
     std::vector<std::uint32_t> too_many(85, 0x000001);
-    auto const                 r = ssm::build_a8_request(too_many);
+    auto const r = ssm::build_a8_request(too_many);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("parse_a8_response extracts data and validates checksum",
-          "[ssm][framing]") {
+TEST_CASE("parse_a8_response extracts data and validates checksum", "[ssm][framing]") {
     // 80 F0 10 03 E8 12 34 [csum]
     // LEN = 1(rsp) + 2(data) = 3
     std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x03, 0xE8, 0x12, 0x34};
@@ -90,8 +86,7 @@ TEST_CASE("parse_a8_response extracts data and validates checksum",
     REQUIRE(*r == std::vector<std::uint8_t>{0x12, 0x34});
 }
 
-TEST_CASE("parse_a8_response flags a bad checksum",
-          "[ssm][framing][error]") {
+TEST_CASE("parse_a8_response flags a bad checksum", "[ssm][framing][error]") {
     std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x03, 0xE8, 0x12, 0x34, 0xDE};
     // 0xDE is intentionally wrong.
     auto const r = ssm::parse_a8_response(resp, 2);
@@ -99,8 +94,7 @@ TEST_CASE("parse_a8_response flags a bad checksum",
     REQUIRE(r.error().code() == st::ErrorCode::BadChecksum);
 }
 
-TEST_CASE("parse_a8_response flags wrong addressing",
-          "[ssm][framing][error]") {
+TEST_CASE("parse_a8_response flags wrong addressing", "[ssm][framing][error]") {
     std::vector<std::uint8_t> resp{0x80, 0xAA, 0xBB, 0x02, 0xE8, 0x12};
     resp.push_back(ssm::ssm_checksum(resp));
     auto const r = ssm::parse_a8_response(resp, 1);
@@ -118,8 +112,7 @@ TEST_CASE("parse_a8_response surfaces an ECU negative response as EcuRejected",
     REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
 }
 
-TEST_CASE("parse_a8_response flags a data-count mismatch",
-          "[ssm][framing][error]") {
+TEST_CASE("parse_a8_response flags a data-count mismatch", "[ssm][framing][error]") {
     std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x03, 0xE8, 0x12, 0x34};
     resp.push_back(ssm::ssm_checksum(resp));
     auto const r = ssm::parse_a8_response(resp, /*expected_n=*/5);
@@ -127,8 +120,7 @@ TEST_CASE("parse_a8_response flags a data-count mismatch",
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("SsmClient::read drives MockTransport with the right frame",
-          "[ssm][client]") {
+TEST_CASE("SsmClient::read drives MockTransport with the right frame", "[ssm][client]") {
     std::vector<std::uint32_t> const addrs{0x000008};
 
     auto const req = ssm::build_a8_request(addrs);
@@ -143,21 +135,19 @@ TEST_CASE("SsmClient::read drives MockTransport with the right frame",
     REQUIRE(t.open({st::transport::LinkKind::KLine, 10400}).has_value());
 
     ssm::SsmClient client{t};
-    auto const     r = client.read(addrs, 100ms);
+    auto const r = client.read(addrs, 100ms);
     REQUIRE(r.has_value());
     REQUIRE(*r == std::vector<std::uint8_t>{0x42});
     REQUIRE(t.exhausted());
 }
 
-TEST_CASE("SsmClient::read_block reads N contiguous bytes",
-          "[ssm][client][block]") {
+TEST_CASE("SsmClient::read_block reads N contiguous bytes", "[ssm][client][block]") {
     std::vector<std::uint32_t> const addrs{0x001000, 0x001001, 0x001002, 0x001003};
 
     auto const req = ssm::build_a8_request(addrs);
     REQUIRE(req.has_value());
 
-    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x05, 0xE8,
-                                   0xDE, 0xAD, 0xBE, 0xEF};
+    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x05, 0xE8, 0xDE, 0xAD, 0xBE, 0xEF};
     resp.push_back(ssm::ssm_checksum(resp));
 
     st::transport::MockTransport t;
@@ -165,30 +155,28 @@ TEST_CASE("SsmClient::read_block reads N contiguous bytes",
     REQUIRE(t.open({}).has_value());
 
     ssm::SsmClient client{t};
-    auto const     r = client.read_block(0x001000, 4, 100ms);
+    auto const r = client.read_block(0x001000, 4, 100ms);
     REQUIRE(r.has_value());
     REQUIRE(*r == std::vector<std::uint8_t>{0xDE, 0xAD, 0xBE, 0xEF});
 }
 
-TEST_CASE("SsmClient::read propagates transport errors",
-          "[ssm][client][error]") {
+TEST_CASE("SsmClient::read propagates transport errors", "[ssm][client][error]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
     t.inject_error(st::ErrorCode::TransportTimeout, "no reply");
 
     std::vector<std::uint32_t> const addrs{0x000008};
-    ssm::SsmClient                   client{t};
-    auto const                       r = client.read(addrs, 10ms);
+    ssm::SsmClient client{t};
+    auto const r = client.read(addrs, 10ms);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::TransportTimeout);
 }
 
-TEST_CASE("SsmClient::read_block with length=0 returns empty",
-          "[ssm][client][block]") {
+TEST_CASE("SsmClient::read_block with length=0 returns empty", "[ssm][client][block]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
     ssm::SsmClient client{t};
-    auto const     r = client.read_block(0, 0);
+    auto const r = client.read_block(0, 0);
     REQUIRE(r.has_value());
     REQUIRE(r->empty());
     // Nothing should have been sent to the transport.
@@ -197,27 +185,24 @@ TEST_CASE("SsmClient::read_block with length=0 returns empty",
 
 // ---- Write tests --------------------------------------------------------
 
-TEST_CASE("build_b0_request constructs the canonical write frame",
-          "[ssm][framing][write]") {
+TEST_CASE("build_b0_request constructs the canonical write frame", "[ssm][framing][write]") {
     auto const r = ssm::build_b0_request(0x012345, 0x42);
     REQUIRE(r.has_value());
 
     // 80 10 F0 05 B0 01 23 45 42 [csum]
-    std::vector<std::uint8_t> const expect_no_csum{
-        0x80, 0x10, 0xF0, 0x05, 0xB0, 0x01, 0x23, 0x45, 0x42};
+    std::vector<std::uint8_t> const expect_no_csum{0x80, 0x10, 0xF0, 0x05, 0xB0,
+                                                   0x01, 0x23, 0x45, 0x42};
     REQUIRE(std::vector<std::uint8_t>(r->begin(), r->end() - 1) == expect_no_csum);
     REQUIRE(r->back() == ssm::ssm_checksum(expect_no_csum));
 }
 
-TEST_CASE("build_b0_request rejects addresses past 24-bit",
-          "[ssm][framing][write][error]") {
+TEST_CASE("build_b0_request rejects addresses past 24-bit", "[ssm][framing][write][error]") {
     auto const r = ssm::build_b0_request(0x01000000, 0x00);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("parse_b0_response returns the echoed byte",
-          "[ssm][framing][write]") {
+TEST_CASE("parse_b0_response returns the echoed byte", "[ssm][framing][write]") {
     // 80 F0 10 02 F0 42 [csum]   LEN = 1(RSP) + 1(echoed)
     std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x02, 0xF0, 0x42};
     resp.push_back(ssm::ssm_checksum(resp));
@@ -227,8 +212,7 @@ TEST_CASE("parse_b0_response returns the echoed byte",
     REQUIRE(*r == 0x42);
 }
 
-TEST_CASE("parse_b0_response surfaces a write negative response",
-          "[ssm][framing][write][error]") {
+TEST_CASE("parse_b0_response surfaces a write negative response", "[ssm][framing][write][error]") {
     // 80 F0 10 02 7F 35 [csum]   NRC 0x35 = invalid key (example)
     std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x02, 0x7F, 0x35};
     resp.push_back(ssm::ssm_checksum(resp));
@@ -237,16 +221,14 @@ TEST_CASE("parse_b0_response surfaces a write negative response",
     REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
 }
 
-TEST_CASE("parse_b0_response flags a bad checksum",
-          "[ssm][framing][write][error]") {
+TEST_CASE("parse_b0_response flags a bad checksum", "[ssm][framing][write][error]") {
     std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x02, 0xF0, 0x42, 0x00};
-    auto const                r = ssm::parse_b0_response(resp);
+    auto const r = ssm::parse_b0_response(resp);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::BadChecksum);
 }
 
-TEST_CASE("SsmClient::write end-to-end through MockTransport",
-          "[ssm][client][write]") {
+TEST_CASE("SsmClient::write end-to-end through MockTransport", "[ssm][client][write]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
@@ -259,14 +241,13 @@ TEST_CASE("SsmClient::write end-to-end through MockTransport",
     t.expect_send_recv(*req, resp);
 
     ssm::SsmClient client{t};
-    auto const     r = client.write(0x001234, 0x7E);
+    auto const r = client.write(0x001234, 0x7E);
     REQUIRE(r.has_value());
     REQUIRE(*r == 0x7E);
     REQUIRE(t.exhausted());
 }
 
-TEST_CASE("SsmClient::write detects an ECU that echoed the wrong byte",
-          "[ssm][client][write]") {
+TEST_CASE("SsmClient::write detects an ECU that echoed the wrong byte", "[ssm][client][write]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
@@ -281,7 +262,7 @@ TEST_CASE("SsmClient::write detects an ECU that echoed the wrong byte",
     t.expect_send_recv(*req, resp);
 
     ssm::SsmClient client{t};
-    auto const     r = client.write(0x001234, 0xAB);
+    auto const r = client.write(0x001234, 0xAB);
     REQUIRE(r.has_value());
     REQUIRE(*r != 0xAB);
     REQUIRE(*r == 0xCD);
@@ -296,15 +277,13 @@ TEST_CASE("build_b8_request constructs the canonical block-write frame",
     REQUIRE(r.has_value());
 
     // 80 10 F0 [LEN=8] B8 01 23 45 AA BB CC DD [csum]   (LEN = 4 + 4)
-    std::vector<std::uint8_t> const expect_no_csum{
-        0x80, 0x10, 0xF0, 0x08, 0xB8, 0x01, 0x23, 0x45,
-        0xAA, 0xBB, 0xCC, 0xDD};
+    std::vector<std::uint8_t> const expect_no_csum{0x80, 0x10, 0xF0, 0x08, 0xB8, 0x01,
+                                                   0x23, 0x45, 0xAA, 0xBB, 0xCC, 0xDD};
     REQUIRE(std::vector<std::uint8_t>(r->begin(), r->end() - 1) == expect_no_csum);
     REQUIRE(r->back() == ssm::ssm_checksum(expect_no_csum));
 }
 
-TEST_CASE("build_b8_request rejects an empty payload",
-          "[ssm][framing][block_write][error]") {
+TEST_CASE("build_b8_request rejects an empty payload", "[ssm][framing][block_write][error]") {
     std::vector<std::uint8_t> const empty;
     auto const r = ssm::build_b8_request(0x000000, empty);
     REQUIRE_FALSE(r.has_value());
@@ -313,8 +292,7 @@ TEST_CASE("build_b8_request rejects an empty payload",
 
 TEST_CASE("build_b8_request rejects payloads past the single-frame LEN limit",
           "[ssm][framing][block_write][error]") {
-    std::vector<std::uint8_t> const oversize(ssm::kMaxBlockWriteBytes + 1U,
-                                              0x00);
+    std::vector<std::uint8_t> const oversize(ssm::kMaxBlockWriteBytes + 1U, 0x00);
     auto const r = ssm::build_b8_request(0x000000, oversize);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
@@ -329,11 +307,9 @@ TEST_CASE("build_b8_request rejects ranges that overflow 24-bit",
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("parse_b8_response returns the echoed bytes",
-          "[ssm][framing][block_write]") {
+TEST_CASE("parse_b8_response returns the echoed bytes", "[ssm][framing][block_write]") {
     // 80 F0 10 [LEN=5] F8 AA BB CC DD [csum]   LEN = 1(RSP) + 4(echo)
-    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x05, 0xF8,
-                                   0xAA, 0xBB, 0xCC, 0xDD};
+    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x05, 0xF8, 0xAA, 0xBB, 0xCC, 0xDD};
     resp.push_back(ssm::ssm_checksum(resp));
 
     auto const r = ssm::parse_b8_response(resp, 4);
@@ -341,10 +317,8 @@ TEST_CASE("parse_b8_response returns the echoed bytes",
     REQUIRE(*r == std::vector<std::uint8_t>{0xAA, 0xBB, 0xCC, 0xDD});
 }
 
-TEST_CASE("parse_b8_response flags an echo-count mismatch",
-          "[ssm][framing][block_write][error]") {
-    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x05, 0xF8,
-                                   0xAA, 0xBB, 0xCC, 0xDD};
+TEST_CASE("parse_b8_response flags an echo-count mismatch", "[ssm][framing][block_write][error]") {
+    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x05, 0xF8, 0xAA, 0xBB, 0xCC, 0xDD};
     resp.push_back(ssm::ssm_checksum(resp));
     auto const r = ssm::parse_b8_response(resp, 3);
     REQUIRE_FALSE(r.has_value());
@@ -361,17 +335,15 @@ TEST_CASE("parse_b8_response surfaces a negative response as EcuRejected",
     REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
 }
 
-TEST_CASE("parse_b8_response flags a bad checksum",
-          "[ssm][framing][block_write][error]") {
+TEST_CASE("parse_b8_response flags a bad checksum", "[ssm][framing][block_write][error]") {
     std::vector<std::uint8_t> const resp{0x80, 0xF0, 0x10, 0x05, 0xF8,
-                                          0xAA, 0xBB, 0xCC, 0xDD, 0x00};
+                                         0xAA, 0xBB, 0xCC, 0xDD, 0x00};
     auto const r = ssm::parse_b8_response(resp, 4);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::BadChecksum);
 }
 
-TEST_CASE("SsmClient::write_block end-to-end through MockTransport",
-          "[ssm][client][block_write]") {
+TEST_CASE("SsmClient::write_block end-to-end through MockTransport", "[ssm][client][block_write]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
@@ -379,21 +351,19 @@ TEST_CASE("SsmClient::write_block end-to-end through MockTransport",
     auto const req = ssm::build_b8_request(0x00ABCD, payload);
     REQUIRE(req.has_value());
 
-    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x04, 0xF8,
-                                   0x11, 0x22, 0x33};
+    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x04, 0xF8, 0x11, 0x22, 0x33};
     resp.push_back(ssm::ssm_checksum(resp));
 
     t.expect_send_recv(*req, resp);
 
     ssm::SsmClient client{t};
-    auto const     r = client.write_block(0x00ABCD, payload);
+    auto const r = client.write_block(0x00ABCD, payload);
     REQUIRE(r.has_value());
     REQUIRE(*r == payload);
     REQUIRE(t.exhausted());
 }
 
-TEST_CASE("SsmClient::write_block surfaces an echo divergence",
-          "[ssm][client][block_write]") {
+TEST_CASE("SsmClient::write_block surfaces an echo divergence", "[ssm][client][block_write]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
@@ -408,7 +378,7 @@ TEST_CASE("SsmClient::write_block surfaces an echo divergence",
     t.expect_send_recv(*req, resp);
 
     ssm::SsmClient client{t};
-    auto const     r = client.write_block(0x000010, payload);
+    auto const r = client.write_block(0x000010, payload);
     REQUIRE(r.has_value());
     REQUIRE(*r != payload);
     REQUIRE((*r)[1] == 0xFF);

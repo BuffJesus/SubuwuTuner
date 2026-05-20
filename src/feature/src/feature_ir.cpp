@@ -12,10 +12,14 @@ namespace st::feature::ir {
 
 char const *op_name(Op op) noexcept {
     switch (op) {
-        case Op::LoadConstant:    return "LoadConstant";
-        case Op::LoadHookInput:   return "LoadHookInput";
-        case Op::CallPrimitive:   return "CallPrimitive";
-        case Op::StoreHookOutput: return "StoreHookOutput";
+    case Op::LoadConstant:
+        return "LoadConstant";
+    case Op::LoadHookInput:
+        return "LoadHookInput";
+    case Op::CallPrimitive:
+        return "CallPrimitive";
+    case Op::StoreHookOutput:
+        return "StoreHookOutput";
     }
     return "?";
 }
@@ -26,8 +30,10 @@ namespace {
 // before storing it as the IR symbol. Robust to either prefix or
 // neither (debug nodes from the no-pack fallback).
 std::string_view strip_kind_prefix(std::string const &kind) {
-    if (kind.starts_with("hook."))      return std::string_view{kind}.substr(5);
-    if (kind.starts_with("primitive.")) return std::string_view{kind}.substr(10);
+    if (kind.starts_with("hook."))
+        return std::string_view{kind}.substr(5);
+    if (kind.starts_with("primitive."))
+        return std::string_view{kind}.substr(10);
     return std::string_view{kind};
 }
 
@@ -36,9 +42,10 @@ std::string_view strip_kind_prefix(std::string const &kind) {
 // chasing NodeIds through find-loops.
 std::size_t index_of(std::vector<Node> const &nodes, NodeId id) {
     for (std::size_t i = 0; i < nodes.size(); ++i) {
-        if (nodes[i].id == id) return i;
+        if (nodes[i].id == id)
+            return i;
     }
-    return nodes.size();   // sentinel: not found
+    return nodes.size(); // sentinel: not found
 }
 
 // Topological sort that respects the same phase-break semantics as
@@ -56,7 +63,7 @@ std::size_t index_of(std::vector<Node> const &nodes, NodeId id) {
 // input-side wave.
 struct SchedSlot {
     std::size_t node_index{};
-    bool        is_input_side{false};
+    bool is_input_side{false};
 };
 
 std::vector<SchedSlot> schedule(Graph const &g) {
@@ -64,13 +71,14 @@ std::vector<SchedSlot> schedule(Graph const &g) {
     auto const &edges = g.edges();
     std::size_t const nv = nodes.size() * 2;
     auto const output_v = [](std::size_t i) { return i * 2; };
-    auto const input_v  = [](std::size_t i) { return i * 2 + 1; };
+    auto const input_v = [](std::size_t i) { return i * 2 + 1; };
     std::vector<std::vector<std::size_t>> adj(nv);
-    std::vector<std::size_t>              indeg(nv, 0);
+    std::vector<std::size_t> indeg(nv, 0);
     for (auto const &e : edges) {
         auto const a = index_of(nodes, e.from_node);
         auto const b = index_of(nodes, e.to_node);
-        if (a >= nodes.size() || b >= nodes.size()) continue;
+        if (a >= nodes.size() || b >= nodes.size())
+            continue;
         adj[output_v(a)].push_back(input_v(b));
         ++indeg[input_v(b)];
     }
@@ -88,14 +96,16 @@ std::vector<SchedSlot> schedule(Graph const &g) {
     order.reserve(nv);
     std::vector<std::size_t> queue;
     for (std::size_t v = 0; v < nv; ++v) {
-        if (indeg[v] == 0) queue.push_back(v);
+        if (indeg[v] == 0)
+            queue.push_back(v);
     }
     while (!queue.empty()) {
         std::size_t const v = queue.back();
         queue.pop_back();
         order.push_back({v / 2, (v % 2) == 1});
         for (auto w : adj[v]) {
-            if (--indeg[w] == 0) queue.push_back(w);
+            if (--indeg[w] == 0)
+                queue.push_back(w);
         }
     }
     return order;
@@ -110,13 +120,12 @@ Result<Module> lower(Graph const &g) {
 
     auto const &nodes = g.nodes();
     auto const &edges = g.edges();
-    Module      m;
+    Module m;
 
     // Locate the producing pin for a given (consumer_node, consumer_pin)
     // — at most one entry per Input pin per the single-driver invariant
     // that connect() enforces.
-    auto const find_driver = [&](NodeId nid, PinId pid)
-        -> std::optional<std::pair<NodeId, PinId>> {
+    auto const find_driver = [&](NodeId nid, PinId pid) -> std::optional<std::pair<NodeId, PinId>> {
         for (auto const &e : edges) {
             if (e.to_node == nid && e.to_pin == pid) {
                 return std::make_pair(e.from_node, e.from_pin);
@@ -131,17 +140,16 @@ Result<Module> lower(Graph const &g) {
     // a hook, or CallPrimitive on a primitive's output emission).
     ValueId next_id = 1;
     auto const make_key = [](NodeId nid, PinId pid) {
-        return (static_cast<std::uint64_t>(nid) << 32)
-             | static_cast<std::uint64_t>(pid);
+        return (static_cast<std::uint64_t>(nid) << 32) | static_cast<std::uint64_t>(pid);
     };
     std::unordered_map<std::uint64_t, ValueId> value_of;
 
     auto const sched = schedule(g);
 
     for (auto const &slot : sched) {
-        auto const &n      = nodes[slot.node_index];
-        bool const  is_in  = slot.is_input_side;
-        bool const  is_hk  = n.is_phase_break;
+        auto const &n = nodes[slot.node_index];
+        bool const is_in = slot.is_input_side;
+        bool const is_hk = n.is_phase_break;
         std::string const sym{strip_kind_prefix(n.kind)};
 
         if (is_hk && !is_in) {
@@ -151,13 +159,14 @@ Result<Module> lower(Graph const &g) {
             // simplicity emit unconditionally so the symbol/pin
             // mapping is stable across edits.
             for (auto const &p : n.pins) {
-                if (p.direction != PinDirection::Output) continue;
+                if (p.direction != PinDirection::Output)
+                    continue;
                 Instruction ins;
-                ins.op          = Op::LoadHookInput;
+                ins.op = Op::LoadHookInput;
                 ins.result_type = p.type;
-                ins.result_id   = next_id++;
-                ins.symbol      = sym;
-                ins.pin_name    = p.name;
+                ins.result_id = next_id++;
+                ins.symbol = sym;
+                ins.pin_name = p.name;
                 value_of[make_key(n.id, p.id)] = ins.result_id;
                 m.instructions.push_back(std::move(ins));
             }
@@ -166,41 +175,38 @@ Result<Module> lower(Graph const &g) {
             // that has a value source. Edge-driven first; defaulted
             // pins emit LoadConstant + StoreHookOutput.
             for (auto const &p : n.pins) {
-                if (p.direction != PinDirection::Input) continue;
+                if (p.direction != PinDirection::Input)
+                    continue;
                 ValueId src = 0;
-                if (auto driver = find_driver(n.id, p.id);
-                    driver.has_value()) {
-                    auto it = value_of.find(make_key(driver->first,
-                                                       driver->second));
+                if (auto driver = find_driver(n.id, p.id); driver.has_value()) {
+                    auto it = value_of.find(make_key(driver->first, driver->second));
                     if (it == value_of.end()) {
-                        return failure(ErrorCode::InvalidArgument,
-                                       "ir::lower: hook input pin '"
-                                           + p.name
-                                           + "' driver not yet "
-                                             "scheduled (graph "
-                                             "topology bug?)");
+                        return failure(ErrorCode::InvalidArgument, "ir::lower: hook input pin '" +
+                                                                       p.name +
+                                                                       "' driver not yet "
+                                                                       "scheduled (graph "
+                                                                       "topology bug?)");
                     }
                     src = it->second;
                 } else if (p.default_value.has_value()) {
                     Instruction k;
-                    k.op             = Op::LoadConstant;
-                    k.result_type    = p.type;
-                    k.result_id      = next_id++;
+                    k.op = Op::LoadConstant;
+                    k.result_type = p.type;
+                    k.result_id = next_id++;
                     k.constant_value = *p.default_value;
-                    src              = k.result_id;
+                    src = k.result_id;
                     m.instructions.push_back(std::move(k));
                 } else {
                     // Override pin with no source. lint warns; we
                     // refuse — codegen can't proceed.
-                    return failure(ErrorCode::InvalidArgument,
-                                   "ir::lower: hook input pin '"
-                                       + p.name + "' on '" + sym
-                                       + "' has no driver and no "
-                                         "default_value");
+                    return failure(ErrorCode::InvalidArgument, "ir::lower: hook input pin '" +
+                                                                   p.name + "' on '" + sym +
+                                                                   "' has no driver and no "
+                                                                   "default_value");
                 }
                 Instruction s;
-                s.op       = Op::StoreHookOutput;
-                s.symbol   = sym;
+                s.op = Op::StoreHookOutput;
+                s.symbol = sym;
                 s.pin_name = p.name;
                 s.operands = {src};
                 m.instructions.push_back(std::move(s));
@@ -212,53 +218,53 @@ Result<Module> lower(Graph const &g) {
             // internal input→output edge to enforce read-before-
             // write order. Emit only on the output-side visit so
             // each node turns into exactly one set of IR ops.
-            if (is_in) continue;
-            std::vector<ValueId>     operands;
+            if (is_in)
+                continue;
+            std::vector<ValueId> operands;
             std::vector<std::string> operand_pin_names;
             operands.reserve(n.pins.size());
             operand_pin_names.reserve(n.pins.size());
             for (auto const &p : n.pins) {
-                if (p.direction != PinDirection::Input) continue;
+                if (p.direction != PinDirection::Input)
+                    continue;
                 ValueId src = 0;
-                if (auto driver = find_driver(n.id, p.id);
-                    driver.has_value()) {
-                    auto it = value_of.find(make_key(driver->first,
-                                                       driver->second));
+                if (auto driver = find_driver(n.id, p.id); driver.has_value()) {
+                    auto it = value_of.find(make_key(driver->first, driver->second));
                     if (it == value_of.end()) {
-                        return failure(ErrorCode::InvalidArgument,
-                                       "ir::lower: primitive input "
-                                       "pin '" + p.name
-                                           + "' driver not yet "
-                                             "scheduled");
+                        return failure(ErrorCode::InvalidArgument, "ir::lower: primitive input "
+                                                                   "pin '" +
+                                                                       p.name +
+                                                                       "' driver not yet "
+                                                                       "scheduled");
                     }
                     src = it->second;
                 } else if (p.default_value.has_value()) {
                     Instruction k;
-                    k.op             = Op::LoadConstant;
-                    k.result_type    = p.type;
-                    k.result_id      = next_id++;
+                    k.op = Op::LoadConstant;
+                    k.result_type = p.type;
+                    k.result_id = next_id++;
                     k.constant_value = *p.default_value;
-                    src              = k.result_id;
+                    src = k.result_id;
                     m.instructions.push_back(std::move(k));
                 } else {
-                    return failure(ErrorCode::InvalidArgument,
-                                   "ir::lower: primitive input pin '"
-                                       + p.name + "' on '" + sym
-                                       + "' has no driver and no "
-                                         "default_value");
+                    return failure(ErrorCode::InvalidArgument, "ir::lower: primitive input pin '" +
+                                                                   p.name + "' on '" + sym +
+                                                                   "' has no driver and no "
+                                                                   "default_value");
                 }
                 operands.push_back(src);
                 operand_pin_names.push_back(p.name);
             }
             for (auto const &p : n.pins) {
-                if (p.direction != PinDirection::Output) continue;
+                if (p.direction != PinDirection::Output)
+                    continue;
                 Instruction c;
-                c.op                = Op::CallPrimitive;
-                c.result_type       = p.type;
-                c.result_id         = next_id++;
-                c.symbol            = sym;
-                c.pin_name          = p.name;
-                c.operands          = operands;
+                c.op = Op::CallPrimitive;
+                c.result_type = p.type;
+                c.result_id = next_id++;
+                c.symbol = sym;
+                c.pin_name = p.name;
+                c.operands = operands;
                 c.operand_pin_names = operand_pin_names;
                 value_of[make_key(n.id, p.id)] = c.result_id;
                 m.instructions.push_back(std::move(c));
@@ -281,11 +287,12 @@ std::string dump(Module const &m) {
         }
         if (!i.operands.empty()) {
             out << ' ';
-            bool const named =
-                i.operand_pin_names.size() == i.operands.size();
+            bool const named = i.operand_pin_names.size() == i.operands.size();
             for (std::size_t k = 0; k < i.operands.size(); ++k) {
-                if (k != 0) out << ", ";
-                if (named) out << i.operand_pin_names[k] << '=';
+                if (k != 0)
+                    out << ", ";
+                if (named)
+                    out << i.operand_pin_names[k] << '=';
                 out << '%' << i.operands[k];
             }
         }
@@ -316,48 +323,49 @@ namespace {
 // out of scope until bench profiling lands.
 struct PrimitiveCost {
     std::string_view symbol;
-    std::size_t      cycles;
+    std::size_t cycles;
 };
 
 constexpr std::size_t kDefaultPrimitiveCycles = 3;
 
 constexpr PrimitiveCost kPrimitiveCosts[] = {
     // Int arithmetic + multiply
-    {"add_int",          1},
-    {"subtract_int",     1},
-    {"multiply_int",     3},   // MUL.L (2) + STS MACL (1)
-    {"divide_int",      18},   // FPU bridge: 2×LDS + 2×FLOAT + FDIV (~14) + FTRC + STS
+    {"add_int", 1},
+    {"subtract_int", 1},
+    {"multiply_int", 3}, // MUL.L (2) + STS MACL (1)
+    {"divide_int", 18},  // FPU bridge: 2×LDS + 2×FLOAT + FDIV (~14) + FTRC + STS
 
     // Int compares (→ Bool)
-    {"compare_lt_int",   2},   // CMP/GT + MOVT
-    {"compare_gt_int",   2},
-    {"compare_eq_int",   2},
+    {"compare_lt_int", 2}, // CMP/GT + MOVT
+    {"compare_gt_int", 2},
+    {"compare_eq_int", 2},
 
     // Bool logic
-    {"and_bool",         1},
-    {"or_bool",          1},
-    {"not_bool",         2},   // TST + MOVT
+    {"and_bool", 1},
+    {"or_bool", 1},
+    {"not_bool", 2}, // TST + MOVT
 
     // Conditional (any type) — taken-branch worst-case
-    {"select_int",       4},   // TST + BT + BRA + NOP-delay
-    {"select_bool",      4},
-    {"select_float",     4},
+    {"select_int", 4}, // TST + BT + BRA + NOP-delay
+    {"select_bool", 4},
+    {"select_float", 4},
 
     // Float arithmetic
-    {"add_float",        5},   // LDS + FSTS + LDS + FSTS + FADD
-    {"subtract_float",   5},
-    {"multiply_float",   5},
-    {"divide_float",    18},   // FDIV latency dominates
+    {"add_float", 5}, // LDS + FSTS + LDS + FSTS + FADD
+    {"subtract_float", 5},
+    {"multiply_float", 5},
+    {"divide_float", 18}, // FDIV latency dominates
 
     // Float compares (→ Bool)
-    {"compare_lt_float", 6},   // 2×(LDS+FSTS) + FCMP + MOVT
+    {"compare_lt_float", 6}, // 2×(LDS+FSTS) + FCMP + MOVT
     {"compare_gt_float", 6},
     {"compare_eq_float", 6},
 };
 
 [[nodiscard]] std::size_t primitive_cycles(std::string_view symbol) noexcept {
     for (auto const &c : kPrimitiveCosts) {
-        if (c.symbol == symbol) return c.cycles;
+        if (c.symbol == symbol)
+            return c.cycles;
     }
     return kDefaultPrimitiveCycles;
 }
@@ -368,10 +376,18 @@ std::size_t estimate_cost(Module const &m) noexcept {
     std::size_t total = 0;
     for (auto const &i : m.instructions) {
         switch (i.op) {
-            case Op::LoadConstant:    total += 1; break;
-            case Op::LoadHookInput:   total += 2; break;
-            case Op::CallPrimitive:   total += primitive_cycles(i.symbol); break;
-            case Op::StoreHookOutput: total += 2; break;
+        case Op::LoadConstant:
+            total += 1;
+            break;
+        case Op::LoadHookInput:
+            total += 2;
+            break;
+        case Op::CallPrimitive:
+            total += primitive_cycles(i.symbol);
+            break;
+        case Op::StoreHookOutput:
+            total += 2;
+            break;
         }
     }
     return total;
@@ -384,20 +400,19 @@ std::vector<LintFinding> lint(Module const &m, LintOptions opts) {
     // Codegen would emit two writes to the same override slot — second
     // wins, first is dead, but the user almost certainly intended a
     // different pin or forgot to merge logic upstream.
-    std::vector<std::size_t> first_store_at;   // parallel to seen
+    std::vector<std::size_t> first_store_at; // parallel to seen
     std::vector<std::pair<std::string, std::string>> seen;
     for (std::size_t i = 0; i < m.instructions.size(); ++i) {
         auto const &ins = m.instructions[i];
-        if (ins.op != Op::StoreHookOutput) continue;
+        if (ins.op != Op::StoreHookOutput)
+            continue;
         bool duplicate = false;
         for (std::size_t k = 0; k < seen.size(); ++k) {
-            if (seen[k].first == ins.symbol
-                && seen[k].second == ins.pin_name) {
-                findings.push_back({
-                    "duplicate store to '" + ins.symbol + '.'
-                        + ins.pin_name + "' (first at instruction "
-                        + std::to_string(first_store_at[k]) + ')',
-                    i});
+            if (seen[k].first == ins.symbol && seen[k].second == ins.pin_name) {
+                findings.push_back({"duplicate store to '" + ins.symbol + '.' + ins.pin_name +
+                                        "' (first at instruction " +
+                                        std::to_string(first_store_at[k]) + ')',
+                                    i});
                 duplicate = true;
                 break;
             }
@@ -414,11 +429,9 @@ std::vector<LintFinding> lint(Module const &m, LintOptions opts) {
     if (opts.budget_cycles > 0) {
         auto const cost = estimate_cost(m);
         if (cost > opts.budget_cycles) {
-            findings.push_back({
-                "estimated cost " + std::to_string(cost)
-                    + " cycles exceeds budget "
-                    + std::to_string(opts.budget_cycles),
-                std::nullopt});
+            findings.push_back({"estimated cost " + std::to_string(cost) +
+                                    " cycles exceeds budget " + std::to_string(opts.budget_cycles),
+                                std::nullopt});
         }
     }
 

@@ -28,11 +28,11 @@ TEST_CASE("Error stores code and message", "[core][error]") {
 
 TEST_CASE("to_string covers known error codes", "[core][error]") {
     using st::ErrorCode;
-    REQUIRE(st::to_string(ErrorCode::Ok)              == "ok");
+    REQUIRE(st::to_string(ErrorCode::Ok) == "ok");
     REQUIRE(st::to_string(ErrorCode::InvalidArgument) == "invalid argument");
-    REQUIRE(st::to_string(ErrorCode::FileNotFound)    == "file not found");
-    REQUIRE(st::to_string(ErrorCode::BadChecksum)     == "checksum mismatch");
-    REQUIRE(st::to_string(ErrorCode::SeedKeyFailed)   == "seed/key authentication failed");
+    REQUIRE(st::to_string(ErrorCode::FileNotFound) == "file not found");
+    REQUIRE(st::to_string(ErrorCode::BadChecksum) == "checksum mismatch");
+    REQUIRE(st::to_string(ErrorCode::SeedKeyFailed) == "seed/key authentication failed");
 }
 
 TEST_CASE("to_string handles unknown codes gracefully", "[core][error]") {
