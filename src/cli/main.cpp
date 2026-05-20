@@ -1024,6 +1024,53 @@ int cmd_dump_table(int argc, char *argv[]) {
         std::printf(", unit=%s", unit.c_str());
     std::printf(")\n");
 
+    // Summary line — at-a-glance sanity check on the table contents
+    // (cell count, value range, mean, zero count). Useful when
+    // localize.py reports a table as HIGH/MED but the values turn out
+    // to be at the wrong address — the summary stats immediately
+    // signal "this looks like noise" vs "this looks like a real cal".
+    auto const compute_summary = [&]() {
+        std::size_t n_rows = 0;
+        std::size_t n_cols = 0;
+        double min_v = std::numeric_limits<double>::infinity();
+        double max_v = -std::numeric_limits<double>::infinity();
+        double sum_v = 0.0;
+        std::size_t count = 0;
+        std::size_t zeros = 0;
+        auto const visit = [&](std::vector<std::vector<double>> const &grid) {
+            for (auto const &row : grid) {
+                if (n_cols == 0)
+                    n_cols = row.size();
+                for (auto const v : row) {
+                    min_v = std::min(min_v, v);
+                    max_v = std::max(max_v, v);
+                    sum_v += v;
+                    ++count;
+                    if (v == 0.0)
+                        ++zeros;
+                }
+            }
+            n_rows += grid.size();
+        };
+        if (table->dimensions == 3) {
+            for (auto const &slice : td->slices)
+                visit(slice);
+        } else {
+            visit(td->values);
+        }
+        return std::make_tuple(n_rows, n_cols, min_v, max_v, sum_v, count, zeros);
+    };
+    auto const [n_rows, n_cols, min_v, max_v, sum_v, count, zeros] = compute_summary();
+    // Elide the summary for scalars — the value-on-a-line output is
+    // already self-describing.
+    if (count > 1) {
+        double const mean_v = sum_v / static_cast<double>(count);
+        std::printf("# %zu cols x %zu rows = %zu cells.  "
+                    "min=%.*f  max=%.*f  mean=%.*f  zeros=%zu (%.1f%%)\n",
+                    n_cols, n_rows, count, precision, min_v, precision, max_v, precision, mean_v,
+                    zeros, 100.0 * static_cast<double>(zeros) / static_cast<double>(count));
+    }
+
     if (table->dimensions == 3) {
         for (std::size_t z = 0; z < td->slices.size(); ++z) {
             std::printf("\n--- z = %.*f ---\n", precision, zs.empty() ? 0.0 : zs[z]);
