@@ -104,7 +104,7 @@ Four concrete features fall out directly. None require new hardware; all run aga
    ```
 
    The shipped fixture (`fixtures/demo-knock-log.csv`) is a synthetic 3rd-gear pull where cyl 1 picks up persistent knock retard and cyls 3-4 stay clean — the output should clearly flag cyl 1 as the outlier.
-3. **Cold-start tuning workflow** — define a methodology (target lambda by ECT, recommended timing pull by ambient) and a GUI mode that gates the cold-start tables behind a checklist. Atlas exposes the maps; nobody ships a workflow around them.
+3. **Cold-start tuning workflow** — define a methodology (target lambda by ECT, recommended timing pull by ambient) and a GUI mode that gates the cold-start tables behind a checklist. Atlas exposes the maps; nobody ships a workflow around them. Domain scaffold at `src/log/include/st/log/coldstart.hpp` — phase classifier (PreCrank / Cranking / InitialFiring / HighIdle / Warmup / ClosedLoop) + ECT-binned aggregation + compliance vs a user-defined `TargetLambdaCurve`. UI on top sequences the user through "what to log next" and surfaces table-edit proposals from the binned observations.
 4. **Boost-controller PID assistant** — fit the EBCS PID gains from a tip-in log. The table exists in every WRX def; the fitting methodology is absent from the community. Closes a real long-standing complaint (boost overshoot / undershoot on tip-in).
 
 Plays 1 and 2 are pure visualization (low risk, ship in OSS). Plays 3 and 4 are tuning-domain features that share infrastructure with the auto-tune kernels in `docs/12`.
