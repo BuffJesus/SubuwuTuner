@@ -1,14 +1,17 @@
-# Handoff — 2026-05-20 (P1 cousin-seed batch + P2 LF79 decryption audit)
+# Handoff — 2026-05-20 (P1 cousin-seed + P2 LF79 audit + localize.py v2 + fake-anchor sweep)
 
-Continuation of the 2026-05-19 handoff (§11 four-play arc, OBDX prep, tooling). This session executed the P1 + P2 deck the prior handoff outlined: ran the `cousin_seed.py → localize.py` pipeline against bludgod-corpus CIDs without pack coverage (6 new packs landed, 4 dropped where the cousin distance was too wide), then ran the LF79xxx partial-decryption audit (one anchor confirmed, 30 partials catalogued, broader same-pattern problem identified across most FlashWrite buckets). **HEAD `80a2a0d`**, in sync with `origin/main`. **Working tree clean apart from `SubaruTuner.zip`**.
+Continuation of the 2026-05-19 handoff (§11 four-play arc, OBDX prep, tooling). This session executed all three deferred items from the prior plan plus the bonus of `localize.py` v2: ran the `cousin_seed.py → localize.py` pipeline against bludgod-corpus CIDs without pack coverage (6 new packs landed, 4 dropped where the cousin distance was too wide); ran the LF79xxx partial-decryption audit (one anchor confirmed, 30 partials catalogued, broader same-pattern problem identified across most FlashWrite buckets); built the pattern-search relocator for `localize.py` with 12 unit tests; swept all 99 anchor entries in `bulk_decrypt_v2.py` for fakes (9 disabled). **HEAD `68c2f02`**, in sync with `origin/main`. **Working tree clean apart from `SubaruTuner.zip`**.
 
 ## What shipped this session (top = newest)
 
 ```
+68c2f02 fix(fixtures/private): comment out 9 fake-anchor PAK_* entries
+70773de tools(defgen): localize.py --relocate-low pattern-search relocator
+852198b docs(handoff): land 2026-05-20 session (P1 cousin-seed batch + P2 LF79 audit)
 80a2a0d defs(packs): cousin-seed 6 new USDM packs from bludgod gap
 ```
 
-One commit on the public side. P2 produced a private-side artifact (`fixtures/private/roms_extracted/decrypted/LF79/RECON.md`, gitignored) and a memory entry (`project_lf79_partial_decrypts.md`).
+Four commits on the public side (one is the mid-session handoff). P2 produced a private-side artifact (`fixtures/private/roms_extracted/decrypted/LF79/RECON.md`, gitignored) and a memory entry (`project_lf79_partial_decrypts.md`).
 
 ## The substantive arc
 
@@ -102,36 +105,50 @@ ZA1J: 3 files, 3 anchors, 0 partials
 
 Captured in `RECON.md` (private-side; gitignored) and in a project memory entry (`project_lf79_partial_decrypts.md`) so future sessions don't re-derive the wall.
 
+### 4. localize.py --relocate-low pattern-search relocator (`70773de`)
+
+When a `[[table]]` entry classifies as LOW, often the table moved within the target ROM rather than being recalibrated. New `--relocate-low` flag does the search: anchor on the sibling's first 16 bytes; `bytes.find` in target ROM (C-optimized, O(N)); back up by anchor offset if a uniform prefix forced an interior anchor (8/16/24/32). Each candidate is dtype-aligned and re-scored via `classify_pair`; only HIGH/MED hits survive. Ties broken by confidence then distance from the original address. `--relocate-max-distance` caps the search radius (default 64 KB).
+
+TSV output gains two columns (`relocated_to`, `relocate_reason`) when the flag is set. Default behavior unchanged when off — regression-checked against `a2tb002c` (still 99.7% HIGH).
+
+Empirical results on the 4 cousin-seed candidates dropped earlier today:
+```
+az1g701v: 31/183 LOW resolved (14% HIGH + 3% MED) -> 53.5% HIGH+MED total (was 44.0%)
+a2wc400l: 32/141 LOW resolved (16% HIGH + 7% MED) -> 62.9% HIGH+MED total (was 52.0%)
+az1g601r: 33/185 LOW resolved (17% HIGH + 1% MED) -> 53.5% HIGH+MED total (was 43.4%)
+az1g710v: 24/197 LOW resolved ( 2% HIGH + 10% MED) -> 50.1% HIGH+MED total (was 43.2%)
+```
+
+None reach the 80% commit threshold — the remaining LOW entries are genuinely-recalibrated tables (model-year or trim changes), not address shifts. The relocator handles the pure-shift subset cleanly; recalibration is unavoidable manual RE. The `+0x54c` shift recurring across az1g701v is a textbook example of a whole sub-region of the ROM having moved by the same offset — exactly the pattern this tool is good at catching.
+
+12 unit tests in `tools/defgen/tests/test_localize.py` cover exact match, interior anchor fallback, distance cap (accept + reject), dtype alignment, closest-wins tie-break, and the helpers. Full defgen suite: 130 tests, all green.
+
+### 5. Fake-anchor sweep in bulk_decrypt_v2.py (`68c2f02`)
+
+For each of the 99 CONFIRMED anchor entries in `bulk_decrypt_v2.py`, md5-checked the plaintext file at its path against the entire `decrypted_v2/partial/` tree. 9 entries point at files that are themselves promoted partials from prior family-anchor passes — the "plaintext" they reference still has its per-CID XOR layer in the calibration body. Disabled (commented out, with re-source path noted):
+
+```
+PAK_LF75600S, PAK_LF75500A, PAK_LF75500G
+PAK_LF78200B
+PAK_LF9C200B, PAK_LF9C300P
+PAK_LF79120P
+PAK_AF56E03B
+PAK_LF61803B
+```
+
+All 9 are from the 2026-05-19 70-anchor pak-derived batch. Original 5 forum-anchored entries and the per-family anchors (LF75300, LF78001, LF9C000, LV9N100, LV9N303) are real and stay active. Active anchor count: 99 → 90.
+
 ## Status snapshot
 
-- **HEAD `80a2a0d`**, in sync with `origin/main`
+- **HEAD `68c2f02`**, in sync with `origin/main`
 - **definitions/ pack count: 367** (up from 361 at session start)
 - **Working tree clean** apart from `SubaruTuner.zip` (untracked 114 MB; gitignore-equivalent — never `git add` it, would break GitHub's 100 MB push limit)
 - **CI clang-format gate: required** (no C++ touched this session)
+- **defgen test suite: 130 tests green** (incl. 12 new for the relocator)
 
-Did not re-run `ctest` this session — no C++ changes, only new TOML data files which would only fail to load at runtime (which is unlikely given they're cousin-seeds of working packs). If asserting test-green is needed before the next code change, run the full suite.
+Did not re-run `ctest` this session — no C++ changes, only TOML data + Python tooling + private-side script comments. If asserting C++ test-green is needed before the next code change, run the full suite.
 
 ## Open threads / known issues
-
-### LF79120P fake-anchor entry in bulk_decrypt_v2.py
-
-`PAK_LF79120P` at `bulk_decrypt_v2.py:369` points at
-`roms_extracted/decrypted/LF79/LF79120P.bin` as its plaintext anchor,
-but that file is itself a promoted partial — the recovered keystream
-doesn't actually unlock anything new. Action items for a future
-session:
-
-1. Either delete the `PAK_LF79120P` CONFIRMED entry (it's not earning
-   keystreams that further decode the bucket), or
-2. Replace the plaintext source with a real LF79120P stock dump
-   (ECUtune purchase, forum source, or OBDX hardware dump once the
-   adapter arrives).
-
-Same audit pattern likely applies to other `PAK_*` anchors whose
-plaintext path is under `decrypted/`. Worth a quick sweep when
-cleaning up: for each `PAK_*` entry, md5-check whether the file at
-that path is itself a known partial. Fakes should be removed or
-re-sourced.
 
 ### Family-granularity claim in bulk_decrypt_v2.py docstring is loose
 
@@ -143,12 +160,20 @@ were right. The actual family granularity is tighter (at least 7 chars,
 possibly variable). Not a blocker but the docstring should be updated to
 reflect empirical truth from the bucket report.
 
-### Map-localization is still verify-only (carried over)
+### Cross-revision cousin packs still need manual RE for recalibrated tables
 
-`localize.py` reports HIGH/MED/LOW/ABSENT but doesn't relocate LOW
-entries. v2 add — pattern-search by axis fingerprint — would have
-saved the 4 dropped cousin-seed targets this session. Particularly
-useful for axis tables whose values give a unique byte signature.
+The `--relocate-low` relocator catches the address-shift subset of LOW
+entries (typically 10-20% of LOW on a cross-revision pack). The
+remaining 80% are tables whose contents fundamentally differ — model-
+year recalibrations the relocator can't handle by byte search. A
+follow-on tool could fingerprint by axis structure (axis tables are
+monotonic and often unique enough to match across recalibrations) but
+it's a separate body of work.
+
+The 4 dropped P1 candidates from today (az1g701v, az1g710v, az1g601r,
+a2wc400l) remain unworkable via pure tooling — they'd need either a
+new sibling pack closer to the target or hand-RE on the diverged
+tables.
 
 ### Forum thread to mine — 2017 WRX engine bin (carried over)
 
@@ -182,7 +207,7 @@ clients already tested against MockTransport.
 
 ## Plan for the next session
 
-### Priority 1 (deferred from 2026-05-19): docs/21-oem-baselines.md
+### Priority 1 (deferred three times now): docs/21-oem-baselines.md
 
 Empirical OEM behavior reference doc derived from the 178+498 ROM
 corpus. Sections per 2026-05-19 plan:
@@ -197,35 +222,41 @@ corpus. Sections per 2026-05-19 plan:
 **Constraint from P2:** Use only ROMs from the `RELIABLE` set when
 extracting empirical values. The bludgod corpus is reliable
 (plaintext, community-sourced). The `decrypted/` corpus is mostly
-NOT reliable for cal data — use only the families with a high
-anchor-to-partial ratio (DE5M, EA1{T,U,Y}, EZ1G, ZA1J, XH3J, and
-similar listed in section 3 above).
+NOT reliable for cal data — use only families with a high
+anchor-to-partial ratio (DE5M, EA1{T,U,Y}, EZ1G, ZA1J, XH3J).
 
-Estimated 1500-2500 words, several tables. Pure docs, no tooling.
+Estimated 1500-2500 words, several tables. Pure docs work but
+requires real RE — loading packs against ROMs and reading the
+median/range of each cal table across the corpus. Deserves a fresh
+session with full focus.
 
-### Priority 2: Map-localization v2 (pattern-search relocator)
+### Priority 2: Re-run cousin_seed batch with the v2 relocator wired in
 
-This session dropped 4 cousin-seed targets because the addresses had
-shifted and `localize.py` can only verify, not relocate. The v2 add
-would:
+The relocator currently only REPORTS candidate addresses in the TSV;
+it doesn't patch the pack TOML. To actually multiply the new-packs
+yield, add a `--patch-pack` flag (or a separate `relocate_apply.py`)
+that rewrites each LOW table's `address` field with the relocator's
+suggested new address. Then re-run the bludgod-gap sweep — the 4
+candidates from today won't reach 80% even with patching, but the
+~10-20% relocation rate adds up across a 50+ candidate batch.
 
-1. For each LOW entry, take the sibling-ROM byte fingerprint at the
-   pack's address (especially axis tables — their values are usually
-   strictly monotonic and unique within a small range).
-2. Search the target ROM for a matching byte pattern (windowed
-   correlation or exact substring search depending on entropy).
-3. Output a relocation candidate per LOW entry with a confidence
-   score.
+Quick-win sweep ahead of this: re-run the gap analysis with the 6
+new packs committed today, find any tens-digit-delta candidates we
+skipped because their sibling-pack count was just below 3.
 
-Would convert most of the dropped 4 targets into commitable packs
-without manual RE.
+### Priority 3: Pack-format extension for `[[table.role]]`
 
-### Priority 3: Clean up fake-anchor entries in bulk_decrypt_v2.py
+The §11 panels (knock, adaptive, cold-start, EBCS) surface
+advisory suggestions but don't apply them to the pack. Documented in
+`docs/05` §11.X as the v1.2 path; gated on adding a `[[table.role]]`
+string-tag schema. Once that lands, panels can route via
+`Definition::find_table_by_role(role_string) -> ByteEdit -> edit::History`
+with the engine-safety linter on the proposed bytes.
 
-Sweep every `PAK_*` CONFIRMED entry; md5-check whether its plaintext
-path is itself a known partial. Remove or re-source the fakes.
-`LF79120P` is the confirmed one from this session — there are
-probably others.
+### Priority 4: docstring fix in bulk_decrypt_v2.py
+
+Family-granularity claim is loose — should be at least 7 chars, not
+6. Honesty pass, not a blocker.
 
 ## House-style notes (carry-over)
 
@@ -250,14 +281,16 @@ New this session:
 
 ## Suggested opener for next session
 
-> "HEAD `80a2a0d`, in sync with `origin/main`. 367 packs in `definitions/`. Working tree clean apart from `SubaruTuner.zip`.
+> "HEAD `68c2f02`, in sync with `origin/main`. 367 packs in `definitions/`. Working tree clean apart from `SubaruTuner.zip`. 130 defgen tests green.
 >
-> Three things on the deck for this session:
-> **(P1)** `docs/21-oem-baselines.md` — empirical OEM behavior reference doc from the 676-ROM corpus. Deferred twice now (originally P3 on 2026-05-19, then deferred again at end of 2026-05-20 in favor of finishing the P2 audit). Use only RELIABLE corpus subsets per the LF79 audit findings — bludgod corpus + the high-anchor families in `decrypted/` (EZ1G, EA1{T,U,Y}, DE5M, ZA1J, XH3J).
-> **(P2)** Map-localization v2 — pattern-search relocator on `localize.py`. Would convert the 4 dropped cousin-seed targets from 2026-05-20 (az1g701v/710v/601r, a2wc400l) into commitable packs.
-> **(P3)** Clean up fake-anchor entries in `bulk_decrypt_v2.py`. The LF79120P fake-anchor was confirmed this session — others likely exist.
+> Recap from 2026-05-20: shipped P1 (6 new packs), P2 (LF79 audit + RECON.md + memory), bonus P2.5 (localize.py v2 with 12 unit tests, --relocate-low pattern-search relocator), bonus P3 (9 fake-anchor PAK_* entries disabled in bulk_decrypt_v2.py — empirical finding that the relocator's 10-20% hit rate on cross-revision packs isn't enough to push the 4 dropped targets over 80%, so they stay deferred).
 >
-> Adapter ETA May 22-25. After arrival, P1/P2/P3 stay valid as pre-test work; if adapter lands mid-session, pivot to the first-light `rom-pull --transport obdx` command pre-staged at `c64b717`."
+> On the deck for this session:
+> **(P1)** `docs/21-oem-baselines.md` — empirical OEM behavior reference doc from the 676-ROM corpus. Deferred three times now. Use only RELIABLE corpus subsets per the LF79 audit findings — bludgod corpus + the high-anchor families in `decrypted/` (EZ1G, EA1{T,U,Y}, DE5M, ZA1J, XH3J).
+> **(P2)** Wire the v2 relocator into a pack-patch flow — currently the relocator only reports candidate addresses in the TSV. A `--patch-pack` flag (or a separate `relocate_apply.py`) would rewrite the LOW table's `address` field with the relocated address, letting the cousin_seed yield rise. Then re-run the bludgod-gap sweep with patching enabled.
+> **(P3)** Pack-format extension for `[[table.role]]` so §11 panels can apply their suggestions via `edit::History`. Documented in `docs/05` §11.X as the v1.2 path.
+>
+> Adapter ETA May 22-25. If it lands mid-session, pivot to the first-light `rom-pull --transport obdx` command pre-staged at `c64b717`."
 
 If the user opens with hardware news:
 
