@@ -186,6 +186,15 @@ CONFIRMED = [
      "ep5l000w_ori.hex", 1024, 0, 1_049_600),
 
     # --- FlashWrite ISO decode 2026-05-19 (70 pak-derived anchors) ---
+    # Audit 2026-05-20: 9 of these PAK_* entries point at plaintext files
+    # that turn out to be promoted partials (md5 match against the
+    # decrypted_v2/partial/ tree), not genuine pak-decoded plaintexts.
+    # Using such a "plaintext" as an anchor recovers a wrong-keystream
+    # that passes entropy heuristics but doesn't strip the per-CID XOR
+    # layer in cal regions. Those 9 are commented out below with a
+    # FAKE-ANCHOR note; re-enable once a real plaintext is sourced
+    # (ECUtune purchase, forum-sourced stock dump, or OBDX hardware
+    # dump). Full audit methodology: roms_extracted/decrypted/LF79/RECON.md.
     ("PAK_EZ1GB20J",
      "roms_extracted/decrypted/EZ1G/EZ1GB20J.bin",
      "ez1gb20j_ori.hex", 1024, 0, 1049600),
@@ -282,9 +291,10 @@ CONFIRMED = [
     ("PAK_EA1T600B",
      "roms_extracted/decrypted/EA1T/EA1T600B.bin",
      "ea1t600b_ori.hex", 1024, 0, 1311488),
-    ("PAK_LF75600S",
-     "roms_extracted/decrypted/LF75/LF75600S.bin",
-     "lf75600s_ori.hex", 1024, 0, 2098176),
+    # FAKE-ANCHOR (audit 2026-05-20): plaintext at path is a promoted partial; re-source needed.
+    # ("PAK_LF75600S",
+    #  "roms_extracted/decrypted/LF75/LF75600S.bin",
+    #  "lf75600s_ori.hex", 1024, 0, 2098176),
     ("PAK_LF9L000E",
      "roms_extracted/decrypted/LF9L/LF9L000E.bin",
      "lf9l000e_ori.hex", 25600, 0, 2622464),
@@ -318,15 +328,18 @@ CONFIRMED = [
     ("PAK_EA1M511B",
      "roms_extracted/decrypted/EA1M/EA1M511B.bin",
      "ea1m511b_ori.hex", 1024, 0, 1311488),
-    ("PAK_AF56E03B",
-     "roms_extracted/decrypted/AF56/AF56E03B.bin",
-     "af56e03b_ori.hex", 1024, 0, 1573888),
-    ("PAK_LF61803B",
-     "roms_extracted/decrypted/LF61/LF61803B.bin",
-     "lf61803b_ori.hex", 1024, 0, 1573888),
-    ("PAK_LF75500A",
-     "roms_extracted/decrypted/LF75/LF75500A.bin",
-     "lf75500a_ori.hex", 1024, 0, 2098176),
+    # FAKE-ANCHOR (audit 2026-05-20): plaintext at path is a promoted partial; re-source needed.
+    # ("PAK_AF56E03B",
+    #  "roms_extracted/decrypted/AF56/AF56E03B.bin",
+    #  "af56e03b_ori.hex", 1024, 0, 1573888),
+    # FAKE-ANCHOR (audit 2026-05-20): plaintext at path is a promoted partial; re-source needed.
+    # ("PAK_LF61803B",
+    #  "roms_extracted/decrypted/LF61/LF61803B.bin",
+    #  "lf61803b_ori.hex", 1024, 0, 1573888),
+    # FAKE-ANCHOR (audit 2026-05-20): plaintext at path is a promoted partial; re-source needed.
+    # ("PAK_LF75500A",
+    #  "roms_extracted/decrypted/LF75/LF75500A.bin",
+    #  "lf75500a_ori.hex", 1024, 0, 2098176),
     ("PAK_EA1M811B",
      "roms_extracted/decrypted/EA1M/EA1M811B.bin",
      "ea1m811b_ori.hex", 1024, 0, 1311488),
@@ -336,9 +349,10 @@ CONFIRMED = [
     ("PAK_ZA1JB01C",
      "roms_extracted/decrypted/ZA1J/ZA1JB01C.bin",
      "ZA1JB01C_ori.hex", 1024, 0, 1311488),
-    ("PAK_LF75500G",
-     "roms_extracted/decrypted/LF75/LF75500G.bin",
-     "lf75500g_ori.hex", 1024, 0, 2098176),
+    # FAKE-ANCHOR (audit 2026-05-20): plaintext at path is a promoted partial; re-source needed.
+    # ("PAK_LF75500G",
+    #  "roms_extracted/decrypted/LF75/LF75500G.bin",
+    #  "lf75500g_ori.hex", 1024, 0, 2098176),
     ("PAK_EA1U300C",
      "roms_extracted/decrypted/EA1U/EA1U300C.bin",
      "ea1u300c_ori.hex", 1024, 0, 1311488),
@@ -360,15 +374,18 @@ CONFIRMED = [
     ("PAK_EB4S200R",
      "roms_extracted/decrypted/EB4S/EB4S200R.bin",
      "eb4s200r_ori.hex", 1024, 0, 1311488),
-    ("PAK_LF78200B",
-     "roms_extracted/decrypted/LF78/LF78200B.bin",
-     "lf78200b_ori.hex", 1024, 0, 2098176),
-    ("PAK_LF9C200B",
-     "roms_extracted/decrypted/LF9C/LF9C200B.bin",
-     "lf9c200b_ori.hex", 1024, 0, 2098176),
-    ("PAK_LF79120P",
-     "roms_extracted/decrypted/LF79/LF79120P.bin",
-     "lf79120p_ori.hex", 1024, 0, 2098176),
+    # FAKE-ANCHOR (audit 2026-05-20): plaintext at path is a promoted partial; re-source needed.
+    # ("PAK_LF78200B",
+    #  "roms_extracted/decrypted/LF78/LF78200B.bin",
+    #  "lf78200b_ori.hex", 1024, 0, 2098176),
+    # FAKE-ANCHOR (audit 2026-05-20): plaintext at path is a promoted partial; re-source needed.
+    # ("PAK_LF9C200B",
+    #  "roms_extracted/decrypted/LF9C/LF9C200B.bin",
+    #  "lf9c200b_ori.hex", 1024, 0, 2098176),
+    # FAKE-ANCHOR (audit 2026-05-20): plaintext at path is a promoted partial; re-source needed.
+    # ("PAK_LF79120P",
+    #  "roms_extracted/decrypted/LF79/LF79120P.bin",
+    #  "lf79120p_ori.hex", 1024, 0, 2098176),
     ("PAK_XH3J2G0A",
      "roms_extracted/decrypted/XH3J/XH3J2G0A.bin",
      "xh3j2g0a_ori.hex", 1024, 0, 1573632),
@@ -387,9 +404,10 @@ CONFIRMED = [
     ("PAK_EA1T500X",
      "roms_extracted/decrypted/EA1T/EA1T500X.bin",
      "ea1t500x_ori.hex", 1024, 0, 1311488),
-    ("PAK_LF9C300P",
-     "roms_extracted/decrypted/LF9C/LF9C300P.bin",
-     "lf9c300p_ori.hex", 1024, 0, 2098176),
+    # FAKE-ANCHOR (audit 2026-05-20): plaintext at path is a promoted partial; re-source needed.
+    # ("PAK_LF9C300P",
+    #  "roms_extracted/decrypted/LF9C/LF9C300P.bin",
+    #  "lf9c300p_ori.hex", 1024, 0, 2098176),
     ("PAK_LF9G002S",
      "roms_extracted/decrypted/LF9G/LF9G002S.bin",
      "lf9g002s_ori.hex", 25600, 0, 2622464),
