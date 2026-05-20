@@ -667,6 +667,42 @@ void print_subaru_cid(st::Rom const &rom) {
     }
 }
 
+// "Wordy" filter for the rom-info ASCII display. A bare
+// is_printable_ascii run lets through every 5-byte sequence of
+// punctuation / random bytes that happen to lie in 0x20..0x7E —
+// for a 1MB Subaru ROM that's typically 4000+ "strings" of pure
+// noise (`;A+d"cC`, `b@@(c`, etc.) drowning the dozens of real
+// labels (CIDs, calibration IDs, build dates, diagnostic text).
+//
+// Real labels are punctuation-light — almost entirely alphanumeric
+// plus space / underscore / hyphen / dot. Random ASCII-range
+// machine code is punctuation-heavy.
+//
+// Rule:
+//   1. >= 6 chars total
+//   2. >= 4 letters (a-zA-Z) — not just alphanumerics; digit-only
+//      strings like `1234567` are usually not labels either
+//   3. <= 2 chars outside the "label charset" [a-zA-Z0-9_.- ]
+//
+// Empirically takes the typical 1MB-ROM 4000+ raw run down to a
+// few dozen genuine labels — the signal-to-noise jump is large.
+bool ascii_looks_wordy(std::string const &s) {
+    if (s.size() < 6)
+        return false;
+    std::size_t letters = 0;
+    std::size_t non_label = 0;
+    for (char c : s) {
+        bool const is_letter = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+        bool const is_digit = (c >= '0' && c <= '9');
+        bool const is_label_punct = (c == '_' || c == '.' || c == '-' || c == ' ');
+        if (is_letter)
+            ++letters;
+        if (!is_letter && !is_digit && !is_label_punct)
+            ++non_label;
+    }
+    return letters >= 4 && non_label <= 2;
+}
+
 void print_rom_summary(std::filesystem::path const &path, st::Rom const &rom) {
     std::printf("File:           %s\n", path.string().c_str());
     std::printf("Size:           %zu bytes (%.2f KiB)\n", rom.size(),
@@ -674,17 +710,36 @@ void print_rom_summary(std::filesystem::path const &path, st::Rom const &rom) {
     std::printf("CRC32:          0x%08X\n", rom.crc32());
     print_subaru_cid(rom);
 
-    auto const strings = rom.scan_ascii(/*min_length=*/5);
-    std::printf("Embedded ASCII: %zu strings (>=5 chars)\n", strings.size());
+    auto const all_strings = rom.scan_ascii(/*min_length=*/5);
+    std::vector<st::Rom::AsciiString> wordy;
+    wordy.reserve(all_strings.size() / 16);
+    for (auto const &s : all_strings) {
+        if (ascii_looks_wordy(s.text))
+            wordy.push_back(s);
+    }
+    std::printf("Embedded ASCII: %zu strings (>=5 chars; %zu wordy)\n", all_strings.size(),
+                wordy.size());
+
+    // Sort by length descending — real labels (firmware version
+    // strings, copyright notices, calibration IDs) tend to be longer
+    // than the false-positive runs that still survive the wordy
+    // filter. Ties broken by offset so output is deterministic.
+    std::vector<st::Rom::AsciiString> display = wordy;
+    std::sort(display.begin(), display.end(), [](auto const &a, auto const &b) {
+        if (a.text.size() != b.text.size())
+            return a.text.size() > b.text.size();
+        return a.offset < b.offset;
+    });
 
     constexpr std::size_t kMaxToPrint = 32;
-    auto const limit = strings.size() < kMaxToPrint ? strings.size() : kMaxToPrint;
+    auto const limit = display.size() < kMaxToPrint ? display.size() : kMaxToPrint;
     for (std::size_t i = 0; i < limit; ++i) {
-        auto const &s = strings[i];
+        auto const &s = display[i];
         std::printf("  0x%08zX  (%2zu chars)  %s\n", s.offset, s.text.size(), s.text.c_str());
     }
-    if (strings.size() > kMaxToPrint) {
-        std::printf("  ... %zu more not shown\n", strings.size() - kMaxToPrint);
+    if (display.size() > kMaxToPrint) {
+        std::printf("  ... %zu wordy strings not shown (sorted by length desc)\n",
+                    display.size() - kMaxToPrint);
     }
 }
 
