@@ -3,6 +3,7 @@
 
 #include "st/log/coldstart.hpp"
 
+#include "st/core/csv.hpp"
 #include "st/core/error.hpp"
 #include "st/core/result.hpp"
 
@@ -10,7 +11,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <fstream>
 #include <limits>
 #include <map>
@@ -70,64 +70,6 @@ struct EctAcc {
     std::uint32_t  count{0};
     std::uint32_t  count_with_cmd{0};
 };
-
-// Inline CSV helpers — same shape as knock_dashboard.cpp /
-// adaptive_history.cpp. Factor on third+ caller.
-std::string_view csv_trim(std::string_view s) noexcept {
-    while (!s.empty()
-           && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r')) {
-        s.remove_prefix(1);
-    }
-    while (!s.empty()
-           && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r')) {
-        s.remove_suffix(1);
-    }
-    return s;
-}
-
-std::vector<std::string_view> csv_split(std::string_view line) {
-    std::vector<std::string_view> out;
-    std::size_t                   start = 0;
-    for (std::size_t i = 0; i <= line.size(); ++i) {
-        if (i == line.size() || line[i] == ',') {
-            out.push_back(csv_trim(line.substr(start, i - start)));
-            start = i + 1;
-        }
-    }
-    return out;
-}
-
-bool csv_parse_double(std::string_view s, double &out) noexcept {
-    if (s.empty()) {
-        out = 0.0;
-        return true;
-    }
-    std::string copy(s);
-    char       *end = nullptr;
-    double const v  = std::strtod(copy.c_str(), &end);
-    if (end == copy.c_str() || end == nullptr || *end != '\0') {
-        return false;
-    }
-    out = v;
-    return true;
-}
-
-std::vector<std::string_view> csv_split_lines(std::string_view text) {
-    std::vector<std::string_view> out;
-    std::size_t                   i = 0;
-    while (i < text.size()) {
-        std::size_t e = i;
-        while (e < text.size() && text[e] != '\n') {
-            ++e;
-        }
-        std::string_view const line = csv_trim(text.substr(i, e - i));
-        if (!line.empty() && line.front() != '#') {
-            out.push_back(line);
-        }
-        i = e + 1;
-    }
-    return out;
-}
 
 std::size_t max_referenced_column(PidMapping const &m) noexcept {
     std::size_t lo = 0;
@@ -346,14 +288,14 @@ st::Result<ColdStartSnapshot> snapshot_from_csv(std::string_view          csv_pa
     buf << f.rdbuf();
     std::string const text = std::move(buf).str();
 
-    auto const lines = csv_split_lines(text);
+    auto const lines = st::core::csv::split_lines(text);
     if (lines.size() < 2) {
         return st::failure(st::ErrorCode::ParseError,
                            std::string{"coldstart: CSV needs a header row "
                                        "and at least one data row"});
     }
 
-    auto const  header_fields = csv_split(lines[0]);
+    auto const  header_fields = st::core::csv::split_fields(lines[0]);
     std::size_t const pid_count = header_fields.size();
     if (pid_count == 0) {
         return st::failure(st::ErrorCode::ParseError,
@@ -372,7 +314,7 @@ st::Result<ColdStartSnapshot> snapshot_from_csv(std::string_view          csv_pa
     std::vector<double> samples;
     samples.reserve((lines.size() - 1) * pid_count);
     for (std::size_t row = 1; row < lines.size(); ++row) {
-        auto const fields = csv_split(lines[row]);
+        auto const fields = st::core::csv::split_fields(lines[row]);
         if (fields.size() < pid_count) {
             return st::failure(st::ErrorCode::ParseError,
                                std::string{"coldstart: CSV row "}
@@ -383,7 +325,7 @@ st::Result<ColdStartSnapshot> snapshot_from_csv(std::string_view          csv_pa
         }
         for (std::size_t col = 0; col < pid_count; ++col) {
             double v = 0.0;
-            if (!csv_parse_double(fields[col], v)) {
+            if (!st::core::csv::parse_double(fields[col], v)) {
                 return st::failure(st::ErrorCode::ParseError,
                                    std::string{"coldstart: CSV row "}
                                        + std::to_string(row + 1) + " col "
