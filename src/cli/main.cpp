@@ -15,6 +15,7 @@
 #include "st/flash.hpp"
 #include "st/flash/checksum.hpp"
 #include "st/log.hpp"
+#include "st/log/knock_dashboard.hpp"
 #include "st/policy.hpp"
 #include "st/project.hpp"
 #include "st/rom.hpp"
@@ -225,6 +226,19 @@ constexpr std::string_view kUsage =
     "                            p8→rpm, p11→iat_c, p18→maf_voltage) so the output\n"
     "                            drops into `autotune *` / `project-autotune-*`\n"
     "                            without a rename pass.\n"
+    "    knock-snapshot --log <CSV> --flkc-cols <a,b,c,d>\n"
+    "                   [--fbkc-cols <a,b,c,d>] [--rpm-col <name>] [--load-col <name>]\n"
+    "                   [--cylinders N] [--window-seconds N] [--sample-rate-hz N]\n"
+    "                   [--min-rpm N] [--min-load N] [--no-gate]\n"
+    "                            Compute a per-cylinder knock dashboard from a CSV\n"
+    "                            datalog. --flkc-cols is required (per-cyl fine knock\n"
+    "                            learn column names, order = cyl 1..N). --fbkc-cols\n"
+    "                            optionally adds feedback knock correction per cyl;\n"
+    "                            negative samples are counted as knock events. The\n"
+    "                            load gate (--min-rpm, --min-load) filters out idle/\n"
+    "                            decel samples; --no-gate disables it. Cylinder count\n"
+    "                            defaults to len(--flkc-cols); --cylinders overrides.\n"
+    "                            See docs/05-improvements.md §11 for the design.\n"
     "    can-replay <FILE.asc>   Load a Vector .asc CAN trace and print per-id\n"
     "                            statistics (count, rate, dlc, first byte mode).\n"
     "    can-diff <A.asc> <B.asc>\n"
@@ -4083,6 +4097,289 @@ std::vector<std::string> split_csv_list(std::string_view s) {
     return out;
 }
 
+// Forward declaration — full definition lives later in this file alongside
+// the autotune-family commands.
+std::optional<double> parse_decimal(std::string_view raw);
+
+// Look up a column name in a CSV header; returns the index, or
+// std::string_view::npos if not found. Comparison is case-insensitive
+// because RomRaider log column names are inconsistently cased.
+std::size_t find_csv_column(std::vector<std::string> const &header,
+                            std::string_view                name) {
+    auto const  to_lower = [](char c) -> char {
+        return static_cast<char>(
+            std::tolower(static_cast<unsigned char>(c)));
+    };
+    std::string want;
+    want.reserve(name.size());
+    for (char c : name) want.push_back(to_lower(c));
+    for (std::size_t i = 0; i < header.size(); ++i) {
+        std::string have;
+        have.reserve(header[i].size());
+        for (char c : header[i]) have.push_back(to_lower(c));
+        if (have == want) return i;
+    }
+    return std::string_view::npos;
+}
+
+// Read just the header row (first non-blank, non-# line) so the CLI
+// can resolve column names to indices before handing off to the snapshot
+// CSV reader (which addresses columns by index).
+bool read_csv_header(std::filesystem::path const &path,
+                     std::vector<std::string>    &out,
+                     std::string                  &err) {
+    std::ifstream f{path};
+    if (!f) {
+        err = "knock-snapshot: cannot open " + path.string();
+        return false;
+    }
+    std::string line;
+    while (std::getline(f, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        // Trim leading whitespace
+        std::size_t a = 0;
+        while (a < line.size()
+               && std::isspace(static_cast<unsigned char>(line[a]))) ++a;
+        if (a >= line.size() || line[a] == '#') continue;
+        // Split on commas
+        std::size_t start = a;
+        for (std::size_t i = a; i <= line.size(); ++i) {
+            if (i == line.size() || line[i] == ',') {
+                // Trim each field
+                std::size_t f0 = start;
+                std::size_t f1 = i;
+                while (f0 < f1
+                       && std::isspace(static_cast<unsigned char>(line[f0]))) ++f0;
+                while (f1 > f0
+                       && std::isspace(static_cast<unsigned char>(line[f1 - 1]))) --f1;
+                out.emplace_back(line.substr(f0, f1 - f0));
+                start = i + 1;
+            }
+        }
+        return true;
+    }
+    err = "knock-snapshot: " + path.string() + " is empty or has no header";
+    return false;
+}
+
+int cmd_knock_snapshot(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> log_path;
+    std::optional<std::string>           rpm_col;
+    std::optional<std::string>           load_col;
+    std::optional<std::string>           flkc_cols_arg;
+    std::optional<std::string>           fbkc_cols_arg;
+    std::optional<std::size_t>           cylinders_override;
+    std::optional<double>                window_seconds;
+    std::optional<double>                sample_rate_hz;
+    std::optional<double>                min_rpm_arg;
+    std::optional<double>                min_load_arg;
+    bool                                 no_gate = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const             need = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "knock-snapshot: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if      (a == "--log")           { auto *v = need("--log");           if (!v) return 2; log_path = std::filesystem::path{v}; }
+        else if (a == "--rpm-col")       { auto *v = need("--rpm-col");       if (!v) return 2; rpm_col       = v; }
+        else if (a == "--load-col")      { auto *v = need("--load-col");      if (!v) return 2; load_col      = v; }
+        else if (a == "--flkc-cols")     { auto *v = need("--flkc-cols");     if (!v) return 2; flkc_cols_arg = v; }
+        else if (a == "--fbkc-cols")     { auto *v = need("--fbkc-cols");     if (!v) return 2; fbkc_cols_arg = v; }
+        else if (a == "--cylinders")     {
+            auto *v = need("--cylinders"); if (!v) return 2;
+            char *end = nullptr;
+            long long const n = std::strtoll(v, &end, 10);
+            if (end == v || *end != '\0' || n < 1 || n > 6) {
+                std::fprintf(stderr,
+                             "knock-snapshot: --cylinders must be 1..6 (got '%s')\n", v);
+                return 2;
+            }
+            cylinders_override = static_cast<std::size_t>(n);
+        }
+        else if (a == "--window-seconds") {
+            auto *v = need("--window-seconds"); if (!v) return 2;
+            auto const p = parse_decimal(v);
+            if (!p.has_value()) {
+                std::fprintf(stderr,
+                             "knock-snapshot: --window-seconds must be a number (got '%s')\n", v);
+                return 2;
+            }
+            window_seconds = *p;
+        }
+        else if (a == "--sample-rate-hz") {
+            auto *v = need("--sample-rate-hz"); if (!v) return 2;
+            auto const p = parse_decimal(v);
+            if (!p.has_value()) {
+                std::fprintf(stderr,
+                             "knock-snapshot: --sample-rate-hz must be a number (got '%s')\n", v);
+                return 2;
+            }
+            sample_rate_hz = *p;
+        }
+        else if (a == "--min-rpm") {
+            auto *v = need("--min-rpm"); if (!v) return 2;
+            auto const p = parse_decimal(v);
+            if (!p.has_value()) {
+                std::fprintf(stderr,
+                             "knock-snapshot: --min-rpm must be a number (got '%s')\n", v);
+                return 2;
+            }
+            min_rpm_arg = *p;
+        }
+        else if (a == "--min-load") {
+            auto *v = need("--min-load"); if (!v) return 2;
+            auto const p = parse_decimal(v);
+            if (!p.has_value()) {
+                std::fprintf(stderr,
+                             "knock-snapshot: --min-load must be a number (got '%s')\n", v);
+                return 2;
+            }
+            min_load_arg = *p;
+        }
+        else if (a == "--no-gate") { no_gate = true; }
+        else {
+            std::fprintf(stderr,
+                         "knock-snapshot: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!log_path.has_value() || !flkc_cols_arg.has_value()) {
+        std::fputs(
+            "knock-snapshot: missing required arguments\n"
+            "Usage: subuwutuner-cli knock-snapshot --log <CSV> --flkc-cols <a,b,c,d>\n"
+            "                                      [--fbkc-cols <a,b,c,d>] [--rpm-col <name>]\n"
+            "                                      [--load-col <name>] [--cylinders N]\n"
+            "                                      [--window-seconds N] [--sample-rate-hz N]\n"
+            "                                      [--min-rpm N] [--min-load N] [--no-gate]\n",
+            stderr);
+        return 2;
+    }
+
+    std::vector<std::string> header;
+    {
+        std::string err;
+        if (!read_csv_header(*log_path, header, err)) {
+            std::fprintf(stderr, "%s\n", err.c_str());
+            return 1;
+        }
+    }
+    auto const flkc_names = split_csv_list(*flkc_cols_arg);
+    if (flkc_names.empty()) {
+        std::fputs("knock-snapshot: --flkc-cols cannot be empty\n", stderr);
+        return 2;
+    }
+    if (flkc_names.size() > st::log::knock::kMaxCylinders) {
+        std::fprintf(stderr,
+                     "knock-snapshot: too many cylinders (%zu); max %u\n",
+                     flkc_names.size(),
+                     static_cast<unsigned>(st::log::knock::kMaxCylinders));
+        return 2;
+    }
+    std::vector<std::string> fbkc_names;
+    if (fbkc_cols_arg.has_value()) {
+        fbkc_names = split_csv_list(*fbkc_cols_arg);
+        if (!fbkc_names.empty() && fbkc_names.size() != flkc_names.size()) {
+            std::fprintf(stderr,
+                         "knock-snapshot: --fbkc-cols count (%zu) must match "
+                         "--flkc-cols (%zu)\n",
+                         fbkc_names.size(), flkc_names.size());
+            return 2;
+        }
+    }
+
+    st::log::knock::PidMapping mapping;
+    mapping.cylinder_count = cylinders_override.has_value()
+        ? static_cast<std::uint8_t>(*cylinders_override)
+        : static_cast<std::uint8_t>(flkc_names.size());
+
+    auto const resolve = [&](std::string_view name, char const *flag) -> std::size_t {
+        std::size_t const idx = find_csv_column(header, name);
+        if (idx == std::string_view::npos) {
+            std::fprintf(stderr,
+                         "knock-snapshot: %s column '%.*s' not in CSV header\n",
+                         flag, static_cast<int>(name.size()), name.data());
+        }
+        return idx;
+    };
+
+    bool bad = false;
+    if (rpm_col.has_value()) {
+        std::size_t const idx = resolve(*rpm_col, "--rpm-col");
+        if (idx == std::string_view::npos) bad = true;
+        else mapping.rpm_idx = idx;
+    }
+    if (load_col.has_value()) {
+        std::size_t const idx = resolve(*load_col, "--load-col");
+        if (idx == std::string_view::npos) bad = true;
+        else mapping.load_idx = idx;
+    }
+    for (std::size_t c = 0; c < flkc_names.size(); ++c) {
+        std::size_t const idx = resolve(flkc_names[c], "--flkc-cols");
+        if (idx == std::string_view::npos) { bad = true; continue; }
+        mapping.fine_knock_learn[c] = idx;
+    }
+    for (std::size_t c = 0; c < fbkc_names.size(); ++c) {
+        std::size_t const idx = resolve(fbkc_names[c], "--fbkc-cols");
+        if (idx == std::string_view::npos) { bad = true; continue; }
+        mapping.feedback_knock[c] = idx;
+    }
+    if (bad) return 1;
+
+    st::log::knock::WindowConfig cfg;
+    if (window_seconds.has_value())    cfg.window_seconds    = *window_seconds;
+    if (sample_rate_hz.has_value())    cfg.sample_rate_hz    = *sample_rate_hz;
+    if (min_rpm_arg.has_value())       cfg.min_rpm           = *min_rpm_arg;
+    if (min_load_arg.has_value())      cfg.min_load          = *min_load_arg;
+    cfg.require_load_gate = !no_gate;
+
+    auto const r = st::log::knock::snapshot_from_csv(
+        log_path->string(), mapping, cfg);
+    if (!r.has_value()) {
+        std::fprintf(stderr, "knock-snapshot: %s\n",
+                     r.error().to_string().c_str());
+        return 1;
+    }
+    auto const &s = *r;
+
+    std::printf("Per-Cylinder Knock Dashboard\n");
+    std::printf("============================\n");
+    std::printf("Log:                %s\n", log_path->string().c_str());
+    std::printf("Window:             %.1fs @ %.1f Hz\n",
+                cfg.window_seconds, cfg.sample_rate_hz);
+    std::printf("Samples considered: %llu\n",
+                static_cast<unsigned long long>(s.samples_considered));
+    std::printf("Samples gated out:  %llu  (gate: %s)\n",
+                static_cast<unsigned long long>(s.samples_gated_out),
+                cfg.require_load_gate ? "on" : "off");
+    std::printf("\n");
+    std::printf("Cyl | FLKC current | FLKC mean | FLKC min | FBKC current | Events | dMean\n");
+    std::printf("----+--------------+-----------+----------+--------------+--------+-------\n");
+    for (std::uint8_t c = 0; c < s.cylinder_count; ++c) {
+        auto const &p = s.per_cyl[c];
+        bool const  has_flkc = mapping.fine_knock_learn[c]
+                               != st::log::knock::kNoPid;
+        bool const  has_fbkc = mapping.feedback_knock[c]
+                               != st::log::knock::kNoPid;
+        std::printf(" %2u | %+12.3f | %+9.3f | %+8.3f | %+12.3f | %6u | %+5.2f%s\n",
+                    static_cast<unsigned>(c + 1),
+                    has_flkc ? p.current_flkc : 0.0,
+                    has_flkc ? p.mean_flkc_window : 0.0,
+                    has_flkc ? p.min_flkc_window : 0.0,
+                    has_fbkc ? p.current_fbkc : 0.0,
+                    static_cast<unsigned>(p.event_count_window),
+                    has_flkc ? p.delta_from_cyl_mean : 0.0,
+                    (!has_flkc && !has_fbkc) ? "  (no per-cyl signal)" : "");
+    }
+
+    return 0;
+}
+
 int cmd_log(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
     std::optional<std::string>           pid_list_arg;
@@ -7891,6 +8188,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "log") {
         return cmd_log(argc - 2, argv + 2);
+    }
+    if (cmd == "knock-snapshot") {
+        return cmd_knock_snapshot(argc - 2, argv + 2);
     }
     if (cmd == "can-replay") {
         return cmd_can_replay(argc - 2, argv + 2);

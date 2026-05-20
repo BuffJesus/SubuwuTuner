@@ -8,6 +8,9 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <system_error>
 #include <vector>
 
 using namespace st::log::knock;
@@ -176,11 +179,55 @@ TEST_CASE("snapshot_from_samples respects kNoPid for missing signals",
     REQUIRE(s.per_cyl[3].strip_flkc.empty());
 }
 
-TEST_CASE("snapshot_from_csv reports NotImplemented",
+TEST_CASE("snapshot_from_csv reports FileNotFound on missing path",
           "[knock][snapshot][csv]") {
     PidMapping const   m = h4_mapping();
     WindowConfig const c = default_cfg();
-    auto const         r = snapshot_from_csv("/dev/null", m, c);
+    auto const         r = snapshot_from_csv(
+        "/definitely/does/not/exist.csv", m, c);
     REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+    REQUIRE(r.error().code() == st::ErrorCode::FileNotFound);
+}
+
+TEST_CASE("snapshot_from_csv reads a small log",
+          "[knock][snapshot][csv]") {
+    // Write a tiny CSV to a temp path, then read it back.
+    auto const path = std::filesystem::temp_directory_path()
+                      / "subuwutuner_test_knock.csv";
+    {
+        std::ofstream of{path};
+        of << "rpm,load,flkc1,flkc2,flkc3,flkc4\n"
+              "2500,2.5,-1.0,-2.0,0.0,0.0\n"
+              "2500,2.5,-1.0,-2.0,0.0,0.0\n"
+              "2500,2.5,-1.0,-2.0,0.0,0.0\n";
+    }
+    PidMapping const   m = h4_mapping();
+    WindowConfig const c = default_cfg();
+    auto const         r = snapshot_from_csv(path.string(), m, c);
+    REQUIRE(r.has_value());
+    REQUIRE(r->samples_considered == 3);
+    REQUIRE_THAT(r->per_cyl[0].mean_flkc_window, WithinAbs(-1.0, 1e-9));
+    REQUIRE_THAT(r->per_cyl[1].mean_flkc_window, WithinAbs(-2.0, 1e-9));
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+TEST_CASE("snapshot_from_csv rejects a CSV with a column-count mismatch",
+          "[knock][snapshot][csv]") {
+    auto const path = std::filesystem::temp_directory_path()
+                      / "subuwutuner_test_knock_bad.csv";
+    {
+        std::ofstream of{path};
+        // Header says 4 columns, but data row has 6 columns referenced
+        // by h4_mapping (rpm=0, load=1, flkc1..4=2..5).
+        of << "rpm,load,flkc1,flkc2\n"
+              "2500,2.5,-1.0,-2.0\n";
+    }
+    PidMapping const   m = h4_mapping();
+    WindowConfig const c = default_cfg();
+    auto const         r = snapshot_from_csv(path.string(), m, c);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
 }
