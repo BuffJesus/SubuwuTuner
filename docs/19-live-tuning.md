@@ -99,6 +99,17 @@ RAM-shadow addresses are per-firmware data. Same provenance rules as the calibra
 
 Same red-line rules from `CLAUDE.md`: do not decompile commercial tools to obtain these. RomRaider's GPL source is the canonical fact source.
 
+## Beyond calibration cells: feature toggles + scalar parameters
+
+The same write primitives work for two adjacent surfaces:
+
+- **Custom-feature enable flags** (`docs/16` §"Live-toggleable features"). A feature declares an `enable_ram_address`; toggling Launch Control on or off is a 1-byte UDS write to that address. The patch's main loop reads the flag every iteration; flag false = feature inert. This is the underlying mechanism for the COBB-AccessPort-style "toggle from the hardware screen" UX described in `docs/18` §12.
+- **Scalar feature parameters.** A feature can also declare `scalar_param_ram_address` entries for runtime-tunable knobs (Launch Control target RPM, anti-lag overrun threshold). These are 2-byte or 4-byte writes to the same kind of RAM address.
+
+The `st::live_tune::Session` API is the same: `write_cell(table_id, row, col, value)` for calibration cells; an additional `write_feature_param(feature_id, param_name, value)` (or equivalent) for feature-side writes. The plan-time linter runs on both — engine-safety verdicts apply to a "launch control RPM = 8500" write the same way they apply to a calibration-cell write.
+
+The handheld surface for this (`docs/18` §12) is the user-facing payoff. Live tuning on a desktop GUI works during dyno tuning; live toggles on a standalone hardware screen work in the driver's seat.
+
 ## Safety regime
 
 Live tuning has a *different* safety problem from flashing:

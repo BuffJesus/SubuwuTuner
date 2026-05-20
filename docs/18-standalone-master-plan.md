@@ -224,6 +224,99 @@ no competitor firmware, capture, or scheme is read or mirrored.
 
 ---
 
+## 12. Hardware feature-toggle UX (COBB-equivalent)
+
+The COBB AccessPort's defining UX feature is a hardware screen that
+toggles individual tuning behaviors live — Launch Control on/off,
+Flat-Foot Shift on/off, idle RPM up or down — without a reflash and
+without a PC. Replicating that experience is *not* a new subsystem;
+it is the **convergence** of three existing designs:
+
+1. **`docs/16` (custom features)** declares each feature with a
+   RAM-mapped enable flag (a `[[feature]]` block in the pack carries
+   an `enable_ram_address` plus optional scalar-parameter addresses).
+   The custom-features designer emits SH-2A/RH850 code that reads
+   that flag every loop iteration; flag false = feature inert.
+2. **`docs/19` (live tuning)** owns the write primitive. Toggling the
+   flag is one UDS `WriteDataByIdentifier` to the RAM address. The
+   same plan-time linter that runs on calibration-cell writes runs
+   on a feature toggle — engine-safety still blocking.
+3. **This document (handheld)** surfaces the toggles as LVGL screens
+   bound to the pack's `[[feature]]` entries: one row per feature,
+   with an on/off switch and (where applicable) a slider for the
+   scalar parameter. The handheld writes via the same `ITransport`
+   it uses for `st::log` and `rom-pull`; no new transport path.
+
+Concrete toggleable surface a v1.5 handheld would carry, given a
+typical FA-DIT WRX pack:
+
+| Toggle | Mechanism | Underlying write |
+|---|---|---|
+| Launch Control on/off                 | feature enable flag | 1-byte RAM write |
+| Launch Control target RPM             | feature scalar       | 2-byte RAM write |
+| Flat-Foot Shift on/off                | feature enable flag | 1-byte RAM write |
+| Flat-Foot Shift min-RPM threshold     | feature scalar       | 2-byte RAM write |
+| Anti-lag on/off                       | feature enable flag | 1-byte RAM write |
+| Idle target RPM offset                | live calibration cell | 2-byte RAM write to RAM-shadow of an Idle Target RPM cell |
+| Boost target offset (e.g. -2..+2 PSI) | live calibration tweak | per-cell RAM-shadow write |
+| Active map (Stock / Tune / Race)      | full reflash (NOT a live toggle — uses the normal flash path) | manifest-driven |
+
+Map switching is the one exception. Switching the "active tune" is a
+full flash cycle, not a RAM write, because the entire calibration
+needs to change atomically. That's identical to how COBB does it
+internally — the AccessPort writes ~2 MB to flash on a map change,
+not a RAM toggle. The handheld surfaces map-switching as a flash
+button, with the same brick-protection + brownout interlock as any
+other flash from `docs/05` §4.
+
+### Safety constraints specific to feature toggles
+
+- **Engine-safety linter runs on every toggle.** A feature whose
+  `enable_ram_address` is bound to a flag with `category =
+  engine_safety` (e.g. "remove rev limiter") cannot be toggled on
+  from this screen in any jurisdiction profile. That toggle has to
+  go through the desktop GUI with explicit confirmation. Driving
+  past the rev limiter on a public road is not a one-button affair.
+- **Connection liveness preflight.** Same as `docs/19`: refuse to
+  enter the toggle screen if battery V is low or the adapter
+  handshake is degraded. A toggle that gets NACK'd silently is the
+  failure mode that ends with "I clicked off and it didn't actually
+  turn off."
+- **Toggle journal.** Every live toggle write goes to the device's
+  SD-backed session log, same shape as `docs/19`'s session journal.
+  After the drive, the user can replay the session into a desktop
+  project to see exactly what was toggled when.
+
+### What this means for clean-room
+
+Concept-side, this is the canonical "concept is fair game, expression
+is not" division from `CLAUDE.md`. *Hardware screen that toggles
+features live* is an idea — COBB pioneered it on Subaru, but it's
+descended from rally-rallying TC1 toggles in physical switches.
+**Implementing it from our spec stack is fine.** What is not fine:
+copying COBB's specific feature catalog (their named features, their
+preset RAM addresses, their UI strings, their .ptm format). All of
+those are expression. Per `CLAUDE.md`'s explicit red flags, we do
+not pull any of that from a COBB tool decompile.
+
+The features in the table above are derived from public engine-
+management literature + the existing `docs/16` sample packs
+(`clutch-kill.stmod`, `flat-foot-shift.stmod`, `launch-control.stmod`).
+Adding a sixth or seventh feature means designing it from first
+principles, not from COBB's list.
+
+### Roadmap
+
+This is **v1.5** alongside live tuning — same hardware-arrival gate,
+same Phase 4 prerequisite. The pieces (docs/16 designer, docs/18
+handheld firmware, docs/19 live writes) have to all reach maturity
+before the cross-cutting UX makes sense to integrate. Until then,
+the v1.0–v1.4 desktop GUI's custom-features-designer (`docs/16`)
+ships the same feature graphs without the hardware-screen layer —
+just less convenient for dyno work.
+
+---
+
 ## Out of scope
 
 - Reimplementing `st::ecu::*` / `st::flash` (shared, not rebuilt).

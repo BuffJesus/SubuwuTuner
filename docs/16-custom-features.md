@@ -2,6 +2,8 @@
 
 A **custom feature** is a piece of new ECU behavior the user authors visually, that SubuwuTuner compiles into a ROM patch and flashes alongside the calibration. Table edits change *parameters*; custom features change *control flow*. The two are different categories, and the latter is structurally more dangerous — which is why this is Phase 5, well after manual editing, datalogging, and the brick-protection work in `docs/05-improvements.md` §4.
 
+> **Terminology bridge.** If you're coming from the RomRaider / ECUFlash world, this is the equivalent of what those tools call **"software patches"** or **"ECU patches"** — hand-written SH-2A assembly snippets injected at known ROM offsets to add behaviors like 2-step / flat-foot shift / clutch kill that aren't in the stock cal. SubuwuTuner's contribution is the *authoring layer above* those patches: a visual node-graph designer + IR + linter + codegen that produces the same byte-level output without requiring the user to write assembly directly. The output `.stmod` is the SubuwuTuner-native equivalent of a hand-rolled ECUFlash patch file, and it flashes through the same `st::flash` pipeline as any other ROM change.
+
 This document captures the design. Phase 5 work is in progress: the
 authoring data model, IR lowerer, SH-2A codegen, CLI, and `.stmod`
 file format have shipped end-to-end. **Flashing** is not yet wired —
@@ -293,6 +295,14 @@ Custom features are categorically more dangerous than table edits:
 3. **RAM allocation.** The compiler claims scratch RAM from the pack's declared `free_ram` region. Conflicts between two simultaneously loaded features must be detected at load time, not at runtime.
 4. **Emissions interaction.** A custom feature that overrides commanded fuel triggers the same jurisdiction-profile linter that emissions-flagged tables trigger (see `docs/06-legal-ethics.md`). Engine-safety refusals still apply unconditionally; jurisdiction refusals follow the user's profile.
 5. **Update channel.** A flash gone wrong while a `.stmod` is loaded must be recoverable by un-flashing the patch without losing the user's calibration. The patch format is therefore additive — it never overwrites the original calibration bytes.
+
+## Live-toggleable features
+
+A feature can declare a **RAM-mapped enable flag** so it can be turned on or off without a reflash. The pack's `[[feature]]` block carries an optional `enable_ram_address` (and optional `scalar_param_ram_address`); the generated SH-2A/RH850 code reads those addresses every loop iteration and gates behavior accordingly. Toggling becomes a single UDS `WriteDataByIdentifier` to the RAM address — the same primitive `docs/19-live-tuning.md` uses for live calibration writes.
+
+This is what makes the COBB-AccessPort-style "turn Launch Control on from the handheld screen" UX possible without a reflash. See `docs/18-standalone-master-plan.md` §12 for the handheld-side UX design and the safety constraints that wrap it (engine-safety toggles do not surface on the hardware screen even with a RAM-mapped flag — those route through the desktop GUI with explicit confirmation).
+
+Not every feature is live-toggleable. Features that wire deep into a hook chain (anti-lag bang-bang fuel cut, custom rev limiter) can be — they branch on the flag and fall through to OEM behavior when off. Features that *replace* a stock function (custom shift logic, a full-replacement boost controller) generally cannot be, because the OEM code path they replace no longer exists. That distinction is per-feature in the pack metadata.
 
 ## Scope and timing
 
