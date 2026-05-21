@@ -140,6 +140,18 @@ Why NOT to start Tier 5 ML now:
   - Tier 5 is also LOWER priority than Tiers 1-3 (drift classifier, LLM explanation, explain-this-log assistant) in the doc's own ordering. Starting Tier 5 first inverts the architecture.
   - The deterministic descriptor library captures the same value with no ML infrastructure cost AND no training-data clean-room work. If the descriptor library proves the value (or its limits), THEN the case for ML is empirical, not speculative.
 
+### Honest acknowledgement: where ML probably IS the right tool eventually
+
+End-of-day discussion clarified the user's framing: ML to **expand coverage where data is sparse**, not just "improve what's known". The descriptor library answers the latter; for the former, ML has a real place. Two specific applications where the data-sparsity argument is strongest, ranked:
+
+1. **Cipher / encryption-bucket classification (Tier 8 in `docs/20`).** Currently in the doc's "research" bucket but probably the highest-leverage ML application for the data-sparse case. The LF79 audit today proved encryption-bucket understanding is the bottleneck for the entire VA/VB family — only LF79100P is a real anchor among 31 LF79xxx, only 5 real anchors across the entire 2MB FA-DIT bucket. Every new ROM family that uses a different encryption scheme currently needs manual RE of the cipher (per_family_xor / per_CID layer). ML over byte-distribution features could fingerprint encryption schemes empirically and short-circuit a lot of that work. **One good cipher-fingerprint tool unlocks more cal coverage than a hundred def-pack drafts.** Worth promoting from "research" to "v2.x reachable" in the doc when we next revise it.
+
+2. **Pack drafting for un-XML'd CIDs (Tier 5).** ML pattern recognition over byte distributions could say "this 0xC1000-0xC1FF region IS a fuel map" even where we have no sibling pack and no source XML. Descriptor library helps a little (scan for fuel-map-shaped regions) but ML scales better across the long tail of CIDs we'll never have RR XMLs for. Justified after the descriptor library establishes the deterministic ceiling.
+
+The stance update: P6 (descriptor library) is the right next step because it sets the empirical baseline. But the long-arc thinking should NOT assume "deterministic is always enough" — for the genuinely-sparse cases (sparse CID coverage, undocumented ciphers), ML is the eventual answer. The descriptor library gives us the data to know when to cross that bridge.
+
+If the user opens a future session with a "we're hitting the deterministic ceiling" observation, the right answer is to revisit `docs/20` Tier 8 first, Tier 5 second.
+
 ### Hardware ETA: OBDX Pro VX adapter, May 22-25 2026
 
 Two days minimum from this handoff. First-light command pre-staged:
