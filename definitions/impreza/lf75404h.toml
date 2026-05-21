@@ -27,14 +27,1329 @@ cid_scan    = true
 ecu_part    = ""
 
 
+[[scaling]]
+id        = "x_256_0"
+formula   = "linear"
+factor    = 0.00390625
+offset    = 0.0
+unit      = "%"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "nm_x_16000_0_80_0"
+formula   = "linear"
+factor    = 0.0125
+offset    = -200.0
+unit      = "Nm"
+precision = 1
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "rpm_x_5_12"
+formula   = "linear"
+factor    = 0.1953125
+offset    = 0.0
+unit      = "RPM"
+precision = 0
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "afr_x_256_0_1_0"
+formula   = "linear"
+factor    = 0.00390625
+offset    = 1.0
+unit      = "AFR"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "x_100_0"
+formula   = "linear"
+factor    = 0.01
+offset    = 0.0
+unit      = ""
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "x_128_0_128_0_100_0"
+formula   = "linear"
+factor    = 0.78125
+offset    = -100.0
+unit      = "%"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "pascal_x_25600_0_100000_0"
+formula   = "linear"
+factor    = 3.90625
+offset    = 0.0
+unit      = "Pascal"
+precision = 2
+data_type = "int16_be"
+
+
+[[scaling]]
+id        = "c_x_4096_0_10_0_40_0"
+formula   = "linear"
+factor    = 0.00244140625
+offset    = -40.0
+unit      = "°C"
+precision = 1
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "bar_x_24000_0_1_0"
+formula   = "linear"
+factor    = 4.1666666666666665e-05
+offset    = -1.0
+unit      = "bar"
+precision = 3
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "bar_x_89_0_99_0"
+formula   = "linear"
+factor    = 0.010101010101010102
+offset    = -0.898989898989899
+unit      = "bar"
+precision = 3
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "pascal_x_25945_0_100000_0"
+formula   = "linear"
+factor    = 3.854307188282906
+offset    = 0.0
+unit      = "Pascal"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "deg_x_0_5_16_0"
+formula   = "linear"
+factor    = 0.5
+offset    = -16.0
+unit      = "deg"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "g_per_rev_x_65535_0_3_3"
+formula   = "linear"
+factor    = 5.035477225909819e-05
+offset    = 0.0
+unit      = "G Per Rev"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "deg_x_10_0"
+formula   = "linear"
+factor    = 0.1
+offset    = 0.0
+unit      = "deg"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "g_per_rev_x_0_0129"
+formula   = "linear"
+factor    = 0.0129
+offset    = 0.0
+unit      = "G Per Rev"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "rpm_x_25_0"
+formula   = "linear"
+factor    = 25.0
+offset    = 0.0
+unit      = "RPM"
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "deg_x_0_5"
+formula   = "linear"
+factor    = 0.5
+offset    = 0.0
+unit      = "deg"
+precision = 2
+data_type = "int8"
+
+
+[[scaling]]
+id        = "deg_x_1260_0_1_0"
+formula   = "linear"
+factor    = -1.0
+offset    = 1260.0
+unit      = "deg"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "x_2_0_100_0"
+formula   = "linear"
+factor    = 50.0
+offset    = 0.0
+unit      = ""
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "afr_x_256_0_0_5"
+formula   = "linear"
+factor    = 0.00390625
+offset    = 0.5
+unit      = "AFR"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "rpm_x_2_0_100_0"
+formula   = "linear"
+factor    = 50.0
+offset    = 0.0
+unit      = "RPM"
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "lambda_x_32768_0_0_00034"
+formula   = "linear"
+factor    = -0.00034
+offset    = 11.14112
+unit      = "Lambda"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "lambda_x_43194_0"
+formula   = "linear"
+factor    = 2.3151363615316943e-05
+offset    = 0.0
+unit      = "Lambda"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "pascal_x_91520_0"
+formula   = "linear"
+factor    = 91520.0
+offset    = 0.0
+unit      = "Pascal"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "c_rshift_16_0_x_205_0_40_0"
+formula   = "linear"
+factor    = 0.0031280517578125
+offset    = -40.0
+unit      = "°C"
+precision = 1
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "v_x_13106_25"
+formula   = "linear"
+factor    = 7.629947544110635e-05
+offset    = 0.0
+unit      = "V"
+precision = 3
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "deg_x_0_5_720_0"
+formula   = "linear"
+factor    = -0.5
+offset    = 720.0
+unit      = "deg"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "deg_x_1_0"
+formula   = "linear"
+factor    = -1.0
+offset    = -0.0
+unit      = "deg"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "x_255_0"
+formula   = "linear"
+factor    = 0.00392156862745098
+offset    = 0.0
+unit      = "%"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "c_x_50_0"
+formula   = "linear"
+factor    = 1.0
+offset    = -50.0
+unit      = "°C"
+precision = 1
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "deg_x_128_0_0_5"
+formula   = "linear"
+factor    = 0.5
+offset    = -64.0
+unit      = "deg"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "deg_x_728_1_0_5"
+formula   = "linear"
+factor    = 0.0027468754291992857
+offset    = 0.0
+unit      = "deg"
+precision = 2
+data_type = "int16_be"
+
+
+[[scaling]]
+id        = "kmh_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "Kmh"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "x_5_1199217"
+formula   = "linear"
+factor    = 0.19531548695363837
+offset    = 0.0
+unit      = ""
+precision = 0
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "c_x_40_0"
+formula   = "linear"
+factor    = 1.0
+offset    = -40.0
+unit      = "°C"
+precision = 1
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "x_65535_0_100_0"
+formula   = "linear"
+factor    = 0.0015259021896696422
+offset    = 0.0
+unit      = "%"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "x_255_0_100_0"
+formula   = "linear"
+factor    = 0.39215686274509803
+offset    = 0.0
+unit      = "%"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "deg_x_0_3515"
+formula   = "linear"
+factor    = 0.3515
+offset    = 0.0
+unit      = "deg"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "x_128_0"
+formula   = "linear"
+factor    = 0.0078125
+offset    = 0.0
+unit      = ""
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "x_16_0"
+formula   = "linear"
+factor    = 0.0625
+offset    = 0.0
+unit      = ""
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "g_per_sec_x_8_0"
+formula   = "linear"
+factor    = 0.125
+offset    = 0.0
+unit      = "G Per Sec"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "kpa_x_61_0_1000_0_10_0"
+formula   = "linear"
+factor    = 0.61
+offset    = 0.0
+unit      = "Kpa"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "x_256_0_100_0"
+formula   = "linear"
+factor    = 0.390625
+offset    = 0.0
+unit      = "%"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "kpa_rshift_20_0_x_63963_0_10_0"
+formula   = "linear"
+factor    = 0.6099987030029297
+offset    = 0.0
+unit      = "Kpa"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "x_5_12"
+formula   = "linear"
+factor    = 0.1953125
+offset    = 0.0
+unit      = ""
+precision = 0
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "lambda_inverse_divide_32768_0_x"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "Lambda"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "x_128_0_128_0_100_0_100_0"
+formula   = "linear"
+factor    = 0.78125
+offset    = 0.0
+unit      = "%"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "rpm_lshift_4_0_lshift_1_0_lshift_1_0_rshift_2_0_x_10_0_40_0_1_0_5_12_3_0"
+formula   = "linear"
+factor    = 31.25
+offset    = 127.8046875
+unit      = "RPM"
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "millisecond_x_10_0"
+formula   = "linear"
+factor    = 10.0
+offset    = 0.0
+unit      = "Millisecond"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "kmh_rshift_8_0_x"
+formula   = "linear"
+factor    = 0.00390625
+offset    = 0.0
+unit      = "Kmh"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "millisecond_rshift_20_0_x_13107_0_125_0_3200_0_100_0"
+formula   = "linear"
+factor    = 0.0031999511718749994
+offset    = 0.0
+unit      = "Millisecond"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "g_per_sec_lshift_8_0_x_76800_0_5_0"
+formula   = "linear"
+factor    = 0.0006666666666666668
+offset    = 0.0
+unit      = "G Per Sec"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "rshift_7_0_x"
+formula   = "linear"
+factor    = 0.0078125
+offset    = 0.0
+unit      = ""
+precision = 0
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "bar_x_99_0"
+formula   = "linear"
+factor    = 0.010101010101010102
+offset    = 0.0
+unit      = "bar"
+precision = 3
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "psi_rshift_8_0_x_0_145038"
+formula   = "linear"
+factor    = 0.0005665546875
+offset    = 0.0
+unit      = "psi"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "x_32768_0_100_0"
+formula   = "linear"
+factor    = 0.0030517578125
+offset    = 0.0
+unit      = "%"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "psi_x_24576_0_14_5038"
+formula   = "linear"
+factor    = 0.0005901611328125
+offset    = 0.0
+unit      = "psi"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "v_x_20_0_256_0"
+formula   = "linear"
+factor    = 0.078125
+offset    = 0.0
+unit      = "V"
+precision = 3
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "g_per_sec_x_76800_0"
+formula   = "linear"
+factor    = 1.3020833333333334e-05
+offset    = 0.0
+unit      = "G Per Sec"
+precision = 2
+data_type = "uint32_be"
+
+
+[[scaling]]
+id        = "c_rshift_11_0_x_5_0_40_0"
+formula   = "linear"
+factor    = 0.00244140625
+offset    = -40.0
+unit      = "°C"
+precision = 1
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "l_x_8000_0"
+formula   = "linear"
+factor    = 0.000125
+offset    = 0.0
+unit      = "L"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "psi_x_25600_0_14_5038"
+formula   = "linear"
+factor    = 0.0005665546875
+offset    = 0.0
+unit      = "psi"
+precision = 2
+data_type = "int16_be"
+
+
+[[scaling]]
+id        = "psi_x_256_0_25600_0_14_5038_5_0"
+formula   = "linear"
+factor    = 0.0290076
+offset    = 0.0
+unit      = "psi"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "rev_per_mi_x_2_66"
+formula   = "linear"
+factor    = 0.37593984962406013
+offset    = 0.0
+unit      = "Rev Per Mi"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "c_x_0_022889"
+formula   = "linear"
+factor    = 0.022889
+offset    = 0.0
+unit      = "°C"
+precision = 1
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "hz_inverse_divide_1_0_x_312500_0"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "Hz"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "v_x_65535_0_5_0"
+formula   = "linear"
+factor    = 7.629510948348211e-05
+offset    = 0.0
+unit      = "V"
+precision = 3
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "bar_x_32768_0_24000_0_0_433"
+formula   = "linear"
+factor    = 4.1666666666666665e-05
+offset    = 0.9323333333333332
+unit      = "bar"
+precision = 3
+data_type = "int16_be"
+
+
+[[scaling]]
+id        = "hz_inverse_divide_1_0_x_12500_0"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = "Hz"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "rshift_17_0_x_33423_0_51_0_20_0"
+formula   = "linear"
+factor    = 0.09999892290900736
+offset    = 0.0
+unit      = "%"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "kpa_x_10_0"
+formula   = "linear"
+factor    = 10.0
+offset    = 0.0
+unit      = "Kpa"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "psi_x_3404_0_24576_0_14_5038"
+formula   = "linear"
+factor    = 0.0005901611328125
+offset    = -2.00890849609375
+unit      = "psi"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "x_200000_0_100_0"
+formula   = "linear"
+factor    = 0.0005
+offset    = 0.0
+unit      = "%"
+precision = 2
+data_type = "float32_be"
+
+
+[[axis]]
+id        = "boost_control_requested_torque"
+name      = "Boost Control - Requested Torque"
+unit      = ""
+type      = "static"
+address   = 0x00028F8C
+length    = 7
+data_type = "uint16_be"
+scaling   = "nm_x_16000_0_80_0"
+
+
+[[axis]]
+id        = "rpm"
+name      = "RPM"
+unit      = ""
+type      = "static"
+address   = 0x0002979C
+length    = 8
+data_type = "uint16_be"
+scaling   = "rpm_x_5_12"
+
+
+[[axis]]
+id        = "req_torque"
+name      = "REQ TORQUE"
+unit      = ""
+type      = "static"
+address   = 0x00028F8C
+length    = 7
+data_type = "uint16_be"
+scaling   = "nm_x_16000_0_80_0"
+
+
+[[axis]]
+id        = "calc_load"
+name      = "CALC LOAD"
+unit      = ""
+type      = "static"
+address   = 0x00011CB4
+length    = 20
+data_type = "uint8"
+scaling   = "x_100_0"
+
+
+[[axis]]
+id        = "boost_error"
+name      = "Boost Error"
+unit      = ""
+type      = "static"
+address   = 0x00028FDE
+length    = 4
+data_type = "int16_be"
+scaling   = "pascal_x_25600_0_100000_0"
+
+
+[[axis]]
+id        = "boost_control_wastegate_iat"
+name      = "Boost Control - Wastegate - IAT"
+unit      = ""
+type      = "static"
+address   = 0x000127DA
+length    = 8
+data_type = "uint16_be"
+scaling   = "c_x_4096_0_10_0_40_0"
+
+
+[[axis]]
+id        = "boost_control_boost_targets_limits_requested_torque"
+name      = "Boost Control - Boost Targets/Limits - Requested Torque"
+unit      = ""
+type      = "static"
+address   = 0x00029086
+length    = 8
+data_type = "uint16_be"
+scaling   = "nm_x_16000_0_80_0"
+
+
+[[axis]]
+id        = "boost_control_wastegate_rpm"
+name      = "Boost Control - Wastegate - RPM"
+unit      = ""
+type      = "static"
+address   = 0x000297D0
+length    = 9
+data_type = "uint16_be"
+scaling   = "rpm_x_5_12"
+
+
+[[axis]]
+id        = "boost_control_barometric_pressure"
+name      = "Boost Control - Barometric Pressure"
+unit      = ""
+type      = "static"
+address   = 0x00028FB8
+length    = 5
+data_type = "uint16_be"
+scaling   = "pascal_x_25945_0_100000_0"
+
+
+[[axis]]
+id        = "calculated_load"
+name      = "Calculated Load"
+unit      = ""
+type      = "static"
+address   = 0x0002FFE2
+length    = 8
+data_type = "uint16_be"
+scaling   = "g_per_rev_x_65535_0_3_3"
+
+
+[[axis]]
+id        = "boost_control_rpm"
+name      = "Boost Control - RPM"
+unit      = ""
+type      = "static"
+address   = 0x0002FFB6
+length    = 11
+data_type = "uint16_be"
+scaling   = "rpm_x_5_12"
+
+
+[[axis]]
+id        = "coolant_temperature"
+name      = "Coolant Temperature"
+unit      = ""
+type      = "static"
+address   = 0x0003834C
+length    = 8
+data_type = "uint16_be"
+scaling   = "c_x_4096_0_10_0_40_0"
+
+
+[[axis]]
+id        = "timing_compensation_calculated_load"
+name      = "Timing - Compensation - Calculated Load"
+unit      = ""
+type      = "static"
+address   = 0x00031E94
+length    = 16
+data_type = "uint8"
+scaling   = "g_per_rev_x_0_0129"
+
+
+[[axis]]
+id        = "timing_compensation_rpm"
+name      = "Timing - Compensation - RPM"
+unit      = ""
+type      = "static"
+address   = 0x00031E7E
+length    = 22
+data_type = "uint8"
+scaling   = "rpm_x_25_0"
+
+
+[[axis]]
+id        = "iat"
+name      = "IAT"
+unit      = ""
+type      = "static"
+address   = 0x00030F0C
+length    = 8
+data_type = "uint16_be"
+scaling   = "c_x_4096_0_10_0_40_0"
+
+
+[[axis]]
+id        = "fueling_injectors_rpm"
+name      = "Fueling - Injectors - RPM"
+unit      = ""
+type      = "static"
+address   = 0x00011DB4
+length    = 8
+data_type = "uint8"
+scaling   = "x_2_0_100_0"
+
+
+[[axis]]
+id        = "fueling_closed_loop_rpm_fuel"
+name      = "Fueling - Closed Loop - RPM Fuel"
+unit      = ""
+type      = "static"
+address   = 0x0002DBA8
+length    = 24
+data_type = "uint8"
+scaling   = "x_100_0"
+
+
+[[axis]]
+id        = "fueling_closed_loop_rpm"
+name      = "Fueling - Closed Loop - RPM"
+unit      = ""
+type      = "static"
+address   = 0x0002DB90
+length    = 24
+data_type = "uint8"
+scaling   = "rpm_x_2_0_100_0"
+
+
+[[axis]]
+id        = "fueling_closed_loop_calculated_load"
+name      = "Fueling - Closed Loop - Calculated Load"
+unit      = ""
+type      = "static"
+address   = 0x0002E51E
+length    = 8
+data_type = "uint8"
+scaling   = "x_100_0"
+
+
+[[axis]]
+id        = "developer_sensors_voltage"
+name      = "Developer - Sensors - Voltage"
+unit      = ""
+type      = "static"
+address   = 0x00056FC0
+length    = 16
+data_type = "uint16_be"
+scaling   = "v_x_13106_25"
+
+
+[[axis]]
+id        = "fueling_injectors_intake_air_temperature"
+name      = "Fueling - Injectors - Intake Air Temperature"
+unit      = ""
+type      = "static"
+address   = 0x00014968
+length    = 8
+data_type = "uint8"
+scaling   = "c_x_50_0"
+
+
+[[axis]]
+id        = "fueling_injectors_oil_temp"
+name      = "Fueling - Injectors - Oil Temp"
+unit      = ""
+type      = "static"
+address   = 0x00014960
+length    = 8
+data_type = "uint8"
+scaling   = "c_x_50_0"
+
+
+[[axis]]
+id        = "avcs_intake_target_calculated_load"
+name      = "AVCS - Intake - Target - Calculated Load"
+unit      = ""
+type      = "static"
+address   = 0x0003BE04
+length    = 16
+data_type = "uint8"
+scaling   = "x_100_0"
+
+
+[[axis]]
+id        = "none"
+name      = "None"
+unit      = ""
+type      = "static"
+address   = 0x000138E6
+length    = 6
+data_type = "uint8"
+scaling   = ""
+
+
+[[axis]]
+id        = "throttle_requested_torque_accelerator_position"
+name      = "Throttle - Requested Torque - Accelerator Position"
+unit      = ""
+type      = "static"
+address   = 0x0001E044
+length    = 10
+data_type = "uint16_be"
+scaling   = "x_65535_0_100_0"
+
+
+[[axis]]
+id        = "throttle_requested_torque_ratio"
+name      = "Throttle - Requested Torque Ratio"
+unit      = ""
+type      = "static"
+address   = 0x0001D664
+length    = 24
+data_type = "uint8"
+scaling   = "x_255_0_100_0"
+
+
+[[axis]]
+id        = "timing_dynamic_advance_dam"
+name      = "Timing - Dynamic Advance - DAM"
+unit      = ""
+type      = "static"
+address   = 0x00027B5B
+length    = 17
+data_type = "uint8"
+scaling   = "x_16_0"
+
+
+[[axis]]
+id        = "timing_compensation_tip_in_tps_delta_raw"
+name      = "Timing - Compensation - Tip-In - TPS Delta Raw"
+unit      = ""
+type      = "static"
+address   = 0x00030706
+length    = 4
+data_type = "uint16_be"
+scaling   = ""
+
+
+[[axis]]
+id        = "idle_control_coolant_temperature"
+name      = "Idle Control - Coolant Temperature"
+unit      = ""
+type      = "static"
+address   = 0x0002523D
+length    = 16
+data_type = "uint8"
+scaling   = "c_x_50_0"
+
+
+[[axis]]
+id        = "idle_control_rpm"
+name      = "Idle Control - RPM"
+unit      = ""
+type      = "static"
+address   = 0x00025228
+length    = 21
+data_type = "uint8"
+scaling   = "rpm_x_2_0_100_0"
+
+
+[[axis]]
+id        = "fuel_fuel_pressure"
+name      = "Fuel - Fuel Pressure"
+unit      = ""
+type      = "static"
+address   = 0x00038462
+length    = 8
+data_type = "uint16_be"
+scaling   = "kpa_x_61_0_1000_0_10_0"
+
+
+[[axis]]
+id        = "fuel_pressure_fuel_pressure_obd"
+name      = "Fuel - Pressure - Fuel Pressure OBD"
+unit      = ""
+type      = "static"
+address   = 0x00038462
+length    = 8
+data_type = "uint16_be"
+scaling   = "kpa_rshift_20_0_x_63963_0_10_0"
+
+
+[[axis]]
+id        = "engine_calculated_load_rescaled"
+name      = "Engine - Calculated Load Rescaled"
+unit      = ""
+type      = "static"
+address   = 0x00017926
+length    = 16
+data_type = "uint8"
+scaling   = "x_100_0"
+
+
+[[axis]]
+id        = "ignition_dynamic_advance_dam"
+name      = "Ignition - Dynamic Advance - DAM"
+unit      = ""
+type      = "static"
+address   = 0x00017936
+length    = 8
+data_type = "uint8"
+scaling   = "x_16_0"
+
+
+[[axis]]
+id        = "timing_knock_thresholds_rpm"
+name      = "Timing - Knock Thresholds - RPM"
+unit      = ""
+type      = "static"
+address   = 0x000382DC
+length    = 16
+data_type = "uint8"
+scaling   = "rpm_lshift_4_0_lshift_1_0_lshift_1_0_rshift_2_0_x_10_0_40_0_1_0_5_12_3_0"
+
+
+[[axis]]
+id        = "engine_idle_speed_rpm"
+name      = "Engine - Idle Speed - RPM"
+unit      = ""
+type      = "static"
+address   = 0x0001DE8C
+length    = 8
+data_type = "uint8"
+scaling   = "rpm_x_2_0_100_0"
+
+
+[[axis]]
+id        = "engine_idle_speed_coolant_temperature"
+name      = "Engine - Idle Speed - Coolant Temperature"
+unit      = ""
+type      = "static"
+address   = 0x0001DE94
+length    = 8
+data_type = "uint8"
+scaling   = "c_x_50_0"
+
+
+[[axis]]
+id        = "engine_rpm"
+name      = "Engine - RPM"
+unit      = ""
+type      = "static"
+address   = 0x000206E2
+length    = 5
+data_type = "uint16_be"
+scaling   = "rpm_x_5_12"
+
+
+[[axis]]
+id        = "gear_position"
+name      = "Gear Position"
+unit      = ""
+type      = "static"
+address   = 0x000206DC
+length    = 5
+data_type = "uint8"
+scaling   = ""
+
+
+[[axis]]
+id        = "y_axis"
+name      = "Y Axis"
+unit      = ""
+type      = "static"
+address   = 0x00020502
+length    = 5
+data_type = "uint8"
+scaling   = ""
+
+
+[[axis]]
+id        = "fuel_injectors_rpm"
+name      = "Fuel - Injectors - RPM"
+unit      = ""
+type      = "static"
+address   = 0x00012FFA
+length    = 20
+data_type = "uint8"
+scaling   = "x_2_0_100_0"
+
+
+[[axis]]
+id        = "scaled_ipw_command"
+name      = "Scaled IPW Command"
+unit      = ""
+type      = "static"
+address   = 0x0001300E
+length    = 4
+data_type = "uint16_be"
+scaling   = "millisecond_rshift_20_0_x_13107_0_125_0_3200_0_100_0"
+
+
+[[axis]]
+id        = "egr_steps"
+name      = "EGR Steps"
+unit      = ""
+type      = "static"
+address   = 0x0002C972
+length    = 8
+data_type = "uint16_be"
+scaling   = "rshift_7_0_x"
+
+
+[[axis]]
+id        = "egr_relative_pressure"
+name      = "EGR Relative Pressure"
+unit      = ""
+type      = "static"
+address   = 0x0002C992
+length    = 12
+data_type = "uint8"
+scaling   = "bar_x_99_0"
+
+
+[[axis]]
+id        = "airflow_egr_manifold_flow_model_rpm"
+name      = "Airflow - EGR - Manifold Flow Model - RPM"
+unit      = ""
+type      = "static"
+address   = 0x0002D870
+length    = 8
+data_type = "uint16_be"
+scaling   = "rpm_x_5_12"
+
+
+[[axis]]
+id        = "sensors_barometric_pressure"
+name      = "Sensors - Barometric Pressure"
+unit      = ""
+type      = "static"
+address   = 0x0002D730
+length    = 8
+data_type = "uint16_be"
+scaling   = "psi_rshift_8_0_x_0_145038"
+
+
+[[axis]]
+id        = "airflow_turbo_manifold_absolute_pressure"
+name      = "Airflow - Turbo - Manifold Absolute Pressure"
+unit      = ""
+type      = "static"
+address   = 0x0002B118
+length    = 8
+data_type = "uint16_be"
+scaling   = "psi_x_24576_0_14_5038"
+
+
+[[axis]]
+id        = "fuel_closed_loop_rpm"
+name      = "Fuel - Closed Loop - RPM"
+unit      = ""
+type      = "static"
+address   = 0x0003F594
+length    = 20
+data_type = "uint8"
+scaling   = "rpm_x_2_0_100_0"
+
+
+[[axis]]
+id        = "fuel_injector_pulse_width"
+name      = "Fuel - Injector Pulse Width"
+unit      = ""
+type      = "static"
+address   = 0x0003F304
+length    = 8
+data_type = "uint16_be"
+scaling   = "millisecond_rshift_20_0_x_13107_0_125_0_3200_0_100_0"
+
+
+[[axis]]
+id        = "battery_voltage"
+name      = "Battery Voltage"
+unit      = ""
+type      = "static"
+address   = 0x0003EF38
+length    = 16
+data_type = "uint8"
+scaling   = "v_x_20_0_256_0"
+
+
+[[axis]]
+id        = "x_axis"
+name      = "X Axis"
+unit      = ""
+type      = "static"
+address   = 0x0001DF0A
+length    = 8
+data_type = "uint8"
+scaling   = ""
+
+
+[[axis]]
+id        = "sensors_coolant_temperature"
+name      = "Sensors - Coolant Temperature"
+unit      = ""
+type      = "static"
+address   = 0x00034324
+length    = 4
+data_type = "uint16_be"
+scaling   = "c_x_4096_0_10_0_40_0"
+
+
+[[axis]]
+id        = "sensors_manifold_absolute_pressure_voltage_5v"
+name      = "Sensors - Manifold Absolute Pressure - Voltage (5V)"
+unit      = ""
+type      = "static"
+address   = 0x000579FC
+length    = 16
+data_type = "uint16_be"
+scaling   = "v_x_65535_0_5_0"
+
+
 [[table]]
 id                     = "airflow_turbo_wastegate_wastegate_duty_maximum"
 name                   = "Airflow - Turbo - Wastegate - Wastegate Duty Maximum"
-category               = "boost control - wastegate"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000292AA
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_256_0"
+axis_x                 = "boost_control_requested_torque"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -42,11 +1357,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_wastegate_wastegate_duty_initial"
 name                   = "Airflow - Turbo - Wastegate - Wastegate Duty Initial"
-category               = "boost control - wastegate"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000290CE
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_256_0"
+axis_x                 = "req_torque"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -54,11 +1371,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_open_loop_avcs_disabled_target_base_tgv_open"
 name                   = "Fuel - Open Loop - AVCS Disabled - Target Base (TGV Open)"
-category               = "fueling - open loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00018BEA
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "afr_x_256_0_1_0"
+axis_x                 = "calc_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -66,11 +1385,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_open_loop_avcs_disabled_target_base_tgv_closed"
 name                   = "Fuel - Open Loop - AVCS Disabled - Target Base (TGV Closed)"
-category               = "fueling - open loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00018A0A
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "afr_x_256_0_1_0"
+axis_x                 = "calc_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -78,11 +1399,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_open_loop_avcs_enabled_target_base_tgv_closed"
 name                   = "Fuel - Open Loop - AVCS Enabled - Target Base (TGV Closed)"
-category               = "fueling - open loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001A978
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "afr_x_256_0_1_0"
+axis_x                 = "calc_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -90,11 +1413,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_open_loop_avcs_enabled_target_base_tgv_open"
 name                   = "Fuel - Open Loop - AVCS Enabled - Target Base (TGV Open)"
-category               = "fueling - open loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001AB58
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "afr_x_256_0_1_0"
+axis_x                 = "calc_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -102,11 +1427,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_open_loop_avcs_enabled_target_base_low_dam"
 name                   = "Fuel - Open Loop - AVCS Enabled - Target Base (Low DAM)"
-category               = "fueling - open loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00013A0D
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "afr_x_256_0_1_0"
+axis_x                 = "calc_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -114,11 +1441,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_wastegate_wastegate_iat_compensation"
 name                   = "Airflow - Turbo - Wastegate - Wastegate IAT Compensation"
-category               = "boost control - wastegate"
+category               = ""
 dimensions             = 0
 address                = 0x00028FA8
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -126,11 +1453,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_pi_control_integral_negative"
 name                   = "Airflow - Turbo - PI Control - Integral Negative"
-category               = "boost control - turbo dynamics"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00029044
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "x_256_0"
+axis_x                 = "boost_error"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -138,11 +1466,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_pi_control_integral_positive"
 name                   = "Airflow - Turbo - PI Control - Integral Positive"
-category               = "boost control - turbo dynamics"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00029056
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "x_256_0"
+axis_x                 = "boost_error"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -150,11 +1479,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_pi_control_proportional"
 name                   = "Airflow - Turbo - PI Control - Proportional"
-category               = "boost control - turbo dynamics"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00029068
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "x_256_0"
+axis_x                 = "boost_error"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -162,11 +1492,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_pi_control_integral_positive_iat_compensation"
 name                   = "Airflow Turbo Pi Control Integral Positive Iat Compensation"
-category               = "boost control - turbo dynamics"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00029024
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0"
+axis_x                 = "boost_control_wastegate_iat"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -174,11 +1505,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_pi_control_integral_negative_iat_compensation"
 name                   = "Airflow Turbo Pi Control Integral Negative Iat Compensation"
-category               = "boost control - turbo dynamics"
+category               = ""
 dimensions             = 0
 address                = 0x00029014
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -186,11 +1517,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_pi_control_proportional_iat_compensation"
 name                   = "Airflow - Turbo - PI Control - Proportional IAT Compensation"
-category               = "boost control - turbo dynamics"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00029034
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0"
+axis_x                 = "boost_control_wastegate_iat"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -198,11 +1530,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_boost_boost_target_main"
 name                   = "Airflow - Turbo - Boost - Boost Target Main"
-category               = "boost control - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000294E0
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "bar_x_24000_0_1_0"
+axis_x                 = "boost_control_boost_targets_limits_requested_torque"
+axis_y                 = "boost_control_wastegate_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -210,11 +1544,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_boost_limits_boost_limit_base"
 name                   = "Airflow - Turbo - Boost - Limits - Boost Limit Base"
-category               = "boost control - target"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0002984A
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "bar_x_89_0_99_0"
+axis_x                 = "boost_control_wastegate_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -222,11 +1557,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_boost_compensation_boost_iat_compensation"
 name                   = "Airflow - Turbo - Boost - Compensation - Boost IAT Compensation"
-category               = "boost control - target"
+category               = ""
 dimensions             = 0
 address                = 0x000290A9
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -234,11 +1569,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_wastegate_wastegate_barometric_compensation"
 name                   = "Airflow - Turbo - Wastegate - Wastegate Barometric Compensation"
-category               = "boost control - wastegate"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00029486
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0"
+axis_x                 = "boost_control_barometric_pressure"
+axis_y                 = "boost_control_wastegate_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -246,11 +1583,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_boost_compensation_boost_barometric_compensation"
 name                   = "Airflow Turbo Boost Compensation Boost Barometric Compensation"
-category               = "boost control - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00029740
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0"
+axis_x                 = "boost_control_barometric_pressure"
+axis_y                 = "boost_control_wastegate_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -258,11 +1597,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_primary_avcs_enabled_tgv_closed"
 name                   = "Ignition - Primary - AVCS Enabled - TGV Closed"
-category               = "ignition timing"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00030002
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "deg_x_0_5_16_0"
+axis_x                 = "calculated_load"
+axis_y                 = "boost_control_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -270,11 +1611,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_primary_avcs_disabled_tgv_closed"
 name                   = "Ignition - Primary - AVCS Disabled - TGV Closed"
-category               = "ignition timing"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00030162
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "deg_x_0_5_16_0"
+axis_x                 = "calculated_load"
+axis_y                 = "boost_control_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -282,11 +1625,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_primary_avcs_enabled_tgv_open"
 name                   = "Ignition - Primary - AVCS Enabled - TGV Open"
-category               = "ignition timing"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000302C2
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "deg_x_0_5_16_0"
+axis_x                 = "calculated_load"
+axis_y                 = "boost_control_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -294,11 +1639,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_primary_avcs_disabled_tgv_open"
 name                   = "Ignition - Primary - AVCS Disabled - TGV Open"
-category               = "ignition timing"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00030422
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "deg_x_0_5_16_0"
+axis_x                 = "calculated_load"
+axis_y                 = "boost_control_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -306,11 +1653,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_coolant_tgv_open"
 name                   = "Ignition - Compensation - Coolant - TGV Open"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00032D2E
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "deg_x_10_0"
+axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -318,11 +1666,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_coolant_tgv_open_activation"
 name                   = "Ignition - Compensation - Coolant - TGV Open Activation"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003276E
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_100_0"
+axis_x                 = "timing_compensation_calculated_load"
+axis_y                 = "timing_compensation_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -330,11 +1680,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_coolant_tgv_closed"
 name                   = "Ignition - Compensation - Coolant - TGV Closed"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00032D0E
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "deg_x_10_0"
+axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -342,11 +1693,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_coolant_tgv_closed_activation"
 name                   = "Ignition - Compensation - Coolant - TGV Closed Activation"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000324AE
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_100_0"
+axis_x                 = "timing_compensation_calculated_load"
+axis_y                 = "timing_compensation_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -354,11 +1707,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_iat_iat_compensation_a"
 name                   = "Ignition - Compensation - IAT - IAT Compensation A"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00030F2C
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int8"
+scaling                = "deg_x_0_5"
+axis_x                 = "iat"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -366,11 +1720,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_iat_iat_compensation_a_activation"
 name                   = "Ignition - Compensation - IAT - IAT Compensation A Activation"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00037F9F
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0"
+axis_x                 = "calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -378,11 +1734,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_iat_iat_compensation_b_activation"
 name                   = "Ignition - Compensation - IAT - IAT Compensation B Activation"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00033666
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0"
+axis_x                 = "calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -390,11 +1748,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_idle_speed_idle_speed_target_a"
 name                   = "Engine - Idle Speed - Idle Speed Target A"
-category               = "idle"
+category               = ""
 dimensions             = 0
 address                = 0x00024AB0
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rpm_x_5_12"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -402,11 +1760,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_idle_speed_idle_speed_target_b"
 name                   = "Engine - Idle Speed - Idle Speed Target B"
-category               = "idle"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00024B50
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rpm_x_5_12"
+axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -414,11 +1773,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_idle_speed_idle_speed_target_c"
 name                   = "Engine - Idle Speed - Idle Speed Target C"
-category               = "idle"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00024B70
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rpm_x_5_12"
+axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -426,11 +1786,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_idle_speed_idle_speed_target_d"
 name                   = "Engine - Idle Speed - Idle Speed Target D"
-category               = "idle"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00026D92
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rpm_x_5_12"
+axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -438,11 +1799,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_idle_speed_idle_speed_target_e"
 name                   = "Engine - Idle Speed - Idle Speed Target E"
-category               = "idle"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00026DB2
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rpm_x_5_12"
+axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -450,11 +1812,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_idle_speed_idle_speed_target_f"
 name                   = "Engine - Idle Speed - Idle Speed Target F"
-category               = "idle"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00026DD2
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rpm_x_5_12"
+axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -462,11 +1825,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_idle_speed_idle_speed_target_g"
 name                   = "Engine - Idle Speed - Idle Speed Target G"
-category               = "idle"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00024AD0
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rpm_x_5_12"
+axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -474,11 +1838,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_idle_speed_idle_speed_target_h"
 name                   = "Engine - Idle Speed - Idle Speed Target H"
-category               = "idle"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00024AF0
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rpm_x_5_12"
+axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -486,11 +1851,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_injectors_start_of_injection_cranking"
 name                   = "Fuel - Injectors - Start of Injection - Cranking"
-category               = "fueling - injectors"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00011DBC
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "deg_x_1260_0_1_0"
+axis_x                 = "coolant_temperature"
+axis_y                 = "fueling_injectors_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -498,11 +1865,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_closed_loop_base_offset"
 name                   = "Fuel - Closed Loop - Base Offset"
-category               = "fueling - closed loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002DBC0
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "afr_x_256_0_0_5"
+axis_x                 = "fueling_closed_loop_rpm_fuel"
+axis_y                 = "fueling_closed_loop_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -510,11 +1879,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_closed_loop_lean_limit_adder_main_lean_limit_adder_tgv_closed"
 name                   = "Fuel Closed Loop Lean Limit Adder Main Lean Limit Adder Tgv Closed"
-category               = "fueling - closed loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002E626
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "lambda_x_32768_0_0_00034"
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -522,11 +1893,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_closed_loop_lean_limit_adder_main_lean_limit_adder_tgv_open"
 name                   = "Fuel Closed Loop Lean Limit Adder Main Lean Limit Adder Tgv Open"
-category               = "fueling - closed loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002E526
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "lambda_x_32768_0_0_00034"
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -534,11 +1907,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_closed_loop_lean_limit_adder_alternate_maybe_high_load_lean_limit_adder_tgv_closed"
 name                   = "Fuel Closed Loop Lean Limit Adder Alternate Maybe High Load Lean Limit Adder Tgv Closed"
-category               = "fueling - closed loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002F1CA
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "lambda_x_32768_0_0_00034"
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -546,11 +1921,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_closed_loop_lean_limit_adder_alternate_maybe_high_load_lean_limit_adder_tgv_open"
 name                   = "Fuel Closed Loop Lean Limit Adder Alternate Maybe High Load Lean Limit Adder Tgv Open"
-category               = "fueling - closed loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002F0CA
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "lambda_x_32768_0_0_00034"
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -558,11 +1935,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_closed_loop_target_low_egr_target_base_tgv_open"
 name                   = "Fuel - Closed Loop - Target - Low EGR - Target Base (TGV Open)"
-category               = "fueling - closed loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002E2FE
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "lambda_x_43194_0"
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "fueling_closed_loop_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -570,11 +1949,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_closed_loop_target_high_egr_target_base_tgv_open"
 name                   = "Fuel - Closed Loop - Target - High EGR - Target Base (TGV Open)"
-category               = "fueling - closed loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002E0FE
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "lambda_x_43194_0"
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "fueling_closed_loop_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -582,11 +1963,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_closed_loop_target_low_egr_target_base_tgv_closed"
 name                   = "Fuel - Closed Loop - Target - Low EGR - Target Base (TGV Closed)"
-category               = "fueling - closed loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002DE6E
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "lambda_x_43194_0"
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "fueling_closed_loop_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -594,11 +1977,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_closed_loop_target_high_egr_target_base_tgv_closed"
 name                   = "Fuel Closed Loop Target High Egr Target Base Tgv Closed"
-category               = "fueling - closed loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0004B42C
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "lambda_x_43194_0"
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "fueling_closed_loop_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -606,11 +1991,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_pressure_fuel_pressure_target_main"
 name                   = "Fuel - Pressure - Fuel Pressure Target Main"
-category               = "fueling"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003F168
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "pascal_x_91520_0"
+axis_x                 = "fueling_closed_loop_rpm"
+axis_y                 = "fueling_closed_loop_calculated_load"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -618,11 +2005,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_pressure_fuel_pressure_target_cranking"
 name                   = "Fuel - Pressure - Fuel Pressure Target Cranking"
-category               = "fueling"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003F2A2
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "pascal_x_91520_0"
+axis_x                 = "fueling_closed_loop_rpm"
+axis_y                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -630,11 +2019,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_pressure_fuel_pressure_target_idle"
 name                   = "Fuel - Pressure - Fuel Pressure Target Idle"
-category               = "fueling"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0003F2F2
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "pascal_x_91520_0"
+axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -642,11 +2032,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "sensors_oil_temperature_sensor_scale"
 name                   = "Sensors - Oil Temperature - Sensor Scale"
-category               = "sensors - temperature"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00056F82
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "c_rshift_16_0_x_205_0_40_0"
+axis_x                 = "developer_sensors_voltage"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -654,11 +2045,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_injectors_start_of_injection_homogeneous"
 name                   = "Fuel - Injectors - Start of Injection - Homogeneous"
-category               = "fueling - injectors"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00011EE6
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "deg_x_0_5_720_0"
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -666,11 +2059,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_injectors_start_of_injection_homogeneous_aggressive"
 name                   = "Fuel - Injectors - Start of Injection - Homogeneous (Aggressive)"
-category               = "fueling - injectors"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00014E5A
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "deg_x_0_5_720_0"
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -678,11 +2073,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_injectors_start_of_injection_compensation_compensation_homogeneous"
 name                   = "Fuel Injectors Start Of Injection Compensation Compensation Homogeneous"
-category               = "fueling - injectors"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00014998
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "deg_x_1_0"
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -690,11 +2087,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_injectors_start_of_injection_compensation_compensation_activation_homogeneous"
 name                   = "Fuel Injectors Start Of Injection Compensation Compensation Activation Homogeneous"
-category               = "fueling - injectors"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00014A98
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_255_0"
+axis_x                 = "fueling_injectors_intake_air_temperature"
+axis_y                 = "fueling_injectors_oil_temp"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -702,11 +2101,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_egr_tgv_closed_ignition_timing_egr_adder_a"
 name                   = "Ignition Compensation Egr Tgv Closed Ignition Timing Egr Adder A"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003095C
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "deg_x_128_0_0_5"
+axis_x                 = "calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -714,11 +2115,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_egr_tgv_open_ignition_timing_egr_adder_b"
 name                   = "Ignition Compensation Egr Tgv Open Ignition Timing Egr Adder B"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000239D2
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "deg_x_128_0_0_5"
+axis_x                 = "calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -726,11 +2129,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_egr_tgv_closed_ignition_timing_egr_adder_c"
 name                   = "Ignition Compensation Egr Tgv Closed Ignition Timing Egr Adder C"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00030ABC
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "deg_x_128_0_0_5"
+axis_x                 = "calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -738,11 +2143,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_egr_tgv_open_ignition_timing_egr_adder_d"
 name                   = "Ignition Compensation Egr Tgv Open Ignition Timing Egr Adder D"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00023B32
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "deg_x_128_0_0_5"
+axis_x                 = "calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -750,11 +2157,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_exhaust_exhaust_cam_retard_target_adder_activation"
 name                   = "AVCS - Exhaust - Exhaust Cam Retard Target Adder Activation"
-category               = "avcs - exhaust"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0003C754
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0"
+axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -762,11 +2170,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_exhaust_barometric_multiplier_low_exhaust_cam_retard_compensation_tgv_open"
 name                   = "Avcs Exhaust Barometric Multiplier Low Exhaust Cam Retard Compensation Tgv Open"
-category               = "avcs - exhaust"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003C4D4
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -774,11 +2184,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_exhaust_barometric_multiplier_high_exhaust_cam_retard_compensation_tgv_closed"
 name                   = "Avcs Exhaust Barometric Multiplier High Exhaust Cam Retard Compensation Tgv Closed"
-category               = "avcs - exhaust"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003E758
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -786,11 +2198,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_exhaust_barometric_multiplier_high_exhaust_cam_retard_compensation_tgv_open"
 name                   = "Avcs Exhaust Barometric Multiplier High Exhaust Cam Retard Compensation Tgv Open"
-category               = "avcs - exhaust"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003E1F8
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -798,11 +2212,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_exhaust_barometric_multiplier_low_exhaust_cam_target_tgv_open"
 name                   = "Avcs Exhaust Barometric Multiplier Low Exhaust Cam Target Tgv Open"
-category               = "avcs - exhaust"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003C054
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -810,11 +2226,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_exhaust_barometric_multiplier_low_exhaust_cam_target_tgv_closed"
 name                   = "Avcs Exhaust Barometric Multiplier Low Exhaust Cam Target Tgv Closed"
-category               = "avcs - exhaust"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003BE14
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -822,11 +2240,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_exhaust_barometric_multiplier_high_exhaust_cam_target_tgv_closed"
 name                   = "Avcs Exhaust Barometric Multiplier High Exhaust Cam Target Tgv Closed"
-category               = "avcs - exhaust"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003DB38
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -834,11 +2254,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_exhaust_barometric_multiplier_high_exhaust_cam_target_tgv_open"
 name                   = "Avcs Exhaust Barometric Multiplier High Exhaust Cam Target Tgv Open"
-category               = "avcs - exhaust"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003DD78
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -846,11 +2268,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_exhaust_barometric_multiplier_low_exhaust_cam_target_aggressive_tgv_open"
 name                   = "Avcs Exhaust Barometric Multiplier Low Exhaust Cam Target Aggressive Tgv Open"
-category               = "avcs - exhaust"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003C294
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -858,11 +2282,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_exhaust_barometric_multiplier_high_exhaust_cam_target_aggressive_tgv_open"
 name                   = "Avcs Exhaust Barometric Multiplier High Exhaust Cam Target Aggressive Tgv Open"
-category               = "avcs - exhaust"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003DFB8
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -870,11 +2296,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed"
 name                   = "Avcs Intake Barometric Multiplier Low Intake Cam Target Tgv Closed"
-category               = "avcs - intake"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003AE20
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -882,11 +2310,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed"
 name                   = "Avcs Intake Barometric Multiplier High Intake Cam Target Tgv Closed"
-category               = "avcs - intake"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003D138
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -894,11 +2324,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_open"
 name                   = "Avcs Intake Barometric Multiplier Low Intake Cam Target Tgv Open"
-category               = "avcs - intake"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003B0A0
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -906,11 +2338,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_open"
 name                   = "Avcs Intake Barometric Multiplier High Intake Cam Target Tgv Open"
-category               = "avcs - intake"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003D3B8
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -918,11 +2352,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_intake_barometric_multiplier_low_intake_cam_target_aggressive_tgv_open"
 name                   = "Avcs Intake Barometric Multiplier Low Intake Cam Target Aggressive Tgv Open"
-category               = "avcs - intake"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003B320
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -930,11 +2366,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_intake_barometric_multiplier_high_intake_cam_target_aggressive_tgv_open"
 name                   = "Avcs Intake Barometric Multiplier High Intake Cam Target Aggressive Tgv Open"
-category               = "avcs - intake"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003D638
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "deg_x_728_1_0_5"
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -942,11 +2380,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_intake_intake_cam_advance_target_adder_activation"
 name                   = "AVCS - Intake - Intake Cam Advance Target Adder Activation"
-category               = "avcs - intake"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0003B820
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0"
+axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -954,11 +2393,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_intake_barometric_multiplier_high_intake_cam_advance_compensation_tgv_closed"
 name                   = "Avcs Intake Barometric Multiplier High Intake Cam Advance Compensation Tgv Closed"
-category               = "avcs - intake"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003E4D8
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -966,11 +2407,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_intake_barometric_multiplier_low_intake_cam_advance_compensation_tgv_open"
 name                   = "Avcs Intake Barometric Multiplier Low Intake Cam Advance Compensation Tgv Open"
-category               = "avcs - intake"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003E4D8
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -978,11 +2421,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_intake_barometric_multiplier_high_intake_cam_advance_compensation_tgv_open"
 name                   = "Avcs Intake Barometric Multiplier High Intake Cam Advance Compensation Tgv Open"
-category               = "avcs - intake"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003D8B8
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "avcs_intake_target_calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -990,11 +2435,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_cl_limits_switch_to_open_loop_fuel_target_rich_limit_2"
 name                   = "Fuel Cl Ol Transition Cl Limits Switch To Open Loop Fuel Target Rich Limit 2"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x0002E726
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "lambda_x_43194_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1002,7 +2447,7 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_delay_closed_loop_delay_increment_1"
 name                   = "Fuel - CL/OL Transition - Delay - Closed Loop Delay Increment 1"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138AE
 data_type              = "uint16_be"
@@ -1014,11 +2459,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_cl_limits_switch_to_open_loop_coolant_temperature_coolant_temperature_threshold"
 name                   = "Fuel Cl Ol Transition Cl Limits Switch To Open Loop Coolant Temperature Coolant Temperature Threshold"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138E2
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "c_x_50_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1026,11 +2471,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_cl_limits_switch_to_open_loop_coolant_temperature_coolant_temperature_offset_negative"
 name                   = "Fuel Cl Ol Transition Cl Limits Switch To Open Loop Coolant Temperature Coolant Temperature Offset Negative"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138E3
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "c_x_50_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1038,11 +2483,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_cl_limits_switch_to_open_loop_vehicle_speed_vehicle_speed_maximum"
 name                   = "Fuel Cl Ol Transition Cl Limits Switch To Open Loop Vehicle Speed Vehicle Speed Maximum"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138E4
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "kmh_x"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1050,11 +2495,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_cl_limits_switch_to_open_loop_per_gear_maximum_rpm_per_gear"
 name                   = "Fuel Cl Ol Transition Cl Limits Switch To Open Loop Per Gear Maximum Rpm Per Gear"
-category               = "fueling - closed loop"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00013910
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_5_1199217"
+axis_x                 = "none"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1062,11 +2508,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_cl_limits_switch_to_open_loop_calculated_load_calculated_load_maximum_a"
 name                   = "Fuel Cl Ol Transition Cl Limits Switch To Open Loop Calculated Load Calculated Load Maximum A"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000CAC16
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1074,11 +2520,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_cl_limits_switch_to_open_loop_calculated_load_calculated_load_maximum_b"
 name                   = "Fuel Cl Ol Transition Cl Limits Switch To Open Loop Calculated Load Calculated Load Maximum B"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138DB
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1086,11 +2532,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_cl_limits_switch_to_open_loop_calculated_load_calculated_load_offset_a_negative"
 name                   = "Fuel Cl Ol Transition Cl Limits Switch To Open Loop Calculated Load Calculated Load Offset A Negative"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138DD
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1098,11 +2544,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_cl_limits_switch_to_open_loop_calculated_load_calculated_load_offset_b_negative"
 name                   = "Fuel Cl Ol Transition Cl Limits Switch To Open Loop Calculated Load Calculated Load Offset B Negative"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138DC
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1110,11 +2556,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_cl_limits_switch_to_open_loop_intake_temperature_intake_temperature_maximum"
 name                   = "Fuel Cl Ol Transition Cl Limits Switch To Open Loop Intake Temperature Intake Temperature Maximum"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138DE
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "c_x_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1122,11 +2568,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_cl_limits_switch_to_open_loop_intake_temperature_intake_temperature_offset_negative"
 name                   = "Fuel Cl Ol Transition Cl Limits Switch To Open Loop Intake Temperature Intake Temperature Offset Negative"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138DF
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "c_x_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1134,11 +2580,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_group_2_redundancy_requested_torque_alternate_b"
 name                   = "Throttle Requested Torque Group 2 Redundancy Requested Torque Alternate B"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001E6FC
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1146,11 +2594,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_requested_torque_b"
 name                   = "Throttle - Requested Torque  - Requested Torque B"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001F0D4
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1158,11 +2608,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_requested_torque_a"
 name                   = "Throttle - Requested Torque  - Requested Torque A"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001E3B4
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1170,11 +2622,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_requested_torque_c"
 name                   = "Throttle - Requested Torque  - Requested Torque C"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001E06C
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1182,11 +2636,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_requested_torque_d"
 name                   = "Throttle - Requested Torque  - Requested Torque D"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001F7B6
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1194,11 +2650,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_group_2_redundancy_requested_torque_alternate_a"
 name                   = "Throttle Requested Torque Group 2 Redundancy Requested Torque Alternate A"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001ED8C
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1206,11 +2664,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_group_2_redundancy_requested_torque_alternate_c"
 name                   = "Throttle Requested Torque Group 2 Redundancy Requested Torque Alternate C"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001EA44
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1218,11 +2678,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_group_2_redundancy_requested_torque_alternate_d"
 name                   = "Throttle Requested Torque Group 2 Redundancy Requested Torque Alternate D"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001F46E
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1230,11 +2692,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_requested_torque_divider"
 name                   = "Throttle - Requested Torque - Requested Torque Divider"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0001DAC6
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1242,11 +2705,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_main_a_tgv_closed"
 name                   = "Throttle - Target Throttle - Main - A (TGV Closed)"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001D67C
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1254,11 +2719,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_alternate_a_tgv_closed"
 name                   = "Throttle - Target Throttle - Alternate - A (TGV Closed)"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00020F94
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1266,11 +2733,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_alternate_b_tgv_closed"
 name                   = "Throttle - Target Throttle - Alternate - B (TGV Closed)"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002209E
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1278,11 +2747,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_main_b_tgv_closed"
 name                   = "Throttle - Target Throttle - Main - B (TGV Closed)"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000213B4
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1290,11 +2761,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_alternate_a_tgv_open"
 name                   = "Throttle - Target Throttle - Alternate - A (TGV Open)"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000217D4
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1302,11 +2775,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_alternate_b_tgv_open"
 name                   = "Throttle - Target Throttle - Alternate - B (TGV Open)"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00021BF4
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1314,11 +2789,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_main_a_tgv_open"
 name                   = "Throttle - Target Throttle - Main - A (TGV Open)"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001D218
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1326,11 +2803,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_main_b_tgv_open"
 name                   = "Throttle - Target Throttle - Main - B (TGV Open)"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000224BE
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1338,11 +2817,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_limits_maximums_maximum_a"
 name                   = "Throttle - Requested Torque - Limits - Maximums - Maximum A"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0001DE44
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1350,11 +2830,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_limits_maximums_maximum_b"
 name                   = "Throttle - Requested Torque - Limits - Maximums - Maximum B"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0001DE5A
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1362,11 +2843,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_limits_maximums_maximum_c"
 name                   = "Throttle - Requested Torque - Limits - Maximums - Maximum C"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0001DE70
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1374,11 +2856,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_dynamic_advance_base_tgv_open"
 name                   = "Ignition - Dynamic Advance - Base (TGV Open)"
-category               = "ignition timing"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001C450
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "deg_x_0_3515"
+axis_x                 = "calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1386,11 +2870,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_dynamic_advance_base_tgv_closed"
 name                   = "Ignition - Dynamic Advance - Base (TGV Closed)"
-category               = "ignition timing"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001C300
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "deg_x_0_3515"
+axis_x                 = "calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1398,11 +2884,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_dynamic_advance_adder_adder_tgv_open"
 name                   = "Ignition - Dynamic Advance - Adder - Adder (TGV Open)"
-category               = "ignition timing"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000279FA
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "deg_x_0_3515"
+axis_x                 = "calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1410,11 +2898,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_dynamic_advance_adder_adder_tgv_closed"
 name                   = "Ignition - Dynamic Advance - Adder - Adder (TGV Closed)"
-category               = "ignition timing"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000278AA
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "deg_x_0_3515"
+axis_x                 = "calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1422,11 +2912,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_dynamic_advance_adder_adder_multiplier"
 name                   = "Ignition - Dynamic Advance - Adder - Adder Multiplier"
-category               = "ignition timing"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00027B7D
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0"
+axis_x                 = "timing_dynamic_advance_dam"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1434,11 +2925,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_dynamic_advance_base_multiplier"
 name                   = "Ignition - Dynamic Advance - Base Multiplier"
-category               = "ignition timing"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00027B6C
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0"
+axis_x                 = "timing_dynamic_advance_dam"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1446,11 +2938,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_dynamic_advance_dam_initial_value"
 name                   = "Ignition - Dynamic Advance - DAM Initial Value"
-category               = "ignition timing"
+category               = ""
 dimensions             = 0
 address                = 0x0001C28A
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_16_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1458,11 +2950,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_tip_in_6th_gear"
 name                   = "Ignition - Compensation - Tip-In - 6th Gear"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00030815
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int8"
+scaling                = "deg_x_0_5"
+axis_x                 = "timing_compensation_tip_in_tps_delta_raw"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1470,11 +2963,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_tip_in_5th_gear"
 name                   = "Ignition - Compensation - Tip-In - 5th Gear"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00030805
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int8"
+scaling                = "deg_x_0_5"
+axis_x                 = "timing_compensation_tip_in_tps_delta_raw"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1482,11 +2976,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_tip_in_4th_gear"
 name                   = "Ignition - Compensation - Tip-In - 4th Gear"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x000307F5
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int8"
+scaling                = "deg_x_0_5"
+axis_x                 = "timing_compensation_tip_in_tps_delta_raw"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1494,11 +2989,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_tip_in_3rd_gear"
 name                   = "Ignition - Compensation - Tip-In - 3rd Gear"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x000307E5
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int8"
+scaling                = "deg_x_0_5"
+axis_x                 = "timing_compensation_tip_in_tps_delta_raw"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1506,11 +3002,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_tip_in_2nd_gear"
 name                   = "Ignition - Compensation - Tip-In - 2nd Gear"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x000307D5
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int8"
+scaling                = "deg_x_0_5"
+axis_x                 = "timing_compensation_tip_in_tps_delta_raw"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1518,11 +3015,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_compensation_tip_in_1st_gear"
 name                   = "Ignition - Compensation - Tip-In - 1st Gear"
-category               = "ignition timing - compensation"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x000307C5
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int8"
+scaling                = "deg_x_0_5"
+axis_x                 = "timing_compensation_tip_in_tps_delta_raw"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1530,11 +3028,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_idle_mass_airflow_minimum"
 name                   = "Airflow - Idle - Mass Airflow Minimum"
-category               = "airflow"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000250D8
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "g_per_sec_x_8_0"
+axis_x                 = "idle_control_coolant_temperature"
+axis_y                 = "idle_control_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1542,11 +3042,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_injectors_pulse_injector_offset_table"
 name                   = "Fuel - Injectors - Pulse - Injector Offset Table"
-category               = "fueling - injectors"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x000384D8
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "fuel_fuel_pressure"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1554,11 +3055,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_injectors_pulse_injector_offset_table_alt"
 name                   = "Fuel - Injectors - Pulse - Injector Offset Table Alt"
-category               = "fueling - injectors"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00014DBA
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "fuel_fuel_pressure"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1566,11 +3068,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_injectors_pulse_injector_mult_table"
 name                   = "Fuel - Injectors - Pulse - Injector Mult Table"
-category               = "fueling - injectors"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00038482
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_256_0_100_0"
+axis_x                 = "fuel_pressure_fuel_pressure_obd"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1578,11 +3081,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_injectors_pulse_injector_mult_table_alt"
 name                   = "Fuel - Injectors - Pulse - Injector Mult Table Alt"
-category               = "fueling - injectors"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00016390
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_256_0_100_0"
+axis_x                 = "fuel_pressure_fuel_pressure_obd"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1590,11 +3094,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_requested_torque_divider_group_2"
 name                   = "Throttle - Requested Torque - Requested Torque Divider Group 2"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00045336
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1602,11 +3107,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_alternate_group_2_b_tgv_closed"
 name                   = "Throttle Target Throttle Alternate Group 2 B Tgv Closed"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000484FE
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1614,11 +3121,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_main_group_2_a_tgv_closed"
 name                   = "Throttle - Target Throttle - Main - Group 2 - A (TGV Closed)"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00044EEC
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1626,11 +3135,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_alternate_group_2_a_tgv_closed"
 name                   = "Throttle Target Throttle Alternate Group 2 A Tgv Closed"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000473F4
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1638,11 +3149,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_main_group_2_b_tgv_closed"
 name                   = "Throttle - Target Throttle - Main - Group 2 - B (TGV Closed)"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00047814
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1650,11 +3163,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_alternate_group_2_a_tgv_open"
 name                   = "Throttle - Target Throttle - Alternate - Group 2 - A (TGV Open)"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00047C34
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1662,11 +3177,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_alternate_group_2_b_tgv_open"
 name                   = "Throttle - Target Throttle - Alternate - Group 2 - B (TGV Open)"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00048054
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1674,11 +3191,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_main_group_2_b_tgv_open"
 name                   = "Throttle - Target Throttle - Main - Group 2 - B (TGV Open)"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0004891E
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1686,11 +3205,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_target_throttle_main_group_2_a_tgv_open"
 name                   = "Throttle - Target Throttle - Main - Group 2 - A (TGV Open)"
-category               = "drive-by-wire throttle - target"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00044A88
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_ratio"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1698,11 +3219,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_rev_limit_fuel_cut_rev_limit_a"
 name                   = "Engine - Rev Limit (Fuel Cut) - Rev Limit A"
-category               = "engine systems"
+category               = ""
 dimensions             = 0
 address                = 0x0001DE26
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_5_12"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1710,11 +3231,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_rev_limit_fuel_cut_rev_limit_b"
 name                   = "Engine - Rev Limit (Fuel Cut) - Rev Limit B"
-category               = "engine systems"
+category               = ""
 dimensions             = 0
 address                = 0x0001DE28
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_5_12"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1722,11 +3243,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_rev_limit_fuel_cut_rev_limit_c"
 name                   = "Engine - Rev Limit (Fuel Cut) - Rev Limit C"
-category               = "engine systems"
+category               = ""
 dimensions             = 0
 address                = 0x0001DE2A
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_5_12"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1734,11 +3255,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_rev_limit_fuel_cut_rev_limit_d"
 name                   = "Engine - Rev Limit (Fuel Cut) - Rev Limit D"
-category               = "engine systems"
+category               = ""
 dimensions             = 0
 address                = 0x0001DE2C
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_5_12"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1746,11 +3267,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_closed_loop_target_aggressive_start_fuel_target"
 name                   = "Fuel - Closed Loop - Target - Aggressive Start - Fuel Target"
-category               = "fueling - closed loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002E748
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "lambda_inverse_divide_32768_0_x"
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "fueling_closed_loop_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1758,11 +3281,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_closed_loop_target_aggressive_start_fuel_target_adder"
 name                   = "Fuel Closed Loop Target Aggressive Start Fuel Target Adder"
-category               = "fueling - closed loop"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00017A3E
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "engine_calculated_load_rescaled"
+axis_y                 = "fueling_closed_loop_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1770,11 +3295,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_closed_loop_target_aggressive_start_fuel_target_adder_activation"
 name                   = "Fuel Closed Loop Target Aggressive Start Fuel Target Adder Activation"
-category               = "fueling - closed loop"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00017C7E
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0_100_0"
+axis_x                 = "ignition_dynamic_advance_dam"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1782,11 +3308,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_closed_loop_target_aggressive_start_coolant_min_activation"
 name                   = "Fuel Closed Loop Target Aggressive Start Coolant Min Activation"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x00036502
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1794,11 +3320,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_closed_loop_target_aggressive_start_coolant_max_activation"
 name                   = "Fuel Closed Loop Target Aggressive Start Coolant Max Activation"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x00036500
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1806,11 +3332,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_knock_thresholds_low_timing_cylinder_1"
 name                   = "Ignition - Knock Thresholds - Low Timing - Cylinder 1"
-category               = "ignition timing - knock control"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00027416
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "timing_knock_thresholds_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1818,11 +3346,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_knock_thresholds_high_timing_cylinder_1"
 name                   = "Ignition - Knock Thresholds - High Timing - Cylinder 1"
-category               = "ignition timing - knock control"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001B992
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "timing_knock_thresholds_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1830,7 +3360,7 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_delay_closed_loop_delay_increment_2"
 name                   = "Fuel - CL/OL Transition - Delay - Closed Loop Delay Increment 2"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138B0
 data_type              = "uint16_be"
@@ -1842,7 +3372,7 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_delay_closed_loop_delay_increment_3"
 name                   = "Fuel - CL/OL Transition - Delay - Closed Loop Delay Increment 3"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138B2
 data_type              = "uint16_be"
@@ -1854,11 +3384,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_knock_thresholds_high_timing_cylinder_2"
 name                   = "Ignition - Knock Thresholds - High Timing - Cylinder 2"
-category               = "ignition timing - knock control"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001BA92
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "timing_knock_thresholds_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1866,11 +3398,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_knock_thresholds_high_timing_cylinder_3"
 name                   = "Ignition - Knock Thresholds - High Timing - Cylinder 3"
-category               = "ignition timing - knock control"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001BB92
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "timing_knock_thresholds_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1878,11 +3412,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_knock_thresholds_high_timing_cylinder_4"
 name                   = "Ignition - Knock Thresholds - High Timing - Cylinder 4"
-category               = "ignition timing - knock control"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001BC92
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "timing_knock_thresholds_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1890,11 +3426,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_knock_thresholds_low_timing_cylinder_2"
 name                   = "Ignition - Knock Thresholds - Low Timing - Cylinder 2"
-category               = "ignition timing - knock control"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00027516
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "timing_knock_thresholds_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1902,11 +3440,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_knock_thresholds_low_timing_cylinder_3"
 name                   = "Ignition - Knock Thresholds - Low Timing - Cylinder 3"
-category               = "ignition timing - knock control"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00027616
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "timing_knock_thresholds_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1914,11 +3454,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_knock_thresholds_low_timing_cylinder_4"
 name                   = "Ignition - Knock Thresholds - Low Timing - Cylinder 4"
-category               = "ignition timing - knock control"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00027716
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "fueling_closed_loop_calculated_load"
+axis_y                 = "timing_knock_thresholds_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1926,11 +3468,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_group_2_requested_torque_a"
 name                   = "Throttle - Requested Torque  - Group 2 - Requested Torque A"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0004573A
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1938,11 +3482,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_group_2_redundancy_group_2_requested_torque_alternate_a"
 name                   = "Throttle Requested Torque Group 2 Redundancy Group 2 Requested Torque Alternate A"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00046112
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1950,11 +3496,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_group_2_requested_torque_b"
 name                   = "Throttle - Requested Torque  - Group 2 - Requested Torque B"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00045A82
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1962,11 +3510,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_group_2_requested_torque_c"
 name                   = "Throttle - Requested Torque  - Group 2 - Requested Torque C"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000453F2
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1974,11 +3524,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_group_2_redundancy_group_2_requested_torque_alternate_b"
 name                   = "Throttle Requested Torque Group 2 Redundancy Group 2 Requested Torque Alternate B"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0004645A
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1986,11 +3538,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_group_2_redundancy_group_2_requested_torque_alternate_c"
 name                   = "Throttle Requested Torque Group 2 Redundancy Group 2 Requested Torque Alternate C"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00045DCA
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1998,11 +3552,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_group_2_requested_torque_d"
 name                   = "Throttle - Requested Torque  - Group 2 - Requested Torque D"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00046B3C
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2010,11 +3566,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_group_2_redundancy_group_2_requested_torque_alternate_d"
 name                   = "Throttle Requested Torque Group 2 Redundancy Group 2 Requested Torque Alternate D"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000467F4
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2022,11 +3580,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_idle_speed_idle_speed_target_i"
 name                   = "Engine - Idle Speed - Idle Speed Target I"
-category               = "idle"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00024B10
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rpm_x_5_12"
+axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2034,11 +3593,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_idle_speed_idle_speed_target_j"
 name                   = "Engine - Idle Speed - Idle Speed Target J"
-category               = "idle"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00024B30
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rpm_x_5_12"
+axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2046,11 +3606,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_open_loop_avcs_enabled_low_dam_threshold"
 name                   = "Fuel - Open Loop - AVCS Enabled - Low DAM Threshold"
-category               = "fueling - open loop"
+category               = ""
 dimensions             = 0
 address                = 0x0001391C
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_16_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2058,11 +3618,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_primary_idle_decel_ignition_timing_a"
 name                   = "Ignition - Primary - Idle/Decel - Ignition Timing A"
-category               = "ignition timing"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x000237F4
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "deg_x_0_5_16_0"
+axis_x                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2070,11 +3631,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "ignition_primary_idle_decel_ignition_timing_b"
 name                   = "Ignition - Primary - Idle/Decel - Ignition Timing B"
-category               = "ignition timing"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00023804
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "deg_x_0_5_16_0"
+axis_x                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2082,11 +3644,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_power_enrichment_hysteresis_leaning"
 name                   = "Fuel - Power Enrichment - Hysteresis (Leaning)"
-category               = "fueling"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0001A8A0
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2094,11 +3657,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_power_enrichment_hysteresis_enriching"
 name                   = "Fuel - Power Enrichment - Hysteresis (Enriching)"
-category               = "fueling"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0001A8B0
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2106,11 +3670,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_power_enrichment_target"
 name                   = "Fuel - Power Enrichment - Target"
-category               = "fueling"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00018E28
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "afr_x_256_0_1_0"
+axis_x                 = "fueling_closed_loop_rpm"
+axis_y                 = "fueling_closed_loop_calculated_load"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2118,11 +3684,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_power_enrichment_dam_activation"
 name                   = "Fuel - Power Enrichment - DAM Activation"
-category               = "fueling"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0001A890
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0"
+axis_x                 = "ignition_dynamic_advance_dam"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2130,11 +3697,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_fuel_cut_decel_delay"
 name                   = "Fuel - Fuel Cut - Decel - Delay"
-category               = "fueling"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001DE9C
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "millisecond_x_10_0"
+axis_x                 = "engine_idle_speed_rpm"
+axis_y                 = "engine_idle_speed_coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2142,11 +3711,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "avcs_activation_minimum_vehicle_speed"
 name                   = "AVCS - Activation - Minimum Vehicle Speed"
-category               = "avcs"
+category               = ""
 dimensions             = 0
 address                = 0x0003ADA6
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "kmh_rshift_8_0_x"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2154,11 +3723,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_decay_decay_c"
 name                   = "Throttle - Requested Torque - Follower - Decay - Decay C"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000206F6
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm"
+axis_y                 = "gear_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2166,11 +3737,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_decay_decay_b"
 name                   = "Throttle - Requested Torque - Follower - Decay - Decay B"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002075A
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm"
+axis_y                 = "gear_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2178,11 +3751,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_decay_decay_a"
 name                   = "Throttle - Requested Torque - Follower - Decay - Decay A"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00020B2E
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm"
+axis_y                 = "gear_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2190,11 +3765,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_ascent_accel_pos_a"
 name                   = "Throttle - Requested Torque - Follower - Ascent - Accel Pos A"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00022F46
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2202,11 +3778,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_ascent_accel_pos_d"
 name                   = "Throttle - Requested Torque - Follower - Ascent - Accel Pos D"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00022F2E
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2214,11 +3791,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_ascent_accel_pos_b"
 name                   = "Throttle - Requested Torque - Follower - Ascent - Accel Pos B"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x000206C4
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2226,11 +3804,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_ascent_si_drive_1_a"
 name                   = "Throttle - Requested Torque - Follower - Ascent - SI Drive 1 A"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000205E4
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm"
+axis_y                 = "y_axis"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2238,11 +3818,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_ascent_accel_pos_c"
 name                   = "Throttle - Requested Torque - Follower - Ascent - Accel Pos C"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x000206AC
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_accelerator_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2250,11 +3831,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_limits_requested_torque_dam_limit"
 name                   = "Throttle Requested Torque Limits Requested Torque Dam Limit"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001DF12
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm"
+axis_y                 = "ignition_dynamic_advance_dam"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2262,11 +3845,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_injectors_pulse_cylinder_1_scalar_table"
 name                   = "Fuel - Injectors - Pulse - Cylinder 1 - Scalar Table"
-category               = "fueling - injectors"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00013020
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0_100_0"
+axis_x                 = "fuel_injectors_rpm"
+axis_y                 = "scaled_ipw_command"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2274,11 +3859,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_manifold_flow_model_egr_flow_model_egr_airflow"
 name                   = "Airflow - Manifold Flow Model - EGR Flow Model - EGR Airflow"
-category               = "airflow - manifold (MAF/MAP)"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002C99E
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "g_per_sec_lshift_8_0_x_76800_0_5_0"
+axis_x                 = "egr_steps"
+axis_y                 = "egr_relative_pressure"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2286,11 +3873,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_manifold_flow_model_egr_flow_model_egr_absolute_pressure_barometric_compensation"
 name                   = "Airflow Manifold Flow Model Egr Flow Model Egr Absolute Pressure Barometric Compensation"
-category               = "airflow - manifold (MAF/MAP)"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002D770
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "bar_x_99_0"
+axis_x                 = "calculated_load"
+axis_y                 = "airflow_egr_manifold_flow_model_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2298,11 +3887,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_manifold_flow_model_egr_flow_model_barometric_compensation_activation"
 name                   = "Airflow Manifold Flow Model Egr Flow Model Barometric Compensation Activation"
-category               = "airflow - manifold (MAF/MAP)"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0002D750
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "x_256_0"
+axis_x                 = "sensors_barometric_pressure"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2310,11 +3900,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_manifold_flow_model_maf_volumetric_efficiency_correction_tgv_open_a"
 name                   = "Airflow Manifold Flow Model Maf Volumetric Efficiency Correction Tgv Open A"
-category               = "airflow - manifold (MAF/MAP)"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002B3F8
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_32768_0_100_0"
+axis_x                 = "airflow_turbo_manifold_absolute_pressure"
+axis_y                 = "engine_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2322,11 +3914,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_manifold_flow_model_maf_volumetric_efficiency_correction_tgv_closed_a"
 name                   = "Airflow Manifold Flow Model Maf Volumetric Efficiency Correction Tgv Closed A"
-category               = "airflow - manifold (MAF/MAP)"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002B138
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_32768_0_100_0"
+axis_x                 = "airflow_turbo_manifold_absolute_pressure"
+axis_y                 = "engine_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2334,11 +3928,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_manifold_flow_model_maf_volumetric_efficiency_correction_b"
 name                   = "Airflow Manifold Flow Model Maf Volumetric Efficiency Correction B"
-category               = "airflow - manifold (MAF/MAP)"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002B6B8
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_32768_0_100_0"
+axis_x                 = "airflow_turbo_manifold_absolute_pressure"
+axis_y                 = "engine_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2346,11 +3942,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_timing_hpfp_valve_close_base"
 name                   = "Fuel - Timing - HPFP - Valve Close Base"
-category               = "fueling - injection timing"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003F5A8
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "deg_x_10_0"
+axis_x                 = "fuel_closed_loop_rpm"
+axis_y                 = "fuel_injector_pulse_width"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2358,11 +3956,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_timing_hpfp_valve_close_limit"
 name                   = "Fuel - Timing - HPFP - Valve Close Limit"
-category               = "fueling - injection timing"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003EF48
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "deg_x_10_0"
+axis_x                 = "rpm"
+axis_y                 = "battery_voltage"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2370,11 +3970,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_timing_hpfp_pulse_dwell_time"
 name                   = "Fuel - Timing - HPFP - Pulse Dwell Time"
-category               = "fueling - injection timing"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0003F148
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "deg_x_10_0"
+axis_x                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2382,11 +3983,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_timing_hpfp_proportional_gain"
 name                   = "Fuel - Timing - HPFP - Proportional Gain"
-category               = "fueling - injection timing"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0003F36A
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "kpa_rshift_20_0_x_63963_0_10_0"
+axis_x                 = "fuel_injectors_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2394,11 +3996,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_timing_hpfp_valve_open_base"
 name                   = "Fuel - Timing - HPFP - Valve Open Base"
-category               = "fueling - injection timing"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0003ED18
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "deg_x_10_0"
+axis_x                 = "rpm"
+axis_y                 = "battery_voltage"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2406,11 +4010,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_limits_requested_torque_per_gear_limit"
 name                   = "Throttle Requested Torque Limits Requested Torque Per Gear Limit"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0001DEFA
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "x_axis"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2418,11 +4023,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "sensors_mass_airflow_sensor_scale"
 name                   = "Sensors - Mass Airflow - Sensor Scale"
-category               = "sensors - MAF"
+category               = ""
 dimensions             = 0
 address                = 0x00028BDC
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint32_be"
+scaling                = "g_per_sec_x_76800_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2430,11 +4035,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "sensors_coolant_temperature_sensor_scale"
 name                   = "Sensors - Coolant Temperature - Sensor Scale"
-category               = "sensors - temperature"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00056EF6
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "c_rshift_11_0_x_5_0_40_0"
+axis_x                 = "developer_sensors_voltage"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2442,7 +4048,7 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_injectors_direct_injector_flow"
 name                   = "Fuel - Injectors - Direct Injector Flow"
-category               = "fueling - injectors"
+category               = ""
 dimensions             = 0
 address                = 0x0001C6EE
 data_type              = "uint16_be"
@@ -2454,11 +4060,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_displacement"
 name                   = "Engine - Displacement"
-category               = "engine systems"
+category               = ""
 dimensions             = 0
 address                = 0x0001C6F2
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "l_x_8000_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2466,11 +4072,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "sensors_manifold_absolute_pressure_map_offset"
 name                   = "Sensors - Manifold Absolute Pressure - MAP Offset"
-category               = "sensors - MAP"
+category               = ""
 dimensions             = 0
 address                = 0x00058EA2
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "psi_x_25600_0_14_5038"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2478,11 +4084,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "sensors_manifold_absolute_pressure_map_multiplier"
 name                   = "Sensors - Manifold Absolute Pressure - MAP Multiplier"
-category               = "sensors - MAP"
+category               = ""
 dimensions             = 0
 address                = 0x00058EA0
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "psi_x_256_0_25600_0_14_5038_5_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2490,11 +4096,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_timing_hpfp_valve_close_limit_minimum"
 name                   = "Fuel - Timing - HPFP - Valve Close Limit Minimum"
-category               = "fueling - injection timing"
+category               = ""
 dimensions             = 0
 address                = 0x0003ED10
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "deg_x_10_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2502,11 +4108,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_timing_hpfp_base_offset"
 name                   = "Fuel - Timing - HPFP - Base Offset"
-category               = "fueling - injection timing"
+category               = ""
 dimensions             = 0
 address                = 0x0003F302
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "deg_x_10_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2514,11 +4120,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_limits_requested_torque_iat_limit"
 name                   = "Throttle Requested Torque Limits Requested Torque Iat Limit"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001FB46
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "iat"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2526,11 +4134,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "transmission_gear_ratios_1st_high"
 name                   = "Transmission - Gear Ratios - 1st - High"
-category               = "transmission - gear"
+category               = ""
 dimensions             = 0
 address                = 0x0003429C
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2538,11 +4146,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "transmission_gear_ratios_1st_low"
 name                   = "Transmission - Gear Ratios - 1st - Low"
-category               = "transmission - gear"
+category               = ""
 dimensions             = 0
 address                = 0x0003429E
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2550,11 +4158,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "transmission_gear_ratios_2nd_high"
 name                   = "Transmission - Gear Ratios - 2nd - High"
-category               = "transmission - gear"
+category               = ""
 dimensions             = 0
 address                = 0x000342A0
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2562,11 +4170,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "transmission_gear_ratios_2nd_low"
 name                   = "Transmission - Gear Ratios - 2nd - Low"
-category               = "transmission - gear"
+category               = ""
 dimensions             = 0
 address                = 0x000342A2
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2574,11 +4182,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "transmission_gear_ratios_3rd_high"
 name                   = "Transmission - Gear Ratios - 3rd - High"
-category               = "transmission - gear"
+category               = ""
 dimensions             = 0
 address                = 0x000342A4
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2586,11 +4194,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "transmission_gear_ratios_3rd_low"
 name                   = "Transmission - Gear Ratios - 3rd - Low"
-category               = "transmission - gear"
+category               = ""
 dimensions             = 0
 address                = 0x000342A6
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2598,11 +4206,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "transmission_gear_ratios_4th_high"
 name                   = "Transmission - Gear Ratios - 4th - High"
-category               = "transmission - gear"
+category               = ""
 dimensions             = 0
 address                = 0x000342A8
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2610,11 +4218,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "transmission_gear_ratios_4th_low"
 name                   = "Transmission - Gear Ratios - 4th - Low"
-category               = "transmission - gear"
+category               = ""
 dimensions             = 0
 address                = 0x000342AA
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2622,11 +4230,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "transmission_gear_ratios_5th_high"
 name                   = "Transmission - Gear Ratios - 5th - High"
-category               = "transmission - gear"
+category               = ""
 dimensions             = 0
 address                = 0x000342AC
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2634,11 +4242,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "transmission_gear_ratios_5th_low"
 name                   = "Transmission - Gear Ratios - 5th - Low"
-category               = "transmission - gear"
+category               = ""
 dimensions             = 0
 address                = 0x000342AE
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2646,11 +4254,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "transmission_gear_ratios_6th_high"
 name                   = "Transmission - Gear Ratios - 6th - High"
-category               = "transmission - gear"
+category               = ""
 dimensions             = 0
 address                = 0x000342B0
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2658,11 +4266,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "transmission_gear_ratios_6th_low"
 name                   = "Transmission - Gear Ratios - 6th - Low"
-category               = "transmission - gear"
+category               = ""
 dimensions             = 0
 address                = 0x000342B2
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2670,11 +4278,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_injectors_pulse_cylinder_2_scalar_table"
 name                   = "Fuel - Injectors - Pulse - Cylinder 2 - Scalar Table"
-category               = "fueling - injectors"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000130D4
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0_100_0"
+axis_x                 = "fuel_injectors_rpm"
+axis_y                 = "scaled_ipw_command"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2682,11 +4292,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_injectors_pulse_cylinder_3_scalar_table"
 name                   = "Fuel - Injectors - Pulse - Cylinder 3 - Scalar Table"
-category               = "fueling - injectors"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00013188
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0_100_0"
+axis_x                 = "fuel_injectors_rpm"
+axis_y                 = "scaled_ipw_command"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2694,11 +4306,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_injectors_pulse_cylinder_4_scalar_table"
 name                   = "Fuel - Injectors - Pulse - Cylinder 4 - Scalar Table"
-category               = "fueling - injectors"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0001323C
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_128_0_128_0_100_0_100_0"
+axis_x                 = "fuel_injectors_rpm"
+axis_y                 = "scaled_ipw_command"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2706,11 +4320,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_radiator_fan_speed_target_a"
 name                   = "Engine - Radiator - Fan Speed Target A"
-category               = "cooling - radiator"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00034312
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "sensors_coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2718,11 +4333,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_radiator_fan_speed_target_b"
 name                   = "Engine - Radiator - Fan Speed Target B"
-category               = "cooling - radiator"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x00034300
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "sensors_coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2730,11 +4346,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_radiator_fan_speed_target_c"
 name                   = "Engine - Radiator - Fan Speed Target C"
-category               = "cooling - radiator"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x000342EE
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "x_65535_0_100_0"
+axis_x                 = "sensors_coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2742,11 +4359,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_catalyst_temp_maximum_switch_to_open_loop"
 name                   = "Fuel Cl Ol Transition Catalyst Temp Maximum Switch To Open Loop"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138D6
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "c_x_0_022889"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2754,11 +4371,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_catalyst_temp_hysteresis_switch_to_open_loop"
 name                   = "Fuel Cl Ol Transition Catalyst Temp Hysteresis Switch To Open Loop"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138D8
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "c_x_0_022889"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2766,11 +4383,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_power_enrichment_catalyst_temp_trigger"
 name                   = "Fuel - Power Enrichment - Catalyst Temp Trigger"
-category               = "fueling"
+category               = ""
 dimensions             = 0
 address                = 0x00018DD4
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "c_x_0_022889"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2778,11 +4395,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_power_enrichment_catalyst_temp_hysteresis"
 name                   = "Fuel - Power Enrichment - Catalyst Temp Hysteresis"
-category               = "fueling"
+category               = ""
 dimensions             = 0
 address                = 0x00018DD6
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "c_x_0_022889"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2790,11 +4407,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_wastegate_frequency_wastegate_pwm_cycle_time"
 name                   = "Airflow Turbo Wastegate Frequency Wastegate Pwm Cycle Time"
-category               = "boost control - wastegate"
+category               = ""
 dimensions             = 0
 address                = 0x001D9932
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "hz_inverse_divide_1_0_x_312500_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2802,11 +4419,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_pressure_maximum_pressure_dtc_threshold"
 name                   = "Fuel - Pressure - Maximum Pressure DTC Threshold"
-category               = "fueling"
+category               = ""
 dimensions             = 0
 address                = 0x000574DC
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "kpa_x_61_0_1000_0_10_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2814,11 +4431,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_radiator_fan_2_coolant_threshold_e_main"
 name                   = "Engine - Radiator - Fan 2 - Coolant Threshold E (Main)"
-category               = "cooling - radiator"
+category               = ""
 dimensions             = 0
 address                = 0x000342E8
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2826,11 +4443,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_radiator_fan_1_coolant_threshold_e_main"
 name                   = "Engine - Radiator - Fan 1 - Coolant Threshold E (Main)"
-category               = "cooling - radiator"
+category               = ""
 dimensions             = 0
 address                = 0x000342E0
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2838,11 +4455,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "sensors_manifold_absolute_pressure_maximum_dtc_threshold"
 name                   = "Sensors - Manifold Absolute Pressure - Maximum DTC Threshold"
-category               = "sensors - MAP"
+category               = ""
 dimensions             = 0
 address                = 0x0005670A
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "v_x_65535_0_5_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2850,11 +4467,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_pi_control_pi_activation_target_boost_threshold_abs"
 name                   = "Airflow Turbo Pi Control Pi Activation Target Boost Threshold Abs"
-category               = "boost control - turbo dynamics"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0002982A
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "bar_x_32768_0_24000_0_0_433"
+axis_x                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2862,11 +4480,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_pi_control_integral_negative_limit"
 name                   = "Airflow - Turbo - PI Control - Integral Negative Limit"
-category               = "boost control - turbo dynamics"
+category               = ""
 dimensions             = 0
 address                = 0x00028FD2
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "x_256_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2874,11 +4492,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_pi_control_integral_positive_limit"
 name                   = "Airflow - Turbo - PI Control - Integral Positive Limit"
-category               = "boost control - turbo dynamics"
+category               = ""
 dimensions             = 0
 address                = 0x00028FD4
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "int16_be"
+scaling                = "x_256_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2886,11 +4504,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_wastegate_frequency_wastegate_pwm_duty_time"
 name                   = "Airflow Turbo Wastegate Frequency Wastegate Pwm Duty Time"
-category               = "boost control - wastegate"
+category               = ""
 dimensions             = 0
 address                = 0x001D993A
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "hz_inverse_divide_1_0_x_12500_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2898,11 +4516,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_calculated_load_minimum"
 name                   = "Fuel - CL/OL Transition - Calculated Load Minimum"
-category               = "fueling - closed loop"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x000151DA
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_100_0"
+axis_x                 = "engine_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2910,11 +4529,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "sensors_intake_air_temperature_sensor_scale"
 name                   = "Sensors - Intake Air Temperature - Sensor Scale"
-category               = "sensors - temperature"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x000579BC
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "c_x_50_0"
+axis_x                 = "sensors_manifold_absolute_pressure_voltage_5v"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2922,11 +4542,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "sensors_manifold_air_temperature_sensor_scale"
 name                   = "Sensors - Manifold Air Temperature - Sensor Scale"
-category               = "sensors - temperature"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x000579DC
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "c_x_50_0"
+axis_x                 = "sensors_manifold_absolute_pressure_voltage_5v"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2934,7 +4555,7 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_delay_thresholds_threshold_d"
 name                   = "Fuel - CL/OL Transition - Delay - Thresholds - Threshold D"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138CA
 data_type              = "uint16_be"
@@ -2946,7 +4567,7 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_delay_thresholds_threshold_c"
 name                   = "Fuel - CL/OL Transition - Delay - Thresholds - Threshold C"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138CC
 data_type              = "uint16_be"
@@ -2958,7 +4579,7 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_delay_thresholds_threshold_b"
 name                   = "Fuel - CL/OL Transition - Delay - Thresholds - Threshold B"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138CE
 data_type              = "uint16_be"
@@ -2970,7 +4591,7 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_cl_ol_transition_delay_thresholds_threshold_a"
 name                   = "Fuel - CL/OL Transition - Delay - Thresholds - Threshold A"
-category               = "fueling - closed loop"
+category               = ""
 dimensions             = 0
 address                = 0x000138D0
 data_type              = "uint16_be"
@@ -2982,11 +4603,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_lpfp_duty_high_demand"
 name                   = "Fuel - LPFP - Duty High Demand"
-category               = "fueling"
+category               = ""
 dimensions             = 0
 address                = 0x00038AD6
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rshift_17_0_x_33423_0_51_0_20_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2994,11 +4615,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_lpfp_duty_medium_demand"
 name                   = "Fuel - LPFP - Duty Medium Demand"
-category               = "fueling"
+category               = ""
 dimensions             = 0
 address                = 0x00038AD8
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rshift_17_0_x_33423_0_51_0_20_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3006,11 +4627,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_lpfp_duty_low_demand"
 name                   = "Fuel - LPFP - Duty Low Demand"
-category               = "fueling"
+category               = ""
 dimensions             = 0
 address                = 0x00038ADA
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "rshift_17_0_x_33423_0_51_0_20_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3018,7 +4639,7 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_lpfp_fuel_flow_high_threshold"
 name                   = "Fuel - LPFP - Fuel Flow High Threshold"
-category               = "fueling"
+category               = ""
 dimensions             = 0
 address                = 0x00038AF6
 data_type              = "uint16_be"
@@ -3030,7 +4651,7 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_lpfp_fuel_flow_mid_threshold"
 name                   = "Fuel - LPFP - Fuel Flow Mid Threshold"
-category               = "fueling"
+category               = ""
 dimensions             = 0
 address                = 0x00038AF8
 data_type              = "uint16_be"
@@ -3042,7 +4663,7 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_lpfp_fuel_flow_threshold_hysteresis"
 name                   = "Fuel - LPFP - Fuel Flow Threshold Hysteresis"
-category               = "fueling"
+category               = ""
 dimensions             = 0
 address                = 0x00038AF4
 data_type              = "uint16_be"
@@ -3054,11 +4675,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_timing_hpfp_integral_step_size"
 name                   = "Fuel - Timing - HPFP - Integral - Step Size"
-category               = "fueling - injection timing"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0003F34A
 data_type              = "uint16_be"
 scaling                = ""
+axis_x                 = "fuel_closed_loop_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3066,11 +4688,12 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_timing_hpfp_integral_threshold"
 name                   = "Fuel - Timing - HPFP - Integral - Threshold"
-category               = "fueling - injection timing"
-dimensions             = 0
+category               = ""
+dimensions             = 1
 address                = 0x0003F38A
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "kpa_x_10_0"
+axis_x                 = "none"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3078,11 +4701,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "fuel_pressure_voltage_high_dtc_threshold"
 name                   = "Fuel - Pressure - Voltage High DTC Threshold"
-category               = "fueling"
+category               = ""
 dimensions             = 0
 address                = 0x0005670E
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "v_x_65535_0_5_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3090,11 +4713,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_manifold_flow_model_egr_flow_model_egr_absolute_pressure_main"
 name                   = "Airflow Manifold Flow Model Egr Flow Model Egr Absolute Pressure Main"
-category               = "airflow - manifold (MAF/MAP)"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002CB4E
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "bar_x_99_0"
+axis_x                 = "calculated_load"
+axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3102,11 +4727,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_manifold_flow_model_egr_flow_model_fill_rate_multiplier_a"
 name                   = "Airflow Manifold Flow Model Egr Flow Model Fill Rate Multiplier A"
-category               = "airflow - manifold (MAF/MAP)"
+category               = ""
 dimensions             = 0
 address                = 0x0002AF84
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "x_255_0_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3114,11 +4739,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_boost_limits_boost_limit_adder"
 name                   = "Airflow - Turbo - Boost - Limits -  Boost Limit Adder"
-category               = "boost control - target"
+category               = ""
 dimensions             = 0
 address                = 0x0001DEF4
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "psi_x_3404_0_24576_0_14_5038"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3126,11 +4751,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "airflow_turbo_boost_limits_boost_limit_delay"
 name                   = "Airflow - Turbo - Boost - Limits -  Boost Limit Delay"
-category               = "boost control - target"
+category               = ""
 dimensions             = 0
 address                = 0x0001DEF8
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "uint8"
+scaling                = "millisecond_x_10_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3138,11 +4763,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_decay_decay_d"
 name                   = "Throttle - Requested Torque - Follower - Decay - Decay D"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00020A66
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm"
+axis_y                 = "gear_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3150,11 +4777,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_decay_decay_e"
 name                   = "Throttle - Requested Torque - Follower - Decay - Decay E"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002083C
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm"
+axis_y                 = "gear_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3162,11 +4791,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_decay_decay_f"
 name                   = "Throttle - Requested Torque - Follower - Decay - Decay F"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000207D8
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm"
+axis_y                 = "gear_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3174,11 +4805,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_decay_decay_g"
 name                   = "Throttle - Requested Torque - Follower - Decay - Decay G"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00020B92
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm"
+axis_y                 = "gear_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3186,11 +4819,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_decay_decay_h"
 name                   = "Throttle - Requested Torque - Follower - Decay - Decay H"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002091E
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm"
+axis_y                 = "gear_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3198,11 +4833,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_decay_decay_i"
 name                   = "Throttle - Requested Torque - Follower - Decay - Decay I"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000208BA
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm"
+axis_y                 = "gear_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3210,11 +4847,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_decay_decay_j"
 name                   = "Throttle - Requested Torque - Follower - Decay - Decay J"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00020ACA
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm"
+axis_y                 = "gear_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3222,11 +4861,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_decay_decay_k"
 name                   = "Throttle - Requested Torque - Follower - Decay - Decay K"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00020A00
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm"
+axis_y                 = "gear_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3234,11 +4875,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_decay_decay_l"
 name                   = "Throttle - Requested Torque - Follower - Decay - Decay L"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002099C
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm"
+axis_y                 = "gear_position"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3246,11 +4889,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_ascent_si_drive_1_b"
 name                   = "Throttle - Requested Torque - Follower - Ascent - SI Drive 1 B"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x0002043A
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm"
+axis_y                 = "y_axis"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3258,11 +4903,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_ascent_si_drive_1_c"
 name                   = "Throttle - Requested Torque - Follower - Ascent - SI Drive 1 C"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x00020290
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm"
+axis_y                 = "y_axis"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3270,11 +4917,13 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_ascent_si_drive_1_d"
 name                   = "Throttle - Requested Torque - Follower - Ascent - SI Drive 1 D"
-category               = "drive-by-wire throttle - request"
-dimensions             = 0
+category               = ""
+dimensions             = 2
 address                = 0x000200E6
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm"
+axis_y                 = "y_axis"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3282,11 +4931,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_ascent_vehicle_speed_min"
 name                   = "Throttle Requested Torque Follower Ascent Vehicle Speed Min"
-category               = "drive-by-wire throttle - request"
+category               = ""
 dimensions             = 0
 address                = 0x0001FCAC
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "kmh_rshift_8_0_x"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3294,11 +4943,11 @@ engine_safety_critical = false
 [[table]]
 id                     = "throttle_requested_torque_follower_ascent_vehicle_speed_min_adder"
 name                   = "Throttle Requested Torque Follower Ascent Vehicle Speed Min Adder"
-category               = "drive-by-wire throttle - request"
+category               = ""
 dimensions             = 0
 address                = 0x0001FCAE
 data_type              = "uint16_be"
-scaling                = ""
+scaling                = "kmh_rshift_8_0_x"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3306,10 +4955,10 @@ engine_safety_critical = false
 [[table]]
 id                     = "engine_calculated_load_scale"
 name                   = "Engine - Calculated Load Scale"
-category               = "engine systems"
+category               = ""
 dimensions             = 0
 address                = 0x000B7F8C
-data_type              = "uint16_be"
-scaling                = ""
+data_type              = "float32_be"
+scaling                = "x_200000_0_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
