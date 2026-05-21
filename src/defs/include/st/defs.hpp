@@ -114,7 +114,19 @@ struct PiecewiseScaling {
     std::vector<double> values;
 };
 
-using ScalingFormula = std::variant<LinearScaling, PiecewiseScaling>;
+// Subaru-specific enrichment formula: value = numerator / (1 + raw * k).
+// Used by primary open-loop fueling tables that store an enrichment offset
+// as raw uint8 0..255 and decode to AFR via 14.7/(1 + raw*0.0078125).
+// Source: Merp's canonical ecu_defs.xml expression="14.7/(1+x*.0078125)".
+// Cannot be expressed as a LinearScaling because the relationship is
+// reciprocal, not affine. Defgen recognizes the expression pattern and
+// emits this named formula in pack.toml.
+struct SubaruAfrEnrichment {
+    double numerator{14.7};
+    double k{0.0078125};
+};
+
+using ScalingFormula = std::variant<LinearScaling, PiecewiseScaling, SubaruAfrEnrichment>;
 
 struct Scaling {
     std::string id;

@@ -5,6 +5,7 @@
 #include "st/defs.hpp"
 #include "st/rom.hpp"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
@@ -459,6 +460,94 @@ TEST_CASE("apply_scaling: piecewise interpolates between breakpoints", "[defs][a
     // Below first breakpoint clamps to first value; above last clamps to last.
     REQUIRE(st::apply_scaling(-10.0, s) == 1.0);
     REQUIRE(st::apply_scaling(500.0, s) == 3.0);
+}
+
+TEST_CASE("apply_scaling: subaru AFR enrichment uses 14.7/(1+raw*k)",
+          "[defs][apply_scaling][afr]") {
+    st::Scaling s;
+    s.formula = st::SubaruAfrEnrichment{.numerator = 14.7, .k = 0.0078125};
+    // raw 0 → stoich. raw 47 → 14.7/(1+47*0.0078125) ≈ 10.74. raw 255 → ≈4.92.
+    REQUIRE(st::apply_scaling(0.0, s) == Catch::Approx(14.7));
+    REQUIRE(st::apply_scaling(47.0, s) == Catch::Approx(10.7456).margin(0.01));
+    REQUIRE(st::apply_scaling(128.0, s) == Catch::Approx(7.35).margin(0.01));
+    REQUIRE(st::apply_scaling(255.0, s) == Catch::Approx(4.917).margin(0.01));
+}
+
+TEST_CASE("apply_scaling: subaru AFR enrichment safe at the singularity",
+          "[defs][apply_scaling][afr]") {
+    // 1 + raw*k = 0 → raw = -1/k. The function returns 0 rather than ±∞;
+    // not physically reachable for uint8 raw but defensive on float inputs.
+    st::Scaling s;
+    s.formula = st::SubaruAfrEnrichment{.numerator = 14.7, .k = 0.0078125};
+    REQUIRE(st::apply_scaling(-128.0, s) == 0.0);
+}
+
+TEST_CASE("invert_scaling: subaru AFR enrichment round-trips",
+          "[defs][invert_scaling][afr]") {
+    st::Scaling s;
+    s.formula = st::SubaruAfrEnrichment{.numerator = 14.7, .k = 0.0078125};
+    for (double raw : {0.0, 47.0, 128.0, 200.0, 255.0}) {
+        double const afr = st::apply_scaling(raw, s);
+        auto const inverted = st::invert_scaling(afr, s);
+        REQUIRE(inverted.has_value());
+        REQUIRE(*inverted == Catch::Approx(raw).margin(1e-9));
+    }
+}
+
+TEST_CASE("invert_scaling: subaru AFR enrichment rejects degenerate value=0",
+          "[defs][invert_scaling][afr]") {
+    st::Scaling s;
+    s.formula = st::SubaruAfrEnrichment{.numerator = 14.7, .k = 0.0078125};
+    auto const r = st::invert_scaling(0.0, s);
+    REQUIRE(!r.has_value());  // value=0 maps to raw=±∞
+}
+
+TEST_CASE("scaling loader: subaru_afr_enrichment formula parsed", "[defs][parse]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 32
+
+[[scaling]]
+id        = "afr"
+formula   = "subaru_afr_enrichment"
+numerator = 14.7
+k         = 0.0078125
+unit      = "AFR"
+data_type = "uint8"
+)toml");
+    REQUIRE(def_r.has_value());
+    auto const &def = *def_r;
+    auto const *afr = def.find_scaling("afr");
+    REQUIRE(afr != nullptr);
+    REQUIRE(std::holds_alternative<st::SubaruAfrEnrichment>(afr->formula));
+    auto const &f = std::get<st::SubaruAfrEnrichment>(afr->formula);
+    REQUIRE(f.numerator == 14.7);
+    REQUIRE(f.k == 0.0078125);
+}
+
+TEST_CASE("scaling loader: subaru_afr_enrichment defaults",
+          "[defs][parse][afr]") {
+    // Constants omitted → defaults 14.7 / 0.0078125 (the canonical EJ form).
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 32
+
+[[scaling]]
+id        = "afr_default"
+formula   = "subaru_afr_enrichment"
+data_type = "uint8"
+)toml");
+    REQUIRE(def_r.has_value());
+    auto const &def = *def_r;
+    auto const *afr = def.find_scaling("afr_default");
+    REQUIRE(afr != nullptr);
+    auto const &f = std::get<st::SubaruAfrEnrichment>(afr->formula);
+    REQUIRE(f.numerator == 14.7);
+    REQUIRE(f.k == 0.0078125);
 }
 
 TEST_CASE("Definition::read_axis_values reads and scales axis bytes", "[defs][read_axis_values]") {

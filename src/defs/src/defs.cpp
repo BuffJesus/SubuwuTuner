@@ -216,6 +216,13 @@ Result<Scaling> parse_scaling(toml::table const &t) {
                                                       "' breakpoints/values must be same length");
         }
         s.formula = std::move(pw);
+    } else if (formula == "subaru_afr_enrichment") {
+        // value = numerator / (1 + raw * k). Defaults are the canonical
+        // 14.7 stoich / 0.0078125 slope; packs may override either.
+        SubaruAfrEnrichment afr;
+        afr.numerator = optional_value<double>(t, "numerator", 14.7);
+        afr.k = optional_value<double>(t, "k", 0.0078125);
+        s.formula = afr;
     } else {
         return failure(ErrorCode::ParseError, "scaling '" + s.id + "' unknown formula: " + formula);
     }
@@ -628,6 +635,15 @@ double apply_scaling(double raw, Scaling const &s) noexcept {
     if (auto const *lin = std::get_if<LinearScaling>(&s.formula); lin != nullptr) {
         return raw * lin->factor + lin->offset;
     }
+    if (auto const *afr = std::get_if<SubaruAfrEnrichment>(&s.formula); afr != nullptr) {
+        // value = numerator / (1 + raw*k). Guard against the singularity
+        // at raw*k == -1 (impossible for the canonical 14.7/(1+x*.0078125)
+        // family since raw is uint8 ≥ 0 and k > 0, but defensive anyway).
+        double const denom = 1.0 + raw * afr->k;
+        if (denom == 0.0)
+            return 0.0;
+        return afr->numerator / denom;
+    }
     auto const *pw = std::get_if<PiecewiseScaling>(&s.formula);
     if (pw == nullptr || pw->breakpoints.empty()) {
         return raw;
@@ -655,6 +671,19 @@ Result<double> invert_scaling(double engineering, Scaling const &s) {
                            "scaling '" + s.id + "' has factor=0; not invertible");
         }
         return (engineering - lin->offset) / lin->factor;
+    }
+    if (auto const *afr = std::get_if<SubaruAfrEnrichment>(&s.formula); afr != nullptr) {
+        // value = numerator / (1 + raw*k) → raw = (numerator/value - 1) / k.
+        // Degenerates when k == 0 or engineering == 0.
+        if (afr->k == 0.0) {
+            return failure(ErrorCode::InvalidArgument,
+                           "scaling '" + s.id + "' has k=0; not invertible");
+        }
+        if (engineering == 0.0) {
+            return failure(ErrorCode::InvalidArgument,
+                           "scaling '" + s.id + "' value=0 maps to raw=±∞; not invertible");
+        }
+        return (afr->numerator / engineering - 1.0) / afr->k;
     }
     auto const *pw = std::get_if<PiecewiseScaling>(&s.formula);
     if (pw == nullptr || pw->values.size() < 2) {

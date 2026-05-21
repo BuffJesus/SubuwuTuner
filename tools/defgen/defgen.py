@@ -180,6 +180,53 @@ def parse_toexpr(expr: str) -> tuple[float, float] | None:
         return None
 
 
+# Canonical Subaru AFR-enrichment expression: numerator / (1 + x * k).
+# Used by primary open-loop fueling tables where raw uint8 0..255 encodes
+# an enrichment offset that decodes to AFR via the rational function.
+# Merp's canonical ecu_defs.xml writes this as `14.7/(1+x*.0078125)`;
+# defgen recognizes the form, extracts the constants, and emits a
+# `formula = "subaru_afr_enrichment"` scaling that the C++ loader
+# evaluates exactly. Without this match, the expression would fall
+# through `parse_toexpr` as non-linear and get flattened to identity.
+#
+# Match shape: optional whitespace, a positive numerator literal, "/",
+# optional whitespace, "(", optional "1.0"|"1" + "+", "x" or "(x)",
+# optional "*", a positive k literal, ")". Tolerant of common variants.
+_AFR_ENRICHMENT_RE = re.compile(
+    r"""^\s*
+        (?P<num>[0-9]+(?:\.[0-9]+)?)        # numerator (e.g. 14.7)
+        \s*/\s*
+        \(\s*
+        1(?:\.0+)?                          # the "1" in "1 + ..."
+        \s*\+\s*
+        \(?\s*x\s*\)?                       # x or (x)
+        \s*\*\s*
+        (?P<k>[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)  # k (e.g. .0078125 or 0.0078125)
+        \s*\)\s*$""",
+    re.VERBOSE)
+
+
+def match_afr_enrichment(expr: str) -> tuple[float, float] | None:
+    """Return (numerator, k) if `expr` matches the Subaru AFR-enrichment
+    form `N/(1+x*K)`, else None. The match is structural, not numeric —
+    the function does not check that the constants are physically
+    plausible; that's the caller's concern."""
+    if expr is None:
+        return None
+    expr = expr.strip()
+    if not expr:
+        return None
+    m = _AFR_ENRICHMENT_RE.match(expr)
+    if m is None:
+        return None
+    try:
+        numerator = float(m.group("num"))
+        k = float(m.group("k"))
+    except ValueError:
+        return None
+    return (numerator, k)
+
+
 # ---------------------------------------------------------------------------
 # Emissions-relevance heuristic
 # ---------------------------------------------------------------------------
@@ -283,9 +330,28 @@ class ScalingRecord:
     maximum: float | None = None
     precision: int = 0
     data_type: str = "uint16_be"
-    formula: str = "linear"  # only "linear" is generated; piecewise is manual
+    # `formula` is "linear" by default; piecewise is hand-edited; defgen
+    # emits "subaru_afr_enrichment" when the source XML expression matches
+    # the canonical 14.7/(1+x*K) pattern Merp uses for AFR enrichment
+    # tables. The numerator/k fields are only used (and only emitted) when
+    # formula == "subaru_afr_enrichment".
+    formula: str = "linear"
+    numerator: float | None = None
+    k: float | None = None
 
     def to_toml(self) -> str:
+        if self.formula == "subaru_afr_enrichment":
+            return _emit_table("[[scaling]]", {
+                "id":        self.id,
+                "formula":   self.formula,
+                "numerator": self.numerator,
+                "k":         self.k,
+                "unit":      self.unit,
+                "min":       self.minimum,
+                "max":       self.maximum,
+                "precision": self.precision,
+                "data_type": self.data_type,
+            })
         return _emit_table("[[scaling]]", {
             "id":        self.id,
             "formula":   self.formula,
@@ -853,7 +919,10 @@ def _scaling_from_element(el: ET.Element,
     # RomRaider's canonical attribute is `expression`; some fixtures use
     # `toexpr`. Accept either, expression winning.
     toexpr = (el.get("expression") or el.get("toexpr") or "x").strip()
-    parsed = parse_toexpr(toexpr)
+    # Try the Subaru AFR-enrichment matcher first — non-linear but a
+    # named formula type the loader knows how to evaluate exactly.
+    afr_match = match_afr_enrichment(toexpr)
+    parsed = None if afr_match is not None else parse_toexpr(toexpr)
     # Inline scalings inside <table> typically have no name= attribute; only
     # `units` + `expression`. Synthesise a stable id from those so identical
     # inline scalings dedup across tables that share them, and so the table
@@ -865,7 +934,11 @@ def _scaling_from_element(el: ET.Element,
         else:
             return None
     slug = _slugify(name)
-    if parsed is None:
+    afr_formula: tuple[float, float] | None = afr_match
+    if afr_formula is not None:
+        # Constants captured; formula type set below at record build.
+        factor, offset = (1.0, 0.0)
+    elif parsed is None:
         # Non-linear toexpr; emit a linear identity and let the user replace
         # the formula by hand. Better than dropping the scaling entirely.
         factor, offset = (1.0, 0.0)
@@ -894,7 +967,7 @@ def _scaling_from_element(el: ET.Element,
     # into a single "omit it" signal — anything else gets parsed as float.
     raw_min = el.get("min") or None
     raw_max = el.get("max") or None
-    return ScalingRecord(
+    rec = ScalingRecord(
         id=slug,
         factor=factor,
         offset=offset,
@@ -904,6 +977,10 @@ def _scaling_from_element(el: ET.Element,
         precision=_format_to_precision(el.get("format")),
         data_type=data_type,
     )
+    if afr_formula is not None:
+        rec.formula = "subaru_afr_enrichment"
+        rec.numerator, rec.k = afr_formula
+    return rec
 
 
 def _format_to_precision(fmt: str | None) -> int:

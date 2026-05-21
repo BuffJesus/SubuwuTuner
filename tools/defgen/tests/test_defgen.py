@@ -898,6 +898,79 @@ class ScalingMinMaxOmissionTest(unittest.TestCase):
         self.assertNotIn("b ", out)
 
 
+class AfrEnrichmentMatchTest(unittest.TestCase):
+    """defgen.match_afr_enrichment recognizes the canonical Subaru AFR
+    expression `N/(1+x*K)` and extracts (numerator, k). Used to emit
+    `formula = "subaru_afr_enrichment"` in pack.toml instead of falling
+    through `parse_toexpr` as non-linear and being flattened to identity."""
+
+    def test_canonical_merp_expression(self):
+        # Exact form from Merp's ecu_defs.xml.
+        self.assertEqual(
+            defgen.match_afr_enrichment("14.7/(1+x*.0078125)"),
+            (14.7, 0.0078125))
+
+    def test_whitespace_tolerance(self):
+        # Spaces, parens around x, explicit 1.0.
+        self.assertEqual(
+            defgen.match_afr_enrichment(" 14.7 / ( 1.0 + (x) * 0.0078125 ) "),
+            (14.7, 0.0078125))
+
+    def test_alternate_numerator_and_k(self):
+        # Some packs may use slightly different constants — match
+        # captures whatever values appear.
+        self.assertEqual(
+            defgen.match_afr_enrichment("9.0/(1+x*0.015625)"),
+            (9.0, 0.015625))
+
+    def test_rejects_linear_expression(self):
+        # x * factor + offset is linear, not enrichment.
+        self.assertIsNone(defgen.match_afr_enrichment("x*0.5+10"))
+
+    def test_rejects_inverse_divide(self):
+        self.assertIsNone(defgen.match_afr_enrichment("1/x"))
+
+    def test_rejects_empty(self):
+        self.assertIsNone(defgen.match_afr_enrichment(""))
+        self.assertIsNone(defgen.match_afr_enrichment(None))
+
+
+class AfrScalingEmissionTest(unittest.TestCase):
+    """When an inline <scaling expression="14.7/(1+x*.0078125)"> is parsed,
+    defgen emits `formula = "subaru_afr_enrichment"` with numerator + k
+    fields, not a flattened linear identity."""
+
+    def test_afr_scaling_round_trip(self):
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="3D" name="open_loop_fuel" storageaddress="0x100"
+                 storagetype="uint8" endian="big" sizex="4" sizey="4">
+            <scaling units="AFR" expression="14.7/(1+x*.0078125)"
+                     to_byte="(14.7/x-1)/.0078125" format="0.00"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        scaling = next(s for s in packs[0].scalings if "estimated" not in s.id)
+        self.assertEqual(scaling.formula, "subaru_afr_enrichment")
+        self.assertEqual(scaling.numerator, 14.7)
+        self.assertEqual(scaling.k, 0.0078125)
+        # The flattened-identity warning must NOT fire for this scaling.
+        for tag, where, msg in packs[0].warnings:
+            self.assertNotIn("flattened to identity", msg,
+                msg=f"unexpected flatten warning on {where}: {msg}")
+        # The emitted TOML carries formula + numerator + k (NOT factor/offset).
+        toml_text = defgen.pack_to_toml(packs[0])
+        self.assertIn('formula   = "subaru_afr_enrichment"', toml_text)
+        self.assertIn("numerator = 14.7", toml_text)
+        self.assertIn("k         = 0.0078125", toml_text)
+        # And factor/offset are NOT emitted for this scaling block.
+        block = toml_text.split('formula   = "subaru_afr_enrichment"', 1)[1]
+        block = block.split("[[", 1)[0]
+        self.assertNotIn("factor", block)
+        self.assertNotIn("offset", block)
+
+
 class StoragetypeInheritanceTest(unittest.TestCase):
     """Merp's canonical ecu_defs.xml puts storagetype on the parent <table>
     element and leaves the inline <scaling> child without it. Before the
