@@ -1,8 +1,8 @@
 # Handoff — 2026-05-21 (P6 + 3 pack-bug sweeps + VA/VB bundle wire-up)
 
-Marathon session. Built on yesterday's `8f4b44f`. **15 commits** all pushed. P6 descriptor library is real and finding real bugs; validate.py surfaced multiple classes of pack-quality issues that we fixed at the source (defgen) and applied corpus-wide; user dropped two forum-sourced VA/VB bundle XMLs which we wired into bulk_regen to upgrade 25 packs from 0D-scalar-only to fully-typed 2D.
+Marathon session. Built on yesterday's `8f4b44f`. **17 commits** all pushed. P6 descriptor library is real and finding real bugs; validate.py surfaced multiple classes of pack-quality issues that we fixed at the source (defgen) and applied corpus-wide; user dropped two forum-sourced VA/VB bundle XMLs which we wired into bulk_regen to upgrade 25 packs from 0D-scalar-only to fully-typed 2D.
 
-**HEAD `875ed2f`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave) and `fixtures/projects/Test/` (user-created GUI state, leave alone).
+**HEAD `8ad18fd`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave) and `fixtures/projects/Test/` (user-created GUI state, leave alone).
 
 ## Fifteen commits shipped (oldest → newest)
 
@@ -22,6 +22,8 @@ fdde497 defs(packs): bulk_regen sweep with defgen storagetype fix (323 packs)
 2055c18 tools(defgen): add timing_compensation_1d + boost_compensation_1d descriptors
 c8db6c5 defs(packs): re-cousin-seed 11 cousin packs from their (now-fixed) bases
 875ed2f tools(defgen)+defs: wire VA/VB WRX bundles into bulk_regen
+31b0e08 docs(handoff): capture VA/VB bundle wire-up + 25-pack upgrade
+1e1029b tools(defgen): engine_rpm_axis tries raw/5.12 scaling for VA-era axes
 ```
 
 ## What's new since yesterday (8f4b44f)
@@ -82,7 +84,7 @@ Schema extension to carry non-linear formulas is **v1.x task** (pack.toml schema
 
 ## Status snapshot
 
-- **HEAD `875ed2f`**, in sync with `origin/main`.
+- **HEAD `8ad18fd`**, in sync with `origin/main`.
 - **definitions/ pack count: 373** (one promoted from throwaway; net unchanged).
 - **defgen test suite: 211 tests green**.
 - **C++ build: not rebuilt this session** (pure Python + TOML data).
@@ -103,13 +105,24 @@ Cross-pack coverage on regenerated packs (sampled mid-session, pre-bundle-wire-u
 - a2tb000l (regen via Merp): PASS 12 / FAIL 13 / NO_DESC 208
 - A2WC400H Forester (regen via Merp): PASS 19 / FAIL 4 / NO_DESC 180
 
-**Newly-upgraded VA/VB packs not yet baselined** — first item on next-session deck.
+**Newly-upgraded VA/VB packs baselined this session (commit `1e1029b`):**
+
+- lf75600h vs LF75600H.bin: PASS 0, FAIL 24, NO_DESC 132, SKIP 44
+- lf9l000e vs LF9L000E.bin: PASS 1, FAIL 32, NO_DESC 235, SKIP 84
+
+**Finding:** the bundle's table addresses don't align with our specific decrypted `.bin` files for these CIDs. The CID region matches (`internalidaddress = 0x297DD` aligns with the literal CID string in the bin), but cal-table addresses (0x2979C etc.) point at code/garbage. Most likely a sub-revision mismatch — the bundle was authored against a different LF75600H build than what we decrypted. Our `.bin` files are 2,072,576 / 2,596,864 bytes — 24,576 bytes short of the pack-declared sizes, consistent with truncated/partial decryption.
+
+This is a useful detection capability of validate.py: it flags pack/ROM revision drift loudly. The right resolution is either source matching-revision `.bin` files OR accept the detection as a feature and move on.
+
+`engine_rpm_axis` predicate extended in `1e1029b` to also try raw/5.12 scaling (the VA-era convention from the bundles). Confirmed additive-only — EJ packs unchanged.
 
 ## Open threads (for next session)
 
 ### Tier 1 — exercise the new VA/VB capacity
 
-**(P6h) Baseline validate.py coverage on the 25 newly-upgraded VA/VB packs.** They now have real 2D structure for descriptors to chew on. Run against LF9C000C.bin, LF79100P.bin, LF75404H.bin (real anchors we have). Expected: meaningful PASS counts on tables that previously showed as SKIPPED 0D scalars.
+**(P6h done this session)** Baseline captured above; finding is revision-mismatch detection.
+
+**(P6h-next) Source matching-revision .bin files for the upgraded VA/VB packs.** Our LF75600H.bin and LF9L000E.bin are 24KB short — partials or wrong revisions. If we can find matching-revision dumps, the upgraded packs become directly usable. Forum search (mhhauto, etc.) is the typical path.
 
 **(P6e) Investigate non-linear AFR formula support.** Schema extension is the v1.x path; meantime, document loudly that AFR `dump-table` values are raw 0-255 enrichment offsets, not AFR. Affected scaling family: any `_x_0078125` or `14.7/(1+x*K)` variant.
 
@@ -148,11 +161,12 @@ OBDX Pro VX adapter ETA May 22-25 — could land mid-day tomorrow. If it arrives
 
 ## Suggested opener for next session
 
-> "HEAD `875ed2f`, in sync with `origin/main`. Marathon yesterday: 15 commits. P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
+> "HEAD `1e1029b`, in sync with `origin/main`. Marathon yesterday: 17 commits. P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
 >
 > Deck for this session:
-> **(P6h)** Baseline validate.py coverage on the 25 newly-upgraded VA/VB packs against the LF9C/LF79/LF75 anchor ROMs. They now have real 2D structure — expect a big PASS uplift over the prior 0D-only state.
 > **(P6e)** Non-linear AFR formula support (schema extension). Pack-format + C++ loader change, biggest tuner-facing usability win — AFR maps would display real 10-15 AFR instead of raw 0-255 enrichment offsets.
 > **(P6a-continued)** 1D fuel-compensation predicates — biggest remaining NO_DESCRIPTOR cluster after the timing+boost comp landed.
+> **(P6b)** More common axes: manifold_pressure_axis, throttle_plate_opening_angle_axis, mass_airflow_axis, atmospheric_pressure_axis. Each ~30 lines including tests.
+> **(P6h-next)** Forum-source matching-revision LF75600H.bin / LF9L000E.bin if you want to actually exercise the upgraded VA/VB packs against their real anchor ROMs.
 >
 > Or pivot — OBDX adapter ETA May 22-25, could arrive mid-session. If hardware lands, pause P6 and pre-stage the first-light rom-pull."
