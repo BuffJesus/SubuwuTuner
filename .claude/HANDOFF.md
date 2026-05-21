@@ -187,7 +187,7 @@ OBDX Pro VX adapter ETA May 22-25 — could land mid-day tomorrow. If it arrives
 
 ## Suggested opener for next session
 
-> "HEAD `6a4693a`, in sync with `origin/main`. Marathon yesterday: 20 commits. P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
+> "HEAD `6a4693a`, in sync with `origin/main`. Marathon yesterday: 24 commits (including this handoff refresh). P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
 >
 > Deck for this session:
 > **(P6a-continued)** Fuel-compensation scalings outside the ±100% family. Examples: `_x_003051758_100` (factor 0.003), `_x_000224304213_7_35` (factor 0.000224). Each needs its own predicate with tighter bands.
