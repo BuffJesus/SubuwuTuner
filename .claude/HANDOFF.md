@@ -1,8 +1,8 @@
 # Handoff — 2026-05-21 (P6 + 3 pack-bug sweeps + VA/VB bundles + AFR formula)
 
-Marathon session. Built on yesterday's `8f4b44f`. **20 commits** all pushed. P6 descriptor library is real and finding real bugs; validate.py surfaced multiple classes of pack-quality issues that we fixed at the source (defgen) and applied corpus-wide; user dropped two forum-sourced VA/VB bundle XMLs which we wired into bulk_regen to upgrade 25 packs from 0D-scalar-only to fully-typed 2D.
+Marathon session. Built on yesterday's `8f4b44f`. **22 commits** all pushed. P6 descriptor library is real and finding real bugs; validate.py surfaced multiple classes of pack-quality issues that we fixed at the source (defgen) and applied corpus-wide; user dropped two forum-sourced VA/VB bundle XMLs which we wired into bulk_regen to upgrade 25 packs from 0D-scalar-only to fully-typed 2D.
 
-**HEAD `f202081`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave) and `fixtures/projects/Test/` (user-created GUI state, leave alone).
+**HEAD `07c8cc3`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave) and `fixtures/projects/Test/` (user-created GUI state, leave alone).
 
 ## Fifteen commits shipped (oldest → newest)
 
@@ -27,6 +27,8 @@ c8db6c5 defs(packs): re-cousin-seed 11 cousin packs from their (now-fixed) bases
 083b9b7 docs(handoff): capture P6h baseline + engine_rpm_axis /5.12 extension
 74624d3 feat(defs+defgen): subaru_afr_enrichment non-linear formula
 f202081 defs(packs): bulk_regen sweep emits subaru_afr_enrichment (323 packs)
+45f7d62 docs(handoff): capture P6e — subaru_afr_enrichment formula shipped
+07c8cc3 tools(defgen): broaden compensation descriptors (1D patterns + new 2D)
 ```
 
 ## What's new since yesterday (8f4b44f)
@@ -93,7 +95,7 @@ The non-linear AFR enrichment formula `14.7/(1+x*0.0078125)` is now a first-clas
 
 ## Status snapshot
 
-- **HEAD `f202081`**, in sync with `origin/main`.
+- **HEAD `07c8cc3`**, in sync with `origin/main`.
 - **definitions/ pack count: 373** (one promoted from throwaway; net unchanged).
 - **defgen test suite: 211 tests green**.
 - **C++ build: not rebuilt this session** (pure Python + TOML data).
@@ -109,6 +111,7 @@ a2tb002c validate.py progression through the session:
 | after intake+load axes | 7 | 6 | 218 | 159 |
 | after base_timing dtype fix | 11 | 2 | 218 | 159 |
 | after comp descriptors + cousin re-seed | 19 | 5 | 207 | 159 |
+| after broader comp patterns + 2D comp (07c8cc3) | 31 | 6 | 194 | 159 |
 
 Cross-pack coverage on regenerated packs (sampled mid-session, pre-bundle-wire-up):
 - a2tb000l (regen via Merp): PASS 12 / FAIL 13 / NO_DESC 208
@@ -170,10 +173,10 @@ OBDX Pro VX adapter ETA May 22-25 — could land mid-day tomorrow. If it arrives
 
 ## Suggested opener for next session
 
-> "HEAD `f202081`, in sync with `origin/main`. Marathon yesterday: 20 commits. P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
+> "HEAD `07c8cc3`, in sync with `origin/main`. Marathon yesterday: 20 commits. P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
 >
 > Deck for this session:
-> **(P6a-continued)** 1D fuel-compensation predicates (ECT/IAT/atm fuel comp). Same pattern as timing+boost comp; biggest remaining cluster of NO_DESCRIPTOR 1D tables.
+> **(P6a-continued)** Fuel-compensation scalings OUTSIDE the ±100% _x_78125_100 family. Examples: primary_open_loop_fueling_compensation_ect uses `_x_003051758_100` (factor 0.003, offset −100 → range −100..−99.22), cl_fueling_target_compensation_a uses `_x_000224304213_7_35` (factor 0.000224, offset −7.35). These need their own predicates with tighter bands; can't be lumped into the existing ±100% comp descriptor.
 > **(P6b)** More common axes: manifold_pressure_axis, throttle_plate_opening_angle_axis, mass_airflow_axis, atmospheric_pressure_axis. Each ~30 lines including tests, but each needs per-axis scaling investigation.
 > **(P6e-VA)** VA bundle's fueling tables (`fuel_cl_ol_transition_*` etc.) use different naming + possibly different non-linear formula variants. Extend the AFR matcher to handle these if `dump-table` on a VA fuel table reads as raw bytes instead of AFR.
 > **(P6h-next)** Forum-source matching-revision `.bin` files for the upgraded VA/VB packs if you want to validate them against real anchors.
