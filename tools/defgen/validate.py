@@ -169,7 +169,8 @@ def validate_entry(entry: PackEntry, rom: bytes) -> EntryReport:
                                        f"{n_bytes}B exceeds ROM size "
                                        f"{len(rom)}")
     buf = rom[entry.address:entry.address + n_bytes]
-    candidates = descriptors.candidates_for(entry.id, kind=entry.kind)
+    candidates = descriptors.candidates_for(entry.id, kind=entry.kind,
+                                            dims=entry.dimensions)
     if not candidates:
         return EntryReport(entry, "NO_DESCRIPTOR", [])
     matched: list[tuple[str, descriptors.Verdict]] = []

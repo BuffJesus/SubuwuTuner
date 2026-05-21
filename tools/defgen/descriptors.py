@@ -143,10 +143,18 @@ class Descriptor:
 
     Typical flow on the consumer side:
       1. Pick candidate descriptors by matching the table id against
-         `id_patterns` (fnmatch globs against the lowercased id).
+         `id_patterns` (fnmatch globs against the lowercased id) AND
+         (when known) by the entry's dimensionality.
       2. Call `predicate(bytes, hint)` to get a Verdict for each candidate.
       3. Take the highest-scoring matching Verdict, or "unknown shape" if
          none match.
+
+    `expected_dims` declares the predicate's intended dimensionality:
+    use 1 for axes / 1D tables and 2 for 2D maps. Setting it lets the
+    registry skip descriptors that would over-match by id alone — e.g.
+    a `*target_boost*` pattern catching a 1D ECT-compensation curve that
+    the 2D predicate would then correctly but loudly reject. `None`
+    means "applies regardless of dims" (rare).
     """
     id: str
     kind: str  # "axis" or "table"
@@ -154,6 +162,7 @@ class Descriptor:
     id_patterns: list[str]
     predicate: Callable[[bytes, DecodeHint], Verdict]
     evidence: list[Evidence] = field(default_factory=list)
+    expected_dims: int | None = None
 
     def id_matches(self, table_id: str) -> bool:
         lid = table_id.lower()
@@ -188,11 +197,22 @@ def by_id(descriptor_id: str) -> Descriptor | None:
     return None
 
 
-def candidates_for(table_id: str, kind: str = "") -> list[Descriptor]:
-    """Return descriptors whose patterns match `table_id` (and optional kind)."""
+def candidates_for(table_id: str, kind: str = "",
+                   dims: int | None = None) -> list[Descriptor]:
+    """Return descriptors that could apply to an entry.
+
+    Filters by id-pattern match, optional `kind` ("axis" / "table"), and
+    optional `dims`. When `dims` is given, descriptors whose
+    `expected_dims` is set to a different value are excluded — this
+    keeps a 2D-only predicate from matching a 1D entry by id alone.
+    Descriptors with `expected_dims=None` pass through regardless.
+    """
     out: list[Descriptor] = []
     for d in _REGISTRY:
         if kind and d.kind != kind:
+            continue
+        if dims is not None and d.expected_dims is not None \
+                and d.expected_dims != dims:
             continue
         if d.id_matches(table_id):
             out.append(d)
@@ -259,12 +279,13 @@ ENGINE_RPM_AXIS = register(Descriptor(
     kind="axis",
     description="Engine-speed (RPM) lookup axis: monotonic, 200-8500 RPM span, 5-32 pts.",
     id_patterns=[
-        "*rpm*", "*engine_speed*", "*engine_rpm*", "*_rpm",
+        "*rpm*", "*engine_speed*", "*engine_rpm*",
     ],
     predicate=_engine_rpm_axis,
     evidence=[
         Evidence("a2tb002c", "engine_speed"),
     ],
+    expected_dims=1,
 ))
 
 
@@ -293,12 +314,13 @@ COOLANT_TEMP_AXIS = register(Descriptor(
     description="Coolant/ECT axis: monotonic, -50 to 150 °C, 4-24 pts.",
     id_patterns=[
         "*ect*axis*", "*coolant*temp*axis*", "*coolant*axis*",
-        "*ect_axis*", "*ect_x*", "*ect_y*",
+        "*coolant_temperature*", "*ect_x*", "*ect_y*",
     ],
     predicate=_coolant_temp_axis,
     evidence=[
         Evidence("a2tb002c", "coolant_temperature"),
     ],
+    expected_dims=1,
 ))
 
 
@@ -344,6 +366,7 @@ WASTEGATE_DUTY = register(Descriptor(
         Evidence("a2tb002c", "max_wastegate_duty"),
         Evidence("a2tb002c", "initial_wastegate_duty"),
     ],
+    expected_dims=2,
 ))
 
 
@@ -396,6 +419,7 @@ BOOST_TARGET = register(Descriptor(
     evidence=[
         Evidence("a2tb002c", "target_boost"),
     ],
+    expected_dims=2,
 ))
 
 
@@ -439,4 +463,5 @@ BASE_TIMING = register(Descriptor(
         Evidence("a2tb002c", "base_timing_primary_cruise"),
         Evidence("a2tb002c", "base_timing_primary_non_cruise"),
     ],
+    expected_dims=2,
 ))

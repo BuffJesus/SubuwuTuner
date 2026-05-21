@@ -103,6 +103,19 @@ class RegistryTest(unittest.TestCase):
         self.assertIn("wastegate_duty", names)
         self.assertNotIn("engine_rpm_axis", names)
 
+    def test_candidates_for_dims_filter_blocks_2d_predicate_on_1d_entry(self):
+        # *target_boost* pattern would match target_boost_compensation_ect
+        # (a 1D ECT compensation), but the boost_target predicate is
+        # explicitly 2D. With dims=1 the 2D-only descriptor must be skipped.
+        names = {d.id for d in descriptors.candidates_for(
+            "target_boost_compensation_ect", kind="table", dims=1)}
+        self.assertNotIn("boost_target", names)
+
+    def test_candidates_for_dims_filter_allows_2d_predicate_on_2d_entry(self):
+        names = {d.id for d in descriptors.candidates_for(
+            "max_wastegate_duty", kind="table", dims=2)}
+        self.assertIn("wastegate_duty", names)
+
 
 # ---------------------------------------------------------------------------
 # Engine RPM axis
