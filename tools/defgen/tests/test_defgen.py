@@ -971,6 +971,31 @@ class AfrScalingEmissionTest(unittest.TestCase):
         self.assertNotIn("offset", block)
 
 
+class FloatEndianQuirkTest(unittest.TestCase):
+    """Merp's ecu_defs.xml declares `endian="little"` on float values
+    despite the actual Subaru ROM bytes being big-endian. _axis_from_element
+    has handled this since the float-axis fix; _scaling_from_element must
+    apply the same override so non-axis float scalings (MAF sensor scaling
+    tables) decode correctly. Reading float32 as little-endian on the
+    big-endian ROM gives nonsense values like 1e35 g/s."""
+
+    def test_float_scaling_overrides_endian_to_big(self):
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="2D" name="maf_scaling_test" storageaddress="0x100"
+                 storagetype="float" endian="little" sizex="4">
+            <scaling units="g/s" expression="x" to_byte="x"
+                     format="0.00" storagetype="float" endian="little"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        # Both the inline scaling and the table (which inherits the
+        # scaling's data_type) end up as float32_be despite endian="little".
+        scaling = next(s for s in packs[0].scalings if "g/s" in s.unit)
+        self.assertEqual(scaling.data_type, "float32_be")
+
+
 class StoragetypeInheritanceTest(unittest.TestCase):
     """Merp's canonical ecu_defs.xml puts storagetype on the parent <table>
     element and leaves the inline <scaling> child without it. Before the

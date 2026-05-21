@@ -916,6 +916,16 @@ def _scaling_from_element(el: ET.Element,
     # so the scaling can honor them when its own element omits them.
     storagetype = el.get("storagetype") or fallback_storagetype
     endian = el.get("endian") or fallback_endian
+    # Merp's ecu_defs.xml declares endian="little" on float values but
+    # the actual ROM bytes are big-endian (decoding as little-endian
+    # yields nonsense like 1e35 g/s for what should be a 0..500 g/s
+    # MAF scaling). The float-axis quirk is documented in _axis_from_element;
+    # apply the same override here so non-axis scalings (e.g. MAF sensor
+    # scaling tables that aren't an axis but ARE a float row) decode
+    # correctly. No legitimate little-endian-float Subaru data exists,
+    # so the override is safe.
+    if storagetype and storagetype.lower().strip() == "float":
+        endian = "big"
     # RomRaider's canonical attribute is `expression`; some fixtures use
     # `toexpr`. Accept either, expression winning.
     toexpr = (el.get("expression") or el.get("toexpr") or "x").strip()

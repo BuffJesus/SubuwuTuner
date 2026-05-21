@@ -33,7 +33,7 @@ factor    = 0.01933677
 offset    = 0.0
 unit      = "psi absolute"
 precision = 3
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -73,7 +73,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "g/rev"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -83,7 +83,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "RPM"
 precision = 0
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -93,7 +93,7 @@ factor    = 14.7
 offset    = 0.0
 unit      = "Air/Fuel Ratio"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -103,7 +103,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "mA"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -123,7 +123,7 @@ factor    = 0.01933677
 offset    = 0.0
 unit      = "psi"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -153,7 +153,7 @@ factor    = 1.8
 offset    = 32.0
 unit      = "Degrees F"
 precision = 0
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -163,7 +163,7 @@ factor    = 1.8
 offset    = 32.0
 unit      = "Coolant Temp (Degrees F)"
 precision = 1
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -183,7 +183,7 @@ factor    = 1.1904761904761905
 offset    = 0.0
 unit      = "Throttle Plate Opening Angle (%)"
 precision = 1
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -203,7 +203,7 @@ factor    = 0.001
 offset    = 0.0
 unit      = "Base Pulse Width (ms)"
 precision = 3
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -213,7 +213,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "Engine Speed (RPM)"
 precision = 0
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -223,7 +223,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "Accelerator Pedal Angle (%)"
 precision = 1
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -243,7 +243,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "volts"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -253,7 +253,7 @@ factor    = 0.01933677
 offset    = 0.0
 unit      = "psi relative"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -263,7 +263,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "ESTIMATED Flow Rate - Gas Only (cc/min)"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -293,7 +293,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "%"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -313,7 +313,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "Throttle Angle Change (%)"
 precision = 1
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -373,7 +373,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "cumulative throttle angle change"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -403,7 +403,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "Mass Airflow (g/s)"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -433,7 +433,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "g/s"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -443,7 +443,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "Engine Load (g/rev)"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -473,7 +473,7 @@ factor    = 0.621
 offset    = 0.0
 unit      = "Vehicle Speed (MPH)"
 precision = 0
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -513,7 +513,7 @@ factor    = -1.0
 offset    = -0.0
 unit      = "degrees of correction"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -523,7 +523,7 @@ factor    = -1.0
 offset    = -0.0
 unit      = "Potential Change in Fine Correction Stored Value Per Knock 'Event' (degrees of correction)"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -533,7 +533,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "Current 'Knock Correction Advance Max' Map Value (degrees)"
 precision = 2
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -553,7 +553,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "Ignition Advance Multiplier (IAM)"
 precision = 4
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -563,7 +563,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "change in multiplier"
 precision = 4
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -593,7 +593,7 @@ factor    = 1.0
 offset    = 0.0
 unit      = "raw ecu value"
 precision = 1
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -603,7 +603,7 @@ factor    = 1.8
 offset    = 32.0
 unit      = "Fuel Temp (Degrees F)"
 precision = 1
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -613,7 +613,7 @@ factor    = 1.8
 offset    = 32.0
 unit      = "Temperature (Degrees F)"
 precision = 1
-data_type = "float32_le"
+data_type = "float32_be"
 
 
 [[scaling]]
@@ -1061,7 +1061,7 @@ name                   = "Manifold Pressure Sensor Scaling"
 category               = "manifold pressure sensor"
 dimensions             = 1
 address                = 0x000C0274
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "psi_absolute_x_01933677"
 axis_x                 = "mps_voltage_to_manifold_absolute_pressure"
 emissions_relevant     = false
@@ -1128,7 +1128,7 @@ name                   = "Front Oxygen Sensor #1 Scaling"
 category               = "fueling - closed loop"
 dimensions             = 1
 address                = 0x000CA08C
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "air_fuel_ratio_x_14_7"
 axis_x                 = "front_oxygen_sensor"
 emissions_relevant     = true
@@ -1141,7 +1141,7 @@ name                   = "Front Oxygen Sensor #2 Scaling"
 category               = "fueling - closed loop"
 dimensions             = 1
 address                = 0x000CA0F4
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "air_fuel_ratio_x_14_7"
 axis_x                 = "front_oxygen_sensor"
 emissions_relevant     = true
@@ -1154,7 +1154,7 @@ name                   = "Front Oxygen Sensor Rich Limit"
 category               = "fueling - closed loop"
 dimensions             = 1
 address                = 0x0001D650
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "air_fuel_ratio_x_14_7"
 axis_x                 = "capped_limit"
 emissions_relevant     = true
@@ -1221,7 +1221,7 @@ name                   = "CL Fueling Target Compensation (ECT) Disable"
 category               = "fueling - closed loop"
 dimensions             = 1
 address                = 0x000C4514
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "coolant_temp_degrees_f_x_1_8_32"
 axis_x                 = "disable_cl_fueling_target_compensation_ect"
 emissions_relevant     = true
@@ -1273,7 +1273,7 @@ name                   = "CL to OL Transition with Delay Throttle Hysteresis"
 category               = "fueling - cl/ol transition"
 dimensions             = 1
 address                = 0x000C46A4
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "throttle_plate_opening_angle_x_84"
 axis_x                 = "ol_to_cl_transition"
 emissions_relevant     = true
@@ -1299,7 +1299,7 @@ name                   = "CL to OL Transition with Delay BPW Hysteresis"
 category               = "fueling - cl/ol transition"
 dimensions             = 1
 address                = 0x000C46A8
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "base_pulse_width_ms_x_001"
 axis_x                 = "ol_to_cl_transition"
 emissions_relevant     = true
@@ -1312,7 +1312,7 @@ name                   = "CL Delay Minimum (ECT)"
 category               = "fueling - cl/ol transition"
 dimensions             = 1
 address                = 0x000C46AC
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "coolant_temp_degrees_f_x_1_8_32"
 axis_x                 = "condition_result"
 emissions_relevant     = true
@@ -1325,7 +1325,7 @@ name                   = "CL Delay Maximum Engine Speed A"
 category               = "fueling - cl/ol transition"
 dimensions             = 1
 address                = 0x000C46B0
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "engine_speed_rpm_x"
 axis_x                 = "condition_result"
 emissions_relevant     = true
@@ -1338,7 +1338,7 @@ name                   = "CL Delay Maximum Engine Speed B"
 category               = "fueling - cl/ol transition"
 dimensions             = 1
 address                = 0x000C46BC
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "engine_speed_rpm_x"
 axis_x                 = "condition_result"
 emissions_relevant     = true
@@ -1363,7 +1363,7 @@ name                   = "CL Delay Maximum (Throttle) A"
 category               = "fueling - cl/ol transition"
 dimensions             = 1
 address                = 0x000C46B8
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "accelerator_pedal_angle_x"
 axis_x                 = "condition_result"
 emissions_relevant     = true
@@ -1402,7 +1402,7 @@ name                   = "Injector Flow Scaling"
 category               = "fueling - injectors"
 dimensions             = 0
 address                = 0x000C4438
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "estimated_flow_rate_gas_only_cc_min_1804727_x"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -1532,7 +1532,7 @@ name                   = "Minimum Tip-in Enrichment Activation"
 category               = "fueling - tip-in enrichment"
 dimensions             = 1
 address                = 0x000C4858
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "additional_injector_pulse_width_ms_x_004"
 axis_x                 = "tip_in_enrichment"
 emissions_relevant     = false
@@ -1545,7 +1545,7 @@ name                   = "Minimum Tip-in Enrichment Activation (Throttle)"
 category               = "fueling - tip-in enrichment"
 dimensions             = 1
 address                = 0x000C4854
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "throttle_angle_change_x"
 axis_x                 = "tip_in_enrichment"
 emissions_relevant     = false
@@ -1623,7 +1623,7 @@ name                   = "Tip-in Enrichment Compensation D (ECT) Activation"
 category               = "fueling - tip-in enrichment"
 dimensions             = 1
 address                = 0x000C4860
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "throttle_angle_change_x"
 axis_x                 = "tip_in_enrichment"
 emissions_relevant     = false
@@ -1662,7 +1662,7 @@ name                   = "Tip-in Enrichment Disable Throttle Cumulative Threshol
 category               = "fueling - tip-in enrichment"
 dimensions             = 1
 address                = 0x000C485C
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "cumulative_throttle_angle_change_x"
 axis_x                 = "disable_tip_in_enrichment"
 emissions_relevant     = false
@@ -1714,7 +1714,7 @@ name                   = "A/F Learning Airflow Ranges"
 category               = "fueling - af correction / learning"
 dimensions             = 1
 address                = 0x000C459C
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "mass_airflow_g_s_x"
 axis_x                 = "a_f_learning_1_and_2_store_apply_ranges"
 emissions_relevant     = true
@@ -1740,7 +1740,7 @@ name                   = "MAF Sensor Scaling"
 category               = "mass airflow / engine load"
 dimensions             = 1
 address                = 0x000C9F48
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "mass_airflow_g_s_x"
 axis_x                 = "maf_sensor"
 emissions_relevant     = false
@@ -1767,7 +1767,7 @@ name                   = "Engine Load Limit (Maximum)"
 category               = "mass airflow / engine load"
 dimensions             = 1
 address                = 0x0001BAE4
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "engine_load_g_rev_x"
 axis_x                 = "capped_limit"
 emissions_relevant     = false
@@ -1945,7 +1945,7 @@ name                   = "Base Timing Idle Vehicle Speed Threshold"
 category               = "ignition timing - advance"
 dimensions             = 1
 address                = 0x000C6954
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "vehicle_speed_mph_x_621"
 axis_x                 = "base_timing_idle_active"
 emissions_relevant     = false
@@ -1999,7 +1999,7 @@ name                   = "Timing Comp Min Load (IAT)"
 category               = "ignition timing - compensation"
 dimensions             = 1
 address                = 0x000C6994
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "engine_load_g_rev_x"
 axis_x                 = "timing_compensation_iat"
 emissions_relevant     = false
@@ -2064,7 +2064,7 @@ name                   = "Feedback Correction Range (RPM)"
 category               = "ignition timing - knock control"
 dimensions             = 1
 address                = 0x000C67B8
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "engine_speed_rpm_x"
 axis_x                 = "feedback_knock_correction"
 emissions_relevant     = false
@@ -2090,7 +2090,7 @@ name                   = "Feedback Correction Retard Value"
 category               = "ignition timing - knock control"
 dimensions             = 0
 address                = 0x000C67A4
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "degrees_of_correction_x"
 emissions_relevant     = false
 engine_safety_critical = true
@@ -2102,7 +2102,7 @@ name                   = "Feedback Correction Retard Limit"
 category               = "ignition timing - knock control"
 dimensions             = 0
 address                = 0x000C67A0
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "degrees_of_correction_x"
 emissions_relevant     = false
 engine_safety_critical = true
@@ -2114,7 +2114,7 @@ name                   = "Feedback Correction Negative Advance Value"
 category               = "ignition timing - knock control"
 dimensions             = 0
 address                = 0x000C67A8
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "degrees_of_correction_x"
 emissions_relevant     = false
 engine_safety_critical = true
@@ -2138,7 +2138,7 @@ name                   = "Fine Correction Range (RPM)"
 category               = "ignition timing - knock control"
 dimensions             = 1
 address                = 0x000C682C
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "engine_speed_rpm_x"
 axis_x                 = "potential_fine_correction_stored_value_adjustments"
 emissions_relevant     = false
@@ -2151,7 +2151,7 @@ name                   = "Fine Correction Range (Load)"
 category               = "ignition timing - knock control"
 dimensions             = 1
 address                = 0x000C683C
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "engine_load_g_rev_x"
 axis_x                 = "potential_fine_correction_stored_value_adjustments"
 emissions_relevant     = false
@@ -2164,7 +2164,7 @@ name                   = "Fine Correction Rows (RPM)"
 category               = "ignition timing - knock control"
 dimensions             = 1
 address                = 0x000C6868
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "engine_speed_rpm_x"
 axis_x                 = "fine_correction_stored_applied_rpm_ranges"
 emissions_relevant     = false
@@ -2177,7 +2177,7 @@ name                   = "Fine Correction Columns (Load)"
 category               = "ignition timing - knock control"
 dimensions             = 1
 address                = 0x000C684C
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "engine_load_g_rev_x"
 axis_x                 = "fine_correction_stored_applied_load_ranges"
 emissions_relevant     = false
@@ -2190,7 +2190,7 @@ name                   = "Fine Correction Retard Value"
 category               = "ignition timing - knock control"
 dimensions             = 1
 address                = 0x000C762C
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "potential_change_in_fine_correction_stored_value_per_knock_event_degrees_of_correction_x"
 axis_x                 = "engine_speed"
 emissions_relevant     = false
@@ -2203,7 +2203,7 @@ name                   = "Fine Correction Retard Limit"
 category               = "ignition timing - knock control"
 dimensions             = 0
 address                = 0x000C6824
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "degrees_of_correction_x"
 emissions_relevant     = false
 engine_safety_critical = true
@@ -2215,7 +2215,7 @@ name                   = "Fine Correction Advance Value"
 category               = "ignition timing - knock control"
 dimensions             = 0
 address                = 0x000C6828
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "degrees_of_correction_x"
 emissions_relevant     = false
 engine_safety_critical = true
@@ -2227,7 +2227,7 @@ name                   = "Fine Correction Advance Limit"
 category               = "ignition timing - knock control"
 dimensions             = 0
 address                = 0x000C6820
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "degrees_of_correction_x"
 emissions_relevant     = false
 engine_safety_critical = true
@@ -2251,7 +2251,7 @@ name                   = "Rough Correction Range (RPM)"
 category               = "ignition timing - knock control"
 dimensions             = 1
 address                = 0x000C67D8
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "engine_speed_rpm_x"
 axis_x                 = "potential_rough_correction_learning_iam"
 emissions_relevant     = false
@@ -2264,7 +2264,7 @@ name                   = "Rough Correction Range (Load)"
 category               = "ignition timing - knock control"
 dimensions             = 1
 address                = 0x000C67E8
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "engine_load_g_rev_x"
 axis_x                 = "potential_rough_correction_learning_iam"
 emissions_relevant     = false
@@ -2277,7 +2277,7 @@ name                   = "Rough Correction Minimum KC Advance Map Value"
 category               = "ignition timing - knock control"
 dimensions             = 1
 address                = 0x000C67F8
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "current_knock_correction_advance_max_map_value_degrees_x"
 axis_x                 = "potential_rough_correction_iam_learning"
 emissions_relevant     = false
@@ -2303,7 +2303,7 @@ name                   = "Advance Multiplier (Initial)"
 category               = "ignition timing - knock control"
 dimensions             = 0
 address                = 0x000C67D4
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "ignition_advance_multiplier_iam_x"
 emissions_relevant     = false
 engine_safety_critical = true
@@ -2315,7 +2315,7 @@ name                   = "Advance Multiplier Step Value"
 category               = "ignition timing - knock control"
 dimensions             = 0
 address                = 0x000C67FC
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "change_in_multiplier_x"
 emissions_relevant     = false
 engine_safety_critical = true
@@ -2411,7 +2411,7 @@ name                   = "Rev Limit A"
 category               = "miscellaneous - limits"
 dimensions             = 1
 address                = 0x000C48C4
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "engine_speed_rpm_x"
 axis_x                 = "rev_limit_fuel_cut"
 emissions_relevant     = false
@@ -2424,7 +2424,7 @@ name                   = "Rev Limit B"
 category               = "miscellaneous - limits"
 dimensions             = 1
 address                = 0x000C48CC
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "engine_speed_rpm_x"
 axis_x                 = "rev_limit_fuel_cut"
 emissions_relevant     = false
@@ -2437,7 +2437,7 @@ name                   = "Fuel Temp Sensor Scaling"
 category               = "miscellaneous - sensor scalings"
 dimensions             = 1
 address                = 0x000C9DA0
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "fuel_temp_degrees_f_x_1_8_32"
 axis_x                 = "fuel_temp_sensor"
 emissions_relevant     = false
@@ -2450,7 +2450,7 @@ name                   = "Intake Temp Sensor Scaling"
 category               = "miscellaneous - sensor scalings"
 dimensions             = 1
 address                = 0x000C04A8
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "temperature_degrees_f_x_1_8_32"
 axis_x                 = "intake_temp_sensor"
 emissions_relevant     = false
@@ -2463,7 +2463,7 @@ name                   = "Coolant Temp Sensor Scaling"
 category               = "miscellaneous - sensor scalings"
 dimensions             = 1
 address                = 0x000C03C0
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "temperature_degrees_f_x_1_8_32"
 axis_x                 = "coolant_temp_sensor"
 emissions_relevant     = false
@@ -2476,7 +2476,7 @@ name                   = "Radiator Fan Modes A (ECT)"
 category               = "miscellaneous - thresholds"
 dimensions             = 1
 address                = 0x000CA798
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "coolant_temp_degrees_f_x_1_8_32"
 axis_x                 = "mode_determination_coolant_temp_change"
 emissions_relevant     = false
@@ -2489,7 +2489,7 @@ name                   = "Radiator Fan Modes B (ECT)"
 category               = "miscellaneous - thresholds"
 dimensions             = 1
 address                = 0x000CA7A8
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "coolant_temp_degrees_f_x_1_8_32"
 axis_x                 = "mode_determination_coolant_temp_change"
 emissions_relevant     = false
@@ -2502,7 +2502,7 @@ name                   = "Radiator Fan Modes C (ECT)"
 category               = "miscellaneous - thresholds"
 dimensions             = 1
 address                = 0x000CA7B8
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "coolant_temp_degrees_f_x_1_8_32"
 axis_x                 = "mode_determination_coolant_temp_change"
 emissions_relevant     = false
@@ -2515,7 +2515,7 @@ name                   = "Radiator Fan Modes Veh Speed"
 category               = "miscellaneous - thresholds"
 dimensions             = 1
 address                = 0x000CA754
-data_type              = "float32_le"
+data_type              = "float32_be"
 scaling                = "vehicle_speed_mph_x_621"
 axis_x                 = "mode_determination_vehicle_speed_change"
 emissions_relevant     = false
