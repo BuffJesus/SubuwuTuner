@@ -88,9 +88,9 @@ data_type = "float32_be"
 
 [[scaling]]
 id        = "estimated_air_fuel_ratio_14_7_1_x"
-formula   = "linear"
-factor    = 1.0
-offset    = 0.0
+formula   = "subaru_afr_enrichment"
+numerator = 14.7
+k         = 1.0
 unit      = "Estimated Air/Fuel Ratio"
 precision = 2
 data_type = "float32_be"

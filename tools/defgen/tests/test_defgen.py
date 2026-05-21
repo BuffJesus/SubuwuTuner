@@ -923,6 +923,19 @@ class AfrEnrichmentMatchTest(unittest.TestCase):
             defgen.match_afr_enrichment("9.0/(1+x*0.015625)"),
             (9.0, 0.015625))
 
+    def test_extra_parens_around_x_times_k(self):
+        # Merp also writes the canonical form with extra parens around
+        # the (x*K) group; same formula, different surface syntax.
+        self.assertEqual(
+            defgen.match_afr_enrichment("14.7/(1+(x*.000030517578125))"),
+            (14.7, 0.000030517578125))
+
+    def test_implicit_k_one(self):
+        # `N/(1+x)` form: K is omitted, implies k=1.
+        self.assertEqual(
+            defgen.match_afr_enrichment("14.7/(1+x)"),
+            (14.7, 1.0))
+
     def test_rejects_linear_expression(self):
         # x * factor + offset is linear, not enrichment.
         self.assertIsNone(defgen.match_afr_enrichment("x*0.5+10"))

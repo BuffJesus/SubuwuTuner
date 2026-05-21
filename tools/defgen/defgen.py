@@ -189,9 +189,15 @@ def parse_toexpr(expr: str) -> tuple[float, float] | None:
 # evaluates exactly. Without this match, the expression would fall
 # through `parse_toexpr` as non-linear and get flattened to identity.
 #
-# Match shape: optional whitespace, a positive numerator literal, "/",
-# optional whitespace, "(", optional "1.0"|"1" + "+", "x" or "(x)",
-# optional "*", a positive k literal, ")". Tolerant of common variants.
+# Match shape: tolerant of four Subaru AFR-enrichment variants in
+# Merp's ecu_defs.xml:
+#   `N/(1+x*K)`        — canonical (e.g. 14.7/(1+x*.0078125))
+#   `N/(1+(x*K))`      — parens around the x*K product
+#   `N/(1+(x)*K)`      — parens around x only
+#   `N/(1+x)`          — implicit k=1 (no *K factor)
+# All reduce to value = N / (1 + raw*k). When *K is absent, k=1.
+# Optional close-parens both before and after the `*K` group absorb the
+# variant surface syntaxes uniformly.
 _AFR_ENRICHMENT_RE = re.compile(
     r"""^\s*
         (?P<num>[0-9]+(?:\.[0-9]+)?)        # numerator (e.g. 14.7)
@@ -199,10 +205,13 @@ _AFR_ENRICHMENT_RE = re.compile(
         \(\s*
         1(?:\.0+)?                          # the "1" in "1 + ..."
         \s*\+\s*
-        \(?\s*x\s*\)?                       # x or (x)
-        \s*\*\s*
-        (?P<k>[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)  # k (e.g. .0078125 or 0.0078125)
-        \s*\)\s*$""",
+        \(?\s*x\s*\)?\s*                    # x with optional surrounding (...)
+        (?:                                  # optional *K group:
+            \*\s*
+            (?P<k>[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?)
+            \s*\)?\s*                        # K's optional close paren
+        )?
+        \)\s*$""",                           # outer close paren of `1+...`
     re.VERBOSE)
 
 
@@ -253,7 +262,9 @@ def match_afr_enrichment(expr: str) -> tuple[float, float] | None:
         return None
     try:
         numerator = float(m.group("num"))
-        k = float(m.group("k"))
+        k_str = m.group("k")
+        # k absent (the `14.7/(1+x)` form) → implicit k=1.
+        k = float(k_str) if k_str is not None else 1.0
     except ValueError:
         return None
     return (numerator, k)
