@@ -95,6 +95,78 @@ TEST_CASE("Flasher::read_full_rom rejects zero max_chunk_size", "[flash][read][e
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
+TEST_CASE("Flasher::read_full_rom fires progress callback per chunk",
+          "[flash][read][progress]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // Two-chunk read at 8 bytes each = 16 bytes total. Expect 3 progress
+    // events: the t=0 start ping + one after each chunk.
+    expect(t, uds::build_read_memory_by_address(0x1000, 8),
+           {0x63, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
+    expect(t, uds::build_read_memory_by_address(0x1008, 8),
+           {0x63, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F});
+
+    std::vector<std::uint32_t> bytes_done_at_each_event;
+    std::uint32_t observed_total = 0;
+    flash::Flasher f{t};
+    auto const r = f.read_full_rom(
+        0x1000, 16, /*max_chunk=*/8,
+        std::chrono::milliseconds{1000},
+        [&](flash::Flasher::ReadProgress p) {
+            bytes_done_at_each_event.push_back(p.bytes_done);
+            observed_total = p.total_bytes;
+        });
+    REQUIRE(r.has_value());
+    REQUIRE(observed_total == 16);
+    // Events: 0 (start), 8 (after chunk 1), 16 (after chunk 2).
+    REQUIRE(bytes_done_at_each_event == std::vector<std::uint32_t>{0, 8, 16});
+}
+
+TEST_CASE("Flasher::read_full_rom aborts when cancel flag set",
+          "[flash][read][cancel]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // Cancel BEFORE the loop even hits the first chunk: nothing should
+    // be sent. The flag is checked at the top of every iteration.
+    std::atomic<bool> cancel{true};
+    flash::Flasher f{t};
+    auto const r = f.read_full_rom(0x1000, 16, /*max_chunk=*/8,
+                                   std::chrono::milliseconds{1000},
+                                   /*progress=*/nullptr, &cancel);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::Cancelled);
+    REQUIRE(t.send_log().empty());
+}
+
+TEST_CASE("Flasher::read_full_rom cancel observed mid-read",
+          "[flash][read][cancel]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // One chunk succeeds; cancel flips inside its progress callback;
+    // the next chunk's cancel check trips before any more I/O.
+    expect(t, uds::build_read_memory_by_address(0x1000, 8),
+           {0x63, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
+
+    std::atomic<bool> cancel{false};
+    flash::Flasher f{t};
+    auto const r = f.read_full_rom(
+        0x1000, 16, /*max_chunk=*/8,
+        std::chrono::milliseconds{1000},
+        [&](flash::Flasher::ReadProgress p) {
+            if (p.bytes_done >= 8)
+                cancel.store(true, std::memory_order_release);
+        },
+        &cancel);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::Cancelled);
+    // The second chunk's request was never sent — exactly one chunk on
+    // the wire.
+    REQUIRE(t.send_log().size() == 1);
+}
+
 // ---------------------------------------------------------------------
 // compute_delta
 // ---------------------------------------------------------------------

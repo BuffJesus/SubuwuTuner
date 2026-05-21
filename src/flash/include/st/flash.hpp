@@ -10,10 +10,12 @@
 #include "st/policy.hpp"
 #include "st/transport.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -173,10 +175,30 @@ public:
     // chunked into `max_chunk_size`-byte requests. Returns the
     // concatenated bytes in the requested order. Errors at any chunk
     // abort the read and surface through the Result.
+    //
+    // The optional `progress` callback fires AFTER each successful chunk
+    // with the running (bytes_done, total) tuple. UI callers wire this
+    // to an atomic counter + a progress bar; CLI callers can no-op it.
+    // The callback runs on the caller's thread (i.e. the worker thread
+    // for a GUI background read) — keep it cheap (single-atomic-store
+    // is fine; no allocation).
+    //
+    // The optional `cancel` flag is polled BEFORE each chunk. If set,
+    // the read aborts with ErrorCode::Cancelled and the partial buffer
+    // is discarded — the caller does not get back the bytes read so far.
+    // Atomic so multi-threaded readers can flip it from a UI thread.
+    struct ReadProgress {
+        std::uint32_t bytes_done;
+        std::uint32_t total_bytes;
+    };
+    using ReadProgressFn = std::function<void(ReadProgress)>;
+
     [[nodiscard]] Result<std::vector<std::uint8_t>>
     read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
                   std::uint32_t max_chunk_size = 0x100,
-                  std::chrono::milliseconds per_chunk_timeout = std::chrono::milliseconds{1000});
+                  std::chrono::milliseconds per_chunk_timeout = std::chrono::milliseconds{1000},
+                  ReadProgressFn progress = nullptr,
+                  std::atomic<bool> const *cancel = nullptr);
 
     // Walk `current` and `target` in `sector_size`-aligned chunks; emit
     // a Sector for every chunk whose bytes differ. Both spans must be

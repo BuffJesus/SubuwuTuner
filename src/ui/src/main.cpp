@@ -20,12 +20,14 @@
 #include "st/log/knock_dashboard.hpp"
 #include "st/policy.hpp"
 #include "st/project.hpp"
+#include "st/transport/factory.hpp"
 
 // ImGui + backends.
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdarg>
@@ -42,11 +44,13 @@
 #include <implot.h>
 #include <ios>
 #include <limits>
+#include <memory>
 #include <nfd.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -716,6 +720,58 @@ struct AppState {
     std::vector<double> kp_at_rpm_axis_values;
     std::vector<double> kp_at_load_axis_values;
     std::string kp_at_status_msg;
+
+    // ===== Read-ROM-from-car modal =====
+    //
+    // Pre-staged for the OBDX Pro VX adapter (ETA May 22-25 2026). The
+    // CLI's `rom-pull` command works end-to-end against the MockTransport
+    // today; this modal is the GUI front-end so the tuner workflow becomes
+    //   Tools → Read ROM from Car → wait → save .bin → File → New project
+    // instead of "open a terminal and type a long command".
+    //
+    // Lifecycle:
+    //
+    //   show_read_rom_modal=true on next frame  →  Idle
+    //   user clicks Read                        →  Running (worker thread)
+    //   worker progresses                       →  bytes_done / total_bytes
+    //   worker finishes / errors / cancelled    →  Done / Failed / Cancelled
+    //                                              (main joins the thread)
+    //   user saves .bin via NFD                 →  back to Idle, popup closes
+    //
+    // Threading: the worker calls Flasher::read_full_rom on a std::thread;
+    // progress is reported via an atomic counter the main loop reads each
+    // frame; cancel is an atomic flag the main loop sets on click. Main
+    // never blocks on the worker except at join time (status transition).
+    bool show_read_rom_modal{false};
+    enum class ReadRomState : std::uint8_t {
+        Idle,       // form entry, no worker thread
+        Running,    // worker reading; progress + cancel atomics live
+        Done,       // worker finished OK; bytes_result has the dump
+        Failed,     // worker errored; error_msg set
+        Cancelled,  // user-initiated abort; nothing to save
+    };
+    ReadRomState read_rom_state{ReadRomState::Idle};
+    // Form inputs.
+    int read_rom_transport_kind{1};         // 0=J2534, 1=OBDX, 2=Native
+    char read_rom_device_path[256]{"COM5"}; // OBDX/Native default; J2534 hides
+    char read_rom_dll_path[1024]{};         // J2534 vendor DLL; OBDX/Native hide
+    char read_rom_base_addr_hex[32]{"0x0"};
+    char read_rom_size_hex[32]{"0x200000"}; // 2 MB default — VA/VB FA-DIT ROM size
+    int read_rom_max_chunk{0x100};
+    // Worker state. The atomics live in shared_ptr storage so the worker
+    // can outlive a destruct of AppState without crashing (defensive — in
+    // practice we always join before tearing down).
+    std::shared_ptr<std::atomic<std::uint32_t>> read_rom_bytes_done;
+    std::shared_ptr<std::atomic<std::uint32_t>> read_rom_total_bytes;
+    std::shared_ptr<std::atomic<bool>> read_rom_cancel;
+    // Result handoff. Set by the worker before transitioning to Done/Failed.
+    std::vector<std::uint8_t> read_rom_bytes_result;
+    std::string read_rom_error_msg;
+    // The worker thread itself. Joined on state transition into a terminal
+    // status; .joinable() is the canonical "is the thread alive" check.
+    std::thread read_rom_worker;
+    // Read start time for the status line ("elapsed: 4m13s").
+    std::chrono::steady_clock::time_point read_rom_start_time;
 
     void try_open_project(std::filesystem::path const &path) {
         auto r = st::Project::open(path);
@@ -3413,6 +3469,356 @@ void apply_theme(Theme t) {
     }
 }
 
+// ===========================================================================
+// Read-ROM-from-car modal
+// ===========================================================================
+//
+// Renders the Tools → Read ROM from Car flow. State machine drives the body:
+// Idle (form) → Running (progress) → Done (save dialog) / Failed (error) /
+// Cancelled (status note). All long-running work runs on `state.read_rom_worker`;
+// the modal just polls atomics + status enum on every frame.
+//
+// ----- v1.1 Write-ROM plan (NOT IMPLEMENTED — design notes only) -----
+//
+// The flash side of this same UX is meaningfully more dangerous than the
+// read side, and the existing render_flash_modal already covers most of
+// it for file-based flashing. The "Write ROM to Car" GUI button would be
+// a thin wrapper that:
+//
+//   1. Routes through the same render_flash_modal policy gate (engine-
+//      safety hard-stop + emissions confirmation + tuner-reason field).
+//   2. Adds a "Pick adapter" sub-form identical to this read modal's
+//      (transport kind + device/DLL path) — could literally share the
+//      ImGui code via a render_adapter_picker(state) helper.
+//   3. Adds a brick-protection confirmation (docs/05 §4): battery > 12.0V
+//      via a UDS PID poll, ignition state check, etc.
+//   4. Background-threads Flasher::execute(plan), with the same atomic
+//      progress + cancel pattern this read modal uses. Flasher::execute
+//      already emits a structured FlashReport per step — surface that
+//      as a per-sector ledger in the modal body.
+//   5. Verify pass (the existing post-erase-write loop in execute()
+//      already does this). Failure path: keep partial-flash report
+//      visible + offer "Resume from journal" if applicable.
+//
+// Scope to defer:
+//   - Resume-from-journal UI is its own modal/dialog.
+//   - Vehicle-state precondition checks (battery, ignition, transmission
+//      in N/P) need new transport calls + a "preflight checks passed"
+//      panel. Hardware-gated — wire after OBDX arrives.
+void render_read_rom_modal(AppState &state) {
+    if (state.show_read_rom_modal) {
+        ImGui::OpenPopup("Read ROM from Car##read_rom_modal");
+        state.show_read_rom_modal = false;
+    }
+    ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(560.0f, 0.0f), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Read ROM from Car##read_rom_modal", nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+
+    // ----- transition: Running → Done/Failed/Cancelled -----
+    // Worker writes the terminal status, we join here so the std::thread
+    // doesn't sit zombified across frames. Join is cheap once the worker
+    // has already finished its loop.
+    if (state.read_rom_worker.joinable() &&
+        state.read_rom_state != AppState::ReadRomState::Running) {
+        state.read_rom_worker.join();
+    }
+
+    char const *const transport_labels[] = {"J2534", "OBDX", "Native"};
+    auto const transport_kind_from_combo = [](int idx) {
+        switch (idx) {
+        case 0:  return st::transport::Kind::J2534;
+        case 2:  return st::transport::Kind::Native;
+        default: return st::transport::Kind::Obdx;
+        }
+    };
+
+    auto const elapsed_str = [&] {
+        auto const dur = std::chrono::steady_clock::now() - state.read_rom_start_time;
+        auto const sec = std::chrono::duration_cast<std::chrono::seconds>(dur).count();
+        long long mm = sec / 60, ss = sec % 60;
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%lldm %02llds", mm, ss);
+        return std::string{buf};
+    };
+
+    // --------- Idle: form entry ---------
+    if (state.read_rom_state == AppState::ReadRomState::Idle) {
+        ImGui::TextUnformatted("Pulls a ROM dump from the connected ECU via the");
+        ImGui::TextUnformatted("OBDX/J2534/native adapter. Read-only — no ECU writes.");
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+
+        ImGui::Combo("Adapter", &state.read_rom_transport_kind,
+                     transport_labels, IM_ARRAYSIZE(transport_labels));
+        if (state.read_rom_transport_kind == 0) {
+            ImGui::InputText("Vendor DLL path", state.read_rom_dll_path,
+                             sizeof state.read_rom_dll_path);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Path to your J2534 vendor DLL\n"
+                                  "(e.g. op20pt32.dll, MongoosePro_GM.dll).");
+            }
+        } else {
+            ImGui::InputText("Device path", state.read_rom_device_path,
+                             sizeof state.read_rom_device_path);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "USB CDC port for the adapter.\n"
+                    "Windows: COM5, COM6 etc.   Linux: /dev/ttyACM0.");
+            }
+        }
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::InputText("Base address (hex)", state.read_rom_base_addr_hex,
+                         sizeof state.read_rom_base_addr_hex);
+        ImGui::InputText("Size (hex)", state.read_rom_size_hex,
+                         sizeof state.read_rom_size_hex);
+        ImGui::InputInt("Max chunk size (bytes)", &state.read_rom_max_chunk,
+                        16, 64);
+        if (state.read_rom_max_chunk < 16)
+            state.read_rom_max_chunk = 16;
+        if (state.read_rom_max_chunk > 0x1000)
+            state.read_rom_max_chunk = 0x1000;
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Bytes per UDS ReadMemoryByAddress request.\n"
+                "256 is the safe default on Subaru SH-2A. Some\n"
+                "adapters tolerate up to 4096.");
+        }
+
+        // Pre-run errors (typically a parse failure from a previous click).
+        if (!state.read_rom_error_msg.empty()) {
+            ImGui::Dummy(ImVec2(0.0f, 6.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.55f, 1.0f));
+            ImGui::TextWrapped("%s", state.read_rom_error_msg.c_str());
+            ImGui::PopStyleColor();
+        }
+
+        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+
+        bool start_disabled = false;
+        if (state.read_rom_transport_kind == 0 && state.read_rom_dll_path[0] == '\0')
+            start_disabled = true;
+        if (state.read_rom_transport_kind != 0 && state.read_rom_device_path[0] == '\0')
+            start_disabled = true;
+
+        ImGui::BeginDisabled(start_disabled);
+        if (ImGui::Button("Read", ImVec2(120.0f, 0.0f))) {
+            // ----- parse form inputs into runtime values -----
+            auto parse_hex_u32 = [](char const *s, std::uint32_t &out) {
+                if (s == nullptr || s[0] == '\0') return false;
+                char *end = nullptr;
+                unsigned long v = std::strtoul(s, &end, 0); // base=0 picks 0x or decimal
+                if (end == s || *end != '\0') return false;
+                if (v > 0xFFFFFFFFul) return false;
+                out = static_cast<std::uint32_t>(v);
+                return true;
+            };
+            std::uint32_t base_addr = 0, size = 0;
+            if (!parse_hex_u32(state.read_rom_base_addr_hex, base_addr)) {
+                state.read_rom_error_msg =
+                    "Base address: parse failed (use 0xNNN or decimal).";
+            } else if (!parse_hex_u32(state.read_rom_size_hex, size)) {
+                state.read_rom_error_msg =
+                    "Size: parse failed (use 0xNNN or decimal).";
+            } else if (size == 0) {
+                state.read_rom_error_msg = "Size must be > 0.";
+            } else {
+                // Build the TransportSpec and launch the worker.
+                st::transport::TransportSpec spec;
+                spec.kind = transport_kind_from_combo(state.read_rom_transport_kind);
+                spec.dll_path = state.read_rom_dll_path;
+                spec.device_path = state.read_rom_device_path;
+
+                state.read_rom_error_msg.clear();
+                state.read_rom_bytes_result.clear();
+                state.read_rom_bytes_done = std::make_shared<std::atomic<std::uint32_t>>(0);
+                state.read_rom_total_bytes = std::make_shared<std::atomic<std::uint32_t>>(size);
+                state.read_rom_cancel = std::make_shared<std::atomic<bool>>(false);
+                state.read_rom_state = AppState::ReadRomState::Running;
+                state.read_rom_start_time = std::chrono::steady_clock::now();
+
+                // Capture shared_ptrs + plain values for the worker. The
+                // worker writes into AppState members ONLY after switching
+                // state away from Running, which is the cue for the main
+                // thread to join + read.
+                AppState *st_ptr = &state;
+                int const max_chunk = state.read_rom_max_chunk;
+                auto bytes_done_sp = state.read_rom_bytes_done;
+                auto total_sp = state.read_rom_total_bytes;
+                auto cancel_sp = state.read_rom_cancel;
+
+                state.read_rom_worker = std::thread(
+                    [st_ptr, spec, base_addr, size, max_chunk,
+                     bytes_done_sp, total_sp, cancel_sp]() mutable {
+                        auto transport_r = st::transport::open_transport(spec);
+                        if (!transport_r.has_value()) {
+                            st_ptr->read_rom_error_msg =
+                                "Adapter open failed: " +
+                                std::string{transport_r.error().message()};
+                            st_ptr->read_rom_state = AppState::ReadRomState::Failed;
+                            return;
+                        }
+                        // Open() the transport with default LinkConfig. When
+                        // the platform layer lands, this is where the user
+                        // would also see "Connecting...".
+                        auto open_r = (*transport_r)->open({});
+                        if (!open_r.has_value()) {
+                            st_ptr->read_rom_error_msg =
+                                "Adapter link open failed: " +
+                                std::string{open_r.error().message()};
+                            st_ptr->read_rom_state = AppState::ReadRomState::Failed;
+                            return;
+                        }
+                        st::flash::Flasher flasher{**transport_r};
+                        auto result = flasher.read_full_rom(
+                            base_addr, size, static_cast<std::uint32_t>(max_chunk),
+                            std::chrono::milliseconds{1500},
+                            [bytes_done_sp, total_sp](st::flash::Flasher::ReadProgress p) {
+                                bytes_done_sp->store(p.bytes_done,
+                                                     std::memory_order_release);
+                                total_sp->store(p.total_bytes,
+                                                std::memory_order_release);
+                            },
+                            cancel_sp.get());
+                        if (!result.has_value()) {
+                            if (result.error().code() == st::ErrorCode::Cancelled) {
+                                st_ptr->read_rom_state = AppState::ReadRomState::Cancelled;
+                                return;
+                            }
+                            st_ptr->read_rom_error_msg =
+                                std::string{result.error().message()};
+                            st_ptr->read_rom_state = AppState::ReadRomState::Failed;
+                            return;
+                        }
+                        st_ptr->read_rom_bytes_result = std::move(*result);
+                        st_ptr->read_rom_state = AppState::ReadRomState::Done;
+                    });
+            }
+        }
+        ImGui::EndDisabled();
+        if (start_disabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Fill in the %s field above.",
+                              state.read_rom_transport_kind == 0
+                                  ? "vendor DLL path"
+                                  : "device path");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+            state.read_rom_error_msg.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+        return;
+    }
+
+    // --------- Running: progress bar + cancel ---------
+    if (state.read_rom_state == AppState::ReadRomState::Running) {
+        std::uint32_t const done = state.read_rom_bytes_done->load(std::memory_order_acquire);
+        std::uint32_t const total = state.read_rom_total_bytes->load(std::memory_order_acquire);
+        float const frac = total > 0
+            ? static_cast<float>(done) / static_cast<float>(total)
+            : 0.0f;
+        char overlay[64];
+        std::snprintf(overlay, sizeof overlay, "0x%X / 0x%X  (%.1f%%)",
+                      done, total, static_cast<double>(100.0f * frac));
+        ImGui::ProgressBar(frac, ImVec2(-1.0f, 0.0f), overlay);
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::Text("Elapsed: %s", elapsed_str().c_str());
+        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+        text_subtle("Reading is slow (10-30 KB/s typical on SSM).");
+        text_subtle("A 2 MB ROM usually takes 4-15 minutes.");
+        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+        if (ImGui::Button("Cancel read", ImVec2(160.0f, 0.0f))) {
+            state.read_rom_cancel->store(true, std::memory_order_release);
+        }
+        ImGui::EndPopup();
+        return;
+    }
+
+    // --------- Done: save .bin + offer to open as project ---------
+    if (state.read_rom_state == AppState::ReadRomState::Done) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.85f, 0.55f, 1.0f));
+        ImGui::TextUnformatted("Read complete.");
+        ImGui::PopStyleColor();
+        ImGui::Text("Got %zu bytes in %s.",
+                    state.read_rom_bytes_result.size(), elapsed_str().c_str());
+        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+
+        if (ImGui::Button("Save .bin...", ImVec2(160.0f, 0.0f))) {
+            NFD::UniquePath out_path;
+            nfdfilteritem_t const filters[] = {{"ROM image", "bin,hex"}};
+            // Suggest a name from base+size for traceability.
+            char default_name[64];
+            std::snprintf(default_name, sizeof default_name, "rom_%s_%s.bin",
+                          state.read_rom_base_addr_hex, state.read_rom_size_hex);
+            nfdresult_t const r = NFD::SaveDialog(out_path, filters, 1, nullptr, default_name);
+            if (r == NFD_OKAY) {
+                std::filesystem::path target{out_path.get()};
+                std::ofstream fh{target, std::ios::binary};
+                if (!fh) {
+                    state.read_rom_error_msg =
+                        "Failed to open output file for write: " + target.string();
+                } else {
+                    fh.write(reinterpret_cast<char const *>(state.read_rom_bytes_result.data()),
+                             static_cast<std::streamsize>(state.read_rom_bytes_result.size()));
+                    if (!fh) {
+                        state.read_rom_error_msg = "Write failed (disk full?).";
+                    } else {
+                        state.status_msg = "Saved " + target.string() +
+                                           ". Use File → New project... to start tuning.";
+                        // Reset to Idle and close the popup.
+                        state.read_rom_bytes_result.clear();
+                        state.read_rom_state = AppState::ReadRomState::Idle;
+                        state.read_rom_error_msg.clear();
+                        ImGui::CloseCurrentPopup();
+                    }
+                }
+            } else if (r == NFD_ERROR) {
+                state.read_rom_error_msg =
+                    std::string{"Save dialog error: "} + NFD::GetError();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Discard", ImVec2(120.0f, 0.0f))) {
+            state.read_rom_bytes_result.clear();
+            state.read_rom_state = AppState::ReadRomState::Idle;
+            ImGui::CloseCurrentPopup();
+        }
+        if (!state.read_rom_error_msg.empty()) {
+            ImGui::Dummy(ImVec2(0.0f, 6.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.55f, 1.0f));
+            ImGui::TextWrapped("%s", state.read_rom_error_msg.c_str());
+            ImGui::PopStyleColor();
+        }
+        ImGui::EndPopup();
+        return;
+    }
+
+    // --------- Failed / Cancelled: surface + back-to-Idle ---------
+    if (state.read_rom_state == AppState::ReadRomState::Failed) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.55f, 1.0f));
+        ImGui::TextUnformatted("Read failed.");
+        ImGui::PopStyleColor();
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::TextWrapped("%s", state.read_rom_error_msg.c_str());
+        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    } else if (state.read_rom_state == AppState::ReadRomState::Cancelled) {
+        ImGui::TextUnformatted("Read cancelled.");
+        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    }
+    if (ImGui::Button("Back", ImVec2(120.0f, 0.0f)) ||
+        ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        state.read_rom_state = AppState::ReadRomState::Idle;
+        state.read_rom_error_msg.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
+
 constexpr float kStatusBarHeight = 26.0f;
 
 // One transparent host window covering the work area (minus our manual status
@@ -3611,6 +4017,28 @@ void render_menubar(AppState &state) {
         if (!has_project && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             // Edit menu itself is disabled (BeginMenu second arg = false).
             ImGui::SetTooltip("No project open — open one to enable editing.");
+        }
+        if (ImGui::BeginMenu("Tools")) {
+            if (ImGui::MenuItem("Read ROM from Car...")) {
+                // Open the modal in Idle state. Leftover bytes_result from
+                // a previous successful run get cleared so the modal opens
+                // on the form, not on the post-read save dialog.
+                state.read_rom_state = AppState::ReadRomState::Idle;
+                state.read_rom_error_msg.clear();
+                state.read_rom_bytes_result.clear();
+                state.show_read_rom_modal = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Dump the ECU's current calibration via the connected\n"
+                    "USB adapter (OBDX / J2534 / Native). Read-only — no\n"
+                    "ECU writes. Saves to a .bin you can then open as a\n"
+                    "new project via File → New project...");
+            }
+            // Future: "Write ROM to Car..." (see plan comment above
+            // render_read_rom_modal). Wired after OBDX adapter validation
+            // + battery / ignition preflight checks land.
+            ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View")) {
             bool const is_grid = state.view_mode == TableViewMode::Grid;
@@ -8399,6 +8827,7 @@ int main(int argc, char *argv[]) {
         render_maf_autotune_modal(state);
         render_kp_autotune_modal(state);
         render_flash_modal(state);
+        render_read_rom_modal(state);
         render_shortcuts_modal(state);
 
         if (state.show_imgui_demo) {
@@ -8461,6 +8890,16 @@ int main(int argc, char *argv[]) {
         render_frame();
     }
     g_render_frame = nullptr;
+
+    // If a Read-ROM-from-Car worker is still running (user closed the GUI
+    // mid-read instead of clicking Cancel), signal it to abort and join
+    // before the AppState destructor runs. Without this the std::thread
+    // destructor would terminate() on a joinable thread.
+    if (state.read_rom_worker.joinable()) {
+        if (state.read_rom_cancel)
+            state.read_rom_cancel->store(true, std::memory_order_release);
+        state.read_rom_worker.join();
+    }
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

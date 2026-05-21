@@ -64,8 +64,13 @@ bool FlashReport::all_sectors_verified() const noexcept {
 
 Result<std::vector<std::uint8_t>>
 Flasher::read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
-                       std::uint32_t max_chunk_size, std::chrono::milliseconds per_chunk_timeout) {
+                       std::uint32_t max_chunk_size,
+                       std::chrono::milliseconds per_chunk_timeout,
+                       Flasher::ReadProgressFn progress,
+                       std::atomic<bool> const *cancel) {
     if (total_length == 0) {
+        if (progress)
+            progress({0, 0});
         return std::vector<std::uint8_t>{};
     }
     if (max_chunk_size == 0) {
@@ -76,7 +81,18 @@ Flasher::read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
     out.reserve(total_length);
     std::uint32_t cursor = base_address;
     std::uint32_t remaining = total_length;
+    // Emit a t=0 progress event so the UI can show "starting…" immediately.
+    if (progress)
+        progress({0, total_length});
     while (remaining > 0) {
+        // Cancel check between chunks — caller's atomic flag. We discard
+        // the partial buffer rather than returning it (the partial bytes
+        // wouldn't form a valid ROM and we don't want callers building
+        // pipelines that try to salvage incomplete reads).
+        if (cancel != nullptr && cancel->load(std::memory_order_acquire)) {
+            return failure(ErrorCode::Cancelled,
+                           "flash: read_full_rom cancelled at " + hex_addr(cursor));
+        }
         std::uint32_t const this_chunk = remaining < max_chunk_size ? remaining : max_chunk_size;
         auto chunk = client_.read_memory_by_address(cursor, this_chunk, per_chunk_timeout);
         if (!chunk.has_value()) {
@@ -93,6 +109,8 @@ Flasher::read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
         out.insert(out.end(), chunk->begin(), chunk->end());
         cursor += this_chunk;
         remaining -= this_chunk;
+        if (progress)
+            progress({total_length - remaining, total_length});
     }
     return out;
 }
