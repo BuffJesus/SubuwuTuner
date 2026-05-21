@@ -126,6 +126,32 @@ lower priority).
 
 13 new tests total (5 C++ + 8 Python).
 
+## Coverage benchmark (vs RomRaider/Merp canonical XML)
+
+Empirical measurement at end of session (commit `6418998`):
+
+| Source | CID count |
+|---|---|
+| Merp canonical ecu_defs.xml (RomRaider open-source reference) | 332 |
+| Our packs in `definitions/` (excluding ecuparams/) | 373 |
+| **Intersection** | **332 (100.0%)** |
+| **Forum-sourced extras** (newer than Merp mainline) | **41** |
+
+Extras break down to:
+- 18 VB WRX packs (LHBH/LHBT/LHBK/LHBP series, 2022-2026 model years)
+- 9 VA WRX packs (LF75/LF79/LF9C/LF9D/LF9G/LF9L/LV9N, 2015-2021)
+- 14 misc EJ-era extras (cousin-seeds + community-only CIDs like ez1g/ez1d/e2vg)
+
+**Stance:** for EJ-era Subaru we are at parity with the RomRaider open-source standard. For VA/VB we are essentially peer with the community-aggregated forum-sourced definitions (since our bundles ARE those definitions ingested). VB 2026-model-year coverage may actually lead community-RomRaider-mainline.
+
+Concrete per-pack richness (post 875ed2f + 09342dd + bb659c1 sweeps):
+
+| family | packs | tables/pack | 2D tables/pack |
+|---|---|---|---|
+| VA WRX | 9 | ~290 | ~144 |
+| VB WRX | 18 | ~1100 | ~399 |
+| EJ-era | 346 | varies | varies |
+
 ## Status snapshot
 
 - **HEAD `bb659c1`**, in sync with `origin/main`.
