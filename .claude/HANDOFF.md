@@ -1,231 +1,178 @@
-# Handoff — 2026-05-20 end-of-day (CLI audit + VA/VB categorization)
+# Handoff — 2026-05-21 mid-session (P6 descriptor library shipped)
 
-Continuation of an already-long session. After the morning's 11-pack cousin-seed arc + localize.py v2 work (snapshotted at `5473115`), the day continued through a wide CLI-audit pass (eight commands cleaned up), a rom_size_bytes regression sweep with three layers of defensive fix, the bulk_regen `--dry-run` upgrade, and finally a VA/VB category-inference tool that retroactively gave 25 sparse packs navigable structure. User was GUI-testing with a2tb002c at end-of-session.
+Picking up from yesterday's end-of-day handoff (HEAD `8f4b44f` then). Today's session attempted P2-batch (all dropped), pivoted "wide" into a defgen XML→TOML investigation that turned out to be a wrong premise, then bootstrapped P6 — the cal-table descriptor library — including a consumer CLI and shape-aware filtering. Three commits, all pushed.
 
-**HEAD `78de957`**, in sync with `origin/main`. **373 .toml packs in `definitions/`**, all axis-validated. **Working tree clean** apart from `SubaruTuner.zip` (untracked 114 MB), `definitions/impreza/lf79100p.toml` (untracked cousin-seed for VA GUI testing), and `fixtures/projects/` (untracked, no idea what that is — may be a previous session leftover).
+**HEAD `7e0f06f`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave), `definitions/impreza/lf79100p.toml` (yesterday's throwaway VA GUI-test cousin-seed, still untracked), and `fixtures/projects/Test/` (user-created GUI project from yesterday's 22:50 session, leave alone).
 
-## What shipped since the last handoff (5473115, top = newest)
+## What shipped this session
 
 ```
-78de957 defs(packs): infer categories for 25 VA/VB packs via tools/defgen/categorize
-4cab7e6 fix(cli): "table/axis not found" errors now suggest similar ids
-3ce83f1 fix(cli): primitive-list --type does case-insensitive match
-d7bdd49 fix(cli): table-list --category does case-insensitive substring match
-eb63698 fix(cli): dump-axis summary + rom-diff sort by max delta
-bd311ca fix(cli): rom-info — category histogram in the def-pack summary
-22daea3 fix(cli): dump-table — at-a-glance summary line (cells/min/max/mean/zeros)
-1a5eca3 fix(cli): rom-info ASCII listing — filter noise + sort by length
-b5ccce3 tools(defgen): bulk_regen --dry-run actually previews changes
-f09c2ae tools(defgen): bulk_regen preserves manually-patched [pack] fields
-4c44a68 docs(handoff): note rom_size_bytes regression sweep + defgen default
-8ea6d71 fix(defgen): default rom_size_bytes to 1MB when XML lacks <filesize>
-0008695 fix(defs): restore rom_size_bytes=1048576 on ez1gc00c + ep5g600a
+7e0f06f tools(defgen): descriptors filter by expected_dims to kill over-match
+b625cc6 tools(defgen): add validate.py — descriptor library consumer
+c774e6d tools(defgen): bootstrap descriptors.py predicate library
 ```
 
-For everything before `5473115` see `git log 5473115` — that's the cousin-seed arc + LF79 audit + localize v2 + axis fix.
+### `tools/defgen/descriptors.py` (442 lines)
 
-## Today's substantive arcs (chronological condensed)
+Predicate library describing what real Subaru cal tables look like. Data model:
 
-1. **11 new packs** via cousin_seed + localize (`80a2a0d`, `897e53b`, `b3a5e14`, `261f5f8`). Same-trim same-region tens/ones-digit deltas work cleanly; cross-region / hundreds-delta drop.
+- `DecodeHint(dtype, dims, length, rows, cols)` — how to interpret a byte region.
+- `Verdict(matches, score, reasons)` — predicate output.
+- `Evidence(pack_id, table_id, rom_path)` — pointer to a real-world positive example.
+- `Descriptor(id, kind, description, id_patterns, predicate, evidence, expected_dims)` — the full triple. `expected_dims` filters out 2D-only predicates from being applied to 1D entries by id pattern alone.
+- `register(d)`, `all_descriptors()`, `by_id(...)`, `candidates_for(id, kind, dims)` — registry API.
+- Helper primitives: `decode_values`, `values_in_range`, `is_monotonic`, `distinct_fraction`.
 
-2. **LF79 audit** — only 1 of 31 LF79xxx files in `decrypted/` is a real anchor (LF79100P). 30 are promoted partials with encrypted cal bodies. Pattern repeats across LF7x/LF9x/LV9N. RECON.md (gitignored) + memory `project_lf79_partial_decrypts.md`.
+**5 seed predicates** (handoff sized eventual lib at 30-50):
 
-3. **localize.py v2** (`70773de`, `de647ba`, `3eb6202`): `--relocate-low` pattern-search relocator → `--patch-pack` in-place rewriter → axis-tracking + axis-aware classifier. 22 unit tests.
+| id | kind | expected_dims | matches |
+|---|---|---|---|
+| `engine_rpm_axis` | axis | 1 | monotonic, 200-8500 RPM span, 5-32 pts |
+| `coolant_temp_axis` | axis | 1 | monotonic, -50..150 °C, 4-24 pts |
+| `wastegate_duty` | table | 2 | uint16 in [0, 27000] (covers ×100/×1/128/×1/256), ≥4×4, ≥10% distinct |
+| `boost_target` | table | 2 | uint16 decodes to 20-350 kPa absolute via raw / /10 / /128 / ×0.1334 (EJ psi) |
+| `base_timing` | table | 2 | signed decodes to -15..+60° BTDC via raw / /4 / /2 |
 
-4. **Fake-anchor sweep** (`68c2f02`): 9 of 99 PAK_* entries in bulk_decrypt_v2 disabled (plaintext at path was itself a partial).
+Each predicate handles multiple Subaru scaling families (the empirical-baseline iteration is built in). Each cites concrete evidence in `a2tb002c` and a real-ROM drift-guard test ensures predicates don't silently regress against their own evidence.
 
-5. **Re-patched 6 cousin-seed packs** (`5598683`, `1df935b`) after dump-table validation exposed the axis-blindness bug.
+### `tools/defgen/validate.py` (332 lines)
 
-6. **CLI pack-discovery bug fix** (`21f89c2`): pack-list + rom-identify finally see single-file packs. Was returning 0 matches against the entire `definitions/` tree.
+Consumer CLI for the descriptor library:
 
-7. **rom_size_bytes regression sweep** (`0008695`, `8ea6d71`, `f09c2ae`): two packs silently wiped by bulk_regen, plus defensive default + preservation layer to stop the class.
+```
+python tools/defgen/validate.py --pack <pack.toml> --rom <rom.bin> [--tsv] [--kind table|axis] [--only ID]
+```
 
-8. **CLI UX audit pass** — eight commands cleaned up (rom-info x2, dump-table, dump-axis, rom-diff, table-list, primitive-list, all "table not found" sites). Pattern that kept holding: commands shipped fast, never exercised heavily, small papercuts accumulated. Each fix improves first-5-minutes-with-the-tool experience.
+For each `[[table]]` and `[[axis]]` in the pack, resolves the 2D shape from referenced axes, decodes bytes at the declared address, runs every applicable descriptor predicate. Reports PASS / FAIL / NO_DESCRIPTOR / SKIPPED with a coverage summary. Exit 0 = no FAILs, 1 = one or more FAILs, 2 = arg/file error.
 
-9. **VA/VB category inference** (`78de957`): hand-tuned rule table maps id-prefix patterns to category strings. 100% coverage on all 25 VA/VB packs in `definitions/impreza/` (22,067 categories inferred, 0 unmatched). Makes `table-list --category boost` actually work for VA/VB packs (was returning 0).
+**a2tb002c baseline (post-dims-filter):**
+```
+PASS                  5  (  1.3%)
+FAIL                  6  (  1.5%)
+NO_DESCRIPTOR       220  ( 56.4%)
+SKIPPED             159  ( 40.8%, all 0D scalars)
+Coverage            2.8%  of non-scalar entries
+```
+
+PASSing entries: `engine_speed` axis, `coolant_temperature` axis, `target_boost`, `initial_wastegate_duty`, `max_wastegate_duty`.
+
+### Tests
+
+- 31 tests in `test_descriptors.py` (28 synthetic + 3 real-ROM evidence checks).
+- 11 tests in `test_validate.py` (synthetic mini-pack + ROM, exercises loader, validate_entry, main exit codes).
+- **196/196 defgen tests green** (152 prior + 44 new).
+
+## Real bugs validate.py surfaced in a2tb002c
+
+These are pack metadata bugs, NOT descriptor problems. Logging for follow-up:
+
+1. **`base_timing_*_cruise` and `base_timing_*_non_cruise` claim `data_type = "uint16_be"`** but the bytes only make sense as `uint8`. Pack scaling factor (0.3515625, offset -20) maps uint8 raw 13-152 → -15..+33° BTDC (sensible). uint16 raw 29336 → 10314° BTDC (nonsense). CLI `dump-table` on these returns garbage values.
+
+2. **`fine_correction_stored_applied_rpm_ranges` axis declares `address = 0x00000000`** — that's inside the CID region of every Subaru ROM, not a real axis address. Likely a sentinel that survived defgen.
+
+3. **`initial_max_wastegate_duty_compensation_atm_pressure`** is matched by `*wastegate*duty*` pattern but it's a signed delta-percentage comp curve, not absolute duty. Needs its own 1D-compensation descriptor.
+
+Items (1) and (2) are pack fixes (touch `definitions/legacy/a2tb002c.toml` after verifying with the bludgod ROM). Item (3) is a descriptor addition (1D wastegate-comp descriptor).
+
+## Earlier this session (chronological)
+
+### P2 batch — all four candidates dropped
+
+Hundreds-digit-delta lesson held perfectly:
+
+| Target | Sibling | HIGH% | Verdict |
+|---|---|---|---|
+| LF9C000C | (no lf9c102p.bin) | — | blocked: sibling pack has no .bin |
+| LV9N100A | lv9n001d | 1.3% | drop |
+| LV9N303J | lv9n001d | 0.0% | drop |
+| LF75300E | lf75404h | 0.7% | drop |
+
+No commits, no new packs. Working tree clean after.
+
+### "Wide" defgen XML→TOML axes investigation
+
+Premise: defgen drops axes for VA/VB packs, demoting tables to 0D-only. Investigated, **premise wrong**:
+
+- defgen's `_axis_from_element` (line 1041-1043) does return None for axes without a `name` attribute, triggering demote-to-scalar at line 1006-1013. Behaviorally accurate diagnosis.
+- BUT the per-CID VA/VB XMLs are structurally minimal: no `sizex`/`sizey`/`size`/`elements` attributes anywhere, no inheritance base, no scaling sub-elements. Without axis lengths, even accepting nameless axes would only produce 2D-shaped tables with length=0 axes — still unusable.
+- Real unlock requires ROM-byte axis-length inference (the P6 descriptor library, in principle). defgen is doing the right thing given the input.
+
+Also discovered: **`build/scratch/SubaruDefs/RomRaider/ecu/standard/ecu_defs.xml`** is Merp's canonical XML (~21 MB), source of the EJ-era pack richness. VA/VB CIDs aren't in it.
+
+### P6 bootstrap (the rest of the session)
+
+Three commits described above. Real-ROM calibration loop worked: first descriptor batch rejected its own a2tb002c evidence (bands too narrow), refined predicates to absorb multiple Subaru scaling variants, added real-ROM tests to prevent regression.
 
 ## Status snapshot
 
-- **HEAD `78de957`**, in sync with `origin/main`
-- **definitions/ pack count: 373** (up from 361 at session start, +12 net — includes the 11 cousin-seeded + the implicit categorization of all VA/VB packs)
-- **defgen test suite: 152 tests green** (22 localize + 11 bulk_regen + ~119 defgen/cousin_seed/loggergen)
-- **C++ build: clean** (cli rebuilt many times today, all green)
-- **CI clang-format gate: required** — applied each time the CLI was edited
-- **All 706 .toml files under definitions/ load cleanly** (verified via `pack-list definitions --quiet`)
+- **HEAD `7e0f06f`**, in sync with `origin/main`
+- **definitions/ pack count: 373** (unchanged from yesterday)
+- **defgen test suite: 196 tests green** (152 prior + 31 descriptors + 11 validate + 2 dims-filter)
+- **C++ build: not rebuilt this session** (pure Python work)
+- **CI clang-format gate: required** — no C++ touched
+- **All 706 .toml files under definitions/ load cleanly** (verified yesterday; nothing changed today)
 
-Pre-existing C++ test failures (~80) exist on `main` due to a Windows-mingw + ctest interaction with non-ASCII test names (`→`/`—` mangle into `ΓåÆ`/`ΓÇö` when ctest invokes the test binary). Not a regression from any of today's work — verified by stashing changes and running on plain `main`. CI on Linux/MSVC presumably handles UTF-8 fine since the historical handoffs all said "807 tests green".
+## Open threads (for next session)
 
-## What the user was doing at end-of-session
+### Tier 1 — finish P6 descriptor library
 
-GUI-testing with the Legacy combo. Confirmed paths I gave them:
-- Pack: `definitions/legacy/a2tb002c.toml`
-- ROM: `fixtures/private/plaintext_corpus/bludgod-roms/USDM/Legacy/A2TB002C-2009-USDM-Subaru-Legacy-GT-AT.hex`
+The framework is solid; coverage is the next axis.
 
-Plus left a throwaway `definitions/impreza/lf79100p.toml` (untracked) for them to test VA-side GUI behavior against `fixtures/private/roms_extracted/decrypted/LF79/LF79100P.bin`.
+**(P6a) Add 1D compensation predicates.** Biggest NO_DESCRIPTOR cluster in a2tb002c is `*timing_compensation_*` curves (signed small magnitudes around 0). Adding a generic `timing_compensation_1d` descriptor would catch ~8 entries. Same for `*_compensation_iat`, `*_compensation_ect`, `*_compensation_atm_pressure` — these are 1D scalars vs the matching reference axis. Easy wins.
 
-The conversation closed on me explaining VA/VB coverage paths (P1 hardware-wait, P2 cousin-seed-existing-anchors, P3 just-landed-category-inference, P4 source-more-XMLs).
+**(P6b) Add common axes that aren't currently modeled.** From the NO_DESCRIPTOR axis list:
+- `intake_temperature` (IAT, -40..+120°C, like coolant)
+- `atmospheric_pressure` (50-105 kPa)
+- `engine_load` (g/rev or kg/h, 0-5 typical)
+- `throttle_plate_opening_angle` (0-100%)
+- `mass_airflow` (0-300 g/s or so)
 
-## Open threads (for tomorrow)
+Each is ~30 lines including tests. 5 descriptors brings coverage from ~3% to maybe 15-20% on a2tb002c.
 
-### Likely-to-surface from the GUI session
+**(P6c) Cross-pack validation runs.** Currently only validated a2tb002c. Run validate.py against:
+- `a2tb100u.toml` + `a2tb100u_*.bin` (impreza EJ, same family)
+- An ez1d* pack (also called out in handoff as known-good)
+- An lf75404h cousin-seeded pack (VA-family, mostly 0D so won't show much, but baselines coverage there)
 
-- **GUI bugs / feedback from a2tb002c session** — user may bring observations. The new dump-table / table-list / rom-info displays I added today aren't wired through the GUI (CLI-only). If the GUI feels less informative than the CLI, that's where to look.
-- **VA-side GUI testing on lf79103p** — now that categorization landed, the sidebar tree should have 26 categories. Confirm visually.
+This surfaces scaling variants the a2tb002c-only seed library missed.
 
-### P2 — cousin-seed remaining VA packs (concrete, today's tools)
+**(P6d) Fix a2tb002c pack bugs validate found.** base_timing dtype (uint16 → uint8) and fine_correction zero-address. Verify with dump-table after the fix.
 
-We have 5 VA real-anchor ROMs but only 2 of them have matching packs (lf79103p was already present; lf79100p I cousin-seeded as a throwaway). The other 3 still need packs:
+### Tier 2 — back to yesterday's deck
 
-| Anchor ROM                  | Sibling pack to seed from | Suggested CID |
-|----------------------------|---------------------------|---------------|
-| LF75300E (in `decrypted/LF75/`) | lf75404h or lf75404s | lf75300e      |
-| LV9N100A (in `decrypted/LV9N/`) | lv9n001d              | lv9n100a      |
-| LV9N303J (in `decrypted/LV9N/`) | lv9n001d              | lv9n303j      |
-| LF9C000C (in `decrypted/LF9C/`) | lf9c102p              | lf9c000c      |
-| LF78001C (in `decrypted/LF78/`) | (no LF78 sibling)     | — needs LF78 sourcing first |
+**(P1)** GUI feedback from a2tb002c session — still nothing surfaced from user.
 
-For each: `cousin_seed.py` → `localize.py --patch-pack` → metadata fixup → commit. Same flow as today's 11 packs. Each lands ~290-300 categorized tables (the categorize tool runs on these too).
+**(P2)** Remaining VA cousin-seeds — blocked per today's run. Hundreds-delta lesson holds across LF9C/LV9N/LF75 families. Needs closer siblings (no current candidates) or actual XMLs.
 
-Also: promote the throwaway `definitions/impreza/lf79100p.toml` to a real commit if the user's GUI test confirmed it loads OK.
+**(P3)** `docs/21-oem-baselines.md` — still deferred 5×. Now arguably even more relevant: validate.py + descriptor library is part of the baseline tooling. Could fold the empirical observation harvesting into a single doc-writing session.
 
-### P3 — docs/21-oem-baselines.md (deferred 5×)
+**(P4)** Axis-fingerprint relocator v3 — superseded by P6 if P6 grows. Drop from deck unless P6 stalls.
 
-Still on the deck. Empirical OEM behavior reference doc derived from the corpus. Needs RE work (load packs + read specific table addresses across ROMs, tabulate medians). Constraint from the LF79 audit: use only RELIABLE ROMs (bludgod corpus + the high-anchor decrypted/ families).
+**(P5)** `[[table.role]]` pack-format extension — C++ heavy, unchanged.
 
-Honest read: this needs a fresh session with full focus. Five deferrals in a row says the work is too heavy to slot into an end-of-session "small slice" pick.
+### Hardware
 
-### P4 — Axis-fingerprint relocator (localize.py v3)
-
-The current `--relocate-low` catches byte-identical address shifts (typically 10-20% of LOW entries on cross-revision packs). Recalibrated tables miss. An axis-fingerprint matcher (monotonic windowed match against the sibling axis values) could catch axes that moved even when their data tables were recalibrated. Speculative payoff — wouldn't push today's 4 dropped P1 candidates (az1g701v/710v/601r, a2wc400l) to commit-worthy, but would chip at the edge.
-
-### P5 — Pack-format extension for `[[table.role]]`
-
-§11 panels (knock dashboard, adaptive history, cold-start, EBCS) surface advisory suggestions but don't apply them. Documented in `docs/05` §11.X as the v1.2 path. Substantial C++ work — schema extension, Definition loader, edit::History routing, lint wiring, UI integration.
-
-### P6 — Cal-table descriptor library (def-pack acceleration, deterministic)
-
-End-of-session question from the user: "should we start on `docs/20` Tier 5 (AI-driven def-pack-acceleration) sooner?" Read-through verdict: **no — Tier 5 stays gated to v2.x as documented**, but the prep work that pays double *should* start now.
-
-The pitch: codify "what a real cal table looks like" as a library of runtime predicates. Examples:
-
-  - "Engine-speed axes are monotonic floats, 600-7000 RPM range, ~10-20 points"
-  - "Wastegate-duty maps are 11×11 uint16_be, value range 0-10000 (0-100% × 100)"
-  - "AFR target tables are bounded 9.0-22.0 with consistent per-row monotonicity"
-  - "EGT compensation tables have negative slopes vs temperature"
-  - "DTC threshold tables are scalar uint16 in 0-65535 raw range"
-
-Each descriptor: `(predicate, source_evidence_examples, table_id_patterns)`. Library is hand-curated from observed-real packs (a2tb002c, ez1d* family — packs we know are correctly categorized).
-
-What this pays off immediately (today's tooling tier):
-
-  - **Relocator gets smarter.** `is_this_actually_a_boost_target_table?` instead of just "byte-pattern matches sibling". Cuts the false-positive HIGH count we saw on ez1g109j (where the relocator's classify_pair said HIGH on bytes that were really a different table starting nearby).
-  - **Categorize gets smarter.** Can infer 2D shape + axis assignment from neighboring tables ("this 256-byte run between known axes X and Y is probably a 16×16 fuel map"). Could uplift the VA/VB packs from 0D-scalar-only to inferred 2D where the byte distribution matches.
-  - **New cousin-seed validation pass.** After patch-pack, run descriptor checks: "table claims to be 'engine_speed_axis' but bytes don't satisfy monotonic-float 600-7000 — reject and flag for manual review."
-
-What this pays off later (v2.x Tier 5 / Tier 7):
-
-  - Each descriptor + example set is **labeled positive training data** if/when we build an ML model. The hand-curation is the expensive part of any ML pipeline; doing it via predicates first makes the data available either way.
-  - Clean-room safe: derived from public RR XML facts + observed bytes in our reliable-anchor corpus (per the LF79 audit's RELIABLE set: bludgod + high-anchor decrypted/ families).
-
-Implementation rough shape — Python first to match the rest of `tools/defgen/`:
-
-  - `tools/defgen/descriptors.py` — predicate library + curator script
-  - `tools/defgen/validate.py` — runs descriptors against a (pack, ROM) pair, reports table-by-table "matches expected shape / doesn't"
-  - localize.py + categorize.py grow optional `--use-descriptors` flag for the smarter-relocation / smarter-shape-inference paths
-
-Sizing: descriptor library bootstrap is probably 30-50 hand-written predicates for the most common Subaru table types. Tractable in 2-3 sessions of focused work. The validator + relocator/categorize integration is another 1-2 sessions.
-
-Why NOT to start Tier 5 ML now:
-  - Tier 5 requires the v2.0 Backend abstraction, Backend::info() provenance metadata, the prompt-confirmation UI, and a clean training corpus pipeline — none built yet.
-  - Tier 5 is also LOWER priority than Tiers 1-3 (drift classifier, LLM explanation, explain-this-log assistant) in the doc's own ordering. Starting Tier 5 first inverts the architecture.
-  - The deterministic descriptor library captures the same value with no ML infrastructure cost AND no training-data clean-room work. If the descriptor library proves the value (or its limits), THEN the case for ML is empirical, not speculative.
-
-### Honest acknowledgement: where ML probably IS the right tool eventually
-
-End-of-day discussion clarified the user's framing: ML to **expand coverage where data is sparse**, not just "improve what's known". The descriptor library answers the latter; for the former, ML has a real place. Two specific applications where the data-sparsity argument is strongest, ranked:
-
-1. **Cipher / encryption-bucket classification (Tier 8 in `docs/20`).** Currently in the doc's "research" bucket but probably the highest-leverage ML application for the data-sparse case. The LF79 audit today proved encryption-bucket understanding is the bottleneck for the entire VA/VB family — only LF79100P is a real anchor among 31 LF79xxx, only 5 real anchors across the entire 2MB FA-DIT bucket. Every new ROM family that uses a different encryption scheme currently needs manual RE of the cipher (per_family_xor / per_CID layer). ML over byte-distribution features could fingerprint encryption schemes empirically and short-circuit a lot of that work. **One good cipher-fingerprint tool unlocks more cal coverage than a hundred def-pack drafts.** Worth promoting from "research" to "v2.x reachable" in the doc when we next revise it.
-
-2. **Pack drafting for un-XML'd CIDs (Tier 5).** ML pattern recognition over byte distributions could say "this 0xC1000-0xC1FF region IS a fuel map" even where we have no sibling pack and no source XML. Descriptor library helps a little (scan for fuel-map-shaped regions) but ML scales better across the long tail of CIDs we'll never have RR XMLs for. Justified after the descriptor library establishes the deterministic ceiling.
-
-The stance update: P6 (descriptor library) is the right next step because it sets the empirical baseline. But the long-arc thinking should NOT assume "deterministic is always enough" — for the genuinely-sparse cases (sparse CID coverage, undocumented ciphers), ML is the eventual answer. The descriptor library gives us the data to know when to cross that bridge.
-
-If the user opens a future session with a "we're hitting the deterministic ceiling" observation, the right answer is to revisit `docs/20` Tier 8 first, Tier 5 second.
-
-### Hardware ETA: OBDX Pro VX adapter, May 22-25 2026
-
-Two days minimum from this handoff. First-light command pre-staged:
-
-```
-subuwutuner-cli rom-pull --transport obdx --device COM5 \
-    --def definitions/impreza/lf79103p.toml -o my_current_cal.bin
-```
-
-Win32 USB-CDC layer at `c64b717`; codec + transport + SSM/UDS clients tested against MockTransport. The dump will be the user's current COBB-tuned cal (bypassing the COBB AppData encryption) — also doubles as the first real LF79103P anchor we'd own, unlocking the LF7910 family in `bulk_decrypt_v2`.
-
-### Forum thread to mine — 2017 WRX engine bin (carried over from 2026-05-19)
-
-<https://mhhauto.com/Thread-2017-Subaru-WRX-need-engine-bin-file>. May contain a clean LF79xxx CID. The P2 LF79 audit confirmed every additional LF79xxx anchor multiplies into ~150 partial→full decrypts in that bucket. Login cookies at `D:\Documents\atlas-personal\forumdownloads\cookies.txt`.
-
-### Investigate `fixtures/projects/` (untracked working-tree clutter)
-
-Showed up in `git status` at end of session. Don't know what created it — could be a stray .stune project from a CLI test I ran (project-new perhaps). Glance + delete if it's empty/junk, leave alone if it's user state.
-
-## Carry-over lessons (memory entries created today)
-
-- **Always dump-table-validate cousin-seeded packs before committing** (`feedback_cousin_seed_axis_validation.md`) — localize.py's HIGH/MED summary isn't enough; axes can be wrong even when data tables are correct. Run dump-table on a 2D table and verify axis labels look sensible (RPM thousands, lambda 0-2, etc.).
-- **decrypted/ ROMs are mostly partials** (`project_lf79_partial_decrypts.md`) — only bulk_decrypt_v2 CONFIRMED-list anchor sources have real cal bodies; partials have correct bootloader bytes but encrypted cal regions.
+**OBDX Pro VX adapter** ETA May 22-25 2026 (1-4 days from this handoff). First-light pre-staged command in yesterday's handoff still valid.
 
 ## House-style notes (carry-over)
 
-- Terse. No trailing summaries.
-- "Proceed" / "Continue" = next narrow thing OR pick a next slice.
-- Push per-commit. Caveman-style messages.
-- Modal failure feedback goes inline in the modal, not the status bar.
-- UI/UX: intuitive + non-intimidating + modern + beautiful + functional, equally weighted.
-- Accent purple `(0.55, 0.35, 0.85)` via `accent_for(Theme)`.
-- `/` in bash paths; `\` in Windows-path strings.
-- NEVER `rm -rf` directories that may hold user files.
-- Don't `git add -A` blindly — `SubaruTuner.zip` (114 MB at repo root) will sweep in and break the push.
-- GUI not smoke-testable by Claude (no display). State explicitly when something ships unverified.
-- Action buttons must complete the action.
-- clang-format gate is required. Binary at `C:\Users\Cornelio\AppData\Roaming\Python\Python314\Scripts\clang-format.exe` — invoke by full path.
+All from yesterday + reinforced today:
 
-Session-style additions from today:
-- **The cousin_seed sweet spot is ones/tens-digit deltas within same trim + region.** Cross-trim (STI↔WRX), cross-region (USDM↔ADM), and hundreds-digit deltas all fail. Drop rather than commit a high-LOW pack.
-- **Post-seed metadata fixes are manual.** cousin_seed doesn't update years/transmission from filename hints; patch them after.
-- **VA/VB packs are 0D-scalar-only.** Inherent to the sparse forum-sourced XMLs. The `78de957` category-inference makes them GUI-navigable but doesn't conjure 2D maps that aren't in the source.
-- **CLI-audit pattern works.** Every command I exercised surfaced either a bug or a UX gap. Worth continuing — see eight commits 1a5eca3 through 4cab7e6 for the cadence.
+- Terse. No trailing summaries.
+- Push per-commit. Caveman commit messages.
+- Don't `git add -A`; explicit paths. (`SubaruTuner.zip` would break the push.)
+- NEVER `rm -rf` user-content directories.
+- `/caveman-review` the diff + `/caveman-commit` the message before push (today: did three commits this way).
+- Real-ROM evidence tests are great safety net — descriptor refinements broke their own evidence twice today; tests caught it.
+- Validate.py FAILs are SIGNAL, not noise. Each surfaced FAIL = either pack bug, predicate gap, or pattern over-match. All three are useful.
 
 ## Suggested opener for next session
 
-> "HEAD `78de957`, in sync with `origin/main`. 373 packs in `definitions/`, all axis-validated AND VA/VB-categorized. Working tree clean apart from `SubaruTuner.zip` + `lf79100p.toml` (throwaway VA GUI-test cousin-seed). 152 defgen tests green; C++ build clean.
+> "HEAD `7e0f06f`, in sync with `origin/main`. P6 descriptor library bootstrapped this session: framework + 5 seed predicates + validate.py consumer CLI + dims-filter for over-match. 196/196 defgen tests green. a2tb002c coverage baseline: 1.3% PASS, 1.5% FAIL, 56.4% NO_DESCRIPTOR, 40.8% SKIPPED (0D scalars).
 >
-> Last session was a marathon — 30+ commits across cousin-seed packs, localize.py v2 + axis-tracking, LF79 audit, CLI UX audit (8 commands), rom_size_bytes regression three-layer fix, bulk_regen --dry-run upgrade, VA/VB category-inference tool. End of session, user was GUI-testing with a2tb002c + the Legacy ROM.
+> Three things on the deck for this session:
+> **(P6a)** Add 1D compensation descriptors — biggest NO_DESCRIPTOR cluster is `*_compensation_*` curves. ~5 new descriptors lifts a2tb002c coverage from ~3% to ~15-20%.
+> **(P6c)** Cross-pack validate.py runs (a2tb100u, ez1d*, an lf75404h-cousin pack) to surface scaling variants we missed.
+> **(P6d)** Fix a2tb002c.toml base_timing dtype (uint16 → uint8, validate.py flagged it; CLI dump-table currently returns garbage on those tables).
 >
-> On the deck for this session:
-> **(P1)** Anything that surfaces from the GUI test (likely user feedback or bug reports).
-> **(P2)** Cousin-seed the 3-4 remaining VA packs from existing anchor ROMs (lf75300e, lv9n100a, lv9n303j, lf9c000c). Today's tools handle this in batch — same pattern as the 11-pack arc.
-> **(P6)** Cal-table descriptor library — bootstrap 30-50 hand-written predicates (RPM-axis shape, wastegate-duty shape, AFR-target shape, etc.) that runtime-validate "is this table what we think it is?". Pays off immediately (smarter relocator/categorize/validate) AND becomes labeled training data if/when we want Tier 5 ML in v2.x. **See the P6 section above for the full rationale on doing this instead of starting docs/20 Tier 5 work.**
-> **(P3)** `docs/21-oem-baselines.md` (deferred 5×). Heavy doc work, needs focused session.
-> **(P4)** Axis-fingerprint relocator v3 — marginal payoff per today's analysis (mostly subsumed by P6 if P6 lands first).
-> **(P5)** `[[table.role]]` pack-format extension for §11 panel-to-pack routing (substantial C++).
->
-> Adapter ETA May 22-25 (any day now). If it lands mid-session, pivot to the first-light `rom-pull` command pre-staged at `c64b717`."
-
-If the user opens with hardware news:
-
-> "OBDX landed? First post-arrival command:
->
-> ```
-> subuwutuner-cli rom-pull --transport obdx --device COM5 \
->     --def definitions/impreza/lf79103p.toml -o my_current_cal.bin
-> ```
->
-> That dumps your CURRENT (COBB-tuned) calibration unencrypted, bypassing the COBB AppData encryption. Win32 USB-CDC layer pre-staged at `c64b717`. Battery > 12.0 V before connecting. The dump is read-only — no flash, no write — so safe with engine off.
->
-> Bonus: once dumped, that LF79103P file becomes the FIRST real LF7910-family anchor we'd own — drop it at `fixtures/private/roms_extracted/decrypted/LF79/LF79103P.bin`, wire it into `bulk_decrypt_v2.py` as a CONFIRMED anchor, and re-run to unlock the ~150-cipher LF7910 family (validates the lf79103p pack at the same time)."
-
-If the user opens with GUI feedback:
-
-> "What did the GUI show? The new CLI displays from today (rom-info category histogram, dump-table summary, dump-axis monotonicity check, "did you mean" suggestions) aren't wired through the GUI yet — if you noticed it feels less informative than the CLI, that's the gap to close. Specific bugs go through the same flow as any other src/ui/ work."
+> Or pivot — adapter may land mid-session. If OBDX arrives, drop P6 and pre-stage the first-light dump."
