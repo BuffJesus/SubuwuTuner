@@ -713,7 +713,7 @@ factor    = 0.3515625
 offset    = -20.0
 unit      = "Base Ignition Timing (degrees BTDC)"
 precision = 2
-data_type = "uint16_be"
+data_type = "uint8"
 
 
 [[scaling]]
@@ -2892,7 +2892,7 @@ name                   = "Base Timing A"
 category               = "ignition timing - advance"
 dimensions             = 2
 address                = 0x000C9244
-data_type              = "uint16_be"
+data_type              = "uint8"
 scaling                = "base_ignition_timing_degrees_btdc_x_3515625_20"
 axis_x                 = "engine_load"
 axis_y                 = "engine_speed"
@@ -2906,7 +2906,7 @@ name                   = "Base Timing B"
 category               = "ignition timing - advance"
 dimensions             = 2
 address                = 0x000C93D8
-data_type              = "uint16_be"
+data_type              = "uint8"
 scaling                = "base_ignition_timing_degrees_btdc_x_3515625_20"
 axis_x                 = "engine_load"
 axis_y                 = "engine_speed"
@@ -2932,7 +2932,7 @@ name                   = "Base Timing Idle (Above Speed Threshold)"
 category               = "ignition timing - advance"
 dimensions             = 1
 address                = 0x000C8970
-data_type              = "uint16_be"
+data_type              = "uint8"
 scaling                = "base_ignition_timing_degrees_btdc_x_3515625_20"
 axis_x                 = "engine_speed"
 emissions_relevant     = false
