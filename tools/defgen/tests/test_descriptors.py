@@ -81,7 +81,8 @@ class RegistryTest(unittest.TestCase):
         ids = {d.id for d in descriptors.all_descriptors()}
         for expected in ("engine_rpm_axis", "coolant_temp_axis",
                          "intake_temp_axis", "engine_load_axis",
-                         "wastegate_duty", "boost_target", "base_timing"):
+                         "wastegate_duty", "boost_target", "base_timing",
+                         "timing_compensation_1d", "boost_compensation_1d"):
             self.assertIn(expected, ids)
 
     def test_by_id(self):
@@ -360,6 +361,67 @@ class BaseTimingTest(unittest.TestCase):
             buf,
             descriptors.DecodeHint(dtype="int16_be", dims=2, rows=8, cols=8))
         self.assertFalse(v.matches)
+
+
+# ---------------------------------------------------------------------------
+# Timing-compensation 1D
+# ---------------------------------------------------------------------------
+
+def _pack_bytes(values: list[int]) -> bytes:
+    return bytes(values)
+
+
+class TimingCompensation1DTest(unittest.TestCase):
+    def test_accepts_typical_ect_comp_curve(self):
+        # Real bytes from a2tb002c timing_compensation_ect (ECT axis comp).
+        # raw 151..117 with the canonical x*.3515625 − 45 scaling decode to
+        # +8..−4° BTDC across the 16-point ECT sweep.
+        raw = [151, 151, 151, 151, 148, 144, 139, 137,
+               134, 131, 128, 128, 128, 128, 122, 117]
+        v = descriptors.TIMING_COMPENSATION_1D.predicate(
+            _pack_bytes(raw),
+            descriptors.DecodeHint(dtype="uint8", dims=1, length=16))
+        self.assertTrue(v.matches, msg=v.reasons)
+
+    def test_rejects_out_of_band(self):
+        # All-zero with scaling x*.352 − 45 → −45° (out of −30..+30 band).
+        # All other tried scalings push it further out.
+        raw = [0] * 16
+        v = descriptors.TIMING_COMPENSATION_1D.predicate(
+            _pack_bytes(raw),
+            descriptors.DecodeHint(dtype="uint8", dims=1, length=16))
+        self.assertFalse(v.matches)
+
+    def test_rejects_wrong_dtype(self):
+        v = descriptors.TIMING_COMPENSATION_1D.predicate(
+            _pack_uint16_be([128] * 16),
+            descriptors.DecodeHint(dtype="uint16_be", dims=1, length=16))
+        self.assertFalse(v.matches)
+
+
+# ---------------------------------------------------------------------------
+# Boost-compensation 1D
+# ---------------------------------------------------------------------------
+
+class BoostCompensation1DTest(unittest.TestCase):
+    def test_accepts_flat_stock_curve(self):
+        # a2tb002c target_boost_compensation_ect — all 128 raw bytes →
+        # 0% adjustment across the table. Flat-stock curve must be PASS.
+        raw = [128] * 16
+        v = descriptors.BOOST_COMPENSATION_1D.predicate(
+            _pack_bytes(raw),
+            descriptors.DecodeHint(dtype="uint8", dims=1, length=16))
+        self.assertTrue(v.matches, msg=v.reasons)
+
+    def test_accepts_asymmetric_compensation(self):
+        # 128±some — typical asymmetric comp where cold ECT gets +20%
+        # and hot ECT gets −10%.
+        raw = [154, 150, 145, 140, 135, 132, 130, 128,
+               128, 126, 124, 122, 120, 118, 117, 115]
+        v = descriptors.BOOST_COMPENSATION_1D.predicate(
+            _pack_bytes(raw),
+            descriptors.DecodeHint(dtype="uint8", dims=1, length=16))
+        self.assertTrue(v.matches, msg=v.reasons)
 
 
 # ---------------------------------------------------------------------------

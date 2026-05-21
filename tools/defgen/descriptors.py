@@ -537,3 +537,102 @@ BASE_TIMING = register(Descriptor(
     ],
     expected_dims=2,
 ))
+
+
+def _timing_compensation_1d(buf: bytes, hint: DecodeHint) -> Verdict:
+    # Timing-compensation 1D curves (ECT comp, IAT comp, MRP comp,
+    # per-cylinder, etc.) carry a signed degree adjustment relative to
+    # base timing. On Subaru EJ/DI ROMs the raw is typically uint8 with
+    # one of a few signed-mapping scalings. The descriptor tries the
+    # common ones and accepts any that places all cells inside ±30°,
+    # which covers everything from gentle cold-engine advance to
+    # aggressive knock-protection retard. Flat curves are accepted
+    # (stock cars run with comp = 0 across the table); the only reject
+    # is "no scaling fits".
+    if hint.dims != 1 or hint.length < 4 or hint.length > 32:
+        return Verdict.no(f"length {hint.length} outside [4,32]")
+    if hint.dtype not in ("uint8", "int8"):
+        return Verdict.no(f"dtype {hint.dtype} not byte-wide")
+    try:
+        vals = decode_values(buf, hint.dtype, hint.length)
+    except (KeyError, struct.error) as exc:
+        return Verdict.no(f"decode failed: {exc}")
+    # Common Subaru scalings for timing comp (factor, offset).
+    candidates = [
+        ("raw×0.352−45°",     [v * 0.3515625 - 45.0 for v in vals]),
+        ("raw×0.5−64°",       [v * 0.5 - 64.0 for v in vals]),
+        ("raw×0.25−32°",      [v * 0.25 - 32.0 for v in vals]),
+        ("raw−128°",          [v - 128.0 for v in vals]),
+    ]
+    for label, scaled in candidates:
+        in_range, bad = values_in_range(scaled, -30.0, 30.0)
+        if in_range:
+            df = distinct_fraction(vals)
+            return Verdict.yes(1.0,
+                f"{hint.length}-pt in [−30,+30]° via {label}, {df:.0%} distinct")
+    return Verdict.no(f"no scaling places all {hint.length} cells in −30..+30°")
+
+
+TIMING_COMPENSATION_1D = register(Descriptor(
+    id="timing_compensation_1d",
+    kind="table",
+    description="1D timing-compensation curve: signed degree adjustment in ±30°.",
+    id_patterns=[
+        "*timing_compensation_ect*", "*timing_compensation_iat*",
+        "*timing_compensation_mrp*", "*timing_compensation_per_cylinder*",
+        "*timing_compensation_a_iat*", "*timing_compensation_b_iat*",
+        "*ignition_timing_correction*",
+    ],
+    predicate=_timing_compensation_1d,
+    evidence=[
+        Evidence("a2tb002c", "timing_compensation_ect"),
+    ],
+    expected_dims=1,
+))
+
+
+def _boost_compensation_1d(buf: bytes, hint: DecodeHint) -> Verdict:
+    # Boost-target / wastegate-duty 1D compensation curves carry a
+    # percent or delta-pressure adjustment. Common Subaru scalings:
+    #   * raw×0.78125 − 100  → range −100..+99.2% (uint8 stock)
+    #   * raw×0.39062 − 50   → range −50..+49.6% (some sub-platforms)
+    #   * raw − 128          → straight signed-byte percent
+    # We accept any scaling that places all cells in ±100% with at
+    # least 1 distinct cell value (covers all-flat stock curves).
+    if hint.dims != 1 or hint.length < 4 or hint.length > 32:
+        return Verdict.no(f"length {hint.length} outside [4,32]")
+    if hint.dtype not in ("uint8", "int8"):
+        return Verdict.no(f"dtype {hint.dtype} not byte-wide")
+    try:
+        vals = decode_values(buf, hint.dtype, hint.length)
+    except (KeyError, struct.error) as exc:
+        return Verdict.no(f"decode failed: {exc}")
+    candidates = [
+        ("raw×0.781−100%",  [v * 0.78125 - 100.0 for v in vals]),
+        ("raw×0.391−50%",   [v * 0.390625 - 50.0 for v in vals]),
+        ("raw−128%",        [v - 128.0 for v in vals]),
+    ]
+    for label, scaled in candidates:
+        in_range, bad = values_in_range(scaled, -100.0, 100.0)
+        if in_range:
+            df = distinct_fraction(vals)
+            return Verdict.yes(1.0,
+                f"{hint.length}-pt in [−100,+100]% via {label}, {df:.0%} distinct")
+    return Verdict.no(f"no scaling places all {hint.length} cells in −100..+100%")
+
+
+BOOST_COMPENSATION_1D = register(Descriptor(
+    id="boost_compensation_1d",
+    kind="table",
+    description="1D boost/wastegate-duty compensation curve: signed adjustment in ±100%.",
+    id_patterns=[
+        "*target_boost_compensation*", "*boost_compensation*",
+        "*wastegate_duty_compensation*", "*wastegate_compensation*",
+        "*initial_max_wastegate_duty_compensation*",
+    ],
+    predicate=_boost_compensation_1d,
+    evidence=[
+        Evidence("a2tb002c", "target_boost_compensation_ect"),
+    ],
+    expected_dims=1,
+))
