@@ -102,6 +102,44 @@ The current `--relocate-low` catches byte-identical address shifts (typically 10
 
 §11 panels (knock dashboard, adaptive history, cold-start, EBCS) surface advisory suggestions but don't apply them. Documented in `docs/05` §11.X as the v1.2 path. Substantial C++ work — schema extension, Definition loader, edit::History routing, lint wiring, UI integration.
 
+### P6 — Cal-table descriptor library (def-pack acceleration, deterministic)
+
+End-of-session question from the user: "should we start on `docs/20` Tier 5 (AI-driven def-pack-acceleration) sooner?" Read-through verdict: **no — Tier 5 stays gated to v2.x as documented**, but the prep work that pays double *should* start now.
+
+The pitch: codify "what a real cal table looks like" as a library of runtime predicates. Examples:
+
+  - "Engine-speed axes are monotonic floats, 600-7000 RPM range, ~10-20 points"
+  - "Wastegate-duty maps are 11×11 uint16_be, value range 0-10000 (0-100% × 100)"
+  - "AFR target tables are bounded 9.0-22.0 with consistent per-row monotonicity"
+  - "EGT compensation tables have negative slopes vs temperature"
+  - "DTC threshold tables are scalar uint16 in 0-65535 raw range"
+
+Each descriptor: `(predicate, source_evidence_examples, table_id_patterns)`. Library is hand-curated from observed-real packs (a2tb002c, ez1d* family — packs we know are correctly categorized).
+
+What this pays off immediately (today's tooling tier):
+
+  - **Relocator gets smarter.** `is_this_actually_a_boost_target_table?` instead of just "byte-pattern matches sibling". Cuts the false-positive HIGH count we saw on ez1g109j (where the relocator's classify_pair said HIGH on bytes that were really a different table starting nearby).
+  - **Categorize gets smarter.** Can infer 2D shape + axis assignment from neighboring tables ("this 256-byte run between known axes X and Y is probably a 16×16 fuel map"). Could uplift the VA/VB packs from 0D-scalar-only to inferred 2D where the byte distribution matches.
+  - **New cousin-seed validation pass.** After patch-pack, run descriptor checks: "table claims to be 'engine_speed_axis' but bytes don't satisfy monotonic-float 600-7000 — reject and flag for manual review."
+
+What this pays off later (v2.x Tier 5 / Tier 7):
+
+  - Each descriptor + example set is **labeled positive training data** if/when we build an ML model. The hand-curation is the expensive part of any ML pipeline; doing it via predicates first makes the data available either way.
+  - Clean-room safe: derived from public RR XML facts + observed bytes in our reliable-anchor corpus (per the LF79 audit's RELIABLE set: bludgod + high-anchor decrypted/ families).
+
+Implementation rough shape — Python first to match the rest of `tools/defgen/`:
+
+  - `tools/defgen/descriptors.py` — predicate library + curator script
+  - `tools/defgen/validate.py` — runs descriptors against a (pack, ROM) pair, reports table-by-table "matches expected shape / doesn't"
+  - localize.py + categorize.py grow optional `--use-descriptors` flag for the smarter-relocation / smarter-shape-inference paths
+
+Sizing: descriptor library bootstrap is probably 30-50 hand-written predicates for the most common Subaru table types. Tractable in 2-3 sessions of focused work. The validator + relocator/categorize integration is another 1-2 sessions.
+
+Why NOT to start Tier 5 ML now:
+  - Tier 5 requires the v2.0 Backend abstraction, Backend::info() provenance metadata, the prompt-confirmation UI, and a clean training corpus pipeline — none built yet.
+  - Tier 5 is also LOWER priority than Tiers 1-3 (drift classifier, LLM explanation, explain-this-log assistant) in the doc's own ordering. Starting Tier 5 first inverts the architecture.
+  - The deterministic descriptor library captures the same value with no ML infrastructure cost AND no training-data clean-room work. If the descriptor library proves the value (or its limits), THEN the case for ML is empirical, not speculative.
+
 ### Hardware ETA: OBDX Pro VX adapter, May 22-25 2026
 
 Two days minimum from this handoff. First-light command pre-staged:
@@ -156,9 +194,10 @@ Session-style additions from today:
 > On the deck for this session:
 > **(P1)** Anything that surfaces from the GUI test (likely user feedback or bug reports).
 > **(P2)** Cousin-seed the 3-4 remaining VA packs from existing anchor ROMs (lf75300e, lv9n100a, lv9n303j, lf9c000c). Today's tools handle this in batch — same pattern as the 11-pack arc.
+> **(P6)** Cal-table descriptor library — bootstrap 30-50 hand-written predicates (RPM-axis shape, wastegate-duty shape, AFR-target shape, etc.) that runtime-validate "is this table what we think it is?". Pays off immediately (smarter relocator/categorize/validate) AND becomes labeled training data if/when we want Tier 5 ML in v2.x. **See the P6 section above for the full rationale on doing this instead of starting docs/20 Tier 5 work.**
 > **(P3)** `docs/21-oem-baselines.md` (deferred 5×). Heavy doc work, needs focused session.
-> **(P4)** `[[table.role]]` pack-format extension for §11 panel-to-pack routing (substantial C++).
-> **(P5)** Axis-fingerprint relocator v3 — marginal payoff per today's analysis.
+> **(P4)** Axis-fingerprint relocator v3 — marginal payoff per today's analysis (mostly subsumed by P6 if P6 lands first).
+> **(P5)** `[[table.role]]` pack-format extension for §11 panel-to-pack routing (substantial C++).
 >
 > Adapter ETA May 22-25 (any day now). If it lands mid-session, pivot to the first-light `rom-pull` command pre-staged at `c64b717`."
 
