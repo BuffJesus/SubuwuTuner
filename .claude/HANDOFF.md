@@ -1,8 +1,8 @@
 # Handoff — 2026-05-21 (P6 + 3 pack-bug sweeps + VA/VB bundles + AFR formula)
 
-Marathon session. Built on yesterday's `8f4b44f`. **23 commits** all pushed. P6 descriptor library is real and finding real bugs; validate.py surfaced multiple classes of pack-quality issues that we fixed at the source (defgen) and applied corpus-wide; user dropped two forum-sourced VA/VB bundle XMLs which we wired into bulk_regen to upgrade 25 packs from 0D-scalar-only to fully-typed 2D.
+Marathon session. Built on yesterday's `8f4b44f`. **28 commits** all pushed. P6 descriptor library is real and finding real bugs; validate.py surfaced multiple classes of pack-quality issues that we fixed at the source (defgen) and applied corpus-wide; user dropped two forum-sourced VA/VB bundle XMLs which we wired into bulk_regen to upgrade 25 packs from 0D-scalar-only to fully-typed 2D.
 
-**HEAD `6a4693a`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave) and `fixtures/projects/Test/` (user-created GUI state, leave alone).
+**HEAD `09342dd`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave) and `fixtures/projects/Test/` (user-created GUI state, leave alone).
 
 ## Fifteen commits shipped (oldest → newest)
 
@@ -31,6 +31,11 @@ f202081 defs(packs): bulk_regen sweep emits subaru_afr_enrichment (323 packs)
 07c8cc3 tools(defgen): broaden compensation descriptors (1D patterns + new 2D)
 b4a062e docs(handoff): capture compensation-descriptor broadening (07c8cc3)
 6a4693a fix(defgen)+defs: float-endian override for non-axis scalings + cousin re-seed
+451b28c docs(handoff): capture user-experience pass + 6a4693a
+fc67e84 docs(handoff): fix stale commit count in suggested opener
+e3c9bf6 docs(handoff): UX pass on a2tb001c deprioritizes P6a-continued
+ad187c4 docs(handoff): P6e-VA investigated — VA fueling tables are correct
+09342dd feat(defs+defgen): inverse_divide non-linear formula
 ```
 
 ## What's new since yesterday (8f4b44f)
@@ -83,7 +88,9 @@ User provided two RomRaider-format bundles at `fixtures/private/romraider_defs/{
 
 The bundle files themselves remain at `fixtures/private/romraider_defs/` — uncommitted per Path B. bulk_regen guards with `if not bundle_path.is_file(): continue` so the public repo + tools work on machines without the bundles.
 
-### AFR formula support shipped (commits `74624d3` + `f202081`)
+### Two non-linear formula types shipped this session
+
+**AFR enrichment (commits `74624d3` + `f202081`):**
 
 The non-linear AFR enrichment formula `14.7/(1+x*0.0078125)` is now a first-class formula type across the stack:
 
@@ -95,9 +102,30 @@ The non-linear AFR enrichment formula `14.7/(1+x*0.0078125)` is now a first-clas
 
 15 new tests total (7 C++ + 8 Python).
 
+**Inverse divide (commit `09342dd`):**
+
+Same shape of fix for the reciprocal expression `N/x`. Found via the
+UX-pass discipline: `injector_flow_scaling` (318-pack scaling) was
+showing raw float 4916 cc/min — Subaru injectors are 380-2000 cc/min.
+The canonical expression `2707090/x` converts to 550.67 cc/min, exactly
+the OEM EJ255 injector flow rate.
+
+- **C++**: `InverseDivideScaling { numerator }` variant. `apply_scaling`:
+  value = numerator / raw with raw==0 guard. `invert_scaling`: raw =
+  numerator / value with value==0 guard. Loader parses `formula = "inverse_divide"`.
+- **defgen**: `match_inverse_divide()` regex for `N/x` or `N/(x)` patterns,
+  tried after AFR matcher but before parse_toexpr's linear path.
+- **bulk_regen sweep**: 323 packs re-emit through fixed defgen path.
+
+Affects: `injector_flow_scaling` (318 packs, high-impact for tuners
+replacing injectors), `gear_determination_thresholds_a/b/c` (122 packs,
+lower priority).
+
+13 new tests total (5 C++ + 8 Python).
+
 ## Status snapshot
 
-- **HEAD `6a4693a`**, in sync with `origin/main`.
+- **HEAD `09342dd`**, in sync with `origin/main`.
 - **definitions/ pack count: 373** (one promoted from throwaway; net unchanged).
 - **defgen test suite: 211 tests green**.
 - **C++ build: not rebuilt this session** (pure Python + TOML data).
@@ -187,7 +215,7 @@ OBDX Pro VX adapter ETA May 22-25 — could land mid-day tomorrow. If it arrives
 
 ## Suggested opener for next session
 
-> "HEAD `6a4693a`, in sync with `origin/main`. Marathon yesterday: 24 commits (including this handoff refresh). P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
+> "HEAD `09342dd`, in sync with `origin/main`. Marathon yesterday: 24 commits (including this handoff refresh). P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
 >
 > Deck for this session:
 > **(P6a-continued — DEPRIORITIZED)** Fuel-comp scalings outside the ±100% family (`_x_003051758_100`, `_x_000224304213_7_35`). UX pass on a2tb001c showed they already display correctly via the linear-scaling path (enrichment offset −100..0%, AFR points ±7.35). Adding predicates would only improve validate.py coverage metric, not user-facing dump-table. Drop unless coverage % becomes a stakeholder concern.
