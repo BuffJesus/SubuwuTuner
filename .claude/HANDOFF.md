@@ -1,8 +1,8 @@
-# Handoff — 2026-05-21 (P6 + 3 pack-bug sweeps + VA/VB bundle wire-up)
+# Handoff — 2026-05-21 (P6 + 3 pack-bug sweeps + VA/VB bundles + AFR formula)
 
-Marathon session. Built on yesterday's `8f4b44f`. **17 commits** all pushed. P6 descriptor library is real and finding real bugs; validate.py surfaced multiple classes of pack-quality issues that we fixed at the source (defgen) and applied corpus-wide; user dropped two forum-sourced VA/VB bundle XMLs which we wired into bulk_regen to upgrade 25 packs from 0D-scalar-only to fully-typed 2D.
+Marathon session. Built on yesterday's `8f4b44f`. **20 commits** all pushed. P6 descriptor library is real and finding real bugs; validate.py surfaced multiple classes of pack-quality issues that we fixed at the source (defgen) and applied corpus-wide; user dropped two forum-sourced VA/VB bundle XMLs which we wired into bulk_regen to upgrade 25 packs from 0D-scalar-only to fully-typed 2D.
 
-**HEAD `8ad18fd`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave) and `fixtures/projects/Test/` (user-created GUI state, leave alone).
+**HEAD `f202081`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave) and `fixtures/projects/Test/` (user-created GUI state, leave alone).
 
 ## Fifteen commits shipped (oldest → newest)
 
@@ -24,6 +24,9 @@ c8db6c5 defs(packs): re-cousin-seed 11 cousin packs from their (now-fixed) bases
 875ed2f tools(defgen)+defs: wire VA/VB WRX bundles into bulk_regen
 31b0e08 docs(handoff): capture VA/VB bundle wire-up + 25-pack upgrade
 1e1029b tools(defgen): engine_rpm_axis tries raw/5.12 scaling for VA-era axes
+083b9b7 docs(handoff): capture P6h baseline + engine_rpm_axis /5.12 extension
+74624d3 feat(defs+defgen): subaru_afr_enrichment non-linear formula
+f202081 defs(packs): bulk_regen sweep emits subaru_afr_enrichment (323 packs)
 ```
 
 ## What's new since yesterday (8f4b44f)
@@ -76,15 +79,21 @@ User provided two RomRaider-format bundles at `fixtures/private/romraider_defs/{
 
 The bundle files themselves remain at `fixtures/private/romraider_defs/` — uncommitted per Path B. bulk_regen guards with `if not bundle_path.is_file(): continue` so the public repo + tools work on machines without the bundles.
 
-### Important caveat — AFR formula still wrong post-fix
+### AFR formula support shipped (commits `74624d3` + `f202081`)
 
-The AFR scaling `14.7/(1+x*.0078125)` is **non-linear**; defgen's `parse_toexpr` can't linearize it and falls back to factor=1.0, offset=0.0. dump-table on AFR maps shows raw 0..255 enrichment offsets — correct in dtype, but NOT directly AFR. Applying the expression by hand: raw 47 → ~10.7 AFR.
+The non-linear AFR enrichment formula `14.7/(1+x*0.0078125)` is now a first-class formula type across the stack:
 
-Schema extension to carry non-linear formulas is **v1.x task** (pack.toml schema change + C++ loader update + defgen output).
+- **C++**: new `SubaruAfrEnrichment` variant in `ScalingFormula`. `apply_scaling` evaluates `numerator / (1 + raw*k)` with a singularity guard. `invert_scaling` solves `raw = (numerator/value - 1) / k` with a degenerate-value guard. The TOML loader recognizes `formula = "subaru_afr_enrichment"` with optional `numerator`/`k` fields.
+- **defgen**: `match_afr_enrichment()` regex tolerantly matches the canonical expression (and structurally-equivalent forms). `_scaling_from_element` tries the AFR match before falling through to `parse_toexpr`'s linear path. `ScalingRecord` gains optional `numerator`/`k` fields; `to_toml` emits the right field set per formula type.
+- **bulk_regen sweep**: 323 packs across legacy/forester/impreza/baja/outback/exiga/tribeca/ecuparams regenerated. Every AFR-bearing scaling now emits `formula = "subaru_afr_enrichment"` instead of the prior flattened linear identity.
+
+**Verification**: `dump-table primary_open_loop_fueling` on a2tb000l now shows **AFR values 4.91-14.70 (mean 11.16)** instead of raw 0-255 enrichment offsets. Engineering-meaningful tuning data.
+
+15 new tests total (7 C++ + 8 Python).
 
 ## Status snapshot
 
-- **HEAD `8ad18fd`**, in sync with `origin/main`.
+- **HEAD `f202081`**, in sync with `origin/main`.
 - **definitions/ pack count: 373** (one promoted from throwaway; net unchanged).
 - **defgen test suite: 211 tests green**.
 - **C++ build: not rebuilt this session** (pure Python + TOML data).
@@ -124,7 +133,7 @@ This is a useful detection capability of validate.py: it flags pack/ROM revision
 
 **(P6h-next) Source matching-revision .bin files for the upgraded VA/VB packs.** Our LF75600H.bin and LF9L000E.bin are 24KB short — partials or wrong revisions. If we can find matching-revision dumps, the upgraded packs become directly usable. Forum search (mhhauto, etc.) is the typical path.
 
-**(P6e) Investigate non-linear AFR formula support.** Schema extension is the v1.x path; meantime, document loudly that AFR `dump-table` values are raw 0-255 enrichment offsets, not AFR. Affected scaling family: any `_x_0078125` or `14.7/(1+x*K)` variant.
+**(P6e shipped this session)** — full stack support for `subaru_afr_enrichment` formula. Future extension: VA bundle uses different fueling-table naming and possibly different AFR formula variants; the matcher could be extended to cover those if needed.
 
 **(P6a-continued) Add 1D fuel-compensation predicates.** ECT/IAT/atm-pressure fuel comp curves, cranking enrichment, tip-in enrichment compensations. The biggest remaining NO_DESCRIPTOR cluster after the timing+boost comp landed.
 
@@ -161,12 +170,12 @@ OBDX Pro VX adapter ETA May 22-25 — could land mid-day tomorrow. If it arrives
 
 ## Suggested opener for next session
 
-> "HEAD `1e1029b`, in sync with `origin/main`. Marathon yesterday: 17 commits. P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
+> "HEAD `f202081`, in sync with `origin/main`. Marathon yesterday: 20 commits. P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
 >
 > Deck for this session:
-> **(P6e)** Non-linear AFR formula support (schema extension). Pack-format + C++ loader change, biggest tuner-facing usability win — AFR maps would display real 10-15 AFR instead of raw 0-255 enrichment offsets.
-> **(P6a-continued)** 1D fuel-compensation predicates — biggest remaining NO_DESCRIPTOR cluster after the timing+boost comp landed.
-> **(P6b)** More common axes: manifold_pressure_axis, throttle_plate_opening_angle_axis, mass_airflow_axis, atmospheric_pressure_axis. Each ~30 lines including tests.
-> **(P6h-next)** Forum-source matching-revision LF75600H.bin / LF9L000E.bin if you want to actually exercise the upgraded VA/VB packs against their real anchor ROMs.
+> **(P6a-continued)** 1D fuel-compensation predicates (ECT/IAT/atm fuel comp). Same pattern as timing+boost comp; biggest remaining cluster of NO_DESCRIPTOR 1D tables.
+> **(P6b)** More common axes: manifold_pressure_axis, throttle_plate_opening_angle_axis, mass_airflow_axis, atmospheric_pressure_axis. Each ~30 lines including tests, but each needs per-axis scaling investigation.
+> **(P6e-VA)** VA bundle's fueling tables (`fuel_cl_ol_transition_*` etc.) use different naming + possibly different non-linear formula variants. Extend the AFR matcher to handle these if `dump-table` on a VA fuel table reads as raw bytes instead of AFR.
+> **(P6h-next)** Forum-source matching-revision `.bin` files for the upgraded VA/VB packs if you want to validate them against real anchors.
 >
 > Or pivot — OBDX adapter ETA May 22-25, could arrive mid-session. If hardware lands, pause P6 and pre-stage the first-light rom-pull."
