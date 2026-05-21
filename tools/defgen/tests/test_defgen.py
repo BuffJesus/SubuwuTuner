@@ -935,6 +935,73 @@ class AfrEnrichmentMatchTest(unittest.TestCase):
         self.assertIsNone(defgen.match_afr_enrichment(None))
 
 
+class InverseDivideMatchTest(unittest.TestCase):
+    """defgen.match_inverse_divide recognizes `N/x` and `N/(x)` patterns.
+    Used by Subaru injector flow scaling (2707090/x) and gear-determination
+    thresholds (96560.6/x). Falls through parse_toexpr as non-linear; the
+    explicit matcher emits `formula = "inverse_divide"` so the loader can
+    evaluate exactly instead of flattening to identity."""
+
+    def test_canonical_injector_flow_expression(self):
+        # 2707090/x is the canonical Subaru injector-flow-scaling form.
+        self.assertEqual(defgen.match_inverse_divide("2707090/x"), 2707090.0)
+
+    def test_parenthesized_x(self):
+        self.assertEqual(defgen.match_inverse_divide("2707090/(x)"), 2707090.0)
+
+    def test_decimal_numerator(self):
+        # Gear-determination thresholds use a decimal numerator.
+        self.assertEqual(defgen.match_inverse_divide("96560.6/x"), 96560.6)
+
+    def test_whitespace_tolerance(self):
+        self.assertEqual(
+            defgen.match_inverse_divide(" 2707090 / ( x ) "), 2707090.0)
+
+    def test_rejects_linear_expression(self):
+        self.assertIsNone(defgen.match_inverse_divide("x*0.5"))
+
+    def test_rejects_afr_form(self):
+        # N/(1+x*K) is the AFR pattern, not bare reciprocal.
+        self.assertIsNone(defgen.match_inverse_divide("14.7/(1+x*.0078125)"))
+
+    def test_rejects_empty(self):
+        self.assertIsNone(defgen.match_inverse_divide(""))
+        self.assertIsNone(defgen.match_inverse_divide(None))
+
+
+class InverseDivideScalingEmissionTest(unittest.TestCase):
+    """When an inline <scaling expression="2707090/x"> is parsed, defgen
+    emits `formula = "inverse_divide"` with the numerator field, not a
+    flattened linear identity."""
+
+    def test_inverse_divide_round_trip(self):
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="1D" name="injector_flow" storageaddress="0x100"
+                 storagetype="float" endian="big">
+            <scaling units="cc/min" expression="2707090/x"
+                     to_byte="2707090/x" format="0.00"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        scaling = next(s for s in packs[0].scalings if "cc/min" in s.unit)
+        self.assertEqual(scaling.formula, "inverse_divide")
+        self.assertEqual(scaling.numerator, 2707090.0)
+        # The flattened-identity warning must NOT fire.
+        for tag, where, msg in packs[0].warnings:
+            self.assertNotIn("flattened to identity", msg,
+                msg=f"unexpected flatten warning on {where}: {msg}")
+        # Emitted TOML carries formula + numerator, no factor/offset.
+        toml_text = defgen.pack_to_toml(packs[0])
+        self.assertIn('formula   = "inverse_divide"', toml_text)
+        self.assertIn("numerator = 2707090.0", toml_text)
+        block = toml_text.split('formula   = "inverse_divide"', 1)[1]
+        block = block.split("[[", 1)[0]
+        self.assertNotIn("factor", block)
+        self.assertNotIn("offset", block)
+
+
 class AfrScalingEmissionTest(unittest.TestCase):
     """When an inline <scaling expression="14.7/(1+x*.0078125)"> is parsed,
     defgen emits `formula = "subaru_afr_enrichment"` with numerator + k

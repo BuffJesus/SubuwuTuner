@@ -223,6 +223,13 @@ Result<Scaling> parse_scaling(toml::table const &t) {
         afr.numerator = optional_value<double>(t, "numerator", 14.7);
         afr.k = optional_value<double>(t, "k", 0.0078125);
         s.formula = afr;
+    } else if (formula == "inverse_divide") {
+        // value = numerator / raw. Used by Subaru injector flow scaling
+        // (numerator = 2707090) and gear-determination thresholds
+        // (numerator = 96560.6).
+        InverseDivideScaling inv;
+        inv.numerator = optional_value<double>(t, "numerator", 1.0);
+        s.formula = inv;
     } else {
         return failure(ErrorCode::ParseError, "scaling '" + s.id + "' unknown formula: " + formula);
     }
@@ -644,6 +651,12 @@ double apply_scaling(double raw, Scaling const &s) noexcept {
             return 0.0;
         return afr->numerator / denom;
     }
+    if (auto const *inv = std::get_if<InverseDivideScaling>(&s.formula); inv != nullptr) {
+        // value = numerator / raw. Guard against the singularity at raw==0.
+        if (raw == 0.0)
+            return 0.0;
+        return inv->numerator / raw;
+    }
     auto const *pw = std::get_if<PiecewiseScaling>(&s.formula);
     if (pw == nullptr || pw->breakpoints.empty()) {
         return raw;
@@ -684,6 +697,15 @@ Result<double> invert_scaling(double engineering, Scaling const &s) {
                            "scaling '" + s.id + "' value=0 maps to raw=±∞; not invertible");
         }
         return (afr->numerator / engineering - 1.0) / afr->k;
+    }
+    if (auto const *inv = std::get_if<InverseDivideScaling>(&s.formula); inv != nullptr) {
+        // value = numerator / raw → raw = numerator / value. Degenerates
+        // at engineering == 0 (maps to raw=±∞).
+        if (engineering == 0.0) {
+            return failure(ErrorCode::InvalidArgument,
+                           "scaling '" + s.id + "' value=0 maps to raw=±∞; not invertible");
+        }
+        return inv->numerator / engineering;
     }
     auto const *pw = std::get_if<PiecewiseScaling>(&s.formula);
     if (pw == nullptr || pw->values.size() < 2) {

@@ -126,7 +126,19 @@ struct SubaruAfrEnrichment {
     double k{0.0078125};
 };
 
-using ScalingFormula = std::variant<LinearScaling, PiecewiseScaling, SubaruAfrEnrichment>;
+// Inverse-divide formula: value = numerator / raw.
+// Used by Subaru injector flow scaling (the float-stored value is a
+// reciprocal pulse-width-to-flow-rate constant; correct cc/min display
+// requires `2707090 / raw`), and by gear-determination thresholds
+// (`96560.6 / raw`). Cannot be expressed as a LinearScaling because
+// the relationship is reciprocal. Defgen recognizes `N/x` expressions
+// in the source XML and emits this formula.
+struct InverseDivideScaling {
+    double numerator{1.0};
+};
+
+using ScalingFormula = std::variant<LinearScaling, PiecewiseScaling,
+                                    SubaruAfrEnrichment, InverseDivideScaling>;
 
 struct Scaling {
     std::string id;

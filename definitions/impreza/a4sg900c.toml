@@ -428,9 +428,8 @@ data_type = "uint16_be"
 
 [[scaling]]
 id        = "estimated_flow_rate_gas_only_cc_min_2707090_x"
-formula   = "linear"
-factor    = 1.0
-offset    = 0.0
+formula   = "inverse_divide"
+numerator = 2707090.0
 unit      = "ESTIMATED Flow Rate - Gas Only (cc/min)"
 precision = 2
 data_type = "uint16_be"
@@ -798,9 +797,8 @@ data_type = "uint8"
 
 [[scaling]]
 id        = "rev_mile_7910240_085_x"
-formula   = "linear"
-factor    = 1.0
-offset    = 0.0
+formula   = "inverse_divide"
+numerator = 7910240.085
 unit      = "Rev/Mile"
 precision = 2
 data_type = "uint16_be"

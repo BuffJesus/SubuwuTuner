@@ -206,6 +206,38 @@ _AFR_ENRICHMENT_RE = re.compile(
     re.VERBOSE)
 
 
+# Inverse-divide pattern: `N / x` or `N / (x)`. Used by Subaru injector
+# flow scaling (expression="2707090/x") and gear-determination thresholds
+# (expression="96560.6/x"). Falls through parse_toexpr as non-linear; we
+# match it explicitly and emit a `formula = "inverse_divide"` scaling
+# that the C++ loader evaluates exactly.
+_INVERSE_DIVIDE_RE = re.compile(
+    r"""^\s*
+        (?P<num>[0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?)  # numerator
+        \s*/\s*
+        \(?\s*x\s*\)?                                      # x or (x)
+        \s*$""",
+    re.VERBOSE)
+
+
+def match_inverse_divide(expr: str) -> float | None:
+    """Return `numerator` if `expr` matches the form `N/x` or `N/(x)`,
+    else None. Used to recognize Subaru's injector-flow / gear-threshold
+    reciprocal scalings."""
+    if expr is None:
+        return None
+    expr = expr.strip()
+    if not expr:
+        return None
+    m = _INVERSE_DIVIDE_RE.match(expr)
+    if m is None:
+        return None
+    try:
+        return float(m.group("num"))
+    except ValueError:
+        return None
+
+
 def match_afr_enrichment(expr: str) -> tuple[float, float] | None:
     """Return (numerator, k) if `expr` matches the Subaru AFR-enrichment
     form `N/(1+x*K)`, else None. The match is structural, not numeric —
@@ -331,10 +363,9 @@ class ScalingRecord:
     precision: int = 0
     data_type: str = "uint16_be"
     # `formula` is "linear" by default; piecewise is hand-edited; defgen
-    # emits "subaru_afr_enrichment" when the source XML expression matches
-    # the canonical 14.7/(1+x*K) pattern Merp uses for AFR enrichment
-    # tables. The numerator/k fields are only used (and only emitted) when
-    # formula == "subaru_afr_enrichment".
+    # emits named non-linear formulas when source XML expressions match:
+    #   * "subaru_afr_enrichment"  for `14.7/(1+x*K)` patterns (uses numerator + k).
+    #   * "inverse_divide"         for `N/x` patterns (uses numerator only).
     formula: str = "linear"
     numerator: float | None = None
     k: float | None = None
@@ -346,6 +377,17 @@ class ScalingRecord:
                 "formula":   self.formula,
                 "numerator": self.numerator,
                 "k":         self.k,
+                "unit":      self.unit,
+                "min":       self.minimum,
+                "max":       self.maximum,
+                "precision": self.precision,
+                "data_type": self.data_type,
+            })
+        if self.formula == "inverse_divide":
+            return _emit_table("[[scaling]]", {
+                "id":        self.id,
+                "formula":   self.formula,
+                "numerator": self.numerator,
                 "unit":      self.unit,
                 "min":       self.minimum,
                 "max":       self.maximum,
@@ -932,7 +974,11 @@ def _scaling_from_element(el: ET.Element,
     # Try the Subaru AFR-enrichment matcher first — non-linear but a
     # named formula type the loader knows how to evaluate exactly.
     afr_match = match_afr_enrichment(toexpr)
-    parsed = None if afr_match is not None else parse_toexpr(toexpr)
+    # Then try the inverse-divide matcher (N/x form, used by injector
+    # flow scaling and gear-determination thresholds).
+    inv_match = match_inverse_divide(toexpr) if afr_match is None else None
+    parsed = (None if (afr_match is not None or inv_match is not None)
+              else parse_toexpr(toexpr))
     # Inline scalings inside <table> typically have no name= attribute; only
     # `units` + `expression`. Synthesise a stable id from those so identical
     # inline scalings dedup across tables that share them, and so the table
@@ -945,7 +991,8 @@ def _scaling_from_element(el: ET.Element,
             return None
     slug = _slugify(name)
     afr_formula: tuple[float, float] | None = afr_match
-    if afr_formula is not None:
+    inv_formula: float | None = inv_match
+    if afr_formula is not None or inv_formula is not None:
         # Constants captured; formula type set below at record build.
         factor, offset = (1.0, 0.0)
     elif parsed is None:
@@ -990,6 +1037,9 @@ def _scaling_from_element(el: ET.Element,
     if afr_formula is not None:
         rec.formula = "subaru_afr_enrichment"
         rec.numerator, rec.k = afr_formula
+    elif inv_formula is not None:
+        rec.formula = "inverse_divide"
+        rec.numerator = inv_formula
     return rec
 
 

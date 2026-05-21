@@ -527,6 +527,67 @@ data_type = "uint8"
     REQUIRE(f.k == 0.0078125);
 }
 
+TEST_CASE("apply_scaling: inverse_divide computes numerator/raw",
+          "[defs][apply_scaling][inverse_divide]") {
+    st::Scaling s;
+    s.formula = st::InverseDivideScaling{.numerator = 2707090.0};
+    // The Subaru injector-flow-scaling case: raw float 4916 → 550.7 cc/min.
+    REQUIRE(st::apply_scaling(4916.0, s) == Catch::Approx(550.67).margin(0.01));
+    // Other anchor values for sanity.
+    REQUIRE(st::apply_scaling(2707.09, s) == Catch::Approx(1000.0).margin(0.01));
+    REQUIRE(st::apply_scaling(1000.0, s) == Catch::Approx(2707.09).margin(0.01));
+}
+
+TEST_CASE("apply_scaling: inverse_divide safe at raw==0",
+          "[defs][apply_scaling][inverse_divide]") {
+    st::Scaling s;
+    s.formula = st::InverseDivideScaling{.numerator = 2707090.0};
+    REQUIRE(st::apply_scaling(0.0, s) == 0.0);
+}
+
+TEST_CASE("invert_scaling: inverse_divide round-trips",
+          "[defs][invert_scaling][inverse_divide]") {
+    st::Scaling s;
+    s.formula = st::InverseDivideScaling{.numerator = 2707090.0};
+    for (double raw : {1.0, 100.0, 4916.0, 100000.0}) {
+        double const eng = st::apply_scaling(raw, s);
+        auto const inverted = st::invert_scaling(eng, s);
+        REQUIRE(inverted.has_value());
+        REQUIRE(*inverted == Catch::Approx(raw).margin(1e-6));
+    }
+}
+
+TEST_CASE("invert_scaling: inverse_divide rejects engineering=0",
+          "[defs][invert_scaling][inverse_divide]") {
+    st::Scaling s;
+    s.formula = st::InverseDivideScaling{.numerator = 2707090.0};
+    REQUIRE(!st::invert_scaling(0.0, s).has_value());
+}
+
+TEST_CASE("scaling loader: inverse_divide formula parsed",
+          "[defs][parse][inverse_divide]") {
+    auto const def_r = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "x"
+endianness     = "big"
+rom_size_bytes = 32
+
+[[scaling]]
+id        = "injector_flow"
+formula   = "inverse_divide"
+numerator = 2707090.0
+unit      = "cc/min"
+data_type = "float32_be"
+)toml");
+    REQUIRE(def_r.has_value());
+    auto const &def = *def_r;
+    auto const *s = def.find_scaling("injector_flow");
+    REQUIRE(s != nullptr);
+    REQUIRE(std::holds_alternative<st::InverseDivideScaling>(s->formula));
+    REQUIRE(std::get<st::InverseDivideScaling>(s->formula).numerator == 2707090.0);
+}
+
+
 TEST_CASE("scaling loader: subaru_afr_enrichment defaults",
           "[defs][parse][afr]") {
     // Constants omitted → defaults 14.7 / 0.0078125 (the canonical EJ form).
