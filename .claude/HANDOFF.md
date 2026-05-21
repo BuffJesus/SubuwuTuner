@@ -1,178 +1,155 @@
-# Handoff — 2026-05-21 mid-session (P6 descriptor library shipped)
+# Handoff — 2026-05-21 late-session (P6 + two big pack-bug sweeps)
 
-Picking up from yesterday's end-of-day handoff (HEAD `8f4b44f` then). Today's session attempted P2-batch (all dropped), pivoted "wide" into a defgen XML→TOML investigation that turned out to be a wrong premise, then bootstrapped P6 — the cal-table descriptor library — including a consumer CLI and shape-aware filtering. Three commits, all pushed.
+Long, dense session. Built on yesterday's `8f4b44f`. Eight commits, all pushed. P6 descriptor library is real and finding real bugs.
 
-**HEAD `7e0f06f`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave), `definitions/impreza/lf79100p.toml` (yesterday's throwaway VA GUI-test cousin-seed, still untracked), and `fixtures/projects/Test/` (user-created GUI project from yesterday's 22:50 session, leave alone).
+**HEAD `feeb6b5`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave) and `fixtures/projects/Test/` (user-created GUI state, leave alone).
 
-## What shipped this session
+## Eight commits shipped (oldest → newest)
 
 ```
-7e0f06f tools(defgen): descriptors filter by expected_dims to kill over-match
-b625cc6 tools(defgen): add validate.py — descriptor library consumer
 c774e6d tools(defgen): bootstrap descriptors.py predicate library
+b625cc6 tools(defgen): add validate.py — descriptor library consumer
+7e0f06f tools(defgen): descriptors filter by expected_dims to kill over-match
+30c8eb5 docs(handoff): 2026-05-21 — P6 descriptor library shipped
+a58c73c tools(defgen): add intake_temp_axis + engine_load_axis descriptors
+f0d4fd8 defs(packs): set factual cid_address on VA/VB packs with confirmed anchors
+a3d6ad6 fix(defs): a2tb002c base_timing tables stored as uint8 not uint16
+feeb6b5 fix(defs): sweep base_timing dtype uint16_be → uint8 across 334 packs
 ```
 
-### `tools/defgen/descriptors.py` (442 lines)
+## What's new since yesterday (8f4b44f)
 
-Predicate library describing what real Subaru cal tables look like. Data model:
+### P6 descriptor library (4 commits)
 
-- `DecodeHint(dtype, dims, length, rows, cols)` — how to interpret a byte region.
-- `Verdict(matches, score, reasons)` — predicate output.
-- `Evidence(pack_id, table_id, rom_path)` — pointer to a real-world positive example.
-- `Descriptor(id, kind, description, id_patterns, predicate, evidence, expected_dims)` — the full triple. `expected_dims` filters out 2D-only predicates from being applied to 1D entries by id pattern alone.
-- `register(d)`, `all_descriptors()`, `by_id(...)`, `candidates_for(id, kind, dims)` — registry API.
-- Helper primitives: `decode_values`, `values_in_range`, `is_monotonic`, `distinct_fraction`.
+`tools/defgen/descriptors.py` + `tools/defgen/validate.py` are real, callable, useful tools.
 
-**5 seed predicates** (handoff sized eventual lib at 30-50):
+**Library: 7 seed predicates** with `expected_dims` filtering, fnmatch id patterns, multi-scaling support, and real-ROM evidence drift-guards:
 
-| id | kind | expected_dims | matches |
+| id | kind | dims | notes |
 |---|---|---|---|
-| `engine_rpm_axis` | axis | 1 | monotonic, 200-8500 RPM span, 5-32 pts |
-| `coolant_temp_axis` | axis | 1 | monotonic, -50..150 °C, 4-24 pts |
-| `wastegate_duty` | table | 2 | uint16 in [0, 27000] (covers ×100/×1/128/×1/256), ≥4×4, ≥10% distinct |
-| `boost_target` | table | 2 | uint16 decodes to 20-350 kPa absolute via raw / /10 / /128 / ×0.1334 (EJ psi) |
-| `base_timing` | table | 2 | signed decodes to -15..+60° BTDC via raw / /4 / /2 |
+| `engine_rpm_axis` | axis | 1 | monotonic 200-8500 RPM, 5-32 pts |
+| `coolant_temp_axis` | axis | 1 | -50..150 °C, 4-24 pts |
+| `intake_temp_axis` | axis | 1 | same band as coolant, different name patterns |
+| `engine_load_axis` | axis | 1 | 0..10 g/rev monotonic with 0.5 minimum span |
+| `wastegate_duty` | table | 2 | [0, 27000] uint16, covers ×100/×128/×256 raw scalings |
+| `boost_target` | table | 2 | 20-350 kPa absolute, tries raw / /10 / /128 / ×0.1334 (EJ psi) |
+| `base_timing` | table | 2 | -15..+60° BTDC via raw / /4 / /2 |
 
-Each predicate handles multiple Subaru scaling families (the empirical-baseline iteration is built in). Each cites concrete evidence in `a2tb002c` and a real-ROM drift-guard test ensures predicates don't silently regress against their own evidence.
+`expected_dims` filter (commit `7e0f06f`) was the principled fix for FAIL-noise: a 2D-only predicate no longer over-matches a 1D entry just because the id pattern fits. Dropped a2tb002c FAIL count from 22 to 6.
 
-### `tools/defgen/validate.py` (332 lines)
-
-Consumer CLI for the descriptor library:
+**Consumer: `validate.py`**
 
 ```
-python tools/defgen/validate.py --pack <pack.toml> --rom <rom.bin> [--tsv] [--kind table|axis] [--only ID]
+python tools/defgen/validate.py --pack <pack.toml> --rom <bin> [--tsv] [--kind ...] [--only ID]
 ```
 
-For each `[[table]]` and `[[axis]]` in the pack, resolves the 2D shape from referenced axes, decodes bytes at the declared address, runs every applicable descriptor predicate. Reports PASS / FAIL / NO_DESCRIPTOR / SKIPPED with a coverage summary. Exit 0 = no FAILs, 1 = one or more FAILs, 2 = arg/file error.
+Walks `[[table]]` + `[[axis]]`, resolves 2D shape via the referenced axes, decodes bytes, runs every applicable descriptor, reports PASS / FAIL / NO_DESCRIPTOR / SKIPPED. Exit 0 = clean, 1 = some FAIL, 2 = arg/file error.
 
-**a2tb002c baseline (post-dims-filter):**
-```
-PASS                  5  (  1.3%)
-FAIL                  6  (  1.5%)
-NO_DESCRIPTOR       220  ( 56.4%)
-SKIPPED             159  ( 40.8%, all 0D scalars)
-Coverage            2.8%  of non-scalar entries
-```
+**a2tb002c baseline through the session:**
 
-PASSing entries: `engine_speed` axis, `coolant_temperature` axis, `target_boost`, `initial_wastegate_duty`, `max_wastegate_duty`.
+| stage | PASS | FAIL | NO_DESCRIPTOR | SKIPPED |
+|---|---|---|---|---|
+| after bootstrap | 4 | 22 | 205 | 159 |
+| after dims-filter | 5 | 6 | 220 | 159 |
+| after intake+load axes | 7 | 6 | 218 | 159 |
+| after base_timing dtype fix | 11 | 2 | 218 | 159 |
 
-### Tests
+The 2 remaining a2tb002c FAILs (real signal): `fine_correction_stored_applied_rpm_ranges` axis declared at `0x00000000` (sentinel — pack bug); `initial_max_wastegate_duty_compensation_atm_pressure` matched by `*wastegate*duty*` but is a 1D-style relative-compensation map, not absolute duty (descriptor-pattern fix territory).
 
-- 31 tests in `test_descriptors.py` (28 synthetic + 3 real-ROM evidence checks).
-- 11 tests in `test_validate.py` (synthetic mini-pack + ROM, exercises loader, validate_entry, main exit codes).
-- **196/196 defgen tests green** (152 prior + 44 new).
+### Pack-bug fix #1: VA/VB cid_address (commit `f0d4fd8`)
 
-## Real bugs validate.py surfaced in a2tb002c
+Empirical scan of decrypted VA/VB ROMs found literal CID strings at per-sub-family offsets in 0x29000-0x38000. Set explicit `cid_address` on packs where we have direct or strong-evidence anchors:
 
-These are pack metadata bugs, NOT descriptor problems. Logging for follow-up:
+| pack | new cid_address | source |
+|---|---|---|
+| lf75600h | `0x000297DD` | direct (LF75600H.bin) |
+| lf79100p | `0x00037C51` | direct (LF79100P.bin) — and promoted from yesterday's throwaway |
+| lf9l000e | `0x00035807` | direct (LF9L000E.bin) |
+| lf9g003t | `0x00035802` | sibling-family (LF9G002 + LF9G100 both at this offset) |
+| lv9n001d | unchanged | added `cid_scan = true` as safety net for the hand-tuned `0x0002AA1C` |
 
-1. **`base_timing_*_cruise` and `base_timing_*_non_cruise` claim `data_type = "uint16_be"`** but the bytes only make sense as `uint8`. Pack scaling factor (0.3515625, offset -20) maps uint8 raw 13-152 → -15..+33° BTDC (sensible). uint16 raw 29336 → 10314° BTDC (nonsense). CLI `dump-table` on these returns garbage values.
+All packs kept `cid_scan = true` as a fallback. Left alone (no anchor in corpus, cid_scan already works): lf75404h, lf75404s, lf79103p, lf9c102p.
 
-2. **`fine_correction_stored_applied_rpm_ranges` axis declares `address = 0x00000000`** — that's inside the CID region of every Subaru ROM, not a real axis address. Likely a sentinel that survived defgen.
+### Pack-bug fix #2: base_timing dtype across 334 packs (commits `a3d6ad6` + `feeb6b5`)
 
-3. **`initial_max_wastegate_duty_compensation_atm_pressure`** is matched by `*wastegate*duty*` pattern but it's a signed delta-percentage comp curve, not absolute duty. Needs its own 1D-compensation descriptor.
+validate.py found that a2tb002c's `base_timing_*` tables decode to nonsense (mean ~8000° BTDC). Root cause: the scaling `base_ignition_timing_degrees_btdc_x_3515625_20` has factor 0.3515625 = 90/256 with offset −20, dimensioned for **uint8 raw input** (0..255 → −20..+70° BTDC). Tables declared `data_type = "uint16_be"` decoded each cell as 2 bytes and got garbage.
 
-Items (1) and (2) are pack fixes (touch `definitions/legacy/a2tb002c.toml` after verifying with the bludgod ROM). Item (3) is a descriptor addition (1D wastegate-comp descriptor).
+Independent confirmation: the 1D base_timing_idle_* tables in a2tb002c sit at addresses 0xCE201, 0xCE211, 0xCE221, 0xCE231 — exactly 16 bytes apart. uint16 cells would need 32 bytes per row and overlap the next table. uint8 layout is consistent.
 
-## Earlier this session (chronological)
+Surgical commit (`a3d6ad6`) fixed a2tb002c (9 tables + scaling block); sweep commit (`feeb6b5`) applied the same regex-narrow fix to all 334 packs using that scaling. 2184 table dtype fixes + 334 scaling dtype fixes. 707/707 packs still load; 203/203 defgen tests green; dump-table on A2WC400H Forester now shows 2..45° BTDC mean ~26° (engineering-norm timing values).
 
-### P2 batch — all four candidates dropped
+## Suspected third pack bug — NOT fixed
 
-Hundreds-digit-delta lesson held perfectly:
+`estimated_air_fuel_ratio_14_7_1_x_0078125` scaling has `factor = 1.0` in the TOML but the name encodes factor 0.0078125 (1/128). AFR tables using it decode to 0..65535 mean ~14050 instead of ~14.7. **A different shape of bug** — wrong `scaling.factor`, not wrong `table.data_type`. Affects ~335 packs (essentially the same corpus as base_timing).
 
-| Target | Sibling | HIGH% | Verdict |
-|---|---|---|---|
-| LF9C000C | (no lf9c102p.bin) | — | blocked: sibling pack has no .bin |
-| LV9N100A | lv9n001d | 1.3% | drop |
-| LV9N303J | lv9n001d | 0.0% | drop |
-| LF75300E | lf75404h | 0.7% | drop |
+Did not fix because:
+- Two valid hypotheses (defgen ate the factor; or upstream XML really has 1.0 and the name is misleading)
+- No clean empirical disambiguator without checking source XMLs
+- Same shape of fix may apply to other suspect scalings (123 distinct scalings have `factor >= 0.1` + `uint16_be`, though most are legitimate — the AFR is the obvious-bug example)
 
-No commits, no new packs. Working tree clean after.
-
-### "Wide" defgen XML→TOML axes investigation
-
-Premise: defgen drops axes for VA/VB packs, demoting tables to 0D-only. Investigated, **premise wrong**:
-
-- defgen's `_axis_from_element` (line 1041-1043) does return None for axes without a `name` attribute, triggering demote-to-scalar at line 1006-1013. Behaviorally accurate diagnosis.
-- BUT the per-CID VA/VB XMLs are structurally minimal: no `sizex`/`sizey`/`size`/`elements` attributes anywhere, no inheritance base, no scaling sub-elements. Without axis lengths, even accepting nameless axes would only produce 2D-shaped tables with length=0 axes — still unusable.
-- Real unlock requires ROM-byte axis-length inference (the P6 descriptor library, in principle). defgen is doing the right thing given the input.
-
-Also discovered: **`build/scratch/SubaruDefs/RomRaider/ecu/standard/ecu_defs.xml`** is Merp's canonical XML (~21 MB), source of the EJ-era pack richness. VA/VB CIDs aren't in it.
-
-### P6 bootstrap (the rest of the session)
-
-Three commits described above. Real-ROM calibration loop worked: first descriptor batch rejected its own a2tb002c evidence (bands too narrow), refined predicates to absorb multiple Subaru scaling variants, added real-ROM tests to prevent regression.
+Logged as a deck item for next session.
 
 ## Status snapshot
 
-- **HEAD `7e0f06f`**, in sync with `origin/main`
-- **definitions/ pack count: 373** (unchanged from yesterday)
-- **defgen test suite: 196 tests green** (152 prior + 31 descriptors + 11 validate + 2 dims-filter)
-- **C++ build: not rebuilt this session** (pure Python work)
+- **HEAD `feeb6b5`**, in sync with `origin/main`
+- **definitions/ pack count: 373** (unchanged; one pack promoted from throwaway)
+- **defgen test suite: 203 tests green** (152 prior + 31 descriptor + 11 validate + 9 added axes + 2 dims-filter — net 51 new)
+- **C++ build: not rebuilt this session** (pure Python + TOML data)
 - **CI clang-format gate: required** — no C++ touched
-- **All 706 .toml files under definitions/ load cleanly** (verified yesterday; nothing changed today)
+- **All 707 .toml files under definitions/ load cleanly** (re-verified post-sweep)
 
 ## Open threads (for next session)
 
 ### Tier 1 — finish P6 descriptor library
 
-The framework is solid; coverage is the next axis.
+**(P6e) Investigate the `_x_0078125` factor-1.0 scaling family.** Hardest of the three because the fix shape isn't `data_type`, it's `scaling.factor`. Steps: (a) load one Merp canonical XML, see if the source XML has factor 1.0 or 0.0078125; (b) if upstream is 0.0078125, this is a defgen bug — find the parsing path that drops it; if upstream is 1.0, the bug is in the XMLs (community-edited?) and we should fix it at the pack level. Affected packs: ~335.
 
-**(P6a) Add 1D compensation predicates.** Biggest NO_DESCRIPTOR cluster in a2tb002c is `*timing_compensation_*` curves (signed small magnitudes around 0). Adding a generic `timing_compensation_1d` descriptor would catch ~8 entries. Same for `*_compensation_iat`, `*_compensation_ect`, `*_compensation_atm_pressure` — these are 1D scalars vs the matching reference axis. Easy wins.
+**(P6a) Add 1D compensation predicates.** Biggest NO_DESCRIPTOR cluster in a2tb002c is `*_compensation_*` 1D curves (timing comp ECT/IAT/MRP, fuel comp, etc.). ~5 descriptors, ~20-30 entries lifted from NO_DESCRIPTOR to PASS. Easy wins.
 
-**(P6b) Add common axes that aren't currently modeled.** From the NO_DESCRIPTOR axis list:
-- `intake_temperature` (IAT, -40..+120°C, like coolant)
-- `atmospheric_pressure` (50-105 kPa)
-- `engine_load` (g/rev or kg/h, 0-5 typical)
-- `throttle_plate_opening_angle` (0-100%)
-- `mass_airflow` (0-300 g/s or so)
+**(P6b) More common axes.** `manifold_pressure_axis`, `throttle_plate_opening_angle_axis`, `mass_airflow_axis`, `atmospheric_pressure_axis`. Each ~30 lines including tests.
 
-Each is ~30 lines including tests. 5 descriptors brings coverage from ~3% to maybe 15-20% on a2tb002c.
+**(P6c) Cross-pack validation runs.** Currently only validated a2tb002c. Run validate.py against a2tb100u, A2WC400H, ez1d*, etc. Surfaces scaling variants the a2tb002c-seeded library missed.
 
-**(P6c) Cross-pack validation runs.** Currently only validated a2tb002c. Run validate.py against:
-- `a2tb100u.toml` + `a2tb100u_*.bin` (impreza EJ, same family)
-- An ez1d* pack (also called out in handoff as known-good)
-- An lf75404h cousin-seeded pack (VA-family, mostly 0D so won't show much, but baselines coverage there)
-
-This surfaces scaling variants the a2tb002c-only seed library missed.
-
-**(P6d) Fix a2tb002c pack bugs validate found.** base_timing dtype (uint16 → uint8) and fine_correction zero-address. Verify with dump-table after the fix.
+**(P6f) Fix `fine_correction_stored_applied_rpm_ranges` address 0x00000000 in a2tb002c.** Smaller follow-up to the base_timing fix; need to find the real address by pattern search or by checking what the values "should" look like.
 
 ### Tier 2 — back to yesterday's deck
 
-**(P1)** GUI feedback from a2tb002c session — still nothing surfaced from user.
+**(P1)** GUI feedback from yesterday's a2tb002c session — still pending, but bullet 4 of dtype fix means GUI dump-table on base_timing in 334 packs now works correctly. If user re-tests, they may notice the improvement automatically.
 
-**(P2)** Remaining VA cousin-seeds — blocked per today's run. Hundreds-delta lesson holds across LF9C/LV9N/LF75 families. Needs closer siblings (no current candidates) or actual XMLs.
+**(P2)** Remaining VA cousin-seeds — still blocked. Hundreds-delta lesson held perfectly.
 
-**(P3)** `docs/21-oem-baselines.md` — still deferred 5×. Now arguably even more relevant: validate.py + descriptor library is part of the baseline tooling. Could fold the empirical observation harvesting into a single doc-writing session.
+**(P3)** `docs/21-oem-baselines.md` — even more relevant now that we have empirical descriptor coverage as a baseline-derivation tool.
 
-**(P4)** Axis-fingerprint relocator v3 — superseded by P6 if P6 grows. Drop from deck unless P6 stalls.
+**(P4)** Axis-fingerprint relocator v3 — drop from deck (subsumed by P6).
 
 **(P5)** `[[table.role]]` pack-format extension — C++ heavy, unchanged.
 
 ### Hardware
 
-**OBDX Pro VX adapter** ETA May 22-25 2026 (1-4 days from this handoff). First-light pre-staged command in yesterday's handoff still valid.
+OBDX Pro VX adapter ETA May 22-25. First-light pre-staged command unchanged.
+
+## Carry-over lessons
+
+- **validate.py FAILs are signal, not noise.** Found two real pack-bug classes today (cid_address placeholders, base_timing dtype); flagged a third (AFR scaling factor).
+- **Real-ROM evidence drift-guard tests pay off.** Caught two predicate-band-too-narrow regressions before they reached commit.
+- **Bulk-sweep pattern works** when (a) the bug shape is identical across packs, (b) the fix is locally scoped (regex anchored to the relevant scaling/table id), and (c) post-sweep `pack-list` + tests + spot-check via dump-table all green. 334-pack sweep landed cleanly.
+- **Address-spacing arguments are independent evidence.** For base_timing, the 16-byte stride between consecutive 1D-table addresses was independent proof of uint8; would have caught the dtype bug even without dump-table verification.
 
 ## House-style notes (carry-over)
 
-All from yesterday + reinforced today:
-
 - Terse. No trailing summaries.
 - Push per-commit. Caveman commit messages.
-- Don't `git add -A`; explicit paths. (`SubaruTuner.zip` would break the push.)
+- Don't `git add -A`; explicit paths. (`SubaruTuner.zip` still in the working tree.)
 - NEVER `rm -rf` user-content directories.
-- `/caveman-review` the diff + `/caveman-commit` the message before push (today: did three commits this way).
-- Real-ROM evidence tests are great safety net — descriptor refinements broke their own evidence twice today; tests caught it.
-- Validate.py FAILs are SIGNAL, not noise. Each surfaced FAIL = either pack bug, predicate gap, or pattern over-match. All three are useful.
+- `/caveman-review` + `/caveman-commit` before push.
 
 ## Suggested opener for next session
 
-> "HEAD `7e0f06f`, in sync with `origin/main`. P6 descriptor library bootstrapped this session: framework + 5 seed predicates + validate.py consumer CLI + dims-filter for over-match. 196/196 defgen tests green. a2tb002c coverage baseline: 1.3% PASS, 1.5% FAIL, 56.4% NO_DESCRIPTOR, 40.8% SKIPPED (0D scalars).
+> "HEAD `feeb6b5`, in sync with `origin/main`. Big session yesterday: P6 descriptor library bootstrapped (7 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing dtype fixed on 334 packs (~2500 individual rewrites). 203/203 defgen tests green.
 >
-> Three things on the deck for this session:
-> **(P6a)** Add 1D compensation descriptors — biggest NO_DESCRIPTOR cluster is `*_compensation_*` curves. ~5 new descriptors lifts a2tb002c coverage from ~3% to ~15-20%.
-> **(P6c)** Cross-pack validate.py runs (a2tb100u, ez1d*, an lf75404h-cousin pack) to surface scaling variants we missed.
-> **(P6d)** Fix a2tb002c.toml base_timing dtype (uint16 → uint8, validate.py flagged it; CLI dump-table currently returns garbage on those tables).
+> Three things on the deck:
+> **(P6e)** Investigate the `_x_0078125` AFR-scaling factor-1.0 bug. Affects ~335 packs. Need to check whether upstream Merp XML has factor 1.0 or 0.0078125, then fix wherever the truth lies. AFR tables currently decode to 0-65535 instead of 9-22.
+> **(P6a)** Add 1D-compensation descriptors — biggest NO_DESCRIPTOR cluster in a2tb002c. ~5 predicates, easy lift to ~15% coverage.
+> **(P6c)** Cross-pack validate.py runs (a2tb100u, A2WC400H Forester, ez1d*) to surface scaling variants we missed.
 >
 > Or pivot — adapter may land mid-session. If OBDX arrives, drop P6 and pre-stage the first-light dump."
