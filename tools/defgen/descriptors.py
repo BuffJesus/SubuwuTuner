@@ -638,15 +638,85 @@ def _boost_compensation_1d(buf: bytes, hint: DecodeHint) -> Verdict:
 BOOST_COMPENSATION_1D = register(Descriptor(
     id="boost_compensation_1d",
     kind="table",
-    description="1D boost/wastegate-duty compensation curve: signed adjustment in ±100%.",
+    description=(
+        "1D signed-percent compensation curve: ±100% adjustment via the "
+        "Subaru _x_78125_100 scaling family (×0.78125 − 100). Despite the "
+        "`boost` prefix in the id, the same predicate covers any 1D "
+        "compensation that lives in this scaling family — boost-target, "
+        "wastegate-duty, turbo-dynamics, injector-PW, tip-in enrichment, "
+        "fuel-cranking comp, etc."),
     id_patterns=[
+        # Boost / wastegate
         "*target_boost_compensation*", "*boost_compensation*",
         "*wastegate_duty_compensation*", "*wastegate_compensation*",
         "*initial_max_wastegate_duty_compensation*",
+        # Turbo dynamics (proportional / integral comp)
+        "*td_proportional_compensation*", "*td_integral*_compensation*",
+        # Injector pulse-width
+        "*injector_pulse_width_compensation*",
+        "*cranking_fuel_ipw_compensation*",
+        # Tip-in enrichment
+        "*tip_in_enrichment_compensation*",
     ],
     predicate=_boost_compensation_1d,
     evidence=[
         Evidence("a2tb002c", "target_boost_compensation_ect"),
+        Evidence("a2tb002c", "td_proportional_compensation_iat"),
     ],
     expected_dims=1,
+))
+
+
+def _compensation_2d_signed_percent(buf: bytes, hint: DecodeHint) -> Verdict:
+    # 2D variant of _boost_compensation_1d. Same scaling family, same
+    # bands. Subaru uses 2D compensation maps for cases where the
+    # adjustment depends on two axes (e.g. per-injector IPW comp by
+    # RPM × load, atm-pressure comp by RPM × something).
+    if hint.dims != 2 or hint.rows < 4 or hint.cols < 4:
+        return Verdict.no(f"shape {hint.rows}x{hint.cols} too small (need 4×4+)")
+    if hint.dtype not in ("uint8", "int8"):
+        return Verdict.no(f"dtype {hint.dtype} not byte-wide")
+    cells = hint.total_cells()
+    try:
+        vals = decode_values(buf, hint.dtype, cells)
+    except (KeyError, struct.error) as exc:
+        return Verdict.no(f"decode failed: {exc}")
+    candidates = [
+        ("raw×0.781−100%",  [v * 0.78125 - 100.0 for v in vals]),
+        ("raw×0.391−50%",   [v * 0.390625 - 50.0 for v in vals]),
+        ("raw−128%",        [v - 128.0 for v in vals]),
+    ]
+    for label, scaled in candidates:
+        in_range, bad = values_in_range(scaled, -100.0, 100.0)
+        if in_range:
+            df = distinct_fraction(vals)
+            return Verdict.yes(1.0,
+                f"{hint.rows}x{hint.cols} in [−100,+100]% via {label}, "
+                f"{df:.0%} distinct")
+    return Verdict.no(f"no scaling places all {cells} cells in −100..+100%")
+
+
+COMPENSATION_2D_SIGNED_PERCENT = register(Descriptor(
+    id="compensation_2d_signed_percent",
+    kind="table",
+    description=(
+        "2D signed-percent compensation map (uint8/int8 ≥4×4): adjustment "
+        "in ±100% via the same _x_78125_100 scaling family the 1D variant "
+        "covers. Examples: per-injector pulse-width comp, cranking-fuel "
+        "IPW comp by RPM, atm-pressure-keyed wastegate-duty comp."),
+    id_patterns=[
+        "*per_injector_pulse_width_compensation*",
+        "*injector_pulse_width_compensation*",
+        "*cranking_fuel_ipw_compensation*",
+        "*initial_max_wastegate_duty_compensation_atm_pressure*",
+        # 2D timing-comp activation tables share the same scaling band
+        # (the activation map is the COMP MULTIPLIER, not absolute timing).
+        "*timing_compensation_*_activation*",
+    ],
+    predicate=_compensation_2d_signed_percent,
+    evidence=[
+        Evidence("a2tb002c", "per_injector_pulse_width_compensation_a"),
+        Evidence("a2tb002c", "cranking_fuel_ipw_compensation_imm_cruise_rpm"),
+    ],
+    expected_dims=2,
 ))

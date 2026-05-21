@@ -82,7 +82,8 @@ class RegistryTest(unittest.TestCase):
         for expected in ("engine_rpm_axis", "coolant_temp_axis",
                          "intake_temp_axis", "engine_load_axis",
                          "wastegate_duty", "boost_target", "base_timing",
-                         "timing_compensation_1d", "boost_compensation_1d"):
+                         "timing_compensation_1d", "boost_compensation_1d",
+                         "compensation_2d_signed_percent"):
             self.assertIn(expected, ids)
 
     def test_by_id(self):
@@ -437,6 +438,67 @@ class BoostCompensation1DTest(unittest.TestCase):
             _pack_bytes(raw),
             descriptors.DecodeHint(dtype="uint8", dims=1, length=16))
         self.assertTrue(v.matches, msg=v.reasons)
+
+    def test_pattern_catches_td_compensation(self):
+        # Turbo-dynamics comp tables use the same _x_78125_100 scaling.
+        names = {d.id for d in descriptors.candidates_for(
+            "td_proportional_compensation_iat", kind="table", dims=1)}
+        self.assertIn("boost_compensation_1d", names)
+
+    def test_pattern_catches_injector_pulse_width_compensation(self):
+        names = {d.id for d in descriptors.candidates_for(
+            "cranking_fuel_ipw_compensation_accelerator",
+            kind="table", dims=1)}
+        self.assertIn("boost_compensation_1d", names)
+
+    def test_pattern_catches_tip_in_enrichment(self):
+        names = {d.id for d in descriptors.candidates_for(
+            "tip_in_enrichment_compensation_boost_error",
+            kind="table", dims=1)}
+        self.assertIn("boost_compensation_1d", names)
+
+
+# ---------------------------------------------------------------------------
+# 2D signed-percent compensation
+# ---------------------------------------------------------------------------
+
+class Compensation2DSignedPercentTest(unittest.TestCase):
+    def test_accepts_flat_stock_2d(self):
+        # 4×4 all-128 (= 0% adjustment) — must accept flat stock.
+        raw = [128] * 16
+        v = descriptors.COMPENSATION_2D_SIGNED_PERCENT.predicate(
+            _pack_bytes(raw),
+            descriptors.DecodeHint(dtype="uint8", dims=2, rows=4, cols=4))
+        self.assertTrue(v.matches, msg=v.reasons)
+
+    def test_accepts_asymmetric_2d(self):
+        # 8×8 grid spreading ±15% around neutral 128.
+        raw = [128 + ((i * 3 - 12) % 25) for i in range(64)]
+        v = descriptors.COMPENSATION_2D_SIGNED_PERCENT.predicate(
+            _pack_bytes(raw),
+            descriptors.DecodeHint(dtype="uint8", dims=2, rows=8, cols=8))
+        self.assertTrue(v.matches, msg=v.reasons)
+
+    def test_rejects_too_small(self):
+        raw = [128] * 9
+        v = descriptors.COMPENSATION_2D_SIGNED_PERCENT.predicate(
+            _pack_bytes(raw),
+            descriptors.DecodeHint(dtype="uint8", dims=2, rows=3, cols=3))
+        self.assertFalse(v.matches)
+
+    def test_pattern_catches_per_injector_pw_comp(self):
+        names = {d.id for d in descriptors.candidates_for(
+            "per_injector_pulse_width_compensation_a",
+            kind="table", dims=2)}
+        self.assertIn("compensation_2d_signed_percent", names)
+
+    def test_pattern_does_not_apply_to_1d_entry(self):
+        # expected_dims=2; a 1D table with matching id pattern shouldn't
+        # surface this descriptor.
+        names = {d.id for d in descriptors.candidates_for(
+            "tip_in_enrichment_compensation_boost_error",
+            kind="table", dims=1)}
+        self.assertNotIn("compensation_2d_signed_percent", names)
 
 
 # ---------------------------------------------------------------------------
