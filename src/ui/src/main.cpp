@@ -425,6 +425,61 @@ enum class ConfirmAction {
     Quit,
 };
 
+// ===========================================================================
+// Adapter picker (shared between Read-ROM and future Write-ROM flows)
+// ===========================================================================
+//
+// The Read-ROM modal needs a "pick your USB adapter" sub-form (transport
+// kind dropdown + device path or DLL path field). The future Write-ROM
+// modal needs an identical form. Factoring this into a self-contained
+// state + render helper so both call sites share the same UX + parsing
+// + spec-construction code path.
+struct AdapterPickerState {
+    int kind_idx{1};                 // 0=J2534, 1=OBDX, 2=Native
+    char device_path[256]{"COM5"};   // OBDX/Native; J2534 hides this field
+    char dll_path[1024]{};           // J2534 vendor DLL; OBDX/Native hide this
+};
+
+// Render the adapter-picker sub-form into the current ImGui window/popup.
+// Returns true iff the form is filled in enough to enable a "go" button
+// (kind selected + the matching path field non-empty). Intended to be
+// called inside a modal/window started by the caller; emits 2 lines of UI.
+[[nodiscard]] inline bool render_adapter_picker(AdapterPickerState &s) {
+    char const *const labels[] = {"J2534", "OBDX", "Native"};
+    ImGui::Combo("Adapter", &s.kind_idx, labels, IM_ARRAYSIZE(labels));
+    if (s.kind_idx == 0) {
+        ImGui::InputText("Vendor DLL path", s.dll_path, sizeof s.dll_path);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Path to your J2534 vendor DLL\n"
+                              "(e.g. op20pt32.dll, MongoosePro_GM.dll).");
+        }
+        return s.dll_path[0] != '\0';
+    }
+    ImGui::InputText("Device path", s.device_path, sizeof s.device_path);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "USB CDC port for the adapter.\n"
+            "Windows: COM5, COM6 etc.   Linux: /dev/ttyACM0.");
+    }
+    return s.device_path[0] != '\0';
+}
+
+// Convert an AdapterPickerState to a TransportSpec ready for
+// `st::transport::open_transport`. Pure function; no UI side effects.
+[[nodiscard]] inline st::transport::TransportSpec
+adapter_picker_to_spec(AdapterPickerState const &s) {
+    st::transport::TransportSpec spec;
+    switch (s.kind_idx) {
+    case 0:  spec.kind = st::transport::Kind::J2534; break;
+    case 2:  spec.kind = st::transport::Kind::Native; break;
+    default: spec.kind = st::transport::Kind::Obdx; break;
+    }
+    spec.dll_path = s.dll_path;
+    spec.device_path = s.device_path;
+    return spec;
+}
+
+
 struct AppState {
     std::optional<st::Project> project;
     // Transient status line shown in the status bar's middle cluster.
@@ -751,10 +806,9 @@ struct AppState {
         Cancelled,  // user-initiated abort; nothing to save
     };
     ReadRomState read_rom_state{ReadRomState::Idle};
-    // Form inputs.
-    int read_rom_transport_kind{1};         // 0=J2534, 1=OBDX, 2=Native
-    char read_rom_device_path[256]{"COM5"}; // OBDX/Native default; J2534 hides
-    char read_rom_dll_path[1024]{};         // J2534 vendor DLL; OBDX/Native hide
+    // Adapter form inputs (shared shape with the future write-rom flow —
+    // see render_adapter_picker / adapter_picker_to_spec helpers).
+    AdapterPickerState read_rom_adapter{};
     char read_rom_base_addr_hex[32]{"0x0"};
     char read_rom_size_hex[32]{"0x200000"}; // 2 MB default — VA/VB FA-DIT ROM size
     int read_rom_max_chunk{0x100};
@@ -3527,15 +3581,6 @@ void render_read_rom_modal(AppState &state) {
         state.read_rom_worker.join();
     }
 
-    char const *const transport_labels[] = {"J2534", "OBDX", "Native"};
-    auto const transport_kind_from_combo = [](int idx) {
-        switch (idx) {
-        case 0:  return st::transport::Kind::J2534;
-        case 2:  return st::transport::Kind::Native;
-        default: return st::transport::Kind::Obdx;
-        }
-    };
-
     auto const elapsed_str = [&] {
         auto const dur = std::chrono::steady_clock::now() - state.read_rom_start_time;
         auto const sec = std::chrono::duration_cast<std::chrono::seconds>(dur).count();
@@ -3551,24 +3596,7 @@ void render_read_rom_modal(AppState &state) {
         ImGui::TextUnformatted("OBDX/J2534/native adapter. Read-only — no ECU writes.");
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
 
-        ImGui::Combo("Adapter", &state.read_rom_transport_kind,
-                     transport_labels, IM_ARRAYSIZE(transport_labels));
-        if (state.read_rom_transport_kind == 0) {
-            ImGui::InputText("Vendor DLL path", state.read_rom_dll_path,
-                             sizeof state.read_rom_dll_path);
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Path to your J2534 vendor DLL\n"
-                                  "(e.g. op20pt32.dll, MongoosePro_GM.dll).");
-            }
-        } else {
-            ImGui::InputText("Device path", state.read_rom_device_path,
-                             sizeof state.read_rom_device_path);
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "USB CDC port for the adapter.\n"
-                    "Windows: COM5, COM6 etc.   Linux: /dev/ttyACM0.");
-            }
-        }
+        bool const adapter_ready = render_adapter_picker(state.read_rom_adapter);
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
         ImGui::InputText("Base address (hex)", state.read_rom_base_addr_hex,
                          sizeof state.read_rom_base_addr_hex);
@@ -3597,12 +3625,7 @@ void render_read_rom_modal(AppState &state) {
 
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
 
-        bool start_disabled = false;
-        if (state.read_rom_transport_kind == 0 && state.read_rom_dll_path[0] == '\0')
-            start_disabled = true;
-        if (state.read_rom_transport_kind != 0 && state.read_rom_device_path[0] == '\0')
-            start_disabled = true;
-
+        bool const start_disabled = !adapter_ready;
         ImGui::BeginDisabled(start_disabled);
         if (ImGui::Button("Read", ImVec2(120.0f, 0.0f))) {
             // ----- parse form inputs into runtime values -----
@@ -3626,10 +3649,8 @@ void render_read_rom_modal(AppState &state) {
                 state.read_rom_error_msg = "Size must be > 0.";
             } else {
                 // Build the TransportSpec and launch the worker.
-                st::transport::TransportSpec spec;
-                spec.kind = transport_kind_from_combo(state.read_rom_transport_kind);
-                spec.dll_path = state.read_rom_dll_path;
-                spec.device_path = state.read_rom_device_path;
+                st::transport::TransportSpec spec =
+                    adapter_picker_to_spec(state.read_rom_adapter);
 
                 state.read_rom_error_msg.clear();
                 state.read_rom_bytes_result.clear();
@@ -3660,9 +3681,13 @@ void render_read_rom_modal(AppState &state) {
                             st_ptr->read_rom_state = AppState::ReadRomState::Failed;
                             return;
                         }
-                        // Open() the transport with default LinkConfig. When
-                        // the platform layer lands, this is where the user
-                        // would also see "Connecting...".
+                        // Open() the transport with default LinkConfig. The
+                        // OBDX/Native paths are fully wired via Win32 serial
+                        // (CreateFileA on \\.\COMx) — a bad device path
+                        // surfaces a real Win32 error. The unverified part
+                        // is the OBDX DVI codec + UDS handshake against
+                        // real-adapter behavior, which only becomes testable
+                        // when hardware arrives.
                         auto open_r = (*transport_r)->open({});
                         if (!open_r.has_value()) {
                             st_ptr->read_rom_error_msg =
@@ -3700,7 +3725,7 @@ void render_read_rom_modal(AppState &state) {
         ImGui::EndDisabled();
         if (start_disabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             ImGui::SetTooltip("Fill in the %s field above.",
-                              state.read_rom_transport_kind == 0
+                              state.read_rom_adapter.kind_idx == 0
                                   ? "vendor DLL path"
                                   : "device path");
         }
