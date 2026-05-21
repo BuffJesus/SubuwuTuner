@@ -44,7 +44,7 @@ bb659c1 tools(defgen): broaden AFR matcher (implicit k=1 + paren variants)
 33aa0d1 feat(ui+flash): Tools → Read ROM from Car (pre-OBDX)
 ```
 
-### Tools → Read ROM from Car (commit `33aa0d1`)
+### Tools → Read ROM from Car + Trace-replay test mode (commits `33aa0d1` + `73959f1`)
 
 Pre-staged GUI flow for the OBDX adapter (ETA May 22-25). After this
 commit, tuner workflow on adapter arrival is:
@@ -57,8 +57,15 @@ Three pieces:
 - New `Tools` top-level menu (between Edit and View).
 
 The C++ + UDS path goes all the way through MockTransport today. The
-real-OBDX leg lights up when `st::transport::open_transport(Kind::Obdx, ...)`
-gets its platform-specific USB-CDC implementation (waiting on hardware).
+real-OBDX leg's transport layer is already wired via Win32 serial
+(serial_byte_channel_win.cpp); the empirically unverified piece is the
+OBDX DVI codec + UDS handshake against real adapter firmware.
+
+Commit `73959f1` adds a 4th "Trace (test)" option to the adapter
+picker that lets the user smoke-test the entire flow against a
+recorded UDS trace file — no adapter required. The parse_uds_trace
+parser was lifted from CLI-only into `st::transport::parse_uds_trace`
+so both surfaces share the same code path.
 
 **Write-ROM plan** documented as a 50-line comment block above
 `render_read_rom_modal` — route through existing `render_flash_modal`
