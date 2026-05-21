@@ -1,8 +1,8 @@
 # Handoff — 2026-05-21 (P6 + 3 pack-bug sweeps + VA/VB bundles + AFR formula)
 
-Marathon session. Built on yesterday's `8f4b44f`. **32 commits** all pushed. P6 descriptor library is real and finding real bugs; validate.py surfaced multiple classes of pack-quality issues that we fixed at the source (defgen) and applied corpus-wide; user dropped two forum-sourced VA/VB bundle XMLs which we wired into bulk_regen to upgrade 25 packs from 0D-scalar-only to fully-typed 2D.
+Marathon session. Built on yesterday's `8f4b44f`. **37 commits** all pushed. P6 descriptor library is real and finding real bugs; validate.py surfaced multiple classes of pack-quality issues that we fixed at the source (defgen) and applied corpus-wide; user dropped two forum-sourced VA/VB bundle XMLs which we wired into bulk_regen to upgrade 25 packs from 0D-scalar-only to fully-typed 2D.
 
-**HEAD `bb659c1`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave) and `fixtures/projects/Test/` (user-created GUI state, leave alone).
+**HEAD `33aa0d1`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave) and `fixtures/projects/Test/` (user-created GUI state, leave alone).
 
 ## Commits shipped this session (oldest → newest)
 
@@ -39,7 +39,33 @@ ad187c4 docs(handoff): P6e-VA investigated — VA fueling tables are correct
 9ec0c32 docs(handoff): inverse_divide formula shipped (09342dd)
 d256920 docs(handoff): fix stale references (commit count, HEAD, test count)
 bb659c1 tools(defgen): broaden AFR matcher (implicit k=1 + paren variants)
+6418998 docs(handoff): final session refresh — 32 commits, all non-linear formulas handled
+2745e73 docs(handoff): empirical coverage benchmark vs RomRaider/Merp
+33aa0d1 feat(ui+flash): Tools → Read ROM from Car (pre-OBDX)
 ```
+
+### Tools → Read ROM from Car (commit `33aa0d1`)
+
+Pre-staged GUI flow for the OBDX adapter (ETA May 22-25). After this
+commit, tuner workflow on adapter arrival is:
+
+  Tools → Read ROM from Car → pick adapter + COM5 → Read → save .bin
+
+Three pieces:
+- `Flasher::read_full_rom` extended with optional progress callback + cancel atomic; 4 new test cases.
+- `render_read_rom_modal()` state machine (Idle → Running → Done / Failed / Cancelled) with background `std::thread`; ~440 lines in main.cpp.
+- New `Tools` top-level menu (between Edit and View).
+
+The C++ + UDS path goes all the way through MockTransport today. The
+real-OBDX leg lights up when `st::transport::open_transport(Kind::Obdx, ...)`
+gets its platform-specific USB-CDC implementation (waiting on hardware).
+
+**Write-ROM plan** documented as a 50-line comment block above
+`render_read_rom_modal` — route through existing `render_flash_modal`
+policy gate, add vehicle-state preflight (battery > 12.0V, ignition,
+transmission), background-thread `Flasher::execute` with per-sector
+ledger, journal-resume modal. Implementation deferred until OBDX
+validation lands.
 
 ## What's new since yesterday (8f4b44f)
 
@@ -154,7 +180,7 @@ Concrete per-pack richness (post 875ed2f + 09342dd + bb659c1 sweeps):
 
 ## Status snapshot
 
-- **HEAD `bb659c1`**, in sync with `origin/main`.
+- **HEAD `33aa0d1`**, in sync with `origin/main`.
 - **definitions/ pack count: 373** (one promoted from throwaway; net unchanged).
 - **defgen test suite: 236 tests green**.
 - **C++ build: not rebuilt this session** (pure Python + TOML data).
@@ -244,7 +270,7 @@ OBDX Pro VX adapter ETA May 22-25 — could land mid-day tomorrow. If it arrives
 
 ## Suggested opener for next session
 
-> "HEAD `bb659c1`, in sync with `origin/main`. Marathon yesterday: 24 commits (including this handoff refresh). P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
+> "HEAD `33aa0d1`, in sync with `origin/main`. Marathon yesterday: 24 commits (including this handoff refresh). P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
 >
 > Deck for this session:
 > **(P6a-continued — DEPRIORITIZED)** Fuel-comp scalings outside the ±100% family (`_x_003051758_100`, `_x_000224304213_7_35`). UX pass on a2tb001c showed they already display correctly via the linear-scaling path (enrichment offset −100..0%, AFR points ±7.35). Adding predicates would only improve validate.py coverage metric, not user-facing dump-table. Drop unless coverage % becomes a stakeholder concern.
