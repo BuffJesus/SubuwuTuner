@@ -25,6 +25,7 @@
 #include "st/transport/factory.hpp"
 #include "st/transport/j2534_discovery.hpp"
 #include "st/transport/mock.hpp"
+#include "st/transport/uds_trace.hpp"
 
 #include <algorithm>
 #include <array>
@@ -7744,117 +7745,13 @@ int cmd_flash_resume(int argc, char *argv[]) {
     return 0;
 }
 
-// Parse a UDS trace file into {request, response} pairs. Format:
-//   > hh hh ...    a tester request (hex bytes, whitespace tolerant,
-//                  optional "0x" prefix per byte)
-//   < hh hh ...    the matching ECU response
-//   # ...          comment to end of line
-//   <blank>        ignored
-//
-// Strict alternation: each '>' line is immediately followed by one '<'
-// line. Anything else is a parse error.
-struct UdsTracePair {
-    std::vector<std::uint8_t> request;
-    std::vector<std::uint8_t> response;
-};
-
-bool parse_uds_trace(std::filesystem::path const &path, std::vector<UdsTracePair> &out_pairs,
-                     std::string &err) {
-    std::ifstream in{path};
-    if (!in) {
-        err = "flash-apply: cannot open trace file: " + path.string();
-        return false;
-    }
-    auto const parse_hex_line = [&](std::string_view body, std::vector<std::uint8_t> &dst,
-                                    int line_no) -> bool {
-        std::istringstream iss{std::string{body}};
-        std::string tok;
-        while (iss >> tok) {
-            std::string_view sv{tok};
-            if (sv.starts_with("0x") || sv.starts_with("0X")) {
-                sv.remove_prefix(2);
-            }
-            if (sv.size() != 2) {
-                err = "flash-apply: bad hex byte '" + tok + "' on line " + std::to_string(line_no);
-                return false;
-            }
-            unsigned value = 0;
-            auto const res = std::from_chars(sv.data(), sv.data() + sv.size(), value, 16);
-            if (res.ec != std::errc{} || res.ptr != sv.data() + sv.size() || value > 0xFFU) {
-                err = "flash-apply: bad hex byte '" + tok + "' on line " + std::to_string(line_no);
-                return false;
-            }
-            dst.push_back(static_cast<std::uint8_t>(value));
-        }
-        return true;
-    };
-
-    std::string line;
-    int line_no = 0;
-    bool expect_request = true;
-    UdsTracePair pending;
-    while (std::getline(in, line)) {
-        ++line_no;
-        if (auto const hash = line.find('#'); hash != std::string::npos) {
-            line.erase(hash);
-        }
-        // Trim leading whitespace.
-        std::size_t i = 0;
-        while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) {
-            ++i;
-        }
-        if (i >= line.size())
-            continue; // blank
-        char const dir = line[i];
-        if (dir != '>' && dir != '<') {
-            err = "flash-apply: line " + std::to_string(line_no) +
-                  " must start with '>' or '<' after any whitespace";
-            return false;
-        }
-        std::string_view const body{line.data() + i + 1, line.size() - i - 1};
-        if (dir == '>') {
-            if (!expect_request) {
-                err = "flash-apply: line " + std::to_string(line_no) +
-                      ": two requests in a row (expected '<')";
-                return false;
-            }
-            pending = UdsTracePair{};
-            if (!parse_hex_line(body, pending.request, line_no))
-                return false;
-            if (pending.request.empty()) {
-                err = "flash-apply: line " + std::to_string(line_no) +
-                      ": request must have at least one byte";
-                return false;
-            }
-            expect_request = false;
-        } else {
-            if (expect_request) {
-                err = "flash-apply: line " + std::to_string(line_no) +
-                      ": response with no preceding request";
-                return false;
-            }
-            if (!parse_hex_line(body, pending.response, line_no))
-                return false;
-            if (pending.response.empty()) {
-                err = "flash-apply: line " + std::to_string(line_no) +
-                      ": response must have at least one byte";
-                return false;
-            }
-            out_pairs.push_back(std::move(pending));
-            expect_request = true;
-        }
-    }
-    if (!expect_request) {
-        err = "flash-apply: trace ends with an unmatched request "
-              "(missing '<' response)";
-        return false;
-    }
-    if (out_pairs.empty()) {
-        err = "flash-apply: trace file contains no exchanges: " + path.string();
-        return false;
-    }
-    return true;
-}
+// CLI-local alias for the library types so existing call sites
+// (cmd_rom_pull, cmd_flash_apply, cmd_project_flash) stay
+// unchanged. The implementation now lives in
+// src/transport/src/uds_trace.cpp so the GUI can call it too —
+// see Tools → Read ROM from Car's Trace-replay mode.
+using st::transport::UdsTracePair;
+using st::transport::parse_uds_trace;
 
 namespace {
 // Print the FlashReport from a successful or failed ExecuteOutcome. Shared

@@ -21,6 +21,8 @@
 #include "st/policy.hpp"
 #include "st/project.hpp"
 #include "st/transport/factory.hpp"
+#include "st/transport/mock.hpp"
+#include "st/transport/uds_trace.hpp"
 
 // ImGui + backends.
 #include <GLFW/glfw3.h>
@@ -435,17 +437,26 @@ enum class ConfirmAction {
 // state + render helper so both call sites share the same UX + parsing
 // + spec-construction code path.
 struct AdapterPickerState {
-    int kind_idx{1};                 // 0=J2534, 1=OBDX, 2=Native
-    char device_path[256]{"COM5"};   // OBDX/Native; J2534 hides this field
-    char dll_path[1024]{};           // J2534 vendor DLL; OBDX/Native hide this
+    int kind_idx{1};                 // 0=J2534, 1=OBDX, 2=Native, 3=Trace (test)
+    char device_path[256]{"COM5"};   // OBDX/Native; J2534/Trace hide this field
+    char dll_path[1024]{};           // J2534 vendor DLL; others hide this
+    char trace_path[1024]{};         // Trace (test) file path; others hide
 };
+
+// Returns true if `s` selects the trace-replay test mode (no real
+// adapter — MockTransport + parse_uds_trace). Read-ROM and (future)
+// Write-ROM modals branch on this to construct a MockTransport
+// directly instead of calling open_transport.
+[[nodiscard]] inline bool adapter_is_trace_mode(AdapterPickerState const &s) noexcept {
+    return s.kind_idx == 3;
+}
 
 // Render the adapter-picker sub-form into the current ImGui window/popup.
 // Returns true iff the form is filled in enough to enable a "go" button
 // (kind selected + the matching path field non-empty). Intended to be
-// called inside a modal/window started by the caller; emits 2 lines of UI.
+// called inside a modal/window started by the caller.
 [[nodiscard]] inline bool render_adapter_picker(AdapterPickerState &s) {
-    char const *const labels[] = {"J2534", "OBDX", "Native"};
+    char const *const labels[] = {"J2534", "OBDX", "Native", "Trace (test)"};
     ImGui::Combo("Adapter", &s.kind_idx, labels, IM_ARRAYSIZE(labels));
     if (s.kind_idx == 0) {
         ImGui::InputText("Vendor DLL path", s.dll_path, sizeof s.dll_path);
@@ -454,6 +465,17 @@ struct AdapterPickerState {
                               "(e.g. op20pt32.dll, MongoosePro_GM.dll).");
         }
         return s.dll_path[0] != '\0';
+    }
+    if (s.kind_idx == 3) {
+        ImGui::InputText("Trace file (.uds)", s.trace_path, sizeof s.trace_path);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Path to a UDS trace file ('> req' / '< resp' pairs).\n"
+                "Lets you smoke-test the flow without an adapter — feeds\n"
+                "the canned exchanges into a MockTransport. Use this for\n"
+                "pre-OBDX testing or for replaying a recorded session.");
+        }
+        return s.trace_path[0] != '\0';
     }
     ImGui::InputText("Device path", s.device_path, sizeof s.device_path);
     if (ImGui::IsItemHovered()) {
@@ -466,6 +488,9 @@ struct AdapterPickerState {
 
 // Convert an AdapterPickerState to a TransportSpec ready for
 // `st::transport::open_transport`. Pure function; no UI side effects.
+// PRECONDITION: !adapter_is_trace_mode(s). Caller must branch on
+// adapter_is_trace_mode first; trace mode does not go through the
+// factory.
 [[nodiscard]] inline st::transport::TransportSpec
 adapter_picker_to_spec(AdapterPickerState const &s) {
     st::transport::TransportSpec spec;
@@ -3648,9 +3673,15 @@ void render_read_rom_modal(AppState &state) {
             } else if (size == 0) {
                 state.read_rom_error_msg = "Size must be > 0.";
             } else {
-                // Build the TransportSpec and launch the worker.
-                st::transport::TransportSpec spec =
-                    adapter_picker_to_spec(state.read_rom_adapter);
+                bool const trace_mode = adapter_is_trace_mode(state.read_rom_adapter);
+                // Real-transport branch builds a spec for open_transport;
+                // trace branch carries the file path (worker loads it).
+                st::transport::TransportSpec spec = trace_mode
+                    ? st::transport::TransportSpec{}
+                    : adapter_picker_to_spec(state.read_rom_adapter);
+                std::string trace_path_str = trace_mode
+                    ? std::string{state.read_rom_adapter.trace_path}
+                    : std::string{};
 
                 state.read_rom_error_msg.clear();
                 state.read_rom_bytes_result.clear();
@@ -3660,10 +3691,6 @@ void render_read_rom_modal(AppState &state) {
                 state.read_rom_state = AppState::ReadRomState::Running;
                 state.read_rom_start_time = std::chrono::steady_clock::now();
 
-                // Capture shared_ptrs + plain values for the worker. The
-                // worker writes into AppState members ONLY after switching
-                // state away from Running, which is the cue for the main
-                // thread to join + read.
                 AppState *st_ptr = &state;
                 int const max_chunk = state.read_rom_max_chunk;
                 auto bytes_done_sp = state.read_rom_bytes_done;
@@ -3671,32 +3698,62 @@ void render_read_rom_modal(AppState &state) {
                 auto cancel_sp = state.read_rom_cancel;
 
                 state.read_rom_worker = std::thread(
-                    [st_ptr, spec, base_addr, size, max_chunk,
-                     bytes_done_sp, total_sp, cancel_sp]() mutable {
-                        auto transport_r = st::transport::open_transport(spec);
-                        if (!transport_r.has_value()) {
-                            st_ptr->read_rom_error_msg =
-                                "Adapter open failed: " +
-                                std::string{transport_r.error().message()};
-                            st_ptr->read_rom_state = AppState::ReadRomState::Failed;
-                            return;
+                    [st_ptr, spec, trace_mode, trace_path_str, base_addr, size,
+                     max_chunk, bytes_done_sp, total_sp, cancel_sp]() mutable {
+                        // Owning storage. Trace-mode keeps a stack MockTransport;
+                        // real-mode owns the unique_ptr from the factory.
+                        st::transport::MockTransport mock;
+                        std::unique_ptr<st::transport::ITransport> owned;
+                        st::transport::ITransport *chosen = nullptr;
+
+                        if (trace_mode) {
+                            std::vector<st::transport::UdsTracePair> pairs;
+                            std::string err;
+                            if (!st::transport::parse_uds_trace(
+                                    std::filesystem::path{trace_path_str}, pairs, err)) {
+                                st_ptr->read_rom_error_msg = std::move(err);
+                                st_ptr->read_rom_state = AppState::ReadRomState::Failed;
+                                return;
+                            }
+                            if (auto s = mock.open({}); !s.has_value()) {
+                                st_ptr->read_rom_error_msg =
+                                    "MockTransport open failed: " +
+                                    std::string{s.error().message()};
+                                st_ptr->read_rom_state = AppState::ReadRomState::Failed;
+                                return;
+                            }
+                            for (auto &p : pairs) {
+                                mock.expect_send_recv(std::move(p.request),
+                                                      std::move(p.response));
+                            }
+                            chosen = &mock;
+                        } else {
+                            auto transport_r = st::transport::open_transport(spec);
+                            if (!transport_r.has_value()) {
+                                st_ptr->read_rom_error_msg =
+                                    "Adapter open failed: " +
+                                    std::string{transport_r.error().message()};
+                                st_ptr->read_rom_state = AppState::ReadRomState::Failed;
+                                return;
+                            }
+                            // The OBDX/Native paths are fully wired via Win32
+                            // serial (CreateFileA on \\.\COMx) — a bad device
+                            // path surfaces a real Win32 error. What's
+                            // empirically unverified is the OBDX DVI codec +
+                            // UDS handshake against real adapter firmware.
+                            auto open_r = (*transport_r)->open({});
+                            if (!open_r.has_value()) {
+                                st_ptr->read_rom_error_msg =
+                                    "Adapter link open failed: " +
+                                    std::string{open_r.error().message()};
+                                st_ptr->read_rom_state = AppState::ReadRomState::Failed;
+                                return;
+                            }
+                            owned = std::move(*transport_r);
+                            chosen = owned.get();
                         }
-                        // Open() the transport with default LinkConfig. The
-                        // OBDX/Native paths are fully wired via Win32 serial
-                        // (CreateFileA on \\.\COMx) — a bad device path
-                        // surfaces a real Win32 error. The unverified part
-                        // is the OBDX DVI codec + UDS handshake against
-                        // real-adapter behavior, which only becomes testable
-                        // when hardware arrives.
-                        auto open_r = (*transport_r)->open({});
-                        if (!open_r.has_value()) {
-                            st_ptr->read_rom_error_msg =
-                                "Adapter link open failed: " +
-                                std::string{open_r.error().message()};
-                            st_ptr->read_rom_state = AppState::ReadRomState::Failed;
-                            return;
-                        }
-                        st::flash::Flasher flasher{**transport_r};
+
+                        st::flash::Flasher flasher{*chosen};
                         auto result = flasher.read_full_rom(
                             base_addr, size, static_cast<std::uint32_t>(max_chunk),
                             std::chrono::milliseconds{1500},
@@ -3724,10 +3781,11 @@ void render_read_rom_modal(AppState &state) {
         }
         ImGui::EndDisabled();
         if (start_disabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Fill in the %s field above.",
-                              state.read_rom_adapter.kind_idx == 0
-                                  ? "vendor DLL path"
-                                  : "device path");
+            char const *const which =
+                state.read_rom_adapter.kind_idx == 0   ? "vendor DLL path"
+                : state.read_rom_adapter.kind_idx == 3 ? "trace file path"
+                                                       : "device path";
+            ImGui::SetTooltip("Fill in the %s field above.", which);
         }
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)) ||

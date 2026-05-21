@@ -8,6 +8,7 @@ set(_st_transport_sources
     src/native.cpp
     src/native_transport.cpp
     src/factory.cpp
+    src/uds_trace.cpp
 )
 
 # Platform-specific IByteChannel implementations. USB-CDC ACM
