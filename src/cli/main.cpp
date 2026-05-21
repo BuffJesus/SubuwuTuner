@@ -606,6 +606,58 @@ bool arg_matches(char const *arg, std::string_view short_form, std::string_view 
     return sv == short_form || sv == long_form;
 }
 
+// Print "did you mean" suggestions to stderr when the user provided
+// an id that didn't match any table/axis in the pack. For a pack
+// with 300+ entries, listing all of them buries the signal; a small
+// list of substring-matching ids gives the user a fast on-ramp to
+// the right name.
+//
+// `entry_kind` is the human label ("table" / "axis") used in the
+// "Did you mean" preamble. `ids` is the full list to filter from.
+// Case-insensitive substring match; results stable-sorted by length
+// ascending then by id alphabetic (so the shortest most-likely
+// matches lead).
+void print_id_suggestions(char const *entry_kind, std::string_view needle,
+                          std::vector<std::string> const &ids) {
+    auto const lower = [](std::string s) {
+        for (char &c : s)
+            if (c >= 'A' && c <= 'Z')
+                c = static_cast<char>(c - 'A' + 'a');
+        return s;
+    };
+    std::string const needle_lower(needle);
+    std::string const folded_needle = lower(needle_lower);
+
+    std::vector<std::string> matches;
+    for (auto const &id : ids) {
+        if (lower(id).find(folded_needle) != std::string::npos)
+            matches.push_back(id);
+    }
+    if (matches.empty()) {
+        std::fprintf(stderr,
+                     "  (no %s id contains '%.*s'; "
+                     "use `subuwutuner-cli table-list <pack>` to see all)\n",
+                     entry_kind, static_cast<int>(needle.size()), needle.data());
+        return;
+    }
+    std::sort(matches.begin(), matches.end(), [](auto const &a, auto const &b) {
+        if (a.size() != b.size())
+            return a.size() < b.size();
+        return a < b;
+    });
+    constexpr std::size_t kMaxSuggestions = 10;
+    auto const n = std::min(matches.size(), kMaxSuggestions);
+    std::fprintf(stderr, "  Did you mean one of these %ss?\n", entry_kind);
+    for (std::size_t i = 0; i < n; ++i) {
+        std::fprintf(stderr, "    %s\n", matches[i].c_str());
+    }
+    if (matches.size() > kMaxSuggestions) {
+        std::fprintf(stderr, "    ... and %zu more matching '%.*s'\n",
+                     matches.size() - kMaxSuggestions, static_cast<int>(needle.size()),
+                     needle.data());
+    }
+}
+
 // Forward-declared so commands defined ahead of parse_range's body can use it.
 bool parse_range(std::string_view s, std::size_t &lo, std::size_t &hi);
 
@@ -892,10 +944,11 @@ int cmd_dump_axis(int argc, char *argv[]) {
     auto const axis = def->find_axis(*axis_id);
     if (axis == nullptr) {
         std::fprintf(stderr, "dump-axis: axis '%s' not found in pack\n", axis_id->c_str());
-        std::fputs("Available axes:\n", stderr);
-        for (auto const &a : def->axes()) {
-            std::fprintf(stderr, "  %s\n", a.id.c_str());
-        }
+        std::vector<std::string> ids;
+        ids.reserve(def->axes().size());
+        for (auto const &a : def->axes())
+            ids.push_back(a.id);
+        print_id_suggestions("axis", *axis_id, ids);
         return 1;
     }
 
@@ -1006,10 +1059,11 @@ int cmd_dump_table(int argc, char *argv[]) {
     auto const *table = def->find_table(*table_id);
     if (table == nullptr) {
         std::fprintf(stderr, "dump-table: table '%s' not found in pack\n", table_id->c_str());
-        std::fputs("Available tables:\n", stderr);
-        for (auto const &t : def->tables()) {
-            std::fprintf(stderr, "  %s\n", t.id.c_str());
-        }
+        std::vector<std::string> ids;
+        ids.reserve(def->tables().size());
+        for (auto const &t : def->tables())
+            ids.push_back(t.id);
+        print_id_suggestions("table", *table_id, ids);
         return 1;
     }
 
@@ -2025,6 +2079,11 @@ int cmd_project_edit(int argc, char *argv[]) {
     auto const *table = proj->definition().find_table(*table_id);
     if (table == nullptr) {
         std::fprintf(stderr, "project-edit: table '%s' not found in pack\n", table_id->c_str());
+        std::vector<std::string> ids;
+        ids.reserve(proj->definition().tables().size());
+        for (auto const &t : proj->definition().tables())
+            ids.push_back(t.id);
+        print_id_suggestions("table", *table_id, ids);
         return 1;
     }
 
@@ -2171,6 +2230,11 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
     auto const *table = proj->definition().find_table(*table_id);
     if (table == nullptr) {
         std::fprintf(stderr, "project-edit-csv: table '%s' not found in pack\n", table_id->c_str());
+        std::vector<std::string> ids;
+        ids.reserve(proj->definition().tables().size());
+        for (auto const &t : proj->definition().tables())
+            ids.push_back(t.id);
+        print_id_suggestions("table", *table_id, ids);
         return 1;
     }
     auto td = proj->definition().read_table_values(proj->working_rom(), *table);
@@ -2333,6 +2397,11 @@ int cmd_project_export_csv(int argc, char *argv[]) {
     if (table == nullptr) {
         std::fprintf(stderr, "project-export-csv: table '%s' not found in pack\n",
                      table_id->c_str());
+        std::vector<std::string> ids;
+        ids.reserve(proj->definition().tables().size());
+        for (auto const &t : proj->definition().tables())
+            ids.push_back(t.id);
+        print_id_suggestions("table", *table_id, ids);
         return 1;
     }
     auto const working_td = proj->definition().read_table_values(proj->working_rom(), *table);
@@ -2864,6 +2933,11 @@ int cmd_project_autotune_maf(int argc, char *argv[]) {
     if (table == nullptr) {
         std::fprintf(stderr, "project-autotune-maf: table '%s' not found in pack\n",
                      table_id->c_str());
+        std::vector<std::string> ids;
+        ids.reserve(proj->definition().tables().size());
+        for (auto const &t : proj->definition().tables())
+            ids.push_back(t.id);
+        print_id_suggestions("table", *table_id, ids);
         return 1;
     }
     if (table->dimensions != 1) {
@@ -3193,6 +3267,11 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
     if (table == nullptr) {
         std::fprintf(stderr, "project-autotune-knock-pull: table '%s' not found in pack\n",
                      table_id->c_str());
+        std::vector<std::string> ids;
+        ids.reserve(proj->definition().tables().size());
+        for (auto const &t : proj->definition().tables())
+            ids.push_back(t.id);
+        print_id_suggestions("table", *table_id, ids);
         return 1;
     }
     if (table->dimensions != 2) {
@@ -3502,6 +3581,11 @@ int cmd_table_edit(int argc, char *argv[]) {
     auto const *table = def->find_table(*table_id);
     if (table == nullptr) {
         std::fprintf(stderr, "table-edit: table '%s' not found in pack\n", table_id->c_str());
+        std::vector<std::string> ids;
+        ids.reserve(def->tables().size());
+        for (auto const &t : def->tables())
+            ids.push_back(t.id);
+        print_id_suggestions("table", *table_id, ids);
         return 1;
     }
 
@@ -3776,6 +3860,11 @@ int cmd_project_diff(int argc, char *argv[]) {
     if (table_filter.has_value() && a->definition().find_table(*table_filter) == nullptr) {
         std::fprintf(stderr, "project-diff: table '%s' not found in pack '%s'\n",
                      table_filter->c_str(), a->definition().pack().id.c_str());
+        std::vector<std::string> ids;
+        ids.reserve(a->definition().tables().size());
+        for (auto const &t : a->definition().tables())
+            ids.push_back(t.id);
+        print_id_suggestions("table", *table_filter, ids);
         return 1;
     }
 
