@@ -20,7 +20,7 @@ includes       = ["../pids.toml"]
 
 [[identification]]
 name        = "LF9L000E"
-cid_address = 0x00000000
+cid_address = 0x00035807
 cid_length  = 8
 cid_match   = "LF9L000E"
 cid_scan    = true

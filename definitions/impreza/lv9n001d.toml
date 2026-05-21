@@ -23,6 +23,7 @@ name        = "LV9N001D"
 cid_address = 0x0002AA1C
 cid_length  = 8
 cid_match   = "LV9N001D"
+cid_scan    = true
 ecu_part    = "8B145A7007"
 
 
