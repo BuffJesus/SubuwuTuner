@@ -255,23 +255,37 @@ def distinct_fraction(values: list[float]) -> float:
 # --- Axes ------------------------------------------------------------------
 
 def _engine_rpm_axis(buf: bytes, hint: DecodeHint) -> Verdict:
-    # Engine-speed axes on Subaru DI/EJ ROMs span roughly 400-7500 RPM with
-    # 8-21 breakpoints. We allow a slightly wider band (200-8500) for
-    # tolerance and require strictly increasing values across the table.
+    # Engine-speed axes on Subaru ROMs span roughly 400-7500 RPM with
+    # 8-21 breakpoints. The raw uint16 encoding varies by era:
+    #   * float32_be RPM (EJ-era Legacy/Impreza — Merp canonical XML)
+    #   * uint16_be raw RPM  (some packs use raw 1:1)
+    #   * uint16_be ×5.12 (VA-era; raw_decoded = raw/5.12 → RPM)
+    # We try each scaling internally and accept any that places all
+    # values in the 200-8500 RPM band with strict monotonic increase
+    # and a 1000+ RPM total span.
     if hint.dims != 1 or hint.length < 5 or hint.length > 32:
         return Verdict.no(f"length {hint.length} outside [5,32]")
     try:
         vals = decode_values(buf, hint.dtype, hint.length)
     except (KeyError, struct.error) as exc:
         return Verdict.no(f"decode failed: {exc}")
-    in_range, bad = values_in_range(vals, 200.0, 8500.0)
-    if not in_range:
-        return Verdict.no(f"{bad}/{hint.length} values outside [200,8500]")
-    if not is_monotonic(vals, strict=True):
-        return Verdict.no("not strictly increasing")
-    if max(vals) - min(vals) < 1000.0:
-        return Verdict.no(f"span {max(vals)-min(vals):.0f} too small (<1000)")
-    return Verdict.yes(1.0, f"monotonic {vals[0]:.0f}..{vals[-1]:.0f} RPM ({hint.length} pts)")
+    candidates = [
+        ("raw",       vals),
+        ("raw/5.12",  [v / 5.12 for v in vals]),
+    ]
+    for label, scaled in candidates:
+        in_range, bad = values_in_range(scaled, 200.0, 8500.0)
+        if not in_range:
+            continue
+        if not is_monotonic(scaled, strict=True):
+            continue
+        if max(scaled) - min(scaled) < 1000.0:
+            continue
+        return Verdict.yes(1.0,
+            f"monotonic {scaled[0]:.0f}..{scaled[-1]:.0f} RPM "
+            f"({hint.length} pts) via {label}")
+    return Verdict.no(f"no scaling places {hint.length} cells in "
+                       f"monotonic 200..8500 RPM band")
 
 
 ENGINE_RPM_AXIS = register(Descriptor(

@@ -142,7 +142,8 @@ class EngineRpmAxisTest(unittest.TestCase):
         v = descriptors.ENGINE_RPM_AXIS.predicate(_pack_floats_be(rpms),
                                                   self._hint(11))
         self.assertFalse(v.matches)
-        self.assertTrue(any("not strictly increasing" in r for r in v.reasons))
+        # Omnibus rejection — no scaling produced a monotonic sweep.
+        self.assertTrue(any("monotonic" in r for r in v.reasons))
 
     def test_rejects_out_of_range(self):
         # Last value is unrealistically high (>8500).
@@ -153,19 +154,33 @@ class EngineRpmAxisTest(unittest.TestCase):
         self.assertFalse(v.matches)
 
     def test_rejects_compressed_span(self):
-        # Span = 900 RPM (< 1000 threshold).
+        # Span = 900 RPM (< 1000 threshold) under raw scaling, and
+        # /5.12 makes the span tinier still — neither candidate passes.
         rpms = [3000.0, 3090.0, 3180.0, 3270.0, 3360.0,
                 3450.0, 3540.0, 3630.0, 3720.0, 3810.0, 3900.0]
         v = descriptors.ENGINE_RPM_AXIS.predicate(_pack_floats_be(rpms),
                                                   self._hint(11))
         self.assertFalse(v.matches)
-        self.assertTrue(any("span" in r for r in v.reasons))
+        # Omnibus rejection — no scaling produced a wide-enough sweep.
+        self.assertTrue(any("RPM band" in r for r in v.reasons))
 
     def test_rejects_truncated_buffer(self):
         # Hint claims 11 entries but buffer only holds 4.
         buf = _pack_floats_be([400.0, 800.0, 1200.0, 1600.0])
         v = descriptors.ENGINE_RPM_AXIS.predicate(buf, self._hint(11))
         self.assertFalse(v.matches)
+
+    def test_accepts_va_era_x_5_12_scaling(self):
+        # VA-era RPM axes encode RPM × 5.12 in uint16_be. Bundle XMLs
+        # declare scaling expression="(x)/5.12". Real-world bytes for
+        # an 8-point sweep from 800 to 6800 RPM under that scaling:
+        rpms = [800, 1200, 1600, 2400, 3200, 4000, 5200, 6800]
+        raw = [int(r * 5.12) for r in rpms]
+        v = descriptors.ENGINE_RPM_AXIS.predicate(
+            _pack_uint16_be(raw),
+            descriptors.DecodeHint(dtype="uint16_be", dims=1, length=8))
+        self.assertTrue(v.matches, msg=v.reasons)
+        self.assertTrue(any("raw/5.12" in r for r in v.reasons))
 
 
 # ---------------------------------------------------------------------------
