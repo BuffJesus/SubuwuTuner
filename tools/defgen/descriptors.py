@@ -324,6 +324,78 @@ COOLANT_TEMP_AXIS = register(Descriptor(
 ))
 
 
+def _intake_temp_axis(buf: bytes, hint: DecodeHint) -> Verdict:
+    # IAT axes share the same physical band as coolant (-40 to +120 °C
+    # typical, with margin -50 to +150). We split the descriptor so the
+    # id_patterns don't conflate IAT-named entries with coolant-named.
+    if hint.dims != 1 or hint.length < 3 or hint.length > 24:
+        return Verdict.no(f"length {hint.length} outside [3,24]")
+    try:
+        vals = decode_values(buf, hint.dtype, hint.length)
+    except (KeyError, struct.error) as exc:
+        return Verdict.no(f"decode failed: {exc}")
+    in_range, bad = values_in_range(vals, -50.0, 150.0)
+    if not in_range:
+        return Verdict.no(f"{bad}/{hint.length} values outside [-50,150]")
+    if not is_monotonic(vals, strict=True):
+        return Verdict.no("not strictly increasing")
+    return Verdict.yes(1.0, f"monotonic {vals[0]:.0f}..{vals[-1]:.0f} °C ({hint.length} pts)")
+
+
+INTAKE_TEMP_AXIS = register(Descriptor(
+    id="intake_temp_axis",
+    kind="axis",
+    description="Intake-air-temperature axis: monotonic, -50 to 150 °C, 3-24 pts.",
+    id_patterns=[
+        "*intake_temperature*", "*intake_air_temperature*",
+        "*iat*axis*", "*iat_x*", "*iat_y*",
+    ],
+    predicate=_intake_temp_axis,
+    evidence=[
+        Evidence("a2tb002c", "intake_temperature"),
+    ],
+    expected_dims=1,
+))
+
+
+def _engine_load_axis(buf: bytes, hint: DecodeHint) -> Verdict:
+    # Engine-load axes on Subaru ROMs are typically float32_be encoding
+    # g/rev (mass per revolution). Observed spans across the corpus run
+    # 0.2 to 5.0 g/rev with monotonic increase, 5-32 breakpoints. Some
+    # MAF-based or AT-tuned packs go higher into compensation territory;
+    # we cap acceptance at 10.0 for tolerance.
+    if hint.dims != 1 or hint.length < 4 or hint.length > 32:
+        return Verdict.no(f"length {hint.length} outside [4,32]")
+    try:
+        vals = decode_values(buf, hint.dtype, hint.length)
+    except (KeyError, struct.error) as exc:
+        return Verdict.no(f"decode failed: {exc}")
+    in_range, bad = values_in_range(vals, 0.0, 10.0)
+    if not in_range:
+        return Verdict.no(f"{bad}/{hint.length} values outside [0,10] g/rev")
+    if not is_monotonic(vals, strict=True):
+        return Verdict.no("not strictly increasing")
+    if max(vals) - min(vals) < 0.5:
+        return Verdict.no(f"span {max(vals)-min(vals):.2f} too small (<0.5)")
+    return Verdict.yes(1.0,
+        f"monotonic {vals[0]:.2f}..{vals[-1]:.2f} g/rev ({hint.length} pts)")
+
+
+ENGINE_LOAD_AXIS = register(Descriptor(
+    id="engine_load_axis",
+    kind="axis",
+    description="Engine-load axis: monotonic float in [0, 10] g/rev, 4-32 pts.",
+    id_patterns=[
+        "*engine_load*", "*load_axis*", "*_load",
+    ],
+    predicate=_engine_load_axis,
+    evidence=[
+        Evidence("a2tb002c", "engine_load"),
+    ],
+    expected_dims=1,
+))
+
+
 # --- Tables ----------------------------------------------------------------
 
 def _wastegate_duty_table(buf: bytes, hint: DecodeHint) -> Verdict:

@@ -80,6 +80,7 @@ class RegistryTest(unittest.TestCase):
     def test_seed_descriptors_loaded(self):
         ids = {d.id for d in descriptors.all_descriptors()}
         for expected in ("engine_rpm_axis", "coolant_temp_axis",
+                         "intake_temp_axis", "engine_load_axis",
                          "wastegate_duty", "boost_target", "base_timing"):
             self.assertIn(expected, ids)
 
@@ -186,6 +187,60 @@ class CoolantTempAxisTest(unittest.TestCase):
             _pack_int16_be(temps),
             descriptors.DecodeHint(dtype="int16_be", dims=1, length=8))
         self.assertFalse(v.matches)
+
+
+# ---------------------------------------------------------------------------
+# Intake-temperature axis
+# ---------------------------------------------------------------------------
+
+class IntakeTempAxisTest(unittest.TestCase):
+    def test_accepts_typical_iat_axis(self):
+        # 6-point IAT axis (float32_be in °C, like a2tb002c).
+        temps = [-20.0, -10.0, 0.0, 10.0, 20.0, 40.0]
+        v = descriptors.INTAKE_TEMP_AXIS.predicate(
+            _pack_floats_be(temps),
+            descriptors.DecodeHint(dtype="float32_be", dims=1, length=6))
+        self.assertTrue(v.matches, msg=v.reasons)
+
+    def test_rejects_non_monotonic(self):
+        temps = [-20.0, -10.0, 5.0, 0.0, 20.0, 40.0]  # 5 → 0 wrong
+        v = descriptors.INTAKE_TEMP_AXIS.predicate(
+            _pack_floats_be(temps),
+            descriptors.DecodeHint(dtype="float32_be", dims=1, length=6))
+        self.assertFalse(v.matches)
+
+
+# ---------------------------------------------------------------------------
+# Engine-load axis
+# ---------------------------------------------------------------------------
+
+class EngineLoadAxisTest(unittest.TestCase):
+    def test_accepts_typical_load_axis(self):
+        # 15-pt engine-load axis: 0.27 → 2.56 g/rev, like a2tb002c.
+        loads = [0.27, 0.57, 0.73, 1.00, 1.17, 1.30, 1.47, 1.64,
+                 1.80, 1.98, 2.20, 2.30, 2.40, 2.48, 2.56]
+        v = descriptors.ENGINE_LOAD_AXIS.predicate(
+            _pack_floats_be(loads),
+            descriptors.DecodeHint(dtype="float32_be", dims=1, length=15))
+        self.assertTrue(v.matches, msg=v.reasons)
+
+    def test_rejects_excessive_load(self):
+        # Negative or way-high values flag this as not an engine-load axis.
+        loads = [0.27, 0.57, 0.73, 1.00, 1.17, 1.30, 1.47, 1.64,
+                 1.80, 1.98, 2.20, 2.30, 2.40, 2.48, 99.0]
+        v = descriptors.ENGINE_LOAD_AXIS.predicate(
+            _pack_floats_be(loads),
+            descriptors.DecodeHint(dtype="float32_be", dims=1, length=15))
+        self.assertFalse(v.matches)
+
+    def test_rejects_compressed_span(self):
+        # Span < 0.5 → likely not a real engine-load sweep.
+        loads = [1.00, 1.05, 1.10, 1.15, 1.20, 1.25, 1.30, 1.35]
+        v = descriptors.ENGINE_LOAD_AXIS.predicate(
+            _pack_floats_be(loads),
+            descriptors.DecodeHint(dtype="float32_be", dims=1, length=8))
+        self.assertFalse(v.matches)
+        self.assertTrue(any("span" in r for r in v.reasons))
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +411,22 @@ class RealRomEvidenceTest(unittest.TestCase):
         v = descriptors.BOOST_TARGET.predicate(
             buf,
             descriptors.DecodeHint(dtype="uint16_be", dims=2, rows=15, cols=11))
+        self.assertTrue(v.matches, msg=v.reasons)
+
+    def test_intake_temp_axis_matches_a2tb002c_intake_temperature(self):
+        # intake_temperature: 6 pts float32_be at 0x000C0B7C.
+        buf = self.rom[0x000C0B7C:0x000C0B7C + 6 * 4]
+        v = descriptors.INTAKE_TEMP_AXIS.predicate(
+            buf,
+            descriptors.DecodeHint(dtype="float32_be", dims=1, length=6))
+        self.assertTrue(v.matches, msg=v.reasons)
+
+    def test_engine_load_axis_matches_a2tb002c_engine_load(self):
+        # engine_load: 15 pts float32_be at 0x000CBCFC.
+        buf = self.rom[0x000CBCFC:0x000CBCFC + 15 * 4]
+        v = descriptors.ENGINE_LOAD_AXIS.predicate(
+            buf,
+            descriptors.DecodeHint(dtype="float32_be", dims=1, length=15))
         self.assertTrue(v.matches, msg=v.reasons)
 
 
