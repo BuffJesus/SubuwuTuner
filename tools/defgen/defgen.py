@@ -837,10 +837,19 @@ def _rom_to_pack(rom: ET.Element) -> Pack | None:
 
 
 def _scaling_from_element(el: ET.Element,
-                          pack: "Pack | None" = None) -> ScalingRecord | None:
+                          pack: "Pack | None" = None,
+                          fallback_storagetype: str | None = None,
+                          fallback_endian: str | None = None) -> ScalingRecord | None:
     name = (el.get("name") or "").strip()
-    storagetype = el.get("storagetype")
-    endian = el.get("endian")
+    # Merp's canonical ecu_defs.xml puts storagetype/endian on the parent
+    # <table> element and leaves the inline <scaling> child without them.
+    # Without the fallback, defgen would default to uint16_be at line ~874
+    # below and pass that back up to _extract_table, which then inherits
+    # it as the table's data_type — silently overriding the parent's real
+    # storagetype. Caller (_extract_table) passes the parent's attributes
+    # so the scaling can honor them when its own element omits them.
+    storagetype = el.get("storagetype") or fallback_storagetype
+    endian = el.get("endian") or fallback_endian
     # RomRaider's canonical attribute is `expression`; some fixtures use
     # `toexpr`. Accept either, expression winning.
     toexpr = (el.get("expression") or el.get("toexpr") or "x").strip()
@@ -945,12 +954,16 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
     else:
         dims = 1
 
-    # Inline scaling
+    # Inline scaling. Pass the parent table's storagetype/endian through
+    # so an inline <scaling> without its own storagetype inherits from
+    # the table — Merp's canonical XML convention.
     inline_scaling = t_el.find("scaling")
     scaling_id = ""
     data_type = "uint16_be"
     if inline_scaling is not None:
-        rec = _scaling_from_element(inline_scaling, pack)
+        rec = _scaling_from_element(inline_scaling, pack,
+                                    fallback_storagetype=t_el.get("storagetype"),
+                                    fallback_endian=t_el.get("endian"))
         if rec is not None:
             scaling_id = rec.id
             data_type = rec.data_type
@@ -980,10 +993,13 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
             continue
         if axis.id not in {a.id for a in pack.axes}:
             pack.axes.append(axis)
-            # also capture the axis's inline scaling if present
+            # also capture the axis's inline scaling if present.
+            # Same storagetype-inheritance rule as the table case above.
             axis_scaling_el = child.find("scaling")
             if axis_scaling_el is not None:
-                rec = _scaling_from_element(axis_scaling_el, pack)
+                rec = _scaling_from_element(axis_scaling_el, pack,
+                                            fallback_storagetype=child.get("storagetype"),
+                                            fallback_endian=child.get("endian"))
                 if rec is not None and rec.id not in seen_scaling_ids:
                     pack.scalings.append(rec)
                     seen_scaling_ids.add(rec.id)
@@ -1085,7 +1101,9 @@ def _axis_from_element(el: ET.Element,
     data_type = axis_data_type or "uint16_be"
     scaling_id = ""
     if inline_scaling is not None:
-        rec = _scaling_from_element(inline_scaling)
+        rec = _scaling_from_element(inline_scaling,
+                                    fallback_storagetype=el.get("storagetype"),
+                                    fallback_endian=el.get("endian"))
         if rec is not None:
             if axis_data_type is None:
                 # No axis-level storagetype to override the scaling's

@@ -898,6 +898,85 @@ class ScalingMinMaxOmissionTest(unittest.TestCase):
         self.assertNotIn("b ", out)
 
 
+class StoragetypeInheritanceTest(unittest.TestCase):
+    """Merp's canonical ecu_defs.xml puts storagetype on the parent <table>
+    element and leaves the inline <scaling> child without it. Before the
+    fix, defgen defaulted the scaling to uint16_be and propagated that
+    back into the table's data_type — silently overriding the table's
+    real uint8 storagetype. Real-world impact: every uint8 table whose
+    scaling lacked storagetype (base_timing, AFR maps, knock-correction
+    advance, etc.) decoded as 2-byte values and produced garbage in
+    dump-table. The fix: _scaling_from_element accepts the parent's
+    storagetype/endian as a fallback when the scaling element omits its
+    own; _extract_table and _axis_from_element pass theirs through."""
+
+    def test_table_storagetype_propagates_to_inline_scaling(self):
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="3D" name="afr_table" storageaddress="0x100"
+                 storagetype="uint8" endian="big" sizex="4" sizey="4">
+            <scaling units="Estimated Air/Fuel Ratio"
+                     expression="14.7/(1+x*.0078125)"
+                     to_byte="(14.7/x-1)/.0078125" format="0.00"/>
+            <table type="X Axis" storageaddress="0x200"
+                   storagetype="uint16" endian="big" sizex="4"/>
+            <table type="Y Axis" storageaddress="0x300"
+                   storagetype="uint16" endian="big" sizey="4"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        scaling = next(s for s in packs[0].scalings
+                       if "estimated_air_fuel_ratio" in s.id)
+        # Scaling inherits uint8 from the parent <table>.
+        self.assertEqual(scaling.data_type, "uint8")
+        # And the table itself reads that same dtype.
+        table = next(t for t in packs[0].tables if t.id == "afr_table")
+        self.assertEqual(table.data_type, "uint8")
+
+    def test_explicit_scaling_storagetype_wins_over_parent(self):
+        # When the inline <scaling> declares its own storagetype, that
+        # takes precedence over the table's. (Sanity check that the
+        # fallback path doesn't override an explicit value.)
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="1D" name="explicit" storageaddress="0x100"
+                 storagetype="uint8" endian="big">
+            <scaling name="explicit" units="" expression="x" to_byte="x"
+                     format="0" storagetype="uint16" endian="big"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        scaling = next(s for s in packs[0].scalings if s.id == "explicit")
+        self.assertEqual(scaling.data_type, "uint16_be")
+
+    def test_axis_storagetype_propagates_to_its_inline_scaling(self):
+        # Mirror case on axes: when an axis declares storagetype but its
+        # inline scaling doesn't, the scaling inherits. The axis needs a
+        # `name` attribute to survive _axis_from_element's nameless-axis
+        # rejection (a separate defgen behavior).
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="2D" name="t" storageaddress="0x100"
+                 storagetype="uint8" endian="big">
+            <scaling units="" expression="x" to_byte="x" format="0"/>
+            <table type="Y Axis" name="load_axis" storageaddress="0x200"
+                   storagetype="float" endian="big" sizey="4">
+              <scaling name="float_axis_units" units="g/rev"
+                       expression="x*.0001" to_byte="x/.0001" format="0.00"/>
+            </table>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        scaling = next(s for s in packs[0].scalings
+                       if s.id == "float_axis_units")
+        # Inherited float32_be from the axis (with Merp's float→big endian
+        # override applied via _axis_from_element).
+        self.assertEqual(scaling.data_type, "float32_be")
+
+
 class DisplayNameFallbackTest(unittest.TestCase):
     """When the OEM name fails the clean-room filter (too long, contains a
     period or comma), we used to emit `name = ""`. That made `pack-info`
