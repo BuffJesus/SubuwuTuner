@@ -1,8 +1,8 @@
 # Handoff — 2026-05-21 (P6 + 3 pack-bug sweeps + VA/VB bundles + AFR formula)
 
-Marathon session. Built on yesterday's `8f4b44f`. **22 commits** all pushed. P6 descriptor library is real and finding real bugs; validate.py surfaced multiple classes of pack-quality issues that we fixed at the source (defgen) and applied corpus-wide; user dropped two forum-sourced VA/VB bundle XMLs which we wired into bulk_regen to upgrade 25 packs from 0D-scalar-only to fully-typed 2D.
+Marathon session. Built on yesterday's `8f4b44f`. **23 commits** all pushed. P6 descriptor library is real and finding real bugs; validate.py surfaced multiple classes of pack-quality issues that we fixed at the source (defgen) and applied corpus-wide; user dropped two forum-sourced VA/VB bundle XMLs which we wired into bulk_regen to upgrade 25 packs from 0D-scalar-only to fully-typed 2D.
 
-**HEAD `07c8cc3`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave) and `fixtures/projects/Test/` (user-created GUI state, leave alone).
+**HEAD `6a4693a`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave) and `fixtures/projects/Test/` (user-created GUI state, leave alone).
 
 ## Fifteen commits shipped (oldest → newest)
 
@@ -29,6 +29,8 @@ c8db6c5 defs(packs): re-cousin-seed 11 cousin packs from their (now-fixed) bases
 f202081 defs(packs): bulk_regen sweep emits subaru_afr_enrichment (323 packs)
 45f7d62 docs(handoff): capture P6e — subaru_afr_enrichment formula shipped
 07c8cc3 tools(defgen): broaden compensation descriptors (1D patterns + new 2D)
+b4a062e docs(handoff): capture compensation-descriptor broadening (07c8cc3)
+6a4693a fix(defgen)+defs: float-endian override for non-axis scalings + cousin re-seed
 ```
 
 ## What's new since yesterday (8f4b44f)
@@ -95,7 +97,7 @@ The non-linear AFR enrichment formula `14.7/(1+x*0.0078125)` is now a first-clas
 
 ## Status snapshot
 
-- **HEAD `07c8cc3`**, in sync with `origin/main`.
+- **HEAD `6a4693a`**, in sync with `origin/main`.
 - **definitions/ pack count: 373** (one promoted from throwaway; net unchanged).
 - **defgen test suite: 211 tests green**.
 - **C++ build: not rebuilt this session** (pure Python + TOML data).
@@ -156,6 +158,18 @@ OBDX Pro VX adapter ETA May 22-25 — could land mid-day tomorrow. If it arrives
 
 ## Carry-over lessons (this session)
 
+- **User-experience pass is the complementary verification to validate.py.**
+  validate.py checks predicate matches against raw bytes; it can't see
+  scaling/units bugs (raw bytes that fall in any predicate band coincidentally
+  but display as garbage after scaling). The session-end ritual: `dump-table`
+  ~8 top-of-mind tables (boost target, max wastegate, base timing, AFR,
+  knock correction, MAF cal, ECT comp, throttle DBW) on the user's primary
+  test pack and eyeball that the ranges look engineering-sensible. Today's
+  pass (commit `6a4693a`) found 2 real bugs validate.py missed: MAF scaling
+  showed 1e35 g/s (float-endian gap in `_scaling_from_element` — the
+  `_axis_from_element` had the override but the scaling path didn't), and
+  a2tb002c AFR showed 0-67 raw because cousin re-seed in `c8db6c5` ran
+  BEFORE the AFR formula commit `74624d3`. Fixed both.
 - **validate.py FAILs are signal, not noise.** Surfaced cid_address placeholders, base_timing dtype, AFR factor flatten, compensation-table dtype, lost cid_scan/ecu_part during regen.
 - **Investigate root cause before bulk-fixing where possible.** Manually swept 334 packs (`feeb6b5`) and only then realized the underlying defgen bug. Both commits land cleanly, but root-cause-first would have saved the manual sweep.
 - **Preservation needs a regression-class mindset.** Each new "regen source" (bundles in this case) can expose dimensions of state that weren't being preserved. The fix in `875ed2f` added preservation for fields the existing master XML rarely touched — but the bundles forced the issue.
@@ -173,10 +187,11 @@ OBDX Pro VX adapter ETA May 22-25 — could land mid-day tomorrow. If it arrives
 
 ## Suggested opener for next session
 
-> "HEAD `07c8cc3`, in sync with `origin/main`. Marathon yesterday: 20 commits. P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
+> "HEAD `6a4693a`, in sync with `origin/main`. Marathon yesterday: 20 commits. P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
 >
 > Deck for this session:
-> **(P6a-continued)** Fuel-compensation scalings OUTSIDE the ±100% _x_78125_100 family. Examples: primary_open_loop_fueling_compensation_ect uses `_x_003051758_100` (factor 0.003, offset −100 → range −100..−99.22), cl_fueling_target_compensation_a uses `_x_000224304213_7_35` (factor 0.000224, offset −7.35). These need their own predicates with tighter bands; can't be lumped into the existing ±100% comp descriptor.
+> **(P6a-continued)** Fuel-compensation scalings outside the ±100% family. Examples: `_x_003051758_100` (factor 0.003), `_x_000224304213_7_35` (factor 0.000224). Each needs its own predicate with tighter bands.
+> **(UX-pass)** Session-end ritual now established (commit `6a4693a`): `dump-table` ~8 top-of-mind tables on the primary test pack and eyeball ranges. Found 2 real bugs validate.py missed. Worth running again next session on a DIFFERENT pack (a regenerated EJ pack like a2tb000l, or one of the upgraded VA packs) to see if more scaling bugs lurk.
 > **(P6b)** More common axes: manifold_pressure_axis, throttle_plate_opening_angle_axis, mass_airflow_axis, atmospheric_pressure_axis. Each ~30 lines including tests, but each needs per-axis scaling investigation.
 > **(P6e-VA)** VA bundle's fueling tables (`fuel_cl_ol_transition_*` etc.) use different naming + possibly different non-linear formula variants. Extend the AFR matcher to handle these if `dump-table` on a VA fuel table reads as raw bytes instead of AFR.
 > **(P6h-next)** Forum-source matching-revision `.bin` files for the upgraded VA/VB packs if you want to validate them against real anchors.
