@@ -17,24 +17,41 @@ namespace st::transport {
 
 // Which kind of physical link this transport will configure. Each adapter
 // implementation supports a subset.
+//
+// Subaru bus history correction (verified 2026-05-21 against a real
+// 2017 WRX + OBDX Pro VX):
+//   - Pre-2008: SSM-over-K-Line (ISO 9141 / KWP2000). EJ era.
+//   - 2008+:    CAN-ISO15765 (OBD-II CAN mandate). EJ-DIT, FA-DIT (VA/VB),
+//               and everything since.
+// Earlier comments here misrepresented "VA WRX = K-Line"; that's wrong.
+// VA WRX (2015-2021) and VB WRX (2022+) both run CAN-ISO15765 at 500 kbaud.
 enum class LinkKind {
-    KLine,       // ISO 9141 / 14230 (KWP2000) — VA WRX
-    CanIso15765, // CAN-TP — VB WRX and most modern Subarus
+    KLine,       // ISO 9141 / 14230 (KWP2000) — pre-2008 Subaru
+    CanIso15765, // CAN-TP — 2008+ Subaru (EJ-DIT, VA WRX, VB WRX, all modern)
     CanFd,       // CAN-FD — future
 };
 
+// Standard Subaru OBD-II ECU CAN addressing (ISO15765-4). Engine ECU
+// listens on 0x7E0 and responds on 0x7E8 — same as every other OBD-II
+// vehicle. Functional broadcast is 0x7DF (not exposed here; tools that
+// need it set can_id_request manually).
+constexpr std::uint32_t kSubaruEngineCanIdRequest = 0x7E0;
+constexpr std::uint32_t kSubaruEngineCanIdResponse = 0x7E8;
+
 struct LinkConfig {
-    LinkKind kind{LinkKind::KLine};
-    // Subaru SSM K-Line is 4800 baud (not the 10400 baud you'd see
-    // for KWP2000-on-K-Line on other vendors' platforms). Subaru
-    // CAN-ISO15765 is 500000 baud. The default reflects the
-    // project's primary use case — SSM-K-Line — so a caller who
-    // forgets to set baud gets the right Subaru-default rather
-    // than a silently-wrong KWP2000 default. Concrete transports
-    // (j2534, native) validate baud > 0; baud == 0 → InvalidArgument.
-    int baud{4800};
-    std::uint32_t can_id_request{0};  // for CAN protocols only
-    std::uint32_t can_id_response{0}; // for CAN protocols only
+    // CAN-ISO15765 is the right default for every Subaru this project
+    // targets (VA WRX, VB WRX, all 2008+ FA-DIT). K-Line was the wrong
+    // default historically; corrected 2026-05-21 after a real-OBDX
+    // smoke test on a 2017 WRX returned the K-Line-unsupported error.
+    LinkKind kind{LinkKind::CanIso15765};
+    // Subaru SSM K-Line is 4800 baud (not the 10400 you'd see for
+    // KWP2000-on-K-Line on other vendors' platforms). Subaru
+    // CAN-ISO15765 is 500000 baud. Default matches the kind default.
+    int baud{500000};
+    // Default to the Subaru OBD-II engine-ECU pair. Tools that talk to
+    // other modules (TCU, ABS) override these.
+    std::uint32_t can_id_request{kSubaruEngineCanIdRequest};
+    std::uint32_t can_id_response{kSubaruEngineCanIdResponse};
 };
 
 // One frame on the wire. `data` is the application-layer payload — the

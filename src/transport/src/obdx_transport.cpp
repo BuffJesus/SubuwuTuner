@@ -202,10 +202,13 @@ using std::chrono::steady_clock;
 [[nodiscard]] Result<std::vector<std::uint8_t>> set_protocol_payload(LinkConfig const &cfg) {
     switch (cfg.kind) {
     case LinkKind::KLine:
-        return failure(ErrorCode::InvalidArgument, "obdx::Transport: OBDX VX doesn't support "
-                                                   "K-Line / ISO9141. Subaru VA WRX needs "
-                                                   "Tactrix OpenPort. (Supported protocols: "
-                                                   "HSCAN, J1850 VPW, GM UART ALDL.)");
+        return failure(ErrorCode::InvalidArgument,
+                       "obdx::Transport: OBDX VX doesn't support K-Line / ISO9141. "
+                       "Only pre-2008 Subarus need K-Line; 2008+ (including VA/VB WRX) "
+                       "run CAN-ISO15765 — use LinkKind::CanIso15765 with the engine ECU "
+                       "CAN IDs (request 0x7E0, response 0x7E8). If you DO need K-Line "
+                       "for an older EJ Subaru, a Tactrix OpenPort is the usual choice. "
+                       "(OBDX VX supported protocols: HSCAN, J1850 VPW, GM UART ALDL.)");
     case LinkKind::CanFd:
         return failure(ErrorCode::InvalidArgument, "obdx::Transport: OBDX VX doesn't support "
                                                    "CAN-FD (the STN2120 silicon is classical-"
