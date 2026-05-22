@@ -9,29 +9,16 @@
 //
 // Invariants from the spec (docs/08 Tier 2a) and their current status:
 //
-//   1. Mid-PDU UDS cancel is deferred           — NOT YET TESTABLE
-//   2. Mid-PDU SSM cancel is deferred           — NOT YET TESTABLE
-//   3. Session-exit on cancel                   — NOT YET TESTABLE
+//   1. Mid-PDU UDS cancel is deferred           — tested below
+//   2. Mid-PDU SSM cancel is deferred           — DEFERRED to v1.3
+//   3. Session-exit on cancel                   — tested below
 //   4. Crash-mid-flash recovery                 — tested below
 //   5. Resume idempotence                       — tested below
 //
-// Invariants 1-3 cannot land yet: `Flasher::execute(FlashPlan const &)` does
-// not accept a cancel token. The existing cancel hook lives only on
-// `Flasher::read_full_rom(...)`. Enforcement work needed before tests land:
-//
-//   - Extend `Flasher::execute` to accept `std::atomic<bool> const *cancel`
-//     (default null, matching `read_full_rom`'s pattern).
-//   - Check the flag between sectors AND between TransferData blocks within
-//     a sector. Between-PDU only — never mid-PDU; the in-flight PDU completes.
-//   - On observed cancel mid-sector: emit `RequestTransferExit` (0x37) for
-//     the in-flight download before unwinding.
-//   - Always emit `DiagnosticSessionControl` → `kDscDefault` (0x10 0x01) on
-//     cancel exit, so the ECU leaves the programming session cleanly.
-//   - Return `ErrorCode::Cancelled` from `execute`.
-//
-// SSM block-write cancellation (invariant #2) is also blocked on this — and
-// further blocked on the SSM B8 write flow itself, which the current
-// `st::ecu::ssm` layer does not implement.
+// Invariant #2 (SSM B8 block-write cancel) is doubly blocked: it requires
+// both the `Flasher::execute` cancel hook (now landed) AND the SSM B8
+// block-write flow itself, which the current `st::ecu::ssm` layer does not
+// implement. SSM is only used by pre-2008 Subarus, scheduled for v1.3.
 
 #include "st/core/crc32.hpp"
 #include "st/ecu/uds.hpp"
@@ -41,11 +28,16 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <random>
+#include <span>
 #include <string>
+#include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace flash = st::flash;
@@ -245,15 +237,310 @@ TEST_CASE("resumed plan executed end-to-end reaches a steady state where resume 
 }
 
 // ---------------------------------------------------------------------------
-// Invariants #1-3 — placeholder
+// Invariants #1 + #3 — mid-PDU UDS cancel deferred + session-exit on cancel
 // ---------------------------------------------------------------------------
-// The mid-PDU UDS / SSM cancel-deferred tests and the session-exit-on-cancel
-// test live HERE once `Flasher::execute` learns a cancel token. The
-// enforcement signature is sketched in the file header. When that lands:
+// `Flasher::execute(plan, &cancel)` polls the cancel flag at PDU boundaries:
+// between sectors AND between TransferData blocks within a sector. It NEVER
+// polls mid-PDU — once a UDS request-response exchange is in flight, the
+// in-flight PDU completes before the cancel check fires. On observed cancel:
 //
-//   TEST_CASE("execute observes cancel between sectors and exits cleanly", ...)
-//   TEST_CASE("execute observes cancel mid-TransferData; finishes PDU first", ...)
-//   TEST_CASE("execute emits RequestTransferExit on cancel between TD and exit", ...)
-//   TEST_CASE("execute final PDU on cancel is DiagnosticSessionControl(default)", ...)
+//   - If a download is in flight (RequestDownload sent, RequestTransferExit
+//     not yet sent), emit RequestTransferExit so the ECU unwinds cleanly.
+//   - Always emit DiagnosticSessionControl → kDscDefault as the final PDU,
+//     so the ECU leaves the programming session cleanly.
+//   - Return ErrorCode::Cancelled with the partial report.
 //
-// Leaving the slots called out so the next person knows where they go.
+// The cancel cleanup PDUs are best-effort: failures are swallowed because
+// the user has already asked us to stop, and a failure-to-clean-up has no
+// useful surface.
+
+namespace {
+
+// Wrapper transport for the "cancel observed mid-stream" tests. Delegates
+// every ITransport call to a backing MockTransport, but counts send_recv
+// invocations and flips the cancel flag immediately AFTER the configured
+// trip exchange returns. The "after" timing is load-bearing: the test
+// asserts that the in-flight PDU completes normally and the NEXT cancel
+// check (at the next PDU boundary in execute()) trips.
+class CancelAfterNthExchange : public st::transport::ITransport {
+public:
+    CancelAfterNthExchange(st::transport::MockTransport &m, std::atomic<bool> &cancel_flag,
+                           int trip_at) noexcept
+        : mock_{m}, cancel_{cancel_flag}, trip_at_{trip_at} {}
+
+    [[nodiscard]] st::Status open(st::transport::LinkConfig const &cfg) override {
+        return mock_.open(cfg);
+    }
+    [[nodiscard]] st::Status close() override {
+        return mock_.close();
+    }
+    [[nodiscard]] st::Result<st::transport::Frame>
+    send_recv(std::span<std::uint8_t const> payload,
+              std::chrono::milliseconds timeout) override {
+        auto r = mock_.send_recv(payload, timeout);
+        if (++count_ == trip_at_)
+            cancel_.store(true, std::memory_order_release);
+        return r;
+    }
+    [[nodiscard]] st::Status send(std::span<std::uint8_t const> payload) override {
+        return mock_.send(payload);
+    }
+    [[nodiscard]] st::Status start_streaming(st::transport::FrameCallback cb) override {
+        return mock_.start_streaming(std::move(cb));
+    }
+    [[nodiscard]] st::Status stop_streaming() override {
+        return mock_.stop_streaming();
+    }
+    [[nodiscard]] std::string_view name() const noexcept override {
+        return "CancelAfterNthExchange";
+    }
+    [[nodiscard]] std::string_view firmware() const noexcept override {
+        return "test";
+    }
+
+private:
+    st::transport::MockTransport &mock_;
+    std::atomic<bool> &cancel_;
+    int const trip_at_;
+    int count_{0};
+};
+
+// Mirror of the file-scope erase-option-record helper in test_flash.cpp.
+// Inlined here so this file stays standalone (the other helper lives in an
+// anonymous namespace one TU over).
+std::vector<std::uint8_t> erase_opt(std::uint32_t addr, std::uint32_t sz) {
+    return {
+        0x44,
+        static_cast<std::uint8_t>((addr >> 24) & 0xFFU),
+        static_cast<std::uint8_t>((addr >> 16) & 0xFFU),
+        static_cast<std::uint8_t>((addr >> 8) & 0xFFU),
+        static_cast<std::uint8_t>(addr & 0xFFU),
+        static_cast<std::uint8_t>((sz >> 24) & 0xFFU),
+        static_cast<std::uint8_t>((sz >> 16) & 0xFFU),
+        static_cast<std::uint8_t>((sz >> 8) & 0xFFU),
+        static_cast<std::uint8_t>(sz & 0xFFU),
+    };
+}
+
+} // namespace
+
+TEST_CASE("execute observes pre-set cancel and exits via DSC(default)",
+          "[flash][cancellation][cancel][session-exit]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // Queued exchanges:
+    //   1. Programming-session enter (DSC 0x02).
+    //   2. (top-of-sector-loop cancel check trips here — between PDUs.)
+    //   3. Final DSC(default) on cancel cleanup.
+    t.expect_send_recv({0x10, 0x02}, {0x50, 0x02});
+    t.expect_send_recv({0x10, 0x01}, {0x50, 0x01});
+
+    std::atomic<bool> cancel{true};
+
+    flash::FlashPlan plan;
+    plan.silence_bus = false;
+    plan.writes.push_back({{0x1000, 4}, {0xAA, 0xAA, 0xAA, 0xAA}});
+
+    flash::Flasher f{t};
+    auto const r = f.execute(plan, &cancel);
+    REQUIRE_FALSE(r.ok());
+    REQUIRE(r.error.has_value());
+    REQUIRE(r.error->code() == st::ErrorCode::Cancelled);
+
+    // No erase, no download — the cancel observation happens at the top of
+    // the sector loop, before any per-sector PDU goes out.
+    auto const &log = t.send_log();
+    REQUIRE(log.size() == 2);
+    REQUIRE(log[0] == std::vector<std::uint8_t>{0x10, 0x02}); // enter programming
+    REQUIRE(log[1] == std::vector<std::uint8_t>{0x10, 0x01}); // session-exit cleanup
+    // Final PDU on cancel IS DiagnosticSessionControl(default).
+    REQUIRE(log.back() == std::vector<std::uint8_t>{0x10, 0x01});
+}
+
+TEST_CASE("execute observes cancel between sectors and exits via DSC(default)",
+          "[flash][cancellation][cancel][session-exit]") {
+    st::transport::MockTransport mock;
+    REQUIRE(mock.open({}).has_value());
+
+    constexpr std::uint32_t addr1 = 0x00001000;
+    constexpr std::uint32_t addr2 = 0x00002000;
+    constexpr std::uint32_t size = 4;
+    std::vector<std::uint8_t> const data1{0xAA, 0xAA, 0xAA, 0xAA};
+    std::vector<std::uint8_t> const data2{0xBB, 0xBB, 0xBB, 0xBB};
+
+    // Sector 1: full happy path through check_deps. Verify is off so we
+    // don't queue a read-back exchange.
+    mock.expect_send_recv({0x10, 0x02}, {0x50, 0x02});
+    mock.expect_send_recv(
+        uds::build_routine_control(uds::kRcStart, uds::kRidEraseMemory, erase_opt(addr1, size)),
+        {0x71, 0x01, 0xFF, 0x00});
+    mock.expect_send_recv(uds::build_request_download(0x00, addr1, size),
+                          {0x74, 0x20, 0x00, 0x06});
+    mock.expect_send_recv(uds::build_transfer_data(1, data1), {0x76, 0x01});
+    mock.expect_send_recv(uds::build_request_transfer_exit(), {0x77});
+    mock.expect_send_recv(
+        uds::build_routine_control(uds::kRcStart, uds::kRidCheckProgrammingDependencies),
+        {0x71, 0x01, 0xFF, 0x01});
+    // Sector 2: never enters. Top-of-loop cancel check trips after the
+    // sector-1 check_deps exchange (the 6th send_recv), before sector 2's
+    // erase goes out.
+    mock.expect_send_recv({0x10, 0x01}, {0x50, 0x01}); // DSC(default) cleanup
+
+    std::atomic<bool> cancel{false};
+    CancelAfterNthExchange wrapper{mock, cancel, /*trip_at=*/6};
+
+    flash::FlashPlan plan;
+    plan.silence_bus = false;
+    plan.verify_after_write = false;
+    plan.writes.push_back({{addr1, size}, data1});
+    plan.writes.push_back({{addr2, size}, data2});
+
+    flash::Flasher f{wrapper};
+    auto const r = f.execute(plan, &cancel);
+    REQUIRE_FALSE(r.ok());
+    REQUIRE(r.error.has_value());
+    REQUIRE(r.error->code() == st::ErrorCode::Cancelled);
+
+    // Sector 1 fully completed (transferred + check_deps_passed). Sector 2
+    // never started — partial report carries the failure visibility.
+    REQUIRE(r.report.sectors.size() == 1);
+    REQUIRE(r.report.sectors[0].transferred);
+    REQUIRE(r.report.sectors[0].exited);
+    REQUIRE(r.report.sectors[0].check_deps_passed);
+
+    // No RequestTransferExit cleanup needed — sector 1's RTE already went
+    // out as part of the happy-path sequence; no in-flight download.
+    auto const &log = mock.send_log();
+    // 6 sector-1 exchanges + DSC(default) cleanup = 7 PDUs.
+    REQUIRE(log.size() == 7);
+    REQUIRE(log.back() == std::vector<std::uint8_t>{0x10, 0x01});
+    // No second sector erase went out.
+    auto const erase2 = uds::build_routine_control(uds::kRcStart, uds::kRidEraseMemory,
+                                                   erase_opt(addr2, size));
+    for (auto const &sent : log) {
+        REQUIRE(sent != erase2);
+    }
+}
+
+TEST_CASE("execute observes cancel mid-TransferData; emits RequestTransferExit + DSC(default)",
+          "[flash][cancellation][cancel][session-exit][mid-pdu]") {
+    st::transport::MockTransport mock;
+    REQUIRE(mock.open({}).has_value());
+
+    constexpr std::uint32_t addr = 0x00001000;
+    constexpr std::uint32_t size = 8;
+    std::vector<std::uint8_t> const data{0xAA, 0xAA, 0xAA, 0xAA, 0xBB, 0xBB, 0xBB, 0xBB};
+
+    // ECU advertises maxNumberOfBlockLength=6, so block_payload=4 → two
+    // TransferData calls (block 1: bytes 0-3, block 2: bytes 4-7). Cancel
+    // trips after the first TransferData response comes back; the second
+    // never goes out. Cleanup emits RequestTransferExit + DSC(default).
+    mock.expect_send_recv({0x10, 0x02}, {0x50, 0x02});
+    mock.expect_send_recv(
+        uds::build_routine_control(uds::kRcStart, uds::kRidEraseMemory, erase_opt(addr, size)),
+        {0x71, 0x01, 0xFF, 0x00});
+    mock.expect_send_recv(uds::build_request_download(0x00, addr, size),
+                          {0x74, 0x20, 0x00, 0x06});
+    mock.expect_send_recv(uds::build_transfer_data(1, std::vector<std::uint8_t>{0xAA, 0xAA, 0xAA, 0xAA}),
+                          {0x76, 0x01});
+    // After this 4th exchange the cancel flag flips. The 2nd TransferData
+    // never starts; cleanup emits RequestTransferExit + DSC(default).
+    mock.expect_send_recv(uds::build_request_transfer_exit(), {0x77});
+    mock.expect_send_recv({0x10, 0x01}, {0x50, 0x01});
+
+    std::atomic<bool> cancel{false};
+    CancelAfterNthExchange wrapper{mock, cancel, /*trip_at=*/4};
+
+    flash::FlashPlan plan;
+    plan.silence_bus = false;
+    plan.verify_after_write = false;
+    plan.writes.push_back({{addr, size}, data});
+
+    flash::Flasher f{wrapper};
+    auto const r = f.execute(plan, &cancel);
+    REQUIRE_FALSE(r.ok());
+    REQUIRE(r.error.has_value());
+    REQUIRE(r.error->code() == st::ErrorCode::Cancelled);
+
+    // Sector visibility: download was started but not fully transferred.
+    REQUIRE(r.report.sectors.size() == 1);
+    REQUIRE(r.report.sectors[0].downloaded);
+    REQUIRE_FALSE(r.report.sectors[0].transferred);
+    REQUIRE_FALSE(r.report.sectors[0].exited);
+
+    auto const &log = mock.send_log();
+    // Expected wire sequence:
+    //   1. DSC(programming)
+    //   2. RoutineControl(Start, EraseMemory, ...)
+    //   3. RequestDownload(addr, size)
+    //   4. TransferData(counter=1, first 4 bytes)
+    //   5. RequestTransferExit  ← cleanup
+    //   6. DSC(default)         ← cleanup, final PDU
+    REQUIRE(log.size() == 6);
+    REQUIRE(log[3] == uds::build_transfer_data(1, std::vector<std::uint8_t>{0xAA, 0xAA, 0xAA, 0xAA}));
+    REQUIRE(log[4] == uds::build_request_transfer_exit());
+    REQUIRE(log[5] == std::vector<std::uint8_t>{0x10, 0x01});
+    REQUIRE(log.back() == std::vector<std::uint8_t>{0x10, 0x01});
+
+    // PDU atomicity: the 2nd TransferData never started — no torn PDU on
+    // the wire. Block counter never reached 2.
+    auto const torn_block2 =
+        uds::build_transfer_data(2, std::vector<std::uint8_t>{0xBB, 0xBB, 0xBB, 0xBB});
+    for (auto const &sent : log) {
+        REQUIRE(sent != torn_block2);
+    }
+}
+
+TEST_CASE("execute cancel restores communication-control when silence_bus was on",
+          "[flash][cancellation][cancel][silence_bus]") {
+    // Without this restore, a cancel that fires after CC(off) but before
+    // the main happy-path CC(on) leaves the ECU's bus silenced until a
+    // power cycle or extended-diag session unsticks it. Not a brick, but
+    // a real user-visible nuisance — the cancel cleanup emits CC(on)
+    // before DSC(default) so the bus comes back to normal.
+
+    st::transport::MockTransport mock;
+    REQUIRE(mock.open({}).has_value());
+
+    // Pre-set cancel + silence_bus=true. Sector loop never executes;
+    // cancel is observed at the top of the first iteration. Expected
+    // wire sequence:
+    //   1. DSC(programming)
+    //   2. CC(off) — silence_bus step
+    //   (top-of-sector-loop cancel check trips here)
+    //   3. CC(on)  — cancel cleanup restore
+    //   4. DSC(default)
+    mock.expect_send_recv({0x10, 0x02}, {0x50, 0x02});
+    mock.expect_send_recv({0x28, uds::kCcDisableRxAndTx, uds::kCtNormalAndNetworkManagement},
+                          {0x68, uds::kCcDisableRxAndTx});
+    mock.expect_send_recv({0x28, uds::kCcEnableRxAndTx, uds::kCtNormalAndNetworkManagement},
+                          {0x68, uds::kCcEnableRxAndTx});
+    mock.expect_send_recv({0x10, 0x01}, {0x50, 0x01});
+
+    std::atomic<bool> cancel{true};
+
+    flash::FlashPlan plan;
+    plan.silence_bus = true;
+    plan.writes.push_back({{0x1000, 4}, {0xAA, 0xAA, 0xAA, 0xAA}});
+
+    flash::Flasher f{mock};
+    auto const r = f.execute(plan, &cancel);
+    REQUIRE_FALSE(r.ok());
+    REQUIRE(r.error.has_value());
+    REQUIRE(r.error->code() == st::ErrorCode::Cancelled);
+    REQUIRE(r.report.silenced_bus);
+    REQUIRE(r.report.restored_bus);
+
+    auto const &log = mock.send_log();
+    REQUIRE(log.size() == 4);
+    REQUIRE(log[0] == std::vector<std::uint8_t>{0x10, 0x02});
+    REQUIRE(log[1] == std::vector<std::uint8_t>{0x28, uds::kCcDisableRxAndTx,
+                                                uds::kCtNormalAndNetworkManagement});
+    REQUIRE(log[2] == std::vector<std::uint8_t>{0x28, uds::kCcEnableRxAndTx,
+                                                uds::kCtNormalAndNetworkManagement});
+    REQUIRE(log[3] == std::vector<std::uint8_t>{0x10, 0x01});
+    // Final PDU still DSC(default); CC(on) goes BEFORE it so the bus is
+    // restored while we're still in the programming session.
+    REQUIRE(log.back() == std::vector<std::uint8_t>{0x10, 0x01});
+}

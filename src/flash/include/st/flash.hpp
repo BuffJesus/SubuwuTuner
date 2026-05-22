@@ -212,7 +212,30 @@ public:
     // Execute a plan. Always returns an `ExecuteOutcome` whose `report`
     // reflects in-progress state up to wherever the sequence stopped;
     // `error` is set iff the flash did not complete successfully.
-    [[nodiscard]] ExecuteOutcome execute(FlashPlan const &plan);
+    //
+    // The optional `cancel` flag is polled at PDU boundaries: between
+    // sectors AND between TransferData blocks within a sector. It is
+    // NEVER polled mid-PDU — once a UDS request is on the wire, the
+    // in-flight exchange completes before the cancel check fires. This
+    // is load-bearing: a UDS request torn mid-PDU can leave the ECU in
+    // an inconsistent download/erase state. Cancel arrives between
+    // PDUs, not within one (docs/08 Tier 2a).
+    //
+    // On observed cancel:
+    //   * If mid-sector (RequestDownload sent but RequestTransferExit
+    //     not yet sent), emit RequestTransferExit so the ECU unwinds
+    //     its download state machine cleanly. Best-effort — a failure
+    //     here is not surfaced.
+    //   * Always emit DiagnosticSessionControl → kDscDefault so the
+    //     ECU exits the programming session. Best-effort — a failure
+    //     is not surfaced.
+    //   * Return ExecuteOutcome with `error.code() == Cancelled` and
+    //     a partial `report` describing what completed before cancel.
+    //
+    // Atomic so a UI thread can flip the flag while a worker thread
+    // runs execute(). Mirror of read_full_rom's cancel parameter.
+    [[nodiscard]] ExecuteOutcome execute(FlashPlan const &plan,
+                                         std::atomic<bool> const *cancel = nullptr);
 
 private:
     ecu::uds::UdsClient client_;

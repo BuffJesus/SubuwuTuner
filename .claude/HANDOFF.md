@@ -1,4 +1,32 @@
-# Handoff — 2026-05-22 evening (`doctor` shipped + blocker #2 started, OBDX retest still pending)
+# Handoff — 2026-05-22 late evening (`doctor` + blocker #2 fully closed, OBDX retest still pending)
+
+**The user is at work. Three pure-software commits landed in their absence: `doctor` (#6 ✅), cancellation-invariant tests (start of #2), and now the cancel-token enforcement on `Flasher::execute()` that closes #2 for v1.0 (UDS only; SSM is v1.3-and-later).**
+
+## Blocker #2 — fully closed for v1.0
+
+`Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *cancel = nullptr)` — added a second parameter, default null for backward compatibility. Cancel polled at PDU boundaries:
+- Top of the per-sector loop (between sectors).
+- Top of the per-block TransferData inner loop (between PDUs within a sector).
+- Never mid-PDU; in-flight UDS exchanges always complete.
+
+On observed cancel, the cleanup helper emits:
+- `RequestTransferExit` (0x37) if a download was in flight (RequestDownload sent but RequestTransferExit not yet sent for the current sector).
+- Always `DiagnosticSessionControl` → `kDscDefault` (0x10 0x01) as the final PDU.
+- Both calls swallow errors; the user has already asked us to stop.
+- Returns `ExecuteOutcome` with `error.code() == Cancelled` and a partial `report`.
+
+Three new tests fill the placeholder block in `tests/unit/flash/test_cancellation_invariants.cpp`:
+- `execute observes pre-set cancel and exits via DSC(default)` — cancel set before execute, sector loop never runs a real iteration.
+- `execute observes cancel between sectors and exits via DSC(default)` — uses a `CancelAfterNthExchange` wrapper transport that flips the cancel flag after the 6th send_recv (post sector-1 check_deps).
+- `execute observes cancel mid-TransferData; emits RequestTransferExit + DSC(default)` — cancel flips after the first of two TransferData blocks. Asserts the second block never goes on the wire (PDU atomicity) and the wire sequence ends with RTE then DSC(default).
+
+All 848/848 tests green.
+
+## Pre-existing build issue surfaced (not introduced here)
+
+`cmake --build build/win-mingw` for the *full* tree fails on `src/ui/src/main.cpp:8735` with `unknown conversion type character 'z' in format` — `text_subtle("edits %zu / %zu", ...)` is rejected on this MinGW toolchain. Confirmed pre-existing by stash/build/pop. CLI + tests build clean. Fix is to cast the `size_t` args to `unsigned long long` and use `%llu`, or migrate to `std::format`. Out of scope for this session.
+
+---
 
 **The user is at work and hasn't retested OBDX yet. Two pure-software ship-blocker commits landed in the meantime: `doctor` (#6) and the start of cancellation invariants (#2).**
 

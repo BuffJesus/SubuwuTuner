@@ -184,7 +184,7 @@ std::uint32_t choose_block_payload(std::uint32_t reported_max, std::uint32_t hin
 
 } // namespace
 
-ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
+ExecuteOutcome Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *cancel) {
     FlashReport report{};
     report.sectors.reserve(plan.writes.size());
 
@@ -197,6 +197,42 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
         out.report = std::move(report);
         out.error = Error{code, std::move(message)};
         return out;
+    };
+
+    // Cancellation predicate. The acquire load pairs with whatever release
+    // store the UI/worker thread does when flipping the flag (mirrors the
+    // pattern in read_full_rom). Pure read — does not mutate the flag.
+    auto is_cancelled = [&]() noexcept {
+        return cancel != nullptr && cancel->load(std::memory_order_acquire);
+    };
+
+    // Best-effort cleanup emitted on observed cancel:
+    //   1. If a download is in-flight (RequestDownload sent, but
+    //      RequestTransferExit not yet sent), emit RequestTransferExit so
+    //      the ECU's download state machine unwinds cleanly.
+    //   2. If we silenced non-diagnostic traffic at step 2 of the main
+    //      sequence, restore it. Skipping this would leave the bus muted
+    //      until a power cycle or extended-diag session unsticks the
+    //      CommunicationControl state — caller-visible nuisance even
+    //      though it isn't a brick risk.
+    //   3. Always emit DiagnosticSessionControl → kDscDefault so the ECU
+    //      leaves the programming session.
+    // All three swallow their errors: the user has already asked us to
+    // stop, and forwarding a cleanup failure here obscures the cancel.
+    // `report.restored_bus` is updated when CC restore succeeds so the
+    // partial report accurately reflects bus state.
+    auto cancel_cleanup = [&](bool mid_sector_download) {
+        if (mid_sector_download) {
+            (void)client_.request_transfer_exit();
+        }
+        if (report.silenced_bus && !report.restored_bus) {
+            if (auto s = client_.communication_control(ecu::uds::kCcEnableRxAndTx,
+                                                       ecu::uds::kCtNormalAndNetworkManagement);
+                s.has_value()) {
+                report.restored_bus = true;
+            }
+        }
+        (void)client_.diagnostic_session_control(ecu::uds::kDscDefault);
     };
 
     // Validate the plan before touching the bus.
@@ -257,6 +293,16 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
         // 3'. Full execution: erase + download + transfer + exit +
         // check_deps + optional verify, per sector.
         for (auto const &w : plan.writes) {
+            // Cancel check at the sector boundary — between PDUs, never
+            // mid-PDU. Any in-flight transfer was on a previous sector
+            // that completed RequestTransferExit before we got here, so
+            // there's no download to unwind. Just exit the session.
+            if (is_cancelled()) {
+                cancel_cleanup(/*mid_sector_download=*/false);
+                return bail(ErrorCode::Cancelled,
+                            "flash: cancelled between sectors at " + hex_addr(w.sector.address));
+            }
+
             SectorOutcome outcome{};
             outcome.sector = w.sector;
 
@@ -294,6 +340,20 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan) {
             std::uint8_t counter = 1;
             std::size_t offset = 0;
             while (offset < w.data.size()) {
+                // Cancel check at the PDU boundary, BEFORE the next
+                // transfer_data call. At this point the previous block's
+                // request-response exchange has completed and the next
+                // hasn't started — nothing in flight. Mid-PDU cancel is
+                // not possible (transfer_data is synchronous).
+                if (is_cancelled()) {
+                    report.bytes_transferred += offset;
+                    commit_outcome(outcome);
+                    cancel_cleanup(/*mid_sector_download=*/true);
+                    return bail(ErrorCode::Cancelled, "flash: cancelled mid-sector at " +
+                                                          hex_addr(w.sector.address) +
+                                                          " after block counter=" +
+                                                          std::to_string(counter - 1));
+                }
                 std::size_t const remaining = w.data.size() - offset;
                 std::size_t const this_block =
                     remaining < block_payload ? remaining : block_payload;
