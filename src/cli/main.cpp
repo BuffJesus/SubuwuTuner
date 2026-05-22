@@ -32,6 +32,7 @@
 #include <cerrno>
 #include <charconv>
 #include <chrono>
+#include <cinttypes>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -5790,9 +5791,13 @@ int cmd_log(int argc, char *argv[]) {
     session.stop();
     out_stream->flush();
 
-    std::fprintf(stderr, "log: cycles=%llu  drops=%llu  io_errors=%llu  channels=%zu\n",
-                 session.cycles_completed(), session.stream().dropped_count(), session.io_errors(),
-                 channels.size());
+    // %llu doesn't match std::uint64_t on Linux (where it's unsigned long, not
+    // unsigned long long). PRIu64 from <cinttypes> expands to the right width
+    // per platform — Clang's -Wformat enforces the match.
+    std::fprintf(
+        stderr, "log: cycles=%" PRIu64 "  drops=%" PRIu64 "  io_errors=%" PRIu64 "  channels=%zu\n",
+        session.cycles_completed(), session.stream().dropped_count(), session.io_errors(),
+        channels.size());
     return 0;
 }
 

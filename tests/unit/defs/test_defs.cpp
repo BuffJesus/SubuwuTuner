@@ -1305,7 +1305,11 @@ TEST_CASE("write_typed round-trips Float32", "[defs][write_typed][float]") {
     std::vector<std::uint8_t> bytes(8, 0);
     auto rom = st::Rom::from_bytes(std::move(bytes));
 
-    REQUIRE(st::write_typed(rom, 0, st::DataType::Float32Be, 3.14159f).has_value());
+    // Apple Clang's -Wdouble-promotion fires inside Catch2's REQUIRE wrapping
+    // when a float literal is forwarded through __builtin_constant_p. Using
+    // a double literal sidesteps the diagnostic; write_typed narrows to the
+    // requested DataType internally.
+    REQUIRE(st::write_typed(rom, 0, st::DataType::Float32Be, 3.14159).has_value());
     auto const r = st::read_typed(rom, 0, st::DataType::Float32Be);
     REQUIRE(r.has_value());
     REQUIRE(static_cast<float>(*r) == 3.14159f);
