@@ -117,3 +117,8 @@ target_link_libraries(subuwutuner-gui
 set_target_properties(subuwutuner-gui PROPERTIES
     OUTPUT_NAME "subuwutuner-gui"
 )
+
+# MSVC strict-mode C4996 fix — see src/cli/CMakeLists.txt for rationale.
+if (MSVC)
+    target_compile_definitions(subuwutuner-gui PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()

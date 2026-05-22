@@ -8997,7 +8997,7 @@ int cmd_feature_compile(int argc, char *argv[]) {
         // map through select_backend()'s VA/VB recognizer.
         std::string a = *arch_override;
         std::transform(a.begin(), a.end(), a.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (a == "sh2a") {
             backend = std::make_unique<st::feature::codegen::Sh2aBackend>();
         } else if (a == "rh850") {

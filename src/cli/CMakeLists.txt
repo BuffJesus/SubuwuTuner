@@ -28,3 +28,13 @@ target_link_libraries(subuwutuner-cli
 set_target_properties(subuwutuner-cli PROPERTIES
     OUTPUT_NAME "subuwutuner-cli"
 )
+
+# MSVC's strict mode (/WX) elevates C4996 to an error for getenv / sscanf /
+# strcpy / etc. The MS-recommended fix is to define _CRT_SECURE_NO_WARNINGS;
+# the alternative is rewriting every cross-platform call to use the _s
+# variants, which are Windows-only and would diverge the binary from
+# its POSIX-portable cousins. SubuwuTuner targets parity across OSes,
+# so we silence the deprecation warning on MSVC only.
+if (MSVC)
+    target_compile_definitions(subuwutuner-cli PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
