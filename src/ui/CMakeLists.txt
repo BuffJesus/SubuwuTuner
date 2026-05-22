@@ -122,3 +122,13 @@ set_target_properties(subuwutuner-gui PROPERTIES
 if (MSVC)
     target_compile_definitions(subuwutuner-gui PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
+
+# Apple deprecated the desktop OpenGL framework in macOS 10.14 (Mojave),
+# but it still works and ImGui's GL3 backend uses it. -Wdeprecated-declarations
+# fires on every glViewport / glClearColor / glClear in the render loop;
+# -Werror promotes the lot. GL_SILENCE_DEPRECATION is Apple's documented
+# escape hatch — silences just the OpenGL-deprecation channel without
+# affecting unrelated deprecation warnings.
+if (APPLE)
+    target_compile_definitions(subuwutuner-gui PRIVATE GL_SILENCE_DEPRECATION)
+endif()

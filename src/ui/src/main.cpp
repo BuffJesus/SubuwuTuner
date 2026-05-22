@@ -63,7 +63,7 @@ namespace {
 // body can use it. Definition lives near the other text helpers
 // further down (text_centered_disabled, text_centered_subtle).
 #if defined(__GNUC__)
-[[gnu::format(gnu_printf, 1, 2)]]
+[[gnu::format(printf, 1, 2)]]
 #endif
 void text_subtle(char const *fmt, ...);
 
@@ -981,7 +981,6 @@ write_current_table_csv(AppState const &state, std::filesystem::path const &path
     out << "# pack_id = \"" << state.project->definition().pack().id << "\"\n";
     out << "# table   = \"" << table->id << "\"\n";
     out << "row,col,value\n";
-    std::size_t emitted = 0;
     char buf[64];
     for (std::size_t r = 0; r < working_td->values.size(); ++r) {
         for (std::size_t c = 0; c < working_td->values[r].size(); ++c) {
@@ -994,7 +993,6 @@ write_current_table_csv(AppState const &state, std::filesystem::path const &path
             }
             std::snprintf(buf, sizeof buf, "%zu,%zu,%.*f\n", r, c, prec, v);
             out << buf;
-            ++emitted;
         }
     }
     if (!out) {
@@ -4960,14 +4958,25 @@ void text_centered_disabled(char const *text) {
 // format attribute at all, so existing call sites with %zu
 // already work — we annotate ours for the catch-mismatched-types
 // benefit + match the gnu_printf semantics those sites assume.
-[[gnu::format(gnu_printf, 1, 2)]]
+[[gnu::format(printf, 1, 2)]]
 #endif
 void text_subtle(char const *fmt, ...) {
     auto const c = ImGui::GetStyleColorVec4(ImGuiCol_Text);
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(c.x, c.y, c.z, c.w * 0.65f));
     va_list args;
     va_start(args, fmt);
+    // `fmt` is the format-attribute-checked parameter of this function;
+    // the static check at the call site has already validated it. Apple
+    // Clang flags the forward into ImGui::TextV anyway, so suppress
+    // -Wformat-nonliteral just for this delegation.
+#if defined(__clang__)
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wformat-nonliteral"
+#endif
     ImGui::TextV(fmt, args);
+#if defined(__clang__)
+#    pragma clang diagnostic pop
+#endif
     va_end(args);
     ImGui::PopStyleColor();
 }
@@ -5544,10 +5553,10 @@ void render_knock_dashboard_panel(AppState &state) {
                             "header. Mappings without a match will be ignored.";
                     }
                     st::log::knock::WindowConfig cfg;
-                    cfg.window_seconds = state.knock_window_seconds;
-                    cfg.sample_rate_hz = state.knock_sample_rate_hz;
-                    cfg.min_rpm = state.knock_min_rpm;
-                    cfg.min_load = state.knock_min_load;
+                    cfg.window_seconds = static_cast<double>(state.knock_window_seconds);
+                    cfg.sample_rate_hz = static_cast<double>(state.knock_sample_rate_hz);
+                    cfg.min_rpm = static_cast<double>(state.knock_min_rpm);
+                    cfg.min_load = static_cast<double>(state.knock_min_load);
                     cfg.require_load_gate = state.knock_gate_enabled;
                     auto const r =
                         st::log::knock::snapshot_from_csv(state.knock_log_path, mapping, cfg);
@@ -5765,7 +5774,7 @@ void render_adaptive_history_panel(AppState &state) {
                         st::log::adaptive::SignalKind::IdleAdapt)] = resolve(state.ah_iac_col);
 
                     st::log::adaptive::BucketConfig cfg;
-                    cfg.bucket_seconds = state.ah_bucket_seconds;
+                    cfg.bucket_seconds = static_cast<double>(state.ah_bucket_seconds);
                     cfg.min_samples_per_bucket =
                         static_cast<std::uint32_t>(state.ah_min_samples_per_bucket);
                     switch (state.ah_ts_unit) {
@@ -6071,8 +6080,8 @@ void render_coldstart_panel(AppState &state) {
                     mapping.commanded_lambda_idx = resolve(state.cs_cmd_col);
 
                     st::log::coldstart::WindowConfig cfg;
-                    cfg.cold_threshold_c = state.cs_cold_threshold_c;
-                    cfg.ect_bin_width_c = state.cs_ect_bin_width_c;
+                    cfg.cold_threshold_c = static_cast<double>(state.cs_cold_threshold_c);
+                    cfg.ect_bin_width_c = static_cast<double>(state.cs_ect_bin_width_c);
                     cfg.min_samples_per_bin =
                         static_cast<std::uint32_t>(state.cs_min_samples_per_bin);
                     switch (state.cs_ts_unit) {
@@ -6354,10 +6363,11 @@ void render_ebcs_panel(AppState &state) {
                     mapping.rpm_idx = resolve(state.ebcs_rpm_col);
 
                     st::log::ebcs::DetectorConfig cfg;
-                    cfg.throttle_step_threshold_pct = state.ebcs_throttle_step_pct;
-                    cfg.target_boost_step_threshold = state.ebcs_target_step;
-                    cfg.max_event_duration_s = state.ebcs_max_event_duration;
-                    cfg.overshoot_warn_pct = state.ebcs_overshoot_warn_pct;
+                    cfg.throttle_step_threshold_pct =
+                        static_cast<double>(state.ebcs_throttle_step_pct);
+                    cfg.target_boost_step_threshold = static_cast<double>(state.ebcs_target_step);
+                    cfg.max_event_duration_s = static_cast<double>(state.ebcs_max_event_duration);
+                    cfg.overshoot_warn_pct = static_cast<double>(state.ebcs_overshoot_warn_pct);
                     switch (state.ebcs_ts_unit) {
                     case 1:
                         cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixMillis;

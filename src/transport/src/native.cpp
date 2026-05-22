@@ -156,7 +156,11 @@ Result<DecodedFrame> decode_frame(std::span<std::uint8_t const> bytes) {
         // in a misconfigured firmware. Surface as a parse error so
         // higher layers see it (rather than silently treating it
         // as a request).
-        char buf[80];
+        // Buffer sized for the full literal expansion (~114 B with the
+        // longest 0x__ substitution) plus headroom — GCC's
+        // -Wformat-truncation flags any tighter size as a guaranteed
+        // truncation.
+        char buf[160];
         std::snprintf(buf, sizeof buf,
                       "native::decode_frame: opcode 0x%02X missing "
                       "response bit (0x80) — adapter sent a request "

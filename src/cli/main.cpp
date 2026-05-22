@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <charconv>
 #include <chrono>
 #include <cmath>
@@ -2038,9 +2039,14 @@ int cmd_project_edit(int argc, char *argv[]) {
         } else if (!op.has_value()) {
             op = std::string{a};
         } else if (!value.has_value() && op != "smooth" && op != "interpolate") {
-            double d = 0.0;
-            auto const res = std::from_chars(a.data(), a.data() + a.size(), d);
-            if (res.ec == std::errc{} && res.ptr == a.data() + a.size()) {
+            // libc++ (Apple Clang) does not implement std::from_chars for
+            // floating-point types through LLVM 18, so route through
+            // std::strtod for portability.
+            std::string const buf{a};
+            char *end = nullptr;
+            errno = 0;
+            double const d = std::strtod(buf.c_str(), &end);
+            if (errno == 0 && end == buf.c_str() + buf.size() && !buf.empty()) {
                 value = d;
             } else if (!proj_path.has_value()) {
                 proj_path = std::filesystem::path{a};
@@ -3535,9 +3541,13 @@ int cmd_table_edit(int argc, char *argv[]) {
             op = std::string{a};
         } else if (!value.has_value() && op != "smooth" && op != "interpolate") {
             // Try parsing as a double; if it doesn't parse, treat as the ROM path.
-            double d = 0.0;
-            auto const res = std::from_chars(a.data(), a.data() + a.size(), d);
-            if (res.ec == std::errc{} && res.ptr == a.data() + a.size()) {
+            // libc++ on Apple Clang lacks from_chars(double) through LLVM 18,
+            // so this routes through std::strtod for portability.
+            std::string const buf{a};
+            char *end = nullptr;
+            errno = 0;
+            double const d = std::strtod(buf.c_str(), &end);
+            if (errno == 0 && end == buf.c_str() + buf.size() && !buf.empty()) {
                 value = d;
             } else if (!rom_path.has_value()) {
                 rom_path = std::filesystem::path{a};
