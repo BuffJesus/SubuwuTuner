@@ -62,8 +62,10 @@ namespace {
 // Forward-declared so render_* panels defined ahead of the helper
 // body can use it. Definition lives near the other text helpers
 // further down (text_centered_disabled, text_centered_subtle).
+// Archetype is `gnu_printf` (not bare `printf`) so MinGW's MS-printf
+// archetype isn't selected — see the definition's commentary block.
 #if defined(__GNUC__)
-[[gnu::format(printf, 1, 2)]]
+[[gnu::format(gnu_printf, 1, 2)]]
 #endif
 void text_subtle(char const *fmt, ...);
 
@@ -4961,7 +4963,7 @@ void text_centered_disabled(char const *text) {
 // format attribute at all, so existing call sites with %zu
 // already work — we annotate ours for the catch-mismatched-types
 // benefit + match the gnu_printf semantics those sites assume.
-[[gnu::format(printf, 1, 2)]]
+[[gnu::format(gnu_printf, 1, 2)]]
 #endif
 void text_subtle(char const *fmt, ...) {
     auto const c = ImGui::GetStyleColorVec4(ImGuiCol_Text);
