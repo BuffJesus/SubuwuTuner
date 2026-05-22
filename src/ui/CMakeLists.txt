@@ -12,6 +12,15 @@ set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_INSTALL        OFF CACHE BOOL "" FORCE)
+# Build the X11 backend only on Linux. Wayland sessions still get the GUI
+# via XWayland, which is universally available on every Wayland desktop.
+# Skipping the Wayland backend means GLFW does not need wayland-scanner at
+# configure time — that binary lives in libwayland-bin on Ubuntu and has
+# been a recurring CI dependency-drift footgun on GitHub-hosted runners
+# (image-roll-related). The cost is a small perf delta on native Wayland;
+# acceptable for a v1.0-targeted tuning workbench. Re-enable if native
+# Wayland latency becomes a measurable problem.
+set(GLFW_BUILD_WAYLAND  OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(glfw)
 
 # Dear ImGui — docking branch. Adds ImGuiConfigFlags_DockingEnable (multi-pane
