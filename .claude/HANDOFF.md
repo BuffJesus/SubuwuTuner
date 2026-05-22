@@ -1,3 +1,35 @@
+# Handoff — 2026-05-22 evening (`doctor` shipped + blocker #2 started, OBDX retest still pending)
+
+**The user is at work and hasn't retested OBDX yet. Two pure-software ship-blocker commits landed in the meantime: `doctor` (#6) and the start of cancellation invariants (#2).**
+
+## Blocker #2 — Cancellation invariants (partial, 🟡)
+
+**Files added:**
+- `tests/unit/flash/test_cancellation_invariants.cpp` — 3 tests covering invariants #4 (crash-mid-flash recovery: simulate a process crash via a UDS negative-response bail mid-execute, then `plan_resume` from the on-disk journal and verify it covers exactly the not-completed sector) and #5 (resume idempotence: `plan_resume` is a pure function and collapses to empty on a fully-done journal — re-invoking recovery is a no-op).
+- `tests/unit/ecu/test_uds_pdu_atomicity.cpp` — 14 tests confirming each `UdsClient` public method produces exactly 1 send_log entry on success, on negative-response (no silent retry), and on transport-level injected error. The cancel-is-deferred logic at the orchestrator only works if each client call is itself indivisible; this suite pins that property so a future refactor that sneaks a retry loop into e.g. `transfer_data()` can't break the cancel contract.
+
+**17 new tests, 70 assertions, total suite 845/845 green.**
+
+**Not yet landed (invariants #1-3 — explicitly flagged in both test file headers + roadmap row #2):**
+- Mid-PDU UDS cancel deferred
+- Mid-PDU SSM cancel deferred
+- Session-exit on cancel
+
+These three need enforcement code first: `Flasher::execute(FlashPlan const &plan)` does not accept a cancel token today (only `read_full_rom` does). The enforcement work spec is in both file headers:
+- Extend `execute()` signature: add `std::atomic<bool> const *cancel = nullptr` (matching `read_full_rom`'s pattern; backward-compatible default).
+- Check cancel between sectors AND between TransferData blocks within a sector (never mid-PDU; in-flight PDU completes first).
+- On cancel mid-sector (after RequestDownload, before RequestTransferExit): emit `RequestTransferExit` (0x37) so the ECU's download state machine unwinds cleanly.
+- Always emit `DiagnosticSessionControl` → `kDscDefault` on cancel exit; ECU leaves programming session cleanly.
+- Return `ErrorCode::Cancelled` from `execute`.
+
+SSM block-write cancellation (invariant #2) is doubly blocked: needs `execute()` cancel hook AND the SSM B8 write flow itself (the current `st::ecu::ssm` layer doesn't implement it yet).
+
+Test slots are stubbed in `tests/unit/flash/test_cancellation_invariants.cpp` (file footer) so the next person knows where they go.
+
+Roadmap row #2 status updated ⬜ → 🟡.
+
+---
+
 # Handoff — 2026-05-22 afternoon (`doctor` shipped, OBDX retest in progress)
 
 **While the user retests the OBDX read flow, I closed v1.0 ship blocker #6: `subuwutuner-cli doctor`.**

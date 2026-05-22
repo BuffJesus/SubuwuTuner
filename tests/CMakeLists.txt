@@ -33,6 +33,7 @@ add_executable(st_unit_tests
     unit/transport/test_j2534_discovery.cpp
     unit/ecu/test_ssm.cpp
     unit/ecu/test_uds.cpp
+    unit/ecu/test_uds_pdu_atomicity.cpp
     unit/log/test_log.cpp
     unit/log/test_knock_dashboard.cpp
     unit/log/test_adaptive_history.cpp
@@ -43,6 +44,7 @@ add_executable(st_unit_tests
     unit/discover/test_discover.cpp
     unit/flash/test_flash.cpp
     unit/flash/test_checksum.cpp
+    unit/flash/test_cancellation_invariants.cpp
     unit/autotune/test_autotune.cpp
     unit/autotune/test_autotune_csv.cpp
     unit/autotune/test_autotune_lint.cpp
