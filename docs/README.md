@@ -26,6 +26,7 @@ This folder contains the design and planning documents for **SubuwuTuner**, a co
 20. [19-live-tuning.md](19-live-tuning.md) — RAM-shadow live tuning design (v1.5+)
 21. [20-ai-integration.md](20-ai-integration.md) — AI / LLM as advisory surface, not modification surface (v2.0+)
 22. [21-stune-format.md](21-stune-format.md) — `.stune` project directory layout and TOML schema
+23. [22-auto-update.md](22-auto-update.md) — `st::updater` design sketch (Phase 6): channels, manifest, signature verification, swap mechanics
 
 ## Status
 

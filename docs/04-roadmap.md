@@ -99,7 +99,7 @@ See `docs/16-custom-features.md` for the full current-state matrix + primitive c
 
 - 🟡 Themed UI — Dark/Light themes shipped with purple accent (`accent_for(Theme)`); audit pass shipped 5 fixes (`0cc5c1b`, `4622bbe`, `9d6aabe`, `03f48cd`) covering modal feedback hygiene, status-msg TTL, discoverability hints, Revert-all confirm, plain-language lint findings
 - ⬜ Accessibility pass (Tab nav in modals, screen-reader labels)
-- ⬜ Installer / codesigning / auto-update channel
+- ⬜ Installer / codesigning / auto-update channel — `st::updater` design sketched in `docs/22-auto-update.md` (channels, manifest, signature verification, swap mechanics); implementation tracks Phase 6 polish. Solo-dev iteration pain (zip-and-send between desktop and laptop) is solved meanwhile by file-sync, not by the in-tool updater.
 - ⬜ Documentation site (Jekyll → MkDocs or similar)
 - ⬜ Onboarding flow for first-time users — partial (welcome panel + new-project modal pack hints landed)
 - ⬜ Telemetry **opt-in only**, crash-report-only, no analytics

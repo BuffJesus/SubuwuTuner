@@ -1,3 +1,9 @@
+# Handoff — 2026-05-22 night (`doctor` + #2 + #3 closed, `st::updater` sketched, OBDX retest still pending)
+
+**The user asked partway through about an easier way to test on their laptop (currently zip-and-send). The discussion landed on a two-track answer: file-sync (Syncthing) for now, real `st::updater` for v1.0 as a proper feature. The design for the latter is sketched in `docs/22-auto-update.md` — no implementation yet, but the API surface, channel model, signature verification, swap mechanics, and CI pipeline are all written up so a future session can implement against it. Roadmap row "Installer / codesigning / auto-update channel" now points at the sketch doc.**
+
+---
+
 # Handoff — 2026-05-22 night (`doctor` + blocker #2 + blocker #3 fully closed, OBDX retest still pending)
 
 **Four pure-software ship-blocker commits in the user's absence this evening: `doctor` (#6 ✅), cancellation-invariant tests (start of #2), cancel-token enforcement closing #2 (UDS path) for v1.0, and the codegen writable-region address gate closing #3 ✅.**
