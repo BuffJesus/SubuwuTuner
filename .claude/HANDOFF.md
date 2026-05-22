@@ -1,3 +1,49 @@
+# Handoff — 2026-05-22 morning (OBDX adapter on hand, K-Line default fixed)
+
+**Tomorrow's first action: re-run the GUI Read flow against the real OBDX adapter.** The user got the OBDX Pro VX in the mail late on 2026-05-21, plugged it in, clicked Tools → Read ROM from Car (Adapter=OBDX, COM port set), and got:
+
+```
+Adapter link open failed: obdx::Transport: OBDX VX doesn't support
+K-Line / ISO9141. Subaru VA WRX needs Tactrix OpenPort.
+```
+
+This is a real coding bug I shipped (and a misleading error message to boot). The OBDX **is** the right adapter for VA/VB WRX — those cars run CAN ISO15765, not K-Line. Subaru switched to CAN with the 2008 OBD-II CAN mandate. Atlas's recommendation of OBDX is correct.
+
+**Fix landed at `f3b7cc7`** (HEAD):
+- `LinkConfig` default changed: `kind=CanIso15765`, `baud=500000`, `can_id_request=0x7E0`, `can_id_response=0x7E8` (standard Subaru engine-ECU OBD-II addressing).
+- New `kSubaruEngineCanIdRequest`/`Response` constants in `src/transport/include/st/transport.hpp`.
+- `LinkKind` enum comments rewritten to reflect actual Subaru bus history (pre-2008 K-Line, 2008+ CAN ISO15765 — including all VA/VB).
+- The OBDX K-Line error message rewritten to redirect users to `CanIso15765` instead of pointing at Tactrix.
+
+The user did **NOT** get to re-test today after the fix landed. **First action tomorrow morning: launch the (already-rebuilt) GUI and click Tools → Read ROM from Car again.** Same form values as yesterday — adapter OBDX, device COM port, addr 0x0, size 0x200000.
+
+## Possible failure modes and what they mean
+
+| Symptom | Interpretation | Next action |
+|---|---|---|
+| Progress bar starts ticking up | **It works.** Wait 5-15 min, save .bin, File → New project. | First real-hardware milestone for the project. |
+| "Adapter open failed: serial open failed for \\\\.\\COM5..." | Wrong COM port number. | Re-check Device Manager. |
+| Link opens but FIRST chunk errors | UDS-request shape doesn't match real ECU expectation. Likely fixable in `src/ecu/uds.cpp` against the actual error byte. | Paste error; iterate. |
+| First chunk succeeds, later chunks error or timeout | ISO-TP fragmentation / flow-control issue in `src/transport/src/obdx_transport.cpp`. | Paste error + approximate bytes_done. |
+| Adapter rejects link with some new error | Another wrong-config bug like today's. Paste error verbatim. | Same shape of fix. |
+
+Pre-flight checklist for the user (in case they need a reminder):
+
+- Battery > 12.0 V (charged or maintainer)
+- Key in ON, engine OFF
+- OBDX plugged into OBD-II port FIRST, then USB to laptop
+- Device Manager → Ports → note the COM number for the OBDX
+
+If the GUI hangs and you need to bisect, drop to the CLI for a 16-byte sanity read:
+
+```
+subuwutuner-cli rom-pull --transport obdx --device COM5 --addr 0 --size 0x10 --output test.bin
+```
+
+If that works, the OBDX protocol layer is fine and only the GUI flow has an issue. If that fails the same way, it's a protocol-layer bug — same code path.
+
+---
+
 # Handoff — 2026-05-21 (P6 + 3 pack-bug sweeps + VA/VB bundles + AFR formula)
 
 Marathon session. Built on yesterday's `8f4b44f`. **37 commits** all pushed. P6 descriptor library is real and finding real bugs; validate.py surfaced multiple classes of pack-quality issues that we fixed at the source (defgen) and applied corpus-wide; user dropped two forum-sourced VA/VB bundle XMLs which we wired into bulk_regen to upgrade 25 packs from 0D-scalar-only to fully-typed 2D.
