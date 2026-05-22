@@ -2,6 +2,35 @@ SubuwuTuner
 Copyright 2026 The SubuwuTuner Authors
 
 This product includes software developed by the SubuwuTuner project
-(https://github.com/...).
+(https://github.com/BuffJesus/SubuwuTuner).
 
 Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+----------------------------------------------------------------------
+Bundled fonts (SIL Open Font License v1.1)
+----------------------------------------------------------------------
+
+This product bundles the following fonts as header-only binary blobs in
+src/ui/ for use by the GUI. They are each licensed under the SIL Open
+Font License, Version 1.1 (OFL-1.1). The full OFL text is available at
+https://openfontlicense.org and is also reproduced in
+THIRD_PARTY_NOTICES.md.
+
+  - Inter (UI font). Copyright (c) The Inter Project Authors
+    (https://github.com/rsms/inter). Licensed under OFL-1.1.
+
+  - JetBrains Mono (monospace font). Copyright (c) JetBrains s.r.o.
+    (https://github.com/JetBrains/JetBrainsMono). Licensed under
+    OFL-1.1.
+
+These fonts are not modified. Per OFL §1, redistribution of the original
+or embedded forms is permitted; per §5, they are provided "as is"
+without warranty.
+
+----------------------------------------------------------------------
+Bundled third-party C++ libraries
+----------------------------------------------------------------------
+
+See THIRD_PARTY_NOTICES.md for the full attribution list, including
+Dear ImGui (MIT), GLFW (Zlib), ImPlot (MIT), nativefiledialog-extended
+(Zlib), tomlplusplus (MIT), tl::expected (CC0), and Catch2 (BSL-1.0).

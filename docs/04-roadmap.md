@@ -104,6 +104,35 @@ See `docs/16-custom-features.md` for the full current-state matrix + primitive c
 - ⬜ Onboarding flow for first-time users — partial (welcome panel + new-project modal pack hints landed)
 - ⬜ Telemetry **opt-in only**, crash-report-only, no analytics
 
+### Pre-1.0 ship blockers (from the 2026-05 review pass)
+
+These came out of the audit against `docs/05-improvements.md` and the external code review. Sequenced so the safety items land first.
+
+1. ⬜ **Brick protection per-ISA** — split the recovery design for SH single-bank (SH7055/58/59) vs RH850 dual-bank, document the hardware serial-boot recovery path for SH, validate both on the bench rig. Tracked in `docs/05-improvements.md` §4a.
+2. ⬜ **Cancellation invariants enforced + tested** — see `docs/08-testing-strategy.md` Tier 2a. Mid-PDU UDS / SSM cancellation must defer to PDU boundaries; crash-mid-flash must be recoverable. Spec lands first, then `tests/unit/flash/test_cancellation_invariants.cpp` + `tests/unit/ecu/test_uds_pdu_atomicity.cpp`, then enforcement code.
+3. ⬜ **Codegen writable-region gate** — `st::feature::codegen` must refuse to emit a `PatchObject` targeting addresses outside the loaded `Definition`'s declared writable regions. Security-boundary hole today; closes before any `.stmod` ships against real silicon. See `docs/16-custom-features.md` §Safety considerations.
+4. ⬜ **`[[table.role]]` schema in v1.0** — optional `role` field on `[[table]]` entries + role enum in `st::defs` + `Definition::find_table_by_role()`. Unblocks the §11 panels' suggestion-to-edit affordance. Schema bump only; per-panel wiring lands incrementally. Promoted from v1.2; see `docs/05-improvements.md` §11.
+5. ⬜ **`.stune` format spec** — pin the project-directory layout into `docs/21-stune-format.md` so users know what they're version-controlling.
+6. ⬜ **`subuwutuner-cli doctor`** — single subcommand: adapter probe, definition-pack health check, missing-CID detection, "what to do next" hints. Closes the install → defgen → open bootstrap cliff.
+7. ⬜ **Frozen `defgen` binary** — PyInstaller / Nuitka build of `tools/defgen/` shipped in the installer, so end users do not need a Python environment.
+8. ⬜ **README platform-feature matrix** — explicit "what works on which OS" table, particularly flagging J2534 flashing as Windows-only.
+9. ⬜ **OFL font licenses in `NOTICE`** — Inter and JetBrains Mono ship as binary blobs; license text must accompany the binary.
+10. ⬜ **CI performance gate** — fail the build on cold-start time / idle-RAM regression past the §1 thresholds (currently aspirational; tracked, not enforced).
+11. ⬜ **Property-based tests** on the codec layer (SSM framing, DVI codec, native SOF/seq/CRC) and the UDS state machine. RapidCheck (or in-tree property harness) — example-based Catch2 will miss bit-flip / reorder cases.
+
+## Personas — who each milestone serves
+
+The architecture serves four user personas; mapping milestones to personas keeps the investment thesis legible.
+
+| Persona | Primary tool | Headline needs |
+|---|---|---|
+| **Street tuner** (largest population) | GUI | Open project → edit map → flash, with strong brick protection. Cold-start + adaptive-history panels (§11) are aimed here. v1.0 + v1.2 §11 panels deliver. |
+| **Dyno operator** | CLI + GUI | Batch-process logs, repeatable pipelines, `--json` output. v1.1 auto-tune CLI + (future) `--json` mode + `subuwutuner-cli doctor` deliver. |
+| **Shop / professional** | GUI primarily | Fleet workflows, signed updates, jurisdiction profile management, support for handing keys to less-experienced staff. v1.2 closed-loop trim + v1.5 live tuning deliver the day-to-day iteration win. |
+| **Vehicle developer / engine swapper** | CLI + CAN toolkit | Reverse-engineering bus traffic, building DBCs, dumping ROMs from non-standard targets. v1.5+ CAN toolkit + v2.0 AI advisory deliver. |
+
+The roadmap rows below carry which persona they target so milestone trade-offs aren't anonymous.
+
 ## After 1.0 — platform expansion
 
 The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0 ships VA + VB WRX MT only because that's what we can brick-test on the Phase-4 bench rig. Subsequent versions add platforms in this order, prioritised by community demand × engineering reuse:

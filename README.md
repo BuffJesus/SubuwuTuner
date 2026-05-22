@@ -14,7 +14,7 @@ SubuwuTuner reads, edits, datalogs, and reflashes the calibration on supported S
 - **Open auto-tune** — MAF / knock-pull / closed-loop algorithms shipped first-party (v1.1)
 - **Jurisdiction-aware, not paternalistic** — first-run profile picker, engine-safety warnings stay strict
 - **Real brick protection** — bench-tested recovery shim subsystem, not a marketing bullet
-- **Cross-platform on day one** — Windows, macOS (Intel + Apple Silicon), Linux (x64 + arm64)
+- **Cross-platform on day one** — Windows, macOS (Intel + Apple Silicon), Linux (x64 + arm64). Editing, datalogging, project work, auto-tune, and the CAN toolkit run on all three; some adapter-specific flashing paths are Windows-only (see [Platform feature matrix](#platform-feature-matrix) below).
 
 v1.0 targets VA (2015–2021) and VB (2022+) WRX manual transmission. v1.x expands to STI, AT variants, older EJ-powered cars, BRZ/86, and the rest of the Subaru lineup. See [`docs/04-roadmap.md`](docs/04-roadmap.md).
 
@@ -59,6 +59,24 @@ See [`CMakePresets.json`](CMakePresets.json) for the full preset list.
 SubuwuTuner ships the *infrastructure* — loader, table editor, project model, flash orchestrator, auto-tune kernels, CAN toolkit, GUI — without bundled calibration definitions. Drop a TOML pack into the per-platform user-data directory (see [`docs/install.md`](docs/install.md)), or generate one from a public RomRaider XML with [`tools/defgen/`](tools/defgen/). The repo includes [`fixtures/demo-pack/`](fixtures/demo-pack/) as a synthetic always-available example so the tool is exercisable from a fresh checkout.
 
 The reasoning behind this distribution choice lives in [`docs/17-data-distribution-policy.md`](docs/17-data-distribution-policy.md).
+
+## Platform feature matrix
+
+The GUI, CLI, project model, auto-tune, and the CAN replay/decode pipeline are platform-symmetric. The asymmetry is in **adapter / flashing transports**, because J2534 v04.04 is a Windows-DLL API.
+
+| Capability | Windows | macOS | Linux |
+|---|---|---|---|
+| GUI, CLI, project work, ROM viewer/editor | ✅ | ✅ | ✅ |
+| TOML pack loader + `defgen` pipeline | ✅ | ✅ | ✅ |
+| Auto-tune kernels (MAF + knock-pull) | ✅ | ✅ | ✅ |
+| CAN replay / DBC decode / `.cdb` discovery | ✅ | ✅ | ✅ |
+| Datalogging via OBDX Pro VX (USB-CDC) | ✅ | ✅ | ✅ |
+| Datalogging via native handheld (USB-CDC) | ✅ | ✅ | ✅ |
+| Flashing via OBDX Pro VX / native handheld | ✅ | ✅ | ✅ |
+| Flashing via **J2534** (Tactrix OpenPort 2.0, Tactrix Pro J) | ✅ | ❌ Windows-only DLL | ❌ Windows-only DLL |
+| Live CAN bus capture (`can-record --live`) | ✅ | ✅ | ✅ |
+
+On macOS and Linux, **flashing requires an OBDX Pro VX or the SubuwuTuner native handheld** (per `docs/13-transport.md`). J2534 support on those platforms is not on the roadmap — the realistic substitute is the OBDX-VX/native path, which is what SubuwuTuner has put its transport-layer engineering behind. If you only own a Tactrix OpenPort 2.0, you flash from Windows.
 
 ## Safety
 

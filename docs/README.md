@@ -25,6 +25,7 @@ This folder contains the design and planning documents for **SubuwuTuner**, a co
 19. [18-standalone-master-plan.md](18-standalone-master-plan.md) — Portable Teensy/ESP32 handheld plan
 20. [19-live-tuning.md](19-live-tuning.md) — RAM-shadow live tuning design (v1.5+)
 21. [20-ai-integration.md](20-ai-integration.md) — AI / LLM as advisory surface, not modification surface (v2.0+)
+22. [21-stune-format.md](21-stune-format.md) — `.stune` project directory layout and TOML schema
 
 ## Status
 

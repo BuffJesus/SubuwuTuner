@@ -17,6 +17,21 @@ Tuning software bricks hardware when it's wrong. Test budget is correspondingly 
 - Fixture ROM dumps loaded, edited, saved, diffed
 - Transport with a **fake J2534** that replays canned ECU traces from real cars
 - SSM and UDS client tested against scripted protocol scenarios
+- **Cancellation invariant tests** (see below) — must pass on every PR that touches `st::flash`, `st::ecu::uds`, or `st::ecu::ssm`
+
+### Tier 2a — Cancellation invariants (subset of Tier 2)
+
+These are the testable safety properties around `std::stop_token` cancellation. A regression here can brick a real ECU; the suite enforces them via `MockTransport` + `FaultInjector` without hardware.
+
+| Invariant | Test asserts |
+|---|---|
+| Mid-PDU UDS cancel is deferred | Drive `stop_token` to "stopped" while `TransferData` is on the wire; assert the orchestrator completes the in-flight PDU, then issues `RequestTransferExit` (0x37) before returning a cancelled `Result`. No bytes dropped, no half-PDU on the wire. |
+| Mid-PDU SSM cancel is deferred | Drive `stop_token` to "stopped" mid-block (SSM B8 256-byte block write); assert the block completes, then the session exits. |
+| Session-exit on cancel | After any cancelled flash, assert the final transmitted PDU is `DiagnosticSessionControl` → `defaultSession` (0x10 0x01). |
+| Crash-mid-flash recovery | Open a `.stune`, start a flash, kill the process between PDU N and N+1, reopen; assert the project's journal flags the ECU as in-programming-session and `Project::open()` offers `plan_resume()` or clean session exit. |
+| Resume idempotence | Run `plan_resume()` twice in a row on the same manifest; assert second call is a no-op (no double-write of completed sectors). |
+
+The tests live at `tests/unit/flash/test_cancellation_invariants.cpp` (TBD) and `tests/unit/ecu/test_uds_pdu_atomicity.cpp` (TBD). New test files block on `src/flash/` and `src/ecu/uds/` carrying the matching guard logic — the spec lands first, the enforcement code lands with the tests.
 
 ### Tier 3 — Fuzzing (nightly + on parser-touching PRs)
 

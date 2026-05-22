@@ -25,11 +25,37 @@ JVM-based tuning tools pay a real cost in cold-start time and idle RAM. Targets 
 Brick protection is a first-class subsystem with a written threat model:
 
 - Recovery shim is installed and **verified by reading it back** before any subsequent write
-- Recovery shim sits in a separate flash bank or in a region the bootloader is guaranteed to read
+- Recovery strategy is **ISA-family specific** — see below
 - Every flash operation publishes a tamper-evident manifest (BLAKE3 over sector hashes) that the user can keep
 - If the host machine dies mid-flash, the next boot of SubuwuTuner offers to resume from the manifest
 
+### 4a. Recovery strategy by ISA family
+
+The "separate flash bank or bootloader-guaranteed region" guarantee depends on the silicon. The two families we ship against need separate recovery designs.
+
+| ISA family | Parts | Bank layout | Recovery strategy |
+|---|---|---|---|
+| SH-2A (VA WRX) | SH7055 / SH7058 / SH7059 | **Single bank** | Minimize the bad-vector window (program → readback-verify → flip boot vector last). Rely on the **ECU's hardware serial boot mode** (mode pin + reset) as the actual brick exit; an in-flash shim cannot live where it would need to during recovery. |
+| RH850 (VB WRX) | RH850 / F1x | **Dual bank** (FA-DIT) | Recovery shim in the secondary bank; primary-bank corruption recovers from the shim on the next boot without external intervention. The boot vector flip is still last. |
+
+The bench rig validates **the actual recovery path per family**, not a generic "we wrote a shim" check:
+
+- **SH parts:** intentionally brick → trigger serial boot mode → recover via host tool → confirm. Document whether the mode pin is reachable via the OBD-II connector or requires opening the ECU case (the difference between "recoverable on the side of the road" and "shop-only recovery").
+- **RH850 parts:** intentionally brick the primary bank → cold-boot → confirm secondary-bank shim takes over → re-flash primary → confirm normal boot resumes.
+
+Single-bank ≠ dual-bank; treating them as one design is how tuners brick cars they thought were protected. Per-family recovery recipes live in `docs/19a-brick-protection-by-isa.md` (TBD; tracked as a v1.0 ship blocker per `04-roadmap.md`).
+
 The whole subsystem is bench-tested on real ECUs as part of CI — junkyard ECUs on a bench harness, automated. See `08-testing-strategy.md`.
+
+### 4b. Cancellation invariants
+
+`std::stop_token` is the cancellation primitive across the orchestrator, but **mid-PDU cancellation is how you brick the ECU.** The invariants the flasher honors (and `tests/unit/flash/` enforces):
+
+- Cancellation **never** aborts an in-flight UDS service. Once a `RequestDownload` or `TransferData` is on the wire, the orchestrator finishes that PDU and then queues a clean `RequestTransferExit` + session exit. Cancel arrives between PDUs, not within one.
+- Same posture for SSM block writes — "finish this 256-byte block, then stop," never "drop the link."
+- The "ECU is in programming session" state is **persistent across host-side crashes.** On the next launch, `Project::open()` checks the journal in the project directory; if a flash was in flight, the GUI/CLI offers either (a) resume from the manifest (`Flasher::plan_resume`), or (b) cleanly exit the session via UDS DSC = `defaultSession`.
+
+These invariants are testable without hardware via `MockTransport` + `FaultInjector`. See `docs/08-testing-strategy.md` Tier 2 for the test plan.
 
 ## 5. Real-time datalogging quality
 
@@ -163,7 +189,7 @@ Role strings are defined in a small enum in `st::defs` (so the GUI / autotune / 
 
 **Until that lands**, the §11 panels surface their suggestions as text and link the user to the relevant table category — they can find the table in the sidebar and edit it manually. The path through `edit::History` still applies to whatever they type in.
 
-Roadmap placement: **v1.2** alongside the closed-loop trim integration (which has the same shape — a suggested cell-delta routed through `edit::History`). Likely a single design pass landing both at once. See `docs/12-auto-tuning.md` *Closed-loop trim integration* for the parallel work.
+Roadmap placement: **schema bump pulled into v1.0**, panel wires land incrementally. Adding an optional `role` field to the `[[table]]` schema, the role-string enum in `st::defs`, and `Definition::find_table_by_role()` is a single PR — it gates nothing on auto-tune work and unblocks all four §11 panels' suggestion-to-edit affordance as soon as `tools/defgen/` (or contributor PRs) populate role mappings per platform. The closed-loop trim integration in `docs/12` still lands in v1.2; the schema does not need to wait for it.
 
 ### FA-DIT logger XML supplement
 
