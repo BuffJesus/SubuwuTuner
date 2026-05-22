@@ -67,7 +67,7 @@ std::vector<std::uint8_t> native_response_frame(std::uint8_t seq, nat::Opcode re
                                                 std::vector<std::uint8_t> payload) {
     std::uint8_t const resp_op = static_cast<std::uint8_t>(req_op) | nat::kResponseMask;
     // Init-list ctor + insert avoids GCC's -Wnull-dereference false
-    // positive on `frame[N] = ...` after a sized-ctor — same pattern as
+    // positive on `frame[N] = ...` after a sized-ctor -- same pattern as
     // src/ecu/src/uds.cpp builders.
     std::vector<std::uint8_t> frame{
         nat::kStartOfFrame,
@@ -238,9 +238,9 @@ TEST_CASE("native::Transport::open rejects CanFd before any IO", "[transport][na
     auto r = t.open({st::transport::LinkKind::CanFd, 2000000, 0, 0});
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
-    // Hmm — open() actually DOES send Hello first (to verify the
+    // Hmm -- open() actually DOES send Hello first (to verify the
     // device) before validating the LinkConfig. That's an
-    // implementation choice — we want to detect "wrong adapter"
+    // implementation choice -- we want to detect "wrong adapter"
     // before "bad config." The test simply asserts open failed.
     (void)raw;
 }
@@ -259,7 +259,7 @@ TEST_CASE("native::Transport::open: Connect error from device -> TransportNack",
           "[transport][native_transport]") {
     auto cp = make_channel();
     cp.raw->queue_read(native_response_frame(0, nat::Opcode::Hello, {'f', 'w'}));
-    // Device rejects the Connect — say err=0x05 (invalid baud for
+    // Device rejects the Connect -- say err=0x05 (invalid baud for
     // protocol).
     cp.raw->queue_read(native_error_frame(1, nat::Opcode::Connect, 0x05U));
 

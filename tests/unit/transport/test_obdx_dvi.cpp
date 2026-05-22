@@ -107,7 +107,7 @@ TEST_CASE("dvi::encode_request: frame round-trips through decode_frame "
     // The codec doesn't distinguish request-from-response at the
     // framing layer; the bytes have identical structure. Encoding a
     // request and decoding it as a frame should recover the same
-    // payload — sanity check that both halves use the same length-
+    // payload -- sanity check that both halves use the same length-
     // width + checksum conventions.
     std::array<std::uint8_t, 4> payload{0xDE, 0xAD, 0xBE, 0xEF};
     auto enc = dvi::encode_request(dvi::Opcode::Settings, payload);

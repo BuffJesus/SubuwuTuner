@@ -1612,7 +1612,7 @@ TEST_CASE("Definition::from_directory ignores [pack] in non-manifest files",
 id         = "real-id"
 endianness = "big"
 )toml");
-    // This [pack] should be silently ignored — id stays "real-id".
+    // This [pack] should be silently ignored -- id stays "real-id".
     write_text(td.path / "stray.toml", R"toml(
 [pack]
 id = "WRONG"
@@ -1676,7 +1676,7 @@ includes   = ["frag.toml"]
     auto const d = st::Definition::from_file(td.path / "main.toml");
     REQUIRE(d.has_value());
     REQUIRE(d->pack().id == "test-pack-001");
-    // Fragment's [pack] is ignored — parent id wins.
+    // Fragment's [pack] is ignored -- parent id wins.
     REQUIRE(d->pids().size() == 1);
     REQUIRE(d->pids()[0].id == "e1");
     REQUIRE(d->pids()[0].ssm_address == 0x20118);
@@ -2089,7 +2089,7 @@ outputs = [ { name = "", type = "float" } ]
 
 TEST_CASE("Hook rejects signal that isn't an inline table", "[defs][hooks]") {
     // docs/16 uses bare strings in its illustrative example, but the
-    // parsed schema requires typed signals — bare strings would not
+    // parsed schema requires typed signals -- bare strings would not
     // carry a type, so they're rejected to fail-loud.
     auto const d = st::Definition::from_toml_string(R"toml(
 [pack]
@@ -2105,7 +2105,7 @@ inputs = [ "rpm", "load" ]
 }
 
 TEST_CASE("Hook + signal labels parse, default to empty when omitted", "[defs][hooks]") {
-    // display_name on the hook, label on signals — both optional. Editor
+    // display_name on the hook, label on signals -- both optional. Editor
     // uses them when non-empty; falls back to id/name otherwise.
     auto const d = st::Definition::from_toml_string(R"toml(
 [pack]

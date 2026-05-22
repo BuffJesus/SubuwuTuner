@@ -181,7 +181,8 @@ TEST_CASE("Rom::scan_ascii finds embedded calibration-ID-like strings", "[rom][s
     // Bytes of binary noise, an embedded CID "AS80U", more noise, then "ABC123"
     std::vector<std::uint8_t> data{
         0x00, 0xFF, 0x80, 0x12, 'A', 'S', '8', '0',  'U', 0x00, 0xCC,
-        0xDD, 'A',  'B',  'C',  '1', '2', '3', 0x00, 'x', 'y', // length 2 — below default threshold
+        0xDD, 'A',  'B',  'C',  '1', '2', '3', 0x00, 'x', 'y', // length 2 -- below default
+                                                               // threshold
     };
     auto const r = st::Rom::from_bytes(std::move(data));
     auto const strings = r.scan_ascii(/*min_length=*/4);

@@ -34,7 +34,7 @@ can_ns::Frame make(std::int64_t ts_ns, std::uint32_t id,
 } // namespace
 
 // =====================================================================
-// BaselineModel — classification
+// BaselineModel -- classification
 // =====================================================================
 
 TEST_CASE("Baseline classifies a byte that never changes as Stable", "[discover][baseline]") {
@@ -52,7 +52,7 @@ TEST_CASE("Baseline classifies a byte that never changes as Stable", "[discover]
 }
 
 TEST_CASE("Baseline classifies a small-set byte as Stable", "[discover][baseline]") {
-    // Byte 0 alternates between three values — within the default
+    // Byte 0 alternates between three values -- within the default
     // stable_max_distinct of 4 -> Stable.
     std::vector<std::uint8_t> const sequence{0x10, 0x20, 0x30, 0x10, 0x20,
                                              0x30, 0x10, 0x20, 0x30, 0x10};
@@ -97,7 +97,7 @@ TEST_CASE("Baseline classifies an unstructured byte as Noisy", "[discover][basel
 }
 
 TEST_CASE("Baseline computes frequency from the capture duration", "[discover][baseline]") {
-    // 11 frames spanning 100 ms — that's 11 samples in a 100 ms window,
+    // 11 frames spanning 100 ms -- that's 11 samples in a 100 ms window,
     // i.e., 110 Hz when measured strictly from the first-to-last span.
     std::vector<can_ns::Frame> frames;
     for (int i = 0; i < 11; ++i) {
@@ -112,11 +112,11 @@ TEST_CASE("Baseline computes frequency from the capture duration", "[discover][b
 }
 
 // =====================================================================
-// ChangeDetector — events
+// ChangeDetector -- events
 // =====================================================================
 
 TEST_CASE("ChangeDetector emits a NewId event for an unseen ID", "[discover][change]") {
-    // Baseline only has 0x100. Watch sees 0x200 — emit NewId.
+    // Baseline only has 0x100. Watch sees 0x200 -- emit NewId.
     std::vector<can_ns::Frame> baseline_frames;
     for (int i = 0; i < 10; ++i) {
         baseline_frames.push_back(make(i * 1'000'000, 0x100, {0x00}));
@@ -125,7 +125,7 @@ TEST_CASE("ChangeDetector emits a NewId event for an unseen ID", "[discover][cha
 
     std::vector<can_ns::Frame> watch_frames;
     watch_frames.push_back(make(1'000'000'000, 0x200, {0xAB}));
-    watch_frames.push_back(make(1'001'000'000, 0x200, {0xCD})); // 2nd sighting — silent
+    watch_frames.push_back(make(1'001'000'000, 0x200, {0xCD})); // 2nd sighting -- silent
     watch_frames.push_back(make(2'000'000'000, 0x100, {0x00})); // known + stable: silent
 
     auto const events = discover_ns::detect_changes(model, watch_frames);
@@ -156,7 +156,7 @@ TEST_CASE("ChangeDetector flags a stable-byte deviation", "[discover][change]") 
 
 TEST_CASE("ChangeDetector ignores a cyclic byte at watch time", "[discover][change]") {
     // Baseline byte 0: a counter 0..15 incrementing each frame.
-    // Watch byte 0: a continuation of that counter — must NOT fire.
+    // Watch byte 0: a continuation of that counter -- must NOT fire.
     std::vector<can_ns::Frame> baseline_frames;
     for (int i = 0; i < 32; ++i) {
         auto const v = static_cast<std::uint8_t>(i & 0x0F);
@@ -208,7 +208,7 @@ TEST_CASE("ChangeDetector debounces - suppresses repeats within the window",
     watch_frames.push_back(make(1'000'000'000, 0x140, {0x01})); // event
     watch_frames.push_back(make(1'100'000'000, 0x140, {0x02})); // debounced
     watch_frames.push_back(make(1'300'000'000, 0x140, {0x03})); // debounced
-    watch_frames.push_back(make(1'600'000'000, 0x140, {0x04})); // past 500ms — event
+    watch_frames.push_back(make(1'600'000'000, 0x140, {0x04})); // past 500ms -- event
 
     auto const events = discover_ns::detect_changes(model, watch_frames);
     REQUIRE(events.size() == 2);
@@ -217,7 +217,7 @@ TEST_CASE("ChangeDetector debounces - suppresses repeats within the window",
 }
 
 TEST_CASE("ChangeDetector emits a NewId only on first sighting", "[discover][change]") {
-    // Baseline has nothing. Watch sees the same new id three times —
+    // Baseline has nothing. Watch sees the same new id three times --
     // only the first fires.
     discover_ns::BaselineModel model;
     model.finalize(std::chrono::nanoseconds{1'000'000'000});
@@ -247,7 +247,7 @@ TEST_CASE("ChangeDetector with flag_noisy_deviations on flags noisy deviations",
     REQUIRE(id != nullptr);
     REQUIRE(id->classes[0] == discover_ns::ByteClass::Noisy);
 
-    // Default options — noisy bytes do not fire.
+    // Default options -- noisy bytes do not fire.
     auto const off = discover_ns::detect_changes(
         model, std::vector<can_ns::Frame>{make(
                    1'000'000'000, 0x400, {static_cast<std::uint8_t>(id->mode_value[0] + 1U)})});

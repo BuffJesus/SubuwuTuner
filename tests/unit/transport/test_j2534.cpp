@@ -13,7 +13,7 @@ namespace j2534 = st::transport::j2534;
 
 // ---- ABI sanity ---------------------------------------------------
 //
-// These are not behavior tests — they lock in the binary layout the
+// These are not behavior tests -- they lock in the binary layout the
 // vendor DLL reads/writes through. A regression here corrupts the
 // CAN/K-Line bus the moment a real DLL is called.
 
@@ -199,7 +199,7 @@ TEST_CASE("j2534::FunctionTable::core_complete: false if any core entry "
     t.connect = nullptr;
     REQUIRE_FALSE(t.core_complete());
 
-    // ReadVersion + GetLastError are diagnostic-only — a vendor DLL
+    // ReadVersion + GetLastError are diagnostic-only -- a vendor DLL
     // missing them should NOT fail the readiness check.
     auto t2 = make_full_table();
     t2.read_version = nullptr;

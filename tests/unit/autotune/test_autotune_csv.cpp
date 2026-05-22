@@ -56,7 +56,7 @@ TEST_CASE("read_maf_samples_csv: required columns populate fields", "[autotune][
 }
 
 TEST_CASE("read_maf_samples_csv: [unit] header suffix is stripped", "[autotune][csv][header]") {
-    // CsvSink in st::log writes columns like `coolant_c [C]` — the unit
+    // CsvSink in st::log writes columns like `coolant_c [C]` -- the unit
     // annotation comes from the channel's scaling. The autotune reader
     // strips ` [...]` so a log CSV drops straight in.
     std::string text = "maf_voltage [V],actual_afr [AFR],commanded_afr [AFR],"

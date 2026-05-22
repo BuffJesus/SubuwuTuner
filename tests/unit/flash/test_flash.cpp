@@ -155,7 +155,7 @@ TEST_CASE("Flasher::read_full_rom cancel observed mid-read", "[flash][read][canc
         &cancel);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::Cancelled);
-    // The second chunk's request was never sent — exactly one chunk on
+    // The second chunk's request was never sent -- exactly one chunk on
     // the wire.
     REQUIRE(t.send_log().size() == 1);
 }
@@ -184,7 +184,7 @@ TEST_CASE("Flasher::compute_delta returns empty for identical buffers", "[flash]
 }
 
 TEST_CASE("Flasher::compute_delta handles a final short sector", "[flash][delta]") {
-    // 0x1800 bytes — the last sector (0x1000..0x17FF) is short (0x800).
+    // 0x1800 bytes -- the last sector (0x1000..0x17FF) is short (0x800).
     std::vector<std::uint8_t> current(0x1800, 0xFF);
     std::vector<std::uint8_t> target = current;
     target[0x1700] = 0x00; // change in the short sector
@@ -195,7 +195,7 @@ TEST_CASE("Flasher::compute_delta handles a final short sector", "[flash][delta]
 }
 
 // ---------------------------------------------------------------------
-// execute — validation
+// execute -- validation
 // ---------------------------------------------------------------------
 
 TEST_CASE("Flasher::execute rejects a write whose data.size() != length",
@@ -216,7 +216,7 @@ TEST_CASE("Flasher::execute rejects a write whose data.size() != length",
 }
 
 // ---------------------------------------------------------------------
-// execute — dry run
+// execute -- dry run
 // ---------------------------------------------------------------------
 
 TEST_CASE("Flasher::execute dry_run exercises session + CC only", "[flash][execute][dry-run]") {
@@ -250,7 +250,7 @@ TEST_CASE("Flasher::execute dry_run exercises session + CC only", "[flash][execu
 }
 
 // ---------------------------------------------------------------------
-// execute — full happy path
+// execute -- full happy path
 // ---------------------------------------------------------------------
 
 TEST_CASE("Flasher::execute full single-sector flash with verify", "[flash][execute][happy-path]") {
@@ -271,11 +271,11 @@ TEST_CASE("Flasher::execute full single-sector flash with verify", "[flash][exec
            uds::build_routine_control(uds::kRcStart, uds::kRidEraseMemory, erase_opt(addr, size)),
            {0x71, 0x01, 0xFF, 0x00});
 
-    // 3b. RequestDownload — ECU reports max_block_length = 6 (payload 4).
+    // 3b. RequestDownload -- ECU reports max_block_length = 6 (payload 4).
     //     aLFI for addr 0x1234 (2 bytes) + size 4 (1 byte) = 0x12.
     expect(t, uds::build_request_download(0x00, addr, size), {0x74, 0x20, 0x00, 0x06});
 
-    // 3c. TransferData(counter=1, data) — fits in one block.
+    // 3c. TransferData(counter=1, data) -- fits in one block.
     expect(t, uds::build_transfer_data(1, data), {0x76, 0x01});
 
     // 3d. RequestTransferExit
@@ -318,7 +318,7 @@ TEST_CASE("Flasher::execute full single-sector flash with verify", "[flash][exec
 }
 
 // ---------------------------------------------------------------------
-// execute — NRC propagation
+// execute -- NRC propagation
 // ---------------------------------------------------------------------
 
 TEST_CASE("Flasher::execute surfaces an NRC on RequestDownload", "[flash][execute][error][nrc]") {
@@ -460,7 +460,7 @@ TEST_CASE("read_plan errors clearly when the file does not exist",
 }
 
 // ---------------------------------------------------------------------
-// Plan TOML — data_file
+// Plan TOML -- data_file
 // ---------------------------------------------------------------------
 
 namespace {
@@ -625,7 +625,7 @@ TEST_CASE("build_manifest excludes non-transferred entries from overall_crc32",
     REQUIRE(m.entries[0].transferred);
     REQUIRE_FALSE(m.entries[1].transferred);
 
-    // Same plan, but the second sector is also not transferred — overall
+    // Same plan, but the second sector is also not transferred -- overall
     // CRC32 should match because only the first entry's bytes feed it.
     flash::FlashReport r2;
     r2.sectors.push_back(r.sectors[0]);
@@ -666,7 +666,7 @@ TEST_CASE("Manifest round-trips policy_profile + policy_reason", "[flash][manife
     m.plan_crc32 = 0xAA;
     m.overall_crc32 = 0xBB;
     m.policy_profile = "california-us";
-    m.policy_reason = "Test cell run #42 — verified on dyno";
+    m.policy_reason = "Test cell run #42 -- verified on dyno";
     m.entries.push_back({{0x1000, 4}, 0x11223344, true, true});
 
     auto const text = flash::format_manifest(m);
@@ -732,7 +732,7 @@ TEST_CASE("read_manifest errors clearly when the file does not exist",
 }
 
 // ---------------------------------------------------------------------
-// execute — incremental journal
+// execute -- incremental journal
 // ---------------------------------------------------------------------
 
 TEST_CASE("Flasher::execute writes a journal manifest on every sector",
@@ -945,7 +945,7 @@ TEST_CASE("plan_resume with empty journal returns the original plan", "[flash][r
 TEST_CASE("plan_resume covers sectors past the end of the journal", "[flash][resume]") {
     auto const original = two_sector_plan();
     flash::Manifest journal;
-    // Only the first sector has a journal entry — the host crashed
+    // Only the first sector has a journal entry -- the host crashed
     // before sector 2 was even started.
     journal.entries.push_back(done_entry(original.writes[0]));
 
@@ -989,7 +989,7 @@ TEST_CASE("plan_resume rejects an oversize journal", "[flash][resume][error]") {
     flash::Manifest journal;
     journal.entries.push_back(done_entry(original.writes[0]));
     journal.entries.push_back(done_entry(original.writes[1]));
-    // Extra entry — journal claims more sectors than the plan has.
+    // Extra entry -- journal claims more sectors than the plan has.
     flash::ManifestEntry extra;
     extra.sector = {0x9999, 4};
     journal.entries.push_back(extra);
@@ -1000,7 +1000,7 @@ TEST_CASE("plan_resume rejects an oversize journal", "[flash][resume][error]") {
 }
 
 // ---------------------------------------------------------------------
-// execute — verify mismatch
+// execute -- verify mismatch
 // ---------------------------------------------------------------------
 
 TEST_CASE("Flasher::execute reports verify_after_write mismatch", "[flash][execute][verify]") {
@@ -1108,7 +1108,7 @@ TEST_CASE("evaluate_plan_policy: no flagged tables -> Silent regardless of profi
           "[flash][policy]") {
     auto const def = make_two_table_def();
     auto const src = make_source_rom();
-    // Plan changes byte 0x30 only — boost_target, neither flag.
+    // Plan changes byte 0x30 only -- boost_target, neither flag.
     auto const plan = plan_for(0x30, {0xB0});
     for (auto p : {st::policy::Profile::MotorsportOnly, st::policy::Profile::AlbertaCa,
                    st::policy::Profile::CaliforniaUs}) {
@@ -1157,7 +1157,7 @@ TEST_CASE("evaluate_plan_policy: engine-safety table -> Block every profile", "[
 
 TEST_CASE("evaluate_plan_policy: writing identical bytes is not a change", "[flash][policy]") {
     // A plan that writes the same bytes already in source should NOT trip
-    // the linter — there's no actual edit happening.
+    // the linter -- there's no actual edit happening.
     auto const def = make_two_table_def();
     auto const src = make_source_rom();
     auto const plan = plan_for(0x20, {0x80}); // cl_target's existing value

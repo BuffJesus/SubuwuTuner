@@ -16,14 +16,19 @@
 #include "st/core/error.hpp"
 #include "st/transport/serial_byte_channel.hpp"
 
+#include <string>
+
 namespace st::transport {
 
-st::Result<std::unique_ptr<IByteChannel>>
-make_serial_byte_channel(SerialChannelConfig const & /*cfg*/) {
-    return failure(ErrorCode::NotImplemented,
-                   "make_serial_byte_channel: POSIX USB CDC channel not yet "
-                   "implemented — adapter-arrival gated, see "
-                   "docs/04-roadmap.md Phase 3");
+st::Result<std::unique_ptr<IByteChannel>> make_serial_byte_channel(SerialChannelConfig const &cfg) {
+    // Include device_path in the message so factory-level tests can pin
+    // the failure back to the caller's spec, mirroring what the Win32 impl
+    // does when CreateFile fails.
+    std::string msg = "make_serial_byte_channel: POSIX USB CDC channel "
+                      "not yet implemented for device '";
+    msg.append(cfg.device_path);
+    msg += "' (adapter-arrival gated, see docs/04-roadmap.md Phase 3)";
+    return failure(ErrorCode::NotImplemented, std::move(msg));
 }
 
 } // namespace st::transport

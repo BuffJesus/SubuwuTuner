@@ -104,7 +104,7 @@ TEST_CASE("parse_a8_response flags wrong addressing", "[ssm][framing][error]") {
 
 TEST_CASE("parse_a8_response surfaces an ECU negative response as EcuRejected",
           "[ssm][framing][error]") {
-    // 80 F0 10 02 7F 12 [csum] — NRC 0x12 (subFunctionNotSupported)
+    // 80 F0 10 02 7F 12 [csum] -- NRC 0x12 (subFunctionNotSupported)
     std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x02, 0x7F, 0x12};
     resp.push_back(ssm::ssm_checksum(resp));
     auto const r = ssm::parse_a8_response(resp, 1);
@@ -254,7 +254,7 @@ TEST_CASE("SsmClient::write detects an ECU that echoed the wrong byte", "[ssm][c
     auto const req = ssm::build_b0_request(0x001234, 0xAB);
     REQUIRE(req.has_value());
 
-    // ECU echoes 0xCD instead of 0xAB — the caller is responsible for
+    // ECU echoes 0xCD instead of 0xAB -- the caller is responsible for
     // comparing, but our client returns whatever was echoed.
     std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x02, 0xF0, 0xCD};
     resp.push_back(ssm::ssm_checksum(resp));
@@ -371,7 +371,7 @@ TEST_CASE("SsmClient::write_block surfaces an echo divergence", "[ssm][client][b
     auto const req = ssm::build_b8_request(0x000010, payload);
     REQUIRE(req.has_value());
 
-    // ECU echoes 0xAB 0xFF — second byte diverges. Client returns the echo;
+    // ECU echoes 0xAB 0xFF -- second byte diverges. Client returns the echo;
     // verifying it against `payload` is the caller's responsibility.
     std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x03, 0xF8, 0xAB, 0xFF};
     resp.push_back(ssm::ssm_checksum(resp));

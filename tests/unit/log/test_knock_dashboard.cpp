@@ -29,7 +29,7 @@ std::vector<double> flatten(std::initializer_list<std::initializer_list<double>>
     return out;
 }
 
-// Simple H4 mapping: 6 PIDs — rpm, load, flkc1..4
+// Simple H4 mapping: 6 PIDs -- rpm, load, flkc1..4
 PidMapping h4_mapping() {
     PidMapping m{};
     m.cylinder_count = 4;

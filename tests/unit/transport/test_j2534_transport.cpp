@@ -97,7 +97,7 @@ TEST_CASE("j2534::to_st_status: prepends context to the error message",
     REQUIRE(m.find("timed out") != std::string::npos);
 }
 
-// ---- Transport — open / close / send / send_recv via fake DLL ----
+// ---- Transport -- open / close / send / send_recv via fake DLL ----
 //
 // J2534 function pointers are C function pointers, not std::function,
 // so the test fakes can't capture per-test state via closures. We
@@ -120,7 +120,7 @@ struct FakeBackend {
     j2534::u32 assigned_device_id = 0xCAFE;
     j2534::u32 assigned_channel_id = 0xBEEF;
 
-    // What write_msgs recorded — the payload bytes from the most
+    // What write_msgs recorded -- the payload bytes from the most
     // recent PassThruMsg the SUT sent.
     std::vector<std::uint8_t> last_write;
     j2534::u32 last_write_protocol = 0;

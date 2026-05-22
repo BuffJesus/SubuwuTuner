@@ -250,7 +250,7 @@ TEST_CASE("Project history round-trips a ByteEdit through edits.toml",
 
         // Forge a ByteEdit that captures a hypothetical DTC-bit toggle on
         // two adjacent ROM bytes. The Project layer should serialize it
-        // through edits.toml without caring about the semantics — that's
+        // through edits.toml without caring about the semantics -- that's
         // the contract.
         p->history().record(st::edit::Edit::bytes({{0x10, 0xFF, 0xFE}, {0x11, 0x00, 0x01}},
                                                   "disable DTC P0420, P0430"));
@@ -334,7 +334,7 @@ TEST_CASE("Project history loads v1 schema (TableEdit-only) edits.toml unchanged
         REQUIRE(p.has_value());
         REQUIRE(p->save_working_rom().has_value());
     }
-    // Hand-write a v1 edits.toml — pure TableEdit, no schema bump.
+    // Hand-write a v1 edits.toml -- pure TableEdit, no schema bump.
     write_text(proj_dir / "edits.toml", R"toml(
 schema_version = 1
 cursor = 1
@@ -532,7 +532,7 @@ TEST_CASE("Project::save_metadata round-trips policy_profile", "[project][policy
 }
 
 // --------------------------------------------------------------------------
-// parse_edit_csv — CSV bulk-edit parser. Same code drives the CLI's
+// parse_edit_csv -- CSV bulk-edit parser. Same code drives the CLI's
 // project-edit-csv command and the GUI's Import CSV path; these tests
 // cover the format invariants both consumers rely on.
 // --------------------------------------------------------------------------

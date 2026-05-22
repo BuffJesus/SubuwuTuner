@@ -104,7 +104,7 @@ std::vector<std::uint8_t> build_response_frame(std::uint8_t seq, std::uint8_t re
     // GCC 15's `-Werror=free-nonheap-object` mis-fires on
     // `reserve() + push_back()` against a length derived from a
     // span size when it can't prove the upper bound. Construct
-    // through the size-then-overwrite idiom instead — same final
+    // through the size-then-overwrite idiom instead -- same final
     // layout, no warning.
     std::vector<std::uint8_t> frame(5 + payload.size() + 2, 0);
     frame[0] = nat::kStartOfFrame;
@@ -182,7 +182,7 @@ TEST_CASE("native::decode_frame: Hello response round-trips through Response",
 
 TEST_CASE("native::decode_frame: response with the response-bit cleared -> ParseError",
           "[transport][native]") {
-    // op = 0x01 (request opcode) in the response slot — adapter
+    // op = 0x01 (request opcode) in the response slot -- adapter
     // misconfiguration. Must not silently pass through as a request.
     auto bytes = build_response_frame(0, 0x01U, {});
     auto r = nat::decode_frame(bytes);

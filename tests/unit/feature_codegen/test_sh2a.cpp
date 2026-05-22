@@ -17,7 +17,7 @@ namespace {
 
 // A definition pack with one hook, `after_fuel_calc`, that has a
 // usable ecu_address + free_ram region. Just enough for the codegen
-// tests — no axes/scalings/tables/identifications, since the SH-2A
+// tests -- no axes/scalings/tables/identifications, since the SH-2A
 // emit path only consults `hooks()`.
 constexpr std::string_view kPackOneHookToml = R"toml(
 [pack]
@@ -40,7 +40,7 @@ outputs = [
 ]
 )toml";
 
-// Pack with a hook that has no ecu_address — used to verify the
+// Pack with a hook that has no ecu_address -- used to verify the
 // "must declare splice point" error path.
 constexpr std::string_view kPackNoEcuAddrToml = R"toml(
 [pack]
@@ -71,7 +71,7 @@ outputs = [
 ]
 )toml";
 
-// LoadConstant instruction factory — concise constructor for tests.
+// LoadConstant instruction factory -- concise constructor for tests.
 ir::Instruction load_const_int(ir::ValueId result_id, std::int64_t value) {
     ir::Instruction ins{};
     ins.op = ir::Op::LoadConstant;
@@ -239,7 +239,7 @@ TEST_CASE("Sh2aBackend: two stores to the same pin share a RAM slot", "[feature_
     REQUIRE(r->hooks.size() == 1);
     auto const &hp = r->hooks[0];
     REQUIRE(hp.code.size() == 2 * cg::sh2a::kStoreSequenceSize);
-    // Two emit sequences but only one RAM claim — both Stores write to
+    // Two emit sequences but only one RAM claim -- both Stores write to
     // the same address.
     REQUIRE(hp.ram_claims.size() == 1);
     REQUIRE(be32_at(hp.code, 12) == 11U);
@@ -420,7 +420,7 @@ TEST_CASE("Sh2aBackend: LoadHookInput + Store emits 20-byte sequence",
     REQUIRE(be32_at(hp.code, 16) == 0x40000000U); // free_ram_base
 
     // One RAM claim for the output slot. No claim for the SSA value
-    // itself — it flows through R0 register.
+    // itself -- it flows through R0 register.
     REQUIRE(hp.ram_claims.size() == 1);
     REQUIRE(hp.ram_claims[0].address == 0x40000000);
 }
@@ -471,7 +471,7 @@ TEST_CASE("Sh2aBackend: mixed LoadConstant + LoadHookInput in one module",
     REQUIRE(be32_at(hp.code, 12) == 42U);
     REQUIRE(be32_at(hp.code, 16) == 0x40000000U);
     // First instruction of the second chain (offset 20) is the
-    // LoadHookInput "MOV.L @(2, PC), R0" preamble — 0xD002.
+    // LoadHookInput "MOV.L @(2, PC), R0" preamble -- 0xD002.
     REQUIRE(be16_at(hp.code, 20) == 0xD002);
     REQUIRE(be16_at(hp.code, 22) == 0x6002); // dereference
     // Second chain literal pool at 32,36.
@@ -492,7 +492,7 @@ TEST_CASE("Sh2aBackend: LoadHookInput Float emits same MOV.L shape",
     auto r = backend.compile(m, *def);
     REQUIRE(r.has_value());
     REQUIRE(r->hooks.size() == 1);
-    // MOV.L is type-agnostic — 4 bytes is 4 bytes. The bytes through
+    // MOV.L is type-agnostic -- 4 bytes is 4 bytes. The bytes through
     // R0 are the same whether the upstream pin is Float or Int.
     REQUIRE(r->hooks[0].code.size() == cg::sh2a::kLoadStoreSequenceSize);
     REQUIRE(be32_at(r->hooks[0].code, 12) == 0x000F1234U); // rpm pin addr
@@ -657,7 +657,7 @@ TEST_CASE("Sh2aBackend: add_int operand-order matters for emit layout",
 
     cg::Sh2aBackend backend;
     ir::Module m;
-    // hook first, const second — same shape size (28 bytes) but the
+    // hook first, const second -- same shape size (28 bytes) but the
     // deref happens on op1, not op2.
     m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm"));
     m.instructions.push_back(load_const_int(2, 7));
@@ -744,7 +744,7 @@ TEST_CASE("Sh2aBackend: Float LoadConstant special values", "[feature_codegen][s
         {-1.0, 0xBF800000U},
         {2.0, 0x40000000U},
         // 3.14f explicitly cast through float so the test-table double struct
-        // members don't promote the literal — Apple Clang -Wdouble-promotion
+        // members don't promote the literal -- Apple Clang -Wdouble-promotion
         // fires inside the brace-initializer otherwise.
         {static_cast<double>(3.14f), 0x4048F5C3U}, // exact 3.14f bit pattern
     };
@@ -764,7 +764,7 @@ TEST_CASE("Sh2aBackend: Float LoadConstant special values", "[feature_codegen][s
 TEST_CASE("Sh2aBackend: Float LoadConstant narrows from double silently",
           "[feature_codegen][sh2a][float]") {
     // 0.1 has no exact binary representation. Double-stored 0.1 narrows
-    // to the nearest float (0x3DCCCCCD). The codegen does NOT refuse —
+    // to the nearest float (0x3DCCCCCD). The codegen does NOT refuse --
     // the float pin author is consenting to single-precision.
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -908,7 +908,7 @@ TEST_CASE("Sh2aBackend: 3-level nested add tree -> Store", "[feature_codegen][sh
 
     cg::Sh2aBackend backend;
     ir::Module m;
-    // ((1+2) + 4) + 8 — three levels of add, four LoadConstants.
+    // ((1+2) + 4) + 8 -- three levels of add, four LoadConstants.
     m.instructions.push_back(load_const_int(1, 1));
     m.instructions.push_back(load_const_int(2, 2));
     m.instructions.push_back(call_primitive(3, "add_int", {1, 2})); // = 3
@@ -935,7 +935,7 @@ TEST_CASE("Sh2aBackend: nested add with LoadHookInput leaf", "[feature_codegen][
 
     cg::Sh2aBackend backend;
     ir::Module m;
-    // ((rpm + 100) + load) — mixed Const + HookInput operands at
+    // ((rpm + 100) + load) -- mixed Const + HookInput operands at
     // different nesting levels.
     m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm"));
     m.instructions.push_back(load_const_int(2, 100));
@@ -1001,7 +1001,7 @@ TEST_CASE("Sh2aBackend: subtract_int(LC, LC) -> Store emits SUB", "[feature_code
     REQUIRE(be32_at(hp.code, 24) == 0x40000000U); // pool[2] = dest
 }
 
-TEST_CASE("Sh2aBackend: subtract_int — operand order matters", "[feature_codegen][sh2a][sub]") {
+TEST_CASE("Sh2aBackend: subtract_int -- operand order matters", "[feature_codegen][sh2a][sub]") {
     // subtract_int(3, 10) should compute 3 - 10 = -7, NOT 10 - 3 = 7.
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -1298,7 +1298,7 @@ TEST_CASE("Sh2aBackend: compare result_type must be Bool", "[feature_codegen][sh
     ir::Module m;
     m.instructions.push_back(load_const_int(1, 1));
     m.instructions.push_back(load_const_int(2, 2));
-    // Lying about result_type — IR says Int but compare_lt produces Bool.
+    // Lying about result_type -- IR says Int but compare_lt produces Bool.
     ir::Instruction cmp{};
     cmp.op = ir::Op::CallPrimitive;
     cmp.symbol = "compare_lt_int";
@@ -1323,7 +1323,7 @@ TEST_CASE("Sh2aBackend: arithmetic result_type must be Int",
     ir::Module m;
     m.instructions.push_back(load_const_int(1, 1));
     m.instructions.push_back(load_const_int(2, 2));
-    // add_int with Bool result_type — codegen should reject.
+    // add_int with Bool result_type -- codegen should reject.
     ir::Instruction add{};
     add.op = ir::Op::CallPrimitive;
     add.symbol = "add_int";
@@ -1339,12 +1339,12 @@ TEST_CASE("Sh2aBackend: arithmetic result_type must be Int",
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("Sh2aBackend: nested compare inside arithmetic — add(compare, 5)",
+TEST_CASE("Sh2aBackend: nested compare inside arithmetic -- add(compare, 5)",
           "[feature_codegen][sh2a][compare][nested]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
 
-    // (rpm < 4000) + 5 — exercises Bool -> Int flow through a slot.
+    // (rpm < 4000) + 5 -- exercises Bool -> Int flow through a slot.
     // The compare result (0 or 1) gets spilled to a RAM slot, then
     // re-loaded as an int operand to the add. Numerically: add of
     // {0,1} + 5 = 5 or 6.
@@ -1361,7 +1361,7 @@ TEST_CASE("Sh2aBackend: nested compare inside arithmetic — add(compare, 5)",
     cmp.operands = {1, 2};
     m.instructions.push_back(cmp);
     m.instructions.push_back(load_const_int(4, 5));
-    // add_int with one Bool operand — currently the operand-type
+    // add_int with one Bool operand -- currently the operand-type
     // check requires Int. The test verifies the check fires.
     ir::Instruction add{};
     add.op = ir::Op::CallPrimitive;
@@ -1381,7 +1381,7 @@ TEST_CASE("Sh2aBackend: nested compare inside arithmetic — add(compare, 5)",
     REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
 }
 
-TEST_CASE("Sh2aBackend: nested mixed primitives — add(sub, mul)",
+TEST_CASE("Sh2aBackend: nested mixed primitives -- add(sub, mul)",
           "[feature_codegen][sh2a][nested][sub][mul]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -1541,7 +1541,7 @@ TEST_CASE("Sh2aBackend: and_bool rejects Int operand", "[feature_codegen][sh2a][
     cg::Sh2aBackend backend;
     ir::Module m;
     m.instructions.push_back(load_const_bool(1, true));
-    m.instructions.push_back(load_const_int(2, 5)); // Int — wrong type
+    m.instructions.push_back(load_const_int(2, 5)); // Int -- wrong type
     ir::Instruction and_ins{};
     and_ins.op = ir::Op::CallPrimitive;
     and_ins.symbol = "and_bool";
@@ -1571,7 +1571,7 @@ TEST_CASE("Sh2aBackend: not_bool with wrong operand count", "[feature_codegen][s
     not_ins.result_type = st::feature::PinType::Bool;
     not_ins.result_id = 3;
     not_ins.pin_name = "out";
-    not_ins.operands = {1, 2}; // 2 operands — wrong for unary
+    not_ins.operands = {1, 2}; // 2 operands -- wrong for unary
     m.instructions.push_back(not_ins);
     m.instructions.push_back(store("after_fuel_calc", "commanded_pw_override", 3));
 
@@ -1582,7 +1582,7 @@ TEST_CASE("Sh2aBackend: not_bool with wrong operand count", "[feature_codegen][s
 
 // ---- Flat-foot pattern: and_bool(compare_lt, compare_gt) ----------------
 
-TEST_CASE("Sh2aBackend: flat-foot AND-tree — and(compare_lt, compare_gt)",
+TEST_CASE("Sh2aBackend: flat-foot AND-tree -- and(compare_lt, compare_gt)",
           "[feature_codegen][sh2a][bool_prim][nested][flat_foot]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -1637,9 +1637,9 @@ TEST_CASE("Sh2aBackend: flat-foot AND-tree — and(compare_lt, compare_gt)",
     REQUIRE(hp.ram_claims.size() == 3);
 
     // Spot-check the patch body contains all three opcodes:
-    //   0x3017 — CMP/GT R1, R0 (compare_gt mirrored variant)
-    //   0x2109 — AND R0, R1
-    //   0x0129 — MOVT R1 (twice — once per compare)
+    //   0x3017 -- CMP/GT R1, R0 (compare_gt mirrored variant)
+    //   0x2109 -- AND R0, R1
+    //   0x0129 -- MOVT R1 (twice -- once per compare)
     int movt_count = 0;
     bool seen_cmp_gt = false;
     bool seen_and = false;
@@ -1684,7 +1684,7 @@ TEST_CASE("Sh2aBackend: select_int(LC, LC, LC) -> Store branch layout",
     auto const &hp = r->hooks[0];
     REQUIRE(hp.code.size() == 40);
 
-    // Body bytes — verifies both branch disp values + MOV.L disp
+    // Body bytes -- verifies both branch disp values + MOV.L disp
     // calculation against the actual pool offset (24).
     REQUIRE(be16_at(hp.code, 0) == 0xD005);  // MOV.L pool[0]=cond -> R0
     REQUIRE(be16_at(hp.code, 2) == 0x2008);  // TST R0, R0
@@ -1735,7 +1735,7 @@ TEST_CASE("Sh2aBackend: select_int with HookInput cond", "[feature_codegen][sh2a
     // HookInput cond adds one deref instruction -> body grows by 2
     // bytes. Pad+pool re-align: body 20 bytes -> epilogue 24 ->
     // pool-aligned (no pad shift since 20+4=24 still 4-aligned but
-    // adds 0 bytes pad — actually we land on 4-aligned without pad
+    // adds 0 bytes pad -- actually we land on 4-aligned without pad
     // this time). Pool 16 bytes. Total 40 bytes.
     REQUIRE(hp.code.size() == 40);
     // First two instructions: load rpm pointer (disp depends on pool
@@ -1833,7 +1833,7 @@ TEST_CASE("Sh2aBackend: select_int with non-Bool cond rejected",
 
     cg::Sh2aBackend backend;
     ir::Module m;
-    m.instructions.push_back(load_const_int(1, 42)); // Int — wrong for cond
+    m.instructions.push_back(load_const_int(1, 42)); // Int -- wrong for cond
     m.instructions.push_back(load_const_int(2, 10));
     m.instructions.push_back(load_const_int(3, 20));
     ir::Instruction sel{};
@@ -1851,12 +1851,12 @@ TEST_CASE("Sh2aBackend: select_int with non-Bool cond rejected",
     REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
 }
 
-TEST_CASE("Sh2aBackend: not_bool(compare_lt) — single-compare invert",
+TEST_CASE("Sh2aBackend: not_bool(compare_lt) -- single-compare invert",
           "[feature_codegen][sh2a][bool_prim][nested]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
 
-    // !(rpm < 1000) — used in launch-control to require non-low RPM.
+    // !(rpm < 1000) -- used in launch-control to require non-low RPM.
     cg::Sh2aBackend backend;
     ir::Module m;
     m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm"));
@@ -2056,7 +2056,7 @@ TEST_CASE("Sh2aBackend: divide_float emits FDIV with op1 in FR1",
 }
 
 TEST_CASE("Sh2aBackend: compare_gt_float emits FCMP/GT + MOVT", "[feature_codegen][sh2a][float]") {
-    // Use the int-hook pack — compare_gt_float produces Bool, and the
+    // Use the int-hook pack -- compare_gt_float produces Bool, and the
     // Int pack's commanded_pw_override is declared as Int, so Bool
     // widening lands cleanly into a 32-bit slot.
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
@@ -2161,7 +2161,7 @@ TEST_CASE("Sh2aBackend: compare_eq_float emits FCMP/EQ", "[feature_codegen][sh2a
 namespace {
 // Multi-hook test pack: one sensor-read hook (read_rpm) + one
 // override-store hook (ignition_cut). Used to exercise the cross-
-// hook value-flow path — a LoadHookInput from one hook feeding a
+// hook value-flow path -- a LoadHookInput from one hook feeding a
 // StoreHookOutput on a different hook.
 constexpr std::string_view kPackTwoHooksToml = R"toml(
 [pack]
@@ -2212,7 +2212,7 @@ TEST_CASE("Sh2aBackend: cross-hook LoadHookInput -> Store compiles",
     REQUIRE(hp.splice_address == 0x000ABE00);
 
     // The source pin's address (0x000F2000) must appear verbatim in
-    // the literal pool — that's how the patch reads the sensor.
+    // the literal pool -- that's how the patch reads the sensor.
     bool seen_source_addr = false;
     bool seen_dest_addr = false;
     for (std::size_t i = 0; i + 3 < hp.code.size(); i += 4) {
@@ -2254,7 +2254,7 @@ TEST_CASE("Sh2aBackend: cross-hook flow through a primitive compiles",
     REQUIRE(r->hooks.size() == 1);
     REQUIRE(r->hooks[0].symbol == "ignition_cut");
 
-    // Source pin address must still show up — it's loaded as the
+    // Source pin address must still show up -- it's loaded as the
     // primitive's first operand from inside the ignition_cut patch.
     bool seen_source_addr = false;
     for (std::size_t i = 0; i + 3 < r->hooks[0].code.size(); i += 4) {
@@ -2268,7 +2268,7 @@ TEST_CASE("Sh2aBackend: cross-hook flow through a primitive compiles",
 TEST_CASE("Sh2aBackend: cross-hook with missing source-pin address errors",
           "[feature_codegen][sh2a][cross_hook]") {
     // Removing the pin-address field on the source hook should
-    // still fail loudly — the cross-hook gate is lifted, but the
+    // still fail loudly -- the cross-hook gate is lifted, but the
     // "pin has no address" check remains.
     constexpr std::string_view bad = R"toml(
 [pack]
@@ -2344,7 +2344,7 @@ TEST_CASE("Sh2aBackend: fanned-out CallPrimitive result is emitted once",
     // or_bool(cmp, false) -> b ; select_bool(_, a, b) -> root ; Store.
     // `cmp` fans out to two consumers (and_bool + or_bool).
     //
-    // Before the fan-out fix the walk visited compare_gt_int twice —
+    // Before the fan-out fix the walk visited compare_gt_int twice --
     // claimed two RAM slots and emitted the CMP fragment twice, with
     // both writes targeting the second slot (the first was leaked).
     // After the fix the walk dedupes by result_id: ONE slot, ONE
@@ -2382,7 +2382,7 @@ TEST_CASE("Sh2aBackend: fanned-out CallPrimitive result is emitted once",
     or_ins.result_type = st::feature::PinType::Bool;
     or_ins.result_id = 7;
     or_ins.pin_name = "out";
-    or_ins.operands = {3, 5}; // reads cmp AGAIN — fan-out
+    or_ins.operands = {3, 5}; // reads cmp AGAIN -- fan-out
     m.instructions.push_back(or_ins);
 
     ir::Instruction sel{};
@@ -2421,7 +2421,7 @@ TEST_CASE("Sh2aBackend: fanned-out CallPrimitive result is emitted once",
 
 // ---- select_bool / select_float -----------------------------------
 //
-// emit_select_fragment is type-agnostic at the register level — same
+// emit_select_fragment is type-agnostic at the register level -- same
 // TST/BT/BRA dance regardless of operand type. These tests prove the
 // dispatcher routes select_bool and select_float through the shared
 // code path and that the bit patterns survive the branch.
@@ -2429,7 +2429,7 @@ TEST_CASE("Sh2aBackend: fanned-out CallPrimitive result is emitted once",
 TEST_CASE("Sh2aBackend: select_bool compiles and the Bool 0/1 lands in the pool",
           "[feature_codegen][sh2a][select]") {
     // select_bool(cond=true, true_val=true, false_val=false). All
-    // operands are Bool — the codegen materializes them as canonical
+    // operands are Bool -- the codegen materializes them as canonical
     // 0/1 longwords in the literal pool.
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -2489,7 +2489,7 @@ TEST_CASE("Sh2aBackend: select_bool compiles and the Bool 0/1 lands in the pool"
 TEST_CASE("Sh2aBackend: select_float compiles and float bits survive the branch",
           "[feature_codegen][sh2a][select]") {
     // select_float(cond=true, true_val=1.5, false_val=-2.0). The
-    // selected branch's IEEE 754 bits go through R1 (no FPU touch —
+    // selected branch's IEEE 754 bits go through R1 (no FPU touch --
     // it's pure value selection, not arithmetic).
     auto def = st::Definition::from_toml_string(kPackFloatHookToml);
     REQUIRE(def.has_value());
@@ -2513,7 +2513,7 @@ TEST_CASE("Sh2aBackend: select_float compiles and float bits survive the branch"
     REQUIRE(r.has_value());
     auto const &hp = r->hooks[0];
 
-    // Same branch primitives as select_bool — same code path.
+    // Same branch primitives as select_bool -- same code path.
     bool seen_tst = false;
     bool seen_bt = false;
     bool seen_bra = false;
@@ -2531,7 +2531,7 @@ TEST_CASE("Sh2aBackend: select_float compiles and float bits survive the branch"
     REQUIRE(seen_bra);
 
     // The IEEE 754 bit patterns 1.5 (0x3FC00000) and -2.0
-    // (0xC0000000) sit verbatim in the pool — no FPU rounding,
+    // (0xC0000000) sit verbatim in the pool -- no FPU rounding,
     // because select doesn't do arithmetic.
     bool seen_15 = false, seen_neg2 = false;
     for (std::size_t i = 0; i + 3 < hp.code.size(); i += 4) {
@@ -2544,7 +2544,7 @@ TEST_CASE("Sh2aBackend: select_float compiles and float bits survive the branch"
     REQUIRE(seen_15);
     REQUIRE(seen_neg2);
 
-    // No FPU ops should be present — select_float is a pure 32-bit
+    // No FPU ops should be present -- select_float is a pure 32-bit
     // shuffle. Concretely, no FADD/FSUB/FMUL/FDIV (0xF1?? with low
     // nibble 0..3) and no LDS Rn, FPUL (0x?05A).
     for (std::size_t i = 0; i + 1 < hp.code.size(); i += 2) {

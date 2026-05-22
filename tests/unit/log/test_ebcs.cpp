@@ -118,7 +118,7 @@ TEST_CASE("snapshot_from_samples computes overshoot percentage", "[ebcs][snapsho
 }
 
 TEST_CASE("snapshot_from_samples flags large overshoot as Spiked", "[ebcs][snapshot][spiked]") {
-    // peak_overshoot = 12 over step 15 -> 80% — above default 50% spike threshold.
+    // peak_overshoot = 12 over step 15 -> 80% -- above default 50% spike threshold.
     auto const samples = synth_clean_tip_in(12.0);
     auto const s = snapshot_from_samples(samples, 6, basic_mapping(), default_cfg());
     REQUIRE(s.total_event_count == 1);
@@ -127,7 +127,7 @@ TEST_CASE("snapshot_from_samples flags large overshoot as Spiked", "[ebcs][snaps
 }
 
 TEST_CASE("snapshot_from_samples returns no events when no tip-in", "[ebcs][snapshot][nodetect]") {
-    // Steady cruise — no throttle step.
+    // Steady cruise -- no throttle step.
     std::vector<double> samples;
     auto add = [&](double t) { samples.insert(samples.end(), {t, 5.0, 5.0, 30.0, 25.0, 2500.0}); };
     for (double t = 0.0; t < 5.0; t += 0.1)

@@ -127,7 +127,7 @@ TEST_CASE("obdx::Transport::open drives ELM probe -> DX DP 1 -> SetProtocol",
     // After the DVI switch, a binary 0x31 (SetProtocol opcode) byte
     // must appear in the write stream. We don't pin its exact byte
     // layout here because the payload shape is still a TODO pending
-    // VT v1.06 PDF verification — just verify the opcode arrived.
+    // VT v1.06 PDF verification -- just verify the opcode arrived.
     bool seen_set_protocol_opcode = false;
     for (auto b : cp.raw->writes()) {
         if (b == static_cast<std::uint8_t>(obdx::dvi::Opcode::SetProtocol)) {
@@ -315,7 +315,7 @@ TEST_CASE("obdx::Transport::send writes a TxSmall request, no RX phase",
     auto r = pair.transport->send(req);
     REQUIRE(r.has_value());
 
-    // Exactly one DVI frame: SOF? No — DVI doesn't have a SOF byte.
+    // Exactly one DVI frame: SOF? No -- DVI doesn't have a SOF byte.
     // The added writes are CMD(0x10) + LEN(0x03) + payload(3) + CHK(1)
     // = 6 bytes total.
     auto const added = raw->writes().size() - writes_before;

@@ -38,7 +38,7 @@ TEST_CASE("parse_rdbi_response flags a DID mismatch", "[uds][framing][rdbi][erro
 }
 
 TEST_CASE("parse_rdbi_response surfaces a negative response", "[uds][framing][rdbi][error]") {
-    // [0x7F] [0x22] [0x33] — securityAccessDenied for RDBI
+    // [0x7F] [0x22] [0x33] -- securityAccessDenied for RDBI
     std::vector<std::uint8_t> const resp{0x7F, 0x22, 0x33};
     auto const r = uds::parse_rdbi_response(resp, 0xF190);
     REQUIRE_FALSE(r.has_value());
@@ -258,7 +258,7 @@ TEST_CASE("RequestDownload encodes address + size in their minimum bytes", "[uds
 }
 
 TEST_CASE("RequestDownload response extracts maxNumberOfBlockLength", "[uds][download]") {
-    // [0x74] [0x20] [0x01 0x00] — len-format-id high nibble=2 means 2 bytes
+    // [0x74] [0x20] [0x01 0x00] -- len-format-id high nibble=2 means 2 bytes
     // follow; 0x0100 = 256-byte max block.
     std::vector<std::uint8_t> const resp{0x74, 0x20, 0x01, 0x00};
     auto const r = uds::parse_request_download_response(resp);
@@ -497,7 +497,7 @@ TEST_CASE("parse_routine_control_response flags RID mismatch", "[uds][framing][r
 
 TEST_CASE("parse_routine_control_response surfaces conditionsNotCorrect NRC",
           "[uds][framing][routine][error]") {
-    // Negative response: 7F 31 22 — conditionsNotCorrect (erase before session)
+    // Negative response: 7F 31 22 -- conditionsNotCorrect (erase before session)
     std::vector<std::uint8_t> const resp{0x7F, 0x31, 0x22};
     auto const r = uds::parse_routine_control_response(resp, uds::kRcStart, uds::kRidEraseMemory);
     REQUIRE_FALSE(r.has_value());
@@ -546,7 +546,7 @@ TEST_CASE("End-to-end flashing sequence through MockTransport",
           "[uds][client][flash][end_to_end]") {
     // Sketch of the seven-step flash flow:
     //   1. enter programming session
-    //   2. (security access — covered elsewhere)
+    //   2. (security access -- covered elsewhere)
     //   3. request download
     //   4. transfer data block 1
     //   5. transfer data block 2
@@ -602,7 +602,7 @@ TEST_CASE("Realistic flash flow with erase + check-deps via RoutineControl",
     t.expect_send_recv({0x36, 0x02, 0xCC, 0xDD}, {0x76, 0x02});
     // 6. requestTransferExit
     t.expect_send_recv({0x37}, {0x77});
-    // 7. checkProgrammingDependencies — ECU returns a CRC status byte
+    // 7. checkProgrammingDependencies -- ECU returns a CRC status byte
     t.expect_send_recv({0x31, 0x01, 0xFF, 0x01}, {0x71, 0x01, 0xFF, 0x01, 0x00});
     // 8. ecu reset
     t.expect_send_recv({0x11, 0x01}, {0x51, 0x01});

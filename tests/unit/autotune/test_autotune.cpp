@@ -118,7 +118,7 @@ TEST_CASE("sample_passes_gates rejects large RPM / throttle transients", "[autot
 }
 
 // ---------------------------------------------------------------------
-// tune_maf — happy paths
+// tune_maf -- happy paths
 // ---------------------------------------------------------------------
 
 TEST_CASE("tune_maf scales up a cell whose samples ran lean", "[autotune][maf]") {
@@ -166,7 +166,7 @@ TEST_CASE("tune_maf scales down a cell whose samples ran rich", "[autotune][maf]
 }
 
 // ---------------------------------------------------------------------
-// tune_maf — gates and sufficiency
+// tune_maf -- gates and sufficiency
 // ---------------------------------------------------------------------
 
 TEST_CASE("tune_maf leaves cells unchanged when below min samples",
@@ -199,7 +199,7 @@ TEST_CASE("tune_maf filters out cold-coolant samples entirely", "[autotune][maf]
 }
 
 // ---------------------------------------------------------------------
-// tune_maf — clamping
+// tune_maf -- clamping
 // ---------------------------------------------------------------------
 
 TEST_CASE("tune_maf clamps proposals to max_delta_pct", "[autotune][maf][clamp]") {
@@ -229,7 +229,7 @@ TEST_CASE("tune_maf clamping is symmetric on the negative side", "[autotune][maf
 }
 
 // ---------------------------------------------------------------------
-// tune_maf — argument validation
+// tune_maf -- argument validation
 // ---------------------------------------------------------------------
 
 TEST_CASE("tune_maf rejects an empty axis", "[autotune][maf][error]") {
@@ -610,7 +610,7 @@ TEST_CASE("apply_knock_add_back: disabled -> passthrough", "[autotune][knock][ad
 TEST_CASE("apply_knock_add_back: adds to clean unpulled cells", "[autotune][knock][addback]") {
     auto const in = build_pull_result({
         {20.0, 20.0, 0.0, 100, false},  // clean, eligible
-        {22.0, 21.25, -2.0, 80, true},  // pulled — skip
+        {22.0, 21.25, -2.0, 80, true},  // pulled -- skip
         {18.0, 18.0, 0.02, 100, false}, // clean within tolerance
     });
     at::KnockAddBackOptions opts;

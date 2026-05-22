@@ -14,7 +14,7 @@ namespace at = st::autotune;
 namespace {
 
 // Build a MafTuneResult with the given proposed values. All cells
-// otherwise default — these tests inspect the proposal shape, not the
+// otherwise default -- these tests inspect the proposal shape, not the
 // upstream stats fields.
 at::MafTuneResult build_result(std::vector<double> const &current,
                                std::vector<double> const &proposed) {
@@ -47,7 +47,7 @@ TEST_CASE("lint_maf_proposal: clean proposal -> no violations", "[autotune][lint
 TEST_CASE("lint_maf_proposal: non-monotonic flagged", "[autotune][lint]") {
     std::vector<double> axis{1.0, 2.0, 3.0};
     std::vector<double> current{1.0, 2.0, 3.0};
-    // Cell 1 (proposed 1.5) > Cell 2 (proposed 1.0) — backwards.
+    // Cell 1 (proposed 1.5) > Cell 2 (proposed 1.0) -- backwards.
     std::vector<double> proposed{0.5, 1.5, 1.0};
 
     auto const r = build_result(current, proposed);
@@ -80,7 +80,7 @@ TEST_CASE("lint_maf_proposal: step discontinuity flagged", "[autotune][lint]") {
     std::vector<double> axis{1.0, 2.0, 3.0};
     // Original calibration: steady steps of 1.0 between cells.
     std::vector<double> current{1.0, 2.0, 3.0};
-    // Proposed: cell 1 unchanged, cell 2 jumped to 5.0 — step 1->2 is
+    // Proposed: cell 1 unchanged, cell 2 jumped to 5.0 -- step 1->2 is
     // now 3.0 vs original 1.0, a 200% deviation.
     std::vector<double> proposed{1.0, 2.0, 5.0};
 
@@ -198,7 +198,7 @@ namespace {
 
 // Build a KnockPullResult from a flat row-major proposed-timing
 // vector. Per-cell `current_value` defaults to `proposed_value + 1.0`
-// so the helper trivially registers as "pulled by 1.0" — the lint
+// so the helper trivially registers as "pulled by 1.0" -- the lint
 // doesn't care about pulled/not, only the proposed surface shape.
 at::KnockPullResult build_knock_result(std::size_t rows, std::size_t cols,
                                        std::vector<double> const &proposed) {
@@ -236,7 +236,7 @@ TEST_CASE("lint_knock_proposal: smooth surface -> no violations", "[autotune][li
 TEST_CASE("lint_knock_proposal: RPM-axis discontinuity flagged", "[autotune][lint][knock]") {
     std::vector<double> rpm_axis{2000.0, 3000.0, 4000.0};
     std::vector<double> load_axis{2.5};
-    // Single load row. Cell at rpm=3000 dropped by 5° vs neighbors —
+    // Single load row. Cell at rpm=3000 dropped by 5° vs neighbors --
     // bigger than the default 3° threshold.
     std::vector<double> timing{20.0, 15.0, 20.0};
 
@@ -252,7 +252,7 @@ TEST_CASE("lint_knock_proposal: RPM-axis discontinuity flagged", "[autotune][lin
 TEST_CASE("lint_knock_proposal: load-axis discontinuity flagged", "[autotune][lint][knock]") {
     std::vector<double> rpm_axis{3000.0};
     std::vector<double> load_axis{1.0, 2.0, 3.0};
-    // Single RPM column. Cell at load=2.0 dropped by 5° — flags both
+    // Single RPM column. Cell at load=2.0 dropped by 5° -- flags both
     // (load 1->2) and (load 2->3).
     std::vector<double> timing{20.0, 15.0, 20.0};
 
@@ -305,7 +305,7 @@ TEST_CASE("lint_knock_proposal: mismatched cells.size() emits a "
     at::KnockPullResult r;
     r.rows = 2;
     r.cols = 2;
-    r.cells.resize(3); // expected 4 — kernel bug or hand-crafted input
+    r.cells.resize(3); // expected 4 -- kernel bug or hand-crafted input
 
     auto const v = at::lint_knock_proposal(empty, empty, r);
     REQUIRE(v.size() == 1);

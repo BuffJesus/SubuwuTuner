@@ -173,7 +173,7 @@ TEST_CASE("apply_checksum_repair: pack with checksum_type=subaru_std -> "
 
     REQUIRE_FALSE(status.has_value());
     REQUIRE(status.error().code() == st::ErrorCode::NotImplemented);
-    // Failure path must not mutate the bytes — important contract
+    // Failure path must not mutate the bytes -- important contract
     // since callers will spill the repaired buffer to disk only
     // on success.
     REQUIRE(rom == before);

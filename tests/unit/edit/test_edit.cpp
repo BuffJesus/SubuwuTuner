@@ -239,7 +239,7 @@ TEST_CASE("History::record + undo + redo walks a single edit", "[edit][history]"
 }
 
 TEST_CASE("History::record after partial undo branches the history", "[edit][history]") {
-    // Apply A, then B. Undo B (cursor moves back). Then record C — this
+    // Apply A, then B. Undo B (cursor moves back). Then record C -- this
     // should drop B and leave the timeline as A -> C.
     st::edit::History h;
 

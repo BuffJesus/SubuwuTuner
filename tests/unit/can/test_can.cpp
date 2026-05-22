@@ -113,7 +113,7 @@ TEST_CASE("parse_asc accepts zero-DLC (heartbeat) frames", "[can][asc][parse]") 
 }
 
 TEST_CASE("parse_asc rejects a frame line with too few data bytes", "[can][asc][parse][error]") {
-    // DLC=4 but only 2 bytes supplied — must surface a parse error.
+    // DLC=4 but only 2 bytes supplied -- must surface a parse error.
     constexpr std::string_view text = "   0.000000 1  140             Rx   d 4 11 22\n";
     auto const r = can_ns::parse_asc(text);
     REQUIRE_FALSE(r.has_value());

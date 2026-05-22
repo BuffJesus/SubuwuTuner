@@ -83,7 +83,7 @@ TEST_CASE("open_transport(native, empty device_path) -> InvalidArgument", "[tran
 //
 // Every concrete kind currently returns NotImplemented because the
 // platform layer (LoadLibraryA / libusb / native CDC) isn't wired
-// yet. The CLI flag is meant to be useful TODAY even so — clean
+// yet. The CLI flag is meant to be useful TODAY even so -- clean
 // errors that name the missing platform piece let the user verify
 // the dispatch works before hardware arrives.
 

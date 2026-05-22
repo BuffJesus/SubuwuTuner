@@ -83,7 +83,7 @@ TEST_CASE("j2534::discover_adapters: runs without crashing + returns a vector "
         REQUIRE_FALSE(a.subkey.empty());
         REQUIRE_FALSE(a.name.empty());
         // function_library is enforced non-empty by walk_view
-        // (entries without a DLL path are skipped — a vendor
+        // (entries without a DLL path are skipped -- a vendor
         // installer that registered a skeleton without filling in
         // FunctionLibrary shouldn't surface as a usable adapter).
         REQUIRE_FALSE(a.function_library.empty());

@@ -125,7 +125,7 @@ TEST_CASE("ir::lower emits LoadConstant for a defaulted input pin", "[feature][i
     REQUIRE(m->instructions[2].operands[0] == m->instructions[0].result_id);
     REQUIRE(m->instructions[2].operands[1] == m->instructions[1].result_id);
     // operand_pin_names anchor each operand to its declared input
-    // pin name — codegen relies on this to map operand[k] back to
+    // pin name -- codegen relies on this to map operand[k] back to
     // `a`/`b` so non-commutative primitives don't swap arguments
     // when a graph reorders pins.
     REQUIRE(m->instructions[2].operand_pin_names.size() == 2);
@@ -148,7 +148,7 @@ TEST_CASE("ir::lower's operand_pin_names tracks pin reordering", "[feature][ir]"
     st::feature::Node sub;
     sub.kind = "primitive.subtract_float";
     sub.label = "sub";
-    // Pin order: b, a, out — reversed from the canonical declaration.
+    // Pin order: b, a, out -- reversed from the canonical declaration.
     sub.pins.push_back(st::feature::Pin{0, "b", st::feature::PinType::Float,
                                         st::feature::PinDirection::Input, ""});
     sub.pins.push_back(st::feature::Pin{1, "a", st::feature::PinType::Float,
@@ -262,7 +262,7 @@ TEST_CASE("ir::estimate_cost prices add_int below divide_int", "[feature][ir]") 
     // Two single-primitive modules differing only in symbol. The
     // table prices add_int as cheap (1 cycle) and divide_int as
     // expensive (FDIV-latency-dominated, 18 cycles). Verifies the
-    // ordering rather than exact totals — keeps the test resilient
+    // ordering rather than exact totals -- keeps the test resilient
     // to future cost-table tuning.
     auto build = [](std::string_view sym) {
         st::feature::ir::Module m;
@@ -284,8 +284,8 @@ TEST_CASE("ir::estimate_cost prices add_int below divide_int", "[feature][ir]") 
 
 TEST_CASE("ir::estimate_cost falls back to default for unknown primitives", "[feature][ir]") {
     // Pack-declared primitives that the codegen doesn't yet handle
-    // (e.g. `flex_fuel_scale`) still get a finite price — the
-    // default constant — so a graph using them lints without a NaN.
+    // (e.g. `flex_fuel_scale`) still get a finite price -- the
+    // default constant -- so a graph using them lints without a NaN.
     st::feature::ir::Module m;
     st::feature::ir::Instruction call;
     call.op = st::feature::ir::Op::CallPrimitive;
