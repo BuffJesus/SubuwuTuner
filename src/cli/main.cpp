@@ -7750,8 +7750,8 @@ int cmd_flash_resume(int argc, char *argv[]) {
 // unchanged. The implementation now lives in
 // src/transport/src/uds_trace.cpp so the GUI can call it too —
 // see Tools → Read ROM from Car's Trace-replay mode.
-using st::transport::UdsTracePair;
 using st::transport::parse_uds_trace;
+using st::transport::UdsTracePair;
 
 namespace {
 // Print the FlashReport from a successful or failed ExecuteOutcome. Shared

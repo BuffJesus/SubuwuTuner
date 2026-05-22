@@ -12,16 +12,14 @@
 
 namespace st::transport {
 
-bool parse_uds_trace(std::filesystem::path const &path,
-                     std::vector<UdsTracePair> &out_pairs,
+bool parse_uds_trace(std::filesystem::path const &path, std::vector<UdsTracePair> &out_pairs,
                      std::string &err) {
     std::ifstream in{path};
     if (!in) {
         err = "uds_trace: cannot open trace file: " + path.string();
         return false;
     }
-    auto const parse_hex_line = [&](std::string_view body,
-                                    std::vector<std::uint8_t> &dst,
+    auto const parse_hex_line = [&](std::string_view body, std::vector<std::uint8_t> &dst,
                                     int line_no) -> bool {
         std::istringstream iss{std::string{body}};
         std::string tok;
@@ -31,17 +29,13 @@ bool parse_uds_trace(std::filesystem::path const &path,
                 sv.remove_prefix(2);
             }
             if (sv.size() != 2) {
-                err = "uds_trace: bad hex byte '" + tok + "' on line " +
-                      std::to_string(line_no);
+                err = "uds_trace: bad hex byte '" + tok + "' on line " + std::to_string(line_no);
                 return false;
             }
             unsigned value = 0;
-            auto const res = std::from_chars(sv.data(), sv.data() + sv.size(),
-                                             value, 16);
-            if (res.ec != std::errc{} || res.ptr != sv.data() + sv.size() ||
-                value > 0xFFU) {
-                err = "uds_trace: bad hex byte '" + tok + "' on line " +
-                      std::to_string(line_no);
+            auto const res = std::from_chars(sv.data(), sv.data() + sv.size(), value, 16);
+            if (res.ec != std::errc{} || res.ptr != sv.data() + sv.size() || value > 0xFFU) {
+                err = "uds_trace: bad hex byte '" + tok + "' on line " + std::to_string(line_no);
                 return false;
             }
             dst.push_back(static_cast<std::uint8_t>(value));

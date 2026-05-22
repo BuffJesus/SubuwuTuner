@@ -95,8 +95,7 @@ TEST_CASE("Flasher::read_full_rom rejects zero max_chunk_size", "[flash][read][e
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("Flasher::read_full_rom fires progress callback per chunk",
-          "[flash][read][progress]") {
+TEST_CASE("Flasher::read_full_rom fires progress callback per chunk", "[flash][read][progress]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
@@ -110,21 +109,18 @@ TEST_CASE("Flasher::read_full_rom fires progress callback per chunk",
     std::vector<std::uint32_t> bytes_done_at_each_event;
     std::uint32_t observed_total = 0;
     flash::Flasher f{t};
-    auto const r = f.read_full_rom(
-        0x1000, 16, /*max_chunk=*/8,
-        std::chrono::milliseconds{1000},
-        [&](flash::Flasher::ReadProgress p) {
-            bytes_done_at_each_event.push_back(p.bytes_done);
-            observed_total = p.total_bytes;
-        });
+    auto const r = f.read_full_rom(0x1000, 16, /*max_chunk=*/8, std::chrono::milliseconds{1000},
+                                   [&](flash::Flasher::ReadProgress p) {
+                                       bytes_done_at_each_event.push_back(p.bytes_done);
+                                       observed_total = p.total_bytes;
+                                   });
     REQUIRE(r.has_value());
     REQUIRE(observed_total == 16);
     // Events: 0 (start), 8 (after chunk 1), 16 (after chunk 2).
     REQUIRE(bytes_done_at_each_event == std::vector<std::uint32_t>{0, 8, 16});
 }
 
-TEST_CASE("Flasher::read_full_rom aborts when cancel flag set",
-          "[flash][read][cancel]") {
+TEST_CASE("Flasher::read_full_rom aborts when cancel flag set", "[flash][read][cancel]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
@@ -132,16 +128,14 @@ TEST_CASE("Flasher::read_full_rom aborts when cancel flag set",
     // be sent. The flag is checked at the top of every iteration.
     std::atomic<bool> cancel{true};
     flash::Flasher f{t};
-    auto const r = f.read_full_rom(0x1000, 16, /*max_chunk=*/8,
-                                   std::chrono::milliseconds{1000},
+    auto const r = f.read_full_rom(0x1000, 16, /*max_chunk=*/8, std::chrono::milliseconds{1000},
                                    /*progress=*/nullptr, &cancel);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::Cancelled);
     REQUIRE(t.send_log().empty());
 }
 
-TEST_CASE("Flasher::read_full_rom cancel observed mid-read",
-          "[flash][read][cancel]") {
+TEST_CASE("Flasher::read_full_rom cancel observed mid-read", "[flash][read][cancel]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
@@ -153,8 +147,7 @@ TEST_CASE("Flasher::read_full_rom cancel observed mid-read",
     std::atomic<bool> cancel{false};
     flash::Flasher f{t};
     auto const r = f.read_full_rom(
-        0x1000, 16, /*max_chunk=*/8,
-        std::chrono::milliseconds{1000},
+        0x1000, 16, /*max_chunk=*/8, std::chrono::milliseconds{1000},
         [&](flash::Flasher::ReadProgress p) {
             if (p.bytes_done >= 8)
                 cancel.store(true, std::memory_order_release);

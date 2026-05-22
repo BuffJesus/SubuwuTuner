@@ -482,8 +482,7 @@ TEST_CASE("apply_scaling: subaru AFR enrichment safe at the singularity",
     REQUIRE(st::apply_scaling(-128.0, s) == 0.0);
 }
 
-TEST_CASE("invert_scaling: subaru AFR enrichment round-trips",
-          "[defs][invert_scaling][afr]") {
+TEST_CASE("invert_scaling: subaru AFR enrichment round-trips", "[defs][invert_scaling][afr]") {
     st::Scaling s;
     s.formula = st::SubaruAfrEnrichment{.numerator = 14.7, .k = 0.0078125};
     for (double raw : {0.0, 47.0, 128.0, 200.0, 255.0}) {
@@ -499,7 +498,7 @@ TEST_CASE("invert_scaling: subaru AFR enrichment rejects degenerate value=0",
     st::Scaling s;
     s.formula = st::SubaruAfrEnrichment{.numerator = 14.7, .k = 0.0078125};
     auto const r = st::invert_scaling(0.0, s);
-    REQUIRE(!r.has_value());  // value=0 maps to raw=±∞
+    REQUIRE(!r.has_value()); // value=0 maps to raw=±∞
 }
 
 TEST_CASE("scaling loader: subaru_afr_enrichment formula parsed", "[defs][parse]") {
@@ -538,15 +537,13 @@ TEST_CASE("apply_scaling: inverse_divide computes numerator/raw",
     REQUIRE(st::apply_scaling(1000.0, s) == Catch::Approx(2707.09).margin(0.01));
 }
 
-TEST_CASE("apply_scaling: inverse_divide safe at raw==0",
-          "[defs][apply_scaling][inverse_divide]") {
+TEST_CASE("apply_scaling: inverse_divide safe at raw==0", "[defs][apply_scaling][inverse_divide]") {
     st::Scaling s;
     s.formula = st::InverseDivideScaling{.numerator = 2707090.0};
     REQUIRE(st::apply_scaling(0.0, s) == 0.0);
 }
 
-TEST_CASE("invert_scaling: inverse_divide round-trips",
-          "[defs][invert_scaling][inverse_divide]") {
+TEST_CASE("invert_scaling: inverse_divide round-trips", "[defs][invert_scaling][inverse_divide]") {
     st::Scaling s;
     s.formula = st::InverseDivideScaling{.numerator = 2707090.0};
     for (double raw : {1.0, 100.0, 4916.0, 100000.0}) {
@@ -564,8 +561,7 @@ TEST_CASE("invert_scaling: inverse_divide rejects engineering=0",
     REQUIRE(!st::invert_scaling(0.0, s).has_value());
 }
 
-TEST_CASE("scaling loader: inverse_divide formula parsed",
-          "[defs][parse][inverse_divide]") {
+TEST_CASE("scaling loader: inverse_divide formula parsed", "[defs][parse][inverse_divide]") {
     auto const def_r = st::Definition::from_toml_string(R"toml(
 [pack]
 id             = "x"
@@ -587,9 +583,7 @@ data_type = "float32_be"
     REQUIRE(std::get<st::InverseDivideScaling>(s->formula).numerator == 2707090.0);
 }
 
-
-TEST_CASE("scaling loader: subaru_afr_enrichment defaults",
-          "[defs][parse][afr]") {
+TEST_CASE("scaling loader: subaru_afr_enrichment defaults", "[defs][parse][afr]") {
     // Constants omitted → defaults 14.7 / 0.0078125 (the canonical EJ form).
     auto const def_r = st::Definition::from_toml_string(R"toml(
 [pack]
