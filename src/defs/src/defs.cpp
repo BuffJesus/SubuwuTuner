@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <ios>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -436,6 +437,69 @@ Result<Hook> parse_hook(toml::table const &t) {
         }
     }
     return h;
+}
+
+Result<WritableRegion> parse_writable_region(toml::table const &t) {
+    WritableRegion w;
+    if (auto const v = t["name"].value<std::string>(); v.has_value() && !v->empty()) {
+        w.name = *v;
+    } else {
+        return failure(ErrorCode::ParseError, "[[writable_region]] missing name");
+    }
+    if (auto const v = t["kind"].value<std::string>(); v.has_value() && !v->empty()) {
+        w.kind = *v;
+        if (w.kind != "calibration" && w.kind != "code" && w.kind != "data") {
+            std::string msg{"[[writable_region]] '"};
+            msg.append(w.name);
+            msg.append("' has unknown kind '");
+            msg.append(w.kind);
+            msg.append("' (expected: calibration | code | data)");
+            return failure(ErrorCode::ParseError, std::move(msg));
+        }
+    } else {
+        std::string msg{"[[writable_region]] '"};
+        msg.append(w.name);
+        msg.append("' missing kind (expected: calibration | code | data)");
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    if (auto const v = t["address"].value<std::int64_t>(); v.has_value()) {
+        if (*v < 0) {
+            // Without this guard, a negative TOML integer would cast
+            // to a near-SIZE_MAX size_t and trip the overflow check
+            // below with a misleading "overflows the address space"
+            // error. Surface the actual mistake.
+            std::string msg{"[[writable_region]] '"};
+            msg.append(w.name);
+            msg.append("' address must be non-negative");
+            return failure(ErrorCode::ParseError, std::move(msg));
+        }
+        w.address = static_cast<std::size_t>(*v);
+    } else {
+        std::string msg{"[[writable_region]] '"};
+        msg.append(w.name);
+        msg.append("' missing address");
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    if (auto const v = t["length"].value<std::int64_t>(); v.has_value() && *v > 0) {
+        w.length = static_cast<std::size_t>(*v);
+    } else {
+        std::string msg{"[[writable_region]] '"};
+        msg.append(w.name);
+        msg.append("' length must be a positive integer");
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    // Reject `address + length` that would overflow the size_t space. This
+    // also catches authoring bugs where the user accidentally pasted a
+    // 64-bit ROM dump address into a 32-bit firmware-address slot.
+    if (w.address > std::numeric_limits<std::size_t>::max() - w.length) {
+        std::string msg{"[[writable_region]] '"};
+        msg.append(w.name);
+        msg.append("' address + length overflows the address space");
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    w.bank = optional_value<std::string>(t, "bank", {});
+    w.description = optional_value<std::string>(t, "description", {});
+    return w;
 }
 
 Result<Primitive> parse_primitive(toml::table const &t) {
@@ -888,6 +952,10 @@ public:
         if (auto r = visit_array("primitive", parse_primitive, def.primitives_); !r.has_value()) {
             return failure(r.error());
         }
+        if (auto r = visit_array("writable_region", parse_writable_region, def.writable_regions_);
+            !r.has_value()) {
+            return failure(r.error());
+        }
         return ok();
     }
 
@@ -923,6 +991,19 @@ public:
         upsert(parent.dtc_bitmaps_, child.dtc_bitmaps_);
         upsert(parent.hooks_, child.hooks_);
         upsert(parent.primitives_, child.primitives_);
+        // WritableRegion is keyed by `name` rather than `id`. Same upsert
+        // semantics — child's same-named region overrides parent's, new
+        // names append.
+        for (auto &el : child.writable_regions_) {
+            auto it = std::find_if(parent.writable_regions_.begin(),
+                                   parent.writable_regions_.end(),
+                                   [&](WritableRegion const &x) { return x.name == el.name; });
+            if (it == parent.writable_regions_.end()) {
+                parent.writable_regions_.push_back(std::move(el));
+            } else {
+                *it = std::move(el);
+            }
+        }
         // DTCs are keyed by `code` rather than `id`; same upsert semantics
         // but a different key field.
         for (auto &el : child.dtcs_) {

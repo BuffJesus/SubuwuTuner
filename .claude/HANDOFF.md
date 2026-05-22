@@ -1,3 +1,35 @@
+# Handoff — 2026-05-22 night (`doctor` + blocker #2 + blocker #3 fully closed, OBDX retest still pending)
+
+**Four pure-software ship-blocker commits in the user's absence this evening: `doctor` (#6 ✅), cancellation-invariant tests (start of #2), cancel-token enforcement closing #2 (UDS path) for v1.0, and the codegen writable-region address gate closing #3 ✅.**
+
+## Blocker #3 — codegen writable-region gate (UDS path)
+
+New schema entry in `docs/11-definition-format.md`:
+
+```toml
+[[writable_region]]
+name        = "calibration_a"
+kind        = "calibration"    # calibration | code | data
+address     = 0x000F0000
+length      = 0x00010000
+bank        = "a"              # optional, for RH850 dual-bank (v1.3+)
+description = "..."             # optional
+```
+
+`st::feature::codegen::gate_patch(PatchObject const &, Definition const &) -> Status` is the security boundary. Wired into `Sh2aBackend::compile()`'s exit path so callers cannot bypass it. Each `HookPatch`'s `[splice_address, splice_address + code.size())` range must be fully contained inside ONE `[[writable_region]]` — spanning two regions is refused even when the union covers the range (bridging two declared-safe zones is the foot-gun the gate exists to prevent).
+
+Fail-closed: a pack with zero `[[writable_region]]` entries refuses every non-empty patch. An empty PatchObject (no hooks) passes vacuously — matches the "empty patch = no-op flash" semantic the SH-2A backend produces for an empty module.
+
+15 tests in `tests/unit/feature_codegen/test_address_gate.cpp`: vacuous-pass cases, fail-closed (no regions declared), single-region containment + start/end boundary cases, splice-outside-all-regions, splice-in-but-code-overflows-region, hook-spans-two-adjacent-regions, multi-region disjoint coverage, multi-hook reporting (one passes, two fail, message names the two failing hooks and lists all available regions). Total suite 864/864 green.
+
+Existing test packs in `test_sh2a.cpp` (`kPackOneHookToml`, `kPackFloatHookToml`, `kPackTwoHooksToml`) had to add `[[writable_region]]` entries to keep their backend-integration tests passing — the gate is wired through `compile()`, so any test that compiles non-empty IR needs to declare regions.
+
+RAM allocation stays gated by per-hook `free_ram` + `RamAllocator` (unchanged).
+
+Roadmap row #3 ⬜ → ✅.
+
+---
+
 # Handoff — 2026-05-22 late evening (`doctor` + blocker #2 fully closed, OBDX retest still pending)
 
 **The user is at work. Three pure-software commits landed in their absence: `doctor` (#6 ✅), cancellation-invariant tests (start of #2), and now the cancel-token enforcement on `Flasher::execute()` that closes #2 for v1.0 (UDS only; SSM is v1.3-and-later).**

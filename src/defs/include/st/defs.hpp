@@ -297,6 +297,32 @@ struct Hook {
     std::optional<std::size_t> free_ram_length;
 };
 
+// A pack-level declaration of one flash address range that the
+// codegen address gate (docs/16 §Safety #6) will accept as a target
+// for compiled `.stmod` patches. Multiple entries allowed; ranges
+// may be non-contiguous. A pack with zero `[[writable_region]]`
+// entries fails closed at gate time — no `.stmod` will compile
+// against it. This is a security boundary, not a sanity check: a
+// buggy or malicious graph that bypassed the gate would otherwise
+// reach `st::flash` with an arbitrary target address.
+//
+// The `kind` field is informational for v1.0 — the gate checks
+// containment regardless of kind. Per-kind policy (e.g. production-
+// fleet profiles refusing patches into `code` regions) can land in
+// a future bundle without breaking the schema.
+//
+// `bank` is reserved for RH850 dual-bank platforms (v1.3+), where
+// each calibration region exists in two banks for live update; v1.0
+// targets SH-2A single-bank and ignores the field.
+struct WritableRegion {
+    std::string name;
+    std::string kind; // "calibration" | "code" | "data"; informational v1.0
+    std::size_t address{0};
+    std::size_t length{0};
+    std::string bank;        // optional; "" if not set
+    std::string description; // optional; "" if not set
+};
+
 // A reusable computation node declared by the pack — arithmetic,
 // boolean logic, table lookup, etc. Distinct from Hook in that
 // primitives don't splice into the firmware; they're pure functions
@@ -364,6 +390,9 @@ public:
     }
     [[nodiscard]] std::vector<Primitive> const &primitives() const noexcept {
         return primitives_;
+    }
+    [[nodiscard]] std::vector<WritableRegion> const &writable_regions() const noexcept {
+        return writable_regions_;
     }
 
     [[nodiscard]] Axis const *find_axis(std::string_view id) const noexcept;
@@ -456,6 +485,7 @@ private:
     std::vector<Dtc> dtcs_;
     std::vector<Hook> hooks_;
     std::vector<Primitive> primitives_;
+    std::vector<WritableRegion> writable_regions_;
 
     friend class DefinitionBuilder;
 };

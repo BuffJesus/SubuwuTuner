@@ -345,6 +345,55 @@ unit          = "°C"
 default_log   = true
 ```
 
+## `[[writable_region]]` — codegen address gate
+
+```toml
+[[writable_region]]
+name        = "calibration_a"
+kind        = "calibration"    # calibration | code | data
+address     = 0x000F0000
+length      = 0x00010000
+bank        = "a"              # optional — RH850 dual-bank tag (v1.3+)
+description = "Main cal table area, EEPROM bank A"   # optional
+```
+
+Pack-level array of flash address ranges that `st::feature::codegen` is
+allowed to target. Per `docs/16` §Safety #6, the codegen address gate
+(`gate_patch`) refuses to emit a `PatchObject` whose per-hook
+`[splice_address, splice_address + code.size())` range is not fully
+contained inside a *single* `[[writable_region]]`. Spanning two regions is
+rejected even when the union covers the range — bridging two declared-safe
+zones is exactly the foot-gun the gate exists to prevent.
+
+**Field semantics:**
+
+- `name` (required, unique within the pack) — short identifier; appears in
+  gate-rejection messages so authors can fix the splice point by reference.
+- `kind` (required, one of `calibration | code | data`) — informational for
+  v1.0. The gate checks containment regardless of `kind`. Reserved for
+  future per-kind policy (e.g. production-fleet profiles refusing patches
+  into `code` regions); declaring it now means the policy can land without
+  a schema break.
+- `address` (required, unsigned integer) — first byte of the writable range
+  in firmware address space.
+- `length` (required, positive integer) — bytes. `address + length` must
+  not overflow `size_t`.
+- `bank` (optional) — for RH850 dual-bank platforms (`a` / `b`). v1.0
+  ignores it; v1.3+ recovery design consumes it.
+- `description` (optional) — human note, surfaced in `pack-info` output.
+
+**Fail-closed behavior.** A pack with zero `[[writable_region]]` entries
+rejects *every* non-empty patch. This is a security boundary, not a sanity
+check: silent fail-open would let a buggy or malicious `.stmod` graph reach
+`st::flash` with an arbitrary target address through the same pipeline
+table edits use. An empty `PatchObject` (no hooks) passes the gate
+vacuously — matches the "empty patch = no-op flash" semantic the SH-2A
+backend produces for an empty module.
+
+**Scope.** The gate is `feature_codegen`-only; `st::flash::execute` is
+unaffected. Table edits flow through `edit::History` and are bounded by
+`table.address + length` at edit time, so they don't need the gate.
+
 ## Inheritance
 
 ```toml

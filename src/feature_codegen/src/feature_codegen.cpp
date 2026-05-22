@@ -1461,12 +1461,119 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m, Definition const &
         hp.ram_claims = w.claims;
         obj.hooks.push_back(std::move(hp));
     }
+    // Address gate per docs/16 §Safety #6. Wired into the backend's
+    // exit path so callers cannot accidentally bypass it. An empty
+    // PatchObject passes the gate vacuously (no hooks to check), which
+    // matches the "no-op flash" semantic above.
+    if (auto s = gate_patch(obj, def); !s.has_value()) {
+        return failure(s.error());
+    }
     return obj;
 }
 
 Result<PatchObject> Rh850Backend::compile(ir::Module const & /*m*/, Definition const & /*def*/) {
     return failure(ErrorCode::NotImplemented,
                    "RH850 backend: instruction emission not yet implemented");
+}
+
+// ---- Address gate -------------------------------------------------------
+
+namespace {
+
+// Pretty-format a `[address, address + length)` range as
+// `0xAAAA..0xBBBB (N bytes)` for the gate error messages. Plain
+// decimal + hex helpers below already exist for other paths; the
+// hex format here matches what `hex_addr` in src/flash uses for
+// consistency across the safety surfaces.
+std::string format_range(std::size_t address, std::size_t length) {
+    char buf[80];
+    std::snprintf(buf, sizeof buf, "0x%08zX..0x%08zX (%zu bytes)", address, address + length,
+                  length);
+    return std::string{buf};
+}
+
+} // namespace
+
+Status gate_patch(PatchObject const &p, Definition const &def) {
+    auto const &regions = def.writable_regions();
+
+    if (regions.empty()) {
+        if (p.hooks.empty()) {
+            // Vacuously passes — no hooks to gate. Matches the empty-
+            // PatchObject = no-op semantic the SH-2A backend produces
+            // for an empty module.
+            return ok();
+        }
+        std::string msg{"codegen address gate: pack has no [[writable_region]] "
+                        "declared but the patch carries "};
+        msg.append(std::to_string(p.hooks.size()));
+        msg.append(" hook(s). Codegen fails closed when no writable regions "
+                   "are declared — declare them in the pack TOML (see "
+                   "docs/11-definition-format.md §writable_region) or the "
+                   "patch cannot be safely emitted.");
+        return failure(ErrorCode::InvalidArgument, std::move(msg));
+    }
+
+    // Total scan — every hook gets checked; the message gathers every
+    // violation so the user fixes them all in one pass instead of one-
+    // by-one. Inspired by `Definition::validate()` which uses the same
+    // multi-violation idiom.
+    std::string violations;
+    std::size_t violation_count = 0;
+
+    for (auto const &hp : p.hooks) {
+        // Reject zero-byte hook code defensively. Should never happen
+        // (backends emit at least one instruction per hook), but a
+        // zero-length range trivially fits any region which would mask
+        // a real bug.
+        if (hp.code.empty()) {
+            continue;
+        }
+        // A hook fits iff a SINGLE region fully contains the entire
+        // [splice, splice+code.size()) range. Spanning two regions is
+        // refused even when the union covers the range — bridging two
+        // declared-safe zones is exactly the foot-gun the gate exists
+        // to prevent.
+        bool fits = false;
+        for (auto const &r : regions) {
+            if (hp.splice_address >= r.address &&
+                hp.splice_address + hp.code.size() <= r.address + r.length) {
+                fits = true;
+                break;
+            }
+        }
+        if (!fits) {
+            if (!violations.empty()) {
+                violations.append("\n");
+            }
+            violations.append("  - hook '");
+            violations.append(hp.symbol);
+            violations.append("' writes ");
+            violations.append(format_range(hp.splice_address, hp.code.size()));
+            violations.append(" which is not contained in any single "
+                              "[[writable_region]]");
+            ++violation_count;
+        }
+    }
+
+    if (violation_count != 0) {
+        std::string msg{"codegen address gate: "};
+        msg.append(std::to_string(violation_count));
+        msg.append(" hook(s) target addresses outside the pack's declared "
+                   "writable regions:\n");
+        msg.append(violations);
+        msg.append("\n  Available regions:");
+        for (auto const &r : regions) {
+            msg.append("\n  - '");
+            msg.append(r.name);
+            msg.append("' (");
+            msg.append(r.kind);
+            msg.append(") ");
+            msg.append(format_range(r.address, r.length));
+        }
+        return failure(ErrorCode::InvalidArgument, std::move(msg));
+    }
+    return ok();
 }
 
 // ---- Backend selection --------------------------------------------------

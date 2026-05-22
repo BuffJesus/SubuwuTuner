@@ -19,11 +19,24 @@ namespace {
 // usable ecu_address + free_ram region. Just enough for the codegen
 // tests -- no axes/scalings/tables/identifications, since the SH-2A
 // emit path only consults `hooks()`.
+//
+// The `[[writable_region]]` entry is required: `Sh2aBackend::compile`
+// runs `gate_patch` on its output, which fails closed against packs
+// that declare no writable regions. The codegen address gate (docs/16
+// §Safety #6) is the v1.0 security boundary. The 64 KiB range here is
+// generous — actual SH-2A hook emissions are 20-40 bytes — but a
+// real pack would mirror the ECU's flash bank layout exactly.
 constexpr std::string_view kPackOneHookToml = R"toml(
 [pack]
 schema_version = 1
 id             = "test-pack-codegen"
 endianness     = "big"
+
+[[writable_region]]
+name    = "test-cal"
+kind    = "calibration"
+address = 0x000A0000
+length  = 0x00010000
 
 [[hook]]
 id              = "after_fuel_calc"
@@ -1912,6 +1925,12 @@ schema_version = 1
 id             = "test-pack-float"
 endianness     = "big"
 
+[[writable_region]]
+name    = "test-cal"
+kind    = "calibration"
+address = 0x000A0000
+length  = 0x00010000
+
 [[hook]]
 id              = "after_fuel_calc"
 ecu_address     = 0x000ABCD0
@@ -2168,6 +2187,12 @@ constexpr std::string_view kPackTwoHooksToml = R"toml(
 schema_version = 1
 id             = "test-pack-cross-hook"
 endianness     = "big"
+
+[[writable_region]]
+name    = "test-cal"
+kind    = "calibration"
+address = 0x000A0000
+length  = 0x00010000
 
 [[hook]]
 id              = "read_rpm"

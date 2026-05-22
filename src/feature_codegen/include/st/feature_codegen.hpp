@@ -192,6 +192,32 @@ inline constexpr std::size_t kLoadStoreLiteralPoolOffset = 12;
 inline constexpr std::size_t kLoadStoreLiteralStride = 4;
 } // namespace sh2a
 
+// Address gate per docs/16 §Safety #6 + docs/04 ship blocker #3.
+//
+// Verifies that every byte each HookPatch in `p` would write to flash
+// falls inside one (single) declared `[[writable_region]]` of `def`.
+// The byte range checked is `[splice_address, splice_address + code.size())`.
+// A hook is rejected if it spans two regions — even if the union of
+// regions covers the range, a single contiguous region must contain it.
+// (Spanning would imply the patch silently bridges two declared-safe
+// zones, which is exactly the foot-gun the gate exists to prevent.)
+//
+// Fails closed: a Definition with zero `[[writable_region]]` entries
+// rejects every patch. Codegen against such a pack cannot emit anything.
+// This is a security boundary, not a sanity check; silent fail-open
+// would let a buggy or malicious graph reach `st::flash` with an
+// arbitrary target address through the same pipeline table edits use.
+//
+// `kind` is informational for v1.0 — the gate checks containment
+// regardless of kind. Per-kind policy (e.g. production-fleet profiles
+// refusing patches into `code` regions) is a future bundle.
+//
+// Returns ok() if every hook fits; InvalidArgument with a multi-line
+// message naming the offending hook(s), the offending byte range, and
+// the available regions otherwise. The check is total — the message
+// reports every violation, not just the first.
+[[nodiscard]] Status gate_patch(PatchObject const &p, Definition const &def);
+
 // Pick the right backend by the loaded pack's platform field. v1.0
 // recognizes "VA" → Sh2a, "VB" → Rh850; anything else is
 // UnsupportedVersion (it's the closest existing ErrorCode — we're
