@@ -24,7 +24,7 @@ std::uint16_t crc16_ccitt_false(std::span<std::uint8_t const> bytes) noexcept {
         crc ^= static_cast<std::uint16_t>(b) << 8U;
         for (int i = 0; i < 8; ++i) {
             if ((crc & 0x8000U) != 0) {
-                crc = static_cast<std::uint16_t>((crc << 1U) ^ 0x1021U);
+                crc = static_cast<std::uint16_t>(static_cast<std::uint16_t>(crc << 1U) ^ 0x1021U);
             } else {
                 crc = static_cast<std::uint16_t>(crc << 1U);
             }
@@ -105,8 +105,9 @@ Result<DecodedFrame> decode_frame(std::span<std::uint8_t const> bytes) {
     }
 
     std::uint16_t const expected_crc = crc_over_frame(bytes.subspan(0, bytes.size() - 2));
-    std::uint16_t const actual_crc = (static_cast<std::uint16_t>(bytes[bytes.size() - 2]) << 8U) |
-                                     static_cast<std::uint16_t>(bytes[bytes.size() - 1]);
+    std::uint16_t const actual_crc =
+        static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes[bytes.size() - 2]) << 8U) |
+                                   static_cast<std::uint16_t>(bytes[bytes.size() - 1]));
     if (expected_crc != actual_crc) {
         char buf[96];
         std::snprintf(buf, sizeof buf,
