@@ -425,6 +425,16 @@ constexpr std::string_view kUsage =
     "                            The DLL path printed for each entry is what\n"
     "                            you'd pass to `--transport j2534 --dll <path>`\n"
     "                            once the platform dynload layer lands.\n"
+    "    doctor [--pack-dir <dir>] [--rom <FILE.bin>]\n"
+    "                            Triage the install: tool/build identity, J2534\n"
+    "                            adapter registry, definition-pack health, and\n"
+    "                            (with --pack-dir + --rom) CID identification.\n"
+    "                            Prints traffic-light status per section + a\n"
+    "                            'what to do next' hint block. Exit 0 on healthy\n"
+    "                            or advisory-only, 1 on any failure, 2 on bad\n"
+    "                            CLI usage. The 'start here' command when an\n"
+    "                            install isn't behaving — composes pack-list /\n"
+    "                            rom-identify / transport-list, no live link.\n"
     "    feature-compile <FILE.stmod> --def <pack.toml> [--arch sh2a|rh850]\n"
     "                    [--format hex|toml|raw|stmod] [--output <FILE>]\n"
     "                    [--validate-only]\n"
@@ -8436,6 +8446,265 @@ int cmd_flash_trace(int argc, char *argv[]) {
     return 0;
 }
 
+// --- doctor: triage / "what to do next" composer -----------------------------
+//
+// Ship blocker #6 from docs/04-roadmap.md. Single subcommand that probes the
+// install: tool/build identity, J2534 adapter registry, definition-pack
+// health, and (with --rom + --pack-dir) CID identification. Each section
+// prints a traffic-light status; the closing block surfaces actionable hints.
+//
+// Composes existing primitives:
+//   - st::transport::j2534::discover_adapters() (transport-list logic)
+//   - discover_pack_paths() + Definition::from_file (pack-list logic)
+//   - Definition::matches(Rom) (rom-identify logic)
+//
+// Exit codes:
+//   0 = healthy or advisory warnings only
+//   1 = any FAIL (bad --pack-dir, every pack failed to parse, ROM doesn't
+//       match any pack, --rom unreadable)
+//   2 = argument errors
+
+enum class DoctorStatus : std::uint8_t { Info, Ok, Warn, Fail };
+
+char const *doctor_glyph(DoctorStatus s) noexcept {
+    switch (s) {
+    case DoctorStatus::Info:
+        return "[INFO]";
+    case DoctorStatus::Ok:
+        return "[ OK ]";
+    case DoctorStatus::Warn:
+        return "[WARN]";
+    case DoctorStatus::Fail:
+        return "[FAIL]";
+    }
+    return "[ ?? ]";
+}
+
+// Tracks worst-severity status seen + the accumulated "what to do next"
+// hints. Info is informational (does not worsen Ok); Warn > Ok; Fail > Warn.
+struct DoctorReport {
+    DoctorStatus worst{DoctorStatus::Ok};
+    std::vector<std::string> hints;
+
+    void note(DoctorStatus s) noexcept {
+        if (s == DoctorStatus::Info)
+            return;
+        if (static_cast<std::uint8_t>(s) > static_cast<std::uint8_t>(worst))
+            worst = s;
+    }
+    void note(DoctorStatus s, std::string hint) {
+        note(s);
+        if (!hint.empty())
+            hints.push_back(std::move(hint));
+    }
+};
+
+char const *doctor_os_label() noexcept {
+#if defined(_WIN32)
+    return "Windows";
+#elif defined(__APPLE__)
+    return "macOS";
+#elif defined(__linux__)
+    return "Linux";
+#else
+    return "unknown OS";
+#endif
+}
+
+void doctor_section_system(DoctorReport &r) {
+    std::printf("%s System\n", doctor_glyph(DoctorStatus::Ok));
+    std::printf("       %.*s %.*s on %s\n", static_cast<int>(st::Version::name().size()),
+                st::Version::name().data(), static_cast<int>(st::Version::string().size()),
+                st::Version::string().data(), doctor_os_label());
+    r.note(DoctorStatus::Ok);
+}
+
+void doctor_section_adapters(DoctorReport &r) {
+    auto const adapters = st::transport::j2534::discover_adapters();
+    if (!adapters.empty()) {
+        std::printf("%s J2534 adapters\n", doctor_glyph(DoctorStatus::Ok));
+        std::printf("       %zu registered\n", adapters.size());
+        for (auto const &a : adapters) {
+            std::printf("       - %s  (%s)\n", a.name.c_str(), a.function_library.c_str());
+        }
+        std::puts("       OBDX Pro VX + doc-18 handheld use USB CDC, not J2534;");
+        std::puts("       this section doesn't enumerate them.");
+        r.note(DoctorStatus::Ok);
+        return;
+    }
+#if defined(_WIN32)
+    std::printf("%s J2534 adapters\n", doctor_glyph(DoctorStatus::Warn));
+    std::puts("       No J2534 vendor DLLs registered under");
+    std::puts("       HKLM\\Software\\PassThruSupport.04.04.");
+    std::puts("       (Irrelevant if your adapter is OBDX Pro VX — it uses USB CDC.)");
+    r.note(DoctorStatus::Warn,
+           "If you'll use a J2534 adapter (Tactrix OpenPort, MongoosePro), install "
+           "the vendor DLL and re-run `doctor`.");
+#else
+    std::printf("%s J2534 adapters\n", doctor_glyph(DoctorStatus::Info));
+    std::puts("       Non-Windows host — J2534 vendor DLLs only register under");
+    std::puts("       the Windows registry. Use OBDX or the doc-18 handheld here.");
+    r.note(DoctorStatus::Info);
+#endif
+}
+
+void doctor_section_packs(DoctorReport &r,
+                          std::optional<std::filesystem::path> const &pack_dir,
+                          std::vector<st::Definition> &loaded_packs) {
+    if (!pack_dir.has_value()) {
+        std::printf("%s Definition packs\n", doctor_glyph(DoctorStatus::Info));
+        std::puts("       --pack-dir not given; skipping pack health check.");
+        std::puts("       Pass --pack-dir <dir> to inspect a pack collection.");
+        r.note(DoctorStatus::Info);
+        return;
+    }
+    std::error_code ec;
+    if (!std::filesystem::is_directory(*pack_dir, ec) || ec) {
+        std::printf("%s Definition packs\n", doctor_glyph(DoctorStatus::Fail));
+        std::printf("       --pack-dir is not a directory: %s\n", pack_dir->string().c_str());
+        r.note(DoctorStatus::Fail, "Provide a real directory path for --pack-dir.");
+        return;
+    }
+    auto const paths = discover_pack_paths(*pack_dir, "doctor");
+    if (paths.empty()) {
+        std::printf("%s Definition packs\n", doctor_glyph(DoctorStatus::Fail));
+        std::printf("       No .toml pack files found under %s.\n", pack_dir->string().c_str());
+        r.note(DoctorStatus::Fail,
+               "Generate packs from RomRaider XML via tools/defgen, "
+               "or drop a community pack bundle in there.");
+        return;
+    }
+    std::size_t failed = 0;
+    std::vector<std::string> failure_paths;
+    for (auto const &p : paths) {
+        auto def = st::Definition::from_file(p);
+        if (def.has_value()) {
+            loaded_packs.push_back(std::move(*def));
+        } else {
+            ++failed;
+            if (failure_paths.size() < 3)
+                failure_paths.push_back(p.string());
+        }
+    }
+    DoctorStatus const s = loaded_packs.empty() ? DoctorStatus::Fail
+                           : failed != 0        ? DoctorStatus::Warn
+                                                : DoctorStatus::Ok;
+    std::printf("%s Definition packs\n", doctor_glyph(s));
+    std::printf("       %zu found, %zu loaded, %zu failed\n", paths.size(), loaded_packs.size(),
+                failed);
+    if (!failure_paths.empty()) {
+        std::printf("       Failing packs (first %zu):\n", failure_paths.size());
+        for (auto const &fp : failure_paths) {
+            std::printf("         - %s\n", fp.c_str());
+        }
+    }
+    if (s == DoctorStatus::Fail) {
+        r.note(s, "Every pack in --pack-dir failed to parse. Run "
+                  "`pack-list <dir>` for the per-file error messages.");
+    } else if (s == DoctorStatus::Warn) {
+        r.note(s, "Some packs failed to load. Run `pack-list <dir>` "
+                  "for per-file errors.");
+    } else {
+        r.note(s);
+    }
+}
+
+void doctor_section_rom(DoctorReport &r, std::optional<std::filesystem::path> const &rom_path,
+                        std::vector<st::Definition> const &loaded_packs) {
+    if (!rom_path.has_value()) {
+        std::printf("%s ROM identification\n", doctor_glyph(DoctorStatus::Info));
+        std::puts("       --rom not given; skipping CID match.");
+        std::puts("       Pass --rom <FILE.bin> alongside --pack-dir to check");
+        std::puts("       which packs match a real ROM dump.");
+        r.note(DoctorStatus::Info);
+        return;
+    }
+    auto rom = st::Rom::from_file(*rom_path);
+    if (!rom.has_value()) {
+        std::printf("%s ROM identification\n", doctor_glyph(DoctorStatus::Fail));
+        std::printf("       Cannot read ROM: %s\n", rom.error().to_string().c_str());
+        r.note(DoctorStatus::Fail,
+               "Check the --rom path; the file must exist and be readable.");
+        return;
+    }
+    if (loaded_packs.empty()) {
+        std::printf("%s ROM identification\n", doctor_glyph(DoctorStatus::Info));
+        std::puts("       No loaded packs to match against (see above).");
+        r.note(DoctorStatus::Info);
+        return;
+    }
+    std::vector<std::pair<std::string, std::string>> matches;
+    for (auto const &def : loaded_packs) {
+        if (auto m = def.matches(*rom); m.has_value()) {
+            matches.emplace_back(def.pack().id, *m);
+        }
+    }
+    if (matches.empty()) {
+        std::printf("%s ROM identification\n", doctor_glyph(DoctorStatus::Fail));
+        std::printf("       %zu-byte ROM, no CID match across %zu loaded packs.\n", rom->size(),
+                    loaded_packs.size());
+        r.note(DoctorStatus::Fail,
+               "No matching definition. The ROM may be an unsupported cal "
+               "ID, an encrypted / partial dump, or need a new pack via "
+               "tools/defgen.");
+        return;
+    }
+    std::printf("%s ROM identification\n", doctor_glyph(DoctorStatus::Ok));
+    std::printf("       %zu-byte ROM, %zu match%s:\n", rom->size(), matches.size(),
+                matches.size() == 1 ? "" : "es");
+    for (auto const &[id, name] : matches) {
+        std::printf("       - %s  (%s)\n", id.c_str(), name.c_str());
+    }
+    r.note(DoctorStatus::Ok);
+}
+
+int cmd_doctor(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> pack_dir;
+    std::optional<std::filesystem::path> rom_path;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--pack-dir") {
+            if (i + 1 >= argc) {
+                std::fputs("doctor: --pack-dir requires a path\n", stderr);
+                return 2;
+            }
+            pack_dir = std::filesystem::path{argv[++i]};
+        } else if (a == "--rom") {
+            if (i + 1 >= argc) {
+                std::fputs("doctor: --rom requires a path\n", stderr);
+                return 2;
+            }
+            rom_path = std::filesystem::path{argv[++i]};
+        } else {
+            std::fprintf(stderr, "doctor: unknown argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    DoctorReport report;
+    doctor_section_system(report);
+    std::puts("");
+    doctor_section_adapters(report);
+    std::puts("");
+    std::vector<st::Definition> loaded_packs;
+    doctor_section_packs(report, pack_dir, loaded_packs);
+    std::puts("");
+    doctor_section_rom(report, rom_path, loaded_packs);
+    std::puts("");
+
+    if (report.hints.empty()) {
+        std::puts("All checks passed.");
+    } else {
+        std::puts("What to do next:");
+        for (auto const &h : report.hints) {
+            std::printf("  - %s\n", h.c_str());
+        }
+    }
+
+    return report.worst == DoctorStatus::Fail ? 1 : 0;
+}
+
 int cmd_transport_list(int argc, char *argv[]) {
     (void)argv;
     if (argc != 0) {
@@ -9272,6 +9541,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "transport-list") {
         return cmd_transport_list(argc - 2, argv + 2);
+    }
+    if (cmd == "doctor") {
+        return cmd_doctor(argc - 2, argv + 2);
     }
     if (cmd == "rom-pull") {
         return cmd_rom_pull(argc - 2, argv + 2);

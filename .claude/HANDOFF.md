@@ -1,3 +1,27 @@
+# Handoff — 2026-05-22 afternoon (`doctor` shipped, OBDX retest in progress)
+
+**While the user retests the OBDX read flow, I closed v1.0 ship blocker #6: `subuwutuner-cli doctor`.**
+
+Composes the existing primitives (`j2534::discover_adapters` from transport-list, `discover_pack_paths` + `Definition::from_file` from pack-list, `Definition::matches(Rom)` from rom-identify) into a single triage command:
+
+```
+subuwutuner-cli doctor [--pack-dir <dir>] [--rom <FILE.bin>]
+```
+
+Four sections, traffic-light status per section (`[ OK ] / [WARN] / [FAIL] / [INFO]`):
+1. **System** — name + version + OS label.
+2. **J2534 adapters** — `discover_adapters()`; WARN on Windows when empty (with hint to install vendor DLL), INFO on macOS/Linux (driver model differs).
+3. **Definition packs** — only when `--pack-dir` given; walks via `discover_pack_paths`, loads each, surfaces first 3 failures, status by load ratio.
+4. **ROM identification** — only when `--rom` AND `--pack-dir` both given; FAIL if no CID match across loaded packs.
+
+Closing block emits "What to do next:" with the actionable hints accumulated during the run. Exit 0 on healthy or advisory-only, 1 on any FAIL, 2 on bad CLI usage. No live link — fully read-only / hardware-free.
+
+Smoke-tested all five paths against the user's Test project ROM (correctly matched `a2tb002c`), an empty pack-dir, an unreadable ROM, a 4-byte non-matching ROM, and `--bogus`.
+
+828 unit tests still green. Roadmap §1 (ship blockers) updated, blocker #6 flipped ✅. Working tree: `src/cli/main.cpp` + `docs/04-roadmap.md` modified; SubaruTuner.zip / fixtures/projects/Test/ still leave-alone.
+
+---
+
 # Handoff — 2026-05-22 morning (OBDX adapter on hand, K-Line default fixed)
 
 **Tomorrow's first action: re-run the GUI Read flow against the real OBDX adapter.** The user got the OBDX Pro VX in the mail late on 2026-05-21, plugged it in, clicked Tools → Read ROM from Car (Adapter=OBDX, COM port set), and got:
