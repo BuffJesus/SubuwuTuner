@@ -209,7 +209,7 @@ TEST_CASE("snapshot_from_samples computes deviation_from_target per bin",
     });
     auto const s = snapshot_from_samples(samples, 6, basic_mapping(), default_cfg(), m);
     REQUIRE(s.ect_bins.size() == 1);
-    // observed=0.85, target≈0.9175 → |dev| ≈ 0.0675
+    // observed=0.85, target≈0.9175 -> |dev| ≈ 0.0675
     REQUIRE_THAT(s.ect_bins[0].deviation_from_target, WithinAbs(0.0675, 1e-3));
 }
 

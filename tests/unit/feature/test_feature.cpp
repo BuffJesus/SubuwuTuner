@@ -110,7 +110,7 @@ TEST_CASE("Graph::connect rejects wrong-direction wires", "[feature][graph]") {
     st::feature::Graph g;
     auto const a = g.add_node(make_source_node("a", st::feature::PinType::Float));
     auto const b = g.add_node(make_sink_node("b", st::feature::PinType::Float));
-    // Input → Output is invalid.
+    // Input -> Output is invalid.
     auto const r = g.connect(b, 0, a, 0);
     REQUIRE_FALSE(r.has_value());
 }

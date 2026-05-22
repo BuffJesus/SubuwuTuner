@@ -45,8 +45,8 @@ DetectorConfig default_cfg() {
     return c;
 }
 
-// Synthesize a clean step response: at t0=1.0s throttle steps 20% → 90%,
-// target boost steps 0 → 15. Actual boost ramps from 0 toward 15 with
+// Synthesize a clean step response: at t0=1.0s throttle steps 20% -> 90%,
+// target boost steps 0 -> 15. Actual boost ramps from 0 toward 15 with
 // `peak_overshoot` of overshoot, settling to 15 at the tail.
 std::vector<double> synth_clean_tip_in(double peak_overshoot = 1.5) {
     std::vector<double> rows;
@@ -108,7 +108,7 @@ TEST_CASE("snapshot_from_samples detects a clean tip-in", "[ebcs][snapshot][dete
 }
 
 TEST_CASE("snapshot_from_samples computes overshoot percentage", "[ebcs][snapshot][overshoot]") {
-    // peak_overshoot=4.5 over a step of 15 → ~30% overshoot.
+    // peak_overshoot=4.5 over a step of 15 -> ~30% overshoot.
     auto const samples = synth_clean_tip_in(/*peak_overshoot=*/4.5);
     DetectorConfig cfg = default_cfg();
     cfg.spike_overshoot_threshold_pct = 80.0; // don't trip Spiked
@@ -118,7 +118,7 @@ TEST_CASE("snapshot_from_samples computes overshoot percentage", "[ebcs][snapsho
 }
 
 TEST_CASE("snapshot_from_samples flags large overshoot as Spiked", "[ebcs][snapshot][spiked]") {
-    // peak_overshoot = 12 over step 15 → 80% — above default 50% spike threshold.
+    // peak_overshoot = 12 over step 15 -> 80% — above default 50% spike threshold.
     auto const samples = synth_clean_tip_in(12.0);
     auto const s = snapshot_from_samples(samples, 6, basic_mapping(), default_cfg());
     REQUIRE(s.total_event_count == 1);

@@ -80,7 +80,7 @@ TEST_CASE("lint_maf_proposal: step discontinuity flagged", "[autotune][lint]") {
     std::vector<double> axis{1.0, 2.0, 3.0};
     // Original calibration: steady steps of 1.0 between cells.
     std::vector<double> current{1.0, 2.0, 3.0};
-    // Proposed: cell 1 unchanged, cell 2 jumped to 5.0 — step 1→2 is
+    // Proposed: cell 1 unchanged, cell 2 jumped to 5.0 — step 1->2 is
     // now 3.0 vs original 1.0, a 200% deviation.
     std::vector<double> proposed{1.0, 2.0, 5.0};
 
@@ -242,7 +242,7 @@ TEST_CASE("lint_knock_proposal: RPM-axis discontinuity flagged", "[autotune][lin
 
     auto const r = build_knock_result(1, 3, timing);
     auto const v = at::lint_knock_proposal(rpm_axis, load_axis, r);
-    REQUIRE(v.size() == 2); // (0→1) and (1→2)
+    REQUIRE(v.size() == 2); // (0->1) and (1->2)
     for (auto const &x : v) {
         CHECK(x.kind == at::LintViolationKind::StepDiscontinuity);
         CHECK(x.message.find("RPM") != std::string::npos);
@@ -253,7 +253,7 @@ TEST_CASE("lint_knock_proposal: load-axis discontinuity flagged", "[autotune][li
     std::vector<double> rpm_axis{3000.0};
     std::vector<double> load_axis{1.0, 2.0, 3.0};
     // Single RPM column. Cell at load=2.0 dropped by 5° — flags both
-    // (load 1→2) and (load 2→3).
+    // (load 1->2) and (load 2->3).
     std::vector<double> timing{20.0, 15.0, 20.0};
 
     auto const r = build_knock_result(3, 1, timing);
@@ -283,9 +283,9 @@ TEST_CASE("lint_knock_proposal: threshold is configurable", "[autotune][lint][kn
 
     auto const r = build_knock_result(1, 2, timing);
     at::KnockLintOptions opts;
-    // Default 3° → flagged.
+    // Default 3° -> flagged.
     CHECK_FALSE(at::lint_knock_proposal(rpm_axis, load_axis, r, opts).empty());
-    // Raised to 5° → clean.
+    // Raised to 5° -> clean.
     opts.max_neighbor_step_degrees = 5.0;
     CHECK(at::lint_knock_proposal(rpm_axis, load_axis, r, opts).empty());
 }

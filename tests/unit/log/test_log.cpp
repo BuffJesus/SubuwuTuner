@@ -263,7 +263,7 @@ TEST_CASE("LogSession applies per-channel scaling on the I/O thread", "[log][ses
     REQUIRE(t.open({}).has_value());
 
     // PID at 0x300, uint8, scaling = raw * 0.5 - 40 (a typical Subaru
-    // intake-air-temperature scaling). Raw 0x90 = 144 → 144*0.5 - 40 = 32.
+    // intake-air-temperature scaling). Raw 0x90 = 144 -> 144*0.5 - 40 = 32.
     st::Scaling scaling;
     scaling.id = "iat_c";
     scaling.formula = st::LinearScaling{0.5, -40.0};

@@ -47,8 +47,8 @@ TEST_CASE("parse_asc handles a minimal single-frame log", "[can][asc][parse]") {
     REQUIRE(r.has_value());
     REQUIRE(r->size() == 1);
     auto const &f = r->front();
-    REQUIRE(f.timestamp_ns == 1'234'000); // 0.001234 s → 1234 µs → 1234000 ns
-    REQUIRE(f.bus == can_ns::BusId::Hs);  // channel 1 → bus 0
+    REQUIRE(f.timestamp_ns == 1'234'000); // 0.001234 s -> 1234 µs -> 1234000 ns
+    REQUIRE(f.bus == can_ns::BusId::Hs);  // channel 1 -> bus 0
     REQUIRE(f.id == 0x140);
     REQUIRE_FALSE(f.extended);
     REQUIRE_FALSE(f.remote);

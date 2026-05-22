@@ -106,7 +106,7 @@ TEST_CASE("j2534::status_message: every documented code maps to a "
     }
 }
 
-TEST_CASE("j2534::status_message: unknown code → 'unknown J2534 status'", "[transport][j2534]") {
+TEST_CASE("j2534::status_message: unknown code -> 'unknown J2534 status'", "[transport][j2534]") {
     j2534::u32 const bogus = 0xDEAD;
     REQUIRE(j2534::status_message(bogus) == "unknown J2534 status");
 }

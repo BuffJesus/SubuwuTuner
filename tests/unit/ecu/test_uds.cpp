@@ -323,13 +323,13 @@ TEST_CASE("RequestTransferExit round-trip", "[uds][exit]") {
 // ---- ReadMemoryByAddress -----------------------------------------------
 
 TEST_CASE("build_read_memory_by_address encodes address+size minimally", "[uds][framing][rmba]") {
-    // addr 0x12 fits in 1 byte, size 0x4000 fits in 2 bytes → aLFI = 0x21.
+    // addr 0x12 fits in 1 byte, size 0x4000 fits in 2 bytes -> aLFI = 0x21.
     auto const r = uds::build_read_memory_by_address(0x12, 0x4000);
     REQUIRE(r == std::vector<std::uint8_t>{0x23, 0x21, 0x12, 0x40, 0x00});
 }
 
 TEST_CASE("build_read_memory_by_address widens addr+size when needed", "[uds][framing][rmba]") {
-    // addr 0x123456 fits in 3 bytes, size 0xFF fits in 1 byte → aLFI = 0x13.
+    // addr 0x123456 fits in 3 bytes, size 0xFF fits in 1 byte -> aLFI = 0x13.
     auto const r = uds::build_read_memory_by_address(0x123456, 0xFF);
     REQUIRE(r == std::vector<std::uint8_t>{0x23, 0x13, 0x12, 0x34, 0x56, 0xFF});
 }

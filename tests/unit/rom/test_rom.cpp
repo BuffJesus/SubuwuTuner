@@ -172,7 +172,7 @@ TEST_CASE("Rom::read_ascii errors on non-printable bytes", "[rom][read_ascii]") 
 }
 
 TEST_CASE("Rom::crc32 matches canonical value for known vector", "[rom][crc32]") {
-    // "123456789" → 0xCBF43926
+    // "123456789" -> 0xCBF43926
     auto const r = st::Rom::from_bytes(make_bytes({'1', '2', '3', '4', '5', '6', '7', '8', '9'}));
     REQUIRE(r.crc32() == 0xCBF43926U);
 }

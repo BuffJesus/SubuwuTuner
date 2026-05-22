@@ -53,7 +53,7 @@ TEST_CASE("Baseline classifies a byte that never changes as Stable", "[discover]
 
 TEST_CASE("Baseline classifies a small-set byte as Stable", "[discover][baseline]") {
     // Byte 0 alternates between three values — within the default
-    // stable_max_distinct of 4 → Stable.
+    // stable_max_distinct of 4 -> Stable.
     std::vector<std::uint8_t> const sequence{0x10, 0x20, 0x30, 0x10, 0x20,
                                              0x30, 0x10, 0x20, 0x30, 0x10};
     std::vector<can_ns::Frame> frames;
@@ -272,7 +272,7 @@ namespace {
 
 // Build a small, hand-tuned baseline: one id at 0x140 with byte 0
 // stable=={0x00}, byte 1 cyclic, byte 2 stable=={0x10,0x20}, byte 3
-// noisy. 32 frames over 100 ms → 320 Hz nominally.
+// noisy. 32 frames over 100 ms -> 320 Hz nominally.
 discover_ns::BaselineModel small_baseline() {
     std::vector<can_ns::Frame> frames;
     for (int i = 0; i < 32; ++i) {

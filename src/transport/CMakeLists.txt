@@ -14,9 +14,12 @@ set(_st_transport_sources
 # Platform-specific IByteChannel implementations. USB-CDC ACM
 # adapters (OBDX Pro VX et al.) show up as a virtual COM port on
 # every OS — Win32 CreateFile here, POSIX termios when Linux/macOS
-# impls land.
+# impls land. The POSIX stub returns NotImplemented so st_transport
+# links cleanly on every CI matrix entry until the real backend ships.
 if(WIN32)
     list(APPEND _st_transport_sources src/serial_byte_channel_win.cpp)
+else()
+    list(APPEND _st_transport_sources src/serial_byte_channel_posix.cpp)
 endif()
 
 add_library(st_transport STATIC ${_st_transport_sources})

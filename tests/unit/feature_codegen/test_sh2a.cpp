@@ -442,10 +442,10 @@ TEST_CASE("Sh2aBackend: distinct LoadHookInputs target distinct addresses",
     auto const &hp = r->hooks[0];
     REQUIRE(hp.code.size() == 2 * cg::sh2a::kLoadStoreSequenceSize);
     REQUIRE(hp.ram_claims.size() == 2);
-    // First chain: rpm → first output slot.
+    // First chain: rpm -> first output slot.
     REQUIRE(be32_at(hp.code, 12) == 0x000F1234U);
     REQUIRE(be32_at(hp.code, 16) == 0x40000000U);
-    // Second chain: load → second output slot at base+4.
+    // Second chain: load -> second output slot at base+4.
     REQUIRE(be32_at(hp.code, 32) == 0x000F1238U);
     REQUIRE(be32_at(hp.code, 36) == 0x40000004U);
 }
@@ -467,7 +467,7 @@ TEST_CASE("Sh2aBackend: mixed LoadConstant + LoadHookInput in one module",
     auto const &hp = r->hooks[0];
     // Both shapes are 20 bytes, so total = 40.
     REQUIRE(hp.code.size() == 40);
-    // First chain (LoadConstant → Store) literal pool at 12,16.
+    // First chain (LoadConstant -> Store) literal pool at 12,16.
     REQUIRE(be32_at(hp.code, 12) == 42U);
     REQUIRE(be32_at(hp.code, 16) == 0x40000000U);
     // First instruction of the second chain (offset 20) is the
@@ -542,7 +542,7 @@ TEST_CASE("Sh2aBackend: LoadHookInput pin without address fails",
 
 // ---- CallPrimitive add_int slice ----------------------------------------
 
-TEST_CASE("Sh2aBackend: add_int(const,const) → Store emits 28-byte sequence",
+TEST_CASE("Sh2aBackend: add_int(const,const) -> Store emits 28-byte sequence",
           "[feature_codegen][sh2a][call_primitive]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -580,7 +580,7 @@ TEST_CASE("Sh2aBackend: add_int(const,const) → Store emits 28-byte sequence",
     REQUIRE(hp.ram_claims[0].address == 0x40000000);
 }
 
-TEST_CASE("Sh2aBackend: add_int(hook,hook) → Store emits 32-byte sequence",
+TEST_CASE("Sh2aBackend: add_int(hook,hook) -> Store emits 32-byte sequence",
           "[feature_codegen][sh2a][call_primitive]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -615,7 +615,7 @@ TEST_CASE("Sh2aBackend: add_int(hook,hook) → Store emits 32-byte sequence",
     REQUIRE(be32_at(hp.code, 28) == 0x40000000U); // free_ram_base
 }
 
-TEST_CASE("Sh2aBackend: add_int(const,hook) → Store emits 28-byte sequence",
+TEST_CASE("Sh2aBackend: add_int(const,hook) -> Store emits 28-byte sequence",
           "[feature_codegen][sh2a][call_primitive]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -743,7 +743,10 @@ TEST_CASE("Sh2aBackend: Float LoadConstant special values", "[feature_codegen][s
         {0.0, 0x00000000U},
         {-1.0, 0xBF800000U},
         {2.0, 0x40000000U},
-        {3.14f, 0x4048F5C3U}, // exact 3.14f bit pattern
+        // 3.14f explicitly cast through float so the test-table double struct
+        // members don't promote the literal — Apple Clang -Wdouble-promotion
+        // fires inside the brace-initializer otherwise.
+        {static_cast<double>(3.14f), 0x4048F5C3U}, // exact 3.14f bit pattern
     };
 
     for (auto const &c : cases) {
@@ -780,7 +783,7 @@ TEST_CASE("Sh2aBackend: Bool LoadConstant canonical 0/1 widening",
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
 
-    // The widening contract: v > 0.5 → 1, else → 0. We assert both
+    // The widening contract: v > 0.5 -> 1, else -> 0. We assert both
     // sides to lock in the canonical representation.
     struct Case {
         double input;
@@ -789,7 +792,7 @@ TEST_CASE("Sh2aBackend: Bool LoadConstant canonical 0/1 widening",
     auto const cases = std::vector<Case>{
         {0.0, 0U},  {1.0, 1U}, {0.4, 0U}, // below threshold
         {0.6, 1U},                        // above threshold
-        {-1.0, 0U},                       // negative → false (matches `v > 0.5`)
+        {-1.0, 0U},                       // negative -> false (matches `v > 0.5`)
     };
 
     for (auto const &c : cases) {
@@ -811,7 +814,7 @@ TEST_CASE("Sh2aBackend: Bool LoadConstant canonical 0/1 widening",
 
 // ---- Nested CallPrimitive ----------------------------------------------
 
-TEST_CASE("Sh2aBackend: nested add(add(LC,LC), LC) → Store allocates a slot",
+TEST_CASE("Sh2aBackend: nested add(add(LC,LC), LC) -> Store allocates a slot",
           "[feature_codegen][sh2a][nested]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -843,7 +846,7 @@ TEST_CASE("Sh2aBackend: nested add(add(LC,LC), LC) → Store allocates a slot",
     // Body layout (5 instrs inner + 6 instrs outer + RTS + NOP +
     // pool-alignment NOP = 26 bytes; pool of 6 longwords = 24 bytes;
     // total = 50 ... but wait, 22+2+2 = 26 isn't 4-aligned at 26,
-    // pad adds 2 → body 28, pool 24 = 52.
+    // pad adds 2 -> body 28, pool 24 = 52.
     REQUIRE(hp.code.size() == 52);
 
     // Inner add fragment (offsets 0..9): op1=Const 5, op2=Const 3,
@@ -877,7 +880,7 @@ TEST_CASE("Sh2aBackend: nested add(add(LC,LC), LC) → Store allocates a slot",
     REQUIRE(be32_at(hp.code, 48) == 0x40000000U); // output pin
 }
 
-TEST_CASE("Sh2aBackend: nested add(LC, add(LC, LC)) → Store (right-deep)",
+TEST_CASE("Sh2aBackend: nested add(LC, add(LC, LC)) -> Store (right-deep)",
           "[feature_codegen][sh2a][nested]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -899,7 +902,7 @@ TEST_CASE("Sh2aBackend: nested add(LC, add(LC, LC)) → Store (right-deep)",
     REQUIRE(hp.code.size() == 52); // same size as left-deep
 }
 
-TEST_CASE("Sh2aBackend: 3-level nested add tree → Store", "[feature_codegen][sh2a][nested]") {
+TEST_CASE("Sh2aBackend: 3-level nested add tree -> Store", "[feature_codegen][sh2a][nested]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
 
@@ -968,7 +971,7 @@ TEST_CASE("Sh2aBackend: nested primitive with unsupported id fails",
 
 // ---- subtract_int / multiply_int -----------------------------------------
 
-TEST_CASE("Sh2aBackend: subtract_int(LC, LC) → Store emits SUB", "[feature_codegen][sh2a][sub]") {
+TEST_CASE("Sh2aBackend: subtract_int(LC, LC) -> Store emits SUB", "[feature_codegen][sh2a][sub]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
 
@@ -985,12 +988,12 @@ TEST_CASE("Sh2aBackend: subtract_int(LC, LC) → Store emits SUB", "[feature_cod
     auto const &hp = r->hooks[0];
     REQUIRE(hp.code.size() == 28); // same size as add (single-fragment)
 
-    // Convention for SUB: op2 → R0 (subtrahend), op1 → R1 (minuend).
+    // Convention for SUB: op2 -> R0 (subtrahend), op1 -> R1 (minuend).
     // So pool[0] = op2 = 3, pool[1] = op1 = 10, pool[2] = dest.
-    REQUIRE(be16_at(hp.code, 0) == 0xD003); // MOV.L pool[0]=3 → R0
-    REQUIRE(be16_at(hp.code, 2) == 0xD104); // MOV.L pool[1]=10 → R1
+    REQUIRE(be16_at(hp.code, 0) == 0xD003); // MOV.L pool[0]=3 -> R0
+    REQUIRE(be16_at(hp.code, 2) == 0xD104); // MOV.L pool[1]=10 -> R1
     REQUIRE(be16_at(hp.code, 4) == 0x3108); // SUB R0, R1  (R1 = 10 - 3 = 7)
-    REQUIRE(be16_at(hp.code, 6) == 0xD204); // MOV.L pool[2]=dest → R2
+    REQUIRE(be16_at(hp.code, 6) == 0xD204); // MOV.L pool[2]=dest -> R2
     REQUIRE(be16_at(hp.code, 8) == 0x2212); // MOV.L R1, @R2
 
     REQUIRE(be32_at(hp.code, 16) == 3U);          // pool[0] = subtrahend
@@ -1021,7 +1024,7 @@ TEST_CASE("Sh2aBackend: subtract_int — operand order matters", "[feature_codeg
     // placement, which we verify via the pool ordering.
 }
 
-TEST_CASE("Sh2aBackend: multiply_int(LC, LC) → Store emits MUL.L + STS MACL",
+TEST_CASE("Sh2aBackend: multiply_int(LC, LC) -> Store emits MUL.L + STS MACL",
           "[feature_codegen][sh2a][mul]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -1044,12 +1047,12 @@ TEST_CASE("Sh2aBackend: multiply_int(LC, LC) → Store emits MUL.L + STS MACL",
     //   3 longwords = 12 bytes
     //   Total: 28 bytes
     REQUIRE(hp.code.size() == 28);
-    REQUIRE(be16_at(hp.code, 0) == 0xD003); // MOV.L pool[0]=4 → R0
-    REQUIRE(be16_at(hp.code, 2) == 0xD104); // MOV.L pool[1]=6 → R1
+    REQUIRE(be16_at(hp.code, 0) == 0xD003); // MOV.L pool[0]=4 -> R0
+    REQUIRE(be16_at(hp.code, 2) == 0xD104); // MOV.L pool[1]=6 -> R1
     REQUIRE(be16_at(hp.code, 4) == 0x0107); // MUL.L R0, R1  (MACL = 4*6)
     REQUIRE(be16_at(hp.code, 6) == 0x011A); // STS MACL, R1
     // pc=8: ((8+4)&~3) = 12; pool[2] at 24; disp = (24-12)/4 = 3.
-    REQUIRE(be16_at(hp.code, 8) == 0xD203);  // MOV.L pool[2]=dest → R2
+    REQUIRE(be16_at(hp.code, 8) == 0xD203);  // MOV.L pool[2]=dest -> R2
     REQUIRE(be16_at(hp.code, 10) == 0x2212); // MOV.L R1, @R2
     REQUIRE(be16_at(hp.code, 12) == 0x000B); // RTS
     REQUIRE(be16_at(hp.code, 14) == 0x0009); // NOP delay
@@ -1078,16 +1081,16 @@ TEST_CASE("Sh2aBackend: multiply_int with HookInput operand", "[feature_codegen]
     REQUIRE(hp.code.size() == 32);
     // 7 body instructions: load ptr, deref, load const, MUL.L,
     // STS MACL, load dest, store.
-    REQUIRE(be16_at(hp.code, 0) == 0xD004); // MOV.L pool[0]=rpm_addr → R0
+    REQUIRE(be16_at(hp.code, 0) == 0xD004); // MOV.L pool[0]=rpm_addr -> R0
     REQUIRE(be16_at(hp.code, 2) == 0x6002); // MOV.L @R0, R0
-    REQUIRE(be16_at(hp.code, 4) == 0xD104); // MOV.L pool[1]=2 → R1
+    REQUIRE(be16_at(hp.code, 4) == 0xD104); // MOV.L pool[1]=2 -> R1
     REQUIRE(be16_at(hp.code, 6) == 0x0107); // MUL.L R0, R1
     REQUIRE(be16_at(hp.code, 8) == 0x011A); // STS MACL, R1
 }
 
 // ---- divide_int (FPU bridge) ---------------------------------------------
 
-TEST_CASE("Sh2aBackend: divide_int(LC, LC) → Store emits FLOAT+FDIV+FTRC",
+TEST_CASE("Sh2aBackend: divide_int(LC, LC) -> Store emits FLOAT+FDIV+FTRC",
           "[feature_codegen][sh2a][div]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -1105,11 +1108,11 @@ TEST_CASE("Sh2aBackend: divide_int(LC, LC) → Store emits FLOAT+FDIV+FTRC",
     auto const &hp = r->hooks[0];
 
     // FPU bridge: 11 body instructions.
-    //   op2 → R0 → FPUL → FR0  (3 instr: MOV.L, LDS, FLOAT)
-    //   op1 → R0 → FPUL → FR1  (3 instr)
+    //   op2 -> R0 -> FPUL -> FR0  (3 instr: MOV.L, LDS, FLOAT)
+    //   op1 -> R0 -> FPUL -> FR1  (3 instr)
     //   FDIV FR0, FR1          (1 instr)
     //   FTRC FR1, FPUL ; STS FPUL, R1 (2 instr)
-    //   MOV.L dest → R2 ; MOV.L R1, @R2 (2 instr)
+    //   MOV.L dest -> R2 ; MOV.L R1, @R2 (2 instr)
     // = 11 instr × 2 bytes = 22 bytes body, + RTS + NOP delay = 26 bytes.
     // 26 not 4-aligned ⇒ +1 NOP pad = 28 bytes.
     // Pool: 3 longwords (op2=2, op1=10, dest) = 12 bytes.
@@ -1119,16 +1122,16 @@ TEST_CASE("Sh2aBackend: divide_int(LC, LC) → Store emits FLOAT+FDIV+FTRC",
     // Spot-check the FPU bridge opcodes appear at the expected
     // offsets. Operand order: op2 loads first (lands in FR0 to
     // become the divisor), op1 second (FR1, dividend).
-    REQUIRE(be16_at(hp.code, 0) == 0xD006);  // MOV.L pool[0]=2 → R0
+    REQUIRE(be16_at(hp.code, 0) == 0xD006);  // MOV.L pool[0]=2 -> R0
     REQUIRE(be16_at(hp.code, 2) == 0x405A);  // LDS R0, FPUL
     REQUIRE(be16_at(hp.code, 4) == 0xF02D);  // FLOAT FPUL, FR0
-    REQUIRE(be16_at(hp.code, 6) == 0xD006);  // MOV.L pool[1]=10 → R0
+    REQUIRE(be16_at(hp.code, 6) == 0xD006);  // MOV.L pool[1]=10 -> R0
     REQUIRE(be16_at(hp.code, 8) == 0x405A);  // LDS R0, FPUL
     REQUIRE(be16_at(hp.code, 10) == 0xF12D); // FLOAT FPUL, FR1
     REQUIRE(be16_at(hp.code, 12) == 0xF103); // FDIV FR0, FR1 (FR1 /= FR0)
     REQUIRE(be16_at(hp.code, 14) == 0xF13D); // FTRC FR1, FPUL
     REQUIRE(be16_at(hp.code, 16) == 0x015A); // STS FPUL, R1
-    REQUIRE(be16_at(hp.code, 18) == 0xD204); // MOV.L pool[2]=dest → R2
+    REQUIRE(be16_at(hp.code, 18) == 0xD204); // MOV.L pool[2]=dest -> R2
     REQUIRE(be16_at(hp.code, 20) == 0x2212); // MOV.L R1, @R2
     REQUIRE(be16_at(hp.code, 22) == 0x000B); // RTS
     REQUIRE(be16_at(hp.code, 24) == 0x0009); // NOP delay
@@ -1197,7 +1200,7 @@ TEST_CASE("Sh2aBackend: divide_int with Float operand returns NotImplemented",
 
 // ---- compare_lt / compare_gt / compare_eq --------------------------------
 
-TEST_CASE("Sh2aBackend: compare_lt(LC, LC) → Store emits CMP/GT R0,R1 + MOVT",
+TEST_CASE("Sh2aBackend: compare_lt(LC, LC) -> Store emits CMP/GT R0,R1 + MOVT",
           "[feature_codegen][sh2a][compare]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -1206,7 +1209,7 @@ TEST_CASE("Sh2aBackend: compare_lt(LC, LC) → Store emits CMP/GT R0,R1 + MOVT",
     ir::Module m;
     m.instructions.push_back(load_const_int(1, 3));
     m.instructions.push_back(load_const_int(2, 10));
-    // compare_lt(3, 10) → true (1)
+    // compare_lt(3, 10) -> true (1)
     ir::Instruction cmp{};
     cmp.op = ir::Op::CallPrimitive;
     cmp.symbol = "compare_lt_int";
@@ -1224,11 +1227,11 @@ TEST_CASE("Sh2aBackend: compare_lt(LC, LC) → Store emits CMP/GT R0,R1 + MOVT",
     // Body: 6 instrs (load op1, load op2, CMP/GT, MOVT, load dest,
     // store) + RTS + NOP = 16 bytes (4-aligned, no pad) + 12 pool = 28.
     REQUIRE(hp.code.size() == 28);
-    REQUIRE(be16_at(hp.code, 0) == 0xD003);  // MOV.L pool[0]=3 (op1) → R0
-    REQUIRE(be16_at(hp.code, 2) == 0xD104);  // MOV.L pool[1]=10 (op2) → R1
+    REQUIRE(be16_at(hp.code, 0) == 0xD003);  // MOV.L pool[0]=3 (op1) -> R0
+    REQUIRE(be16_at(hp.code, 2) == 0xD104);  // MOV.L pool[1]=10 (op2) -> R1
     REQUIRE(be16_at(hp.code, 4) == 0x3107);  // CMP/GT R0, R1 (T = R1>R0 = op2>op1 = op1<op2)
     REQUIRE(be16_at(hp.code, 6) == 0x0129);  // MOVT R1
-    REQUIRE(be16_at(hp.code, 8) == 0xD203);  // MOV.L pool[2]=dest → R2
+    REQUIRE(be16_at(hp.code, 8) == 0xD203);  // MOV.L pool[2]=dest -> R2
     REQUIRE(be16_at(hp.code, 10) == 0x2212); // MOV.L R1, @R2
 
     REQUIRE(be32_at(hp.code, 16) == 3U);          // op1
@@ -1341,7 +1344,7 @@ TEST_CASE("Sh2aBackend: nested compare inside arithmetic — add(compare, 5)",
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
 
-    // (rpm < 4000) + 5 — exercises Bool → Int flow through a slot.
+    // (rpm < 4000) + 5 — exercises Bool -> Int flow through a slot.
     // The compare result (0 or 1) gets spilled to a RAM slot, then
     // re-loaded as an int operand to the add. Numerically: add of
     // {0,1} + 5 = 5 or 6.
@@ -1429,7 +1432,8 @@ TEST_CASE("Sh2aBackend: nested mixed primitives — add(sub, mul)",
 
 // ---- and_bool / or_bool / not_bool ---------------------------------------
 
-TEST_CASE("Sh2aBackend: and_bool(LC, LC) → Store emits AND", "[feature_codegen][sh2a][bool_prim]") {
+TEST_CASE("Sh2aBackend: and_bool(LC, LC) -> Store emits AND",
+          "[feature_codegen][sh2a][bool_prim]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
 
@@ -1454,10 +1458,10 @@ TEST_CASE("Sh2aBackend: and_bool(LC, LC) → Store emits AND", "[feature_codegen
     // 5 body instructions + RTS + NOP + pad (28 bytes total like add):
     //   load op1, load op2, AND R0 R1, load dest, store R1
     REQUIRE(hp.code.size() == 28);
-    REQUIRE(be16_at(hp.code, 0) == 0xD003); // MOV.L pool[0]=1 → R0
-    REQUIRE(be16_at(hp.code, 2) == 0xD104); // MOV.L pool[1]=1 → R1
+    REQUIRE(be16_at(hp.code, 0) == 0xD003); // MOV.L pool[0]=1 -> R0
+    REQUIRE(be16_at(hp.code, 2) == 0xD104); // MOV.L pool[1]=1 -> R1
     REQUIRE(be16_at(hp.code, 4) == 0x2109); // AND R0, R1
-    REQUIRE(be16_at(hp.code, 6) == 0xD204); // MOV.L pool[2]=dest → R2
+    REQUIRE(be16_at(hp.code, 6) == 0xD204); // MOV.L pool[2]=dest -> R2
     REQUIRE(be16_at(hp.code, 8) == 0x2212); // MOV.L R1, @R2
 
     REQUIRE(be32_at(hp.code, 16) == 1U);
@@ -1465,7 +1469,7 @@ TEST_CASE("Sh2aBackend: and_bool(LC, LC) → Store emits AND", "[feature_codegen
     REQUIRE(be32_at(hp.code, 24) == 0x40000000U);
 }
 
-TEST_CASE("Sh2aBackend: or_bool(LC, LC) → Store emits OR", "[feature_codegen][sh2a][bool_prim]") {
+TEST_CASE("Sh2aBackend: or_bool(LC, LC) -> Store emits OR", "[feature_codegen][sh2a][bool_prim]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
 
@@ -1488,11 +1492,11 @@ TEST_CASE("Sh2aBackend: or_bool(LC, LC) → Store emits OR", "[feature_codegen][
     auto const &hp = r->hooks[0];
     // Same shape as and_bool; only the opcode differs.
     REQUIRE(be16_at(hp.code, 4) == 0x210B); // OR R0, R1
-    REQUIRE(be32_at(hp.code, 16) == 0U);    // op1 = false → 0
-    REQUIRE(be32_at(hp.code, 20) == 1U);    // op2 = true → 1
+    REQUIRE(be32_at(hp.code, 16) == 0U);    // op1 = false -> 0
+    REQUIRE(be32_at(hp.code, 20) == 1U);    // op2 = true -> 1
 }
 
-TEST_CASE("Sh2aBackend: not_bool(LC) → Store emits TST + MOVT (unary)",
+TEST_CASE("Sh2aBackend: not_bool(LC) -> Store emits TST + MOVT (unary)",
           "[feature_codegen][sh2a][bool_prim]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -1514,16 +1518,16 @@ TEST_CASE("Sh2aBackend: not_bool(LC) → Store emits TST + MOVT (unary)",
     REQUIRE(r.has_value());
     auto const &hp = r->hooks[0];
 
-    // 5 body instructions: load op → R0, TST R0,R0, MOVT R1,
-    // load dest → R2, store R1. + RTS + NOP + pad NOP = 8 instr.
+    // 5 body instructions: load op -> R0, TST R0,R0, MOVT R1,
+    // load dest -> R2, store R1. + RTS + NOP + pad NOP = 8 instr.
     // 16 bytes body+epilogue + 2 longwords pool = 24 bytes.
     REQUIRE(hp.code.size() == 24);
-    // pool[0]@16 disp from pc=0: (16-4)/4 = 3 → 0xD003.
-    // pool[1]@20 disp from pc=6: aligned=8, (20-8)/4 = 3 → 0xD203.
-    REQUIRE(be16_at(hp.code, 0) == 0xD003); // MOV.L pool[0]=1 → R0
+    // pool[0]@16 disp from pc=0: (16-4)/4 = 3 -> 0xD003.
+    // pool[1]@20 disp from pc=6: aligned=8, (20-8)/4 = 3 -> 0xD203.
+    REQUIRE(be16_at(hp.code, 0) == 0xD003); // MOV.L pool[0]=1 -> R0
     REQUIRE(be16_at(hp.code, 2) == 0x2008); // TST R0, R0
     REQUIRE(be16_at(hp.code, 4) == 0x0129); // MOVT R1
-    REQUIRE(be16_at(hp.code, 6) == 0xD203); // MOV.L pool[1]=dest → R2
+    REQUIRE(be16_at(hp.code, 6) == 0xD203); // MOV.L pool[1]=dest -> R2
     REQUIRE(be16_at(hp.code, 8) == 0x2212); // MOV.L R1, @R2
 
     REQUIRE(be32_at(hp.code, 16) == 1U);          // op value
@@ -1591,7 +1595,7 @@ TEST_CASE("Sh2aBackend: flat-foot AND-tree — and(compare_lt, compare_gt)",
     ir::Module m;
     m.instructions.push_back(load_hook_input(1, "after_fuel_calc", "rpm"));
     m.instructions.push_back(load_const_int(2, 4000));
-    // compare_gt(rpm, 4000) → Bool
+    // compare_gt(rpm, 4000) -> Bool
     ir::Instruction cmp1{};
     cmp1.op = ir::Op::CallPrimitive;
     cmp1.symbol = "compare_gt_int";
@@ -1603,7 +1607,7 @@ TEST_CASE("Sh2aBackend: flat-foot AND-tree — and(compare_lt, compare_gt)",
 
     m.instructions.push_back(load_hook_input(4, "after_fuel_calc", "load"));
     m.instructions.push_back(load_const_int(5, 90));
-    // compare_gt(throttle, 90) → Bool
+    // compare_gt(throttle, 90) -> Bool
     ir::Instruction cmp2{};
     cmp2.op = ir::Op::CallPrimitive;
     cmp2.symbol = "compare_gt_int";
@@ -1613,7 +1617,7 @@ TEST_CASE("Sh2aBackend: flat-foot AND-tree — and(compare_lt, compare_gt)",
     cmp2.operands = {4, 5};
     m.instructions.push_back(cmp2);
 
-    // and_bool(cmp1, cmp2) → Bool
+    // and_bool(cmp1, cmp2) -> Bool
     ir::Instruction and_ins{};
     and_ins.op = ir::Op::CallPrimitive;
     and_ins.symbol = "and_bool";
@@ -1655,7 +1659,7 @@ TEST_CASE("Sh2aBackend: flat-foot AND-tree — and(compare_lt, compare_gt)",
 
 // ---- select_int (branch support) ----------------------------------------
 
-TEST_CASE("Sh2aBackend: select_int(LC, LC, LC) → Store branch layout",
+TEST_CASE("Sh2aBackend: select_int(LC, LC, LC) -> Store branch layout",
           "[feature_codegen][sh2a][select]") {
     auto def = st::Definition::from_toml_string(kPackOneHookToml);
     REQUIRE(def.has_value());
@@ -1682,20 +1686,20 @@ TEST_CASE("Sh2aBackend: select_int(LC, LC, LC) → Store branch layout",
 
     // Body bytes — verifies both branch disp values + MOV.L disp
     // calculation against the actual pool offset (24).
-    REQUIRE(be16_at(hp.code, 0) == 0xD005);  // MOV.L pool[0]=cond → R0
+    REQUIRE(be16_at(hp.code, 0) == 0xD005);  // MOV.L pool[0]=cond -> R0
     REQUIRE(be16_at(hp.code, 2) == 0x2008);  // TST R0, R0
     REQUIRE(be16_at(hp.code, 4) == 0x8902);  // BT use_false (disp=2)
-    REQUIRE(be16_at(hp.code, 6) == 0xD105);  // MOV.L pool[1]=true_val → R1
+    REQUIRE(be16_at(hp.code, 6) == 0xD105);  // MOV.L pool[1]=true_val -> R1
     REQUIRE(be16_at(hp.code, 8) == 0xA001);  // BRA done (disp=1)
     REQUIRE(be16_at(hp.code, 10) == 0x0009); // NOP (BRA delay slot)
-    REQUIRE(be16_at(hp.code, 12) == 0xD104); // MOV.L pool[2]=false_val → R1
-    REQUIRE(be16_at(hp.code, 14) == 0xD205); // MOV.L pool[3]=dest → R2
+    REQUIRE(be16_at(hp.code, 12) == 0xD104); // MOV.L pool[2]=false_val -> R1
+    REQUIRE(be16_at(hp.code, 14) == 0xD205); // MOV.L pool[3]=dest -> R2
     REQUIRE(be16_at(hp.code, 16) == 0x2212); // MOV.L R1, @R2
     REQUIRE(be16_at(hp.code, 18) == 0x000B); // RTS
     REQUIRE(be16_at(hp.code, 20) == 0x0009); // NOP (RTS delay)
     REQUIRE(be16_at(hp.code, 22) == 0x0009); // NOP (pool-align pad)
 
-    REQUIRE(be32_at(hp.code, 24) == 1U);          // cond = true → 1
+    REQUIRE(be32_at(hp.code, 24) == 1U);          // cond = true -> 1
     REQUIRE(be32_at(hp.code, 28) == 42U);         // true_val
     REQUIRE(be32_at(hp.code, 32) == 99U);         // false_val
     REQUIRE(be32_at(hp.code, 36) == 0x40000000U); // dest
@@ -1728,8 +1732,8 @@ TEST_CASE("Sh2aBackend: select_int with HookInput cond", "[feature_codegen][sh2a
     auto r = backend.compile(m, *def);
     REQUIRE(r.has_value());
     auto const &hp = r->hooks[0];
-    // HookInput cond adds one deref instruction → body grows by 2
-    // bytes. Pad+pool re-align: body 20 bytes → epilogue 24 →
+    // HookInput cond adds one deref instruction -> body grows by 2
+    // bytes. Pad+pool re-align: body 20 bytes -> epilogue 24 ->
     // pool-aligned (no pad shift since 20+4=24 still 4-aligned but
     // adds 0 bytes pad — actually we land on 4-aligned without pad
     // this time). Pool 16 bytes. Total 40 bytes.
@@ -2112,7 +2116,7 @@ TEST_CASE("Sh2aBackend: compare_lt_float swaps operand mapping vs gt",
 
     auto r = backend.compile(m, *def);
     REQUIRE(r.has_value());
-    // compare_lt_float: load op1→FR0, op2→FR1, FCMP/GT FR0, FR1
+    // compare_lt_float: load op1->FR0, op2->FR1, FCMP/GT FR0, FR1
     // ⇒ T = (FR1 > FR0). Encoding: 1111_0001_0000_0101 = 0xF105.
     bool seen_fcmp_gt_swapped = false;
     for (std::size_t i = 0; i + 1 < r->hooks[0].code.size(); i += 2) {
@@ -2182,7 +2186,7 @@ outputs = [
 )toml";
 } // namespace
 
-TEST_CASE("Sh2aBackend: cross-hook LoadHookInput → Store compiles",
+TEST_CASE("Sh2aBackend: cross-hook LoadHookInput -> Store compiles",
           "[feature_codegen][sh2a][cross_hook]") {
     // Read RPM from `read_rpm`, store it directly into the
     // `ignition_cut` hook's RAM slot. Pre-move-#7 this hit a
@@ -2226,7 +2230,7 @@ TEST_CASE("Sh2aBackend: cross-hook flow through a primitive compiles",
           "[feature_codegen][sh2a][cross_hook]") {
     // Cross-hook + nested CallPrimitive: read RPM, compare against a
     // constant, store the bool result into ignition_cut. Both call
-    // sites of resolve_hook_input_address (direct Load→Store and
+    // sites of resolve_hook_input_address (direct Load->Store and
     // primitive operand) take the same path post-#7.
     auto def = st::Definition::from_toml_string(kPackTwoHooksToml);
     REQUIRE(def.has_value());
@@ -2336,8 +2340,8 @@ TEST_CASE("Sh2aBackend: add_float operand load uses HookInputPointer deref",
 
 TEST_CASE("Sh2aBackend: fanned-out CallPrimitive result is emitted once",
           "[feature_codegen][sh2a][fanout]") {
-    // Graph: compare_gt_int(LC, LC) → cmp ; and_bool(cmp, true) → a ;
-    // or_bool(cmp, false) → b ; select_bool(_, a, b) → root ; Store.
+    // Graph: compare_gt_int(LC, LC) -> cmp ; and_bool(cmp, true) -> a ;
+    // or_bool(cmp, false) -> b ; select_bool(_, a, b) -> root ; Store.
     // `cmp` fans out to two consumers (and_bool + or_bool).
     //
     // Before the fan-out fix the walk visited compare_gt_int twice —
@@ -2398,7 +2402,7 @@ TEST_CASE("Sh2aBackend: fanned-out CallPrimitive result is emitted once",
 
     // RAM claims: ONE for the output pin (commanded_pw_override) +
     // ONE each for cmp, and_bool, or_bool (three nested CallPrimitive
-    // results that aren't the root). The select is the root → no slot.
+    // results that aren't the root). The select is the root -> no slot.
     // Without dedup `cmp` would claim THREE slots (one per consumer),
     // for a total of 6 claims.
     REQUIRE(hp.ram_claims.size() == 4);

@@ -3821,8 +3821,11 @@ void render_read_rom_modal(AppState &state) {
         if (ImGui::Button("Save .bin...", ImVec2(160.0f, 0.0f))) {
             NFD::UniquePath out_path;
             nfdfilteritem_t const filters[] = {{"ROM image", "bin,hex"}};
-            // Suggest a name from base+size for traceability.
-            char default_name[64];
+            // Suggest a name from base+size for traceability. Buffer sized
+            // for the literal prefix + two hex strings up to 31 chars each
+            // (the actual struct field widths) — GCC -Wformat-truncation
+            // computes the worst-case as ~72 B, so 128 is comfortable.
+            char default_name[128];
             std::snprintf(default_name, sizeof default_name, "rom_%s_%s.bin",
                           state.read_rom_base_addr_hex, state.read_rom_size_hex);
             nfdresult_t const r = NFD::SaveDialog(out_path, filters, 1, nullptr, default_name);

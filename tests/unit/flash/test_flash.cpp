@@ -1141,7 +1141,7 @@ TEST_CASE("evaluate_plan_policy: engine-safety table -> Block every profile", "[
     auto const def = make_two_table_def();
     auto const src = make_source_rom();
     // Plan changes BOTH the safety-critical rev_limit AND the emissions
-    // cl_target. Safety wins → Block, regardless of profile.
+    // cl_target. Safety wins -> Block, regardless of profile.
     flash::FlashPlan plan;
     plan.writes.push_back({{0x10, 1}, {0x55}}); // rev_limit changed
     plan.writes.push_back({{0x20, 1}, {0x90}}); // cl_target changed

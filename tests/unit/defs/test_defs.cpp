@@ -466,7 +466,7 @@ TEST_CASE("apply_scaling: subaru AFR enrichment uses 14.7/(1+raw*k)",
           "[defs][apply_scaling][afr]") {
     st::Scaling s;
     s.formula = st::SubaruAfrEnrichment{.numerator = 14.7, .k = 0.0078125};
-    // raw 0 → stoich. raw 47 → 14.7/(1+47*0.0078125) ≈ 10.74. raw 255 → ≈4.92.
+    // raw 0 -> stoich. raw 47 -> 14.7/(1+47*0.0078125) ≈ 10.74. raw 255 -> ≈4.92.
     REQUIRE(st::apply_scaling(0.0, s) == Catch::Approx(14.7));
     REQUIRE(st::apply_scaling(47.0, s) == Catch::Approx(10.7456).margin(0.01));
     REQUIRE(st::apply_scaling(128.0, s) == Catch::Approx(7.35).margin(0.01));
@@ -475,7 +475,7 @@ TEST_CASE("apply_scaling: subaru AFR enrichment uses 14.7/(1+raw*k)",
 
 TEST_CASE("apply_scaling: subaru AFR enrichment safe at the singularity",
           "[defs][apply_scaling][afr]") {
-    // 1 + raw*k = 0 → raw = -1/k. The function returns 0 rather than ±∞;
+    // 1 + raw*k = 0 -> raw = -1/k. The function returns 0 rather than ±∞;
     // not physically reachable for uint8 raw but defensive on float inputs.
     st::Scaling s;
     s.formula = st::SubaruAfrEnrichment{.numerator = 14.7, .k = 0.0078125};
@@ -530,7 +530,7 @@ TEST_CASE("apply_scaling: inverse_divide computes numerator/raw",
           "[defs][apply_scaling][inverse_divide]") {
     st::Scaling s;
     s.formula = st::InverseDivideScaling{.numerator = 2707090.0};
-    // The Subaru injector-flow-scaling case: raw float 4916 → 550.7 cc/min.
+    // The Subaru injector-flow-scaling case: raw float 4916 -> 550.7 cc/min.
     REQUIRE(st::apply_scaling(4916.0, s) == Catch::Approx(550.67).margin(0.01));
     // Other anchor values for sanity.
     REQUIRE(st::apply_scaling(2707.09, s) == Catch::Approx(1000.0).margin(0.01));
@@ -584,7 +584,7 @@ data_type = "float32_be"
 }
 
 TEST_CASE("scaling loader: subaru_afr_enrichment defaults", "[defs][parse][afr]") {
-    // Constants omitted → defaults 14.7 / 0.0078125 (the canonical EJ form).
+    // Constants omitted -> defaults 14.7 / 0.0078125 (the canonical EJ form).
     auto const def_r = st::Definition::from_toml_string(R"toml(
 [pack]
 id             = "x"
@@ -2129,7 +2129,7 @@ outputs = [
     auto const &h = d->hooks().front();
     REQUIRE(h.display_name == "After fuel calc");
     REQUIRE(h.inputs[0].label == "Commanded fuel PW");
-    REQUIRE(h.inputs[1].label == ""); // omitted → empty
+    REQUIRE(h.inputs[1].label == ""); // omitted -> empty
     REQUIRE(h.outputs[0].label == "Override fuel PW");
 }
 

@@ -66,18 +66,21 @@ private:
 std::vector<std::uint8_t> native_response_frame(std::uint8_t seq, nat::Opcode req_op,
                                                 std::vector<std::uint8_t> payload) {
     std::uint8_t const resp_op = static_cast<std::uint8_t>(req_op) | nat::kResponseMask;
-    std::vector<std::uint8_t> frame(5 + payload.size() + 2, 0);
-    frame[0] = nat::kStartOfFrame;
-    frame[1] = seq;
-    frame[2] = resp_op;
-    frame[3] = static_cast<std::uint8_t>(payload.size() >> 8U);
-    frame[4] = static_cast<std::uint8_t>(payload.size() & 0xFFU);
-    for (std::size_t i = 0; i < payload.size(); ++i) {
-        frame[5 + i] = payload[i];
-    }
+    // Init-list ctor + insert avoids GCC's -Wnull-dereference false
+    // positive on `frame[N] = ...` after a sized-ctor — same pattern as
+    // src/ecu/src/uds.cpp builders.
+    std::vector<std::uint8_t> frame{
+        nat::kStartOfFrame,
+        seq,
+        resp_op,
+        static_cast<std::uint8_t>(payload.size() >> 8U),
+        static_cast<std::uint8_t>(payload.size() & 0xFFU),
+    };
+    frame.reserve(5 + payload.size() + 2);
+    frame.insert(frame.end(), payload.begin(), payload.end());
     auto const crc = nat::crc16_ccitt_false(std::span{frame.data(), 5 + payload.size()});
-    frame[5 + payload.size() + 0] = static_cast<std::uint8_t>(crc >> 8U);
-    frame[5 + payload.size() + 1] = static_cast<std::uint8_t>(crc & 0xFFU);
+    frame.push_back(static_cast<std::uint8_t>(crc >> 8U));
+    frame.push_back(static_cast<std::uint8_t>(crc & 0xFFU));
     return frame;
 }
 
@@ -134,7 +137,7 @@ struct ReadyTransport {
 
 // ---- connect_payload_for + ConnectPayload::encode ---------------
 
-TEST_CASE("native::connect_payload_for: KLine → protocol 0x03 + baud",
+TEST_CASE("native::connect_payload_for: KLine -> protocol 0x03 + baud",
           "[transport][native_transport]") {
     st::transport::LinkConfig cfg{st::transport::LinkKind::KLine, 4800, 0, 0};
     auto r = nat::connect_payload_for(cfg);
@@ -143,7 +146,7 @@ TEST_CASE("native::connect_payload_for: KLine → protocol 0x03 + baud",
     REQUIRE(r->baud == 4800U);
 }
 
-TEST_CASE("native::connect_payload_for: CanIso15765 → protocol 0x06 + IDs",
+TEST_CASE("native::connect_payload_for: CanIso15765 -> protocol 0x06 + IDs",
           "[transport][native_transport]") {
     st::transport::LinkConfig cfg{st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8};
     auto r = nat::connect_payload_for(cfg);
@@ -154,7 +157,8 @@ TEST_CASE("native::connect_payload_for: CanIso15765 → protocol 0x06 + IDs",
     REQUIRE(r->can_id_response == 0x7E8U);
 }
 
-TEST_CASE("native::connect_payload_for: CanFd → InvalidArgument", "[transport][native_transport]") {
+TEST_CASE("native::connect_payload_for: CanFd -> InvalidArgument",
+          "[transport][native_transport]") {
     st::transport::LinkConfig cfg{st::transport::LinkKind::CanFd, 2000000, 0, 0};
     auto r = nat::connect_payload_for(cfg);
     REQUIRE_FALSE(r.has_value());
@@ -189,7 +193,7 @@ TEST_CASE("native::ConnectPayload::encode: big-endian baud + CAN IDs",
 
 // ---- open() -----------------------------------------------------
 
-TEST_CASE("native::Transport::open drives Hello → Connect, caches firmware",
+TEST_CASE("native::Transport::open drives Hello -> Connect, caches firmware",
           "[transport][native_transport]") {
     auto cp = make_channel();
     std::vector<std::uint8_t> const fw_payload{'h', 'a', 'n', 'd', 'h', 'e',
@@ -241,7 +245,7 @@ TEST_CASE("native::Transport::open rejects CanFd before any IO", "[transport][na
     (void)raw;
 }
 
-TEST_CASE("native::Transport::open with no Hello response → TransportTimeout",
+TEST_CASE("native::Transport::open with no Hello response -> TransportTimeout",
           "[transport][native_transport]") {
     auto cp = make_channel(); // no queued reads
     nat::Transport t{std::move(cp.owner)};
@@ -251,7 +255,7 @@ TEST_CASE("native::Transport::open with no Hello response → TransportTimeout",
     REQUIRE_FALSE(t.is_open());
 }
 
-TEST_CASE("native::Transport::open: Connect error from device → TransportNack",
+TEST_CASE("native::Transport::open: Connect error from device -> TransportNack",
           "[transport][native_transport]") {
     auto cp = make_channel();
     cp.raw->queue_read(native_response_frame(0, nat::Opcode::Hello, {'f', 'w'}));
@@ -268,7 +272,7 @@ TEST_CASE("native::Transport::open: Connect error from device → TransportNack"
 
 // ---- send_recv --------------------------------------------------
 
-TEST_CASE("native::Transport::send_recv does SendBytes → RecvBytes "
+TEST_CASE("native::Transport::send_recv does SendBytes -> RecvBytes "
           "and returns the RecvBytes payload",
           "[transport][native_transport]") {
     auto pair = build_open_transport();
@@ -310,7 +314,7 @@ TEST_CASE("native::Transport::send_recv does SendBytes → RecvBytes "
     REQUIRE(recv_idx > send_idx);
 }
 
-TEST_CASE("native::Transport::send_recv: seq mismatch in response → "
+TEST_CASE("native::Transport::send_recv: seq mismatch in response -> "
           "TransportNack with details",
           "[transport][native_transport]") {
     auto pair = build_open_transport();
@@ -324,7 +328,7 @@ TEST_CASE("native::Transport::send_recv: seq mismatch in response → "
     REQUIRE(r.error().message().find("seq mismatch") != std::string::npos);
 }
 
-TEST_CASE("native::Transport::send_recv: opcode mismatch → TransportNack",
+TEST_CASE("native::Transport::send_recv: opcode mismatch -> TransportNack",
           "[transport][native_transport]") {
     auto pair = build_open_transport();
     // Send a Disconnect response in the slot where SendBytes
@@ -338,7 +342,7 @@ TEST_CASE("native::Transport::send_recv: opcode mismatch → TransportNack",
     REQUIRE(r.error().message().find("opcode mismatch") != std::string::npos);
 }
 
-TEST_CASE("native::Transport::send_recv before open → TransportUnavailable",
+TEST_CASE("native::Transport::send_recv before open -> TransportUnavailable",
           "[transport][native_transport]") {
     auto cp = make_channel();
     nat::Transport t{std::move(cp.owner)};
@@ -348,7 +352,7 @@ TEST_CASE("native::Transport::send_recv before open → TransportUnavailable",
     REQUIRE(r.error().code() == st::ErrorCode::TransportUnavailable);
 }
 
-TEST_CASE("native::Transport::send_recv: device error frame → TransportNack "
+TEST_CASE("native::Transport::send_recv: device error frame -> TransportNack "
           "with the error code in the message",
           "[transport][native_transport]") {
     auto pair = build_open_transport();

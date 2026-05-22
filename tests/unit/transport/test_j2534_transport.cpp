@@ -19,7 +19,7 @@ using std::chrono::milliseconds;
 
 // ---- ConnectParams + status mapping (pure helpers) --------------
 
-TEST_CASE("j2534::connect_params_for: KLine → ISO9141 + baud", "[transport][j2534_transport]") {
+TEST_CASE("j2534::connect_params_for: KLine -> ISO9141 + baud", "[transport][j2534_transport]") {
     st::transport::LinkConfig cfg{st::transport::LinkKind::KLine, 4800, 0, 0};
     auto r = j2534::connect_params_for(cfg);
     REQUIRE(r.has_value());
@@ -28,7 +28,7 @@ TEST_CASE("j2534::connect_params_for: KLine → ISO9141 + baud", "[transport][j2
     REQUIRE(r->flags == 0U);
 }
 
-TEST_CASE("j2534::connect_params_for: CanIso15765 → ISO15765 + baud",
+TEST_CASE("j2534::connect_params_for: CanIso15765 -> ISO15765 + baud",
           "[transport][j2534_transport]") {
     st::transport::LinkConfig cfg{st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8};
     auto r = j2534::connect_params_for(cfg);
@@ -37,7 +37,7 @@ TEST_CASE("j2534::connect_params_for: CanIso15765 → ISO15765 + baud",
     REQUIRE(r->baud == 500000U);
 }
 
-TEST_CASE("j2534::connect_params_for: CanFd → InvalidArgument (not in v04.04)",
+TEST_CASE("j2534::connect_params_for: CanFd -> InvalidArgument (not in v04.04)",
           "[transport][j2534_transport]") {
     st::transport::LinkConfig cfg{st::transport::LinkKind::CanFd, 2000000, 0, 0};
     auto r = j2534::connect_params_for(cfg);
@@ -52,12 +52,12 @@ TEST_CASE("j2534::connect_params_for: zero baud rejected", "[transport][j2534_tr
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("j2534::to_st_status: NoError → ok", "[transport][j2534_transport]") {
+TEST_CASE("j2534::to_st_status: NoError -> ok", "[transport][j2534_transport]") {
     auto r = j2534::to_st_status(j2534::Status::NoError);
     REQUIRE(r.has_value());
 }
 
-TEST_CASE("j2534::to_st_status: Timeout / BufferEmpty → TransportTimeout",
+TEST_CASE("j2534::to_st_status: Timeout / BufferEmpty -> TransportTimeout",
           "[transport][j2534_transport]") {
     auto a = j2534::to_st_status(j2534::Status::Timeout);
     auto b = j2534::to_st_status(j2534::Status::BufferEmpty);
@@ -67,21 +67,21 @@ TEST_CASE("j2534::to_st_status: Timeout / BufferEmpty → TransportTimeout",
     REQUIRE(b.error().code() == st::ErrorCode::TransportTimeout);
 }
 
-TEST_CASE("j2534::to_st_status: DeviceNotConnected → TransportUnavailable",
+TEST_CASE("j2534::to_st_status: DeviceNotConnected -> TransportUnavailable",
           "[transport][j2534_transport]") {
     auto r = j2534::to_st_status(j2534::Status::DeviceNotConnected);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::TransportUnavailable);
 }
 
-TEST_CASE("j2534::to_st_status: parameter-shape errors → InvalidArgument",
+TEST_CASE("j2534::to_st_status: parameter-shape errors -> InvalidArgument",
           "[transport][j2534_transport]") {
     auto r = j2534::to_st_status(j2534::Status::InvalidProtocolId);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("j2534::to_st_status: opaque vendor failure → TransportNack",
+TEST_CASE("j2534::to_st_status: opaque vendor failure -> TransportNack",
           "[transport][j2534_transport]") {
     auto r = j2534::to_st_status(j2534::Status::Failed);
     REQUIRE_FALSE(r.has_value());
@@ -126,7 +126,7 @@ struct FakeBackend {
     j2534::u32 last_write_protocol = 0;
 
     // Queue of payload bytes that the next read_msgs calls will
-    // return. Empty queue → returns the configured "no data" status
+    // return. Empty queue -> returns the configured "no data" status
     // (default BufferEmpty so the SUT's polling loop can still hit
     // its host-side deadline).
     std::deque<std::vector<std::uint8_t>> queued_reads;
@@ -143,7 +143,7 @@ struct FakeBackend {
     j2534::Status read_status_when_empty = j2534::Status::BufferEmpty;
     j2534::Status read_version_status = j2534::Status::NoError;
 
-    // Firmware string the fake ReadVersion returns. Empty → fake
+    // Firmware string the fake ReadVersion returns. Empty -> fake
     // skips the copy (still returns NoError) so we can verify the
     // SUT's empty-firmware path too.
     std::string firmware = "TestFW v1.0";
@@ -376,7 +376,7 @@ TEST_CASE("j2534::Transport: send_recv reports TransportTimeout when no "
     REQUIRE(elapsed >= milliseconds{20});
 }
 
-TEST_CASE("j2534::Transport: send_recv before open → TransportUnavailable",
+TEST_CASE("j2534::Transport: send_recv before open -> TransportUnavailable",
           "[transport][j2534_transport]") {
     ScopedBackend ctx;
     j2534::Transport t{j2534::J2534Library{make_full_table()}};
@@ -439,7 +439,7 @@ TEST_CASE("j2534::Transport: name() is 'J2534'", "[transport][j2534_transport]")
     REQUIRE(t.name() == "J2534");
 }
 
-TEST_CASE("j2534::Transport: missing core entry point → TransportUnavailable",
+TEST_CASE("j2534::Transport: missing core entry point -> TransportUnavailable",
           "[transport][j2534_transport]") {
     ScopedBackend ctx;
     auto table = make_full_table();

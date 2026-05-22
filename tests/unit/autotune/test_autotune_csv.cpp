@@ -207,7 +207,7 @@ TEST_CASE("read_maf_samples_csv: rates default to 50 ms period without time_ms",
     auto const r = at::read_maf_samples_csv(text);
     REQUIRE(r.has_value());
     REQUIRE(r->size() == 2);
-    // 50 ms default → 0.05 s. (2550 - 2500) / 0.05 = 1000 RPM/s.
+    // 50 ms default -> 0.05 s. (2550 - 2500) / 0.05 = 1000 RPM/s.
     CHECK((*r)[1].rpm_rate == Approx(1000.0));
     CHECK((*r)[1].throttle_rate == Approx(20.0));
 }
@@ -307,10 +307,10 @@ TEST_CASE("read_maf_samples_csv: integrates with tune_maf end-to-end", "[autotun
     auto const result = at::tune_maf(axis, current, *samples);
     REQUIRE(result.has_value());
     REQUIRE(result->cells.size() == 2);
-    // Lean cell → proposed > current (we report mean error > 1).
+    // Lean cell -> proposed > current (we report mean error > 1).
     CHECK(result->cells[0].mean_error > 1.0);
     CHECK(result->cells[0].proposed_value > result->cells[0].current_value);
-    // Stoich cell → unchanged within noise.
+    // Stoich cell -> unchanged within noise.
     CHECK(result->cells[1].mean_error == Approx(1.0));
     CHECK(result->cells[1].proposed_value == Approx(1.0));
 }
@@ -361,7 +361,7 @@ TEST_CASE("read_knock_samples_csv: optional limp_mode", "[autotune][csv][knock]"
     std::string text = "rpm,load,feedback_knock,coolant_c,iat_c,limp_mode\n"
                        "3000,2.5,-1.75,90,30,1\n"
                        "3000,2.5,-1.75,90,30,false\n"
-                       "3000,2.5,-1.75,90,30,\n"; // empty cell → false
+                       "3000,2.5,-1.75,90,30,\n"; // empty cell -> false
 
     auto const r = at::read_knock_samples_csv(text);
     REQUIRE(r.has_value());
@@ -411,10 +411,10 @@ TEST_CASE("read_knock_samples_csv: integrates with tune_knock_pull "
     auto const result = at::tune_knock_pull(rpm_axis, load_axis, current_timing, *samples);
     REQUIRE(result.has_value());
     REQUIRE(result->cells.size() == 2);
-    // Cell 0 (rpm=3000): no knock → unchanged.
+    // Cell 0 (rpm=3000): no knock -> unchanged.
     CHECK_FALSE(result->cells[0].pulled);
     CHECK(result->cells[0].proposed_value == Approx(20.0));
-    // Cell 1 (rpm=4000): sustained -2.0 < -1.5 trigger → pulled by 0.75.
+    // Cell 1 (rpm=4000): sustained -2.0 < -1.5 trigger -> pulled by 0.75.
     CHECK(result->cells[1].pulled);
     CHECK(result->cells[1].proposed_value == Approx(19.25));
 }

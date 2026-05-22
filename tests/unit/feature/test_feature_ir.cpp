@@ -57,7 +57,7 @@ TEST_CASE("ir::lower on an empty graph returns an empty module", "[feature][ir]"
     REQUIRE(m->instructions.empty());
 }
 
-TEST_CASE("ir::lower emits LoadHookInput → CallPrimitive → "
+TEST_CASE("ir::lower emits LoadHookInput -> CallPrimitive -> "
           "StoreHookOutput for the canonical splice shape",
           "[feature][ir]") {
     // hook.read_rpm provides RPM; primitive.passthrough consumes
@@ -156,8 +156,8 @@ TEST_CASE("ir::lower's operand_pin_names tracks pin reordering", "[feature][ir]"
     sub.pins.push_back(st::feature::Pin{2, "out", st::feature::PinType::Float,
                                         st::feature::PinDirection::Output, ""});
     auto const sid = g.add_node(std::move(sub));
-    REQUIRE(g.connect(src_a, 0, sid, 0).has_value()); // a→b slot
-    REQUIRE(g.connect(src_b, 0, sid, 1).has_value()); // b→a slot
+    REQUIRE(g.connect(src_a, 0, sid, 0).has_value()); // a->b slot
+    REQUIRE(g.connect(src_b, 0, sid, 1).has_value()); // b->a slot
 
     auto const m = st::feature::ir::lower(g);
     REQUIRE(m.has_value());
@@ -198,7 +198,7 @@ TEST_CASE("ir::lower refuses a graph that fails validate()", "[feature][ir]") {
 TEST_CASE("ir::estimate_cost adds per-op cycle counts", "[feature][ir]") {
     // Module from the canonical splice shape (LoadHookInput +
     // CallPrimitive + StoreHookOutput). The `passthrough` primitive
-    // is not in the per-symbol cost table → defaults to 3 cycles.
+    // is not in the per-symbol cost table -> defaults to 3 cycles.
     // Total: 2 + 3 + 2 = 7.
     st::feature::Graph g;
     auto const src =
@@ -345,7 +345,7 @@ TEST_CASE("ir::lint flags an RT-budget overrun", "[feature][ir][lint]") {
 }
 
 TEST_CASE("ir::lint flags duplicate StoreHookOutput", "[feature][ir][lint]") {
-    // Two source-only hooks → one shared sink hook with TWO Input
+    // Two source-only hooks -> one shared sink hook with TWO Input
     // pins of the same name forces the lowerer to emit two stores
     // to the same (symbol, pin_name). The lint should flag the
     // second occurrence and point at its instruction index.

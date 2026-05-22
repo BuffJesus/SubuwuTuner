@@ -15,12 +15,12 @@ namespace nat = st::transport::native;
 
 // ---- CRC-16/CCITT-FALSE -----------------------------------------
 
-TEST_CASE("native::crc16_ccitt_false: empty input → 0xFFFF (init)", "[transport][native]") {
+TEST_CASE("native::crc16_ccitt_false: empty input -> 0xFFFF (init)", "[transport][native]") {
     std::vector<std::uint8_t> empty;
     REQUIRE(nat::crc16_ccitt_false(std::span<std::uint8_t const>{empty}) == 0xFFFFU);
 }
 
-TEST_CASE("native::crc16_ccitt_false: '123456789' → 0x29B1 (RevEng vector)",
+TEST_CASE("native::crc16_ccitt_false: '123456789' -> 0x29B1 (RevEng vector)",
           "[transport][native]") {
     // Standard RevEng CRC-16/CCITT-FALSE check vector. If this
     // shifts we picked the wrong polynomial / init / reflection.
@@ -30,7 +30,7 @@ TEST_CASE("native::crc16_ccitt_false: '123456789' → 0x29B1 (RevEng vector)",
     REQUIRE(nat::crc16_ccitt_false(bytes) == 0x29B1U);
 }
 
-TEST_CASE("native::crc16_ccitt_false: single 0x00 byte → 0xE1F0", "[transport][native]") {
+TEST_CASE("native::crc16_ccitt_false: single 0x00 byte -> 0xE1F0", "[transport][native]") {
     // crc=0xFFFF, XOR with 0x00<<8 = 0xFFFF, then 8 left-shift +
     // conditional XOR with 0x1021 yields 0xE1F0. Independently
     // computable by hand or via any CRC-16/CCITT-FALSE reference.
@@ -122,28 +122,28 @@ std::vector<std::uint8_t> build_response_frame(std::uint8_t seq, std::uint8_t re
 }
 } // namespace
 
-TEST_CASE("native::decode_frame: too short (< 7 B) → ParseError", "[transport][native]") {
+TEST_CASE("native::decode_frame: too short (< 7 B) -> ParseError", "[transport][native]") {
     std::array<std::uint8_t, 6> short_buf{0xAAU, 0, 0, 0, 0, 0};
     auto r = nat::decode_frame(short_buf);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("native::decode_frame: wrong SOF byte → ParseError", "[transport][native]") {
+TEST_CASE("native::decode_frame: wrong SOF byte -> ParseError", "[transport][native]") {
     auto bytes = build_response_frame(0, 0x81U, {}); // SOF=AA, seq=0, op=Hello-response, len=0
     bytes[0] = 0x55U;
     auto r = nat::decode_frame(bytes);
     REQUIRE_FALSE(r.has_value());
 }
 
-TEST_CASE("native::decode_frame: bad CRC → ParseError", "[transport][native]") {
+TEST_CASE("native::decode_frame: bad CRC -> ParseError", "[transport][native]") {
     auto bytes = build_response_frame(0, 0x81U, {});
     bytes[bytes.size() - 1] ^= 0x01U; // flip the low CRC byte
     auto r = nat::decode_frame(bytes);
     REQUIRE_FALSE(r.has_value());
 }
 
-TEST_CASE("native::decode_frame: declared length overruns buffer → ParseError",
+TEST_CASE("native::decode_frame: declared length overruns buffer -> ParseError",
           "[transport][native]") {
     // Build a valid 7-byte frame, then claim 4-byte payload via the
     // length field. CRC over the now-broken header won't match
@@ -155,7 +155,7 @@ TEST_CASE("native::decode_frame: declared length overruns buffer → ParseError"
     REQUIRE_FALSE(r.has_value());
 }
 
-TEST_CASE("native::decode_frame: trailing bytes → ParseError", "[transport][native]") {
+TEST_CASE("native::decode_frame: trailing bytes -> ParseError", "[transport][native]") {
     auto bytes = build_response_frame(0, 0x81U, {});
     bytes.push_back(0xFFU);
     auto r = nat::decode_frame(bytes);
@@ -180,7 +180,7 @@ TEST_CASE("native::decode_frame: Hello response round-trips through Response",
     REQUIRE(rf->payload[5] == 0xFFU);
 }
 
-TEST_CASE("native::decode_frame: response with the response-bit cleared → ParseError",
+TEST_CASE("native::decode_frame: response with the response-bit cleared -> ParseError",
           "[transport][native]") {
     // op = 0x01 (request opcode) in the response slot — adapter
     // misconfiguration. Must not silently pass through as a request.
@@ -204,7 +204,7 @@ TEST_CASE("native::decode_frame: error frame parses out seq + request_op + err",
     REQUIRE(ef->error_code == 0x07U);
 }
 
-TEST_CASE("native::decode_frame: error frame with wrong payload length → ParseError",
+TEST_CASE("native::decode_frame: error frame with wrong payload length -> ParseError",
           "[transport][native]") {
     std::array<std::uint8_t, 2> payload{0x42U, 0x04U}; // missing err byte
     auto bytes = build_response_frame(0, nat::kErrorOpcode, payload);
@@ -226,7 +226,7 @@ TEST_CASE("native::decode_frame: event frame splits event_code + payload", "[tra
     REQUIRE(ev->payload[3] == 0xEFU);
 }
 
-TEST_CASE("native::decode_frame: empty event payload → ParseError", "[transport][native]") {
+TEST_CASE("native::decode_frame: empty event payload -> ParseError", "[transport][native]") {
     auto bytes = build_response_frame(0, nat::kEventOpcode, {});
     auto r = nat::decode_frame(bytes);
     REQUIRE_FALSE(r.has_value());

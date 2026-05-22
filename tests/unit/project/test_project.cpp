@@ -642,7 +642,7 @@ TEST_CASE("parse_edit_csv errors on cells outside table bounds", "[project][edit
 }
 
 TEST_CASE("parse_edit_csv skips bounds check when dims are zero", "[project][edit_csv]") {
-    // Both dims zero → bounds disabled. Caller validates separately.
+    // Both dims zero -> bounds disabled. Caller validates separately.
     st::EditCsvParseOptions opts;
     auto r = st::parse_edit_csv("0,0,1.0\n100,200,2.0\n", opts);
     REQUIRE(r.has_value());
