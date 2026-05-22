@@ -77,6 +77,13 @@ target_link_libraries(st_unit_tests
         Catch2::Catch2WithMain
 )
 
+# MSVC's strict mode (/WX) elevates C4996 to an error for strncpy /
+# sscanf / getenv / etc. Same posture as the cli/gui targets — see
+# src/cli/CMakeLists.txt for rationale.
+if (MSVC)
+    target_compile_definitions(st_unit_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
 # Private integration tests — exercise against locally-staged ROM
 # dumps in fixtures/private/. Source files are gitignored
 # (`.gitignore` whitelists only README + template); CONFIGURE_DEPENDS

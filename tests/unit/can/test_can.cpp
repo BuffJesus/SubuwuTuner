@@ -47,8 +47,8 @@ TEST_CASE("parse_asc handles a minimal single-frame log", "[can][asc][parse]") {
     REQUIRE(r.has_value());
     REQUIRE(r->size() == 1);
     auto const &f = r->front();
-    REQUIRE(f.timestamp_ns == 1'234'000); // 0.001234 s → 1234 µs → 1234000 ns
-    REQUIRE(f.bus == can_ns::BusId::Hs);  // channel 1 → bus 0
+    REQUIRE(f.timestamp_ns == 1'234'000); // 0.001234 s -> 1234 µs -> 1234000 ns
+    REQUIRE(f.bus == can_ns::BusId::Hs);  // channel 1 -> bus 0
     REQUIRE(f.id == 0x140);
     REQUIRE_FALSE(f.extended);
     REQUIRE_FALSE(f.remote);
@@ -113,7 +113,7 @@ TEST_CASE("parse_asc accepts zero-DLC (heartbeat) frames", "[can][asc][parse]") 
 }
 
 TEST_CASE("parse_asc rejects a frame line with too few data bytes", "[can][asc][parse][error]") {
-    // DLC=4 but only 2 bytes supplied — must surface a parse error.
+    // DLC=4 but only 2 bytes supplied -- must surface a parse error.
     constexpr std::string_view text = "   0.000000 1  140             Rx   d 4 11 22\n";
     auto const r = can_ns::parse_asc(text);
     REQUIRE_FALSE(r.has_value());

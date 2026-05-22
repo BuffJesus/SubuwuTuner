@@ -29,8 +29,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <charconv>
 #include <chrono>
+#include <cinttypes>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -2038,9 +2040,14 @@ int cmd_project_edit(int argc, char *argv[]) {
         } else if (!op.has_value()) {
             op = std::string{a};
         } else if (!value.has_value() && op != "smooth" && op != "interpolate") {
-            double d = 0.0;
-            auto const res = std::from_chars(a.data(), a.data() + a.size(), d);
-            if (res.ec == std::errc{} && res.ptr == a.data() + a.size()) {
+            // libc++ (Apple Clang) does not implement std::from_chars for
+            // floating-point types through LLVM 18, so route through
+            // std::strtod for portability.
+            std::string const buf{a};
+            char *end = nullptr;
+            errno = 0;
+            double const d = std::strtod(buf.c_str(), &end);
+            if (errno == 0 && end == buf.c_str() + buf.size() && !buf.empty()) {
                 value = d;
             } else if (!proj_path.has_value()) {
                 proj_path = std::filesystem::path{a};
@@ -3535,9 +3542,13 @@ int cmd_table_edit(int argc, char *argv[]) {
             op = std::string{a};
         } else if (!value.has_value() && op != "smooth" && op != "interpolate") {
             // Try parsing as a double; if it doesn't parse, treat as the ROM path.
-            double d = 0.0;
-            auto const res = std::from_chars(a.data(), a.data() + a.size(), d);
-            if (res.ec == std::errc{} && res.ptr == a.data() + a.size()) {
+            // libc++ on Apple Clang lacks from_chars(double) through LLVM 18,
+            // so this routes through std::strtod for portability.
+            std::string const buf{a};
+            char *end = nullptr;
+            errno = 0;
+            double const d = std::strtod(buf.c_str(), &end);
+            if (errno == 0 && end == buf.c_str() + buf.size() && !buf.empty()) {
                 value = d;
             } else if (!rom_path.has_value()) {
                 rom_path = std::filesystem::path{a};
@@ -5780,9 +5791,13 @@ int cmd_log(int argc, char *argv[]) {
     session.stop();
     out_stream->flush();
 
-    std::fprintf(stderr, "log: cycles=%llu  drops=%llu  io_errors=%llu  channels=%zu\n",
-                 session.cycles_completed(), session.stream().dropped_count(), session.io_errors(),
-                 channels.size());
+    // %llu doesn't match std::uint64_t on Linux (where it's unsigned long, not
+    // unsigned long long). PRIu64 from <cinttypes> expands to the right width
+    // per platform — Clang's -Wformat enforces the match.
+    std::fprintf(
+        stderr, "log: cycles=%" PRIu64 "  drops=%" PRIu64 "  io_errors=%" PRIu64 "  channels=%zu\n",
+        session.cycles_completed(), session.stream().dropped_count(), session.io_errors(),
+        channels.size());
     return 0;
 }
 
@@ -7750,8 +7765,8 @@ int cmd_flash_resume(int argc, char *argv[]) {
 // unchanged. The implementation now lives in
 // src/transport/src/uds_trace.cpp so the GUI can call it too —
 // see Tools → Read ROM from Car's Trace-replay mode.
-using st::transport::UdsTracePair;
 using st::transport::parse_uds_trace;
+using st::transport::UdsTracePair;
 
 namespace {
 // Print the FlashReport from a successful or failed ExecuteOutcome. Shared
@@ -8997,7 +9012,7 @@ int cmd_feature_compile(int argc, char *argv[]) {
         // map through select_backend()'s VA/VB recognizer.
         std::string a = *arch_override;
         std::transform(a.begin(), a.end(), a.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (a == "sh2a") {
             backend = std::make_unique<st::feature::codegen::Sh2aBackend>();
         } else if (a == "rh850") {

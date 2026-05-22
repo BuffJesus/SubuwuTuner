@@ -29,7 +29,7 @@ std::vector<double> flatten(std::initializer_list<std::initializer_list<double>>
     return out;
 }
 
-// Simple H4 mapping: 6 PIDs — rpm, load, flkc1..4
+// Simple H4 mapping: 6 PIDs -- rpm, load, flkc1..4
 PidMapping h4_mapping() {
     PidMapping m{};
     m.cylinder_count = 4;
@@ -76,12 +76,12 @@ TEST_CASE("snapshot_from_samples gates out samples below min_rpm", "[knock][snap
     auto const s = snapshot_from_samples(samples, 6, m, c);
     REQUIRE(s.samples_gated_out == 2);
     REQUIRE(s.samples_considered == 2);
-    // cyl 0: window samples -2, -4 → mean -3, min -4
+    // cyl 0: window samples -2, -4 -> mean -3, min -4
     REQUIRE_THAT(s.per_cyl[0].mean_flkc_window, WithinAbs(-3.0, 1e-9));
     REQUIRE_THAT(s.per_cyl[0].min_flkc_window, WithinAbs(-4.0, 1e-9));
     // current = last sample
     REQUIRE_THAT(s.per_cyl[0].current_flkc, WithinAbs(-4.0, 1e-9));
-    // cyl 3: window samples 0, 0 → mean 0
+    // cyl 3: window samples 0, 0 -> mean 0
     REQUIRE_THAT(s.per_cyl[3].mean_flkc_window, WithinAbs(0.0, 1e-9));
 }
 
@@ -94,7 +94,7 @@ TEST_CASE("snapshot_from_samples computes delta from all-cyl mean", "[knock][sna
         {2500.0, 2.0, -4.0, -2.0, 0.0, 0.0},
     });
     auto const s = snapshot_from_samples(samples, 6, m, c);
-    // means: -4, -2, 0, 0 → grand mean = -1.5
+    // means: -4, -2, 0, 0 -> grand mean = -1.5
     // deltas: -2.5, -0.5, +1.5, +1.5
     REQUIRE_THAT(s.per_cyl[0].delta_from_cyl_mean, WithinAbs(-2.5, 1e-9));
     REQUIRE_THAT(s.per_cyl[1].delta_from_cyl_mean, WithinAbs(-0.5, 1e-9));

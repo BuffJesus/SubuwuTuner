@@ -18,17 +18,17 @@ TEST_CASE("dvi::checksum: empty span sums to 0, NOT'd to 0xFF", "[transport][obd
     REQUIRE(dvi::checksum(std::span<std::uint8_t const>{empty}) == 0xFFU);
 }
 
-TEST_CASE("dvi::checksum: single 0x00 → 0xFF", "[transport][obdx_dvi]") {
+TEST_CASE("dvi::checksum: single 0x00 -> 0xFF", "[transport][obdx_dvi]") {
     std::array<std::uint8_t, 1> one{0x00};
     REQUIRE(dvi::checksum(one) == 0xFFU);
 }
 
-TEST_CASE("dvi::checksum: single 0xFF → 0x00", "[transport][obdx_dvi]") {
+TEST_CASE("dvi::checksum: single 0xFF -> 0x00", "[transport][obdx_dvi]") {
     std::array<std::uint8_t, 1> one{0xFFU};
     REQUIRE(dvi::checksum(one) == 0x00U);
 }
 
-TEST_CASE("dvi::checksum: 0x22 0x01 → ~(0x23)=0xDC", "[transport][obdx_dvi]") {
+TEST_CASE("dvi::checksum: 0x22 0x01 -> ~(0x23)=0xDC", "[transport][obdx_dvi]") {
     // ScantoolInfo (0x22) + sub-op 0x01 (HW string request payload byte)
     // is a real shape we'll send. Sum = 0x23, NOT = 0xDC.
     std::array<std::uint8_t, 2> bytes{0x22U, 0x01U};
@@ -107,7 +107,7 @@ TEST_CASE("dvi::encode_request: frame round-trips through decode_frame "
     // The codec doesn't distinguish request-from-response at the
     // framing layer; the bytes have identical structure. Encoding a
     // request and decoding it as a frame should recover the same
-    // payload — sanity check that both halves use the same length-
+    // payload -- sanity check that both halves use the same length-
     // width + checksum conventions.
     std::array<std::uint8_t, 4> payload{0xDE, 0xAD, 0xBE, 0xEF};
     auto enc = dvi::encode_request(dvi::Opcode::Settings, payload);
@@ -123,14 +123,15 @@ TEST_CASE("dvi::encode_request: frame round-trips through decode_frame "
 
 // ---- decode_frame ------------------------------------------------
 
-TEST_CASE("dvi::decode_frame: truncated buffer (< 3 bytes) → ParseError", "[transport][obdx_dvi]") {
+TEST_CASE("dvi::decode_frame: truncated buffer (< 3 bytes) -> ParseError",
+          "[transport][obdx_dvi]") {
     std::array<std::uint8_t, 2> too_short{0x22U, 0x00U};
     auto r = dvi::decode_frame(too_short);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("dvi::decode_frame: bad checksum → ParseError", "[transport][obdx_dvi]") {
+TEST_CASE("dvi::decode_frame: bad checksum -> ParseError", "[transport][obdx_dvi]") {
     // [0x22, 0x00, 0xDD] is valid; [0x22, 0x00, 0xDE] differs by 1.
     std::array<std::uint8_t, 3> bad{0x22U, 0x00U, 0xDEU};
     auto r = dvi::decode_frame(bad);
@@ -138,7 +139,7 @@ TEST_CASE("dvi::decode_frame: bad checksum → ParseError", "[transport][obdx_dv
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("dvi::decode_frame: declared-length overruns buffer → ParseError",
+TEST_CASE("dvi::decode_frame: declared-length overruns buffer -> ParseError",
           "[transport][obdx_dvi]") {
     // Claims 4-byte payload but the buffer doesn't carry that many.
     std::array<std::uint8_t, 3> short_frame{0x22U, 0x04U, 0xD9U};
@@ -147,7 +148,7 @@ TEST_CASE("dvi::decode_frame: declared-length overruns buffer → ParseError",
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("dvi::decode_frame: extra trailing bytes → ParseError", "[transport][obdx_dvi]") {
+TEST_CASE("dvi::decode_frame: extra trailing bytes -> ParseError", "[transport][obdx_dvi]") {
     // The decoder requires `bytes` to be exactly one frame.
     // [0x22, 0x00, 0xDD] is a valid 3-byte frame; appending a stray
     // byte should fail (stream reassembly is a higher-layer concern).
@@ -171,7 +172,7 @@ TEST_CASE("dvi::decode_frame: error frame parses out request_op + error_code",
     REQUIRE(ef->error_code == 0x04U);
 }
 
-TEST_CASE("dvi::decode_frame: error frame with wrong LEN → ParseError", "[transport][obdx_dvi]") {
+TEST_CASE("dvi::decode_frame: error frame with wrong LEN -> ParseError", "[transport][obdx_dvi]") {
     // Error frames must declare LEN=2 (CMD + ERR). LEN=3 is malformed.
     // Build with a payload that satisfies length-field math + checksum
     // so we don't trip the size check first.
@@ -189,7 +190,7 @@ TEST_CASE("dvi::decode_frame: 2-byte-length response for RxLarge", "[transport][
     // payload to verify length parsing.
     // bytes: [0x19, 0x00, 0x04, 0xAA, 0xBB, 0xCC, 0xDD, CHK]
     // sum = 0x19 + 0x00 + 0x04 + 0xAA + 0xBB + 0xCC + 0xDD = 0x32B
-    //     → low byte 0x2B; chk = ~0x2B = 0xD4.
+    //     -> low byte 0x2B; chk = ~0x2B = 0xD4.
     std::array<std::uint8_t, 8> frame{0x19U, 0x00U, 0x04U, 0xAAU, 0xBBU, 0xCCU, 0xDDU, 0xD4U};
     auto r = dvi::decode_frame(frame);
     REQUIRE(r.has_value());

@@ -89,13 +89,18 @@ Result<std::vector<std::uint8_t>> parse_rdbi_response(std::span<std::uint8_t con
 
 std::vector<std::uint8_t> build_wdbi_request(std::uint16_t did,
                                              std::span<std::uint8_t const> data) {
-    // Size-initialised + indexed writes avoid a GCC 15 -O3 false positive
-    // for -Wfree-nonheap-object on the reserve+push_back+insert pattern.
-    std::vector<std::uint8_t> out(3 + data.size());
-    out[0] = kSidWriteDataByIdentifier;
-    out[1] = static_cast<std::uint8_t>((did >> 8) & 0xFFU);
-    out[2] = static_cast<std::uint8_t>(did & 0xFFU);
-    std::copy(data.begin(), data.end(), out.begin() + 3);
+    // Init-list construction + insert avoids two distinct GCC false positives:
+    // -Wnull-dereference on `out[N] = ...` after sized-init (GCC 13) and
+    // -Wfree-nonheap-object on reserve+push_back (GCC 15). The init-list
+    // constructor makes `out` non-empty by construction, so GCC's null-
+    // analysis sees the storage as definitely allocated.
+    std::vector<std::uint8_t> out{
+        kSidWriteDataByIdentifier,
+        static_cast<std::uint8_t>((did >> 8) & 0xFFU),
+        static_cast<std::uint8_t>(did & 0xFFU),
+    };
+    out.reserve(3 + data.size());
+    out.insert(out.end(), data.begin(), data.end());
     return out;
 }
 
@@ -142,11 +147,10 @@ Result<std::vector<std::uint8_t>> parse_security_access_seed(std::span<std::uint
 
 std::vector<std::uint8_t> build_security_access_send_key(std::uint8_t sub_function,
                                                          std::span<std::uint8_t const> key) {
-    // See build_wdbi_request — same GCC -O3 workaround.
-    std::vector<std::uint8_t> out(2 + key.size());
-    out[0] = kSidSecurityAccess;
-    out[1] = sub_function;
-    std::copy(key.begin(), key.end(), out.begin() + 2);
+    // See build_wdbi_request — same GCC false-positive workaround.
+    std::vector<std::uint8_t> out{kSidSecurityAccess, sub_function};
+    out.reserve(2 + key.size());
+    out.insert(out.end(), key.begin(), key.end());
     return out;
 }
 
@@ -320,10 +324,10 @@ Result<std::uint32_t> parse_request_download_response(std::span<std::uint8_t con
 
 std::vector<std::uint8_t> build_transfer_data(std::uint8_t block_sequence_counter,
                                               std::span<std::uint8_t const> data) {
-    std::vector<std::uint8_t> out(2 + data.size());
-    out[0] = kSidTransferData;
-    out[1] = block_sequence_counter;
-    std::copy(data.begin(), data.end(), out.begin() + 2);
+    // See build_wdbi_request — same GCC false-positive workaround.
+    std::vector<std::uint8_t> out{kSidTransferData, block_sequence_counter};
+    out.reserve(2 + data.size());
+    out.insert(out.end(), data.begin(), data.end());
     return out;
 }
 
@@ -368,12 +372,15 @@ Status parse_request_transfer_exit_response(std::span<std::uint8_t const> resp) 
 
 std::vector<std::uint8_t> build_routine_control(std::uint8_t sub_function, std::uint16_t routine_id,
                                                 std::span<std::uint8_t const> option_record) {
-    std::vector<std::uint8_t> out(4 + option_record.size());
-    out[0] = kSidRoutineControl;
-    out[1] = sub_function;
-    out[2] = static_cast<std::uint8_t>((routine_id >> 8) & 0xFFU);
-    out[3] = static_cast<std::uint8_t>(routine_id & 0xFFU);
-    std::copy(option_record.begin(), option_record.end(), out.begin() + 4);
+    // See build_wdbi_request — same GCC false-positive workaround.
+    std::vector<std::uint8_t> out{
+        kSidRoutineControl,
+        sub_function,
+        static_cast<std::uint8_t>((routine_id >> 8) & 0xFFU),
+        static_cast<std::uint8_t>(routine_id & 0xFFU),
+    };
+    out.reserve(4 + option_record.size());
+    out.insert(out.end(), option_record.begin(), option_record.end());
     return out;
 }
 

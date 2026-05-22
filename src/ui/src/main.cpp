@@ -63,7 +63,7 @@ namespace {
 // body can use it. Definition lives near the other text helpers
 // further down (text_centered_disabled, text_centered_subtle).
 #if defined(__GNUC__)
-[[gnu::format(gnu_printf, 1, 2)]]
+[[gnu::format(printf, 1, 2)]]
 #endif
 void text_subtle(char const *fmt, ...);
 
@@ -437,10 +437,10 @@ enum class ConfirmAction {
 // state + render helper so both call sites share the same UX + parsing
 // + spec-construction code path.
 struct AdapterPickerState {
-    int kind_idx{1};                 // 0=J2534, 1=OBDX, 2=Native, 3=Trace (test)
-    char device_path[256]{"COM5"};   // OBDX/Native; J2534/Trace hide this field
-    char dll_path[1024]{};           // J2534 vendor DLL; others hide this
-    char trace_path[1024]{};         // Trace (test) file path; others hide
+    int kind_idx{1};               // 0=J2534, 1=OBDX, 2=Native, 3=Trace (test)
+    char device_path[256]{"COM5"}; // OBDX/Native; J2534/Trace hide this field
+    char dll_path[1024]{};         // J2534 vendor DLL; others hide this
+    char trace_path[1024]{};       // Trace (test) file path; others hide
 };
 
 // Returns true if `s` selects the trace-replay test mode (no real
@@ -469,19 +469,17 @@ struct AdapterPickerState {
     if (s.kind_idx == 3) {
         ImGui::InputText("Trace file (.uds)", s.trace_path, sizeof s.trace_path);
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(
-                "Path to a UDS trace file ('> req' / '< resp' pairs).\n"
-                "Lets you smoke-test the flow without an adapter — feeds\n"
-                "the canned exchanges into a MockTransport. Use this for\n"
-                "pre-OBDX testing or for replaying a recorded session.");
+            ImGui::SetTooltip("Path to a UDS trace file ('> req' / '< resp' pairs).\n"
+                              "Lets you smoke-test the flow without an adapter — feeds\n"
+                              "the canned exchanges into a MockTransport. Use this for\n"
+                              "pre-OBDX testing or for replaying a recorded session.");
         }
         return s.trace_path[0] != '\0';
     }
     ImGui::InputText("Device path", s.device_path, sizeof s.device_path);
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(
-            "USB CDC port for the adapter.\n"
-            "Windows: COM5, COM6 etc.   Linux: /dev/ttyACM0.");
+        ImGui::SetTooltip("USB CDC port for the adapter.\n"
+                          "Windows: COM5, COM6 etc.   Linux: /dev/ttyACM0.");
     }
     return s.device_path[0] != '\0';
 }
@@ -495,15 +493,20 @@ struct AdapterPickerState {
 adapter_picker_to_spec(AdapterPickerState const &s) {
     st::transport::TransportSpec spec;
     switch (s.kind_idx) {
-    case 0:  spec.kind = st::transport::Kind::J2534; break;
-    case 2:  spec.kind = st::transport::Kind::Native; break;
-    default: spec.kind = st::transport::Kind::Obdx; break;
+    case 0:
+        spec.kind = st::transport::Kind::J2534;
+        break;
+    case 2:
+        spec.kind = st::transport::Kind::Native;
+        break;
+    default:
+        spec.kind = st::transport::Kind::Obdx;
+        break;
     }
     spec.dll_path = s.dll_path;
     spec.device_path = s.device_path;
     return spec;
 }
-
 
 struct AppState {
     std::optional<st::Project> project;
@@ -824,11 +827,11 @@ struct AppState {
     // never blocks on the worker except at join time (status transition).
     bool show_read_rom_modal{false};
     enum class ReadRomState : std::uint8_t {
-        Idle,       // form entry, no worker thread
-        Running,    // worker reading; progress + cancel atomics live
-        Done,       // worker finished OK; bytes_result has the dump
-        Failed,     // worker errored; error_msg set
-        Cancelled,  // user-initiated abort; nothing to save
+        Idle,      // form entry, no worker thread
+        Running,   // worker reading; progress + cancel atomics live
+        Done,      // worker finished OK; bytes_result has the dump
+        Failed,    // worker errored; error_msg set
+        Cancelled, // user-initiated abort; nothing to save
     };
     ReadRomState read_rom_state{ReadRomState::Idle};
     // Adapter form inputs (shared shape with the future write-rom flow —
@@ -978,7 +981,6 @@ write_current_table_csv(AppState const &state, std::filesystem::path const &path
     out << "# pack_id = \"" << state.project->definition().pack().id << "\"\n";
     out << "# table   = \"" << table->id << "\"\n";
     out << "row,col,value\n";
-    std::size_t emitted = 0;
     char buf[64];
     for (std::size_t r = 0; r < working_td->values.size(); ++r) {
         for (std::size_t c = 0; c < working_td->values[r].size(); ++c) {
@@ -991,7 +993,6 @@ write_current_table_csv(AppState const &state, std::filesystem::path const &path
             }
             std::snprintf(buf, sizeof buf, "%zu,%zu,%.*f\n", r, c, prec, v);
             out << buf;
-            ++emitted;
         }
     }
     if (!out) {
@@ -3625,19 +3626,16 @@ void render_read_rom_modal(AppState &state) {
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
         ImGui::InputText("Base address (hex)", state.read_rom_base_addr_hex,
                          sizeof state.read_rom_base_addr_hex);
-        ImGui::InputText("Size (hex)", state.read_rom_size_hex,
-                         sizeof state.read_rom_size_hex);
-        ImGui::InputInt("Max chunk size (bytes)", &state.read_rom_max_chunk,
-                        16, 64);
+        ImGui::InputText("Size (hex)", state.read_rom_size_hex, sizeof state.read_rom_size_hex);
+        ImGui::InputInt("Max chunk size (bytes)", &state.read_rom_max_chunk, 16, 64);
         if (state.read_rom_max_chunk < 16)
             state.read_rom_max_chunk = 16;
         if (state.read_rom_max_chunk > 0x1000)
             state.read_rom_max_chunk = 0x1000;
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(
-                "Bytes per UDS ReadMemoryByAddress request.\n"
-                "256 is the safe default on Subaru SH-2A. Some\n"
-                "adapters tolerate up to 4096.");
+            ImGui::SetTooltip("Bytes per UDS ReadMemoryByAddress request.\n"
+                              "256 is the safe default on Subaru SH-2A. Some\n"
+                              "adapters tolerate up to 4096.");
         }
 
         // Pre-run errors (typically a parse failure from a previous click).
@@ -3655,33 +3653,33 @@ void render_read_rom_modal(AppState &state) {
         if (ImGui::Button("Read", ImVec2(120.0f, 0.0f))) {
             // ----- parse form inputs into runtime values -----
             auto parse_hex_u32 = [](char const *s, std::uint32_t &out) {
-                if (s == nullptr || s[0] == '\0') return false;
+                if (s == nullptr || s[0] == '\0')
+                    return false;
                 char *end = nullptr;
                 unsigned long v = std::strtoul(s, &end, 0); // base=0 picks 0x or decimal
-                if (end == s || *end != '\0') return false;
-                if (v > 0xFFFFFFFFul) return false;
+                if (end == s || *end != '\0')
+                    return false;
+                if (v > 0xFFFFFFFFul)
+                    return false;
                 out = static_cast<std::uint32_t>(v);
                 return true;
             };
             std::uint32_t base_addr = 0, size = 0;
             if (!parse_hex_u32(state.read_rom_base_addr_hex, base_addr)) {
-                state.read_rom_error_msg =
-                    "Base address: parse failed (use 0xNNN or decimal).";
+                state.read_rom_error_msg = "Base address: parse failed (use 0xNNN or decimal).";
             } else if (!parse_hex_u32(state.read_rom_size_hex, size)) {
-                state.read_rom_error_msg =
-                    "Size: parse failed (use 0xNNN or decimal).";
+                state.read_rom_error_msg = "Size: parse failed (use 0xNNN or decimal).";
             } else if (size == 0) {
                 state.read_rom_error_msg = "Size must be > 0.";
             } else {
                 bool const trace_mode = adapter_is_trace_mode(state.read_rom_adapter);
                 // Real-transport branch builds a spec for open_transport;
                 // trace branch carries the file path (worker loads it).
-                st::transport::TransportSpec spec = trace_mode
-                    ? st::transport::TransportSpec{}
-                    : adapter_picker_to_spec(state.read_rom_adapter);
-                std::string trace_path_str = trace_mode
-                    ? std::string{state.read_rom_adapter.trace_path}
-                    : std::string{};
+                st::transport::TransportSpec spec =
+                    trace_mode ? st::transport::TransportSpec{}
+                               : adapter_picker_to_spec(state.read_rom_adapter);
+                std::string trace_path_str =
+                    trace_mode ? std::string{state.read_rom_adapter.trace_path} : std::string{};
 
                 state.read_rom_error_msg.clear();
                 state.read_rom_bytes_result.clear();
@@ -3697,94 +3695,86 @@ void render_read_rom_modal(AppState &state) {
                 auto total_sp = state.read_rom_total_bytes;
                 auto cancel_sp = state.read_rom_cancel;
 
-                state.read_rom_worker = std::thread(
-                    [st_ptr, spec, trace_mode, trace_path_str, base_addr, size,
-                     max_chunk, bytes_done_sp, total_sp, cancel_sp]() mutable {
-                        // Owning storage. Trace-mode keeps a stack MockTransport;
-                        // real-mode owns the unique_ptr from the factory.
-                        st::transport::MockTransport mock;
-                        std::unique_ptr<st::transport::ITransport> owned;
-                        st::transport::ITransport *chosen = nullptr;
+                state.read_rom_worker = std::thread([st_ptr, spec, trace_mode, trace_path_str,
+                                                     base_addr, size, max_chunk, bytes_done_sp,
+                                                     total_sp, cancel_sp]() mutable {
+                    // Owning storage. Trace-mode keeps a stack MockTransport;
+                    // real-mode owns the unique_ptr from the factory.
+                    st::transport::MockTransport mock;
+                    std::unique_ptr<st::transport::ITransport> owned;
+                    st::transport::ITransport *chosen = nullptr;
 
-                        if (trace_mode) {
-                            std::vector<st::transport::UdsTracePair> pairs;
-                            std::string err;
-                            if (!st::transport::parse_uds_trace(
-                                    std::filesystem::path{trace_path_str}, pairs, err)) {
-                                st_ptr->read_rom_error_msg = std::move(err);
-                                st_ptr->read_rom_state = AppState::ReadRomState::Failed;
-                                return;
-                            }
-                            if (auto s = mock.open({}); !s.has_value()) {
-                                st_ptr->read_rom_error_msg =
-                                    "MockTransport open failed: " +
-                                    std::string{s.error().message()};
-                                st_ptr->read_rom_state = AppState::ReadRomState::Failed;
-                                return;
-                            }
-                            for (auto &p : pairs) {
-                                mock.expect_send_recv(std::move(p.request),
-                                                      std::move(p.response));
-                            }
-                            chosen = &mock;
-                        } else {
-                            auto transport_r = st::transport::open_transport(spec);
-                            if (!transport_r.has_value()) {
-                                st_ptr->read_rom_error_msg =
-                                    "Adapter open failed: " +
-                                    std::string{transport_r.error().message()};
-                                st_ptr->read_rom_state = AppState::ReadRomState::Failed;
-                                return;
-                            }
-                            // The OBDX/Native paths are fully wired via Win32
-                            // serial (CreateFileA on \\.\COMx) — a bad device
-                            // path surfaces a real Win32 error. What's
-                            // empirically unverified is the OBDX DVI codec +
-                            // UDS handshake against real adapter firmware.
-                            auto open_r = (*transport_r)->open({});
-                            if (!open_r.has_value()) {
-                                st_ptr->read_rom_error_msg =
-                                    "Adapter link open failed: " +
-                                    std::string{open_r.error().message()};
-                                st_ptr->read_rom_state = AppState::ReadRomState::Failed;
-                                return;
-                            }
-                            owned = std::move(*transport_r);
-                            chosen = owned.get();
-                        }
-
-                        st::flash::Flasher flasher{*chosen};
-                        auto result = flasher.read_full_rom(
-                            base_addr, size, static_cast<std::uint32_t>(max_chunk),
-                            std::chrono::milliseconds{1500},
-                            [bytes_done_sp, total_sp](st::flash::Flasher::ReadProgress p) {
-                                bytes_done_sp->store(p.bytes_done,
-                                                     std::memory_order_release);
-                                total_sp->store(p.total_bytes,
-                                                std::memory_order_release);
-                            },
-                            cancel_sp.get());
-                        if (!result.has_value()) {
-                            if (result.error().code() == st::ErrorCode::Cancelled) {
-                                st_ptr->read_rom_state = AppState::ReadRomState::Cancelled;
-                                return;
-                            }
-                            st_ptr->read_rom_error_msg =
-                                std::string{result.error().message()};
+                    if (trace_mode) {
+                        std::vector<st::transport::UdsTracePair> pairs;
+                        std::string err;
+                        if (!st::transport::parse_uds_trace(std::filesystem::path{trace_path_str},
+                                                            pairs, err)) {
+                            st_ptr->read_rom_error_msg = std::move(err);
                             st_ptr->read_rom_state = AppState::ReadRomState::Failed;
                             return;
                         }
-                        st_ptr->read_rom_bytes_result = std::move(*result);
-                        st_ptr->read_rom_state = AppState::ReadRomState::Done;
-                    });
+                        if (auto s = mock.open({}); !s.has_value()) {
+                            st_ptr->read_rom_error_msg =
+                                "MockTransport open failed: " + std::string{s.error().message()};
+                            st_ptr->read_rom_state = AppState::ReadRomState::Failed;
+                            return;
+                        }
+                        for (auto &p : pairs) {
+                            mock.expect_send_recv(std::move(p.request), std::move(p.response));
+                        }
+                        chosen = &mock;
+                    } else {
+                        auto transport_r = st::transport::open_transport(spec);
+                        if (!transport_r.has_value()) {
+                            st_ptr->read_rom_error_msg = "Adapter open failed: " +
+                                                         std::string{transport_r.error().message()};
+                            st_ptr->read_rom_state = AppState::ReadRomState::Failed;
+                            return;
+                        }
+                        // The OBDX/Native paths are fully wired via Win32
+                        // serial (CreateFileA on \\.\COMx) — a bad device
+                        // path surfaces a real Win32 error. What's
+                        // empirically unverified is the OBDX DVI codec +
+                        // UDS handshake against real adapter firmware.
+                        auto open_r = (*transport_r)->open({});
+                        if (!open_r.has_value()) {
+                            st_ptr->read_rom_error_msg = "Adapter link open failed: " +
+                                                         std::string{open_r.error().message()};
+                            st_ptr->read_rom_state = AppState::ReadRomState::Failed;
+                            return;
+                        }
+                        owned = std::move(*transport_r);
+                        chosen = owned.get();
+                    }
+
+                    st::flash::Flasher flasher{*chosen};
+                    auto result = flasher.read_full_rom(
+                        base_addr, size, static_cast<std::uint32_t>(max_chunk),
+                        std::chrono::milliseconds{1500},
+                        [bytes_done_sp, total_sp](st::flash::Flasher::ReadProgress p) {
+                            bytes_done_sp->store(p.bytes_done, std::memory_order_release);
+                            total_sp->store(p.total_bytes, std::memory_order_release);
+                        },
+                        cancel_sp.get());
+                    if (!result.has_value()) {
+                        if (result.error().code() == st::ErrorCode::Cancelled) {
+                            st_ptr->read_rom_state = AppState::ReadRomState::Cancelled;
+                            return;
+                        }
+                        st_ptr->read_rom_error_msg = std::string{result.error().message()};
+                        st_ptr->read_rom_state = AppState::ReadRomState::Failed;
+                        return;
+                    }
+                    st_ptr->read_rom_bytes_result = std::move(*result);
+                    st_ptr->read_rom_state = AppState::ReadRomState::Done;
+                });
             }
         }
         ImGui::EndDisabled();
         if (start_disabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            char const *const which =
-                state.read_rom_adapter.kind_idx == 0   ? "vendor DLL path"
-                : state.read_rom_adapter.kind_idx == 3 ? "trace file path"
-                                                       : "device path";
+            char const *const which = state.read_rom_adapter.kind_idx == 0   ? "vendor DLL path"
+                                      : state.read_rom_adapter.kind_idx == 3 ? "trace file path"
+                                                                             : "device path";
             ImGui::SetTooltip("Fill in the %s field above.", which);
         }
         ImGui::SameLine();
@@ -3801,12 +3791,10 @@ void render_read_rom_modal(AppState &state) {
     if (state.read_rom_state == AppState::ReadRomState::Running) {
         std::uint32_t const done = state.read_rom_bytes_done->load(std::memory_order_acquire);
         std::uint32_t const total = state.read_rom_total_bytes->load(std::memory_order_acquire);
-        float const frac = total > 0
-            ? static_cast<float>(done) / static_cast<float>(total)
-            : 0.0f;
+        float const frac = total > 0 ? static_cast<float>(done) / static_cast<float>(total) : 0.0f;
         char overlay[64];
-        std::snprintf(overlay, sizeof overlay, "0x%X / 0x%X  (%.1f%%)",
-                      done, total, static_cast<double>(100.0f * frac));
+        std::snprintf(overlay, sizeof overlay, "0x%X / 0x%X  (%.1f%%)", done, total,
+                      static_cast<double>(100.0f * frac));
         ImGui::ProgressBar(frac, ImVec2(-1.0f, 0.0f), overlay);
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
         ImGui::Text("Elapsed: %s", elapsed_str().c_str());
@@ -3826,15 +3814,18 @@ void render_read_rom_modal(AppState &state) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.85f, 0.55f, 1.0f));
         ImGui::TextUnformatted("Read complete.");
         ImGui::PopStyleColor();
-        ImGui::Text("Got %zu bytes in %s.",
-                    state.read_rom_bytes_result.size(), elapsed_str().c_str());
+        ImGui::Text("Got %zu bytes in %s.", state.read_rom_bytes_result.size(),
+                    elapsed_str().c_str());
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
 
         if (ImGui::Button("Save .bin...", ImVec2(160.0f, 0.0f))) {
             NFD::UniquePath out_path;
             nfdfilteritem_t const filters[] = {{"ROM image", "bin,hex"}};
-            // Suggest a name from base+size for traceability.
-            char default_name[64];
+            // Suggest a name from base+size for traceability. Buffer sized
+            // for the literal prefix + two hex strings up to 31 chars each
+            // (the actual struct field widths) — GCC -Wformat-truncation
+            // computes the worst-case as ~72 B, so 128 is comfortable.
+            char default_name[128];
             std::snprintf(default_name, sizeof default_name, "rom_%s_%s.bin",
                           state.read_rom_base_addr_hex, state.read_rom_size_hex);
             nfdresult_t const r = NFD::SaveDialog(out_path, filters, 1, nullptr, default_name);
@@ -3860,8 +3851,7 @@ void render_read_rom_modal(AppState &state) {
                     }
                 }
             } else if (r == NFD_ERROR) {
-                state.read_rom_error_msg =
-                    std::string{"Save dialog error: "} + NFD::GetError();
+                state.read_rom_error_msg = std::string{"Save dialog error: "} + NFD::GetError();
             }
         }
         ImGui::SameLine();
@@ -3900,7 +3890,6 @@ void render_read_rom_modal(AppState &state) {
     }
     ImGui::EndPopup();
 }
-
 
 constexpr float kStatusBarHeight = 26.0f;
 
@@ -4112,11 +4101,10 @@ void render_menubar(AppState &state) {
                 state.show_read_rom_modal = true;
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip(
-                    "Dump the ECU's current calibration via the connected\n"
-                    "USB adapter (OBDX / J2534 / Native). Read-only — no\n"
-                    "ECU writes. Saves to a .bin you can then open as a\n"
-                    "new project via File → New project...");
+                ImGui::SetTooltip("Dump the ECU's current calibration via the connected\n"
+                                  "USB adapter (OBDX / J2534 / Native). Read-only — no\n"
+                                  "ECU writes. Saves to a .bin you can then open as a\n"
+                                  "new project via File → New project...");
             }
             // Future: "Write ROM to Car..." (see plan comment above
             // render_read_rom_modal). Wired after OBDX adapter validation
@@ -4973,14 +4961,25 @@ void text_centered_disabled(char const *text) {
 // format attribute at all, so existing call sites with %zu
 // already work — we annotate ours for the catch-mismatched-types
 // benefit + match the gnu_printf semantics those sites assume.
-[[gnu::format(gnu_printf, 1, 2)]]
+[[gnu::format(printf, 1, 2)]]
 #endif
 void text_subtle(char const *fmt, ...) {
     auto const c = ImGui::GetStyleColorVec4(ImGuiCol_Text);
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(c.x, c.y, c.z, c.w * 0.65f));
     va_list args;
     va_start(args, fmt);
+    // `fmt` is the format-attribute-checked parameter of this function;
+    // the static check at the call site has already validated it. Apple
+    // Clang flags the forward into ImGui::TextV anyway, so suppress
+    // -Wformat-nonliteral just for this delegation.
+#if defined(__clang__)
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wformat-nonliteral"
+#endif
     ImGui::TextV(fmt, args);
+#if defined(__clang__)
+#    pragma clang diagnostic pop
+#endif
     va_end(args);
     ImGui::PopStyleColor();
 }
@@ -5557,10 +5556,10 @@ void render_knock_dashboard_panel(AppState &state) {
                             "header. Mappings without a match will be ignored.";
                     }
                     st::log::knock::WindowConfig cfg;
-                    cfg.window_seconds = state.knock_window_seconds;
-                    cfg.sample_rate_hz = state.knock_sample_rate_hz;
-                    cfg.min_rpm = state.knock_min_rpm;
-                    cfg.min_load = state.knock_min_load;
+                    cfg.window_seconds = static_cast<double>(state.knock_window_seconds);
+                    cfg.sample_rate_hz = static_cast<double>(state.knock_sample_rate_hz);
+                    cfg.min_rpm = static_cast<double>(state.knock_min_rpm);
+                    cfg.min_load = static_cast<double>(state.knock_min_load);
                     cfg.require_load_gate = state.knock_gate_enabled;
                     auto const r =
                         st::log::knock::snapshot_from_csv(state.knock_log_path, mapping, cfg);
@@ -5778,7 +5777,7 @@ void render_adaptive_history_panel(AppState &state) {
                         st::log::adaptive::SignalKind::IdleAdapt)] = resolve(state.ah_iac_col);
 
                     st::log::adaptive::BucketConfig cfg;
-                    cfg.bucket_seconds = state.ah_bucket_seconds;
+                    cfg.bucket_seconds = static_cast<double>(state.ah_bucket_seconds);
                     cfg.min_samples_per_bucket =
                         static_cast<std::uint32_t>(state.ah_min_samples_per_bucket);
                     switch (state.ah_ts_unit) {
@@ -6084,8 +6083,8 @@ void render_coldstart_panel(AppState &state) {
                     mapping.commanded_lambda_idx = resolve(state.cs_cmd_col);
 
                     st::log::coldstart::WindowConfig cfg;
-                    cfg.cold_threshold_c = state.cs_cold_threshold_c;
-                    cfg.ect_bin_width_c = state.cs_ect_bin_width_c;
+                    cfg.cold_threshold_c = static_cast<double>(state.cs_cold_threshold_c);
+                    cfg.ect_bin_width_c = static_cast<double>(state.cs_ect_bin_width_c);
                     cfg.min_samples_per_bin =
                         static_cast<std::uint32_t>(state.cs_min_samples_per_bin);
                     switch (state.cs_ts_unit) {
@@ -6367,10 +6366,11 @@ void render_ebcs_panel(AppState &state) {
                     mapping.rpm_idx = resolve(state.ebcs_rpm_col);
 
                     st::log::ebcs::DetectorConfig cfg;
-                    cfg.throttle_step_threshold_pct = state.ebcs_throttle_step_pct;
-                    cfg.target_boost_step_threshold = state.ebcs_target_step;
-                    cfg.max_event_duration_s = state.ebcs_max_event_duration;
-                    cfg.overshoot_warn_pct = state.ebcs_overshoot_warn_pct;
+                    cfg.throttle_step_threshold_pct =
+                        static_cast<double>(state.ebcs_throttle_step_pct);
+                    cfg.target_boost_step_threshold = static_cast<double>(state.ebcs_target_step);
+                    cfg.max_event_duration_s = static_cast<double>(state.ebcs_max_event_duration);
+                    cfg.overshoot_warn_pct = static_cast<double>(state.ebcs_overshoot_warn_pct);
                     switch (state.ebcs_ts_unit) {
                     case 1:
                         cfg.timestamp_unit = st::log::ebcs::TimestampUnit::UnixMillis;

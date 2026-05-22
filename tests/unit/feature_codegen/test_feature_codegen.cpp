@@ -76,11 +76,11 @@ TEST_CASE("RamAllocator: refuses on region exhaustion", "[feature_codegen][ram_a
 
     auto a1 = a.claim(8);
     REQUIRE(a1.has_value());
-    auto a2 = a.claim(8); // exactly fits — should succeed
+    auto a2 = a.claim(8); // exactly fits -- should succeed
     REQUIRE(a2.has_value());
     REQUIRE(a.remaining() == 0);
 
-    auto a3 = a.claim(1); // one byte over — refuses
+    auto a3 = a.claim(1); // one byte over -- refuses
     REQUIRE_FALSE(a3.has_value());
     REQUIRE(a3.error().code() == st::ErrorCode::OutOfRange);
 }

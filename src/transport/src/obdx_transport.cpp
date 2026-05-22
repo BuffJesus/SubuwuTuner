@@ -368,8 +368,8 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
     // simplicity we let the adapter wait for the full remaining
     // budget. Exact byte format pending PDF verification on real
     // hardware — for the codec-only slice this stays a TODO.
-    std::array<std::uint8_t, 0> rx_args{}; // TODO: timeout argument bytes
-    auto rx = dvi_exchange(*channel_, dvi::Opcode::RxSmall, rx_args, rx_budget);
+    auto rx =
+        dvi_exchange(*channel_, dvi::Opcode::RxSmall, std::span<std::uint8_t const>{}, rx_budget);
     if (!rx.has_value()) {
         return failure(rx.error());
     }

@@ -2,8 +2,9 @@
 
 ## Language & standard
 
-- **C++23** with `std::expected`, `std::flat_map`, `std::print`, `std::stop_token`, `consteval` use across the board.
+- **C++23** with `std::expected`, `std::print`, `std::stop_token`, `consteval` use across the board.
 - Fall back to C++20 only if we adopt a compiler that lacks 23 features we want (unlikely given the target list below).
+- `std::flat_map` was previously listed here but **isn't used anywhere in `src/`**. libc++ (Apple Clang's stdlib) didn't ship `std::flat_map` until upstream Clang 20, so anything we add later will either polyfill via `boost::container::flat_map` behind a feature macro, or be a small in-tree implementation over `std::vector` + binary search.
 
 ## Toolchains we will support
 
@@ -60,9 +61,23 @@ Reserved for future work — referenced in roadmap items, not yet linked:
 
 | Need | Library | Where it lands |
 |---|---|---|
-| Crypto / TLS | OpenSSL 3 | Signed-update channel + verified release manifests (post-v1) |
-| USB raw | libusb 1.0 | OBDX Pro VX + native-handheld platform layer on Linux/macOS (hardware-gated) |
+| Signature verification | **libsodium** (preferred) or OpenSSL 3 | Signed-update channel + verified release manifests (post-v1). See LGPL/crypto note below. |
+| USB raw | libusb 1.0 | OBDX Pro VX + native-handheld platform layer on Linux/macOS (hardware-gated). See LGPL note below. |
 | Hashing | BLAKE3 | Flash-verify upgrade from CRC32 once bench rig validates it (docs/05 §4) |
+
+### libusb LGPL linking strategy
+
+libusb is LGPL-2.1, which compels either dynamic linking or distribution of object files / linkable artifacts so end users can re-link with a modified libusb. Plan per-platform:
+
+- **Linux:** dynamic-link against the system-package libusb-1.0 (`libusb-1.0-0` on Debian/Ubuntu, `libusb` on Arch / Fedora). No additional ceremony.
+- **macOS:** dynamic-link against the Homebrew or system libusb; document the dependency in the installer/DMG README.
+- **Windows:** static-link for installer-size reasons. Releases ship the `subuwutuner-gui` object archive alongside the installer artifact, plus a one-page re-link recipe (cmake target + commands) in `docs/install.md`. This satisfies LGPL-2.1 §6(a) without forcing every user onto a DLL.
+
+This was implicit in the earlier "the LGPL ceremony is worth it" line; it's now explicit so the v1.0 release-engineering checklist can implement it.
+
+### Signature crypto — libsodium over OpenSSL
+
+For verified signed-update manifests, **libsodium is the preferred path**: ~100 KB linked, stable API (Ed25519 / BLAKE2b primitives), small CVE surface. OpenSSL 3 adds ~5 MB to the binary plus ongoing CVE pressure for a use case that needs nothing beyond signature verify. If a future need adds TLS in-process (it shouldn't — updates come via the host's HTTPS), reconsider.
 
 The earlier plan listed Lua + Sol2, FlatBuffers, nlohmann/json, FakeIt, libFuzzer, csv-parser, spdlog, `serial`, and a raw-OpenGL 3D surface widget. None of them shipped — the typed-dataflow IR in `st::feature::ir` replaced the Lua direction, CSV replaced FlatBuffers, and the 3D surface widget didn't make v1.x. They're tracked in this doc's history if a future direction-flip wants them back.
 

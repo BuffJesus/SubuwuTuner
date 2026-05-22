@@ -122,7 +122,7 @@ TEST_CASE("snapshot_from_samples tracks phase_seconds from timestamp deltas",
     // 4 samples of cranking 1.0 s apart, then 4 samples of high-idle 1.0 s
     // apart. Phase duration accounting attributes each delta to the
     // PREVIOUS sample's phase. So cranking gets 3 s (deltas 0->1, 1->2,
-    // 2->3) and high-idle gets 3 s (3->4, 4->5, 5->6 — last cranking
+    // 2->3) and high-idle gets 3 s (3->4, 4->5, 5->6 -- last cranking
     // sample's transition to first high-idle gets attributed to cranking,
     // then three high-idle->high-idle deltas).
     auto const samples = flatten({
@@ -146,7 +146,7 @@ TEST_CASE("snapshot_from_samples tracks phase_seconds from timestamp deltas",
 }
 
 TEST_CASE("snapshot_from_samples drops huge timestamp gaps", "[coldstart][snapshot][duration]") {
-    // 10-second gap between two cranking samples — log paused, drop it.
+    // 10-second gap between two cranking samples -- log paused, drop it.
     auto const samples = flatten({
         {0.0, 20.0, 20.0, 300.0, 0.0, 0.0},
         {10.0, 20.0, 20.0, 300.0, 0.0, 0.0},
@@ -184,7 +184,7 @@ TEST_CASE("snapshot_from_samples excludes warm samples from bins", "[coldstart][
     auto const samples = flatten({
         {0.0, 30.0, 20.0, 900.0, 0.90, 0.92},
         {0.1, 30.0, 20.0, 900.0, 0.91, 0.92},
-        // 70 °C — above cold_threshold 55, must NOT bucket
+        // 70 °C -- above cold_threshold 55, must NOT bucket
         {0.2, 70.0, 20.0, 900.0, 1.00, 1.00},
         {0.3, 71.0, 20.0, 900.0, 0.99, 1.00},
         {0.4, 72.0, 20.0, 900.0, 1.01, 1.00},
@@ -209,7 +209,7 @@ TEST_CASE("snapshot_from_samples computes deviation_from_target per bin",
     });
     auto const s = snapshot_from_samples(samples, 6, basic_mapping(), default_cfg(), m);
     REQUIRE(s.ect_bins.size() == 1);
-    // observed=0.85, target≈0.9175 → |dev| ≈ 0.0675
+    // observed=0.85, target≈0.9175 -> |dev| ≈ 0.0675
     REQUIRE_THAT(s.ect_bins[0].deviation_from_target, WithinAbs(0.0675, 1e-3));
 }
 

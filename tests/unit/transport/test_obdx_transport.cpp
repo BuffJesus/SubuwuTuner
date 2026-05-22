@@ -24,7 +24,7 @@ namespace {
 
 // Test double for IDeviceChannel: records every byte written,
 // serves bytes from a pre-queued FIFO on each read. A read finds
-// the queue empty → returns an empty vector after the requested
+// the queue empty -> returns an empty vector after the requested
 // timeout elapses (mirrors a real USB endpoint that has nothing
 // pending; the Transport's framing loop polls back).
 class FakeChannel : public obdx::IDeviceChannel {
@@ -104,7 +104,7 @@ struct ChannelPair {
 
 // ---- open() handshake -------------------------------------------
 
-TEST_CASE("obdx::Transport::open drives ELM probe → DX DP 1 → SetProtocol",
+TEST_CASE("obdx::Transport::open drives ELM probe -> DX DP 1 -> SetProtocol",
           "[transport][obdx_transport]") {
     auto cp = make_channel();
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>"); // probe response
@@ -127,7 +127,7 @@ TEST_CASE("obdx::Transport::open drives ELM probe → DX DP 1 → SetProtocol",
     // After the DVI switch, a binary 0x31 (SetProtocol opcode) byte
     // must appear in the write stream. We don't pin its exact byte
     // layout here because the payload shape is still a TODO pending
-    // VT v1.06 PDF verification — just verify the opcode arrived.
+    // VT v1.06 PDF verification -- just verify the opcode arrived.
     bool seen_set_protocol_opcode = false;
     for (auto b : cp.raw->writes()) {
         if (b == static_cast<std::uint8_t>(obdx::dvi::Opcode::SetProtocol)) {
@@ -188,7 +188,7 @@ TEST_CASE("obdx::Transport::open fails when no ELM prompt arrives "
           "(timeout)",
           "[transport][obdx_transport]") {
     auto cp = make_channel();
-    // No queued reads → reads return empty vectors until the host-
+    // No queued reads -> reads return empty vectors until the host-
     // side deadline expires.
     obdx::Transport t{std::move(cp.owner)};
     auto const r = t.open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
@@ -270,7 +270,7 @@ TEST_CASE("obdx::Transport::send_recv rejects oversized payload", "[transport][o
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("obdx::Transport::send_recv before open → TransportUnavailable",
+TEST_CASE("obdx::Transport::send_recv before open -> TransportUnavailable",
           "[transport][obdx_transport]") {
     auto cp = make_channel();
     obdx::Transport t{std::move(cp.owner)};
@@ -315,14 +315,14 @@ TEST_CASE("obdx::Transport::send writes a TxSmall request, no RX phase",
     auto r = pair.transport->send(req);
     REQUIRE(r.has_value());
 
-    // Exactly one DVI frame: SOF? No — DVI doesn't have a SOF byte.
+    // Exactly one DVI frame: SOF? No -- DVI doesn't have a SOF byte.
     // The added writes are CMD(0x10) + LEN(0x03) + payload(3) + CHK(1)
     // = 6 bytes total.
     auto const added = raw->writes().size() - writes_before;
     REQUIRE(added == 6);
 }
 
-TEST_CASE("obdx::Transport::send before open → TransportUnavailable",
+TEST_CASE("obdx::Transport::send before open -> TransportUnavailable",
           "[transport][obdx_transport]") {
     auto cp = make_channel();
     obdx::Transport t{std::move(cp.owner)};

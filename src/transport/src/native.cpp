@@ -21,10 +21,11 @@ std::uint16_t crc16_ccitt_false(std::span<std::uint8_t const> bytes) noexcept {
     // the unit tests).
     std::uint16_t crc = 0xFFFFU;
     for (auto b : bytes) {
-        crc ^= static_cast<std::uint16_t>(b) << 8U;
+        crc = static_cast<std::uint16_t>(
+            crc ^ static_cast<std::uint16_t>(static_cast<std::uint16_t>(b) << 8U));
         for (int i = 0; i < 8; ++i) {
             if ((crc & 0x8000U) != 0) {
-                crc = static_cast<std::uint16_t>((crc << 1U) ^ 0x1021U);
+                crc = static_cast<std::uint16_t>(static_cast<std::uint16_t>(crc << 1U) ^ 0x1021U);
             } else {
                 crc = static_cast<std::uint16_t>(crc << 1U);
             }
@@ -105,8 +106,9 @@ Result<DecodedFrame> decode_frame(std::span<std::uint8_t const> bytes) {
     }
 
     std::uint16_t const expected_crc = crc_over_frame(bytes.subspan(0, bytes.size() - 2));
-    std::uint16_t const actual_crc = (static_cast<std::uint16_t>(bytes[bytes.size() - 2]) << 8U) |
-                                     static_cast<std::uint16_t>(bytes[bytes.size() - 1]);
+    std::uint16_t const actual_crc =
+        static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes[bytes.size() - 2]) << 8U) |
+                                   static_cast<std::uint16_t>(bytes[bytes.size() - 1]));
     if (expected_crc != actual_crc) {
         char buf[96];
         std::snprintf(buf, sizeof buf,
@@ -154,7 +156,11 @@ Result<DecodedFrame> decode_frame(std::span<std::uint8_t const> bytes) {
         // in a misconfigured firmware. Surface as a parse error so
         // higher layers see it (rather than silently treating it
         // as a request).
-        char buf[80];
+        // Buffer sized for the full literal expansion (~114 B with the
+        // longest 0x__ substitution) plus headroom — GCC's
+        // -Wformat-truncation flags any tighter size as a guaranteed
+        // truncation.
+        char buf[160];
         std::snprintf(buf, sizeof buf,
                       "native::decode_frame: opcode 0x%02X missing "
                       "response bit (0x80) — adapter sent a request "

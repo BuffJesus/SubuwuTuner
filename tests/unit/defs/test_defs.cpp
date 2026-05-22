@@ -466,7 +466,7 @@ TEST_CASE("apply_scaling: subaru AFR enrichment uses 14.7/(1+raw*k)",
           "[defs][apply_scaling][afr]") {
     st::Scaling s;
     s.formula = st::SubaruAfrEnrichment{.numerator = 14.7, .k = 0.0078125};
-    // raw 0 → stoich. raw 47 → 14.7/(1+47*0.0078125) ≈ 10.74. raw 255 → ≈4.92.
+    // raw 0 -> stoich. raw 47 -> 14.7/(1+47*0.0078125) ≈ 10.74. raw 255 -> ≈4.92.
     REQUIRE(st::apply_scaling(0.0, s) == Catch::Approx(14.7));
     REQUIRE(st::apply_scaling(47.0, s) == Catch::Approx(10.7456).margin(0.01));
     REQUIRE(st::apply_scaling(128.0, s) == Catch::Approx(7.35).margin(0.01));
@@ -475,15 +475,14 @@ TEST_CASE("apply_scaling: subaru AFR enrichment uses 14.7/(1+raw*k)",
 
 TEST_CASE("apply_scaling: subaru AFR enrichment safe at the singularity",
           "[defs][apply_scaling][afr]") {
-    // 1 + raw*k = 0 → raw = -1/k. The function returns 0 rather than ±∞;
+    // 1 + raw*k = 0 -> raw = -1/k. The function returns 0 rather than ±∞;
     // not physically reachable for uint8 raw but defensive on float inputs.
     st::Scaling s;
     s.formula = st::SubaruAfrEnrichment{.numerator = 14.7, .k = 0.0078125};
     REQUIRE(st::apply_scaling(-128.0, s) == 0.0);
 }
 
-TEST_CASE("invert_scaling: subaru AFR enrichment round-trips",
-          "[defs][invert_scaling][afr]") {
+TEST_CASE("invert_scaling: subaru AFR enrichment round-trips", "[defs][invert_scaling][afr]") {
     st::Scaling s;
     s.formula = st::SubaruAfrEnrichment{.numerator = 14.7, .k = 0.0078125};
     for (double raw : {0.0, 47.0, 128.0, 200.0, 255.0}) {
@@ -499,7 +498,7 @@ TEST_CASE("invert_scaling: subaru AFR enrichment rejects degenerate value=0",
     st::Scaling s;
     s.formula = st::SubaruAfrEnrichment{.numerator = 14.7, .k = 0.0078125};
     auto const r = st::invert_scaling(0.0, s);
-    REQUIRE(!r.has_value());  // value=0 maps to raw=±∞
+    REQUIRE(!r.has_value()); // value=0 maps to raw=±∞
 }
 
 TEST_CASE("scaling loader: subaru_afr_enrichment formula parsed", "[defs][parse]") {
@@ -531,22 +530,20 @@ TEST_CASE("apply_scaling: inverse_divide computes numerator/raw",
           "[defs][apply_scaling][inverse_divide]") {
     st::Scaling s;
     s.formula = st::InverseDivideScaling{.numerator = 2707090.0};
-    // The Subaru injector-flow-scaling case: raw float 4916 → 550.7 cc/min.
+    // The Subaru injector-flow-scaling case: raw float 4916 -> 550.7 cc/min.
     REQUIRE(st::apply_scaling(4916.0, s) == Catch::Approx(550.67).margin(0.01));
     // Other anchor values for sanity.
     REQUIRE(st::apply_scaling(2707.09, s) == Catch::Approx(1000.0).margin(0.01));
     REQUIRE(st::apply_scaling(1000.0, s) == Catch::Approx(2707.09).margin(0.01));
 }
 
-TEST_CASE("apply_scaling: inverse_divide safe at raw==0",
-          "[defs][apply_scaling][inverse_divide]") {
+TEST_CASE("apply_scaling: inverse_divide safe at raw==0", "[defs][apply_scaling][inverse_divide]") {
     st::Scaling s;
     s.formula = st::InverseDivideScaling{.numerator = 2707090.0};
     REQUIRE(st::apply_scaling(0.0, s) == 0.0);
 }
 
-TEST_CASE("invert_scaling: inverse_divide round-trips",
-          "[defs][invert_scaling][inverse_divide]") {
+TEST_CASE("invert_scaling: inverse_divide round-trips", "[defs][invert_scaling][inverse_divide]") {
     st::Scaling s;
     s.formula = st::InverseDivideScaling{.numerator = 2707090.0};
     for (double raw : {1.0, 100.0, 4916.0, 100000.0}) {
@@ -564,8 +561,7 @@ TEST_CASE("invert_scaling: inverse_divide rejects engineering=0",
     REQUIRE(!st::invert_scaling(0.0, s).has_value());
 }
 
-TEST_CASE("scaling loader: inverse_divide formula parsed",
-          "[defs][parse][inverse_divide]") {
+TEST_CASE("scaling loader: inverse_divide formula parsed", "[defs][parse][inverse_divide]") {
     auto const def_r = st::Definition::from_toml_string(R"toml(
 [pack]
 id             = "x"
@@ -587,10 +583,8 @@ data_type = "float32_be"
     REQUIRE(std::get<st::InverseDivideScaling>(s->formula).numerator == 2707090.0);
 }
 
-
-TEST_CASE("scaling loader: subaru_afr_enrichment defaults",
-          "[defs][parse][afr]") {
-    // Constants omitted → defaults 14.7 / 0.0078125 (the canonical EJ form).
+TEST_CASE("scaling loader: subaru_afr_enrichment defaults", "[defs][parse][afr]") {
+    // Constants omitted -> defaults 14.7 / 0.0078125 (the canonical EJ form).
     auto const def_r = st::Definition::from_toml_string(R"toml(
 [pack]
 id             = "x"
@@ -1311,7 +1305,11 @@ TEST_CASE("write_typed round-trips Float32", "[defs][write_typed][float]") {
     std::vector<std::uint8_t> bytes(8, 0);
     auto rom = st::Rom::from_bytes(std::move(bytes));
 
-    REQUIRE(st::write_typed(rom, 0, st::DataType::Float32Be, 3.14159f).has_value());
+    // Apple Clang's -Wdouble-promotion fires inside Catch2's REQUIRE wrapping
+    // when a float literal is forwarded through __builtin_constant_p. Using
+    // a double literal sidesteps the diagnostic; write_typed narrows to the
+    // requested DataType internally.
+    REQUIRE(st::write_typed(rom, 0, st::DataType::Float32Be, 3.14159).has_value());
     auto const r = st::read_typed(rom, 0, st::DataType::Float32Be);
     REQUIRE(r.has_value());
     REQUIRE(static_cast<float>(*r) == 3.14159f);
@@ -1614,7 +1612,7 @@ TEST_CASE("Definition::from_directory ignores [pack] in non-manifest files",
 id         = "real-id"
 endianness = "big"
 )toml");
-    // This [pack] should be silently ignored — id stays "real-id".
+    // This [pack] should be silently ignored -- id stays "real-id".
     write_text(td.path / "stray.toml", R"toml(
 [pack]
 id = "WRONG"
@@ -1678,7 +1676,7 @@ includes   = ["frag.toml"]
     auto const d = st::Definition::from_file(td.path / "main.toml");
     REQUIRE(d.has_value());
     REQUIRE(d->pack().id == "test-pack-001");
-    // Fragment's [pack] is ignored — parent id wins.
+    // Fragment's [pack] is ignored -- parent id wins.
     REQUIRE(d->pids().size() == 1);
     REQUIRE(d->pids()[0].id == "e1");
     REQUIRE(d->pids()[0].ssm_address == 0x20118);
@@ -2091,7 +2089,7 @@ outputs = [ { name = "", type = "float" } ]
 
 TEST_CASE("Hook rejects signal that isn't an inline table", "[defs][hooks]") {
     // docs/16 uses bare strings in its illustrative example, but the
-    // parsed schema requires typed signals — bare strings would not
+    // parsed schema requires typed signals -- bare strings would not
     // carry a type, so they're rejected to fail-loud.
     auto const d = st::Definition::from_toml_string(R"toml(
 [pack]
@@ -2107,7 +2105,7 @@ inputs = [ "rpm", "load" ]
 }
 
 TEST_CASE("Hook + signal labels parse, default to empty when omitted", "[defs][hooks]") {
-    // display_name on the hook, label on signals — both optional. Editor
+    // display_name on the hook, label on signals -- both optional. Editor
     // uses them when non-empty; falls back to id/name otherwise.
     auto const d = st::Definition::from_toml_string(R"toml(
 [pack]
@@ -2131,7 +2129,7 @@ outputs = [
     auto const &h = d->hooks().front();
     REQUIRE(h.display_name == "After fuel calc");
     REQUIRE(h.inputs[0].label == "Commanded fuel PW");
-    REQUIRE(h.inputs[1].label == ""); // omitted → empty
+    REQUIRE(h.inputs[1].label == ""); // omitted -> empty
     REQUIRE(h.outputs[0].label == "Override fuel PW");
 }
 

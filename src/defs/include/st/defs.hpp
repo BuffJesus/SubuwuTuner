@@ -137,8 +137,8 @@ struct InverseDivideScaling {
     double numerator{1.0};
 };
 
-using ScalingFormula = std::variant<LinearScaling, PiecewiseScaling,
-                                    SubaruAfrEnrichment, InverseDivideScaling>;
+using ScalingFormula =
+    std::variant<LinearScaling, PiecewiseScaling, SubaruAfrEnrichment, InverseDivideScaling>;
 
 struct Scaling {
     std::string id;

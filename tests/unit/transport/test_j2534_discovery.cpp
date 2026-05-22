@@ -23,13 +23,13 @@ TEST_CASE("j2534::registry_view_name: stable strings for each view",
 
 // ---- format_protocols_supported ---------------------------------
 
-TEST_CASE("j2534::format_protocols_supported: zero mask → '(none)'",
+TEST_CASE("j2534::format_protocols_supported: zero mask -> '(none)'",
           "[transport][j2534_discovery]") {
     REQUIRE(j2534::format_protocols_supported(0) == "(none)");
 }
 
 TEST_CASE("j2534::format_protocols_supported: single known bit", "[transport][j2534_discovery]") {
-    // J1850VPW is bit 0 per spec (ProtocolId 0x01 → 1 << 0).
+    // J1850VPW is bit 0 per spec (ProtocolId 0x01 -> 1 << 0).
     REQUIRE(j2534::format_protocols_supported(1U << 0U) == "J1850VPW");
     REQUIRE(j2534::format_protocols_supported(1U << 1U) == "J1850PWM");
     REQUIRE(j2534::format_protocols_supported(1U << 2U) == "ISO9141");
@@ -50,7 +50,7 @@ TEST_CASE("j2534::format_protocols_supported: all six known bits set",
             "J1850VPW, J1850PWM, ISO9141, ISO14230, CAN, ISO15765");
 }
 
-TEST_CASE("j2534::format_protocols_supported: unknown high bit → "
+TEST_CASE("j2534::format_protocols_supported: unknown high bit -> "
           "hex annotation",
           "[transport][j2534_discovery]") {
     REQUIRE(j2534::format_protocols_supported(0x80000000U) == "(unknown: 0x80000000)");
@@ -79,11 +79,11 @@ TEST_CASE("j2534::discover_adapters: runs without crashing + returns a vector "
     // runs on whatever the host happens to have.
     for (auto const &a : adapters) {
         // Subkey + name are always non-empty (impl falls back
-        // name → subkey).
+        // name -> subkey).
         REQUIRE_FALSE(a.subkey.empty());
         REQUIRE_FALSE(a.name.empty());
         // function_library is enforced non-empty by walk_view
-        // (entries without a DLL path are skipped — a vendor
+        // (entries without a DLL path are skipped -- a vendor
         // installer that registered a skeleton without filling in
         // FunctionLibrary shouldn't surface as a usable adapter).
         REQUIRE_FALSE(a.function_library.empty());
@@ -94,7 +94,7 @@ TEST_CASE("j2534::discover_adapters: runs without crashing + returns a vector "
 }
 
 #ifndef _WIN32
-TEST_CASE("j2534::discover_adapters: non-Windows host → empty list",
+TEST_CASE("j2534::discover_adapters: non-Windows host -> empty list",
           "[transport][j2534_discovery]") {
     REQUIRE(j2534::discover_adapters().empty());
 }

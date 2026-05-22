@@ -64,22 +64,33 @@ jobs:
         with:
           arch: x64
 
-      - name: Install Clang 18 (linux-asan)
+      - name: Install Clang 18 + GLFW X11 + GTK3 deps (linux-asan)
         if: matrix.preset == 'linux-asan'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-18 lld-18 llvm-18
+          sudo apt-get install -y \
+            clang-18 lld-18 llvm-18 \
+            libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev \
+            libgtk-3-dev
           echo "CC=clang-18" >> "$GITHUB_ENV"
           echo "CXX=clang++-18" >> "$GITHUB_ENV"
 
-      - name: Cache CMake build
+      - name: Install GLFW X11 + GTK3 deps (linux-gcc)
+        if: matrix.preset == 'linux-gcc'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev \
+            libgtk-3-dev
+
+      - name: Cache CMake build (v2 — busted on c2bfa03 to drop pre-fix _deps state)
         uses: actions/cache@v4
         with:
           path: |
             build/${{ matrix.preset }}/_deps
-          key: ${{ matrix.preset }}-cmake-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt') }}
+          key: ${{ matrix.preset }}-cmake-v2-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt', 'src/ui/CMakeLists.txt', 'CMakePresets.json') }}
           restore-keys: |
-            ${{ matrix.preset }}-cmake-
+            ${{ matrix.preset }}-cmake-v2-
 
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}

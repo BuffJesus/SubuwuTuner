@@ -197,8 +197,7 @@ public:
     read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
                   std::uint32_t max_chunk_size = 0x100,
                   std::chrono::milliseconds per_chunk_timeout = std::chrono::milliseconds{1000},
-                  ReadProgressFn progress = nullptr,
-                  std::atomic<bool> const *cancel = nullptr);
+                  ReadProgressFn progress = nullptr, std::atomic<bool> const *cancel = nullptr);
 
     // Walk `current` and `target` in `sector_size`-aligned chunks; emit
     // a Sector for every chunk whose bytes differ. Both spans must be

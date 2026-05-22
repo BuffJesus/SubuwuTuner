@@ -64,10 +64,8 @@ bool FlashReport::all_sectors_verified() const noexcept {
 
 Result<std::vector<std::uint8_t>>
 Flasher::read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
-                       std::uint32_t max_chunk_size,
-                       std::chrono::milliseconds per_chunk_timeout,
-                       Flasher::ReadProgressFn progress,
-                       std::atomic<bool> const *cancel) {
+                       std::uint32_t max_chunk_size, std::chrono::milliseconds per_chunk_timeout,
+                       Flasher::ReadProgressFn progress, std::atomic<bool> const *cancel) {
     if (total_length == 0) {
         if (progress)
             progress({0, 0});

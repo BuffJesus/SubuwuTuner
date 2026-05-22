@@ -57,7 +57,7 @@ TEST_CASE("ir::lower on an empty graph returns an empty module", "[feature][ir]"
     REQUIRE(m->instructions.empty());
 }
 
-TEST_CASE("ir::lower emits LoadHookInput → CallPrimitive → "
+TEST_CASE("ir::lower emits LoadHookInput -> CallPrimitive -> "
           "StoreHookOutput for the canonical splice shape",
           "[feature][ir]") {
     // hook.read_rpm provides RPM; primitive.passthrough consumes
@@ -125,7 +125,7 @@ TEST_CASE("ir::lower emits LoadConstant for a defaulted input pin", "[feature][i
     REQUIRE(m->instructions[2].operands[0] == m->instructions[0].result_id);
     REQUIRE(m->instructions[2].operands[1] == m->instructions[1].result_id);
     // operand_pin_names anchor each operand to its declared input
-    // pin name — codegen relies on this to map operand[k] back to
+    // pin name -- codegen relies on this to map operand[k] back to
     // `a`/`b` so non-commutative primitives don't swap arguments
     // when a graph reorders pins.
     REQUIRE(m->instructions[2].operand_pin_names.size() == 2);
@@ -148,7 +148,7 @@ TEST_CASE("ir::lower's operand_pin_names tracks pin reordering", "[feature][ir]"
     st::feature::Node sub;
     sub.kind = "primitive.subtract_float";
     sub.label = "sub";
-    // Pin order: b, a, out — reversed from the canonical declaration.
+    // Pin order: b, a, out -- reversed from the canonical declaration.
     sub.pins.push_back(st::feature::Pin{0, "b", st::feature::PinType::Float,
                                         st::feature::PinDirection::Input, ""});
     sub.pins.push_back(st::feature::Pin{1, "a", st::feature::PinType::Float,
@@ -156,8 +156,8 @@ TEST_CASE("ir::lower's operand_pin_names tracks pin reordering", "[feature][ir]"
     sub.pins.push_back(st::feature::Pin{2, "out", st::feature::PinType::Float,
                                         st::feature::PinDirection::Output, ""});
     auto const sid = g.add_node(std::move(sub));
-    REQUIRE(g.connect(src_a, 0, sid, 0).has_value()); // a→b slot
-    REQUIRE(g.connect(src_b, 0, sid, 1).has_value()); // b→a slot
+    REQUIRE(g.connect(src_a, 0, sid, 0).has_value()); // a->b slot
+    REQUIRE(g.connect(src_b, 0, sid, 1).has_value()); // b->a slot
 
     auto const m = st::feature::ir::lower(g);
     REQUIRE(m.has_value());
@@ -198,7 +198,7 @@ TEST_CASE("ir::lower refuses a graph that fails validate()", "[feature][ir]") {
 TEST_CASE("ir::estimate_cost adds per-op cycle counts", "[feature][ir]") {
     // Module from the canonical splice shape (LoadHookInput +
     // CallPrimitive + StoreHookOutput). The `passthrough` primitive
-    // is not in the per-symbol cost table → defaults to 3 cycles.
+    // is not in the per-symbol cost table -> defaults to 3 cycles.
     // Total: 2 + 3 + 2 = 7.
     st::feature::Graph g;
     auto const src =
@@ -262,7 +262,7 @@ TEST_CASE("ir::estimate_cost prices add_int below divide_int", "[feature][ir]") 
     // Two single-primitive modules differing only in symbol. The
     // table prices add_int as cheap (1 cycle) and divide_int as
     // expensive (FDIV-latency-dominated, 18 cycles). Verifies the
-    // ordering rather than exact totals — keeps the test resilient
+    // ordering rather than exact totals -- keeps the test resilient
     // to future cost-table tuning.
     auto build = [](std::string_view sym) {
         st::feature::ir::Module m;
@@ -284,8 +284,8 @@ TEST_CASE("ir::estimate_cost prices add_int below divide_int", "[feature][ir]") 
 
 TEST_CASE("ir::estimate_cost falls back to default for unknown primitives", "[feature][ir]") {
     // Pack-declared primitives that the codegen doesn't yet handle
-    // (e.g. `flex_fuel_scale`) still get a finite price — the
-    // default constant — so a graph using them lints without a NaN.
+    // (e.g. `flex_fuel_scale`) still get a finite price -- the
+    // default constant -- so a graph using them lints without a NaN.
     st::feature::ir::Module m;
     st::feature::ir::Instruction call;
     call.op = st::feature::ir::Op::CallPrimitive;
@@ -345,7 +345,7 @@ TEST_CASE("ir::lint flags an RT-budget overrun", "[feature][ir][lint]") {
 }
 
 TEST_CASE("ir::lint flags duplicate StoreHookOutput", "[feature][ir][lint]") {
-    // Two source-only hooks → one shared sink hook with TWO Input
+    // Two source-only hooks -> one shared sink hook with TWO Input
     // pins of the same name forces the lowerer to emit two stores
     // to the same (symbol, pin_name). The lint should flag the
     // second occurrence and point at its instruction index.

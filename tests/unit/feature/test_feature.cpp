@@ -71,7 +71,7 @@ TEST_CASE("Graph::connect accepts matching units", "[feature][graph]") {
 
 TEST_CASE("Graph::connect treats an empty unit as unit-agnostic", "[feature][graph]") {
     // Generic math nodes don't declare units. Connecting a
-    // unit-bearing sensor output to such a node should succeed —
+    // unit-bearing sensor output to such a node should succeed --
     // otherwise pack-driven hook nodes couldn't feed any generic
     // arithmetic without explicit conversion plumbing.
     st::feature::Graph g;
@@ -110,7 +110,7 @@ TEST_CASE("Graph::connect rejects wrong-direction wires", "[feature][graph]") {
     st::feature::Graph g;
     auto const a = g.add_node(make_source_node("a", st::feature::PinType::Float));
     auto const b = g.add_node(make_sink_node("b", st::feature::PinType::Float));
-    // Input → Output is invalid.
+    // Input -> Output is invalid.
     auto const r = g.connect(b, 0, a, 0);
     REQUIRE_FALSE(r.has_value());
 }
@@ -187,7 +187,7 @@ TEST_CASE("Graph TOML round-trip preserves shape", "[feature][toml]") {
     REQUIRE(loaded.has_value());
     REQUIRE(loaded->nodes().size() == 2);
     REQUIRE(loaded->edges().size() == 1);
-    // Positions survive — even though node ids may have been
+    // Positions survive -- even though node ids may have been
     // remapped, the order is preserved.
     REQUIRE(loaded->nodes()[0].x == 12.5f);
     REQUIRE(loaded->nodes()[1].y == 80.5f);

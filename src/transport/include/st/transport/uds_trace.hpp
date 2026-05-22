@@ -55,8 +55,7 @@ struct UdsTracePair {
 // Empty `out_pairs` is treated as an error (callers want pairs to feed
 // to MockTransport — an empty trace would be a no-op masquerading as a
 // dataset, so reject it loudly).
-bool parse_uds_trace(std::filesystem::path const &path,
-                     std::vector<UdsTracePair> &out_pairs,
+bool parse_uds_trace(std::filesystem::path const &path, std::vector<UdsTracePair> &out_pairs,
                      std::string &err);
 
 } // namespace st::transport

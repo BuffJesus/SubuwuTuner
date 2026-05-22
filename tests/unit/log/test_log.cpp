@@ -93,7 +93,7 @@ TEST_CASE("LogStream drops when full and counts the drops", "[log][drop]") {
     }
     REQUIRE(s.approximate_size() == 4);
 
-    // Buffer full — the next three pushes must all fail.
+    // Buffer full -- the next three pushes must all fail.
     for (int i = 0; i < 3; ++i) {
         std::vector<double> in{99.0};
         REQUIRE_FALSE(s.try_push(100 + i, in));
@@ -263,7 +263,7 @@ TEST_CASE("LogSession applies per-channel scaling on the I/O thread", "[log][ses
     REQUIRE(t.open({}).has_value());
 
     // PID at 0x300, uint8, scaling = raw * 0.5 - 40 (a typical Subaru
-    // intake-air-temperature scaling). Raw 0x90 = 144 → 144*0.5 - 40 = 32.
+    // intake-air-temperature scaling). Raw 0x90 = 144 -> 144*0.5 - 40 = 32.
     st::Scaling scaling;
     scaling.id = "iat_c";
     scaling.formula = st::LinearScaling{0.5, -40.0};
@@ -325,9 +325,9 @@ TEST_CASE("LogSession::stop is idempotent and safe on a never-started session", 
         {"x", 0x0001, st::DataType::Uint8, std::nullopt},
     };
     log_ns::LogSession session{t, channels, 16};
-    // Stop before start — must not deadlock.
+    // Stop before start -- must not deadlock.
     session.stop();
-    // Stop after a no-op start failure — must also not deadlock.
+    // Stop after a no-op start failure -- must also not deadlock.
     log_ns::LogSession nochans{t, {}, 16};
     (void)nochans.start();
     nochans.stop();
@@ -491,7 +491,7 @@ TEST_CASE("LogStream SPSC stress: producer + consumer agree on totals",
                 consumed_ts.push_back(ts);
                 continue;
             }
-            // Empty for now — if the producer is done and we've drained,
+            // Empty for now -- if the producer is done and we've drained,
             // we're finished.
             if (producer_done.load(std::memory_order_acquire) && s.approximate_size() == 0) {
                 break;
@@ -508,7 +508,7 @@ TEST_CASE("LogStream SPSC stress: producer + consumer agree on totals",
     REQUIRE(consumed_ts.size() + s.dropped_count() == static_cast<std::uint64_t>(N));
     REQUIRE(s.pushed_count() + s.dropped_count() == static_cast<std::uint64_t>(N));
 
-    // Consumed timestamps must be strictly increasing — the SPSC ring
+    // Consumed timestamps must be strictly increasing -- the SPSC ring
     // preserves FIFO order even though some samples were dropped.
     for (std::size_t i = 1; i < consumed_ts.size(); ++i) {
         REQUIRE(consumed_ts[i] > consumed_ts[i - 1]);

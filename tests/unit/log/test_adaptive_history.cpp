@@ -90,11 +90,11 @@ TEST_CASE("snapshot_from_samples computes drift_per_second slope", "[adaptive][s
 
 TEST_CASE("snapshot_from_samples respects min_samples_per_bucket", "[adaptive][snapshot][filter]") {
     auto const samples = flatten({
-        // Day 0: 3 samples — passes filter (count == 3)
+        // Day 0: 3 samples -- passes filter (count == 3)
         {0.0, 1.0, 1.0, 0.0},
         {3600.0, 3.0, 1.0, 0.0},
         {7200.0, 5.0, 1.0, 0.0},
-        // Day 1: 1 sample — fails filter
+        // Day 1: 1 sample -- fails filter
         {86400.0, 9.0, 1.0, 0.0},
     });
     BucketConfig cfg = daily_unix_cfg();

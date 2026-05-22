@@ -295,6 +295,7 @@ Custom features are categorically more dangerous than table edits:
 3. **RAM allocation.** The compiler claims scratch RAM from the pack's declared `free_ram` region. Conflicts between two simultaneously loaded features must be detected at load time, not at runtime.
 4. **Emissions interaction.** A custom feature that overrides commanded fuel triggers the same jurisdiction-profile linter that emissions-flagged tables trigger (see `docs/06-legal-ethics.md`). Engine-safety refusals still apply unconditionally; jurisdiction refusals follow the user's profile.
 5. **Update channel.** A flash gone wrong while a `.stmod` is loaded must be recoverable by un-flashing the patch without losing the user's calibration. The patch format is therefore additive — it never overwrites the original calibration bytes.
+6. **Codegen address gate — the pack is the source of truth.** `st::feature::codegen` **must refuse** to emit a `PatchObject` whose target address (hook splice, free-RAM claim, or any byte written by the patch) falls outside the loaded `Definition`'s declared writable regions. The graph cannot widen that surface; the pack does. This is a security boundary, not a sanity check — a malicious or buggy `.stmod` graph that bypassed this would target arbitrary flash addresses through the same `st::flash` pipeline that table edits use. Tracked as a pre-v1.0 ship blocker in `docs/04-roadmap.md` and tested per backend at `tests/unit/feature_codegen/test_address_gate.cpp` (TBD).
 
 ## Live-toggleable features
 

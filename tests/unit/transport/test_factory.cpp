@@ -39,7 +39,7 @@ TEST_CASE("factory::parse_kind rejects unknown + empty strings", "[transport][fa
     REQUIRE_FALSE(tp::parse_kind("foo").has_value());
 }
 
-TEST_CASE("factory: every Kind round-trips through name → parse", "[transport][factory]") {
+TEST_CASE("factory: every Kind round-trips through name -> parse", "[transport][factory]") {
     for (auto k : {tp::Kind::J2534, tp::Kind::Obdx, tp::Kind::Native}) {
         auto const name = tp::kind_name(k);
         auto const parsed = tp::parse_kind(name);
@@ -50,7 +50,7 @@ TEST_CASE("factory: every Kind round-trips through name → parse", "[transport]
 
 // ---- open_transport validation paths ----------------------------
 
-TEST_CASE("open_transport(j2534, empty dll_path) → InvalidArgument with hint",
+TEST_CASE("open_transport(j2534, empty dll_path) -> InvalidArgument with hint",
           "[transport][factory]") {
     tp::TransportSpec spec{tp::Kind::J2534, /*dll_path=*/"", /*device_path=*/""};
     auto r = tp::open_transport(spec);
@@ -61,7 +61,7 @@ TEST_CASE("open_transport(j2534, empty dll_path) → InvalidArgument with hint",
     REQUIRE(m.find("op20pt32.dll") != std::string::npos);
 }
 
-TEST_CASE("open_transport(obdx, empty device_path) → InvalidArgument with hint",
+TEST_CASE("open_transport(obdx, empty device_path) -> InvalidArgument with hint",
           "[transport][factory]") {
     tp::TransportSpec spec{tp::Kind::Obdx, "", ""};
     auto r = tp::open_transport(spec);
@@ -72,7 +72,7 @@ TEST_CASE("open_transport(obdx, empty device_path) → InvalidArgument with hint
     REQUIRE(m.find("COM") != std::string::npos); // example path mentioned
 }
 
-TEST_CASE("open_transport(native, empty device_path) → InvalidArgument", "[transport][factory]") {
+TEST_CASE("open_transport(native, empty device_path) -> InvalidArgument", "[transport][factory]") {
     tp::TransportSpec spec{tp::Kind::Native, "", ""};
     auto r = tp::open_transport(spec);
     REQUIRE_FALSE(r.has_value());
@@ -83,11 +83,11 @@ TEST_CASE("open_transport(native, empty device_path) → InvalidArgument", "[tra
 //
 // Every concrete kind currently returns NotImplemented because the
 // platform layer (LoadLibraryA / libusb / native CDC) isn't wired
-// yet. The CLI flag is meant to be useful TODAY even so — clean
+// yet. The CLI flag is meant to be useful TODAY even so -- clean
 // errors that name the missing platform piece let the user verify
 // the dispatch works before hardware arrives.
 
-TEST_CASE("open_transport(j2534, valid path) → NotImplemented "
+TEST_CASE("open_transport(j2534, valid path) -> NotImplemented "
           "(platform dynload not yet wired)",
           "[transport][factory]") {
     tp::TransportSpec spec{tp::Kind::J2534, "op20pt32.dll", ""};
@@ -99,21 +99,21 @@ TEST_CASE("open_transport(j2534, valid path) → NotImplemented "
     REQUIRE(m.find("dynamic-load") != std::string::npos);
 }
 
-TEST_CASE("open_transport(obdx, nonexistent path) → FileNotFound "
+TEST_CASE("open_transport(obdx, nonexistent path) -> FileNotFound "
           "(platform USB CDC wired; this device doesn't exist)",
           "[transport][factory]") {
     tp::TransportSpec spec{tp::Kind::Obdx, "", "COM_NONEXISTENT_TEST"};
     auto r = tp::open_transport(spec);
     REQUIRE_FALSE(r.has_value());
-    // On Windows, opening a missing COM port → FileNotFound. On other
-    // platforms (where the serial layer is NotImplemented) → NotImplemented.
+    // On Windows, opening a missing COM port -> FileNotFound. On other
+    // platforms (where the serial layer is NotImplemented) -> NotImplemented.
     auto const code = r.error().code();
     REQUIRE((code == st::ErrorCode::FileNotFound || code == st::ErrorCode::NotImplemented));
     auto const m = r.error().message();
     REQUIRE(m.find("COM_NONEXISTENT_TEST") != std::string::npos);
 }
 
-TEST_CASE("open_transport(native, nonexistent path) → FileNotFound or "
+TEST_CASE("open_transport(native, nonexistent path) -> FileNotFound or "
           "NotImplemented depending on platform",
           "[transport][factory]") {
     tp::TransportSpec spec{tp::Kind::Native, "", "COM_NONEXISTENT_NATIVE"};

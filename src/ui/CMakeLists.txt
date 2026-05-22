@@ -12,6 +12,15 @@ set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_INSTALL        OFF CACHE BOOL "" FORCE)
+# Build the X11 backend only on Linux. Wayland sessions still get the GUI
+# via XWayland, which is universally available on every Wayland desktop.
+# Skipping the Wayland backend means GLFW does not need wayland-scanner at
+# configure time — that binary lives in libwayland-bin on Ubuntu and has
+# been a recurring CI dependency-drift footgun on GitHub-hosted runners
+# (image-roll-related). The cost is a small perf delta on native Wayland;
+# acceptable for a v1.0-targeted tuning workbench. Re-enable if native
+# Wayland latency becomes a measurable problem.
+set(GLFW_BUILD_WAYLAND  OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(glfw)
 
 # Dear ImGui — docking branch. Adds ImGuiConfigFlags_DockingEnable (multi-pane
@@ -108,3 +117,18 @@ target_link_libraries(subuwutuner-gui
 set_target_properties(subuwutuner-gui PROPERTIES
     OUTPUT_NAME "subuwutuner-gui"
 )
+
+# MSVC strict-mode C4996 fix — see src/cli/CMakeLists.txt for rationale.
+if (MSVC)
+    target_compile_definitions(subuwutuner-gui PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
+# Apple deprecated the desktop OpenGL framework in macOS 10.14 (Mojave),
+# but it still works and ImGui's GL3 backend uses it. -Wdeprecated-declarations
+# fires on every glViewport / glClearColor / glClear in the render loop;
+# -Werror promotes the lot. GL_SILENCE_DEPRECATION is Apple's documented
+# escape hatch — silences just the OpenGL-deprecation channel without
+# affecting unrelated deprecation warnings.
+if (APPLE)
+    target_compile_definitions(subuwutuner-gui PRIVATE GL_SILENCE_DEPRECATION)
+endif()
