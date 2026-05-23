@@ -84,64 +84,20 @@ Inherited from prior session, still uncommitted:
 - `src/ui/src/main.cpp` — Protocol dropdown, Verbose checkbox, RAII trace-guard, yellow preflight notice.
 - `tests/CMakeLists.txt`, `docs/09-risks.md` (cosmetic IDE-open edit), `docs/13-transport.md`.
 
-## Uncommitted bundle — commit cadence reminder
+## Committed bundle (6 commits on `main`, not yet pushed)
 
-The whole stack above is in the working tree but **not committed**. Per `feedback_caveman_cadence.md`, the gate before any `git push` is:
+The work above landed as six commits, oldest → newest:
 
-- `/caveman-review` over the diff
-- `/caveman-commit` for the message
+1. **`19eb16c`** — `fix(transport+ecu+flash+log): SSM-on-CAN bare-payload framing` — main SSM fix (Framing enum threaded through builders/parsers/SsmClient/Flasher/LogSession), EnableNetwork strict validation with SoftReboot cleanup, flash bail() CC restore, B0 size assertion fix, shared `erase_opt` test helper extraction. 19 files.
+2. **`64e5693`** — `feat(defs): validate flags duplicate hook/primitive/writable_region`. 2 files, +4 tests.
+3. **`d474d1d`** — `feat(feature_codegen): sqrt_float IR primitive (SH-2A FSQRT)`. 4 files, +2 tests.
+4. **`668a247`** — `feat(fixtures): demo-pack writable_region + 4 FA24-themed hooks + 4 samples`. 6 files; independent bugfix (writable_region) unblocks all bundled samples.
+5. **`85d0fb5`** — `docs: FA20→FA24 swap worked example + IR primitive notes`. 2 files.
+6. **`cf70a5f`** — `docs(handoff): refresh for end-of-session state`. 1 file. (This file's prior version; the post-commit cleanup landed in a small follow-up that you're reading now.)
 
-The natural split is **3–5 commits** rather than one. From narrow to broad scope:
+`docs/09-risks.md` was deliberately kept out of every commit (recurring IDE-artifact 3-blank-line diff; `git restore`'d before staging). The local-only files `SubaruTuner.zip`, `definitions/legacy/.stfolder/`, and `fixtures/projects/` remain untracked per prior handoff.
 
-1. **`fix(transport+ecu+flash+log): SSM-on-CAN framing — bare payload, no K-Line wrapper`** — the main SSM fix end-to-end: framing enum, all consumers, all tests. The B0 size assertion fix in `test_ssm_properties.cpp` rides here. Includes strict EnableNetwork validation in `obdx_transport.cpp::open()` since it's the same module and same incident class. About 14 files.
-2. **`fix(flash): restore CC on non-cancel failure bail`** — independent flash-module change closing the gap flagged in `ddece0f` review. ~2 files.
-3. **`feat(defs): validate flags duplicate hook/primitive/writable_region names`** — independent defs-module hardening. ~2 files.
-4. **`refactor(tests): extract shared erase_opt helper to _helpers/`** — purely refactor, no behavior change. 3 files (new helper + 2 call sites).
-5. **`docs(custom-features): FA20→FA24 swap motivating example + roadmap cross-ref`** — doc-only. 2 files.
-
-Acceptable to bundle 2+3+4 into a single "follow-up cleanup" commit if the granularity feels excessive; the SSM fix and the docs commit are the two that should stay separate.
-
-Status of unstaged files right now (`git status` snapshot):
-```
-M .claude/HANDOFF.md                                ← this file
-M docs/04-roadmap.md                                ← FA24-swap persona row
-M docs/09-risks.md                                  (cosmetic IDE-open edit; do not commit)
-M docs/13-transport.md                              ← VT v1.06 §3.11 row clarified (single-line edit)
-M docs/16-custom-features.md                        ← Motivating use cases + FA24 example
-M src/defs/src/defs.cpp                             ← validate() duplicate-name check
-M src/ecu/include/st/ecu/ssm.hpp                    ← Framing enum
-M src/ecu/src/ssm.cpp                               ← IsoTp build/parse paths
-M src/flash/include/st/flash.hpp
-M src/flash/src/flash.cpp                           ← bail() CC restore
-M src/log/include/st/log.hpp                        ← LogSession framing
-M src/log/src/log.cpp                               ← LogSession framing
-M src/transport/include/st/transport/obdx_dvi.hpp
-M src/transport/include/st/transport/obdx_transport.hpp
-M src/transport/src/obdx_transport.cpp              ← strict EnableNetwork validation
-M src/ui/src/main.cpp
-M tests/CMakeLists.txt
-M tests/unit/defs/test_defs.cpp                     ← +4 duplicate-name validate tests
-M tests/unit/ecu/test_ssm.cpp                       ← +10 IsoTp tests
-M tests/unit/flash/test_cancellation_invariants.cpp ← uses shared erase_opt helper
-M tests/unit/flash/test_flash.cpp                   ← +1 Flasher IsoTp, +2 CC-restore tests
-M tests/unit/log/test_log.cpp                       ← +1 LogSession IsoTp test
-M tests/unit/transport/test_obdx_transport.cpp      ← +3 EnableNetwork strict tests; existing tests use realistic 02 01
-M tests/unit/feature_codegen/test_sh2a.cpp          ← +2 sqrt_float tests (FSQRT encoding, wrong-arity rejection)
-M src/feature/src/feature_ir.cpp                    ← sqrt_float cycle cost (15)
-M src/feature_codegen/src/feature_codegen.cpp       ← sqrt_float emit + dispatch + primitive_shape entry
-M src/feature_codegen/src/sh2a.hpp                  ← enc_fsqrt encoding helper
-M fixtures/demo-pack/hooks.toml                     ← +4 hooks (override_vvt_target, override_hpfp_target, override_injector_pw, read_aux_fuel_pressure)
-M fixtures/demo-pack/pack.toml                      ← +2 writable_region entries (unblocks all bundled samples)
-?? SubaruTuner.zip                                  (leave; per prior handoff)
-?? definitions/legacy/.stfolder/                    (Syncthing marker)
-?? fixtures/projects/                               (personal test project, leave)
-?? fixtures/samples/vvt-override-demo.stmod         ← new sample (generic VVT-override pattern demo)
-?? fixtures/samples/fa24-hpfp-clamp.stmod           ← new sample (HPFP clamp, hard ceiling)
-?? fixtures/samples/fa24-aux-pressure-clamp.stmod   ← new sample (HPFP clamp, 3rd-party CAN sensor driven)
-?? fixtures/samples/fa24-bernoulli-comp.stmod       ← new sample (Bernoulli diff-fuel-pressure correction, exercises sqrt_float)
-?? tests/unit/_helpers/erase_opt.hpp                ← new shared test helper
-?? tests/unit/ecu/test_ssm_properties.cpp           (now correct; promote to tracked on commit)
-```
+**Push posture:** `hold till I test` per user instruction. Run `git push origin main` after the OBDX retest succeeds (or after the retest result clearly indicates additional code work is needed first).
 
 ## If the retest succeeds
 
