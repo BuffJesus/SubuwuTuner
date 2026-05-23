@@ -182,61 +182,69 @@ using std::chrono::steady_clock;
                                        "variant");
 }
 
-// Map a LinkConfig to the bytes we'd hand the SetProtocol opcode.
-// **NOT FINAL** — the VT v1.06 PDF documents the exact sub-op /
-// flag layout; until the developer's adapter arrives we send a
-// best-guess shape and mark this helper as needs-verification.
+// Map a LinkConfig to the DVI SetProtocol data payload, per the VT v1.06
+// Reference Guide §3.10.1 ("Setting and Requesting the OBD Protocol").
 //
-// What's settled:
-//   - The VX hardware supports HSCAN (CAN ISO-15765), J1850 VPW,
-//     GM UART ALDL. NO K-Line. (per docs/13 OBDX rewrite this
-//     session.)
-//   - The opcode is 0x31 SetProtocol.
+// The full SetProtocol frame on the wire is:
+//   CMD=0x31  LEN=0x02  SUB=0x01  PROTO=XX  CHK
+// where PROTO is:
+//   0x00 ALDL  0x01 VPW  0x02 HS CAN  0x03 MS CAN  0x04 GMLAN
+//   0x05 PWM (not implemented)  0x06 LIN (not implemented)
 //
-// What's NOT settled:
-//   - Exact payload byte layout (protocol enum + flags + CAN
-//     filter IDs). The PDF has it; we don't yet.
+// Only the data payload (SUB + PROTO, 2 bytes) is returned here; the
+// outer CMD + LEN + CHK frame is built by `encode_request` in the DVI
+// codec layer.
 //
-// Returns a payload byte vector or an InvalidArgument when
-// LinkConfig requests a protocol the VX can't do.
+// Note that SetProtocol carries NEITHER the bus baud rate NOR the CAN
+// IDs — baud is implicit per protocol (HS CAN = 500 kbps), and the
+// adapter handles OBD-II standard addressing (0x7E0 / 0x7E8) by
+// default when in HS CAN mode. Per-bus filters (for non-standard
+// addressing or extended-ID CAN) ride on the 0x33 family of commands.
+// `LinkConfig::baud` / `LinkConfig::can_id_request` / `can_id_response`
+// are kept for compatibility with other transport backends (J2534,
+// native handheld); they're unused on OBDX.
+//
+// Diagnosed on real hardware 2026-05-22: an earlier 11-byte best-
+// guess shape returned OBDX error 0x05 (Error_SubCommandIncorrectSize)
+// with protocol enum 0x06 (LIN, not even implemented). Both fixed by
+// matching the documented 2-byte format.
+//
+// Returns a 2-byte payload or InvalidArgument when LinkConfig requests
+// a protocol the VX can't do.
 [[nodiscard]] Result<std::vector<std::uint8_t>> set_protocol_payload(LinkConfig const &cfg) {
+    constexpr std::uint8_t kSubSetProtocol = 0x01;
+    constexpr std::uint8_t kProtoHsCan = 0x02;
+
     switch (cfg.kind) {
     case LinkKind::KLine:
         return failure(ErrorCode::InvalidArgument,
                        "obdx::Transport: OBDX VX doesn't support K-Line / ISO9141. "
                        "Only pre-2008 Subarus need K-Line; 2008+ (including VA/VB WRX) "
-                       "run CAN-ISO15765 — use LinkKind::CanIso15765 with the engine ECU "
-                       "CAN IDs (request 0x7E0, response 0x7E8). If you DO need K-Line "
-                       "for an older EJ Subaru, a Tactrix OpenPort is the usual choice. "
-                       "(OBDX VX supported protocols: HSCAN, J1850 VPW, GM UART ALDL.)");
+                       "run CAN-ISO15765 — use LinkKind::CanIso15765. If you DO need "
+                       "K-Line for an older EJ Subaru, a Tactrix OpenPort is the usual "
+                       "choice. (OBDX VX supported protocols per VT v1.06 §3.10.1: ALDL, "
+                       "VPW, HS CAN, MS CAN, GMLAN.)");
     case LinkKind::CanFd:
         return failure(ErrorCode::InvalidArgument, "obdx::Transport: OBDX VX doesn't support "
                                                    "CAN-FD (the STN2120 silicon is classical-"
                                                    "CAN-only).");
-    case LinkKind::CanIso15765: {
-        // TODO(transport_obdx): final byte layout pending VT
-        // v1.06 PDF cross-check on real hardware. Current shape:
-        // [protocol = 0x06 (ISO15765-ish)] [flags lo / hi]
-        // [baud BE bytes] [request id BE] [response id BE].
-        // Real adapter will confirm or correct this.
-        std::vector<std::uint8_t> bytes;
-        bytes.reserve(12);
-        bytes.push_back(0x06U);
-        bytes.push_back(0x00U);
-        bytes.push_back(0x00U);
-        auto const baud = static_cast<std::uint32_t>(cfg.baud);
-        bytes.push_back(static_cast<std::uint8_t>(baud >> 24U));
-        bytes.push_back(static_cast<std::uint8_t>(baud >> 16U));
-        bytes.push_back(static_cast<std::uint8_t>(baud >> 8U));
-        bytes.push_back(static_cast<std::uint8_t>(baud));
-        bytes.push_back(static_cast<std::uint8_t>(cfg.can_id_request >> 8U));
-        bytes.push_back(static_cast<std::uint8_t>(cfg.can_id_request));
-        bytes.push_back(static_cast<std::uint8_t>(cfg.can_id_response >> 8U));
-        bytes.push_back(static_cast<std::uint8_t>(cfg.can_id_response));
-        return bytes;
-    }
+    case LinkKind::CanIso15765:
+        return std::vector<std::uint8_t>{kSubSetProtocol, kProtoHsCan};
     }
     return failure(ErrorCode::InvalidArgument, "obdx::Transport: unknown LinkKind");
+}
+
+// Build the DVI payload that enables network communication on the
+// currently-selected protocol, per VT v1.06 §3.10.2.
+//   Wire frame: CMD=0x31  LEN=0x02  SUB=0x02  STATE=0x01  CHK
+// where STATE is 0x00 OFF / 0x01 ON / 0x02 LISTEN ONLY. Default is
+// OFF — without this step the adapter accepts SetProtocol but won't
+// actually pass bytes to the bus, so opening the link looks fine
+// but every send_recv() times out.
+[[nodiscard]] std::vector<std::uint8_t> enable_network_payload() {
+    constexpr std::uint8_t kSubEnableNetwork = 0x02;
+    constexpr std::uint8_t kStateOn = 0x01;
+    return {kSubEnableNetwork, kStateOn};
 }
 
 // Sniff an ELM-mode response for a string that suggests we're
@@ -300,7 +308,8 @@ st::Status Transport::open(LinkConfig const &cfg) {
         return failure(switch_rsp.error());
     }
 
-    // 3. Configure the bus per LinkConfig via DVI SetProtocol.
+    // 3. Configure the bus per LinkConfig via DVI SetProtocol
+    // (§3.10.1: sub-command 0x01, picks the OBD protocol enum).
     auto sp = set_protocol_payload(cfg);
     if (!sp.has_value()) {
         return failure(sp.error());
@@ -308,6 +317,15 @@ st::Status Transport::open(LinkConfig const &cfg) {
     auto setp = dvi_exchange(*channel_, dvi::Opcode::SetProtocol, *sp, kSetProtocolTimeout);
     if (!setp.has_value()) {
         return failure(setp.error());
+    }
+
+    // 4. Enable network communication (§3.10.2: same 0x31 opcode,
+    // sub-command 0x02, state 0x01 ON). Default is OFF — without
+    // this step send_recv would time out on every exchange.
+    auto const en = enable_network_payload();
+    auto enable_rsp = dvi_exchange(*channel_, dvi::Opcode::SetProtocol, en, kSetProtocolTimeout);
+    if (!enable_rsp.has_value()) {
+        return failure(enable_rsp.error());
     }
 
     open_ = true;

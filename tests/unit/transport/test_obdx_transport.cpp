@@ -104,38 +104,45 @@ struct ChannelPair {
 
 // ---- open() handshake -------------------------------------------
 
-TEST_CASE("obdx::Transport::open drives ELM probe -> DX DP 1 -> SetProtocol",
+TEST_CASE("obdx::Transport::open drives ELM probe -> DX DP 1 -> SetProtocol -> EnableNetwork",
           "[transport][obdx_transport]") {
     auto cp = make_channel();
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>"); // probe response
     cp.raw->queue_read_ascii("OK\r>");               // DX DP 1 response
     cp.raw->queue_read(
         dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x00})); // SetProtocol ack
+    cp.raw->queue_read(
+        dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x00})); // EnableNetwork ack
 
     obdx::Transport t{std::move(cp.owner)};
     auto const r = t.open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
     REQUIRE(r.has_value());
     REQUIRE(t.is_open());
 
-    // The host should have written ELM probe + DVI-switch + a DVI
-    // SetProtocol frame. The first 5 chars of `writes` should be
-    // "AT @1" followed by CR.
     auto const writes = cp.raw->writes_as_string();
     REQUIRE(writes.find("AT @1\r") == 0);
     REQUIRE(writes.find("DX DP 1\r") != std::string::npos);
 
-    // After the DVI switch, a binary 0x31 (SetProtocol opcode) byte
-    // must appear in the write stream. We don't pin its exact byte
-    // layout here because the payload shape is still a TODO pending
-    // VT v1.06 PDF verification -- just verify the opcode arrived.
-    bool seen_set_protocol_opcode = false;
-    for (auto b : cp.raw->writes()) {
-        if (b == static_cast<std::uint8_t>(obdx::dvi::Opcode::SetProtocol)) {
-            seen_set_protocol_opcode = true;
-            break;
+    // VT v1.06 §3.10.1 + §3.10.2 specify the exact 5-byte frames on
+    // the wire after DVI switch:
+    //   SetProtocol(HS CAN) = 31 02 01 02 <chk>
+    //   EnableNetwork(ON)   = 31 02 02 01 <chk>
+    // Verify both showed up, in order.
+    auto const &raw_writes = cp.raw->writes();
+    auto find_frame = [&](std::uint8_t sub, std::uint8_t arg) -> std::size_t {
+        for (std::size_t i = 0; i + 3 < raw_writes.size(); ++i) {
+            if (raw_writes[i] == 0x31U && raw_writes[i + 1] == 0x02U &&
+                raw_writes[i + 2] == sub && raw_writes[i + 3] == arg) {
+                return i;
+            }
         }
-    }
-    REQUIRE(seen_set_protocol_opcode);
+        return std::string::npos;
+    };
+    auto const set_pos = find_frame(0x01U, 0x02U);    // SetProtocol(HS CAN)
+    auto const enable_pos = find_frame(0x02U, 0x01U); // EnableNetwork(ON)
+    REQUIRE(set_pos != std::string::npos);
+    REQUIRE(enable_pos != std::string::npos);
+    REQUIRE(enable_pos > set_pos);
 
     REQUIRE(t.firmware() == "OBDX Pro VX v1.0\r");
 }
@@ -213,6 +220,10 @@ struct ReadyTransport {
     auto cp = make_channel();
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
     cp.raw->queue_read_ascii("OK\r>");
+    // SetProtocol(HS CAN) ack — VT v1.06 §3.10.1.
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x00}));
+    // EnableNetwork(ON) ack — VT v1.06 §3.10.2; sent right after
+    // SetProtocol because the default network state is OFF.
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x00}));
     auto t = std::make_unique<obdx::Transport>(std::move(cp.owner));
     auto const open_r = t->open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
