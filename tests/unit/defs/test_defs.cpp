@@ -268,6 +268,116 @@ length    = 16
     REQUIRE_FALSE(v.has_value());
 }
 
+TEST_CASE("Definition::validate flags duplicate hook ids", "[defs][validate][hook]") {
+    auto const dr = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[hook]]
+id          = "after_fuel_calc"
+description = "First copy"
+
+[[hook]]
+id          = "after_fuel_calc"
+description = "Shadowing duplicate"
+)toml");
+    REQUIRE(dr.has_value()); // load succeeds; uniqueness is a validate-time check
+    auto const v = dr->validate();
+    REQUIRE_FALSE(v.has_value());
+    REQUIRE(v.error().message().find("hook 'after_fuel_calc' is defined more than once") !=
+            std::string::npos);
+}
+
+TEST_CASE("Definition::validate flags duplicate primitive ids", "[defs][validate][primitive]") {
+    auto const dr = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[primitive]]
+id           = "multiply"
+display_name = "First"
+
+[[primitive]]
+id           = "multiply"
+display_name = "Shadowing duplicate"
+)toml");
+    REQUIRE(dr.has_value());
+    auto const v = dr->validate();
+    REQUIRE_FALSE(v.has_value());
+    REQUIRE(v.error().message().find("primitive 'multiply' is defined more than once") !=
+            std::string::npos);
+}
+
+TEST_CASE("Definition::validate flags duplicate writable_region names",
+          "[defs][validate][writable_region]") {
+    auto const dr = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[writable_region]]
+name    = "calibration-bank"
+kind    = "calibration"
+address = 0x000A0000
+length  = 0x00010000
+
+[[writable_region]]
+name    = "calibration-bank"
+kind    = "calibration"
+address = 0x000B0000
+length  = 0x00010000
+)toml");
+    REQUIRE(dr.has_value());
+    auto const v = dr->validate();
+    REQUIRE_FALSE(v.has_value());
+    REQUIRE(v.error().message().find(
+                "writable_region 'calibration-bank' is defined more than once") !=
+            std::string::npos);
+}
+
+TEST_CASE("Definition::validate accepts a pack with unique hook/primitive/writable_region names",
+          "[defs][validate]") {
+    // Sanity check that the new uniqueness pass doesn't false-positive on
+    // distinct entries.
+    auto const dr = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[writable_region]]
+name    = "cal-a"
+kind    = "calibration"
+address = 0x000A0000
+length  = 0x00008000
+
+[[writable_region]]
+name    = "cal-b"
+kind    = "calibration"
+address = 0x000B0000
+length  = 0x00008000
+
+[[hook]]
+id          = "after_fuel_calc"
+description = "After fuel"
+
+[[hook]]
+id          = "before_ignition"
+description = "Before ignition"
+
+[[primitive]]
+id           = "multiply"
+display_name = "Multiply"
+
+[[primitive]]
+id           = "divide"
+display_name = "Divide"
+)toml");
+    REQUIRE(dr.has_value());
+    REQUIRE(dr->validate().has_value());
+}
+
 TEST_CASE("Definition::matches finds an identification by CID bytes", "[defs][matches]") {
     auto const dr = st::Definition::from_toml_string(kPackWithEverything);
     REQUIRE(dr.has_value());

@@ -22,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -1331,6 +1332,40 @@ Status Definition::validate() const {
                  "' (length_bytes=" + std::to_string(bm->length_bytes) + ")");
         }
     }
+
+    // Duplicate-id checks for collections whose lookup helpers
+    // (`find_hook`, `find_primitive`) return the first match. A
+    // duplicate would silently shadow the second entry, leaving the
+    // pack author with hard-to-diagnose codegen / address-gate
+    // surprises. Same goes for `writable_region.name` — the address
+    // gate iterates the vector linearly and a duplicate name could
+    // make an audit trail look correct while the actual gate decision
+    // was made by a different entry than the one a user inspected.
+    //
+    // Empty ids are not flagged here — that's a different class of
+    // bad pack, handled (or not) by the loader's per-entry parsing.
+    auto const check_duplicates =
+        [&](char const *kind, auto getter, auto const &collection) {
+            std::unordered_set<std::string_view> seen;
+            seen.reserve(collection.size());
+            for (auto const &entry : collection) {
+                std::string_view const key = getter(entry);
+                if (key.empty()) {
+                    continue;
+                }
+                auto const [_, inserted] = seen.emplace(key);
+                if (!inserted) {
+                    note(std::string{kind} + " '" + std::string{key} +
+                         "' is defined more than once");
+                }
+            }
+        };
+    check_duplicates("hook", [](Hook const &h) { return std::string_view{h.id}; }, hooks_);
+    check_duplicates(
+        "primitive", [](Primitive const &p) { return std::string_view{p.id}; }, primitives_);
+    check_duplicates(
+        "writable_region", [](WritableRegion const &w) { return std::string_view{w.name}; },
+        writable_regions_);
 
     if (!violations.empty()) {
         return failure(ErrorCode::ParseError, std::move(violations));
