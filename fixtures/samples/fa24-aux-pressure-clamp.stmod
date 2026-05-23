@@ -1,0 +1,134 @@
+# FA20→FA24 HPFP clamp driven by 3rd-party CAN-bus fuel pressure sensor.
+#
+# Architectural counterpart to fa24-hpfp-clamp.stmod — same hook, same
+# clamp shape, but with the clamp THRESHOLD coming from a live aftermarket
+# sensor reading instead of a hard-coded constant.
+#
+# Mirrors the pattern Atlas calls "3rd-party sensor integration" and COBB
+# calls "Differential Fuel Pressure Compensation" — both products solve
+# the FA24-into-VA HPFP capacity ceiling by sensing actual rail pressure
+# via an aftermarket sensor and feeding it back into the fueling
+# strategy.
+#
+# WHAT IT DOES:
+#
+#     pump_struggling = (aux_pressure_bar < UNDERSHOOT_THRESHOLD_BAR)
+#     clamped_target  = select(pump_struggling, SAFE_TARGET_BAR, commanded)
+#
+# If the aftermarket sensor reads rail pressure significantly below the
+# commanded target, the FA24 pump is at capacity. Cap the commanded
+# target to a safe lower value so the OEM PID stops fighting an
+# unreachable target (which prevents the P008x DTC + derate).
+#
+# Placeholder constants:
+#   UNDERSHOOT_THRESHOLD_BAR = 130.0  ← aux reads below this means pump
+#                                       can't reach what's being asked
+#   SAFE_TARGET_BAR          = 120.0  ← target the pump CAN reach at any
+#                                       reasonable RPM × load
+#
+# Real values come from logging aux_pressure vs commanded across a sweep
+# (transient load, full throttle pulls, hot/cold). For an FA24 stock pump
+# the Nostrum product page suggests ~170 bar is the practical ceiling;
+# the threshold + safe target above leave conservative headroom.
+#
+# A more sophisticated version using Bernoulli's principle (flow ∝ √Δp)
+# to compute injector pulse-width correction instead of clamping the
+# commanded pressure requires a `sqrt_float` IR primitive that isn't
+# shipped yet — see docs/16 §"Where the next IR primitive lands."
+#
+# Pairs with fixtures/demo-pack. Compile with:
+#
+#   subuwutuner-cli feature-compile fixtures/samples/fa24-aux-pressure-clamp.stmod \
+#     --def fixtures/demo-pack --arch sh2a
+
+[graph]
+schema_version = 1
+
+# ---- Hook: read the 3rd-party CAN fuel pressure sensor ------------
+
+[[node]]
+id    = 1
+kind  = "hook.read_aux_fuel_pressure"
+label = "Aux fuel pressure"
+x     = 48.0
+y     = 48.0
+phase_break = true
+pins  = [
+  { id = 0, name = "aux_pressure_bar", label = "Aux rail pressure", type = "float", direction = "output", unit = "bar" },
+]
+
+# ---- Hook: HPFP target override splice point ----------------------
+
+[[node]]
+id    = 2
+kind  = "hook.override_hpfp_target"
+label = "Override HPFP target"
+x     = 48.0
+y     = 192.0
+phase_break = true
+pins  = [
+  { id = 0, name = "commanded_pressure_bar", label = "Commanded rail pressure", type = "float", direction = "output", unit = "bar" },
+  { id = 1, name = "actual_pressure_bar",    label = "Actual rail pressure",    type = "float", direction = "output", unit = "bar" },
+  { id = 2, name = "rpm",                    label = "Engine RPM",              type = "float", direction = "output", unit = "rpm" },
+  { id = 3, name = "load",                   label = "Engine load",             type = "float", direction = "output", unit = "%"   },
+  { id = 4, name = "target_override_bar",    label = "Override target pressure", type = "float", direction = "input",  unit = "bar" },
+]
+
+# ---- Compare: aux_pressure < UNDERSHOOT_THRESHOLD_BAR -------------
+
+[[node]]
+id    = 3
+kind  = "primitive.compare_lt_float"
+label = "aux < 130 bar"
+x     = 288.0
+y     = 48.0
+pins  = [
+  { id = 0, name = "a",     type = "float", direction = "input",  unit = "bar" },
+  { id = 1, name = "b",     type = "float", direction = "input",  unit = "bar", default = 130.0 },
+  { id = 2, name = "a < b", type = "bool",  direction = "output", unit = "" },
+]
+
+# ---- Select: pump_struggling ? SAFE_TARGET : commanded ------------
+
+[[node]]
+id    = 4
+kind  = "primitive.select_float"
+label = "clamp to 120 bar when struggling"
+x     = 528.0
+y     = 120.0
+pins  = [
+  { id = 0, name = "cond",   type = "bool",  direction = "input",  unit = "" },
+  { id = 1, name = "if_yes", type = "float", direction = "input",  unit = "bar", default = 120.0 },
+  { id = 2, name = "if_no",  type = "float", direction = "input",  unit = "bar" },
+  { id = 3, name = "out",    type = "float", direction = "output", unit = "bar" },
+]
+
+# ---- Edges --------------------------------------------------------
+
+# aux_pressure_bar → compare.a
+[[edge]]
+from_node = 1
+from_pin  = 0
+to_node   = 3
+to_pin    = 0
+
+# compare.out → select.cond
+[[edge]]
+from_node = 3
+from_pin  = 2
+to_node   = 4
+to_pin    = 0
+
+# commanded_pressure_bar → select.if_no
+[[edge]]
+from_node = 2
+from_pin  = 0
+to_node   = 4
+to_pin    = 2
+
+# select.out → override_hpfp_target.target_override_bar
+[[edge]]
+from_node = 4
+from_pin  = 3
+to_node   = 2
+to_pin    = 4

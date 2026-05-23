@@ -1,0 +1,148 @@
+# VVT-override demo — generic value-override pattern.
+#
+# Demonstrates the override_vvt_target hook: read the ECU's commanded
+# intake + exhaust VVT angles, apply a linear remap (scale then offset),
+# write the remapped values back. Pure illustrative scaffolding for the
+# value-override pattern.
+#
+# NOT a recipe for any specific engine swap. Initially scaffolded as an
+# FA20→FA24 swap demo before research (docs/16 §"Motivating use cases")
+# clarified that the FA24-swap cam-side concern is solved mechanically
+# by FA20-pattern cam trigger wheels in the RS Motors swap kit — not by
+# a software VVT remap. The pattern below is still useful for legitimate
+# use cases:
+#
+#   - Anti-knock VVT retard override (read knock count, scale VVT
+#     retard correction beyond the OEM table)
+#   - Custom VVT scheduling on race engines
+#   - VVT compensation for non-stock cam profiles (cam grind retrofit)
+#
+# What it does:
+#
+#     intake_actual  = (commanded_intake  * INTAKE_SCALE)  + INTAKE_OFFSET
+#     exhaust_actual = (commanded_exhaust * EXHAUST_SCALE) + EXHAUST_OFFSET
+#
+# Coefficients here are identity (1.0 * x + 0.0) — wire-shape smoke test,
+# not a real calibration.
+#
+# Pairs with fixtures/demo-pack (placeholder hook address). Compile with:
+#
+#   subuwutuner-cli feature-compile fixtures/samples/vvt-override-demo.stmod \
+#     --def fixtures/demo-pack --arch sh2a
+
+[graph]
+schema_version = 1
+
+# ---- Hook: read FA20 ECU's commanded VVT targets ------------------
+
+[[node]]
+id    = 1
+kind  = "hook.override_vvt_target"
+label = "Override VVT target"
+x     = 48.0
+y     = 48.0
+phase_break = true
+pins  = [
+  { id = 0, name = "commanded_intake_deg",  label = "Commanded intake VVT",  type = "float", direction = "output", unit = "deg" },
+  { id = 1, name = "commanded_exhaust_deg", label = "Commanded exhaust VVT", type = "float", direction = "output", unit = "deg" },
+  { id = 2, name = "rpm",                   label = "Engine RPM",            type = "float", direction = "output", unit = "rpm" },
+  { id = 3, name = "coolant_temp",          label = "Coolant temp",          type = "float", direction = "output", unit = "°C"  },
+  { id = 4, name = "intake_override_deg",   label = "Override intake VVT",   type = "float", direction = "input",  unit = "deg" },
+  { id = 5, name = "exhaust_override_deg",  label = "Override exhaust VVT",  type = "float", direction = "input",  unit = "deg" },
+]
+
+# ---- Intake remap: scale then offset -----------------------------
+
+[[node]]
+id    = 2
+kind  = "primitive.multiply_float"
+label = "intake * INTAKE_SCALE"
+x     = 288.0
+y     = 48.0
+pins  = [
+  { id = 0, name = "a",   type = "float", direction = "input",  unit = "deg" },
+  { id = 1, name = "b",   type = "float", direction = "input",  unit = "",    default = 1.0 },
+  { id = 2, name = "out", type = "float", direction = "output", unit = "deg" },
+]
+
+[[node]]
+id    = 3
+kind  = "primitive.add_float"
+label = "+ INTAKE_OFFSET"
+x     = 528.0
+y     = 48.0
+pins  = [
+  { id = 0, name = "a",   type = "float", direction = "input",  unit = "deg" },
+  { id = 1, name = "b",   type = "float", direction = "input",  unit = "deg", default = 0.0 },
+  { id = 2, name = "out", type = "float", direction = "output", unit = "deg" },
+]
+
+# ---- Exhaust remap: scale then offset ----------------------------
+
+[[node]]
+id    = 4
+kind  = "primitive.multiply_float"
+label = "exhaust * EXHAUST_SCALE"
+x     = 288.0
+y     = 192.0
+pins  = [
+  { id = 0, name = "a",   type = "float", direction = "input",  unit = "deg" },
+  { id = 1, name = "b",   type = "float", direction = "input",  unit = "",    default = 1.0 },
+  { id = 2, name = "out", type = "float", direction = "output", unit = "deg" },
+]
+
+[[node]]
+id    = 5
+kind  = "primitive.add_float"
+label = "+ EXHAUST_OFFSET"
+x     = 528.0
+y     = 192.0
+pins  = [
+  { id = 0, name = "a",   type = "float", direction = "input",  unit = "deg" },
+  { id = 1, name = "b",   type = "float", direction = "input",  unit = "deg", default = 0.0 },
+  { id = 2, name = "out", type = "float", direction = "output", unit = "deg" },
+]
+
+# ---- Edges -------------------------------------------------------
+
+# commanded_intake_deg → intake.multiply.a
+[[edge]]
+from_node = 1
+from_pin  = 0
+to_node   = 2
+to_pin    = 0
+
+# intake.multiply.out → intake.add.a
+[[edge]]
+from_node = 2
+from_pin  = 2
+to_node   = 3
+to_pin    = 0
+
+# intake.add.out → hook.intake_override_deg
+[[edge]]
+from_node = 3
+from_pin  = 2
+to_node   = 1
+to_pin    = 4
+
+# commanded_exhaust_deg → exhaust.multiply.a
+[[edge]]
+from_node = 1
+from_pin  = 1
+to_node   = 4
+to_pin    = 0
+
+# exhaust.multiply.out → exhaust.add.a
+[[edge]]
+from_node = 4
+from_pin  = 2
+to_node   = 5
+to_pin    = 0
+
+# exhaust.add.out → hook.exhaust_override_deg
+[[edge]]
+from_node = 5
+from_pin  = 2
+to_node   = 1
+to_pin    = 5

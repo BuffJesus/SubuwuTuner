@@ -1,0 +1,333 @@
+# FA20→FA24 Bernoulli differential-fuel-pressure compensation.
+#
+# Demonstrates the math COBB ships in production as "Subaru Differential
+# Fuel Pressure Compensation": when the FA24's stock HPFP can't reach
+# the FA20 ECU's commanded rail pressure, the per-cycle fuel delivered
+# by a fixed-duration injector pulse is off by sqrt(actual_dp /
+# expected_dp). Compensating on the injector pulse-width side preserves
+# the ECU's AFR closed-loop behavior; compensating on the HPFP target
+# side just fights the OEM PID.
+#
+# WHAT IT DOES (production-shape math):
+#
+#     commanded_dp   = commanded_pressure - manifold_pressure
+#     actual_dp      = actual_pressure - manifold_pressure
+#     raw_correction = sqrt(commanded_dp / actual_dp)
+#     low_clamped    = max(raw_correction, 0.8)
+#     correction     = min(low_clamped, 1.4)
+#     corrected_pw   = commanded_pw * correction
+#
+# When actual rail pressure can keep up with commanded, correction
+# ≈ 1.0 and the OEM PW is passed through. When the pump is struggling
+# (actual < commanded), correction > 1.0 and the injector stays open
+# longer to deliver the intended fuel mass. The [0.8, 1.4] clamp
+# guards against transient sensor faults or out-of-range readings
+# driving the injector to absurd duty.
+#
+# Why ΔP (rail − manifold) instead of raw rail pressure: a direct
+# injector flows against the cylinder pressure during the injection
+# window, which tracks manifold pressure under most conditions.
+# Bernoulli's principle relates flow to the pressure DIFFERENCE
+# across the orifice, not the absolute pressure on either side, so
+# ignoring manifold pressure inflates the correction factor under
+# boost.
+#
+# Pipeline (9 primitive nodes): 2×subtract_float (to get ΔPs) +
+# divide_float (ratio) + sqrt_float (Bernoulli) + compare_lt_float +
+# select_float (low clamp) + compare_gt_float + select_float (high
+# clamp) + multiply_float (apply to commanded PW). All FPU ops; no
+# new IR primitives needed. The `F0 6D` byte sequence somewhere in
+# the emitted machine code is FSQRT FR0.
+#
+# Remaining honest caveats:
+#
+#   - On-throttle transient compensation requires the actual-pressure
+#     input to be filtered (the aux sensor's reading lags reality by
+#     several ms during a step transient). Production tuners add a
+#     low-pass filter; this sample assumes the input is pre-filtered
+#     by the CAN-RX driver. A filter primitive isn't shipped yet.
+#
+#   - The clamp range [0.8, 1.4] is illustrative. Real values come
+#     from logging the swap project under all expected operating
+#     points and picking bounds that bracket the steady-state
+#     correction with margin.
+#
+# Pairs with fixtures/demo-pack. Compile with:
+#
+#   subuwutuner-cli feature-compile fixtures/samples/fa24-bernoulli-comp.stmod \
+#     --def fixtures/demo-pack --arch sh2a
+
+[graph]
+schema_version = 1
+
+# ---- Hook: aux fuel pressure sensor read --------------------------
+
+[[node]]
+id    = 1
+kind  = "hook.read_aux_fuel_pressure"
+label = "Aux fuel pressure"
+x     = 48.0
+y     = 48.0
+phase_break = true
+pins  = [
+  { id = 0, name = "aux_pressure_bar", label = "Aux rail pressure", type = "float", direction = "output", unit = "bar" },
+]
+
+# ---- Hook: injector PW splice (commanded values in, override out) -
+
+[[node]]
+id    = 2
+kind  = "hook.override_injector_pw"
+label = "Override injector PW"
+x     = 48.0
+y     = 192.0
+phase_break = true
+pins  = [
+  { id = 0, name = "commanded_pw_ms",        label = "Commanded injector PW",  type = "float", direction = "output", unit = "ms" },
+  { id = 1, name = "rpm",                    label = "Engine RPM",             type = "float", direction = "output", unit = "rpm" },
+  { id = 2, name = "load",                   label = "Engine load",            type = "float", direction = "output", unit = "%"   },
+  { id = 3, name = "manifold_pressure_bar",  label = "Manifold abs pressure",  type = "float", direction = "output", unit = "bar" },
+  { id = 4, name = "commanded_pressure_bar", label = "Commanded rail pressure", type = "float", direction = "output", unit = "bar" },
+  { id = 5, name = "pw_override_ms",         label = "Override injector PW",   type = "float", direction = "input",  unit = "ms" },
+]
+
+# ---- Math: commanded_dp = commanded_pressure - manifold_pressure --
+
+[[node]]
+id    = 3
+kind  = "primitive.subtract_float"
+label = "commanded_dp = commanded - manifold"
+x     = 288.0
+y     = 48.0
+pins  = [
+  { id = 0, name = "a",   type = "float", direction = "input",  unit = "bar" },
+  { id = 1, name = "b",   type = "float", direction = "input",  unit = "bar" },
+  { id = 2, name = "out", type = "float", direction = "output", unit = "bar" },
+]
+
+# ---- Math: actual_dp = actual_pressure - manifold_pressure --------
+
+[[node]]
+id    = 4
+kind  = "primitive.subtract_float"
+label = "actual_dp = actual - manifold"
+x     = 288.0
+y     = 144.0
+pins  = [
+  { id = 0, name = "a",   type = "float", direction = "input",  unit = "bar" },
+  { id = 1, name = "b",   type = "float", direction = "input",  unit = "bar" },
+  { id = 2, name = "out", type = "float", direction = "output", unit = "bar" },
+]
+
+# ---- Math: ratio = commanded_dp / actual_dp -----------------------
+
+[[node]]
+id    = 5
+kind  = "primitive.divide_float"
+label = "commanded_dp / actual_dp"
+x     = 528.0
+y     = 96.0
+pins  = [
+  { id = 0, name = "a",   type = "float", direction = "input",  unit = "" },
+  { id = 1, name = "b",   type = "float", direction = "input",  unit = "" },
+  { id = 2, name = "out", type = "float", direction = "output", unit = "" },
+]
+
+# ---- Math: raw_correction = sqrt(ratio) ---------------------------
+
+[[node]]
+id    = 6
+kind  = "primitive.sqrt_float"
+label = "sqrt(ratio)"
+x     = 768.0
+y     = 96.0
+pins  = [
+  { id = 0, name = "in",  type = "float", direction = "input",  unit = "" },
+  { id = 1, name = "out", type = "float", direction = "output", unit = "" },
+]
+
+# ---- Clamp low: raw < 0.8 ? -------------------------------------
+
+[[node]]
+id    = 7
+kind  = "primitive.compare_lt_float"
+label = "raw < 0.8"
+x     = 1008.0
+y     = 48.0
+pins  = [
+  { id = 0, name = "a",     type = "float", direction = "input",  unit = "" },
+  { id = 1, name = "b",     type = "float", direction = "input",  unit = "", default = 0.8 },
+  { id = 2, name = "a < b", type = "bool",  direction = "output", unit = "" },
+]
+
+# ---- Clamp low: select(too_low, 0.8, raw) -------------------------
+
+[[node]]
+id    = 8
+kind  = "primitive.select_float"
+label = "low_clamped = max(raw, 0.8)"
+x     = 1248.0
+y     = 96.0
+pins  = [
+  { id = 0, name = "cond",   type = "bool",  direction = "input",  unit = "" },
+  { id = 1, name = "if_yes", type = "float", direction = "input",  unit = "", default = 0.8 },
+  { id = 2, name = "if_no",  type = "float", direction = "input",  unit = "" },
+  { id = 3, name = "out",    type = "float", direction = "output", unit = "" },
+]
+
+# ---- Clamp high: low_clamped > 1.4 ? -----------------------------
+
+[[node]]
+id    = 9
+kind  = "primitive.compare_gt_float"
+label = "low_clamped > 1.4"
+x     = 1488.0
+y     = 48.0
+pins  = [
+  { id = 0, name = "a",     type = "float", direction = "input",  unit = "" },
+  { id = 1, name = "b",     type = "float", direction = "input",  unit = "", default = 1.4 },
+  { id = 2, name = "a > b", type = "bool",  direction = "output", unit = "" },
+]
+
+# ---- Clamp high: select(too_high, 1.4, low_clamped) ---------------
+
+[[node]]
+id    = 10
+kind  = "primitive.select_float"
+label = "correction = min(low_clamped, 1.4)"
+x     = 1728.0
+y     = 96.0
+pins  = [
+  { id = 0, name = "cond",   type = "bool",  direction = "input",  unit = "" },
+  { id = 1, name = "if_yes", type = "float", direction = "input",  unit = "", default = 1.4 },
+  { id = 2, name = "if_no",  type = "float", direction = "input",  unit = "" },
+  { id = 3, name = "out",    type = "float", direction = "output", unit = "" },
+]
+
+# ---- Final: corrected_pw = commanded_pw * correction --------------
+
+[[node]]
+id    = 11
+kind  = "primitive.multiply_float"
+label = "commanded_pw * correction"
+x     = 1728.0
+y     = 240.0
+pins  = [
+  { id = 0, name = "a",   type = "float", direction = "input",  unit = "ms" },
+  { id = 1, name = "b",   type = "float", direction = "input",  unit = "" },
+  { id = 2, name = "out", type = "float", direction = "output", unit = "ms" },
+]
+
+# ---- Edges --------------------------------------------------------
+
+# commanded_pressure_bar → commanded_dp.a
+[[edge]]
+from_node = 2
+from_pin  = 4
+to_node   = 3
+to_pin    = 0
+
+# manifold_pressure_bar → commanded_dp.b
+[[edge]]
+from_node = 2
+from_pin  = 3
+to_node   = 3
+to_pin    = 1
+
+# aux_pressure_bar → actual_dp.a
+[[edge]]
+from_node = 1
+from_pin  = 0
+to_node   = 4
+to_pin    = 0
+
+# manifold_pressure_bar → actual_dp.b
+[[edge]]
+from_node = 2
+from_pin  = 3
+to_node   = 4
+to_pin    = 1
+
+# commanded_dp.out → divide.a
+[[edge]]
+from_node = 3
+from_pin  = 2
+to_node   = 5
+to_pin    = 0
+
+# actual_dp.out → divide.b
+[[edge]]
+from_node = 4
+from_pin  = 2
+to_node   = 5
+to_pin    = 1
+
+# divide.out → sqrt.in
+[[edge]]
+from_node = 5
+from_pin  = 2
+to_node   = 6
+to_pin    = 0
+
+# sqrt.out → compare_lt.a
+[[edge]]
+from_node = 6
+from_pin  = 1
+to_node   = 7
+to_pin    = 0
+
+# compare_lt.out → low_clamp_select.cond
+[[edge]]
+from_node = 7
+from_pin  = 2
+to_node   = 8
+to_pin    = 0
+
+# sqrt.out → low_clamp_select.if_no
+[[edge]]
+from_node = 6
+from_pin  = 1
+to_node   = 8
+to_pin    = 2
+
+# low_clamp_select.out → compare_gt.a
+[[edge]]
+from_node = 8
+from_pin  = 3
+to_node   = 9
+to_pin    = 0
+
+# compare_gt.out → high_clamp_select.cond
+[[edge]]
+from_node = 9
+from_pin  = 2
+to_node   = 10
+to_pin    = 0
+
+# low_clamp_select.out → high_clamp_select.if_no
+[[edge]]
+from_node = 8
+from_pin  = 3
+to_node   = 10
+to_pin    = 2
+
+# commanded_pw_ms → multiply.a
+[[edge]]
+from_node = 2
+from_pin  = 0
+to_node   = 11
+to_pin    = 0
+
+# high_clamp_select.out → multiply.b
+[[edge]]
+from_node = 10
+from_pin  = 3
+to_node   = 11
+to_pin    = 1
+
+# multiply.out → override_injector_pw.pw_override_ms
+[[edge]]
+from_node = 11
+from_pin  = 2
+to_node   = 2
+to_pin    = 5

@@ -53,6 +53,74 @@ outputs = [
   { name = "map_index", label = "Map index", type = "int" },
 ]
 
+[[hook]]
+id           = "override_vvt_target"
+display_name = "Override VVT target angle"
+description  = """
+Splice point after the ECU computes its commanded intake/exhaust VVT target
+angles, before the value is dispatched to the cam-phaser control loop.
+
+Generic VVT-override hook — supports any case where user code needs to
+inject a corrected cam target between the ECU's VE/spark/AFR models and
+the AVCS actuator. NOT the FA20→FA24 swap fix (that's a cam-trigger-wheel
+hardware change plus VE table edits, per docs/16); kept here as a useful
+primitive for other projects (cam-swap recipes, custom VVT scheduling on
+race engines, anti-knock VVT retard overrides).
+
+Pack-specific notes: address + RAM region are placeholders in this demo
+pack; a real VA-WRX pack supplies the actual firmware splice address (the
+instruction where the cam-target word is written to the VVT control
+register) plus a writable free-RAM region for the patch's working storage.
+"""
+ecu_address  = 0x000ABE80
+free_ram     = { base = 0x40000200, length = 128 }
+inputs = [
+  { name = "commanded_intake_deg",  label = "Commanded intake VVT",  type = "float", unit = "deg", address = 0x000F2100 },
+  { name = "commanded_exhaust_deg", label = "Commanded exhaust VVT", type = "float", unit = "deg", address = 0x000F2104 },
+  { name = "rpm",                   label = "Engine RPM",            type = "float", unit = "rpm", address = 0x000F2000 },
+  { name = "coolant_temp",          label = "Coolant temp",          type = "float", unit = "°C",  address = 0x000F2108 },
+]
+outputs = [
+  { name = "intake_override_deg",  label = "Override intake VVT",  type = "float", unit = "deg" },
+  { name = "exhaust_override_deg", label = "Override exhaust VVT", type = "float", unit = "deg" },
+]
+
+[[hook]]
+id           = "override_hpfp_target"
+display_name = "Override HPFP target pressure"
+description  = """
+Splice point after the ECU computes its commanded HPFP rail pressure
+target, before the value is dispatched to the pump-control PID.
+
+Primary use case (docs/16 §"Motivating use cases"): integrating a
+CAN-bus aftermarket fuel pressure sensor into the FA20 ECU's HPFP
+control loop on an FA20→FA24 swap. The OEM ECU has no slot for a
+secondary fuel pressure sensor's signal; a custom feature ingests
+the aftermarket reading and clamps the commanded target to a value
+the FA24 pump can actually reach at the current RPM. Pairs with a
+CAN-RX node for the aftermarket sensor.
+
+NOTE: the simpler fix for the same swap is just to make the HPFP duty
++ target pressure tables editable in the definition pack (see docs/16
+§"Worked example"). Use this hook when you need RUNTIME behavior the
+tables can't express — e.g. dynamic clamping based on a real-time
+3rd-party pressure reading.
+
+Pack-specific notes: address + RAM region are placeholders here; real
+VA-WRX packs supply the firmware splice address and writable RAM.
+"""
+ecu_address  = 0x000ABF00
+free_ram     = { base = 0x40000280, length = 128 }
+inputs = [
+  { name = "commanded_pressure_bar", label = "Commanded rail pressure", type = "float", unit = "bar", address = 0x000F2200 },
+  { name = "actual_pressure_bar",    label = "Actual rail pressure",    type = "float", unit = "bar", address = 0x000F2204 },
+  { name = "rpm",                    label = "Engine RPM",              type = "float", unit = "rpm", address = 0x000F2000 },
+  { name = "load",                   label = "Engine load",             type = "float", unit = "%",   address = 0x000F2208 },
+]
+outputs = [
+  { name = "target_override_bar", label = "Override target pressure", type = "float", unit = "bar" },
+]
+
 # ---- Sensor reads --------------------------------------------------
 
 [[hook]]
@@ -98,4 +166,73 @@ description  = "Read the current vehicle speed from the ECU's VSS input"
 ecu_address  = 0x000AB210
 inputs = [
   { name = "speed", label = "Speed", type = "float", unit = "km/h", address = 0x000F2040 },
+]
+
+[[hook]]
+id           = "override_injector_pw"
+display_name = "Override injector pulse-width"
+description  = """
+Splice point after the ECU computes its commanded injector pulse-width
+(per cycle, per cylinder), before the value is dispatched to the
+injector driver hardware.
+
+The canonical surface for Bernoulli-based differential-fuel-pressure
+compensation. When the actual rail pressure deviates from the
+commanded pressure (e.g. FA24 stock HPFP can't reach the FA20 ECU's
+target), the per-cycle fuel delivered by a fixed-duration pulse is
+off by sqrt(actual_dp / expected_dp). Compensating on the PW side —
+lengthening the pulse so total fuel mass matches the ECU's intent —
+preserves AFR closed-loop behavior; compensating on the HPFP target
+side just fights the OEM PID. COBB's "Subaru Differential Fuel
+Pressure Compensation" is this same shape.
+
+Pairs with `read_aux_fuel_pressure` (for the actual rail pressure
+signal) and the SH-2A `sqrt_float` primitive (for the Bernoulli
+correction). See fixtures/samples/fa24-bernoulli-comp.stmod for the
+worked sample.
+
+Pack-specific notes: address + RAM region are placeholders. A real
+VA-WRX pack supplies the firmware splice address (the instruction
+where the per-cycle PW is written to the injector control register
+or the inter-cylinder PW queue) plus a writable free-RAM region.
+"""
+ecu_address  = 0x000ABF80
+free_ram     = { base = 0x40000300, length = 128 }
+inputs = [
+  { name = "commanded_pw_ms",        label = "Commanded injector PW",  type = "float", unit = "ms",  address = 0x000F2300 },
+  { name = "rpm",                    label = "Engine RPM",             type = "float", unit = "rpm", address = 0x000F2000 },
+  { name = "load",                   label = "Engine load",            type = "float", unit = "%",   address = 0x000F2208 },
+  { name = "manifold_pressure_bar",  label = "Manifold abs pressure",  type = "float", unit = "bar", address = 0x000F2304 },
+  { name = "commanded_pressure_bar", label = "Commanded rail pressure", type = "float", unit = "bar", address = 0x000F2200 },
+]
+outputs = [
+  { name = "pw_override_ms", label = "Override injector PW", type = "float", unit = "ms" },
+]
+
+[[hook]]
+id           = "read_aux_fuel_pressure"
+display_name = "Aux fuel pressure (3rd-party CAN sensor)"
+description  = """
+Read an aftermarket fuel pressure sensor value that an aftermarket CAN
+bus has deposited into a known firmware RAM address.
+
+This is the SubuwuTuner equivalent of Atlas's "3rd-party sensor
+integration" and COBB's "Differential Fuel Pressure Compensation"
+pattern: the OEM ECU has no native slot for an aux sensor, so the
+user wires the sensor onto a CAN bus, configures the ECU's existing
+CAN driver (via separate pack metadata — out of this hook's scope)
+to deposit incoming bytes at a fixed RAM address, and then user code
+reads that address as if it were a sensor input.
+
+Used in the fa24-aux-pressure-clamp.stmod sample to clamp the FA20
+ECU's commanded HPFP target dynamically when the FA24's smaller
+pump can't sustain the requested pressure.
+
+The `aux_pressure_bar` input's `address` is a placeholder — a real
+VA-WRX pack configured for an aftermarket sensor would point at the
+exact RAM word where the CAN driver writes the decoded value.
+"""
+ecu_address  = 0x000AB220
+inputs = [
+  { name = "aux_pressure_bar", label = "Aux rail pressure", type = "float", unit = "bar", address = 0x000F2050 },
 ]
