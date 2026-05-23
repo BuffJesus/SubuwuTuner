@@ -355,6 +355,7 @@ constexpr PrimitiveCost kPrimitiveCosts[] = {
     {"subtract_float", 5},
     {"multiply_float", 5},
     {"divide_float", 18}, // FDIV latency dominates
+    {"sqrt_float", 15},   // FSQRT latency ≈ FDIV's; one operand load not two
 
     // Float compares (→ Bool)
     {"compare_lt_float", 6}, // 2×(LDS+FSTS) + FCMP + MOVT

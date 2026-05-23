@@ -225,6 +225,9 @@ public:
     void fdiv(sh2a::FReg frm, sh2a::FReg frn) {
         emit_be16(body_, sh2a::enc_fdiv(frm, frn));
     }
+    void fsqrt(sh2a::FReg frn) {
+        emit_be16(body_, sh2a::enc_fsqrt(frn));
+    }
     void lds_r_fpul(sh2a::Reg rm) {
         emit_be16(body_, sh2a::enc_lds_r_fpul(rm));
     }
@@ -698,6 +701,23 @@ void emit_div_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, Primitiv
     emit_store_fr_to(fe, sh2a::FReg::FR1, dst);
 }
 
+// Body fragment for `sqrt_float(op)` → store. Single-operand FPU op.
+// FSQRT FRn ⇒ FRn = sqrt(FRn). Negative-operand handling: FPU raises
+// Invalid Operation. Mirrors the divide_float posture — caller is
+// trusted not to pass negatives, or to gate via compare → select.
+//
+// Motivating use case (docs/16 §"Where the next IR primitive lands"):
+// Bernoulli-based differential-fuel-pressure compensation, where the
+// injector pulse-width correction factor is sqrt(actual_rail_pressure /
+// commanded_rail_pressure). Same shape COBB ships as "Differential
+// Fuel Pressure Compensation" — see fixtures/samples/fa24-bernoulli-
+// comp.stmod for an FA24-swap-themed worked example.
+void emit_sqrt_float_fragment(FragmentEmitter &fe, PrimitiveOperand op, std::uint32_t dst) {
+    load_operand_into_fr(fe, op, sh2a::FReg::FR0);
+    fe.fsqrt(sh2a::FReg::FR0); // FR0 = sqrt(FR0)
+    emit_store_fr_to(fe, sh2a::FReg::FR0, dst);
+}
+
 // Body fragment for `divide_int(op1, op2)` → store. SH-2A's iterative
 // integer divide (DIV0S + 32× DIV1) is encoding-tricky and has corner
 // cases (INT_MIN / -1 overflow, signed-vs-unsigned modes) that we'd
@@ -841,6 +861,10 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, Primi
         emit_div_float_fragment(fe, operands[0], operands[1], dst);
         return ok();
     }
+    if (symbol == "sqrt_float") {
+        emit_sqrt_float_fragment(fe, operands[0], dst);
+        return ok();
+    }
     if (symbol == "compare_lt_float") {
         emit_cmp_lt_float_fragment(fe, operands[0], operands[1], dst);
         return ok();
@@ -861,7 +885,7 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, Primi
                "and_bool, or_bool, not_bool, select_int, "
                "select_bool, select_float, add_float, "
                "subtract_float, multiply_float, divide_float, "
-               "compare_lt_float, compare_gt_float, "
+               "sqrt_float, compare_lt_float, compare_gt_float, "
                "compare_eq_float)");
     return failure(ErrorCode::NotImplemented, std::move(msg));
 }
@@ -1084,6 +1108,7 @@ struct PrimitiveShape {
         {"subtract_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
         {"multiply_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
         {"divide_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
+        {"sqrt_float", {1, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
         {"compare_lt_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},
         {"compare_gt_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},
         {"compare_eq_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},

@@ -242,6 +242,17 @@ enum class FReg : std::uint8_t {
         static_cast<std::uint16_t>(static_cast<std::uint16_t>(frm) << 4U));
 }
 
+// FSQRT FRn — FRn = sqrt(FRn). Single-precision square root with
+// FPSCR.PR=0 (the same assumption every other Float primitive makes).
+// On a negative operand the FPU raises an Invalid Operation exception;
+// for v1.x we mirror the divide_float posture and trust the user not
+// to author a sqrt-of-negative (a guard primitive is a later concern).
+// Encoding: 1111 nnnn 0110 1101.
+[[nodiscard]] constexpr std::uint16_t enc_fsqrt(FReg frn) noexcept {
+    return static_cast<std::uint16_t>(
+        0xF06DU | static_cast<std::uint16_t>(static_cast<std::uint16_t>(frn) << 8U));
+}
+
 // LDS Rm, FPUL — FPUL = Rm (transfer GPR → FPU communications
 // register). Used as the first step of "move int-bit pattern into
 // FPU side." Encoding: 0100 mmmm 0101 1010.

@@ -2074,6 +2074,50 @@ TEST_CASE("Sh2aBackend: divide_float emits FDIV with op1 in FR1",
     REQUIRE(seen_fdiv);
 }
 
+TEST_CASE("Sh2aBackend: sqrt_float emits FSQRT on FR0",
+          "[feature_codegen][sh2a][float][sqrt]") {
+    auto def = st::Definition::from_toml_string(kPackFloatHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module m;
+    m.instructions.push_back(load_const_float(1, 4.0));
+    m.instructions.push_back(
+        call_primitive(2, "sqrt_float", {1}, st::feature::PinType::Float));
+    m.instructions.push_back(store("after_fuel_calc", "commanded_pw_override", 2));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    // FSQRT FR0. Encoding: 1111_0000_0110_1101 = 0xF06D.
+    bool seen_fsqrt = false;
+    for (std::size_t i = 0; i + 1 < r->hooks[0].code.size(); i += 2) {
+        if (be16_at(r->hooks[0].code, i) == 0xF06D)
+            seen_fsqrt = true;
+    }
+    REQUIRE(seen_fsqrt);
+}
+
+TEST_CASE("Sh2aBackend: sqrt_float rejects wrong arity",
+          "[feature_codegen][sh2a][float][sqrt][error]") {
+    auto def = st::Definition::from_toml_string(kPackFloatHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module m;
+    m.instructions.push_back(load_const_float(1, 4.0));
+    m.instructions.push_back(load_const_float(2, 9.0));
+    // sqrt_float is single-operand; passing two operands must be rejected
+    // by validate_call_primitive before the emitter runs.
+    m.instructions.push_back(
+        call_primitive(3, "sqrt_float", {1, 2}, st::feature::PinType::Float));
+    m.instructions.push_back(store("after_fuel_calc", "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(std::string{r.error().message()}.find("requires exactly 1 operand") !=
+            std::string::npos);
+}
+
 TEST_CASE("Sh2aBackend: compare_gt_float emits FCMP/GT + MOVT", "[feature_codegen][sh2a][float]") {
     // Use the int-hook pack -- compare_gt_float produces Bool, and the
     // Int pack's commanded_pw_override is declared as Int, so Bool
