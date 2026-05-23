@@ -43,6 +43,134 @@ What does not ship:
 - A general-purpose scripting language exposed to users (`Lua` was floated in the Phase 5 roadmap line but is intentionally not on the v1.0 plate — too easy to footgun, too hard to lint). The graph compiler emits machine code directly; the Lua-runtime layer is a possible v2.0+ optimization if performance demands it.
 - Auto-import of features from any third-party tool's format. Specs are SubuwuTuner-native; the user re-authors anything they want to carry over.
 
+## Motivating use cases
+
+What problem is custom features solving that table editing alone cannot?
+
+The distinction matters because every "I need to change how my ECU behaves" question has two possible shapes:
+
+1. **The stock control loop is right, just calibrated for different hardware** → edit a *table*. The control law in firmware stays untouched; only the numbers it reads change.
+2. **The stock control loop is wrong for what's downstream of it** → write a *custom feature*. The control flow itself has to bend.
+
+The case below is a worked example that hits both categories — the same swap project needs table edits *and* a custom feature, and naming which is which is most of the work.
+
+### Worked example: FA20 → FA24 engine swap into a VA WRX
+
+This is a recurring community project: take a stock 2015–2021 VA WRX (FA20DIT) and bolt in the 2.4L FA24 from a 2022+ VB WRX or Ascent. The result is a bigger, torquier engine in the older chassis with the original ECU and harness retained.
+
+The instructive thing about this case isn't that it needs a custom feature — it's that the **easy story is wrong**. Community shorthand says "Atlas custom features handle the FA24 swap," which makes it sound like the swap is a custom-feature problem. After researching what the actual work is, the breakdown is:
+
+| Concern | Reality | Where it lives in SubuwuTuner |
+|---|---|---|
+| **Cam timing wheels** | FA20 and FA24 trigger wheels emit different signals with a 6° timing offset. The FA20 ECU rejects the FA24's signals outright. | **Hardware** — solved by physically swapping FA20-pattern cam trigger wheels onto the FA24 cams (RS Motors kit, ~$700). Not a software problem. |
+| **HPFP control** | The HPFP-driving intake cam lobe lift was reduced in 2017+ (carries into FA24). Pre-2017 FA20 ECU's pump-control PID targets fuel rail pressures the FA24 pump can't reach; it runs the pump at max duty fighting an unachievable target and logs P008x DTCs. **On a 2017+ VA the cam lift is parity** — the mismatch is smaller. | **Table edits** — expose `hpfp_duty_*` + `hpfp_target_pressure_*` tables in the definition pack and let the user rescale. Atlas's contribution is *just exposing those tables as editable* (EcuTek doesn't). No runtime custom-feature compensation is needed if the tables are accessible. |
+| **VE / MAF scaling** | More displacement = more air per cycle at the same MAP/RPM. | **Table edit** — `st::edit` + v1.1 MAF autotune kernel covers this. |
+| **Cam profile differences (LSA, overlap)** | FA24 cams have different duration/lift/centerline than FA20 cams. Affects spark timing, knock margin, AFR targets in transient regions. | **Table edits + definition-pack analyticals** — pack supplies precise FA24 cam specs as constants; derived readouts (LSA, overlap) computed from commanded intake/exhaust VVT angles surface in the datalog UI for tuning visibility. Not a runtime control change. |
+| **Injectors** | Most swap kits keep FA20 direct injectors via rail spacers — no rescaling. If different injectors go in, scale flow. | **Table edit.** |
+| **3rd-party sensor integration** (aftermarket fuel pressure sensor, oil pressure sensor, ethanol-content sensor) | OEM ECU has no slot for these. To use them in any control decision, the value has to be brought into ECU code at runtime. | **Custom feature.** This is where the node-graph designer earns its keep on a swap project — *not* in the cam-angle or HPFP fix, but in wiring a CAN-bus 3rd-party signal into the FA20 ECU's existing control loops. |
+
+So **the swap is dominated by table edits**, with custom features filling a real but narrower role (3rd-party sensor integration). The common misconception "Atlas does the cam-angle remap with a custom feature" conflates three separate things:
+
+1. The cam *trigger wheel* signal mismatch (solved mechanically by the hardware swap kit)
+2. The cam *profile* differences (covered by table edits + analytical readouts using known FA24 cam specs)
+3. The HPFP control mismatch (covered by exposing the HPFP tables — EcuTek can't, Atlas can, SubuwuTuner can once it has the addresses)
+
+**Implications for SubuwuTuner's swap-support story:**
+
+- The infrastructure to support an FA24-into-VA swap already exists in v1.0 (`st::edit`, `Definition` schema with `[[table]]` entries, v1.1 MAF autotune kernel).
+- What's missing is **firmware RE work** — finding the FA20 ECU addresses for HPFP duty / target pressure tables and adding them to the VA pack. That's a definition-pack contribution, not a code change.
+- The custom-features designer is the right tool for **3rd-party sensor integration** patterns the swap user might pursue separately (aftermarket fuel pressure sensor → CAN bus → override decision). Sample `.stmod` files demonstrate this pattern via the `override_*_target` hooks in the demo pack.
+
+### Public references for the swap
+
+Hardware kits + harnesses:
+
+- [iBuildRacecars FA24 Engine Swap Kit](https://www.ibuildracecars.com/store/fa-24-manifold-swap-kit) — production kit; keeps FA20 ECU + FA20 injectors via rail spacers
+- [RS Motors FA24 swap kit (Facebook product post)](https://www.facebook.com/rs.motors.burnsville/posts/) — supplies the four FA20-pattern cam trigger wheels + crank reluctor + fuel pressure sensor; **this is what makes the cam-trigger-signal problem hardware-only instead of software-only**
+- [Hachi Electronics FA24 Engine Swap Harness](https://hachielectronics.com/products/fa24-engine-swap-harness) — adapter harness for sensor-connector differences
+- [NTMotorsports FA24 Swap Harness Kit](https://www.ntmotorsports.com/shop/p/q6vuqrz3imvb13rkyryh74l2m24lt5) — injector / temperature sensor / MAP sensor harness for VA WRX FA24 swap
+- [Nostrum FA24 HPFP product page](https://nostrum.mybigcommerce.com/subaru-fa24-upgraded-high-pressure-fuel-pump/) — confirms the FA24 stock pump's flow capacity vs FA20's, useful when sizing an aftermarket pump upgrade
+
+Forum threads + community discussion:
+
+- [Subaru WRX Forum — FA20 to FA24 swap thread](https://www.clubwrx.net/threads/fa20-to-fa24-swap.134622150/) — community-level discussion of both install paths
+- [GR86 Forum — FA24 swap into 1st gen FRS/86/BRZ, page 4](https://www.gr86.org/threads/how-to-fa24-swap-into-1st-generation-frs-86-brz.12044/page-4) — has the most detailed HPFP / cam-lobe-lift technical detail
+- [NASIOC FA24 Swap into 2015 WRX (paywalled — search-indexed only)](https://forums.nasioc.com/forums/showthread.php?t=2952254) — primary VA-WRX-specific build thread; full body behind a paywall but appears in search results
+
+### Real-world VA-gen FA24 swap projects (2017+)
+
+The "only 2 documented projects" line in community threads is outdated. Confirmed working VA-gen FA24 swaps as of early 2026:
+
+| Project | Donor car | Tuner | Software | Result |
+|---|---|---|---|---|
+| **[Prime Motoring + JrTuned](https://forums.nasioc.com/forums/showthread.php?t=2907007)** | 2017 WRX, FA24 from Ascent, stock motor | JrTuned | **COBB AccessPort + WRX (FA20) ECU** | **502 whp / 484 lb-ft @ 22.1 psi**, hit fueling ceiling, planning COBB Speed Density + port injection |
+| **[Six Star SPF](https://www.facebook.com/SixStarSPF/videos/659521719420930/)** | **2020 WRX**, FA24 swap | Six Star Performance Fab | (unspecified — likely COBB) | **450 WHP / 440 WTQ on stock turbo, E85**, Killer B header, iterative dyno sessions |
+| **["FIRST DRIVE in FA24 Swapped VA WRX"](https://m.youtube.com/watch?v=1mq5QGwBNF0)** | VA WRX (Mar 2025) | (in-video) | (in-video) | Single driving-impressions video |
+| **["Cheapest VA FA24 Engine Swap" series](https://www.youtube.com/watch?v=4g8HSnPVn2Q)** | VA WRX (Part 1 → Part 3 Feb 2026) | (in-video) | (in-video) | Multi-part low-budget build documentation |
+
+**Key takeaway:** Prime Motoring's 502 whp build runs on the **stock FA20 ECU + COBB tooling alone** — no Atlas, no EcuTek, no Link. The HPFP ceiling is the documented wall at that power level (~500 whp), with the standard workaround being COBB Speed Density or port injection — not a custom-feature compensation. So the swap is **less software-dependent than community shorthand implies**, at least on the COBB-tuned path.
+
+### Tuning-path matrix
+
+| Path | What it does | FA24-swap fit |
+|---|---|---|
+| **COBB AccessPort + AccessTUNER** | Stock FA20 ECU; full Subaru factory table catalog; **[Gen2 Custom Features (CCF Gen2)](https://www.cobbtuning.com/gen2-custom-features-for-2015-2019-subaru-wrx/)** with flex fuel; **[Speed Density](https://www.cobbtuning.com/cobb-brings-speed-density-to-2-0l-turbo-subarus/)** mode bypasses MAF range limit; **[Differential Fuel Pressure Compensation](https://cobbtuning.atlassian.net/wiki/spaces/PRS/pages/26870434/Subaru+Differential+Fuel+Pressure+Compensation)** uses an aftermarket fuel pressure sensor to scale injector pulse-width via Bernoulli's principle (`flow ∝ √Δp`) | Production-validated to ≥500 whp on 2017 WRX (Prime Motoring). The mainstream path. |
+| **Atlas (free)** | Stock FA20 ECU; full factory table catalog; **HPFP duty + target pressure tables exposed for editing** (EcuTek's gap); **custom features** designer can do cam-trigger signal interpretation in software if the RS Motors hardware kit isn't installed; analyticals for FA24 cam profile (LSA, overlap) | Real and free, but typically chosen when the user is OK trading hardware cost (no RS Motors kit) for software work |
+| **EcuTek** | Stock FA20 ECU; **does not expose HPFP control tables** — capped for high-power swaps that hit the FA20-ECU-vs-FA24-pump pressure mismatch | Workable for moderate-power swaps; ceiling lower than COBB / Atlas |
+| **Link standalone ECU** | Replaces the FA20 ECU entirely with a fully tunable standalone | Most flexible, most expensive, most invasive — usually a last resort |
+
+### Resolving the "Atlas custom features make the FA24 cams work" claim
+
+The forum statement *"the swap kit alone is not enough to make the FA24 cams work with the FA20 ECU — that will need Atlas custom features"* turns out to be conditional, not absolute. Two paths to the same outcome:
+
+- **Path A — Hardware fix:** install the RS Motors swap kit's four FA20-pattern cam trigger wheels on the FA24 cams. The FA24 cams now emit cam-position signals the FA20 ECU recognizes. **No software cam-signal interpretation needed.** Prime Motoring + Six Star SPF take this path.
+- **Path B — Software fix:** skip the RS Motors trigger-wheel swap, leave the FA24 cams emitting their native pattern, and use Atlas custom features to interpret the FA24 trigger pattern in firmware code. Cheaper hardware bill, more involved software work.
+
+Both produce a running car. The "Atlas custom features are required" framing applies only to Path B.
+
+### Implications for SubuwuTuner's swap-support story
+
+The infrastructure to support an FA24-into-VA swap is **mostly in v1.0 already**:
+
+- `st::edit` covers HPFP duty / target pressure / VE table edits — same shape as any other Subaru calibration table
+- v1.1 MAF autotune kernel covers the air-mass rescaling for the larger displacement
+- The custom-features designer (`src/feature` + SH-2A codegen) covers the **3rd-party-sensor-integration pattern**, which is the same shape as COBB's Differential Fuel Pressure Compensation (Bernoulli-based injector-scale correction) — see the sample `fa24-hpfp-clamp.stmod` for a minimal version
+
+What's missing is **firmware-RE work**: finding the FA20 ECU addresses for the HPFP duty / target pressure / VE / AVCS target tables. That's a definition-pack contribution, not a code change. Once those addresses are in the VA pack, this swap is supported the same way Atlas supports it today: just expose the right tables for editing.
+
+For Path B (no RS Motors kit) support — software cam-trigger-signal interpretation — there's a real custom-features design problem still open: the IR doesn't yet have a primitive for "decode this cam-position pulse train and emit a derived cam-angle value." That would join `flex_fuel_scale` and any future curve / table-lookup primitives on the "primitives we'd add when a user pulls them" list. **Not a v1.x gate.**
+
+### IR primitives the FA24 swap pattern pulled on
+
+The Bernoulli-based differential-fuel-pressure correction COBB ships is one multiplication and one square-root over runtime sensor values. The math:
+
+```
+correction = sqrt( actual_rail_pressure_bar / commanded_rail_pressure_bar )
+```
+
+is one `divide_float` plus a `sqrt_float` plus a `multiply_float`. **`sqrt_float` shipped alongside this doc** — single-operand FPU primitive, emits `FSQRT FRn` (`0xF06D | (n << 8)`), cycle cost ~15 (FSQRT latency dominates, similar to FDIV). The full pipeline is exercised end-to-end by [`fixtures/samples/fa24-bernoulli-comp.stmod`](../fixtures/samples/fa24-bernoulli-comp.stmod), which compiles to 108 bytes of SH-2A machine code against the demo pack.
+
+Still missing from the "really do an FA24 swap" custom-features story:
+
+- **Curve / table-lookup primitive** — needed for `flex_fuel_scale` and for any production-quality compensation whose reference values depend on RPM × load (e.g. a load-dependent Bernoulli `nominal_dp` baseline, or a temperature-dependent fueling trim). Sample `flex-fuel.stmod` is the canonical blocker.
+- **CAN-RX hook type** — the aux sensor pattern in this doc piggybacks on the OEM ECU's existing CAN driver depositing values at a known RAM address. A dedicated CAN-RX node type would let SubuwuTuner emit the CAN-driver-config bytes directly, removing the configuration handoff.
+- **Low-pass filter primitive** — on-throttle transient compensation needs the actual-pressure input filtered (the aux sensor's reading lags reality by several ms during a step transient). One-state IIR filter; a `filter_lpf_float(input, alpha)` primitive would express the standard `y[n] = α·x[n] + (1−α)·y[n−1]` shape and need IR + codegen support for per-instance persistent state.
+
+What **isn't** missing anymore:
+
+- `override_injector_pw` hook — Bernoulli compensation properly lives on the injector PW side; HPFP-target compensation would just fight the OEM PID.
+- `sqrt_float` primitive — `FSQRT FRn`, see SH-2A primitive coverage table above.
+- **Manifold-pressure-aware ΔP** in `fa24-bernoulli-comp.stmod` — uses `(rail − manifold)` for both commanded and actual pressures, the physically-correct quantity for orifice flow.
+- **Bilateral correction-factor clamping** in `fa24-bernoulli-comp.stmod` — clamps correction to `[0.8, 1.4]` via two `compare/select` pairs, guarding against transient sensor faults driving the injector to absurd duty.
+
+### Other use cases for the custom-features designer
+
+- **EJ20 / EJ25 platform → newer-sensor retrofits** (`docs/04-roadmap.md` v1.3) — older Subarus retrofitted with later sensor packages have analogous gaps where the OEM ECU has no slot for the new sensor's signal.
+- **CAN-bus aftermarket sensors** (oil pressure, ethanol content, MAP from an aftermarket sensor, EGT) — the path Atlas calls "3rd-party sensor integration." Hook = CAN RX + override target. This is the *primary* swap-related use case for the custom-features designer.
+- **Anti-lag bang-bang fuel cut + custom rev limiter + clutch kill + flat-foot shift** — pure motorsport features that don't fit OEM behavior. The existing samples (`clutch-kill`, `flat-foot-shift`, `launch-control`) cover this category.
+
+These are not v1.0 ship-gate items — the use cases live at user-pull speed. But the *design surface* is the same and the doc lives here, not in a separate "engine swap" file.
+
 ## Architectural fit
 
 ```
@@ -106,6 +234,7 @@ table plus one `emit_*_fragment` function — see
 | `subtract_float` | (Float, Float) | Float | `FSUB FRm, FRn` |
 | `multiply_float` | (Float, Float) | Float | `FMUL FRm, FRn` |
 | `divide_float` | (Float, Float) | Float | `FDIV FRm, FRn` |
+| `sqrt_float` | (Float,) | Float | `FSQRT FRn` |
 | `compare_lt_float` | (Float, Float) | Bool | `FCMP/GT FRm, FRn` (swapped) + `MOVT` |
 | `compare_gt_float` | (Float, Float) | Bool | `FCMP/GT FRm, FRn` + `MOVT` |
 | `compare_eq_float` | (Float, Float) | Bool | `FCMP/EQ FRm, FRn` + `MOVT` |
@@ -315,7 +444,7 @@ conservative. Actual progress:
 |---|---|---|
 | Graph data structure + persistence + editor | 2–3 wk | shipped (Phase 5 designer is in `View → Custom features designer (preview)`; editor canvas is functional with pin labels, defaults, pin-context menus, wire dragging) |
 | IR + linter + RT-budget analyzer | 2 wk | shipped; RT-budget uses placeholder per-Op costs (real per-ISA cycle counts wait on bench profiling) |
-| One codegen backend (SH-2A) | 2–3 wk | shipped: Int + Bool + control flow + Float + Float compares + cross-hook flow + fan-out dedup + `divide_int` (FPU bridge). Open gaps: table-lookup primitives, per-ISA cycle costs. |
+| One codegen backend (SH-2A) | 2–3 wk | shipped: Int + Bool + control flow + Float + Float compares + cross-hook flow + fan-out dedup + `divide_int` (FPU bridge) + `sqrt_float` (FSQRT). Open gaps: table-lookup primitives, per-ISA cycle costs. |
 | Patch insertion + free-RAM management | 1–2 wk | not started — bench-rig-blocked. Needs a real ECU's vector table and the firmware's known free-RAM map to develop against. |
 | Sample packs + docs | 1 wk | 4 samples ship (3 compile end-to-end, 1 waits on `flex_fuel_scale` curve primitive). This doc you're reading is the design + current-state ref. |
 | Second backend (RH850) | 2–3 wk | not started; stub returns NotImplemented. Per the original recommendation, RH850 drops first under timing pressure — VA users get custom features, VB waits a release. |

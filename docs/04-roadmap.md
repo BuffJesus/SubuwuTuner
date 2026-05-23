@@ -129,7 +129,7 @@ The architecture serves four user personas; mapping milestones to personas keeps
 | **Street tuner** (largest population) | GUI | Open project → edit map → flash, with strong brick protection. Cold-start + adaptive-history panels (§11) are aimed here. v1.0 + v1.2 §11 panels deliver. |
 | **Dyno operator** | CLI + GUI | Batch-process logs, repeatable pipelines, `--json` output. v1.1 auto-tune CLI + (future) `--json` mode + `subuwutuner-cli doctor` deliver. |
 | **Shop / professional** | GUI primarily | Fleet workflows, signed updates, jurisdiction profile management, support for handing keys to less-experienced staff. v1.2 closed-loop trim + v1.5 live tuning deliver the day-to-day iteration win. |
-| **Vehicle developer / engine swapper** | CLI + CAN toolkit | Reverse-engineering bus traffic, building DBCs, dumping ROMs from non-standard targets. v1.5+ CAN toolkit + v2.0 AI advisory deliver. |
+| **Vehicle developer / engine swapper** | CLI + CAN toolkit + custom-features designer | Reverse-engineering bus traffic, building DBCs, dumping ROMs from non-standard targets, and authoring the patch code that makes a cross-platform swap drive correctly (e.g. FA20→FA24 into a VA WRX needs a VVT/cam-angle remap as a custom feature alongside HPFP + VE table rescaling — see `docs/16-custom-features.md` worked example). v1.5+ CAN toolkit + v2.0 AI advisory deliver the reverse-engineering side; the custom-features side ships once Phase 5 patch insertion + bench validation land. |
 
 The roadmap rows below carry which persona they target so milestone trade-offs aren't anonymous.
 
