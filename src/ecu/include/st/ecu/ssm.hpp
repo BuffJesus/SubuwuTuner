@@ -14,16 +14,26 @@
 
 namespace st::ecu::ssm {
 
-// Wire-format constants for Subaru Select Monitor (the protocol modern
-// Subaru ECUs speak over K-Line as ISO 9141/14230 or encapsulated over
-// CAN-TP). The framing below is what's documented in publicly-available
-// references (RomRaider source, NASIOC forum threads, vendor docs); none
-// of it has been validated against a real Subaru ECU yet — this is the
-// design we'll test as soon as the developer's OBDX Pro VX adapter and a
-// real car are both available. Discrepancies discovered then will land
-// as targeted fixes here.
+// Wire-format constants for Subaru Select Monitor. Modern Subaru ECUs
+// speak SSM2 over two different transports — and the framing differs
+// between them:
 //
-// Request framing (read-by-address):
+//   * K-Line (ISO 9141/14230 serial, 4800 baud) — pre-2008 EJ Subarus,
+//     accessed via a Tactrix OpenPort cable. Carries the SSM frame
+//     verbatim including header / addressing / length / checksum bytes.
+//
+//   * CAN ISO 15765-2 (ISO-TP, 500 kbps) — every 2008+ Subaru including
+//     all VA / VB WRXs. The CAN ID + ISO-TP layer carry the addressing
+//     and length, so the K-Line wrapper is STRIPPED. The ECU sees just
+//     the bare SSM command bytes (`A8 00 + addrs` for a read).
+//
+// Picking the wrong framing for the bus is a silent failure: the ECU
+// receives bytes that don't match its expectations and drops them
+// without responding. Diagnosed 2026-05-23 on a real 2017 VA WRX —
+// emitting K-Line-shaped frames on CAN caused the adapter's ISO-TP TX
+// to hang waiting for a Flow Control that never came.
+//
+// K-Line request framing (read-by-address):
 //
 //     +------+------+------+-----+-----+-----+---- N times ----+------+
 //     | 0x80 | dst  | src  | LEN | CMD | PAD | addr_hi|md|lo  | CSUM |
@@ -36,7 +46,7 @@ namespace st::ecu::ssm {
 //     PAD   = 0x00
 //     CSUM  = 8-bit sum of all preceding bytes, mod 256
 //
-// Response framing:
+// K-Line response framing:
 //
 //     +------+------+------+-----+-----+---- N times ----+------+
 //     | 0x80 | 0xF0 | 0x10 | LEN | RSP | data_byte       | CSUM |
@@ -45,8 +55,32 @@ namespace st::ecu::ssm {
 //     RSP   = 0xE8 (positive A8 response = CMD + 0x40)
 //     LEN   = 1 (RSP) + N (data bytes)
 //
+// CAN ISO-TP request framing (read-by-address):
+//
+//     +-----+-----+---- N times ----+
+//     | CMD | PAD | addr_hi|md|lo  |
+//     +-----+-----+----------------+
+//
+//     The 0x80 header, 0x10/0xF0 addressing, LEN, and CSUM bytes are
+//     omitted — CAN ID 0x7E0 identifies the destination, the ISO-TP
+//     PCI carries the length, and CAN's frame CRC supersedes CSUM.
+//
+// CAN ISO-TP response framing:
+//
+//     +-----+---- N times ----+
+//     | RSP | data_byte       |
+//     +-----+-----------------+
+//
 // Negative responses use RSP = 0x7F with a one-byte NRC; SsmClient maps
 // these to ErrorCode::EcuRejected with the NRC in the message.
+
+// Selects which wire format the builders / parsers / SsmClient produce
+// and consume. Pick to match the underlying transport — KLine for
+// ISO 9141 serial, IsoTp for CAN-bus ECUs (every 2008+ Subaru).
+enum class Framing : std::uint8_t {
+    KLine = 0, // K-Line / ISO 9141 — full wrapper (80 10 F0 LEN ... CSUM)
+    IsoTp = 1, // CAN ISO 15765-2 — bare SSM payload, framing carried by CAN+ISO-TP
+};
 
 inline constexpr std::uint8_t kHeader = 0x80;
 inline constexpr std::uint8_t kDestEcu = 0x10;
@@ -73,57 +107,74 @@ inline constexpr std::uint32_t kMaxAddress = 0x00FFFFFFU;
 // Build the wire bytes for a multi-address read-by-address request.
 // Returns InvalidArgument if any address exceeds kMaxAddress, or if the
 // resulting payload would exceed what the LEN byte can encode.
+//
+// The K-Line LEN-byte ceiling does not apply to IsoTp (ISO-TP carries
+// length in its own 12-bit field), so on IsoTp the request can grow up
+// to whatever the transport accepts — capped in practice by the SSM
+// 24-bit address space and the ECU's own response buffer.
 [[nodiscard]] Result<std::vector<std::uint8_t>>
-build_a8_request(std::span<std::uint32_t const> addresses);
+build_a8_request(std::span<std::uint32_t const> addresses, Framing framing = Framing::KLine);
 
 // Parse a response frame from the ECU, expecting `expected_n` data bytes.
-// Verifies the header, source/dest, length, response byte, and checksum.
-// Returns the N data bytes on success.
+// On KLine, verifies the header, source/dest, length, response byte, and
+// checksum. On IsoTp, the response is `RSP <data...>` (positive) or
+// `7F <NRC>` (negative) — no wrapper bytes.
 [[nodiscard]] Result<std::vector<std::uint8_t>>
-parse_a8_response(std::span<std::uint8_t const> resp, std::size_t expected_n);
+parse_a8_response(std::span<std::uint8_t const> resp, std::size_t expected_n,
+                  Framing framing = Framing::KLine);
 
 // Build the wire bytes for a single-byte write-by-address request.
-// Frame: 80 10 F0 [LEN] B0 [addr_hi addr_med addr_low] [data] [CSUM]
-// LEN = 5 (CMD + 3*addr + 1*data). Returns InvalidArgument on addr > 24-bit.
+// KLine frame: 80 10 F0 [LEN] B0 [addr_hi addr_med addr_low] [data] [CSUM]
+// IsoTp frame: B0 [addr_hi addr_med addr_low] [data]
+// Returns InvalidArgument on addr > 24-bit.
 //
 // For multi-byte writes at consecutive addresses, use build_b8_request
 // instead.
-[[nodiscard]] Result<std::vector<std::uint8_t>> build_b0_request(std::uint32_t address,
-                                                                 std::uint8_t data);
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+build_b0_request(std::uint32_t address, std::uint8_t data, Framing framing = Framing::KLine);
 
 // Parse a write response. The ECU typically echoes the written byte, which
 // we surface to the caller so they can confirm the write took. Negative
 // responses (NRC) become EcuRejected like for A8.
-[[nodiscard]] Result<std::uint8_t> parse_b0_response(std::span<std::uint8_t const> resp);
+[[nodiscard]] Result<std::uint8_t> parse_b0_response(std::span<std::uint8_t const> resp,
+                                                    Framing framing = Framing::KLine);
 
 // Build the wire bytes for a block-write request — N consecutive bytes
 // written at `address`, `address+1`, …, `address+N-1`.
 //
-// Frame: 80 10 F0 [LEN] B8 [addr_hi addr_med addr_low] [d0 … d_{N-1}] [CSUM]
-// LEN = 4 + N (CMD + 3*addr + N*data).
+// KLine frame: 80 10 F0 [LEN] B8 [addr_hi addr_med addr_low] [d0 … d_{N-1}] [CSUM]
+// IsoTp frame: B8 [addr_hi addr_med addr_low] [d0 … d_{N-1}]
 //
 // Returns InvalidArgument if:
 //   - data is empty,
 //   - address > 24-bit, or address + N - 1 > 24-bit,
-//   - N > kMaxBlockWriteBytes (single-frame LEN limit).
+//   - on KLine: N > kMaxBlockWriteBytes (single-frame LEN limit).
 //
 // Same RAM-write semantics as build_b0_request — this is NOT a flash-write
 // path. Block opcodes are not fully consistent across all Subaru ECU
 // families; this framing matches publicly-documented modern (CAN-era)
 // implementations and needs validation against a real ECU.
 [[nodiscard]] Result<std::vector<std::uint8_t>>
-build_b8_request(std::uint32_t address, std::span<std::uint8_t const> data);
+build_b8_request(std::uint32_t address, std::span<std::uint8_t const> data,
+                 Framing framing = Framing::KLine);
 
 // Parse a block-write response. The ECU echoes all N written bytes; we
 // surface them so the caller can verify each one against what it sent.
 // Negative responses (NRC) become EcuRejected like for A8 / B0.
 [[nodiscard]] Result<std::vector<std::uint8_t>>
-parse_b8_response(std::span<std::uint8_t const> resp, std::size_t expected_n);
+parse_b8_response(std::span<std::uint8_t const> resp, std::size_t expected_n,
+                  Framing framing = Framing::KLine);
 
 // High-level client that wraps the framing and talks to a transport.
 class SsmClient {
 public:
-    explicit SsmClient(transport::ITransport &t) noexcept : transport_{&t} {}
+    explicit SsmClient(transport::ITransport &t,
+                       Framing framing = Framing::KLine) noexcept
+        : transport_{&t}, framing_{framing} {}
+
+    [[nodiscard]] Framing framing() const noexcept {
+        return framing_;
+    }
 
     // Read one byte per address. The returned vector has size addresses.size().
     [[nodiscard]] Result<std::vector<std::uint8_t>>
@@ -156,6 +207,7 @@ public:
 
 private:
     transport::ITransport *transport_;
+    Framing framing_;
 };
 
 } // namespace st::ecu::ssm

@@ -125,9 +125,9 @@ TEST_CASE("obdx::Transport::open drives ELM probe -> DX DP 1 -> SetProtocol -> E
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>"); // probe response
     cp.raw->queue_read_ascii("OK\r>");               // DX DP 1 response
     cp.raw->queue_read(
-        dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x00})); // SetProtocol ack
+        dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02})); // SetProtocol ack (sub=01, HS CAN=02)
     cp.raw->queue_read(
-        dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x00})); // EnableNetwork ack
+        dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x01})); // EnableNetwork ack (sub=02, state=ON)
 
     obdx::Transport t{std::move(cp.owner)};
     auto const r = t.open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
@@ -218,6 +218,79 @@ TEST_CASE("obdx::Transport::open fails when no ELM prompt arrives "
     REQUIRE(r.error().code() == st::ErrorCode::TransportTimeout);
 }
 
+TEST_CASE("obdx::Transport::open rejects EnableNetwork ACK with state != ON",
+          "[transport][obdx_transport]") {
+    // Adapter acknowledges EnableNetwork but reports state OFF (0x00) —
+    // the bus didn't actually come up. open() must fail at this step
+    // with a descriptive TransportNack instead of silently succeeding
+    // and leaving every subsequent send_recv to time out without
+    // explanation. open() must ALSO emit a best-effort SoftReboot to
+    // return the adapter to ELM mode so the user's next open() attempt
+    // doesn't fail confusingly on the ELM probe.
+    auto cp = make_channel();
+    cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
+    cp.raw->queue_read_ascii("OK\r>");
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x00}));
+    // SoftReboot ACK — best-effort cleanup the validation-failure path emits.
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SoftReboot, {}));
+
+    obdx::Transport t{std::move(cp.owner)};
+    auto const r = t.open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::TransportNack);
+    REQUIRE(std::string{r.error().message()}.find("state byte 0x00") != std::string::npos);
+
+    // Verify SoftReboot opcode (0x25) appears in the raw write log.
+    auto const &raw_writes = cp.raw->writes();
+    bool soft_reboot_sent = false;
+    for (std::size_t i = 0; i + 1 < raw_writes.size(); ++i) {
+        if (raw_writes[i] == 0x25U && raw_writes[i + 1] == 0x00U) {
+            soft_reboot_sent = true;
+            break;
+        }
+    }
+    REQUIRE(soft_reboot_sent);
+}
+
+TEST_CASE("obdx::Transport::open rejects EnableNetwork ACK with wrong sub-op echo",
+          "[transport][obdx_transport]") {
+    // First byte of EnableNetwork response must echo sub-op 0x02. A
+    // garbage prefix here means the firmware misinterpreted the request
+    // — surface immediately rather than push ahead with a half-open
+    // adapter. SoftReboot is emitted on the cleanup path; not asserted
+    // here (it's verified in the state != ON test).
+    auto cp = make_channel();
+    cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
+    cp.raw->queue_read_ascii("OK\r>");
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0xEE, 0x01}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SoftReboot, {}));
+
+    obdx::Transport t{std::move(cp.owner)};
+    auto const r = t.open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::TransportNack);
+    REQUIRE(std::string{r.error().message()}.find("sub-op") != std::string::npos);
+}
+
+TEST_CASE("obdx::Transport::open accepts EnableNetwork ACK with state=LISTEN-ONLY",
+          "[transport][obdx_transport]") {
+    // 0x02 = LISTEN-ONLY is a valid bus state, even though send paths
+    // won't actually reach the bus. Accept the open so the caller can
+    // still use the adapter for sniffing; verbose-mode emits a warning
+    // (not checked here — would require capturing stderr).
+    auto cp = make_channel();
+    cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
+    cp.raw->queue_read_ascii("OK\r>");
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
+
+    obdx::Transport t{std::move(cp.owner)};
+    auto const r = t.open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
+    REQUIRE(r.has_value());
+}
+
 // ---- send_recv --------------------------------------------------
 
 namespace {
@@ -235,11 +308,13 @@ struct ReadyTransport {
     auto cp = make_channel();
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
     cp.raw->queue_read_ascii("OK\r>");
-    // SetProtocol(HS CAN) ack — VT v1.06 §3.10.1.
-    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x00}));
+    // SetProtocol(HS CAN) ack — VT v1.06 §3.10.1. Response echoes the
+    // sub-op (0x01) and the selected protocol enum (0x02 = HS CAN).
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
     // EnableNetwork(ON) ack — VT v1.06 §3.10.2; sent right after
-    // SetProtocol because the default network state is OFF.
-    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x00}));
+    // SetProtocol because the default network state is OFF. Response
+    // echoes the sub-op (0x02) and the final state byte (0x01 = ON).
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x01}));
     auto t = std::make_unique<obdx::Transport>(std::move(cp.owner));
     auto const open_r = t->open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
     REQUIRE(open_r.has_value());

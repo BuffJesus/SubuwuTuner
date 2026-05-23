@@ -6,6 +6,7 @@
 
 #include "st/core/result.hpp"
 #include "st/defs.hpp"
+#include "st/ecu/ssm.hpp"
 #include "st/transport.hpp"
 
 #include <atomic>
@@ -125,8 +126,16 @@ struct LogChannel {
 //     duration — ITransport's send_recv is not thread-safe.
 class LogSession {
 public:
+    // `ssm_framing` selects the SSM wire format the io-loop emits — pick
+    // `IsoTp` on CAN-era Subarus (2008+ — every VA/VB WRX) and `KLine`
+    // for ISO 9141 serial via a Tactrix OpenPort or for trace-replay
+    // fixtures captured in the K-Line wire format. Same trap as Read
+    // ROM: a default-KLine LogSession against a CAN-bus ECU produces
+    // bytes the ECU drops silently, and the io-loop just accumulates
+    // io_errors without explanation.
     LogSession(transport::ITransport &transport, std::vector<LogChannel> channels,
-               std::size_t ring_capacity = 1024);
+               std::size_t ring_capacity = 1024,
+               ecu::ssm::Framing ssm_framing = ecu::ssm::Framing::KLine);
 
     LogSession(LogSession const &) = delete;
     LogSession &operator=(LogSession const &) = delete;
@@ -174,6 +183,7 @@ private:
 
     transport::ITransport *transport_;
     std::vector<LogChannel> channels_;
+    ecu::ssm::Framing ssm_framing_;
 
     // Expanded read plan: every byte we need to read in one shot, plus
     // an index into that flat list for each channel's first byte.

@@ -51,6 +51,20 @@
 
 namespace st::transport::obdx {
 
+// Process-wide hex-trace toggle. When set, every send_recv on every
+// obdx::Transport instance prints its TX payload and the RX frame (or
+// the error code) as hex to stderr, prefixed with `[trace][obdx-tx]`
+// / `[trace][obdx-rx]` / `[trace][obdx-err]`. Off by default; the GUI
+// flips it on for the duration of a Read ROM operation when the
+// "Verbose console output" checkbox is set, so the user can see
+// whether bytes are actually moving between host and adapter.
+//
+// Implementation is a single std::atomic<bool> — cost when off is one
+// relaxed load per send_recv, which is negligible compared to the
+// USB round-trip the call is already doing.
+void set_trace_enabled(bool on) noexcept;
+[[nodiscard]] bool trace_enabled() noexcept;
+
 // Back-compat alias. The byte-channel abstraction lives in
 // st::transport::IByteChannel (byte_channel.hpp) — it's generic
 // to USB CDC, not OBDX-specific, and shared with native::Transport

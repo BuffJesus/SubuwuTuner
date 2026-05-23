@@ -114,6 +114,80 @@ Flasher::read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
 }
 
 // ---------------------------------------------------------------------
+// read_full_rom_ssm — chunked SSM 0xA8 ReadByAddress loop
+// ---------------------------------------------------------------------
+//
+// VA WRX (and every CAN-era Subaru still on SSM rather than UDS) responds
+// to the K-Line SSM frame format encapsulated in ISO-TP on CAN ID 0x7E0.
+// SSM 0xA8 carries one address per data byte; the request's LEN field is
+// a single byte and the payload is `CMD(1) + PAD(1) + 3*N`, so the per-
+// request ceiling is N=84 addresses. We cap at 80 for headroom and let
+// the caller pass the same `max_chunk_size` they would for UDS — internal
+// clamping does the right thing either way.
+
+namespace {
+constexpr std::uint32_t kSsmMaxChunkBytes = 80;
+} // namespace
+
+Result<std::vector<std::uint8_t>>
+Flasher::read_full_rom_ssm(std::uint32_t base_address, std::uint32_t total_length,
+                           std::uint32_t max_chunk_size,
+                           std::chrono::milliseconds per_chunk_timeout,
+                           Flasher::ReadProgressFn progress,
+                           std::atomic<bool> const *cancel) {
+    if (total_length == 0) {
+        if (progress)
+            progress({0, 0});
+        return std::vector<std::uint8_t>{};
+    }
+    if (max_chunk_size == 0) {
+        return failure(ErrorCode::InvalidArgument,
+                       "flash: read_full_rom_ssm max_chunk_size must be > 0");
+    }
+    if (base_address > ecu::ssm::kMaxAddress ||
+        static_cast<std::uint64_t>(base_address) + total_length - 1U > ecu::ssm::kMaxAddress) {
+        return failure(ErrorCode::InvalidArgument,
+                       "flash: read_full_rom_ssm: address range exceeds SSM 24-bit limit "
+                       "(base " +
+                           hex_addr(base_address) + ", len " + std::to_string(total_length) + ")");
+    }
+    std::uint32_t const effective_chunk =
+        max_chunk_size < kSsmMaxChunkBytes ? max_chunk_size : kSsmMaxChunkBytes;
+
+    std::vector<std::uint8_t> out;
+    out.reserve(total_length);
+    std::uint32_t cursor = base_address;
+    std::uint32_t remaining = total_length;
+    if (progress)
+        progress({0, total_length});
+    while (remaining > 0) {
+        if (cancel != nullptr && cancel->load(std::memory_order_acquire)) {
+            return failure(ErrorCode::Cancelled,
+                           "flash: read_full_rom_ssm cancelled at " + hex_addr(cursor));
+        }
+        std::uint32_t const this_chunk = remaining < effective_chunk ? remaining : effective_chunk;
+        auto chunk = ssm_client_.read_block(cursor, this_chunk, per_chunk_timeout);
+        if (!chunk.has_value()) {
+            return failure(chunk.error().code(), "flash: read_full_rom_ssm failed at " +
+                                                     hex_addr(cursor) + ": " +
+                                                     std::string{chunk.error().message()});
+        }
+        if (chunk->size() != this_chunk) {
+            return failure(ErrorCode::UnexpectedEof, "flash: short SSM read at " +
+                                                         hex_addr(cursor) + " (expected " +
+                                                         std::to_string(this_chunk) + ", got " +
+                                                         std::to_string(chunk->size()) + ")");
+        }
+        out.insert(out.end(), chunk->begin(), chunk->end());
+        cursor += this_chunk;
+        remaining -= this_chunk;
+        if (progress)
+            progress({total_length - remaining, total_length});
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------
 // compute_delta — sector-aligned byte-diff
 // ---------------------------------------------------------------------
 
@@ -192,7 +266,24 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *
     // into an ExecuteOutcome and return. Keeps the original failure
     // sites readable while guaranteeing the partial report is never
     // discarded.
+    //
+    // When the bus was silenced earlier in the sequence and we haven't
+    // yet restored it, bail attempts a best-effort CC restore before
+    // returning. Otherwise a mid-flash failure (eraseMemory, RequestDownload,
+    // TransferData, RequestTransferExit, checkProgrammingDependencies,
+    // verify) would leave non-diagnostic traffic muted until something
+    // else (power cycle, extended-diag session) un-mutes it — a real
+    // user-visible nuisance even though it isn't a brick risk. Mirrors
+    // the cancel_cleanup behavior below; the failure case was the gap
+    // flagged in this module's review.
     auto bail = [&](ErrorCode code, std::string message) {
+        if (report.silenced_bus && !report.restored_bus) {
+            if (auto s = client_.communication_control(ecu::uds::kCcEnableRxAndTx,
+                                                       ecu::uds::kCtNormalAndNetworkManagement);
+                s.has_value()) {
+                report.restored_bus = true;
+            }
+        }
         ExecuteOutcome out;
         out.report = std::move(report);
         out.error = Error{code, std::move(message)};

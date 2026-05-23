@@ -69,7 +69,16 @@ enum class Opcode : std::uint8_t {
     Settings = 0x24,     // includes sub-op 0x03 = enable µs RX timestamps
     SoftReboot = 0x25,   // return to ELM mode
     SetProtocol = 0x31,  // OBD protocol + enable + ELM↔DVI switch
-    VpwSettings = 0x33,  // VPW-specific (unused for Subaru)
+    // 0x33 is documented in VT v1.06 §3.11 as "VPW Specific Settings"
+    // but sub-ops 0x00–0x04 (To filter, From filter, To range filter,
+    // From range filter, Mask) are protocol-agnostic filter primitives.
+    // Sub-op 0x05 is unused in v1.06. Sub-ops 0x06–0x0F are scoped to
+    // VPW (4x speed, CRC validation, 1x/4x timings, error bits).
+    // The byte semantics of `MM` / `BB NN MM` for non-VPW protocols
+    // (notably CAN-ID mapping on the VX) are not in the VT PDF;
+    // treat as unverified until we either probe on hardware or read
+    // OBDXPro/OBDX-Templates under the clean-room split.
+    ProtocolSettings = 0x33,
     Adc = 0x3A,          // DLC pin 16 battery voltage
 };
 

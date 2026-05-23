@@ -188,7 +188,7 @@ Documented opcodes we'll use:
 | `0x24` | Settings (sub-op `0x03` = enable µs-resolution RX timestamp) | turn on at log-session start so frame arrival times come from the adapter, not the host |
 | `0x25` | Soft reboot back to ELM mode | clean shutdown |
 | `0x31` | Set OBD protocol + enable/disable network + switch ELM↔DVI | post-handshake configuration |
-| `0x33` | VPW-specific (15 sub-ops) | unused for Subaru |
+| `0x33` | Filter + protocol settings (titled "VPW Specific Settings" in VT v1.06 §3.11, but sub-ops 0x00–0x04 — To/From filter, To/From range filter, Mask — are generic filter primitives). | sub-ops 0x06–0x0F are VPW-scoped (4x speed, CRC, 1x/4x timings, error bits); the filter primitives' CAN byte semantics on the VX are not in the VT PDF |
 | `0x3A` | ADC — read DLC pin 16 voltage | battery-health check before flash |
 
 Implementation strategy:

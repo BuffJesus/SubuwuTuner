@@ -6,6 +6,7 @@
 
 #include "st/core/result.hpp"
 #include "st/defs.hpp"
+#include "st/ecu/ssm.hpp"
 #include "st/ecu/uds.hpp"
 #include "st/policy.hpp"
 #include "st/transport.hpp"
@@ -169,7 +170,22 @@ struct ExecuteOutcome {
 
 class Flasher {
 public:
-    explicit Flasher(transport::ITransport &t) noexcept : client_{t} {}
+    // Constructed once per transport; the Flasher exposes both a UDS
+    // read path (`read_full_rom`) for ECUs that speak ISO 14229 (Subaru
+    // VB and newer) and an SSM read path (`read_full_rom_ssm`) for
+    // ECUs that speak Subaru Select Monitor — which is every CAN-era
+    // VA WRX. The clients share the transport; only one is ever in
+    // flight at a time (caller picks).
+    //
+    // `ssm_framing` picks the SSM wire format. Default is K-Line for
+    // backward compatibility with pre-CAN transports + existing tests.
+    // GUI / CLI callers that opened a `LinkKind::CanIso15765` transport
+    // MUST pass `ecu::ssm::Framing::IsoTp` — emitting K-Line frames on
+    // CAN causes the ECU to silently drop the request (diagnosed on a
+    // real 2017 WRX, 2026-05-23).
+    explicit Flasher(transport::ITransport &t,
+                     ecu::ssm::Framing ssm_framing = ecu::ssm::Framing::KLine) noexcept
+        : client_{t}, ssm_client_{t, ssm_framing} {}
 
     // Read a contiguous span of ECU memory via ReadMemoryByAddress,
     // chunked into `max_chunk_size`-byte requests. Returns the
@@ -198,6 +214,36 @@ public:
                   std::uint32_t max_chunk_size = 0x100,
                   std::chrono::milliseconds per_chunk_timeout = std::chrono::milliseconds{1000},
                   ReadProgressFn progress = nullptr, std::atomic<bool> const *cancel = nullptr);
+
+    // SSM (Subaru Select Monitor) variant of read_full_rom — uses
+    // SSM 0xA8 (ReadByAddress) instead of UDS 0x23. This is the path
+    // for VA WRX (and every other CAN-era Subaru that hasn't moved to
+    // UDS).
+    //
+    // Wire framing depends on the `ssm_framing` passed to the Flasher
+    // constructor:
+    //   * KLine — `80 10 F0 LEN A8 00 <addrs> CSUM` over ISO 9141 serial
+    //     (Tactrix OpenPort, pre-2008 Subarus).
+    //   * IsoTp — `A8 00 <addrs>` raw payload over CAN ID 0x7E0 with
+    //     the OBDX adapter handling ISO-TP segmentation. The K-Line
+    //     wrapper is stripped because CAN+ISO-TP supersedes it.
+    //
+    // `max_chunk_size` is silently clamped to the SSM single-frame
+    // limit (80 bytes ≈ 84 addresses; we use 80 for headroom). Tooling
+    // can pass 256 or 4096 — we'll do the right thing internally. SSM
+    // addresses are 24 bits; `base_address + total_length` must stay
+    // within `0x00FFFFFF`.
+    //
+    // Speed: ~10–30 KB/s on a healthy adapter (one SSM round-trip per
+    // chunk; ISO-TP fragmentation handled by the adapter). A 1 MiB ROM
+    // takes 5–15 minutes; surface progress + cancel exactly as the UDS
+    // variant does.
+    [[nodiscard]] Result<std::vector<std::uint8_t>>
+    read_full_rom_ssm(std::uint32_t base_address, std::uint32_t total_length,
+                      std::uint32_t max_chunk_size = 0x40,
+                      std::chrono::milliseconds per_chunk_timeout = std::chrono::milliseconds{1500},
+                      ReadProgressFn progress = nullptr,
+                      std::atomic<bool> const *cancel = nullptr);
 
     // Walk `current` and `target` in `sector_size`-aligned chunks; emit
     // a Sector for every chunk whose bytes differ. Both spans must be
@@ -239,6 +285,7 @@ public:
 
 private:
     ecu::uds::UdsClient client_;
+    ecu::ssm::SsmClient ssm_client_;
 };
 
 // =====================================================================

@@ -514,3 +514,80 @@ TEST_CASE("LogStream SPSC stress: producer + consumer agree on totals",
         REQUIRE(consumed_ts[i] > consumed_ts[i - 1]);
     }
 }
+
+// =====================================================================
+// SSM-over-CAN (ISO-TP) framing — bare-payload variant
+// =====================================================================
+//
+// LogSession constructed with Framing::IsoTp must emit bare SSM payloads
+// (no 80 10 F0 LEN ... CSUM wrapper) and parse bare SSM responses (no
+// 80 F0 10 LEN ... CSUM wrapper). Mirrors the Read ROM fix landed
+// 2026-05-23: a default-KLine LogSession against a real CAN-era Subaru
+// produces bytes the ECU silently drops.
+
+namespace {
+
+// IsoTp request for `channels` — same address expansion as a8_request_for
+// but emits the bare A8 frame.
+std::vector<std::uint8_t> a8_request_for_isotp(std::vector<log_ns::LogChannel> const &channels) {
+    std::vector<std::uint32_t> addrs;
+    for (auto const &ch : channels) {
+        auto const bytes = st::byte_size(ch.data_type);
+        for (std::size_t i = 0; i < bytes; ++i) {
+            addrs.push_back(ch.address + static_cast<std::uint32_t>(i));
+        }
+    }
+    auto r = st::ecu::ssm::build_a8_request(addrs, st::ecu::ssm::Framing::IsoTp);
+    REQUIRE(r.has_value());
+    return *r;
+}
+
+// IsoTp response: bare `E8 <data...>` — no header, no LEN, no CSUM.
+std::vector<std::uint8_t> a8_response_isotp(std::vector<std::uint8_t> data_bytes) {
+    std::vector<std::uint8_t> resp;
+    resp.push_back(0xE8);
+    resp.insert(resp.end(), data_bytes.begin(), data_bytes.end());
+    return resp;
+}
+
+} // namespace
+
+TEST_CASE("LogSession with IsoTp framing emits bare-payload frames",
+          "[log][session][isotp]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({st::transport::LinkKind::CanIso15765, 500000}).has_value());
+
+    std::vector<log_ns::LogChannel> const channels{
+        {"iat", 0x1000, st::DataType::Uint8, std::nullopt},
+    };
+    auto const req = a8_request_for_isotp(channels);
+    // Wire-bytes sanity: first 5 bytes are `A8 00 00 10 00` — no 0x80
+    // header, no LEN, no CSUM.
+    REQUIRE(req.size() == 5);
+    REQUIRE(req[0] == 0xA8);
+    REQUIRE(req[1] == 0x00);
+    REQUIRE(req[2] == 0x00);
+    REQUIRE(req[3] == 0x10);
+    REQUIRE(req[4] == 0x00);
+
+    t.expect_send_recv(req, a8_response_isotp({0x42}));
+    t.expect_send_recv(req, a8_response_isotp({0x55}));
+
+    log_ns::LogSession session{t, channels, /*ring_capacity=*/16,
+                               st::ecu::ssm::Framing::IsoTp};
+    REQUIRE(session.start().has_value());
+
+    REQUIRE(wait_until(1000ms, [&] { return t.remaining() == 0; }));
+    REQUIRE(wait_until(200ms, [&] { return session.io_errors() > 0; }));
+
+    session.stop();
+    REQUIRE(session.cycles_completed() == 2);
+
+    std::int64_t ts = 0;
+    std::vector<double> out(1, 0.0);
+    std::vector<double> seen;
+    while (session.stream().try_pop(ts, out)) {
+        seen.push_back(out[0]);
+    }
+    REQUIRE(seen == std::vector<double>{0x42, 0x55});
+}

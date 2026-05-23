@@ -383,3 +383,115 @@ TEST_CASE("SsmClient::write_block surfaces an echo divergence", "[ssm][client][b
     REQUIRE(*r != payload);
     REQUIRE((*r)[1] == 0xFF);
 }
+
+// =====================================================================
+// SSM-over-CAN (ISO-TP) framing — bare-payload variant for 2008+ Subarus
+// =====================================================================
+//
+// On CAN, the K-Line wrapper (80 10 F0 LEN ... CSUM) is stripped — CAN
+// IDs carry addressing, ISO-TP carries length, and CAN's frame CRC makes
+// the SSM checksum redundant. Diagnosed against a real 2017 VA WRX:
+// emitting K-Line-shaped frames on CAN caused the adapter's ISO-TP TX
+// to hang waiting for a Flow Control the ECU never sent.
+
+TEST_CASE("build_a8_request IsoTp omits the K-Line wrapper", "[ssm][framing][isotp]") {
+    std::vector<std::uint32_t> const addrs{0x000008};
+    auto const r = ssm::build_a8_request(addrs, ssm::Framing::IsoTp);
+    REQUIRE(r.has_value());
+    // Expected wire bytes per the Autosport Labs SSM-over-OBDII writeup:
+    // single-byte read at 0x000008 emits `A8 00 00 00 08` (5 bytes), no
+    // 0x80 header, no LEN byte, no CSUM.
+    REQUIRE(*r == std::vector<std::uint8_t>{0xA8, 0x00, 0x00, 0x00, 0x08});
+}
+
+TEST_CASE("build_a8_request IsoTp handles multi-address requests past KLine LEN cap",
+          "[ssm][framing][isotp]") {
+    // K-Line caps at 84 addresses (LEN byte). IsoTp has no such limit
+    // — ISO-TP's 12-bit length field allows up to 4095 bytes per
+    // request.
+    std::vector<std::uint32_t> addrs(100, 0x000001);
+    auto const r = ssm::build_a8_request(addrs, ssm::Framing::IsoTp);
+    REQUIRE(r.has_value());
+    // 2 (CMD + PAD) + 100*3 = 302 bytes
+    REQUIRE(r->size() == 302);
+    REQUIRE((*r)[0] == 0xA8);
+    REQUIRE((*r)[1] == 0x00);
+}
+
+TEST_CASE("parse_a8_response IsoTp extracts data from bare payload",
+          "[ssm][framing][isotp]") {
+    // ECU response on 0x7E8: just `E8 <data...>` — no wrapper.
+    std::vector<std::uint8_t> const resp{0xE8, 0xDE, 0xAD, 0xBE, 0xEF};
+    auto const r = ssm::parse_a8_response(resp, /*expected_n=*/4, ssm::Framing::IsoTp);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == std::vector<std::uint8_t>{0xDE, 0xAD, 0xBE, 0xEF});
+}
+
+TEST_CASE("parse_a8_response IsoTp surfaces negative response as EcuRejected",
+          "[ssm][framing][isotp][error]") {
+    // `7F NRC` — minimum 2 bytes, NRC 0x33 = securityAccessDenied.
+    std::vector<std::uint8_t> const resp{0x7F, 0x33};
+    auto const r = ssm::parse_a8_response(resp, 0, ssm::Framing::IsoTp);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+}
+
+TEST_CASE("parse_a8_response IsoTp flags data-count mismatch", "[ssm][framing][isotp][error]") {
+    std::vector<std::uint8_t> const resp{0xE8, 0x12, 0x34};
+    auto const r = ssm::parse_a8_response(resp, /*expected_n=*/5, ssm::Framing::IsoTp);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("build_b0_request IsoTp produces a bare write frame", "[ssm][framing][isotp][write]") {
+    auto const r = ssm::build_b0_request(0x012345, 0x42, ssm::Framing::IsoTp);
+    REQUIRE(r.has_value());
+    // `B0 01 23 45 42` — 5 bytes, no wrapper, no checksum.
+    REQUIRE(*r == std::vector<std::uint8_t>{0xB0, 0x01, 0x23, 0x45, 0x42});
+}
+
+TEST_CASE("parse_b0_response IsoTp returns the echoed byte", "[ssm][framing][isotp][write]") {
+    std::vector<std::uint8_t> const resp{0xF0, 0x42};
+    auto const r = ssm::parse_b0_response(resp, ssm::Framing::IsoTp);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == 0x42);
+}
+
+TEST_CASE("build_b8_request IsoTp produces a bare block-write frame",
+          "[ssm][framing][isotp][write][block]") {
+    std::vector<std::uint8_t> const data{0xDE, 0xAD, 0xBE, 0xEF};
+    auto const r = ssm::build_b8_request(0x000010, data, ssm::Framing::IsoTp);
+    REQUIRE(r.has_value());
+    // `B8 00 00 10 DE AD BE EF` — 8 bytes, no wrapper.
+    REQUIRE(*r ==
+            std::vector<std::uint8_t>{0xB8, 0x00, 0x00, 0x10, 0xDE, 0xAD, 0xBE, 0xEF});
+}
+
+TEST_CASE("parse_b8_response IsoTp returns the echoed bytes",
+          "[ssm][framing][isotp][write][block]") {
+    std::vector<std::uint8_t> const resp{0xF8, 0xDE, 0xAD, 0xBE, 0xEF};
+    auto const r = ssm::parse_b8_response(resp, /*expected_n=*/4, ssm::Framing::IsoTp);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == std::vector<std::uint8_t>{0xDE, 0xAD, 0xBE, 0xEF});
+}
+
+TEST_CASE("SsmClient with IsoTp framing emits bare-payload frames", "[ssm][client][isotp]") {
+    std::vector<std::uint32_t> const addrs{0x000008};
+    auto const expected_req = ssm::build_a8_request(addrs, ssm::Framing::IsoTp);
+    REQUIRE(expected_req.has_value());
+    REQUIRE(*expected_req == std::vector<std::uint8_t>{0xA8, 0x00, 0x00, 0x00, 0x08});
+
+    // Bare-payload response: `E8 42`.
+    std::vector<std::uint8_t> const resp{0xE8, 0x42};
+
+    st::transport::MockTransport t;
+    t.expect_send_recv(*expected_req, resp);
+    REQUIRE(t.open({st::transport::LinkKind::CanIso15765, 500000}).has_value());
+
+    ssm::SsmClient client{t, ssm::Framing::IsoTp};
+    REQUIRE(client.framing() == ssm::Framing::IsoTp);
+    auto const r = client.read(addrs, 100ms);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == std::vector<std::uint8_t>{0x42});
+    REQUIRE(t.exhausted());
+}

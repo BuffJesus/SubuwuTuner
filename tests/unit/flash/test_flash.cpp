@@ -2,10 +2,13 @@
 // Copyright 2026 The SubuwuTuner Authors
 
 #include "st/core/error.hpp"
+#include "st/ecu/ssm.hpp"
 #include "st/ecu/uds.hpp"
 #include "st/flash.hpp"
 #include "st/transport.hpp"
 #include "st/transport/mock.hpp"
+
+#include "../_helpers/erase_opt.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -20,6 +23,7 @@
 #include <vector>
 
 namespace flash = st::flash;
+namespace ssm = st::ecu::ssm;
 namespace uds = st::ecu::uds;
 
 namespace {
@@ -31,22 +35,35 @@ void expect(st::transport::MockTransport &t, std::vector<std::uint8_t> req,
     t.expect_send_recv(std::move(req), std::move(resp));
 }
 
-// The 9-byte eraseMemory option record the orchestrator emits: aLFI 0x44
-// (4-byte size, 4-byte address), 32-bit address, 32-bit size, all big-
-// endian. Mirrors the format documented in flash.cpp.
-std::vector<std::uint8_t> erase_opt(std::uint32_t addr, std::uint32_t size) {
-    return {
-        0x44,
-        static_cast<std::uint8_t>((addr >> 24) & 0xFFU),
-        static_cast<std::uint8_t>((addr >> 16) & 0xFFU),
-        static_cast<std::uint8_t>((addr >> 8) & 0xFFU),
-        static_cast<std::uint8_t>(addr & 0xFFU),
-        static_cast<std::uint8_t>((size >> 24) & 0xFFU),
-        static_cast<std::uint8_t>((size >> 16) & 0xFFU),
-        static_cast<std::uint8_t>((size >> 8) & 0xFFU),
-        static_cast<std::uint8_t>(size & 0xFFU),
-    };
+// Build an SSM A8 positive response frame: 0x80 F0 10 LEN E8 [data...] CSUM.
+// LEN = 1 (RSP) + data.size(). CSUM = sum of bytes 0..n-2 mod 256. Built via
+// indexed assignment to sidestep a GCC 15 false-positive on the natural
+// `out.push_back(checksum(out))` form (-Werror=free-nonheap-object).
+std::vector<std::uint8_t> ssm_a8_response(std::span<std::uint8_t const> data) {
+    std::size_t const total = 6 + data.size();
+    std::vector<std::uint8_t> out(total);
+    out[0] = ssm::kHeader;
+    out[1] = ssm::kSrcTool;
+    out[2] = ssm::kDestEcu;
+    out[3] = static_cast<std::uint8_t>(1 + data.size());
+    out[4] = ssm::kRespReadByAddress;
+    std::copy(data.begin(), data.end(), out.begin() + 5);
+    std::span<std::uint8_t const> const view(out.data(), total - 1);
+    out[total - 1] = ssm::ssm_checksum(view);
+    return out;
 }
+
+std::vector<std::uint8_t> ssm_a8_request_for_range(std::uint32_t base, std::uint32_t length) {
+    std::vector<std::uint32_t> addrs;
+    addrs.reserve(length);
+    for (std::uint32_t i = 0; i < length; ++i)
+        addrs.push_back(base + i);
+    auto r = ssm::build_a8_request(addrs);
+    REQUIRE(r.has_value());
+    return *r;
+}
+
+using st::test::erase_opt;
 
 } // namespace
 
@@ -158,6 +175,137 @@ TEST_CASE("Flasher::read_full_rom cancel observed mid-read", "[flash][read][canc
     // The second chunk's request was never sent -- exactly one chunk on
     // the wire.
     REQUIRE(t.send_log().size() == 1);
+}
+
+// ---------------------------------------------------------------------
+// read_full_rom_ssm
+// ---------------------------------------------------------------------
+
+TEST_CASE("Flasher::read_full_rom_ssm concatenates chunked SSM A8 reads", "[flash][ssm][read]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // 16 bytes from 0x001000, split into 2 chunks of 8 SSM addresses.
+    {
+        std::vector<std::uint8_t> const data{0, 1, 2, 3, 4, 5, 6, 7};
+        expect(t, ssm_a8_request_for_range(0x001000, 8), ssm_a8_response(data));
+    }
+    {
+        std::vector<std::uint8_t> const data{8, 9, 10, 11, 12, 13, 14, 15};
+        expect(t, ssm_a8_request_for_range(0x001008, 8), ssm_a8_response(data));
+    }
+
+    flash::Flasher f{t};
+    auto const r = f.read_full_rom_ssm(0x001000, 16, /*max_chunk=*/8);
+    REQUIRE(r.has_value());
+    REQUIRE(r->size() == 16);
+    for (std::size_t i = 0; i < r->size(); ++i)
+        REQUIRE((*r)[i] == i);
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("Flasher::read_full_rom_ssm clamps oversized max_chunk to SSM single-frame limit",
+          "[flash][ssm][read]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // Caller passes UDS's 0x100 (256). SSM only fits ~84 addrs per
+    // single-frame request; the read should clamp to 80 internally,
+    // producing 2 chunks of {80, 16} for 96 total bytes — NOT one 256-
+    // address request (which would blow the LEN byte at build time).
+    std::vector<std::uint8_t> first_chunk(80);
+    for (std::size_t i = 0; i < first_chunk.size(); ++i)
+        first_chunk[i] = static_cast<std::uint8_t>(i);
+    std::vector<std::uint8_t> second_chunk(16);
+    for (std::size_t i = 0; i < second_chunk.size(); ++i)
+        second_chunk[i] = static_cast<std::uint8_t>(80 + i);
+
+    expect(t, ssm_a8_request_for_range(0x000000, 80), ssm_a8_response(first_chunk));
+    expect(t, ssm_a8_request_for_range(0x000050, 16), ssm_a8_response(second_chunk));
+
+    flash::Flasher f{t};
+    auto const r = f.read_full_rom_ssm(0x000000, 96, /*max_chunk=*/0x100);
+    REQUIRE(r.has_value());
+    REQUIRE(r->size() == 96);
+    for (std::size_t i = 0; i < r->size(); ++i)
+        REQUIRE((*r)[i] == static_cast<std::uint8_t>(i));
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("Flasher::read_full_rom_ssm with zero length returns empty without I/O",
+          "[flash][ssm][read]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    flash::Flasher f{t};
+    auto const r = f.read_full_rom_ssm(0x001000, 0);
+    REQUIRE(r.has_value());
+    REQUIRE(r->empty());
+    REQUIRE(t.send_log().empty());
+}
+
+TEST_CASE("Flasher::read_full_rom_ssm rejects ranges beyond SSM 24-bit limit",
+          "[flash][ssm][read][error]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    flash::Flasher f{t};
+    auto const r = f.read_full_rom_ssm(0x00FFFF00, 0x200);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("Flasher::read_full_rom_ssm aborts when cancel flag set", "[flash][ssm][read][cancel]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    std::atomic<bool> cancel{true};
+    flash::Flasher f{t};
+    auto const r = f.read_full_rom_ssm(0x001000, 16, /*max_chunk=*/8,
+                                       std::chrono::milliseconds{1000},
+                                       /*progress=*/nullptr, &cancel);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::Cancelled);
+    REQUIRE(t.send_log().empty());
+}
+
+TEST_CASE("Flasher with IsoTp framing emits bare SSM payloads (no K-Line wrapper)",
+          "[flash][ssm][read][isotp]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({st::transport::LinkKind::CanIso15765, 500000}).has_value());
+
+    // Two CAN-shaped SSM reads of 8 bytes each. Request: bare `A8 00 +
+    // 8*3 addrs`. Response: bare `E8 <data>`. No 0x80 header, no LEN, no
+    // CSUM on either side.
+    auto const expected_req_0 = ssm::build_a8_request(
+        std::vector<std::uint32_t>{0x001000, 0x001001, 0x001002, 0x001003, 0x001004,
+                                   0x001005, 0x001006, 0x001007},
+        ssm::Framing::IsoTp);
+    REQUIRE(expected_req_0.has_value());
+    REQUIRE((*expected_req_0)[0] == 0xA8);
+    REQUIRE((*expected_req_0)[1] == 0x00);
+
+    std::vector<std::uint8_t> const resp_0{0xE8, 0x00, 0x01, 0x02, 0x03,
+                                            0x04, 0x05, 0x06, 0x07};
+    t.expect_send_recv(*expected_req_0, resp_0);
+
+    auto const expected_req_1 = ssm::build_a8_request(
+        std::vector<std::uint32_t>{0x001008, 0x001009, 0x00100A, 0x00100B, 0x00100C,
+                                   0x00100D, 0x00100E, 0x00100F},
+        ssm::Framing::IsoTp);
+    REQUIRE(expected_req_1.has_value());
+    std::vector<std::uint8_t> const resp_1{0xE8, 0x08, 0x09, 0x0A, 0x0B,
+                                            0x0C, 0x0D, 0x0E, 0x0F};
+    t.expect_send_recv(*expected_req_1, resp_1);
+
+    flash::Flasher f{t, ssm::Framing::IsoTp};
+    auto const r = f.read_full_rom_ssm(0x001000, 16, /*max_chunk=*/8);
+    REQUIRE(r.has_value());
+    REQUIRE(r->size() == 16);
+    for (std::size_t i = 0; i < 16; ++i) {
+        REQUIRE((*r)[i] == static_cast<std::uint8_t>(i));
+    }
+    REQUIRE(t.exhausted());
 }
 
 // ---------------------------------------------------------------------
@@ -336,6 +484,12 @@ TEST_CASE("Flasher::execute surfaces an NRC on RequestDownload", "[flash][execut
            {0x71, 0x01, 0xFF, 0x00});
     // RequestDownload denied (securityAccessDenied = 0x33).
     expect(t, uds::build_request_download(0x00, addr, size), {0x7F, 0x34, 0x33});
+    // Bail-on-failure now restores CC (best-effort) so the bus isn't left
+    // muted when the flash aborts mid-sequence. Mirrors the cancel-cleanup
+    // restoration; the gap in non-cancel failure paths was the open follow-
+    // up flagged in the module's review.
+    expect(t, {0x28, uds::kCcEnableRxAndTx, uds::kCtNormalAndNetworkManagement},
+           {0x68, uds::kCcEnableRxAndTx});
 
     flash::FlashPlan plan;
     plan.writes.push_back({{addr, size}, data});
@@ -350,6 +504,79 @@ TEST_CASE("Flasher::execute surfaces an NRC on RequestDownload", "[flash][execut
     REQUIRE(r.report.sectors.size() == 1);
     REQUIRE(r.report.sectors[0].erased);
     REQUIRE_FALSE(r.report.sectors[0].downloaded);
+    REQUIRE(r.report.silenced_bus);
+    REQUIRE(r.report.restored_bus);
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("Flasher::execute restores CC on eraseMemory failure (non-cancel bail path)",
+          "[flash][execute][error][nrc][cc_restore]") {
+    // Mirror of the cancel-cleanup CC restore, but for the non-cancel
+    // failure path: if the first per-sector op (eraseMemory) fails after
+    // CC(off) was emitted, the bail handler attempts CC(on) before
+    // returning so the bus isn't muted until power-cycle.
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    constexpr std::uint32_t addr = 0x00001234;
+    constexpr std::uint32_t size = 4;
+    std::vector<std::uint8_t> const data{0xDE, 0xAD, 0xBE, 0xEF};
+
+    expect(t, {0x10, 0x02}, {0x50, 0x02});
+    expect(t, {0x28, uds::kCcDisableRxAndTx, uds::kCtNormalAndNetworkManagement},
+           {0x68, uds::kCcDisableRxAndTx});
+    // eraseMemory rejected — generalReject (0x10).
+    expect(t,
+           uds::build_routine_control(uds::kRcStart, uds::kRidEraseMemory, erase_opt(addr, size)),
+           {0x7F, 0x31, 0x10});
+    // bail restores CC so the bus comes back online.
+    expect(t, {0x28, uds::kCcEnableRxAndTx, uds::kCtNormalAndNetworkManagement},
+           {0x68, uds::kCcEnableRxAndTx});
+
+    flash::FlashPlan plan;
+    plan.writes.push_back({{addr, size}, data});
+
+    flash::Flasher f{t};
+    auto const r = f.execute(plan);
+    REQUIRE_FALSE(r.ok());
+    REQUIRE(r.error->code() == st::ErrorCode::EcuRejected);
+    REQUIRE(r.report.sectors.size() == 1);
+    REQUIRE_FALSE(r.report.sectors[0].erased);
+    REQUIRE(r.report.silenced_bus);
+    REQUIRE(r.report.restored_bus);
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("Flasher::execute does not attempt CC restore when silence_bus=false",
+          "[flash][execute][error][cc_restore]") {
+    // If the caller never silenced the bus, bail() must not emit a
+    // gratuitous CC(on) — there's nothing to restore. Mirrors the
+    // silence_bus=true path above to pin the absence of CC traffic.
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    constexpr std::uint32_t addr = 0x00001234;
+    constexpr std::uint32_t size = 4;
+    std::vector<std::uint8_t> const data{0xDE, 0xAD, 0xBE, 0xEF};
+
+    expect(t, {0x10, 0x02}, {0x50, 0x02});
+    // No CC(off) — silence_bus=false.
+    expect(t,
+           uds::build_routine_control(uds::kRcStart, uds::kRidEraseMemory, erase_opt(addr, size)),
+           {0x7F, 0x31, 0x10});
+    // No CC(on) — bail must skip the restore branch.
+
+    flash::FlashPlan plan;
+    plan.silence_bus = false;
+    plan.writes.push_back({{addr, size}, data});
+
+    flash::Flasher f{t};
+    auto const r = f.execute(plan);
+    REQUIRE_FALSE(r.ok());
+    REQUIRE(r.error->code() == st::ErrorCode::EcuRejected);
+    REQUIRE_FALSE(r.report.silenced_bus);
+    REQUIRE_FALSE(r.report.restored_bus);
+    REQUIRE(t.exhausted());
 }
 
 // ---------------------------------------------------------------------

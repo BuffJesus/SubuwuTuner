@@ -22,6 +22,7 @@
 #include "st/project.hpp"
 #include "st/transport/factory.hpp"
 #include "st/transport/mock.hpp"
+#include "st/transport/obdx_transport.hpp"
 #include "st/transport/uds_trace.hpp"
 
 // ImGui + backends.
@@ -842,6 +843,16 @@ struct AppState {
     char read_rom_base_addr_hex[32]{"0x0"};
     char read_rom_size_hex[32]{"0x200000"}; // 2 MB default — VA/VB FA-DIT ROM size
     int read_rom_max_chunk{0x100};
+    // 0 = SSM (VA WRX + every CAN-era Subaru that hasn't moved to UDS).
+    // 1 = UDS (VB WRX + newer ISO 14229 ECUs). Default SSM because v1.0
+    // targets the VA. Wrong choice on a real car = silent timeout
+    // because the ECU drops the unknown SID without responding.
+    int read_rom_protocol{0};
+    // When set, the worker enables obdx::set_trace_enabled() for the
+    // duration of the read, so every TX/RX frame is hex-dumped to
+    // stderr. Default on while we're still bringing up real-hardware
+    // I/O; users can flip it off when reads are reliably succeeding.
+    bool read_rom_verbose{true};
     // Worker state. The atomics live in shared_ptr storage so the worker
     // can outlive a destruct of AppState without crashing (defensive — in
     // practice we always join before tearing down).
@@ -3625,6 +3636,13 @@ void render_read_rom_modal(AppState &state) {
     if (state.read_rom_state == AppState::ReadRomState::Idle) {
         ImGui::TextUnformatted("Pulls a ROM dump from the connected ECU via the");
         ImGui::TextUnformatted("OBDX/J2534/native adapter. Read-only — no ECU writes.");
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.85f, 0.55f, 1.0f));
+        ImGui::TextWrapped("Before clicking Read: ignition must be in ACC or RUN "
+                           "(engine off is fine), nothing else (e.g. COBB AccessPort) "
+                           "plugged into the OBD-II port, OBDX in the port. ECU is "
+                           "asleep with key out — it won't answer.");
+        ImGui::PopStyleColor();
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
 
         bool const adapter_ready = render_adapter_picker(state.read_rom_adapter);
@@ -3632,15 +3650,35 @@ void render_read_rom_modal(AppState &state) {
         ImGui::InputText("Base address (hex)", state.read_rom_base_addr_hex,
                          sizeof state.read_rom_base_addr_hex);
         ImGui::InputText("Size (hex)", state.read_rom_size_hex, sizeof state.read_rom_size_hex);
+        ImGui::Combo("Protocol", &state.read_rom_protocol, "SSM (VA WRX)\0UDS (VB WRX)\0\0");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Wire-level protocol used to talk to the ECU.\n"
+                              "SSM: Subaru Select Monitor — A8 ReadByAddress.\n"
+                              "     Every CAN-era VA WRX still uses this.\n"
+                              "UDS: ISO 14229 — SID 0x23 ReadMemoryByAddress.\n"
+                              "     VB WRX (2022+) and newer Subarus.\n"
+                              "Wrong choice = silent timeout (ECU drops the\n"
+                              "unknown SID without responding).");
+        }
         ImGui::InputInt("Max chunk size (bytes)", &state.read_rom_max_chunk, 16, 64);
         if (state.read_rom_max_chunk < 16)
             state.read_rom_max_chunk = 16;
         if (state.read_rom_max_chunk > 0x1000)
             state.read_rom_max_chunk = 0x1000;
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Bytes per UDS ReadMemoryByAddress request.\n"
-                              "256 is the safe default on Subaru SH-2A. Some\n"
-                              "adapters tolerate up to 4096.");
+            ImGui::SetTooltip("Bytes per request.\n"
+                              "SSM: caps at 80 internally (single-frame limit);\n"
+                              "     larger values are silently clamped.\n"
+                              "UDS: 256 is the safe Subaru SH-2A default;\n"
+                              "     some adapters tolerate up to 4096.");
+        }
+        ImGui::Checkbox("Verbose console output", &state.read_rom_verbose);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("When on, every TX/RX frame is hex-dumped to the\n"
+                              "spawned console as `[trace][obdx-tx]` / `[obdx-rx]`.\n"
+                              "Useful while debugging silent timeouts — you can\n"
+                              "see whether bytes are leaving the adapter and\n"
+                              "whether the ECU is responding at all.");
         }
 
         // Pre-run errors (typically a parse failure from a previous click).
@@ -3696,18 +3734,41 @@ void render_read_rom_modal(AppState &state) {
 
                 AppState *st_ptr = &state;
                 int const max_chunk = state.read_rom_max_chunk;
+                int const protocol = state.read_rom_protocol;
+                bool const verbose = state.read_rom_verbose;
                 auto bytes_done_sp = state.read_rom_bytes_done;
                 auto total_sp = state.read_rom_total_bytes;
                 auto cancel_sp = state.read_rom_cancel;
 
                 state.read_rom_worker = std::thread([st_ptr, spec, trace_mode, trace_path_str,
-                                                     base_addr, size, max_chunk, bytes_done_sp,
-                                                     total_sp, cancel_sp]() mutable {
+                                                     base_addr, size, max_chunk, protocol, verbose,
+                                                     bytes_done_sp, total_sp, cancel_sp]() mutable {
                     // Owning storage. Trace-mode keeps a stack MockTransport;
                     // real-mode owns the unique_ptr from the factory.
                     st::transport::MockTransport mock;
                     std::unique_ptr<st::transport::ITransport> owned;
                     st::transport::ITransport *chosen = nullptr;
+
+                    // Flip the process-wide OBDX hex-trace toggle for the
+                    // duration of the worker; restore it on every exit
+                    // path via the RAII guard below so a backgrounded
+                    // datalog can't inherit a stuck-on trace flag.
+                    bool const previous_trace = st::transport::obdx::trace_enabled();
+                    st::transport::obdx::set_trace_enabled(verbose);
+                    struct TraceGuard {
+                        bool restore_to;
+                        ~TraceGuard() { st::transport::obdx::set_trace_enabled(restore_to); }
+                    } const trace_guard{previous_trace};
+
+                    if (verbose) {
+                        char const *const proto_name = protocol == 0 ? "SSM" : "UDS";
+                        std::fprintf(stderr,
+                                     "[trace][read-rom] starting %s read: "
+                                     "base=0x%08X size=0x%X max_chunk=%d trace_mode=%d\n",
+                                     proto_name, base_addr, size, max_chunk,
+                                     trace_mode ? 1 : 0);
+                        std::fflush(stderr);
+                    }
 
                     if (trace_mode) {
                         std::vector<st::transport::UdsTracePair> pairs;
@@ -3752,23 +3813,55 @@ void render_read_rom_modal(AppState &state) {
                         chosen = owned.get();
                     }
 
-                    st::flash::Flasher flasher{*chosen};
-                    auto result = flasher.read_full_rom(
-                        base_addr, size, static_cast<std::uint32_t>(max_chunk),
-                        std::chrono::milliseconds{1500},
+                    // SSM-on-CAN strips the K-Line wrapper (per
+                    // docs/13-transport.md). Real-hardware SSM mode opens
+                    // the adapter on HS CAN (LinkConfig default
+                    // CanIso15765), so the ECU expects bare `A8 00 + addrs`
+                    // payloads. Trace mode replays K-Line-shaped fixtures
+                    // — keep KLine framing there so existing trace files
+                    // round-trip unchanged.
+                    auto const ssm_framing = (!trace_mode && protocol == 0)
+                                                 ? st::ecu::ssm::Framing::IsoTp
+                                                 : st::ecu::ssm::Framing::KLine;
+                    st::flash::Flasher flasher{*chosen, ssm_framing};
+                    auto const progress_cb =
                         [bytes_done_sp, total_sp](st::flash::Flasher::ReadProgress p) {
                             bytes_done_sp->store(p.bytes_done, std::memory_order_release);
                             total_sp->store(p.total_bytes, std::memory_order_release);
-                        },
-                        cancel_sp.get());
+                        };
+                    auto result = protocol == 0
+                                      ? flasher.read_full_rom_ssm(
+                                            base_addr, size, static_cast<std::uint32_t>(max_chunk),
+                                            std::chrono::milliseconds{1500}, progress_cb,
+                                            cancel_sp.get())
+                                      : flasher.read_full_rom(
+                                            base_addr, size, static_cast<std::uint32_t>(max_chunk),
+                                            std::chrono::milliseconds{1500}, progress_cb,
+                                            cancel_sp.get());
                     if (!result.has_value()) {
                         if (result.error().code() == st::ErrorCode::Cancelled) {
+                            if (verbose) {
+                                std::fprintf(stderr,
+                                             "[trace][read-rom] cancelled by user\n");
+                                std::fflush(stderr);
+                            }
                             st_ptr->read_rom_state = AppState::ReadRomState::Cancelled;
                             return;
+                        }
+                        if (verbose) {
+                            std::fprintf(stderr, "[trace][read-rom] FAILED: %s\n",
+                                         std::string{result.error().message()}.c_str());
+                            std::fflush(stderr);
                         }
                         st_ptr->read_rom_error_msg = std::string{result.error().message()};
                         st_ptr->read_rom_state = AppState::ReadRomState::Failed;
                         return;
+                    }
+                    if (verbose) {
+                        std::fprintf(stderr,
+                                     "[trace][read-rom] done: %zu bytes received\n",
+                                     result->size());
+                        std::fflush(stderr);
                     }
                     st_ptr->read_rom_bytes_result = std::move(*result);
                     st_ptr->read_rom_state = AppState::ReadRomState::Done;

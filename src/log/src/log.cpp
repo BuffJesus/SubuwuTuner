@@ -183,9 +183,10 @@ std::size_t total_bytes(std::vector<LogChannel> const &channels) noexcept {
 } // namespace
 
 LogSession::LogSession(transport::ITransport &transport, std::vector<LogChannel> channels,
-                       std::size_t ring_capacity)
+                       std::size_t ring_capacity, ecu::ssm::Framing ssm_framing)
     : transport_{&transport},
       channels_{std::move(channels)},
+      ssm_framing_{ssm_framing},
       stream_{channels_.empty() ? std::size_t{1} : channels_.size(), ring_capacity} {
     // Build the flat read plan: each channel contributes byte_size(dt)
     // consecutive addresses; we remember each channel's first-byte
@@ -235,7 +236,7 @@ void LogSession::stop() noexcept {
 }
 
 void LogSession::io_loop(std::chrono::milliseconds timeout) noexcept {
-    ecu::ssm::SsmClient client{*transport_};
+    ecu::ssm::SsmClient client{*transport_, ssm_framing_};
     std::vector<double> sample(channels_.size(), 0.0);
 
     while (!stop_requested_.load(std::memory_order_acquire)) {

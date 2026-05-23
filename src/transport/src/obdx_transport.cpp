@@ -7,9 +7,11 @@
 #include "st/transport/obdx_dvi.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <span>
 #include <string>
 #include <string_view>
@@ -22,6 +24,25 @@ namespace {
 
 using std::chrono::milliseconds;
 using std::chrono::steady_clock;
+
+// Process-wide hex-trace toggle. See header for rationale.
+std::atomic<bool> g_trace_enabled{false};
+
+// Dump a byte span to stderr as `<prefix> NN NN NN ...` (uppercase hex,
+// space-separated, single line per call so log readers can grep). Caps
+// the printed prefix to keep huge frames from blowing the terminal —
+// SSM responses can be ~85 bytes and UDS up to a few hundred.
+void trace_dump(char const *prefix, std::span<std::uint8_t const> bytes) {
+    std::string line{prefix};
+    line.reserve(line.size() + 4 * bytes.size() + 16);
+    char buf[8];
+    for (auto const b : bytes) {
+        std::snprintf(buf, sizeof buf, " %02X", static_cast<unsigned>(b));
+        line.append(buf);
+    }
+    std::fprintf(stderr, "%s (%zu B)\n", line.c_str(), bytes.size());
+    std::fflush(stderr);
+}
 
 // Read exactly `n` bytes from the channel, accumulating across
 // multiple read_bytes calls until `n` bytes are collected or the
@@ -266,6 +287,14 @@ constexpr milliseconds kCloseTimeout{200};
 
 } // namespace
 
+void set_trace_enabled(bool on) noexcept {
+    g_trace_enabled.store(on, std::memory_order_release);
+}
+
+bool trace_enabled() noexcept {
+    return g_trace_enabled.load(std::memory_order_acquire);
+}
+
 Transport::Transport(std::unique_ptr<IDeviceChannel> channel) noexcept
     : channel_(std::move(channel)) {}
 
@@ -285,12 +314,27 @@ st::Status Transport::open(LinkConfig const &cfg) {
                        "obdx::Transport::open: no byte channel attached");
     }
 
+    bool const trace = g_trace_enabled.load(std::memory_order_acquire);
+    if (trace) {
+        std::fprintf(stderr, "[trace][obdx-open] step 1: ELM probe (AT @1)\n");
+        std::fflush(stderr);
+    }
+
     // 1. ELM-mode probe. `AT @1` returns the device's identifier
     // string; we verify it mentions OBDX before sending anything
     // that could disturb a non-OBDX device on the same port.
     auto probe = elm_exchange(*channel_, "AT @1", kElmProbeTimeout);
     if (!probe.has_value()) {
+        if (trace) {
+            std::fprintf(stderr, "[trace][obdx-open] step 1 FAILED: %s\n",
+                         std::string{probe.error().message()}.c_str());
+            std::fflush(stderr);
+        }
         return failure(probe.error());
+    }
+    if (trace) {
+        std::fprintf(stderr, "[trace][obdx-open] step 1 OK: '%s'\n", probe->c_str());
+        std::fflush(stderr);
     }
     if (!looks_like_obdx(*probe)) {
         std::string msg{"obdx::Transport::open: device did not identify as OBDX "
@@ -301,11 +345,24 @@ st::Status Transport::open(LinkConfig const &cfg) {
     }
     firmware_ = *probe;
 
+    if (trace) {
+        std::fprintf(stderr, "[trace][obdx-open] step 2: switch to DVI (DX DP 1)\n");
+        std::fflush(stderr);
+    }
     // 2. Switch to DVI binary mode. Last ASCII exchange — after
     // this the adapter speaks DVI on the wire.
     auto switch_rsp = elm_exchange(*channel_, "DX DP 1", kDviSwitchTimeout);
     if (!switch_rsp.has_value()) {
+        if (trace) {
+            std::fprintf(stderr, "[trace][obdx-open] step 2 FAILED: %s\n",
+                         std::string{switch_rsp.error().message()}.c_str());
+            std::fflush(stderr);
+        }
         return failure(switch_rsp.error());
+    }
+    if (trace) {
+        std::fprintf(stderr, "[trace][obdx-open] step 2 OK: '%s'\n", switch_rsp->c_str());
+        std::fflush(stderr);
     }
 
     // 3. Configure the bus per LinkConfig via DVI SetProtocol
@@ -314,18 +371,103 @@ st::Status Transport::open(LinkConfig const &cfg) {
     if (!sp.has_value()) {
         return failure(sp.error());
     }
+    if (trace) {
+        trace_dump("[trace][obdx-open] step 3 TX SetProtocol", *sp);
+    }
     auto setp = dvi_exchange(*channel_, dvi::Opcode::SetProtocol, *sp, kSetProtocolTimeout);
     if (!setp.has_value()) {
+        if (trace) {
+            std::fprintf(stderr, "[trace][obdx-open] step 3 FAILED: %s\n",
+                         std::string{setp.error().message()}.c_str());
+            std::fflush(stderr);
+        }
         return failure(setp.error());
+    }
+    if (trace) {
+        trace_dump("[trace][obdx-open] step 3 RX SetProtocol ACK", *setp);
     }
 
     // 4. Enable network communication (§3.10.2: same 0x31 opcode,
     // sub-command 0x02, state 0x01 ON). Default is OFF — without
     // this step send_recv would time out on every exchange.
     auto const en = enable_network_payload();
+    if (trace) {
+        trace_dump("[trace][obdx-open] step 4 TX EnableNetwork", en);
+    }
     auto enable_rsp = dvi_exchange(*channel_, dvi::Opcode::SetProtocol, en, kSetProtocolTimeout);
     if (!enable_rsp.has_value()) {
+        if (trace) {
+            std::fprintf(stderr, "[trace][obdx-open] step 4 FAILED: %s\n",
+                         std::string{enable_rsp.error().message()}.c_str());
+            std::fflush(stderr);
+        }
         return failure(enable_rsp.error());
+    }
+    if (trace) {
+        trace_dump("[trace][obdx-open] step 4 RX EnableNetwork ACK", *enable_rsp);
+    }
+
+    // EnableNetwork's positive response per VT v1.06 §3.10.2 echoes the
+    // sub-command byte (0x02) followed by the final state byte (0x01 ON,
+    // 0x02 LISTEN-ONLY, 0x00 OFF). If the adapter ACK'd the request but
+    // the state byte isn't 0x01, the bus didn't actually come up — the
+    // adapter accepted the command but couldn't bring the network online
+    // (cable disconnected, ECU not powered, bus contention). Catching it
+    // here means the caller gets a meaningful error at open() time
+    // instead of a string of inscrutable send_recv timeouts later.
+    //
+    // The check is conservative on the response *shape*: anything shorter
+    // than 2 bytes, sub-op echo other than 0x02, or state byte not in
+    // {ON, LISTEN-ONLY} is rejected. LISTEN-ONLY is accepted with a
+    // verbose warning because some firmware revs may report it when the
+    // adapter chose listen-only after a contention probe.
+    constexpr std::uint8_t kEnableSubOp = 0x02;
+    constexpr std::uint8_t kStateOn = 0x01;
+    constexpr std::uint8_t kStateListenOnly = 0x02;
+
+    // Validation-failure helper: the adapter has already been switched into
+    // DVI mode + had a protocol set; bailing here without resetting it would
+    // leave it stuck and the user's next open() attempt would fail
+    // confusingly on the ELM probe (`AT @1` returns nothing in DVI mode).
+    // Best-effort SoftReboot returns the adapter to ELM mode for the next
+    // attempt. Ignore the result — the channel may be gone (USB unplugged),
+    // which is fine for cleanup.
+    auto const bail_from_validation = [&](st::Error err) {
+        (void)dvi_exchange(*channel_, dvi::Opcode::SoftReboot,
+                           std::span<std::uint8_t const>{}, kCloseTimeout);
+        return failure(std::move(err));
+    };
+
+    if (enable_rsp->size() < 2) {
+        return bail_from_validation(
+            st::Error{ErrorCode::TransportNack,
+                      "obdx::Transport::open: EnableNetwork response too "
+                      "short — expected sub-op echo + state byte, got " +
+                          std::to_string(enable_rsp->size()) + " bytes"});
+    }
+    if ((*enable_rsp)[0] != kEnableSubOp) {
+        char buf[96];
+        std::snprintf(buf, sizeof buf,
+                      "obdx::Transport::open: EnableNetwork response sub-op "
+                      "echo is 0x%02X, expected 0x02",
+                      static_cast<unsigned>((*enable_rsp)[0]));
+        return bail_from_validation(st::Error{ErrorCode::TransportNack, std::string{buf}});
+    }
+    auto const state_byte = (*enable_rsp)[1];
+    if (state_byte != kStateOn && state_byte != kStateListenOnly) {
+        char buf[160];
+        std::snprintf(buf, sizeof buf,
+                      "obdx::Transport::open: EnableNetwork acknowledged but "
+                      "state byte 0x%02X is not ON (0x01) — the adapter could "
+                      "not bring the bus online (cable / ignition / contention)",
+                      static_cast<unsigned>(state_byte));
+        return bail_from_validation(st::Error{ErrorCode::TransportNack, std::string{buf}});
+    }
+    if (trace && state_byte == kStateListenOnly) {
+        std::fprintf(stderr, "[trace][obdx-open] WARNING: EnableNetwork "
+                             "returned LISTEN-ONLY (0x02); send paths may not "
+                             "reach the bus.\n");
+        std::fflush(stderr);
     }
 
     open_ = true;
@@ -358,14 +500,26 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
                        "obdx::Transport::send_recv: no byte channel");
     }
 
-    // Split the host-side budget across the two DVI exchanges: the
-    // TX confirmation should land quickly (adapter ACKs the write),
-    // so give it ~25% and the remaining 75% to RX. If the caller
-    // passes a tiny budget the split may both round to 0; in that
-    // case we still attempt each exchange with at least 1ms so a
-    // local fake doesn't dead-loop.
-    auto const tx_budget = std::max(milliseconds{1}, milliseconds{timeout.count() / 4});
+    // Split the host-side budget across the two DVI exchanges. For
+    // small (single-frame ISO-TP) payloads the adapter ACKs the TX
+    // almost immediately, so the historical 25/75 TX/RX split is
+    // fine. For larger payloads the adapter has to do multi-frame
+    // ISO-TP (send a First Frame, WAIT for the ECU's Flow Control,
+    // then stream Consecutive Frames) and the TX-side ACK can take
+    // hundreds of ms — at 500 kbps with even a modest STmin the
+    // 35-frame transmission for an 80-address SSM A8 read can run
+    // to 300+ ms. Use a 50/50 split when payload > 32 B (single-
+    // frame ISO-TP threshold for OBD-II addressing is 7 B, so >32
+    // is comfortably into multi-frame territory).
+    bool const multi_frame_tx = payload.size() > 32;
+    auto const tx_share = multi_frame_tx ? timeout.count() / 2 : timeout.count() / 4;
+    auto const tx_budget = std::max(milliseconds{1}, milliseconds{tx_share});
     auto const rx_budget = std::max(milliseconds{1}, timeout - tx_budget);
+
+    bool const trace = g_trace_enabled.load(std::memory_order_acquire);
+    if (trace) {
+        trace_dump("[trace][obdx-tx]", payload);
+    }
 
     // Phase 1: TX the ECU payload onto the bus via DVI TxSmall.
     if (payload.size() > 255) {
@@ -378,6 +532,11 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
     }
     auto tx = dvi_exchange(*channel_, dvi::Opcode::TxSmall, payload, tx_budget);
     if (!tx.has_value()) {
+        if (trace) {
+            std::fprintf(stderr, "[trace][obdx-err] TX phase: %s\n",
+                         std::string{tx.error().message()}.c_str());
+            std::fflush(stderr);
+        }
         return failure(tx.error());
     }
 
@@ -395,6 +554,11 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
     // accept e.g. another error frame.
     auto resp = read_dvi_frame(*channel_, rx_budget);
     if (!resp.has_value()) {
+        if (trace) {
+            std::fprintf(stderr, "[trace][obdx-err] RX phase: %s\n",
+                         std::string{resp.error().message()}.c_str());
+            std::fflush(stderr);
+        }
         return failure(resp.error());
     }
     if (auto const *ef = std::get_if<dvi::ErrorFrame>(&*resp)) {
@@ -426,6 +590,9 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
     Frame f;
     f.data = std::move(rf->payload);
     f.arrived = steady_clock::now();
+    if (trace) {
+        trace_dump("[trace][obdx-rx]", f.data);
+    }
     return f;
 }
 

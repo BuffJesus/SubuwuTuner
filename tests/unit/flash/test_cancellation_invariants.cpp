@@ -26,6 +26,8 @@
 #include "st/transport.hpp"
 #include "st/transport/mock.hpp"
 
+#include "../_helpers/erase_opt.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
@@ -305,22 +307,7 @@ private:
     int count_{0};
 };
 
-// Mirror of the file-scope erase-option-record helper in test_flash.cpp.
-// Inlined here so this file stays standalone (the other helper lives in an
-// anonymous namespace one TU over).
-std::vector<std::uint8_t> erase_opt(std::uint32_t addr, std::uint32_t sz) {
-    return {
-        0x44,
-        static_cast<std::uint8_t>((addr >> 24) & 0xFFU),
-        static_cast<std::uint8_t>((addr >> 16) & 0xFFU),
-        static_cast<std::uint8_t>((addr >> 8) & 0xFFU),
-        static_cast<std::uint8_t>(addr & 0xFFU),
-        static_cast<std::uint8_t>((sz >> 24) & 0xFFU),
-        static_cast<std::uint8_t>((sz >> 16) & 0xFFU),
-        static_cast<std::uint8_t>((sz >> 8) & 0xFFU),
-        static_cast<std::uint8_t>(sz & 0xFFU),
-    };
-}
+using st::test::erase_opt;
 
 } // namespace
 
