@@ -851,6 +851,9 @@ struct AppState {
     // Result handoff. Set by the worker before transitioning to Done/Failed.
     std::vector<std::uint8_t> read_rom_bytes_result;
     std::string read_rom_error_msg;
+    // Change-detection shadow for the stderr error-mirror pass — see
+    // tick_status_msg(). Internal; no call site reads or writes this.
+    std::string read_rom_error_msg_prev;
     // The worker thread itself. Joined on state transition into a terminal
     // status; .joinable() is the canonical "is the thread alive" check.
     std::thread read_rom_worker;
@@ -8549,10 +8552,54 @@ void render_table_view(AppState &state, Fonts const &fonts) {
 //    start, monotonic). No allocations, no calls outside ImGui.
 constexpr double kStatusMsgTtlSeconds = 5.0;
 
+// Mirror a status/error string to stderr the moment its value changes,
+// so the console window that opens alongside the GUI captures every
+// user-visible status/error as a copy-pasteable line. Heuristic:
+// classify as `[err]` when the text matches an error-flavored regex
+// (Failed / Error / cannot / Invalid / missing / Reject — same set
+// other error sites use), otherwise `[status]`. Both classifications
+// land on stderr so the console captures the full timeline.
+//
+// Called from tick_status_msg() once per frame — cheap because the
+// fprintf only fires when `current` differs from the shadow `prev`.
+void mirror_status_change(std::string const &current, std::string &prev,
+                          char const *surface_label) {
+    if (current == prev) {
+        return;
+    }
+    prev = current;
+    if (current.empty()) {
+        return;
+    }
+    auto const looks_like_error = [&](std::string const &s) noexcept {
+        constexpr std::string_view kErrorMarkers[] = {
+            "Failed", "failed", "Error", "error", "cannot", "Cannot",
+            "Invalid", "missing", "Reject", "reject",
+        };
+        for (auto const &m : kErrorMarkers) {
+            if (s.find(m) != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    };
+    char const *severity = looks_like_error(current) ? "err" : "status";
+    std::fprintf(stderr, "[%s][%s] %s\n", severity, surface_label, current.c_str());
+    std::fflush(stderr);
+}
+
 void tick_status_msg(AppState &state) {
     double const now = ImGui::GetTime();
-    if (state.status_msg != state.status_msg_prev) {
-        state.status_msg_prev = state.status_msg;
+    // Stderr-mirror every surface that carries a user-visible status
+    // string, BEFORE the TTL pass — so the console captures the
+    // message even if it's about to be auto-cleared this frame.
+    // Both `status_msg` (the status bar) and `read_rom_error_msg`
+    // (the Tools → Read ROM from Car modal) get the same treatment;
+    // adding more surfaces is one line per new shadow field.
+    bool const status_changed = state.status_msg != state.status_msg_prev;
+    mirror_status_change(state.status_msg, state.status_msg_prev, "status-bar");
+    mirror_status_change(state.read_rom_error_msg, state.read_rom_error_msg_prev, "read-rom");
+    if (status_changed) {
         state.status_msg_seen_at = now;
         return;
     }
