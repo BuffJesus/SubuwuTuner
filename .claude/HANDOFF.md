@@ -1,122 +1,127 @@
-# Handoff — 2026-05-22 night (`doctor` + #2 + #3 closed, `st::updater` sketched, OBDX retest still pending)
+# Handoff — 2026-05-22 evening (3 v1.0 blockers closed, OBDX transport now spec-correct, live retest in progress)
 
-**The user asked partway through about an easier way to test on their laptop (currently zip-and-send). The discussion landed on a two-track answer: file-sync (Syncthing) for now, real `st::updater` for v1.0 as a proper feature. The design for the latter is sketched in `docs/22-auto-update.md` — no implementation yet, but the API surface, channel model, signature verification, swap mechanics, and CI pipeline are all written up so a future session can implement against it. Roadmap row "Installer / codesigning / auto-update channel" now points at the sketch doc.**
+**Tomorrow-first action: continue the OBDX live read flow.** The user has the adapter plugged into a 2017 WRX, the laptop pulled the rebuilt binaries via Syncthing, and is iterating on Tools → Read ROM from Car. Two OBDX bugs were diagnosed and fixed today against the published VT v1.06 PDF; the next failure mode (if any) is most likely UDS-layer or CAN-filter-related, NOT a repeat of the SetProtocol / RxSmall issues we already crushed.
 
----
-
-# Handoff — 2026-05-22 night (`doctor` + blocker #2 + blocker #3 fully closed, OBDX retest still pending)
-
-**Four pure-software ship-blocker commits in the user's absence this evening: `doctor` (#6 ✅), cancellation-invariant tests (start of #2), cancel-token enforcement closing #2 (UDS path) for v1.0, and the codegen writable-region address gate closing #3 ✅.**
-
-## Blocker #3 — codegen writable-region gate (UDS path)
-
-New schema entry in `docs/11-definition-format.md`:
-
-```toml
-[[writable_region]]
-name        = "calibration_a"
-kind        = "calibration"    # calibration | code | data
-address     = 0x000F0000
-length      = 0x00010000
-bank        = "a"              # optional, for RH850 dual-bank (v1.3+)
-description = "..."             # optional
-```
-
-`st::feature::codegen::gate_patch(PatchObject const &, Definition const &) -> Status` is the security boundary. Wired into `Sh2aBackend::compile()`'s exit path so callers cannot bypass it. Each `HookPatch`'s `[splice_address, splice_address + code.size())` range must be fully contained inside ONE `[[writable_region]]` — spanning two regions is refused even when the union covers the range (bridging two declared-safe zones is the foot-gun the gate exists to prevent).
-
-Fail-closed: a pack with zero `[[writable_region]]` entries refuses every non-empty patch. An empty PatchObject (no hooks) passes vacuously — matches the "empty patch = no-op flash" semantic the SH-2A backend produces for an empty module.
-
-15 tests in `tests/unit/feature_codegen/test_address_gate.cpp`: vacuous-pass cases, fail-closed (no regions declared), single-region containment + start/end boundary cases, splice-outside-all-regions, splice-in-but-code-overflows-region, hook-spans-two-adjacent-regions, multi-region disjoint coverage, multi-hook reporting (one passes, two fail, message names the two failing hooks and lists all available regions). Total suite 864/864 green.
-
-Existing test packs in `test_sh2a.cpp` (`kPackOneHookToml`, `kPackFloatHookToml`, `kPackTwoHooksToml`) had to add `[[writable_region]]` entries to keep their backend-integration tests passing — the gate is wired through `compile()`, so any test that compiles non-empty IR needs to declare regions.
-
-RAM allocation stays gated by per-hook `free_ram` + `RamAllocator` (unchanged).
-
-Roadmap row #3 ⬜ → ✅.
+If you're resuming this session and the user comes back with another OBDX error: the GUI now mirrors `read-rom` modal errors to the spawned console as `[err][read-rom] <text>`, so they can paste the exact string instead of re-typing from a screenshot.
 
 ---
 
-# Handoff — 2026-05-22 late evening (`doctor` + blocker #2 fully closed, OBDX retest still pending)
-
-**The user is at work. Three pure-software commits landed in their absence: `doctor` (#6 ✅), cancellation-invariant tests (start of #2), and now the cancel-token enforcement on `Flasher::execute()` that closes #2 for v1.0 (UDS only; SSM is v1.3-and-later).**
-
-## Blocker #2 — fully closed for v1.0
-
-`Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *cancel = nullptr)` — added a second parameter, default null for backward compatibility. Cancel polled at PDU boundaries:
-- Top of the per-sector loop (between sectors).
-- Top of the per-block TransferData inner loop (between PDUs within a sector).
-- Never mid-PDU; in-flight UDS exchanges always complete.
-
-On observed cancel, the cleanup helper emits:
-- `RequestTransferExit` (0x37) if a download was in flight (RequestDownload sent but RequestTransferExit not yet sent for the current sector).
-- Always `DiagnosticSessionControl` → `kDscDefault` (0x10 0x01) as the final PDU.
-- Both calls swallow errors; the user has already asked us to stop.
-- Returns `ExecuteOutcome` with `error.code() == Cancelled` and a partial `report`.
-
-Three new tests fill the placeholder block in `tests/unit/flash/test_cancellation_invariants.cpp`:
-- `execute observes pre-set cancel and exits via DSC(default)` — cancel set before execute, sector loop never runs a real iteration.
-- `execute observes cancel between sectors and exits via DSC(default)` — uses a `CancelAfterNthExchange` wrapper transport that flips the cancel flag after the 6th send_recv (post sector-1 check_deps).
-- `execute observes cancel mid-TransferData; emits RequestTransferExit + DSC(default)` — cancel flips after the first of two TransferData blocks. Asserts the second block never goes on the wire (PDU atomicity) and the wire sequence ends with RTE then DSC(default).
-
-All 848/848 tests green.
-
-## Pre-existing build issue surfaced (not introduced here)
-
-`cmake --build build/win-mingw` for the *full* tree fails on `src/ui/src/main.cpp:8735` with `unknown conversion type character 'z' in format` — `text_subtle("edits %zu / %zu", ...)` is rejected on this MinGW toolchain. Confirmed pre-existing by stash/build/pop. CLI + tests build clean. Fix is to cast the `size_t` args to `unsigned long long` and use `%llu`, or migrate to `std::format`. Out of scope for this session.
-
----
-
-**The user is at work and hasn't retested OBDX yet. Two pure-software ship-blocker commits landed in the meantime: `doctor` (#6) and the start of cancellation invariants (#2).**
-
-## Blocker #2 — Cancellation invariants (partial, 🟡)
-
-**Files added:**
-- `tests/unit/flash/test_cancellation_invariants.cpp` — 3 tests covering invariants #4 (crash-mid-flash recovery: simulate a process crash via a UDS negative-response bail mid-execute, then `plan_resume` from the on-disk journal and verify it covers exactly the not-completed sector) and #5 (resume idempotence: `plan_resume` is a pure function and collapses to empty on a fully-done journal — re-invoking recovery is a no-op).
-- `tests/unit/ecu/test_uds_pdu_atomicity.cpp` — 14 tests confirming each `UdsClient` public method produces exactly 1 send_log entry on success, on negative-response (no silent retry), and on transport-level injected error. The cancel-is-deferred logic at the orchestrator only works if each client call is itself indivisible; this suite pins that property so a future refactor that sneaks a retry loop into e.g. `transfer_data()` can't break the cancel contract.
-
-**17 new tests, 70 assertions, total suite 845/845 green.**
-
-**Not yet landed (invariants #1-3 — explicitly flagged in both test file headers + roadmap row #2):**
-- Mid-PDU UDS cancel deferred
-- Mid-PDU SSM cancel deferred
-- Session-exit on cancel
-
-These three need enforcement code first: `Flasher::execute(FlashPlan const &plan)` does not accept a cancel token today (only `read_full_rom` does). The enforcement work spec is in both file headers:
-- Extend `execute()` signature: add `std::atomic<bool> const *cancel = nullptr` (matching `read_full_rom`'s pattern; backward-compatible default).
-- Check cancel between sectors AND between TransferData blocks within a sector (never mid-PDU; in-flight PDU completes first).
-- On cancel mid-sector (after RequestDownload, before RequestTransferExit): emit `RequestTransferExit` (0x37) so the ECU's download state machine unwinds cleanly.
-- Always emit `DiagnosticSessionControl` → `kDscDefault` on cancel exit; ECU leaves programming session cleanly.
-- Return `ErrorCode::Cancelled` from `execute`.
-
-SSM block-write cancellation (invariant #2) is doubly blocked: needs `execute()` cancel hook AND the SSM B8 write flow itself (the current `st::ecu::ssm` layer doesn't implement it yet).
-
-Test slots are stubbed in `tests/unit/flash/test_cancellation_invariants.cpp` (file footer) so the next person knows where they go.
-
-Roadmap row #2 status updated ⬜ → 🟡.
-
----
-
-# Handoff — 2026-05-22 afternoon (`doctor` shipped, OBDX retest in progress)
-
-**While the user retests the OBDX read flow, I closed v1.0 ship blocker #6: `subuwutuner-cli doctor`.**
-
-Composes the existing primitives (`j2534::discover_adapters` from transport-list, `discover_pack_paths` + `Definition::from_file` from pack-list, `Definition::matches(Rom)` from rom-identify) into a single triage command:
+## What shipped today (9 commits, all on `origin/main`)
 
 ```
-subuwutuner-cli doctor [--pack-dir <dir>] [--rom <FILE.bin>]
+5b0ae89 fix(transport): receive OBDX frames as unsolicited push
+3f9b27d feat(ui): mirror status + error messages to stderr
+aaa1d69 fix(transport): correct OBDX SetProtocol payload per VT v1.06
+1e9619f fix(ui): use gnu_printf archetype for text_subtle
+39ee4a5 docs(updater): sketch st::updater design (Phase 6)
+ddece0f feat(defs+codegen): add writable-region address gate          (#3 ✅)
+1f4c5d9 feat(flash): execute() honors cancel between PDUs              (#2 ✅)
+473b8f6 test(flash+ecu): pin cancellation + PDU-atomicity invariants
+ccaca6d feat(cli): add 'doctor' triage subcommand                      (#6 ✅)
 ```
 
-Four sections, traffic-light status per section (`[ OK ] / [WARN] / [FAIL] / [INFO]`):
-1. **System** — name + version + OS label.
-2. **J2534 adapters** — `discover_adapters()`; WARN on Windows when empty (with hint to install vendor DLL), INFO on macOS/Linux (driver model differs).
-3. **Definition packs** — only when `--pack-dir` given; walks via `discover_pack_paths`, loads each, surfaces first 3 failures, status by load ratio.
-4. **ROM identification** — only when `--rom` AND `--pack-dir` both given; FAIL if no CID match across loaded packs.
+865/865 tests green throughout. Full-tree build clean on MinGW (the pre-existing `%zu` UI breakage is fixed in `1e9619f`).
 
-Closing block emits "What to do next:" with the actionable hints accumulated during the run. Exit 0 on healthy or advisory-only, 1 on any FAIL, 2 on bad CLI usage. No live link — fully read-only / hardware-free.
+### Ship-blocker grid
 
-Smoke-tested all five paths against the user's Test project ROM (correctly matched `a2tb002c`), an empty pack-dir, an unreadable ROM, a 4-byte non-matching ROM, and `--bogus`.
+| # | Title | Status after today | Notes |
+|---|---|---|---|
+| 1 | Brick protection per-ISA | ⬜ hardware-blocked | Bench rig prerequisite |
+| 2 | Cancellation invariants | ✅ | UDS path complete; SSM moot until v1.3 |
+| 3 | Codegen writable-region gate | ✅ | Fail-closed, wired into Sh2aBackend |
+| 4 | `[[table.role]]` schema | ✅ | PR #1 |
+| 5 | `.stune` format spec | ✅ | PR #1 |
+| 6 | `subuwutuner-cli doctor` | ✅ | Composes adapter probe + pack health + ROM CID |
+| 7 | Frozen `defgen` binary | ⬜ packaging | PyInstaller / Nuitka choice pending |
+| 8 | README platform matrix | ✅ | PR #1 |
+| 9 | OFL font licenses | ✅ | PR #1 |
+| 10 | CI performance gate | ⬜ | Aspirational thresholds, not enforced |
+| 11 | Property-based codec tests | ⬜ | RapidCheck wire-up — next-up task in this session |
 
-828 unit tests still green. Roadmap §1 (ship blockers) updated, blocker #6 flipped ✅. Working tree: `src/cli/main.cpp` + `docs/04-roadmap.md` modified; SubaruTuner.zip / fixtures/projects/Test/ still leave-alone.
+**Pure-software blockers remaining: #7, #10, #11.** #1 is hardware-blocked.
+
+---
+
+## OBDX live-test decision tree
+
+Status as of session-end: two OBDX firmware-layer bugs fixed; user is mid-retest. If a third error appears, classify it against this table BEFORE assuming new code is needed.
+
+| Console text (after `[err][read-rom]`) | Diagnosis | Where to look |
+|---|---|---|
+| `Adapter open failed: serial open failed for ...` | Wrong COM port. | Device Manager → Ports. |
+| `device returned 0x05 for opcode 0x31` | Would mean my SetProtocol fix regressed. **Should not happen.** | `src/transport/src/obdx_transport.cpp::set_protocol_payload` — confirm 2-byte format. |
+| `device returned 0x01 for opcode 0x08` | Would mean the RxSmall fix regressed. **Should not happen.** | `src/transport/src/obdx_transport.cpp::Transport::send_recv` phase 2. |
+| `read_full_rom: short read at 0x...` | UDS layer: ECU rejected the chunk size or refused mid-read. Look at the actual bytes received. | `src/ecu/src/uds.cpp::read_memory_by_address`, `src/flash/src/flash.cpp::read_full_rom`. |
+| `read_full_rom: ... ecu negative response 0x7F 0x23 NN` | ECU said no to ReadMemoryByAddress (SID 0x23). NN explains why; 0x33 = securityAccessDenied (needs session escalation + seed/key); 0x31 = requestOutOfRange (address invalid for this ECU); 0x12 = subFunctionNotSupported. | Add a DSC(extended) + SecurityAccess preamble per the ECU's needs, OR adjust addr/length. |
+| `send_recv: timeout / no response from ECU` | TX ack came back but no 0x08 push. Almost certainly the OBDX needs a CAN filter set for the ECU's response ID. The VT manual covers 0x33 for VPW only — VX adds CAN sub-commands we don't have a public spec for. | Speculative: add a `dvi::Opcode 0x33` filter command setting accept-id = 0x7E8 before phase 2 of `send_recv`. Don't guess the byte layout — pull the VX manual or iterate. |
+| `expected unsolicited RxSmall/Large (0x08/0x09); got opcode 0x??` | Adapter returned something we don't expect. Read the opcode value. | Look at VT v1.06 §3 for the matching opcode; might be a config error we need to handle. |
+
+The OBDX VX-specific reference manual is NOT publicly available at obdxpro.com without an account; the VT (VPW-only) manual at https://obdxpro.com/Downloads/ReferenceManuals/OBDX%20Pro%20VT%20Reference%20Guide%20v2.pdf is what we used today. The VX likely uses the same opcode set with additional CAN-specific sub-commands on 0x31 (already cracked) and 0x33 (filters — not yet exercised).
+
+---
+
+## Background that's still load-bearing for tomorrow
+
+### Syncthing desktop ↔ laptop
+
+Installed and configured today. Two send-only folders (`build/win-mingw/bin/` and `definitions/legacy/`) mirror from desktop to laptop via Task Scheduler-spawned daemon. Replaces the old zip-and-send loop.
+
+- Desktop device ID: `NSYHPXO-QVWHQT6-4XUNW2M-OET6FJY-CYP7Z7I-CM5HV7D-M7PEYEY-SIIJKQ4`
+- Laptop device ID: `VZ6D4AZ-WUZL35M-UR5EOJ4-TPBMLFJ-6QOT7TR-R4BAHVR-5HBTKOH-3GHJ6AP`
+- Web UI: http://127.0.0.1:8384/
+- Full setup notes: `.claude/SYNCTHING-SETUP.md` (gitignored, lives on this machine only)
+- Memory: see `project_syncthing_setup.md`
+
+### Workflow
+
+Desktop: edit + commit + `cmake --build build/win-mingw`. Laptop receives binaries within seconds via fs-watcher. No git pull or rebuild on the laptop is needed — Syncthing IS the propagation. The laptop is a test target, not a build host.
+
+### Auto-updater (Phase 6 work)
+
+`docs/22-auto-update.md` sketches the in-tool `Help → Check for Updates` flow that closes the v1.0 "Installer / codesigning / auto-update channel" row when Phase 6 polish starts. Channel model, GitHub-Releases manifest shape, Ed25519 signature verification, Windows helper-process swap pattern, UI flow — all there. Three open questions called out inline. Not for tomorrow; the file-sync above solves the dev-iteration problem in the meantime.
+
+### Pre-existing notes still relevant
+
+- The `fixtures/projects/Test/` untracked dir is the user's GUI-created test project ("BigTittyGothGF"). Leave alone — it's personal test data, not a repo asset.
+- `SubaruTuner.zip` at the repo root (120 MB) is a backup the user dropped; HANDOFF history says "leave."
+- `docs/09-risks.md` carries an unstaged two-blank-line edit from the user opening the file in their IDE. Cosmetic; don't include in commits.
+
+---
+
+## What's next after the OBDX live test settles
+
+If OBDX read succeeds:
+1. User gets a real ROM dump on disk → File → New project flow → first real-hardware end-to-end milestone for the project. Phase 1 ship gate (≥20 maps from a real definition pack) becomes testable.
+2. Memory entry "COBB-encrypted 2017 WRX stock ROM" gets a follow-up note that the OBDX path produces the tuned cal (not stock — that's still locked in COBB AccessPort's encrypted store).
+
+If OBDX read fails as a UDS-layer issue:
+1. Likely needs session escalation (DSC 0x03 extendedDiagnostic) + possibly SecurityAccess before ReadMemoryByAddress on a tuned ECU. Forum threads on COBB-tuned VAs hint that the COBB tune may leave the security level partially open; that's why a dump is even attempted before seed/key implementation.
+2. Add `Flasher::read_full_rom` an optional session-escalation preamble — or, simpler, expose DSC + SA primitives at the CLI/GUI level so the user can drive the escalation themselves.
+
+If OBDX read fails as "TX ack but no response" (filter issue):
+1. Need the VX manual's 0x33 sub-command catalog for CAN.
+2. Without it: iterate blind, but each iteration is a real-hardware run, not cheap.
+3. Worth asking OBDX support directly via their contact page — they're responsive to developer requests.
+
+---
+
+## Pure-software follow-ups (not OBDX-blocking)
+
+In rough priority order:
+
+1. **Ship blocker #11**: property-based codec tests. Up next in this session per user direction.
+2. **Ship blocker #10**: CI performance gate. Cold-start time + idle-RAM thresholds in CMake; fail the matrix build on regression past §1 in `docs/05-improvements.md`.
+3. **Ship blocker #7**: Frozen `defgen` binary. PyInstaller is fine, Nuitka is slimmer. Either, then bundle into the installer when that lands.
+4. **`Definition::validate()` duplicate-name check** for `[[writable_region]]` entries. Flagged in `ddece0f` review; same applies to `[[hook]]` / `[[primitive]]` which also don't enforce uniqueness today.
+5. **Shared test-helper header** at `tests/unit/_helpers/`. `erase_opt`, `dvi_response_frame`, `dvi_unsolicited_frame`, `make_def_with_regions` are now duplicated across 2-3 test files each. Mechanical extraction.
+6. **`EnableNetwork` response echo validation** in `obdx_transport.cpp::open()` — flagged in `aaa1d69` review. Verify the adapter actually flipped to ON instead of taking the ACK on faith.
+7. **`Flasher::execute` cancel-cleanup CC restore** is already done; the equivalent on the happy-path failure paths (e.g. mid-sector erase failure) could also restore CC. Minor.
+
+---
+
+# Earlier-today + previous-day handoffs (preserved for context)
+
+Everything below this line is historical. The state described in those sections has been superseded by the work in today's 9 commits, but the prose around motivation / decisions is still useful for future readers.
 
 ---
 
@@ -137,321 +142,4 @@ This is a real coding bug I shipped (and a misleading error message to boot). Th
 - `LinkKind` enum comments rewritten to reflect actual Subaru bus history (pre-2008 K-Line, 2008+ CAN ISO15765 — including all VA/VB).
 - The OBDX K-Line error message rewritten to redirect users to `CanIso15765` instead of pointing at Tactrix.
 
-The user did **NOT** get to re-test today after the fix landed. **First action tomorrow morning: launch the (already-rebuilt) GUI and click Tools → Read ROM from Car again.** Same form values as yesterday — adapter OBDX, device COM port, addr 0x0, size 0x200000.
-
-## Possible failure modes and what they mean
-
-| Symptom | Interpretation | Next action |
-|---|---|---|
-| Progress bar starts ticking up | **It works.** Wait 5-15 min, save .bin, File → New project. | First real-hardware milestone for the project. |
-| "Adapter open failed: serial open failed for \\\\.\\COM5..." | Wrong COM port number. | Re-check Device Manager. |
-| Link opens but FIRST chunk errors | UDS-request shape doesn't match real ECU expectation. Likely fixable in `src/ecu/uds.cpp` against the actual error byte. | Paste error; iterate. |
-| First chunk succeeds, later chunks error or timeout | ISO-TP fragmentation / flow-control issue in `src/transport/src/obdx_transport.cpp`. | Paste error + approximate bytes_done. |
-| Adapter rejects link with some new error | Another wrong-config bug like today's. Paste error verbatim. | Same shape of fix. |
-
-Pre-flight checklist for the user (in case they need a reminder):
-
-- Battery > 12.0 V (charged or maintainer)
-- Key in ON, engine OFF
-- OBDX plugged into OBD-II port FIRST, then USB to laptop
-- Device Manager → Ports → note the COM number for the OBDX
-
-If the GUI hangs and you need to bisect, drop to the CLI for a 16-byte sanity read:
-
-```
-subuwutuner-cli rom-pull --transport obdx --device COM5 --addr 0 --size 0x10 --output test.bin
-```
-
-If that works, the OBDX protocol layer is fine and only the GUI flow has an issue. If that fails the same way, it's a protocol-layer bug — same code path.
-
----
-
-# Handoff — 2026-05-21 (P6 + 3 pack-bug sweeps + VA/VB bundles + AFR formula)
-
-Marathon session. Built on yesterday's `8f4b44f`. **37 commits** all pushed. P6 descriptor library is real and finding real bugs; validate.py surfaced multiple classes of pack-quality issues that we fixed at the source (defgen) and applied corpus-wide; user dropped two forum-sourced VA/VB bundle XMLs which we wired into bulk_regen to upgrade 25 packs from 0D-scalar-only to fully-typed 2D.
-
-**HEAD `33aa0d1`**, in sync with `origin/main`. Working tree clean apart from `SubaruTuner.zip` (114 MB, leave) and `fixtures/projects/Test/` (user-created GUI state, leave alone).
-
-## Commits shipped this session (oldest → newest)
-
-```
-c774e6d tools(defgen): bootstrap descriptors.py predicate library
-b625cc6 tools(defgen): add validate.py — descriptor library consumer
-7e0f06f tools(defgen): descriptors filter by expected_dims to kill over-match
-30c8eb5 docs(handoff): 2026-05-21 — P6 descriptor library shipped
-a58c73c tools(defgen): add intake_temp_axis + engine_load_axis descriptors
-f0d4fd8 defs(packs): set factual cid_address on VA/VB packs with confirmed anchors
-a3d6ad6 fix(defs): a2tb002c base_timing tables stored as uint8 not uint16
-feeb6b5 fix(defs): sweep base_timing dtype uint16_be → uint8 across 334 packs
-5d9938f docs(handoff): late-session 2026-05-21 refresh
-7a29de7 fix(defgen): propagate parent-table storagetype to inline scaling
-fdde497 defs(packs): bulk_regen sweep with defgen storagetype fix (323 packs)
-63dac51 docs(handoff): capture AFR investigation + defgen storagetype fix
-2055c18 tools(defgen): add timing_compensation_1d + boost_compensation_1d descriptors
-c8db6c5 defs(packs): re-cousin-seed 11 cousin packs from their (now-fixed) bases
-875ed2f tools(defgen)+defs: wire VA/VB WRX bundles into bulk_regen
-31b0e08 docs(handoff): capture VA/VB bundle wire-up + 25-pack upgrade
-1e1029b tools(defgen): engine_rpm_axis tries raw/5.12 scaling for VA-era axes
-083b9b7 docs(handoff): capture P6h baseline + engine_rpm_axis /5.12 extension
-74624d3 feat(defs+defgen): subaru_afr_enrichment non-linear formula
-f202081 defs(packs): bulk_regen sweep emits subaru_afr_enrichment (323 packs)
-45f7d62 docs(handoff): capture P6e — subaru_afr_enrichment formula shipped
-07c8cc3 tools(defgen): broaden compensation descriptors (1D patterns + new 2D)
-b4a062e docs(handoff): capture compensation-descriptor broadening (07c8cc3)
-6a4693a fix(defgen)+defs: float-endian override for non-axis scalings + cousin re-seed
-451b28c docs(handoff): capture user-experience pass + 6a4693a
-fc67e84 docs(handoff): fix stale commit count in suggested opener
-e3c9bf6 docs(handoff): UX pass on a2tb001c deprioritizes P6a-continued
-ad187c4 docs(handoff): P6e-VA investigated — VA fueling tables are correct
-09342dd feat(defs+defgen): inverse_divide non-linear formula
-9ec0c32 docs(handoff): inverse_divide formula shipped (09342dd)
-d256920 docs(handoff): fix stale references (commit count, HEAD, test count)
-bb659c1 tools(defgen): broaden AFR matcher (implicit k=1 + paren variants)
-6418998 docs(handoff): final session refresh — 32 commits, all non-linear formulas handled
-2745e73 docs(handoff): empirical coverage benchmark vs RomRaider/Merp
-33aa0d1 feat(ui+flash): Tools → Read ROM from Car (pre-OBDX)
-```
-
-### Tools → Read ROM from Car + Trace-replay test mode (commits `33aa0d1` + `73959f1`)
-
-Pre-staged GUI flow for the OBDX adapter (ETA May 22-25). After this
-commit, tuner workflow on adapter arrival is:
-
-  Tools → Read ROM from Car → pick adapter + COM5 → Read → save .bin
-
-Three pieces:
-- `Flasher::read_full_rom` extended with optional progress callback + cancel atomic; 4 new test cases.
-- `render_read_rom_modal()` state machine (Idle → Running → Done / Failed / Cancelled) with background `std::thread`; ~440 lines in main.cpp.
-- New `Tools` top-level menu (between Edit and View).
-
-The C++ + UDS path goes all the way through MockTransport today. The
-real-OBDX leg's transport layer is already wired via Win32 serial
-(serial_byte_channel_win.cpp); the empirically unverified piece is the
-OBDX DVI codec + UDS handshake against real adapter firmware.
-
-Commit `73959f1` adds a 4th "Trace (test)" option to the adapter
-picker that lets the user smoke-test the entire flow against a
-recorded UDS trace file — no adapter required. The parse_uds_trace
-parser was lifted from CLI-only into `st::transport::parse_uds_trace`
-so both surfaces share the same code path.
-
-**Write-ROM plan** documented as a 50-line comment block above
-`render_read_rom_modal` — route through existing `render_flash_modal`
-policy gate, add vehicle-state preflight (battery > 12.0V, ignition,
-transmission), background-thread `Flasher::execute` with per-sector
-ledger, journal-resume modal. Implementation deferred until OBDX
-validation lands.
-
-## What's new since yesterday (8f4b44f)
-
-### P6 descriptor library (5 commits, 9 seed predicates)
-
-`tools/defgen/descriptors.py` (~550 lines) + `tools/defgen/validate.py` (332 lines) ship as a working pair.
-
-**Library: 9 seed predicates** with `expected_dims` filtering, fnmatch id patterns, multi-scaling support, real-ROM evidence drift-guards:
-
-| id | kind | dims | notes |
-|---|---|---|---|
-| `engine_rpm_axis` | axis | 1 | monotonic 200-8500 RPM, 5-32 pts |
-| `coolant_temp_axis` | axis | 1 | -50..150 °C, 4-24 pts |
-| `intake_temp_axis` | axis | 1 | same band as coolant, different patterns |
-| `engine_load_axis` | axis | 1 | 0..10 g/rev monotonic, 0.5 min span |
-| `wastegate_duty` | table | 2 | [0, 27000] uint16, ×100/×128/×256 raw scalings |
-| `boost_target` | table | 2 | 20-350 kPa abs, tries raw / /10 / /128 / ×0.1334 (EJ psi) |
-| `base_timing` | table | 2 | -15..+60° BTDC via raw / /4 / /2 |
-| `timing_compensation_1d` | table | 1 | signed ±30° via raw×0.352-45 / etc.; flat-stock curves accepted |
-| `boost_compensation_1d` | table | 1 | signed ±100% via raw×0.781-100 / etc. |
-
-**Consumer: validate.py** walks `[[table]]` + `[[axis]]`, resolves shape via referenced axes, decodes bytes, runs every applicable descriptor. PASS / FAIL / NO_DESCRIPTOR / SKIPPED. Exit 0/1/2.
-
-### Pack-bug class fixes (5 commits)
-
-| # | Commit | Scope | What |
-|---|---|---|---|
-| 1 | `f0d4fd8` | 5 packs | factual VA/VB `cid_address` from empirical scan |
-| 2 | `a3d6ad6`+`feeb6b5` | 1 + 334 packs | `base_timing` dtype uint16→uint8 manual sweep |
-| 3 | `7a29de7` | defgen.py | root-cause fix: propagate parent-table storagetype |
-| 4 | `fdde497` | 323 packs | bulk_regen sweep through the fixed defgen path |
-| 5 | `c8db6c5` | 11 packs | re-cousin-seed cousins from now-correct bases |
-
-### VA/VB bundle wire-up (1 commit, 25 packs upgraded)
-
-User provided two RomRaider-format bundles at `fixtures/private/romraider_defs/{va,vb}/`. Unlike the per-CID forum XMLs already in-tree (sparse, no `sizex/sizey/storagetype/scaling`), the bundles carry the full inheritance pattern Merp's canonical EJ XML uses: `<rom base="va_2015_2018_base">` root with structural fields, per-CID `<rom base="…">` overrides with address remaps only.
-
-`bulk_regen` extended with:
-- `MASTER_BUNDLES` list (Merp master + VA bundle + VB bundle).
-- `_cid_source_map()` builds unified `{UPPER_CID → (xml_path, default_subdir, original_case_cid)}`. Original case preserved for VB CIDs (`LHBHE00Bx0G` etc. — defgen's `--rom-id` filter is case-sensitive).
-- `--create-missing` flag (unused this commit since all 26 bundle CIDs already had packs).
-- `_apply_ident_preservation()` — new preservation pass for `[[identification]]` block. Preserves `cid_address`, `ecu_part`, and inserts `cid_scan` when defgen omits it. Discovered mid-sweep when the first regen pass clobbered hand-tunes — without this, `lf9g003t` would have lost its sibling-family-inferred `cid_address = 0x00035802`.
-- `platform` added to `_PRESERVABLE_PACK_FIELDS` (defgen emits bare `"subaru"` from `<model>WRX</model>`; we prefer `subaru.impreza`).
-
-**Data impact:**
-- 8 VA packs (lf9c102p, lf75404h/s, lf79103p, lf75600h, lf9d012h, lf9g003t, lf9l000e) upgraded from ~250 0D scalars to e.g. `84 0D + 66 1D + 146 2D` (lf9c102p).
-- 17 VB packs (LHB* series, incl. 2026 model year CIDs) upgraded from ~1094 0D-only to e.g. `527 0D + 170 1D + 399 2D` (lhbt210ub0g).
-- lf79100p (cousin-seed) skipped, retains hand-tuned `cid_address=0x00037C51`.
-
-The bundle files themselves remain at `fixtures/private/romraider_defs/` — uncommitted per Path B. bulk_regen guards with `if not bundle_path.is_file(): continue` so the public repo + tools work on machines without the bundles.
-
-### Two non-linear formula types shipped this session
-
-**AFR enrichment (commits `74624d3` + `f202081`):**
-
-The non-linear AFR enrichment formula `14.7/(1+x*0.0078125)` is now a first-class formula type across the stack:
-
-- **C++**: new `SubaruAfrEnrichment` variant in `ScalingFormula`. `apply_scaling` evaluates `numerator / (1 + raw*k)` with a singularity guard. `invert_scaling` solves `raw = (numerator/value - 1) / k` with a degenerate-value guard. The TOML loader recognizes `formula = "subaru_afr_enrichment"` with optional `numerator`/`k` fields.
-- **defgen**: `match_afr_enrichment()` regex tolerantly matches the canonical expression (and structurally-equivalent forms). `_scaling_from_element` tries the AFR match before falling through to `parse_toexpr`'s linear path. `ScalingRecord` gains optional `numerator`/`k` fields; `to_toml` emits the right field set per formula type.
-- **bulk_regen sweep**: 323 packs across legacy/forester/impreza/baja/outback/exiga/tribeca/ecuparams regenerated. Every AFR-bearing scaling now emits `formula = "subaru_afr_enrichment"` instead of the prior flattened linear identity.
-
-**Verification**: `dump-table primary_open_loop_fueling` on a2tb000l now shows **AFR values 4.91-14.70 (mean 11.16)** instead of raw 0-255 enrichment offsets. Engineering-meaningful tuning data.
-
-15 new tests total (7 C++ + 8 Python).
-
-**Inverse divide (commit `09342dd`):**
-
-Same shape of fix for the reciprocal expression `N/x`. Found via the
-UX-pass discipline: `injector_flow_scaling` (318-pack scaling) was
-showing raw float 4916 cc/min — Subaru injectors are 380-2000 cc/min.
-The canonical expression `2707090/x` converts to 550.67 cc/min, exactly
-the OEM EJ255 injector flow rate.
-
-- **C++**: `InverseDivideScaling { numerator }` variant. `apply_scaling`:
-  value = numerator / raw with raw==0 guard. `invert_scaling`: raw =
-  numerator / value with value==0 guard. Loader parses `formula = "inverse_divide"`.
-- **defgen**: `match_inverse_divide()` regex for `N/x` or `N/(x)` patterns,
-  tried after AFR matcher but before parse_toexpr's linear path.
-- **bulk_regen sweep**: 323 packs re-emit through fixed defgen path.
-
-Affects: `injector_flow_scaling` (318 packs, high-impact for tuners
-replacing injectors), `gear_determination_thresholds_a/b/c` (122 packs,
-lower priority).
-
-13 new tests total (5 C++ + 8 Python).
-
-## Coverage benchmark (vs RomRaider/Merp canonical XML)
-
-Empirical measurement at end of session (commit `6418998`):
-
-| Source | CID count |
-|---|---|
-| Merp canonical ecu_defs.xml (RomRaider open-source reference) | 332 |
-| Our packs in `definitions/` (excluding ecuparams/) | 373 |
-| **Intersection** | **332 (100.0%)** |
-| **Forum-sourced extras** (newer than Merp mainline) | **41** |
-
-Extras break down to:
-- 18 VB WRX packs (LHBH/LHBT/LHBK/LHBP series, 2022-2026 model years)
-- 9 VA WRX packs (LF75/LF79/LF9C/LF9D/LF9G/LF9L/LV9N, 2015-2021)
-- 14 misc EJ-era extras (cousin-seeds + community-only CIDs like ez1g/ez1d/e2vg)
-
-**Stance:** for EJ-era Subaru we are at parity with the RomRaider open-source standard. For VA/VB we are essentially peer with the community-aggregated forum-sourced definitions (since our bundles ARE those definitions ingested). VB 2026-model-year coverage may actually lead community-RomRaider-mainline.
-
-Concrete per-pack richness (post 875ed2f + 09342dd + bb659c1 sweeps):
-
-| family | packs | tables/pack | 2D tables/pack |
-|---|---|---|---|
-| VA WRX | 9 | ~290 | ~144 |
-| VB WRX | 18 | ~1100 | ~399 |
-| EJ-era | 346 | varies | varies |
-
-## Status snapshot
-
-- **HEAD `33aa0d1`**, in sync with `origin/main`.
-- **definitions/ pack count: 373** (one promoted from throwaway; net unchanged).
-- **defgen test suite: 236 tests green**.
-- **C++ build: not rebuilt this session** (pure Python + TOML data).
-- **CI clang-format gate: required** — no C++ touched.
-- **All 707 .toml files load cleanly** post-bundle-wire-up.
-
-a2tb002c validate.py progression through the session:
-
-| stage | PASS | FAIL | NO_DESC | SKIP |
-|---|---|---|---|---|
-| after bootstrap | 4 | 22 | 205 | 159 |
-| after dims-filter | 5 | 6 | 220 | 159 |
-| after intake+load axes | 7 | 6 | 218 | 159 |
-| after base_timing dtype fix | 11 | 2 | 218 | 159 |
-| after comp descriptors + cousin re-seed | 19 | 5 | 207 | 159 |
-| after broader comp patterns + 2D comp (07c8cc3) | 31 | 6 | 194 | 159 |
-
-Cross-pack coverage on regenerated packs (sampled mid-session, pre-bundle-wire-up):
-- a2tb000l (regen via Merp): PASS 12 / FAIL 13 / NO_DESC 208
-- A2WC400H Forester (regen via Merp): PASS 19 / FAIL 4 / NO_DESC 180
-
-**Newly-upgraded VA/VB packs baselined this session (commit `1e1029b`):**
-
-- lf75600h vs LF75600H.bin: PASS 0, FAIL 24, NO_DESC 132, SKIP 44
-- lf9l000e vs LF9L000E.bin: PASS 1, FAIL 32, NO_DESC 235, SKIP 84
-
-**Finding:** the bundle's table addresses don't align with our specific decrypted `.bin` files for these CIDs. The CID region matches (`internalidaddress = 0x297DD` aligns with the literal CID string in the bin), but cal-table addresses (0x2979C etc.) point at code/garbage. Most likely a sub-revision mismatch — the bundle was authored against a different LF75600H build than what we decrypted. Our `.bin` files are 2,072,576 / 2,596,864 bytes — 24,576 bytes short of the pack-declared sizes, consistent with truncated/partial decryption.
-
-This is a useful detection capability of validate.py: it flags pack/ROM revision drift loudly. The right resolution is either source matching-revision `.bin` files OR accept the detection as a feature and move on.
-
-`engine_rpm_axis` predicate extended in `1e1029b` to also try raw/5.12 scaling (the VA-era convention from the bundles). Confirmed additive-only — EJ packs unchanged.
-
-## Open threads (for next session)
-
-### Tier 1 — exercise the new VA/VB capacity
-
-**(P6h done this session)** Baseline captured above; finding is revision-mismatch detection.
-
-**(P6h-next) Source matching-revision .bin files for the upgraded VA/VB packs.** Our LF75600H.bin and LF9L000E.bin are 24KB short — partials or wrong revisions. If we can find matching-revision dumps, the upgraded packs become directly usable. Forum search (mhhauto, etc.) is the typical path.
-
-**(P6e shipped this session)** — full stack support for `subaru_afr_enrichment` formula. Future extension: VA bundle uses different fueling-table naming and possibly different AFR formula variants; the matcher could be extended to cover those if needed.
-
-**(P6a-continued) Add 1D fuel-compensation predicates.** ECT/IAT/atm-pressure fuel comp curves, cranking enrichment, tip-in enrichment compensations. The biggest remaining NO_DESCRIPTOR cluster after the timing+boost comp landed.
-
-**(P6b) Remaining common axes.** `manifold_pressure_axis`, `throttle_plate_opening_angle_axis`, `mass_airflow_axis`, `atmospheric_pressure_axis`.
-
-**(P6f) Fix `fine_correction_stored_applied_rpm_ranges` address 0x0 in a2tb002c.** Pack-level surgical fix (cousin-seed, not reached by bulk_regen).
-
-### Tier 2 — yesterday's deck
-
-- **(P3)** `docs/21-oem-baselines.md` — even more relevant; the validate.py + descriptor library is baseline-derivation infrastructure now.
-- **(P5)** `[[table.role]]` pack-format extension — C++ heavy, unchanged.
-- **(P2)** Remaining VA cousin-seeds — most blocked by hundreds-delta lesson; some may now work via the bundle if base packs are richer.
-
-### Hardware
-
-OBDX Pro VX adapter ETA May 22-25 — could land mid-day tomorrow. If it arrives, pause P6 and pre-stage the first-light rom-pull (command in earlier handoffs).
-
-## Carry-over lessons (this session)
-
-- **User-experience pass is the complementary verification to validate.py.**
-  validate.py checks predicate matches against raw bytes; it can't see
-  scaling/units bugs (raw bytes that fall in any predicate band coincidentally
-  but display as garbage after scaling). The session-end ritual: `dump-table`
-  ~8 top-of-mind tables (boost target, max wastegate, base timing, AFR,
-  knock correction, MAF cal, ECT comp, throttle DBW) on the user's primary
-  test pack and eyeball that the ranges look engineering-sensible. Today's
-  pass (commit `6a4693a`) found 2 real bugs validate.py missed: MAF scaling
-  showed 1e35 g/s (float-endian gap in `_scaling_from_element` — the
-  `_axis_from_element` had the override but the scaling path didn't), and
-  a2tb002c AFR showed 0-67 raw because cousin re-seed in `c8db6c5` ran
-  BEFORE the AFR formula commit `74624d3`. Fixed both.
-- **validate.py FAILs are signal, not noise.** Surfaced cid_address placeholders, base_timing dtype, AFR factor flatten, compensation-table dtype, lost cid_scan/ecu_part during regen.
-- **Investigate root cause before bulk-fixing where possible.** Manually swept 334 packs (`feeb6b5`) and only then realized the underlying defgen bug. Both commits land cleanly, but root-cause-first would have saved the manual sweep.
-- **Preservation needs a regression-class mindset.** Each new "regen source" (bundles in this case) can expose dimensions of state that weren't being preserved. The fix in `875ed2f` added preservation for fields the existing master XML rarely touched — but the bundles forced the issue.
-- **Real-ROM evidence drift-guard tests pay off.** Caught two predicate-band-too-narrow regressions before commit.
-- **bulk_regen is the canonical re-application path** for defgen-level fixes; per-pack manual sweeps are the immediate cure for known bugs, defgen+regen is the principled cure.
-
-## House-style notes (carry-over)
-
-- Terse. No trailing summaries.
-- Push per-commit. Caveman commit messages.
-- Don't `git add -A`; explicit paths.
-- NEVER `rm -rf` user-content directories.
-- `/caveman-review` + `/caveman-commit` before push.
-- Bundles in `fixtures/private/` are user-private; bulk_regen guards their absence.
-
-## Suggested opener for next session
-
-> "HEAD `33aa0d1`, in sync with `origin/main`. Marathon yesterday: 24 commits (including this handoff refresh). P6 descriptor library bootstrapped (9 predicates + validate.py), VA/VB cid_address fixed on 5 packs, base_timing+AFR dtype fixed at defgen root cause and bulk_regen-swept across 323 packs, 11 cousin-seeds re-seeded, and 25 VA/VB packs upgraded from 0D-only to fully-typed 2D via two new forum bundles (va_wrx_bundle.xml + vb_wrx_bundle.xml) wired into bulk_regen.
->
-> Deck for this session:
-> **(P6a-continued — DEPRIORITIZED)** Fuel-comp scalings outside the ±100% family (`_x_003051758_100`, `_x_000224304213_7_35`). UX pass on a2tb001c showed they already display correctly via the linear-scaling path (enrichment offset −100..0%, AFR points ±7.35). Adding predicates would only improve validate.py coverage metric, not user-facing dump-table. Drop unless coverage % becomes a stakeholder concern.
-> **(UX-pass)** Session-end ritual now established (commit `6a4693a`): `dump-table` ~8 top-of-mind tables on the primary test pack and eyeball ranges. Cross-family validation complete this session — Legacy GT cousin-seed (a2tb002c), Legacy regen (a2tb001c, a2tb000l), Forester regen (A2WC400H), Outback regen (a2wc500r) — all five came back clean across boost target, max wastegate, base timing, AFR, knock correction, MAF, injector flow, comp tables. The EJ-era corpus is in good shape; future scaling-change commits should re-run this on at least one pack.
-> **(P6b)** More common axes: manifold_pressure_axis, throttle_plate_opening_angle_axis, mass_airflow_axis, atmospheric_pressure_axis. Each ~30 lines including tests, but each needs per-axis scaling investigation.
-> **(P6e-VA — investigated, NOT a bug)** VA bundle's `Fuel - Open Loop - ... Target Base` tables use linear expression `((x)/256.0)+1.0` → displays lambda 1.0-1.46 with unit "AFR". This is correct per Merp's XML convention: VA-era fueling architecture decomposes the rich-target into BASE (stoich-to-lean lambda 1.0-1.5) + separate enrichment tables at high load. The EJ `14.7/(1+x*K)` formula doesn't apply. defgen correctly extracts the linear factor 0.00390625 + offset 1.0 and dump-table shows the right values per the source convention.
-> **(P6h-next)** Forum-source matching-revision `.bin` files for the upgraded VA/VB packs if you want to validate them against real anchors.
->
-> Or pivot — OBDX adapter ETA May 22-25, could arrive mid-session. If hardware lands, pause P6 and pre-stage the first-light rom-pull."
+This morning's first-action was completed mid-session — the user retested and hit the SetProtocol payload bug (then the RxSmall bug). Both fixed in today's commits. See the new top-of-file section for current state.
