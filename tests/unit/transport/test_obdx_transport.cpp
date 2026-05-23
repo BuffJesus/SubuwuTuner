@@ -74,7 +74,8 @@ private:
 
 // Build a complete DVI response frame for a given request opcode
 // + payload (response opcode = request | 0x10, then standard
-// CMD/LEN/DATA/CHK).
+// CMD/LEN/DATA/CHK). Use for PC→adapter request acks (TxSmall,
+// SetProtocol, etc.) per VT v1.06 §3.2.
 std::vector<std::uint8_t> dvi_response_frame(obdx::dvi::Opcode req_op,
                                              std::vector<std::uint8_t> payload) {
     std::uint8_t const resp_op = static_cast<std::uint8_t>(req_op) | 0x10U;
@@ -83,6 +84,20 @@ std::vector<std::uint8_t> dvi_response_frame(obdx::dvi::Opcode req_op,
     frame.push_back(static_cast<std::uint8_t>(payload.size()));
     frame.insert(frame.end(), payload.begin(), payload.end());
     // Recompute checksum the same way the codec does.
+    frame.push_back(obdx::dvi::checksum(std::span<std::uint8_t const>{frame.data(), frame.size()}));
+    return frame;
+}
+
+// Build a complete DVI adapter-initiated push frame — the kind the
+// OBDX sends to the PC when a network message arrives. Per VT v1.06
+// §3.3 these use the BARE opcode (no |0x10), since they're not
+// responses to a PC request. Use for RxSmall (0x08) / RxLarge (0x09).
+std::vector<std::uint8_t> dvi_unsolicited_frame(obdx::dvi::Opcode op,
+                                                std::vector<std::uint8_t> payload) {
+    std::vector<std::uint8_t> frame;
+    frame.push_back(static_cast<std::uint8_t>(op));
+    frame.push_back(static_cast<std::uint8_t>(payload.size()));
+    frame.insert(frame.end(), payload.begin(), payload.end());
     frame.push_back(obdx::dvi::checksum(std::span<std::uint8_t const>{frame.data(), frame.size()}));
     return frame;
 }
@@ -233,17 +248,20 @@ struct ReadyTransport {
 
 } // namespace
 
-TEST_CASE("obdx::Transport::send_recv writes TX request, reads RX response, "
+TEST_CASE("obdx::Transport::send_recv writes TX request, reads unsolicited RX push, "
           "returns the RX payload",
           "[transport][obdx_transport]") {
     auto pair = build_open_transport();
     auto &t = *pair.transport;
     auto *raw = pair.raw;
 
-    // Queue: TX-ack response, then RX-with-payload response.
+    // Queue what the adapter would actually send back per VT v1.06:
+    //   1. TxSmall ack: response opcode 0x20 (= 0x10 | 0x10).
+    //   2. RxSmall push: bare opcode 0x08, NOT 0x18 — adapter-initiated
+    //      pushes (incoming network frames) don't get the |0x10 bit.
     raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::TxSmall, {0x00}));
-    raw->queue_read(
-        dvi_response_frame(obdx::dvi::Opcode::RxSmall, {0x80, 0xF0, 0x10, 0x05, 0xE8, 0x12, 0x34}));
+    raw->queue_read(dvi_unsolicited_frame(obdx::dvi::Opcode::RxSmall,
+                                          {0x80, 0xF0, 0x10, 0x05, 0xE8, 0x12, 0x34}));
 
     std::vector<std::uint8_t> const req{0x80U, 0x10U, 0xF0U, 0x05U, 0xA8U, 0x00U, 0x12U, 0x34U};
     auto r = t.send_recv(req, milliseconds{200});
@@ -252,25 +270,24 @@ TEST_CASE("obdx::Transport::send_recv writes TX request, reads RX response, "
     REQUIRE(r->data[0] == 0x80U);
     REQUIRE(r->data[6] == 0x34U);
 
-    // Two DVI request opcodes must have shown up in the write stream
-    // after the handshake bytes: TxSmall (0x10) then RxSmall (0x08).
-    auto const writes = raw->writes();
+    // PC writes exactly ONE DVI request frame after the handshake:
+    // TxSmall (0x10). RxSmall (0x08) is an adapter-to-PC push only —
+    // we do NOT send it ourselves (doing so triggers Error_Invalid-
+    // Command from the firmware, diagnosed against real hardware
+    // 2026-05-22). This property is implicit in the test passing:
+    // if send_recv tried to write opcode 0x08, it would block on a
+    // queued response we deliberately did not provide and the test
+    // would time out. The TxSmall opcode appearing in the write
+    // stream is the positive marker.
+    auto const &writes = raw->writes();
     std::size_t tx_pos = std::string::npos;
-    std::size_t rx_pos = std::string::npos;
     for (std::size_t i = 0; i < writes.size(); ++i) {
-        if (tx_pos == std::string::npos &&
-            writes[i] == static_cast<std::uint8_t>(obdx::dvi::Opcode::TxSmall)) {
+        if (writes[i] == static_cast<std::uint8_t>(obdx::dvi::Opcode::TxSmall)) {
             tx_pos = i;
-        }
-        if (tx_pos != std::string::npos &&
-            writes[i] == static_cast<std::uint8_t>(obdx::dvi::Opcode::RxSmall) &&
-            rx_pos == std::string::npos) {
-            rx_pos = i;
+            break;
         }
     }
     REQUIRE(tx_pos != std::string::npos);
-    REQUIRE(rx_pos != std::string::npos);
-    REQUIRE(rx_pos > tx_pos);
 }
 
 TEST_CASE("obdx::Transport::send_recv rejects oversized payload", "[transport][obdx_transport]") {

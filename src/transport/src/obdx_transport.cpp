@@ -381,18 +381,50 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
         return failure(tx.error());
     }
 
-    // Phase 2: pull the ECU's response off the bus via DVI RxSmall.
-    // Payload of RxSmall is the read-side timeout argument; for
-    // simplicity we let the adapter wait for the full remaining
-    // budget. Exact byte format pending PDF verification on real
-    // hardware — for the codec-only slice this stays a TODO.
-    auto rx =
-        dvi_exchange(*channel_, dvi::Opcode::RxSmall, std::span<std::uint8_t const>{}, rx_budget);
-    if (!rx.has_value()) {
-        return failure(rx.error());
+    // Phase 2: read the ECU's response. Critical distinction per VT
+    // v1.06 §3.3: RxSmall (opcode 0x08) is an ADAPTER-TO-PC push only
+    // — the OBDX automatically pushes a `08 LEN <frame> CHK` frame
+    // whenever a network message arrives. The PC does NOT request it
+    // with opcode 0x08 (that's Error_InvalidCommand 0x01 — diagnosed
+    // 2026-05-22 on a real WRX).
+    //
+    // So this phase passively reads the next frame off the channel,
+    // expecting an unsolicited 0x08 (RxSmall) frame from the adapter.
+    // 0x09 (RxLarge) is the wider variant for frames > 255 B; we
+    // surface anything else as a protocol error rather than silently
+    // accept e.g. another error frame.
+    auto resp = read_dvi_frame(*channel_, rx_budget);
+    if (!resp.has_value()) {
+        return failure(resp.error());
+    }
+    if (auto const *ef = std::get_if<dvi::ErrorFrame>(&*resp)) {
+        char buf[96];
+        std::snprintf(buf, sizeof buf,
+                      "obdx::send_recv: device returned error 0x%02X "
+                      "for opcode 0x%02X while awaiting ECU response",
+                      static_cast<unsigned>(ef->error_code),
+                      static_cast<unsigned>(ef->request_opcode));
+        return failure(ErrorCode::TransportNack, std::string{buf});
+    }
+    auto const *rf = std::get_if<dvi::ResponseFrame>(&*resp);
+    if (rf == nullptr) {
+        return failure(ErrorCode::Unknown,
+                       "obdx::send_recv: decoded frame matched no known variant");
+    }
+    // Per spec, adapter→PC pushes use the bare opcode (NOT |0x10) —
+    // so we expect 0x08 for RxSmall, not 0x18.
+    auto const expected_rx = static_cast<std::uint8_t>(dvi::Opcode::RxSmall);
+    auto const expected_rx_large = static_cast<std::uint8_t>(dvi::Opcode::RxLarge);
+    if (rf->response_opcode != expected_rx && rf->response_opcode != expected_rx_large) {
+        char buf[96];
+        std::snprintf(buf, sizeof buf,
+                      "obdx::send_recv: expected unsolicited RxSmall/Large (0x08/0x09); "
+                      "got opcode 0x%02X",
+                      static_cast<unsigned>(rf->response_opcode));
+        return failure(ErrorCode::TransportNack, std::string{buf});
     }
     Frame f;
-    f.data = std::move(*rx);
+    f.data = std::move(rf->payload);
     f.arrived = steady_clock::now();
     return f;
 }
