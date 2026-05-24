@@ -79,8 +79,11 @@ constexpr std::string_view kUsage =
     "    -V, --version           Print version and exit\n"
     "\n"
     "COMMANDS:\n"
-    "    pack-list <dir> [--quiet]\n"
+    "    pack-list [<dir>] [--quiet]\n"
     "                            Walk a directory for definition packs (recursive\n"
+    "                            scan for nested pack.toml files; defaults to the\n"
+    "                            definitions_root from `config show` when <dir>\n"
+    "                            is omitted) and print one\n"
     "                            scan for nested pack.toml files) and print one\n"
     "                            line per pack with id, display name, platform,\n"
     "                            and content counts. Companion to rom-identify\n"
@@ -4116,13 +4119,17 @@ int cmd_pack_list(int argc, char *argv[]) {
             return 2;
         }
     }
+    // Default the directory to st::config::definitions_root() (per
+    // docs/25 §7). Override precedence still applies — passing
+    // `<dir>` positionally is the CLI-flag layer and wins.
     if (!pack_dir.has_value()) {
-        std::fputs("pack-list: missing directory\n"
-                   "Usage: subuwutuner-cli pack-list <dir> [--quiet]\n"
-                   "       [--registry] force the PackRegistry overlay path\n"
-                   "       [--walk]     force the recursive path-based walk\n",
-                   stderr);
-        return 2;
+        pack_dir = st::config::definitions_root();
+        if (!quiet) {
+            std::fprintf(stderr,
+                         "pack-list: no directory given, using "
+                         "definitions_root from config: %s\n",
+                         pack_dir->string().c_str());
+        }
     }
     if (force_registry && force_walk) {
         std::fputs("pack-list: --registry and --walk are mutually exclusive\n",
