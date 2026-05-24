@@ -76,7 +76,29 @@ MIT) and could be implemented in-tree without contamination — we just
 haven't yet. SSMK1 and SSMCAN1 don't have license-compatible references
 we've found.
 
-## Deriving SSMCAN1 from a Y-cable capture (the recommended path)
+## Algorithm structure recovered (2026-05-24)
+
+Analyst-mode RE of the plaintext flash images for all 8 A-series CIDs (2015–2021 WRX 6MT) and all 16 B-series CIDs (2022–2026) has identified both generations' SecurityAccess primitives. The wall-clean spec lives off-tree at the analyst workspace (`Findings/algorithms/`, staged into `fixtures/private/findings_algorithms/` for reference). Headline state change:
+
+- **Gen-A (SH-2A 1 MB / 2 MB, all `LF7x` / `LF9x` and predecessors):** 16-round Feistel on 32-bit blocks, with a 32-entry × 4-bit packed S-box providing non-linearity. Per-round F is *xor with round key → 5-bit S-box lookup per nibble (with bit 0 of x promoted to bit 4 of the high-nibble index, an asymmetric construction) → 16-bit rotate-left by 13*. L1 round-key table (16 × uint16) is **byte-identical across every A-series ROM sampled**; flash address varies per CID but the bytes are the same. Gen A.2 (2 MB) carries an additional L3/L5 round-key table sitting 32 bytes before the L1 table — these are the "deep diagnostic" sub-functions (`27 03/04`, `27 05/06`). Bootloader-unlock-only sessions still use L1.
+
+- **Gen-B (RH850 4 MB, all `LHB*`):** **AES-128 in ECB mode**, NOT the Gen-A Feistel. Forward S-box and Te1/Te2/Te3 T-tables are present in the firmware at known flash addresses; inverse S-box is *absent* (the ECU only encrypts, which is what a seed-to-key one-way function needs). Three universal 16-byte master keys recovered byte-identical across all 16 B-series ROMs. K_secret #1 is confirmed `flash_write` (sub-fn `0x03/0x04`); #2 and #3 map to the `datalog` and `virginize` levels in TBD order.
+
+**Implications:**
+
+1. **Provenance is firmware, not GPL.** The constants and the structural description above were extracted from the plaintext ROMs themselves under the analyst-mode workflow (`docs/15`). That is a different upstream than the GPL-3 implementations surveyed when this plug-in was designed (RomRaider / ECUFlash / james-portman / LibSSM2 — see `Why the key function is plug-in rather than built-in` above). The original copyright-contamination argument for keeping the algorithm out of this Apache-2.0 codebase therefore does not apply to the analyst-mode output. A second, distinct decision still remains: even with copyright clean, should the algorithm be bundled in the public repo or distributed via the existing plug-in seam? This is the parallel question to `docs/17`'s Path B call for definitions, and the developer's call.
+
+2. **`tools/solve_ssmcan1.py`'s UNSAT was structural, as the linearity-check predicted.** The solver scaffold encoded a 16-round XOR cipher per the publicly described fenugrec/nisprog shape (`IndexKeyBase[16]` + `KeyPartsTable[32]` + 3-bit barrel-roll + byte swap). That encoded structure is provably GF(2)-linear (`linearity-check` finding, commit `ae6cf7d`), so ~480 of 512 table bits are mathematically invisible. The actual primitive is a Feistel with a non-linear S-box, which is consistent with the linearity diagnostic: the "S-box-style indexing" refinement the HANDOFF flagged is exactly the right one. Two paths from here:
+   - **Refine the solver** to encode the Feistel + S-box structure (without consulting the analyst-side constants), then verify it solves against tomorrow's Y-cable capture independently. This keeps the existing clean-room boundary intact for the in-tree code path and gives the public repo a derive-it-from-pairs flow.
+   - **Skip the solve.** With the structure and constants already byte-verified across 8 ROMs analyst-side, the Y-cable capture becomes a *validation* step ("does the analyst-side answer round-trip against this car's seed?") rather than a derivation step.
+
+3. **Plug-in API is unchanged.** `st::ecu::SecurityKeyFn` and `Flasher::set_security_key_fn` continue to be the integration seam regardless of which delivery path the algorithm takes. The stubs in `subaru_security.hpp` remain `NotImplemented` until a delivery decision lands.
+
+4. **Per-CID round-key addresses are catalogued.** All eight FULL-decrypt A-series CIDs have their L1 table address tabulated (see `fixtures/private/findings_algorithms/generation-A-seed-to-key.md` § Constants). LF79103P (the 2017 USDM 6MT, the user's daily-driver family) is at flash `0x06E358` (L1) / `0x06E338` (L3/L5). Same for all 16 B-series CIDs' AES key blocks.
+
+The Y-cable capture flow described below remains correct as a parallel / verification path — it just isn't the *only* path to a working SA function anymore.
+
+## Deriving SSMCAN1 from a Y-cable capture (the parallel / verification path)
 
 Best path for a vehicle owner with a working authenticated tool (COBB
 AP, EcuTek, ECUFlash, etc.) already paired to their car:

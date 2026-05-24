@@ -45,6 +45,15 @@ The bench rig validates **the actual recovery path per family**, not a generic "
 
 Single-bank ≠ dual-bank; treating them as one design is how tuners brick cars they thought were protected. Per-family recovery recipes live in `docs/19a-brick-protection-by-isa.md` (TBD; tracked as a v1.0 ship blocker per `04-roadmap.md`).
 
+**Facts staged for the recipes (2026-05-24).** Analyst-mode RE of the plaintext A-series and B-series ROMs has produced:
+
+- `fixtures/private/findings_flash_region_map/` — per-CID Bootloader / Calibration / EEPROM / RAM-mirror / IO ranges for all 24 CIDs (2015–2026).
+- `fixtures/private/findings_algorithms/checksum-recompute.md` — the sum-of-16-bit-shorts-to-`0x5AA5` invariant, magic `0x55 0x55` at offset 0, A-series BE / B-series LE; verified across all 24 plaintext ROMs.
+- `fixtures/private/findings_decrypted_inventory/INVENTORY.md` — FULL / MIXED / PARTIAL decryption status per family; the FULL set is what the bench-rig recovery harness can validate against without hardware. Only those are staged under `fixtures/private/roms_plaintext_by_cid/`.
+- `fixtures/private/findings_algorithms/` `brick-protection.md` companion: SH-2A 2 MB FCU register MMIO (`0xFFFFE800..0xFFFFE873` primary, `0xFFFFEC00..0xFFFFEC4F` extended), 41 distinct FCU register accesses found in the bootloader, sector-erase allow-list excludes bootloader sectors `0x00..0x0F`, reset PC `0x000000E8`. These are concrete anchors for the SH-2A recovery recipe.
+
+The Tier 4 HIL plan can now reference these as a known-good baseline when junkyard ECUs come online.
+
 The whole subsystem is bench-tested on real ECUs as part of CI — junkyard ECUs on a bench harness, automated. See `08-testing-strategy.md`.
 
 ### 4b. Cancellation invariants

@@ -91,10 +91,27 @@ Path B is a distribution-boundary change. It does **not** change:
 
 The git history of the public repo was rewritten to remove the Atlas-derived `definitions/va/` and `definitions/vb/` directories from all 143 commits as part of the initial Path B implementation. The pre-rewrite mirror is preserved at `D:\Documents\SubuwuTuner-backup-pre-pathb.git` for the developer's reference; it is not a public artifact. The 2026-05-19 forum-sourced VA/VB packs are independent of that rewrite — they're generated fresh from a different (§1201-clean) upstream and live in `definitions/impreza/` rather than a re-instated `definitions/va/`.
 
-## 7 — References
+## 7 — Analyst-mode RE outputs (staged 2026-05-24, pending posture decision)
 
-- `docs/15-clean-room-engineering.md` §13 — historical record of what triggered Path B
-- `docs/install.md` — user-side workflow for installing definition packs
-- `docs/06-legal-ethics.md` — emissions, IP, jurisdiction stance
-- `D:\Documents\SubuwuTuner-specs\AUDIT.md` — analyst-side audit (private)
-- `D:\Documents\SubuwuTuner-specs\path-b-implementation-checklist.md` — the implementation work that landed Path B (private)
+A new category of material has appeared upstream of the public-repo distribution boundary: outputs from analyst-mode RE of the plaintext flash images themselves (not forum-sourced RR XML, not Atlas runtime instrumentation). Staged under `fixtures/private/findings_*` on 2026-05-24:
+
+| Artifact | Staged at | What it is | Promotion gate |
+|---|---|---|---|
+| Per-CID plaintext ROMs (24) | `fixtures/private/roms_plaintext_by_cid/` | OEM firmware images | Stays private regardless. Test fixtures only. |
+| SA algorithm structure + constants | `fixtures/private/findings_algorithms/generation-{A,B}-seed-to-key.md` | Gen-A 16-round Feistel + S-box; Gen-B AES-128 ECB + master keys | See `docs/23` § "Algorithm structure recovered" — decision pending between in-tree reference impl vs. plug-in distribution. |
+| Checksum recompute algorithm | `fixtures/private/findings_algorithms/checksum-recompute.md` | Algorithm matches existing `st::flash`; new info is per-generation byte-order + slot-offset gap | Algorithm is already in-tree (matches the existing flash module). Per-CID slot offsets are the missing data; can ship as a TOML lookup once the offsets are confirmed (brute-force scan is feasible per the analyst-side roadmap). |
+| Flash-at-rest cipher | `fixtures/private/findings_algorithms/flash-at-rest-cipher.md` | The cipher used to produce the plaintext ROMs in the first place | Stays private. This is the §1201-loaded one — the cipher is what the original at-rest protection circumvents. |
+| Per-CID flash region map (24) | `fixtures/private/findings_flash_region_map/` | Bootloader / Calibration / EEPROM / RAM / IO ranges per CID | Likely shippable as a TOML data file (factual partitioning, not expression). Same axis check as §4. |
+| Live-signal catalogs | `fixtures/private/findings_signals/` | 165 A-series + 786 B-series RAM signals with per-variant addresses + scaling | Same axis check as definitions. Eligible for `definitions/<platform>/logger/` shipping if §1201 axis clears. |
+| Cross-CID table-evolution map | `fixtures/private/findings_table_evolution/` | 18,791 (table, CID, address) triples | Analyst-side QA artifact; not a candidate for shipping. Useful as input to `tools/defgen/` cross-CID localization. |
+| Candidate per-CID definition XMLs | `fixtures/private/findings_definitions/` | Auto-extracted, byte-verified, and hybrid variants per CID | See that folder's README — two gates (copyright clean already; §1201 axis pending). |
+| UDS service catalog | `fixtures/private/findings_protocols/uds-catalog.md` | 20 standard SIDs + 5 OBD-II modes + manufacturer 0xA8/0xAA, NRC table | Pure protocol facts; eligible for in-tree shipping as a docs/13 / docs/24 cross-reference. |
+
+**Posture decision the developer owes the project.** The forum-sourced packs in `definitions/impreza/` (per §2) shipped because their upstream is an open RR XML community release — the §1201 axis is cleanly OK because the data was published openly upstream by its author. The analyst-mode outputs above have a *different* upstream (the analyst desktop's own RE pipeline against the plaintext ROMs), so the question that §2 implicitly answered yes-to for the forum packs needs answering again for this category. Two reasonable answers exist:
+
+- **Treat analyst-mode RE outputs as user-supplied data** (Path B posture extended). The plug-in seam for SA algorithm already exists; same pattern would apply to definitions, region maps, signals. Public repo loads, doesn't bundle.
+- **Treat analyst-mode RE outputs as eligible under §4 criteria.** The clean-room methodology in `docs/15` was specifically designed to produce wall-clean facts. If the wall did its job (and the Findings tree's vendor-neutral framing suggests it did), the §1201 axis is satisfied by the source being the firmware itself, not any commercial tool's runtime.
+
+The decision is forward-looking and equally valid for either answer. This document is updated to record the question; the implementation in `src/` does not change until the answer lands.
+
+## 8 — References

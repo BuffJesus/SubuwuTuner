@@ -1,3 +1,68 @@
+# Handoff — 2026-05-24 (Findings tree landed; algorithm structure recovered; staging + doc updates, no commits yet)
+
+**Today's session was triage + private staging + doc updates around `C:\Users\Cornelio\Desktop\Findings\` — the analyst-mode RE output from this week's work on the desktop. Nothing committed yet; the tree is dirty under `fixtures/private/` (gitignored) and four `docs/` files.** The big state change: the Gen-A and Gen-B SecurityAccess primitives have been fully recovered from the plaintext ROMs (Gen-A is a 16-round Feistel with 5-bit-indexed S-box, NOT the fenugrec/nisprog XOR cipher; Gen-B is AES-128 ECB with three universal master keys byte-identical across all 16 B-series CIDs). This explains last night's `tools/solve_ssmcan1.py` linearity-degeneracy finding — the encoded structure was the publicly-described XOR cipher, which is GF(2)-linear; the actual primitive is non-linear via the S-box. The linearity-check diagnostic predicted exactly this.
+
+**Decision the developer owes the project before the next implementation push:** the SA algorithm material has been *recovered from firmware itself* (analyst-mode RE, not GPL source). The original "all clean implementations are GPL-3" argument in `security_key.hpp` for keeping the algorithm out of this Apache-2.0 codebase does not apply to firmware-derived facts. But Path B's §1201 axis (per `docs/17`) is parallel and separate. The new `docs/17` §7 (added today) frames the question; the answer determines whether the next commit drops the Gen-A reference implementation into `src/ecu/src/subaru_security.cpp` or whether it ships as an external plug-in module the way `docs/17` ships definitions.
+
+## Three next-action paths, in priority order
+
+1. **§1201-axis call on analyst-mode RE outputs.** Read `docs/17` §7 (today's addition). Two reasonable answers; pick one. The answer governs how the SA algorithm, the per-CID region map, the live-signal catalogs, and the candidate definition XMLs are distributed. The plug-in seam already exists either way; the question is whether the public repo bundles or links externally.
+
+2. **Y-cable validation of the analyst-side answer.** Vgate Y-cable arrived per the prior memory note. Whichever distribution path the §1201 call lands on, the Findings algorithm should still be validated end-to-end against a real ECU before any reference implementation is trusted. The simplest validation:
+   - Run the existing `subuwutuner-cli sniff` flow per `docs/23` § "Deriving SSMCAN1 from a Y-cable capture" → emit `pairs.json`.
+   - Implement the Findings Gen-A Feistel in `tools/solve_ssmcan1.py` as a `verify` target (analogous to the existing `verify` subcommand for the encoded XOR cipher).
+   - Run `solve_ssmcan1.py verify pairs.json` → expect 100% of pairs round-trip cleanly. If not, the Findings answer needs refinement; if yes, the algorithm is hardware-validated.
+
+3. **Definitions anchor verification for LF79103P** (the 2017 USDM 6MT, user's daily-driver family). The byte-verified XML in `fixtures/private/findings_definitions/byte-verified/LF79103P.xml` had only 88/165 axes monotonic in the Findings author's first-pass check. Run `tools/defgen/` dump-table against ≥3 well-known tables (AVCS lead, target boost, ignition base) → confirm sane axes per `feedback_cousin_seed_axis_validation.md` (memory). If the LF79103P anchor passes, it's the first family ready for promotion to `definitions/impreza/` *if* §7 of `docs/17` lands on "eligible." If §7 lands on "user-supplied," the verification still matters but the file stays private.
+
+## What landed today (not yet committed)
+
+All changes are staged in working tree only. No `git add` or `git commit` yet — the §1201 decision in (1) above governs what *should* commit and to where.
+
+### 1. Findings tree triage
+
+`C:\Users\Cornelio\Desktop\Findings\` is the user's analyst-mode RE output from this week's desktop work. Vendor-neutral framing throughout ("ECU family", "calibration ID", "Generation A / B"; no Subaru / Atlas / RomRaider mentions). The output style matches what `docs/analyst-mode-prompt.md` is designed to produce. Contents reviewed against the IP boundaries in `CLAUDE.md`:
+
+- **Algorithm constants and structure** are described as extracted from the firmware images themselves (byte-search across all 8 A-series ROMs locates the L1 round-key table verbatim; per-CID flash addresses tabulated). That puts them in the analyst-mode-output category, not the GPL-contamination category.
+- **The `communication-protocols/uds-catalog.md` upstream phrasing** ("Compiled from the request / response class set in the firmware project files, one Java class per SID; the SID-to-class binding lives in a single registry table") suggests an analyst-mode session that touched the off-limits `atlas-decompiled/` tree. The vendor-neutral framing is the right output style for analyst mode under that scenario, but it's worth confirming the upstream provenance before any in-tree reference impl ships. Stays private until that confirmation.
+- **24 plaintext ROMs** stage cleanly as private test fixtures regardless of any other call. Staged under `fixtures/private/roms_plaintext_by_cid/`.
+
+### 2. Private staging (all under `fixtures/private/`, gitignored)
+
+| Folder | Source | Size | Purpose |
+|---|---|---|---|
+| `roms_plaintext_by_cid/` | `Findings/engine-ecu-rom-plaintext/` | 81 MB | Per-CID `rom.bin` + `info.txt` for the 8 A-series FULL-decrypt + 16 B-series FULL-decrypt CIDs. Test fixtures for hardware-free validation. |
+| `findings_definitions/` | `Findings/definitions/` | 23 MB | `auto-extracted/`, `byte-verified/`, `hybrid/` per-CID XMLs. Candidate material; not promoted to `definitions/impreza/`. |
+| `findings_signals/` | `Findings/live-signals/` | 1.3 MB | 165 A + 786 B RAM signal catalogs (CSV + MD). Read-on-demand via UDS 0x23 / mfr 0xA8. |
+| `findings_table_evolution/` | `Findings/table-evolution/` | 1.6 MB | 18,791 (table, CID, address) triples + summary. Input to `tools/defgen/` cross-CID work. |
+| `findings_flash_region_map/` | `Findings/flash-region-map/` | 96 KB | Per-CID Bootloader / Calibration / EEPROM / RAM / IO ranges, all 24 CIDs. Input to `docs/05` §4 recovery recipes. |
+| `findings_algorithms/` | `Findings/algorithms/` + `Findings/{README,brick-protection,real-time-flashing,engine-variant-portability,expansion-ideas,flash-disassembly-roadmap,uds-read-workflow,parameter-glossary}.{md,csv}` | small | Algorithm narrative docs: Gen-A and Gen-B SA, checksum recompute, flash-at-rest cipher, plus the top-level reading material. |
+| `findings_protocols/` | `Findings/communication-protocols/` | small | UDS service catalog + overview. |
+| `findings_decrypted_inventory/` | `Findings/decrypted-rom-inventory/` | small | FULL / MIXED / PARTIAL status per family. |
+
+`fixtures/private/findings_definitions/README.md` and `fixtures/private/roms_plaintext_by_cid/README.md` got SubuwuTuner-side staging headers prepended (preserving upstream content below).
+
+### 3. Doc updates
+
+Four files touched. All scope-limited inserts, no rewrites:
+
+- **`docs/23-security-access.md`** — new `## Algorithm structure recovered (2026-05-24)` section inserted between `## The plug-in interface` and the Y-cable derivation section. Documents the Gen-A Feistel structure (with S-box, byte-identical round-key tables across all 8 A-series ROMs, per-CID flash addresses tabulated), the Gen-B AES-128 ECB result (three universal 16-byte master keys), the implications for `tools/solve_ssmcan1.py` (the linearity-check diagnostic was right; refined structure or skip-the-solve), and that the plug-in API is unchanged regardless. Y-cable section retitled from "the recommended path" to "the parallel / verification path."
+- **`docs/05-improvements.md`** §4a — added a "Facts staged for the recipes (2026-05-24)" paragraph pointing to `fixtures/private/findings_flash_region_map/`, the checksum-recompute spec, the inventory, and the brick-protection facts (FCU MMIO addresses, sector allow-list, reset PC `0x000000E8`).
+- **`docs/19-live-tuning.md`** — new `## Signal catalog input (staged 2026-05-24)` section above `## Architectural fit`, pointing at `fixtures/private/findings_signals/`. Notes that the read-on-demand half is catalogued; passive CAN broadcast frames still need flash disassembly.
+- **`docs/17-data-distribution-policy.md`** — new `## 7 — Analyst-mode RE outputs (staged 2026-05-24, pending posture decision)` section with the artifact table and the two-option posture framing. Old §7 renumbered to §8.
+
+### 4. Implications for `src/ecu/include/st/ecu/security_key.hpp` and `subaru_security.hpp` (NOT yet edited)
+
+The header comments in both files argue against in-tree algorithm constants on the grounds that every clean reference is GPL-3. The analyst-mode Findings output is *not* a GPL reference — it's firmware-derived. Once the §1201 axis call in (1) lands, those header comments will need updating to reflect the new state. Left alone today since the user's instruction was "docs, roms, defs" — not src.
+
+### 5. Memory updates (pending — see below)
+
+A new memory entry for the Findings tree location and contents is worth adding under `C:\Users\Cornelio\.claude\projects\D--Documents-JetBrains-SubaruTuner\memory\` so future sessions have a pointer. Likely entry: `project_findings_tree.md` describing the analyst-mode RE output, its staging under `fixtures/private/findings_*`, and the pending posture decision.
+
+The existing `project_obdx_eta.md` entry ("current focus is ROM dump... blocker is now the SSMCAN1 SA key algorithm") may want a refresh once the §1201 decision lands.
+
+---
+
 # Handoff — 2026-05-23 end-of-day (sniff mode + SA plug-in + rdbi shipped; pushed to origin/main)
 
 **Five pushes today: ~18:40 SA/sniff/rdbi cycle + ~20:00 docs follow-up + ~21:30 solver scaffold + ~22:30 SA NRC guidance + ~23:00 sniff-log extractors.** 22 commits landed on `origin/main` (range `0ccf9e0..0e5cddc`): the 6 from yesterday's SSM-on-CAN bundle that had been sitting unpushed + 7 from today's transport hardening / SA plug-in / sniff toolchain / icon / handoff / rdbi cycle + 3 evening-docs commits + 2 handoff refreshes + 2 commits scaffolding `tools/solve_ssmcan1.py` (algorithm + Z3 solver + C++ emitter + linearity-check) + 1 SA NRC recovery-guidance commit (`reject_if_sa_negative` translating 0x33/0x35/0x36/0x37 to actionable text) + 1 three-extractor commit (sniff-log Workflows 1/2/3 from docs/24). Tree clean. https://github.com/BuffJesus/SubuwuTuner

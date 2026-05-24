@@ -25,6 +25,12 @@ Three concrete workflows, in descending order of "what tuners actually do":
 
 Live tuning is not "auto-tune live." Auto-tune (`docs/12`) proposes edits from a recorded log; live tuning lets the user apply manual edits at speed. They are complementary — auto-tune for the bulk, live tuning for the long-tail polish.
 
+## Signal catalog input (staged 2026-05-24)
+
+The "which RAM page is this table mirrored to right now?" lookup needs a per-CID RAM signal catalog. Analyst-mode RE has produced a candidate one: `fixtures/private/findings_signals/` carries 165 A-series signals across 7 variants and 786 B-series signals across 12 variants, each with per-variant RAM address (A-series in the `0xFFFE0000`+ region; B-series at `0xFEDF0000`+) and a scaling expression in the firmware project's own format. This is the **read-on-demand** half — UDS SID `0x23` ReadMemoryByAddress or the manufacturer single-32-bit-read (`0xA8`/`0xE8`) covers all of it.
+
+What's NOT in this catalog: passive CAN broadcast frames the ECU emits continuously without being asked. Those are hardcoded in firmware code (TX-task handlers in the per-CID flash) and require disassembly to enumerate. The live-tuning subsystem here is concerned with the *write* path; for the *read* path, both the on-demand and broadcast surfaces eventually feed `st::log`. The on-demand surface is now catalogued; the broadcast surface remains a future flash-disassembly task (per `fixtures/private/findings_algorithms/flash-disassembly-roadmap.md` item 7).
+
 ## Architectural fit
 
 Live tuning is the first SubuwuTuner subsystem that is *bidirectional*. Every prior subsystem either reads from the ECU (`st::log`, `rom-pull`), or writes to it as a discrete event (`st::flash`). Live tuning is a sustained two-way conversation: the tool publishes a new value, the ECU acknowledges, the tool may then immediately publish another value. The module's threading model is more like a chat session than a flash plan.
