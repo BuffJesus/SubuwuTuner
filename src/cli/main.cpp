@@ -43,6 +43,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <ios>
@@ -9016,10 +9017,11 @@ int cmd_rom_pull(int argc, char *argv[]) {
             return 2;
         }
     }
-    if (!addr.has_value() || !size.has_value() || !output_path.has_value()) {
-        std::fputs("rom-pull: missing --addr / --size / --output\n"
+    if (!addr.has_value() || !size.has_value()) {
+        std::fputs("rom-pull: missing --addr / --size\n"
                    "Usage: subuwutuner-cli rom-pull --addr <hex> --size <hex>\n"
-                   "         --output <FILE.bin>\n"
+                   "         [--output <FILE.bin>]                "
+                   "(default: <rom_dump_root>/subuwutuner-rom-<UTC-timestamp>.bin)\n"
                    "         (--trace <FILE.uds> | --transport <kind>\n"
                    "                               [--dll <path>] [--device <path>])\n"
                    "         [--max-chunk <hex>]\n"
@@ -9031,6 +9033,42 @@ int cmd_rom_pull(int argc, char *argv[]) {
                    "(default 0x01 — bootloader unlock)\n",
                    stderr);
         return 2;
+    }
+    // Default --output to <rom_dump_root>/subuwutuner-rom-<UTC>.bin per
+    // docs/25 §7. The CID isn't known until after the read, so the
+    // timestamp goes in the filename; the user (or downstream tooling)
+    // can rename to <CID>.bin once rom-identify confirms it. Creates the
+    // parent directory if it doesn't exist (rom_dump_root is typically
+    // under %USERPROFILE%\\Documents\\..., which is writable but may
+    // not have been created yet on a fresh install).
+    if (!output_path.has_value()) {
+        auto const dump_root = st::config::rom_dump_root();
+        // UTC ISO 8601-like compact form, safe for filenames.
+        std::time_t const now = std::time(nullptr);
+        std::tm tm{};
+#ifdef _WIN32
+        gmtime_s(&tm, &now);
+#else
+        gmtime_r(&now, &tm);
+#endif
+        char ts[32];
+        std::strftime(ts, sizeof ts, "%Y%m%dT%H%M%SZ", &tm);
+        std::string fname = "subuwutuner-rom-";
+        fname += ts;
+        fname += ".bin";
+        output_path = dump_root / fname;
+        std::error_code ec;
+        std::filesystem::create_directories(dump_root, ec);
+        if (ec) {
+            std::fprintf(stderr,
+                         "rom-pull: cannot create rom_dump_root %s: %s\n",
+                         dump_root.string().c_str(), ec.message().c_str());
+            return 1;
+        }
+        std::fprintf(stderr,
+                     "rom-pull: no --output given, using "
+                     "rom_dump_root from config: %s\n",
+                     output_path->string().c_str());
     }
     bool const have_trace = trace_path.has_value();
     bool const have_transport = transport_kind.has_value();
