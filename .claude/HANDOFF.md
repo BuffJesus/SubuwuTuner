@@ -1,12 +1,12 @@
 # Handoff — 2026-05-23 end-of-day (sniff mode + SA plug-in + rdbi shipped; pushed to origin/main)
 
-**Push complete 2026-05-23 ~18:40.** 13 commits landed on `origin/main` (range `0ccf9e0..c5602cb`): the 6 from yesterday's SSM-on-CAN bundle that had been sitting unpushed + 7 from today (transport hardening / SA plug-in / sniff toolchain / icon / handoff / rdbi). Tree clean. https://github.com/BuffJesus/SubuwuTuner
+**Push complete 2026-05-23 ~18:40 + docs follow-up ~20:00.** 16 commits landed on `origin/main` (range `0ccf9e0..b1bbd8e`): the 6 from yesterday's SSM-on-CAN bundle that had been sitting unpushed + 7 from today's transport hardening / SA plug-in / sniff toolchain / icon / handoff / rdbi cycle + 3 evening-docs commits (sniff-workflows recipe doc + tuning-coach section + envelope caveat). Tree clean. https://github.com/BuffJesus/SubuwuTuner
 
 **Two next-action paths, parallelizable:**
 
 1. **Pre-Y-cable, anytime the user plugs in**: run `subuwutuner-cli rdbi --transport obdx --device COMx --did 0xF190 --verbose`. Multi-frame ISO-TP RX validation — if the VIN comes back clean, the entire UDS+ISO-TP stack is hardware-validated end-to-end. If garbled, we know precisely what to fix.
 
-2. **When the Y-cable arrives** (Vgate B015649DHA ordered, ETA ~2 days): SA capture flow per `docs/23-security-access.md`:
+2. **When the Y-cable arrives** (Vgate B015649DHA ordered, arrives 2026-05-24): SA capture flow per `docs/23-security-access.md`:
 
    ```sh
    subuwutuner-cli sniff --transport obdx --device COM3 \
@@ -113,11 +113,15 @@ but has never been exercised against real ECU + real OBDX firmware.
 
 Both at `D:\Documents\JetBrains\SubaruTuner\build\win-mingw\bin\`. Syncthing should have propagated to the laptop.
 
-## Commit log (pushed, `0ccf9e0..c5602cb`)
+## Commit log (pushed, `0ccf9e0..b1bbd8e`)
 
-In chronological push order — bottom to top is yesterday's bundle, top is today's:
+In chronological push order — bottom to top is yesterday's bundle, top is tonight's docs follow-up:
 
 ```
+b1bbd8e docs(ai): goal-conditioned tuning coach as v2.1 composite
+3e77b20 docs(sniff): clarify format-byte envelope caveat for sniff-during-flash
+d192f4c docs(sniff): catalog non-SA Y-cable workflows
+─── (boundary: ~20:00 docs push above, ~18:40 SA/sniff/rdbi push below) ──
 c5602cb feat(cli): rdbi subcommand for ReadDataByIdentifier ground-truth
 a84843f docs(handoff): refresh end-of-session state
 0117495 feat(ui): SA authentication checkbox + program icon
@@ -134,7 +138,7 @@ d474d1d feat(feature_codegen): sqrt_float IR primitive (SH-2A FSQRT)
 19eb16c fix(transport+ecu+flash+log): SSM-on-CAN bare-payload framing
 ```
 
-13 commits total. `origin/main` is now at `c5602cb`. No more pending work waiting to push.
+16 commits total. `origin/main` is now at `b1bbd8e`. No more pending work waiting to push.
 
 ## Pre-existing untracked / leave-alone
 
@@ -145,7 +149,7 @@ d474d1d feat(feature_codegen): sqrt_float IR primitive (SH-2A FSQRT)
 
 ## Reference: Pre-Y-cable activities the user can run now
 
-The Y-cable is in transit (Vgate B015649DHA, ETA ~2 days). The user can run these on the existing OBDX VX (no Y-cable needed) for additional validation. In suggested priority order:
+The Y-cable arrives 2026-05-24 (Vgate B015649DHA). Until then, the user can run these on the existing OBDX VX (no Y-cable needed) for additional validation. In suggested priority order:
 
 1. **RDBI VIN read** (highest-value) — exercises an untested code path.
 
