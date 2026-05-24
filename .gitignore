@@ -141,3 +141,8 @@ tools/LAPTOP-COMMANDS.txt
 
 # Syncthing folder markers (per-folder safety check, not source).
 .stfolder/
+
+# Per-platform definition archives produced by tools/build_definition_archives.py.
+# Sources are the loose `definitions/<platform>/*.toml` files; archives are
+# derived install artifacts shipped to end users (~6 MB total vs ~71 MB loose).
+definitions/_archives/
