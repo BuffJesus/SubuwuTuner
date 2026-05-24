@@ -6,7 +6,9 @@
 
 #include "st/core/result.hpp"
 #include "st/defs.hpp"
+#include "st/ecu/security_key.hpp"
 #include "st/ecu/ssm.hpp"
+#include "st/ecu/subaru_security.hpp"
 #include "st/ecu/uds.hpp"
 #include "st/policy.hpp"
 #include "st/transport.hpp"
@@ -185,7 +187,15 @@ public:
     // real 2017 WRX, 2026-05-23).
     explicit Flasher(transport::ITransport &t,
                      ecu::ssm::Framing ssm_framing = ecu::ssm::Framing::KLine) noexcept
-        : client_{t}, ssm_client_{t, ssm_framing} {}
+        : client_{t}, ssm_client_{t, ssm_framing}, security_key_fn_{ecu::subaru::ssmcan1_key_stub} {}
+
+    // Plug in a custom SecurityAccess key transform for the
+    // `read_full_rom(authenticate=true)` path. Defaults to
+    // `st::ecu::subaru::ssmcan1_key_stub` (returns NotImplemented). See
+    // `st/ecu/security_key.hpp` for the rationale.
+    void set_security_key_fn(ecu::SecurityKeyFn fn) noexcept {
+        security_key_fn_ = std::move(fn);
+    }
 
     // Read a contiguous span of ECU memory via ReadMemoryByAddress,
     // chunked into `max_chunk_size`-byte requests. Returns the
@@ -213,7 +223,9 @@ public:
     read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
                   std::uint32_t max_chunk_size = 0x100,
                   std::chrono::milliseconds per_chunk_timeout = std::chrono::milliseconds{1000},
-                  ReadProgressFn progress = nullptr, std::atomic<bool> const *cancel = nullptr);
+                  ReadProgressFn progress = nullptr, std::atomic<bool> const *cancel = nullptr,
+                  bool enter_diagnostic_session = false, bool authenticate = false,
+                  std::uint8_t security_level = 0x01);
 
     // SSM (Subaru Select Monitor) variant of read_full_rom — uses
     // SSM 0xA8 (ReadByAddress) instead of UDS 0x23. This is the path
@@ -286,6 +298,7 @@ public:
 private:
     ecu::uds::UdsClient client_;
     ecu::ssm::SsmClient ssm_client_;
+    ecu::SecurityKeyFn security_key_fn_;
 };
 
 // =====================================================================

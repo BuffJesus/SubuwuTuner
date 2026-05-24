@@ -1,6 +1,7 @@
 add_library(st_ecu STATIC
     src/ssm.cpp
     src/uds.cpp
+    src/subaru_security.cpp
 )
 add_library(st::ecu ALIAS st_ecu)
 

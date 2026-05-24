@@ -177,6 +177,107 @@ TEST_CASE("Flasher::read_full_rom cancel observed mid-read", "[flash][read][canc
     REQUIRE(t.send_log().size() == 1);
 }
 
+// ---- SecurityAccess preamble ----------------------------------------
+
+TEST_CASE("Flasher::read_full_rom SA preamble does request_seed then key_fn then send_key",
+          "[flash][read][sa]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // SA exchange: requestSeed sub=0x01 → ECU returns seed DE AD BE EF;
+    // sendKey sub=0x02 with our computed key → ECU acks.
+    expect(t, uds::build_security_access_request_seed(0x01),
+           {0x67, 0x01, 0xDE, 0xAD, 0xBE, 0xEF});
+    std::vector<std::uint8_t> const expected_key{0xCA, 0xFE, 0xBA, 0xBE};
+    expect(t, uds::build_security_access_send_key(0x02, expected_key), {0x67, 0x02});
+    // Then the chunk loop.
+    expect(t, uds::build_read_memory_by_address(0x1000, 8),
+           {0x63, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
+
+    flash::Flasher f{t};
+    // Pluggable key function — deterministic for the test (echoes the
+    // seed XOR'd with a constant). The real Subaru algorithm is a runtime
+    // plug-in too, but lives outside this codebase.
+    f.set_security_key_fn(
+        [](std::span<std::uint8_t const> seed) -> st::Result<std::vector<std::uint8_t>> {
+            // Map DE AD BE EF → CA FE BA BE via fixed XOR mask 14 53 04 51.
+            REQUIRE(seed.size() == 4);
+            return std::vector<std::uint8_t>{
+                static_cast<std::uint8_t>(seed[0] ^ 0x14U),
+                static_cast<std::uint8_t>(seed[1] ^ 0x53U),
+                static_cast<std::uint8_t>(seed[2] ^ 0x04U),
+                static_cast<std::uint8_t>(seed[3] ^ 0x51U),
+            };
+        });
+    auto const r =
+        f.read_full_rom(0x1000, 8, /*max_chunk=*/8, std::chrono::milliseconds{1000},
+                        /*progress=*/nullptr, /*cancel=*/nullptr,
+                        /*enter_diagnostic_session=*/false, /*authenticate=*/true);
+    REQUIRE(r.has_value());
+    REQUIRE(r->size() == 8);
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("Flasher::read_full_rom surfaces stub key function as NotImplemented",
+          "[flash][read][sa][error]") {
+    // Default Flasher comes with the Subaru stub; ECU returns a seed but
+    // the stub fails before sendKey ever leaves the host.
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    expect(t, uds::build_security_access_request_seed(0x01),
+           {0x67, 0x01, 0xDE, 0xAD, 0xBE, 0xEF});
+
+    flash::Flasher f{t};
+    auto const r =
+        f.read_full_rom(0x1000, 8, /*max_chunk=*/8, std::chrono::milliseconds{1000},
+                        /*progress=*/nullptr, /*cancel=*/nullptr,
+                        /*enter_diagnostic_session=*/false, /*authenticate=*/true);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+    REQUIRE(std::string{r.error().message()}.find("stub") != std::string::npos);
+    // sendKey was never put on the wire — only the requestSeed.
+    REQUIRE(t.send_log().size() == 1);
+}
+
+TEST_CASE("Flasher::read_full_rom propagates ECU NRC 0x35 invalidKey",
+          "[flash][read][sa][error]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    expect(t, uds::build_security_access_request_seed(0x01),
+           {0x67, 0x01, 0xDE, 0xAD, 0xBE, 0xEF});
+    std::vector<std::uint8_t> const zero_key{0x00, 0x00, 0x00, 0x00};
+    expect(t, uds::build_security_access_send_key(0x02, zero_key),
+           {0x7F, 0x27, uds::kNrcInvalidKey});
+
+    flash::Flasher f{t};
+    f.set_security_key_fn(
+        [](std::span<std::uint8_t const>) -> st::Result<std::vector<std::uint8_t>> {
+            return std::vector<std::uint8_t>{0x00, 0x00, 0x00, 0x00};
+        });
+    auto const r =
+        f.read_full_rom(0x1000, 8, /*max_chunk=*/8, std::chrono::milliseconds{1000},
+                        /*progress=*/nullptr, /*cancel=*/nullptr,
+                        /*enter_diagnostic_session=*/false, /*authenticate=*/true);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+    REQUIRE(std::string{r.error().message()}.find("sendKey") != std::string::npos);
+}
+
+TEST_CASE("Flasher::read_full_rom skips SA preamble when authenticate=false (default)",
+          "[flash][read][sa]") {
+    // No SA-related transactions queued — proves the SA preamble doesn't
+    // fire when the caller didn't ask for it.
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    expect(t, uds::build_read_memory_by_address(0x1000, 8),
+           {0x63, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
+
+    flash::Flasher f{t};
+    auto const r = f.read_full_rom(0x1000, 8, /*max_chunk=*/8);
+    REQUIRE(r.has_value());
+    REQUIRE(t.exhausted());
+}
+
 // ---------------------------------------------------------------------
 // read_full_rom_ssm
 // ---------------------------------------------------------------------

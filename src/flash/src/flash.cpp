@@ -65,7 +65,9 @@ bool FlashReport::all_sectors_verified() const noexcept {
 Result<std::vector<std::uint8_t>>
 Flasher::read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
                        std::uint32_t max_chunk_size, std::chrono::milliseconds per_chunk_timeout,
-                       Flasher::ReadProgressFn progress, std::atomic<bool> const *cancel) {
+                       Flasher::ReadProgressFn progress, std::atomic<bool> const *cancel,
+                       bool enter_diagnostic_session, bool authenticate,
+                       std::uint8_t security_level) {
     if (total_length == 0) {
         if (progress)
             progress({0, 0});
@@ -75,6 +77,85 @@ Flasher::read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
         return failure(ErrorCode::InvalidArgument,
                        "flash: read_full_rom max_chunk_size must be > 0");
     }
+
+    // Optional extendedDiagnostic-session entry before the chunk loop.
+    // Subaru Hitachi ECUs (FA20DIT and similar) silently drop RMBA
+    // (SID 0x23) in the default session — no NRC, just silence.
+    // Diagnosed 2026-05-23: stock VA WRX with COBB tune uninstalled
+    // still produced silent RX timeouts on UDS RMBA until DSC entry
+    // was added. Mirrors what EcuTek's ProECU calls "Enter Utility
+    // Mode" in its ROM-dump workflow.
+    //
+    // Opt-in (default off) because Flasher::execute's verify-after-write
+    // path already enters programmingSession at the top of the sequence;
+    // a transition to extendedSession mid-flash would invalidate the
+    // erase+download work. Standalone Read-ROM callers (CLI / GUI Tools →
+    // Read ROM from Car) pass true so the ECU is in the right state
+    // before the first RMBA.
+    if (enter_diagnostic_session) {
+        if (auto s = client_.diagnostic_session_control(ecu::uds::kDscExtendedDiagnostic,
+                                                        per_chunk_timeout);
+            !s.has_value()) {
+            return failure(s.error().code(),
+                           std::string{"flash: read_full_rom session entry failed: "} +
+                               std::string{s.error().message()});
+        }
+    }
+
+    // Optional UDS SecurityAccess preamble. Real-hardware Subaru ECUs
+    // gate RMBA (and most other "interesting" services) behind seed/key
+    // authentication — read attempts without it come back as
+    // `7F 23 33` (securityAccessDenied), diagnosed 2026-05-23 on a 2017
+    // VA WRX. Per ISO 14229, odd sub-functions = requestSeed, even =
+    // sendKey-one-greater; `security_level` selects the odd one.
+    //
+    // `security_key_fn_` is a runtime-pluggable transform — defaults to
+    // `st::ecu::subaru::ssmcan1_key_stub` which always fails with
+    // NotImplemented. See `src/ecu/include/st/ecu/security_key.hpp` for
+    // why the algorithm itself is plug-in rather than built-in.
+    if (authenticate) {
+        if (!security_key_fn_) {
+            return failure(ErrorCode::InvalidArgument,
+                           "flash: read_full_rom: authenticate=true but "
+                           "security_key_fn_ is empty — call "
+                           "Flasher::set_security_key_fn first");
+        }
+        auto seed = client_.security_access_request_seed(security_level, per_chunk_timeout);
+        if (!seed.has_value()) {
+            return failure(seed.error().code(),
+                           std::string{"flash: read_full_rom SecurityAccess requestSeed "
+                                       "(sub 0x"} +
+                               [security_level]() {
+                                   char b[3];
+                                   std::snprintf(b, sizeof b, "%02X",
+                                                 static_cast<unsigned>(security_level));
+                                   return std::string{b};
+                               }() +
+                               ") failed: " + std::string{seed.error().message()});
+        }
+        auto key = security_key_fn_(*seed);
+        if (!key.has_value()) {
+            return failure(key.error().code(),
+                           std::string{"flash: read_full_rom SecurityAccess key derivation "
+                                       "failed: "} +
+                               std::string{key.error().message()});
+        }
+        auto const send_sub = static_cast<std::uint8_t>(security_level + 1U);
+        if (auto s = client_.security_access_send_key(send_sub, *key, per_chunk_timeout);
+            !s.has_value()) {
+            return failure(s.error().code(),
+                           std::string{"flash: read_full_rom SecurityAccess sendKey "
+                                       "(sub 0x"} +
+                               [send_sub]() {
+                                   char b[3];
+                                   std::snprintf(b, sizeof b, "%02X",
+                                                 static_cast<unsigned>(send_sub));
+                                   return std::string{b};
+                               }() +
+                               ") rejected by ECU: " + std::string{s.error().message()});
+        }
+    }
+
     std::vector<std::uint8_t> out;
     out.reserve(total_length);
     std::uint32_t cursor = base_address;
