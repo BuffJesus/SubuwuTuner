@@ -203,6 +203,7 @@ Failure modes:
 ## See also
 
 - `docs/13-transport.md` §sniff for the listen_only mode wire details
+- `docs/24-sniff-workflows.md` — other uses of the same Y-cable rig (sniff-during-flash, datalogger RAM-address discovery, protocol learning, feature reverse-engineering for launch control / flat-foot shift / rev limits)
 - `src/ecu/include/st/ecu/security_key.hpp` — the plug-in type
 - `src/ecu/include/st/ecu/subaru_security.hpp` — the stub declarations
 - `tools/extract_subaru_sa.py` — the capture parser

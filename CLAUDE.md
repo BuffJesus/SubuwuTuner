@@ -50,6 +50,12 @@ Phase 0/1/2 done. Phase 3 protocol framing complete (SSM + full UDS catalog incl
 | Reason about custom features / node-graph designer | `docs/16-custom-features.md` |
 | Reason about data distribution / Path B | `docs/17-data-distribution-policy.md` |
 | Reason about the portable Teensy/ESP32 handheld | `docs/18-standalone-master-plan.md` |
+| Reason about live tuning / RAM-shadow real-time edits | `docs/19-live-tuning.md` |
+| Reason about AI integration (drift classifier, LLM explanations — not auto-tune) | `docs/20-ai-integration.md` |
+| Reason about the `.stune` project directory layout | `docs/21-stune-format.md` |
+| Reason about auto-update / installer / release channel | `docs/22-auto-update.md` |
+| Reason about SecurityAccess (UDS 0x27) / seed-key plug-in | `docs/23-security-access.md` |
+| Reason about Y-cable sniffing (during-flash capture, datalog RAM-poll discovery, protocol learning, feature RE for LC / FFS / rev limit) | `docs/24-sniff-workflows.md` |
 | Look up a tuning term | `docs/10-glossary.md` |
 
 ## Stance on emissions / jurisdiction
