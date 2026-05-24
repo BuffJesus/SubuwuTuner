@@ -109,10 +109,11 @@ Flasher::read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
     // VA WRX. Per ISO 14229, odd sub-functions = requestSeed, even =
     // sendKey-one-greater; `security_level` selects the odd one.
     //
-    // `security_key_fn_` is a runtime-pluggable transform — defaults to
-    // `st::ecu::subaru::ssmcan1_key_stub` which always fails with
-    // NotImplemented. See `src/ecu/include/st/ecu/security_key.hpp` for
-    // why the algorithm itself is plug-in rather than built-in.
+    // `security_key_fn_` is a runtime-pluggable transform. Since
+    // 2026-05-24 the default `st::ecu::subaru::ssmcan1_key_stub` is the
+    // real Gen-A.2 L1 implementation (SH7058 ECUs ~2008-2017). Other eras
+    // — Gen-A K-Line, Gen-B AES, or any user-supplied override — slot in
+    // via `set_security_key_fn`. See `src/ecu/include/st/ecu/security_key.hpp`.
     if (authenticate) {
         if (!security_key_fn_) {
             return failure(ErrorCode::InvalidArgument,

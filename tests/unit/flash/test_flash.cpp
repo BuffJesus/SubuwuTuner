@@ -3,6 +3,7 @@
 
 #include "st/core/error.hpp"
 #include "st/ecu/ssm.hpp"
+#include "st/ecu/subaru_security.hpp"
 #include "st/ecu/uds.hpp"
 #include "st/flash.hpp"
 #include "st/transport.hpp"
@@ -218,25 +219,37 @@ TEST_CASE("Flasher::read_full_rom SA preamble does request_seed then key_fn then
     REQUIRE(t.exhausted());
 }
 
-TEST_CASE("Flasher::read_full_rom surfaces stub key function as NotImplemented",
-          "[flash][read][sa][error]") {
-    // Default Flasher comes with the Subaru stub; ECU returns a seed but
-    // the stub fails before sendKey ever leaves the host.
+TEST_CASE("Flasher::read_full_rom default key fn computes a real Gen-A L1 key",
+          "[flash][read][sa]") {
+    // As of 2026-05-24 the default `ssmcan1_key_stub` is the real Gen-A.2
+    // L1 implementation. ECU emits a seed; the default key fn computes a
+    // 4-byte key; the host sends sendKey and the ECU acks. The ECU side
+    // is mocked by computing the expected key in-test via the same public
+    // function, so this test pins the wire-format contract without
+    // duplicating algorithm constants here.
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
+
+    std::vector<std::uint8_t> const seed_bytes{0xDE, 0xAD, 0xBE, 0xEF};
     expect(t, uds::build_security_access_request_seed(0x01),
            {0x67, 0x01, 0xDE, 0xAD, 0xBE, 0xEF});
 
+    auto const expected_key_r =
+        st::ecu::subaru::ssmcan1_key_stub(std::span<std::uint8_t const>{seed_bytes});
+    REQUIRE(expected_key_r.has_value());
+    expect(t, uds::build_security_access_send_key(0x02, *expected_key_r), {0x67, 0x02});
+    expect(t, uds::build_read_memory_by_address(0x1000, 8),
+           {0x63, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
+
     flash::Flasher f{t};
+    // Use the Flasher's default — no set_security_key_fn call.
     auto const r =
         f.read_full_rom(0x1000, 8, /*max_chunk=*/8, std::chrono::milliseconds{1000},
                         /*progress=*/nullptr, /*cancel=*/nullptr,
                         /*enter_diagnostic_session=*/false, /*authenticate=*/true);
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
-    REQUIRE(std::string{r.error().message()}.find("stub") != std::string::npos);
-    // sendKey was never put on the wire — only the requestSeed.
-    REQUIRE(t.send_log().size() == 1);
+    REQUIRE(r.has_value());
+    REQUIRE(r->size() == 8);
+    REQUIRE(t.exhausted());
 }
 
 TEST_CASE("Flasher::read_full_rom propagates ECU NRC 0x35 invalidKey",

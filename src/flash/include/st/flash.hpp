@@ -191,8 +191,10 @@ public:
 
     // Plug in a custom SecurityAccess key transform for the
     // `read_full_rom(authenticate=true)` path. Defaults to
-    // `st::ecu::subaru::ssmcan1_key_stub` (returns NotImplemented). See
-    // `st/ecu/security_key.hpp` for the rationale.
+    // `st::ecu::subaru::ssmcan1_key_stub`, which since 2026-05-24 is the
+    // real Gen-A.2 L1 implementation (SH7058, 2008-2017 Subarus). See
+    // `st/ecu/security_key.hpp` for the rationale; override to plug in
+    // Gen-B (AES) or any other era.
     void set_security_key_fn(ecu::SecurityKeyFn fn) noexcept {
         security_key_fn_ = std::move(fn);
     }

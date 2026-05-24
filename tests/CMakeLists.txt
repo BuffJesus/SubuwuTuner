@@ -34,6 +34,7 @@ add_executable(st_unit_tests
     unit/transport/test_j2534_discovery.cpp
     unit/ecu/test_ssm.cpp
     unit/ecu/test_ssm_properties.cpp
+    unit/ecu/test_subaru_security.cpp
     unit/ecu/test_uds.cpp
     unit/ecu/test_uds_pdu_atomicity.cpp
     unit/log/test_log.cpp

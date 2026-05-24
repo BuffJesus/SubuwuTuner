@@ -8793,6 +8793,14 @@ int cmd_rom_pull(int argc, char *argv[]) {
     std::optional<std::string> transport_kind;
     std::string dll_path;
     std::string device_path;
+    // SA / DSC defaults: real-hardware (--transport) path needs both; the
+    // trace-replay (--trace) path expects the captured exchange to be
+    // exactly what gets sent, so both default OFF there. Either can be
+    // toggled with --authenticate / --no-authenticate and --enter-dsc /
+    // --no-enter-dsc.
+    std::optional<bool> authenticate_flag;
+    std::optional<bool> enter_dsc_flag;
+    std::uint8_t security_level = 0x01;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -8861,6 +8869,25 @@ int cmd_rom_pull(int argc, char *argv[]) {
                 output_path = std::filesystem::path{v};
             else
                 return 2;
+        } else if (a == "--authenticate") {
+            authenticate_flag = true;
+        } else if (a == "--no-authenticate") {
+            authenticate_flag = false;
+        } else if (a == "--enter-dsc") {
+            enter_dsc_flag = true;
+        } else if (a == "--no-enter-dsc") {
+            enter_dsc_flag = false;
+        } else if (a == "--security-level") {
+            auto const *v = require_arg("--security-level");
+            if (v == nullptr)
+                return 2;
+            std::uint32_t val = 0;
+            if (!parse_uint32_arg(v, val) || val == 0 || val > 0xFFU) {
+                std::fprintf(stderr, "rom-pull: --security-level must be a "
+                                     "positive 8-bit hex or decimal integer\n");
+                return 2;
+            }
+            security_level = static_cast<std::uint8_t>(val);
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "rom-pull: unknown option: %s\n", argv[i]);
             return 2;
@@ -8875,7 +8902,13 @@ int cmd_rom_pull(int argc, char *argv[]) {
                    "         --output <FILE.bin>\n"
                    "         (--trace <FILE.uds> | --transport <kind>\n"
                    "                               [--dll <path>] [--device <path>])\n"
-                   "         [--max-chunk <hex>]\n",
+                   "         [--max-chunk <hex>]\n"
+                   "         [--authenticate|--no-authenticate]   "
+                   "(default ON for --transport, OFF for --trace)\n"
+                   "         [--enter-dsc|--no-enter-dsc]         "
+                   "(default ON for --transport, OFF for --trace)\n"
+                   "         [--security-level <hex>]             "
+                   "(default 0x01 — bootloader unlock)\n",
                    stderr);
         return 2;
     }
@@ -8951,8 +8984,22 @@ int cmd_rom_pull(int argc, char *argv[]) {
         chosen = owned.get();
     }
 
+    // Defaults: --transport (real hardware) needs DSC + SA; --trace
+    // (replay) expects the captured exchange to drive the wire byte-for-
+    // byte, so both default OFF there. Explicit flags override.
+    bool const authenticate = authenticate_flag.value_or(have_transport);
+    bool const enter_dsc = enter_dsc_flag.value_or(have_transport);
+
+    // Real hardware over CAN needs ISO-TP SSM framing too — but
+    // read_full_rom uses UDS RMBA, not SSM, so SSM framing doesn't apply
+    // here. Leaving the Flasher's default KLine setting alone since this
+    // path never touches the SSM client.
     st::flash::Flasher flasher{*chosen};
-    auto const r = flasher.read_full_rom(*addr, *size, max_chunk);
+    auto const r = flasher.read_full_rom(*addr, *size, max_chunk,
+                                          std::chrono::milliseconds{1000},
+                                          /*progress=*/nullptr,
+                                          /*cancel=*/nullptr,
+                                          enter_dsc, authenticate, security_level);
     if (!r.has_value()) {
         std::fprintf(stderr, "rom-pull: %s\n", r.error().to_string().c_str());
         return 1;
