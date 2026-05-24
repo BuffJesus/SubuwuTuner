@@ -3,6 +3,7 @@
 
 #include "st/autotune.hpp"
 #include "st/can.hpp"
+#include "st/config.hpp"
 #include "st/core/version.hpp"
 #include "st/dbc.hpp"
 #include "st/defs.hpp"
@@ -10014,6 +10015,172 @@ int cmd_feature_compile(int argc, char *argv[]) {
     return 0;
 }
 
+// Renders one row of `config show` output with the value + provenance
+// (env var / config file / default).
+namespace {
+void print_config_row(char const *key, std::filesystem::path const &resolved,
+                      char const *env_name,
+                      std::filesystem::path const &default_value,
+                      std::filesystem::path const &config_source_path,
+                      bool config_file_present) {
+    char const *source = "default";
+    std::string source_detail;
+    if (char const *e = std::getenv(env_name); e != nullptr && *e != '\0') {
+        source = "env";
+        source_detail = env_name;
+    } else if (config_file_present && resolved != default_value) {
+        source = "config";
+        source_detail = config_source_path.string();
+    }
+    if (source_detail.empty()) {
+        std::printf("%-18s = \"%s\"  (source: %s)\n", key,
+                    resolved.string().c_str(), source);
+    } else {
+        std::printf("%-18s = \"%s\"  (source: %s %s)\n", key,
+                    resolved.string().c_str(), source, source_detail.c_str());
+    }
+}
+} // namespace
+
+int cmd_config(int argc, char *argv[]) {
+    constexpr std::string_view kHelp =
+        "Usage: subuwutuner-cli config <subcommand> [args]\n"
+        "\n"
+        "Subcommands:\n"
+        "  path                       print the config file path "
+        "(honors ST_CONFIG_FILE)\n"
+        "  show                       dump resolved values + provenance\n"
+        "  get <key>                  print one resolved value\n"
+        "  set <key> <value>          write one key to the config file\n"
+        "  reset                      restore defaults (overwrites the config file)\n"
+        "\n"
+        "Keys: definitions_root, rom_dump_root\n"
+        "\n"
+        "See docs/25-config-system.md for precedence rules and the schema.\n";
+
+    if (argc < 1) {
+        std::fputs(kHelp.data(), stderr);
+        return 2;
+    }
+    std::string_view const sub{argv[0]};
+
+    if (sub == "-h" || sub == "--help") {
+        std::fputs(kHelp.data(), stdout);
+        return 0;
+    }
+
+    if (sub == "path") {
+        std::printf("%s\n", st::config::default_config_path().string().c_str());
+        return 0;
+    }
+
+    if (sub == "show") {
+        auto const cfg_path = st::config::default_config_path();
+        bool const present = std::filesystem::exists(cfg_path);
+        std::printf("config file: %s%s\n", cfg_path.string().c_str(),
+                    present ? "" : "  (not present — defaults in use)\n");
+        if (!present) {
+            std::printf("\n");
+        }
+
+        // Load the config so we can compare resolved value vs default to
+        // infer "did the file explicitly set this key" without parsing twice.
+        auto cfg_r = st::config::Config::load();
+        if (!cfg_r.has_value()) {
+            std::fprintf(stderr, "config show: %s\n",
+                         cfg_r.error().to_string().c_str());
+            return 1;
+        }
+        auto const defaults = st::config::Config::defaults();
+
+        std::printf("[paths]\n");
+        print_config_row("definitions_root",
+                         st::config::definitions_root(),
+                         "ST_DEFINITIONS_ROOT",
+                         defaults.paths().definitions_root,
+                         cfg_r->source_path(), present);
+        print_config_row("rom_dump_root", st::config::rom_dump_root(),
+                         "ST_ROM_DUMP_ROOT",
+                         defaults.paths().rom_dump_root,
+                         cfg_r->source_path(), present);
+        return 0;
+    }
+
+    if (sub == "get") {
+        if (argc < 2) {
+            std::fputs("config get: missing key (definitions_root | rom_dump_root)\n",
+                       stderr);
+            return 2;
+        }
+        std::string_view const key{argv[1]};
+        if (key == "definitions_root") {
+            std::printf("%s\n", st::config::definitions_root().string().c_str());
+            return 0;
+        }
+        if (key == "rom_dump_root") {
+            std::printf("%s\n", st::config::rom_dump_root().string().c_str());
+            return 0;
+        }
+        std::fprintf(stderr, "config get: unknown key '%s' "
+                              "(valid: definitions_root, rom_dump_root)\n",
+                     argv[1]);
+        return 2;
+    }
+
+    if (sub == "set") {
+        if (argc < 3) {
+            std::fputs("config set: usage: subuwutuner-cli config set "
+                       "<definitions_root|rom_dump_root> <path>\n",
+                       stderr);
+            return 2;
+        }
+        std::string_view const key{argv[1]};
+        std::filesystem::path const value{argv[2]};
+        auto cfg_r = st::config::Config::load();
+        if (!cfg_r.has_value()) {
+            std::fprintf(stderr, "config set: load failed: %s\n",
+                         cfg_r.error().to_string().c_str());
+            return 1;
+        }
+        if (key == "definitions_root") {
+            cfg_r->paths().definitions_root = value;
+        } else if (key == "rom_dump_root") {
+            cfg_r->paths().rom_dump_root = value;
+        } else {
+            std::fprintf(stderr, "config set: unknown key '%s' "
+                                  "(valid: definitions_root, rom_dump_root)\n",
+                         argv[1]);
+            return 2;
+        }
+        auto s = cfg_r->save();
+        if (!s.has_value()) {
+            std::fprintf(stderr, "config set: save failed: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        std::fprintf(stderr, "wrote %s -> %s\n", argv[1], value.string().c_str());
+        return 0;
+    }
+
+    if (sub == "reset") {
+        auto c = st::config::Config::defaults();
+        c.set_source_path(st::config::default_config_path());
+        auto s = c.save();
+        if (!s.has_value()) {
+            std::fprintf(stderr, "config reset: save failed: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        std::fprintf(stderr, "config reset: wrote defaults to %s\n",
+                     c.source_path().string().c_str());
+        return 0;
+    }
+
+    std::fprintf(stderr, "config: unknown subcommand '%s'\n", argv[0]);
+    std::fputs(kHelp.data(), stderr);
+    return 2;
+}
+
 int main(int argc, char *argv[]) {
     if (argc <= 1) {
         print_usage();
@@ -10179,6 +10346,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "rdbi") {
         return cmd_rdbi(argc - 2, argv + 2);
+    }
+    if (cmd == "config") {
+        return cmd_config(argc - 2, argv + 2);
     }
     if (cmd == "flash-trace") {
         return cmd_flash_trace(argc - 2, argv + 2);

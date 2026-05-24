@@ -5,6 +5,7 @@ add_executable(subuwutuner-cli
 target_link_libraries(subuwutuner-cli
     PRIVATE
         st::core
+        st::config
         st::rom
         st::defs
         st::edit
