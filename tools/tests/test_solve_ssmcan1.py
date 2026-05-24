@@ -394,5 +394,95 @@ class TestVerifyGenACommand(unittest.TestCase):
         self.assertEqual(rc, 1)
 
 
+class TestRecoverGenA(unittest.TestCase):
+    """Aftermarket-table recovery: synthesize pairs against a modified
+    table, confirm recovery finds the modification."""
+
+    def _write_pairs_for_rk(self, rk: list[int], n: int) -> Path:
+        # Generate `n` synthetic pairs by running the forward algorithm
+        # against the given round-key table.
+        pairs = []
+        seeds = [0xCAFEBABE, 0xDEADBEEF, 0x12345678, 0xA5A5A5A5,
+                 0x00000001, 0xFFFFFFFE, 0x80808080, 0x55AA55AA]
+        for ik in seeds[:n]:
+            ik_bytes = ik.to_bytes(4, "big")
+            state = solve_ssmcan1.gen_a_feistel_forward(ik, rk)
+            seed_packed = solve_ssmcan1._gen_a_wordswap32(state)
+            seed = seed_packed.to_bytes(4, "big")
+            pairs.append({"seed": seed.hex().upper(),
+                          "key": ik_bytes.hex().upper()})
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump({"schema": "subuwutuner.sa.v1", "pairs": pairs}, tmp)
+        tmp.close()
+        return Path(tmp.name)
+
+    def test_stock_pairs_recognized(self) -> None:
+        # Pairs generated from stock table - recover should report
+        # "ALGORITHM CORRECT, nothing to recover" and exit 0.
+        path = self._write_pairs_for_rk(solve_ssmcan1.GEN_A_RK_L1, 4)
+        try:
+            rc = solve_ssmcan1.main(
+                ["recover-gen-a", str(path), "--min-pairs", "4"])
+            self.assertEqual(rc, 0)
+        finally:
+            path.unlink()
+
+    def test_xor_mask_recovered(self) -> None:
+        mask = 0x1234
+        fake_rk = [r ^ mask for r in solve_ssmcan1.GEN_A_RK_L1]
+        path = self._write_pairs_for_rk(fake_rk, 4)
+        try:
+            with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".json", delete=False,
+                    encoding="utf-8") as out:
+                out_path = Path(out.name)
+            rc = solve_ssmcan1.main([
+                "recover-gen-a", str(path), "--min-pairs", "4",
+                "--output", str(out_path),
+            ])
+            self.assertEqual(rc, 0)
+            # Verify the JSON sidecar contains the right table.
+            with out_path.open() as f:
+                payload = json.load(f)
+            self.assertEqual(payload["algorithm"], "gen_a_ssmcan1")
+            self.assertEqual(payload["level"], 1)
+            self.assertEqual(payload["verified_against_pairs"], 4)
+            recovered = [int(s, 16) for s in payload["rk_l1"]]
+            self.assertEqual(recovered, fake_rk)
+            out_path.unlink()
+        finally:
+            path.unlink()
+
+    def test_single_substitution_recovered(self) -> None:
+        # Replace one position with an arbitrary value, confirm
+        # single-sub search finds it. Note: XOR-mask shape would NOT
+        # find this (no single C produces a one-position-only change),
+        # so the test exercises the deeper search.
+        fake_rk = list(solve_ssmcan1.GEN_A_RK_L1)
+        fake_rk[5] = 0xBEEF  # position 5 replaced
+        path = self._write_pairs_for_rk(fake_rk, 4)
+        try:
+            rc = solve_ssmcan1.main(
+                ["recover-gen-a", str(path), "--min-pairs", "4"])
+            self.assertEqual(rc, 0)
+        finally:
+            path.unlink()
+
+    def test_too_few_pairs_exit_one(self) -> None:
+        path = self._write_pairs_for_rk(solve_ssmcan1.GEN_A_RK_L1, 1)
+        try:
+            rc = solve_ssmcan1.main(
+                ["recover-gen-a", str(path), "--min-pairs", "2"])
+            self.assertEqual(rc, 1)
+        finally:
+            path.unlink()
+
+    def test_missing_file_exit_one(self) -> None:
+        rc = solve_ssmcan1.main(
+            ["recover-gen-a", "/nonexistent/file.json"])
+        self.assertEqual(rc, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

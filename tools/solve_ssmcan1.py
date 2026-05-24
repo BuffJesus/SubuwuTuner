@@ -981,6 +981,200 @@ def cmd_verify_gen_a(args: argparse.Namespace) -> int:
     return 3
 
 
+# =============================================================================
+# Gen-A SSMCAN1 aftermarket-table recovery
+# =============================================================================
+#
+# When verify-gen-a reports MISMATCH (every captured pair fails round-trip
+# against stock RK_L1), the algorithm is correct but the ECU's installed
+# round-key table has been replaced by an aftermarket tuning install. The
+# recovery search per docs/25-ish + the analyst-side
+# fixtures/private/findings_algorithms/sa-aftermarket-alteration.md §3
+# tries candidate replacement tables in priority order:
+#
+#   1. Known-list   — vendor-specific tables we've previously recovered.
+#                     Currently empty; populated as recoveries land.
+#   2. XOR-mask     — RK[i] = stock_RK[i] XOR C for a 16-bit constant C.
+#                     65,536 candidates. The most common alteration shape.
+#   3. Single-sub   — exactly one of the 16 table entries replaced with
+#                     an arbitrary 16-bit value. 16 × 65,536 ≈ 1M cands.
+#
+# Each candidate is verified against EVERY captured pair. N pairs give
+# 32·N bits of constraint on a 256-bit unknown; for N=4 the false-
+# positive rate is 2^-128 (statistically zero). The script enforces
+# N ≥ 2 minimum and recommends N ≥ 4.
+#
+# Shapes 4 (byte-swap permutations) and 5 (arbitrary 256-bit) are NOT
+# attempted by default — too large or no usable structure. Add to the
+# generator only if recoveries against shapes 1-3 keep failing on a
+# given pack.
+
+# Known-list of previously recovered aftermarket tables. Populated as
+# vendor recoveries land; each entry is a 16-tuple matching the layout
+# of GEN_A_RK_L1. Provenance + vendor-attribution kept in comments per
+# the docs/15 clean-room posture (recorded as facts, not as expression).
+GEN_A_RK_L1_KNOWN_AFTERMARKET: list[tuple[str, list[int]]] = [
+    # Format: ("provenance label", [u16; 16])
+    # ex: ("VendorX OTS v3.2 — recovered 2026-06-15 from car-A capture", [0x1234, ...])
+]
+
+
+def gen_a_verify_table_against_pairs(rk: list[int],
+                                     pairs: list[tuple[bytes, bytes]]) -> bool:
+    """Return True iff `rk` (16 × u16) round-trips EVERY (seed, key) pair."""
+    for seed_bytes, expected_key_bytes in pairs:
+        seed_packed = int.from_bytes(seed_bytes, "big")
+        state_post_rounds = _gen_a_wordswap32(seed_packed)
+        internal_key = gen_a_feistel_inverse(state_post_rounds, rk)
+        derived_key_bytes = internal_key.to_bytes(4, "big")
+        if derived_key_bytes != expected_key_bytes:
+            return False
+    return True
+
+
+def gen_a_recovery_candidates(
+    stock_rk: list[int],
+) -> "Iterable[tuple[str, list[int]]]":
+    """Yield (label, rk) candidates in priority order for the recovery
+    search. Caller terminates on the first one that verifies all pairs.
+    Uses generators throughout — the 1M+ single-sub candidates are
+    streamed, not materialized."""
+    # Shape 1: known list.
+    for label, rk in GEN_A_RK_L1_KNOWN_AFTERMARKET:
+        yield f"known-list: {label}", list(rk)
+
+    # Shape 2: XOR-mask. 65,536 candidates. ~seconds in Python.
+    for c in range(1, 0x10000):  # c=0 is the stock table; skip
+        yield f"xor-mask: stock ^ 0x{c:04x}", [s ^ c for s in stock_rk]
+
+    # Shape 3: single-position substitution. 16 × 65,536 = ~1M
+    # candidates. ~tens of seconds to a minute in Python; if this
+    # becomes the routine path it's straightforward to vectorize.
+    for pos in range(16):
+        for val in range(0x10000):
+            if val == stock_rk[pos]:  # skip the stock entry
+                continue
+            sub = list(stock_rk)
+            sub[pos] = val
+            yield f"single-sub: pos={pos} val=0x{val:04x}", sub
+
+
+def cmd_recover_gen_a(args: argparse.Namespace) -> int:
+    """Recover the modified L1 round-key table from captured (seed, key)
+    pairs. Run when verify-gen-a reports ALGORITHM MISMATCH."""
+    try:
+        text = args.pairs.read_text(encoding="utf-8")
+        data = json.loads(text)
+    except OSError as e:
+        print(f"recover-gen-a: cannot read {args.pairs}: {e}", file=sys.stderr)
+        return 1
+    except json.JSONDecodeError as e:
+        print(f"recover-gen-a: invalid JSON in {args.pairs}: {e}",
+              file=sys.stderr)
+        return 1
+
+    raw_pairs = data.get("pairs") if isinstance(data, dict) else None
+    if not raw_pairs:
+        print(f"recover-gen-a: no pairs in {args.pairs}", file=sys.stderr)
+        return 1
+
+    pairs: list[tuple[bytes, bytes]] = []
+    for i, p in enumerate(raw_pairs):
+        try:
+            seed = bytes.fromhex(p["seed"])
+            key = bytes.fromhex(p["key"])
+        except (KeyError, TypeError, ValueError):
+            print(f"  [{i}] malformed pair, skipping", file=sys.stderr)
+            continue
+        if len(seed) != 4 or len(key) != 4:
+            print(f"  [{i}] wrong byte count, skipping", file=sys.stderr)
+            continue
+        pairs.append((seed, key))
+
+    if len(pairs) < args.min_pairs:
+        print(
+            f"recover-gen-a: need at least {args.min_pairs} valid pairs, "
+            f"got {len(pairs)}. Capture more SA exchanges and retry.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"Loaded {len(pairs)} valid (seed, key) pair(s).", file=sys.stderr)
+
+    # Sanity check: are the pairs consistent with stock? If so, the
+    # algorithm isn't altered and recovery is unnecessary.
+    if gen_a_verify_table_against_pairs(GEN_A_RK_L1, pairs):
+        print(
+            "RESULT: ALGORITHM CORRECT - every pair verifies against stock "
+            "RK_L1. No table replacement detected; nothing to recover.",
+            file=sys.stderr,
+        )
+        return 0
+
+    print(
+        f"Stock RK_L1 fails on at least one pair - searching for replacement.",
+        file=sys.stderr,
+    )
+    print(file=sys.stderr)
+
+    # Search loop with periodic progress to stderr.
+    import time
+    start = time.time()
+    last_progress = start
+    examined = 0
+    for label, candidate in gen_a_recovery_candidates(GEN_A_RK_L1):
+        examined += 1
+        if gen_a_verify_table_against_pairs(candidate, pairs):
+            elapsed = time.time() - start
+            print(
+                f"RESULT: RECOVERED after examining {examined:,} candidate(s) "
+                f"in {elapsed:.1f}s.",
+                file=sys.stderr,
+            )
+            print(f"  shape: {label}", file=sys.stderr)
+            print(f"  rk_l1 (16 x u16, big-endian on the wire):", file=sys.stderr)
+            for i in range(0, 16, 4):
+                row = " ".join(f"0x{v:04x}" for v in candidate[i:i + 4])
+                print(f"    [{i:>2}-{i+3:>2}] {row}", file=sys.stderr)
+            # Emit a JSON sidecar the user can re-load / share.
+            if args.output is not None:
+                payload = {
+                    "schema": "subuwutuner.sa_recovery.v1",
+                    "algorithm": "gen_a_ssmcan1",
+                    "level": 1,
+                    "shape": label,
+                    "rk_l1": [f"0x{v:04x}" for v in candidate],
+                    "verified_against_pairs": len(pairs),
+                    "examined_candidates": examined,
+                    "elapsed_seconds": round(elapsed, 2),
+                }
+                args.output.write_text(json.dumps(payload, indent=2) + "\n",
+                                       encoding="utf-8")
+                print(f"  wrote {args.output}", file=sys.stderr)
+            return 0
+        now = time.time()
+        if now - last_progress > 5.0:
+            print(f"  ...examined {examined:,} candidates "
+                  f"({now - start:.0f}s elapsed)",
+                  file=sys.stderr)
+            last_progress = now
+
+    elapsed = time.time() - start
+    print(
+        f"RESULT: NO RECOVERY after examining {examined:,} candidates "
+        f"in {elapsed:.1f}s.",
+        file=sys.stderr,
+    )
+    print(
+        "  Tried known-list + XOR-mask (65k) + single-sub (1M). The vendor "
+        "may have applied a deeper transformation (shape 4/5) or modified "
+        "the S-box (shape D). Capture more pairs (4+ recommended) and "
+        "consider a wider search.",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=__doc__,
@@ -1066,6 +1260,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="pairs.json (from extract_subaru_sa.py)",
     )
     p_vga.set_defaults(func=cmd_verify_gen_a)
+
+    p_rec = sub.add_parser(
+        "recover-gen-a",
+        help=(
+            "search for the replacement L1 round-key table when "
+            "verify-gen-a reports MISMATCH (aftermarket-locked ECU)"
+        ),
+    )
+    p_rec.add_argument(
+        "pairs",
+        type=Path,
+        help="pairs.json (from extract_subaru_sa.py); 4+ pairs recommended",
+    )
+    p_rec.add_argument(
+        "--min-pairs",
+        type=int,
+        default=2,
+        help="minimum (seed, key) pairs required for the search (default 2; "
+             "4 gives a 2^-128 false-positive rate)",
+    )
+    p_rec.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        default=None,
+        help="write a subuwutuner.sa_recovery.v1 JSON sidecar with the "
+             "recovered table (paste back to the maintainer / load into the "
+             "Flasher's set_security_key_fn)",
+    )
+    p_rec.set_defaults(func=cmd_recover_gen_a)
 
     return p
 
