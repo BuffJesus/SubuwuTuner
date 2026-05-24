@@ -1,18 +1,24 @@
-# Handoff — 2026-05-23 end-of-day (sniff mode + SA plug-in landed; awaiting Y-cable for SSMCAN1 derivation)
+# Handoff — 2026-05-23 end-of-day (sniff mode + SA plug-in + rdbi shipped; pushed to origin/main)
 
-**Next action: when the user has the Y-cable, run the SA capture flow** documented in `docs/23-security-access.md`. CLI invocation:
+**Push complete 2026-05-23 ~18:40.** 13 commits landed on `origin/main` (range `0ccf9e0..c5602cb`): the 6 from yesterday's SSM-on-CAN bundle that had been sitting unpushed + 7 from today (transport hardening / SA plug-in / sniff toolchain / icon / handoff / rdbi). Tree clean. https://github.com/BuffJesus/SubuwuTuner
 
-```sh
-subuwutuner-cli sniff --transport obdx --device COM3 \
-    --output capture.log --filter 0x7E0,0x7E8
-# In parallel: 10-15 COBB AP power cycles OR plug/unplug from Y-cable
-# Ctrl+C the sniffer when done
-python tools/extract_subaru_sa.py capture.log --output pairs.json
-```
+**Two next-action paths, parallelizable:**
 
-`pairs.json` is the input to the (yet-unwritten) algorithm-solver — that comes next.
+1. **Pre-Y-cable, anytime the user plugs in**: run `subuwutuner-cli rdbi --transport obdx --device COMx --did 0xF190 --verbose`. Multi-frame ISO-TP RX validation — if the VIN comes back clean, the entire UDS+ISO-TP stack is hardware-validated end-to-end. If garbled, we know precisely what to fix.
 
-## What landed today (uncommitted bundle, 5 logical commits ahead)
+2. **When the Y-cable arrives** (Vgate B015649DHA ordered, ETA ~2 days): SA capture flow per `docs/23-security-access.md`:
+
+   ```sh
+   subuwutuner-cli sniff --transport obdx --device COM3 \
+       --output capture.log --filter 0x7E0,0x7E8
+   # In parallel: 10-15 COBB AP power cycles OR plug/unplug from Y-cable
+   # Ctrl+C the sniffer when done
+   python tools/extract_subaru_sa.py capture.log --output pairs.json
+   ```
+
+   `pairs.json` is the input to the (yet-unwritten) algorithm-solver — that comes next once we have real data to fit against.
+
+## What landed today (7 commits, all pushed)
 
 ### 1. OBDX CAN ID prefix + ISO-TP filter setup (transport bug fix)
 
@@ -68,7 +74,33 @@ User added an AI-generated PNG (cute neon WRX with uwu face + gauge) to the desk
 - `scripts/embed_icon.py` regenerates both from `assets/icon.png` on demand
 - GUI binary went from 14.6 → 14.8 MB (icon overhead)
 
-### 5. HANDOFF refresh (this file)
+### 5. HANDOFF refresh
+
+Previous in-session handoff. Captured the bundle as planned. (This file
+is one more refresh on top of that — see end-of-section commit `a84843f`.)
+
+### 6. rdbi CLI subcommand (post-handoff add)
+
+User asked whether a dump/read attempt before the Y-cable arrives would
+be useful. Highest-value pre-Y-cable test: RDBI for the VIN DID (0xF190)
+— 17 ASCII bytes + 3-byte header = 20 bytes total, exceeds CAN single-
+frame, forces multi-frame ISO-TP RX. That validates the
+`strip_iso_tp` First-Frame path (PCI `0x1XYY` → strip 2) which ships
+but has never been exercised against real ECU + real OBDX firmware.
+
+- `cmd_rdbi` in `src/cli/main.cpp` — ~200 LoC, mirrors `cmd_rom_pull`
+  shape (real-transport only, no trace replay)
+- Args: `--transport`, `--device`, `--dll`, `--did <16-bit hex>`,
+  optional `--output FILE.bin`, `--no-dsc` (default enters extended
+  session), `--verbose` (toggles obdx trace)
+- Output: hex dump + ASCII rendering side-by-side, so VIN-style
+  responses are immediately recognizable while non-printable responses
+  don't trash the terminal
+- Useful-DID inline reference in the help text (0xF190 VIN, 0xF188 cal
+  ID, 0xF195 SW version, etc.)
+- No new tests — thin shim over already-tested UDS RDBI builders
+
+### 7. HANDOFF refresh (this file, post-push)
 
 ## Test state: **919/919 green** (+9 from yesterday's 910)
 
@@ -76,22 +108,33 @@ User added an AI-generated PNG (cute neon WRX with uwu face + gauge) to the desk
 
 ## Binary artifacts (Syncthing-distributed)
 
-- `subuwutuner-gui.exe` — 14.84 MB (icon + sniff + SA wiring)
-- `subuwutuner-cli.exe` — 5.96 MB (new `sniff` subcommand)
+- `subuwutuner-gui.exe` — 14.84 MB (icon + sniff + SA wiring), built 2026-05-23 18:23
+- `subuwutuner-cli.exe` — 5.96 MB (new `sniff` + `rdbi` subcommands), built 2026-05-23 18:37
 
-Both at `D:\Documents\JetBrains\SubaruTuner\build\win-mingw\bin\`, timestamps 17:33 / 18:23 on 2026-05-23.
+Both at `D:\Documents\JetBrains\SubaruTuner\build\win-mingw\bin\`. Syncthing should have propagated to the laptop.
 
-## Commit posture
+## Commit log (pushed, `0ccf9e0..c5602cb`)
 
-Five commits planned, in dependency order:
+In chronological push order — bottom to top is yesterday's bundle, top is today's:
 
-1. `fix(transport): OBDX CAN ID prefix + ISO-TP filter setup` — the morning's transport fix, hardware-validated
-2. `feat(ecu+flash+ui): UDS SecurityAccess plug-in architecture` — SA infrastructure (key fn typedef, stubs, Flasher integration, UI checkbox, tests)
-3. `feat(transport+cli): passive CAN sniffer mode + SA capture toolchain` — listen_only, start_streaming, sniff CLI, extractor, docs
-4. `feat(ui): SubuwuTuner program icon` — assets + Windows .rc + GLFW glue
-5. `docs(handoff): refresh end-of-session state` — this file
+```
+c5602cb feat(cli): rdbi subcommand for ReadDataByIdentifier ground-truth
+a84843f docs(handoff): refresh end-of-session state
+0117495 feat(ui): SA authentication checkbox + program icon
+45cf795 feat(cli+tools+docs): CAN sniff subcommand + SA capture toolchain
+cf878ef feat(ecu+flash): UDS SecurityAccess plug-in architecture
+9730be8 fix(transport+uds): OBDX CAN-ISO15765 hardening for VA WRX hardware
+─── (boundary: yesterday's bundle below) ──────────────────────────────
+20211ae docs(handoff): replace stale uncommitted-bundle prose with commit list
+cf70a5f docs(handoff): refresh for end-of-session state
+85d0fb5 docs: FA20→FA24 swap worked example + IR primitive notes
+668a247 feat(fixtures): demo-pack writable_region + 4 FA24-themed hooks + 4 samples
+d474d1d feat(feature_codegen): sqrt_float IR primitive (SH-2A FSQRT)
+64e5693 feat(defs): validate flags duplicate hook/primitive/writable_region
+19eb16c fix(transport+ecu+flash+log): SSM-on-CAN bare-payload framing
+```
 
-**Push posture**: hold until user runs the Y-cable capture and validates the toolchain. Already committed work from this morning's session (6 commits, `19eb16c` → `cf70a5f`) also still unpushed — push the whole batch together once the SA capture succeeds.
+13 commits total. `origin/main` is now at `c5602cb`. No more pending work waiting to push.
 
 ## Pre-existing untracked / leave-alone
 
@@ -100,15 +143,33 @@ Five commits planned, in dependency order:
 - `fixtures/projects/` (user's GUI-created test project "BigTittyGothGF")
 - `tests/unit/ecu/test_ssm_properties.cpp` (still untracked from yesterday — promote to tracked when the SSM-on-CAN bundle commits land for real)
 
-## Reference: Pre-Y-cable activities the user might want to try
+## Reference: Pre-Y-cable activities the user can run now
 
-Since the Y-cable is in transit (Vgate B015649DHA, ETA ~2 days), the user can run these on the existing OBDX VX (no Y-cable needed) for additional validation:
+The Y-cable is in transit (Vgate B015649DHA, ETA ~2 days). The user can run these on the existing OBDX VX (no Y-cable needed) for additional validation. In suggested priority order:
 
-1. **SA-enabled Read ROM** with Authenticate checkbox ON. Will fail with `NotImplemented` at the key step but the trace shows the actual seed bytes from the ECU (one real data point) AND confirms the new SA plumbing reaches the wire correctly. ~5 min.
+1. **RDBI VIN read** (highest-value) — exercises an untested code path.
 
-2. **RDBI VIN read** — UDS service 0x22 DID 0xF1 0x90. Not gated behind SA, returns 17-byte ASCII VIN which forces multi-frame ISO-TP RX (currently untested on real hardware). If it succeeds we know our PCI strip handles First Frame + Consecutive Frame correctly. If garbled, we have a concrete failure to fix. Would need a small CLI helper (`subuwutuner-cli rdbi --did 0xF190` or similar) since the current GUI Read ROM does RMBA only.
+   ```sh
+   subuwutuner-cli rdbi --transport obdx --device COMx --did 0xF190 --verbose
+   ```
 
-3. **Address-range probing** — `subuwutuner-cli rom-pull --addr 0x080000 --size 0x10 ...` to see if the calibration region is readable without SA. Low probability of success but quick to try.
+   UDS SID 0x22 DID 0xF1 0x90. Not gated behind SA. Returns 17-byte ASCII VIN which forces multi-frame ISO-TP RX (the OBDX transport's First-Frame strip path is shipped but never validated against real hardware). If the VIN comes back clean, our entire UDS+ISO-TP stack is hardware-validated end-to-end. If garbled (extra bytes, `?` characters, wrong length), we have a precise failure mode to fix.
+
+   Quick follow-up: `--did 0xF188` for the calibration ID (smaller response, single-frame — should work even if VIN doesn't). Currently flashed COBB cal ID would come back.
+
+2. **SA-enabled Read ROM** with Authenticate checkbox ON. GUI → Tools → Read ROM, leave Authenticate checked (default ON), Size = 0x100, click Read. Will fail with `NotImplemented` at the key step but the trace shows:
+
+   ```
+   [trace][obdx-tx] 27 01
+   [trace][obdx-rx] 67 01 NN NN NN NN   ← real ECU seed bytes captured
+   [err][read-rom] flash: read_full_rom SecurityAccess key derivation
+                   failed: subaru security key stub — algorithm not
+                   provided. See src/ecu/include/st/ecu/subaru_security.hpp...
+   ```
+
+   Confirms the new SA plumbing reaches the wire correctly AND gives us one real seed value from the ECU on disk (a starting data point even before the Y-cable arrives). ~2 min.
+
+3. **Address-range probing** — `subuwutuner-cli rom-pull --addr 0x080000 --size 0x10 ...` to see if any cal region is readable without SA. Low probability of success but quick to try.
 
 ## Reference: SSMCAN1 algorithm structure (publicly documented)
 
