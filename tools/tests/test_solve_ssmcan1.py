@@ -172,6 +172,43 @@ class TestEmitter(unittest.TestCase):
         self.assertIn("(low << 16) | high", cpp) # final byte swap
 
 
+class TestLinearityCheck(unittest.TestCase):
+    """Diagnostic tests for the GF(2)-linearity check.
+
+    Note: these tests assume the CURRENT encoded `ssmcan1_encrypt` is
+    linear (it is, by inspection — pure XOR + rotate, no S-box indexing).
+    If the algorithm is later refined to add nonlinear elements, the
+    `test_current_algorithm_is_linear` expectation flips to NONLINEAR
+    and the assertion below needs updating along with the module
+    docstring's "EMPIRICAL FINDING" section.
+    """
+
+    def test_current_algorithm_is_linear(self) -> None:
+        tables = solve_ssmcan1.generate_tables(rng_seed=42)
+        result = solve_ssmcan1.check_linearity(tables, num_tests=16, rng_seed=0)
+        self.assertTrue(
+            result.is_linear,
+            msg="current ssmcan1_encrypt is expected to be linear (see module "
+                "docstring); if this assertion now fails, the algorithm has "
+                "been refined — update the docstring's EMPIRICAL FINDING "
+                "section and flip this test's expectation.",
+        )
+        self.assertEqual(len(result.samples), 16)
+        for _, _, _, match in result.samples:
+            self.assertTrue(match)
+
+    def test_constant_is_encrypt_of_zero_seed(self) -> None:
+        tables = solve_ssmcan1.generate_tables(rng_seed=99)
+        result = solve_ssmcan1.check_linearity(tables, num_tests=4, rng_seed=1)
+        expected = solve_ssmcan1.ssmcan1_encrypt(b"\x00\x00\x00\x00", tables)
+        self.assertEqual(result.table_only_constant, expected)
+
+    def test_cli_linearity_check_exits_zero(self) -> None:
+        # Diagnostic always exits 0, regardless of LINEAR/NONLINEAR result.
+        rc = solve_ssmcan1.main(["linearity-check", "--num-tests", "4"])
+        self.assertEqual(rc, 0)
+
+
 @unittest.skipUnless(_z3_available(), "z3-solver not installed; skipping symbolic-solve tests")
 class TestZ3Solver(unittest.TestCase):
     def test_round_trip_recovers_encryption(self) -> None:

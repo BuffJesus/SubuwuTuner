@@ -51,8 +51,38 @@ structure is encoded — it does not validate the structure itself.
 This separation is intentional: get the tooling right first, then
 iterate the structure once real data is available.
 
+EMPIRICAL FINDING (2026-05-23): the algorithm as currently encoded
+is provably GF(2)-linear in (seed, tables) — i.e.,
+`encrypt(s, T) == encrypt(s, 0) XOR encrypt(0, T)` for every seed.
+Verify with:
+
+    python tools/solve_ssmcan1.py linearity-check
+
+Consequence: the 512-bit table space maps to AT MOST 32 bits of
+effective constant offset. ~480 bits of table parameter are
+mathematically invisible — multiple table-sets produce the IDENTICAL
+encryption function across all 2^32 possible seeds. The `solve`
+subcommand will therefore correctly report "ambiguous" on synthetic
+captures from this encoding regardless of how many pairs are
+provided (verified at 200 pairs, rng-seed=1234: still ambiguous;
+recovered tables differ from ground truth in 30/32 IKB bytes and
+32/32 KPT bytes).
+
+Against a real Subaru capture, `solve` will most likely return
+UNSAT — real SSMCAN1 must contain nonlinear elements the current
+encoding lacks. That UNSAT is itself the useful signal: it confirms
+which structural assumption is wrong and tells us to refine.
+
+The most likely missing structural element: `KeyPartsTable` is
+probably INDEXED by state bits (S-box style) rather than XOR'd in
+as a positional constant. S-box indexing makes table content
+observable in the output, which is what lets pair captures pin the
+values. This refinement is gated on real-capture data — guessing
+further without it would compound speculation.
+
 Z3 is required for the actual solve (`pip install z3-solver`). The
-`generate` and `verify` subcommands work without z3.
+`generate`, `verify`, and `linearity-check` subcommands work
+without z3.
 """
 
 from __future__ import annotations
@@ -272,6 +302,59 @@ def verify_pairs(
         elif len(failures) < max_failure_examples:
             failures.append((p.seed, p.key, computed))
     return VerifyReport(total=len(pairs), passed=passed, failed_examples=failures)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Linearity diagnostic
+# ──────────────────────────────────────────────────────────────────────
+
+@dataclass
+class LinearityResult:
+    is_linear: bool
+    table_only_constant: bytes               # encrypt(0, tables)
+    samples: list[tuple[bytes, bytes, bytes, bool]] = field(default_factory=list)
+    # (seed, full_encrypt, predicted_via_linearity, match)
+
+
+def check_linearity(
+    tables: Tables, num_tests: int = 16, rng_seed: int = 0
+) -> LinearityResult:
+    """Empirically test whether ssmcan1_encrypt is GF(2)-linear in
+    (seed, tables): does `encrypt(s, T) == encrypt(s, 0) XOR encrypt(0, T)`
+    hold for every seed?
+
+    A LINEAR result is a structural defect for a seed/key algorithm — it
+    means the 512-bit table space maps onto at most 32 bits of observable
+    signal, so the solver can't recover unique tables from any number of
+    (seed, key) pairs. A NONLINEAR result means table content is
+    observable in the output, which is what the solver needs.
+
+    See module docstring "EMPIRICAL FINDING" for context.
+    """
+    import random
+    rng = random.Random(rng_seed)
+
+    zero_tables = Tables(
+        ikb=bytes(IKB_ENTRIES * IKB_ENTRY_BYTES),
+        kpt=bytes(KPT_ENTRIES * KPT_ENTRY_BYTES),
+    )
+    constant = ssmcan1_encrypt(b"\x00" * SEED_BYTES, tables)
+
+    samples: list[tuple[bytes, bytes, bytes, bool]] = []
+    is_linear = True
+    for _ in range(num_tests):
+        s = bytes(rng.randint(0, 255) for _ in range(SEED_BYTES))
+        full = ssmcan1_encrypt(s, tables)
+        seed_only = ssmcan1_encrypt(s, zero_tables)
+        predicted = bytes(a ^ b for a, b in zip(seed_only, constant))
+        match = full == predicted
+        if not match:
+            is_linear = False
+        samples.append((s, full, predicted, match))
+
+    return LinearityResult(
+        is_linear=is_linear, table_only_constant=constant, samples=samples
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -613,6 +696,68 @@ def cmd_solve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_linearity_check(args: argparse.Namespace) -> int:
+    """Diagnostic: is the encoded algorithm GF(2)-linear in (seed, tables)?
+    See `check_linearity` and the module docstring's "EMPIRICAL FINDING"
+    section for what the answer means."""
+    tables = generate_tables(rng_seed=args.tables_seed)
+    result = check_linearity(
+        tables, num_tests=args.num_tests, rng_seed=args.seed_rng
+    )
+
+    print(
+        f"encrypt(0, T) = {result.table_only_constant.hex().upper()}"
+        f"  (table-only contribution)",
+        file=sys.stderr,
+    )
+    print(
+        "Linearity test: encrypt(s, T) == encrypt(s, 0) XOR encrypt(0, T) ?",
+        file=sys.stderr,
+    )
+    print(file=sys.stderr)
+    for seed, full, predicted, match in result.samples:
+        marker = "OK" if match else "MISMATCH"
+        print(
+            f"  seed={seed.hex().upper()}  full={full.hex().upper()}  "
+            f"pred={predicted.hex().upper()}  {marker}",
+            file=sys.stderr,
+        )
+    print(file=sys.stderr)
+
+    if result.is_linear:
+        print("RESULT: LINEAR - algorithm is GF(2)-linear in (seed, tables).", file=sys.stderr)
+        print(
+            "        Table parameters have at most 32 bits of observable signal",
+            file=sys.stderr,
+        )
+        print(
+            "        regardless of how many (seed, key) pairs are captured.",
+            file=sys.stderr,
+        )
+        print(
+            "        `solve` will report 'ambiguous' on synthetic captures and",
+            file=sys.stderr,
+        )
+        print(
+            "        is likely to return UNSAT on real Subaru data.",
+            file=sys.stderr,
+        )
+    else:
+        print("RESULT: NONLINEAR - table content is observable in the output.", file=sys.stderr)
+        print(
+            "        `solve` can in principle recover unique tables given",
+            file=sys.stderr,
+        )
+        print(
+            "        enough pairs.",
+            file=sys.stderr,
+        )
+
+    # Exit 0 either way — this is a diagnostic, not a pass/fail test.
+    # Both outcomes are informative for the algorithm-refinement loop.
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=__doc__,
@@ -666,6 +811,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="print recovered table hex to stderr",
     )
     p_solve.set_defaults(func=cmd_solve)
+
+    p_lin = sub.add_parser(
+        "linearity-check",
+        help="diagnostic: is the encoded algorithm GF(2)-linear in (seed, tables)?",
+    )
+    p_lin.add_argument(
+        "--num-tests", type=int, default=16,
+        help="number of random test seeds to evaluate (default 16)",
+    )
+    p_lin.add_argument(
+        "--tables-seed", type=int, default=42,
+        help="RNG seed for the test tables (default 42, reproducible)",
+    )
+    p_lin.add_argument(
+        "--seed-rng", type=int, default=0,
+        help="RNG seed for the test seeds (default 0, reproducible)",
+    )
+    p_lin.set_defaults(func=cmd_linearity_check)
 
     return p
 
