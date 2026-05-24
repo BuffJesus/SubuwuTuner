@@ -177,3 +177,61 @@ message(STATUS "  Sanitizers            : ${ST_SANITIZE}")
 message(STATUS "  Install archives      : ${ST_INSTALL_ARCHIVES}")
 message(STATUS "  Install bin dir       : ${ST_INSTALL_BIN_DIR}")
 message(STATUS "")
+
+# ---------------------------------------------------------------------------
+# CPack — packaging configuration
+# ---------------------------------------------------------------------------
+#
+# Produces installable / portable packages from the install tree built by
+# `cmake --install`. Two generators wired by default on Windows:
+#
+#   - NSIS:  click-through .exe installer. Lets the end user pick the
+#            install directory via a graphical wizard. Single-root layout:
+#            everything (binaries + definitions/) goes under one install
+#            root. Per-directory pickers for definitions / ROM dumps are
+#            a Phase 2 enhancement (custom NSIS template + a config file
+#            in %APPDATA%).
+#   - ZIP:   portable zip — no installer, user extracts wherever.
+#
+# Build either with:
+#   cmake --build BUILD --target package    (default: both generators)
+#   cpack -G NSIS  -C Release               (NSIS installer only)
+#   cpack -G ZIP   -C Release               (portable zip only)
+#
+# Output goes to <build>/SubuwuTuner-<version>-<gen>.<ext>.
+
+set(CPACK_PACKAGE_NAME "SubuwuTuner")
+set(CPACK_PACKAGE_VENDOR "BuffJesus")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "ECU calibration suite for Subaru WRX (VA/VB)")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "SubuwuTuner")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/BuffJesus/SubuwuTuner")
+
+# CMake's CPack picks the generators automatically; only NSIS needs
+# Windows-specific tweaks. The NSIS section gives the installer a sensible
+# Start Menu entry, allows uninstaller registration, and asks the user
+# whether to add shortcuts.
+if(WIN32)
+    set(CPACK_GENERATOR "NSIS;ZIP")
+    set(CPACK_NSIS_PACKAGE_NAME "SubuwuTuner ${PROJECT_VERSION}")
+    set(CPACK_NSIS_DISPLAY_NAME "SubuwuTuner ${PROJECT_VERSION}")
+    set(CPACK_NSIS_HELP_LINK "${CPACK_PACKAGE_HOMEPAGE_URL}")
+    set(CPACK_NSIS_URL_INFO_ABOUT "${CPACK_PACKAGE_HOMEPAGE_URL}")
+    set(CPACK_NSIS_CONTACT "noreply@github.com")
+    set(CPACK_NSIS_MODIFY_PATH OFF)
+    set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+    # Lets the wizard ask the user whether to create desktop / start-menu
+    # shortcuts for the GUI binary. CLI gets neither — terminal-only tool.
+    set(CPACK_NSIS_CREATE_ICONS_EXTRA
+        "CreateShortcut '$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\SubuwuTuner.lnk' \
+'$INSTDIR\\\\subuwutuner-gui.exe'")
+    set(CPACK_NSIS_DELETE_ICONS_EXTRA
+        "Delete '$SMPROGRAMS\\\\$START_MENU\\\\SubuwuTuner.lnk'")
+elseif(APPLE)
+    set(CPACK_GENERATOR "TGZ;DragNDrop")
+else()
+    set(CPACK_GENERATOR "TGZ;STGZ")
+endif()
+
+include(CPack)
