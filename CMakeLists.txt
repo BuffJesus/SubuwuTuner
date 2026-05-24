@@ -53,6 +53,7 @@ include(Sanitizers)
 # Subdirectories
 # ---------------------------------------------------------------------------
 add_subdirectory(src/core)
+add_subdirectory(src/config)
 add_subdirectory(src/rom)
 add_subdirectory(src/defs)
 add_subdirectory(src/edit)

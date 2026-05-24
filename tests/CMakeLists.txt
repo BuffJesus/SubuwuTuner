@@ -17,6 +17,7 @@ add_executable(st_unit_tests
     unit/core/test_error.cpp
     unit/core/test_version.cpp
     unit/core/test_crc32.cpp
+    unit/config/test_config.cpp
     unit/rom/test_rom.cpp
     unit/defs/test_defs.cpp
     unit/defs/test_pack_registry.cpp
@@ -63,6 +64,7 @@ add_executable(st_unit_tests
 target_link_libraries(st_unit_tests
     PRIVATE
         st::core
+        st::config
         st::rom
         st::defs
         st::edit
