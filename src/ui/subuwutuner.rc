@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The SubuwuTuner Authors
+//
+// Windows resource script for subuwutuner-gui. Embeds icon.ico into the
+// EXE so Windows Explorer, taskbar, Alt+Tab, and start-menu shortcuts
+// all show the SubuwuTuner icon. The runtime GLFW window title-bar icon
+// is set separately in main.cpp via glfwSetWindowIcon — both paths
+// load from the same source PNG/ICO.
+//
+// Wired in via CMake's enable_language(RC) + ${PROJECT_SOURCE_DIR}/src/
+// ui/subuwutuner.rc on the GUI target. MinGW's windres takes the .rc
+// and produces a COFF object that links into the EXE.
+
+#include <windows.h>
+
+// The first icon resource (lowest ID) is what Explorer picks up as the
+// EXE's icon. Using ID 1 (IDI_APPLICATION by Windows convention) means
+// the icon survives shortcut creation, ShellExecute, etc.
+1 ICON "../../assets/icon.ico"

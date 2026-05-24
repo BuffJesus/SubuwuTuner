@@ -25,6 +25,8 @@
 #include "st/transport/obdx_transport.hpp"
 #include "st/transport/uds_trace.hpp"
 
+#include "icon_data.hpp"
+
 // ImGui + backends.
 #include <GLFW/glfw3.h>
 
@@ -853,6 +855,14 @@ struct AppState {
     // stderr. Default on while we're still bringing up real-hardware
     // I/O; users can flip it off when reads are reliably succeeding.
     bool read_rom_verbose{true};
+    // When set, the worker performs UDS SecurityAccess (request seed,
+    // compute key via Flasher::security_key_fn_, send key) BEFORE the
+    // RMBA loop. Real Subaru ECUs reject RMBA with NRC 0x33
+    // (securityAccessDenied) until SA succeeds. Defaults ON for real-
+    // hardware UDS reads; the default key function is the stub which
+    // returns NotImplemented, so the user has to either plug in a key
+    // function or leave this off (and accept that RMBA will fail).
+    bool read_rom_authenticate{true};
     // Worker state. The atomics live in shared_ptr storage so the worker
     // can outlive a destruct of AppState without crashing (defensive — in
     // practice we always join before tearing down).
@@ -3650,15 +3660,28 @@ void render_read_rom_modal(AppState &state) {
         ImGui::InputText("Base address (hex)", state.read_rom_base_addr_hex,
                          sizeof state.read_rom_base_addr_hex);
         ImGui::InputText("Size (hex)", state.read_rom_size_hex, sizeof state.read_rom_size_hex);
-        ImGui::Combo("Protocol", &state.read_rom_protocol, "SSM (VA WRX)\0UDS (VB WRX)\0\0");
+        ImGui::Combo("Protocol", &state.read_rom_protocol,
+                     "SSM2 (pre-2016 K-Line + early CAN)\0"
+                     "UDS / SSM4 (2016+ WRX, FA20DIT, FA24)\0\0");
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Wire-level protocol used to talk to the ECU.\n"
-                              "SSM: Subaru Select Monitor — A8 ReadByAddress.\n"
-                              "     Every CAN-era VA WRX still uses this.\n"
-                              "UDS: ISO 14229 — SID 0x23 ReadMemoryByAddress.\n"
-                              "     VB WRX (2022+) and newer Subarus.\n"
-                              "Wrong choice = silent timeout (ECU drops the\n"
-                              "unknown SID without responding).");
+            ImGui::SetTooltip(
+                "Wire-level protocol used to talk to the ECU.\n"
+                "\n"
+                "SSM2: Subaru Select Monitor 2 — A8 ReadByAddress.\n"
+                "  Used by older EJ Subarus on K-Line and the early\n"
+                "  CAN-era cars (≤ 2015 model year). Maps to the\n"
+                "  dealer's SSMIII software in Subaru parlance.\n"
+                "\n"
+                "UDS / SSM4: ISO 14229 — SID 0x23 ReadMemoryByAddress.\n"
+                "  Used by 2016+ Subarus (VA WRX 2016-2021, VB WRX\n"
+                "  2022+, FA20DIT, FA24, Hitachi-built ECUs). Maps\n"
+                "  to the dealer's SSM4 software, which is documented\n"
+                "  as 'Generic OBDII of the Subaru Select Monitor 4'\n"
+                "  in Subaru's own technician reference.\n"
+                "\n"
+                "Wrong choice = silent timeout (ECU drops the unknown\n"
+                "SID without responding). For a 2015 VA WRX, try both:\n"
+                "Subaru transitioned dealer software at MY 2016.");
         }
         ImGui::InputInt("Max chunk size (bytes)", &state.read_rom_max_chunk, 16, 64);
         if (state.read_rom_max_chunk < 16)
@@ -3679,6 +3702,23 @@ void render_read_rom_modal(AppState &state) {
                               "Useful while debugging silent timeouts — you can\n"
                               "see whether bytes are leaving the adapter and\n"
                               "whether the ECU is responding at all.");
+        }
+        ImGui::Checkbox("Authenticate (UDS SecurityAccess)", &state.read_rom_authenticate);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "When on, performs UDS SID 0x27 seed/key exchange before\n"
+                "the read loop. Real Subaru ECUs reject ReadMemoryByAddress\n"
+                "with NRC 0x33 (securityAccessDenied) until SA succeeds.\n"
+                "\n"
+                "The key algorithm itself is a plug-in (see\n"
+                "src/ecu/include/st/ecu/security_key.hpp for the rationale).\n"
+                "The shipped default is a stub that returns NotImplemented,\n"
+                "so without a custom key function plugged in this will\n"
+                "fail with a clear NotImplemented error rather than a\n"
+                "bare NRC 0x33.\n"
+                "\n"
+                "SSM protocol path does not consult this checkbox — SSM\n"
+                "does not gate ReadByAddress behind seed/key.");
         }
 
         // Pre-run errors (typically a parse failure from a previous click).
@@ -3736,13 +3776,15 @@ void render_read_rom_modal(AppState &state) {
                 int const max_chunk = state.read_rom_max_chunk;
                 int const protocol = state.read_rom_protocol;
                 bool const verbose = state.read_rom_verbose;
+                bool const authenticate = state.read_rom_authenticate;
                 auto bytes_done_sp = state.read_rom_bytes_done;
                 auto total_sp = state.read_rom_total_bytes;
                 auto cancel_sp = state.read_rom_cancel;
 
                 state.read_rom_worker = std::thread([st_ptr, spec, trace_mode, trace_path_str,
                                                      base_addr, size, max_chunk, protocol, verbose,
-                                                     bytes_done_sp, total_sp, cancel_sp]() mutable {
+                                                     authenticate, bytes_done_sp, total_sp,
+                                                     cancel_sp]() mutable {
                     // Owning storage. Trace-mode keeps a stack MockTransport;
                     // real-mode owns the unique_ptr from the factory.
                     st::transport::MockTransport mock;
@@ -3837,7 +3879,9 @@ void render_read_rom_modal(AppState &state) {
                                       : flasher.read_full_rom(
                                             base_addr, size, static_cast<std::uint32_t>(max_chunk),
                                             std::chrono::milliseconds{1500}, progress_cb,
-                                            cancel_sp.get());
+                                            cancel_sp.get(),
+                                            /*enter_diagnostic_session=*/!trace_mode,
+                                            /*authenticate=*/authenticate && !trace_mode);
                     if (!result.has_value()) {
                         if (result.error().code() == st::ErrorCode::Cancelled) {
                             if (verbose) {
@@ -8940,6 +8984,20 @@ int main(int argc, char *argv[]) {
     }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
+
+    // Set the window title-bar icon from the compiled-in RGBA blob
+    // (icon_data.hpp, regenerated by scripts/embed_icon.py from
+    // assets/icon.png). GLFW takes ownership of nothing — pixels stay
+    // in our static .rodata segment. The Windows Explorer / taskbar
+    // EXE icon is set separately via subuwutuner.rc + windres in
+    // src/ui/CMakeLists.txt; both originate from the same PNG.
+    {
+        GLFWimage icon_image{};
+        icon_image.width = st::ui::icon::kWidth;
+        icon_image.height = st::ui::icon::kHeight;
+        icon_image.pixels = const_cast<unsigned char *>(st::ui::icon::kRgba);
+        glfwSetWindowIcon(window, 1, &icon_image);
+    }
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();

@@ -89,8 +89,21 @@ FetchContent_MakeAvailable(nfd)
 
 find_package(OpenGL REQUIRED)
 
+# Windows resource script — embeds assets/icon.ico into the EXE so
+# Explorer/taskbar/Alt-Tab pick up the SubuwuTuner icon. The runtime
+# GLFW window-title-bar icon is set separately in main.cpp via
+# glfwSetWindowIcon (loads the same icon.png at startup). On non-Windows
+# the .rc is silently skipped — Linux/macOS use the runtime path only.
+if (WIN32)
+    enable_language(RC)
+    set(_subuwutuner_resources ${CMAKE_CURRENT_SOURCE_DIR}/subuwutuner.rc)
+else()
+    set(_subuwutuner_resources "")
+endif()
+
 add_executable(subuwutuner-gui
     src/main.cpp
+    ${_subuwutuner_resources}
 )
 
 target_link_libraries(subuwutuner-gui
