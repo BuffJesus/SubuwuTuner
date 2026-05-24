@@ -1,6 +1,6 @@
 # Handoff — 2026-05-23 end-of-day (sniff mode + SA plug-in + rdbi shipped; pushed to origin/main)
 
-**Push complete 2026-05-23 ~18:40 + docs follow-up ~20:00.** 16 commits landed on `origin/main` (range `0ccf9e0..b1bbd8e`): the 6 from yesterday's SSM-on-CAN bundle that had been sitting unpushed + 7 from today's transport hardening / SA plug-in / sniff toolchain / icon / handoff / rdbi cycle + 3 evening-docs commits (sniff-workflows recipe doc + tuning-coach section + envelope caveat). Tree clean. https://github.com/BuffJesus/SubuwuTuner
+**Pushes today: ~18:40 SA/sniff/rdbi cycle + ~20:00 docs follow-up + ~21:30 solver scaffold.** 19 commits landed on `origin/main` (range `0ccf9e0..ae6cf7d`): the 6 from yesterday's SSM-on-CAN bundle that had been sitting unpushed + 7 from today's transport hardening / SA plug-in / sniff toolchain / icon / handoff / rdbi cycle + 3 evening-docs commits (sniff-workflows recipe doc + tuning-coach section + envelope caveat) + 1 handoff refresh + 2 late-evening commits scaffolding `tools/solve_ssmcan1.py` (algorithm + Z3 solver + C++ emitter + linearity-check diagnostic). Tree clean. https://github.com/BuffJesus/SubuwuTuner
 
 **Two next-action paths, parallelizable:**
 
@@ -16,7 +16,7 @@
    python tools/extract_subaru_sa.py capture.log --output pairs.json
    ```
 
-   `pairs.json` is the input to the (yet-unwritten) algorithm-solver — that comes next once we have real data to fit against.
+   `pairs.json` feeds straight into `python tools/solve_ssmcan1.py solve pairs.json --output ssmcan1.cpp` (scaffold shipped tonight, see new "## Continued evening" section below). Most likely tomorrow's first solve returns UNSAT — the encoded algorithm structure is provably GF(2)-linear, which the empirical finding under `## Continued evening` argues real SSMCAN1 cannot be. UNSAT is itself the useful signal: it tells us which structural assumption to refine (probable culprit: KeyPartsTable indexed by state bits S-box-style, not XOR'd in positionally).
 
 ## What landed today (7 commits, all pushed)
 
@@ -102,9 +102,38 @@ but has never been exercised against real ECU + real OBDX firmware.
 
 ### 7. HANDOFF refresh (this file, post-push)
 
-## Test state: **919/919 green** (+9 from yesterday's 910)
+## Continued evening: SSMCAN1 solver scaffold + structural-degeneracy finding (3 commits)
 
-+5 sniff transport tests, +4 SA preamble tests. All open-handshake fixtures updated to include the new CAN filter ACK between SetProtocol and EnableNetwork.
+Pre-Y-cable scaffolding so tomorrow's capture is "feed real `pairs.json` in, get C++ source out" rather than "start writing the solver from scratch." Three commits.
+
+### 8. HANDOFF mid-evening fix (commit `71ecb8a`)
+
+Surgical patches to this file for the docs-push delta. No code changes.
+
+### 9. `tools/solve_ssmcan1.py` scaffold (commit `0fd6d21`)
+
+Clean-room implementation of the algorithm (16-round XOR cipher per public structural docs), synthetic generator + verifier, Z3-symbolic solver with ambiguity detection, C++ emitter producing a fork-namespaced drop-in source file matching `st::ecu::SecurityKeyFn`. Three CLI subcommands: `generate` / `verify` / `solve`. Z3 is lazy-imported (only required by `solve`); `generate` and `verify` work standalone. Tests in `tools/tests/test_solve_ssmcan1.py` — establishes that directory as the home for non-defgen Python tests. Round-trip on synthetic data confirmed (Z3 recovers a 24-pair fixture's encryption in <1s).
+
+The clean-room boundary held: algorithm encoded from a paragraph of public structural prose, no GPL source consulted. Emitted C++ leaves SPDX as `<fork-author-choose>` — correct, since the fork's license choice depends on what other sources they integrate.
+
+### 10. Linearity diagnostic + EMPIRICAL FINDING docstring (commit `ae6cf7d`)
+
+200-pair smoke test on commit `0fd6d21` exposed severe structural degeneracy — recovered tables differ from ground truth in 30/32 IKB bytes and 32/32 KPT bytes despite the solver self-verifying against all 200 captured pairs. Diagnosed: `ssmcan1_encrypt` as encoded is provably GF(2)-linear in (seed, tables), confirmed empirically via `encrypt(s, T) == encrypt(s, 0) XOR encrypt(0, T)` holding for every test seed.
+
+Consequence: the 512-bit table space maps to AT MOST 32 bits of effective constant. ~480 bits are mathematically invisible — multiple table-sets produce the identical encryption function across all 2^32 seeds. No number of pairs can fix this; it's structural.
+
+Added:
+- `EMPIRICAL FINDING (2026-05-23)` section in the script docstring documenting the linearity result, the 200-pair numbers, and the S-box-indexing hypothesis for refinement
+- `check_linearity()` + `LinearityResult` dataclass (reusable API)
+- `linearity-check` CLI subcommand (diagnostic, always exits 0)
+- 3 tests in `TestLinearityCheck` with an explicit expectation-reversal note for when the algorithm is eventually refined to be nonlinear
+- ASCII hyphens in the printed RESULT (em-dashes mangle under Windows cp1252)
+
+**What this means for tomorrow's capture:** with high probability the real-data `solve` returns UNSAT against the current encoded structure. Don't read that as "the tooling is broken"; read it as "the encoded structure is wrong, refine it." The most likely refinement is adding S-box-style table indexing (where state bits select which table entry gets XOR'd, making table content observable in the output). That refinement is gated on real data — guessing further from prose alone would compound speculation.
+
+## Test state: **919/919 C++ green** + **16/16 Python green** (`tools/tests/`)
+
+C++ side: +5 sniff transport tests, +4 SA preamble tests, all open-handshake fixtures updated for the new CAN filter ACK between SetProtocol and EnableNetwork. Count unchanged since `0fd6d21`/`ae6cf7d` (those are Python-only). Python side: 16 new tests under `tools/tests/test_solve_ssmcan1.py` covering algorithm determinism, generator reproducibility, verifier pass/fail, pairs-JSON round-trip, C++ emitter structure, Z3 round-trip (skipped without z3-solver), Z3 ambiguity detection, and the new linearity check. Run with `python -m unittest discover -s tools/tests`.
 
 ## Binary artifacts (Syncthing-distributed)
 
@@ -113,11 +142,15 @@ but has never been exercised against real ECU + real OBDX firmware.
 
 Both at `D:\Documents\JetBrains\SubaruTuner\build\win-mingw\bin\`. Syncthing should have propagated to the laptop.
 
-## Commit log (pushed, `0ccf9e0..b1bbd8e`)
+## Commit log (pushed, `0ccf9e0..ae6cf7d`)
 
-In chronological push order — bottom to top is yesterday's bundle, top is tonight's docs follow-up:
+In chronological push order — bottom to top is yesterday's bundle, top is tonight's solver scaffold:
 
 ```
+ae6cf7d feat(tools): linearity-check subcommand + EMPIRICAL FINDING docstring
+0fd6d21 feat(tools): SSMCAN1 solver scaffold + synthetic round-trip harness
+71ecb8a docs(handoff): note evening docs push + Y-cable arrival date
+─── (boundary: ~21:30 solver push above, ~20:00 docs push below) ────────
 b1bbd8e docs(ai): goal-conditioned tuning coach as v2.1 composite
 3e77b20 docs(sniff): clarify format-byte envelope caveat for sniff-during-flash
 d192f4c docs(sniff): catalog non-SA Y-cable workflows
@@ -138,7 +171,7 @@ d474d1d feat(feature_codegen): sqrt_float IR primitive (SH-2A FSQRT)
 19eb16c fix(transport+ecu+flash+log): SSM-on-CAN bare-payload framing
 ```
 
-16 commits total. `origin/main` is now at `b1bbd8e`. No more pending work waiting to push.
+19 commits total. `origin/main` is now at `ae6cf7d`. No more pending work waiting to push.
 
 ## Pre-existing untracked / leave-alone
 
@@ -184,7 +217,7 @@ Per `fenugrec/nisprog/SubaruSIDs.txt` (GPL-3 — read for facts, don't lift code
 - 3-bit barrel-roll right per round
 - Final top/bottom byte swap on the 4-byte output
 
-With these 64 bytes + the operation sequence, any seed maps deterministically to its key. A future `tools/solve_ssmcan1.py` can derive the table values from ~10 captured (seed, key) pairs via brute-force / constraint solving (search space narrows dramatically per pair).
+`tools/solve_ssmcan1.py` (commit `0fd6d21`) encodes one plausible per-round operation order matching this structural description. The script's `EMPIRICAL FINDING` docstring section (commit `ae6cf7d`) documents the catch: the encoded operation order is GF(2)-linear, so as encoded, ~480 of the 512 table bits are mathematically invisible. The script's `linearity-check` subcommand is the diagnostic. Tomorrow's first real-data `solve` against this encoding most likely returns UNSAT, which signals the structure needs refinement — the leading hypothesis is S-box-style indexing of `KeyPartsTable` by state bits rather than positional XOR. See the script's docstring for the full reasoning. Once the algorithm structure is refined to be nonlinear, 16+ pairs should over-determine the 512-bit table space; until then, no number of pairs will recover unique tables.
 
 ---
 
@@ -234,8 +267,10 @@ Installed 2026-05-22. Two send-only folders mirror desktop → laptop. Replaces 
 
 ## Pure-software follow-ups (not Y-cable-blocking, lower priority than the SA derivation)
 
-1. **`tools/solve_ssmcan1.py`** — algorithm-solver. Takes `pairs.json` from the extractor + the publicly-documented algorithm structure; outputs the 64 bytes of table values. Write against real data once user has a capture.
-2. **`subuwutuner-cli rdbi --did <hex>`** — small CLI helper for reading well-known UDS DIDs (VIN, cal ID, SW version). Most useful as the multi-frame ISO-TP RX validation path that doesn't require SA. Would surface ISO-TP PCI strip bugs (if any) without needing a successful flash unlock.
+1. ~~**`tools/solve_ssmcan1.py`** — algorithm-solver.~~ **Done** (commit `0fd6d21`); scaffold encoded one plausible structure but the encoding is GF(2)-linear, so post-capture refinement is needed — see commit `ae6cf7d`'s EMPIRICAL FINDING. Algorithm-structure refinement is now the gated item; wait for real data.
+2. ~~**`subuwutuner-cli rdbi --did <hex>`**.~~ **Done** (commit `c5602cb`).
 3. **CY1 AES implementation** — `jglim/UnlockECU/SubaruSecurityAccess2018CY1.cs` is MIT-licensed, can be re-implemented in `subaru_security.cpp` without contamination. Targets 2018+ Subarus, not the dev's 2017 — defer until Path B for VB packs.
-4. **Ship blocker #10**: CI performance gate.
-5. **Ship blocker #7**: Frozen `defgen` binary.
+4. **Three missing extractors from `docs/24`** — `tools/extract_uds_transfer.py` (sniff-during-flash payload recovery), `tools/extract_rmba_polls.py` (datalogger RAM-address discovery), `tools/decode_uds_capture.py` (UDS timeline + anomaly highlighter). All marked TODO; ~2–4 hr each. Lower urgency than solver-refinement since they support Workflows 1/2/3 in `docs/24`, not the immediate ROM-dump path.
+5. **NRC 0x36 (exceededNumberOfAttempts) error message + test** — if user accidentally triggers the 3-bad-key lockout, the message should clearly say "wait 10 min or power-cycle ignition" rather than propagating the bare NRC. Small (~30 min); pre-empts a real "wtf is happening" moment tomorrow.
+6. **Ship blocker #10**: CI performance gate.
+7. **Ship blocker #7**: Frozen `defgen` binary.
