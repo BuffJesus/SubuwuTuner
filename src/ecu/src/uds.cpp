@@ -42,6 +42,50 @@ std::string hex_byte(std::uint8_t b) {
     return ok();
 }
 
+// SA-aware variant of reject_if_negative. Same shape, but for the four NRCs
+// that show up regularly in seed/key flows it appends a human-readable name
+// plus (where actionable) recovery guidance. The bare NRC byte alone is
+// hard to interpret in the heat of a stuck SA session; tagging the message
+// with "exceededNumberOfAttempts" + "power-cycle the ECU" turns a "wtf is
+// happening" moment into a directly actionable one.
+[[nodiscard]] Status reject_if_sa_negative(std::span<std::uint8_t const> resp) {
+    if (!(resp.size() >= 3 && resp[0] == kNegativeResponse)) {
+        return ok();
+    }
+    if (resp[1] != kSidSecurityAccess) {
+        return failure(ErrorCode::ParseError,
+                       "UDS negative response for wrong SID: " + hex_byte(resp[1]));
+    }
+    auto const nrc = resp[2];
+    std::string msg = "UDS NRC=" + hex_byte(nrc);
+    switch (nrc) {
+        case kNrcSecurityAccessDenied:
+            msg += " (securityAccessDenied) - this SA level is not permitted "
+                   "for the current session / target operation";
+            break;
+        case kNrcInvalidKey:
+            msg += " (invalidKey) - the seed/key derivation produced a key the "
+                   "ECU rejected. After ~3 total consecutive invalidKey responses "
+                   "(per ISO 14229 §10.4.2.3) the ECU returns exceededNumberOfAttempts "
+                   "(NRC 0x36) and locks SA for ~10 minutes; verify the key function "
+                   "before retrying.";
+            break;
+        case kNrcExceededNumberOfAttempts:
+            msg += " (exceededNumberOfAttempts) - ECU has locked SecurityAccess "
+                   "after too many bad-key attempts. To reset: power-cycle the "
+                   "ECU (ignition off, wait 10s, ignition on) OR wait ~10 minutes "
+                   "for automatic unlock.";
+            break;
+        case kNrcRequiredTimeDelayNotExpired:
+            msg += " (requiredTimeDelayNotExpired) - wait briefly (~10s) before "
+                   "retrying SA; the ECU is in a post-failure cooldown.";
+            break;
+        default:
+            break;
+    }
+    return failure(ErrorCode::EcuRejected, std::move(msg));
+}
+
 void append_be16(std::vector<std::uint8_t> &out, std::uint16_t v) {
     out.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFFU));
     out.push_back(static_cast<std::uint8_t>(v & 0xFFU));
@@ -129,7 +173,7 @@ std::vector<std::uint8_t> build_security_access_request_seed(std::uint8_t sub_fu
 
 Result<std::vector<std::uint8_t>> parse_security_access_seed(std::span<std::uint8_t const> resp,
                                                              std::uint8_t expected_sub_function) {
-    if (auto r = reject_if_negative(resp, kSidSecurityAccess); !r.has_value()) {
+    if (auto r = reject_if_sa_negative(resp); !r.has_value()) {
         return failure(r.error());
     }
     // Positive response: [67] [sub_function] [seed...]
@@ -156,7 +200,7 @@ std::vector<std::uint8_t> build_security_access_send_key(std::uint8_t sub_functi
 
 Status parse_security_access_key_ack(std::span<std::uint8_t const> resp,
                                      std::uint8_t expected_sub_function) {
-    if (auto r = reject_if_negative(resp, kSidSecurityAccess); !r.has_value()) {
+    if (auto r = reject_if_sa_negative(resp); !r.has_value()) {
         return failure(r.error());
     }
     if (resp.size() < 2) {

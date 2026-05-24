@@ -110,6 +110,48 @@ TEST_CASE("parse_security_access_key_ack rejects invalidKey NRC", "[uds][framing
     auto const r = uds::parse_security_access_key_ack(resp, 0x02);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+    // Bare NRC byte is too cryptic — the message should name the NRC and
+    // warn about the lockout that follows three more attempts.
+    std::string const msg{r.error().message()};
+    REQUIRE(msg.find("0x35") != std::string::npos);
+    REQUIRE(msg.find("invalidKey") != std::string::npos);
+    REQUIRE(msg.find("exceededNumberOfAttempts") != std::string::npos);
+}
+
+TEST_CASE("parse_security_access_key_ack on exceededNumberOfAttempts NRC includes "
+          "power-cycle recovery guidance",
+          "[uds][framing][sa][error]") {
+    std::vector<std::uint8_t> const resp{0x7F, 0x27, 0x36}; // exceededNumberOfAttempts
+    auto const r = uds::parse_security_access_key_ack(resp, 0x02);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+    std::string const msg{r.error().message()};
+    REQUIRE(msg.find("0x36") != std::string::npos);
+    REQUIRE(msg.find("exceededNumberOfAttempts") != std::string::npos);
+    // Must be actionable, not just descriptive.
+    REQUIRE(msg.find("power-cycle") != std::string::npos);
+    REQUIRE(msg.find("10 minutes") != std::string::npos);
+}
+
+TEST_CASE("parse_security_access_seed on securityAccessDenied NRC names the NRC",
+          "[uds][framing][sa][error]") {
+    std::vector<std::uint8_t> const resp{0x7F, 0x27, 0x33}; // securityAccessDenied
+    auto const r = uds::parse_security_access_seed(resp, 0x01);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+    std::string const msg{r.error().message()};
+    REQUIRE(msg.find("securityAccessDenied") != std::string::npos);
+}
+
+TEST_CASE("parse_security_access_key_ack on requiredTimeDelayNotExpired NRC names the NRC",
+          "[uds][framing][sa][error]") {
+    std::vector<std::uint8_t> const resp{0x7F, 0x27, 0x37}; // requiredTimeDelayNotExpired
+    auto const r = uds::parse_security_access_key_ack(resp, 0x02);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+    std::string const msg{r.error().message()};
+    REQUIRE(msg.find("requiredTimeDelayNotExpired") != std::string::npos);
+    REQUIRE(msg.find("~10s") != std::string::npos);
 }
 
 // ---- UdsClient through MockTransport -----------------------------------

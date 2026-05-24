@@ -260,7 +260,41 @@ TEST_CASE("Flasher::read_full_rom propagates ECU NRC 0x35 invalidKey",
                         /*enter_diagnostic_session=*/false, /*authenticate=*/true);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
-    REQUIRE(std::string{r.error().message()}.find("sendKey") != std::string::npos);
+    std::string const msg{r.error().message()};
+    REQUIRE(msg.find("sendKey") != std::string::npos);
+    REQUIRE(msg.find("invalidKey") != std::string::npos);
+}
+
+TEST_CASE("Flasher::read_full_rom surfaces NRC 0x36 with power-cycle recovery guidance",
+          "[flash][read][sa][error]") {
+    // exceededNumberOfAttempts: the ECU has locked SA after too many bad
+    // keys. The bare NRC byte is opaque; the SA preamble must propagate
+    // a message that tells the user how to recover (power-cycle OR wait
+    // ~10 min) so they aren't left guessing.
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    expect(t, uds::build_security_access_request_seed(0x01),
+           {0x67, 0x01, 0xDE, 0xAD, 0xBE, 0xEF});
+    std::vector<std::uint8_t> const zero_key{0x00, 0x00, 0x00, 0x00};
+    expect(t, uds::build_security_access_send_key(0x02, zero_key),
+           {0x7F, 0x27, uds::kNrcExceededNumberOfAttempts});
+
+    flash::Flasher f{t};
+    f.set_security_key_fn(
+        [](std::span<std::uint8_t const>) -> st::Result<std::vector<std::uint8_t>> {
+            return std::vector<std::uint8_t>{0x00, 0x00, 0x00, 0x00};
+        });
+    auto const r =
+        f.read_full_rom(0x1000, 8, /*max_chunk=*/8, std::chrono::milliseconds{1000},
+                        /*progress=*/nullptr, /*cancel=*/nullptr,
+                        /*enter_diagnostic_session=*/false, /*authenticate=*/true);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+    std::string const msg{r.error().message()};
+    REQUIRE(msg.find("sendKey") != std::string::npos);
+    REQUIRE(msg.find("exceededNumberOfAttempts") != std::string::npos);
+    REQUIRE(msg.find("power-cycle") != std::string::npos);
+    REQUIRE(msg.find("10 minutes") != std::string::npos);
 }
 
 TEST_CASE("Flasher::read_full_rom skips SA preamble when authenticate=false (default)",
