@@ -81,6 +81,89 @@ When the user asks "why does it think vacuum leak?", `st::ai::Explain::why(diagn
 
 Why this separation matters: the classifier is testable in CI without a model loaded. The LLM is replaceable (Ollama / OpenAI / Anthropic / future). Their failure modes are independent.
 
+## Composite: goal-conditioned tuning coach (v2.1+)
+
+Tiers 1–3 are point features ("here's what your log says"). A natural composite layers them into a multi-step guided workflow: the user states their tuning goals up front, the coach walks them through a step-by-step plan, evaluates each step's log before suggesting the next, and proposes specific edits with rationale at every gate. **This is what most users mean by "AI tuning"** when they ask — and it can be built safely from the existing tier substrate without slipping into the auto-tune / auto-flash red lines.
+
+The coach is not a new tier; it's a goal-conditioned wrapper around Tiers 1+2+3 (with Tier 4 optional for advanced "add a feature" steps once that tier lands).
+
+### Phases
+
+1. **Goal elicitation** — structured intake form: target peak power, fuel grade, hardware modifications, intended use, risk tolerance, jurisdiction profile. Saved to `[ai.goals]` in `project.toml`. The coach refuses to plan against absent fields — no implicit defaults for "what fuel".
+2. **Gap analysis** — deterministic checks against the goals before any tuning begins: stock-injector saturation against target power, fuel-system flow headroom, fuel-grade vs. knock-margin envelope, hardware mismatches (e.g., a Stage-3 boost target on a Stage-1 intake). Rules decide; the LLM narrates the result. Blockers are surfaced as "fix this before continuing" rather than auto-relaxed.
+3. **Playbook generation** — an ordered list of tuning steps with explicit success criteria per step. Example for a +40 hp / 93-octane / Stage-2-hardware project: (1) baseline WOT log, (2) MAF scaling pull, (3) knock-margin sweep at high load, (4) boost target stairstep, (5) wastegate-duty re-trim, (6) final verification pull. User reviews the playbook and edits / reorders / skips steps before starting — saved to `<project>.stune/ai/playbook-*.toml`.
+4. **Per-step interpretation loop** — user runs a step, uploads the resulting log, the coach evaluates the log against that step's success criteria via Tier 1, narrates findings via Tier 2, suggests specific cell edits with rationale, and the user reviews + applies each edit through the existing edit dialog (which records to `st::edit::History` like any other edit). The coach advances to the next step only when the user marks the current step's criteria as met.
+
+### What the coach is *not*
+
+- **Not auto-applying edits.** The coach proposes; the user clicks Apply through the same dialog as any manual edit. `st::policy` engine-safety gates check coach-proposed edits identically to manual ones — no "AI override" channel.
+- **Not generating calibration values from scratch.** Coach-proposed edits are derived by the same auto-tune kernels (`docs/12`) the user could invoke manually. The AI's contribution is *which kernel to run given the goal*, not the cal math itself.
+- **Not paternalistic.** Experienced tuners can mark steps as already-done, override the playbook, skip the narrative, or feed raw logs directly. The coach has a "quiet mode" that strips the prose down to bare diagnoses + edit proposals.
+- **Not bypassing jurisdiction policy.** A coach asked to plan around emissions equipment routes through `docs/06`'s profile layer — warned per profile, never silently fulfilled, never refused on regulatory grounds for an Alberta user.
+- **Not closing the loop.** No flash decision passes through the coach. "Coach proposes edits → user applies → flash" is the workflow; the coach never sees the Flash button.
+
+### Goal schema (sketch)
+
+Saved to `<project>.stune/project.toml` under `[ai.goals]`:
+
+```toml
+[ai.goals]
+schema = "subuwutuner.tuning_goals.v1"
+
+target_peak_hp = 340                    # wheel hp
+fuel = "93"                             # "91" | "93" | "e30" | "e40" | "e85"
+hardware = [
+    "3-port boost solenoid",
+    "Cobb Stage 2 intake",
+    "TMIC",
+]
+use = "daily-summer-only"               # | "track-only" | "drag-only" | "year-round-daily"
+risk_tolerance = "conservative"         # | "moderate" | "aggressive"
+jurisdiction = "ca-ab"                  # matches existing profile chip
+notes = """
+Pump 93 available locally year-round.
+Owner plans E30 blend for summer pulls only.
+"""
+```
+
+Each goal field has a deterministic check the coach can run during gap analysis. Missing fields block planning until filled.
+
+### Playbook schema (sketch)
+
+```toml
+[playbook]
+schema = "subuwutuner.tuning_playbook.v1"
+goal_snapshot_hash = "sha256:..."       # invalidates the playbook if goals change;
+                                        # algo follows whatever st::project hashing
+                                        # currently uses (SHA-256 today, BLAKE3 once
+                                        # the flash-hash upgrade lands)
+
+[[step]]
+id = "baseline"
+title = "Baseline WOT log"
+success_criteria = [
+    "≥60s WOT pull in 3rd or 4th gear",
+    "no fuel-cut DTCs",
+    "AFR trace stable (no fuel-pump dropout)",
+]
+suggested_log_pids = ["RPM", "Load", "MAF", "STFT", "LTFT", "FBKC", "FLKC", "Boost", "WGDC"]
+status = "pending"                      # | "in-progress" | "passed" | "needs-redo"
+notes = ""
+```
+
+The playbook is regular TOML — the user can edit it directly, the coach re-reads it on every interaction.
+
+### Why this composes safely
+
+The coach introduces zero new write capabilities. Every action it can take, the user could already take manually:
+
+- It reads logs through the same `st::log` snapshots the existing analyzers consume.
+- It proposes edits through the same edit dialog that accepts manual cell changes.
+- It runs the same auto-tune kernels (`docs/12`) the user can invoke from the menu.
+- The only new logic is the goal-conditioned planning — and planning is suggestion-only, fully editable, fully overridable.
+
+Failure modes of the AI layer (hallucination, misclassification, wrong step ordering) downgrade to "the coach suggested a wrong next step," which has the same severity as a human tuner suggesting a wrong next step. Engine-safety policy and jurisdiction policy remain authoritative, not advisory.
+
 ## Architectural fit
 
 ```
@@ -189,8 +272,8 @@ The same red lines from `CLAUDE.md` / `docs/15` apply, with one notable addition
 
 - **v1.0–v1.5** — nothing. Foundational tuning + flash + log analyzers + live tuning + hardware support land first. No AI surface.
 - **v2.0** — Tier 1 (drift classifier, rules-based) + Tier 2 (LLM explanation over classifier output, optional local-only via Ollama). New `st::ai` module with the Backend abstraction. CLI: `subuwutuner-cli diagnose-drift --log <CSV>`. GUI: a "Diagnostics" panel that consumes the existing adaptive-history snapshot.
-- **v2.1** — Tier 3 (explain-this-log assistant). Extends Tier 2's LLM substrate to take free-form queries. Local-first; cloud backends opt-in.
-- **v2.2+** — Tier 4 (custom-feature-from-description, drafts `.stmod` graphs). Requires the v1.0 custom-features designer (`docs/16`) to be hardware-validated.
+- **v2.1** — Tier 3 (explain-this-log assistant). Extends Tier 2's LLM substrate to take free-form queries. Local-first; cloud backends opt-in. **Goal-conditioned tuning coach** lands the same release — it composes Tiers 1+2+3 plus the goal/playbook schemas above. Coach is the user-facing headline feature for v2.1; the bare Tier-3 free-form assistant is a power-user fallback for the same substrate.
+- **v2.2+** — Tier 4 (custom-feature-from-description, drafts `.stmod` graphs). Requires the v1.0 custom-features designer (`docs/16`) to be hardware-validated. Coach gains "add launch control at 4000 RPM" style steps via Tier 4 in this release.
 - **v2.x** — Tier 5 (def-pack-acceleration ML model), Tier 6 (CAN signal naming), Tier 7 (trained drift classifier) — each gated on training data + holdout-set wins.
 - **never** — auto-tune as ML, auto-flash from AI, etc.
 
