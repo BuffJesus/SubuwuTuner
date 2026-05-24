@@ -83,6 +83,78 @@ if(ST_BUILD_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------
+# Install rules
+# ---------------------------------------------------------------------------
+#
+# Default install layout (Windows / MinGW; Linux uses `bin/` per convention):
+#
+#   <install>/
+#     subuwutuner-gui.exe
+#     subuwutuner-cli.exe
+#     definitions/
+#       <platform>.zip   (built at install time from definitions/<platform>/)
+#
+# The bundled-definitions archives drop disk footprint from ~71 MB loose to
+# ~6 MB zipped (~92% compression on TOML — see commit 8192817 and docs/17
+# §7). The runtime PackRegistry overlay (commit 571ca22) reads the archives
+# AND lets users drop loose `<id>.toml` files alongside as overrides, so
+# this packaging step doesn't lock users out of customization.
+
+option(ST_INSTALL_ARCHIVES
+    "Build + install per-platform definition zip archives instead of \
+loose TOMLs. OFF leaves the install dir without definitions/ and the \
+caller is responsible for staging packs themselves."
+    ON)
+
+if(WIN32)
+    set(ST_INSTALL_BIN_DIR ".")
+else()
+    set(ST_INSTALL_BIN_DIR "bin")
+endif()
+
+if(ST_BUILD_CLI)
+    install(TARGETS subuwutuner-cli
+            RUNTIME DESTINATION ${ST_INSTALL_BIN_DIR})
+endif()
+if(ST_BUILD_GUI)
+    install(TARGETS subuwutuner-gui
+            RUNTIME DESTINATION ${ST_INSTALL_BIN_DIR})
+endif()
+
+# Definition archives. Built at install time by tools/build_definition_archives.py
+# so the artifact lives in the install dir's `definitions/` next to the
+# binaries — no copy step, no intermediate build-dir staging area.
+if(ST_INSTALL_ARCHIVES)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(NOT Python3_Interpreter_FOUND)
+        message(WARNING
+            "ST_INSTALL_ARCHIVES=ON requires Python3 for the archive build "
+            "step. Either install Python3 or pass -DST_INSTALL_ARCHIVES=OFF.")
+    else()
+        # CMAKE_INSTALL_PREFIX is resolved at install time so DESTDIR /
+        # `--prefix` overrides at `cmake --install` work correctly. The
+        # source-side variables (Python interp, script path, defs root)
+        # are substituted now at configure time.
+        install(CODE "
+            set(_archives_out \"\${CMAKE_INSTALL_PREFIX}/definitions\")
+            message(STATUS \"Building definition archives -> \${_archives_out}\")
+            execute_process(
+                COMMAND \"${Python3_EXECUTABLE}\"
+                        \"${CMAKE_SOURCE_DIR}/tools/build_definition_archives.py\"
+                        --defs-dir \"${CMAKE_SOURCE_DIR}/definitions\"
+                        --output-dir \"\${_archives_out}\"
+                RESULT_VARIABLE _archives_rv
+            )
+            if(NOT _archives_rv EQUAL 0)
+                message(FATAL_ERROR
+                    \"Definition archive build failed (exit code \${_archives_rv}); \"
+                    \"either fix the failure or reconfigure with -DST_INSTALL_ARCHIVES=OFF.\")
+            endif()
+        ")
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 message(STATUS "")
@@ -95,4 +167,6 @@ message(STATUS "  CLI                   : ${ST_BUILD_CLI}")
 message(STATUS "  GUI                   : ${ST_BUILD_GUI}")
 message(STATUS "  Warnings as errors    : ${ST_WARNINGS_AS_ERRORS}")
 message(STATUS "  Sanitizers            : ${ST_SANITIZE}")
+message(STATUS "  Install archives      : ${ST_INSTALL_ARCHIVES}")
+message(STATUS "  Install bin dir       : ${ST_INSTALL_BIN_DIR}")
 message(STATUS "")

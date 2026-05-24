@@ -10,6 +10,7 @@ FetchContent_Declare(
     GIT_TAG        v1.1.0
     GIT_SHALLOW    TRUE
     SYSTEM
+    EXCLUDE_FROM_ALL    # suppresses tl_expected's install rules
 )
 set(EXPECTED_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(tl_expected)
