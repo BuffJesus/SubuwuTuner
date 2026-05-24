@@ -9394,6 +9394,7 @@ int cmd_sniff(int argc, char *argv[]) {
     std::optional<std::filesystem::path> output_path;
     std::optional<std::uint32_t> duration_seconds;
     std::vector<std::uint32_t> id_filter;
+    bool verbose = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -9460,6 +9461,8 @@ int cmd_sniff(int argc, char *argv[]) {
                     break;
                 rest = rest.substr(comma + 1);
             }
+        } else if (a == "--verbose" || a == "-v") {
+            verbose = true;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "sniff: unknown option: %s\n", argv[i]);
             return 2;
@@ -9474,6 +9477,7 @@ int cmd_sniff(int argc, char *argv[]) {
                    "Usage: subuwutuner-cli sniff --transport <kind> --output <FILE.log>\n"
                    "                             [--device <path>] [--dll <path>]\n"
                    "                             [--filter <id>[,<id>...]] [--duration <sec>]\n"
+                   "                             [--verbose|-v]\n"
                    "\n"
                    "Passive CAN bus monitor. Opens the adapter in LISTEN-ONLY mode\n"
                    "(no TX), records every CAN frame to --output until Ctrl+C\n"
@@ -9483,9 +9487,18 @@ int cmd_sniff(int argc, char *argv[]) {
                    "Intended for SecurityAccess seed/key capture (run while COBB AP\n"
                    "or any other active tool is connected via a Y-cable), DBC reverse\n"
                    "engineering, or general bus exploration. Safe to run on a live\n"
-                   "vehicle — listen-only mode means the adapter never transmits.\n",
+                   "vehicle — listen-only mode means the adapter never transmits.\n"
+                   "\n"
+                   "--verbose dumps every OBDX DVI exchange (open handshake, filter\n"
+                   "  install, EnableNetwork, unsolicited RX pushes) to stderr.\n"
+                   "  Use when sniff reports 'captured 0 frames' so we can see\n"
+                   "  whether the adapter / filter / network path is at fault.\n",
                    stderr);
         return 2;
+    }
+
+    if (verbose) {
+        st::transport::obdx::set_trace_enabled(true);
     }
 
     auto const kind = st::transport::parse_kind(*transport_kind);
