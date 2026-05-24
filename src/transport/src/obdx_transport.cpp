@@ -217,13 +217,14 @@ void trace_dump(char const *prefix, std::span<std::uint8_t const> bytes) {
 // codec layer.
 //
 // Note that SetProtocol carries NEITHER the bus baud rate NOR the CAN
-// IDs — baud is implicit per protocol (HS CAN = 500 kbps), and the
-// adapter handles OBD-II standard addressing (0x7E0 / 0x7E8) by
-// default when in HS CAN mode. Per-bus filters (for non-standard
-// addressing or extended-ID CAN) ride on the 0x33 family of commands.
-// `LinkConfig::baud` / `LinkConfig::can_id_request` / `can_id_response`
-// are kept for compatibility with other transport backends (J2534,
-// native handheld); they're unused on OBDX.
+// IDs — baud is implicit per protocol (HS CAN = 500 kbps). CAN IDs
+// (request + response) are configured separately via the 0x34 CAN
+// Protocol Settings family (Developers Reference Manual §3.14), which
+// open() drives right after SetProtocol. `LinkConfig::baud` is still
+// unused on OBDX (the silicon doesn't accept off-spec rates), but
+// `can_id_request` / `can_id_response` ARE consumed — they drive the
+// filter setup so the adapter knows where to send requests and what
+// to listen for on response.
 //
 // Diagnosed on real hardware 2026-05-22: an earlier 11-byte best-
 // guess shape returned OBDX error 0x05 (Error_SubCommandIncorrectSize)
@@ -261,11 +262,129 @@ void trace_dump(char const *prefix, std::span<std::uint8_t const> bytes) {
 // where STATE is 0x00 OFF / 0x01 ON / 0x02 LISTEN ONLY. Default is
 // OFF — without this step the adapter accepts SetProtocol but won't
 // actually pass bytes to the bus, so opening the link looks fine
-// but every send_recv() times out.
-[[nodiscard]] std::vector<std::uint8_t> enable_network_payload() {
+// but every send_recv() times out. `state_on=false` selects LISTEN-
+// ONLY mode for sniff sessions where another tool (e.g. COBB AP via
+// a Y-cable) is bus-mastering and any TX from us would collide.
+[[nodiscard]] std::vector<std::uint8_t> enable_network_payload(bool state_on = true) {
     constexpr std::uint8_t kSubEnableNetwork = 0x02;
     constexpr std::uint8_t kStateOn = 0x01;
-    return {kSubEnableNetwork, kStateOn};
+    constexpr std::uint8_t kStateListenOnly = 0x02;
+    return {kSubEnableNetwork, state_on ? kStateOn : kStateListenOnly};
+}
+
+// Build an OBDX "Entire Filter" payload (Developers Reference Manual
+// v3.00 §3.14.1). Wire frame:
+//   CMD=0x34  LEN=0x11(17)  SUB=0x00  MM  NN  XX  ZZ  <4B FilterID>
+//                                            <4B Mask>  <4B FlowID>  CHK
+// where:
+//   SUB=0x00 = Entire Filter (set every field in one shot)
+//   MM       = filter slot index (0..27 for 11-bit, default capacity)
+//   NN       = frame type 0x00 = 11-bit, 0x01 = 29-bit
+//   XX       = filter type 0x00 = Pass, 0x01 = Flow, 0x02 = Block
+//   ZZ       = status 0x00 = off, 0x01 = on
+//   Filter ID / Mask = CAN-ID we want to receive (big-endian)
+//   Flow ID  = CAN-ID the adapter sends ISO-TP Flow Control on
+//
+// Without this command, the adapter has no filter configured for the
+// ECU's response ID. Even though §3.4 says "the network is turned off
+// so no frames are received and all filters are set to off", it leaves
+// you a chicken-and-egg: enabling the network without filters means
+// every ECU response is silently dropped → every send_recv times out
+// in RX phase. Configuring one Flow filter (Filter ID = ECU response,
+// Flow ID = our request) fixes that AND lets the adapter handle
+// ISO-TP flow control on multi-frame outbound transfers automatically.
+[[nodiscard]] std::vector<std::uint8_t>
+can_filter_payload(std::uint32_t filter_id, std::uint32_t mask, std::uint32_t flow_id) {
+    constexpr std::uint8_t kSubEntireFilter = 0x00;
+    constexpr std::uint8_t kSlotZero = 0x00;
+    constexpr std::uint8_t kFrameType11Bit = 0x00;
+    constexpr std::uint8_t kFrameType29Bit = 0x01;
+    constexpr std::uint8_t kFilterTypeFlow = 0x01;
+    constexpr std::uint8_t kStatusOn = 0x01;
+
+    // 29-bit IDs use any value above the 11-bit ceiling.
+    bool const is_extended = filter_id > 0x7FFU || mask > 0x7FFU || flow_id > 0x7FFU;
+    std::uint8_t const frame_type = is_extended ? kFrameType29Bit : kFrameType11Bit;
+
+    // Same GCC 15 false-positive avoidance as send_recv/send: build the
+    // 17-byte payload in a fixed-size array, then move into vector. No
+    // reserve + push_back loops to trip `-Werror=free-nonheap-object`.
+    std::uint8_t const bytes[17] = {
+        kSubEntireFilter,
+        kSlotZero,
+        frame_type,
+        kFilterTypeFlow,
+        kStatusOn,
+        static_cast<std::uint8_t>((filter_id >> 24U) & 0xFFU),
+        static_cast<std::uint8_t>((filter_id >> 16U) & 0xFFU),
+        static_cast<std::uint8_t>((filter_id >> 8U) & 0xFFU),
+        static_cast<std::uint8_t>(filter_id & 0xFFU),
+        static_cast<std::uint8_t>((mask >> 24U) & 0xFFU),
+        static_cast<std::uint8_t>((mask >> 16U) & 0xFFU),
+        static_cast<std::uint8_t>((mask >> 8U) & 0xFFU),
+        static_cast<std::uint8_t>(mask & 0xFFU),
+        static_cast<std::uint8_t>((flow_id >> 24U) & 0xFFU),
+        static_cast<std::uint8_t>((flow_id >> 16U) & 0xFFU),
+        static_cast<std::uint8_t>((flow_id >> 8U) & 0xFFU),
+        static_cast<std::uint8_t>(flow_id & 0xFFU),
+    };
+    return std::vector<std::uint8_t>(std::begin(bytes), std::end(bytes));
+}
+
+// Strip the leading 4-byte big-endian CAN ID prefix that the OBDX
+// includes in every CAN RxSmall push (Developers Reference Manual
+// v3.00 §3.4.3). Returns the rest of the payload as a span and writes
+// the recovered CAN ID into `out_id`. Fails if the payload is shorter
+// than 4 bytes (which would be malformed for any CAN frame).
+[[nodiscard]] Result<std::span<std::uint8_t const>>
+strip_can_id(std::span<std::uint8_t const> payload, std::uint32_t &out_id) {
+    if (payload.size() < 4) {
+        return failure(ErrorCode::ParseError, "obdx::strip_can_id: RxSmall payload < 4 bytes — "
+                                              "no room for CAN ID prefix");
+    }
+    out_id = (static_cast<std::uint32_t>(payload[0]) << 24U) |
+             (static_cast<std::uint32_t>(payload[1]) << 16U) |
+             (static_cast<std::uint32_t>(payload[2]) << 8U) |
+             static_cast<std::uint32_t>(payload[3]);
+    return payload.subspan(4);
+}
+
+// Strip the ISO-TP PCI byte(s) from a CAN frame's data field. Per ISO
+// 15765-2, the first nibble identifies the frame type:
+//   0x0L  Single Frame, L = number of data bytes (1..7).  Strip 1 byte.
+//   0x1X YY  First Frame of a multi-frame message; 12-bit length
+//            spread across the low nibble + next byte.  Strip 2 bytes.
+//            (Assumes the adapter reassembled the full payload behind
+//            the FF header — observed behavior on OBDX with auto
+//            formatting + Flow filter; if this turns out wrong on
+//            hardware we'll surface multi-frame as a distinct path.)
+//   0x2X     Consecutive Frame — should never reach the application
+//            layer when a Flow filter is active (the adapter handles
+//            reassembly). Return as-is and let the protocol parser
+//            barf with a clear message.
+//   0x3X     Flow Control from us → never an inbound payload on a
+//            real ECU read.  Same handling as 0x2X.
+[[nodiscard]] std::span<std::uint8_t const>
+strip_iso_tp(std::span<std::uint8_t const> data) noexcept {
+    if (data.empty()) {
+        return data;
+    }
+    std::uint8_t const pci_hi = static_cast<std::uint8_t>(data[0] & 0xF0U);
+    if (pci_hi == 0x00U) {
+        std::size_t const len = data[0] & 0x0FU;
+        std::size_t const take = std::min<std::size_t>(len, data.size() - 1);
+        return data.subspan(1, take);
+    }
+    if (pci_hi == 0x10U) {
+        if (data.size() < 2) {
+            return data;
+        }
+        std::size_t const len = (static_cast<std::size_t>(data[0] & 0x0FU) << 8U) |
+                                static_cast<std::size_t>(data[1]);
+        std::size_t const take = std::min<std::size_t>(len, data.size() - 2);
+        return data.subspan(2, take);
+    }
+    return data;
 }
 
 // Sniff an ELM-mode response for a string that suggests we're
@@ -283,6 +402,7 @@ void trace_dump(char const *prefix, std::span<std::uint8_t const> bytes) {
 constexpr milliseconds kElmProbeTimeout{500};
 constexpr milliseconds kDviSwitchTimeout{500};
 constexpr milliseconds kSetProtocolTimeout{500};
+constexpr milliseconds kCanFilterTimeout{500};
 constexpr milliseconds kCloseTimeout{200};
 
 } // namespace
@@ -299,6 +419,9 @@ Transport::Transport(std::unique_ptr<IDeviceChannel> channel) noexcept
     : channel_(std::move(channel)) {}
 
 Transport::~Transport() {
+    // Stop the streaming thread first — it holds the byte channel
+    // and will deadlock close() if still running.
+    (void)stop_streaming();
     if (open_) {
         (void)close();
     }
@@ -387,24 +510,67 @@ st::Status Transport::open(LinkConfig const &cfg) {
         trace_dump("[trace][obdx-open] step 3 RX SetProtocol ACK", *setp);
     }
 
-    // 4. Enable network communication (§3.10.2: same 0x31 opcode,
-    // sub-command 0x02, state 0x01 ON). Default is OFF — without
-    // this step send_recv would time out on every exchange.
-    auto const en = enable_network_payload();
+    // 4. Configure a CAN Flow filter so the adapter knows which CAN ID
+    // is the ECU's response (and where to send ISO-TP Flow Control).
+    // Per Developers Reference Manual v3.14: "It is recommended to set
+    // at least one filter before enabling the network to prevent
+    // unwanted frames." Without this the adapter accepts EnableNetwork
+    // and SetProtocol but silently drops every incoming ECU response —
+    // exactly the silent-timeout failure mode diagnosed against the
+    // 2017 WRX on 2026-05-23. Mask 0x7FF for 11-bit (Subaru standard)
+    // means "match all 11 bits exactly". Only emitted for CAN; K-Line
+    // / CAN-FD are rejected above, so reaching here implies CanIso15765.
+    //
+    // SKIPPED in listen_only (sniff) mode: per §3.4, "to monitor all
+    // messages, disable all filters and enable network." With no filter
+    // configured the adapter pushes every CAN frame it sees, which is
+    // the entire point of sniffing.
+    if (cfg.kind == LinkKind::CanIso15765 && !cfg.listen_only) {
+        constexpr std::uint32_t k11BitMask = 0x000007FFU;
+        auto const filt =
+            can_filter_payload(cfg.can_id_response, k11BitMask, cfg.can_id_request);
+        if (trace) {
+            trace_dump("[trace][obdx-open] step 4 TX CAN Filter setup", filt);
+        }
+        auto filt_rsp =
+            dvi_exchange(*channel_, dvi::Opcode::CanProtocolSettings, filt, kCanFilterTimeout);
+        if (!filt_rsp.has_value()) {
+            if (trace) {
+                std::fprintf(stderr, "[trace][obdx-open] step 4 FAILED: %s\n",
+                             std::string{filt_rsp.error().message()}.c_str());
+                std::fflush(stderr);
+            }
+            return failure(filt_rsp.error());
+        }
+        if (trace) {
+            trace_dump("[trace][obdx-open] step 4 RX CAN Filter ACK", *filt_rsp);
+        }
+    } else if (trace && cfg.listen_only) {
+        std::fprintf(stderr, "[trace][obdx-open] step 4 SKIPPED (listen_only): "
+                             "no CAN filter — sniff every frame on the bus\n");
+        std::fflush(stderr);
+    }
+
+    // 5. Enable network communication (§3.10.2: same 0x31 opcode,
+    // sub-command 0x02, state 0x01 ON / 0x02 LISTEN-ONLY). Default is
+    // OFF — without this step send_recv would time out on every
+    // exchange. In listen_only mode we use STATE=0x02 so the adapter
+    // never transmits — critical when sharing the bus with another tool.
+    auto const en = enable_network_payload(/*state_on=*/!cfg.listen_only);
     if (trace) {
-        trace_dump("[trace][obdx-open] step 4 TX EnableNetwork", en);
+        trace_dump("[trace][obdx-open] step 5 TX EnableNetwork", en);
     }
     auto enable_rsp = dvi_exchange(*channel_, dvi::Opcode::SetProtocol, en, kSetProtocolTimeout);
     if (!enable_rsp.has_value()) {
         if (trace) {
-            std::fprintf(stderr, "[trace][obdx-open] step 4 FAILED: %s\n",
+            std::fprintf(stderr, "[trace][obdx-open] step 5 FAILED: %s\n",
                          std::string{enable_rsp.error().message()}.c_str());
             std::fflush(stderr);
         }
         return failure(enable_rsp.error());
     }
     if (trace) {
-        trace_dump("[trace][obdx-open] step 4 RX EnableNetwork ACK", *enable_rsp);
+        trace_dump("[trace][obdx-open] step 5 RX EnableNetwork ACK", *enable_rsp);
     }
 
     // EnableNetwork's positive response per VT v1.06 §3.10.2 echoes the
@@ -463,13 +629,22 @@ st::Status Transport::open(LinkConfig const &cfg) {
                       static_cast<unsigned>(state_byte));
         return bail_from_validation(st::Error{ErrorCode::TransportNack, std::string{buf}});
     }
-    if (trace && state_byte == kStateListenOnly) {
+    // Warn only when LISTEN-ONLY was NOT requested — an unexpected
+    // LISTEN-ONLY may indicate adapter chose listen-only after a
+    // contention probe and our active sends won't reach the bus.
+    // When listen_only=true, LISTEN-ONLY is the expected response and
+    // not worth warning about.
+    if (trace && state_byte == kStateListenOnly && !cfg.listen_only) {
         std::fprintf(stderr, "[trace][obdx-open] WARNING: EnableNetwork "
-                             "returned LISTEN-ONLY (0x02); send paths may not "
-                             "reach the bus.\n");
+                             "returned LISTEN-ONLY (0x02) but caller asked for "
+                             "active mode; send paths may not reach the bus.\n");
         std::fflush(stderr);
     }
 
+    kind_ = cfg.kind;
+    can_id_request_ = cfg.can_id_request;
+    can_id_response_ = cfg.can_id_response;
+    listen_only_ = cfg.listen_only;
     open_ = true;
     return ok();
 }
@@ -499,6 +674,13 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
         return failure(ErrorCode::TransportUnavailable,
                        "obdx::Transport::send_recv: no byte channel");
     }
+    if (listen_only_) {
+        return failure(ErrorCode::TransportUnavailable,
+                       "obdx::Transport::send_recv: transport opened with "
+                       "listen_only=true (sniff mode); active sends are "
+                       "disabled to avoid colliding with another tool on "
+                       "the bus. Use start_streaming() to receive frames.");
+    }
 
     // Split the host-side budget across the two DVI exchanges. For
     // small (single-frame ISO-TP) payloads the adapter ACKs the TX
@@ -522,15 +704,45 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
     }
 
     // Phase 1: TX the ECU payload onto the bus via DVI TxSmall.
-    if (payload.size() > 255) {
-        // TODO(transport_obdx): TxLarge (opcode 0x11, 2-byte length)
-        // for payloads > 255 B. Not relevant for ITransport's normal
-        // request shape (SSM/UDS payloads are well under 100 B) but
-        // worth surfacing as a clean error until implemented.
-        return failure(ErrorCode::InvalidArgument, "obdx::Transport::send_recv: payload > 255 B "
-                                                   "needs DVI TxLarge — not yet wired");
+    // CAN-ISO15765 TxSmall payload is `[4B BE CAN ID][user bytes]` per
+    // Developers Reference Manual v3.00 §3.6.3. Without the CAN ID
+    // prefix the adapter has no destination — bytes go nowhere and the
+    // ECU never sees the request. Total wire payload is +4 vs the
+    // user payload, so the 255 B limit needs the same +4 accounting.
+    std::vector<std::uint8_t> tx_payload;
+    if (kind_ == LinkKind::CanIso15765) {
+        if (payload.size() + 4 > 255) {
+            // TODO(transport_obdx): TxLarge (opcode 0x11, 2-byte length)
+            // for payloads > 251 B. Not relevant for ITransport's normal
+            // request shape (SSM/UDS payloads are well under 100 B) but
+            // worth surfacing as a clean error until implemented.
+            return failure(ErrorCode::InvalidArgument,
+                           "obdx::Transport::send_recv: payload > 251 B (+ 4B CAN ID prefix > "
+                           "255) needs DVI TxLarge — not yet wired");
+        }
+        // Build the prefix in a fixed-size array first, then assign +
+        // insert. GCC 15 raises a false-positive `-Werror=free-nonheap-
+        // object` on the reserve-then-push_back pattern with small
+        // capacities (see prior fix in this file's git history); the
+        // assign+insert shape sidesteps it without losing the single
+        // allocation.
+        std::uint8_t const prefix[4] = {
+            static_cast<std::uint8_t>((can_id_request_ >> 24U) & 0xFFU),
+            static_cast<std::uint8_t>((can_id_request_ >> 16U) & 0xFFU),
+            static_cast<std::uint8_t>((can_id_request_ >> 8U) & 0xFFU),
+            static_cast<std::uint8_t>(can_id_request_ & 0xFFU),
+        };
+        tx_payload.assign(std::begin(prefix), std::end(prefix));
+        tx_payload.insert(tx_payload.end(), payload.begin(), payload.end());
+    } else {
+        if (payload.size() > 255) {
+            return failure(ErrorCode::InvalidArgument,
+                           "obdx::Transport::send_recv: payload > 255 B needs DVI TxLarge — "
+                           "not yet wired");
+        }
+        tx_payload.assign(payload.begin(), payload.end());
     }
-    auto tx = dvi_exchange(*channel_, dvi::Opcode::TxSmall, payload, tx_budget);
+    auto tx = dvi_exchange(*channel_, dvi::Opcode::TxSmall, tx_payload, tx_budget);
     if (!tx.has_value()) {
         if (trace) {
             std::fprintf(stderr, "[trace][obdx-err] TX phase: %s\n",
@@ -587,9 +799,31 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
                       static_cast<unsigned>(rf->response_opcode));
         return failure(ErrorCode::TransportNack, std::string{buf});
     }
+    // CAN-ISO15765 RxSmall payload is `[4B BE CAN ID][ISO-TP PCI...][app bytes]`
+    // per Developers Reference Manual v3.00 §3.4.3. Strip both prefixes so
+    // the caller (SSM / UDS client) sees only application-layer bytes,
+    // exactly as the existing test fixtures and protocol parsers expect.
     Frame f;
-    f.data = std::move(rf->payload);
     f.arrived = steady_clock::now();
+    if (kind_ == LinkKind::CanIso15765) {
+        std::uint32_t rx_can_id = 0;
+        auto stripped = strip_can_id(rf->payload, rx_can_id);
+        if (!stripped.has_value()) {
+            return failure(stripped.error());
+        }
+        if (rx_can_id != can_id_response_) {
+            char buf[128];
+            std::snprintf(buf, sizeof buf,
+                          "obdx::send_recv: ECU response arrived on CAN ID 0x%X but expected "
+                          "0x%X — wrong module or stray bus traffic",
+                          rx_can_id, can_id_response_);
+            return failure(ErrorCode::TransportNack, std::string{buf});
+        }
+        auto const app = strip_iso_tp(*stripped);
+        f.data.assign(app.begin(), app.end());
+    } else {
+        f.data = std::move(rf->payload);
+    }
     if (trace) {
         trace_dump("[trace][obdx-rx]", f.data);
     }
@@ -604,25 +838,177 @@ st::Status Transport::send(std::span<std::uint8_t const> payload) {
     if (channel_ == nullptr) {
         return failure(ErrorCode::TransportUnavailable, "obdx::Transport::send: no byte channel");
     }
-    if (payload.size() > 255) {
-        return failure(ErrorCode::InvalidArgument, "obdx::Transport::send: payload > 255 B "
-                                                   "needs DVI TxLarge — not yet wired");
+    if (listen_only_) {
+        return failure(ErrorCode::TransportUnavailable,
+                       "obdx::Transport::send: transport opened with "
+                       "listen_only=true (sniff mode); active sends are "
+                       "disabled");
     }
-    auto tx = dvi_exchange(*channel_, dvi::Opcode::TxSmall, payload, milliseconds{100});
+    // Same +4B CAN ID prefix dance as send_recv: the wire format isn't
+    // protocol-aware, so fire-and-forget sends still need the destination
+    // ID prepended on CAN.
+    std::vector<std::uint8_t> tx_payload;
+    if (kind_ == LinkKind::CanIso15765) {
+        if (payload.size() + 4 > 255) {
+            return failure(ErrorCode::InvalidArgument,
+                           "obdx::Transport::send: payload > 251 B (+ 4B CAN ID prefix > 255) "
+                           "needs DVI TxLarge — not yet wired");
+        }
+        std::uint8_t const prefix[4] = {
+            static_cast<std::uint8_t>((can_id_request_ >> 24U) & 0xFFU),
+            static_cast<std::uint8_t>((can_id_request_ >> 16U) & 0xFFU),
+            static_cast<std::uint8_t>((can_id_request_ >> 8U) & 0xFFU),
+            static_cast<std::uint8_t>(can_id_request_ & 0xFFU),
+        };
+        tx_payload.assign(std::begin(prefix), std::end(prefix));
+        tx_payload.insert(tx_payload.end(), payload.begin(), payload.end());
+    } else {
+        if (payload.size() > 255) {
+            return failure(ErrorCode::InvalidArgument, "obdx::Transport::send: payload > 255 B "
+                                                       "needs DVI TxLarge — not yet wired");
+        }
+        tx_payload.assign(payload.begin(), payload.end());
+    }
+    auto tx = dvi_exchange(*channel_, dvi::Opcode::TxSmall, tx_payload, milliseconds{100});
     if (!tx.has_value())
         return failure(tx.error());
     return ok();
 }
 
-st::Status Transport::start_streaming(FrameCallback /*callback*/) {
-    return failure(ErrorCode::NotImplemented, "obdx::Transport::start_streaming: streaming lands "
-                                              "with the datalogger I/O thread + ring buffer "
-                                              "(Phase 3 follow-up).");
+st::Status Transport::start_streaming(FrameCallback callback) {
+    if (!open_) {
+        return failure(ErrorCode::TransportUnavailable,
+                       "obdx::Transport::start_streaming: transport not open");
+    }
+    if (channel_ == nullptr) {
+        return failure(ErrorCode::TransportUnavailable,
+                       "obdx::Transport::start_streaming: no byte channel");
+    }
+    if (streaming_thread_.joinable()) {
+        return failure(ErrorCode::InvalidArgument,
+                       "obdx::Transport::start_streaming: already streaming — "
+                       "call stop_streaming() first");
+    }
+    if (!callback) {
+        return failure(ErrorCode::InvalidArgument,
+                       "obdx::Transport::start_streaming: callback is empty");
+    }
+
+    bool const trace = g_trace_enabled.load(std::memory_order_acquire);
+    if (trace) {
+        std::fprintf(stderr,
+                     "[trace][obdx-stream] starting (listen_only=%d)\n",
+                     listen_only_ ? 1 : 0);
+        std::fflush(stderr);
+    }
+
+    streaming_callback_ = std::move(callback);
+    streaming_stop_.store(false, std::memory_order_release);
+
+    streaming_thread_ = std::thread([this]() {
+        bool const trace_local = g_trace_enabled.load(std::memory_order_acquire);
+        // Short per-read timeout so the thread re-checks the stop flag
+        // promptly. A bus that's busy with COBB+ECU traffic produces
+        // many frames per second; sleeping on a long timeout would
+        // make stop_streaming sluggish.
+        constexpr milliseconds kStreamReadTimeout{50};
+        while (!streaming_stop_.load(std::memory_order_acquire)) {
+            auto frame = read_dvi_frame(*channel_, kStreamReadTimeout);
+            if (!frame.has_value()) {
+                // TransportTimeout is the empty-bus case — just loop.
+                // Anything else is a real error; log under trace but
+                // don't terminate (the bus might recover).
+                if (trace_local &&
+                    frame.error().code() != ErrorCode::TransportTimeout) {
+                    std::fprintf(stderr,
+                                 "[trace][obdx-stream-err] %s\n",
+                                 std::string{frame.error().message()}.c_str());
+                    std::fflush(stderr);
+                }
+                continue;
+            }
+            auto const *rf = std::get_if<dvi::ResponseFrame>(&*frame);
+            if (rf == nullptr) {
+                // ErrorFrame — log and skip; not fatal in sniff mode.
+                if (trace_local) {
+                    std::fprintf(stderr,
+                                 "[trace][obdx-stream] ignoring error frame\n");
+                    std::fflush(stderr);
+                }
+                continue;
+            }
+            // Per VT v1.06 §3.3 only the bare 0x08/0x09 opcodes are
+            // adapter→PC pushes (network arrivals). Anything else is
+            // an unsolicited response we have no business processing
+            // while streaming.
+            auto const op = rf->response_opcode;
+            if (op != static_cast<std::uint8_t>(dvi::Opcode::RxSmall) &&
+                op != static_cast<std::uint8_t>(dvi::Opcode::RxLarge)) {
+                if (trace_local) {
+                    std::fprintf(stderr,
+                                 "[trace][obdx-stream] ignoring opcode 0x%02X "
+                                 "(not RxSmall/RxLarge)\n",
+                                 static_cast<unsigned>(op));
+                    std::fflush(stderr);
+                }
+                continue;
+            }
+
+            Frame out;
+            out.arrived = steady_clock::now();
+            if (kind_ == LinkKind::CanIso15765) {
+                std::uint32_t rx_can_id = 0;
+                auto stripped = strip_can_id(rf->payload, rx_can_id);
+                if (!stripped.has_value()) {
+                    if (trace_local) {
+                        std::fprintf(stderr,
+                                     "[trace][obdx-stream] dropped short frame "
+                                     "(< 4 B CAN ID prefix)\n");
+                        std::fflush(stderr);
+                    }
+                    continue;
+                }
+                out.can_id = rx_can_id;
+                // CRITICAL: do NOT strip the ISO-TP PCI byte in sniff
+                // mode. The PCI byte is part of the raw bus frame and
+                // the user is here to see real bus traffic byte-for-
+                // byte. Stripping it would hide ISO-TP behavior the
+                // user explicitly wants to observe (and would break
+                // SecurityAccess capture — the seed bytes follow the
+                // PCI byte directly).
+                out.data.assign(stripped->begin(), stripped->end());
+            } else {
+                out.data = std::move(rf->payload);
+            }
+            if (trace_local) {
+                std::fprintf(stderr,
+                             "[trace][obdx-stream-rx] 0x%X (%zu B)\n",
+                             out.can_id, out.data.size());
+                std::fflush(stderr);
+            }
+            // The callback owns its own error handling; if it throws,
+            // the streaming thread terminates rather than corrupting
+            // adjacent frames. Document that contract at the call site
+            // in start_streaming's docstring (already in transport.hpp).
+            streaming_callback_(out);
+        }
+        if (trace_local) {
+            std::fprintf(stderr, "[trace][obdx-stream] stopped\n");
+            std::fflush(stderr);
+        }
+    });
+
+    return ok();
 }
 
 st::Status Transport::stop_streaming() {
-    return failure(ErrorCode::NotImplemented,
-                   "obdx::Transport::stop_streaming: see start_streaming");
+    if (!streaming_thread_.joinable()) {
+        return ok();
+    }
+    streaming_stop_.store(true, std::memory_order_release);
+    streaming_thread_.join();
+    streaming_callback_ = {};
+    return ok();
 }
 
 } // namespace st::transport::obdx

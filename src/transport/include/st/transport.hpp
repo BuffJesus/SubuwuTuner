@@ -52,13 +52,30 @@ struct LinkConfig {
     // other modules (TCU, ABS) override these.
     std::uint32_t can_id_request{kSubaruEngineCanIdRequest};
     std::uint32_t can_id_response{kSubaruEngineCanIdResponse};
+    // Open in passive bus-monitor (sniff) mode. When true:
+    //   * Adapter skips CAN filter setup — receives ALL bus traffic, not
+    //     just `can_id_response`.
+    //   * EnableNetwork uses STATE=0x02 (LISTEN-ONLY) instead of 0x01
+    //     (ON), so the adapter never transmits an ACK or any other frame
+    //     on the bus. Critical when another tool is bus-mastering on the
+    //     same physical OBD-II port (e.g. COBB AccessPort via a Y-cable):
+    //     two tools writing to the same CAN-H/CAN-L pair would collide.
+    //   * send() / send_recv() reject with TransportUnavailable. Callers
+    //     use start_streaming() to receive frames.
+    //   * can_id_request / can_id_response are ignored.
+    bool listen_only{false};
 };
 
 // One frame on the wire. `data` is the application-layer payload — the
 // transport implementation handles ISO-TP fragmentation/reassembly on CAN.
+// `can_id` is the source CAN ID for CAN-based transports (0 for K-Line
+// and other non-CAN buses). In sniff mode this is how callers tell which
+// module's traffic they're looking at; in active mode it's redundant
+// with the transport's configured can_id_response.
 struct Frame {
     std::vector<std::uint8_t> data;
     std::chrono::steady_clock::time_point arrived{};
+    std::uint32_t can_id{0};
 };
 
 using FrameCallback = std::function<void(Frame const &)>;

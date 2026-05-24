@@ -69,16 +69,20 @@ enum class Opcode : std::uint8_t {
     Settings = 0x24,     // includes sub-op 0x03 = enable µs RX timestamps
     SoftReboot = 0x25,   // return to ELM mode
     SetProtocol = 0x31,  // OBD protocol + enable + ELM↔DVI switch
-    // 0x33 is documented in VT v1.06 §3.11 as "VPW Specific Settings"
-    // but sub-ops 0x00–0x04 (To filter, From filter, To range filter,
-    // From range filter, Mask) are protocol-agnostic filter primitives.
-    // Sub-op 0x05 is unused in v1.06. Sub-ops 0x06–0x0F are scoped to
-    // VPW (4x speed, CRC validation, 1x/4x timings, error bits).
-    // The byte semantics of `MM` / `BB NN MM` for non-VPW protocols
-    // (notably CAN-ID mapping on the VX) are not in the VT PDF;
-    // treat as unverified until we either probe on hardware or read
-    // OBDXPro/OBDX-Templates under the clean-room split.
+    // 0x33 is documented in VT v1.06 §3.11 as "VPW Specific Settings".
+    // VPW-only on the VT; the VX shares the opcode for legacy reasons
+    // but VPW-specific sub-ops (4x speed, CRC validation) are no-ops
+    // on the VX since it can't bus-master VPW. Kept here for sniffing
+    // older GM platforms via the VPW pin.
     ProtocolSettings = 0x33,
+    // OBDX Pro Developers Reference Manual v3.00 §3.14 "CAN Protocol
+    // Settings". Family covers filter setup (sub-op 0x00 Entire Filter),
+    // flow-control configuration (0x0A FC frame data, 0x0B FC delay,
+    // 0x0E/0x0F padding byte/state), and per-baud-rate selection.
+    // Critical for ISO15765 — without an explicit Flow filter, the
+    // adapter has no idea which CAN IDs are the ECU's responses and
+    // drops every incoming frame.
+    CanProtocolSettings = 0x34,
     Adc = 0x3A,          // DLC pin 16 battery voltage
 };
 

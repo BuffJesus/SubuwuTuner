@@ -322,16 +322,27 @@ TEST_CASE("RequestTransferExit round-trip", "[uds][exit]") {
 
 // ---- ReadMemoryByAddress -----------------------------------------------
 
-TEST_CASE("build_read_memory_by_address encodes address+size minimally", "[uds][framing][rmba]") {
-    // addr 0x12 fits in 1 byte, size 0x4000 fits in 2 bytes -> aLFI = 0x21.
-    auto const r = uds::build_read_memory_by_address(0x12, 0x4000);
-    REQUIRE(r == std::vector<std::uint8_t>{0x23, 0x21, 0x12, 0x40, 0x00});
+TEST_CASE("build_read_memory_by_address emits fixed 4-byte address + 1-byte size for sizes <= 255",
+          "[uds][framing][rmba]") {
+    // Subaru Hitachi (FA20DIT and similar) require the fixed 4-byte
+    // address format. ISO 14229 allows variable widths but production
+    // ECUs silently drop requests with shorter addresses.
+    // addr 0x12 → 00 00 00 12 (4 bytes), size 0xFF (1 byte) → aLFI = 0x14.
+    auto const r = uds::build_read_memory_by_address(0x12, 0xFF);
+    REQUIRE(r == std::vector<std::uint8_t>{0x23, 0x14, 0x00, 0x00, 0x00, 0x12, 0xFF});
 }
 
-TEST_CASE("build_read_memory_by_address widens addr+size when needed", "[uds][framing][rmba]") {
-    // addr 0x123456 fits in 3 bytes, size 0xFF fits in 1 byte -> aLFI = 0x13.
-    auto const r = uds::build_read_memory_by_address(0x123456, 0xFF);
-    REQUIRE(r == std::vector<std::uint8_t>{0x23, 0x13, 0x12, 0x34, 0x56, 0xFF});
+TEST_CASE("build_read_memory_by_address widens size byte when size > 255",
+          "[uds][framing][rmba]") {
+    // size 0x4000 needs 2 size bytes → aLFI = 0x24. Address stays 4 bytes.
+    auto const r = uds::build_read_memory_by_address(0x12, 0x4000);
+    REQUIRE(r == std::vector<std::uint8_t>{0x23, 0x24, 0x00, 0x00, 0x00, 0x12, 0x40, 0x00});
+}
+
+TEST_CASE("build_read_memory_by_address keeps 4-byte address for large addresses",
+          "[uds][framing][rmba]") {
+    auto const r = uds::build_read_memory_by_address(0x12345678, 0xFF);
+    REQUIRE(r == std::vector<std::uint8_t>{0x23, 0x14, 0x12, 0x34, 0x56, 0x78, 0xFF});
 }
 
 TEST_CASE("parse_read_memory_by_address_response returns the data", "[uds][framing][rmba]") {
@@ -352,7 +363,9 @@ TEST_CASE("UdsClient::read_memory_by_address round-trip", "[uds][client][rmba]")
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
-    t.expect_send_recv({0x23, 0x21, 0x12, 0x40, 0x00}, {0x63, 0xDE, 0xAD, 0xBE, 0xEF});
+    // Fixed 4-byte address + 2-byte size (size > 255) -> aLFI = 0x24.
+    t.expect_send_recv({0x23, 0x24, 0x00, 0x00, 0x00, 0x12, 0x40, 0x00},
+                       {0x63, 0xDE, 0xAD, 0xBE, 0xEF});
 
     uds::UdsClient client{t};
     auto const r = client.read_memory_by_address(0x12, 0x4000);

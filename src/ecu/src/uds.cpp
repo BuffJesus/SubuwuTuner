@@ -412,8 +412,17 @@ parse_routine_control_response(std::span<std::uint8_t const> resp,
 
 std::vector<std::uint8_t> build_read_memory_by_address(std::uint32_t memory_address,
                                                        std::uint32_t memory_size) {
-    auto const addr_bytes = bytes_to_encode(memory_address);
-    auto const size_bytes = bytes_to_encode(memory_size);
+    // Subaru Hitachi ECUs (and most production ECUs) expect a fixed 4-byte
+    // address + 1-byte size format (ALF = 0x14). Earlier versions of this
+    // builder used the ISO 14229 dynamic encoding (minimum bytes needed),
+    // which produced wire payloads like `23 11 00 10` (ALF 0x11 = 1 addr,
+    // 1 size). On a stock 2017 VA WRX with FA20DIT the ECU silently drops
+    // requests with non-fixed-width addressing — diagnosed 2026-05-23.
+    //
+    // Sizes > 255 bytes need 2 size bytes, which gives ALF = 0x24. The
+    // builder falls back to that automatically.
+    auto const addr_bytes = std::uint8_t{4};
+    auto const size_bytes = memory_size > 0xFFU ? std::uint8_t{2} : std::uint8_t{1};
 
     std::vector<std::uint8_t> out;
     out.reserve(std::size_t{2} + addr_bytes + size_bytes);

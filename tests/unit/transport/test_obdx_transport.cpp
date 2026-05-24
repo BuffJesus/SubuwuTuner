@@ -12,8 +12,10 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -119,13 +121,18 @@ struct ChannelPair {
 
 // ---- open() handshake -------------------------------------------
 
-TEST_CASE("obdx::Transport::open drives ELM probe -> DX DP 1 -> SetProtocol -> EnableNetwork",
+TEST_CASE("obdx::Transport::open drives ELM probe -> DX DP 1 -> SetProtocol -> "
+          "CAN filter -> EnableNetwork",
           "[transport][obdx_transport]") {
     auto cp = make_channel();
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>"); // probe response
     cp.raw->queue_read_ascii("OK\r>");               // DX DP 1 response
     cp.raw->queue_read(
         dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02})); // SetProtocol ack (sub=01, HS CAN=02)
+    // CAN filter setup ack — Developers Reference Manual v3.00 §3.14.1.
+    // Response shape echoes the sub-op byte (0x00 = Entire Filter); the
+    // exact payload isn't asserted here beyond "successful response".
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
     cp.raw->queue_read(
         dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x01})); // EnableNetwork ack (sub=02, state=ON)
 
@@ -138,11 +145,12 @@ TEST_CASE("obdx::Transport::open drives ELM probe -> DX DP 1 -> SetProtocol -> E
     REQUIRE(writes.find("AT @1\r") == 0);
     REQUIRE(writes.find("DX DP 1\r") != std::string::npos);
 
-    // VT v1.06 §3.10.1 + §3.10.2 specify the exact 5-byte frames on
-    // the wire after DVI switch:
-    //   SetProtocol(HS CAN) = 31 02 01 02 <chk>
-    //   EnableNetwork(ON)   = 31 02 02 01 <chk>
-    // Verify both showed up, in order.
+    // VT v1.06 §3.10.1 + §3.10.2 + Developers Reference Manual §3.14.1
+    // specify the exact frames on the wire after DVI switch:
+    //   SetProtocol(HS CAN)    = 31 02 01 02 <chk>
+    //   CAN filter (0x7E8/0x7E0) = 34 11 00 00 00 01 01 00 00 07 E8 00 00 07 FF 00 00 07 E0 <chk>
+    //   EnableNetwork(ON)      = 31 02 02 01 <chk>
+    // Verify all three showed up, in order.
     auto const &raw_writes = cp.raw->writes();
     auto find_frame = [&](std::uint8_t sub, std::uint8_t arg) -> std::size_t {
         for (std::size_t i = 0; i + 3 < raw_writes.size(); ++i) {
@@ -158,6 +166,30 @@ TEST_CASE("obdx::Transport::open drives ELM probe -> DX DP 1 -> SetProtocol -> E
     REQUIRE(set_pos != std::string::npos);
     REQUIRE(enable_pos != std::string::npos);
     REQUIRE(enable_pos > set_pos);
+
+    // CAN filter frame: locate `34 11 00 00 00 01 01` (CMD + LEN(17) + sub +
+    // slot + frame_type(11-bit) + filter_type(Flow) + status(ON)) and
+    // verify Filter ID (0x7E8), Mask (0x7FF), Flow ID (0x7E0) follow as
+    // big-endian 4-byte fields.
+    std::size_t filter_pos = std::string::npos;
+    for (std::size_t i = 0; i + 19 < raw_writes.size(); ++i) {
+        if (raw_writes[i] == 0x34U && raw_writes[i + 1] == 0x11U &&
+            raw_writes[i + 2] == 0x00U && raw_writes[i + 3] == 0x00U &&
+            raw_writes[i + 4] == 0x00U && raw_writes[i + 5] == 0x01U &&
+            raw_writes[i + 6] == 0x01U && raw_writes[i + 7] == 0x00U &&
+            raw_writes[i + 8] == 0x00U && raw_writes[i + 9] == 0x07U &&
+            raw_writes[i + 10] == 0xE8U && raw_writes[i + 11] == 0x00U &&
+            raw_writes[i + 12] == 0x00U && raw_writes[i + 13] == 0x07U &&
+            raw_writes[i + 14] == 0xFFU && raw_writes[i + 15] == 0x00U &&
+            raw_writes[i + 16] == 0x00U && raw_writes[i + 17] == 0x07U &&
+            raw_writes[i + 18] == 0xE0U) {
+            filter_pos = i;
+            break;
+        }
+    }
+    REQUIRE(filter_pos != std::string::npos);
+    REQUIRE(filter_pos > set_pos);
+    REQUIRE(filter_pos < enable_pos);
 
     REQUIRE(t.firmware() == "OBDX Pro VX v1.0\r");
 }
@@ -231,6 +263,7 @@ TEST_CASE("obdx::Transport::open rejects EnableNetwork ACK with state != ON",
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x00}));
     // SoftReboot ACK — best-effort cleanup the validation-failure path emits.
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SoftReboot, {}));
@@ -264,6 +297,7 @@ TEST_CASE("obdx::Transport::open rejects EnableNetwork ACK with wrong sub-op ech
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0xEE, 0x01}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SoftReboot, {}));
 
@@ -284,6 +318,7 @@ TEST_CASE("obdx::Transport::open accepts EnableNetwork ACK with state=LISTEN-ONL
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
 
     obdx::Transport t{std::move(cp.owner)};
@@ -311,9 +346,12 @@ struct ReadyTransport {
     // SetProtocol(HS CAN) ack — VT v1.06 §3.10.1. Response echoes the
     // sub-op (0x01) and the selected protocol enum (0x02 = HS CAN).
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
-    // EnableNetwork(ON) ack — VT v1.06 §3.10.2; sent right after
-    // SetProtocol because the default network state is OFF. Response
-    // echoes the sub-op (0x02) and the final state byte (0x01 = ON).
+    // CAN filter ack — Developers Reference Manual v3.00 §3.14.1.
+    // Response echoes the sub-op (0x00 = Entire Filter).
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
+    // EnableNetwork(ON) ack — VT v1.06 §3.10.2; sent right after the
+    // CAN filter so the bus comes up with a configured filter already.
+    // Response echoes the sub-op (0x02) and the final state byte (0x01).
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x01}));
     auto t = std::make_unique<obdx::Transport>(std::move(cp.owner));
     auto const open_r = t->open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
@@ -330,13 +368,20 @@ TEST_CASE("obdx::Transport::send_recv writes TX request, reads unsolicited RX pu
     auto &t = *pair.transport;
     auto *raw = pair.raw;
 
-    // Queue what the adapter would actually send back per VT v1.06:
+    // Queue what the adapter would actually send back per VT v1.06 +
+    // Developers Reference Manual v3.00 §3.4.3:
     //   1. TxSmall ack: response opcode 0x20 (= 0x10 | 0x10).
     //   2. RxSmall push: bare opcode 0x08, NOT 0x18 — adapter-initiated
     //      pushes (incoming network frames) don't get the |0x10 bit.
+    //      Payload shape for CAN: [4B BE CAN ID][ISO-TP PCI][app bytes].
+    //      For a 7-byte SSM response on 0x7E8 the PCI is 0x07 (Single
+    //      Frame, length=7). The user-facing transport result must
+    //      strip both the CAN ID and the PCI, leaving only the 7 SSM
+    //      response bytes.
     raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::TxSmall, {0x00}));
     raw->queue_read(dvi_unsolicited_frame(obdx::dvi::Opcode::RxSmall,
-                                          {0x80, 0xF0, 0x10, 0x05, 0xE8, 0x12, 0x34}));
+                                          {0x00, 0x00, 0x07, 0xE8, 0x07,
+                                           0x80, 0xF0, 0x10, 0x05, 0xE8, 0x12, 0x34}));
 
     std::vector<std::uint8_t> const req{0x80U, 0x10U, 0xF0U, 0x05U, 0xA8U, 0x00U, 0x12U, 0x34U};
     auto r = t.send_recv(req, milliseconds{200});
@@ -419,10 +464,13 @@ TEST_CASE("obdx::Transport::send writes a TxSmall request, no RX phase",
     REQUIRE(r.has_value());
 
     // Exactly one DVI frame: SOF? No -- DVI doesn't have a SOF byte.
-    // The added writes are CMD(0x10) + LEN(0x03) + payload(3) + CHK(1)
-    // = 6 bytes total.
+    // For CAN-ISO15765 the wire is CMD(0x10) + LEN(0x07) +
+    // CAN_ID(4 BE bytes) + payload(3) + CHK(1) = 10 bytes total.
+    // Pre-CAN-prefix this was 6 bytes; the +4 is the destination CAN ID
+    // that every CAN TxSmall payload must carry per Developers Reference
+    // Manual §3.6.3.
     auto const added = raw->writes().size() - writes_before;
-    REQUIRE(added == 6);
+    REQUIRE(added == 10);
 }
 
 TEST_CASE("obdx::Transport::send before open -> TransportUnavailable",
@@ -469,16 +517,176 @@ TEST_CASE("obdx::Transport::close sends a SoftReboot, becomes idempotent",
     REQUIRE(raw->writes().size() == writes_after_first_close);
 }
 
-// ---- streaming + name + firmware --------------------------------
+// ---- listen_only (sniff) mode -----------------------------------
 
-TEST_CASE("obdx::Transport::start_streaming returns NotImplemented (stub)",
-          "[transport][obdx_transport]") {
+TEST_CASE("obdx::Transport::open in listen_only mode skips filter setup and "
+          "uses EnableNetwork LISTEN-ONLY",
+          "[transport][obdx_transport][sniff]") {
+    // Sniff-mode handshake — no CAN filter exchange between SetProtocol and
+    // EnableNetwork, and EnableNetwork state byte is 0x02 (LISTEN-ONLY).
+    auto cp = make_channel();
+    cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
+    cp.raw->queue_read_ascii("OK\r>");
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    // NO CAN filter ACK queued — open() must skip it in listen_only mode.
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
+
+    obdx::Transport t{std::move(cp.owner)};
+    st::transport::LinkConfig cfg{};
+    cfg.kind = st::transport::LinkKind::CanIso15765;
+    cfg.baud = 500000;
+    cfg.listen_only = true;
+    auto const r = t.open(cfg);
+    REQUIRE(r.has_value());
+    REQUIRE(t.is_open());
+
+    // Verify the filter command (0x34) NEVER appeared on the wire.
+    auto const &raw_writes = cp.raw->writes();
+    bool saw_filter_cmd = false;
+    for (auto b : raw_writes) {
+        if (b == 0x34U) {
+            saw_filter_cmd = true;
+            break;
+        }
+    }
+    REQUIRE_FALSE(saw_filter_cmd);
+
+    // Verify EnableNetwork was emitted as `31 02 02 02` (sub=02, state=02
+    // = LISTEN-ONLY).
+    bool saw_listen_only_enable = false;
+    for (std::size_t i = 0; i + 3 < raw_writes.size(); ++i) {
+        if (raw_writes[i] == 0x31U && raw_writes[i + 1] == 0x02U &&
+            raw_writes[i + 2] == 0x02U && raw_writes[i + 3] == 0x02U) {
+            saw_listen_only_enable = true;
+            break;
+        }
+    }
+    REQUIRE(saw_listen_only_enable);
+}
+
+TEST_CASE("obdx::Transport::send_recv refused in listen_only mode",
+          "[transport][obdx_transport][sniff]") {
+    auto cp = make_channel();
+    cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
+    cp.raw->queue_read_ascii("OK\r>");
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
+
+    obdx::Transport t{std::move(cp.owner)};
+    st::transport::LinkConfig cfg{};
+    cfg.kind = st::transport::LinkKind::CanIso15765;
+    cfg.listen_only = true;
+    REQUIRE(t.open(cfg).has_value());
+
+    std::vector<std::uint8_t> const req{0x10U, 0x03U};
+    auto const r = t.send_recv(req, milliseconds{100});
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::TransportUnavailable);
+    REQUIRE(std::string{r.error().message()}.find("listen_only") != std::string::npos);
+}
+
+TEST_CASE("obdx::Transport::send refused in listen_only mode",
+          "[transport][obdx_transport][sniff]") {
+    auto cp = make_channel();
+    cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
+    cp.raw->queue_read_ascii("OK\r>");
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
+
+    obdx::Transport t{std::move(cp.owner)};
+    st::transport::LinkConfig cfg{};
+    cfg.kind = st::transport::LinkKind::CanIso15765;
+    cfg.listen_only = true;
+    REQUIRE(t.open(cfg).has_value());
+
+    std::vector<std::uint8_t> const req{0xAAU};
+    REQUIRE_FALSE(t.send(req).has_value());
+}
+
+// ---- streaming --------------------------------------------------
+
+TEST_CASE("obdx::Transport::start_streaming pushes unsolicited frames to callback "
+          "with CAN ID stripped + populated",
+          "[transport][obdx_transport][sniff][stream]") {
+    auto cp = make_channel();
+    cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
+    cp.raw->queue_read_ascii("OK\r>");
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
+
+    // Two unsolicited adapter→PC pushes the streaming thread will see.
+    // Sniff mode preserves the ISO-TP PCI byte in the data payload (the
+    // 0x02 here is the SF PCI for a 2-byte UDS frame; the user is
+    // capturing raw bus state, not parsed UDS).
+    auto *raw = cp.raw;
+    raw->queue_read(dvi_unsolicited_frame(obdx::dvi::Opcode::RxSmall,
+                                          {0x00, 0x00, 0x07, 0xE0, 0x02, 0x27, 0x01}));
+    raw->queue_read(dvi_unsolicited_frame(obdx::dvi::Opcode::RxSmall,
+                                          {0x00, 0x00, 0x07, 0xE8, 0x06, 0x67, 0x01, 0xDE,
+                                           0xAD, 0xBE, 0xEF}));
+
+    obdx::Transport t{std::move(cp.owner)};
+    st::transport::LinkConfig cfg{};
+    cfg.kind = st::transport::LinkKind::CanIso15765;
+    cfg.listen_only = true;
+    REQUIRE(t.open(cfg).has_value());
+
+    std::mutex mu;
+    std::vector<st::transport::Frame> received;
+    auto const cb = [&](st::transport::Frame const &f) {
+        std::scoped_lock lk{mu};
+        received.push_back(f);
+    };
+    REQUIRE(t.start_streaming(cb).has_value());
+
+    // Poll for both frames to arrive (the FakeChannel drains its queue
+    // immediately on each read_bytes call, but the streaming thread runs
+    // its own scheduling). Cap the wait so a regression doesn't hang.
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{2000};
+    for (;;) {
+        {
+            std::scoped_lock lk{mu};
+            if (received.size() >= 2)
+                break;
+        }
+        if (std::chrono::steady_clock::now() >= deadline)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    }
+    REQUIRE(t.stop_streaming().has_value());
+
+    std::scoped_lock lk{mu};
+    REQUIRE(received.size() == 2);
+    REQUIRE(received[0].can_id == 0x7E0U);
+    REQUIRE(received[0].data == std::vector<std::uint8_t>{0x02, 0x27, 0x01});
+    REQUIRE(received[1].can_id == 0x7E8U);
+    REQUIRE(received[1].data ==
+            std::vector<std::uint8_t>{0x06, 0x67, 0x01, 0xDE, 0xAD, 0xBE, 0xEF});
+}
+
+TEST_CASE("obdx::Transport::start_streaming rejects empty callback",
+          "[transport][obdx_transport][sniff][stream]") {
+    auto cp = make_channel();
+    cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
+    cp.raw->queue_read_ascii("OK\r>");
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
+    obdx::Transport t{std::move(cp.owner)};
+    st::transport::LinkConfig cfg{};
+    cfg.kind = st::transport::LinkKind::CanIso15765;
+    cfg.listen_only = true;
+    REQUIRE(t.open(cfg).has_value());
+
+    auto const r = t.start_streaming({});
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("obdx::Transport::stop_streaming on never-started is a no-op",
+          "[transport][obdx_transport][sniff][stream]") {
     auto cp = make_channel();
     obdx::Transport t{std::move(cp.owner)};
-    auto r = t.start_streaming([](st::transport::Frame const &) {});
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
-    REQUIRE_FALSE(t.stop_streaming().has_value());
+    REQUIRE(t.stop_streaming().has_value());
 }
 
 TEST_CASE("obdx::Transport::name() reports 'OBDX'", "[transport][obdx_transport]") {

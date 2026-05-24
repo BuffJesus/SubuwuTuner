@@ -40,6 +40,7 @@
 #include "st/transport/byte_channel.hpp"
 #include "st/transport/obdx_dvi.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -47,6 +48,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace st::transport::obdx {
@@ -114,6 +116,24 @@ private:
     std::unique_ptr<IDeviceChannel> channel_;
     bool open_{false};
     std::string firmware_;
+    // Cached at open() time. CAN-ISO15765 send_recv prepends the request
+    // ID (BE 4-byte) to every TX payload, and validates that incoming
+    // RxSmall pushes carry the response ID. Without these the adapter
+    // either fires bytes onto an undefined CAN ID, or drops every
+    // incoming ECU reply (no filter match).
+    LinkKind kind_{LinkKind::CanIso15765};
+    std::uint32_t can_id_request_{0};
+    std::uint32_t can_id_response_{0};
+    bool listen_only_{false};
+    // start_streaming spawns this thread; stop_streaming flips
+    // `streaming_stop_` and joins. The thread does blocking
+    // read_dvi_frame calls on the byte channel and posts decoded frames
+    // to streaming_callback_. send/send_recv are mutually exclusive with
+    // streaming (the byte channel can't be shared) — the contract is
+    // enforced at start_streaming time.
+    std::thread streaming_thread_;
+    std::atomic<bool> streaming_stop_{false};
+    FrameCallback streaming_callback_;
 };
 
 } // namespace st::transport::obdx
