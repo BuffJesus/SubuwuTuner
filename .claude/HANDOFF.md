@@ -1,6 +1,6 @@
 # Handoff — 2026-05-23 end-of-day (sniff mode + SA plug-in + rdbi shipped; pushed to origin/main)
 
-**Pushes today: ~18:40 SA/sniff/rdbi cycle + ~20:00 docs follow-up + ~21:30 solver scaffold.** 19 commits landed on `origin/main` (range `0ccf9e0..ae6cf7d`): the 6 from yesterday's SSM-on-CAN bundle that had been sitting unpushed + 7 from today's transport hardening / SA plug-in / sniff toolchain / icon / handoff / rdbi cycle + 3 evening-docs commits (sniff-workflows recipe doc + tuning-coach section + envelope caveat) + 1 handoff refresh + 2 late-evening commits scaffolding `tools/solve_ssmcan1.py` (algorithm + Z3 solver + C++ emitter + linearity-check diagnostic). Tree clean. https://github.com/BuffJesus/SubuwuTuner
+**Five pushes today: ~18:40 SA/sniff/rdbi cycle + ~20:00 docs follow-up + ~21:30 solver scaffold + ~22:30 SA NRC guidance + ~23:00 sniff-log extractors.** 22 commits landed on `origin/main` (range `0ccf9e0..0e5cddc`): the 6 from yesterday's SSM-on-CAN bundle that had been sitting unpushed + 7 from today's transport hardening / SA plug-in / sniff toolchain / icon / handoff / rdbi cycle + 3 evening-docs commits + 2 handoff refreshes + 2 commits scaffolding `tools/solve_ssmcan1.py` (algorithm + Z3 solver + C++ emitter + linearity-check) + 1 SA NRC recovery-guidance commit (`reject_if_sa_negative` translating 0x33/0x35/0x36/0x37 to actionable text) + 1 three-extractor commit (sniff-log Workflows 1/2/3 from docs/24). Tree clean. https://github.com/BuffJesus/SubuwuTuner
 
 **Two next-action paths, parallelizable:**
 
@@ -131,9 +131,36 @@ Added:
 
 **What this means for tomorrow's capture:** with high probability the real-data `solve` returns UNSAT against the current encoded structure. Don't read that as "the tooling is broken"; read it as "the encoded structure is wrong, refine it." The most likely refinement is adding S-box-style table indexing (where state bits select which table entry gets XOR'd, making table content observable in the output). That refinement is gated on real data — guessing further from prose alone would compound speculation.
 
-## Test state: **919/919 C++ green** + **16/16 Python green** (`tools/tests/`)
+## Continued late evening: pre-Y-cable polish (2 commits)
 
-C++ side: +5 sniff transport tests, +4 SA preamble tests, all open-handshake fixtures updated for the new CAN filter ACK between SetProtocol and EnableNetwork. Count unchanged since `0fd6d21`/`ae6cf7d` (those are Python-only). Python side: 16 new tests under `tools/tests/test_solve_ssmcan1.py` covering algorithm determinism, generator reproducibility, verifier pass/fail, pairs-JSON round-trip, C++ emitter structure, Z3 round-trip (skipped without z3-solver), Z3 ambiguity detection, and the new linearity check. Run with `python -m unittest discover -s tools/tests`.
+Both commits close pre-Y-cable follow-up items so tomorrow's first capture has the most ergonomic experience possible.
+
+### 11. SA NRC named guidance — closes follow-up #5 (commit `7e03771`)
+
+The bare `UDS NRC=0x36` propagated by `reject_if_negative` is opaque mid-stuck-SA session. Added `reject_if_sa_negative` helper in `src/ecu/src/uds.cpp` that translates the four SA-relevant NRCs (0x33/0x35/0x36/0x37) to named + actionable messages. NRC 0x36 in particular now reads:
+
+> `UDS NRC=0x36 (exceededNumberOfAttempts) - ECU has locked SecurityAccess after too many bad-key attempts. To reset: power-cycle the ECU (ignition off, wait 10s, ignition on) OR wait ~10 minutes for automatic unlock.`
+
+NRC 0x35 also warns about the lockout that follows ~3 cumulative bad keys (citing ISO 14229 §10.4.2.3 so the figure isn't arbitrary). Generic `reject_if_negative` stays untouched — SA-specific guidance lives only in SA parsers. Both `parse_security_access_seed` and `parse_security_access_key_ack` rewired to the new helper. 4 new unit tests in `test_uds.cpp` covering all four guidance cases, 1 new Flasher-level integration test in `test_flash.cpp` confirming the recovery message survives propagation through the SA preamble. Test assertions use substring keyword anchors so the wording can be tuned without breaking suite. **923/923 C++ green** (+4 from 919).
+
+### 12. Three sniff-log extractors — closes follow-up #4 (commit `0e5cddc`)
+
+(Commit message says "#5" but it closes #4 — the three extractors `docs/24-sniff-workflows.md` had been promising as TODOs. The previous commit `7e03771` was the actual #5. Cosmetic typo, no impact.)
+
+Three Python scripts in `tools/`:
+- `extract_uds_transfer.py` — Workflow 1, sniff-during-flash payload recovery. Pairs RequestDownload (0x34) with TransferData (0x36), tracks blockSequenceCounter wrap (0xFF→0x00), emits per-transfer `.bin` payloads + manifest JSON.
+- `extract_rmba_polls.py` — Workflow 2, datalogger RAM-address discovery. Pairs RMBA/RDBI requests with responses, aggregates per-(kind,address) stats. Defensive handling for NRC 0x78 ("still working, wait") so a busy ECU doesn't make us drop the in-flight request.
+- `decode_uds_capture.py` — Workflow 3, protocol learning. Walks the log producing a human-readable timeline with named ISO 14229 SIDs, sub-functions, and NRCs. Text or `--json` output. Anomaly section at the end flags uncatalogued SIDs/NRCs.
+
+Shared infrastructure in `tools/sniff_common.py`:
+- `Frame` + `parse_log` (SubuwuTuner sniff-log format reader)
+- `IsoTpReassembler` with full SF / standard FF / **escape FF** (FF_DL=0 with 32-bit length per ISO 15765-2 — important for COBB ProTuner blocks >4095 bytes) / CF / per-CAN-ID concurrent state. Out-of-sequence CFs drop the in-flight message rather than emit corrupted bytes.
+
+Schema names match `docs/24` exactly: `subuwutuner.flash.v1`, `subuwutuner.poll.v1`. Workflow 3 uses a new `subuwutuner.uds_timeline.v1`. **46/46 Python green** (+30 from 16).
+
+## Test state: **923/923 C++ green** + **46/46 Python green** (`tools/tests/`)
+
+C++ side: morning batch added +5 sniff transport tests + +4 SA preamble tests; commit `7e03771` adds +4 SA-NRC-guidance tests and tightens +2 existing. Python side: solver scaffold added 16 tests (`test_solve_ssmcan1.py`); extractor commit `0e5cddc` adds 30 more across `test_sniff_common.py`, `test_extract_uds_transfer.py`, `test_extract_rmba_polls.py`, `test_decode_uds_capture.py` (ISO-TP edge cases incl. escape-FF and out-of-sequence CF, RMBA/RDBI aggregation incl. NRC 0x78 handling, UDS timeline rendering, anomaly detection). Run with `python -m unittest discover -s tools/tests`.
 
 ## Binary artifacts (Syncthing-distributed)
 
@@ -142,11 +169,15 @@ C++ side: +5 sniff transport tests, +4 SA preamble tests, all open-handshake fix
 
 Both at `D:\Documents\JetBrains\SubaruTuner\build\win-mingw\bin\`. Syncthing should have propagated to the laptop.
 
-## Commit log (pushed, `0ccf9e0..ae6cf7d`)
+## Commit log (pushed, `0ccf9e0..0e5cddc`)
 
-In chronological push order — bottom to top is yesterday's bundle, top is tonight's solver scaffold:
+In chronological push order — bottom to top is yesterday's bundle, top is tonight's late-evening polish:
 
 ```
+0e5cddc feat(tools): three sniff-log extractors for docs/24 Workflows 1/2/3
+7e03771 feat(ecu+flash): named NRCs + recovery guidance for SecurityAccess failures
+613303a docs(handoff): refresh for solver scaffold + structural-degeneracy finding
+─── (boundary: ~23:00 extractors push, ~22:30 SA NRC push above ~21:30 solver push) ──
 ae6cf7d feat(tools): linearity-check subcommand + EMPIRICAL FINDING docstring
 0fd6d21 feat(tools): SSMCAN1 solver scaffold + synthetic round-trip harness
 71ecb8a docs(handoff): note evening docs push + Y-cable arrival date
@@ -171,7 +202,7 @@ d474d1d feat(feature_codegen): sqrt_float IR primitive (SH-2A FSQRT)
 19eb16c fix(transport+ecu+flash+log): SSM-on-CAN bare-payload framing
 ```
 
-19 commits total. `origin/main` is now at `ae6cf7d`. No more pending work waiting to push.
+22 commits total. `origin/main` is now at `0e5cddc`. No more pending work waiting to push.
 
 ## Pre-existing untracked / leave-alone
 
@@ -270,7 +301,8 @@ Installed 2026-05-22. Two send-only folders mirror desktop → laptop. Replaces 
 1. ~~**`tools/solve_ssmcan1.py`** — algorithm-solver.~~ **Done** (commit `0fd6d21`); scaffold encoded one plausible structure but the encoding is GF(2)-linear, so post-capture refinement is needed — see commit `ae6cf7d`'s EMPIRICAL FINDING. Algorithm-structure refinement is now the gated item; wait for real data.
 2. ~~**`subuwutuner-cli rdbi --did <hex>`**.~~ **Done** (commit `c5602cb`).
 3. **CY1 AES implementation** — `jglim/UnlockECU/SubaruSecurityAccess2018CY1.cs` is MIT-licensed, can be re-implemented in `subaru_security.cpp` without contamination. Targets 2018+ Subarus, not the dev's 2017 — defer until Path B for VB packs.
-4. **Three missing extractors from `docs/24`** — `tools/extract_uds_transfer.py` (sniff-during-flash payload recovery), `tools/extract_rmba_polls.py` (datalogger RAM-address discovery), `tools/decode_uds_capture.py` (UDS timeline + anomaly highlighter). All marked TODO; ~2–4 hr each. Lower urgency than solver-refinement since they support Workflows 1/2/3 in `docs/24`, not the immediate ROM-dump path.
-5. **NRC 0x36 (exceededNumberOfAttempts) error message + test** — if user accidentally triggers the 3-bad-key lockout, the message should clearly say "wait 10 min or power-cycle ignition" rather than propagating the bare NRC. Small (~30 min); pre-empts a real "wtf is happening" moment tomorrow.
-6. **Ship blocker #10**: CI performance gate.
-7. **Ship blocker #7**: Frozen `defgen` binary.
+4. ~~**Three missing extractors from `docs/24`**~~ **Done** (commit `0e5cddc`); `tools/extract_uds_transfer.py` / `extract_rmba_polls.py` / `decode_uds_capture.py` shipped with shared `sniff_common.py` (incl. ISO-TP escape-FF for large blocks). 46/46 Python tests green.
+5. ~~**NRC 0x36 (exceededNumberOfAttempts) error message + test**~~ **Done** (commit `7e03771`); `reject_if_sa_negative` translates 0x33/0x35/0x36/0x37 to actionable messages with recovery guidance. 923/923 C++ tests green.
+6. **Algorithm-structure refinement** for `tools/solve_ssmcan1.py` — gated on real-capture data per the EMPIRICAL FINDING in commit `ae6cf7d`. Leading hypothesis is S-box-style indexing of `KeyPartsTable` by state bits rather than positional XOR. Don't refine speculatively; wait for first real `pairs.json`.
+7. **Ship blocker #10**: CI performance gate.
+8. **Ship blocker #7**: Frozen `defgen` binary.
