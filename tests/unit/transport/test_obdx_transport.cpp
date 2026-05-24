@@ -519,16 +519,23 @@ TEST_CASE("obdx::Transport::close sends a SoftReboot, becomes idempotent",
 
 // ---- listen_only (sniff) mode -----------------------------------
 
-TEST_CASE("obdx::Transport::open in listen_only mode skips filter setup and "
-          "uses EnableNetwork LISTEN-ONLY",
+TEST_CASE("obdx::Transport::open in listen_only mode installs a PERMISSIVE "
+          "filter and uses EnableNetwork LISTEN-ONLY",
           "[transport][obdx_transport][sniff]") {
-    // Sniff-mode handshake — no CAN filter exchange between SetProtocol and
-    // EnableNetwork, and EnableNetwork state byte is 0x02 (LISTEN-ONLY).
+    // Sniff-mode handshake — a permissive `id=0, mask=0, flow=0` filter
+    // exchange between SetProtocol and EnableNetwork, and EnableNetwork
+    // state byte is 0x02 (LISTEN-ONLY).
+    //
+    // Earlier rev SKIPPED the filter entirely on a misreading of OBDX
+    // §3.4; that produced a silent "captured 0 frames" in field testing
+    // because the OBDX adapter's default is drop-all-frames-unless-a-
+    // filter-matches. mask=0 means every frame matches, so every CAN
+    // frame on the bus gets pushed to the host.
     auto cp = make_channel();
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
-    // NO CAN filter ACK queued — open() must skip it in listen_only mode.
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
 
     obdx::Transport t{std::move(cp.owner)};
@@ -540,16 +547,35 @@ TEST_CASE("obdx::Transport::open in listen_only mode skips filter setup and "
     REQUIRE(r.has_value());
     REQUIRE(t.is_open());
 
-    // Verify the filter command (0x34) NEVER appeared on the wire.
     auto const &raw_writes = cp.raw->writes();
-    bool saw_filter_cmd = false;
-    for (auto b : raw_writes) {
-        if (b == 0x34U) {
-            saw_filter_cmd = true;
+
+    // Verify the filter command (0x34) DID appear, AND its payload
+    // carries id=0, mask=0, flow=0 (the permissive shape). The filter
+    // payload is 17 bytes immediately after the 0x34 + length header
+    // per can_filter_payload(); we look for a sub-block matching the
+    // 4-byte id / 4-byte mask / 4-byte flow tail.
+    bool saw_permissive_filter = false;
+    for (std::size_t i = 0; i + 16 < raw_writes.size(); ++i) {
+        if (raw_writes[i] != 0x34U) {
+            continue;
+        }
+        // 0x34 + 1-byte length + 17-byte payload = match here.
+        // Permissive filter: id=00 00 00 00, mask=00 00 00 00, flow=00 00 00 00.
+        std::size_t const tail_start = i + 2 + 5; // skip opcode, len, 5 header bytes
+        bool all_zero = true;
+        for (std::size_t k = 0; k < 12; ++k) {
+            if (tail_start + k >= raw_writes.size() ||
+                raw_writes[tail_start + k] != 0x00U) {
+                all_zero = false;
+                break;
+            }
+        }
+        if (all_zero) {
+            saw_permissive_filter = true;
             break;
         }
     }
-    REQUIRE_FALSE(saw_filter_cmd);
+    REQUIRE(saw_permissive_filter);
 
     // Verify EnableNetwork was emitted as `31 02 02 02` (sub=02, state=02
     // = LISTEN-ONLY).
@@ -570,6 +596,7 @@ TEST_CASE("obdx::Transport::send_recv refused in listen_only mode",
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
 
     obdx::Transport t{std::move(cp.owner)};
@@ -591,6 +618,7 @@ TEST_CASE("obdx::Transport::send refused in listen_only mode",
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
 
     obdx::Transport t{std::move(cp.owner)};
@@ -612,6 +640,7 @@ TEST_CASE("obdx::Transport::start_streaming pushes unsolicited frames to callbac
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
 
     // Two unsolicited adapter→PC pushes the streaming thread will see.
@@ -670,6 +699,7 @@ TEST_CASE("obdx::Transport::start_streaming rejects empty callback",
     cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
     obdx::Transport t{std::move(cp.owner)};
     st::transport::LinkConfig cfg{};

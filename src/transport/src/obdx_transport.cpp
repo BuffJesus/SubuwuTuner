@@ -521,16 +521,30 @@ st::Status Transport::open(LinkConfig const &cfg) {
     // means "match all 11 bits exactly". Only emitted for CAN; K-Line
     // / CAN-FD are rejected above, so reaching here implies CanIso15765.
     //
-    // SKIPPED in listen_only (sniff) mode: per §3.4, "to monitor all
-    // messages, disable all filters and enable network." With no filter
-    // configured the adapter pushes every CAN frame it sees, which is
-    // the entire point of sniffing.
-    if (cfg.kind == LinkKind::CanIso15765 && !cfg.listen_only) {
+    // Sniff (listen_only) mode uses a PERMISSIVE filter (id=0, mask=0,
+    // flow_id=0) rather than skipping the filter setup entirely. The
+    // earlier "skip the filter for sniff" approach (per a misreading of
+    // §3.4) hit the same silent-drop behavior diagnosed above: with no
+    // filter configured, the adapter accepts EnableNetwork but pushes
+    // ZERO frames to the host. Empirically confirmed on the user's 2017
+    // VA WRX — a 142s bus-check captured 0 frames even with the engine
+    // running and an AccessPort actively negotiating settings on the
+    // bus. mask=0 means "(received_id & 0) == (filter_id & 0)" — always
+    // true, so every frame matches and gets pushed.
+    if (cfg.kind == LinkKind::CanIso15765) {
         constexpr std::uint32_t k11BitMask = 0x000007FFU;
-        auto const filt =
-            can_filter_payload(cfg.can_id_response, k11BitMask, cfg.can_id_request);
+        std::uint32_t const filt_id =
+            cfg.listen_only ? 0x000U : cfg.can_id_response;
+        std::uint32_t const filt_mask =
+            cfg.listen_only ? 0x000U : k11BitMask;
+        std::uint32_t const flow_id =
+            cfg.listen_only ? 0x000U : cfg.can_id_request;
+        auto const filt = can_filter_payload(filt_id, filt_mask, flow_id);
         if (trace) {
-            trace_dump("[trace][obdx-open] step 4 TX CAN Filter setup", filt);
+            trace_dump(cfg.listen_only
+                           ? "[trace][obdx-open] step 4 TX CAN Filter (permissive, listen-only)"
+                           : "[trace][obdx-open] step 4 TX CAN Filter setup",
+                       filt);
         }
         auto filt_rsp =
             dvi_exchange(*channel_, dvi::Opcode::CanProtocolSettings, filt, kCanFilterTimeout);
@@ -545,10 +559,6 @@ st::Status Transport::open(LinkConfig const &cfg) {
         if (trace) {
             trace_dump("[trace][obdx-open] step 4 RX CAN Filter ACK", *filt_rsp);
         }
-    } else if (trace && cfg.listen_only) {
-        std::fprintf(stderr, "[trace][obdx-open] step 4 SKIPPED (listen_only): "
-                             "no CAN filter — sniff every frame on the bus\n");
-        std::fflush(stderr);
     }
 
     // 5. Enable network communication (§3.10.2: same 0x31 opcode,
