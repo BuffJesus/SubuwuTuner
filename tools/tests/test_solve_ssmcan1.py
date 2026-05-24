@@ -244,5 +244,155 @@ class TestZ3Solver(unittest.TestCase):
             self.assertEqual(report.passed, len(pairs))
 
 
+class TestGenAFeistel(unittest.TestCase):
+    """Tests for the recovered Gen-A SSMCAN1 algorithm. Mirrors the
+    C++ test in tests/unit/ecu/test_subaru_security.cpp.
+    """
+
+    def test_F_hand_computed_vectors(self) -> None:
+        # F(0, 0): all four S-box indices = 0 -> S[0] = 0x05 four times ->
+        # y = 0x5555 -> rol16(0x5555, 13) = 0xAAAA.
+        self.assertEqual(solve_ssmcan1.gen_a_F(0x0000, 0x0000), 0xAAAA)
+        # F(0, 0xFFFF): all indices = 31 -> S[31] = 0x08 four times ->
+        # y = 0x8888 -> rol16(0x8888, 13) = 0x1111.
+        self.assertEqual(solve_ssmcan1.gen_a_F(0x0000, 0xFFFF), 0x1111)
+        # F(0x1234, 0x5678): mixed indices; hand-traced to 0xF333.
+        self.assertEqual(solve_ssmcan1.gen_a_F(0x1234, 0x5678), 0xF333)
+
+    def test_F_self_cancellation(self) -> None:
+        for k in (0x0000, 0xFFFF, 0xCAFE, 0xDEAD, 0x1234, 0x5678):
+            self.assertEqual(solve_ssmcan1.gen_a_F(k, k), 0xAAAA)
+
+    def test_feistel_forward_inverse_round_trip(self) -> None:
+        for k in (0x00000000, 0x00000001, 0xCAFEBABE, 0xDEADBEEF,
+                  0x12345678, 0x80000000, 0x000000FF, 0xA5A5A5A5,
+                  0xFFFFFFFF):
+            forward = solve_ssmcan1.gen_a_feistel_forward(
+                k, solve_ssmcan1.GEN_A_RK_L1)
+            back = solve_ssmcan1.gen_a_feistel_inverse(
+                forward, solve_ssmcan1.GEN_A_RK_L1)
+            self.assertEqual(back, k, msg=f"round-trip failed for {k:#010x}")
+
+    def test_seed_to_key_round_trip(self) -> None:
+        # Forward (ECU side) any internal_key -> seed; tester-side
+        # seed_to_key must recover the same internal_key.
+        for ik in (0x00000001, 0xCAFEBABE, 0xDEADBEEF, 0x12345678,
+                   0xA5A5A5A5, 0xFFFFFFFE):
+            ik_bytes = ik.to_bytes(4, "big")
+            seed = solve_ssmcan1.gen_a_key_to_seed_l1(ik_bytes)
+            recovered = solve_ssmcan1.gen_a_seed_to_key_l1(seed)
+            self.assertEqual(recovered, ik_bytes,
+                             msg=f"round-trip failed for ik={ik:#010x}")
+
+    def test_seed_to_key_rejects_wrong_length(self) -> None:
+        with self.assertRaises(ValueError):
+            solve_ssmcan1.gen_a_seed_to_key_l1(b"")
+        with self.assertRaises(ValueError):
+            solve_ssmcan1.gen_a_seed_to_key_l1(b"\x01\x02\x03")
+        with self.assertRaises(ValueError):
+            solve_ssmcan1.gen_a_seed_to_key_l1(b"\x01\x02\x03\x04\x05")
+
+    def test_seed_to_key_deterministic(self) -> None:
+        # Same seed always produces the same key (the ECU's session
+        # validation contract).
+        seed = b"\x72\x0B\xE3\x22"  # the bytes from the user's first attempt
+        k1 = solve_ssmcan1.gen_a_seed_to_key_l1(seed)
+        k2 = solve_ssmcan1.gen_a_seed_to_key_l1(seed)
+        self.assertEqual(k1, k2)
+        self.assertEqual(len(k1), 4)
+
+    def test_seed_to_key_matches_cpp_implementation_for_user_seed(self) -> None:
+        # Pins the Python implementation against the same answer the
+        # C++ produced on 2026-05-24's first real-car attempt
+        # (seed 72 0B E3 22 -> key 02 C5 BA 29). If this assertion
+        # ever changes value, the Python and C++ implementations have
+        # diverged.
+        seed = b"\x72\x0B\xE3\x22"
+        expected = b"\x02\xC5\xBA\x29"
+        self.assertEqual(solve_ssmcan1.gen_a_seed_to_key_l1(seed), expected)
+
+
+class TestVerifyGenACommand(unittest.TestCase):
+    """Exit-code + JSON-handling tests for the verify-gen-a subcommand."""
+
+    def _write_pairs(self, pairs: list[dict]) -> Path:
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump({"schema": "subuwutuner.sa.v1", "pairs": pairs}, tmp)
+        tmp.close()
+        return Path(tmp.name)
+
+    def test_matching_pairs_exit_zero(self) -> None:
+        # Generate a few synthetic pairs by running forward (ECU side)
+        # on known internal_keys, then verify they all round-trip.
+        pairs = []
+        for ik in (0xCAFEBABE, 0xDEADBEEF, 0x12345678):
+            ik_bytes = ik.to_bytes(4, "big")
+            seed = solve_ssmcan1.gen_a_key_to_seed_l1(ik_bytes)
+            pairs.append({"seed": seed.hex().upper(), "key": ik_bytes.hex().upper()})
+        path = self._write_pairs(pairs)
+        try:
+            rc = solve_ssmcan1.main(["verify-gen-a", str(path)])
+            self.assertEqual(rc, 0)
+        finally:
+            path.unlink()
+
+    def test_all_mismatching_pairs_exit_two(self) -> None:
+        # Captured keys deliberately wrong — simulates "COBB-modified
+        # algorithm" scenario where the algorithm never matches.
+        pairs = []
+        for ik in (0xCAFEBABE, 0xDEADBEEF, 0x12345678):
+            ik_bytes = ik.to_bytes(4, "big")
+            seed = solve_ssmcan1.gen_a_key_to_seed_l1(ik_bytes)
+            wrong_key = bytes(b ^ 0xFF for b in ik_bytes)
+            pairs.append({"seed": seed.hex().upper(), "key": wrong_key.hex().upper()})
+        path = self._write_pairs(pairs)
+        try:
+            rc = solve_ssmcan1.main(["verify-gen-a", str(path)])
+            self.assertEqual(rc, 2)
+        finally:
+            path.unlink()
+
+    def test_partial_match_exit_three(self) -> None:
+        # 2 right + 1 wrong -> partial match, exit 3.
+        pairs = []
+        for i, ik in enumerate((0xCAFEBABE, 0xDEADBEEF, 0x12345678)):
+            ik_bytes = ik.to_bytes(4, "big")
+            seed = solve_ssmcan1.gen_a_key_to_seed_l1(ik_bytes)
+            key = (bytes(b ^ 0xFF for b in ik_bytes) if i == 2 else ik_bytes)
+            pairs.append({"seed": seed.hex().upper(), "key": key.hex().upper()})
+        path = self._write_pairs(pairs)
+        try:
+            rc = solve_ssmcan1.main(["verify-gen-a", str(path)])
+            self.assertEqual(rc, 3)
+        finally:
+            path.unlink()
+
+    def test_empty_pairs_exit_one(self) -> None:
+        path = self._write_pairs([])
+        try:
+            rc = solve_ssmcan1.main(["verify-gen-a", str(path)])
+            self.assertEqual(rc, 1)
+        finally:
+            path.unlink()
+
+    def test_malformed_json_exit_one(self) -> None:
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8")
+        tmp.write("this is not json")
+        tmp.close()
+        path = Path(tmp.name)
+        try:
+            rc = solve_ssmcan1.main(["verify-gen-a", str(path)])
+            self.assertEqual(rc, 1)
+        finally:
+            path.unlink()
+
+    def test_missing_file_exit_one(self) -> None:
+        rc = solve_ssmcan1.main(
+            ["verify-gen-a", "/nonexistent/path/does/not/exist.json"])
+        self.assertEqual(rc, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

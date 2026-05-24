@@ -758,6 +758,229 @@ def cmd_linearity_check(args: argparse.Namespace) -> int:
     return 0
 
 
+# =============================================================================
+# Gen-A SSMCAN1 — recovered Feistel + S-box (analyst-mode RE, 2026-05-24)
+# =============================================================================
+#
+# Python mirror of the C++ implementation in src/ecu/src/subaru_security.cpp.
+# Constants are byte-verified against all 8 A-series ROMs sampled (LF75 ..
+# LF9L, model years 2015-2021). See docs/23-security-access.md § "Algorithm
+# structure recovered (2026-05-24)" for the algorithm description and
+# docs/17 §7 for the distribution-axis reasoning.
+#
+# Used by the `verify-gen-a` subcommand below to round-trip a captured
+# (seed, key) pair against the recovered algorithm — for example, pairs
+# extracted from a Y-cable sniff of COBB AccessPort authenticating to the
+# user's car. If every captured pair matches what our algorithm computes,
+# the algorithm + constants are correct for that car. If pairs mismatch,
+# the captured keys are ground truth to derive whatever's different
+# (e.g. COBB-modified round-key constants).
+
+GEN_A_SBOX = bytes([
+    0x05, 0x06, 0x07, 0x01, 0x09, 0x0c, 0x0d, 0x08,
+    0x0a, 0x0d, 0x02, 0x0b, 0x0f, 0x04, 0x00, 0x03,
+    0x0b, 0x04, 0x06, 0x00, 0x0f, 0x02, 0x0d, 0x09,
+    0x05, 0x0c, 0x01, 0x0a, 0x03, 0x0d, 0x0e, 0x08,
+])
+
+GEN_A_RK_L1: list[int] = [
+    0x78b1, 0x4625, 0x201c, 0x9ea5,
+    0xad6b, 0x35f4, 0xfd21, 0x5e71,
+    0xb046, 0x7f4a, 0x4b75, 0x93f9,
+    0x1895, 0x8961, 0x3ecc, 0x862b,
+]
+
+
+def _gen_a_rol16(v: int, n: int) -> int:
+    n &= 15
+    v &= 0xFFFF
+    if n == 0:
+        return v
+    return ((v << n) | (v >> (16 - n))) & 0xFFFF
+
+
+def gen_a_F(x: int, k: int) -> int:
+    """Per-round F function: x XOR k, four overlapping 5-bit S-box lookups,
+    16-bit rotate-left by 13. Bit 0 of x promotes to bit 4 of the
+    high-nibble index (the asymmetric construction)."""
+    x = (x ^ k) & 0xFFFF
+    i3 = ((x & 0x0001) << 4) | (x >> 12)
+    i2 = (x >> 8) & 0x1F
+    i1 = (x >> 4) & 0x1F
+    i0 = x & 0x1F
+    y = ((GEN_A_SBOX[i3] << 12) | (GEN_A_SBOX[i2] << 8)
+         | (GEN_A_SBOX[i1] << 4) | GEN_A_SBOX[i0])
+    return _gen_a_rol16(y, 13)
+
+
+def gen_a_feistel_forward(state: int, rk: list[int]) -> int:
+    """ECU's direction: internal_key -> post-rounds state."""
+    state &= 0xFFFFFFFF
+    for k in rk:
+        L = state & 0xFFFF
+        H = (state >> 16) & 0xFFFF
+        new_L = (H ^ gen_a_F(L, k)) & 0xFFFF
+        new_H = L
+        state = ((new_H << 16) | new_L) & 0xFFFFFFFF
+    return state
+
+
+def gen_a_feistel_inverse(state: int, rk: list[int]) -> int:
+    """Tester's direction: post-rounds state -> internal_key."""
+    state &= 0xFFFFFFFF
+    for k in reversed(rk):
+        L_new = state & 0xFFFF
+        H_new = (state >> 16) & 0xFFFF
+        L_old = H_new
+        H_old = (L_new ^ gen_a_F(L_old, k)) & 0xFFFF
+        state = ((H_old << 16) | L_old) & 0xFFFFFFFF
+    return state
+
+
+def _gen_a_wordswap32(v: int) -> int:
+    return ((v >> 16) | ((v & 0xFFFF) << 16)) & 0xFFFFFFFF
+
+
+def gen_a_seed_to_key_l1(seed_bytes: bytes) -> bytes:
+    """Compute the L1 (bootloader-unlock) key from the 4 wire seed bytes.
+
+    `seed_bytes` is exactly the 4 bytes at positions [2..5] of the
+    `67 01 ...` requestSeed response. Returns the 4 bytes to place at
+    positions [2..5] of the `27 02 ...` sendKey request.
+    """
+    if len(seed_bytes) != 4:
+        raise ValueError(
+            f"Gen-A L1 seed must be 4 bytes, got {len(seed_bytes)}")
+    seed_packed = int.from_bytes(seed_bytes, "big")  # L1 shuffle = identity
+    state_post_rounds = _gen_a_wordswap32(seed_packed)
+    internal_key = gen_a_feistel_inverse(state_post_rounds, GEN_A_RK_L1)
+    return internal_key.to_bytes(4, "big")
+
+
+def gen_a_key_to_seed_l1(key_bytes: bytes) -> bytes:
+    """Inverse of gen_a_seed_to_key_l1 — the ECU-side direction.
+
+    Given a 4-byte internal_key, returns what the ECU would have emitted
+    on the wire as the L1 seed. Used by tests and by the verify-gen-a
+    summary when the captured key needs to be checked against a
+    forward-computed seed too.
+    """
+    if len(key_bytes) != 4:
+        raise ValueError(
+            f"Gen-A L1 key must be 4 bytes, got {len(key_bytes)}")
+    internal_key = int.from_bytes(key_bytes, "big")
+    post_rounds = gen_a_feistel_forward(internal_key, GEN_A_RK_L1)
+    seed_packed = _gen_a_wordswap32(post_rounds)
+    return seed_packed.to_bytes(4, "big")
+
+
+def cmd_verify_gen_a(args: argparse.Namespace) -> int:
+    """Round-trip a captured pairs.json against the recovered Gen-A L1
+    algorithm. Used as a one-shot sanity check before burning real-car
+    attempts: if every captured pair matches, the algorithm is correct
+    for this car; if every captured pair mismatches, the captured keys
+    give us ground truth to derive what's different (likely COBB-
+    modified round-key constants)."""
+    try:
+        text = args.pairs.read_text(encoding="utf-8")
+        data = json.loads(text)
+    except OSError as e:
+        print(f"verify-gen-a: cannot read {args.pairs}: {e}", file=sys.stderr)
+        return 1
+    except json.JSONDecodeError as e:
+        print(f"verify-gen-a: invalid JSON in {args.pairs}: {e}", file=sys.stderr)
+        return 1
+
+    pairs = data.get("pairs") if isinstance(data, dict) else None
+    if not pairs:
+        print(f"verify-gen-a: no pairs in {args.pairs}", file=sys.stderr)
+        return 1
+
+    matches = 0
+    mismatches = 0
+    malformed = 0
+    print(
+        f"Verifying {len(pairs)} captured pair(s) against Gen-A SSMCAN1 L1",
+        file=sys.stderr,
+    )
+    print(file=sys.stderr)
+
+    for i, p in enumerate(pairs):
+        try:
+            seed = bytes.fromhex(p["seed"])
+            captured_key = bytes.fromhex(p["key"])
+        except (KeyError, TypeError, ValueError) as e:
+            print(f"  [{i:2d}] malformed pair: {e}", file=sys.stderr)
+            malformed += 1
+            continue
+        if len(seed) != 4 or len(captured_key) != 4:
+            print(
+                f"  [{i:2d}] wrong byte count: seed={len(seed)} key={len(captured_key)} "
+                f"(both must be 4)",
+                file=sys.stderr,
+            )
+            malformed += 1
+            continue
+        try:
+            computed_key = gen_a_seed_to_key_l1(seed)
+        except ValueError as e:
+            print(f"  [{i:2d}] algorithm error: {e}", file=sys.stderr)
+            malformed += 1
+            continue
+        match = computed_key == captured_key
+        marker = "MATCH" if match else "MISMATCH"
+        print(
+            f"  [{i:2d}] seed={seed.hex().upper()}  "
+            f"captured={captured_key.hex().upper()}  "
+            f"computed={computed_key.hex().upper()}  {marker}",
+            file=sys.stderr,
+        )
+        if match:
+            matches += 1
+        else:
+            mismatches += 1
+
+    print(file=sys.stderr)
+    total = matches + mismatches + malformed
+    print(
+        f"Summary: {matches}/{total} match, {mismatches}/{total} mismatch, "
+        f"{malformed}/{total} malformed.",
+        file=sys.stderr,
+    )
+
+    if matches == total and total > 0:
+        print(
+            "RESULT: ALGORITHM CORRECT - Gen-A L1 reproduces every captured pair.",
+            file=sys.stderr,
+        )
+        print(
+            "        Safe to retry the real-car SA. If it still fails, the issue "
+            "is elsewhere (transport, NRC, security level, session).",
+            file=sys.stderr,
+        )
+        return 0
+    if matches == 0 and mismatches > 0:
+        print(
+            "RESULT: ALGORITHM MISMATCH - no captured pair reproduces.",
+            file=sys.stderr,
+        )
+        print(
+            "        Most likely COBB modified the SA constants or structure on "
+            "this car. The captured pairs are ground truth - use them to derive "
+            "what changed (e.g. brute-force the L1 round-key table against "
+            "these pairs by inverting the algorithm).",
+            file=sys.stderr,
+        )
+        return 2
+    print(
+        f"RESULT: PARTIAL MATCH - {matches}/{total} reproduce. Inconsistent - "
+        "could indicate capture noise or partial COBB modification. Inspect the "
+        "per-pair lines above.",
+        file=sys.stderr,
+    )
+    return 3
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=__doc__,
@@ -829,6 +1052,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="RNG seed for the test seeds (default 0, reproducible)",
     )
     p_lin.set_defaults(func=cmd_linearity_check)
+
+    p_vga = sub.add_parser(
+        "verify-gen-a",
+        help=(
+            "verify a captured pairs.json against the recovered Gen-A L1 "
+            "algorithm (analyst-mode RE, 2026-05-24)"
+        ),
+    )
+    p_vga.add_argument(
+        "pairs",
+        type=Path,
+        help="pairs.json (from extract_subaru_sa.py)",
+    )
+    p_vga.set_defaults(func=cmd_verify_gen_a)
 
     return p
 
