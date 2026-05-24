@@ -109,6 +109,7 @@ add_executable(subuwutuner-gui
 target_link_libraries(subuwutuner-gui
     PRIVATE
         st::core
+        st::config
         st::rom
         st::defs
         st::edit

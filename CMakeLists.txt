@@ -229,6 +229,28 @@ if(WIN32)
 '$INSTDIR\\\\subuwutuner-gui.exe'")
     set(CPACK_NSIS_DELETE_ICONS_EXTRA
         "Delete '$SMPROGRAMS\\\\$START_MENU\\\\SubuwuTuner.lnk'")
+
+    # Phase 2 step 7 note: the design (docs/25 §8) called for both an
+    # install-time config.toml write AND custom NSIS UI pages with
+    # per-directory pickers. After landing the rest of Phase 2:
+    #
+    #   - The install-time config write is unnecessary. st::config's
+    #     defaults (executable_dir()/definitions and
+    #     %USERPROFILE%\\Documents\\SubuwuTuner\\roms) already do the
+    #     right thing on a fresh install with no config file present.
+    #     A missing-file is explicitly not an error (docs/25 §12), so
+    #     the system Just Works from first launch.
+    #
+    #   - The custom-page UI requires forking CPack's NSIS template
+    #     (cmake/NSIS.template.in) to inject Page directory blocks
+    #     with their own destination variables. Out-of-scope for the
+    #     Phase 2 time-box; tracked in docs/25 §15 as Phase 3 work.
+    #
+    # End-user UX today: standard one-directory installer + per-user
+    # editing post-install via Tools -> Settings... (step 6) or
+    # `subuwutuner-cli config set` (step 2). Equivalent in capability
+    # to the design, just spread across install + first-run instead
+    # of all in the installer wizard.
 elseif(APPLE)
     set(CPACK_GENERATOR "TGZ;DragNDrop")
 else()

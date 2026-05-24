@@ -19,6 +19,7 @@
 #include "st/log/ebcs.hpp"
 #include "st/log/knock_dashboard.hpp"
 #include "st/policy.hpp"
+#include "st/config.hpp"
 #include "st/defs/pack_registry.hpp"
 #include "st/project.hpp"
 #include "st/transport/factory.hpp"
@@ -948,6 +949,17 @@ struct AppState {
     // per-platform loose, or zipped). Read-only for v1 — useful for
     // verifying the new <platform>.zip overlay loader (commit 571ca22)
     // sees the same packs as the loose-only walk.
+    // --- Settings (Tools -> Settings...) ---------------------------------
+    // Persists to %APPDATA%\SubuwuTuner\config.toml (Windows) /
+    // $XDG_CONFIG_HOME/SubuwuTuner/config.toml (POSIX) via st::config.
+    // Implements docs/25 §9 — Phase 2 step 6.
+    bool show_settings_modal{false};
+    char settings_def_root_input[1024]{};
+    char settings_rom_dump_root_input[1024]{};
+    bool settings_loaded_once{false};
+    std::string settings_status_msg;
+    ImVec4 settings_status_color{1.0f, 1.0f, 1.0f, 1.0f};
+
     bool show_def_registry_modal{false};
     char def_registry_root_input[1024]{"definitions"};
     // Cached scan result. Rebuilt when the user clicks Scan.
@@ -3637,6 +3649,156 @@ void apply_theme(Theme t) {
 // would surface (loose top-level, per-platform loose, zipped). Future
 // commits wire this into the New-Project pack selector so the user can
 // pick a pack-by-id instead of a file path.
+// Tools -> Settings... — Phase 2 step 6 (docs/25 §9).
+// Atomic save semantics handled by st::config::Config::save() (tmp +
+// rename). After a successful save we reload PackRegistry so the new
+// definitions_root takes effect without restarting the GUI.
+void render_settings_modal(AppState &state) {
+    if (state.show_settings_modal) {
+        ImGui::OpenPopup("Settings##settings_modal");
+        state.show_settings_modal = false;
+        // Refresh from disk every time the modal opens so concurrent
+        // edits via the CLI `config set` subcommand don't get clobbered.
+        auto cfg_r = st::config::Config::load();
+        if (cfg_r.has_value()) {
+            std::snprintf(state.settings_def_root_input,
+                          sizeof state.settings_def_root_input, "%s",
+                          cfg_r->paths().definitions_root.string().c_str());
+            std::snprintf(state.settings_rom_dump_root_input,
+                          sizeof state.settings_rom_dump_root_input, "%s",
+                          cfg_r->paths().rom_dump_root.string().c_str());
+            state.settings_status_msg.clear();
+        } else {
+            state.settings_status_msg =
+                "Load failed: " + cfg_r.error().to_string();
+            state.settings_status_color = ImVec4(1.0f, 0.55f, 0.55f, 1.0f);
+        }
+        state.settings_loaded_once = true;
+    }
+    ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(640.0f, 0.0f), ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Settings##settings_modal", nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+
+    ImGui::Text("Config file:");
+    ImGui::SameLine();
+    auto const cfg_path = st::config::default_config_path().string();
+    ImGui::TextDisabled("%s", cfg_path.c_str());
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "%s%s",
+            cfg_path.c_str(),
+            std::filesystem::exists(st::config::default_config_path())
+                ? ""
+                : "\n(not present — defaults in use until first Save)");
+    }
+    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+
+    float const avail = ImGui::GetContentRegionAvail().x;
+    float const btn_w = 96.0f;
+    float const input_w = std::max(120.0f, avail - btn_w - 16.0f);
+
+    ImGui::TextUnformatted("Definitions root");
+    ImGui::SetNextItemWidth(input_w);
+    ImGui::InputText("##settings_def_root", state.settings_def_root_input,
+                     sizeof state.settings_def_root_input);
+    ImGui::SameLine();
+    if (ImGui::Button("Folder...##settings_def_pick", ImVec2(btn_w, 0.0f))) {
+        NFD::UniquePathU8 out;
+        if (NFD::PickFolder(out) == NFD_OKAY) {
+            std::snprintf(state.settings_def_root_input,
+                          sizeof state.settings_def_root_input, "%s",
+                          out.get());
+        }
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Where PackRegistry looks for <platform>.zip archives and\n"
+            "loose <id>.toml overrides. See docs/17 and docs/25.");
+    }
+
+    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::TextUnformatted("ROM dump root");
+    ImGui::SetNextItemWidth(input_w);
+    ImGui::InputText("##settings_rom_root", state.settings_rom_dump_root_input,
+                     sizeof state.settings_rom_dump_root_input);
+    ImGui::SameLine();
+    if (ImGui::Button("Folder...##settings_rom_pick", ImVec2(btn_w, 0.0f))) {
+        NFD::UniquePathU8 out;
+        if (NFD::PickFolder(out) == NFD_OKAY) {
+            std::snprintf(state.settings_rom_dump_root_input,
+                          sizeof state.settings_rom_dump_root_input, "%s",
+                          out.get());
+        }
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Default destination for rom-pull captures when no\n"
+            "--output is given. Must be writable by the running user\n"
+            "(not Program Files).");
+    }
+
+    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, 4.0f));
+
+    if (ImGui::Button("Save", ImVec2(110.0f, 0.0f))) {
+        auto cfg_r = st::config::Config::load();
+        if (!cfg_r.has_value()) {
+            state.settings_status_msg =
+                "Load failed: " + cfg_r.error().to_string();
+            state.settings_status_color = ImVec4(1.0f, 0.55f, 0.55f, 1.0f);
+        } else {
+            cfg_r->paths().definitions_root = state.settings_def_root_input;
+            cfg_r->paths().rom_dump_root = state.settings_rom_dump_root_input;
+            auto s = cfg_r->save();
+            if (s.has_value()) {
+                state.settings_status_msg =
+                    "Saved to " + cfg_r->source_path().string();
+                state.settings_status_color = ImVec4(0.4f, 0.85f, 0.4f, 1.0f);
+                // Invalidate the registry modal's cached scan so the
+                // next open re-walks against the new definitions_root.
+                state.def_registry_scanned = false;
+                state.def_registry_rows.clear();
+                state.def_registry_warnings.clear();
+            } else {
+                state.settings_status_msg =
+                    "Save failed: " + s.error().to_string();
+                state.settings_status_color = ImVec4(1.0f, 0.55f, 0.55f, 1.0f);
+            }
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Restore Defaults", ImVec2(140.0f, 0.0f))) {
+        auto defs = st::config::Config::defaults();
+        std::snprintf(state.settings_def_root_input,
+                      sizeof state.settings_def_root_input, "%s",
+                      defs.paths().definitions_root.string().c_str());
+        std::snprintf(state.settings_rom_dump_root_input,
+                      sizeof state.settings_rom_dump_root_input, "%s",
+                      defs.paths().rom_dump_root.string().c_str());
+        state.settings_status_msg =
+            "Defaults restored in form (click Save to persist).";
+        state.settings_status_color = ImVec4(0.95f, 0.85f, 0.4f, 1.0f);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Close", ImVec2(110.0f, 0.0f))) {
+        ImGui::CloseCurrentPopup();
+    }
+
+    if (!state.settings_status_msg.empty()) {
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, state.settings_status_color);
+        ImGui::TextWrapped("%s", state.settings_status_msg.c_str());
+        ImGui::PopStyleColor();
+    }
+
+    ImGui::EndPopup();
+}
+
 void render_def_registry_modal(AppState &state) {
     if (state.show_def_registry_modal) {
         ImGui::OpenPopup("Browse Definitions##def_registry_modal");
@@ -4436,6 +4598,17 @@ void render_menubar(AppState &state) {
                     "list every pack found (loose + zipped). Useful\n"
                     "for verifying a ship-time install layout where\n"
                     "<platform>.zip archives replace loose .toml files.");
+            }
+            if (ImGui::MenuItem("Settings...")) {
+                state.show_settings_modal = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Edit the runtime config that PackRegistry and\n"
+                    "rom-pull consult for default paths. Lives at\n"
+                    "%%APPDATA%%\\SubuwuTuner\\config.toml. Equivalent\n"
+                    "to running `subuwutuner-cli config set` from a\n"
+                    "shell. See docs/25 for precedence rules.");
             }
             ImGui::EndMenu();
         }
@@ -9298,6 +9471,7 @@ int main(int argc, char *argv[]) {
         render_flash_modal(state);
         render_read_rom_modal(state);
         render_def_registry_modal(state);
+        render_settings_modal(state);
         render_shortcuts_modal(state);
 
         if (state.show_imgui_demo) {
