@@ -138,6 +138,7 @@ __pycache__/
 # C:\Users\Cornelio\Desktop\Subuwu\Tools\). User-specific paths; not
 # for the public repo.
 tools/LAPTOP-COMMANDS.txt
+tools/STOCK-VALIDATION-FLOW.txt
 
 # Syncthing folder markers (per-folder safety check, not source).
 .stfolder/
