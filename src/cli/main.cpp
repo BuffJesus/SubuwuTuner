@@ -6,6 +6,7 @@
 #include "st/core/version.hpp"
 #include "st/dbc.hpp"
 #include "st/defs.hpp"
+#include "st/defs/pack_registry.hpp"
 #include "st/discover.hpp"
 #include "st/ecu/ssm.hpp"
 #include "st/edit.hpp"
@@ -4054,14 +4055,56 @@ int cmd_project_diff(int argc, char *argv[]) {
     return 0;
 }
 
+// Returns true iff at least one immediate child of `dir` is a regular
+// file with a .zip extension. Used by pack-list to decide whether to
+// route through PackRegistry (overlay loader) or fall back to the
+// recursive-walk path-based discovery.
+[[nodiscard]] bool directory_contains_zip(std::filesystem::path const &dir) noexcept {
+    std::error_code ec;
+    if (!std::filesystem::is_directory(dir, ec) || ec) {
+        return false;
+    }
+    for (auto const &e : std::filesystem::directory_iterator{dir, ec}) {
+        if (ec) {
+            break;
+        }
+        std::error_code is_file_ec;
+        if (!e.is_regular_file(is_file_ec) || is_file_ec) {
+            continue;
+        }
+        if (e.path().extension() == ".zip") {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] std::string_view pack_source_label(st::defs::PackEntry::Source s) noexcept {
+    switch (s) {
+    case st::defs::PackEntry::Source::LooseTopLevel:
+        return "loose-top";
+    case st::defs::PackEntry::Source::LoosePlatform:
+        return "loose";
+    case st::defs::PackEntry::Source::Zipped:
+        return "zipped";
+    }
+    return "?";
+}
+
 int cmd_pack_list(int argc, char *argv[]) {
     std::optional<std::filesystem::path> pack_dir;
     bool quiet = false;
+    bool force_registry = false;
+    bool force_walk = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         if (a == "--quiet" || a == "-q") {
             quiet = true;
+        } else if (a == "--registry") {
+            force_registry = true;
+        } else if (a == "--walk") {
+            force_walk = true;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "pack-list: unknown option: %s\n", argv[i]);
             return 2;
@@ -4074,7 +4117,14 @@ int cmd_pack_list(int argc, char *argv[]) {
     }
     if (!pack_dir.has_value()) {
         std::fputs("pack-list: missing directory\n"
-                   "Usage: subuwutuner-cli pack-list <dir> [--quiet]\n",
+                   "Usage: subuwutuner-cli pack-list <dir> [--quiet]\n"
+                   "       [--registry] force the PackRegistry overlay path\n"
+                   "       [--walk]     force the recursive path-based walk\n",
+                   stderr);
+        return 2;
+    }
+    if (force_registry && force_walk) {
+        std::fputs("pack-list: --registry and --walk are mutually exclusive\n",
                    stderr);
         return 2;
     }
@@ -4082,6 +4132,68 @@ int cmd_pack_list(int argc, char *argv[]) {
     if (!std::filesystem::is_directory(*pack_dir, ec) || ec) {
         std::fprintf(stderr, "pack-list: not a directory: %s\n", pack_dir->string().c_str());
         return 2;
+    }
+
+    // Decide which discovery path to use:
+    //   - `--registry` / `--walk` are explicit overrides
+    //   - auto: PackRegistry when any .zip is present at the top level
+    //           (the ship-time install layout); recursive walk otherwise
+    //           (multi-file pack layouts like fixtures/demo-pack/).
+    bool const use_registry =
+        force_registry || (!force_walk && directory_contains_zip(*pack_dir));
+
+    if (use_registry) {
+        auto reg_r = st::defs::PackRegistry::from_directory(*pack_dir);
+        if (!reg_r.has_value()) {
+            std::fprintf(stderr, "pack-list: %s\n",
+                         reg_r.error().to_string().c_str());
+            return 1;
+        }
+        auto const &reg = *reg_r;
+        for (auto const &w : reg.warnings()) {
+            if (!quiet) {
+                std::fprintf(stderr, "  (warning) %s\n", w.c_str());
+            }
+        }
+        auto packs = reg.list_packs();
+        if (packs.empty()) {
+            std::fprintf(stderr, "pack-list: no packs in %s\n",
+                         pack_dir->string().c_str());
+            return 1;
+        }
+        std::sort(packs.begin(), packs.end(),
+                  [](auto const &a, auto const &b) { return a.id < b.id; });
+        std::size_t loaded = 0;
+        std::size_t failed = 0;
+        for (auto const &entry : packs) {
+            auto def = reg.load_pack(entry.id);
+            if (!def.has_value()) {
+                ++failed;
+                if (!quiet) {
+                    std::fprintf(stderr, "  (skip) %s [%s] — load failed: %s\n",
+                                 entry.id.c_str(),
+                                 std::string{pack_source_label(entry.source)}.c_str(),
+                                 def.error().to_string().c_str());
+                }
+                continue;
+            }
+            ++loaded;
+            auto const &p = def->pack();
+            std::printf(
+                "%-32s  %-40s  %-18s  tables=%-3zu pids=%-3zu hooks=%-3zu  [%s]\n",
+                p.id.c_str(),
+                p.display_name.empty() ? "—" : p.display_name.c_str(),
+                p.platform.empty() ? "—" : p.platform.c_str(),
+                def->tables().size(), def->pids().size(), def->hooks().size(),
+                std::string{pack_source_label(entry.source)}.c_str());
+        }
+        std::printf("\n%zu pack%s found, %zu loaded\n", packs.size(),
+                    packs.size() == 1 ? "" : "s", loaded);
+        if (failed != 0) {
+            std::printf("(%zu failed to load%s)\n", failed,
+                        quiet ? " — rerun without --quiet to see errors" : "");
+        }
+        return loaded == 0 ? 1 : 0;
     }
 
     // Walk pack_dir for both single-file packs (`<id>.toml`) and
