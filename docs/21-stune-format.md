@@ -53,6 +53,14 @@ crc32 = 467298693                           # changes as edits land
 [project.definition]
 path = "../demo-pack"                       # path to a definition pack directory or single TOML
                                             # may be relative (recommended for portability) or absolute
+
+[security_access]                           # optional table — SA-related per-project state
+handheld_serial = ""                        # aftermarket vendor programming-handheld serial, if any.
+                                            # Used (eventually) by the SA key-derivation plug-in when
+                                            # the recovered constants are keyed to a specific handheld.
+                                            # Empty / table absent ⇒ stock ECU or unknown handheld.
+                                            # See docs/23-security-access.md for the open question
+                                            # this field exists to answer.
 ```
 
 ## Design choices

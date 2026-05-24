@@ -681,3 +681,99 @@ TEST_CASE("parse_edit_csv handles file without trailing newline", "[project][edi
     REQUIRE(r->cells.size() == 1);
     REQUIRE(r->cells[0].value == 1.5);
 }
+
+TEST_CASE("Project::handheld_serial defaults to empty on a fresh project",
+          "[project][handheld_serial]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+
+    auto p = st::Project::create(td.path / "fresh.stune", rom_path, pack_dir, "fresh");
+    REQUIRE(p.has_value());
+    REQUIRE(p->handheld_serial().empty());
+}
+
+TEST_CASE("Project::handheld_serial round-trips through save / reopen",
+          "[project][handheld_serial]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "hh.stune";
+
+    {
+        auto p = st::Project::create(proj_dir, rom_path, pack_dir, "hh");
+        REQUIRE(p.has_value());
+        p->set_handheld_serial("AP3-EXAMPLE-12345");
+        REQUIRE(p->save_metadata().has_value());
+    }
+
+    auto reopened = st::Project::open(proj_dir);
+    REQUIRE(reopened.has_value());
+    REQUIRE(reopened->handheld_serial() == "AP3-EXAMPLE-12345");
+}
+
+TEST_CASE("Project::open accepts a legacy project lacking [security_access]",
+          "[project][handheld_serial]") {
+    // A project written by an older build won't have the [security_access]
+    // table at all. The loader must accept that case and leave the serial
+    // default-empty, not error out — this is the forward-compat contract
+    // documented in docs/21-stune-format.md.
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "legacy.stune";
+    std::filesystem::create_directories(proj_dir);
+
+    // Hand-build a v1 project.toml that pre-dates the [security_access]
+    // table. Copy the ROM into place to satisfy source/working path checks.
+    write_bytes(proj_dir / "source.bin", make_rom_bytes());
+    write_bytes(proj_dir / "working.bin", make_rom_bytes());
+    auto const legacy_toml = std::string{R"toml(
+[project]
+schema_version = 1
+display_name   = "legacy"
+created        = "2026-01-01T00:00:00Z"
+notes          = ""
+policy_profile = "motorsport-only"
+
+[project.source_rom]
+path  = "source.bin"
+crc32 = 0
+
+[project.working_rom]
+path  = "working.bin"
+crc32 = 0
+
+[project.definition]
+path = ")toml"} + pack_dir.generic_string() + "\"\n";
+    write_text(proj_dir / "project.toml", legacy_toml);
+
+    auto p = st::Project::open(proj_dir);
+    REQUIRE(p.has_value());
+    REQUIRE(p->handheld_serial().empty());
+    REQUIRE(p->display_name() == "legacy");
+}
+
+TEST_CASE("Project::handheld_serial preserves empty on default save / reopen",
+          "[project][handheld_serial]") {
+    // A project that never sets a handheld serial must round-trip with the
+    // field still empty (i.e. the [security_access] table being present
+    // with an empty value is equivalent to the table being absent).
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "empty.stune";
+
+    {
+        auto p = st::Project::create(proj_dir, rom_path, pack_dir, "empty");
+        REQUIRE(p.has_value());
+    }
+
+    auto reopened = st::Project::open(proj_dir);
+    REQUIRE(reopened.has_value());
+    REQUIRE(reopened->handheld_serial().empty());
+}

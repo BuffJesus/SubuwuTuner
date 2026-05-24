@@ -294,6 +294,15 @@ std::string render_project_toml(Project const &p, std::uint32_t source_crc32,
     ss << "\n";
     ss << "[project.definition]\n";
     emit_string("path", def_rel.generic_string());
+
+    // Optional aftermarket-vendor handheld serial. Lives in its own
+    // top-level table per docs/21-stune-format.md's forward-compat rule
+    // (new optional tables are silently ignored by older loaders). The
+    // table is emitted unconditionally so a present-but-empty value
+    // round-trips identically to an absent value.
+    ss << "\n";
+    ss << "[security_access]\n";
+    emit_string("handheld_serial", p.handheld_serial());
     return std::move(ss).str();
 }
 
@@ -423,6 +432,12 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
     }
     // else: default is MotorsportOnly via member init — silently OK for
     // older projects that pre-date the field.
+
+    if (auto const *sa = tbl["security_access"].as_table(); sa != nullptr) {
+        p.handheld_serial_ = (*sa)["handheld_serial"].value_or<std::string>("");
+    }
+    // else: [security_access] table absent (older project, or no SA-related
+    // state to persist yet) — handheld_serial_ stays default-empty.
 
     auto const get_path = [&](toml::table const &t, char const *key) -> std::string {
         return t[key].value_or<std::string>("");

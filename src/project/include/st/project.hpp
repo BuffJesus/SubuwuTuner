@@ -85,6 +85,29 @@ public:
         policy_profile_ = p;
     }
 
+    // Aftermarket-vendor programming-handheld serial number for the ECU
+    // this project targets, if any. Persisted in `[security_access]
+    // handheld_serial = "..."`.
+    //
+    // Why this lives in the project rather than user-prefs: when an ECU's
+    // SecurityAccess constants have been replaced by an aftermarket tuning
+    // install, recovery of the replacement constants may need the handheld's
+    // serial as an input (open question — see the per-handheld vs.
+    // static-per-firmware×CALID hypothesis worked through in the off-tree
+    // SA-alteration analysis). Keeping the field at project scope means a
+    // single user with multiple cars / handhelds can carry per-car serials
+    // without re-entering them.
+    //
+    // Empty string ⇒ stock ECU or unknown handheld; no derivation will use
+    // it. Format is whatever the vendor prints on the device — we do not
+    // validate, normalize, or transmit it.
+    [[nodiscard]] std::string const &handheld_serial() const noexcept {
+        return handheld_serial_;
+    }
+    void set_handheld_serial(std::string s) noexcept {
+        handheld_serial_ = std::move(s);
+    }
+
     [[nodiscard]] Rom const &source_rom() const noexcept {
         return source_;
     }
@@ -118,6 +141,7 @@ private:
     std::string created_;
     std::uint32_t source_crc32_{0};
     policy::Profile policy_profile_{policy::Profile::MotorsportOnly};
+    std::string handheld_serial_;
 
     std::filesystem::path source_rel_{"source.bin"};
     std::filesystem::path working_rel_{"working.bin"};
