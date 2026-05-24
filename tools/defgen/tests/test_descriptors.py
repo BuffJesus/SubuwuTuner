@@ -199,7 +199,9 @@ class CoolantTempAxisTest(unittest.TestCase):
         self.assertTrue(v.matches, msg=v.reasons)
 
     def test_rejects_out_of_range(self):
-        temps = [-40, -20, 0, 20, 40, 60, 80, 500]
+        # Final value reverses monotonicity, so no candidate scaling
+        # (raw, /256, /256 - 192) can sneak it through.
+        temps = [-40, -20, 0, 20, 40, 60, 80, 10]
         v = descriptors.COOLANT_TEMP_AXIS.predicate(
             _pack_int16_be(temps),
             descriptors.DecodeHint(dtype="int16_be", dims=1, length=8))
@@ -251,13 +253,18 @@ class EngineLoadAxisTest(unittest.TestCase):
         self.assertFalse(v.matches)
 
     def test_rejects_compressed_span(self):
-        # Span < 0.5 → likely not a real engine-load sweep.
+        # Span < 0.5 g/rev (and < 10 % under any uint scaling). The
+        # multi-candidate predicate emits an omnibus rejection reason
+        # naming both bands.
         loads = [1.00, 1.05, 1.10, 1.15, 1.20, 1.25, 1.30, 1.35]
         v = descriptors.ENGINE_LOAD_AXIS.predicate(
             _pack_floats_be(loads),
             descriptors.DecodeHint(dtype="float32_be", dims=1, length=8))
         self.assertFalse(v.matches)
-        self.assertTrue(any("span" in r for r in v.reasons))
+        self.assertTrue(
+            any("g/rev" in r or "%" in r for r in v.reasons),
+            msg=v.reasons,
+        )
 
 
 # ---------------------------------------------------------------------------

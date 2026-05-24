@@ -255,14 +255,16 @@ def distinct_fraction(values: list[float]) -> float:
 # --- Axes ------------------------------------------------------------------
 
 def _engine_rpm_axis(buf: bytes, hint: DecodeHint) -> Verdict:
-    # Engine-speed axes on Subaru ROMs span roughly 400-7500 RPM with
-    # 8-21 breakpoints. The raw uint16 encoding varies by era:
-    #   * float32_be RPM (EJ-era Legacy/Impreza — Merp canonical XML)
-    #   * uint16_be raw RPM  (some packs use raw 1:1)
-    #   * uint16_be ×5.12 (VA-era; raw_decoded = raw/5.12 → RPM)
-    # We try each scaling internally and accept any that places all
-    # values in the 200-8500 RPM band with strict monotonic increase
-    # and a 1000+ RPM total span.
+    # Engine-speed axes on Subaru ROMs span roughly 400-8500 RPM with
+    # 8-32 breakpoints. The raw encoding varies by era / table:
+    #   * float32_be RPM            (EJ-era Legacy/Impreza, Merp canonical)
+    #   * uint16_be raw RPM         (some packs use raw 1:1)
+    #   * uint16_be ×5.12  (DI-era; raw_decoded = raw/5.12 → RPM)
+    #   * uint16_be ×10    (DI-era timing-compensation axes)
+    #   * uint16_be ×4     (some idle / cold-start RPM axes)
+    # Bounds extend to 12000 RPM since some compensation tables include
+    # rev-limit-and-beyond breakpoints. Accept any candidate that places
+    # all values monotonically in the band with a 1000+ RPM total span.
     if hint.dims != 1 or hint.length < 5 or hint.length > 32:
         return Verdict.no(f"length {hint.length} outside [5,32]")
     try:
@@ -272,9 +274,11 @@ def _engine_rpm_axis(buf: bytes, hint: DecodeHint) -> Verdict:
     candidates = [
         ("raw",       vals),
         ("raw/5.12",  [v / 5.12 for v in vals]),
+        ("raw/10",    [v / 10.0 for v in vals]),
+        ("raw/4",     [v / 4.0 for v in vals]),
     ]
     for label, scaled in candidates:
-        in_range, bad = values_in_range(scaled, 200.0, 8500.0)
+        in_range, bad = values_in_range(scaled, 200.0, 12000.0)
         if not in_range:
             continue
         if not is_monotonic(scaled, strict=True):
@@ -285,7 +289,7 @@ def _engine_rpm_axis(buf: bytes, hint: DecodeHint) -> Verdict:
             f"monotonic {scaled[0]:.0f}..{scaled[-1]:.0f} RPM "
             f"({hint.length} pts) via {label}")
     return Verdict.no(f"no scaling places {hint.length} cells in "
-                       f"monotonic 200..8500 RPM band")
+                       f"monotonic 200..12000 RPM band")
 
 
 ENGINE_RPM_AXIS = register(Descriptor(
@@ -304,22 +308,35 @@ ENGINE_RPM_AXIS = register(Descriptor(
 
 
 def _coolant_temp_axis(buf: bytes, hint: DecodeHint) -> Verdict:
-    # Coolant axes are typically -40 to +120 °C, 5-12 breakpoints, scaled
-    # signed int8/int16 or unsigned with offset. We check for monotonic
-    # values within [-50, +150] (degrees) after type-decode. Strictly
-    # increasing — same convention as other axes.
+    # Coolant axes are typically -40 to +120 °C, 4-16 breakpoints. The
+    # raw encoding varies:
+    #   * float32 / int8 / int16     decoded value already in °C
+    #   * uint16_be / 256             °C (e.g. DI-era 16-point tables)
+    #   * uint16_be / 256 - 192       offset-encoded °C
+    # Accept any candidate that places all values monotonically in
+    # [-50, 150] °C.
     if hint.dims != 1 or hint.length < 4 or hint.length > 24:
         return Verdict.no(f"length {hint.length} outside [4,24]")
     try:
         vals = decode_values(buf, hint.dtype, hint.length)
     except (KeyError, struct.error) as exc:
         return Verdict.no(f"decode failed: {exc}")
-    in_range, bad = values_in_range(vals, -50.0, 150.0)
-    if not in_range:
-        return Verdict.no(f"{bad}/{hint.length} values outside [-50,150]")
-    if not is_monotonic(vals, strict=True):
-        return Verdict.no("not strictly increasing")
-    return Verdict.yes(1.0, f"monotonic {vals[0]:.0f}..{vals[-1]:.0f} °C ({hint.length} pts)")
+    candidates = [
+        ("raw",                vals),
+        ("raw/256",            [v / 256.0 for v in vals]),
+        ("raw/256 - 192",      [v / 256.0 - 192.0 for v in vals]),
+    ]
+    for label, scaled in candidates:
+        in_range, bad = values_in_range(scaled, -50.0, 150.0)
+        if not in_range:
+            continue
+        if not is_monotonic(scaled, strict=True):
+            continue
+        return Verdict.yes(1.0,
+            f"monotonic {scaled[0]:.0f}..{scaled[-1]:.0f} °C "
+            f"({hint.length} pts) via {label}")
+    return Verdict.no(
+        f"no scaling places {hint.length} cells in monotonic -50..150 °C")
 
 
 COOLANT_TEMP_AXIS = register(Descriptor(
@@ -340,20 +357,30 @@ COOLANT_TEMP_AXIS = register(Descriptor(
 
 def _intake_temp_axis(buf: bytes, hint: DecodeHint) -> Verdict:
     # IAT axes share the same physical band as coolant (-40 to +120 °C
-    # typical, with margin -50 to +150). We split the descriptor so the
-    # id_patterns don't conflate IAT-named entries with coolant-named.
+    # typical, with margin -50 to +150) and the same encoding variants.
+    # Split descriptor so id_patterns don't conflate IAT with coolant.
     if hint.dims != 1 or hint.length < 3 or hint.length > 24:
         return Verdict.no(f"length {hint.length} outside [3,24]")
     try:
         vals = decode_values(buf, hint.dtype, hint.length)
     except (KeyError, struct.error) as exc:
         return Verdict.no(f"decode failed: {exc}")
-    in_range, bad = values_in_range(vals, -50.0, 150.0)
-    if not in_range:
-        return Verdict.no(f"{bad}/{hint.length} values outside [-50,150]")
-    if not is_monotonic(vals, strict=True):
-        return Verdict.no("not strictly increasing")
-    return Verdict.yes(1.0, f"monotonic {vals[0]:.0f}..{vals[-1]:.0f} °C ({hint.length} pts)")
+    candidates = [
+        ("raw",                vals),
+        ("raw/256",            [v / 256.0 for v in vals]),
+        ("raw/256 - 192",      [v / 256.0 - 192.0 for v in vals]),
+    ]
+    for label, scaled in candidates:
+        in_range, bad = values_in_range(scaled, -50.0, 150.0)
+        if not in_range:
+            continue
+        if not is_monotonic(scaled, strict=True):
+            continue
+        return Verdict.yes(1.0,
+            f"monotonic {scaled[0]:.0f}..{scaled[-1]:.0f} °C "
+            f"({hint.length} pts) via {label}")
+    return Verdict.no(
+        f"no scaling places {hint.length} cells in monotonic -50..150 °C")
 
 
 INTAKE_TEMP_AXIS = register(Descriptor(
@@ -373,26 +400,49 @@ INTAKE_TEMP_AXIS = register(Descriptor(
 
 
 def _engine_load_axis(buf: bytes, hint: DecodeHint) -> Verdict:
-    # Engine-load axes on Subaru ROMs are typically float32_be encoding
-    # g/rev (mass per revolution). Observed spans across the corpus run
-    # 0.2 to 5.0 g/rev with monotonic increase, 5-32 breakpoints. Some
-    # MAF-based or AT-tuned packs go higher into compensation territory;
-    # we cap acceptance at 10.0 for tolerance.
+    # Engine-load axes come in two physical flavours on Subaru:
+    #   * "g/rev"  — mass-per-revolution, typical 0.2..5.0 g/rev (EJ-era
+    #               float32, DI-era uint16 ×256 or ×2560).
+    #   * "calc-load %" — normalized to a reference (FA-DIT specifically),
+    #               range 0..400 % with most cells in 0..300 % via raw/256.
+    # Try both physical interpretations across the common raw scalings.
+    # Accept the first that comes out monotonic in its range.
     if hint.dims != 1 or hint.length < 4 or hint.length > 32:
         return Verdict.no(f"length {hint.length} outside [4,32]")
     try:
         vals = decode_values(buf, hint.dtype, hint.length)
     except (KeyError, struct.error) as exc:
         return Verdict.no(f"decode failed: {exc}")
-    in_range, bad = values_in_range(vals, 0.0, 10.0)
-    if not in_range:
-        return Verdict.no(f"{bad}/{hint.length} values outside [0,10] g/rev")
-    if not is_monotonic(vals, strict=True):
-        return Verdict.no("not strictly increasing")
-    if max(vals) - min(vals) < 0.5:
-        return Verdict.no(f"span {max(vals)-min(vals):.2f} too small (<0.5)")
-    return Verdict.yes(1.0,
-        f"monotonic {vals[0]:.2f}..{vals[-1]:.2f} g/rev ({hint.length} pts)")
+    grev_candidates = [
+        ("raw g/rev",          vals),
+        ("raw/2560 g/rev",     [v / 2560.0 for v in vals]),
+        ("raw/32768 g/rev",    [v / 32768.0 for v in vals]),
+    ]
+    pct_candidates = [
+        ("raw/256 %",          [v / 256.0 for v in vals]),
+        ("raw/100 %",          [v / 100.0 for v in vals]),
+    ]
+    for label, scaled in grev_candidates:
+        in_range, bad = values_in_range(scaled, 0.0, 10.0)
+        if not in_range or not is_monotonic(scaled, strict=True):
+            continue
+        if max(scaled) - min(scaled) < 0.5:
+            continue
+        return Verdict.yes(1.0,
+            f"monotonic {scaled[0]:.2f}..{scaled[-1]:.2f} g/rev "
+            f"({hint.length} pts) via {label}")
+    for label, scaled in pct_candidates:
+        in_range, bad = values_in_range(scaled, 0.0, 400.0)
+        if not in_range or not is_monotonic(scaled, strict=True):
+            continue
+        if max(scaled) - min(scaled) < 10.0:
+            continue
+        return Verdict.yes(1.0,
+            f"monotonic {scaled[0]:.1f}..{scaled[-1]:.1f} % "
+            f"({hint.length} pts) via {label}")
+    return Verdict.no(
+        f"no scaling places {hint.length} cells in monotonic "
+        f"[0,10] g/rev or [0,400] % bands")
 
 
 ENGINE_LOAD_AXIS = register(Descriptor(
