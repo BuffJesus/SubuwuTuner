@@ -108,21 +108,53 @@ class SaPair:
     seed_response_ms: int
     send_key_ms: int
     key_ack_ms: int = -1  # not always present (positive ack is short)
+    level: int = 1        # 1 (sub-fn 0x01/0x02), 3 (0x03/0x04), 5 (0x05/0x06)
+
+
+# UDS SecurityAccess sub-function pairs we recognize. Each tuple is
+# (request_seed_sub, send_key_sub, level). Subaru DI engine ECUs expose
+# all three on Gen-A.2 silicon (LF79 family +); Gen-A 1MB only has L1.
+SA_LEVEL_PAIRS: list[tuple[int, int, int]] = [
+    (0x01, 0x02, 1),  # bootloader-unlock / RMBA / RequestDownload
+    (0x03, 0x04, 3),  # Gen-A.2: live RAM-write privileges
+    (0x05, 0x06, 5),  # Gen-A.2: additional unlock surface
+]
 
 
 def extract_pairs(frames: list[Frame]) -> list[SaPair]:
-    """Walk the frame stream looking for `27 01 / 67 01 SEED / 27 02 KEY / 67 02`
-    sequences on the engine ECU pair."""
+    """Walk the frame stream looking for SecurityAccess exchanges at any
+    supported level (L1 / L3 / L5). Emits one SaPair per completed
+    `27 LL / 67 LL SEED / 27 LL+1 KEY / 67 LL+1` sequence."""
     pairs: list[SaPair] = []
+
+    # Index sub-fns by direction for O(1) dispatch.
+    req_seed_subs = {p[0]: p for p in SA_LEVEL_PAIRS}
+    send_key_subs = {p[1]: p for p in SA_LEVEL_PAIRS}
 
     # State machine: collect the 4 events in order. If anything else
     # appears on the SA path between them we discard the partial pair
     # — better to drop a noisy capture than emit a corrupt (seed, key).
+    pending_level: Optional[int] = None       # 1 / 3 / 5
+    pending_req_sub: Optional[int] = None     # 0x01 / 0x03 / 0x05
+    pending_key_sub: Optional[int] = None     # 0x02 / 0x04 / 0x06
     pending_seed_req_ms: Optional[int] = None
     pending_seed: Optional[bytes] = None
     pending_seed_ms: Optional[int] = None
     pending_send_key_ms: Optional[int] = None
     pending_key: Optional[bytes] = None
+
+    def reset() -> None:
+        nonlocal pending_level, pending_req_sub, pending_key_sub
+        nonlocal pending_seed_req_ms, pending_seed, pending_seed_ms
+        nonlocal pending_send_key_ms, pending_key
+        pending_level = None
+        pending_req_sub = None
+        pending_key_sub = None
+        pending_seed_req_ms = None
+        pending_seed = None
+        pending_seed_ms = None
+        pending_send_key_ms = None
+        pending_key = None
 
     for f in frames:
         if f.can_id != SUBARU_REQUEST_ID and f.can_id != SUBARU_RESPONSE_ID:
@@ -135,56 +167,67 @@ def extract_pairs(frames: list[Frame]) -> list[SaPair]:
         sub = app[1]
         body = app[2:]
 
-        # 27 01 — request seed (level 1, the standard Subaru level)
-        if f.can_id == SUBARU_REQUEST_ID and sid == SID_SECURITY_ACCESS and sub == 0x01:
+        # 27 LL — request seed (LL ∈ {0x01, 0x03, 0x05}). Any new
+        # request-seed restarts the state machine even if we were
+        # mid-collection at a different level; the tool's choice of
+        # level overrides whatever we were tracking.
+        if (
+            f.can_id == SUBARU_REQUEST_ID
+            and sid == SID_SECURITY_ACCESS
+            and sub in req_seed_subs
+        ):
+            req_pair = req_seed_subs[sub]
+            reset()
+            pending_req_sub = req_pair[0]
+            pending_key_sub = req_pair[1]
+            pending_level = req_pair[2]
             pending_seed_req_ms = f.ms
-            pending_seed = None
-            pending_seed_ms = None
-            pending_send_key_ms = None
-            pending_key = None
             continue
 
-        # 67 01 SEED4 — positive seed response
+        # 67 LL — positive seed response. Sub-fn must match the
+        # outstanding request; mismatches are ignored (some other
+        # tester pair we don't care about, or stale crosstalk).
         if (
             f.can_id == SUBARU_RESPONSE_ID
             and sid == SA_RESPONSE_SID
-            and sub == 0x01
+            and pending_req_sub is not None
+            and sub == pending_req_sub
             and pending_seed_req_ms is not None
         ):
             if len(body) < 1:
-                pending_seed_req_ms = None
+                reset()
                 continue
             pending_seed = bytes(body)
             pending_seed_ms = f.ms
             continue
 
-        # 27 02 KEY4 — send key (sub_function = request_sub + 1 = 0x02)
+        # 27 LL+1 KEY — send key.
         if (
             f.can_id == SUBARU_REQUEST_ID
             and sid == SID_SECURITY_ACCESS
-            and sub == 0x02
+            and pending_key_sub is not None
+            and sub == pending_key_sub
             and pending_seed is not None
         ):
             if len(body) < 1:
-                # Bad send_key — reset.
-                pending_seed_req_ms = None
-                pending_seed = None
-                pending_seed_ms = None
+                reset()
                 continue
             pending_key = bytes(body)
             pending_send_key_ms = f.ms
             continue
 
-        # 67 02 — positive key ack (no payload, the unlock event)
+        # 67 LL+1 — positive key ack (no payload, the unlock event).
         if (
             f.can_id == SUBARU_RESPONSE_ID
             and sid == SA_RESPONSE_SID
-            and sub == 0x02
+            and pending_key_sub is not None
+            and sub == pending_key_sub
             and pending_key is not None
             and pending_seed is not None
             and pending_seed_ms is not None
             and pending_seed_req_ms is not None
             and pending_send_key_ms is not None
+            and pending_level is not None
         ):
             pairs.append(
                 SaPair(
@@ -194,13 +237,10 @@ def extract_pairs(frames: list[Frame]) -> list[SaPair]:
                     seed_response_ms=pending_seed_ms,
                     send_key_ms=pending_send_key_ms,
                     key_ack_ms=f.ms,
+                    level=pending_level,
                 )
             )
-            pending_seed_req_ms = None
-            pending_seed = None
-            pending_seed_ms = None
-            pending_send_key_ms = None
-            pending_key = None
+            reset()
             continue
 
         # 7F 27 NN — SA negative response; reset state, the tool will
@@ -210,11 +250,7 @@ def extract_pairs(frames: list[Frame]) -> list[SaPair]:
             and sid == 0x7F
             and sub == SID_SECURITY_ACCESS
         ):
-            pending_seed_req_ms = None
-            pending_seed = None
-            pending_seed_ms = None
-            pending_send_key_ms = None
-            pending_key = None
+            reset()
             continue
 
     return pairs
@@ -256,7 +292,18 @@ def main() -> int:
     print(f"parsed {len(frames)} frames from {args.log}", file=sys.stderr)
 
     pairs = extract_pairs(frames)
-    print(f"extracted {len(pairs)} SecurityAccess pair(s)", file=sys.stderr)
+    # Per-level breakdown for the stderr summary.
+    by_level: dict[int, int] = {}
+    for pair in pairs:
+        by_level[pair.level] = by_level.get(pair.level, 0) + 1
+    breakdown = ", ".join(f"L{lvl}={n}" for lvl, n in sorted(by_level.items()))
+    if breakdown:
+        print(
+            f"extracted {len(pairs)} SecurityAccess pair(s)  [{breakdown}]",
+            file=sys.stderr,
+        )
+    else:
+        print(f"extracted {len(pairs)} SecurityAccess pair(s)", file=sys.stderr)
 
     out = {
         "schema": "subuwutuner.sa.v1",
@@ -266,6 +313,7 @@ def main() -> int:
             {
                 "seed": pair.seed.hex().upper(),
                 "key": pair.key.hex().upper(),
+                "level": pair.level,
                 "request_seed_ms": pair.request_seed_ms,
                 "seed_response_ms": pair.seed_response_ms,
                 "send_key_ms": pair.send_key_ms,

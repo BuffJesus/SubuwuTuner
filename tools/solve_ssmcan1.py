@@ -790,6 +790,25 @@ GEN_A_RK_L1: list[int] = [
     0x1895, 0x8961, 0x3ecc, 0x862b,
 ]
 
+# Level-3 + Level-5 share the same round-key table on Gen-A.2.
+# Byte-verified across all LF7x/LF9x ROMs in
+# fixtures/private/findings_algorithms/generation-A-seed-to-key.md §
+# "Constants - level 3 / level 5".
+GEN_A_RK_L35: list[int] = [
+    0x794b, 0x3caf, 0x3019, 0x8b57,
+    0x52a0, 0xa77c, 0x38c9, 0xb0b5,
+    0x6520, 0x3b66, 0xa09d, 0x2877,
+    0x479f, 0xb685, 0x7568, 0x84d7,
+]
+
+
+def _stock_rk_for_level(level: int) -> list[int]:
+    if level == 1:
+        return GEN_A_RK_L1
+    if level in (3, 5):
+        return GEN_A_RK_L35
+    raise ValueError(f"unsupported SA level: {level}")
+
 
 def _gen_a_rol16(v: int, n: int) -> int:
     n &= 15
@@ -848,13 +867,146 @@ def gen_a_seed_to_key_l1(seed_bytes: bytes) -> bytes:
     `67 01 ...` requestSeed response. Returns the 4 bytes to place at
     positions [2..5] of the `27 02 ...` sendKey request.
     """
+    return gen_a_seed_to_key(seed_bytes, level=1)
+
+
+# -----------------------------------------------------------------------------
+# Per-level byte shuffles (analyst-side reference C, fixtures/private/
+# findings_algorithms/ + ../reference-implementations/seed_to_key_gen_a.c).
+# L1 is the identity case. L3/L5 reorder bytes on both the seed-in and
+# key-out paths so a tester can't naively cross-replay between levels.
+# -----------------------------------------------------------------------------
+
+def _l1_wire_seed_to_packed(wire: bytes) -> int:
+    return int.from_bytes(wire, "big")
+
+
+def _l1_state_to_wire_key(state: int) -> bytes:
+    return state.to_bytes(4, "big")
+
+
+def _l3_wire_seed_to_packed(wire: bytes) -> int:
+    # The analyst-side spec / reference C describes L3 as a 3-byte seed:
+    # s1=wire[0], s2=wire[1], s0=wire[2], s3 forced to 0. That makes the
+    # inverse lossy and the synthetic round-trip impossible for most
+    # internal_keys (the forward direction's low-byte-of-seed_packed
+    # would have to happen to be 0 for round-trip to hold).
+    #
+    # Empirically on a 2017 LF79103P, the ECU's `67 03 ...` response
+    # carries a 4-byte payload after SID/sub (PCI=06 in observed
+    # captures), and wire[3] is nonzero. We treat ALL FOUR wire bytes
+    # as seed material with the spec's same per-byte permutation
+    # (s1, s2, s0, then wire[3] as s3 rather than forced 0). This
+    # preserves round-trip on synthetic pairs and matches the actually-
+    # observed Gen-A.2 wire shape. If a future capture from an older
+    # Gen-A 1MB ECU shows s3=0 in wire[3], swap this back to forcing 0.
+    s1, s2, s0, s3 = wire[0], wire[1], wire[2], wire[3]
+    return (s0 << 24) | (s1 << 16) | (s2 << 8) | s3
+
+
+def _l3_state_to_wire_key(state: int) -> bytes:
+    # Reference C: wire[0]=k3, wire[1]=k1, wire[2]=k2, wire[3]=k0 where
+    # k0..k3 are state bytes MSB->LSB.
+    k0 = (state >> 24) & 0xFF
+    k1 = (state >> 16) & 0xFF
+    k2 = (state >> 8) & 0xFF
+    k3 = state & 0xFF
+    return bytes([k3, k1, k2, k0])
+
+
+def _l5_wire_seed_to_packed(wire: bytes) -> int:
+    # Reference C: s3=wire[0], s1=wire[1], s0=wire[2], s2=wire[3].
+    s3, s1, s0, s2 = wire[0], wire[1], wire[2], wire[3]
+    return (s0 << 24) | (s1 << 16) | (s2 << 8) | s3
+
+
+def _l5_state_to_wire_key(state: int) -> bytes:
+    # Reference C: wire[0]=k1, wire[1]=k3, wire[2]=k0, wire[3]=k2.
+    k0 = (state >> 24) & 0xFF
+    k1 = (state >> 16) & 0xFF
+    k2 = (state >> 8) & 0xFF
+    k3 = state & 0xFF
+    return bytes([k1, k3, k0, k2])
+
+
+def _shuffles_for_level(level: int) -> "tuple[Callable[[bytes], int], Callable[[int], bytes]]":
+    if level == 1:
+        return _l1_wire_seed_to_packed, _l1_state_to_wire_key
+    if level == 3:
+        return _l3_wire_seed_to_packed, _l3_state_to_wire_key
+    if level == 5:
+        return _l5_wire_seed_to_packed, _l5_state_to_wire_key
+    raise ValueError(f"unsupported SA level: {level}")
+
+
+def gen_a_seed_to_key(seed_bytes: bytes, level: int) -> bytes:
+    """Compute the wire-key bytes from the wire-seed bytes for any
+    supported SA level (1 / 3 / 5). All levels share the Feistel +
+    S-box primitive and the wordswap step — they differ only in the
+    per-level byte shuffle (in/out) and in the round-key table
+    selection (L1 uses RK_L1; L3 and L5 share RK_L35).
+
+    `seed_bytes` is the 4 bytes at positions [2..5] of the `67 LL`
+    requestSeed response. Returns the 4 bytes to place at
+    positions [2..5] of the `27 LL+1` sendKey request.
+    """
     if len(seed_bytes) != 4:
         raise ValueError(
-            f"Gen-A L1 seed must be 4 bytes, got {len(seed_bytes)}")
-    seed_packed = int.from_bytes(seed_bytes, "big")  # L1 shuffle = identity
+            f"Gen-A L{level} seed must be 4 bytes, got {len(seed_bytes)}")
+    rk = _stock_rk_for_level(level)
+    seed_to_packed, state_to_wire = _shuffles_for_level(level)
+
+    seed_packed = seed_to_packed(seed_bytes)
     state_post_rounds = _gen_a_wordswap32(seed_packed)
-    internal_key = gen_a_feistel_inverse(state_post_rounds, GEN_A_RK_L1)
-    return internal_key.to_bytes(4, "big")
+    internal_key = gen_a_feistel_inverse(state_post_rounds, rk)
+    return state_to_wire(internal_key)
+
+
+def gen_a_key_to_seed(key_bytes: bytes, level: int) -> bytes:
+    """Inverse of gen_a_seed_to_key — the ECU-side direction. Useful
+    for synthesizing test pairs at any level.
+    """
+    if len(key_bytes) != 4:
+        raise ValueError(
+            f"Gen-A L{level} key must be 4 bytes, got {len(key_bytes)}")
+    rk = _stock_rk_for_level(level)
+    seed_to_packed, state_to_wire = _shuffles_for_level(level)
+    # Run the per-level key-out shuffle in reverse to recover the
+    # internal state bytes from the wire key.
+    if level == 1:
+        internal_key = int.from_bytes(key_bytes, "big")
+    elif level == 3:
+        # wire[0]=k3 wire[1]=k1 wire[2]=k2 wire[3]=k0 -> state bytes (k0,k1,k2,k3)
+        k3, k1, k2, k0 = key_bytes[0], key_bytes[1], key_bytes[2], key_bytes[3]
+        internal_key = (k0 << 24) | (k1 << 16) | (k2 << 8) | k3
+    elif level == 5:
+        # wire[0]=k1 wire[1]=k3 wire[2]=k0 wire[3]=k2
+        k1, k3, k0, k2 = key_bytes[0], key_bytes[1], key_bytes[2], key_bytes[3]
+        internal_key = (k0 << 24) | (k1 << 16) | (k2 << 8) | k3
+    else:
+        raise ValueError(f"unsupported SA level: {level}")
+    post_rounds = gen_a_feistel_forward(internal_key, rk)
+    seed_packed = _gen_a_wordswap32(post_rounds)
+    # Run per-level seed-in shuffle in reverse to recover wire bytes.
+    if level == 1:
+        return seed_packed.to_bytes(4, "big")
+    if level == 3:
+        s0 = (seed_packed >> 24) & 0xFF
+        s1 = (seed_packed >> 16) & 0xFF
+        s2 = (seed_packed >> 8) & 0xFF
+        s3 = seed_packed & 0xFF
+        # Per the analyst-side spec L3 wire is "(s1, s2, s0)" with wire[3]
+        # forced to 0 — but the observed LF79103P wire carries a real s3
+        # byte at wire[3]. We emit the actual s3 here to keep symmetry
+        # with _l3_wire_seed_to_packed above and synthetic round-trip.
+        return bytes([s1, s2, s0, s3])
+    if level == 5:
+        s0 = (seed_packed >> 24) & 0xFF
+        s1 = (seed_packed >> 16) & 0xFF
+        s2 = (seed_packed >> 8) & 0xFF
+        s3 = seed_packed & 0xFF
+        return bytes([s3, s1, s0, s2])
+    raise ValueError(f"unsupported SA level: {level}")  # unreachable
 
 
 def gen_a_key_to_seed_l1(key_bytes: bytes) -> bytes:
@@ -875,12 +1027,16 @@ def gen_a_key_to_seed_l1(key_bytes: bytes) -> bytes:
 
 
 def cmd_verify_gen_a(args: argparse.Namespace) -> int:
-    """Round-trip a captured pairs.json against the recovered Gen-A L1
-    algorithm. Used as a one-shot sanity check before burning real-car
-    attempts: if every captured pair matches, the algorithm is correct
-    for this car; if every captured pair mismatches, the captured keys
-    give us ground truth to derive what's different (likely COBB-
-    modified round-key constants)."""
+    """Round-trip a captured pairs.json against the recovered Gen-A
+    algorithm at every captured level (1/3/5). Auto-dispatches per pair
+    using the `level` field in the JSON; defaults to L1 for older
+    captures without the field.
+
+    Used as a one-shot sanity check before burning real-car attempts:
+    if every captured pair matches, the algorithm + stock constants are
+    correct for that level on this car; if every captured pair
+    mismatches, the level's constants have been altered by an
+    aftermarket tune (use recover-gen-a to derive the replacement)."""
     try:
         text = args.pairs.read_text(encoding="utf-8")
         data = json.loads(text)
@@ -896,11 +1052,13 @@ def cmd_verify_gen_a(args: argparse.Namespace) -> int:
         print(f"verify-gen-a: no pairs in {args.pairs}", file=sys.stderr)
         return 1
 
-    matches = 0
-    mismatches = 0
+    # Per-level tallies for the per-level result line.
+    matches_by_level: dict[int, int] = {}
+    mismatches_by_level: dict[int, int] = {}
     malformed = 0
     print(
-        f"Verifying {len(pairs)} captured pair(s) against Gen-A SSMCAN1 L1",
+        f"Verifying {len(pairs)} captured pair(s) against Gen-A SSMCAN1 "
+        f"(L1/L3/L5)",
         file=sys.stderr,
     )
     print(file=sys.stderr)
@@ -921,8 +1079,14 @@ def cmd_verify_gen_a(args: argparse.Namespace) -> int:
             )
             malformed += 1
             continue
+        level = int(p.get("level", 1))
+        if level not in (1, 3, 5):
+            print(f"  [{i:2d}] unsupported level {level} (must be 1/3/5)",
+                  file=sys.stderr)
+            malformed += 1
+            continue
         try:
-            computed_key = gen_a_seed_to_key_l1(seed)
+            computed_key = gen_a_seed_to_key(seed, level=level)
         except ValueError as e:
             print(f"  [{i:2d}] algorithm error: {e}", file=sys.stderr)
             malformed += 1
@@ -930,52 +1094,55 @@ def cmd_verify_gen_a(args: argparse.Namespace) -> int:
         match = computed_key == captured_key
         marker = "MATCH" if match else "MISMATCH"
         print(
-            f"  [{i:2d}] seed={seed.hex().upper()}  "
+            f"  [{i:2d}] L{level}  seed={seed.hex().upper()}  "
             f"captured={captured_key.hex().upper()}  "
             f"computed={computed_key.hex().upper()}  {marker}",
             file=sys.stderr,
         )
         if match:
-            matches += 1
+            matches_by_level[level] = matches_by_level.get(level, 0) + 1
         else:
-            mismatches += 1
+            mismatches_by_level[level] = mismatches_by_level.get(level, 0) + 1
 
     print(file=sys.stderr)
-    total = matches + mismatches + malformed
+    levels_seen = sorted(set(matches_by_level) | set(mismatches_by_level))
+    total = sum(matches_by_level.values()) + sum(mismatches_by_level.values()) + malformed
+    matches = sum(matches_by_level.values())
+    mismatches = sum(mismatches_by_level.values())
     print(
         f"Summary: {matches}/{total} match, {mismatches}/{total} mismatch, "
         f"{malformed}/{total} malformed.",
         file=sys.stderr,
     )
+    for level in levels_seen:
+        m = matches_by_level.get(level, 0)
+        mm = mismatches_by_level.get(level, 0)
+        verdict = (
+            "STOCK" if m > 0 and mm == 0
+            else "ALTERED" if m == 0 and mm > 0
+            else "MIXED"
+        )
+        print(f"  L{level}: {m}/{m+mm} match  -> {verdict}", file=sys.stderr)
 
+    # Exit code rolls up across all levels: 0 if every pair matched (all
+    # levels stock), 2 if every pair mismatched (all levels altered), 3
+    # if mixed (some levels stock, some altered, or noise).
     if matches == total and total > 0:
         print(
-            "RESULT: ALGORITHM CORRECT - Gen-A L1 reproduces every captured pair.",
-            file=sys.stderr,
-        )
-        print(
-            "        Safe to retry the real-car SA. If it still fails, the issue "
-            "is elsewhere (transport, NRC, security level, session).",
+            "RESULT: ALGORITHM CORRECT at every captured level - stock constants verified.",
             file=sys.stderr,
         )
         return 0
     if matches == 0 and mismatches > 0:
         print(
-            "RESULT: ALGORITHM MISMATCH - no captured pair reproduces.",
-            file=sys.stderr,
-        )
-        print(
-            "        Most likely COBB modified the SA constants or structure on "
-            "this car. The captured pairs are ground truth - use them to derive "
-            "what changed (e.g. brute-force the L1 round-key table against "
-            "these pairs by inverting the algorithm).",
+            "RESULT: ALGORITHM MISMATCH at every captured level - constants altered. "
+            "Run recover-gen-a per level to derive the replacement tables.",
             file=sys.stderr,
         )
         return 2
     print(
-        f"RESULT: PARTIAL MATCH - {matches}/{total} reproduce. Inconsistent - "
-        "could indicate capture noise or partial COBB modification. Inspect the "
-        "per-pair lines above.",
+        f"RESULT: MIXED - some levels match stock, others don't. "
+        "Inspect the per-level summary above.",
         file=sys.stderr,
     )
     return 3
@@ -1020,13 +1187,20 @@ GEN_A_RK_L1_KNOWN_AFTERMARKET: list[tuple[str, list[int]]] = [
 
 
 def gen_a_verify_table_against_pairs(rk: list[int],
-                                     pairs: list[tuple[bytes, bytes]]) -> bool:
-    """Return True iff `rk` (16 × u16) round-trips EVERY (seed, key) pair."""
+                                     pairs: list[tuple[bytes, bytes]],
+                                     level: int = 1) -> bool:
+    """Return True iff `rk` (16 × u16) round-trips EVERY (seed, key) pair.
+
+    All pairs must be at the same SA level (the caller filters by level
+    before invoking). Wire->packed and state->wire shuffles are per-level
+    per docs/15 + the analyst-side spec.
+    """
+    seed_to_packed, state_to_wire = _shuffles_for_level(level)
     for seed_bytes, expected_key_bytes in pairs:
-        seed_packed = int.from_bytes(seed_bytes, "big")
+        seed_packed = seed_to_packed(seed_bytes)
         state_post_rounds = _gen_a_wordswap32(seed_packed)
         internal_key = gen_a_feistel_inverse(state_post_rounds, rk)
-        derived_key_bytes = internal_key.to_bytes(4, "big")
+        derived_key_bytes = state_to_wire(internal_key)
         if derived_key_bytes != expected_key_bytes:
             return False
     return True
@@ -1060,8 +1234,15 @@ def gen_a_recovery_candidates(
 
 
 def cmd_recover_gen_a(args: argparse.Namespace) -> int:
-    """Recover the modified L1 round-key table from captured (seed, key)
-    pairs. Run when verify-gen-a reports ALGORITHM MISMATCH."""
+    """Recover the modified round-key table for one SA level from captured
+    (seed, key) pairs. Run per-level when verify-gen-a reports ALTERED at
+    that level. Defaults to --level 1; pass --level 3 or --level 5 to
+    recover a non-L1 table (L3 and L5 both use RK_L35 as the stock base).
+
+    Pairs in the JSON are filtered by `level` field: only pairs at the
+    requested level participate in the search. Older pairs.json files
+    without a `level` field default to L1.
+    """
     try:
         text = args.pairs.read_text(encoding="utf-8")
         data = json.loads(text)
@@ -1078,8 +1259,24 @@ def cmd_recover_gen_a(args: argparse.Namespace) -> int:
         print(f"recover-gen-a: no pairs in {args.pairs}", file=sys.stderr)
         return 1
 
+    target_level = int(args.level)
+    if target_level not in (1, 3, 5):
+        print(f"recover-gen-a: --level must be 1, 3, or 5 (got {target_level})",
+              file=sys.stderr)
+        return 1
+    try:
+        stock_rk = _stock_rk_for_level(target_level)
+    except ValueError as e:
+        print(f"recover-gen-a: {e}", file=sys.stderr)
+        return 1
+
     pairs: list[tuple[bytes, bytes]] = []
+    skipped_wrong_level = 0
     for i, p in enumerate(raw_pairs):
+        pair_level = int(p.get("level", 1))
+        if pair_level != target_level:
+            skipped_wrong_level += 1
+            continue
         try:
             seed = bytes.fromhex(p["seed"])
             key = bytes.fromhex(p["key"])
@@ -1091,28 +1288,39 @@ def cmd_recover_gen_a(args: argparse.Namespace) -> int:
             continue
         pairs.append((seed, key))
 
+    if skipped_wrong_level > 0:
+        print(
+            f"  (skipped {skipped_wrong_level} pair(s) at other levels)",
+            file=sys.stderr,
+        )
+
     if len(pairs) < args.min_pairs:
         print(
-            f"recover-gen-a: need at least {args.min_pairs} valid pairs, "
-            f"got {len(pairs)}. Capture more SA exchanges and retry.",
+            f"recover-gen-a: need at least {args.min_pairs} valid pairs at "
+            f"level {target_level}, got {len(pairs)}. Capture more L{target_level} "
+            f"SA exchanges and retry.",
             file=sys.stderr,
         )
         return 1
 
-    print(f"Loaded {len(pairs)} valid (seed, key) pair(s).", file=sys.stderr)
+    print(
+        f"Loaded {len(pairs)} valid L{target_level} (seed, key) pair(s).",
+        file=sys.stderr,
+    )
 
     # Sanity check: are the pairs consistent with stock? If so, the
     # algorithm isn't altered and recovery is unnecessary.
-    if gen_a_verify_table_against_pairs(GEN_A_RK_L1, pairs):
+    if gen_a_verify_table_against_pairs(stock_rk, pairs, level=target_level):
+        rk_name = "RK_L1" if target_level == 1 else "RK_L35"
         print(
-            "RESULT: ALGORITHM CORRECT - every pair verifies against stock "
-            "RK_L1. No table replacement detected; nothing to recover.",
+            f"RESULT: ALGORITHM CORRECT - every pair verifies against stock "
+            f"{rk_name}. No table replacement detected; nothing to recover.",
             file=sys.stderr,
         )
         return 0
 
     print(
-        f"Stock RK_L1 fails on at least one pair - searching for replacement.",
+        f"Stock RK fails on at least one pair - searching for replacement.",
         file=sys.stderr,
     )
     print(file=sys.stderr)
@@ -1122,17 +1330,19 @@ def cmd_recover_gen_a(args: argparse.Namespace) -> int:
     start = time.time()
     last_progress = start
     examined = 0
-    for label, candidate in gen_a_recovery_candidates(GEN_A_RK_L1):
+    for label, candidate in gen_a_recovery_candidates(stock_rk):
         examined += 1
-        if gen_a_verify_table_against_pairs(candidate, pairs):
+        if gen_a_verify_table_against_pairs(candidate, pairs, level=target_level):
             elapsed = time.time() - start
             print(
-                f"RESULT: RECOVERED after examining {examined:,} candidate(s) "
-                f"in {elapsed:.1f}s.",
+                f"RESULT: RECOVERED L{target_level} after examining {examined:,} "
+                f"candidate(s) in {elapsed:.1f}s.",
                 file=sys.stderr,
             )
             print(f"  shape: {label}", file=sys.stderr)
-            print(f"  rk_l1 (16 x u16, big-endian on the wire):", file=sys.stderr)
+            rk_name = "rk_l1" if target_level == 1 else "rk_l35"
+            print(f"  {rk_name} (16 x u16, big-endian on the wire):",
+                  file=sys.stderr)
             for i in range(0, 16, 4):
                 row = " ".join(f"0x{v:04x}" for v in candidate[i:i + 4])
                 print(f"    [{i:>2}-{i+3:>2}] {row}", file=sys.stderr)
@@ -1141,9 +1351,9 @@ def cmd_recover_gen_a(args: argparse.Namespace) -> int:
                 payload = {
                     "schema": "subuwutuner.sa_recovery.v1",
                     "algorithm": "gen_a_ssmcan1",
-                    "level": 1,
+                    "level": target_level,
                     "shape": label,
-                    "rk_l1": [f"0x{v:04x}" for v in candidate],
+                    rk_name: [f"0x{v:04x}" for v in candidate],
                     "verified_against_pairs": len(pairs),
                     "examined_candidates": examined,
                     "elapsed_seconds": round(elapsed, 2),
@@ -1264,14 +1474,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_rec = sub.add_parser(
         "recover-gen-a",
         help=(
-            "search for the replacement L1 round-key table when "
-            "verify-gen-a reports MISMATCH (aftermarket-locked ECU)"
+            "search for the replacement round-key table when verify-gen-a "
+            "reports MISMATCH (aftermarket-locked ECU). One level per run."
         ),
     )
     p_rec.add_argument(
         "pairs",
         type=Path,
         help="pairs.json (from extract_subaru_sa.py); 4+ pairs recommended",
+    )
+    p_rec.add_argument(
+        "--level",
+        type=int,
+        default=1,
+        choices=(1, 3, 5),
+        help="SA level to recover (default 1). L3 and L5 both use RK_L35 "
+             "as the stock base but apply different per-level byte shuffles; "
+             "the pairs JSON's level field is used to filter input pairs.",
     )
     p_rec.add_argument(
         "--min-pairs",
