@@ -1,120 +1,125 @@
-# Handoff — 2026-05-23 (SSM-on-CAN framing bug found and fixed; awaiting Read ROM retest)
+# Handoff — 2026-05-23 end-of-day (sniff mode + SA plug-in landed; awaiting Y-cable for SSMCAN1 derivation)
 
-**Next action: when the user retests, ask for the new `[trace][obdx-tx]` + `[trace][obdx-rx]` lines.** Expected new shape:
+**Next action: when the user has the Y-cable, run the SA capture flow** documented in `docs/23-security-access.md`. CLI invocation:
 
+```sh
+subuwutuner-cli sniff --transport obdx --device COM3 \
+    --output capture.log --filter 0x7E0,0x7E8
+# In parallel: 10-15 COBB AP power cycles OR plug/unplug from Y-cable
+# Ctrl+C the sniffer when done
+python tools/extract_subaru_sa.py capture.log --output pairs.json
 ```
-[trace][obdx-tx] A8 00 00 00 00 00 00 01 ... 00 4F  (~242 B, NO 80/10/F0/LEN prefix, NO CSUM suffix)
-[trace][obdx-rx] E8 <byte_0> <byte_1> ... <byte_79>  (~81 B)
-```
 
-If the trace still shows `80 10 F0 F2 A8 ...` on the TX line, the user is running the **old** GUI binary — they need to transfer the freshly-built `subuwutuner-gui.exe` from `build/win-mingw/bin/` to the laptop (Syncthing handles this at home; they were planning a manual transfer for next-time on the work-network).
+`pairs.json` is the input to the (yet-unwritten) algorithm-solver — that comes next.
 
-## Root cause and fix (resolved this session)
+## What landed today (uncommitted bundle, 5 logical commits ahead)
 
-The prior session's `80 10 F0 F2 A8 ... 4F 72` (247 B) trace was diagnosed: Subaru SSM-over-CAN **strips the K-Line/serial wrapper**. The ECU on CAN ID 0x7E0 expects only the bare SSM payload — `A8 00 + 24-bit addresses` — with ISO-TP carrying length, CAN IDs carrying addressing, and CAN's own frame CRC superseding the SSM checksum. We were emitting the full K-Line frame (`80 10 F0 LEN A8 00 ... CSUM`) as the ISO-TP payload; the ECU saw `0x80` as a leading byte instead of the expected `0xA8`, didn't recognize the request, and silently dropped the First Frame without sending Flow Control. Adapter parked → 750 ms TX deadline expired.
+### 1. OBDX CAN ID prefix + ISO-TP filter setup (transport bug fix)
 
-Public sources (Autosport Labs SSM-over-OBDII forum thread, src0x/LibSSM2 README): wire example for a single-byte read at 0x000008 is `00 00 07 E0 A8 00 00 00 08` — CAN ID 0x7E0 + 5 bytes data, no wrapper.
+Diagnosed against the 2017 VA WRX morning of 2026-05-23 from the OBDX Pro Developers Reference Manual v3.00:
+- Every `TxSmall` payload on CAN must start with `[4B BE CAN ID][user bytes]` (§3.6.3). We were sending raw protocol bytes with no ID prefix.
+- Default adapter state is "all filters off → all frames dropped" (§3.4). We weren't setting up a Flow filter, so even when the ECU did respond on 0x7E8, the adapter dropped it.
 
-The fix is a `Framing` enum threaded through SSM:
+Fix:
+- `Opcode::CanProtocolSettings = 0x34` added to `obdx_dvi.hpp`
+- `open()` step 4: Entire Filter setup before EnableNetwork — `34 11 00 00 00 01 01 00 00 07 E8 00 00 07 FF 00 00 07 E0 YY`
+- `send_recv` / `send` prepend 4-byte BE CAN ID from `can_id_request_`
+- `send_recv` RX strips 4-byte CAN ID + ISO-TP PCI (SF=0x0L → strip 1, FF=0x1XYY → strip 2)
+- All open-handshake fixtures updated; +1 new write-log assertion verifying filter frame position
 
-- `st::ecu::ssm::Framing::KLine` (default) — full wrapper, what ISO 9141 / Tactrix OpenPort needs.
-- `st::ecu::ssm::Framing::IsoTp` — bare payload (`A8 00 + addrs` / response `E8 + data`), what every 2008+ Subaru on HS CAN needs.
+**Hardware validated** this afternoon: full handshake works end-to-end, DSC `10 03 → 50 03` succeeds, RMBA `23 24 ...` reaches ECU and gets structured `7F 23 33 (securityAccessDenied)` instead of silent timeout.
 
-Threaded through: `build_a8_request` / `parse_a8_response` / `build_b0_request` / `parse_b0_response` / `build_b8_request` / `parse_b8_response` / `SsmClient` ctor / `Flasher` ctor / `LogSession` ctor. UI selects `IsoTp` for real-hardware SSM mode; trace mode and CLI replay keep `KLine` so existing fixtures replay unchanged.
+### 2. UDS SecurityAccess plug-in architecture
 
-## Test state: **909/909 green**
+NRC 0x33 → need SA. Surveyed every clean-licensed reference for the Subaru SSMCAN1 algorithm: came up empty. RomRaider, ECUFlash, james-portman, LibSSM2 all GPL-3 (contamination risk for our Apache 2.0). The 2018+ AES algorithm is MIT-licensed in jglim/UnlockECU but doesn't apply to SH7058. Decided on a runtime-pluggable architecture:
 
-- +10 new ISO-TP unit tests in `tests/unit/ecu/test_ssm.cpp` covering build/parse for A8 / B0 / B8 IsoTp + SsmClient IsoTp round-trip.
-- +1 new Flasher integration test in `tests/unit/flash/test_flash.cpp` exercising bare-payload `read_full_rom_ssm` end-to-end.
-- +1 new LogSession IsoTp test in `tests/unit/log/test_log.cpp`.
-- The previously-failing `tests/unit/ecu/test_ssm_properties.cpp:191` (B0 size assertion off by one — author forgot the data byte slot) is **fixed**. File is still untracked in git; promote to tracked when committing the rest of the bundle.
-- +4 `Definition::validate` duplicate-name tests in `tests/unit/defs/test_defs.cpp` covering hook / primitive / writable_region.
-- +3 OBDX open() validation tests in `tests/unit/transport/test_obdx_transport.cpp` covering EnableNetwork state byte (ON / OFF / LISTEN-ONLY) and sub-op echo enforcement. Existing open() tests updated to mock realistic `02 01` shape.
-- +2 Flasher CC-restore-on-bail tests in `tests/unit/flash/test_flash.cpp`; one existing NRC-on-RequestDownload test updated to expect the new CC restore and assert `restored_bus`.
+- `st::ecu::SecurityKeyFn = std::function<Result<vector<u8>>(span<const u8> seed)>` typedef in `security_key.hpp`
+- Three Subaru-era stubs in `subaru_security.hpp` (SSMK1/SSMCAN1/CY1-AES), all return `NotImplemented` with a clear pointer at the plug-in path
+- `Flasher::set_security_key_fn(fn)` setter; defaults to `subaru::ssmcan1_key_stub`
+- `Flasher::read_full_rom` gains `bool authenticate=false, std::uint8_t security_level=0x01` parameters
+- When `authenticate=true`: request_seed → key_fn(seed) → send_key, with diagnostic error at each failure point
+- GUI Read ROM modal: new "Authenticate (UDS SecurityAccess)" checkbox, default ON, tooltip explains the stub limitation
+- +4 SA preamble tests in `test_flash.cpp` (happy path, stub→NotImplemented, NRC 0x35, authenticate=false skip)
 
-## Pre-emptive LogSession framing plumb
+**Hardware behavior with Authenticate ON + stub** (predicted, not yet tested): trace will show `27 01 → 67 01 SEED4` then `[err] flash: read_full_rom SecurityAccess key derivation failed: subaru security key stub — algorithm not provided...`. Strictly better than today's bare NRC 0x33: user sees the ECU's actual seed bytes in the trace AND gets an actionable error pointing at exactly what's missing.
 
-`src/log/src/log.cpp::io_loop` constructs an internal `SsmClient` per session. With the bare default it would hit the **same** silent-drop bug on real CAN hardware during datalogging. `LogSession` ctor now takes a `Framing` parameter (default `KLine` keeps existing tests/CLI replay working). When the GUI eventually wires up live datalogging against the OBDX, the call site picks `IsoTp` from `LinkConfig::kind` — same one-liner as the Flasher path.
+### 3. Passive CAN sniffer mode (the path to a derivable SSMCAN1)
 
-## Side work this session (not OBDX-related)
+Asked the user to buy a CAN dongle; user pushed back asking why the OBDX itself can't sniff. Right answer — OBDX VX supports LISTEN-ONLY explicitly per §3.4 + §3.10.2. Built sniff mode end-to-end so the user only needs a $15 OBD-II Y-cable (Vgate B015649DHA, ordered):
 
-- **Docs:** `docs/16-custom-features.md` got a new "Motivating use cases" section with the FA20→FA24 swap into a VA WRX as a worked example. Distinguishes the cam-angle/VVT remap (custom feature) from the HPFP / VE / injector / knock work (table edits). Cites public sources only. `docs/04-roadmap.md` engine-swapper persona row updated to reference the worked example. Triggered by the user mentioning Atlas's role in FA24 swaps; no code change.
+- `LinkConfig::listen_only` flag (and `Frame::can_id` field — populated for CAN, 0 elsewhere)
+- OBDX `open()` branches on `listen_only`: skip filter setup, EnableNetwork STATE=0x02 instead of 0x01
+- `send` / `send_recv` reject with TransportUnavailable when `listen_only=true` (safe-by-default — can't accidentally TX while a tuner is bus-mastering)
+- `start_streaming` actually implemented (was stub): spawns reader thread, parses every RxSmall push, populates `Frame{data, can_id, arrived}` (no ISO-TP strip — sniff sees raw bus bytes), invokes callback
+- `stop_streaming` flips atomic + joins; destructor stops first
+- `subuwutuner-cli sniff --transport obdx --device COM3 --output capture.log --filter 0x7E0,0x7E8 [--duration N]` with Ctrl+C clean shutdown
+- `tools/extract_subaru_sa.py` — parses sniff log, extracts (seed, key) pairs via SF PCI strip + state machine, emits JSON; validated against synthetic log (correctly extracts 2 successful pairs, skips 1 NRC-0x35 rejected one)
+- `docs/23-security-access.md` (new) — full architecture + Y-cable workflow + trace shapes + failure-mode NRC table
+- `docs/13-transport.md` gains a "Sniff mode (passive bus monitor)" section
+- +5 transport tests: listen_only handshake (no filter cmd, STATE=0x02), send/send_recv rejection, start_streaming round-trip with 2 frames, empty-callback rejection, stop-on-never-started no-op
 
-## Quick file map for this session's changes (additive on top of yesterday's bundle)
+### 4. Program icon
 
-Today only:
-- `src/ecu/include/st/ecu/ssm.hpp` — `Framing` enum + `framing` param threaded through builders/parsers; `SsmClient` ctor + `framing()` accessor.
-- `src/ecu/src/ssm.cpp` — each builder/parser branches on framing; IsoTp paths emit/expect bare payloads.
-- `src/flash/include/st/flash.hpp` — `Flasher` ctor takes `ssm_framing` (default KLine).
-- `src/flash/src/flash.cpp` — bail() now attempts CC restore best-effort when the bus was silenced (mirrors cancel-cleanup; closes the non-cancel failure-path gap).
-- `src/log/include/st/log.hpp` — `LogSession` ctor takes `ssm_framing` (default KLine); new private member.
-- `src/log/src/log.cpp` — ctor stores framing, `io_loop` passes it to internal `SsmClient`.
-- `src/transport/src/obdx_transport.cpp` — EnableNetwork response strict validation: sub-op echo must be 0x02, state must be ON or LISTEN-ONLY (warn-on-listen). The verbose-only warning was lifted to a hard open() failure.
-- `src/defs/src/defs.cpp` — `Definition::validate()` now flags duplicate hook / primitive / writable_region names. `<unordered_set>` added.
-- `src/ui/src/main.cpp` — Read ROM modal picks `IsoTp` for real-hardware SSM, `KLine` for trace mode.
-- `tests/unit/_helpers/erase_opt.hpp` — new shared helper consolidating two duplicate definitions across `test_flash.cpp` and `test_cancellation_invariants.cpp`.
-- `tests/unit/ecu/test_ssm.cpp` — +10 ISO-TP framing test cases.
-- `tests/unit/flash/test_flash.cpp` — +1 Flasher IsoTp integration test; +2 CC-restore-on-bail tests; existing NRC test updated to expect CC restore; switched to shared `erase_opt` helper.
-- `tests/unit/flash/test_cancellation_invariants.cpp` — switched to shared `erase_opt` helper.
-- `tests/unit/log/test_log.cpp` — +1 LogSession IsoTp test.
-- `tests/unit/ecu/test_ssm_properties.cpp` — fixed B0 size assertion (was 9, is 10); added data-byte index check.
-- `tests/unit/defs/test_defs.cpp` — +4 duplicate-name validate tests (hook, primitive, writable_region, happy-path sanity).
-- `tests/unit/transport/test_obdx_transport.cpp` — +3 EnableNetwork strict-validation tests; existing handshake tests updated to mock realistic `02 01` responses.
-- `docs/16-custom-features.md` — "Motivating use cases" section + FA20→FA24 worked example. Subsequent revision corrected the technical picture (cam-trigger-wheel issue is hardware-solved by RS Motors kit; HPFP capacity is the actual software-relevant concern). Added working-project table (Prime Motoring 502whp, Six Star SPF 450whp/E85, two YouTube series), tuning-path matrix (COBB / Atlas / EcuTek / Link), "Atlas custom features make cams work" claim resolved (Path A hardware kit vs Path B software cam-signal interpretation), and pointer to `sqrt_float` as the next natural IR primitive for Bernoulli-based fuel-pressure correction.
-- `docs/04-roadmap.md` — engine-swapper persona row references the worked example.
-- `fixtures/demo-pack/pack.toml` — added two `[[writable_region]]` entries. **Independent bugfix** the FA24 work surfaced: before this, none of the bundled sample `.stmod` files (clutch-kill, flat-foot-shift, launch-control, map-selector-int) compiled against the demo-pack because the codegen address gate was failing closed.
-- `fixtures/demo-pack/hooks.toml` — added `override_vvt_target` (generic VVT value-override hook), `override_hpfp_target` (HPFP commanded-target override), `read_aux_fuel_pressure` (3rd-party CAN-bus fuel pressure sensor read).
-- `fixtures/samples/vvt-override-demo.stmod` (new) — generic VVT-override pattern demo (initially scaffolded as the FA24 fix before research clarified the cam-side concern is hardware-solved).
-- `fixtures/samples/fa24-hpfp-clamp.stmod` (new) — runtime clamp of FA20 ECU's commanded HPFP target to a hard ceiling the FA24 stock pump can hit. Compiles to 76 bytes SH-2A.
-- `fixtures/samples/fa24-aux-pressure-clamp.stmod` (new) — same clamp shape but threshold driven by a live 3rd-party CAN-bus fuel pressure sensor reading. Mirrors COBB's Differential Fuel Pressure Compensation pattern + Atlas's 3rd-party-sensor-integration pattern. Compiles to 76 bytes SH-2A.
-- **All seven `.stmod` samples in `fixtures/samples/` now compile end-to-end against `fixtures/demo-pack` via the SH-2A backend.** Previously: zero. (Updated: now eight samples, with `fa24-bernoulli-comp.stmod` added once `sqrt_float` landed — see below. `flex-fuel.stmod` remains blocked on the curve / table-lookup primitive.)
-- **`sqrt_float` IR primitive shipped end-to-end:**
-   - `src/feature_codegen/src/sh2a.hpp` — `enc_fsqrt(FReg frn)` returning `0xF06D | (n << 8)` per the SH-2A FSQRT spec
-   - `src/feature_codegen/src/feature_codegen.cpp` — `FragmentEmitter::fsqrt`, `emit_sqrt_float_fragment`, dispatch case, primitive_shape entry, updated error-message strings
-   - `src/feature/src/feature_ir.cpp` — `sqrt_float` cycle cost added (15, between FDIV's 18 and FMUL's 5; FSQRT latency dominates)
-   - `tests/unit/feature_codegen/test_sh2a.cpp` — +2 tests (FSQRT encoding emitted + wrong-arity rejection)
-   - `fixtures/samples/fa24-bernoulli-comp.stmod` — new sample exercising `divide_float → sqrt_float → multiply_float` for differential fuel pressure correction; targets `override_injector_pw` (compiles to 108 bytes of SH-2A)
-   - `docs/16-custom-features.md` — `sqrt_float` added to the SH-2A primitive coverage table; the "next IR primitive" subsection rewritten to describe what shipped + what remains
-- **`override_injector_pw` hook added to demo-pack:** Bernoulli compensation properly belongs on the injector pulse-width side (preserves OEM AFR closed-loop; HPFP-target compensation would just fight the OEM PID). The new hook takes commanded PW + RPM + load + manifold pressure + commanded rail pressure as inputs, returns an overridden PW. `fa24-bernoulli-comp.stmod` was refactored to use it correctly (no more passthrough-hook gymnastics).
-- **`fa24-bernoulli-comp.stmod` upgraded to production-shape math:** added manifold-pressure-aware ΔP (uses `rail − manifold` for both pressures — the physically-correct quantity per Bernoulli's principle) and bilateral correction-factor clamping (`[0.8, 1.4]` via two `compare/select` pairs). Now 11 primitive nodes, compiles to 328 bytes of SH-2A with the IEEE 754 constants for the clamp thresholds (`3F 4C CC CD` = 0.8, `3F B3 33 33` = 1.4) baked into the literal pool. `docs/16` "remaining gaps" list updated — only curve primitive, CAN-RX hook, and low-pass filter primitive remain on the FA24 follow-up list.
+User added an AI-generated PNG (cute neon WRX with uwu face + gauge) to the desktop. Wired through:
 
-Inherited from prior session, still uncommitted:
-- `src/flash/include/st/flash.hpp`, `src/flash/src/flash.cpp` — `read_full_rom_ssm`.
-- `src/transport/include/st/transport/obdx_transport.hpp`, `src/transport/src/obdx_transport.cpp` — open() instrumentation, EnableNetwork ACK validation, 50/50 TX budget split, `obdx_dvi.hpp` carries the codec the new property tests cover.
-- `src/ui/src/main.cpp` — Protocol dropdown, Verbose checkbox, RAII trace-guard, yellow preflight notice.
-- `tests/CMakeLists.txt`, `docs/09-risks.md` (cosmetic IDE-open edit), `docs/13-transport.md`.
+- `assets/icon.png` (transparent rounded corners — masked via Pillow)
+- `assets/icon.ico` (multi-res 16/24/32/48/64/128/256) → embedded into EXE via `src/ui/subuwutuner.rc` + CMake `enable_language(RC)`. Drives Explorer / taskbar / Alt+Tab.
+- `src/ui/src/icon_data.hpp` (auto-gen 64×64 RGBA C++ literal) → `glfwSetWindowIcon` at startup. Drives the GLFW window title-bar icon.
+- `scripts/embed_icon.py` regenerates both from `assets/icon.png` on demand
+- GUI binary went from 14.6 → 14.8 MB (icon overhead)
 
-## Committed bundle (6 commits on `main`, not yet pushed)
+### 5. HANDOFF refresh (this file)
 
-The work above landed as six commits, oldest → newest:
+## Test state: **919/919 green** (+9 from yesterday's 910)
 
-1. **`19eb16c`** — `fix(transport+ecu+flash+log): SSM-on-CAN bare-payload framing` — main SSM fix (Framing enum threaded through builders/parsers/SsmClient/Flasher/LogSession), EnableNetwork strict validation with SoftReboot cleanup, flash bail() CC restore, B0 size assertion fix, shared `erase_opt` test helper extraction. 19 files.
-2. **`64e5693`** — `feat(defs): validate flags duplicate hook/primitive/writable_region`. 2 files, +4 tests.
-3. **`d474d1d`** — `feat(feature_codegen): sqrt_float IR primitive (SH-2A FSQRT)`. 4 files, +2 tests.
-4. **`668a247`** — `feat(fixtures): demo-pack writable_region + 4 FA24-themed hooks + 4 samples`. 6 files; independent bugfix (writable_region) unblocks all bundled samples.
-5. **`85d0fb5`** — `docs: FA20→FA24 swap worked example + IR primitive notes`. 2 files.
-6. **`cf70a5f`** — `docs(handoff): refresh for end-of-session state`. 1 file. (This file's prior version; the post-commit cleanup landed in a small follow-up that you're reading now.)
++5 sniff transport tests, +4 SA preamble tests. All open-handshake fixtures updated to include the new CAN filter ACK between SetProtocol and EnableNetwork.
 
-`docs/09-risks.md` was deliberately kept out of every commit (recurring IDE-artifact 3-blank-line diff; `git restore`'d before staging). The local-only files `SubaruTuner.zip`, `definitions/legacy/.stfolder/`, and `fixtures/projects/` remain untracked per prior handoff.
+## Binary artifacts (Syncthing-distributed)
 
-**Push posture:** `hold till I test` per user instruction. Run `git push origin main` after the OBDX retest succeeds (or after the retest result clearly indicates additional code work is needed first).
+- `subuwutuner-gui.exe` — 14.84 MB (icon + sniff + SA wiring)
+- `subuwutuner-cli.exe` — 5.96 MB (new `sniff` subcommand)
 
-## If the retest succeeds
+Both at `D:\Documents\JetBrains\SubaruTuner\build\win-mingw\bin\`, timestamps 17:33 / 18:23 on 2026-05-23.
 
-1. User gets a real ROM dump on disk → File → New project flow → first real-hardware end-to-end milestone. Phase 1 ship gate (≥20 maps from a real definition pack) becomes testable.
-2. Memory entry `project_tuner_supplied_encrypted_rom.md` gets a follow-up note that the OBDX path produces the **tuned** cal (not stock — that's still locked in COBB AccessPort's encrypted store).
-3. Commit the bundle per the cadence above; promote `test_ssm_properties.cpp` to tracked.
+## Commit posture
 
-## If the retest still fails
+Five commits planned, in dependency order:
 
-The framing fix eliminated the most likely cause. New failure modes and where to look:
+1. `fix(transport): OBDX CAN ID prefix + ISO-TP filter setup` — the morning's transport fix, hardware-validated
+2. `feat(ecu+flash+ui): UDS SecurityAccess plug-in architecture` — SA infrastructure (key fn typedef, stubs, Flasher integration, UI checkbox, tests)
+3. `feat(transport+cli): passive CAN sniffer mode + SA capture toolchain` — listen_only, start_streaming, sniff CLI, extractor, docs
+4. `feat(ui): SubuwuTuner program icon` — assets + Windows .rc + GLFW glue
+5. `docs(handoff): refresh end-of-session state` — this file
 
-| `[trace][obdx-tx]` shape | Diagnosis | Next step |
-|---|---|---|
-| Still `80 10 F0 F2 A8 ...` | User is running the **old** binary on the laptop. | Confirm they transferred `subuwutuner-gui.exe` from today's build (timestamp 2026-05-23 ~08:04). |
-| `A8 00 00 00 00 ...` (correct) but TX still times out | ECU isn't on CAN ID 0x7E0 for SSM (or ignition isn't actually in RUN, or wiring problem). Bus is fundamentally silent. | Bus sniffer to confirm whether the ECU IS responding; if yes, the CAN ID is wrong. RR's source has the CAN IDs as a clean-room reference candidate (we can read RR public protocol *documentation* per CLAUDE.md, just not its Java source). |
-| `A8 00 ...` and TX succeeds, but RX comes back with `7F NN` (negative response) | ECU answered with a NRC. Most likely 0x33 (securityAccessDenied) — the COBB tune may have locked the SSM read addresses. | Add a session-escalation preamble (DSC + SecurityAccess), or pick a different address range to read first to confirm baseline connectivity. |
-| `A8 00 ...` and RX comes back with `E8 <bytes...>` | Working. Run the full 2 MB dump. | Continue per "If the retest succeeds" above. |
+**Push posture**: hold until user runs the Y-cable capture and validates the toolchain. Already committed work from this morning's session (6 commits, `19eb16c` → `cf70a5f`) also still unpushed — push the whole batch together once the SA capture succeeds.
+
+## Pre-existing untracked / leave-alone
+
+- `SubaruTuner.zip` (120 MB, user-dropped backup)
+- `definitions/legacy/.stfolder/` (Syncthing marker)
+- `fixtures/projects/` (user's GUI-created test project "BigTittyGothGF")
+- `tests/unit/ecu/test_ssm_properties.cpp` (still untracked from yesterday — promote to tracked when the SSM-on-CAN bundle commits land for real)
+
+## Reference: Pre-Y-cable activities the user might want to try
+
+Since the Y-cable is in transit (Vgate B015649DHA, ETA ~2 days), the user can run these on the existing OBDX VX (no Y-cable needed) for additional validation:
+
+1. **SA-enabled Read ROM** with Authenticate checkbox ON. Will fail with `NotImplemented` at the key step but the trace shows the actual seed bytes from the ECU (one real data point) AND confirms the new SA plumbing reaches the wire correctly. ~5 min.
+
+2. **RDBI VIN read** — UDS service 0x22 DID 0xF1 0x90. Not gated behind SA, returns 17-byte ASCII VIN which forces multi-frame ISO-TP RX (currently untested on real hardware). If it succeeds we know our PCI strip handles First Frame + Consecutive Frame correctly. If garbled, we have a concrete failure to fix. Would need a small CLI helper (`subuwutuner-cli rdbi --did 0xF190` or similar) since the current GUI Read ROM does RMBA only.
+
+3. **Address-range probing** — `subuwutuner-cli rom-pull --addr 0x080000 --size 0x10 ...` to see if the calibration region is readable without SA. Low probability of success but quick to try.
+
+## Reference: SSMCAN1 algorithm structure (publicly documented)
+
+Per `fenugrec/nisprog/SubaruSIDs.txt` (GPL-3 — read for facts, don't lift code):
+
+- 16-round XOR cipher
+- Two lookup tables: `IndexKeyBase[16]` of 2-byte values (32 B) + `KeyPartsTable[32]` of 1-byte values (32 B) — **64 bytes total**
+- 3-bit barrel-roll right per round
+- Final top/bottom byte swap on the 4-byte output
+
+With these 64 bytes + the operation sequence, any seed maps deterministically to its key. A future `tools/solve_ssmcan1.py` can derive the table values from ~10 captured (seed, key) pairs via brute-force / constraint solving (search space narrows dramatically per pair).
 
 ---
 
@@ -124,139 +129,48 @@ The state described below was superseded by today's work, but the prose around m
 
 ---
 
-## What shipped today (9 commits, all on `origin/main`)
+## Earlier today AM — OBDX CAN ID prefix + filter setup (now committed in commit 1 of the bundle above)
 
-```
-5b0ae89 fix(transport): receive OBDX frames as unsolicited push
-3f9b27d feat(ui): mirror status + error messages to stderr
-aaa1d69 fix(transport): correct OBDX SetProtocol payload per VT v1.06
-1e9619f fix(ui): use gnu_printf archetype for text_subtle
-39ee4a5 docs(updater): sketch st::updater design (Phase 6)
-ddece0f feat(defs+codegen): add writable-region address gate          (#3 ✅)
-1f4c5d9 feat(flash): execute() honors cancel between PDUs              (#2 ✅)
-473b8f6 test(flash+ecu): pin cancellation + PDU-atomicity invariants
-ccaca6d feat(cli): add 'doctor' triage subcommand                      (#6 ✅)
-```
+The morning's deep-dive into the OBDX Pro Developers Reference Manual v3.00 (`C:\Users\Cornelio\Desktop\OBDX-Pro-Developers-Reference-Manual.pdf`) revealed the two transport bugs above. Key sections used:
 
-865/865 tests green throughout. Full-tree build clean on MinGW (the pre-existing `%zu` UI breakage is fixed in `1e9619f`).
+- **§3.2 Checksum Calculation** — sum + bitwise NOT (same as VT). Codec was already correct.
+- **§3.4 Receive from Network Normal (0x08)** — adapter→PC push. CAN format: `08 [LEN] [4B BE CAN ID] [bus payload incl. PCI] [CHK]`. Filters default to OFF.
+- **§3.6 Send to Network Normal (0x10)** — PC→adapter. CAN format: `10 [LEN] [4B BE CAN ID] [user bytes] [CHK]`.
+- **§3.14 CAN Protocol Settings (0x34)** — Entire Filter sub-op 0x00 sets ID/mask/type/status/flow-id in one shot.
 
-### Ship-blocker grid
+The fix unblocked everything from "silent timeouts everywhere" to "structured `7F 23 33` from ECU" which is what made today's SA work possible.
 
-| # | Title | Status after today | Notes |
-|---|---|---|---|
-| 1 | Brick protection per-ISA | ⬜ hardware-blocked | Bench rig prerequisite |
-| 2 | Cancellation invariants | ✅ | UDS path complete; SSM moot until v1.3 |
-| 3 | Codegen writable-region gate | ✅ | Fail-closed, wired into Sh2aBackend |
-| 4 | `[[table.role]]` schema | ✅ | PR #1 |
-| 5 | `.stune` format spec | ✅ | PR #1 |
-| 6 | `subuwutuner-cli doctor` | ✅ | Composes adapter probe + pack health + ROM CID |
-| 7 | Frozen `defgen` binary | ⬜ packaging | PyInstaller / Nuitka choice pending |
-| 8 | README platform matrix | ✅ | PR #1 |
-| 9 | OFL font licenses | ✅ | PR #1 |
-| 10 | CI performance gate | ⬜ | Aspirational thresholds, not enforced |
-| 11 | Property-based codec tests | ⬜ | RapidCheck wire-up — next-up task in this session |
+## Yesterday AM (2026-05-22) — SSM-on-CAN framing fix (6 commits committed locally, not pushed)
 
-**Pure-software blockers remaining: #7, #10, #11.** #1 is hardware-blocked.
+The first half of today's predecessor session fixed an SSM framing bug: K-Line wrapper bytes (`80 10 F0 LEN ... CSUM`) shouldn't be on the CAN bus. Implemented `st::ecu::ssm::Framing { KLine, IsoTp }` enum threaded through all SSM builders/parsers, SsmClient, Flasher, LogSession. UI selects `IsoTp` for real-hardware SSM mode.
 
----
+Six commits landed (all on `main`, not pushed):
+1. `19eb16c` — `fix(transport+ecu+flash+log): SSM-on-CAN bare-payload framing`. 19 files.
+2. `64e5693` — `feat(defs): validate flags duplicate hook/primitive/writable_region`. 2 files.
+3. `d474d1d` — `feat(feature_codegen): sqrt_float IR primitive (SH-2A FSQRT)`. 4 files.
+4. `668a247` — `feat(fixtures): demo-pack writable_region + 4 FA24-themed hooks + 4 samples`. 6 files.
+5. `85d0fb5` — `docs: FA20→FA24 swap worked example + IR primitive notes`. 2 files.
+6. `cf70a5f` — `docs(handoff): refresh for end-of-session state`. 1 file.
 
-## OBDX live-test decision tree
+## Syncthing desktop ↔ laptop
 
-Status as of session-end: two OBDX firmware-layer bugs fixed; user is mid-retest. If a third error appears, classify it against this table BEFORE assuming new code is needed.
-
-| Console text (after `[err][read-rom]`) | Diagnosis | Where to look |
-|---|---|---|
-| `Adapter open failed: serial open failed for ...` | Wrong COM port. | Device Manager → Ports. |
-| `device returned 0x05 for opcode 0x31` | Would mean my SetProtocol fix regressed. **Should not happen.** | `src/transport/src/obdx_transport.cpp::set_protocol_payload` — confirm 2-byte format. |
-| `device returned 0x01 for opcode 0x08` | Would mean the RxSmall fix regressed. **Should not happen.** | `src/transport/src/obdx_transport.cpp::Transport::send_recv` phase 2. |
-| `read_full_rom: short read at 0x...` | UDS layer: ECU rejected the chunk size or refused mid-read. Look at the actual bytes received. | `src/ecu/src/uds.cpp::read_memory_by_address`, `src/flash/src/flash.cpp::read_full_rom`. |
-| `read_full_rom: ... ecu negative response 0x7F 0x23 NN` | ECU said no to ReadMemoryByAddress (SID 0x23). NN explains why; 0x33 = securityAccessDenied (needs session escalation + seed/key); 0x31 = requestOutOfRange (address invalid for this ECU); 0x12 = subFunctionNotSupported. | Add a DSC(extended) + SecurityAccess preamble per the ECU's needs, OR adjust addr/length. |
-| `send_recv: timeout / no response from ECU` | TX ack came back but no 0x08 push. Most likely the ECU genuinely didn't respond (wrong ignition state, wiring, wrong protocol on this car). Per VT v1.06 §3.3, "by default … all filters are set to off … to monitor all messages, disable all filters and enable network" — so the receive path is *open* by default, not *closed*. A missing filter is unlikely to be the cause. | Check ignition is in ACC/RUN; confirm OBD-II port wired to the engine ECU; verify HS CAN (Subaru) and not MS CAN. Only chase the CAN filter angle if a bus sniffer shows the ECU IS responding but the adapter isn't pushing the frame to us. |
-| `expected unsolicited RxSmall/Large (0x08/0x09); got opcode 0x??` | Adapter returned something we don't expect. Read the opcode value. | Look at VT v1.06 §3 for the matching opcode; might be a config error we need to handle. |
-
-VT v1.06 PDF: https://obdxpro.com/Downloads/ReferenceManuals/OBDX%20Pro%20VT%20Reference%20Guide%20v2.pdf — the manual covers the full opcode catalog used by the VX, including HS CAN as protocol 0x02 under §3.10.1 SetProtocol (already in use) and the 0x33 filter sub-commands (§3.11.1–3.11.5). The section is titled "VPW Specific Settings" but sub-ops 0x00–0x04 are filter primitives (Set To Filter, Set From Filter, To/From Range Filter, Set Mask); sub-op 0x05 is unused; sub-ops 0x06–0x0F are VPW-scoped (4x speed, CRC, 1x/4x timings, error bits). The byte semantics of `MM` (1-byte filter ID) and `BB NN MM` (3-byte mask) are defined for VPW's 3-byte header; how those fields map to 11-bit / 29-bit CAN IDs on the VX is NOT documented in the VT PDF and would need either the VX manual (account-gated at obdxpro.com) or a clean-room read of `OBDXPro/OBDX-Templates` (C# samples, allowed per `docs/13-transport.md:209`).
-
----
-
-## Background that's still load-bearing for tomorrow
-
-### Syncthing desktop ↔ laptop
-
-Installed and configured today. Two send-only folders (`build/win-mingw/bin/` and `definitions/legacy/`) mirror from desktop to laptop via Task Scheduler-spawned daemon. Replaces the old zip-and-send loop.
+Installed 2026-05-22. Two send-only folders mirror desktop → laptop. Replaces the old zip-and-send loop.
 
 - Desktop device ID: `NSYHPXO-QVWHQT6-4XUNW2M-OET6FJY-CYP7Z7I-CM5HV7D-M7PEYEY-SIIJKQ4`
 - Laptop device ID: `VZ6D4AZ-WUZL35M-UR5EOJ4-TPBMLFJ-6QOT7TR-R4BAHVR-5HBTKOH-3GHJ6AP`
-- Web UI: http://127.0.0.1:8384/
-- Full setup notes: `.claude/SYNCTHING-SETUP.md` (gitignored, lives on this machine only)
-- Memory: see `project_syncthing_setup.md`
+- Web UI: http://127.0.0.1:8384/ (API key in `.claude/SYNCTHING-SETUP.md`)
+- Workflow: build on desktop; laptop receives binaries within seconds via fs-watcher. No git pull or rebuild on laptop.
 
-### Workflow
+## Pre-existing notes still relevant
 
-Desktop: edit + commit + `cmake --build build/win-mingw`. Laptop receives binaries within seconds via fs-watcher. No git pull or rebuild on the laptop is needed — Syncthing IS the propagation. The laptop is a test target, not a build host.
-
-### Auto-updater (Phase 6 work)
-
-`docs/22-auto-update.md` sketches the in-tool `Help → Check for Updates` flow that closes the v1.0 "Installer / codesigning / auto-update channel" row when Phase 6 polish starts. Channel model, GitHub-Releases manifest shape, Ed25519 signature verification, Windows helper-process swap pattern, UI flow — all there. Three open questions called out inline. Not for tomorrow; the file-sync above solves the dev-iteration problem in the meantime.
-
-### Pre-existing notes still relevant
-
-- The `fixtures/projects/Test/` untracked dir is the user's GUI-created test project ("BigTittyGothGF"). Leave alone — it's personal test data, not a repo asset.
-- `SubaruTuner.zip` at the repo root (120 MB) is a backup the user dropped; HANDOFF history says "leave."
+- `fixtures/projects/Test/` — user's GUI-created test project. Personal test data; leave alone.
+- `SubaruTuner.zip` at repo root — user-dropped backup; leave.
 - `docs/09-risks.md` carries an unstaged two-blank-line edit from the user opening the file in their IDE. Cosmetic; don't include in commits.
 
----
+## Pure-software follow-ups (not Y-cable-blocking, lower priority than the SA derivation)
 
-## What's next after the OBDX live test settles
-
-If OBDX read succeeds:
-1. User gets a real ROM dump on disk → File → New project flow → first real-hardware end-to-end milestone for the project. Phase 1 ship gate (≥20 maps from a real definition pack) becomes testable.
-2. Memory entry "COBB-encrypted 2017 WRX stock ROM" gets a follow-up note that the OBDX path produces the tuned cal (not stock — that's still locked in COBB AccessPort's encrypted store).
-
-If OBDX read fails as a UDS-layer issue:
-1. Likely needs session escalation (DSC 0x03 extendedDiagnostic) + possibly SecurityAccess before ReadMemoryByAddress on a tuned ECU. Forum threads on COBB-tuned VAs hint that the COBB tune may leave the security level partially open; that's why a dump is even attempted before seed/key implementation.
-2. Add `Flasher::read_full_rom` an optional session-escalation preamble — or, simpler, expose DSC + SA primitives at the CLI/GUI level so the user can drive the escalation themselves.
-
-If OBDX read fails as "TX ack but no response":
-1. First rule out the boring causes: ignition position, wiring, protocol mismatch. The adapter's default is "all filters off, accept all" per VT v1.06 §3.3 — a missing filter is unlikely to be the root cause.
-2. If a bus sniffer proves the ECU IS responding but the adapter is silent, then it's a CAN filter / acceptance issue and we need the VX-specific CAN byte semantics for the 0x33 family (sub-op catalog is in the VT PDF; CAN-ID mapping isn't). Options: (a) ask OBDX support, (b) clean-room read of `OBDXPro/OBDX-Templates`'s C# CAN example per `docs/13-transport.md:209`.
-
----
-
-## Pure-software follow-ups (not OBDX-blocking)
-
-In rough priority order:
-
-1. **Ship blocker #11**: property-based codec tests. Up next in this session per user direction.
-2. **Ship blocker #10**: CI performance gate. Cold-start time + idle-RAM thresholds in CMake; fail the matrix build on regression past §1 in `docs/05-improvements.md`.
-3. **Ship blocker #7**: Frozen `defgen` binary. PyInstaller is fine, Nuitka is slimmer. Either, then bundle into the installer when that lands.
-4. **`Definition::validate()` duplicate-name check** for `[[writable_region]]` entries. Flagged in `ddece0f` review; same applies to `[[hook]]` / `[[primitive]]` which also don't enforce uniqueness today.
-5. **Shared test-helper header** at `tests/unit/_helpers/`. `erase_opt`, `dvi_response_frame`, `dvi_unsolicited_frame`, `make_def_with_regions` are now duplicated across 2-3 test files each. Mechanical extraction.
-6. **`EnableNetwork` response echo validation** in `obdx_transport.cpp::open()` — flagged in `aaa1d69` review. Verify the adapter actually flipped to ON instead of taking the ACK on faith.
-7. **`Flasher::execute` cancel-cleanup CC restore** is already done; the equivalent on the happy-path failure paths (e.g. mid-sector erase failure) could also restore CC. Minor.
-
----
-
-# Earlier-today + previous-day handoffs (preserved for context)
-
-Everything below this line is historical. The state described in those sections has been superseded by the work in today's 9 commits, but the prose around motivation / decisions is still useful for future readers.
-
----
-
-# Handoff — 2026-05-22 morning (OBDX adapter on hand, K-Line default fixed)
-
-**Tomorrow's first action: re-run the GUI Read flow against the real OBDX adapter.** The user got the OBDX Pro VX in the mail late on 2026-05-21, plugged it in, clicked Tools → Read ROM from Car (Adapter=OBDX, COM port set), and got:
-
-```
-Adapter link open failed: obdx::Transport: OBDX VX doesn't support
-K-Line / ISO9141. Subaru VA WRX needs Tactrix OpenPort.
-```
-
-This is a real coding bug I shipped (and a misleading error message to boot). The OBDX **is** the right adapter for VA/VB WRX — those cars run CAN ISO15765, not K-Line. Subaru switched to CAN with the 2008 OBD-II CAN mandate. Atlas's recommendation of OBDX is correct.
-
-**Fix landed at `f3b7cc7`** (HEAD):
-- `LinkConfig` default changed: `kind=CanIso15765`, `baud=500000`, `can_id_request=0x7E0`, `can_id_response=0x7E8` (standard Subaru engine-ECU OBD-II addressing).
-- New `kSubaruEngineCanIdRequest`/`Response` constants in `src/transport/include/st/transport.hpp`.
-- `LinkKind` enum comments rewritten to reflect actual Subaru bus history (pre-2008 K-Line, 2008+ CAN ISO15765 — including all VA/VB).
-- The OBDX K-Line error message rewritten to redirect users to `CanIso15765` instead of pointing at Tactrix.
-
-This morning's first-action was completed mid-session — the user retested and hit the SetProtocol payload bug (then the RxSmall bug). Both fixed in today's commits. See the new top-of-file section for current state.
+1. **`tools/solve_ssmcan1.py`** — algorithm-solver. Takes `pairs.json` from the extractor + the publicly-documented algorithm structure; outputs the 64 bytes of table values. Write against real data once user has a capture.
+2. **`subuwutuner-cli rdbi --did <hex>`** — small CLI helper for reading well-known UDS DIDs (VIN, cal ID, SW version). Most useful as the multi-frame ISO-TP RX validation path that doesn't require SA. Would surface ISO-TP PCI strip bugs (if any) without needing a successful flash unlock.
+3. **CY1 AES implementation** — `jglim/UnlockECU/SubaruSecurityAccess2018CY1.cs` is MIT-licensed, can be re-implemented in `subaru_security.cpp` without contamination. Targets 2018+ Subarus, not the dev's 2017 — defer until Path B for VB packs.
+4. **Ship blocker #10**: CI performance gate.
+5. **Ship blocker #7**: Frozen `defgen` binary.
