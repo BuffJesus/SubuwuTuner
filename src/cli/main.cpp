@@ -25,6 +25,7 @@
 #include "st/transport/factory.hpp"
 #include "st/transport/j2534_discovery.hpp"
 #include "st/transport/mock.hpp"
+#include "st/transport/obdx_transport.hpp"
 #include "st/transport/uds_trace.hpp"
 
 #include <algorithm>
@@ -344,6 +345,18 @@ constexpr std::string_view kUsage =
     "                            FlashReport summary. With --manifest, writes a\n"
     "                            Manifest of the run; with --journal, sets\n"
     "                            FlashPlan.journal_path for incremental writes.\n"
+    "    rdbi --transport <kind> --did <hex>\n"
+    "         [--device <path>] [--dll <path>] [--output FILE.bin]\n"
+    "         [--no-dsc] [--verbose]\n"
+    "                            Read one UDS DataByIdentifier (SID 0x22) and\n"
+    "                            print hex + ASCII. Useful for ground-truth\n"
+    "                            validation against live hardware without needing\n"
+    "                            SecurityAccess - well-known emissions DIDs are\n"
+    "                            always readable in the default session. The VIN\n"
+    "                            DID (0xF190) forces multi-frame ISO-TP RX which\n"
+    "                            validates the OBDX transport's First-Frame strip\n"
+    "                            path. Defaults enter extendedDiagnosticSession;\n"
+    "                            --no-dsc to skip.\n"
     "    sniff --transport <kind> --output <FILE.log> [--device <path>]\n"
     "          [--dll <path>] [--filter <id>[,<id>...]] [--duration <sec>]\n"
     "                            Passive CAN bus monitor. Opens the adapter in\n"
@@ -8971,6 +8984,190 @@ int cmd_rom_pull(int argc, char *argv[]) {
     return 0;
 }
 
+// ReadDataByIdentifier (UDS SID 0x22) one-shot CLI. The shipped GUI
+// Read ROM flow always does RMBA (SID 0x23) which gets gated behind
+// SecurityAccess on a stock Subaru. RDBI for well-known emissions
+// DIDs (VIN, calibration ID, software version) is allowed in the
+// default session on every OBD-II-compliant ECU, so this is the best
+// way to ground-truth the transport + UDS stack against live hardware
+// without needing SA.
+//
+// More importantly, the canonical VIN read (`22 F1 90`) returns 17 ASCII
+// bytes + 3 header bytes = 20 bytes total, which exceeds the 7-byte
+// CAN single-frame limit and forces the ECU into multi-frame ISO-TP.
+// That validates the strip_iso_tp First-Frame path in the OBDX
+// transport which is otherwise untested against real hardware.
+int cmd_rdbi(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::optional<std::uint32_t> did;
+    std::optional<std::filesystem::path> output_path;
+    bool enter_dsc = true;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "rdbi: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--did") {
+            auto const *v = require_arg("--did");
+            if (v == nullptr)
+                return 2;
+            std::uint32_t val = 0;
+            if (!parse_uint32_arg(v, val) || val > 0xFFFFU) {
+                std::fputs("rdbi: --did must be a 16-bit hex value (e.g. 0xF190 for VIN)\n",
+                           stderr);
+                return 2;
+            }
+            did = val;
+        } else if (a == "--output" || a == "-o") {
+            if (auto const *v = require_arg("--output"); v)
+                output_path = std::filesystem::path{v};
+            else
+                return 2;
+        } else if (a == "--no-dsc") {
+            enter_dsc = false;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "rdbi: unknown option: %s\n", argv[i]);
+            return 2;
+        } else {
+            std::fprintf(stderr, "rdbi: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || !did.has_value()) {
+        std::fputs(
+            "rdbi: missing --transport / --did\n"
+            "Usage: subuwutuner-cli rdbi --transport <kind> --did <hex>\n"
+            "                            [--device <path>] [--dll <path>]\n"
+            "                            [--output FILE.bin] [--no-dsc] [--verbose]\n"
+            "\n"
+            "Read one UDS DataByIdentifier (SID 0x22). Defaults enter the\n"
+            "extendedDiagnosticSession (DSC 0x03) before the request, then\n"
+            "RDBI. Output is hex + ASCII to stderr; raw response bytes to\n"
+            "--output if given. --no-dsc skips the session entry (some\n"
+            "emissions DIDs work in the default session).\n"
+            "\n"
+            "Useful DIDs (mandatory OBD-II, not SA-gated):\n"
+            "  0xF190  VIN (17 ASCII bytes - forces multi-frame ISO-TP RX)\n"
+            "  0xF188  ECU software number (calibration ID)\n"
+            "  0xF195  System Supplier ECU Software Version Number\n"
+            "  0xF196  System Supplier ECU HW Version Number\n"
+            "  0xF18C  ECU serial number\n"
+            "  0xF18A  System Supplier Identifier\n",
+            stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "rdbi: --transport '%s' not recognized (expected j2534|obdx|native).\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "rdbi: %s\n", t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+
+    st::transport::LinkConfig link{};
+    link.kind = st::transport::LinkKind::CanIso15765;
+    link.baud = 500000;
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "rdbi: transport open failed: %s\n", s.error().to_string().c_str());
+        return 1;
+    }
+
+    st::ecu::uds::UdsClient client{**t};
+
+    if (enter_dsc) {
+        if (auto s = client.diagnostic_session_control(st::ecu::uds::kDscExtendedDiagnostic);
+            !s.has_value()) {
+            std::fprintf(stderr, "rdbi: DSC extended session entry failed: %s\n",
+                         s.error().to_string().c_str());
+            (void)(*t)->close();
+            return 1;
+        }
+    }
+
+    auto const r = client.read_data_by_identifier(static_cast<std::uint16_t>(*did));
+    if (!r.has_value()) {
+        std::fprintf(stderr, "rdbi: %s\n", r.error().to_string().c_str());
+        (void)(*t)->close();
+        return 1;
+    }
+    auto const &data = *r;
+
+    // Format: header line + hex dump + ASCII rendering. ASCII swap
+    // unprintables for '.' so VIN-style responses are immediately
+    // recognizable while non-printable responses don't trash the
+    // terminal.
+    std::fprintf(stderr, "rdbi: DID 0x%04X returned %zu bytes\n",
+                 static_cast<unsigned>(*did), data.size());
+    std::fprintf(stderr, "  hex:   ");
+    for (std::size_t i = 0; i < data.size(); ++i) {
+        std::fprintf(stderr, "%02X%s", static_cast<unsigned>(data[i]),
+                     (i + 1 < data.size()) ? " " : "");
+    }
+    std::fprintf(stderr, "\n");
+    std::fprintf(stderr, "  ascii: \"");
+    for (auto b : data) {
+        std::fputc((b >= 0x20 && b <= 0x7E) ? static_cast<int>(b) : '.', stderr);
+    }
+    std::fprintf(stderr, "\"\n");
+
+    if (output_path.has_value()) {
+        std::ofstream out{*output_path, std::ios::binary};
+        if (!out) {
+            std::fprintf(stderr, "rdbi: cannot open output: %s\n",
+                         output_path->string().c_str());
+            (void)(*t)->close();
+            return 1;
+        }
+        out.write(reinterpret_cast<char const *>(data.data()),
+                  static_cast<std::streamsize>(data.size()));
+        if (!out) {
+            std::fprintf(stderr, "rdbi: write failed: %s\n", output_path->string().c_str());
+            (void)(*t)->close();
+            return 1;
+        }
+        std::fprintf(stderr, "rdbi: wrote %zu bytes to %s\n", data.size(),
+                     output_path->string().c_str());
+    }
+
+    (void)(*t)->close();
+    return 0;
+}
+
 // SIGINT handler for cmd_sniff. The shape (function-pointer that flips
 // an atomic) is the only safe thing to do inside a signal handler per
 // POSIX — and Windows's SIGINT runs in a separate thread anyway, so the
@@ -9820,6 +10017,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "sniff") {
         return cmd_sniff(argc - 2, argv + 2);
+    }
+    if (cmd == "rdbi") {
+        return cmd_rdbi(argc - 2, argv + 2);
     }
     if (cmd == "flash-trace") {
         return cmd_flash_trace(argc - 2, argv + 2);
