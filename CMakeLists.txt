@@ -121,6 +121,13 @@ if(ST_BUILD_GUI)
             RUNTIME DESTINATION ${ST_INSTALL_BIN_DIR})
 endif()
 
+# No DLL-bundling step on Windows/MinGW: the C++ runtime (libstdc++ /
+# libgcc / libwinpthread) is statically linked into the binaries via
+# st::platform's -static link options (cmake/CompilerWarnings.cmake §80+).
+# objdump on the produced .exe lists only Windows system DLLs and Universal
+# CRT (`api-ms-win-crt-*-l1-1-0.dll`, part of Windows 10+). End users run
+# the .exe straight out of the install directory.
+
 # Definition archives. Built at install time by tools/build_definition_archives.py
 # so the artifact lives in the install dir's `definitions/` next to the
 # binaries — no copy step, no intermediate build-dir staging area.

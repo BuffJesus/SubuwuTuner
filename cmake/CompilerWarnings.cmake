@@ -75,6 +75,25 @@ endif()
 
 # Platform-specific link tweaks. Statically link the MinGW C/C++ runtime so
 # Windows executables don't drag DLLs around the filesystem next to themselves.
+#
+# Why static (no DLL bundling step):
+#   The alternative is shipping libgcc_s_seh-1.dll + libstdc++-6.dll +
+#   libwinpthread-1.dll next to the .exe (commonly via
+#   install(IMPORTED_RUNTIME_ARTIFACTS) or install(RUNTIME_DEPENDENCY_SET)).
+#   That's brittle: it depends on the MinGW distribution shipping the right
+#   DLL filenames, and pulling them via objdump introspection breaks if a
+#   MSYS2 vs WinLibs vs Cygwin layout shifts the search path. Static linking
+#   is what every Subaru-tuner-style portable Windows tool actually wants
+#   (single-folder install, no DLL-hell), and it sidesteps the question.
+#
+#   Cost: ~2-3 MB of binary growth across cli + gui combined.
+#   Verified by running `objdump -p subuwutuner-{cli,gui}.exe | grep "DLL Name"`
+#   and seeing no libgcc/libstdc++/libwinpthread entries.
+#
+# License posture: GCC's runtime library (libgcc_s) is dual-licensed under
+# GPL + the Runtime Library Exception, which explicitly permits static
+# linking into proprietary or differently-licensed apps. libstdc++ uses the
+# same exception. We're Apache-2.0 either way, so no conflict.
 add_library(st_platform INTERFACE)
 add_library(st::platform ALIAS st_platform)
 if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -83,4 +102,6 @@ if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         -static-libgcc
         -static-libstdc++
     )
+    message(STATUS "Windows/MinGW: linking C++ runtime statically; "
+                   "no libstdc++-6.dll / libgcc_s_seh-1.dll / libwinpthread-1.dll bundle needed.")
 endif()
