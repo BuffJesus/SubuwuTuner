@@ -133,3 +133,11 @@ docs-build/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Personal laptop quick-reference (Syncthing-mirrored to laptop's
+# C:\Users\Cornelio\Desktop\Subuwu\Tools\). User-specific paths; not
+# for the public repo.
+tools/LAPTOP-COMMANDS.txt
+
+# Syncthing folder markers (per-folder safety check, not source).
+.stfolder/
