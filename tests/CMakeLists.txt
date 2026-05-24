@@ -19,6 +19,7 @@ add_executable(st_unit_tests
     unit/core/test_crc32.cpp
     unit/rom/test_rom.cpp
     unit/defs/test_defs.cpp
+    unit/defs/test_pack_registry.cpp
     unit/edit/test_edit.cpp
     unit/project/test_project.cpp
     unit/transport/test_mock.cpp
