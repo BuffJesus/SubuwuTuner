@@ -77,7 +77,7 @@ A planned extractor (`tools/extract_uds_transfer.py`, **not yet written**) walks
 }
 ```
 
-Each `payload_path` is the reassembled bytes for that transfer — the tune calibration as it went into the ECU (post-decryption, since RequestDownload format byte 0x00 means the bytes on the wire are the bytes that get written).
+Each `payload_path` is the reassembled bytes for that transfer. **Whether those bytes are the tune as-it-hits-flash depends on the active tool's payload envelope.** RequestDownload's dataFormatIdentifier (the `00` in `34 00 44 …`) is the OEM-side declaration of compression / encryption applied to the *transferred* bytes; a value of 0x00 means the ECU writes the wire bytes verbatim. Tuner tools often layer their own outer envelope on top (COBB-format ROMs, EcuTek's container) that the ECU's bootloader strips before flashing — or pre-process the calibration into a delta against a known base. Treat the extracted payload as "what the wire saw" and validate against a known-pre-flash baseline (or a same-CID stock ROM, if available) before trusting it as the calibration in flash. Non-zero `dataFormatIdentifier` makes this unambiguous: the wire bytes are not the flash bytes.
 
 ### Caveats
 
