@@ -29,11 +29,13 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <charconv>
 #include <chrono>
 #include <cinttypes>
 #include <cmath>
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -44,6 +46,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <numeric>
 #include <optional>
 #include <span>
@@ -341,6 +344,20 @@ constexpr std::string_view kUsage =
     "                            FlashReport summary. With --manifest, writes a\n"
     "                            Manifest of the run; with --journal, sets\n"
     "                            FlashPlan.journal_path for incremental writes.\n"
+    "    sniff --transport <kind> --output <FILE.log> [--device <path>]\n"
+    "          [--dll <path>] [--filter <id>[,<id>...]] [--duration <sec>]\n"
+    "                            Passive CAN bus monitor. Opens the adapter in\n"
+    "                            LISTEN-ONLY mode (adapter never transmits — safe to\n"
+    "                            share the OBD-II port with COBB AP or another active\n"
+    "                            tool via a Y-cable) and records every CAN frame to\n"
+    "                            --output. Stops on Ctrl+C or after --duration\n"
+    "                            seconds. --filter narrows the recorded IDs (the\n"
+    "                            adapter still hears everything; the filter only\n"
+    "                            controls what gets written to the file). Output is\n"
+    "                            one frame per line: '<ms> 0xCANID <hex bytes>'.\n"
+    "                            Use case: SecurityAccess seed/key capture (run\n"
+    "                            during a COBB connect cycle) for downstream feeding\n"
+    "                            into tools/extract_subaru_sa.py.\n"
     "    rom-pull --addr <hex> --size <hex> --output <FILE.bin>\n"
     "             (--trace <FILE.uds> | --transport <kind> [--dll <path>]\n"
     "                                   [--device <path>])\n"
@@ -8954,6 +8971,259 @@ int cmd_rom_pull(int argc, char *argv[]) {
     return 0;
 }
 
+// SIGINT handler for cmd_sniff. The shape (function-pointer that flips
+// an atomic) is the only safe thing to do inside a signal handler per
+// POSIX — and Windows's SIGINT runs in a separate thread anyway, so the
+// atomic is the cross-platform sync primitive that works for both.
+//
+// Function-scope rather than file-scope so it doesn't bleed into other
+// commands; cmd_sniff installs + restores around its blocking wait.
+namespace {
+std::atomic<bool> g_sniff_stop{false};
+void sniff_sigint_handler(int /*sig*/) {
+    g_sniff_stop.store(true, std::memory_order_release);
+}
+} // namespace
+
+int cmd_sniff(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::optional<std::filesystem::path> output_path;
+    std::optional<std::uint32_t> duration_seconds;
+    std::vector<std::uint32_t> id_filter;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "sniff: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--output" || a == "-o") {
+            if (auto const *v = require_arg("--output"); v)
+                output_path = std::filesystem::path{v};
+            else
+                return 2;
+        } else if (a == "--duration") {
+            auto const *v = require_arg("--duration");
+            if (v == nullptr)
+                return 2;
+            std::uint32_t val = 0;
+            if (!parse_uint32_arg(v, val) || val == 0) {
+                std::fputs("sniff: --duration must be a positive integer (seconds)\n", stderr);
+                return 2;
+            }
+            duration_seconds = val;
+        } else if (a == "--filter") {
+            auto const *v = require_arg("--filter");
+            if (v == nullptr)
+                return 2;
+            // Comma-separated CAN IDs in hex or decimal. The sniff
+            // captures everything from the bus regardless (no adapter
+            // filter), but we apply this filter in the writer callback
+            // to keep the output file small. Example for SA capture:
+            // --filter 0x7E0,0x7E8 keeps only engine ECU traffic.
+            std::string_view rest{v};
+            while (!rest.empty()) {
+                auto const comma = rest.find(',');
+                std::string_view const tok =
+                    comma == std::string_view::npos ? rest : rest.substr(0, comma);
+                std::string const tok_str{tok};
+                std::uint32_t val = 0;
+                if (!parse_uint32_arg(tok_str.c_str(), val)) {
+                    std::fprintf(stderr, "sniff: --filter token '%s' is not a valid CAN ID\n",
+                                 tok_str.c_str());
+                    return 2;
+                }
+                id_filter.push_back(val);
+                if (comma == std::string_view::npos)
+                    break;
+                rest = rest.substr(comma + 1);
+            }
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "sniff: unknown option: %s\n", argv[i]);
+            return 2;
+        } else {
+            std::fprintf(stderr, "sniff: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || !output_path.has_value()) {
+        std::fputs("sniff: missing --transport / --output\n"
+                   "Usage: subuwutuner-cli sniff --transport <kind> --output <FILE.log>\n"
+                   "                             [--device <path>] [--dll <path>]\n"
+                   "                             [--filter <id>[,<id>...]] [--duration <sec>]\n"
+                   "\n"
+                   "Passive CAN bus monitor. Opens the adapter in LISTEN-ONLY mode\n"
+                   "(no TX), records every CAN frame to --output until Ctrl+C\n"
+                   "(or --duration seconds elapsed). Output format is one frame\n"
+                   "per line: '<elapsed_ms> 0xCANID <hex bytes>'.\n"
+                   "\n"
+                   "Intended for SecurityAccess seed/key capture (run while COBB AP\n"
+                   "or any other active tool is connected via a Y-cable), DBC reverse\n"
+                   "engineering, or general bus exploration. Safe to run on a live\n"
+                   "vehicle — listen-only mode means the adapter never transmits.\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "sniff: --transport '%s' not recognized "
+                     "(expected one of: j2534, obdx, native).\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "sniff: %s\n", t.error().to_string().c_str());
+        return 1;
+    }
+    // listen_only=true: skip CAN filter setup (capture everything) +
+    // EnableNetwork LISTEN-ONLY (adapter never TXes, safe to share the
+    // bus with COBB AP via Y-cable).
+    st::transport::LinkConfig link{};
+    link.kind = st::transport::LinkKind::CanIso15765;
+    link.baud = 500000;
+    link.listen_only = true;
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "sniff: transport open failed: %s\n", s.error().to_string().c_str());
+        return 1;
+    }
+
+    std::ofstream out{*output_path, std::ios::binary};
+    if (!out) {
+        std::fprintf(stderr, "sniff: cannot open output: %s\n", output_path->string().c_str());
+        return 1;
+    }
+    // Header — `tools/extract_subaru_sa.py` parses this so the version
+    // bump signals a format change. Comment lines start with `#`.
+    out << "# subuwutuner sniff log v1\n";
+    out << "# format: <elapsed_ms> 0x<can_id> <hex bytes...>\n";
+
+    auto const start_time = std::chrono::steady_clock::now();
+    std::mutex out_mutex; // serializes the writer callback + the final stats append
+    std::atomic<std::uint64_t> frames_captured{0};
+
+    // Frame callback fires on the OBDX streaming thread — keep it fast.
+    auto const writer = [&](st::transport::Frame const &f) {
+        // Apply CLI-side filter (the adapter is wide-open in sniff mode).
+        if (!id_filter.empty()) {
+            bool matched = false;
+            for (auto wanted : id_filter) {
+                if (wanted == f.can_id) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched)
+                return;
+        }
+        auto const now = std::chrono::steady_clock::now();
+        auto const elapsed_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
+
+        std::string line;
+        line.reserve(48 + 3 * f.data.size());
+        line.append(std::to_string(elapsed_ms));
+        line.push_back('\t');
+        // Right-pad CAN ID to 3 hex digits for 11-bit so columns align
+        // for typical Subaru traffic; longer IDs render naturally.
+        char id_buf[12];
+        std::snprintf(id_buf, sizeof id_buf, "0x%03X", f.can_id);
+        line.append(id_buf);
+        line.push_back('\t');
+        for (std::size_t i = 0; i < f.data.size(); ++i) {
+            char b_buf[4];
+            std::snprintf(b_buf, sizeof b_buf, "%02X", static_cast<unsigned>(f.data[i]));
+            line.append(b_buf);
+            if (i + 1 < f.data.size())
+                line.push_back(' ');
+        }
+        line.push_back('\n');
+
+        std::scoped_lock lk{out_mutex};
+        out << line;
+        frames_captured.fetch_add(1, std::memory_order_relaxed);
+    };
+
+    if (auto s = (*t)->start_streaming(writer); !s.has_value()) {
+        std::fprintf(stderr, "sniff: start_streaming failed: %s\n", s.error().to_string().c_str());
+        return 1;
+    }
+
+    // Install SIGINT handler so Ctrl+C signals a clean exit. Save the
+    // previous handler and restore after — be polite to whoever's
+    // shelling out to this CLI.
+    g_sniff_stop.store(false, std::memory_order_release);
+    auto const prev_handler = std::signal(SIGINT, sniff_sigint_handler);
+
+    std::fprintf(stderr,
+                 "sniff: capturing to %s — press Ctrl+C to stop%s\n",
+                 output_path->string().c_str(),
+                 duration_seconds ? (" (or wait " + std::to_string(*duration_seconds) +
+                                     "s for auto-stop)")
+                                        .c_str()
+                                  : "");
+
+    auto const deadline =
+        duration_seconds
+            ? std::optional<std::chrono::steady_clock::time_point>{
+                  start_time + std::chrono::seconds{*duration_seconds}}
+            : std::nullopt;
+    while (!g_sniff_stop.load(std::memory_order_acquire)) {
+        if (deadline && std::chrono::steady_clock::now() >= *deadline) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{100});
+    }
+
+    (void)std::signal(SIGINT, prev_handler);
+
+    if (auto s = (*t)->stop_streaming(); !s.has_value()) {
+        std::fprintf(stderr, "sniff: stop_streaming failed: %s\n", s.error().to_string().c_str());
+        // Continue anyway — we want the file flushed.
+    }
+    if (auto s = (*t)->close(); !s.has_value()) {
+        std::fprintf(stderr, "sniff: close failed: %s\n", s.error().to_string().c_str());
+    }
+
+    auto const total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - start_time)
+                              .count();
+    {
+        std::scoped_lock lk{out_mutex};
+        out << "# captured " << frames_captured.load(std::memory_order_relaxed) << " frames in "
+            << total_ms << " ms\n";
+    }
+    std::fprintf(stderr,
+                 "sniff: captured %" PRIu64 " frames in %lld ms -> %s\n",
+                 frames_captured.load(std::memory_order_relaxed),
+                 static_cast<long long>(total_ms), output_path->string().c_str());
+    return 0;
+}
+
 int cmd_lint_graph(int argc, char *argv[]) {
     if (argc < 1) {
         std::fputs("lint-graph: missing path\n", stderr);
@@ -9547,6 +9817,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "rom-pull") {
         return cmd_rom_pull(argc - 2, argv + 2);
+    }
+    if (cmd == "sniff") {
+        return cmd_sniff(argc - 2, argv + 2);
     }
     if (cmd == "flash-trace") {
         return cmd_flash_trace(argc - 2, argv + 2);

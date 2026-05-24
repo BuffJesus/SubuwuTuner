@@ -397,6 +397,35 @@ Pending (gated on hardware on the bench):
 14. 🟡 `subuwutuner-cli log` against a real car — exercises the LogSession pipeline end-to-end through whichever transport's platform layer comes online first.
 15. ⬜ Phase 4 (flashing) gates on all of the above plus the safety story in `docs/08-testing-strategy.md` Tier 4.
 
+## Sniff mode (passive bus monitor)
+
+Set `LinkConfig::listen_only = true` to open a CAN transport in
+passive-monitor mode. Three things change vs the normal active flow:
+
+1. **No CAN filter** is configured at the adapter level (OBDX
+   "Entire Filter" command 0x34 is skipped). Every CAN frame on the bus
+   is pushed to the host regardless of CAN ID.
+2. **EnableNetwork** uses STATE=0x02 (LISTEN-ONLY) instead of 0x01
+   (ON), so the adapter is electrically silent on the bus. The MAC
+   never transmits even an ACK bit. This is what makes it safe to
+   share the OBD-II port with another active tool via a Y-cable —
+   two transmitters fighting over the same CAN-H/CAN-L would collide.
+3. **`send` / `send_recv` are disabled** in this mode (return
+   `TransportUnavailable`). The only way to consume frames is via
+   `start_streaming(callback)`.
+
+When a frame arrives the callback gets a `Frame` whose `can_id` field is
+populated (vs always-zero in active mode — active mode strips the CAN ID
+after validating it matches `can_id_response`). The `data` field is the
+raw bus payload including the ISO-TP PCI byte — sniff mode is for
+observing bus state byte-for-byte, not for application-layer
+deserialization.
+
+`subuwutuner-cli sniff` is the user-facing entry point. See
+`docs/23-security-access.md` for the SA capture workflow that motivated
+this mode, and `tools/extract_subaru_sa.py` for the parser that turns a
+sniff log into a JSON list of seed/key pairs.
+
 ## Open questions
 
 - **Tactrix runtime on macOS arm64.** Their Mac driver historically lagged. May require shipping x64-only on Mac for v1, or pushing OBDX as the recommended adapter for M-series users.
