@@ -8233,6 +8233,13 @@ int cmd_flash_apply(int argc, char *argv[]) {
     bool confirm = false;
     std::optional<std::string> reason;
 
+    // Plan overrides. When set, these win over the TOML values after the
+    // plan is loaded — convenient for ad-hoc runs without authoring a new
+    // .plan.toml. The same fields can be set directly in plan TOML if
+    // they belong to the plan itself.
+    std::optional<std::uint8_t> data_format_override;
+    std::optional<std::uint32_t> integrity_check_offset_override;
+
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         auto const require_arg = [&](char const *name) -> char const * {
@@ -8284,6 +8291,41 @@ int cmd_flash_apply(int argc, char *argv[]) {
                 reason = std::string{v};
             else
                 return 2;
+        } else if (a == "--data-format") {
+            // RequestDownload dataFormatIdentifier. 0x00 = no
+            // compression/encryption (default). 0x04 = Subaru ciphertext,
+            // which switches the per-block transfer service from 0x36
+            // TransferData to 0xB6 Subaru bulk transfer.
+            auto const *v = require_arg("--data-format");
+            if (v == nullptr)
+                return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 0); // base 0 auto-detects 0x
+            if (end == v || *end != '\0' || val > 0xFFULL) {
+                std::fprintf(stderr, "flash-apply: --data-format must be a "
+                                     "0-255 hex or decimal value (0x04 = "
+                                     "Subaru ciphertext / bulk transfer)\n");
+                return 2;
+            }
+            data_format_override = static_cast<std::uint8_t>(val);
+        } else if (a == "--integrity-check-offset") {
+            // Brick-safe sector reordering. The sector containing this
+            // flash offset (e.g. 0x1FFFFE for the SH-2A WRX calibration
+            // checksum) is written LAST regardless of plan order. Power
+            // loss during the body leaves the checksum invalid and the
+            // ECU detecting corruption at boot — the safe failure mode.
+            auto const *v = require_arg("--integrity-check-offset");
+            if (v == nullptr)
+                return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 0); // base 0 auto-detects 0x
+            if (end == v || *end != '\0' || val > 0xFFFFFFFFULL) {
+                std::fprintf(stderr, "flash-apply: --integrity-check-offset "
+                                     "must be a hex or decimal integer in "
+                                     "32-bit range\n");
+                return 2;
+            }
+            integrity_check_offset_override = static_cast<std::uint32_t>(val);
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "flash-apply: unknown option: %s\n", argv[i]);
             return 2;
@@ -8297,8 +8339,17 @@ int cmd_flash_apply(int argc, char *argv[]) {
                    "Usage: subuwutuner-cli flash-apply --plan <FILE.toml> "
                    "--trace <FILE.uds>\n"
                    "       [--journal <FILE.toml>] [--manifest <FILE.toml>]\n"
+                   "       [--data-format <hex>] [--integrity-check-offset <hex>]\n"
                    "       [--profile <P> --def <pack.toml> --source <rom.bin>]\n"
-                   "       [--confirm] [--reason \"…\"]\n",
+                   "       [--confirm] [--reason \"…\"]\n"
+                   "\n"
+                   "  --data-format            Override plan.data_format. 0x04 selects\n"
+                   "                           Subaru bulk-transfer (0xB6) over standard\n"
+                   "                           0x36 TransferData.\n"
+                   "  --integrity-check-offset Override plan.integrity_check_offset.\n"
+                   "                           Sector containing this offset is written\n"
+                   "                           LAST (brick-safe ordering). Typical:\n"
+                   "                           0x1FFFFE for SH-2A WRX calibration checksum.\n",
                    stderr);
         return 2;
     }
@@ -8310,6 +8361,12 @@ int cmd_flash_apply(int argc, char *argv[]) {
     }
     if (journal_path.has_value()) {
         plan->journal_path = *journal_path;
+    }
+    if (data_format_override.has_value()) {
+        plan->data_format = *data_format_override;
+    }
+    if (integrity_check_offset_override.has_value()) {
+        plan->integrity_check_offset = *integrity_check_offset_override;
     }
 
     // Optional policy gate. When --profile is provided we diff the plan

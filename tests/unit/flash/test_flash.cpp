@@ -914,6 +914,48 @@ TEST_CASE("FlashPlan round-trips through format_plan + parse_plan", "[flash][pla
     REQUIRE(r->writes[1].data == p.writes[1].data);
 }
 
+TEST_CASE("FlashPlan round-trips integrity_check_offset when set",
+          "[flash][plan][toml][brick-safe-ordering]") {
+    flash::FlashPlan p;
+    p.integrity_check_offset = 0x1FFFFE; // SH-2A WRX calibration checksum
+    p.writes.push_back({{0x100, 4}, {0x01, 0x02, 0x03, 0x04}});
+
+    auto const text = flash::format_plan(p);
+    REQUIRE(text.find("integrity_check_offset") != std::string::npos);
+
+    auto const r = flash::parse_plan(text);
+    REQUIRE(r.has_value());
+    REQUIRE(r->integrity_check_offset.has_value());
+    REQUIRE(*r->integrity_check_offset == 0x1FFFFE);
+}
+
+TEST_CASE("FlashPlan omits integrity_check_offset when unset",
+          "[flash][plan][toml][brick-safe-ordering]") {
+    flash::FlashPlan p;
+    p.writes.push_back({{0x100, 4}, {0x01, 0x02, 0x03, 0x04}});
+
+    auto const text = flash::format_plan(p);
+    // The TOML must not contain the key when the optional is empty —
+    // keeps plans that don't need brick-safe reordering free of noise.
+    REQUIRE(text.find("integrity_check_offset") == std::string::npos);
+
+    auto const r = flash::parse_plan(text);
+    REQUIRE(r.has_value());
+    REQUIRE_FALSE(r->integrity_check_offset.has_value());
+}
+
+TEST_CASE("parse_plan rejects integrity_check_offset out of 32-bit range",
+          "[flash][plan][toml][error]") {
+    constexpr std::string_view text = "[plan]\n"
+                                      "schema_version = 1\n"
+                                      "integrity_check_offset = 0x100000000\n"
+                                      "[[write]]\n"
+                                      "address = 0x100\n"
+                                      "data    = \"00\"\n";
+    auto const r = flash::parse_plan(text);
+    REQUIRE_FALSE(r.has_value());
+}
+
 TEST_CASE("parse_plan accepts whitespace and 0x prefixes in data", "[flash][plan][toml]") {
     // Basic TOML strings can't span lines; we wrap the multi-line hex
     // payload in a triple-quoted literal so the parser receives the raw

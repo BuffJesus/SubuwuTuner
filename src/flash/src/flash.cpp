@@ -884,6 +884,19 @@ Result<FlashPlan> parse_plan(std::string_view text, std::filesystem::path const 
     plan.block_size_hint = opt_u32("block_size_hint", plan.block_size_hint);
     plan.verify_chunk_size = opt_u32("verify_chunk_size", plan.verify_chunk_size);
 
+    // integrity_check_offset is optional — present only when the plan
+    // wants the brick-safe sector reordering (checksum sector last).
+    // Read as int64 so we get a clean range check and clear errors on
+    // out-of-32-bit-range values.
+    if (auto const *node = plan_tbl->get_as<int64_t>("integrity_check_offset")) {
+        auto const v = node->get();
+        if (v < 0 || v > 0xFFFFFFFFLL) {
+            return failure(ErrorCode::ParseError,
+                           "flash plan: integrity_check_offset out of 32-bit range");
+        }
+        plan.integrity_check_offset = static_cast<std::uint32_t>(v);
+    }
+
     auto const *writes = root["write"].as_array();
     if (writes == nullptr) {
         return failure(ErrorCode::ParseError,
@@ -992,6 +1005,12 @@ std::string format_plan(FlashPlan const &plan) {
     out << "dry_run            = " << (plan.dry_run ? "true" : "false") << "\n";
     out << "block_size_hint    = " << plan.block_size_hint << "\n";
     out << "verify_chunk_size  = 0x" << std::hex << plan.verify_chunk_size << std::dec << "\n";
+    // Emit integrity_check_offset only when set — keeps plans that don't
+    // need brick-safe reordering free of a noise key.
+    if (plan.integrity_check_offset.has_value()) {
+        out << "integrity_check_offset = 0x" << std::hex << *plan.integrity_check_offset << std::dec
+            << "\n";
+    }
 
     for (auto const &w : plan.writes) {
         out << "\n[[write]]\n";
