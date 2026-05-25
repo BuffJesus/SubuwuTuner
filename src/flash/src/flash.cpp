@@ -420,6 +420,25 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *
         }
     }
 
+    // Brick-safe sector ordering: if the plan specifies an
+    // `integrity_check_offset` and one of the sectors contains it, move
+    // that sector to the END of the iteration order. The checksum stays
+    // invalid throughout the body of the flash; only the final write
+    // restores it. A power loss between the first erase and the last
+    // write leaves the ECU detecting corruption at boot and refusing
+    // to run — the safe failure mode. See FlashPlan doc for rationale.
+    std::vector<SectorWrite> writes_ordered = plan.writes;
+    if (plan.integrity_check_offset.has_value()) {
+        auto const off = *plan.integrity_check_offset;
+        auto const it = std::find_if(
+            writes_ordered.begin(), writes_ordered.end(), [off](SectorWrite const &w) {
+                return w.sector.address <= off && off < w.sector.address + w.sector.length;
+            });
+        if (it != writes_ordered.end() && it + 1 != writes_ordered.end()) {
+            std::rotate(it, it + 1, writes_ordered.end());
+        }
+    }
+
     // 1. Enter programming session.
     if (auto s = client_.diagnostic_session_control(plan.session); !s.has_value()) {
         return bail(s.error().code(), "flash: diagnostic_session_control failed: " +
@@ -459,13 +478,13 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *
     // per planned sector with everything false so the caller can see
     // what would have been done.
     if (plan.dry_run) {
-        for (auto const &w : plan.writes) {
+        for (auto const &w : writes_ordered) {
             commit_outcome(SectorOutcome{w.sector});
         }
     } else {
         // 3'. Full execution: erase + download + transfer + exit +
         // check_deps + optional verify, per sector.
-        for (auto const &w : plan.writes) {
+        for (auto const &w : writes_ordered) {
             // Cancel check at the sector boundary — between PDUs, never
             // mid-PDU. Any in-flight transfer was on a previous sector
             // that completed RequestTransferExit before we got here, so
@@ -509,38 +528,58 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *
                                                         std::to_string(*rdl));
             }
 
-            // 3c. TransferData blocks.
+            // 3c. TransferData blocks. Two wire formats: standard
+            // 0x36 with a 1-byte block-sequence counter (default), or
+            // 0xB6 Subaru-bulk-transfer with an explicit 3-byte address
+            // per call (selected by data_format == 0x04). For the 0xB6
+            // path the orchestrator advances the address by chunk size
+            // between calls; there is no counter.
+            bool const use_b6 = (plan.data_format == kDataFormatSubaruCiphertext);
             std::uint8_t counter = 1;
             std::size_t offset = 0;
             while (offset < w.data.size()) {
                 // Cancel check at the PDU boundary, BEFORE the next
-                // transfer_data call. At this point the previous block's
+                // transfer call. At this point the previous block's
                 // request-response exchange has completed and the next
                 // hasn't started — nothing in flight. Mid-PDU cancel is
-                // not possible (transfer_data is synchronous).
+                // not possible (transfer call is synchronous).
                 if (is_cancelled()) {
                     report.bytes_transferred += offset;
                     commit_outcome(outcome);
                     cancel_cleanup(/*mid_sector_download=*/true);
-                    return bail(ErrorCode::Cancelled, "flash: cancelled mid-sector at " +
-                                                          hex_addr(w.sector.address) +
-                                                          " after block counter=" +
-                                                          std::to_string(counter - 1));
+                    return bail(ErrorCode::Cancelled,
+                                "flash: cancelled mid-sector at " + hex_addr(w.sector.address) +
+                                    (use_b6 ? " at chunk offset 0x" + hex_addr(
+                                                  static_cast<std::uint32_t>(offset))
+                                            : " after block counter=" +
+                                                  std::to_string(counter - 1)));
                 }
                 std::size_t const remaining = w.data.size() - offset;
                 std::size_t const this_block =
                     remaining < block_payload ? remaining : block_payload;
                 std::span<std::uint8_t const> chunk{w.data.data() + offset, this_block};
-                if (auto s = client_.transfer_data(counter, chunk); !s.has_value()) {
-                    report.bytes_transferred += offset;
-                    commit_outcome(outcome);
-                    return bail(s.error().code(),
-                                "flash: transfer_data counter=" + std::to_string(counter) +
-                                    " failed: " + std::string{s.error().message()});
+                if (use_b6) {
+                    std::uint32_t const chunk_addr =
+                        w.sector.address + static_cast<std::uint32_t>(offset);
+                    if (auto s = client_.subaru_bulk_transfer(chunk_addr, chunk); !s.has_value()) {
+                        report.bytes_transferred += offset;
+                        commit_outcome(outcome);
+                        return bail(s.error().code(), "flash: subaru_bulk_transfer at " +
+                                                          hex_addr(chunk_addr) + " failed: " +
+                                                          std::string{s.error().message()});
+                    }
+                } else {
+                    if (auto s = client_.transfer_data(counter, chunk); !s.has_value()) {
+                        report.bytes_transferred += offset;
+                        commit_outcome(outcome);
+                        return bail(s.error().code(),
+                                    "flash: transfer_data counter=" + std::to_string(counter) +
+                                        " failed: " + std::string{s.error().message()});
+                    }
+                    counter = static_cast<std::uint8_t>(counter + 1U);
+                    // counter wraps from 0xFF to 0x00 per ISO 14229.
                 }
                 offset += this_block;
-                counter = static_cast<std::uint8_t>(counter + 1U);
-                // counter wraps from 0xFF to 0x00 per ISO 14229.
             }
             report.bytes_transferred += offset;
             outcome.transferred = true;

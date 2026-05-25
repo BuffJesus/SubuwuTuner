@@ -72,7 +72,11 @@ struct FlashPlan {
     // RequestDownload's dataFormatIdentifier. High nibble = compression
     // method, low nibble = encryption method. 0x00 is the most common
     // case for stock Subaru flashing tools (no compression, no
-    // encryption).
+    // encryption). Setting `data_format = kDataFormatSubaruCiphertext`
+    // (0x04) switches `execute()` from standard TransferData (0x36) to
+    // the Subaru-manufacturer bulk-transfer service (0xB6) — the wire
+    // format COBB AccessPort uses on aftermarket reflash, per
+    // Findings/communication-protocols/cobb-install-flow.md §5.
     std::uint8_t data_format{0x00};
 
     // When true, the plan probes the ECU's session-level acceptance
@@ -119,7 +123,34 @@ struct FlashPlan {
     std::filesystem::path journal_path{};
 
     std::vector<SectorWrite> writes;
+
+    // Optional flash offset of the boot-time integrity check (e.g., the
+    // calibration checksum at 0x1FFFFE on SH-2A WRX ECUs). When set,
+    // `execute()` reorders per-sector iteration so the sector containing
+    // this offset is written LAST. The checksum location stays erased
+    // (= invalid) until the very end of the flash, which makes a power-
+    // loss-recovery boot detect corruption and refuse to run a partially-
+    // flashed tune — the safe failure mode.
+    //
+    // This is the brick-protection-by-construction pattern observed in
+    // the COBB AccessPort install (decoded from cobb-reinstall-3.log,
+    // see Findings/communication-protocols/cobb-install-flow.md §4):
+    // erase the checksum sector first, write the body, write the
+    // checksum sector last. Independent of any specific cipher or
+    // checksum algorithm — just an ordering constraint.
+    //
+    // When unset, sectors execute in plan.writes order without
+    // reordering. When set but no sector contains the offset, the order
+    // is also unchanged (the sector list might not include the checksum
+    // region in a partial flash).
+    std::optional<std::uint32_t> integrity_check_offset{};
 };
+
+// dataFormatIdentifier for RequestDownload that signals the Subaru
+// manufacturer-specific bulk-transfer service (0xB6). When the active
+// FlashPlan uses this value, `execute()` issues 0xB6 with explicit
+// per-call addresses in place of standard 0x36 TransferData.
+inline constexpr std::uint8_t kDataFormatSubaruCiphertext = 0x04;
 
 // Per-sector outcome surfaced through `FlashReport`. Every boolean
 // reports the success of a discrete UDS exchange so a partial failure

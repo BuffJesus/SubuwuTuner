@@ -614,6 +614,159 @@ TEST_CASE("Flasher::execute full single-sector flash with verify", "[flash][exec
 }
 
 // ---------------------------------------------------------------------
+// execute -- Subaru 0xB6 bulk-transfer path
+// ---------------------------------------------------------------------
+
+TEST_CASE("Flasher::execute uses 0xB6 when data_format=0x04 (Subaru ciphertext)",
+          "[flash][execute][b6]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    constexpr std::uint32_t addr = 0x006000;
+    constexpr std::uint32_t size = 8;
+    std::vector<std::uint8_t> const data{0xF1, 0x35, 0xFA, 0x11, 0x94, 0x14, 0x78, 0xD7};
+
+    expect(t, {0x10, 0x02}, {0x50, 0x02});
+    expect(t, {0x28, 0x03, 0x03}, {0x68, 0x03});
+    expect(t,
+           uds::build_routine_control(uds::kRcStart, uds::kRidEraseMemory, erase_opt(addr, size)),
+           {0x71, 0x01, 0xFF, 0x00});
+    // RequestDownload with data_format = 0x04 (Subaru ciphertext).
+    expect(t, uds::build_request_download(0x04, addr, size), {0x74, 0x20, 0x00, 0x10});
+
+    // Two 0xB6 transfers — each carries an explicit absolute address.
+    // First: addr=0x006000, 4 bytes; second: addr=0x006004, 4 bytes.
+    expect(t, uds::build_subaru_bulk_transfer(0x006000, {data.data(), 4}), {0xF6});
+    expect(t, uds::build_subaru_bulk_transfer(0x006004, {data.data() + 4, 4}), {0xF6});
+
+    expect(t, uds::build_request_transfer_exit(), {0x77});
+    expect(t, uds::build_routine_control(uds::kRcStart, uds::kRidCheckProgrammingDependencies),
+           {0x71, 0x01, 0xFF, 0x01});
+    expect(t, uds::build_read_memory_by_address(addr, size),
+           {0x63, 0xF1, 0x35, 0xFA, 0x11, 0x94, 0x14, 0x78, 0xD7});
+    expect(t, {0x28, 0x00, 0x03}, {0x68, 0x00});
+
+    flash::FlashPlan plan;
+    plan.data_format = flash::kDataFormatSubaruCiphertext;
+    plan.block_size_hint = 4; // cap chunk size so we get 2 B6 transfers
+    plan.verify_chunk_size = 0x100;
+    plan.writes.push_back({{addr, size}, data});
+
+    flash::Flasher f{t};
+    auto const r = f.execute(plan);
+    REQUIRE(r.ok());
+    REQUIRE(r.report.sectors.size() == 1);
+    auto const &so = r.report.sectors[0];
+    REQUIRE(so.transferred);
+    REQUIRE(so.verified);
+    REQUIRE(r.report.bytes_transferred == size);
+    REQUIRE(t.exhausted());
+}
+
+// ---------------------------------------------------------------------
+// execute -- brick-safe sector ordering via integrity_check_offset
+// ---------------------------------------------------------------------
+
+TEST_CASE("Flasher::execute writes the integrity-check sector LAST",
+          "[flash][execute][brick-safe-ordering]") {
+    // Three sectors at 0x1000, 0x2000, 0x3000. integrity_check_offset
+    // 0x2010 lives in the SECOND sector. The orchestrator must reorder
+    // so the second sector runs last (rotated to the end).
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    constexpr std::uint32_t s1 = 0x1000;
+    constexpr std::uint32_t s2 = 0x2000;
+    constexpr std::uint32_t s3 = 0x3000;
+    constexpr std::uint32_t size = 4;
+    std::vector<std::uint8_t> const d1{0x11, 0x11, 0x11, 0x11};
+    std::vector<std::uint8_t> const d2{0x22, 0x22, 0x22, 0x22};
+    std::vector<std::uint8_t> const d3{0x33, 0x33, 0x33, 0x33};
+
+    expect(t, {0x10, 0x02}, {0x50, 0x02});
+    expect(t, {0x28, 0x03, 0x03}, {0x68, 0x03});
+
+    // Expected execution order: s1, s3, s2. For each, the full sequence:
+    // erase + RequestDownload + TransferData + RequestTransferExit +
+    // checkProgrammingDependencies. verify_after_write is disabled here
+    // to keep the queue tractable.
+    auto queue_sector = [&](std::uint32_t addr, std::vector<std::uint8_t> const &data) {
+        expect(t, uds::build_routine_control(uds::kRcStart, uds::kRidEraseMemory,
+                                             erase_opt(addr, size)),
+               {0x71, 0x01, 0xFF, 0x00});
+        expect(t, uds::build_request_download(0x00, addr, size), {0x74, 0x20, 0x00, 0x10});
+        expect(t, uds::build_transfer_data(1, data), {0x76, 0x01});
+        expect(t, uds::build_request_transfer_exit(), {0x77});
+        expect(t, uds::build_routine_control(uds::kRcStart, uds::kRidCheckProgrammingDependencies),
+               {0x71, 0x01, 0xFF, 0x01});
+    };
+    queue_sector(s1, d1);
+    queue_sector(s3, d3);
+    queue_sector(s2, d2);
+
+    expect(t, {0x28, 0x00, 0x03}, {0x68, 0x00});
+
+    flash::FlashPlan plan;
+    plan.verify_after_write = false; // skip RMBA readback to keep the queue simple
+    plan.integrity_check_offset = 0x2002; // sits inside sector s2 (0x2000..0x2003)
+    plan.writes.push_back({{s1, size}, d1});
+    plan.writes.push_back({{s2, size}, d2});
+    plan.writes.push_back({{s3, size}, d3});
+
+    flash::Flasher f{t};
+    auto const r = f.execute(plan);
+    REQUIRE(r.ok());
+    REQUIRE(r.report.sectors.size() == 3);
+    // The report records sectors in execution order.
+    REQUIRE(r.report.sectors[0].sector.address == s1);
+    REQUIRE(r.report.sectors[1].sector.address == s3);
+    REQUIRE(r.report.sectors[2].sector.address == s2);
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("Flasher::execute leaves sector order unchanged when integrity_check_offset is unset",
+          "[flash][execute][brick-safe-ordering]") {
+    // Sanity check: no reordering when integrity_check_offset is nullopt.
+    // Two sectors, plan order = execution order = s1 then s2.
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    constexpr std::uint32_t s1 = 0x1000;
+    constexpr std::uint32_t s2 = 0x2000;
+    constexpr std::uint32_t size = 4;
+    std::vector<std::uint8_t> const d1{0x11, 0x11, 0x11, 0x11};
+    std::vector<std::uint8_t> const d2{0x22, 0x22, 0x22, 0x22};
+
+    expect(t, {0x10, 0x02}, {0x50, 0x02});
+    expect(t, {0x28, 0x03, 0x03}, {0x68, 0x03});
+    for (auto const &p : std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>>{
+             {s1, d1}, {s2, d2}}) {
+        expect(t, uds::build_routine_control(uds::kRcStart, uds::kRidEraseMemory,
+                                             erase_opt(p.first, size)),
+               {0x71, 0x01, 0xFF, 0x00});
+        expect(t, uds::build_request_download(0x00, p.first, size), {0x74, 0x20, 0x00, 0x10});
+        expect(t, uds::build_transfer_data(1, p.second), {0x76, 0x01});
+        expect(t, uds::build_request_transfer_exit(), {0x77});
+        expect(t, uds::build_routine_control(uds::kRcStart, uds::kRidCheckProgrammingDependencies),
+               {0x71, 0x01, 0xFF, 0x01});
+    }
+    expect(t, {0x28, 0x00, 0x03}, {0x68, 0x00});
+
+    flash::FlashPlan plan;
+    plan.verify_after_write = false;
+    plan.writes.push_back({{s1, size}, d1});
+    plan.writes.push_back({{s2, size}, d2});
+
+    flash::Flasher f{t};
+    auto const r = f.execute(plan);
+    REQUIRE(r.ok());
+    REQUIRE(r.report.sectors.size() == 2);
+    REQUIRE(r.report.sectors[0].sector.address == s1);
+    REQUIRE(r.report.sectors[1].sector.address == s2);
+    REQUIRE(t.exhausted());
+}
+
+// ---------------------------------------------------------------------
 // execute -- NRC propagation
 // ---------------------------------------------------------------------
 

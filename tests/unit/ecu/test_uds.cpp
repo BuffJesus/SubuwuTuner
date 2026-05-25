@@ -350,6 +350,62 @@ TEST_CASE("UdsClient::transfer_data through MockTransport", "[uds][client][trans
     REQUIRE(client.transfer_data(1, data).has_value());
 }
 
+// ---- SubaruBulkTransfer (0xB6) ----------------------------------------
+
+TEST_CASE("build_subaru_bulk_transfer encodes address as 3 big-endian bytes",
+          "[uds][framing][b6]") {
+    // Wire format from cobb-reinstall-3.log: B6 + addr(3) + data.
+    std::vector<std::uint8_t> const data{0xF1, 0x35, 0xFA, 0x11};
+    auto const r = uds::build_subaru_bulk_transfer(0x006000, data);
+    REQUIRE(r == std::vector<std::uint8_t>{0xB6, 0x00, 0x60, 0x00, 0xF1, 0x35, 0xFA, 0x11});
+}
+
+TEST_CASE("build_subaru_bulk_transfer with empty data is just the header",
+          "[uds][framing][b6]") {
+    auto const r = uds::build_subaru_bulk_transfer(0x123456, {});
+    REQUIRE(r == std::vector<std::uint8_t>{0xB6, 0x12, 0x34, 0x56});
+}
+
+TEST_CASE("parse_subaru_bulk_transfer_response accepts F6 positive",
+          "[uds][framing][b6]") {
+    std::vector<std::uint8_t> const resp{0xF6};
+    REQUIRE(uds::parse_subaru_bulk_transfer_response(resp).has_value());
+
+    // Some ECUs include a trailing status byte (observed `F6 00` in
+    // cobb-reinstall-3.log). Accept and ignore.
+    std::vector<std::uint8_t> const resp_with_status{0xF6, 0x00};
+    REQUIRE(uds::parse_subaru_bulk_transfer_response(resp_with_status).has_value());
+}
+
+TEST_CASE("parse_subaru_bulk_transfer_response surfaces an NRC",
+          "[uds][framing][b6][error]") {
+    std::vector<std::uint8_t> const nrc_resp{0x7F, 0xB6, 0x31};
+    auto const r = uds::parse_subaru_bulk_transfer_response(nrc_resp);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+}
+
+TEST_CASE("parse_subaru_bulk_transfer_response flags an unexpected SID",
+          "[uds][framing][b6][error]") {
+    std::vector<std::uint8_t> const wrong_sid{0x76, 0x01};
+    auto const r = uds::parse_subaru_bulk_transfer_response(wrong_sid);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+}
+
+TEST_CASE("UdsClient::subaru_bulk_transfer round-trip through MockTransport",
+          "[uds][client][b6]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    // Mirror the first B6 transfer captured at cobb-reinstall-3.log:163442.
+    std::vector<std::uint8_t> const data(256, 0xFF);
+    auto expected_req = std::vector<std::uint8_t>{0xB6, 0x00, 0x60, 0x00};
+    expected_req.insert(expected_req.end(), data.begin(), data.end());
+    t.expect_send_recv(expected_req, {0xF6});
+    uds::UdsClient client{t};
+    REQUIRE(client.subaru_bulk_transfer(0x006000, data).has_value());
+}
+
 // ---- RequestTransferExit ----------------------------------------------
 
 TEST_CASE("RequestTransferExit round-trip", "[uds][exit]") {

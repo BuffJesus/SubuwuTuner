@@ -392,6 +392,43 @@ Status parse_transfer_data_response(std::span<std::uint8_t const> resp,
     return ok();
 }
 
+// ---- SubaruBulkTransfer (0xB6) -----------------------------------------
+
+std::vector<std::uint8_t>
+build_subaru_bulk_transfer(std::uint32_t memory_address, std::span<std::uint8_t const> data) {
+    // Wire format from cobb-reinstall-3.log: `B6 <addr_be3> <data...>`.
+    // No addressAndLengthFormat byte and no block-sequence counter —
+    // address width is implicit (always 3 bytes) and the address is the
+    // sequence anchor that the orchestrator advances between calls.
+    //
+    // See build_wdbi_request — same GCC 15 false-positive workaround
+    // (brace-init the fixed prefix, then reserve, then insert).
+    std::vector<std::uint8_t> out{
+        kSidSubaruBulkTransfer,
+        static_cast<std::uint8_t>((memory_address >> 16) & 0xFFU),
+        static_cast<std::uint8_t>((memory_address >> 8) & 0xFFU),
+        static_cast<std::uint8_t>(memory_address & 0xFFU),
+    };
+    out.reserve(4 + data.size());
+    out.insert(out.end(), data.begin(), data.end());
+    return out;
+}
+
+Status parse_subaru_bulk_transfer_response(std::span<std::uint8_t const> resp) {
+    if (auto r = reject_if_negative(resp, kSidSubaruBulkTransfer); !r.has_value()) {
+        return failure(r.error());
+    }
+    if (resp.empty()) {
+        return failure(ErrorCode::ParseError, "UDS SubaruBulkTransfer response empty");
+    }
+    if (resp[0] != kSidSubaruBulkTransfer + kPositiveResponseOffset) {
+        return failure(ErrorCode::EcuRejected, "UDS SubaruBulkTransfer unexpected SID");
+    }
+    // Positive response may carry trailing status bytes (observed `F6 00`
+    // in cobb-reinstall-3.log) — accept and ignore.
+    return ok();
+}
+
 // ---- RequestTransferExit -----------------------------------------------
 
 std::vector<std::uint8_t> build_request_transfer_exit() {
@@ -650,6 +687,16 @@ Status UdsClient::transfer_data(std::uint8_t block_sequence_counter,
     if (!resp.has_value())
         return failure(resp.error());
     return parse_transfer_data_response(resp->data, block_sequence_counter);
+}
+
+Status UdsClient::subaru_bulk_transfer(std::uint32_t memory_address,
+                                       std::span<std::uint8_t const> data,
+                                       std::chrono::milliseconds timeout) {
+    auto const req = build_subaru_bulk_transfer(memory_address, data);
+    auto const resp = transport_->send_recv(req, timeout);
+    if (!resp.has_value())
+        return failure(resp.error());
+    return parse_subaru_bulk_transfer_response(resp->data);
 }
 
 Status UdsClient::request_transfer_exit(std::chrono::milliseconds timeout) {

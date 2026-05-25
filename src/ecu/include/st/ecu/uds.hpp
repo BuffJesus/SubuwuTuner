@@ -45,12 +45,9 @@ inline constexpr std::uint8_t kSidRequestTransferExit = 0x37;
 // (= 0xB6 + kPositiveResponseOffset); negative is the usual `7F B6
 // NRC`. Sniff/extract tooling that filters for 0x36 will see zero
 // matching frames during an actual write session — filter for 0xB6
-// instead, or for both. Cross-reference: analyst-side
-// fixtures/private/findings_protocols/uds-catalog.md §3.
-//
-// We hold off on a framing helper until SubuwuTuner grows a flash-
-// write path that needs to recognise reflash traffic; until then
-// this is documentation-only.
+// instead, or for both. Cross-reference:
+// Findings/communication-protocols/cobb-install-flow.md §5 (full
+// wire-format derivation from cobb-reinstall-3.log).
 inline constexpr std::uint8_t kSidSubaruBulkTransfer = 0xB6;
 inline constexpr std::uint8_t kSidTesterPresent = 0x3E;
 inline constexpr std::uint8_t kSidWriteMemoryByAddress = 0x3D;
@@ -141,6 +138,23 @@ parse_request_download_response(std::span<std::uint8_t const> resp);
                                                             std::span<std::uint8_t const> data);
 [[nodiscard]] Status parse_transfer_data_response(std::span<std::uint8_t const> resp,
                                                   std::uint8_t expected_counter);
+
+// SubaruBulkTransfer (0xB6) — Subaru manufacturer-specific bulk-transfer
+// service, used in place of 0x36 when RequestDownload negotiated
+// dataFormatIdentifier=0x04. Each request carries an explicit 3-byte
+// big-endian target address followed by the data payload — NO block-
+// sequence counter. The address itself is the sequence anchor; the
+// orchestrator advances it by chunk size between calls.
+//
+// Positive response: [0xF6] [optional status bytes — ignored].
+// Negative response: standard [0x7F] [0xB6] [NRC]. The transport layer
+// is responsible for swallowing NRC 0x78 (responsePending) intermediate
+// frames and surfacing only the final response — every observed B6 in
+// cobb-reinstall-3.log produced one `7F B6 78` followed by an `F6` and
+// real adapters / J2534 drivers handle this transparently.
+[[nodiscard]] std::vector<std::uint8_t>
+build_subaru_bulk_transfer(std::uint32_t memory_address, std::span<std::uint8_t const> data);
+[[nodiscard]] Status parse_subaru_bulk_transfer_response(std::span<std::uint8_t const> resp);
 
 // RequestTransferExit (0x37) — finalize. Some ECUs include a CRC in the response;
 // for portability we accept any positive response and ignore extra bytes.
@@ -256,6 +270,20 @@ public:
     [[nodiscard]] Status
     transfer_data(std::uint8_t block_sequence_counter, std::span<std::uint8_t const> data,
                   std::chrono::milliseconds timeout = std::chrono::milliseconds{2000});
+
+    // Subaru manufacturer-specific bulk transfer (0xB6). Use instead of
+    // transfer_data() when the active RequestDownload negotiated
+    // dataFormatIdentifier=0x04 (Subaru ciphertext). Each call carries an
+    // explicit 3-byte target address; the orchestrator must advance the
+    // address by chunk size between calls.
+    //
+    // Default timeout is 10000 ms: real B6 transfers can stall on NRC 0x78
+    // (responsePending) for 200-500 ms typical, with outliers up to 4 s
+    // around sector-boundary work. The transport layer is expected to
+    // swallow the intermediate 0x78 frames.
+    [[nodiscard]] Status
+    subaru_bulk_transfer(std::uint32_t memory_address, std::span<std::uint8_t const> data,
+                         std::chrono::milliseconds timeout = std::chrono::milliseconds{10000});
 
     [[nodiscard]] Status
     request_transfer_exit(std::chrono::milliseconds timeout = std::chrono::milliseconds{2000});
