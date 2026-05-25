@@ -221,6 +221,17 @@ public:
     };
     using ReadProgressFn = std::function<void(ReadProgress)>;
 
+    // `per_chunk_timeout` default of 1000 ms is tuned for READS: a
+    // 256-byte RMBA chunk at 500 kbps + ISO-TP overhead round-trips in
+    // ~100-200 ms, so 1000 ms is comfortable. Matches the OBDX VX
+    // J2534 driver's default multi-frame read timeout.
+    //
+    // DO NOT inherit this default for flash WRITES. TransferData (and
+    // Subaru's manufacturer-specific 0xB6 bulk-transfer variant) blocks
+    // commonly take 200-500 ms on the wire AND the ECU often replies
+    // with NRC 0x78 "response pending" while writing — legitimate
+    // writes can run 2-5 s per block. Write callers should pass at
+    // least 5000-10000 ms, possibly more depending on block size.
     [[nodiscard]] Result<std::vector<std::uint8_t>>
     read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
                   std::uint32_t max_chunk_size = 0x100,
