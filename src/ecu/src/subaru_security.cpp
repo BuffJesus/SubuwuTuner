@@ -46,6 +46,17 @@ constexpr std::array<std::uint16_t, 16> kRoundKeysL1 = {
     0x1895, 0x8961, 0x3ecc, 0x862b,
 };
 
+// Level-3 / Level-5 round-key table, shared on Gen-A.2. Byte-verified
+// across every A-series ROM sampled (LF7x/LF9x, MY 2015-2021). Loaded
+// in-tree because COBB-tuned ECUs swap which table the L1 feistel uses
+// — see `ssmcan1_l1_cobb_tuned` below.
+constexpr std::array<std::uint16_t, 16> kRoundKeysL35 = {
+    0x794b, 0x3caf, 0x3019, 0x8b57,
+    0x52a0, 0xa77c, 0x38c9, 0xb0b5,
+    0x6520, 0x3b66, 0xa09d, 0x2877,
+    0x479f, 0xb685, 0x7568, 0x84d7,
+};
+
 constexpr std::uint16_t rol16(std::uint16_t v, unsigned n) noexcept {
     n &= 15U;
     if (n == 0) {
@@ -168,33 +179,66 @@ std::span<std::uint16_t const, 16> test_only_round_keys_l1() noexcept {
 
 } // namespace internal
 
+namespace {
+
+// Shared L1 wire body — only the round-key table varies between stock
+// and the COBB-tuned variant. Both call this with the table they want.
+Result<std::vector<std::uint8_t>>
+ssmcan1_l1_compute(std::span<std::uint8_t const> seed,
+                   std::span<std::uint16_t const, 16> rk,
+                   char const *variant_name) {
+    if (seed.size() != 4) {
+        return failure(ErrorCode::InvalidArgument,
+                       std::string{"ssmcan1 ("} + variant_name +
+                           " L1): seed must be exactly 4 bytes, got " +
+                           std::to_string(seed.size()));
+    }
+    auto const seed_packed = read_u32_be(seed);
+    auto const state_post_rounds = wordswap32(seed_packed);
+    auto const internal_key = feistel_inverse(state_post_rounds, rk);
+    std::vector<std::uint8_t> key(4);
+    write_u32_be(internal_key, key);
+    return key;
+}
+
+} // namespace
+
 Result<std::vector<std::uint8_t>> ssmcan1_key_stub(std::span<std::uint8_t const> seed) {
     // Historical name. As of 2026-05-24 this is the real Gen-A.2 level-1
     // implementation, not a stub — kept under the original symbol so the
     // Flasher default doesn't need to chase a rename across every caller.
     // The other two functions in this file remain genuine NotImplemented
     // stubs.
-    if (seed.size() != 4) {
-        return failure(ErrorCode::InvalidArgument,
-                       "ssmcan1 (Gen-A L1): seed must be exactly 4 bytes, got " +
-                           std::to_string(seed.size()));
-    }
-    // Level-1 wire format: the four seed bytes at positions [2..5] of the
-    // `67 01 ...` response are seed_packed in big-endian byte order. No
-    // per-level shuffle for L1 — the identity case.
-    auto const seed_packed = read_u32_be(seed);
+    return ssmcan1_l1_compute(
+        seed, std::span<std::uint16_t const, 16>{kRoundKeysL1}, "Gen-A");
+}
 
-    // Reverse the ECU's final wordswap, then unwind 16 Feistel rounds to
-    // recover the pre-Feistel state — that 32-bit value IS the key the
-    // ECU is waiting to compare against.
-    auto const state_post_rounds = wordswap32(seed_packed);
-    auto const internal_key = feistel_inverse(
-        state_post_rounds, std::span<std::uint16_t const, 16>{kRoundKeysL1});
-
-    // L1 wire format mirrors the seed: key_packed BE → wire bytes [2..5].
-    std::vector<std::uint8_t> key(4);
-    write_u32_be(internal_key, key);
-    return key;
+Result<std::vector<std::uint8_t>>
+ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const> seed) {
+    // COBB-tuned variant: identical algorithm structure, but the L1 feistel
+    // uses kRoundKeysL35 (the stock L3/L5 table) instead of kRoundKeysL1.
+    //
+    // EMPIRICAL FINDING (2026-05-24, not yet field-verified beyond 1 pair):
+    // on a 2017 LF79103P that has been COBB-flashed, the L1 SA challenge
+    // `seed=4BC3CC87` returned `key=A73FED09` — which matches this
+    // RK_L35-based derivation exactly (random-match probability 2^-32).
+    // The same session's L3 pair also matched a parallel table-swap
+    // hypothesis (L3 uses RK_L1), suggesting a clean pointer swap in
+    // COBB's flash patch.
+    //
+    // HOWEVER, 3 earlier L3 captures from prior sessions on the same car
+    // do NOT match any simple table-swap, and 2 L3 pairs captured 9s apart
+    // in the SAME session don't share any recoverable common RK. So L3 has
+    // additional session-dependent state we don't yet model. Whether L1
+    // shares that property is unverified — only 1 L1 pair on file.
+    //
+    // Caller risk: if L1 also has hidden session state, this derivation
+    // will fail with NRC 0x35 (invalidKey) and burn 1 of 3 SA attempts.
+    // Capture additional L1 pairs (multiple reinstalls) before relying
+    // on this in production. Plumbed into the CLI behind `--cobb-tuned`
+    // so the user opts in explicitly.
+    return ssmcan1_l1_compute(
+        seed, std::span<std::uint16_t const, 16>{kRoundKeysL35}, "COBB-tuned");
 }
 
 Result<std::vector<std::uint8_t>> ssmk1_key_stub(std::span<std::uint8_t const> seed) {

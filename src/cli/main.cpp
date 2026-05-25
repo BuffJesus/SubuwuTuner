@@ -10,6 +10,7 @@
 #include "st/defs/pack_registry.hpp"
 #include "st/discover.hpp"
 #include "st/ecu/ssm.hpp"
+#include "st/ecu/subaru_security.hpp"
 #include "st/edit.hpp"
 #include "st/feature.hpp"
 #include "st/feature_codegen.hpp"
@@ -8922,6 +8923,8 @@ int cmd_rom_pull(int argc, char *argv[]) {
     std::optional<bool> authenticate_flag;
     std::optional<bool> enter_dsc_flag;
     std::uint8_t security_level = 0x01;
+    bool cobb_tuned = false;  // opt-in for COBB-flashed ECUs; see
+                              // st::ecu::subaru::ssmcan1_l1_cobb_tuned
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -9009,6 +9012,8 @@ int cmd_rom_pull(int argc, char *argv[]) {
                 return 2;
             }
             security_level = static_cast<std::uint8_t>(val);
+        } else if (a == "--cobb-tuned") {
+            cobb_tuned = true;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "rom-pull: unknown option: %s\n", argv[i]);
             return 2;
@@ -9030,7 +9035,10 @@ int cmd_rom_pull(int argc, char *argv[]) {
                    "         [--enter-dsc|--no-enter-dsc]         "
                    "(default ON for --transport, OFF for --trace)\n"
                    "         [--security-level <hex>]             "
-                   "(default 0x01 — bootloader unlock)\n",
+                   "(default 0x01 — bootloader unlock)\n"
+                   "         [--cobb-tuned]                       "
+                   "(opt-in: use the COBB L1 SA variant for COBB-flashed "
+                   "ECUs; see docs/23)\n",
                    stderr);
         return 2;
     }
@@ -9153,6 +9161,12 @@ int cmd_rom_pull(int argc, char *argv[]) {
     // here. Leaving the Flasher's default KLine setting alone since this
     // path never touches the SSM client.
     st::flash::Flasher flasher{*chosen};
+    if (cobb_tuned) {
+        flasher.set_security_key_fn(&st::ecu::subaru::ssmcan1_l1_cobb_tuned);
+        std::fputs("rom-pull: using COBB-tuned L1 SA variant "
+                   "(RK_L35 swap; opt-in via --cobb-tuned)\n",
+                   stderr);
+    }
     auto const r = flasher.read_full_rom(*addr, *size, max_chunk,
                                           std::chrono::milliseconds{1000},
                                           /*progress=*/nullptr,

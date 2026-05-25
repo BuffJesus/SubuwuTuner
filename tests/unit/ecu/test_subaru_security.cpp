@@ -208,6 +208,52 @@ TEST_CASE("ssmcan1_key_stub: degenerate-seed cases produce deterministic keys",
     REQUIRE(*r1 != std::vector<std::uint8_t>{0x00, 0x00, 0x00, 0x00});
 }
 
+TEST_CASE("ssmcan1_l1_cobb_tuned: captured pair from 2017 LF79103P",
+          "[ecu][sa][gen_a][cobb]") {
+    // EMPIRICAL VECTOR (2026-05-24). Captured during a COBB AccessPort
+    // reinstall flash on a 2017 USDM WRX 6MT (LF79103P, AP serial
+    // SUB0484551). The AP sent `27 02 A7 3F ED 09` in response to the
+    // ECU's `67 01 4B C3 CC 87` seed challenge, and got positive ack.
+    //
+    // Random-match probability with a single pair: 2^-32 (≈ 1 in 4
+    // billion) — sufficient to anchor unit-level confidence, but
+    // L1 session-state behavior is unverified beyond this point. Add
+    // more captured vectors here as additional COBB-tuned ECUs come
+    // through.
+    using ecu::subaru::ssmcan1_l1_cobb_tuned;
+    std::array<std::uint8_t, 4> const seed{0x4B, 0xC3, 0xCC, 0x87};
+    auto const r = ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const>{seed});
+    REQUIRE(r.has_value());
+    std::vector<std::uint8_t> const expected{0xA7, 0x3F, 0xED, 0x09};
+    REQUIRE(*r == expected);
+}
+
+TEST_CASE("ssmcan1_l1_cobb_tuned: rejects wrong seed length",
+          "[ecu][sa][gen_a][cobb]") {
+    using ecu::subaru::ssmcan1_l1_cobb_tuned;
+    std::array<std::uint8_t, 3> const three{0x00, 0x00, 0x00};
+    auto const r = ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const>{three});
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("ssmcan1_l1_cobb_tuned: differs from stock for nontrivial seeds",
+          "[ecu][sa][gen_a][cobb]") {
+    // The two variants share everything except the round-key table, so
+    // they MUST disagree on any seed for which the algorithm depends on
+    // the table contents (i.e., almost all seeds). Explicit guard so a
+    // future refactor that accidentally makes them identical would fail
+    // loudly.
+    using ecu::subaru::ssmcan1_key_stub;
+    using ecu::subaru::ssmcan1_l1_cobb_tuned;
+    std::array<std::uint8_t, 4> const seed{0xDE, 0xAD, 0xBE, 0xEF};
+    auto const stock = ssmcan1_key_stub(std::span<std::uint8_t const>{seed});
+    auto const cobb = ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const>{seed});
+    REQUIRE(stock.has_value());
+    REQUIRE(cobb.has_value());
+    REQUIRE(*stock != *cobb);
+}
+
 TEST_CASE("ssmk1_key_stub remains NotImplemented",
           "[ecu][sa][gen_a]") {
     // Sanity check that the K-Line algorithm stub continues to surface
