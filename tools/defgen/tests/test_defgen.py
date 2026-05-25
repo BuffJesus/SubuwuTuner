@@ -509,6 +509,92 @@ class AxisLengthTest(unittest.TestCase):
         axes = {a.id: a for a in packs[0].axes}
         self.assertEqual(axes["curve_x"].length, 7)
 
+    def test_same_named_axes_with_different_lengths_disambiguated(self):
+        # Two tables both have an inline "RPM" Y-axis but at different
+        # storage addresses and lengths. Before the dedup-by-content fix,
+        # the second axis was silently dropped and its table pointed at
+        # the first (truncated) axis, hiding rows of data. Now both axes
+        # must survive into the pack, and the second table must point at
+        # its own axis.
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="3D" name="boost_target" sizex="8" sizey="8"
+                 storageaddress="0x100" storagetype="uint16" endian="big">
+            <table type="X Axis" name="load" storageaddress="0x200"
+                   storagetype="uint8" endian="big" size="8"/>
+            <table type="Y Axis" name="rpm" storageaddress="0x300"
+                   storagetype="uint16" endian="big" size="8"/>
+          </table>
+          <table type="3D" name="cam_target" sizex="8" sizey="20"
+                 storageaddress="0x400" storagetype="uint16" endian="big">
+            <table type="X Axis" name="load" storageaddress="0x500"
+                   storagetype="uint8" endian="big" size="8"/>
+            <table type="Y Axis" name="rpm" storageaddress="0x600"
+                   storagetype="uint16" endian="big" size="20"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        axes = {a.id: a for a in packs[0].axes}
+        # Both RPM axes must survive — one at the original slug, the
+        # other disambiguated with the _len{N} suffix.
+        rpm_axes = [a for a in packs[0].axes if a.id.startswith("rpm")]
+        self.assertEqual(len(rpm_axes), 2,
+                         f"expected 2 distinct RPM axes, got: {[a.id for a in rpm_axes]}")
+        lengths = sorted(a.length for a in rpm_axes)
+        self.assertEqual(lengths, [8, 20])
+        # The two tables must point at axes whose lengths match what the
+        # source XML declared on each table — not at each other.
+        boost = next(t for t in packs[0].tables if t.id == "boost_target")
+        cam = next(t for t in packs[0].tables if t.id == "cam_target")
+        self.assertEqual(axes[boost.axis_y].length, 8)
+        self.assertEqual(axes[cam.axis_y].length, 20)
+        # Reusing the same load axis (same length, address, data_type)
+        # MUST collapse to a single shared axis (the load axes match
+        # by content here — true dedup).
+        load_axes_x100 = [a for a in packs[0].axes if a.id.startswith("load") and a.address == 0x200]
+        load_axes_x500 = [a for a in packs[0].axes if a.id.startswith("load") and a.address == 0x500]
+        self.assertEqual(len(load_axes_x100), 1)
+        self.assertEqual(len(load_axes_x500), 1)
+        # boost uses load@0x200, cam uses load@0x500 — different addresses
+        # so they get disambiguated.
+        self.assertNotEqual(boost.axis_x, cam.axis_x)
+
+    def test_same_named_axes_with_identical_content_collapse_to_one(self):
+        # Two tables, both with an inline RPM axis at the same address +
+        # length + data_type. True duplicates — should collapse to one
+        # axis entry shared by both tables (the original dedup policy
+        # was correct for this case).
+        xml = """<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="3D" name="t1" sizex="8" sizey="12"
+                 storageaddress="0x100" storagetype="uint16" endian="big">
+            <table type="X Axis" name="load" storageaddress="0x200"
+                   storagetype="uint8" endian="big" size="8"/>
+            <table type="Y Axis" name="rpm" storageaddress="0x300"
+                   storagetype="uint16" endian="big" size="12"/>
+          </table>
+          <table type="3D" name="t2" sizex="8" sizey="12"
+                 storageaddress="0x400" storagetype="uint16" endian="big">
+            <table type="X Axis" name="load" storageaddress="0x200"
+                   storagetype="uint8" endian="big" size="8"/>
+            <table type="Y Axis" name="rpm" storageaddress="0x300"
+                   storagetype="uint16" endian="big" size="12"/>
+          </table>
+        </rom></roms>"""
+        packs = defgen.parse_rom_xml(xml)
+        # Exactly one rpm axis and one load axis — content matches
+        # across both tables, so they get unified.
+        rpm_axes = [a for a in packs[0].axes if a.id == "rpm"]
+        load_axes = [a for a in packs[0].axes if a.id == "load"]
+        self.assertEqual(len(rpm_axes), 1)
+        self.assertEqual(len(load_axes), 1)
+        t1 = next(t for t in packs[0].tables if t.id == "t1")
+        t2 = next(t for t in packs[0].tables if t.id == "t2")
+        self.assertEqual(t1.axis_y, t2.axis_y)
+        self.assertEqual(t1.axis_x, t2.axis_x)
+
     def test_elements_still_works_as_fallback(self):
         xml = """<roms><rom>
           <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>

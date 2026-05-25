@@ -28,7 +28,7 @@ import math
 import re
 import sys
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -1139,9 +1139,12 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
         axis = _axis_from_element(child, fallback_length=fallback)
         if axis is None:
             continue
-        if axis.id not in {a.id for a in pack.axes}:
-            pack.axes.append(axis)
-            # also capture the axis's inline scaling if present.
+        # Register the axis, disambiguating slug collisions where the
+        # content differs (e.g. two source-XML "RPM" axes with different
+        # row counts). See _find_or_register_axis for the policy.
+        registered_id, was_added = _find_or_register_axis(pack, axis)
+        if was_added:
+            # Also capture the axis's inline scaling if present.
             # Same storagetype-inheritance rule as the table case above.
             axis_scaling_el = child.find("scaling")
             if axis_scaling_el is not None:
@@ -1152,9 +1155,9 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
                     pack.scalings.append(rec)
                     seen_scaling_ids.add(rec.id)
         if child_type in ("x axis", "static x axis"):
-            axis_x_id = axis.id
+            axis_x_id = registered_id
         elif child_type in ("y axis", "static y axis"):
-            axis_y_id = axis.id
+            axis_y_id = registered_id
 
     # RomRaider's 2D (= our 1D) tables put the single axis on `Y Axis`. Our
     # schema needs it under `axis_x` for dimensions=1, so demote.
@@ -1198,6 +1201,64 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
         engine_safety_critical=is_engine_safety_critical(category),
     )
     pack.tables.append(table)
+
+
+def _find_or_register_axis(pack: "PackBuilder",
+                           axis: AxisRecord) -> tuple[str, bool]:
+    """Add `axis` to `pack.axes` if not already present.
+
+    Returns `(registered_id, was_added)`.
+
+    Dedup policy:
+      - No axis with the same id exists → append; return its id, True.
+      - An axis with the same id AND the same (length, address,
+        data_type, scaling) exists → reuse; return its id, False.
+      - An axis with the same id but DIFFERENT content exists →
+        disambiguate by appending `_len{length}` to the id and try
+        again. If that still conflicts, append `_v{n}` until unique.
+
+    The disambiguation matters because RomRaider source XMLs often
+    have multiple inline axes named "RPM" (one per table that uses an
+    RPM axis), with different lengths, addresses, or storage types.
+    The previous behaviour (dedup by slug alone) silently dropped all
+    but the first such axis and pointed every later table at the wrong
+    one — visible in dumps as tables that read fewer rows/cols than
+    the source XML specifies, with the trailing bytes invisible. The
+    pathological example on lf79103p.toml was a 20-row Y-axis being
+    truncated to an 8-row axis, hiding ~24% of every affected table
+    from the dumper.
+    """
+    def content_match(a: AxisRecord, b: AxisRecord) -> bool:
+        return (a.length    == b.length
+            and a.address   == b.address
+            and a.data_type == b.data_type
+            and a.scaling   == b.scaling)
+
+    # Fast path: no id collision.
+    if not any(existing.id == axis.id for existing in pack.axes):
+        pack.axes.append(axis)
+        return axis.id, True
+
+    # An axis with this id already exists.
+    for existing in pack.axes:
+        if existing.id == axis.id and content_match(existing, axis):
+            return existing.id, False
+
+    # Slug collision with different content. Try `_len{N}` first.
+    candidates = [f"{axis.id}_len{axis.length}"]
+    for n in range(2, 100):
+        candidates.append(f"{axis.id}_len{axis.length}_v{n}")
+    for candidate in candidates:
+        match = next((a for a in pack.axes if a.id == candidate), None)
+        if match is None:
+            new_axis = replace(axis, id=candidate)
+            pack.axes.append(new_axis)
+            return candidate, True
+        if content_match(match, axis):
+            return candidate, False
+    # Genuinely should never happen — 99 disambiguations is plenty.
+    raise RuntimeError(
+        f"could not disambiguate axis id '{axis.id}' after 99 attempts")
 
 
 def _axis_from_element(el: ET.Element,
