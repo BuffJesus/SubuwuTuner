@@ -982,6 +982,17 @@ scaling   = "psi_x_01933677"
 
 
 [[axis]]
+id        = "atmospheric_pressure_len6"
+name      = "Atmospheric Pressure"
+unit      = ""
+type      = "static"
+address   = 0x000C75FC
+length    = 6
+data_type = "float32_be"
+scaling   = "psi_x_01933677"
+
+
+[[axis]]
 id        = "boost_control"
 name      = "Boost Control"
 unit      = ""
@@ -990,6 +1001,61 @@ address   = 0x00000000
 length    = 2
 data_type = "uint16_be"
 scaling   = ""
+
+
+[[axis]]
+id        = "boost_control_len1"
+name      = "Boost Control"
+unit      = ""
+type      = "static"
+address   = 0x00000000
+length    = 1
+data_type = "uint16_be"
+scaling   = ""
+
+
+[[axis]]
+id        = "requested_torque_len14"
+name      = "Requested Torque"
+unit      = ""
+type      = "static"
+address   = 0x000C1248
+length    = 14
+data_type = "float32_be"
+scaling   = "raw_ecu_value_x"
+
+
+[[axis]]
+id        = "engine_speed_len16"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C1280
+length    = 16
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "requested_torque_len14_v2"
+name      = "Requested Torque"
+unit      = ""
+type      = "static"
+address   = 0x000C0DD8
+length    = 14
+data_type = "float32_be"
+scaling   = "raw_ecu_value_x"
+
+
+[[axis]]
+id        = "engine_speed_len16_v2"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C0E10
+length    = 16
+data_type = "float32_be"
+scaling   = "rpm_x"
 
 
 [[axis]]
@@ -1004,6 +1070,39 @@ scaling   = ""
 
 
 [[axis]]
+id        = "intake_temperature_len16"
+name      = "Intake Temperature"
+unit      = ""
+type      = "static"
+address   = 0x000C0770
+length    = 16
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
+
+
+[[axis]]
+id        = "atmospheric_pressure_len6_v2"
+name      = "Atmospheric Pressure"
+unit      = ""
+type      = "static"
+address   = 0x000C0B60
+length    = 6
+data_type = "float32_be"
+scaling   = "psi_x_01933677"
+
+
+[[axis]]
+id        = "engine_speed_len4"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C0B78
+length    = 4
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
 id        = "boost_error"
 name      = "Boost Error"
 unit      = ""
@@ -1012,6 +1111,61 @@ address   = 0x000C0A00
 length    = 9
 data_type = "float32_be"
 scaling   = "psi_x_01933677"
+
+
+[[axis]]
+id        = "boost_error_len9"
+name      = "Boost Error"
+unit      = ""
+type      = "static"
+address   = 0x000C0A70
+length    = 9
+data_type = "float32_be"
+scaling   = "psi_x_01933677"
+
+
+[[axis]]
+id        = "boost_error_len9_v2"
+name      = "Boost Error"
+unit      = ""
+type      = "static"
+address   = 0x000C0A38
+length    = 9
+data_type = "float32_be"
+scaling   = "psi_x_01933677"
+
+
+[[axis]]
+id        = "intake_temperature_len16_v2"
+name      = "Intake Temperature"
+unit      = ""
+type      = "static"
+address   = 0x000C0880
+length    = 16
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
+
+
+[[axis]]
+id        = "intake_temperature_len16_v3"
+name      = "Intake Temperature"
+unit      = ""
+type      = "static"
+address   = 0x000C0920
+length    = 16
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
+
+
+[[axis]]
+id        = "intake_temperature_len16_v4"
+name      = "Intake Temperature"
+unit      = ""
+type      = "static"
+address   = 0x000C08D0
+length    = 16
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
 
 
 [[axis]]
@@ -1103,6 +1257,39 @@ scaling   = "g_rev_x"
 
 
 [[axis]]
+id        = "engine_speed_len18"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C7D04
+length    = 18
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len18"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000C7E90
+length    = 18
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len18_v2"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C7ED8
+length    = 18
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
 id        = "switch_to_failsafe_fueling_map"
 name      = "Switch to Failsafe Fueling Map"
 unit      = ""
@@ -1147,6 +1334,17 @@ scaling   = "x"
 
 
 [[axis]]
+id        = "coolant_temperature_len16"
+name      = "Coolant Temperature"
+unit      = ""
+type      = "static"
+address   = 0x000C5FC8
+length    = 16
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
+
+
+[[axis]]
 id        = "timing_compensation_mrp_timing_compensation_iat"
 name      = "'Timing Compensation (MRP)' + 'Timing Compensation (IAT)'"
 unit      = ""
@@ -1169,6 +1367,61 @@ scaling   = "ma_x"
 
 
 [[axis]]
+id        = "atmospheric_pressure_len4"
+name      = "Atmospheric Pressure"
+unit      = ""
+type      = "static"
+address   = 0x000C3F48
+length    = 4
+data_type = "float32_be"
+scaling   = "psi_x_01933677"
+
+
+[[axis]]
+id        = "engine_load_len6"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000C8858
+length    = 6
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len6"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C8870
+length    = 6
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len2"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000C866C
+length    = 2
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_load_len2_v2"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000C8720
+length    = 2
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
 id        = "delay_value"
 name      = "Delay Value"
 unit      = ""
@@ -1180,6 +1433,17 @@ scaling   = ""
 
 
 [[axis]]
+id        = "engine_speed_len16_v3"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C63D8
+length    = 16
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
 id        = "ol_to_cl_transition"
 name      = "OL to CL Transition"
 unit      = ""
@@ -1188,6 +1452,17 @@ address   = 0x00000000
 length    = 1
 data_type = "uint16_be"
 scaling   = ""
+
+
+[[axis]]
+id        = "engine_speed_len16_v4"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C6F18
+length    = 16
+data_type = "float32_be"
+scaling   = "rpm_x"
 
 
 [[axis]]
@@ -1208,6 +1483,17 @@ unit      = ""
 type      = "static"
 address   = 0x00000000
 length    = 1
+data_type = "uint16_be"
+scaling   = ""
+
+
+[[axis]]
+id        = "condition_result_len2"
+name      = "(Condition) - Result"
+unit      = ""
+type      = "static"
+address   = 0x00000000
+length    = 2
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1246,6 +1532,138 @@ scaling   = "ms_x_001"
 
 
 [[axis]]
+id        = "engine_speed_len12"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C8084
+length    = 12
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "last_calculated_base_pulse_width_len8"
+name      = "Last Calculated Base Pulse Width"
+unit      = ""
+type      = "static"
+address   = 0x000C8114
+length    = 8
+data_type = "float32_be"
+scaling   = "ms_x_001"
+
+
+[[axis]]
+id        = "engine_speed_len12_v2"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C8134
+length    = 12
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "last_calculated_base_pulse_width_len8_v2"
+name      = "Last Calculated Base Pulse Width"
+unit      = ""
+type      = "static"
+address   = 0x000C81C4
+length    = 8
+data_type = "float32_be"
+scaling   = "ms_x_001"
+
+
+[[axis]]
+id        = "engine_speed_len12_v3"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C81E4
+length    = 12
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "last_calculated_base_pulse_width_len8_v3"
+name      = "Last Calculated Base Pulse Width"
+unit      = ""
+type      = "static"
+address   = 0x000C8274
+length    = 8
+data_type = "float32_be"
+scaling   = "ms_x_001"
+
+
+[[axis]]
+id        = "engine_speed_len12_v4"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C8294
+length    = 12
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_speed_len5"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C78E4
+length    = 5
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "coolant_temperature_len7"
+name      = "Coolant Temperature"
+unit      = ""
+type      = "static"
+address   = 0x000C78F8
+length    = 7
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
+
+
+[[axis]]
+id        = "engine_speed_len5_v2"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C798C
+length    = 5
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "coolant_temperature_len7_v2"
+name      = "Coolant Temperature"
+unit      = ""
+type      = "static"
+address   = 0x000C79A0
+length    = 7
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
+
+
+[[axis]]
+id        = "accelerator_pedal_angle_len6"
+name      = "Accelerator Pedal Angle"
+unit      = ""
+type      = "static"
+address   = 0x000C60E4
+length    = 6
+data_type = "float32_be"
+scaling   = "x"
+
+
+[[axis]]
 id        = "throttle_angle_change"
 name      = "Throttle Angle Change"
 unit      = ""
@@ -1265,6 +1683,17 @@ address   = 0x00000000
 length    = 1
 data_type = "uint16_be"
 scaling   = ""
+
+
+[[axis]]
+id        = "boost_error_len9_v3"
+name      = "Boost Error"
+unit      = ""
+type      = "static"
+address   = 0x000C65AC
+length    = 9
+data_type = "float32_be"
+scaling   = "psi_x_01933677"
 
 
 [[axis]]
@@ -1298,6 +1727,50 @@ address   = 0x00000000
 length    = 1
 data_type = "uint16_be"
 scaling   = ""
+
+
+[[axis]]
+id        = "engine_load_len8"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000C7AD0
+length    = 8
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_load_len8_v2"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000C7A30
+length    = 8
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "coolant_temperature_len10"
+name      = "Coolant Temperature"
+unit      = ""
+type      = "static"
+address   = 0x000C7B70
+length    = 10
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
+
+
+[[axis]]
+id        = "engine_load_len3"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000C7B98
+length    = 3
+data_type = "float32_be"
+scaling   = "g_rev_x"
 
 
 [[axis]]
@@ -1345,6 +1818,28 @@ scaling   = "volts_x"
 
 
 [[axis]]
+id        = "intake_temperature_len5"
+name      = "Intake Temperature"
+unit      = ""
+type      = "static"
+address   = 0x000C41DC
+length    = 5
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
+
+
+[[axis]]
+id        = "mass_airflow_len8"
+name      = "Mass Airflow"
+unit      = ""
+type      = "static"
+address   = 0x000C41F0
+length    = 8
+data_type = "float32_be"
+scaling   = "g_s_x"
+
+
+[[axis]]
 id        = "manifold_pressure"
 name      = "Manifold Pressure"
 unit      = ""
@@ -1353,6 +1848,127 @@ address   = 0x000C4238
 length    = 11
 data_type = "float32_be"
 scaling   = "psi_relative_sea_level_x_760_01933677"
+
+
+[[axis]]
+id        = "engine_speed_len13"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C4264
+length    = 13
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len18_v2"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000CA380
+length    = 18
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len18_v3"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000CA3C8
+length    = 18
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len18_v3"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000CA740
+length    = 18
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len18_v4"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000CA788
+length    = 18
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len19"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000CA554
+length    = 19
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len18_v5"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000CA5A0
+length    = 18
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len18_v4"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000CA914
+length    = 18
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len18_v6"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000CA95C
+length    = 18
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "coolant_temperature_len16_v2"
+name      = "Coolant Temperature"
+unit      = ""
+type      = "static"
+address   = 0x000C9764
+length    = 16
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
+
+
+[[axis]]
+id        = "engine_speed_len9"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C98F8
+length    = 9
+data_type = "float32_be"
+scaling   = "rpm_x"
 
 
 [[axis]]
@@ -1367,6 +1983,94 @@ scaling   = ""
 
 
 [[axis]]
+id        = "engine_load_len18_v5"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000CB278
+length    = 18
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len18_v7"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000CB2C0
+length    = 18
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len19_v2"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000CB08C
+length    = 19
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len18_v8"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000CB0D8
+length    = 18
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "intake_temperature_len16_v5"
+name      = "Intake Temperature"
+unit      = ""
+type      = "static"
+address   = 0x000C9998
+length    = 16
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
+
+
+[[axis]]
+id        = "engine_speed_len8"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000CAAE8
+length    = 8
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len8_v3"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000CAB08
+length    = 8
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "intake_temperature_len16_v6"
+name      = "Intake Temperature"
+unit      = ""
+type      = "static"
+address   = 0x000C9ECC
+length    = 16
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
+
+
+[[axis]]
 id        = "timing_compensation_b_iat"
 name      = "'Timing Compensation B (IAT)'"
 unit      = ""
@@ -1378,6 +2082,17 @@ scaling   = ""
 
 
 [[axis]]
+id        = "atmospheric_pressure_len5"
+name      = "Atmospheric Pressure"
+unit      = ""
+type      = "static"
+address   = 0x000CAE14
+length    = 5
+data_type = "float32_be"
+scaling   = "psi_x_01933677"
+
+
+[[axis]]
 id        = "manifold_relative_pressure"
 name      = "Manifold Relative Pressure"
 unit      = ""
@@ -1386,6 +2101,94 @@ address   = 0x000CAE28
 length    = 3
 data_type = "float32_be"
 scaling   = "psi_x_01933677"
+
+
+[[axis]]
+id        = "engine_speed_len14"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000CAE44
+length    = 14
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len4"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000CAE7C
+length    = 4
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len14_v2"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000CAEC4
+length    = 14
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len4_v2"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000CAEFC
+length    = 4
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len14_v3"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000CAF44
+length    = 14
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len4_v3"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000CAF7C
+length    = 4
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len14_v4"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000CAFC4
+length    = 14
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len4_v4"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000CAFFC
+length    = 4
+data_type = "float32_be"
+scaling   = "g_rev_x"
 
 
 [[axis]]
@@ -1411,12 +2214,34 @@ scaling   = ""
 
 
 [[axis]]
+id        = "feedback_knock_correction_len2"
+name      = "Feedback Knock Correction"
+unit      = ""
+type      = "static"
+address   = 0x00000000
+length    = 2
+data_type = "uint16_be"
+scaling   = ""
+
+
+[[axis]]
 id        = "potential_fine_correction_stored_value_adjustments"
 name      = "Potential Fine Correction Stored Value Adjustments"
 unit      = ""
 type      = "static"
 address   = 0x00000000
 length    = 2
+data_type = "uint16_be"
+scaling   = ""
+
+
+[[axis]]
+id        = "potential_fine_correction_stored_value_adjustments_len4"
+name      = "Potential Fine Correction Stored Value Adjustments"
+unit      = ""
+type      = "static"
+address   = 0x00000000
+length    = 4
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1463,6 +2288,303 @@ address   = 0x00000000
 length    = 1
 data_type = "uint16_be"
 scaling   = ""
+
+
+[[axis]]
+id        = "engine_speed_len10"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000C9F54
+length    = 10
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len14"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000CFD2C
+length    = 14
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len18_v9"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000CFD64
+length    = 18
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len14_v2"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000CFFA4
+length    = 14
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len18_v10"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000CFFDC
+length    = 18
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len14_v3"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000D0654
+length    = 14
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len18_v11"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000D068C
+length    = 18
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "engine_load_len14_v4"
+name      = "Engine Load"
+unit      = ""
+type      = "static"
+address   = 0x000D08CC
+length    = 14
+data_type = "float32_be"
+scaling   = "g_rev_x"
+
+
+[[axis]]
+id        = "engine_speed_len18_v12"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000D0904
+length    = 18
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "accelerator_pedal_angle_len20"
+name      = "Accelerator Pedal Angle"
+unit      = ""
+type      = "static"
+address   = 0x000DC888
+length    = 20
+data_type = "float32_be"
+scaling   = "x"
+
+
+[[axis]]
+id        = "engine_speed_len22"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000DC8D8
+length    = 22
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "accelerator_pedal_angle_len20_v2"
+name      = "Accelerator Pedal Angle"
+unit      = ""
+type      = "static"
+address   = 0x000DD4D0
+length    = 20
+data_type = "float32_be"
+scaling   = "x"
+
+
+[[axis]]
+id        = "engine_speed_len22_v2"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000DD520
+length    = 22
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "accelerator_pedal_angle_len20_v3"
+name      = "Accelerator Pedal Angle"
+unit      = ""
+type      = "static"
+address   = 0x000DCCA0
+length    = 20
+data_type = "float32_be"
+scaling   = "x"
+
+
+[[axis]]
+id        = "engine_speed_len22_v3"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000DCCF0
+length    = 22
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "accelerator_pedal_angle_len20_v4"
+name      = "Accelerator Pedal Angle"
+unit      = ""
+type      = "static"
+address   = 0x000DD8E8
+length    = 20
+data_type = "float32_be"
+scaling   = "x"
+
+
+[[axis]]
+id        = "engine_speed_len22_v4"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000DD938
+length    = 22
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "accelerator_pedal_angle_len20_v5"
+name      = "Accelerator Pedal Angle"
+unit      = ""
+type      = "static"
+address   = 0x000DD0B8
+length    = 20
+data_type = "float32_be"
+scaling   = "x"
+
+
+[[axis]]
+id        = "engine_speed_len22_v5"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000DD108
+length    = 22
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "accelerator_pedal_angle_len20_v6"
+name      = "Accelerator Pedal Angle"
+unit      = ""
+type      = "static"
+address   = 0x000DDD00
+length    = 20
+data_type = "float32_be"
+scaling   = "x"
+
+
+[[axis]]
+id        = "engine_speed_len22_v6"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000DDD50
+length    = 22
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "requested_torque_len21"
+name      = "Requested Torque"
+unit      = ""
+type      = "static"
+address   = 0x000DBEEC
+length    = 21
+data_type = "float32_be"
+scaling   = "raw_ecu_value_x"
+
+
+[[axis]]
+id        = "engine_speed_len16_v5"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000DBF40
+length    = 16
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "requested_torque_len21_v2"
+name      = "Requested Torque"
+unit      = ""
+type      = "static"
+address   = 0x000DC220
+length    = 21
+data_type = "float32_be"
+scaling   = "raw_ecu_value_x"
+
+
+[[axis]]
+id        = "engine_speed_len16_v6"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000DC274
+length    = 16
+data_type = "float32_be"
+scaling   = "rpm_x"
+
+
+[[axis]]
+id        = "requested_torque_len21_v3"
+name      = "Requested Torque"
+unit      = ""
+type      = "static"
+address   = 0x000DC554
+length    = 21
+data_type = "float32_be"
+scaling   = "raw_ecu_value_x"
+
+
+[[axis]]
+id        = "engine_speed_len16_v7"
+name      = "Engine Speed"
+unit      = ""
+type      = "static"
+address   = 0x000DC5A8
+length    = 16
+data_type = "float32_be"
+scaling   = "rpm_x"
 
 
 [[axis]]
@@ -1564,6 +2686,17 @@ data_type = "uint16_be"
 scaling   = ""
 
 
+[[axis]]
+id        = "coolant_temperature_len16_v3"
+name      = "Coolant Temperature"
+unit      = ""
+type      = "static"
+address   = 0x000CBAA8
+length    = 16
+data_type = "float32_be"
+scaling   = "degrees_f_x_1_8_32"
+
+
 [[table]]
 id                     = "target_boost"
 name                   = "Target Boost"
@@ -1651,7 +2784,7 @@ dimensions             = 1
 address                = 0x000C7614
 data_type              = "uint16_be"
 scaling                = "psi_absolute_x_01933677"
-axis_x                 = "atmospheric_pressure"
+axis_x                 = "atmospheric_pressure_len6"
 emissions_relevant     = false
 engine_safety_critical = true
 
@@ -1677,7 +2810,7 @@ dimensions             = 1
 address                = 0x000C06C4
 data_type              = "float32_be"
 scaling                = "current_fine_correction_learning_degrees_of_correction_x"
-axis_x                 = "boost_control"
+axis_x                 = "boost_control_len1"
 emissions_relevant     = false
 engine_safety_critical = true
 
@@ -1702,8 +2835,8 @@ dimensions             = 2
 address                = 0x000C12C0
 data_type              = "uint16_be"
 scaling                = "wastegate_duty_cycle_x_00390625"
-axis_x                 = "requested_torque"
-axis_y                 = "engine_speed"
+axis_x                 = "requested_torque_len14"
+axis_y                 = "engine_speed_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1716,8 +2849,8 @@ dimensions             = 2
 address                = 0x000C0E50
 data_type              = "uint16_be"
 scaling                = "wastegate_duty_cycle_x_00390625"
-axis_x                 = "requested_torque"
-axis_y                 = "engine_speed"
+axis_x                 = "requested_torque_len14_v2"
+axis_y                 = "engine_speed_len16_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1743,7 +2876,7 @@ dimensions             = 1
 address                = 0x000C07B0
 data_type              = "uint8"
 scaling                = "initial_max_wastegate_duty_compensation_relative_x_78125_100"
-axis_x                 = "intake_temperature"
+axis_x                 = "intake_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1769,8 +2902,8 @@ dimensions             = 2
 address                = 0x000C0B88
 data_type              = "uint8"
 scaling                = "initial_max_wastegate_duty_compensation_relative_x_78125_100"
-axis_x                 = "atmospheric_pressure"
-axis_y                 = "engine_speed"
+axis_x                 = "atmospheric_pressure_len6_v2"
+axis_y                 = "engine_speed_len4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1796,7 +2929,7 @@ dimensions             = 1
 address                = 0x000C0A94
 data_type              = "uint16_be"
 scaling                = "wastegate_duty_correction_absolute_x_00390625_50"
-axis_x                 = "boost_error"
+axis_x                 = "boost_error_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1809,7 +2942,7 @@ dimensions             = 1
 address                = 0x000C0A5C
 data_type              = "uint16_be"
 scaling                = "wastegate_duty_correction_absolute_x_00390625_50"
-axis_x                 = "boost_error"
+axis_x                 = "boost_error_len9_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1822,7 +2955,7 @@ dimensions             = 1
 address                = 0x000C08C0
 data_type              = "uint8"
 scaling                = "td_proportional_map_target_compensation_relative_x_78125_100"
-axis_x                 = "intake_temperature"
+axis_x                 = "intake_temperature_len16_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1835,7 +2968,7 @@ dimensions             = 1
 address                = 0x000C0960
 data_type              = "uint8"
 scaling                = "td_integral_positive_map_target_compensation_relative_x_78125_100"
-axis_x                 = "intake_temperature"
+axis_x                 = "intake_temperature_len16_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1848,7 +2981,7 @@ dimensions             = 1
 address                = 0x000C0910
 data_type              = "uint8"
 scaling                = "td_integral_negative_map_target_compensation_relative_x_78125_100"
-axis_x                 = "intake_temperature"
+axis_x                 = "intake_temperature_len16_v4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1979,7 +3112,7 @@ address                = 0x000C7D4C
 data_type              = "uint8"
 scaling                = "estimated_air_fuel_ratio_14_7_1_x_0078125"
 axis_x                 = "engine_load"
-axis_y                 = "engine_speed"
+axis_y                 = "engine_speed_len18"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -1992,8 +3125,8 @@ dimensions             = 2
 address                = 0x000C7F20
 data_type              = "uint8"
 scaling                = "estimated_air_fuel_ratio_14_7_1_x_0078125"
-axis_x                 = "engine_load"
-axis_y                 = "engine_speed"
+axis_x                 = "engine_load_len18"
+axis_y                 = "engine_speed_len18_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2058,7 +3191,7 @@ dimensions             = 1
 address                = 0x000C702C
 data_type              = "uint16_be"
 scaling                = "primary_open_loop_fueling_enrichment_offset_compensation_x_003051758_100"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2110,7 +3243,7 @@ dimensions             = 1
 address                = 0x000C3F58
 data_type              = "uint16_be"
 scaling                = "front_oxygen_sensor_compensation_x_00003051758"
-axis_x                 = "atmospheric_pressure"
+axis_x                 = "atmospheric_pressure_len4"
 emissions_relevant     = true
 engine_safety_critical = false
 
@@ -2123,8 +3256,8 @@ dimensions             = 2
 address                = 0x000C8888
 data_type              = "uint16_be"
 scaling                = "estimated_air_fuel_ratio_points_additive_x_000224304213_7_35"
-axis_x                 = "engine_load"
-axis_y                 = "engine_speed"
+axis_x                 = "engine_load_len6"
+axis_y                 = "engine_speed_len6"
 emissions_relevant     = true
 engine_safety_critical = false
 
@@ -2137,8 +3270,8 @@ dimensions             = 2
 address                = 0x000C8674
 data_type              = "uint16_be"
 scaling                = "estimated_air_fuel_ratio_points_additive_x_000224304213_7_350001"
-axis_x                 = "coolant_temperature"
-axis_y                 = "engine_load"
+axis_x                 = "coolant_temperature_len16"
+axis_y                 = "engine_load_len2"
 emissions_relevant     = true
 engine_safety_critical = false
 
@@ -2151,8 +3284,8 @@ dimensions             = 2
 address                = 0x000C8728
 data_type              = "uint16_be"
 scaling                = "estimated_air_fuel_ratio_points_additive_x_000224304213_7_350001"
-axis_x                 = "coolant_temperature"
-axis_y                 = "engine_load"
+axis_x                 = "coolant_temperature_len16"
+axis_y                 = "engine_load_len2_v2"
 emissions_relevant     = true
 engine_safety_critical = false
 
@@ -2191,7 +3324,7 @@ dimensions             = 1
 address                = 0x000C6418
 data_type              = "uint8"
 scaling                = "throttle_plate_opening_angle_x_581287202"
-axis_x                 = "engine_speed"
+axis_x                 = "engine_speed_len16_v3"
 emissions_relevant     = true
 engine_safety_critical = false
 
@@ -2217,7 +3350,7 @@ dimensions             = 1
 address                = 0x000C6F58
 data_type              = "uint16_be"
 scaling                = "base_pulse_width_ms_x_004"
-axis_x                 = "engine_speed"
+axis_x                 = "engine_speed_len16_v4"
 emissions_relevant     = true
 engine_safety_critical = false
 
@@ -2269,7 +3402,7 @@ dimensions             = 1
 address                = 0x000C5CA4
 data_type              = "float32_be"
 scaling                = "vehicle_speed_mph_x_621"
-axis_x                 = "condition_result"
+axis_x                 = "condition_result_len2"
 emissions_relevant     = true
 engine_safety_critical = false
 
@@ -2282,7 +3415,7 @@ dimensions             = 1
 address                = 0x000C5CB4
 data_type              = "float32_be"
 scaling                = "engine_load_g_rev_x"
-axis_x                 = "condition_result"
+axis_x                 = "condition_result_len2"
 emissions_relevant     = true
 engine_safety_critical = false
 
@@ -2320,7 +3453,7 @@ dimensions             = 1
 address                = 0x000C5C80
 data_type              = "float32_be"
 scaling                = "engine_speed_rpm_x"
-axis_x                 = "condition_result"
+axis_x                 = "condition_result_len2"
 emissions_relevant     = true
 engine_safety_critical = false
 
@@ -2359,7 +3492,7 @@ address                = 0x000C80B4
 data_type              = "uint8"
 scaling                = "injector_pulse_width_compensation_x_78125_100"
 axis_x                 = "last_calculated_base_pulse_width"
-axis_y                 = "engine_speed"
+axis_y                 = "engine_speed_len12"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2372,8 +3505,8 @@ dimensions             = 2
 address                = 0x000C8164
 data_type              = "uint8"
 scaling                = "injector_pulse_width_compensation_x_78125_100"
-axis_x                 = "last_calculated_base_pulse_width"
-axis_y                 = "engine_speed"
+axis_x                 = "last_calculated_base_pulse_width_len8"
+axis_y                 = "engine_speed_len12_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2386,8 +3519,8 @@ dimensions             = 2
 address                = 0x000C8214
 data_type              = "uint8"
 scaling                = "injector_pulse_width_compensation_x_78125_100"
-axis_x                 = "last_calculated_base_pulse_width"
-axis_y                 = "engine_speed"
+axis_x                 = "last_calculated_base_pulse_width_len8_v2"
+axis_y                 = "engine_speed_len12_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2400,8 +3533,8 @@ dimensions             = 2
 address                = 0x000C82C4
 data_type              = "uint8"
 scaling                = "injector_pulse_width_compensation_x_78125_100"
-axis_x                 = "last_calculated_base_pulse_width"
-axis_y                 = "engine_speed"
+axis_x                 = "last_calculated_base_pulse_width_len8_v3"
+axis_y                 = "engine_speed_len12_v4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2414,7 +3547,7 @@ dimensions             = 1
 address                = 0x000C665A
 data_type              = "uint16_be"
 scaling                = "injector_pulse_width_ms_x_008"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2427,7 +3560,7 @@ dimensions             = 1
 address                = 0x000C667A
 data_type              = "uint16_be"
 scaling                = "injector_pulse_width_ms_x_008"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2440,7 +3573,7 @@ dimensions             = 1
 address                = 0x000C669A
 data_type              = "uint16_be"
 scaling                = "injector_pulse_width_ms_x_008"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2453,7 +3586,7 @@ dimensions             = 1
 address                = 0x000C66BA
 data_type              = "uint16_be"
 scaling                = "injector_pulse_width_ms_x_008"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2466,7 +3599,7 @@ dimensions             = 1
 address                = 0x000C66DA
 data_type              = "uint16_be"
 scaling                = "injector_pulse_width_ms_x_008"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2479,7 +3612,7 @@ dimensions             = 1
 address                = 0x000C66FA
 data_type              = "uint16_be"
 scaling                = "injector_pulse_width_ms_x_008"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2492,8 +3625,8 @@ dimensions             = 2
 address                = 0x000C7914
 data_type              = "uint8"
 scaling                = "cranking_fuel_injector_pulse_width_compensation_x_78125_100"
-axis_x                 = "engine_speed"
-axis_y                 = "coolant_temperature"
+axis_x                 = "engine_speed_len5"
+axis_y                 = "coolant_temperature_len7"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2506,8 +3639,8 @@ dimensions             = 2
 address                = 0x000C79BC
 data_type              = "uint8"
 scaling                = "cranking_fuel_injector_pulse_width_compensation_x_78125_100"
-axis_x                 = "engine_speed"
-axis_y                 = "coolant_temperature"
+axis_x                 = "engine_speed_len5_v2"
+axis_y                 = "coolant_temperature_len7_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2520,7 +3653,7 @@ dimensions             = 1
 address                = 0x000C60FC
 data_type              = "uint8"
 scaling                = "cranking_fuel_injector_pulse_width_compensation_x_78125_100"
-axis_x                 = "accelerator_pedal_angle"
+axis_x                 = "accelerator_pedal_angle_len6"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2572,7 +3705,7 @@ dimensions             = 1
 address                = 0x000C65D0
 data_type              = "uint8"
 scaling                = "throttle_tip_in_enrichment_compensation_x_78125_100"
-axis_x                 = "boost_error"
+axis_x                 = "boost_error_len9_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2585,7 +3718,7 @@ dimensions             = 1
 address                = 0x000C758A
 data_type              = "uint16_be"
 scaling                = "throttle_tip_in_enrichment_compensation_x_01220703125_100"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2650,8 +3783,8 @@ dimensions             = 2
 address                = 0x000C7AF0
 data_type              = "uint8"
 scaling                = "minimum_primary_enrichment_offset_additive_cruise_x_00390625"
-axis_x                 = "coolant_temperature"
-axis_y                 = "engine_load"
+axis_x                 = "coolant_temperature_len16"
+axis_y                 = "engine_load_len8"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2664,8 +3797,8 @@ dimensions             = 2
 address                = 0x000C7A50
 data_type              = "uint8"
 scaling                = "minimum_primary_enrichment_offset_additive_non_cruise_x_00390625"
-axis_x                 = "coolant_temperature"
-axis_y                 = "engine_load"
+axis_x                 = "coolant_temperature_len16"
+axis_y                 = "engine_load_len8_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2678,8 +3811,8 @@ dimensions             = 2
 address                = 0x000C7BA4
 data_type              = "uint8"
 scaling                = "minimum_primary_enrichment_offset_additive_1_x_00390625"
-axis_x                 = "coolant_temperature"
-axis_y                 = "engine_load"
+axis_x                 = "coolant_temperature_len10"
+axis_y                 = "engine_load_len3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2692,7 +3825,7 @@ dimensions             = 1
 address                = 0x000C67BA
 data_type              = "uint16_be"
 scaling                = "initial_afterstart_offset_x_0002441406"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2705,7 +3838,7 @@ dimensions             = 1
 address                = 0x000C67DA
 data_type              = "uint16_be"
 scaling                = "initial_afterstart_offset_x_0002441406"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2718,7 +3851,7 @@ dimensions             = 1
 address                = 0x000C67FA
 data_type              = "uint16_be"
 scaling                = "initial_afterstart_offset_x_0002441406"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2731,7 +3864,7 @@ dimensions             = 1
 address                = 0x000C681A
 data_type              = "uint16_be"
 scaling                = "initial_afterstart_offset_x_0002441406"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2744,7 +3877,7 @@ dimensions             = 1
 address                = 0x000C683A
 data_type              = "uint16_be"
 scaling                = "decay_step_value_x_0000009536743"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2757,7 +3890,7 @@ dimensions             = 1
 address                = 0x000C685A
 data_type              = "uint16_be"
 scaling                = "decay_step_value_x_0000009536743"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2770,7 +3903,7 @@ dimensions             = 1
 address                = 0x000C673A
 data_type              = "uint16_be"
 scaling                = "initial_afterstart_offset_x_00390625"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2783,7 +3916,7 @@ dimensions             = 1
 address                = 0x000C675A
 data_type              = "uint16_be"
 scaling                = "initial_afterstart_offset_x_00390625"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2796,7 +3929,7 @@ dimensions             = 1
 address                = 0x000C677A
 data_type              = "uint16_be"
 scaling                = "initial_afterstart_offset_x_00390625"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2809,7 +3942,7 @@ dimensions             = 1
 address                = 0x000C679A
 data_type              = "uint16_be"
 scaling                = "initial_afterstart_offset_x_00390625"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2822,7 +3955,7 @@ dimensions             = 1
 address                = 0x000C6112
 data_type              = "uint8"
 scaling                = "period_in_between_decay_multiplier_application_x"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2835,7 +3968,7 @@ dimensions             = 1
 address                = 0x000C6122
 data_type              = "uint8"
 scaling                = "period_in_between_decay_multiplier_application_x"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2913,8 +4046,8 @@ dimensions             = 2
 address                = 0x000C4210
 data_type              = "uint8"
 scaling                = "mass_airflow_compensation_x_390625_50"
-axis_x                 = "intake_temperature"
-axis_y                 = "mass_airflow"
+axis_x                 = "intake_temperature_len5"
+axis_y                 = "mass_airflow_len8"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2941,7 +4074,7 @@ address                = 0x000C4298
 data_type              = "uint8"
 scaling                = "engine_load_compensation_x_390625_50"
 axis_x                 = "manifold_pressure"
-axis_y                 = "engine_speed"
+axis_y                 = "engine_speed_len13"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2954,8 +4087,8 @@ dimensions             = 2
 address                = 0x000CA410
 data_type              = "uint8"
 scaling                = "base_ignition_timing_degrees_btdc_x_3515625_20"
-axis_x                 = "engine_load"
-axis_y                 = "engine_speed"
+axis_x                 = "engine_load_len18_v2"
+axis_y                 = "engine_speed_len18_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2968,8 +4101,8 @@ dimensions             = 2
 address                = 0x000CA7D0
 data_type              = "uint8"
 scaling                = "base_ignition_timing_degrees_btdc_x_3515625_20"
-axis_x                 = "engine_load"
-axis_y                 = "engine_speed"
+axis_x                 = "engine_load_len18_v3"
+axis_y                 = "engine_speed_len18_v4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2982,8 +4115,8 @@ dimensions             = 2
 address                = 0x000CA5E8
 data_type              = "uint8"
 scaling                = "base_ignition_timing_degrees_btdc_x_3515625_20"
-axis_x                 = "engine_load"
-axis_y                 = "engine_speed"
+axis_x                 = "engine_load_len19"
+axis_y                 = "engine_speed_len18_v5"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2996,8 +4129,8 @@ dimensions             = 2
 address                = 0x000CA9A4
 data_type              = "uint8"
 scaling                = "base_ignition_timing_degrees_btdc_x_3515625_20"
-axis_x                 = "engine_load"
-axis_y                 = "engine_speed"
+axis_x                 = "engine_load_len18_v4"
+axis_y                 = "engine_speed_len18_v6"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3010,7 +4143,7 @@ dimensions             = 1
 address                = 0x000C9925
 data_type              = "uint8"
 scaling                = "base_ignition_timing_degrees_btdc_x_3515625_20"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3023,7 +4156,7 @@ dimensions             = 1
 address                = 0x000C9935
 data_type              = "uint8"
 scaling                = "base_ignition_timing_degrees_btdc_x_3515625_20"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3036,7 +4169,7 @@ dimensions             = 1
 address                = 0x000C9945
 data_type              = "uint8"
 scaling                = "base_ignition_timing_degrees_btdc_x_3515625_20"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3049,7 +4182,7 @@ dimensions             = 1
 address                = 0x000C9955
 data_type              = "uint8"
 scaling                = "base_ignition_timing_degrees_btdc_x_3515625_20"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3062,7 +4195,7 @@ dimensions             = 1
 address                = 0x000C991C
 data_type              = "uint8"
 scaling                = "base_ignition_timing_degrees_btdc_x_3515625_20"
-axis_x                 = "engine_speed"
+axis_x                 = "engine_speed_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3088,8 +4221,8 @@ dimensions             = 2
 address                = 0x000CB308
 data_type              = "uint8"
 scaling                = "maximum_knock_correction_timing_advance_degrees_x_3515625"
-axis_x                 = "engine_load"
-axis_y                 = "engine_speed"
+axis_x                 = "engine_load_len18_v5"
+axis_y                 = "engine_speed_len18_v7"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3102,8 +4235,8 @@ dimensions             = 2
 address                = 0x000CB120
 data_type              = "uint8"
 scaling                = "maximum_knock_correction_timing_advance_degrees_x_3515625"
-axis_x                 = "engine_load"
-axis_y                 = "engine_speed"
+axis_x                 = "engine_load_len19_v2"
+axis_y                 = "engine_speed_len18_v8"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3116,7 +4249,7 @@ dimensions             = 1
 address                = 0x000C99D8
 data_type              = "uint8"
 scaling                = "ignition_timing_correction_degrees_x_3515625_45"
-axis_x                 = "intake_temperature"
+axis_x                 = "intake_temperature_len16_v5"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3129,8 +4262,8 @@ dimensions             = 2
 address                = 0x000CAB28
 data_type              = "uint8"
 scaling                = "timing_compensation_intake_temp_map_target_compensation_x_78125_100"
-axis_x                 = "engine_speed"
-axis_y                 = "engine_load"
+axis_x                 = "engine_speed_len8"
+axis_y                 = "engine_load_len8_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3143,7 +4276,7 @@ dimensions             = 1
 address                = 0x000C9F0C
 data_type              = "uint8"
 scaling                = "ignition_timing_correction_degrees_x_3515625_45"
-axis_x                 = "intake_temperature"
+axis_x                 = "intake_temperature_len16_v6"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3181,7 +4314,7 @@ dimensions             = 1
 address                = 0x000C9985
 data_type              = "uint8"
 scaling                = "ignition_timing_correction_degrees_x_3515625_45"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3194,7 +4327,7 @@ dimensions             = 2
 address                = 0x000CAE34
 data_type              = "uint8"
 scaling                = "ignition_timing_correction_degrees_x_3515625_45"
-axis_x                 = "atmospheric_pressure"
+axis_x                 = "atmospheric_pressure_len5"
 axis_y                 = "manifold_relative_pressure"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3208,8 +4341,8 @@ dimensions             = 2
 address                = 0x000CAE8C
 data_type              = "uint8"
 scaling                = "ignition_timing_correction_degrees_x_3515625_45"
-axis_x                 = "engine_speed"
-axis_y                 = "engine_load"
+axis_x                 = "engine_speed_len14"
+axis_y                 = "engine_load_len4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3222,8 +4355,8 @@ dimensions             = 2
 address                = 0x000CAF0C
 data_type              = "uint8"
 scaling                = "ignition_timing_correction_degrees_x_3515625_45"
-axis_x                 = "engine_speed"
-axis_y                 = "engine_load"
+axis_x                 = "engine_speed_len14_v2"
+axis_y                 = "engine_load_len4_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3236,8 +4369,8 @@ dimensions             = 2
 address                = 0x000CAF8C
 data_type              = "uint8"
 scaling                = "ignition_timing_correction_degrees_x_3515625_45"
-axis_x                 = "engine_speed"
-axis_y                 = "engine_load"
+axis_x                 = "engine_speed_len14_v3"
+axis_y                 = "engine_load_len4_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3250,8 +4383,8 @@ dimensions             = 2
 address                = 0x000CB00C
 data_type              = "uint8"
 scaling                = "ignition_timing_correction_degrees_x_3515625_45"
-axis_x                 = "engine_speed"
-axis_y                 = "engine_load"
+axis_x                 = "engine_speed_len14_v4"
+axis_y                 = "engine_load_len4_v4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3316,7 +4449,7 @@ dimensions             = 1
 address                = 0x000C95BC
 data_type              = "float32_be"
 scaling                = "engine_load_g_rev_x"
-axis_x                 = "feedback_knock_correction"
+axis_x                 = "feedback_knock_correction_len2"
 emissions_relevant     = false
 engine_safety_critical = true
 
@@ -3415,7 +4548,7 @@ dimensions             = 1
 address                = 0x000C9754
 data_type              = "float32_be"
 scaling                = "engine_load_g_rev_x"
-axis_x                 = "potential_fine_correction_stored_value_adjustments"
+axis_x                 = "potential_fine_correction_stored_value_adjustments_len4"
 emissions_relevant     = false
 engine_safety_critical = true
 
@@ -3553,7 +4686,7 @@ dimensions             = 1
 address                = 0x000C9F7C
 data_type              = "uint8"
 scaling                = "rough_correction_iam_positive_learning_delay_counter_threshold_x"
-axis_x                 = "engine_speed"
+axis_x                 = "engine_speed_len10"
 emissions_relevant     = false
 engine_safety_critical = true
 
@@ -3590,8 +4723,8 @@ dimensions             = 2
 address                = 0x000CFDAC
 data_type              = "uint16_be"
 scaling                = "advance_degrees_x_0054931640625"
-axis_x                 = "engine_load"
-axis_y                 = "engine_speed"
+axis_x                 = "engine_load_len14"
+axis_y                 = "engine_speed_len18_v9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3604,8 +4737,8 @@ dimensions             = 2
 address                = 0x000D0024
 data_type              = "uint16_be"
 scaling                = "advance_degrees_x_0054931640625"
-axis_x                 = "engine_load"
-axis_y                 = "engine_speed"
+axis_x                 = "engine_load_len14_v2"
+axis_y                 = "engine_speed_len18_v10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3618,8 +4751,8 @@ dimensions             = 2
 address                = 0x000D06D4
 data_type              = "uint16_be"
 scaling                = "retard_degrees_x_0054931640625"
-axis_x                 = "engine_load"
-axis_y                 = "engine_speed"
+axis_x                 = "engine_load_len14_v3"
+axis_y                 = "engine_speed_len18_v11"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3632,8 +4765,8 @@ dimensions             = 2
 address                = 0x000D094C
 data_type              = "uint16_be"
 scaling                = "retard_degrees_x_0054931640625"
-axis_x                 = "engine_load"
-axis_y                 = "engine_speed"
+axis_x                 = "engine_load_len14_v4"
+axis_y                 = "engine_speed_len18_v12"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3646,8 +4779,8 @@ dimensions             = 2
 address                = 0x000DC930
 data_type              = "uint16_be"
 scaling                = "requested_torque_raw_ecu_value_x_0078125"
-axis_x                 = "accelerator_pedal_angle"
-axis_y                 = "engine_speed"
+axis_x                 = "accelerator_pedal_angle_len20"
+axis_y                 = "engine_speed_len22"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3660,8 +4793,8 @@ dimensions             = 2
 address                = 0x000DD578
 data_type              = "uint16_be"
 scaling                = "requested_torque_raw_ecu_value_x_0078125"
-axis_x                 = "accelerator_pedal_angle"
-axis_y                 = "engine_speed"
+axis_x                 = "accelerator_pedal_angle_len20_v2"
+axis_y                 = "engine_speed_len22_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3674,8 +4807,8 @@ dimensions             = 2
 address                = 0x000DCD48
 data_type              = "uint16_be"
 scaling                = "requested_torque_raw_ecu_value_x_0078125"
-axis_x                 = "accelerator_pedal_angle"
-axis_y                 = "engine_speed"
+axis_x                 = "accelerator_pedal_angle_len20_v3"
+axis_y                 = "engine_speed_len22_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3688,8 +4821,8 @@ dimensions             = 2
 address                = 0x000DD990
 data_type              = "uint16_be"
 scaling                = "requested_torque_raw_ecu_value_x_0078125"
-axis_x                 = "accelerator_pedal_angle"
-axis_y                 = "engine_speed"
+axis_x                 = "accelerator_pedal_angle_len20_v4"
+axis_y                 = "engine_speed_len22_v4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3702,8 +4835,8 @@ dimensions             = 2
 address                = 0x000DD160
 data_type              = "uint16_be"
 scaling                = "requested_torque_raw_ecu_value_x_0078125"
-axis_x                 = "accelerator_pedal_angle"
-axis_y                 = "engine_speed"
+axis_x                 = "accelerator_pedal_angle_len20_v5"
+axis_y                 = "engine_speed_len22_v5"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3716,8 +4849,8 @@ dimensions             = 2
 address                = 0x000DDDA8
 data_type              = "uint16_be"
 scaling                = "requested_torque_raw_ecu_value_x_0078125"
-axis_x                 = "accelerator_pedal_angle"
-axis_y                 = "engine_speed"
+axis_x                 = "accelerator_pedal_angle_len20_v6"
+axis_y                 = "engine_speed_len22_v6"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3730,8 +4863,8 @@ dimensions             = 2
 address                = 0x000DBF80
 data_type              = "uint16_be"
 scaling                = "target_throttle_plate_opening_angle_x_002270655357"
-axis_x                 = "requested_torque"
-axis_y                 = "engine_speed"
+axis_x                 = "requested_torque_len21"
+axis_y                 = "engine_speed_len16_v5"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3744,8 +4877,8 @@ dimensions             = 2
 address                = 0x000DC2B4
 data_type              = "uint16_be"
 scaling                = "target_throttle_plate_opening_angle_x_002270655357"
-axis_x                 = "requested_torque"
-axis_y                 = "engine_speed"
+axis_x                 = "requested_torque_len21_v2"
+axis_y                 = "engine_speed_len16_v6"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3758,8 +4891,8 @@ dimensions             = 2
 address                = 0x000DC5E8
 data_type              = "uint16_be"
 scaling                = "target_throttle_plate_opening_angle_x_002270655357"
-axis_x                 = "requested_torque"
-axis_y                 = "engine_speed"
+axis_x                 = "requested_torque_len21_v3"
+axis_y                 = "engine_speed_len16_v7"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3967,7 +5100,7 @@ dimensions             = 1
 address                = 0x000CBF96
 data_type              = "uint16_be"
 scaling                = "engine_speed_rpm_x_1953125"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3980,7 +5113,7 @@ dimensions             = 1
 address                = 0x000CBFD6
 data_type              = "uint16_be"
 scaling                = "engine_speed_rpm_x_1953125"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3993,7 +5126,7 @@ dimensions             = 1
 address                = 0x000CC016
 data_type              = "uint16_be"
 scaling                = "engine_speed_rpm_x_1953125"
-axis_x                 = "coolant_temperature"
+axis_x                 = "coolant_temperature_len16_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 

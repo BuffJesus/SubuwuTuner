@@ -10,10 +10,10 @@ schema_version = 1
 id             = "lf79103p"
 display_name   = "LF79103P"
 platform       = "subaru"
-transmission   = ""
+transmission   = "mt"
 years          = [2017]
 endianness     = "big"
-rom_size_bytes = 1048576
+rom_size_bytes = 2097152
 license        = "Apache-2.0"
 
 
@@ -26,22 +26,22 @@ ecu_part    = ""
 
 
 [[scaling]]
-id        = "x_256"
+id        = "x_256_0"
 formula   = "linear"
 factor    = 0.00390625
 offset    = 0.0
-unit      = "﹪"
+unit      = "%"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "nm_x_16000_80"
+id        = "nm_x_16000_0_80_0"
 formula   = "linear"
 factor    = 0.0125
 offset    = -200.0
 unit      = "Nm"
-precision = 2
+precision = 1
 data_type = "uint16_be"
 
 
@@ -51,174 +51,24 @@ formula   = "linear"
 factor    = 0.1953125
 offset    = 0.0
 unit      = "RPM"
-precision = 2
+precision = 0
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "afreq_x_256_1"
+id        = "afr_x_256_0_1_0"
 formula   = "linear"
 factor    = 0.00390625
 offset    = 1.0
-unit      = "afrEQ"
+unit      = "AFR"
 precision = 2
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "g_rev_x_100"
+id        = "x_100_0"
 formula   = "linear"
 factor    = 0.01
-offset    = 0.0
-unit      = "g/rev"
-precision = 2
-data_type = "uint8"
-
-
-[[scaling]]
-id        = "x_128_128_100"
-formula   = "linear"
-factor    = 0.78125
-offset    = -100.0
-unit      = "﹪"
-precision = 2
-data_type = "uint8"
-
-
-[[scaling]]
-id        = "pa_x_25600_100000"
-formula   = "linear"
-factor    = 3.90625
-offset    = 0.0
-unit      = "Pa"
-precision = 2
-data_type = "int16_be"
-
-
-[[scaling]]
-id        = "c_x_4096_10_40"
-formula   = "linear"
-factor    = 0.00244140625
-offset    = -40.0
-unit      = "°C"
-precision = 2
-data_type = "uint16_be"
-
-
-[[scaling]]
-id        = "bar_x_24000_1"
-formula   = "linear"
-factor    = 4.1666666666666665e-05
-offset    = -1.0
-unit      = "bar"
-precision = 2
-data_type = "uint16_be"
-
-
-[[scaling]]
-id        = "bar_x_89_99"
-formula   = "linear"
-factor    = 0.010101010101010102
-offset    = -0.898989898989899
-unit      = "bar"
-precision = 2
-data_type = "uint8"
-
-
-[[scaling]]
-id        = "pa_x_25945_100000"
-formula   = "linear"
-factor    = 3.854307188282906
-offset    = 0.0
-unit      = "Pa"
-precision = 2
-data_type = "uint16_be"
-
-
-[[scaling]]
-id        = "x_0_5_16"
-formula   = "linear"
-factor    = 0.5
-offset    = -16.0
-unit      = "°"
-precision = 2
-data_type = "uint8"
-
-
-[[scaling]]
-id        = "g_rev_x_65535_3_3"
-formula   = "linear"
-factor    = 5.035477225909819e-05
-offset    = 0.0
-unit      = "g/rev"
-precision = 2
-data_type = "uint16_be"
-
-
-[[scaling]]
-id        = "x_10"
-formula   = "linear"
-factor    = 0.1
-offset    = 0.0
-unit      = "°"
-precision = 2
-data_type = "uint16_be"
-
-
-[[scaling]]
-id        = "x_100"
-formula   = "linear"
-factor    = 1.0
-offset    = -100.0
-unit      = "﹪"
-precision = 2
-data_type = "uint16_be"
-
-
-[[scaling]]
-id        = "g_rev_x_0_0129"
-formula   = "linear"
-factor    = 0.0129
-offset    = 0.0
-unit      = "g/rev"
-precision = 2
-data_type = "uint8"
-
-
-[[scaling]]
-id        = "rpm_x_25"
-formula   = "linear"
-factor    = 25.0
-offset    = 0.0
-unit      = "RPM"
-precision = 2
-data_type = "uint8"
-
-
-[[scaling]]
-id        = "x_0_5"
-formula   = "linear"
-factor    = 0.5
-offset    = 0.0
-unit      = "°"
-precision = 2
-data_type = "int8"
-
-
-[[scaling]]
-id        = "x_1260_1"
-formula   = "linear"
-factor    = -1.0
-offset    = 1260.0
-unit      = "°"
-precision = 2
-data_type = "uint16_be"
-
-
-[[scaling]]
-id        = "x_2_100"
-formula   = "linear"
-factor    = 50.0
 offset    = 0.0
 unit      = ""
 precision = 2
@@ -226,62 +76,202 @@ data_type = "uint8"
 
 
 [[scaling]]
-id        = "afreq_x_256_0_5"
+id        = "x_128_0_128_0_100_0"
 formula   = "linear"
-factor    = 0.00390625
-offset    = 0.5
-unit      = "afrEQ"
+factor    = 0.78125
+offset    = -100.0
+unit      = "%"
 precision = 2
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "rpm_x_2_100"
+id        = "pascal_x_25600_0_100000_0"
+formula   = "linear"
+factor    = 3.90625
+offset    = 0.0
+unit      = "Pascal"
+precision = 2
+data_type = "int16_be"
+
+
+[[scaling]]
+id        = "c_x_4096_0_10_0_40_0"
+formula   = "linear"
+factor    = 0.00244140625
+offset    = -40.0
+unit      = "°C"
+precision = 1
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "bar_x_24000_0_1_0"
+formula   = "linear"
+factor    = 4.1666666666666665e-05
+offset    = -1.0
+unit      = "bar"
+precision = 3
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "bar_x_89_0_99_0"
+formula   = "linear"
+factor    = 0.010101010101010102
+offset    = -0.898989898989899
+unit      = "bar"
+precision = 3
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "pascal_x_25945_0_100000_0"
+formula   = "linear"
+factor    = 3.854307188282906
+offset    = 0.0
+unit      = "Pascal"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "deg_x_0_5_16_0"
+formula   = "linear"
+factor    = 0.5
+offset    = -16.0
+unit      = "deg"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "g_per_rev_x_65535_0_3_3"
+formula   = "linear"
+factor    = 5.035477225909819e-05
+offset    = 0.0
+unit      = "G Per Rev"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "deg_x_10_0"
+formula   = "linear"
+factor    = 0.1
+offset    = 0.0
+unit      = "deg"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "g_per_rev_x_0_0129"
+formula   = "linear"
+factor    = 0.0129
+offset    = 0.0
+unit      = "G Per Rev"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "rpm_x_25_0"
+formula   = "linear"
+factor    = 25.0
+offset    = 0.0
+unit      = "RPM"
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "deg_x_0_5"
+formula   = "linear"
+factor    = 0.5
+offset    = 0.0
+unit      = "deg"
+precision = 2
+data_type = "int8"
+
+
+[[scaling]]
+id        = "deg_x_1260_0_1_0"
+formula   = "linear"
+factor    = -1.0
+offset    = 1260.0
+unit      = "deg"
+precision = 2
+data_type = "uint16_be"
+
+
+[[scaling]]
+id        = "x_2_0_100_0"
+formula   = "linear"
+factor    = 50.0
+offset    = 0.0
+unit      = ""
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "afr_x_256_0_0_5"
+formula   = "linear"
+factor    = 0.00390625
+offset    = 0.5
+unit      = "AFR"
+precision = 2
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "rpm_x_2_0_100_0"
 formula   = "linear"
 factor    = 50.0
 offset    = 0.0
 unit      = "RPM"
-precision = 2
+precision = 0
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "x_32768_0_00034"
+id        = "lambda_x_32768_0_0_00034"
 formula   = "linear"
 factor    = -0.00034
 offset    = 11.14112
-unit      = "λ"
+unit      = "Lambda"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "x_43194"
+id        = "lambda_x_43194_0"
 formula   = "linear"
 factor    = 2.3151363615316943e-05
 offset    = 0.0
-unit      = "λ"
+unit      = "Lambda"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "pa_x_91520"
+id        = "pascal_x_91520_0"
 formula   = "linear"
 factor    = 91520.0
 offset    = 0.0
-unit      = "Pa"
+unit      = "Pascal"
 precision = 2
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "c_x_205_16_40"
+id        = "c_rshift_16_0_x_205_0_40_0"
 formula   = "linear"
-factor    = 1.0
-offset    = 0.0
+factor    = 0.0031280517578125
+offset    = -40.0
 unit      = "°C"
-precision = 2
+precision = 1
 data_type = "uint16_be"
 
 
@@ -291,76 +281,76 @@ formula   = "linear"
 factor    = 7.629947544110635e-05
 offset    = 0.0
 unit      = "V"
-precision = 2
+precision = 3
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "x_0_5_720"
+id        = "deg_x_0_5_720_0"
 formula   = "linear"
 factor    = -0.5
 offset    = 720.0
-unit      = "°"
+unit      = "deg"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "x_1"
+id        = "deg_x_1_0"
 formula   = "linear"
 factor    = -1.0
 offset    = -0.0
-unit      = "°"
+unit      = "deg"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "g_rev_x_0_01294"
+id        = "g_per_rev_x_0_01294"
 formula   = "linear"
 factor    = 0.01294
 offset    = 0.0
-unit      = "g/rev"
+unit      = "G Per Rev"
 precision = 2
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "x_255"
+id        = "x_255_0"
 formula   = "linear"
 factor    = 0.00392156862745098
 offset    = 0.0
-unit      = "﹪"
+unit      = "%"
 precision = 2
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "c_x_50"
+id        = "c_x_50_0"
 formula   = "linear"
 factor    = 1.0
 offset    = -50.0
 unit      = "°C"
-precision = 2
+precision = 1
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "x_128_0_5"
+id        = "deg_x_128_0_0_5"
 formula   = "linear"
 factor    = 0.5
 offset    = -64.0
-unit      = "°"
+unit      = "deg"
 precision = 2
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "x_728_1_0_5"
+id        = "deg_x_728_1_0_5"
 formula   = "linear"
 factor    = 0.0027468754291992857
 offset    = 0.0
-unit      = "°"
+unit      = "deg"
 precision = 2
 data_type = "int16_be"
 
@@ -370,7 +360,7 @@ id        = "kmh_x"
 formula   = "linear"
 factor    = 1.0
 offset    = 0.0
-unit      = "kmh"
+unit      = "Kmh"
 precision = 2
 data_type = "uint8"
 
@@ -381,106 +371,106 @@ formula   = "linear"
 factor    = 0.19531548695363837
 offset    = 0.0
 unit      = ""
-precision = 2
+precision = 0
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "c_x_40"
+id        = "c_x_40_0"
 formula   = "linear"
 factor    = 1.0
 offset    = -40.0
 unit      = "°C"
-precision = 2
+precision = 1
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "x_65535_100"
+id        = "x_65535_0_100_0"
 formula   = "linear"
 factor    = 0.0015259021896696422
 offset    = 0.0
-unit      = "﹪"
+unit      = "%"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "x_255_100"
+id        = "x_255_0_100_0"
 formula   = "linear"
 factor    = 0.39215686274509803
 offset    = 0.0
-unit      = "﹪"
+unit      = "%"
 precision = 2
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "x_0_3515"
+id        = "deg_x_0_3515"
 formula   = "linear"
 factor    = 0.3515
 offset    = 0.0
-unit      = "°"
+unit      = "deg"
 precision = 2
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "x_128"
+id        = "x_128_0"
 formula   = "linear"
 factor    = 0.0078125
 offset    = 0.0
 unit      = ""
-precision = 2
+precision = 0
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "x_16"
+id        = "x_16_0"
 formula   = "linear"
 factor    = 0.0625
 offset    = 0.0
 unit      = ""
-precision = 2
+precision = 0
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "g_sec_x_8"
+id        = "g_per_sec_x_8_0"
 formula   = "linear"
 factor    = 0.125
 offset    = 0.0
-unit      = "g/sec"
+unit      = "G Per Sec"
 precision = 2
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "kpa_x_61_1000_10"
+id        = "kpa_x_61_0_1000_0_10_0"
 formula   = "linear"
 factor    = 0.61
 offset    = 0.0
-unit      = "kPa"
+unit      = "Kpa"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "x_256_100"
+id        = "x_256_0_100_0"
 formula   = "linear"
 factor    = 0.390625
 offset    = 0.0
-unit      = "﹪"
+unit      = "%"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "kpa_x_63963_20_10"
+id        = "kpa_rshift_20_0_x_63963_0_10_0"
 formula   = "linear"
-factor    = 1.0
+factor    = 0.6099987030029297
 offset    = 0.0
-unit      = "kPa"
+unit      = "Kpa"
 precision = 2
 data_type = "uint16_be"
 
@@ -491,104 +481,104 @@ formula   = "linear"
 factor    = 0.1953125
 offset    = 0.0
 unit      = ""
-precision = 2
+precision = 0
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "x"
+id        = "lambda_inverse_divide_32768_0_x"
 formula   = "linear"
 factor    = 1.0
 offset    = 0.0
-unit      = "λ"
+unit      = "Lambda"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "x_128_128_100_100"
+id        = "x_128_0_128_0_100_0_100_0"
 formula   = "linear"
 factor    = 0.78125
 offset    = 0.0
-unit      = "﹪"
+unit      = "%"
 precision = 2
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "rpm_x_10_2_40_1_1_1_4_5_12_3"
+id        = "rpm_lshift_4_0_lshift_1_0_lshift_1_0_rshift_2_0_x_10_0_40_0_1_0_5_12_3_0"
 formula   = "linear"
-factor    = 1.0
-offset    = 0.0
+factor    = 31.25
+offset    = 127.8046875
 unit      = "RPM"
-precision = 2
+precision = 0
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "ms_x_10"
+id        = "millisecond_x_10_0"
 formula   = "linear"
 factor    = 10.0
 offset    = 0.0
-unit      = "ms"
+unit      = "Millisecond"
 precision = 2
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "kmh_x_8"
+id        = "kmh_rshift_8_0_x"
 formula   = "linear"
-factor    = 1.0
+factor    = 0.00390625
 offset    = 0.0
-unit      = "kmh"
+unit      = "Kmh"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "ms_x_13107_20_125_3200_100"
+id        = "millisecond_rshift_20_0_x_13107_0_125_0_3200_0_100_0"
 formula   = "linear"
-factor    = 1.0
+factor    = 0.0031999511718749994
 offset    = 0.0
-unit      = "ms"
+unit      = "Millisecond"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "g_sec_x_8_76800_5"
+id        = "g_per_sec_lshift_8_0_x_76800_0_5_0"
 formula   = "linear"
-factor    = 1.0
+factor    = 0.0006666666666666668
 offset    = 0.0
-unit      = "g/sec"
+unit      = "G Per Sec"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "x_7"
+id        = "rshift_7_0_x"
 formula   = "linear"
-factor    = 1.0
+factor    = 0.0078125
 offset    = 0.0
 unit      = ""
-precision = 2
+precision = 0
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "bar_x_99"
+id        = "bar_x_99_0"
 formula   = "linear"
 factor    = 0.010101010101010102
 offset    = 0.0
 unit      = "bar"
-precision = 2
+precision = 3
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "psi_x_8_0_145038"
+id        = "psi_rshift_8_0_x_0_145038"
 formula   = "linear"
-factor    = 1.0
+factor    = 0.0005665546875
 offset    = 0.0
 unit      = "psi"
 precision = 2
@@ -596,17 +586,17 @@ data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "x_32768_100"
+id        = "x_32768_0_100_0"
 formula   = "linear"
 factor    = 0.0030517578125
 offset    = 0.0
-unit      = "﹪"
+unit      = "%"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "psi_x_24576_14_5038"
+id        = "psi_x_24576_0_14_5038"
 formula   = "linear"
 factor    = 0.0005901611328125
 offset    = 0.0
@@ -616,37 +606,37 @@ data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "v_x_20_256"
+id        = "v_x_20_0_256_0"
 formula   = "linear"
 factor    = 0.078125
 offset    = 0.0
 unit      = "V"
-precision = 2
+precision = 3
 data_type = "uint8"
 
 
 [[scaling]]
-id        = "g_sec_x_76800"
+id        = "g_per_sec_x_76800_0"
 formula   = "linear"
 factor    = 1.3020833333333334e-05
 offset    = 0.0
-unit      = "g/sec"
+unit      = "G Per Sec"
 precision = 2
 data_type = "uint32_be"
 
 
 [[scaling]]
-id        = "c_x_5_11_40"
+id        = "c_rshift_11_0_x_5_0_40_0"
 formula   = "linear"
-factor    = 1.0
-offset    = 0.0
+factor    = 0.00244140625
+offset    = -40.0
 unit      = "°C"
-precision = 2
+precision = 1
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "l_x_8000"
+id        = "l_x_8000_0"
 formula   = "linear"
 factor    = 0.000125
 offset    = 0.0
@@ -656,7 +646,7 @@ data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "psi_x_25600_14_5038"
+id        = "psi_x_25600_0_14_5038"
 formula   = "linear"
 factor    = 0.0005665546875
 offset    = 0.0
@@ -666,7 +656,7 @@ data_type = "int16_be"
 
 
 [[scaling]]
-id        = "psi_x_256_25600_14_5038_5"
+id        = "psi_x_256_0_25600_0_14_5038_5_0"
 formula   = "linear"
 factor    = 0.0290076
 offset    = 0.0
@@ -676,21 +666,21 @@ data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "rev_mi_x_2_66"
+id        = "rev_per_mi_x_2_66"
 formula   = "linear"
 factor    = 0.37593984962406013
 offset    = 0.0
-unit      = "rev/mi"
+unit      = "Rev Per Mi"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "x_32768_32768_1_100"
+id        = "x_32768_0_32768_0_1_0_100_0"
 formula   = "linear"
 factor    = 0.0030517578125
 offset    = 0.0
-unit      = "﹪"
+unit      = "%"
 precision = 2
 data_type = "uint16_be"
 
@@ -701,14 +691,14 @@ formula   = "linear"
 factor    = 0.022889
 offset    = 0.0
 unit      = "°C"
-precision = 2
+precision = 1
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "hz_x_312500"
+id        = "hz_inverse_divide_1_0_x_312500_0"
 formula   = "linear"
-factor    = 312500.0
+factor    = 1.0
 offset    = 0.0
 unit      = "Hz"
 precision = 2
@@ -716,29 +706,29 @@ data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "v_x_65535_5"
+id        = "v_x_65535_0_5_0"
 formula   = "linear"
 factor    = 7.629510948348211e-05
 offset    = 0.0
 unit      = "V"
-precision = 2
+precision = 3
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "bar_x_32768_24000_0_433"
+id        = "bar_x_32768_0_24000_0_0_433"
 formula   = "linear"
 factor    = 4.1666666666666665e-05
 offset    = 0.9323333333333332
 unit      = "bar"
-precision = 2
+precision = 3
 data_type = "int16_be"
 
 
 [[scaling]]
-id        = "hz_x_12500"
+id        = "hz_inverse_divide_1_0_x_12500_0"
 formula   = "linear"
-factor    = 12500.0
+factor    = 1.0
 offset    = 0.0
 unit      = "Hz"
 precision = 2
@@ -746,27 +736,27 @@ data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "x_33423_17_51_20"
+id        = "rshift_17_0_x_33423_0_51_0_20_0"
 formula   = "linear"
-factor    = 1.0
+factor    = 0.09999892290900736
 offset    = 0.0
-unit      = "﹪"
+unit      = "%"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "kpa_x_10"
+id        = "kpa_x_10_0"
 formula   = "linear"
 factor    = 10.0
 offset    = 0.0
-unit      = "kPa"
+unit      = "Kpa"
 precision = 2
 data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "psi_x_3404_24576_14_5038"
+id        = "psi_x_3404_0_24576_0_14_5038"
 formula   = "linear"
 factor    = 0.0005901611328125
 offset    = -2.00890849609375
@@ -776,11 +766,11 @@ data_type = "uint16_be"
 
 
 [[scaling]]
-id        = "x_200000_100"
+id        = "x_200000_0_100_0"
 formula   = "linear"
 factor    = 0.0005
 offset    = 0.0
-unit      = "﹪"
+unit      = "%"
 precision = 2
 data_type = "float32_be"
 
@@ -791,9 +781,9 @@ name      = "Boost Control - Requested Torque"
 unit      = ""
 type      = "static"
 address   = 0x00031314
-length    = 14
+length    = 7
 data_type = "uint16_be"
-scaling   = "nm_x_16000_80"
+scaling   = "nm_x_16000_0_80_0"
 
 
 [[axis]]
@@ -802,7 +792,7 @@ name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00031B24
-length    = 17
+length    = 8
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -813,9 +803,9 @@ name      = "REQ TORQUE"
 unit      = ""
 type      = "static"
 address   = 0x00031314
-length    = 14
+length    = 7
 data_type = "uint16_be"
-scaling   = "nm_x_16000_80"
+scaling   = "nm_x_16000_0_80_0"
 
 
 [[axis]]
@@ -826,16 +816,16 @@ type      = "static"
 address   = 0x0001205C
 length    = 20
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
-id        = "rpm_len24"
+id        = "rpm_len12"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00012070
-length    = 24
+length    = 12
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -846,31 +836,31 @@ name      = "Boost Error"
 unit      = ""
 type      = "static"
 address   = 0x00031366
-length    = 9
+length    = 4
 data_type = "int16_be"
-scaling   = "pa_x_25600_100000"
+scaling   = "pascal_x_25600_0_100000_0"
 
 
 [[axis]]
-id        = "boost_error_len9"
+id        = "boost_error_len4"
 name      = "Boost Error"
 unit      = ""
 type      = "static"
 address   = 0x00031378
-length    = 9
+length    = 4
 data_type = "int16_be"
-scaling   = "pa_x_25600_100000"
+scaling   = "pascal_x_25600_0_100000_0"
 
 
 [[axis]]
-id        = "boost_error_len9_v2"
+id        = "boost_error_len4_v2"
 name      = "Boost Error"
 unit      = ""
 type      = "static"
 address   = 0x0003138A
-length    = 9
+length    = 4
 data_type = "int16_be"
-scaling   = "pa_x_25600_100000"
+scaling   = "pascal_x_25600_0_100000_0"
 
 
 [[axis]]
@@ -879,9 +869,9 @@ name      = "Boost Control - Wastegate - IAT"
 unit      = ""
 type      = "static"
 address   = 0x00040E04
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "c_x_4096_10_40"
+scaling   = "c_x_4096_0_10_0_40_0"
 
 
 [[axis]]
@@ -890,9 +880,9 @@ name      = "Boost Control - Boost Targets/Limits - Requested Torque"
 unit      = ""
 type      = "static"
 address   = 0x0003140E
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "nm_x_16000_80"
+scaling   = "nm_x_16000_0_80_0"
 
 
 [[axis]]
@@ -901,18 +891,18 @@ name      = "Boost Control - Wastegate - RPM"
 unit      = ""
 type      = "static"
 address   = 0x00031B58
-length    = 19
+length    = 9
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
 
 [[axis]]
-id        = "boost_control_wastegate_rpm_len19"
+id        = "boost_control_wastegate_rpm_len9"
 name      = "Boost Control - Wastegate - RPM"
 unit      = ""
 type      = "static"
 address   = 0x00031BE6
-length    = 19
+length    = 9
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -923,40 +913,40 @@ name      = "Boost Control - Barometric Pressure"
 unit      = ""
 type      = "static"
 address   = 0x00031340
-length    = 10
+length    = 5
 data_type = "uint16_be"
-scaling   = "pa_x_25945_100000"
+scaling   = "pascal_x_25945_0_100000_0"
 
 
 [[axis]]
-id        = "boost_control_wastegate_rpm_len9"
+id        = "boost_control_wastegate_rpm_len4"
 name      = "Boost Control - Wastegate - RPM"
 unit      = ""
 type      = "static"
 address   = 0x00031B7E
-length    = 9
+length    = 4
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
 
 [[axis]]
-id        = "boost_control_barometric_pressure_len8"
+id        = "boost_control_barometric_pressure_len4"
 name      = "Boost Control - Barometric Pressure"
 unit      = ""
 type      = "static"
 address   = 0x00031442
-length    = 8
+length    = 4
 data_type = "uint16_be"
-scaling   = "pa_x_25945_100000"
+scaling   = "pascal_x_25945_0_100000_0"
 
 
 [[axis]]
-id        = "boost_control_wastegate_rpm_len9_v2"
+id        = "boost_control_wastegate_rpm_len4_v2"
 name      = "Boost Control - Wastegate - RPM"
 unit      = ""
 type      = "static"
 address   = 0x00031B46
-length    = 9
+length    = 4
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -967,9 +957,9 @@ name      = "Calculated Load"
 unit      = ""
 type      = "static"
 address   = 0x00038456
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "g_rev_x_65535_3_3"
+scaling   = "g_per_rev_x_65535_0_3_3"
 
 
 [[axis]]
@@ -978,7 +968,7 @@ name      = "Boost Control - RPM"
 unit      = ""
 type      = "static"
 address   = 0x0003842A
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -989,9 +979,9 @@ name      = "Coolant Temperature"
 unit      = ""
 type      = "static"
 address   = 0x00040E04
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "c_x_4096_10_40"
+scaling   = "c_x_4096_0_10_0_40_0"
 
 
 [[axis]]
@@ -1002,7 +992,7 @@ type      = "static"
 address   = 0x0003A308
 length    = 16
 data_type = "uint8"
-scaling   = "g_rev_x_0_0129"
+scaling   = "g_per_rev_x_0_0129"
 
 
 [[axis]]
@@ -1013,7 +1003,7 @@ type      = "static"
 address   = 0x0003A2F2
 length    = 22
 data_type = "uint8"
-scaling   = "rpm_x_25"
+scaling   = "rpm_x_25_0"
 
 
 [[axis]]
@@ -1022,62 +1012,62 @@ name      = "IAT"
 unit      = ""
 type      = "static"
 address   = 0x00039380
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "c_x_4096_10_40"
+scaling   = "c_x_4096_0_10_0_40_0"
 
 
 [[axis]]
-id        = "calculated_load_len16"
+id        = "calculated_load_len8"
 name      = "Calculated Load"
 unit      = ""
 type      = "static"
 address   = 0x000230F8
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "g_rev_x_65535_3_3"
+scaling   = "g_per_rev_x_65535_0_3_3"
 
 
 [[axis]]
-id        = "rpm_len22"
+id        = "rpm_len11"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x000230CC
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
 
 [[axis]]
-id        = "iat_len16"
+id        = "iat_len8"
 name      = "IAT"
 unit      = ""
 type      = "static"
 address   = 0x0003CABC
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "c_x_4096_10_40"
+scaling   = "c_x_4096_0_10_0_40_0"
 
 
 [[axis]]
-id        = "calculated_load_len16_v2"
+id        = "calculated_load_len8_v2"
 name      = "Calculated Load"
 unit      = ""
 type      = "static"
 address   = 0x0003CA9C
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "g_rev_x_65535_3_3"
+scaling   = "g_per_rev_x_65535_0_3_3"
 
 
 [[axis]]
-id        = "rpm_len22_v2"
+id        = "rpm_len11_v2"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0003CA70
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1088,20 +1078,20 @@ name      = "Barometric Pressure"
 unit      = ""
 type      = "static"
 address   = 0x00040E04
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "pa_x_25945_100000"
+scaling   = "pascal_x_25945_0_100000_0"
 
 
 [[axis]]
-id        = "coolant_temperature_len16"
+id        = "coolant_temperature_len8"
 name      = "Coolant Temperature"
 unit      = ""
 type      = "static"
 address   = 0x0002E744
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "c_x_4096_10_40"
+scaling   = "c_x_4096_0_10_0_40_0"
 
 
 [[axis]]
@@ -1112,7 +1102,7 @@ type      = "static"
 address   = 0x0001215C
 length    = 8
 data_type = "uint8"
-scaling   = "x_2_100"
+scaling   = "x_2_0_100_0"
 
 
 [[axis]]
@@ -1123,7 +1113,7 @@ type      = "static"
 address   = 0x00036010
 length    = 24
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
@@ -1134,7 +1124,7 @@ type      = "static"
 address   = 0x00035FF8
 length    = 24
 data_type = "uint8"
-scaling   = "rpm_x_2_100"
+scaling   = "rpm_x_2_0_100_0"
 
 
 [[axis]]
@@ -1145,18 +1135,18 @@ type      = "static"
 address   = 0x00036986
 length    = 8
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
-id        = "coolant_temperature_len16_v2"
+id        = "coolant_temperature_len8_v2"
 name      = "Coolant Temperature"
 unit      = ""
 type      = "static"
 address   = 0x00036966
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "c_x_4096_10_40"
+scaling   = "c_x_4096_0_10_0_40_0"
 
 
 [[axis]]
@@ -1167,7 +1157,7 @@ type      = "static"
 address   = 0x00056804
 length    = 16
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
@@ -1178,7 +1168,7 @@ type      = "static"
 address   = 0x000567F4
 length    = 16
 data_type = "uint8"
-scaling   = "rpm_x_2_100"
+scaling   = "rpm_x_2_0_100_0"
 
 
 [[axis]]
@@ -1189,7 +1179,7 @@ type      = "static"
 address   = 0x00049B0C
 length    = 16
 data_type = "uint8"
-scaling   = "rpm_x_2_100"
+scaling   = "rpm_x_2_0_100_0"
 
 
 [[axis]]
@@ -1200,7 +1190,7 @@ type      = "static"
 address   = 0x00049B1C
 length    = 16
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
@@ -1211,18 +1201,18 @@ type      = "static"
 address   = 0x00049B44
 length    = 4
 data_type = "uint8"
-scaling   = "rpm_x_2_100"
+scaling   = "rpm_x_2_0_100_0"
 
 
 [[axis]]
-id        = "coolant_temperature_len8"
+id        = "coolant_temperature_len4"
 name      = "Coolant Temperature"
 unit      = ""
 type      = "static"
 address   = 0x00049B34
-length    = 8
+length    = 4
 data_type = "uint16_be"
-scaling   = "c_x_4096_10_40"
+scaling   = "c_x_4096_0_10_0_40_0"
 
 
 [[axis]]
@@ -1231,7 +1221,7 @@ name      = "Developer - Sensors - Voltage"
 unit      = ""
 type      = "static"
 address   = 0x0006269E
-length    = 32
+length    = 16
 data_type = "uint16_be"
 scaling   = "v_x_13106_25"
 
@@ -1244,16 +1234,16 @@ type      = "static"
 address   = 0x00012286
 length    = 8
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
-id        = "rpm_len16"
+id        = "rpm_len8"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00012266
-length    = 16
+length    = 8
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1266,16 +1256,16 @@ type      = "static"
 address   = 0x000151FA
 length    = 8
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
-id        = "rpm_len16_v2"
+id        = "rpm_len8_v2"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x000151DA
-length    = 16
+length    = 8
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1288,16 +1278,16 @@ type      = "static"
 address   = 0x00014D38
 length    = 8
 data_type = "uint8"
-scaling   = "g_rev_x_0_01294"
+scaling   = "g_per_rev_x_0_01294"
 
 
 [[axis]]
-id        = "rpm_len16_v3"
+id        = "rpm_len8_v3"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00014D18
-length    = 16
+length    = 8
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1310,7 +1300,7 @@ type      = "static"
 address   = 0x00014D10
 length    = 8
 data_type = "uint8"
-scaling   = "c_x_50"
+scaling   = "c_x_50_0"
 
 
 [[axis]]
@@ -1321,27 +1311,27 @@ type      = "static"
 address   = 0x00014D08
 length    = 8
 data_type = "uint8"
-scaling   = "c_x_50"
+scaling   = "c_x_50_0"
 
 
 [[axis]]
-id        = "calculated_load_len16_v3"
+id        = "calculated_load_len8_v3"
 name      = "Calculated Load"
 unit      = ""
 type      = "static"
 address   = 0x00021D5A
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "g_rev_x_65535_3_3"
+scaling   = "g_per_rev_x_65535_0_3_3"
 
 
 [[axis]]
-id        = "rpm_len22_v3"
+id        = "rpm_len11_v3"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00021D2E
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1354,16 +1344,16 @@ type      = "static"
 address   = 0x000452C4
 length    = 16
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
-id        = "rpm_len18"
+id        = "rpm_len9"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x000452A0
-length    = 18
+length    = 9
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1376,7 +1366,7 @@ type      = "static"
 address   = 0x00045290
 length    = 16
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
@@ -1387,7 +1377,7 @@ type      = "static"
 address   = 0x000452C4
 length    = 16
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
@@ -1398,16 +1388,16 @@ type      = "static"
 address   = 0x00044288
 length    = 16
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
-id        = "rpm_len20"
+id        = "rpm_len10"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00044298
-length    = 20
+length    = 10
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1420,7 +1410,7 @@ type      = "static"
 address   = 0x000442C0
 length    = 16
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
@@ -1440,51 +1430,51 @@ name      = "Throttle - Requested Torque - Accelerator Position"
 unit      = ""
 type      = "static"
 address   = 0x00024534
-length    = 20
+length    = 10
 data_type = "uint16_be"
-scaling   = "x_65535_100"
+scaling   = "x_65535_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len21"
+id        = "rpm_len10_v2"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0002450A
-length    = 21
+length    = 10
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
 
 [[axis]]
-id        = "throttle_requested_torque_accelerator_position_len20"
+id        = "throttle_requested_torque_accelerator_position_len10"
 name      = "Throttle - Requested Torque - Accelerator Position"
 unit      = ""
 type      = "static"
 address   = 0x00025936
-length    = 20
+length    = 10
 data_type = "uint16_be"
-scaling   = "x_65535_100"
+scaling   = "x_65535_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len21_v2"
+id        = "rpm_len10_v3"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0002590C
-length    = 21
+length    = 10
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
 
 [[axis]]
-id        = "rpm_len21_v3"
+id        = "rpm_len10_v4"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00023F8C
-length    = 21
+length    = 10
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1497,16 +1487,16 @@ type      = "static"
 address   = 0x00023B54
 length    = 24
 data_type = "uint8"
-scaling   = "x_255_100"
+scaling   = "x_255_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len22_v4"
+id        = "rpm_len11_v4"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00023B28
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1519,16 +1509,16 @@ type      = "static"
 address   = 0x00027466
 length    = 24
 data_type = "uint8"
-scaling   = "x_255_100"
+scaling   = "x_255_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len22_v5"
+id        = "rpm_len11_v5"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00027422
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1541,16 +1531,16 @@ type      = "static"
 address   = 0x0002744E
 length    = 24
 data_type = "uint8"
-scaling   = "x_255_100"
+scaling   = "x_255_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len22_v6"
+id        = "rpm_len11_v6"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x000273F6
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1563,16 +1553,16 @@ type      = "static"
 address   = 0x00028530
 length    = 24
 data_type = "uint8"
-scaling   = "x_255_100"
+scaling   = "x_255_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len22_v7"
+id        = "rpm_len11_v7"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00028504
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1585,16 +1575,16 @@ type      = "static"
 address   = 0x00028574
 length    = 24
 data_type = "uint8"
-scaling   = "x_255_100"
+scaling   = "x_255_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len22_v8"
+id        = "rpm_len11_v8"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00028548
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1607,104 +1597,104 @@ type      = "static"
 address   = 0x000236F0
 length    = 24
 data_type = "uint8"
-scaling   = "x_255_100"
+scaling   = "x_255_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len22_v9"
+id        = "rpm_len11_v9"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x000236C4
-length    = 22
-data_type = "uint16_be"
-scaling   = "rpm_x_5_12"
-
-
-[[axis]]
-id        = "rpm_len11"
-name      = "RPM"
-unit      = ""
-type      = "static"
-address   = 0x0002431E
 length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
 
 [[axis]]
-id        = "calculated_load_len16_v4"
+id        = "rpm_len5"
+name      = "RPM"
+unit      = ""
+type      = "static"
+address   = 0x0002431E
+length    = 5
+data_type = "uint16_be"
+scaling   = "rpm_x_5_12"
+
+
+[[axis]]
+id        = "calculated_load_len8_v4"
 name      = "Calculated Load"
 unit      = ""
 type      = "static"
 address   = 0x000227A6
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "g_rev_x_65535_3_3"
+scaling   = "g_per_rev_x_65535_0_3_3"
 
 
 [[axis]]
-id        = "rpm_len21_v4"
+id        = "rpm_len10_v5"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x000227C6
-length    = 21
+length    = 10
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
 
 [[axis]]
-id        = "rpm_len21_v5"
+id        = "rpm_len10_v6"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0002277C
-length    = 21
+length    = 10
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
 
 [[axis]]
-id        = "calculated_load_len16_v5"
+id        = "calculated_load_len8_v5"
 name      = "Calculated Load"
 unit      = ""
 type      = "static"
 address   = 0x0002F9BA
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "g_rev_x_65535_3_3"
+scaling   = "g_per_rev_x_65535_0_3_3"
 
 
 [[axis]]
-id        = "rpm_len21_v6"
+id        = "rpm_len10_v7"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0002F990
-length    = 21
+length    = 10
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
 
 [[axis]]
-id        = "calculated_load_len16_v6"
+id        = "calculated_load_len8_v6"
 name      = "Calculated Load"
 unit      = ""
 type      = "static"
 address   = 0x0002F970
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "g_rev_x_65535_3_3"
+scaling   = "g_per_rev_x_65535_0_3_3"
 
 
 [[axis]]
-id        = "rpm_len21_v7"
+id        = "rpm_len10_v8"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0002F946
-length    = 21
+length    = 10
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1717,7 +1707,7 @@ type      = "static"
 address   = 0x0002FC8B
 length    = 17
 data_type = "uint8"
-scaling   = "x_16"
+scaling   = "x_16_0"
 
 
 [[axis]]
@@ -1728,7 +1718,7 @@ type      = "static"
 address   = 0x0002FC7A
 length    = 17
 data_type = "uint8"
-scaling   = "x_16"
+scaling   = "x_16_0"
 
 
 [[axis]]
@@ -1737,7 +1727,7 @@ name      = "Timing - Compensation - Tip-In - TPS Delta Raw"
 unit      = ""
 type      = "static"
 address   = 0x00038B7A
-length    = 8
+length    = 4
 data_type = "uint16_be"
 scaling   = ""
 
@@ -1750,7 +1740,7 @@ type      = "static"
 address   = 0x0002C419
 length    = 16
 data_type = "uint8"
-scaling   = "c_x_50"
+scaling   = "c_x_50_0"
 
 
 [[axis]]
@@ -1761,7 +1751,7 @@ type      = "static"
 address   = 0x0002C404
 length    = 21
 data_type = "uint8"
-scaling   = "rpm_x_2_100"
+scaling   = "rpm_x_2_0_100_0"
 
 
 [[axis]]
@@ -1770,9 +1760,9 @@ name      = "Fuel - Fuel Pressure"
 unit      = ""
 type      = "static"
 address   = 0x00040F1A
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "kpa_x_61_1000_10"
+scaling   = "kpa_x_61_0_1000_0_10_0"
 
 
 [[axis]]
@@ -1781,29 +1771,29 @@ name      = "Fuel - Pressure - Fuel Pressure OBD"
 unit      = ""
 type      = "static"
 address   = 0x00040F1A
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "kpa_x_63963_20_10"
+scaling   = "kpa_rshift_20_0_x_63963_0_10_0"
 
 
 [[axis]]
-id        = "fuel_pressure_fuel_pressure_obd_len16"
+id        = "fuel_pressure_fuel_pressure_obd_len8"
 name      = "Fuel - Pressure - Fuel Pressure OBD"
 unit      = ""
 type      = "static"
 address   = 0x00016718
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "kpa_x_63963_20_10"
+scaling   = "kpa_rshift_20_0_x_63963_0_10_0"
 
 
 [[axis]]
-id        = "rpm_len21_v8"
+id        = "rpm_len10_v9"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0004FC98
-length    = 21
+length    = 10
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1816,16 +1806,16 @@ type      = "static"
 address   = 0x0004F860
 length    = 24
 data_type = "uint8"
-scaling   = "x_255_100"
+scaling   = "x_255_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len22_v10"
+id        = "rpm_len11_v10"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0004F834
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1838,16 +1828,16 @@ type      = "static"
 address   = 0x00051D62
 length    = 24
 data_type = "uint8"
-scaling   = "x_255_100"
+scaling   = "x_255_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len22_v11"
+id        = "rpm_len11_v11"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00051D1E
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1860,16 +1850,16 @@ type      = "static"
 address   = 0x00051D4A
 length    = 24
 data_type = "uint8"
-scaling   = "x_255_100"
+scaling   = "x_255_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len22_v12"
+id        = "rpm_len11_v12"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00051CF2
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1882,16 +1872,16 @@ type      = "static"
 address   = 0x00052E2C
 length    = 24
 data_type = "uint8"
-scaling   = "x_255_100"
+scaling   = "x_255_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len22_v13"
+id        = "rpm_len11_v13"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00052E00
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1904,16 +1894,16 @@ type      = "static"
 address   = 0x00052E70
 length    = 24
 data_type = "uint8"
-scaling   = "x_255_100"
+scaling   = "x_255_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len22_v14"
+id        = "rpm_len11_v14"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00052E44
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1926,16 +1916,16 @@ type      = "static"
 address   = 0x0004F3FC
 length    = 24
 data_type = "uint8"
-scaling   = "x_255_100"
+scaling   = "x_255_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len22_v15"
+id        = "rpm_len11_v15"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0004F3D0
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1948,7 +1938,7 @@ type      = "static"
 address   = 0x00036BA0
 length    = 16
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
@@ -1959,7 +1949,7 @@ type      = "static"
 address   = 0x00036B90
 length    = 16
 data_type = "uint8"
-scaling   = "rpm_x_2_100"
+scaling   = "rpm_x_2_0_100_0"
 
 
 [[axis]]
@@ -1970,16 +1960,16 @@ type      = "static"
 address   = 0x00017CCE
 length    = 16
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
-id        = "fueling_closed_loop_rpm_len16_v4"
+id        = "fueling_closed_loop_rpm_len8"
 name      = "Fueling - Closed Loop - RPM"
 unit      = ""
 type      = "static"
 address   = 0x00017CAE
-length    = 16
+length    = 8
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1992,7 +1982,7 @@ type      = "static"
 address   = 0x00017CDE
 length    = 8
 data_type = "uint8"
-scaling   = "x_16"
+scaling   = "x_16_0"
 
 
 [[axis]]
@@ -2003,7 +1993,7 @@ type      = "static"
 address   = 0x00021E79
 length    = 8
 data_type = "uint8"
-scaling   = "g_rev_x_0_0129"
+scaling   = "g_per_rev_x_0_0129"
 
 
 [[axis]]
@@ -2014,93 +2004,93 @@ type      = "static"
 address   = 0x00040D94
 length    = 16
 data_type = "uint8"
-scaling   = "rpm_x_10_2_40_1_1_1_4_5_12_3"
+scaling   = "rpm_lshift_4_0_lshift_1_0_lshift_1_0_rshift_2_0_x_10_0_40_0_1_0_5_12_3_0"
 
 
 [[axis]]
-id        = "throttle_requested_torque_accelerator_position_len20_v2"
+id        = "throttle_requested_torque_accelerator_position_len10_v2"
 name      = "Throttle - Requested Torque - Accelerator Position"
 unit      = ""
 type      = "static"
 address   = 0x0004FD56
-length    = 20
+length    = 10
 data_type = "uint16_be"
-scaling   = "x_65535_100"
+scaling   = "x_65535_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len21_v9"
+id        = "rpm_len10_v10"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0004FD2C
-length    = 21
+length    = 10
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
 
 [[axis]]
-id        = "throttle_requested_torque_accelerator_position_len20_v3"
+id        = "throttle_requested_torque_accelerator_position_len10_v3"
 name      = "Throttle - Requested Torque - Accelerator Position"
 unit      = ""
 type      = "static"
 address   = 0x00051158
-length    = 20
+length    = 10
 data_type = "uint16_be"
-scaling   = "x_65535_100"
+scaling   = "x_65535_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len21_v10"
+id        = "rpm_len10_v11"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0005112E
-length    = 21
+length    = 10
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
 
 [[axis]]
-id        = "rpm_len16_v4"
+id        = "rpm_len16"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0002A910
 length    = 16
 data_type = "uint8"
-scaling   = "rpm_x_25"
+scaling   = "rpm_x_25_0"
 
 
 [[axis]]
-id        = "rpm_len16_v5"
+id        = "rpm_len16_v2"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0002A920
 length    = 16
 data_type = "uint8"
-scaling   = "rpm_x_25"
+scaling   = "rpm_x_25_0"
 
 
 [[axis]]
-id        = "rpm_len8"
+id        = "rpm_len4"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x000191B0
-length    = 8
+length    = 4
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
 
 [[axis]]
-id        = "rpm_len8_v2"
+id        = "rpm_len4_v2"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x000191C0
-length    = 8
+length    = 4
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2113,16 +2103,16 @@ type      = "static"
 address   = 0x0001205C
 length    = 20
 data_type = "uint8"
-scaling   = "g_rev_x_100"
+scaling   = "x_100_0"
 
 
 [[axis]]
-id        = "fueling_closed_loop_calculated_load_len24"
+id        = "fueling_closed_loop_calculated_load_len12"
 name      = "Fueling - Closed Loop - Calculated Load"
 unit      = ""
 type      = "static"
 address   = 0x00012070
-length    = 24
+length    = 12
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2135,7 +2125,7 @@ type      = "static"
 address   = 0x00016C0C
 length    = 16
 data_type = "uint8"
-scaling   = "x_16"
+scaling   = "x_16_0"
 
 
 [[axis]]
@@ -2146,7 +2136,7 @@ type      = "static"
 address   = 0x0002437C
 length    = 8
 data_type = "uint8"
-scaling   = "rpm_x_2_100"
+scaling   = "rpm_x_2_0_100_0"
 
 
 [[axis]]
@@ -2157,7 +2147,7 @@ type      = "static"
 address   = 0x00024384
 length    = 8
 data_type = "uint8"
-scaling   = "c_x_50"
+scaling   = "c_x_50_0"
 
 
 [[axis]]
@@ -2166,7 +2156,7 @@ name      = "Engine - RPM"
 unit      = ""
 type      = "static"
 address   = 0x00026BD2
-length    = 10
+length    = 5
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2183,45 +2173,45 @@ scaling   = ""
 
 
 [[axis]]
-id        = "throttle_requested_torque_accelerator_position_len6"
+id        = "throttle_requested_torque_accelerator_position_len3"
 name      = "Throttle - Requested Torque - Accelerator Position"
 unit      = ""
 type      = "static"
 address   = 0x0002942A
-length    = 6
+length    = 3
 data_type = "uint16_be"
-scaling   = "x_65535_100"
+scaling   = "x_65535_0_100_0"
 
 
 [[axis]]
-id        = "throttle_requested_torque_accelerator_position_len6_v2"
+id        = "throttle_requested_torque_accelerator_position_len3_v2"
 name      = "Throttle - Requested Torque - Accelerator Position"
 unit      = ""
 type      = "static"
 address   = 0x00029412
-length    = 6
+length    = 3
 data_type = "uint16_be"
-scaling   = "x_65535_100"
+scaling   = "x_65535_0_100_0"
 
 
 [[axis]]
-id        = "throttle_requested_torque_accelerator_position_len6_v3"
+id        = "throttle_requested_torque_accelerator_position_len3_v3"
 name      = "Throttle - Requested Torque - Accelerator Position"
 unit      = ""
 type      = "static"
 address   = 0x00026BC0
-length    = 6
+length    = 3
 data_type = "uint16_be"
-scaling   = "x_65535_100"
+scaling   = "x_65535_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len10"
+id        = "rpm_len5_v2"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x000269F8
-length    = 10
+length    = 5
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2238,23 +2228,23 @@ scaling   = ""
 
 
 [[axis]]
-id        = "throttle_requested_torque_accelerator_position_len6_v4"
+id        = "throttle_requested_torque_accelerator_position_len3_v4"
 name      = "Throttle - Requested Torque - Accelerator Position"
 unit      = ""
 type      = "static"
 address   = 0x00026BA8
-length    = 6
+length    = 3
 data_type = "uint16_be"
-scaling   = "x_65535_100"
+scaling   = "x_65535_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len14"
+id        = "rpm_len7"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x000244B0
-length    = 14
+length    = 7
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2267,7 +2257,7 @@ type      = "static"
 address   = 0x000244AA
 length    = 6
 data_type = "uint8"
-scaling   = "x_16"
+scaling   = "x_16_0"
 
 
 [[axis]]
@@ -2278,7 +2268,7 @@ type      = "static"
 address   = 0x000133A2
 length    = 20
 data_type = "uint8"
-scaling   = "x_2_100"
+scaling   = "x_2_0_100_0"
 
 
 [[axis]]
@@ -2287,9 +2277,9 @@ name      = "Scaled IPW Command"
 unit      = ""
 type      = "static"
 address   = 0x000133B6
-length    = 9
+length    = 4
 data_type = "uint16_be"
-scaling   = "ms_x_13107_20_125_3200_100"
+scaling   = "millisecond_rshift_20_0_x_13107_0_125_0_3200_0_100_0"
 
 
 [[axis]]
@@ -2298,9 +2288,9 @@ name      = "EGR Steps"
 unit      = ""
 type      = "static"
 address   = 0x00034DBE
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "x_7"
+scaling   = "rshift_7_0_x"
 
 
 [[axis]]
@@ -2311,18 +2301,18 @@ type      = "static"
 address   = 0x00034DDE
 length    = 12
 data_type = "uint8"
-scaling   = "bar_x_99"
+scaling   = "bar_x_99_0"
 
 
 [[axis]]
-id        = "calculated_load_len16_v7"
+id        = "calculated_load_len16"
 name      = "Calculated Load"
 unit      = ""
 type      = "static"
 address   = 0x00035CDC
 length    = 16
 data_type = "uint8"
-scaling   = "g_rev_x_0_01294"
+scaling   = "g_per_rev_x_0_01294"
 
 
 [[axis]]
@@ -2331,7 +2321,7 @@ name      = "Airflow - EGR - Manifold Flow Model - RPM"
 unit      = ""
 type      = "static"
 address   = 0x00035CBC
-length    = 16
+length    = 8
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2342,9 +2332,9 @@ name      = "Sensors - Barometric Pressure"
 unit      = ""
 type      = "static"
 address   = 0x00035B7C
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "psi_x_8_0_145038"
+scaling   = "psi_rshift_8_0_x_0_145038"
 
 
 [[axis]]
@@ -2353,18 +2343,18 @@ name      = "Airflow - Turbo - Manifold Absolute Pressure"
 unit      = ""
 type      = "static"
 address   = 0x00033564
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "psi_x_24576_14_5038"
+scaling   = "psi_x_24576_0_14_5038"
 
 
 [[axis]]
-id        = "engine_rpm_len22"
+id        = "engine_rpm_len11"
 name      = "Engine - RPM"
 unit      = ""
 type      = "static"
 address   = 0x00033538
-length    = 22
+length    = 11
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2377,7 +2367,7 @@ type      = "static"
 address   = 0x00049E3A
 length    = 20
 data_type = "uint8"
-scaling   = "rpm_x_2_100"
+scaling   = "rpm_x_2_0_100_0"
 
 
 [[axis]]
@@ -2386,18 +2376,18 @@ name      = "Fuel - Injector Pulse Width"
 unit      = ""
 type      = "static"
 address   = 0x00049BAA
-length    = 16
+length    = 8
 data_type = "uint16_be"
-scaling   = "ms_x_13107_20_125_3200_100"
+scaling   = "millisecond_rshift_20_0_x_13107_0_125_0_3200_0_100_0"
 
 
 [[axis]]
-id        = "rpm_len16_v6"
+id        = "rpm_len8_v4"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x000497BC
-length    = 16
+length    = 8
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2410,7 +2400,7 @@ type      = "static"
 address   = 0x000497DC
 length    = 16
 data_type = "uint8"
-scaling   = "v_x_20_256"
+scaling   = "v_x_20_0_256_0"
 
 
 [[axis]]
@@ -2421,7 +2411,7 @@ type      = "static"
 address   = 0x00049BDA
 length    = 16
 data_type = "uint8"
-scaling   = "x_2_100"
+scaling   = "x_2_0_100_0"
 
 
 [[axis]]
@@ -2436,34 +2426,34 @@ scaling   = ""
 
 
 [[axis]]
-id        = "developer_sensors_voltage_len32"
+id        = "developer_sensors_voltage_len16"
 name      = "Developer - Sensors - Voltage"
 unit      = ""
 type      = "static"
 address   = 0x00062612
-length    = 32
+length    = 16
 data_type = "uint16_be"
 scaling   = "v_x_13106_25"
 
 
 [[axis]]
-id        = "iat_len12"
+id        = "iat_len6"
 name      = "IAT"
 unit      = ""
 type      = "static"
 address   = 0x0002601E
-length    = 12
+length    = 6
 data_type = "uint16_be"
-scaling   = "c_x_4096_10_40"
+scaling   = "c_x_4096_0_10_0_40_0"
 
 
 [[axis]]
-id        = "rpm_len14_v2"
+id        = "rpm_len7_v2"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00026002
-length    = 14
+length    = 7
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2474,29 +2464,29 @@ name      = "Sensors - Coolant Temperature"
 unit      = ""
 type      = "static"
 address   = 0x0003CDD4
-length    = 9
+length    = 4
 data_type = "uint16_be"
-scaling   = "c_x_4096_10_40"
+scaling   = "c_x_4096_0_10_0_40_0"
 
 
 [[axis]]
-id        = "rpm_len16_v7"
+id        = "rpm_len8_v5"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00031B90
-length    = 16
+length    = 8
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
 
 [[axis]]
-id        = "engine_rpm_len16"
+id        = "engine_rpm_len8"
 name      = "Engine - RPM"
 unit      = ""
 type      = "static"
 address   = 0x00015562
-length    = 16
+length    = 8
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2507,9 +2497,9 @@ name      = "Sensors - Manifold Absolute Pressure - Voltage (5V)"
 unit      = ""
 type      = "static"
 address   = 0x000630D8
-length    = 32
+length    = 16
 data_type = "uint16_be"
-scaling   = "v_x_65535_5"
+scaling   = "v_x_65535_0_5_0"
 
 
 [[axis]]
@@ -2520,49 +2510,49 @@ type      = "static"
 address   = 0x00049BDA
 length    = 16
 data_type = "uint8"
-scaling   = "rpm_x_2_100"
+scaling   = "rpm_x_2_0_100_0"
 
 
 [[axis]]
-id        = "none_len8"
+id        = "none_len4"
 name      = "None"
 unit      = ""
 type      = "static"
 address   = 0x00049BCA
-length    = 8
+length    = 4
 data_type = "uint16_be"
 scaling   = ""
 
 
 [[axis]]
-id        = "calculated_load_len16_v8"
+id        = "calculated_load_len16_v2"
 name      = "Calculated Load"
 unit      = ""
 type      = "static"
 address   = 0x00034F8A
 length    = 16
 data_type = "uint8"
-scaling   = "g_rev_x_0_0129"
+scaling   = "g_per_rev_x_0_0129"
 
 
 [[axis]]
-id        = "rpm_len16_v8"
+id        = "rpm_len8_v6"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00034F6A
-length    = 16
+length    = 8
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
 
 [[axis]]
-id        = "engine_rpm_len10"
+id        = "engine_rpm_len5"
 name      = "Engine - RPM"
 unit      = ""
 type      = "static"
 address   = 0x00026CB4
-length    = 10
+length    = 5
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2579,12 +2569,12 @@ scaling   = ""
 
 
 [[axis]]
-id        = "engine_rpm_len10_v2"
+id        = "engine_rpm_len5_v2"
 name      = "Engine - RPM"
 unit      = ""
 type      = "static"
 address   = 0x00026D96
-length    = 10
+length    = 5
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2601,12 +2591,12 @@ scaling   = ""
 
 
 [[axis]]
-id        = "engine_rpm_len10_v3"
+id        = "engine_rpm_len5_v3"
 name      = "Engine - RPM"
 unit      = ""
 type      = "static"
 address   = 0x00026E78
-length    = 10
+length    = 5
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2623,12 +2613,12 @@ scaling   = ""
 
 
 [[axis]]
-id        = "rpm_len10_v2"
+id        = "rpm_len5_v3"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0002684E
-length    = 10
+length    = 5
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2645,12 +2635,12 @@ scaling   = ""
 
 
 [[axis]]
-id        = "rpm_len10_v3"
+id        = "rpm_len5_v4"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x000266A4
-length    = 10
+length    = 5
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2667,12 +2657,12 @@ scaling   = ""
 
 
 [[axis]]
-id        = "rpm_len10_v4"
+id        = "rpm_len5_v5"
 name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x000264FA
-length    = 10
+length    = 5
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2695,7 +2685,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00031632
 data_type              = "uint16_be"
-scaling                = "x_256"
+scaling                = "x_256_0"
 axis_x                 = "boost_control_requested_torque"
 axis_y                 = "rpm"
 emissions_relevant     = false
@@ -2709,7 +2699,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00031456
 data_type              = "uint16_be"
-scaling                = "x_256"
+scaling                = "x_256_0"
 axis_x                 = "req_torque"
 axis_y                 = "rpm"
 emissions_relevant     = false
@@ -2723,9 +2713,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00018F92
 data_type              = "uint8"
-scaling                = "afreq_x_256_1"
+scaling                = "afr_x_256_0_1_0"
 axis_x                 = "calc_load"
-axis_y                 = "rpm_len24"
+axis_y                 = "rpm_len12"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2737,9 +2727,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00018DB2
 data_type              = "uint8"
-scaling                = "afreq_x_256_1"
+scaling                = "afr_x_256_0_1_0"
 axis_x                 = "calc_load"
-axis_y                 = "rpm_len24"
+axis_y                 = "rpm_len12"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2751,9 +2741,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0001AD20
 data_type              = "uint8"
-scaling                = "afreq_x_256_1"
+scaling                = "afr_x_256_0_1_0"
 axis_x                 = "calc_load"
-axis_y                 = "rpm_len24"
+axis_y                 = "rpm_len12"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2765,9 +2755,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0001AF00
 data_type              = "uint8"
-scaling                = "afreq_x_256_1"
+scaling                = "afr_x_256_0_1_0"
 axis_x                 = "calc_load"
-axis_y                 = "rpm_len24"
+axis_y                 = "rpm_len12"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2779,9 +2769,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00013DB5
 data_type              = "uint8"
-scaling                = "afreq_x_256_1"
+scaling                = "afr_x_256_0_1_0"
 axis_x                 = "calc_load"
-axis_y                 = "rpm_len24"
+axis_y                 = "rpm_len12"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2793,7 +2783,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00031330
 data_type              = "uint8"
-scaling                = "x_128_128_100"
+scaling                = "x_128_0_128_0_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2805,7 +2795,7 @@ category               = ""
 dimensions             = 1
 address                = 0x000313CC
 data_type              = "int16_be"
-scaling                = "x_256"
+scaling                = "x_256_0"
 axis_x                 = "boost_error"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -2818,8 +2808,8 @@ category               = ""
 dimensions             = 1
 address                = 0x000313DE
 data_type              = "int16_be"
-scaling                = "x_256"
-axis_x                 = "boost_error_len9"
+scaling                = "x_256_0"
+axis_x                 = "boost_error_len4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2831,8 +2821,8 @@ category               = ""
 dimensions             = 1
 address                = 0x000313F0
 data_type              = "int16_be"
-scaling                = "x_256"
-axis_x                 = "boost_error_len9_v2"
+scaling                = "x_256_0"
+axis_x                 = "boost_error_len4_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2844,7 +2834,7 @@ category               = ""
 dimensions             = 1
 address                = 0x000313AC
 data_type              = "uint8"
-scaling                = "x_128_128_100"
+scaling                = "x_128_0_128_0_100_0"
 axis_x                 = "boost_control_wastegate_iat"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -2857,7 +2847,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003139C
 data_type              = "uint8"
-scaling                = "x_128_128_100"
+scaling                = "x_128_0_128_0_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2869,7 +2859,7 @@ category               = ""
 dimensions             = 1
 address                = 0x000313BC
 data_type              = "uint8"
-scaling                = "x_128_128_100"
+scaling                = "x_128_0_128_0_100_0"
 axis_x                 = "boost_control_wastegate_iat"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -2882,7 +2872,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00031868
 data_type              = "uint16_be"
-scaling                = "bar_x_24000_1"
+scaling                = "bar_x_24000_0_1_0"
 axis_x                 = "boost_control_boost_targets_limits_requested_torque"
 axis_y                 = "boost_control_wastegate_rpm"
 emissions_relevant     = false
@@ -2896,8 +2886,8 @@ category               = ""
 dimensions             = 1
 address                = 0x00031BD2
 data_type              = "uint8"
-scaling                = "bar_x_89_99"
-axis_x                 = "boost_control_wastegate_rpm_len19"
+scaling                = "bar_x_89_0_99_0"
+axis_x                 = "boost_control_wastegate_rpm_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2909,7 +2899,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00031431
 data_type              = "uint8"
-scaling                = "x_128_128_100"
+scaling                = "x_128_0_128_0_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2921,9 +2911,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0003180E
 data_type              = "uint8"
-scaling                = "x_128_128_100"
+scaling                = "x_128_0_128_0_100_0"
 axis_x                 = "boost_control_barometric_pressure"
-axis_y                 = "boost_control_wastegate_rpm_len9"
+axis_y                 = "boost_control_wastegate_rpm_len4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2935,9 +2925,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00031AC8
 data_type              = "uint8"
-scaling                = "x_128_128_100"
-axis_x                 = "boost_control_barometric_pressure_len8"
-axis_y                 = "boost_control_wastegate_rpm_len9_v2"
+scaling                = "x_128_0_128_0_100_0"
+axis_x                 = "boost_control_barometric_pressure_len4"
+axis_y                 = "boost_control_wastegate_rpm_len4_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -2949,7 +2939,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00038476
 data_type              = "uint8"
-scaling                = "x_0_5_16"
+scaling                = "deg_x_0_5_16_0"
 axis_x                 = "calculated_load"
 axis_y                 = "boost_control_rpm"
 emissions_relevant     = false
@@ -2963,7 +2953,7 @@ category               = ""
 dimensions             = 2
 address                = 0x000385D6
 data_type              = "uint8"
-scaling                = "x_0_5_16"
+scaling                = "deg_x_0_5_16_0"
 axis_x                 = "calculated_load"
 axis_y                 = "boost_control_rpm"
 emissions_relevant     = false
@@ -2977,7 +2967,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00038736
 data_type              = "uint8"
-scaling                = "x_0_5_16"
+scaling                = "deg_x_0_5_16_0"
 axis_x                 = "calculated_load"
 axis_y                 = "boost_control_rpm"
 emissions_relevant     = false
@@ -2991,7 +2981,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00038896
 data_type              = "uint8"
-scaling                = "x_0_5_16"
+scaling                = "deg_x_0_5_16_0"
 axis_x                 = "calculated_load"
 axis_y                 = "boost_control_rpm"
 emissions_relevant     = false
@@ -3005,7 +2995,7 @@ category               = ""
 dimensions             = 1
 address                = 0x0003B1A2
 data_type              = "uint16_be"
-scaling                = "x_10"
+scaling                = "deg_x_10_0"
 axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3018,7 +3008,7 @@ category               = ""
 dimensions             = 2
 address                = 0x0003ABE2
 data_type              = "uint16_be"
-scaling                = "x_100"
+scaling                = "x_100_0"
 axis_x                 = "timing_compensation_calculated_load"
 axis_y                 = "timing_compensation_rpm"
 emissions_relevant     = false
@@ -3032,7 +3022,7 @@ category               = ""
 dimensions             = 1
 address                = 0x0003B182
 data_type              = "uint16_be"
-scaling                = "x_10"
+scaling                = "deg_x_10_0"
 axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3045,7 +3035,7 @@ category               = ""
 dimensions             = 2
 address                = 0x0003A922
 data_type              = "uint16_be"
-scaling                = "x_100"
+scaling                = "x_100_0"
 axis_x                 = "timing_compensation_calculated_load"
 axis_y                 = "timing_compensation_rpm"
 emissions_relevant     = false
@@ -3059,7 +3049,7 @@ category               = ""
 dimensions             = 1
 address                = 0x000393A0
 data_type              = "int8"
-scaling                = "x_0_5"
+scaling                = "deg_x_0_5"
 axis_x                 = "iat"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3072,9 +3062,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00040A57
 data_type              = "uint8"
-scaling                = "x_128_128_100"
-axis_x                 = "calculated_load_len16"
-axis_y                 = "rpm_len22"
+scaling                = "x_128_0_128_0_100_0"
+axis_x                 = "calculated_load_len8"
+axis_y                 = "rpm_len11"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3087,7 +3077,7 @@ dimensions             = 1
 address                = 0x0003CADC
 data_type              = "uint16_be"
 scaling                = ""
-axis_x                 = "iat_len16"
+axis_x                 = "iat_len8"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3099,9 +3089,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0003C710
 data_type              = "uint8"
-scaling                = "x_128_128_100"
-axis_x                 = "calculated_load_len16_v2"
-axis_y                 = "rpm_len22_v2"
+scaling                = "x_128_0_128_0_100_0"
+axis_x                 = "calculated_load_len8_v2"
+axis_y                 = "rpm_len11_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3218,7 +3208,7 @@ address                = 0x0002ED64
 data_type              = "uint16_be"
 scaling                = "rpm_x_5_12"
 axis_x                 = "barometric_pressure"
-axis_y                 = "coolant_temperature_len16"
+axis_y                 = "coolant_temperature_len8"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3232,7 +3222,7 @@ address                = 0x0002EB64
 data_type              = "uint16_be"
 scaling                = "rpm_x_5_12"
 axis_x                 = "barometric_pressure"
-axis_y                 = "coolant_temperature_len16"
+axis_y                 = "coolant_temperature_len8"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3244,7 +3234,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00012164
 data_type              = "uint16_be"
-scaling                = "x_1260_1"
+scaling                = "deg_x_1260_0_1_0"
 axis_x                 = "coolant_temperature"
 axis_y                 = "fueling_injectors_rpm"
 emissions_relevant     = false
@@ -3258,7 +3248,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00036028
 data_type              = "uint8"
-scaling                = "afreq_x_256_0_5"
+scaling                = "afr_x_256_0_0_5"
 axis_x                 = "fueling_closed_loop_rpm_fuel"
 axis_y                 = "fueling_closed_loop_rpm"
 emissions_relevant     = false
@@ -3272,9 +3262,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00036A8E
 data_type              = "uint16_be"
-scaling                = "x_32768_0_00034"
+scaling                = "lambda_x_32768_0_0_00034"
 axis_x                 = "fueling_closed_loop_calculated_load"
-axis_y                 = "coolant_temperature_len16_v2"
+axis_y                 = "coolant_temperature_len8_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3286,9 +3276,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0003698E
 data_type              = "uint16_be"
-scaling                = "x_32768_0_00034"
+scaling                = "lambda_x_32768_0_0_00034"
 axis_x                 = "fueling_closed_loop_calculated_load"
-axis_y                 = "coolant_temperature_len16_v2"
+axis_y                 = "coolant_temperature_len8_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3300,9 +3290,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00037632
 data_type              = "uint16_be"
-scaling                = "x_32768_0_00034"
+scaling                = "lambda_x_32768_0_0_00034"
 axis_x                 = "fueling_closed_loop_calculated_load"
-axis_y                 = "coolant_temperature_len16_v2"
+axis_y                 = "coolant_temperature_len8_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3314,9 +3304,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00037532
 data_type              = "uint16_be"
-scaling                = "x_32768_0_00034"
+scaling                = "lambda_x_32768_0_0_00034"
 axis_x                 = "fueling_closed_loop_calculated_load"
-axis_y                 = "coolant_temperature_len16_v2"
+axis_y                 = "coolant_temperature_len8_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3328,7 +3318,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00036766
 data_type              = "uint16_be"
-scaling                = "x_43194"
+scaling                = "lambda_x_43194_0"
 axis_x                 = "fueling_closed_loop_calculated_load_len16"
 axis_y                 = "fueling_closed_loop_rpm_len16"
 emissions_relevant     = false
@@ -3342,7 +3332,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00036566
 data_type              = "uint16_be"
-scaling                = "x_43194"
+scaling                = "lambda_x_43194_0"
 axis_x                 = "fueling_closed_loop_calculated_load_len16"
 axis_y                 = "fueling_closed_loop_rpm_len16"
 emissions_relevant     = false
@@ -3356,7 +3346,7 @@ category               = ""
 dimensions             = 2
 address                = 0x000362D6
 data_type              = "uint16_be"
-scaling                = "x_43194"
+scaling                = "lambda_x_43194_0"
 axis_x                 = "fueling_closed_loop_calculated_load_len16"
 axis_y                 = "fueling_closed_loop_rpm_len16"
 emissions_relevant     = false
@@ -3370,7 +3360,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00056814
 data_type              = "uint16_be"
-scaling                = "x_43194"
+scaling                = "lambda_x_43194_0"
 axis_x                 = "fueling_closed_loop_calculated_load_len16"
 axis_y                 = "fueling_closed_loop_rpm_len16"
 emissions_relevant     = false
@@ -3384,7 +3374,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00049A0C
 data_type              = "uint8"
-scaling                = "pa_x_91520"
+scaling                = "pascal_x_91520_0"
 axis_x                 = "fueling_closed_loop_rpm_len16_v2"
 axis_y                 = "fueling_closed_loop_calculated_load_len16_v2"
 emissions_relevant     = false
@@ -3398,9 +3388,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00049B48
 data_type              = "uint8"
-scaling                = "pa_x_91520"
+scaling                = "pascal_x_91520_0"
 axis_x                 = "fueling_closed_loop_rpm_len4"
-axis_y                 = "coolant_temperature_len8"
+axis_y                 = "coolant_temperature_len4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3412,7 +3402,7 @@ category               = ""
 dimensions             = 1
 address                = 0x00049B98
 data_type              = "uint8"
-scaling                = "pa_x_91520"
+scaling                = "pascal_x_91520_0"
 axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3425,7 +3415,7 @@ category               = ""
 dimensions             = 1
 address                = 0x0006265E
 data_type              = "uint16_be"
-scaling                = "c_x_205_16_40"
+scaling                = "c_rshift_16_0_x_205_0_40_0"
 axis_x                 = "developer_sensors_voltage"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3438,9 +3428,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0001228E
 data_type              = "uint16_be"
-scaling                = "x_0_5_720"
+scaling                = "deg_x_0_5_720_0"
 axis_x                 = "fueling_closed_loop_calculated_load_len8"
-axis_y                 = "rpm_len16"
+axis_y                 = "rpm_len8"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3452,9 +3442,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00015202
 data_type              = "uint16_be"
-scaling                = "x_0_5_720"
+scaling                = "deg_x_0_5_720_0"
 axis_x                 = "fueling_closed_loop_calculated_load_len8_v2"
-axis_y                 = "rpm_len16_v2"
+axis_y                 = "rpm_len8_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3466,9 +3456,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00014D40
 data_type              = "uint16_be"
-scaling                = "x_1"
+scaling                = "deg_x_1_0"
 axis_x                 = "fueling_closed_loop_calculated_load_len8_v3"
-axis_y                 = "rpm_len16_v3"
+axis_y                 = "rpm_len8_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3480,7 +3470,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00014E40
 data_type              = "uint8"
-scaling                = "x_255"
+scaling                = "x_255_0"
 axis_x                 = "fueling_injectors_intake_air_temperature"
 axis_y                 = "fueling_injectors_oil_temp"
 emissions_relevant     = false
@@ -3494,9 +3484,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00038DD0
 data_type              = "uint8"
-scaling                = "x_128_0_5"
-axis_x                 = "calculated_load_len16_v3"
-axis_y                 = "rpm_len22_v3"
+scaling                = "deg_x_128_0_0_5"
+axis_x                 = "calculated_load_len8_v3"
+axis_y                 = "rpm_len11_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3508,9 +3498,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0002AACE
 data_type              = "uint8"
-scaling                = "x_128_0_5"
-axis_x                 = "calculated_load_len16_v3"
-axis_y                 = "rpm_len22_v3"
+scaling                = "deg_x_128_0_0_5"
+axis_x                 = "calculated_load_len8_v3"
+axis_y                 = "rpm_len11_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3522,9 +3512,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00038F30
 data_type              = "uint8"
-scaling                = "x_128_0_5"
-axis_x                 = "calculated_load_len16_v3"
-axis_y                 = "rpm_len22_v3"
+scaling                = "deg_x_128_0_0_5"
+axis_x                 = "calculated_load_len8_v3"
+axis_y                 = "rpm_len11_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3536,9 +3526,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0002AC2E
 data_type              = "uint8"
-scaling                = "x_128_0_5"
-axis_x                 = "calculated_load_len16_v3"
-axis_y                 = "rpm_len22_v3"
+scaling                = "deg_x_128_0_0_5"
+axis_x                 = "calculated_load_len8_v3"
+axis_y                 = "rpm_len11_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3550,7 +3540,7 @@ category               = ""
 dimensions             = 1
 address                = 0x00045C14
 data_type              = "uint8"
-scaling                = "x_128_128_100"
+scaling                = "x_128_0_128_0_100_0"
 axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3563,9 +3553,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00045994
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load"
-axis_y                 = "rpm_len18"
+axis_y                 = "rpm_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3577,9 +3567,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000485B8
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load_len16"
-axis_y                 = "rpm_len18"
+axis_y                 = "rpm_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3591,9 +3581,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00048378
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load_len16"
-axis_y                 = "rpm_len18"
+axis_y                 = "rpm_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3605,9 +3595,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000476B8
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load"
-axis_y                 = "rpm_len18"
+axis_y                 = "rpm_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3619,9 +3609,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000487F8
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_calculated_load"
-axis_y                 = "rpm_len18"
+axis_y                 = "rpm_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3633,9 +3623,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00048A38
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_calculated_load"
-axis_y                 = "rpm_len18"
+axis_y                 = "rpm_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3647,9 +3637,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00045514
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load"
-axis_y                 = "rpm_len18"
+axis_y                 = "rpm_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3661,9 +3651,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000452D4
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load_len16"
-axis_y                 = "rpm_len18"
+axis_y                 = "rpm_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3675,9 +3665,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00046FF8
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load_len16"
-axis_y                 = "rpm_len18"
+axis_y                 = "rpm_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3689,9 +3679,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00047238
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load"
-axis_y                 = "rpm_len18"
+axis_y                 = "rpm_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3703,9 +3693,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00045754
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load"
-axis_y                 = "rpm_len18"
+axis_y                 = "rpm_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3717,9 +3707,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00047478
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load"
-axis_y                 = "rpm_len18"
+axis_y                 = "rpm_len9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3731,9 +3721,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000442F0
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load_len16_v2"
-axis_y                 = "rpm_len20"
+axis_y                 = "rpm_len10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3745,9 +3735,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000465F8
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load_len16_v2"
-axis_y                 = "rpm_len20"
+axis_y                 = "rpm_len10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3759,9 +3749,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00044570
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load_len16_v3"
-axis_y                 = "rpm_len20"
+axis_y                 = "rpm_len10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3773,9 +3763,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00046878
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load_len16_v3"
-axis_y                 = "rpm_len20"
+axis_y                 = "rpm_len10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3787,9 +3777,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000447F0
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load_len16_v3"
-axis_y                 = "rpm_len20"
+axis_y                 = "rpm_len10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3801,9 +3791,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00046AF8
 data_type              = "int16_be"
-scaling                = "x_728_1_0_5"
+scaling                = "deg_x_728_1_0_5"
 axis_x                 = "avcs_intake_target_calculated_load_len16_v3"
-axis_y                 = "rpm_len20"
+axis_y                 = "rpm_len10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3815,7 +3805,7 @@ category               = ""
 dimensions             = 1
 address                = 0x00028DF5
 data_type              = "uint8"
-scaling                = "x_128_128_100"
+scaling                = "x_128_0_128_0_100_0"
 axis_x                 = "coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -3830,7 +3820,7 @@ address                = 0x00047E78
 data_type              = "uint16_be"
 scaling                = ""
 axis_x                 = "avcs_intake_target_calculated_load_len16_v2"
-axis_y                 = "rpm_len20"
+axis_y                 = "rpm_len10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3844,7 +3834,7 @@ address                = 0x000480F8
 data_type              = "uint16_be"
 scaling                = ""
 axis_x                 = "avcs_intake_target_calculated_load_len16_v2"
-axis_y                 = "rpm_len20"
+axis_y                 = "rpm_len10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3858,7 +3848,7 @@ address                = 0x00044A70
 data_type              = "uint16_be"
 scaling                = ""
 axis_x                 = "avcs_intake_target_calculated_load_len16_v3"
-axis_y                 = "rpm_len20"
+axis_y                 = "rpm_len10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3872,7 +3862,7 @@ address                = 0x00046D78
 data_type              = "uint16_be"
 scaling                = ""
 axis_x                 = "avcs_intake_target_calculated_load_len16_v3"
-axis_y                 = "rpm_len20"
+axis_y                 = "rpm_len10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3886,7 +3876,7 @@ address                = 0x00047978
 data_type              = "uint16_be"
 scaling                = ""
 axis_x                 = "avcs_intake_target_calculated_load_len16_v3"
-axis_y                 = "rpm_len20"
+axis_y                 = "rpm_len10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3900,7 +3890,7 @@ address                = 0x00047BF8
 data_type              = "uint16_be"
 scaling                = ""
 axis_x                 = "avcs_intake_target_calculated_load_len16_v3"
-axis_y                 = "rpm_len20"
+axis_y                 = "rpm_len10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3912,7 +3902,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00037C02
 data_type              = "uint16_be"
-scaling                = "x_43194"
+scaling                = "lambda_x_43194_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3924,7 +3914,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00036B8E
 data_type              = "uint16_be"
-scaling                = "x_43194"
+scaling                = "lambda_x_43194_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3948,7 +3938,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00013C8A
 data_type              = "uint8"
-scaling                = "c_x_50"
+scaling                = "c_x_50_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3960,7 +3950,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00013C8B
 data_type              = "uint8"
-scaling                = "c_x_50"
+scaling                = "c_x_50_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -3997,7 +3987,7 @@ category               = ""
 dimensions             = 0
 address                = 0x000DA9D4
 data_type              = "uint8"
-scaling                = "g_rev_x_100"
+scaling                = "x_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4009,7 +3999,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00013C83
 data_type              = "uint8"
-scaling                = "g_rev_x_100"
+scaling                = "x_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4021,7 +4011,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00013C84
 data_type              = "uint8"
-scaling                = "g_rev_x_100"
+scaling                = "x_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4033,7 +4023,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00013C85
 data_type              = "uint8"
-scaling                = "g_rev_x_100"
+scaling                = "x_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4045,7 +4035,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00013C86
 data_type              = "uint8"
-scaling                = "c_x_40"
+scaling                = "c_x_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4057,7 +4047,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00013C87
 data_type              = "uint8"
-scaling                = "c_x_40"
+scaling                = "c_x_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4069,9 +4059,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000255C4
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
+scaling                = "nm_x_16000_0_80_0"
 axis_x                 = "throttle_requested_torque_accelerator_position"
-axis_y                 = "rpm_len21"
+axis_y                 = "rpm_len10_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4083,9 +4073,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00024BEC
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
+scaling                = "nm_x_16000_0_80_0"
 axis_x                 = "throttle_requested_torque_accelerator_position"
-axis_y                 = "rpm_len21"
+axis_y                 = "rpm_len10_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4097,9 +4087,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000248A4
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
+scaling                = "nm_x_16000_0_80_0"
 axis_x                 = "throttle_requested_torque_accelerator_position"
-axis_y                 = "rpm_len21"
+axis_y                 = "rpm_len10_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4111,9 +4101,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0002455C
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
+scaling                = "nm_x_16000_0_80_0"
 axis_x                 = "throttle_requested_torque_accelerator_position"
-axis_y                 = "rpm_len21"
+axis_y                 = "rpm_len10_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4125,9 +4115,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00025CA6
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "throttle_requested_torque_accelerator_position_len20"
-axis_y                 = "rpm_len21_v2"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position_len10"
+axis_y                 = "rpm_len10_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4139,9 +4129,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0002527C
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
+scaling                = "nm_x_16000_0_80_0"
 axis_x                 = "throttle_requested_torque_accelerator_position"
-axis_y                 = "rpm_len21"
+axis_y                 = "rpm_len10_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4153,9 +4143,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00024F34
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
+scaling                = "nm_x_16000_0_80_0"
 axis_x                 = "throttle_requested_torque_accelerator_position"
-axis_y                 = "rpm_len21"
+axis_y                 = "rpm_len10_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4167,9 +4157,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0002595E
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "throttle_requested_torque_accelerator_position_len20"
-axis_y                 = "rpm_len21_v2"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position_len10"
+axis_y                 = "rpm_len10_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4181,8 +4171,8 @@ category               = ""
 dimensions             = 1
 address                = 0x00023FB6
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "rpm_len21_v3"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm_len10_v4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4194,9 +4184,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00023B6C
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio"
-axis_y                 = "rpm_len22_v4"
+axis_y                 = "rpm_len11_v4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4208,9 +4198,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00027484
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio_len24"
-axis_y                 = "rpm_len22_v5"
+axis_y                 = "rpm_len11_v5"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4222,9 +4212,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0002858E
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio"
-axis_y                 = "rpm_len22_v4"
+axis_y                 = "rpm_len11_v4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4236,9 +4226,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000278A4
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio_len24_v2"
-axis_y                 = "rpm_len22_v6"
+axis_y                 = "rpm_len11_v6"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4250,9 +4240,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00027CC4
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio_len24_v3"
-axis_y                 = "rpm_len22_v7"
+axis_y                 = "rpm_len11_v7"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4264,9 +4254,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000280E4
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio_len24_v4"
-axis_y                 = "rpm_len22_v8"
+axis_y                 = "rpm_len11_v8"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4278,9 +4268,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00023708
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio_len24_v5"
-axis_y                 = "rpm_len22_v9"
+axis_y                 = "rpm_len11_v9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4292,9 +4282,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000289AE
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio_len24_v5"
-axis_y                 = "rpm_len22_v9"
+axis_y                 = "rpm_len11_v9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4306,8 +4296,8 @@ category               = ""
 dimensions             = 1
 address                = 0x00024334
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "rpm_len11"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm_len5"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4319,8 +4309,8 @@ category               = ""
 dimensions             = 1
 address                = 0x0002434A
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "rpm_len11"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm_len5"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4332,8 +4322,8 @@ category               = ""
 dimensions             = 1
 address                = 0x00024360
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "rpm_len11"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm_len5"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4345,9 +4335,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00022940
 data_type              = "uint8"
-scaling                = "x_0_3515"
-axis_x                 = "calculated_load_len16_v4"
-axis_y                 = "rpm_len21_v4"
+scaling                = "deg_x_0_3515"
+axis_x                 = "calculated_load_len8_v4"
+axis_y                 = "rpm_len10_v5"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4359,9 +4349,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000227F0
 data_type              = "uint8"
-scaling                = "x_0_3515"
-axis_x                 = "calculated_load_len16_v4"
-axis_y                 = "rpm_len21_v5"
+scaling                = "deg_x_0_3515"
+axis_x                 = "calculated_load_len8_v4"
+axis_y                 = "rpm_len10_v6"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4373,9 +4363,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0002FB2A
 data_type              = "uint8"
-scaling                = "x_0_3515"
-axis_x                 = "calculated_load_len16_v5"
-axis_y                 = "rpm_len21_v6"
+scaling                = "deg_x_0_3515"
+axis_x                 = "calculated_load_len8_v5"
+axis_y                 = "rpm_len10_v7"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4387,9 +4377,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0002F9DA
 data_type              = "uint8"
-scaling                = "x_0_3515"
-axis_x                 = "calculated_load_len16_v6"
-axis_y                 = "rpm_len21_v7"
+scaling                = "deg_x_0_3515"
+axis_x                 = "calculated_load_len8_v6"
+axis_y                 = "rpm_len10_v8"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4401,7 +4391,7 @@ category               = ""
 dimensions             = 1
 address                = 0x0002FCAD
 data_type              = "uint8"
-scaling                = "x_128"
+scaling                = "x_128_0"
 axis_x                 = "timing_dynamic_advance_dam"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -4414,7 +4404,7 @@ category               = ""
 dimensions             = 1
 address                = 0x0002FC9C
 data_type              = "uint8"
-scaling                = "x_128"
+scaling                = "x_128_0"
 axis_x                 = "timing_dynamic_advance_dam_len17"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -4427,7 +4417,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0002277A
 data_type              = "uint8"
-scaling                = "x_16"
+scaling                = "x_16_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4439,7 +4429,7 @@ category               = ""
 dimensions             = 1
 address                = 0x00038C89
 data_type              = "int8"
-scaling                = "x_0_5"
+scaling                = "deg_x_0_5"
 axis_x                 = "timing_compensation_tip_in_tps_delta_raw"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -4452,7 +4442,7 @@ category               = ""
 dimensions             = 1
 address                = 0x00038C79
 data_type              = "int8"
-scaling                = "x_0_5"
+scaling                = "deg_x_0_5"
 axis_x                 = "timing_compensation_tip_in_tps_delta_raw"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -4465,7 +4455,7 @@ category               = ""
 dimensions             = 1
 address                = 0x00038C69
 data_type              = "int8"
-scaling                = "x_0_5"
+scaling                = "deg_x_0_5"
 axis_x                 = "timing_compensation_tip_in_tps_delta_raw"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -4478,7 +4468,7 @@ category               = ""
 dimensions             = 1
 address                = 0x00038C59
 data_type              = "int8"
-scaling                = "x_0_5"
+scaling                = "deg_x_0_5"
 axis_x                 = "timing_compensation_tip_in_tps_delta_raw"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -4491,7 +4481,7 @@ category               = ""
 dimensions             = 1
 address                = 0x00038C49
 data_type              = "int8"
-scaling                = "x_0_5"
+scaling                = "deg_x_0_5"
 axis_x                 = "timing_compensation_tip_in_tps_delta_raw"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -4504,7 +4494,7 @@ category               = ""
 dimensions             = 1
 address                = 0x00038C39
 data_type              = "int8"
-scaling                = "x_0_5"
+scaling                = "deg_x_0_5"
 axis_x                 = "timing_compensation_tip_in_tps_delta_raw"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -4517,7 +4507,7 @@ category               = ""
 dimensions             = 2
 address                = 0x0002C2B4
 data_type              = "uint8"
-scaling                = "g_sec_x_8"
+scaling                = "g_per_sec_x_8_0"
 axis_x                 = "idle_control_coolant_temperature"
 axis_y                 = "idle_control_rpm"
 emissions_relevant     = false
@@ -4557,7 +4547,7 @@ category               = ""
 dimensions             = 1
 address                = 0x00040F3A
 data_type              = "uint16_be"
-scaling                = "x_256_100"
+scaling                = "x_256_0_100_0"
 axis_x                 = "fuel_pressure_fuel_pressure_obd"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -4570,8 +4560,8 @@ category               = ""
 dimensions             = 1
 address                = 0x00016738
 data_type              = "uint16_be"
-scaling                = "x_256_100"
-axis_x                 = "fuel_pressure_fuel_pressure_obd_len16"
+scaling                = "x_256_0_100_0"
+axis_x                 = "fuel_pressure_fuel_pressure_obd_len8"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4583,8 +4573,8 @@ category               = ""
 dimensions             = 1
 address                = 0x0004FCC2
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "rpm_len21_v8"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm_len10_v9"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4596,9 +4586,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00052E8A
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio_len24_v6"
-axis_y                 = "rpm_len22_v10"
+axis_y                 = "rpm_len11_v10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4610,9 +4600,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0004F878
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio_len24_v6"
-axis_y                 = "rpm_len22_v10"
+axis_y                 = "rpm_len11_v10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4624,9 +4614,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00051D80
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio_len24_v7"
-axis_y                 = "rpm_len22_v11"
+axis_y                 = "rpm_len11_v11"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4638,9 +4628,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000521A0
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio_len24_v8"
-axis_y                 = "rpm_len22_v12"
+axis_y                 = "rpm_len11_v12"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4652,9 +4642,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000525C0
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio_len24_v9"
-axis_y                 = "rpm_len22_v13"
+axis_y                 = "rpm_len11_v13"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4666,9 +4656,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000529E0
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio_len24_v10"
-axis_y                 = "rpm_len22_v14"
+axis_y                 = "rpm_len11_v14"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4680,9 +4670,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000532AA
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio_len24_v11"
-axis_y                 = "rpm_len22_v15"
+axis_y                 = "rpm_len11_v15"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4694,9 +4684,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0004F414
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "throttle_requested_torque_ratio_len24_v11"
-axis_y                 = "rpm_len22_v15"
+axis_y                 = "rpm_len11_v15"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4756,7 +4746,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00036BB0
 data_type              = "uint16_be"
-scaling                = "x"
+scaling                = "lambda_inverse_divide_32768_0_x"
 axis_x                 = "fueling_closed_loop_calculated_load_len16_v3"
 axis_y                 = "fueling_closed_loop_rpm_len16_v3"
 emissions_relevant     = false
@@ -4772,7 +4762,7 @@ address                = 0x00017DE6
 data_type              = "uint16_be"
 scaling                = ""
 axis_x                 = "engine_calculated_load_rescaled"
-axis_y                 = "fueling_closed_loop_rpm_len16_v4"
+axis_y                 = "fueling_closed_loop_rpm_len8"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4784,7 +4774,7 @@ category               = ""
 dimensions             = 1
 address                = 0x00018026
 data_type              = "uint8"
-scaling                = "x_128_128_100_100"
+scaling                = "x_128_0_128_0_100_0_100_0"
 axis_x                 = "ignition_dynamic_advance_dam"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -4797,7 +4787,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003EFBA
 data_type              = "uint16_be"
-scaling                = "c_x_4096_10_40"
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4809,7 +4799,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003EFB8
 data_type              = "uint16_be"
-scaling                = "c_x_4096_10_40"
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4957,9 +4947,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000500C6
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "throttle_requested_torque_accelerator_position_len20_v2"
-axis_y                 = "rpm_len21_v9"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position_len10_v2"
+axis_y                 = "rpm_len10_v10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4971,9 +4961,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00050A9E
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "throttle_requested_torque_accelerator_position_len20_v2"
-axis_y                 = "rpm_len21_v9"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position_len10_v2"
+axis_y                 = "rpm_len10_v10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4985,9 +4975,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0005040E
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "throttle_requested_torque_accelerator_position_len20_v2"
-axis_y                 = "rpm_len21_v9"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position_len10_v2"
+axis_y                 = "rpm_len10_v10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -4999,9 +4989,9 @@ category               = ""
 dimensions             = 2
 address                = 0x0004FD7E
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "throttle_requested_torque_accelerator_position_len20_v2"
-axis_y                 = "rpm_len21_v9"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position_len10_v2"
+axis_y                 = "rpm_len10_v10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5013,9 +5003,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00050DE6
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "throttle_requested_torque_accelerator_position_len20_v2"
-axis_y                 = "rpm_len21_v9"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position_len10_v2"
+axis_y                 = "rpm_len10_v10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5027,9 +5017,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00050756
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "throttle_requested_torque_accelerator_position_len20_v2"
-axis_y                 = "rpm_len21_v9"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position_len10_v2"
+axis_y                 = "rpm_len10_v10"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5041,9 +5031,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000514C8
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "throttle_requested_torque_accelerator_position_len20_v3"
-axis_y                 = "rpm_len21_v10"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position_len10_v3"
+axis_y                 = "rpm_len10_v11"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5055,9 +5045,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00051180
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "throttle_requested_torque_accelerator_position_len20_v3"
-axis_y                 = "rpm_len21_v10"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "throttle_requested_torque_accelerator_position_len10_v3"
+axis_y                 = "rpm_len10_v11"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5095,7 +5085,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00013CC4
 data_type              = "uint8"
-scaling                = "x_16"
+scaling                = "x_16_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5107,8 +5097,8 @@ category               = ""
 dimensions             = 1
 address                = 0x0002A8F0
 data_type              = "uint8"
-scaling                = "x_0_5_16"
-axis_x                 = "rpm_len16_v4"
+scaling                = "deg_x_0_5_16_0"
+axis_x                 = "rpm_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5120,8 +5110,8 @@ category               = ""
 dimensions             = 1
 address                = 0x0002A900
 data_type              = "uint8"
-scaling                = "x_0_5_16"
-axis_x                 = "rpm_len16_v5"
+scaling                = "deg_x_0_5_16_0"
+axis_x                 = "rpm_len16_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5134,7 +5124,7 @@ dimensions             = 1
 address                = 0x0001AC48
 data_type              = "uint16_be"
 scaling                = ""
-axis_x                 = "rpm_len8"
+axis_x                 = "rpm_len4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5147,7 +5137,7 @@ dimensions             = 1
 address                = 0x0001AC58
 data_type              = "uint16_be"
 scaling                = ""
-axis_x                 = "rpm_len8_v2"
+axis_x                 = "rpm_len4_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5159,9 +5149,9 @@ category               = ""
 dimensions             = 2
 address                = 0x000191D0
 data_type              = "uint8"
-scaling                = "afreq_x_256_1"
+scaling                = "afr_x_256_0_1_0"
 axis_x                 = "fueling_closed_loop_rpm_len20"
-axis_y                 = "fueling_closed_loop_calculated_load_len24"
+axis_y                 = "fueling_closed_loop_calculated_load_len12"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5173,7 +5163,7 @@ category               = ""
 dimensions             = 1
 address                = 0x0001AC38
 data_type              = "uint8"
-scaling                = "x_128"
+scaling                = "x_128_0"
 axis_x                 = "ignition_dynamic_advance_dam_len16"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -5186,7 +5176,7 @@ category               = ""
 dimensions             = 2
 address                = 0x0002438C
 data_type              = "uint8"
-scaling                = "ms_x_10"
+scaling                = "millisecond_x_10_0"
 axis_x                 = "engine_idle_speed_rpm"
 axis_y                 = "engine_idle_speed_coolant_temperature"
 emissions_relevant     = false
@@ -5200,7 +5190,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00044286
 data_type              = "uint16_be"
-scaling                = "kmh_x_8"
+scaling                = "kmh_rshift_8_0_x"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5212,7 +5202,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00026BE6
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
+scaling                = "nm_x_16000_0_80_0"
 axis_x                 = "engine_rpm"
 axis_y                 = "gear_position"
 emissions_relevant     = false
@@ -5226,7 +5216,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00026C4A
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
+scaling                = "nm_x_16000_0_80_0"
 axis_x                 = "engine_rpm"
 axis_y                 = "gear_position"
 emissions_relevant     = false
@@ -5240,7 +5230,7 @@ category               = ""
 dimensions             = 2
 address                = 0x0002701E
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
+scaling                = "nm_x_16000_0_80_0"
 axis_x                 = "engine_rpm"
 axis_y                 = "gear_position"
 emissions_relevant     = false
@@ -5254,8 +5244,8 @@ category               = ""
 dimensions             = 1
 address                = 0x00029436
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
-axis_x                 = "throttle_requested_torque_accelerator_position_len6"
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_accelerator_position_len3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5267,8 +5257,8 @@ category               = ""
 dimensions             = 1
 address                = 0x0002941E
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
-axis_x                 = "throttle_requested_torque_accelerator_position_len6_v2"
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_accelerator_position_len3_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5280,8 +5270,8 @@ category               = ""
 dimensions             = 1
 address                = 0x00026BB4
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
-axis_x                 = "throttle_requested_torque_accelerator_position_len6_v3"
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_accelerator_position_len3_v3"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5293,8 +5283,8 @@ category               = ""
 dimensions             = 2
 address                = 0x00026AD4
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "rpm_len10"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm_len5_v2"
 axis_y                 = "y_axis"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -5307,8 +5297,8 @@ category               = ""
 dimensions             = 1
 address                = 0x00026B9C
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
-axis_x                 = "throttle_requested_torque_accelerator_position_len6_v4"
+scaling                = "x_65535_0_100_0"
+axis_x                 = "throttle_requested_torque_accelerator_position_len3_v4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5320,8 +5310,8 @@ category               = ""
 dimensions             = 2
 address                = 0x00024402
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "rpm_len14"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm_len7"
 axis_y                 = "ignition_dynamic_advance_dam_len6"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -5334,7 +5324,7 @@ category               = ""
 dimensions             = 2
 address                = 0x000133C8
 data_type              = "uint8"
-scaling                = "x_128_128_100_100"
+scaling                = "x_128_0_128_0_100_0_100_0"
 axis_x                 = "fuel_injectors_rpm"
 axis_y                 = "scaled_ipw_command"
 emissions_relevant     = false
@@ -5348,7 +5338,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00034DEA
 data_type              = "uint16_be"
-scaling                = "g_sec_x_8_76800_5"
+scaling                = "g_per_sec_lshift_8_0_x_76800_0_5_0"
 axis_x                 = "egr_steps"
 axis_y                 = "egr_relative_pressure"
 emissions_relevant     = false
@@ -5362,8 +5352,8 @@ category               = ""
 dimensions             = 2
 address                = 0x00035BBC
 data_type              = "uint8"
-scaling                = "bar_x_99"
-axis_x                 = "calculated_load_len16_v7"
+scaling                = "bar_x_99_0"
+axis_x                 = "calculated_load_len16"
 axis_y                 = "airflow_egr_manifold_flow_model_rpm"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -5376,7 +5366,7 @@ category               = ""
 dimensions             = 1
 address                = 0x00035B9C
 data_type              = "int16_be"
-scaling                = "x_256"
+scaling                = "x_256_0"
 axis_x                 = "sensors_barometric_pressure"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -5389,9 +5379,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00033844
 data_type              = "uint16_be"
-scaling                = "x_32768_100"
+scaling                = "x_32768_0_100_0"
 axis_x                 = "airflow_turbo_manifold_absolute_pressure"
-axis_y                 = "engine_rpm_len22"
+axis_y                 = "engine_rpm_len11"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5403,9 +5393,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00033584
 data_type              = "uint16_be"
-scaling                = "x_32768_100"
+scaling                = "x_32768_0_100_0"
 axis_x                 = "airflow_turbo_manifold_absolute_pressure"
-axis_y                 = "engine_rpm_len22"
+axis_y                 = "engine_rpm_len11"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5417,9 +5407,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00033B04
 data_type              = "uint16_be"
-scaling                = "x_32768_100"
+scaling                = "x_32768_0_100_0"
 axis_x                 = "airflow_turbo_manifold_absolute_pressure"
-axis_y                 = "engine_rpm_len22"
+axis_y                 = "engine_rpm_len11"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5431,7 +5421,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00049E4E
 data_type              = "uint16_be"
-scaling                = "x_10"
+scaling                = "deg_x_10_0"
 axis_x                 = "fuel_closed_loop_rpm"
 axis_y                 = "fuel_injector_pulse_width"
 emissions_relevant     = false
@@ -5445,8 +5435,8 @@ category               = ""
 dimensions             = 2
 address                = 0x000497EC
 data_type              = "uint16_be"
-scaling                = "x_10"
-axis_x                 = "rpm_len16_v6"
+scaling                = "deg_x_10_0"
+axis_x                 = "rpm_len8_v4"
 axis_y                 = "battery_voltage"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -5459,8 +5449,8 @@ category               = ""
 dimensions             = 1
 address                = 0x000499EC
 data_type              = "uint16_be"
-scaling                = "x_10"
-axis_x                 = "rpm_len16_v6"
+scaling                = "deg_x_10_0"
+axis_x                 = "rpm_len8_v4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5472,7 +5462,7 @@ category               = ""
 dimensions             = 1
 address                = 0x00049C10
 data_type              = "uint16_be"
-scaling                = "kpa_x_63963_20_10"
+scaling                = "kpa_rshift_20_0_x_63963_0_10_0"
 axis_x                 = "fuel_injectors_rpm_len16"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -5485,8 +5475,8 @@ category               = ""
 dimensions             = 2
 address                = 0x000495BC
 data_type              = "uint16_be"
-scaling                = "x_10"
-axis_x                 = "rpm_len16_v6"
+scaling                = "deg_x_10_0"
+axis_x                 = "rpm_len8_v4"
 axis_y                 = "battery_voltage"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -5499,7 +5489,7 @@ category               = ""
 dimensions             = 1
 address                = 0x000243EA
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
+scaling                = "nm_x_16000_0_80_0"
 axis_x                 = "x_axis"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -5512,7 +5502,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00030F64
 data_type              = "uint32_be"
-scaling                = "g_sec_x_76800"
+scaling                = "g_per_sec_x_76800_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5524,8 +5514,8 @@ category               = ""
 dimensions             = 1
 address                = 0x000625D2
 data_type              = "uint16_be"
-scaling                = "c_x_5_11_40"
-axis_x                 = "developer_sensors_voltage_len32"
+scaling                = "c_rshift_11_0_x_5_0_40_0"
+axis_x                 = "developer_sensors_voltage_len16"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5549,7 +5539,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00022BE2
 data_type              = "uint16_be"
-scaling                = "l_x_8000"
+scaling                = "l_x_8000_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5561,7 +5551,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00064606
 data_type              = "int16_be"
-scaling                = "psi_x_25600_14_5038"
+scaling                = "psi_x_25600_0_14_5038"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5573,7 +5563,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00064604
 data_type              = "uint16_be"
-scaling                = "psi_x_256_25600_14_5038_5"
+scaling                = "psi_x_256_0_25600_0_14_5038_5_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5585,7 +5575,7 @@ category               = ""
 dimensions             = 0
 address                = 0x000495B4
 data_type              = "uint16_be"
-scaling                = "x_10"
+scaling                = "deg_x_10_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5597,7 +5587,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00049BA8
 data_type              = "uint16_be"
-scaling                = "x_10"
+scaling                = "deg_x_10_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5609,9 +5599,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00026036
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "iat_len12"
-axis_y                 = "rpm_len14_v2"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "iat_len6"
+axis_y                 = "rpm_len7_v2"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5623,7 +5613,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD4C
 data_type              = "uint16_be"
-scaling                = "rev_mi_x_2_66"
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5635,7 +5625,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD4E
 data_type              = "uint16_be"
-scaling                = "rev_mi_x_2_66"
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5647,7 +5637,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD50
 data_type              = "uint16_be"
-scaling                = "rev_mi_x_2_66"
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5659,7 +5649,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD52
 data_type              = "uint16_be"
-scaling                = "rev_mi_x_2_66"
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5671,7 +5661,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD54
 data_type              = "uint16_be"
-scaling                = "rev_mi_x_2_66"
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5683,7 +5673,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD56
 data_type              = "uint16_be"
-scaling                = "rev_mi_x_2_66"
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5695,7 +5685,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD58
 data_type              = "uint16_be"
-scaling                = "rev_mi_x_2_66"
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5707,7 +5697,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD5A
 data_type              = "uint16_be"
-scaling                = "rev_mi_x_2_66"
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5719,7 +5709,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD5C
 data_type              = "uint16_be"
-scaling                = "rev_mi_x_2_66"
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5731,7 +5721,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD5E
 data_type              = "uint16_be"
-scaling                = "rev_mi_x_2_66"
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5743,7 +5733,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD60
 data_type              = "uint16_be"
-scaling                = "rev_mi_x_2_66"
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5755,7 +5745,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD62
 data_type              = "uint16_be"
-scaling                = "rev_mi_x_2_66"
+scaling                = "rev_per_mi_x_2_66"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5767,7 +5757,7 @@ category               = ""
 dimensions             = 2
 address                = 0x0001347C
 data_type              = "uint8"
-scaling                = "x_128_128_100_100"
+scaling                = "x_128_0_128_0_100_0_100_0"
 axis_x                 = "fuel_injectors_rpm"
 axis_y                 = "scaled_ipw_command"
 emissions_relevant     = false
@@ -5781,7 +5771,7 @@ category               = ""
 dimensions             = 2
 address                = 0x00013530
 data_type              = "uint8"
-scaling                = "x_128_128_100_100"
+scaling                = "x_128_0_128_0_100_0_100_0"
 axis_x                 = "fuel_injectors_rpm"
 axis_y                 = "scaled_ipw_command"
 emissions_relevant     = false
@@ -5795,7 +5785,7 @@ category               = ""
 dimensions             = 2
 address                = 0x000135E4
 data_type              = "uint8"
-scaling                = "x_128_128_100_100"
+scaling                = "x_128_0_128_0_100_0_100_0"
 axis_x                 = "fuel_injectors_rpm"
 axis_y                 = "scaled_ipw_command"
 emissions_relevant     = false
@@ -5809,7 +5799,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003E54A
 data_type              = "uint16_be"
-scaling                = "x_32768_32768_1_100"
+scaling                = "x_32768_0_32768_0_1_0_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5821,7 +5811,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003E548
 data_type              = "uint16_be"
-scaling                = "x_32768_32768_1_100"
+scaling                = "x_32768_0_32768_0_1_0_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5833,7 +5823,7 @@ category               = ""
 dimensions             = 1
 address                = 0x0003CDC2
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "sensors_coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -5846,7 +5836,7 @@ category               = ""
 dimensions             = 1
 address                = 0x0003CDC2
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "sensors_coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -5859,7 +5849,7 @@ category               = ""
 dimensions             = 1
 address                = 0x0003CDC2
 data_type              = "uint16_be"
-scaling                = "x_65535_100"
+scaling                = "x_65535_0_100_0"
 axis_x                 = "sensors_coolant_temperature"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -5920,7 +5910,7 @@ category               = ""
 dimensions             = 0
 address                = 0x001DC1B6
 data_type              = "uint16_be"
-scaling                = "hz_x_312500"
+scaling                = "hz_inverse_divide_1_0_x_312500_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5932,7 +5922,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00062BB8
 data_type              = "uint16_be"
-scaling                = "kpa_x_61_1000_10"
+scaling                = "kpa_x_61_0_1000_0_10_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5944,7 +5934,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CE10
 data_type              = "uint16_be"
-scaling                = "c_x_4096_10_40"
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5956,7 +5946,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD84
 data_type              = "uint16_be"
-scaling                = "c_x_4096_10_40"
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5968,7 +5958,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CE4C
 data_type              = "uint16_be"
-scaling                = "c_x_4096_10_40"
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5980,7 +5970,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD8C
 data_type              = "uint16_be"
-scaling                = "c_x_4096_10_40"
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -5992,7 +5982,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CE50
 data_type              = "uint16_be"
-scaling                = "c_x_4096_10_40"
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6004,7 +5994,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD88
 data_type              = "uint16_be"
-scaling                = "c_x_4096_10_40"
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6016,7 +6006,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD94
 data_type              = "uint16_be"
-scaling                = "c_x_4096_10_40"
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6028,7 +6018,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD98
 data_type              = "uint16_be"
-scaling                = "c_x_4096_10_40"
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6040,7 +6030,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003CD90
 data_type              = "uint16_be"
-scaling                = "c_x_4096_10_40"
+scaling                = "c_x_4096_0_10_0_40_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6052,7 +6042,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00061DE6
 data_type              = "uint16_be"
-scaling                = "v_x_65535_5"
+scaling                = "v_x_65535_0_5_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6064,8 +6054,8 @@ category               = ""
 dimensions             = 1
 address                = 0x00031BB2
 data_type              = "int16_be"
-scaling                = "bar_x_32768_24000_0_433"
-axis_x                 = "rpm_len16_v7"
+scaling                = "bar_x_32768_0_24000_0_0_433"
+axis_x                 = "rpm_len8_v5"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6077,7 +6067,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003135A
 data_type              = "int16_be"
-scaling                = "x_256"
+scaling                = "x_256_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6089,7 +6079,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0003135C
 data_type              = "int16_be"
-scaling                = "x_256"
+scaling                = "x_256_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6101,7 +6091,7 @@ category               = ""
 dimensions             = 0
 address                = 0x001DC1BE
 data_type              = "uint16_be"
-scaling                = "hz_x_12500"
+scaling                = "hz_inverse_divide_1_0_x_12500_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6113,8 +6103,8 @@ category               = ""
 dimensions             = 1
 address                = 0x00015582
 data_type              = "uint8"
-scaling                = "g_rev_x_100"
-axis_x                 = "engine_rpm_len16"
+scaling                = "x_100_0"
+axis_x                 = "engine_rpm_len8"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6126,7 +6116,7 @@ category               = ""
 dimensions             = 1
 address                = 0x00063098
 data_type              = "uint8"
-scaling                = "c_x_50"
+scaling                = "c_x_50_0"
 axis_x                 = "sensors_manifold_absolute_pressure_voltage_5v"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -6139,7 +6129,7 @@ category               = ""
 dimensions             = 1
 address                = 0x000630B8
 data_type              = "uint8"
-scaling                = "c_x_50"
+scaling                = "c_x_50_0"
 axis_x                 = "sensors_manifold_absolute_pressure_voltage_5v"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -6200,7 +6190,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0004159A
 data_type              = "uint16_be"
-scaling                = "x_33423_17_51_20"
+scaling                = "rshift_17_0_x_33423_0_51_0_20_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6212,7 +6202,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0004159C
 data_type              = "uint16_be"
-scaling                = "x_33423_17_51_20"
+scaling                = "rshift_17_0_x_33423_0_51_0_20_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6224,7 +6214,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0004159E
 data_type              = "uint16_be"
-scaling                = "x_33423_17_51_20"
+scaling                = "rshift_17_0_x_33423_0_51_0_20_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6285,8 +6275,8 @@ category               = ""
 dimensions             = 1
 address                = 0x00049C30
 data_type              = "uint16_be"
-scaling                = "kpa_x_10"
-axis_x                 = "none_len8"
+scaling                = "kpa_x_10_0"
+axis_x                 = "none_len4"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6298,7 +6288,7 @@ category               = ""
 dimensions             = 0
 address                = 0x00061DEA
 data_type              = "uint16_be"
-scaling                = "v_x_65535_5"
+scaling                = "v_x_65535_0_5_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6310,9 +6300,9 @@ category               = ""
 dimensions             = 2
 address                = 0x00034F9A
 data_type              = "uint8"
-scaling                = "bar_x_99"
-axis_x                 = "calculated_load_len16_v8"
-axis_y                 = "rpm_len16_v8"
+scaling                = "bar_x_99_0"
+axis_x                 = "calculated_load_len16_v2"
+axis_y                 = "rpm_len8_v6"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6324,7 +6314,7 @@ category               = ""
 dimensions             = 0
 address                = 0x000333D0
 data_type              = "uint8"
-scaling                = "x_255_100"
+scaling                = "x_255_0_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6336,7 +6326,7 @@ category               = ""
 dimensions             = 0
 address                = 0x000243E4
 data_type              = "uint16_be"
-scaling                = "psi_x_3404_24576_14_5038"
+scaling                = "psi_x_3404_0_24576_0_14_5038"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6348,7 +6338,7 @@ category               = ""
 dimensions             = 0
 address                = 0x000243E8
 data_type              = "uint8"
-scaling                = "ms_x_10"
+scaling                = "millisecond_x_10_0"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6360,8 +6350,8 @@ category               = ""
 dimensions             = 2
 address                = 0x00026F56
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "engine_rpm_len10"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm_len5"
 axis_y                 = "gear_position_len5"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -6374,8 +6364,8 @@ category               = ""
 dimensions             = 2
 address                = 0x00026D2C
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "engine_rpm_len10"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm_len5"
 axis_y                 = "gear_position_len5"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -6388,8 +6378,8 @@ category               = ""
 dimensions             = 2
 address                = 0x00026CC8
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "engine_rpm_len10"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm_len5"
 axis_y                 = "gear_position_len5"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -6402,8 +6392,8 @@ category               = ""
 dimensions             = 2
 address                = 0x00027082
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "engine_rpm_len10_v2"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm_len5_v2"
 axis_y                 = "gear_position_len5_v2"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -6416,8 +6406,8 @@ category               = ""
 dimensions             = 2
 address                = 0x00026E0E
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "engine_rpm_len10_v2"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm_len5_v2"
 axis_y                 = "gear_position_len5_v2"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -6430,8 +6420,8 @@ category               = ""
 dimensions             = 2
 address                = 0x00026DAA
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "engine_rpm_len10_v2"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm_len5_v2"
 axis_y                 = "gear_position_len5_v2"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -6444,8 +6434,8 @@ category               = ""
 dimensions             = 2
 address                = 0x00026FBA
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "engine_rpm_len10_v3"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm_len5_v3"
 axis_y                 = "gear_position_len5_v3"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -6458,8 +6448,8 @@ category               = ""
 dimensions             = 2
 address                = 0x00026EF0
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "engine_rpm_len10_v3"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm_len5_v3"
 axis_y                 = "gear_position_len5_v3"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -6472,8 +6462,8 @@ category               = ""
 dimensions             = 2
 address                = 0x00026E8C
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "engine_rpm_len10_v3"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "engine_rpm_len5_v3"
 axis_y                 = "gear_position_len5_v3"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -6486,8 +6476,8 @@ category               = ""
 dimensions             = 2
 address                = 0x0002692A
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "rpm_len10_v2"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm_len5_v3"
 axis_y                 = "y_axis_len5"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -6500,8 +6490,8 @@ category               = ""
 dimensions             = 2
 address                = 0x00026780
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "rpm_len10_v3"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm_len5_v4"
 axis_y                 = "y_axis_len5_v2"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -6514,8 +6504,8 @@ category               = ""
 dimensions             = 2
 address                = 0x000265D6
 data_type              = "uint16_be"
-scaling                = "nm_x_16000_80"
-axis_x                 = "rpm_len10_v4"
+scaling                = "nm_x_16000_0_80_0"
+axis_x                 = "rpm_len5_v5"
 axis_y                 = "y_axis_len5_v3"
 emissions_relevant     = false
 engine_safety_critical = false
@@ -6528,7 +6518,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0002619C
 data_type              = "uint16_be"
-scaling                = "kmh_x_8"
+scaling                = "kmh_rshift_8_0_x"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6540,7 +6530,7 @@ category               = ""
 dimensions             = 0
 address                = 0x0002619E
 data_type              = "uint16_be"
-scaling                = "kmh_x_8"
+scaling                = "kmh_rshift_8_0_x"
 emissions_relevant     = false
 engine_safety_critical = false
 
@@ -6552,6 +6542,6 @@ category               = ""
 dimensions             = 0
 address                = 0x000C77EC
 data_type              = "float32_be"
-scaling                = "x_200000_100"
+scaling                = "x_200000_0_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
