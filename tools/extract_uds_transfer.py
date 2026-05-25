@@ -66,6 +66,13 @@ SID_REQUEST_DOWNLOAD = 0x34
 SID_REQUEST_UPLOAD = 0x35
 SID_TRANSFER_DATA = 0x36
 SID_REQUEST_TRANSFER_EXIT = 0x37
+# Subaru manufacturer-specific bulk-transfer service. Substituted for
+# 0x36 when the preceding 0x34 RequestDownload negotiates
+# dataFormatIdentifier=0x04 (Subaru ciphertext payload). Same
+# `<sid> <bsq> <bytes...>` shape as 0x36, same per-block 7F XX 78
+# response-pending semantics, positive ack 0xF6. Reference:
+# src/ecu/include/st/ecu/uds.hpp `kSidSubaruBulkTransfer`.
+SID_SUBARU_BULK_TRANSFER = 0xB6
 POSITIVE_RESPONSE_OFFSET = 0x40
 
 
@@ -74,9 +81,10 @@ class Transfer:
     direction: str         # "download" (host → ECU) or "upload" (ECU → host)
     address: int           # decoded from RequestDownload/Upload addressAndLengthFormat
     declared_size: int     # what `34` said the transfer would be
-    received_size: int = 0  # what we actually reassembled from `36` blocks
+    received_size: int = 0  # what we actually reassembled from transfer blocks
     format_byte: int = 0   # dataFormatIdentifier
     addr_len_format: int = 0  # addressAndLengthFormatIdentifier
+    transfer_sid: int = SID_TRANSFER_DATA  # which SID carried the blocks (0x36 standard or 0xB6 Subaru bulk)
     block_count: int = 0
     block_seq_wraps: int = 0
     payload: bytearray = field(default_factory=bytearray)
@@ -158,9 +166,20 @@ def extract_transfers(
                     request_ms=f.ms,
                 )
                 last_seq = None
-            elif sid == SID_TRANSFER_DATA and current is not None:
+            elif sid in (SID_TRANSFER_DATA, SID_SUBARU_BULK_TRANSFER) and current is not None:
                 if len(app) < 2:
                     continue
+                # First block on this transfer pins which SID is carrying
+                # it; mixing 0x36 and 0xB6 inside one 34/37 cycle would be
+                # a protocol violation, so warn and stick with the first.
+                if current.block_count == 0:
+                    current.transfer_sid = sid
+                elif sid != current.transfer_sid:
+                    warnings.append(
+                        f"mixed transfer SIDs at t={f.ms}ms: started with "
+                        f"0x{current.transfer_sid:02X}, saw 0x{sid:02X} — "
+                        f"counting bytes anyway"
+                    )
                 seq = app[1]
                 data = app[2:]
                 if last_seq is not None:
@@ -265,6 +284,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             "received_size": t.received_size,
             "format_byte": f"0x{t.format_byte:02X}",
             "addr_len_format": f"0x{t.addr_len_format:02X}",
+            "transfer_sid": f"0x{t.transfer_sid:02X}",
             "block_count": t.block_count,
             "block_seq_wraps": t.block_seq_wraps,
             "payload_sha256": digest,
