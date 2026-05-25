@@ -36,6 +36,22 @@ inline constexpr std::uint8_t kSidRoutineControl = 0x31;
 inline constexpr std::uint8_t kSidRequestDownload = 0x34;
 inline constexpr std::uint8_t kSidTransferData = 0x36;
 inline constexpr std::uint8_t kSidRequestTransferExit = 0x37;
+
+// 0xB6 — Subaru manufacturer-specific bulk transfer service. Used in
+// place of standard 0x36 TransferData when RequestDownload (0x34)
+// negotiates dataFormatIdentifier=0x04 (Subaru ciphertext payload).
+// During an aftermarket reflash, the ciphertext blocks ride on 0xB6
+// and 0x36 never appears on the wire. Positive response is 0xF6
+// (= 0xB6 + kPositiveResponseOffset); negative is the usual `7F B6
+// NRC`. Sniff/extract tooling that filters for 0x36 will see zero
+// matching frames during an actual write session — filter for 0xB6
+// instead, or for both. Cross-reference: analyst-side
+// fixtures/private/findings_protocols/uds-catalog.md §3.
+//
+// We hold off on a framing helper until SubuwuTuner grows a flash-
+// write path that needs to recognise reflash traffic; until then
+// this is documentation-only.
+inline constexpr std::uint8_t kSidSubaruBulkTransfer = 0xB6;
 inline constexpr std::uint8_t kSidTesterPresent = 0x3E;
 inline constexpr std::uint8_t kSidWriteMemoryByAddress = 0x3D;
 

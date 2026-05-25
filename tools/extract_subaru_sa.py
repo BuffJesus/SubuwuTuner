@@ -279,6 +279,21 @@ def main() -> int:
         default=SUBARU_RESPONSE_ID,
         help=f"CAN ID for SA responses (default 0x{SUBARU_RESPONSE_ID:03X})",
     )
+    p.add_argument(
+        "--strip-zero-seed-polls",
+        action="store_true",
+        help=(
+            "Drop pairs whose seed is all-zero (ISO 14229 §11.4.2.4 "
+            "'already unlocked' polls — the ECU's way of saying "
+            "'no challenge needed, you're already authenticated'). "
+            "These are session keepalives, not algorithmic "
+            "challenges. The key field in a zero-seed pair is "
+            "whatever constant the tester sends back, not a "
+            "derivation output, so feeding them to verify-gen-a / "
+            "recover-gen-a wastes search time and pollutes the "
+            "summary. Off by default to keep the extraction lossless."
+        ),
+    )
     args = p.parse_args()
 
     # Allow overriding the default Subaru pair for other modules / non-Subaru.
@@ -292,6 +307,17 @@ def main() -> int:
     print(f"parsed {len(frames)} frames from {args.log}", file=sys.stderr)
 
     pairs = extract_pairs(frames)
+    # Optional: drop zero-seed keepalive polls before emission.
+    if args.strip_zero_seed_polls:
+        before = len(pairs)
+        pairs = [p for p in pairs if any(b != 0 for b in p.seed)]
+        dropped = before - len(pairs)
+        if dropped > 0:
+            print(
+                f"  dropped {dropped} zero-seed poll(s) "
+                "(--strip-zero-seed-polls)",
+                file=sys.stderr,
+            )
     # Per-level breakdown for the stderr summary.
     by_level: dict[int, int] = {}
     for pair in pairs:
