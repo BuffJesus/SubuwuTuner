@@ -352,6 +352,15 @@ constexpr std::string_view kUsage =
     "                            FlashReport summary. With --manifest, writes a\n"
     "                            Manifest of the run; with --journal, sets\n"
     "                            FlashPlan.journal_path for incremental writes.\n"
+    "    obd-info --transport <kind> --pid <cal-id|cvn|vin>\n"
+    "             [--device <path>] [--dll <path>] [--verbose]\n"
+    "                            Send OBD-II Mode 0x09 (vehicle information).\n"
+    "                            cal-id (0x04) returns the 16-byte calibration ID,\n"
+    "                            cvn (0x06) the 4-byte calibration verification\n"
+    "                            number, vin (0x02) the 17-byte VIN. Lives in the\n"
+    "                            default session, no SecurityAccess needed.\n"
+    "                            Useful as a quick tune-state identity check\n"
+    "                            before/after applying a tune via COBB AP.\n"
     "    rdbi --transport <kind> --did <hex>\n"
     "         [--device <path>] [--dll <path>] [--output FILE.bin]\n"
     "         [--no-dsc] [--verbose]\n"
@@ -9466,6 +9475,151 @@ int cmd_rdbi(int argc, char *argv[]) {
     return 0;
 }
 
+// OBD-II Mode 09 vehicle-info query. Most useful Subaru-side for
+// fetching the calibration ID (CAL ID), which lets the user identify
+// which tune is currently active on the ECU without dumping the full
+// ROM. Mode 09 is in the default session and SA-free, so the command
+// is intentionally short: open transport, send `09 PID`, print
+// response. Pairs with the tuned-dump workflow in
+// Findings/HANDOFF-to-analyst-2026-05-25-tuned-dump-plan.md §4 step 6.
+int cmd_obd_info(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::optional<std::string> pid_name;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "obd-info: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--pid") {
+            if (auto const *v = require_arg("--pid"); v)
+                pid_name = std::string{v};
+            else
+                return 2;
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "obd-info: unknown option: %s\n", argv[i]);
+            return 2;
+        } else {
+            std::fprintf(stderr, "obd-info: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || !pid_name.has_value()) {
+        std::fputs(
+            "obd-info: missing --transport / --pid\n"
+            "Usage: subuwutuner-cli obd-info --transport <kind> --pid <name>\n"
+            "                                [--device <path>] [--dll <path>] [--verbose]\n"
+            "\n"
+            "Send OBD-II Mode 0x09 (vehicle information) and print the\n"
+            "ECU's response. Lives in the default session, no SA required.\n"
+            "Supported PIDs:\n"
+            "  cal-id   PID 0x04 — 16-byte calibration ID (e.g. 'LF79102P')\n"
+            "  cvn      PID 0x06 — 4-byte calibration verification number\n"
+            "  vin      PID 0x02 — 17-byte vehicle identification number\n",
+            stderr);
+        return 2;
+    }
+
+    std::uint8_t pid_byte = 0;
+    std::size_t pid_width = 0;
+    if (*pid_name == "cal-id" || *pid_name == "calid") {
+        pid_byte = st::ecu::uds::kObd2PidCalibrationId;
+        pid_width = 16;
+    } else if (*pid_name == "cvn") {
+        pid_byte = st::ecu::uds::kObd2PidCvn;
+        pid_width = 4;
+    } else if (*pid_name == "vin") {
+        pid_byte = st::ecu::uds::kObd2PidVin;
+        pid_width = 17;
+    } else {
+        std::fprintf(stderr,
+                     "obd-info: --pid '%s' not recognized (expected cal-id|cvn|vin).\n",
+                     pid_name->c_str());
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "obd-info: --transport '%s' not recognized (expected j2534|obdx|native).\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "obd-info: %s\n", t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+
+    st::transport::LinkConfig link{};
+    link.kind = st::transport::LinkKind::CanIso15765;
+    link.baud = 500000;
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "obd-info: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    st::ecu::uds::UdsClient client{**t};
+    auto const r = client.obd2_vehicle_info(pid_byte, pid_width);
+    if (!r.has_value()) {
+        std::fprintf(stderr, "obd-info: %s\n", r.error().to_string().c_str());
+        (void)(*t)->close();
+        return 1;
+    }
+
+    // Print each message: hex line + ASCII rendering (NULs and
+    // non-printables shown as '.' so CAL ID padding doesn't trash the
+    // terminal but the actual ID stays readable).
+    std::fprintf(stderr, "obd-info: PID 0x%02X returned %zu message(s)\n",
+                 static_cast<unsigned>(pid_byte), r->size());
+    for (std::size_t i = 0; i < r->size(); ++i) {
+        auto const &msg = (*r)[i];
+        std::fprintf(stderr, "  [%zu] hex:   ", i);
+        for (std::size_t j = 0; j < msg.size(); ++j) {
+            std::fprintf(stderr, "%02X%s", static_cast<unsigned>(msg[j]),
+                         (j + 1 < msg.size()) ? " " : "");
+        }
+        std::fprintf(stderr, "\n");
+        std::fprintf(stderr, "      ascii: \"");
+        for (auto b : msg) {
+            std::fputc((b >= 0x20 && b <= 0x7E) ? static_cast<int>(b) : '.', stderr);
+        }
+        std::fprintf(stderr, "\"\n");
+    }
+
+    (void)(*t)->close();
+    return 0;
+}
+
 // SIGINT handler for cmd_sniff. The shape (function-pointer that flips
 // an atomic) is the only safe thing to do inside a signal handler per
 // POSIX — and Windows's SIGINT runs in a separate thread anyway, so the
@@ -10497,6 +10651,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "rdbi") {
         return cmd_rdbi(argc - 2, argv + 2);
+    }
+    if (cmd == "obd-info") {
+        return cmd_obd_info(argc - 2, argv + 2);
     }
     if (cmd == "config") {
         return cmd_config(argc - 2, argv + 2);

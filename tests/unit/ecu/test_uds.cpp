@@ -430,6 +430,92 @@ TEST_CASE("UdsClient::subaru_bulk_transfer rejects addresses > 24 bits",
     REQUIRE(t.send_log().size() == before); // no frame emitted
 }
 
+// ---- OBD-II Mode 09 ---------------------------------------------------
+
+TEST_CASE("build_obd2_vehicle_info_request emits [09 pid]", "[uds][framing][obd2]") {
+    REQUIRE(uds::build_obd2_vehicle_info_request(uds::kObd2PidCalibrationId) ==
+            std::vector<std::uint8_t>{0x09, 0x04});
+    REQUIRE(uds::build_obd2_vehicle_info_request(uds::kObd2PidCvn) ==
+            std::vector<std::uint8_t>{0x09, 0x06});
+}
+
+TEST_CASE("parse_obd2_vehicle_info_response decodes one CAL ID (LF79102P)",
+          "[uds][framing][obd2]") {
+    // Real response from cobb-reinstall-3.log:14565 — engine ECU reports
+    // its calibration ID as "LF79102P" (8 printable bytes) padded to 16
+    // with NULs. Total UDS payload: 3-byte header + 16-byte message = 19.
+    std::vector<std::uint8_t> const resp{0x49, 0x04, 0x01, 0x4C, 0x46, 0x37, 0x39, 0x31,
+                                         0x30, 0x32, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                         0x00, 0x00, 0x00};
+    auto const r = uds::parse_obd2_vehicle_info_response(resp, uds::kObd2PidCalibrationId, 16);
+    REQUIRE(r.has_value());
+    REQUIRE(r->size() == 1);
+    REQUIRE((*r)[0].size() == 16);
+    // First 8 bytes are the printable CID.
+    std::string const cid((*r)[0].begin(), (*r)[0].begin() + 8);
+    REQUIRE(cid == "LF79102P");
+}
+
+TEST_CASE("parse_obd2_vehicle_info_response decodes a 4-byte CVN", "[uds][framing][obd2]") {
+    std::vector<std::uint8_t> const resp{0x49, 0x06, 0x01, 0xDE, 0xAD, 0xBE, 0xEF};
+    auto const r = uds::parse_obd2_vehicle_info_response(resp, uds::kObd2PidCvn, 4);
+    REQUIRE(r.has_value());
+    REQUIRE(r->size() == 1);
+    REQUIRE((*r)[0] == std::vector<std::uint8_t>{0xDE, 0xAD, 0xBE, 0xEF});
+}
+
+TEST_CASE("parse_obd2_vehicle_info_response handles NODI>1", "[uds][framing][obd2]") {
+    // Synthetic: two 4-byte CVNs back-to-back.
+    std::vector<std::uint8_t> const resp{0x49, 0x06, 0x02, 0x01, 0x02, 0x03, 0x04,
+                                         0x05, 0x06, 0x07, 0x08};
+    auto const r = uds::parse_obd2_vehicle_info_response(resp, uds::kObd2PidCvn, 4);
+    REQUIRE(r.has_value());
+    REQUIRE(r->size() == 2);
+    REQUIRE((*r)[0] == std::vector<std::uint8_t>{0x01, 0x02, 0x03, 0x04});
+    REQUIRE((*r)[1] == std::vector<std::uint8_t>{0x05, 0x06, 0x07, 0x08});
+}
+
+TEST_CASE("parse_obd2_vehicle_info_response rejects PID mismatch",
+          "[uds][framing][obd2][error]") {
+    std::vector<std::uint8_t> const resp{0x49, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00};
+    auto const r = uds::parse_obd2_vehicle_info_response(resp, uds::kObd2PidCvn, 4);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("parse_obd2_vehicle_info_response rejects length mismatch",
+          "[uds][framing][obd2][error]") {
+    // NODI=2 declares 8 bytes of payload, but only 4 follow.
+    std::vector<std::uint8_t> const resp{0x49, 0x06, 0x02, 0xDE, 0xAD, 0xBE, 0xEF};
+    auto const r = uds::parse_obd2_vehicle_info_response(resp, uds::kObd2PidCvn, 4);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("parse_obd2_vehicle_info_response surfaces an NRC", "[uds][framing][obd2][error]") {
+    std::vector<std::uint8_t> const resp{0x7F, 0x09, 0x12};
+    auto const r = uds::parse_obd2_vehicle_info_response(resp, uds::kObd2PidCvn, 4);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+}
+
+TEST_CASE("UdsClient::obd2_vehicle_info round-trip via MockTransport",
+          "[uds][client][obd2]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    // Mirror the install-log exchange: request 09 04, response carrying
+    // the 16-byte CAL ID padded with NULs.
+    t.expect_send_recv({0x09, 0x04}, {0x49, 0x04, 0x01, 0x4C, 0x46, 0x37, 0x39, 0x31,
+                                       0x30, 0x32, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                       0x00, 0x00, 0x00});
+    uds::UdsClient client{t};
+    auto const r = client.obd2_vehicle_info(uds::kObd2PidCalibrationId, 16);
+    REQUIRE(r.has_value());
+    REQUIRE(r->size() == 1);
+    std::string const cid((*r)[0].begin(), (*r)[0].begin() + 8);
+    REQUIRE(cid == "LF79102P");
+}
+
 // ---- RequestTransferExit ----------------------------------------------
 
 TEST_CASE("RequestTransferExit round-trip", "[uds][exit]") {

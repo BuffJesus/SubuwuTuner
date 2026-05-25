@@ -429,6 +429,50 @@ Status parse_subaru_bulk_transfer_response(std::span<std::uint8_t const> resp) {
     return ok();
 }
 
+// ---- OBD-II Mode 09 ----------------------------------------------------
+
+std::vector<std::uint8_t> build_obd2_vehicle_info_request(std::uint8_t pid) {
+    return std::vector<std::uint8_t>{kSidObd2VehicleInfo, pid};
+}
+
+Result<std::vector<std::vector<std::uint8_t>>>
+parse_obd2_vehicle_info_response(std::span<std::uint8_t const> resp, std::uint8_t expected_pid,
+                                 std::size_t message_width) {
+    // OBD-II uses kPositiveResponseOffset same as UDS, so positive
+    // response SID is 0x09 + 0x40 = 0x49. Negative responses follow
+    // the standard `7F <SID> <NRC>` shape too — engine ECUs that
+    // don't expose a particular PID return NRC 0x12 (subFunction
+    // not supported, despite Mode 09 not having a sub-function).
+    if (auto r = reject_if_negative(resp, kSidObd2VehicleInfo); !r.has_value()) {
+        return failure(r.error());
+    }
+    if (resp.size() < 3) {
+        return failure(ErrorCode::ParseError, "OBD2 Mode 09 response too short for header");
+    }
+    if (resp[0] != kSidObd2VehicleInfo + kPositiveResponseOffset) {
+        return failure(ErrorCode::EcuRejected, "OBD2 Mode 09 unexpected response SID");
+    }
+    if (resp[1] != expected_pid) {
+        return failure(ErrorCode::ParseError, "OBD2 Mode 09 PID mismatch");
+    }
+    if (message_width == 0) {
+        return failure(ErrorCode::InvalidArgument, "OBD2 Mode 09 message_width must be > 0");
+    }
+    std::size_t const nodi = resp[2];
+    std::size_t const expected_payload = nodi * message_width;
+    if (resp.size() != 3 + expected_payload) {
+        return failure(ErrorCode::ParseError,
+                       "OBD2 Mode 09 response length doesn't match NODI * message_width");
+    }
+    std::vector<std::vector<std::uint8_t>> messages;
+    messages.reserve(nodi);
+    for (std::size_t i = 0; i < nodi; ++i) {
+        auto const slice = resp.subspan(3 + i * message_width, message_width);
+        messages.emplace_back(slice.begin(), slice.end());
+    }
+    return messages;
+}
+
 // ---- RequestTransferExit -----------------------------------------------
 
 std::vector<std::uint8_t> build_request_transfer_exit() {
@@ -746,6 +790,16 @@ Status UdsClient::write_memory_by_address(std::uint32_t memory_address,
         return failure(resp.error());
     return parse_write_memory_by_address_response(resp->data, memory_address,
                                                   static_cast<std::uint32_t>(data.size()));
+}
+
+Result<std::vector<std::vector<std::uint8_t>>>
+UdsClient::obd2_vehicle_info(std::uint8_t pid, std::size_t message_width,
+                             std::chrono::milliseconds timeout) {
+    auto const req = build_obd2_vehicle_info_request(pid);
+    auto const resp = transport_->send_recv(req, timeout);
+    if (!resp.has_value())
+        return failure(resp.error());
+    return parse_obd2_vehicle_info_response(resp->data, pid, message_width);
 }
 
 Status UdsClient::communication_control(std::uint8_t control_type, std::uint8_t communication_type,

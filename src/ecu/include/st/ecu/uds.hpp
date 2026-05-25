@@ -164,6 +164,34 @@ build_subaru_bulk_transfer(std::uint32_t memory_address, std::span<std::uint8_t 
 // 24-bit ceiling on the address embedded in 0xB6 transfers.
 inline constexpr std::uint32_t kSubaruBulkTransferAddressMax = 0xFFFFFFU;
 
+// OBD-II legacy mode 0x09 — vehicle information. Lives in the same
+// namespace as the UDS services because it rides the same ISO-15765
+// transport (CAN ID 0x7DF functional or 0x7E0/0x7E8 physical) and
+// SubuwuTuner only ever talks to engine-ECU diagnostics, where Mode
+// 09 reuse is universal.
+//
+// Wire format mirrors all OBD-II legacy modes:
+//   Request:  [0x09] [PID]                                    (2 bytes)
+//   Response: [0x49] [PID] [NODI] [message1] ... [messageN]   (variable)
+// where NODI ("Number Of Data Items") is the count of fixed-size
+// messages that follow. PID 0x02 (VIN), PID 0x04 (CAL ID),
+// PID 0x06 (CVN) all share this shape with different message widths.
+inline constexpr std::uint8_t kSidObd2VehicleInfo = 0x09;
+inline constexpr std::uint8_t kObd2PidVin = 0x02;
+inline constexpr std::uint8_t kObd2PidCalibrationId = 0x04;
+inline constexpr std::uint8_t kObd2PidCvn = 0x06;
+
+[[nodiscard]] std::vector<std::uint8_t> build_obd2_vehicle_info_request(std::uint8_t pid);
+
+// Parse a Mode 09 response that returns N fixed-width messages. Returns
+// each message as a separate vector<uint8_t> in the order the ECU sent
+// them. `message_width` is the per-message byte count (CAL ID = 16,
+// CVN = 4, VIN = 17). Returns ParseError if the response length doesn't
+// match `NODI * message_width + 3` (the 3-byte header).
+[[nodiscard]] Result<std::vector<std::vector<std::uint8_t>>>
+parse_obd2_vehicle_info_response(std::span<std::uint8_t const> resp, std::uint8_t expected_pid,
+                                 std::size_t message_width);
+
 // RequestTransferExit (0x37) — finalize. Some ECUs include a CRC in the response;
 // for portability we accept any positive response and ignore extra bytes.
 [[nodiscard]] std::vector<std::uint8_t> build_request_transfer_exit();
@@ -315,6 +343,18 @@ public:
     [[nodiscard]] Status
     communication_control(std::uint8_t control_type, std::uint8_t communication_type,
                           std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
+
+    // OBD-II Mode 09: vehicle information. Returns one or more
+    // fixed-width messages depending on the PID. Engine ECUs typically
+    // answer NODI=1 for these queries, so most callers will see a
+    // one-element vector — but the wire format permits NODI>1 (rare,
+    // typically only on chassis modules) so the return is a vector.
+    //
+    // `message_width` MUST match the PID: 16 for CAL ID (0x04), 4 for
+    // CVN (0x06), 17 for VIN (0x02). A mismatch produces ParseError.
+    [[nodiscard]] Result<std::vector<std::vector<std::uint8_t>>>
+    obd2_vehicle_info(std::uint8_t pid, std::size_t message_width,
+                      std::chrono::milliseconds timeout = std::chrono::milliseconds{1000});
 
 private:
     transport::ITransport *transport_;
