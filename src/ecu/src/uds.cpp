@@ -692,6 +692,15 @@ Status UdsClient::transfer_data(std::uint8_t block_sequence_counter,
 Status UdsClient::subaru_bulk_transfer(std::uint32_t memory_address,
                                        std::span<std::uint8_t const> data,
                                        std::chrono::milliseconds timeout) {
+    // 0xB6 carries a 3-byte address; reject before silently truncating
+    // bits the wire can't fit. Subaru flash maxes at 0x1FFFFF so this
+    // shouldn't fire in normal use — it catches caller-side off-by-one
+    // and any future call sites that bypass the Flasher's sector
+    // geometry.
+    if (memory_address > kSubaruBulkTransferAddressMax) {
+        return failure(ErrorCode::InvalidArgument,
+                       "UDS SubaruBulkTransfer address exceeds 24-bit ceiling 0xFFFFFF");
+    }
     auto const req = build_subaru_bulk_transfer(memory_address, data);
     auto const resp = transport_->send_recv(req, timeout);
     if (!resp.has_value())

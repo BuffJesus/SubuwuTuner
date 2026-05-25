@@ -8296,15 +8296,26 @@ int cmd_flash_apply(int argc, char *argv[]) {
             // compression/encryption (default). 0x04 = Subaru ciphertext,
             // which switches the per-block transfer service from 0x36
             // TransferData to 0xB6 Subaru bulk transfer.
+            //
+            // Hex when prefixed with 0x; otherwise base 10. NOT base 0
+            // (auto-detect) — that would treat a leading-zero literal
+            // like `010` as octal and parse it as 8, surprising users
+            // who meant decimal ten.
             auto const *v = require_arg("--data-format");
             if (v == nullptr)
                 return 2;
+            std::string_view sv{v};
+            int base = 10;
+            if (sv.starts_with("0x") || sv.starts_with("0X")) {
+                sv.remove_prefix(2);
+                base = 16;
+            }
             char *end = nullptr;
-            auto const val = std::strtoull(v, &end, 0); // base 0 auto-detects 0x
-            if (end == v || *end != '\0' || val > 0xFFULL) {
+            auto const val = std::strtoull(sv.data(), &end, base);
+            if (end == sv.data() || *end != '\0' || val > 0xFFULL) {
                 std::fprintf(stderr, "flash-apply: --data-format must be a "
-                                     "0-255 hex or decimal value (0x04 = "
-                                     "Subaru ciphertext / bulk transfer)\n");
+                                     "0-255 hex (0x..) or decimal value "
+                                     "(0x04 = Subaru ciphertext / bulk transfer)\n");
                 return 2;
             }
             data_format_override = static_cast<std::uint8_t>(val);
@@ -8314,15 +8325,24 @@ int cmd_flash_apply(int argc, char *argv[]) {
             // checksum) is written LAST regardless of plan order. Power
             // loss during the body leaves the checksum invalid and the
             // ECU detecting corruption at boot — the safe failure mode.
+            //
+            // Same hex-or-decimal parsing as --data-format; no octal
+            // auto-detect.
             auto const *v = require_arg("--integrity-check-offset");
             if (v == nullptr)
                 return 2;
+            std::string_view sv{v};
+            int base = 10;
+            if (sv.starts_with("0x") || sv.starts_with("0X")) {
+                sv.remove_prefix(2);
+                base = 16;
+            }
             char *end = nullptr;
-            auto const val = std::strtoull(v, &end, 0); // base 0 auto-detects 0x
-            if (end == v || *end != '\0' || val > 0xFFFFFFFFULL) {
+            auto const val = std::strtoull(sv.data(), &end, base);
+            if (end == sv.data() || *end != '\0' || val > 0xFFFFFFFFULL) {
                 std::fprintf(stderr, "flash-apply: --integrity-check-offset "
-                                     "must be a hex or decimal integer in "
-                                     "32-bit range\n");
+                                     "must be a hex (0x..) or decimal integer "
+                                     "in 32-bit range\n");
                 return 2;
             }
             integrity_check_offset_override = static_cast<std::uint32_t>(val);

@@ -152,9 +152,17 @@ parse_request_download_response(std::span<std::uint8_t const> resp);
 // frames and surfacing only the final response — every observed B6 in
 // cobb-reinstall-3.log produced one `7F B6 78` followed by an `F6` and
 // real adapters / J2534 drivers handle this transparently.
+//
+// PRECONDITION: `memory_address <= 0xFFFFFF`. The wire format only
+// carries 3 address bytes; values above the 24-bit ceiling are silently
+// truncated here (the build helper is a low-level shaper, no validation).
+// The runtime check is in `UdsClient::subaru_bulk_transfer`.
 [[nodiscard]] std::vector<std::uint8_t>
 build_subaru_bulk_transfer(std::uint32_t memory_address, std::span<std::uint8_t const> data);
 [[nodiscard]] Status parse_subaru_bulk_transfer_response(std::span<std::uint8_t const> resp);
+
+// 24-bit ceiling on the address embedded in 0xB6 transfers.
+inline constexpr std::uint32_t kSubaruBulkTransferAddressMax = 0xFFFFFFU;
 
 // RequestTransferExit (0x37) — finalize. Some ECUs include a CRC in the response;
 // for portability we accept any positive response and ignore extra bytes.

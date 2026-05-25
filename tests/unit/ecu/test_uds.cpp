@@ -406,6 +406,30 @@ TEST_CASE("UdsClient::subaru_bulk_transfer round-trip through MockTransport",
     REQUIRE(client.subaru_bulk_transfer(0x006000, data).has_value());
 }
 
+TEST_CASE("UdsClient::subaru_bulk_transfer rejects addresses > 24 bits",
+          "[uds][client][b6][error]") {
+    // The 0xB6 wire format carries 3 address bytes. Catch any caller-side
+    // off-by-one that would silently truncate the high byte into the wrong
+    // flash region.
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    uds::UdsClient client{t};
+    std::vector<std::uint8_t> const data(4, 0xAA);
+
+    // Boundary: 0xFFFFFF accepted (queue the expected exchange).
+    auto expected_max = std::vector<std::uint8_t>{0xB6, 0xFF, 0xFF, 0xFF};
+    expected_max.insert(expected_max.end(), data.begin(), data.end());
+    t.expect_send_recv(expected_max, {0xF6});
+    REQUIRE(client.subaru_bulk_transfer(0xFFFFFF, data).has_value());
+
+    // Just over: 0x01000000 rejected without touching the wire.
+    auto const before = t.send_log().size();
+    auto const r = client.subaru_bulk_transfer(0x01000000, data);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+    REQUIRE(t.send_log().size() == before); // no frame emitted
+}
+
 // ---- RequestTransferExit ----------------------------------------------
 
 TEST_CASE("RequestTransferExit round-trip", "[uds][exit]") {

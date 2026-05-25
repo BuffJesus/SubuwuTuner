@@ -434,10 +434,17 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *
             writes_ordered.begin(), writes_ordered.end(), [off](SectorWrite const &w) {
                 return w.sector.address <= off && off < w.sector.address + w.sector.length;
             });
-        if (it != writes_ordered.end() && it + 1 != writes_ordered.end()) {
+        // `std::rotate(it, it+1, end)` is a no-op when it == end-1, so
+        // the "is it already last" check would be redundant. Just guard
+        // against it == end (offset not in any sector — no rotation).
+        if (it != writes_ordered.end()) {
             std::rotate(it, it + 1, writes_ordered.end());
         }
     }
+    // 0xB6 vs 0x36 dispatch is determined entirely by plan.data_format
+    // and is invariant across the per-sector loop below — hoist out so
+    // the comparison runs once per execute() rather than once per sector.
+    bool const use_b6 = (plan.data_format == kDataFormatSubaruCiphertext);
 
     // 1. Enter programming session.
     if (auto s = client_.diagnostic_session_control(plan.session); !s.has_value()) {
@@ -531,10 +538,9 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *
             // 3c. TransferData blocks. Two wire formats: standard
             // 0x36 with a 1-byte block-sequence counter (default), or
             // 0xB6 Subaru-bulk-transfer with an explicit 3-byte address
-            // per call (selected by data_format == 0x04). For the 0xB6
-            // path the orchestrator advances the address by chunk size
-            // between calls; there is no counter.
-            bool const use_b6 = (plan.data_format == kDataFormatSubaruCiphertext);
+            // per call (selected by data_format == 0x04 above). For the
+            // 0xB6 path the orchestrator advances the address by chunk
+            // size between calls; there is no counter.
             std::uint8_t counter = 1;
             std::size_t offset = 0;
             while (offset < w.data.size()) {
