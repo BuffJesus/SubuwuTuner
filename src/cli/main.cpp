@@ -8923,8 +8923,8 @@ int cmd_rom_pull(int argc, char *argv[]) {
     std::optional<bool> authenticate_flag;
     std::optional<bool> enter_dsc_flag;
     std::uint8_t security_level = 0x01;
-    bool cobb_tuned = false;  // opt-in for COBB-flashed ECUs; see
-                              // st::ecu::subaru::ssmcan1_l1_cobb_tuned
+    bool cobb_tuned = false;  // DEPRECATED — see comment at the
+                              // call site below. Now a no-op alias.
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -9163,8 +9163,10 @@ int cmd_rom_pull(int argc, char *argv[]) {
     st::flash::Flasher flasher{*chosen};
     if (cobb_tuned) {
         flasher.set_security_key_fn(&st::ecu::subaru::ssmcan1_l1_cobb_tuned);
-        std::fputs("rom-pull: using COBB-tuned L1 SA variant "
-                   "(RK_L35 swap; opt-in via --cobb-tuned)\n",
+        std::fputs("rom-pull: --cobb-tuned is now a no-op alias. "
+                   "Default L1 SA uses the COBB-uninstalled constants "
+                   "by design (the original two-variant model was "
+                   "wrong; see src/ecu/src/subaru_security.cpp).\n",
                    stderr);
     }
     auto const r = flasher.read_full_rom(*addr, *size, max_chunk,

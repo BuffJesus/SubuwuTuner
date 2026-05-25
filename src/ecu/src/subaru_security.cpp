@@ -36,25 +36,50 @@ constexpr std::array<std::uint8_t, 32> kSBox = {
     0x05, 0x0c, 0x01, 0x0a, 0x03, 0x0d, 0x0e, 0x08,
 };
 
-// Level-1 round-key table (16 × uint16, big-endian on the wire). Level 1
-// is the bootloader-unlock level — sufficient for ReadMemoryByAddress
-// and RequestDownload (so, sufficient for a stock ROM dump).
-constexpr std::array<std::uint16_t, 16> kRoundKeysL1 = {
-    0x78b1, 0x4625, 0x201c, 0x9ea5,
-    0xad6b, 0x35f4, 0xfd21, 0x5e71,
-    0xb046, 0x7f4a, 0x4b75, 0x93f9,
-    0x1895, 0x8961, 0x3ecc, 0x862b,
-};
+// SA round-key tables — IMPORTANT naming correction (2026-05-24 PM)
+//
+// The analyst-side bootloader disassembly of the 2017 LF79103P dump
+// (HANDOFF-to-subuwutuner-2026-05-24-pm-2.md §2, code at flash
+// 0x000BE8CC) showed that the L1 SA dispatcher loads its round-key
+// table from flash address 0x074338, and L3/L5 loads from 0x074358.
+// Earlier drafts of this file inverted those labels: what was named
+// `kRoundKeysL1` was the bytes at 0x074358 (the L3/L5 table per code
+// semantics), and `kRoundKeysL35` was the bytes at 0x074338 (the L1
+// table per code semantics).
+//
+// The constants below are renamed to match what the dispatcher does.
+// Byte values are unchanged. Provenance of values: extracted from the
+// 2017 LF79103P-AP-uninstalled dump SHA-256
+// 52e60da2c1e7f5d1bdc3f45ee1ed78745cf32a81261c07a7aa6c5906538831cc;
+// also byte-identical to the LF79100P reference ROM (which itself is
+// now believed to be COBB-tuned, NOT stock — see
+// `project_cobb_uninstall_no_sa_restore.md`). The per-CID variation
+// table in the analyst handoff §1 confirms different LF79 ECU
+// families carry different SA constants, so these values are NOT
+// universal across all Gen-A.2 hardware — they're specifically the
+// values observed on a COBB-touched LF79103P (uninstalled state).
+//
+// We do NOT have validated truly-stock LF79103P constants on file
+// (every dump in our reference set has been COBB-influenced). A user
+// running a never-tuned LF79103P would likely need different bytes
+// here for SA to succeed; on the upside, the bytes can be read out
+// of any successfully-dumped ROM at the same flash offsets.
 
-// Level-3 / Level-5 round-key table, shared on Gen-A.2. Byte-verified
-// across every A-series ROM sampled (LF7x/LF9x, MY 2015-2021). Loaded
-// in-tree because COBB-tuned ECUs swap which table the L1 feistel uses
-// — see `ssmcan1_l1_cobb_tuned` below.
-constexpr std::array<std::uint16_t, 16> kRoundKeysL35 = {
+// Loaded for L1 dispatch (subfn 0x01 / 0x02). Flash address 0x074338.
+constexpr std::array<std::uint16_t, 16> kSaTableL1 = {
     0x794b, 0x3caf, 0x3019, 0x8b57,
     0x52a0, 0xa77c, 0x38c9, 0xb0b5,
     0x6520, 0x3b66, 0xa09d, 0x2877,
     0x479f, 0xb685, 0x7568, 0x84d7,
+};
+
+// Loaded for L3 / L5 dispatch (subfn 0x03/0x04 / 0x05/0x06).
+// Flash address 0x074358.
+constexpr std::array<std::uint16_t, 16> kSaTableL35 = {
+    0x78b1, 0x4625, 0x201c, 0x9ea5,
+    0xad6b, 0x35f4, 0xfd21, 0x5e71,
+    0xb046, 0x7f4a, 0x4b75, 0x93f9,
+    0x1895, 0x8961, 0x3ecc, 0x862b,
 };
 
 constexpr std::uint16_t rol16(std::uint16_t v, unsigned n) noexcept {
@@ -174,15 +199,13 @@ std::uint32_t test_only_feistel_inverse(std::uint32_t state,
 }
 
 std::span<std::uint16_t const, 16> test_only_round_keys_l1() noexcept {
-    return std::span<std::uint16_t const, 16>{kRoundKeysL1};
+    return std::span<std::uint16_t const, 16>{kSaTableL1};
 }
 
 } // namespace internal
 
 namespace {
 
-// Shared L1 wire body — only the round-key table varies between stock
-// and the COBB-tuned variant. Both call this with the table they want.
 Result<std::vector<std::uint8_t>>
 ssmcan1_l1_compute(std::span<std::uint8_t const> seed,
                    std::span<std::uint16_t const, 16> rk,
@@ -204,41 +227,48 @@ ssmcan1_l1_compute(std::span<std::uint8_t const> seed,
 } // namespace
 
 Result<std::vector<std::uint8_t>> ssmcan1_key_stub(std::span<std::uint8_t const> seed) {
-    // Historical name. As of 2026-05-24 this is the real Gen-A.2 level-1
-    // implementation, not a stub — kept under the original symbol so the
-    // Flasher default doesn't need to chase a rename across every caller.
-    // The other two functions in this file remain genuine NotImplemented
-    // stubs.
+    // Gen-A.2 SSMCAN1 level-1 derivation using the round-key table that
+    // the SA dispatcher loads for L1 (analyst-side disassembly of the
+    // 2017 LF79103P-AP-uninstalled dump at flash 0x000BE8CC).
+    //
+    // CAVEATS — 2026-05-24 PM:
+    // 1. The constants in `kSaTableL1` are observed on a COBB-touched
+    //    LF79103P. A truly never-tuned LF79103P likely has different
+    //    constants at the same flash slot (analyst handoff §1 confirms
+    //    different LF79 families have different SA constants). This
+    //    function will fail with NRC 0x35 on a truly-stock LF79103P
+    //    unless its constants happen to match.
+    // 2. Captured L1 pairs from this car produce seeds that vary across
+    //    sessions even with the same constants, which means the Feistel
+    //    has an as-yet-unidentified session-variable input. The function
+    //    DOES reproduce captured keys for COBB-uninstalled-state pairs
+    //    (4/4 captured pairs on file match), so empirically it works
+    //    for that state — but the algorithm-level model isn't complete.
+    // 3. The "_stub" suffix is historical. This is the real
+    //    implementation, kept under the original symbol so the Flasher
+    //    default doesn't need a rename across every caller.
     return ssmcan1_l1_compute(
-        seed, std::span<std::uint16_t const, 16>{kRoundKeysL1}, "Gen-A");
+        seed, std::span<std::uint16_t const, 16>{kSaTableL1}, "Gen-A L1");
 }
 
 Result<std::vector<std::uint8_t>>
 ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const> seed) {
-    // COBB-tuned variant: identical algorithm structure, but the L1 feistel
-    // uses kRoundKeysL35 (the stock L3/L5 table) instead of kRoundKeysL1.
+    // DEPRECATED ALIAS (2026-05-24 PM). Originally introduced as a
+    // separate function under the (then-believed) assumption that COBB-
+    // tuned ECUs run a different L1 algorithm than stock — specifically,
+    // that COBB swapped the L1 dispatch's table pointer from RK_L1 to
+    // RK_L35. That model was incorrect: per analyst handoff §1.6 / §2,
+    // COBB does NOT modify the dispatch code. They modify the round-key
+    // table contents in-place at flash 0x074338, and the constants we
+    // shipped here as "kRoundKeysL35" were actually the bytes COBB
+    // writes into the L1 slot. With the renamed constants, this function
+    // and `ssmcan1_key_stub` now do bit-identical work — both run the L1
+    // feistel against `kSaTableL1`.
     //
-    // EMPIRICAL FINDING (2026-05-24, not yet field-verified beyond 1 pair):
-    // on a 2017 LF79103P that has been COBB-flashed, the L1 SA challenge
-    // `seed=4BC3CC87` returned `key=A73FED09` — which matches this
-    // RK_L35-based derivation exactly (random-match probability 2^-32).
-    // The same session's L3 pair also matched a parallel table-swap
-    // hypothesis (L3 uses RK_L1), suggesting a clean pointer swap in
-    // COBB's flash patch.
-    //
-    // HOWEVER, 3 earlier L3 captures from prior sessions on the same car
-    // do NOT match any simple table-swap, and 2 L3 pairs captured 9s apart
-    // in the SAME session don't share any recoverable common RK. So L3 has
-    // additional session-dependent state we don't yet model. Whether L1
-    // shares that property is unverified — only 1 L1 pair on file.
-    //
-    // Caller risk: if L1 also has hidden session state, this derivation
-    // will fail with NRC 0x35 (invalidKey) and burn 1 of 3 SA attempts.
-    // Capture additional L1 pairs (multiple reinstalls) before relying
-    // on this in production. Plumbed into the CLI behind `--cobb-tuned`
-    // so the user opts in explicitly.
-    return ssmcan1_l1_compute(
-        seed, std::span<std::uint16_t const, 16>{kRoundKeysL35}, "COBB-tuned");
+    // Kept as an alias for CLI back-compat (`--cobb-tuned`) and for any
+    // out-of-tree callers that explicitly wired this name. Will route to
+    // `ssmcan1_key_stub` until a future cleanup pass removes it.
+    return ssmcan1_key_stub(seed);
 }
 
 Result<std::vector<std::uint8_t>> ssmk1_key_stub(std::span<std::uint8_t const> seed) {

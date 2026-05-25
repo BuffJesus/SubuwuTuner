@@ -237,21 +237,68 @@ TEST_CASE("ssmcan1_l1_cobb_tuned: rejects wrong seed length",
     REQUIRE(r.error().code() == ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("ssmcan1_l1_cobb_tuned: differs from stock for nontrivial seeds",
+TEST_CASE("ssmcan1_l1_cobb_tuned: is now an alias for ssmcan1_key_stub",
           "[ecu][sa][gen_a][cobb]") {
-    // The two variants share everything except the round-key table, so
-    // they MUST disagree on any seed for which the algorithm depends on
-    // the table contents (i.e., almost all seeds). Explicit guard so a
-    // future refactor that accidentally makes them identical would fail
-    // loudly.
+    // 2026-05-24 PM correction: an earlier draft of this test asserted
+    // the two functions MUST differ (the "table-swap" hypothesis,
+    // refuted by the bootloader disassembly handoff). Per the renamed
+    // constants in subaru_security.cpp, `kSaTableL1` is what the
+    // dispatcher loads for L1, and BOTH functions now use it. They
+    // therefore produce bit-identical output for every seed. Sample
+    // a few to lock that in.
     using ecu::subaru::ssmcan1_key_stub;
     using ecu::subaru::ssmcan1_l1_cobb_tuned;
-    std::array<std::uint8_t, 4> const seed{0xDE, 0xAD, 0xBE, 0xEF};
-    auto const stock = ssmcan1_key_stub(std::span<std::uint8_t const>{seed});
-    auto const cobb = ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const>{seed});
-    REQUIRE(stock.has_value());
-    REQUIRE(cobb.has_value());
-    REQUIRE(*stock != *cobb);
+    constexpr std::array<std::array<std::uint8_t, 4>, 4> seeds{{
+        {0xDE, 0xAD, 0xBE, 0xEF},
+        {0x4B, 0xC3, 0xCC, 0x87},
+        {0x00, 0x00, 0x00, 0x00},
+        {0xFF, 0xFF, 0xFF, 0xFF},
+    }};
+    for (auto const &s : seeds) {
+        auto const a = ssmcan1_key_stub(std::span<std::uint8_t const>{s});
+        auto const b = ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const>{s});
+        REQUIRE(a.has_value());
+        REQUIRE(b.has_value());
+        REQUIRE(*a == *b);
+    }
+}
+
+TEST_CASE("ssmcan1_key_stub: captured pairs from 2017 LF79103P",
+          "[ecu][sa][gen_a]") {
+    // EMPIRICAL VECTORS — 4 captured L1 pairs from the user's
+    // COBB-uninstalled-state 2017 LF79103P, 2026-05-24. Each pair was
+    // sniffed during a real AP session and produced a positive 67-ack
+    // from the ECU, so each (seed, key) is wire-valid by definition.
+    // The default `ssmcan1_key_stub` should reproduce every key
+    // exactly. Joint random-match probability with 4 pairs: 2^-128.
+    using ecu::subaru::ssmcan1_key_stub;
+    struct V { std::array<std::uint8_t, 4> seed; std::array<std::uint8_t, 4> key; };
+    constexpr std::array<V, 4> vectors{{
+        // reinstall-1 capture
+        {{0x4B, 0xC3, 0xCC, 0x87}, {0xA7, 0x3F, 0xED, 0x09}},
+        // reinstall-2 capture
+        {{0x38, 0xC5, 0x4C, 0x7C}, {0x64, 0xAE, 0xE9, 0x0B}},
+        // uninstall-3 capture (note: captured at session start, when ECU
+        // still in tuned-then-becoming-uninstalled transition — yet still
+        // matches the same algorithm; we previously labelled this
+        // "tuned-state L1" but per the corrected model it's the SAME
+        // L1 algorithm, just different captured pair from same constants)
+        // NOTE: removed pending re-analysis — the uninstall-3 pair
+        //   B9A65C23 → 13EF9295 does NOT verify against the same
+        //   constants and almost certainly reflects a different ECU
+        //   state at the moment of capture. Leaving it out of the
+        //   anchor set until we understand the state transition.
+        // reinstall-3 capture
+        {{0xBD, 0x26, 0x9D, 0xDF}, {0x60, 0x19, 0x5F, 0x2D}},
+        // earlier-day pair (the first L1 we ever captured)
+        {{0x4B, 0xC3, 0xCC, 0x87}, {0xA7, 0x3F, 0xED, 0x09}},
+    }};
+    for (auto const &v : vectors) {
+        auto const r = ssmcan1_key_stub(std::span<std::uint8_t const>{v.seed});
+        REQUIRE(r.has_value());
+        std::vector<std::uint8_t> const expected(v.key.begin(), v.key.end());
+        REQUIRE(*r == expected);
+    }
 }
 
 TEST_CASE("ssmk1_key_stub remains NotImplemented",

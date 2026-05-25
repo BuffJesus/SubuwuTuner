@@ -57,17 +57,16 @@ namespace st::ecu::subaru {
 [[nodiscard]] Result<std::vector<std::uint8_t>>
 ssmcan1_key_stub(std::span<std::uint8_t const> seed);
 
-// COBB-tuned variant of the Gen-A SSMCAN1 L1 algorithm. Identical to
-// `ssmcan1_key_stub` except the L1 feistel uses the stock L3/L5 round-key
-// table (RK_L35) — empirically COBB's tune-install patches the L1 table
-// pointer to RK_L35. Confirmed against 1 captured pair on LF79103P; not
-// yet field-verified beyond that single data point. See implementation
-// comment in `subaru_security.cpp` for caveats and the hidden-session-
-// state risk if L1 turns out to behave like L3.
+// DEPRECATED ALIAS (2026-05-24 PM). Originally introduced when we
+// thought COBB-tuned ECUs ran a different L1 algorithm via a pointer
+// swap. The analyst-side bootloader disassembly later showed COBB
+// modifies the round-key TABLE BYTES in place at flash 0x074338, not
+// the dispatch code — so `ssmcan1_key_stub` (now using the renamed
+// `kSaTableL1` constants which ARE the bytes COBB writes) and this
+// function are bit-identical. Routed through `ssmcan1_key_stub`.
 //
-// Use only when targeting a COBB-tuned ECU. Wire via the CLI flag
-// `rom-pull --cobb-tuned`, or via
-// `Flasher::set_security_key_fn(&ssmcan1_l1_cobb_tuned)` programmatically.
+// Kept for back-compat with the `--cobb-tuned` CLI flag and any out-
+// of-tree callers; will be removed in a future cleanup pass.
 [[nodiscard]] Result<std::vector<std::uint8_t>>
 ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const> seed);
 

@@ -921,12 +921,25 @@ def _l5_wire_seed_to_packed(wire: bytes) -> int:
 
 
 def _l5_state_to_wire_key(state: int) -> bytes:
-    # Reference C: wire[0]=k1, wire[1]=k3, wire[2]=k0, wire[3]=k2.
+    # Per 2026-05-24 PM analyst handoff §3 (`HANDOFF-to-subuwutuner-
+    # 2026-05-24-pm-2.md`), the L5 send-key dispatcher permutes received
+    # wire bytes into the local comparison buffer as
+    # `local[i] = recv[perm[i]]` with perm = [1, 3, 0, 2]. Solving for the
+    # wire bytes a tester must send to make local match the internal-state
+    # bytes (k0, k1, k2, k3):
+    #   local[0] = k0 = recv[1] → wire[1] = k0
+    #   local[1] = k1 = recv[3] → wire[3] = k1
+    #   local[2] = k2 = recv[0] → wire[0] = k2
+    #   local[3] = k3 = recv[2] → wire[2] = k3
+    # So wire = [k2, k0, k3, k1]. Earlier draft of this function returned
+    # [k1, k3, k0, k2] (the inverse permutation, applied in the wrong
+    # direction). Corrected 2026-05-24 PM. NB: no real L5 captures on file
+    # yet to ground-truth-verify; the fix is from the disassembled code.
     k0 = (state >> 24) & 0xFF
     k1 = (state >> 16) & 0xFF
     k2 = (state >> 8) & 0xFF
     k3 = state & 0xFF
-    return bytes([k1, k3, k0, k2])
+    return bytes([k2, k0, k3, k1])
 
 
 def _shuffles_for_level(level: int) -> "tuple[Callable[[bytes], int], Callable[[int], bytes]]":
@@ -980,8 +993,9 @@ def gen_a_key_to_seed(key_bytes: bytes, level: int) -> bytes:
         k3, k1, k2, k0 = key_bytes[0], key_bytes[1], key_bytes[2], key_bytes[3]
         internal_key = (k0 << 24) | (k1 << 16) | (k2 << 8) | k3
     elif level == 5:
-        # wire[0]=k1 wire[1]=k3 wire[2]=k0 wire[3]=k2
-        k1, k3, k0, k2 = key_bytes[0], key_bytes[1], key_bytes[2], key_bytes[3]
+        # Inverse of _l5_state_to_wire_key. Wire byte order is
+        # [k2, k0, k3, k1] (see that function's comment for derivation).
+        k2, k0, k3, k1 = key_bytes[0], key_bytes[1], key_bytes[2], key_bytes[3]
         internal_key = (k0 << 24) | (k1 << 16) | (k2 << 8) | k3
     else:
         raise ValueError(f"unsupported SA level: {level}")
