@@ -364,6 +364,19 @@ strip_can_id(std::span<std::uint8_t const> payload, std::uint32_t &out_id) {
 //            barf with a clear message.
 //   0x3X     Flow Control from us → never an inbound payload on a
 //            real ECU read.  Same handling as 0x2X.
+//
+// IMPLICIT ADAPTER-DEFAULT DEPENDENCY (logged 2026-05-24 from analyst-
+// side decompile of OBDXVX_J2534.dll): the OBDX J2534 driver exposes
+// an `AutoProcessAndBulkRead` toggle (1 = adapter reassembles ISO-TP,
+// 0 = host receives raw CAN frames). Our DVI-mode open() never
+// explicitly sets the equivalent in the native binary protocol — we
+// rely on the adapter's power-on default doing the right thing. This
+// has worked empirically across every UDS / SSM test against the
+// 2017 LF79103P reference hardware, but a future firmware version or
+// a different OBDX model could ship a different default and silently
+// break multi-frame reads. If the FF / CF assumptions above ever fail
+// in production, this is the first place to look — explicit
+// configuration via DVI is the principled fix.
 [[nodiscard]] std::span<std::uint8_t const>
 strip_iso_tp(std::span<std::uint8_t const> data) noexcept {
     if (data.empty()) {
