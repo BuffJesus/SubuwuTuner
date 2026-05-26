@@ -149,10 +149,19 @@ class IsoTpReassembler:
                 if len(frame_data) < 6:
                     return None
                 total_length = int.from_bytes(frame_data[2:6], "big")
-                first_chunk = bytes(frame_data[6:8])  # FF carries up to 2 bytes here
+                # Take all bytes after the 6-byte PCI. For raw 8-byte CAN
+                # frames this is the documented "up to 2 bytes in the FF".
+                # For OBDX-reassembled log entries (frame_data > 8 bytes)
+                # this is the entire payload — the adapter already pre-
+                # joined the FF + every CF before delivering, so there's
+                # no later CF to wait on.
+                first_chunk = bytes(frame_data[6:])
             else:
                 total_length = standard_length
-                first_chunk = bytes(frame_data[2:8])  # up to 6 bytes
+                # Same OBDX-reassembled-vs-raw consideration as escape FF
+                # above. Raw 8-byte CAN frame -> up to 6 bytes here.
+                # OBDX pre-reassembled entry -> the entire payload.
+                first_chunk = bytes(frame_data[2:])
             if total_length == 0:
                 # Malformed even after escape — drop silently.
                 return None

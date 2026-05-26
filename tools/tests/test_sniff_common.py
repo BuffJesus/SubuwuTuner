@@ -146,6 +146,44 @@ class TestIsoTpReassembler(unittest.TestCase):
         # No in-flight state left over either.
         self.assertEqual(r.in_flight(), {})
 
+    def test_obdx_prereassembled_ff_returns_full_payload(self) -> None:
+        # Some sniff adapters (OBDX Pro VX in DVI mode) reassemble multi-
+        # frame ISO-TP messages in hardware before delivering them to the
+        # host. The sniff log then carries the FF PCI immediately followed
+        # by the ENTIRE payload in one log line, with no subsequent CFs.
+        # The reassembler must detect this (frame_data length > the 8-byte
+        # raw CAN ceiling) and return the full payload immediately rather
+        # than buffering the first 6 bytes and waiting for CFs that never
+        # arrive.
+        #
+        # Concrete case from cobb-reinstall-3.log: a 0x34 RequestDownload
+        # arrives as `10 09 34 04 33 1E 00 00 02 00 00` (11 bytes total —
+        # PCI says length 9, payload is 9 bytes after the 2-byte PCI).
+        # The old behaviour buffered the first 6 bytes (`34 04 33 1E 00 00`)
+        # and waited for 3 more via CFs — they never arrived, the 0x34
+        # was silently dropped, and every subsequent 0xB6 that referenced
+        # the open transfer was discarded (`current is None`).
+        r = sniff_common.IsoTpReassembler()
+        ff_with_full_payload = bytes([
+            0x10, 0x09,                                     # standard FF, length 9
+            0x34, 0x04, 0x33, 0x1E, 0x00, 0x00, 0x02, 0x00, 0x00,  # 9-byte payload
+        ])
+        out = r.feed(0x7E0, ff_with_full_payload)
+        self.assertEqual(out, bytes([0x34, 0x04, 0x33, 0x1E, 0x00, 0x00, 0x02, 0x00, 0x00]))
+        # Reassembler should have no pending state — the FF was complete.
+        self.assertEqual(r.in_flight(), {})
+
+    def test_obdx_prereassembled_escape_ff_returns_full_payload(self) -> None:
+        # Same OBDX-prereassembled case but for the escape-FF format used
+        # for messages longer than 4095 bytes. Verifies the >8-byte
+        # frame_data handling in the escape branch too.
+        r = sniff_common.IsoTpReassembler()
+        body = bytes(range(256))  # arbitrary 256-byte payload
+        ff_escape = bytes([0x10, 0x00, 0x00, 0x00, 0x01, 0x00]) + body  # length 256
+        out = r.feed(0x7E0, ff_escape)
+        self.assertEqual(out, body)
+        self.assertEqual(r.in_flight(), {})
+
 
 if __name__ == "__main__":
     unittest.main()
