@@ -9130,7 +9130,7 @@ int cmd_rom_pull(int argc, char *argv[]) {
                    "         [--security-level <hex>]             "
                    "(default 0x01 — bootloader unlock)\n"
                    "         [--sa-variant <name>]                "
-                   "(default | fehr-active; see docs/23)\n"
+                   "(default | fehr-active[-l1] | fehr-active-l3; see docs/23)\n"
                    "         [--cobb-tuned]                       "
                    "(DEPRECATED no-op alias; use --sa-variant)\n",
                    stderr);
@@ -9143,12 +9143,16 @@ int cmd_rom_pull(int argc, char *argv[]) {
     if (sa_variant.has_value()) {
         if (*sa_variant == "default" || *sa_variant == "factory") {
             sa_variant_fn = &st::ecu::subaru::ssmcan1_key_stub;
-        } else if (*sa_variant == "fehr-active") {
+        } else if (*sa_variant == "fehr-active" ||
+                   *sa_variant == "fehr-active-l1") {
             sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_fehr_active;
+        } else if (*sa_variant == "fehr-active-l3") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l3_fehr_active;
         } else {
             std::fprintf(stderr,
                          "rom-pull: --sa-variant '%s' not recognized "
-                         "(expected one of: default, fehr-active).\n",
+                         "(expected one of: default, fehr-active, "
+                         "fehr-active-l1, fehr-active-l3).\n",
                          sa_variant->c_str());
             return 2;
         }
