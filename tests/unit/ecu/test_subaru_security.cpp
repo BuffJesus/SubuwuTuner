@@ -354,6 +354,62 @@ TEST_CASE("ssmcan1_l1_fehr_active differs from ssmcan1_key_stub on the same seed
     }
 }
 
+TEST_CASE("ssmcan1_l3_fehr_active: captured Fehr L3 pair (fehr-active-sa)",
+          "[ecu][sa][gen_a][fehr]") {
+    // EMPIRICAL VECTOR. The only on-file captured Fehr-active L3 (seed,
+    // key) pair: extracted from sniff-fehr-active-sa.log,
+    // `Captures/2026-05-25/sniff-fehr-active-sa-pairs.json`. The ECU
+    // ACK'd this key with 0x67 0x04 and immediately served an RMBA read
+    // of 0x001FFFC0 returning ASCII "W585" (Fehr's tuner tag), so the
+    // L3 session was definitely elevated by this exchange.
+    //
+    // Random-match probability for a single 32-bit pair: 2^-32. The
+    // shared loop-reversal patch with L1 (validated 4/4 against captured
+    // pairs cross-level — see calibration-deltas/l3_cipher_recovered.md
+    // for the full cross-check) brings effective confidence higher.
+    using ecu::subaru::ssmcan1_l3_fehr_active;
+    std::array<std::uint8_t, 4> const seed{0x4A, 0xDF, 0xFE, 0x07};
+    auto const r = ssmcan1_l3_fehr_active(std::span<std::uint8_t const>{seed});
+    REQUIRE(r.has_value());
+    std::vector<std::uint8_t> const expected{0x24, 0x24, 0x3A, 0x06};
+    REQUIRE(*r == expected);
+}
+
+TEST_CASE("ssmcan1_l3_fehr_active: rejects wrong seed length",
+          "[ecu][sa][gen_a][fehr]") {
+    using ecu::subaru::ssmcan1_l3_fehr_active;
+    std::array<std::uint8_t, 3> const three{0x00, 0x00, 0x00};
+    auto const r = ssmcan1_l3_fehr_active(std::span<std::uint8_t const>{three});
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("ssmcan1_l3_fehr_active differs from L1 variants on the same seed",
+          "[ecu][sa][gen_a][fehr]") {
+    // L3 has a different round-key table AND per-level byte
+    // permutations; it must produce a different key from both the
+    // factory L1 path and the Fehr-active L1 path for the same seed.
+    using ecu::subaru::ssmcan1_key_stub;
+    using ecu::subaru::ssmcan1_l1_fehr_active;
+    using ecu::subaru::ssmcan1_l3_fehr_active;
+    constexpr std::array<std::array<std::uint8_t, 4>, 4> seeds{{
+        {0xDE, 0xAD, 0xBE, 0xEF},
+        {0x4A, 0xDF, 0xFE, 0x07},
+        {0x00, 0x00, 0x00, 0x00},
+        {0xFF, 0xFF, 0xFF, 0xFF},
+    }};
+    for (auto const &s : seeds) {
+        auto const factory_l1 = ssmcan1_key_stub(std::span<std::uint8_t const>{s});
+        auto const fehr_l1 = ssmcan1_l1_fehr_active(std::span<std::uint8_t const>{s});
+        auto const fehr_l3 = ssmcan1_l3_fehr_active(std::span<std::uint8_t const>{s});
+        REQUIRE(factory_l1.has_value());
+        REQUIRE(fehr_l1.has_value());
+        REQUIRE(fehr_l3.has_value());
+        REQUIRE(*fehr_l3 != *factory_l1);
+        REQUIRE(*fehr_l3 != *fehr_l1);
+    }
+}
+
 TEST_CASE("ssmk1_key_stub remains NotImplemented",
           "[ecu][sa][gen_a]") {
     // Sanity check that the K-Line algorithm stub continues to surface

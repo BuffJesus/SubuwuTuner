@@ -96,6 +96,33 @@ ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const> seed);
 [[nodiscard]] Result<std::vector<std::uint8_t>>
 ssmcan1_l1_fehr_active(std::span<std::uint8_t const> seed);
 
+// Fehr-active L3 variant — Gen-A.2 SecurityAccess sub-function `27 03`
+// (RequestSeed L3) / `27 04` (SendKey L3) for ECUs running a Fehr Tuning
+// e-tune. The same SA-dispatcher reversed-iteration patch that flips
+// L1's direction also flips L3 — the patched loop is shared across all
+// levels — so this function's structure mirrors `ssmcan1_l1_fehr_active`
+// (forward Feistel + final wordswap), differing only by:
+//   * The round-key table (`kSaTableL35Fehr`, extracted from flash
+//     0x074358 of the live LF79101P dump 2026-05-26).
+//   * The factory dispatcher inserts a per-level byte permutation on the
+//     wire seed before the Feistel and on the wire key after, which this
+//     function applies internally.
+//
+// Validated against the captured `fehr-active-sa L3` pair
+// (seed=0x4ADFFE07 → key=0x24243A06) from
+// `Captures/2026-05-25/sniff-fehr-active-sa-pairs.json`. Joint random-
+// match probability for the single 32-bit pair: 2^-32. A live-hardware
+// validation against the user's car is recommended before relying on
+// this in production (one shot, fresh attempts-counter window — same
+// pattern as the L1 path).
+//
+// See `Findings/calibration-deltas/l3_cipher_recovered.md` for the full
+// derivation, the byte-level evidence of the loop-reversal patch in the
+// factory SA handler, and the cross-check against all four known SA
+// pairs (2 stock + 2 Fehr-active).
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+ssmcan1_l3_fehr_active(std::span<std::uint8_t const> seed);
+
 // SSMK1 — pre-2008 K-Line SecurityAccess. Algorithm not yet recovered
 // (no K-Line capture rig in hand). Returns failure(NotImplemented) on
 // every input.

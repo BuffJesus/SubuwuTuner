@@ -114,6 +114,31 @@ constexpr std::array<std::uint16_t, 16> kSaTableL1Fehr = {
     0xe9ac, 0xc45b, 0xc832, 0x415c,
 };
 
+// Fehr-active L35 round-key table — Fehr's e-tune overwrites the L35 slot
+// at flash 0x074358 with these constants. The same SA-dispatcher reversed-
+// iteration patch that applies to L1 (see `kSaTableL1Fehr`) also applies
+// to L3/L5, so the tester direction is the same: forward Feistel + final
+// wordswap, but with the per-level seed and key byte permutations the
+// factory dispatcher inserts around the core.
+//
+// Bytes extracted from `fehr-full-dump.bin` at flash 0x074358 (2026-05-26
+// live read; SHA256 `73431f11…`). Validated against the captured Fehr-
+// active L3 pair from `Captures/2026-05-25/sniff-fehr-active-sa-pairs.json`
+// (seed=0x4ADFFE07 → key=0x24243A06, ACK'd by ECU + followed by a
+// successful RMBA read of 0x001FFFC0 = "W585"). Joint random-match
+// probability for this single 32-bit pair: 2^-32.
+//
+// See `Findings/calibration-deltas/l3_cipher_recovered.md` for the full
+// derivation, the byte-level evidence of the loop-reversal patch in the
+// factory SA handler at 0xBE911 + 0xBE9C7..0xBE9CE, and the cross-check
+// against all four known SA pairs (2 stock + 2 Fehr-active).
+constexpr std::array<std::uint16_t, 16> kSaTableL35Fehr = {
+    0x8593, 0xc32d, 0x4402, 0x21d3,
+    0x8496, 0xfb45, 0x477d, 0xce15,
+    0x7f48, 0xcc0d, 0xc771, 0x0562,
+    0x86f0, 0x107e, 0xbf37, 0x60c8,
+};
+
 constexpr std::uint16_t rol16(std::uint16_t v, unsigned n) noexcept {
     n &= 15U;
     if (n == 0) {
@@ -323,6 +348,76 @@ ssmcan1_l1_fehr_active(std::span<std::uint8_t const> seed) {
         seed_packed, std::span<std::uint16_t const, 16>{kSaTableL1Fehr});
     std::vector<std::uint8_t> key(4);
     write_u32_be(key_u32, key);
+    return key;
+}
+
+namespace {
+
+// Factory SEED_PERM[3] applied to a 4-byte wire seed.
+// SEED_PERM[3] = {1,2,0,3} — for each wire byte i, the permuted state's
+// position perm[i] receives that byte. Output bytes: out[1]=in[0],
+// out[2]=in[1], out[0]=in[2], out[3]=in[3].
+constexpr std::uint32_t apply_seed_perm_l3(std::uint32_t wire_seed) noexcept {
+    std::uint8_t const in0 = static_cast<std::uint8_t>((wire_seed >> 24) & 0xFFU);
+    std::uint8_t const in1 = static_cast<std::uint8_t>((wire_seed >> 16) & 0xFFU);
+    std::uint8_t const in2 = static_cast<std::uint8_t>((wire_seed >> 8) & 0xFFU);
+    std::uint8_t const in3 = static_cast<std::uint8_t>(wire_seed & 0xFFU);
+    std::uint8_t const out0 = in2;
+    std::uint8_t const out1 = in0;
+    std::uint8_t const out2 = in1;
+    std::uint8_t const out3 = in3;
+    return (static_cast<std::uint32_t>(out0) << 24) |
+           (static_cast<std::uint32_t>(out1) << 16) |
+           (static_cast<std::uint32_t>(out2) << 8) |
+            static_cast<std::uint32_t>(out3);
+}
+
+// Inverse of factory KEY_PERM[3] = {3,1,2,0}.
+// Forward: nonce[perm[i]] = wire_key[i]. So wire_key[i] = state[perm[i]]:
+// wire_key[0]=state[3], wire_key[1]=state[1], wire_key[2]=state[2],
+// wire_key[3]=state[0].
+constexpr std::uint32_t apply_inverse_key_perm_l3(std::uint32_t state) noexcept {
+    std::uint8_t const s0 = static_cast<std::uint8_t>((state >> 24) & 0xFFU);
+    std::uint8_t const s1 = static_cast<std::uint8_t>((state >> 16) & 0xFFU);
+    std::uint8_t const s2 = static_cast<std::uint8_t>((state >> 8) & 0xFFU);
+    std::uint8_t const s3 = static_cast<std::uint8_t>(state & 0xFFU);
+    std::uint8_t const k0 = s3;
+    std::uint8_t const k1 = s1;
+    std::uint8_t const k2 = s2;
+    std::uint8_t const k3 = s0;
+    return (static_cast<std::uint32_t>(k0) << 24) |
+           (static_cast<std::uint32_t>(k1) << 16) |
+           (static_cast<std::uint32_t>(k2) << 8) |
+            static_cast<std::uint32_t>(k3);
+}
+
+} // namespace
+
+Result<std::vector<std::uint8_t>>
+ssmcan1_l3_fehr_active(std::span<std::uint8_t const> seed) {
+    // Fehr e-tune L3 SA: same reversed-iteration patch as L1 (the SA
+    // dispatcher patch at flash 0xBE911 + 0xBE9C7..0xBE9CE is shared
+    // between levels), so the tester runs forward Feistel + final
+    // wordswap rather than the factory's inverse Feistel direction.
+    // Differs from L1 in two places:
+    //   * Round-key table is `kSaTableL35Fehr` (flash 0x074358).
+    //   * The factory dispatcher inserts a per-level byte permutation on
+    //     each side of the core: SEED_PERM[3] before the rounds and
+    //     inverse KEY_PERM[3] after. These come from `decrypt_combined.py`
+    //     SEED_PERM/KEY_PERM tables; Fehr does NOT touch them.
+    if (seed.size() != 4) {
+        return failure(ErrorCode::InvalidArgument,
+                       std::string{"ssmcan1 (Gen-A L3 Fehr-active): "
+                                   "seed must be exactly 4 bytes, got "} +
+                           std::to_string(seed.size()));
+    }
+    auto const seed_packed = read_u32_be(seed);
+    auto const permuted_seed = apply_seed_perm_l3(seed_packed);
+    auto const cipher_out = feistel_forward_with_swap(
+        permuted_seed, std::span<std::uint16_t const, 16>{kSaTableL35Fehr});
+    auto const wire_key_u32 = apply_inverse_key_perm_l3(cipher_out);
+    std::vector<std::uint8_t> key(4);
+    write_u32_be(wire_key_u32, key);
     return key;
 }
 
