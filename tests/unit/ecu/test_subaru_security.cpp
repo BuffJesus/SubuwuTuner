@@ -384,6 +384,47 @@ TEST_CASE("ssmcan1_l3_fehr_active: rejects wrong seed length",
     REQUIRE(r.error().code() == ErrorCode::InvalidArgument);
 }
 
+TEST_CASE("ssmcan1_l1_cobb_ap is byte-equivalent to ssmcan1_l1_fehr_active alias",
+          "[ecu][sa][gen_a][fehr]") {
+    // The 2026-05-26 PM rename made `_cobb_ap` the canonical name and
+    // `_fehr_active` a pass-through alias.  This test pins the
+    // equivalence — any divergence here is a regression in the alias.
+    using ecu::subaru::ssmcan1_l1_cobb_ap;
+    using ecu::subaru::ssmcan1_l1_fehr_active;
+    constexpr std::array<std::array<std::uint8_t, 4>, 4> seeds{{
+        {0xDE, 0xAD, 0xBE, 0xEF},
+        {0xB9, 0xA6, 0x5C, 0x23},
+        {0x00, 0x00, 0x00, 0x00},
+        {0xFF, 0xFF, 0xFF, 0xFF},
+    }};
+    for (auto const &s : seeds) {
+        auto const cobb = ssmcan1_l1_cobb_ap(std::span<std::uint8_t const>{s});
+        auto const fehr = ssmcan1_l1_fehr_active(std::span<std::uint8_t const>{s});
+        REQUIRE(cobb.has_value());
+        REQUIRE(fehr.has_value());
+        REQUIRE(*cobb == *fehr);
+    }
+}
+
+TEST_CASE("ssmcan1_l3_cobb_ap is byte-equivalent to ssmcan1_l3_fehr_active alias",
+          "[ecu][sa][gen_a][fehr]") {
+    using ecu::subaru::ssmcan1_l3_cobb_ap;
+    using ecu::subaru::ssmcan1_l3_fehr_active;
+    constexpr std::array<std::array<std::uint8_t, 4>, 4> seeds{{
+        {0x4A, 0xDF, 0xFE, 0x07},
+        {0xDE, 0xAD, 0xBE, 0xEF},
+        {0x00, 0x00, 0x00, 0x00},
+        {0xFF, 0xFF, 0xFF, 0xFF},
+    }};
+    for (auto const &s : seeds) {
+        auto const cobb = ssmcan1_l3_cobb_ap(std::span<std::uint8_t const>{s});
+        auto const fehr = ssmcan1_l3_fehr_active(std::span<std::uint8_t const>{s});
+        REQUIRE(cobb.has_value());
+        REQUIRE(fehr.has_value());
+        REQUIRE(*cobb == *fehr);
+    }
+}
+
 TEST_CASE("ssmcan1_l3_fehr_active differs from L1 variants on the same seed",
           "[ecu][sa][gen_a][fehr]") {
     // L3 has a different round-key table AND per-level byte

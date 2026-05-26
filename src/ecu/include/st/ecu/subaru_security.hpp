@@ -70,56 +70,78 @@ ssmcan1_key_stub(std::span<std::uint8_t const> seed);
 [[nodiscard]] Result<std::vector<std::uint8_t>>
 ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const> seed);
 
-// Fehr-active L1 variant — for ECUs running a Fehr Tuning e-tune
-// (CAL ID `LF79101P` on 2017 USDM WRX hardware). Fehr's tune patches
-// the SA dispatcher's round-iteration AND substitutes its own L1
-// round-key table at flash 0x074338, so neither `ssmcan1_key_stub`
-// nor `ssmcan1_l1_cobb_tuned` produce a valid key for these ECUs —
-// both return NRC 0x35 (invalidKey).
+// COBB-AccessPort-framework L1 variant — for ECUs that have been
+// touched by the COBB AccessPort at any time, regardless of which
+// specific tune (COBB OTS Stage 0/1/2, Fehr/DMann e-tune,
+// NexGen-style etc.) is currently installed.  The COBB-AP install
+// patches the SA dispatcher's round-iteration patch at flash
+// 0xBE911 + 0xBE9C7..0xBE9CE AND substitutes its own L1 round-key
+// table at flash 0x074338, so neither `ssmcan1_key_stub` nor
+// `ssmcan1_l1_cobb_tuned` (which still use the FACTORY constants)
+// produce a valid key for these ECUs — both return NRC 0x35
+// (invalidKey).
+//
+// CROSS-VENDOR FINDING (2026-05-26 PM).  This path was originally
+// introduced as `ssmcan1_l1_fehr_active` under the assumption it was
+// Fehr-specific.  Install-sniff captures of COBB Stage 0/1/2 then
+// showed the SAME L1 keys + SAME loop-reversal patch — they belong to
+// the AP framework, not to any one tuner.  Renamed accordingly;
+// `ssmcan1_l1_fehr_active` is now a pass-through alias.
+//
+// Use the tuner-tag region at flash 0x001FFFC0 to discriminate VENDOR
+// at runtime: ASCII `"COBB"` for COBB OTS stages, `"W585"` for the
+// Fehr/DMann e-tune, factory all-FF for stock.
 //
 // Validated against the captured `cobb-uninstall-3 L1` pair
 // (seed=0xB9A65C23 → key=0x13EF9295) AND against the user's live
 // 2017 LF79101P on 2026-05-26 by reading the pairing token at
-// 0x001FFFB0 via UDS RMBA + the SA preamble through this key
-// function (`Flasher::set_security_key_fn(&ssmcan1_l1_fehr_active)`).
-//
-// Out-of-tree forks that need to support other e-tunes should copy
-// the same pattern: extract the tune's 16 × u16 BE round-key table
-// from offset 0x074338 of the decrypted plaintext and register a
-// new function through `Flasher::set_security_key_fn`. The S-box at
-// 0x074378 is invariant across all observed e-tunes.
-//
-// See `docs/23-security-access.md` § "Algorithm structure recovered"
-// for the broader picture and `docs/17-data-distribution-policy.md`
-// §7 for the in-tree-vs-pluggable posture (the Fehr variant's
-// constants are shipped in-tree, same precedent as `kSaTableL1`).
+// 0x001FFFB0 via UDS RMBA + the SA preamble through this key function.
+// Cross-checked against COBB Stage 0 install bytes 2026-05-26 PM:
+// byte-identical L1 constants.  See
+// `Findings/calibration-deltas/install_roms_comparison.md` §"SA
+// constants" for the data.
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+ssmcan1_l1_cobb_ap(std::span<std::uint8_t const> seed);
+
+// RETAINED ALIAS (2026-05-26 PM).  Pass-through to
+// `ssmcan1_l1_cobb_ap` — same constants, same algorithm.  Kept under
+// the original name so the CLI's `--sa-variant fehr-active[-l1]` flag,
+// the gitignored hardware-validation tests in `tests/private/`, and
+// any out-of-tree callers continue to work without source churn.  New
+// in-tree code should prefer `ssmcan1_l1_cobb_ap`.
 [[nodiscard]] Result<std::vector<std::uint8_t>>
 ssmcan1_l1_fehr_active(std::span<std::uint8_t const> seed);
 
-// Fehr-active L3 variant — Gen-A.2 SecurityAccess sub-function `27 03`
-// (RequestSeed L3) / `27 04` (SendKey L3) for ECUs running a Fehr Tuning
-// e-tune. The same SA-dispatcher reversed-iteration patch that flips
-// L1's direction also flips L3 — the patched loop is shared across all
-// levels — so this function's structure mirrors `ssmcan1_l1_fehr_active`
-// (forward Feistel + final wordswap), differing only by:
-//   * The round-key table (`kSaTableL35Fehr`, extracted from flash
-//     0x074358 of the live LF79101P dump 2026-05-26).
-//   * The factory dispatcher inserts a per-level byte permutation on the
-//     wire seed before the Feistel and on the wire key after, which this
-//     function applies internally.
+// COBB-AccessPort-framework L3 variant — Gen-A.2 SecurityAccess
+// sub-function `27 03` (RequestSeed L3) / `27 04` (SendKey L3) for any
+// COBB-AP-installed tune on this CID family.  The same dispatcher
+// reversed-iteration patch that flips L1's direction also flips L3
+// (the patched loop is shared across all SA levels), so this
+// function's structure mirrors `ssmcan1_l1_cobb_ap` — forward Feistel
+// + final wordswap — differing only by:
+//   * Round-key table (`kSaTableL35CobbAp` at flash 0x074358).
+//   * The factory dispatcher inserts a per-level byte permutation on
+//     the wire seed before the Feistel and on the wire key after,
+//     which this function applies internally.
 //
-// Validated against the captured `fehr-active-sa L3` pair
-// (seed=0x4ADFFE07 → key=0x24243A06) from
-// `Captures/2026-05-25/sniff-fehr-active-sa-pairs.json`. Joint random-
-// match probability for the single 32-bit pair: 2^-32. A live-hardware
-// validation against the user's car is recommended before relying on
-// this in production (one shot, fresh attempts-counter window — same
-// pattern as the L1 path).
+// Validated against the captured Fehr-active L3 pair (seed=0x4ADFFE07
+// → key=0x24243A06).  Cross-checked against COBB Stage 0 install
+// bytes 2026-05-26 PM: byte-identical L35 constants.  Joint match
+// probability 2^-32 from offline validation; one live-hardware test
+// shot would push to 2^-64 (queued in `tests/private/` under tag
+// `[.fehr-live][l3-token]`).
 //
 // See `Findings/calibration-deltas/l3_cipher_recovered.md` for the full
-// derivation, the byte-level evidence of the loop-reversal patch in the
-// factory SA handler, and the cross-check against all four known SA
-// pairs (2 stock + 2 Fehr-active).
+// derivation and `Findings/calibration-deltas/install_roms_comparison.md`
+// for the COBB-vs-Fehr cross-vendor identity.
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+ssmcan1_l3_cobb_ap(std::span<std::uint8_t const> seed);
+
+// RETAINED ALIAS (2026-05-26 PM).  Pass-through to
+// `ssmcan1_l3_cobb_ap` — same constants, same algorithm.  Kept under
+// the original name so the CLI's `--sa-variant fehr-active-l3` flag
+// and gitignored private hardware tests continue to work without
+// source churn.  New in-tree code should prefer `ssmcan1_l3_cobb_ap`.
 [[nodiscard]] Result<std::vector<std::uint8_t>>
 ssmcan1_l3_fehr_active(std::span<std::uint8_t const> seed);
 
