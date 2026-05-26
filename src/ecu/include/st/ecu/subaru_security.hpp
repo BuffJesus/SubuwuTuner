@@ -70,6 +70,32 @@ ssmcan1_key_stub(std::span<std::uint8_t const> seed);
 [[nodiscard]] Result<std::vector<std::uint8_t>>
 ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const> seed);
 
+// Fehr-active L1 variant — for ECUs running a Fehr Tuning e-tune
+// (CAL ID `LF79101P` on 2017 USDM WRX hardware). Fehr's tune patches
+// the SA dispatcher's round-iteration AND substitutes its own L1
+// round-key table at flash 0x074338, so neither `ssmcan1_key_stub`
+// nor `ssmcan1_l1_cobb_tuned` produce a valid key for these ECUs —
+// both return NRC 0x35 (invalidKey).
+//
+// Validated against the captured `cobb-uninstall-3 L1` pair
+// (seed=0xB9A65C23 → key=0x13EF9295) AND against the user's live
+// 2017 LF79101P on 2026-05-26 by reading the pairing token at
+// 0x001FFFB0 via UDS RMBA + the SA preamble through this key
+// function (`Flasher::set_security_key_fn(&ssmcan1_l1_fehr_active)`).
+//
+// Out-of-tree forks that need to support other e-tunes should copy
+// the same pattern: extract the tune's 16 × u16 BE round-key table
+// from offset 0x074338 of the decrypted plaintext and register a
+// new function through `Flasher::set_security_key_fn`. The S-box at
+// 0x074378 is invariant across all observed e-tunes.
+//
+// See `docs/23-security-access.md` § "Algorithm structure recovered"
+// for the broader picture and `docs/17-data-distribution-policy.md`
+// §7 for the in-tree-vs-pluggable posture (the Fehr variant's
+// constants are shipped in-tree, same precedent as `kSaTableL1`).
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+ssmcan1_l1_fehr_active(std::span<std::uint8_t const> seed);
+
 // SSMK1 — pre-2008 K-Line SecurityAccess. Algorithm not yet recovered
 // (no K-Line capture rig in hand). Returns failure(NotImplemented) on
 // every input.

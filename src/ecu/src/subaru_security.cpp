@@ -82,6 +82,38 @@ constexpr std::array<std::uint16_t, 16> kSaTableL35 = {
     0x1895, 0x8961, 0x3ecc, 0x862b,
 };
 
+// Fehr-active L1 round-key table — Fehr's e-tune overwrites the L1 slot
+// at flash 0x074338 with these constants AND patches the SA dispatcher's
+// loop iteration from `for r in 0..15` to `for r in 15..0` (analyst
+// handoff `HANDOFF-to-subuwutuner-2026-05-25-cipher-structure.md` §7c).
+// Both modifications are required; using either one alone produces NRC
+// 0x35 against a Fehr-active ECU.
+//
+// Bytes extracted from the user's `fehr-tune-plaintext.bin` (full 99.6%
+// coverage, recovered 2026-05-25). Validated against captured Fehr L1
+// pair `cobb-uninstall-3 L1` (seed=0xB9A65C23 → key=0x13EF9295) AND
+// against the user's live ECU on 2026-05-26: read the pairing token at
+// flash 0x001FFFB0 via UDS SA + RMBA, expected `64 11 4A 47`, got
+// exactly that. Full 2 MB live dump matched the analyst reference
+// byte-for-byte on every non-0xFF position.
+//
+// Net effect of the two patches: per Feistel structural symmetry,
+// running the forward routine with reversed key iteration is
+// equivalent to running the forward routine on a swapped state with
+// the un-reversed keys. Concretely: the Fehr tester runs forward
+// Feistel + final wordswap on the SEED bytes to produce the KEY bytes
+// — opposite of the factory direction (factory tester runs inverse
+// Feistel on wordswapped seed).
+//
+// S-box at 0x074378 and B6 cipher constants at 0x074398 are NOT
+// modified by the Fehr tune (per `decrypt_combined.py` line 105).
+constexpr std::array<std::uint16_t, 16> kSaTableL1Fehr = {
+    0x9ec3, 0x9190, 0x095b, 0xbb25,
+    0xf476, 0xe722, 0xb623, 0xb3b9,
+    0xe513, 0x8c80, 0xc3a1, 0x5cb2,
+    0xe9ac, 0xc45b, 0xc832, 0x415c,
+};
+
 constexpr std::uint16_t rol16(std::uint16_t v, unsigned n) noexcept {
     n &= 15U;
     if (n == 0) {
@@ -146,6 +178,28 @@ constexpr std::uint32_t feistel_inverse(std::uint32_t state,
 // after unwinding rounds.
 constexpr std::uint32_t wordswap32(std::uint32_t v) noexcept {
     return (v >> 16) | (v << 16);
+}
+
+// Forward Feistel composed with the post-loop wordswap. Used for the
+// Fehr-active tester direction: `key_u32 = forward_with_swap(seed_u32,
+// fehr_L1)` — see `kSaTableL1Fehr` for the math derivation.
+//
+// Same 16 forward rounds as `feistel_forward` but with the swap baked
+// in, so the seed bytes can be packed BE and fed in directly without a
+// separate pre-wordswap step.
+constexpr std::uint32_t feistel_forward_with_swap(std::uint32_t state,
+                                                  std::span<std::uint16_t const, 16> rk) noexcept {
+    auto state_hi = static_cast<std::uint16_t>(state >> 16);
+    auto state_lo = static_cast<std::uint16_t>(state & 0xFFFFU);
+    for (auto const k : rk) {
+        auto const f_out = feistel_F(state_lo, k);
+        auto const new_lo = static_cast<std::uint16_t>(state_hi ^ f_out);
+        auto const new_hi = state_lo;
+        state_hi = new_hi;
+        state_lo = new_lo;
+    }
+    // Final wordswap baked in: low half goes high, high half goes low.
+    return (static_cast<std::uint32_t>(state_lo) << 16) | state_hi;
 }
 
 constexpr std::uint32_t read_u32_be(std::span<std::uint8_t const> b) noexcept {
@@ -249,6 +303,27 @@ Result<std::vector<std::uint8_t>> ssmcan1_key_stub(std::span<std::uint8_t const>
     //    default doesn't need a rename across every caller.
     return ssmcan1_l1_compute(
         seed, std::span<std::uint16_t const, 16>{kSaTableL1}, "Gen-A L1");
+}
+
+Result<std::vector<std::uint8_t>>
+ssmcan1_l1_fehr_active(std::span<std::uint8_t const> seed) {
+    // Fehr e-tune L1 SA: the ECU's reversed-iteration patch makes the
+    // tester's key-derivation direction the OPPOSITE of factory. Apply
+    // forward Feistel + final wordswap on the SEED bytes directly to
+    // produce the KEY bytes. See `kSaTableL1Fehr` for the math derivation
+    // and validation against captured + live pairs.
+    if (seed.size() != 4) {
+        return failure(ErrorCode::InvalidArgument,
+                       std::string{"ssmcan1 (Gen-A L1 Fehr-active): "
+                                   "seed must be exactly 4 bytes, got "} +
+                           std::to_string(seed.size()));
+    }
+    auto const seed_packed = read_u32_be(seed);
+    auto const key_u32 = feistel_forward_with_swap(
+        seed_packed, std::span<std::uint16_t const, 16>{kSaTableL1Fehr});
+    std::vector<std::uint8_t> key(4);
+    write_u32_be(key_u32, key);
+    return key;
 }
 
 Result<std::vector<std::uint8_t>>

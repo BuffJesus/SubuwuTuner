@@ -9011,6 +9011,7 @@ int cmd_rom_pull(int argc, char *argv[]) {
     std::uint8_t security_level = 0x01;
     bool cobb_tuned = false;  // DEPRECATED — see comment at the
                               // call site below. Now a no-op alias.
+    std::optional<std::string> sa_variant;  // --sa-variant <name>.
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -9100,6 +9101,12 @@ int cmd_rom_pull(int argc, char *argv[]) {
             security_level = static_cast<std::uint8_t>(val);
         } else if (a == "--cobb-tuned") {
             cobb_tuned = true;
+        } else if (a == "--sa-variant") {
+            if (auto const *v = require_arg("--sa-variant"); v) {
+                sa_variant = std::string{v};
+            } else {
+                return 2;
+            }
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "rom-pull: unknown option: %s\n", argv[i]);
             return 2;
@@ -9122,11 +9129,29 @@ int cmd_rom_pull(int argc, char *argv[]) {
                    "(default ON for --transport, OFF for --trace)\n"
                    "         [--security-level <hex>]             "
                    "(default 0x01 — bootloader unlock)\n"
+                   "         [--sa-variant <name>]                "
+                   "(default | fehr-active; see docs/23)\n"
                    "         [--cobb-tuned]                       "
-                   "(opt-in: use the COBB L1 SA variant for COBB-flashed "
-                   "ECUs; see docs/23)\n",
+                   "(DEPRECATED no-op alias; use --sa-variant)\n",
                    stderr);
         return 2;
+    }
+    // Resolve --sa-variant to a key function. Allow `default` as an
+    // explicit synonym for the factory L1 path so scripts can be
+    // explicit about which variant they're using.
+    st::ecu::SecurityKeyFn sa_variant_fn;
+    if (sa_variant.has_value()) {
+        if (*sa_variant == "default" || *sa_variant == "factory") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_key_stub;
+        } else if (*sa_variant == "fehr-active") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_fehr_active;
+        } else {
+            std::fprintf(stderr,
+                         "rom-pull: --sa-variant '%s' not recognized "
+                         "(expected one of: default, fehr-active).\n",
+                         sa_variant->c_str());
+            return 2;
+        }
     }
     // Default --output to <rom_dump_root>/subuwutuner-rom-<UTC>.bin per
     // docs/25 §7. The CID isn't known until after the read, so the
@@ -9247,12 +9272,16 @@ int cmd_rom_pull(int argc, char *argv[]) {
     // here. Leaving the Flasher's default KLine setting alone since this
     // path never touches the SSM client.
     st::flash::Flasher flasher{*chosen};
-    if (cobb_tuned) {
+    if (sa_variant_fn) {
+        flasher.set_security_key_fn(sa_variant_fn);
+        std::fprintf(stderr, "rom-pull: SA variant: %s\n", sa_variant->c_str());
+    } else if (cobb_tuned) {
         flasher.set_security_key_fn(&st::ecu::subaru::ssmcan1_l1_cobb_tuned);
         std::fputs("rom-pull: --cobb-tuned is now a no-op alias. "
                    "Default L1 SA uses the COBB-uninstalled constants "
                    "by design (the original two-variant model was "
-                   "wrong; see src/ecu/src/subaru_security.cpp).\n",
+                   "wrong; see src/ecu/src/subaru_security.cpp). For "
+                   "Fehr e-tunes, pass --sa-variant fehr-active.\n",
                    stderr);
     }
     auto const r = flasher.read_full_rom(*addr, *size, max_chunk,
