@@ -50,6 +50,7 @@ add_executable(st_unit_tests
     unit/flash/test_flash.cpp
     unit/flash/test_checksum.cpp
     unit/flash/test_cancellation_invariants.cpp
+    unit/flash/test_read_full_rom_sa_v4_port.cpp
     unit/autotune/test_autotune.cpp
     unit/autotune/test_autotune_csv.cpp
     unit/autotune/test_autotune_lint.cpp
