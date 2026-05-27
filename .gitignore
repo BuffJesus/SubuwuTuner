@@ -125,6 +125,18 @@ SubuwuTuner-specs/
 *.exp
 *.ilk
 
+# Release archives produced by CPack / `cmake --install ... && zip` runs.
+# Build outputs already live under build/, but the packaging step sometimes
+# drops a SubaruTuner-*.zip at the repo root depending on how it was invoked.
+SubaruTuner*.zip
+SubuwuTuner*.zip
+
+# GUI-created user scratch projects. The .stune format defaults to writing
+# into fixtures/projects/ when launched from this working directory; those
+# projects are user content, not committed test fixtures (which live as
+# fixtures/demo.stune/).
+fixtures/projects/
+
 # Generated docs
 site/
 docs-build/
