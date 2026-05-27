@@ -76,9 +76,9 @@ Orchestrator + Manifest + journal + policy gate + checksum-type field all exist 
 
 **Gate:** 🔒 100 successful flash cycles on a junkyard ECU bench rig — zero bricks, zero corrupted images. **No customer ever flashes a car until this gate is met.** Hardware-blocked.
 
-## Phase 5 — Custom features (4–6 weeks) 🟡 design + tooling complete
+## Phase 5 — Custom features (4–6 weeks) 🟢 design + IR + SH-2A codegen for VA shipped; patch insertion + RH850 codegen remaining
 
-Heavy progress this session — what was sized at 4–6 weeks for the editor + IR + one backend shipped much faster. Delivery path (patch insertion + flashing) waits on Phase 4 hardware.
+Heavy progress this session — what was sized at 4–6 weeks for the editor + IR + one backend shipped much faster. Delivery path (patch insertion + RH850 codegen + flashing) waits on Phase 4 hardware. See `docs/16-custom-features.md` for the granular current-state matrix and the recommendation to drop RH850 first under timing pressure.
 
 - ✅ Visual node-graph editor with pin labels + per-pin defaults + wire dragging + pin-context menus; promoted out of `View → Debug` to top-level `View → Custom features designer (preview)` (`0cc5c1b`)
 - ✅ Graph data model (`st::feature::Graph`) + IR lowerer (`st::feature::ir::Module`) + graph-level + IR-level linters
@@ -157,6 +157,9 @@ The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0
 - ⬜ ELM327 write path (only if we can prove it's safe — likely never)
 - ⬜ Bench-tools mode for ECU benches (Tactrix Pro J)
 - ✅ `defgen` tool to convert RomRaider XML → our TOML schema (Python 3.12+ in `tools/defgen/`; 88 tests)
+- ✅ **OBD-II Mode 0x09 vehicle-info** (CAL ID / CVN / VIN) — `st::ecu::uds` extension + CLI; lets a tool read the calibration identifier without an authenticated session, which underpins per-CID definition-pack auto-selection.
+- ✅ **SecurityAccess for A-series SSMCAN1** — factory Feistel + COBB-AP / Fehr-active L1+L3 variants in tree, CLI `--sa-variant {factory,cobb-ap,fehr-active-l1,fehr-active-l3}`; see `docs/23-security-access.md`.
+- ✅ **Optional gated 0xB6 bulk-reflash cipher** (build flag `ST_ENABLE_BULK_REFLASH_CIPHER` + runtime `--enable-bulk-reflash-cipher`); see `docs/26-bulk-reflash-cipher.md`.
 - ✅ **DTC enable/disable** via `[[dtc_bitmap]]` schema in definition packs (see `11-definition-format.md`). CLI:
   ```
   pack-dtcs <DEF>                       # list known codes + emissions flag

@@ -27,7 +27,7 @@ mytune.stune/
 │   ├── 00001-smooth.toml
 │   └── …
 └── flash/                # optional — flash session records
-    ├── 2026-05-17-1330-manifest.toml      # tamper-evident BLAKE3 manifest
+    ├── 2026-05-17-1330-manifest.toml      # tamper-evident manifest (CRC32 today; BLAKE3 staged after bench-rig validation, see docs/03 §Hashing)
     └── 2026-05-17-1330-journal.toml       # crash-safe per-sector journal
 ```
 

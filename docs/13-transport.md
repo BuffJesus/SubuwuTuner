@@ -15,6 +15,9 @@ Status today (2026-05-26) — the **shapes** are real and locked under unit test
 | `st::transport::native::Transport` + SOF/seq/CRC16 codec | 🟡 shipped, gated on a real USB CDC byte channel |
 | `st::ecu::ssm::SsmClient` (K-Line + CAN paths) | 🟡 shipped against MockTransport; needs real-car validation |
 | `st::ecu::uds::UdsClient` | 🟡 shipped against MockTransport; needs real-car validation |
+| `st::ecu::uds` OBD-II Mode 0x09 (CAL ID / CVN / VIN) | ✅ shipped + CLI surfaced |
+| `st::ecu::subaru_security` (SecurityAccess Feistel: factory + COBB-AP + Fehr-active L1/L3 variants, CLI `--sa-variant`) | ✅ shipped |
+| `st::ecu::bulk_reflash` (gated 0xB6 cipher, `ST_ENABLE_BULK_REFLASH_CIPHER`) | ✅ shipped, off in default builds |
 | `st::log::LogStream` (SPSC ring) + `LogSession` (I/O thread) + `CsvSink` | ✅ shipped; consumed by MockTransport-backed tests |
 | `subuwutuner-cli log --def <pack> --pid <ids> [--csv …]` | ✅ shipped; gates on transport platform wiring for live ECU |
 | ELM327 (read-only) | ⬜ deferred — not blocking VA/VB targets |
