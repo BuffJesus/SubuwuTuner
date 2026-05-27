@@ -21,7 +21,7 @@ definitions/    defgen-generated ECU packs (Path B: off-tree; see docs/17)
 fixtures/   demo-pack/, demo.stune/, samples/*.stmod, demo-trace.hex
 tests/unit/<module>/   Catch2 v3
 tools/defgen/tests/    Python tests
-docs/       design — read first; numbered 00–27
+docs/       design — read first; numbered 00–28
 ```
 
 For module-by-module detail, read the headers under `src/<module>/include/` and the corresponding `tests/unit/<module>/`. For CLI surface, run `subuwutuner-cli --help`.
@@ -58,6 +58,7 @@ Phase 0/1/2 done. Phase 3 protocol framing complete (SSM + full UDS catalog incl
 | Reason about Y-cable sniffing (during-flash capture, datalog RAM-poll discovery, protocol learning, feature RE for LC / FFS / rev limit) | `docs/24-sniff-workflows.md` |
 | Reason about the optional 0xB6 bulk-transfer write path (off by default) | `docs/26-bulk-reflash-cipher.md` |
 | Reason about the user's specific Fehr e-tune (cal delta vs factory, SA L1/L35 status, patch manifests) | `docs/27-fehr-analysis-2026-05-26.md` |
+| Reason about / execute the junkyard-ECU bench-rig assembly (FSM pin references, power-on sequence, first read, brick-recovery loop) | `docs/28-bench-rig-build.md` |
 | Look up a tuning term | `docs/10-glossary.md` |
 
 ## Stance on emissions / jurisdiction

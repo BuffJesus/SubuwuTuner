@@ -32,6 +32,7 @@ This folder contains the design and planning documents for **SubuwuTuner**, a co
 26. [25-config-system.md](25-config-system.md) — `st::config` user-config layout, `[security_access].handheld_serial`, persistence rules
 27. [26-bulk-reflash-cipher.md](26-bulk-reflash-cipher.md) — Optional gated 0xB6 bulk-transfer write path: two-step arming, failure modes, brick-risk rationale
 28. [27-fehr-analysis-2026-05-26.md](27-fehr-analysis-2026-05-26.md) — Fehr e-tune calibration analysis: cal delta vs factory, SA L1/L3 status, patch manifests
+29. [28-bench-rig-build.md](28-bench-rig-build.md) — Junkyard-ECU bench-rig assembly runbook: FSM-page-referenced harness wiring, minimum-viable power-on, OBDX bring-up, first read, brick-recovery loop
 
 ## Status
 

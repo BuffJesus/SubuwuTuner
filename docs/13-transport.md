@@ -9,12 +9,14 @@ Status today (2026-05-26) — the **shapes** are real and locked under unit test
 | `st::transport::ITransport` interface + contract tests | ✅ shipped |
 | `st::transport::MockTransport` (queue + replay) | ✅ shipped |
 | `st::transport::IByteChannel` (USB CDC byte abstraction) | ✅ shipped |
-| `st::transport::open_transport` factory + CLI `--transport <kind>` flag | ✅ shipped (returns `NotImplemented` until platform layers wire up) |
+| `st::transport::open_transport` factory + CLI `--transport <kind>` flag | ✅ shipped |
 | `st::transport::j2534::Transport` (skeleton + DLL discovery) | 🟡 shipped, gated on `LoadLibraryA` of a real vendor DLL |
-| `st::transport::obdx::Transport` + DVI codec | 🟡 shipped, gated on a real USB CDC byte channel |
-| `st::transport::native::Transport` + SOF/seq/CRC16 codec | 🟡 shipped, gated on a real USB CDC byte channel |
-| `st::ecu::ssm::SsmClient` (K-Line + CAN paths) | 🟡 shipped against MockTransport; needs real-car validation |
-| `st::ecu::uds::UdsClient` | 🟡 shipped against MockTransport; needs real-car validation |
+| `st::transport::obdx::Transport` + DVI codec | ✅ shipped end-to-end on Windows — operational against the user's 2017 WRX (ROM dumps, install-flow sniff captures, live SA L3 read). POSIX byte-channel impl is the only remaining gap. |
+| `st::transport::native::Transport` + SOF/seq/CRC16 codec | 🟡 shipped, gated on doc-18 handheld firmware (not on the byte-channel layer, which works) |
+| Win32 serial `IByteChannel` (`CreateFile` + DCB + COMMTIMEOUTS) | ✅ shipped (`src/transport/src/serial_byte_channel_win.cpp`) |
+| POSIX serial `IByteChannel` (termios) | ⬜ stub returns `NotImplemented`; lands when first Linux/macOS user needs it |
+| `st::ecu::ssm::SsmClient` (K-Line + CAN paths) | ✅ CAN path validated against real ECU (SSM/UDS sniff captures); K-Line still MockTransport-only |
+| `st::ecu::uds::UdsClient` | ✅ validated against the user's 2017 WRX over OBDX (SecurityAccess, RDBI, RMBA, ReadFullRom via UDS RequestDownload/TransferData) |
 | `st::ecu::uds` OBD-II Mode 0x09 (CAL ID / CVN / VIN) | ✅ shipped + CLI surfaced |
 | `st::ecu::subaru_security` (SecurityAccess Feistel: factory + COBB-AP + Fehr-active L1/L3 variants, CLI `--sa-variant`) | ✅ shipped |
 | `st::ecu::bulk_reflash` (gated 0xB6 cipher, `ST_ENABLE_BULK_REFLASH_CIPHER`) | ✅ shipped, off in default builds |
