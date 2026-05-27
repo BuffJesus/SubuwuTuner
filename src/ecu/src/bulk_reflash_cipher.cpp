@@ -17,8 +17,9 @@ namespace st::ecu::bulk_reflash {
 
 namespace {
 
-// Rotate-right a 16-bit value by `n` bits. n in [0, 16); guarded at the
-// call-site (we only use n=3 here).
+// Rotate-right a 16-bit value by `n` bits. n in [1, 16] — n==0 would
+// shift a u16 by 16 (UB), so the range excludes it. We only ever pass
+// n=3 from f_round() below.
 constexpr std::uint16_t ror16(std::uint16_t v, unsigned n) noexcept {
     return static_cast<std::uint16_t>((v >> n) | (v << (16 - n)));
 }
@@ -119,6 +120,12 @@ std::vector<std::uint8_t> decrypt_bytes(std::span<std::uint8_t const> ciphertext
     return transform_bytes(ciphertext, kRoundKeysDecrypt);
 }
 
+// Process-global arming flag. Deliberate exception to the "no global
+// state" rule in CLAUDE.md: the runtime arm has to be reachable from
+// the CLI pre-pass without threading a service through every subcommand
+// + the flash::Flasher constructor, and the gate is intentionally
+// process-scoped so a single armed invocation cannot leak its arming
+// to a future invocation of the same binary.
 namespace {
 std::atomic<bool> g_armed{false};
 }  // namespace

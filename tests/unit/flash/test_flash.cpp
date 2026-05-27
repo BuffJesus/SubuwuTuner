@@ -621,7 +621,7 @@ TEST_CASE("Flasher::execute full single-sector flash with verify", "[flash][exec
 // execute -- Subaru 0xB6 bulk-transfer path
 // ---------------------------------------------------------------------
 
-TEST_CASE("Flasher::execute refuses data_format=0x04 by default (PolicyDenied)",
+TEST_CASE("Flasher::execute refuses data_format=0x04 when not armed (PolicyDenied)",
           "[flash][execute][b6][policy]") {
     // The 0xB6 Subaru-bulk-transfer write path requires the bulk-reflash
     // cipher to be compiled in (ST_ENABLE_BULK_REFLASH_CIPHER) AND armed

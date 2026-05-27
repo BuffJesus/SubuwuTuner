@@ -10538,6 +10538,10 @@ int main(int argc, char *argv[]) {
             }
             argv[write++] = argv[read];
         }
+        // C standard guarantees argv[argc] == nullptr; preserve that after
+        // compaction so subcommands that walk argv defensively still see
+        // the terminator at the new end.
+        argv[write] = nullptr;
         argc = write;
 
         if (wants_bulk_reflash_cipher) {
