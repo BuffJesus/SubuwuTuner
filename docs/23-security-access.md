@@ -16,8 +16,12 @@ ReadMemoryByAddress and most flash services behind UDS SecurityAccess
 4. Proceed to RMBA
 
 Steps 1, 3, and 4 are fully implemented and tested in this codebase.
-**Step 2 is intentionally not.** The algorithm itself is a runtime
-plug-in via `Flasher::set_security_key_fn(...)`.
+**Step 2 is also implemented in-tree now** for the A-series SSMCAN1 family
+— the analyst-mode RE finding in §"Algorithm structure recovered" below
+made the constants firmware-derived (not GPL-contaminated), so the factory
+algorithm + aftermarket variants ship in `src/ecu/src/subaru_security.cpp`.
+The plug-in seam (`Flasher::set_security_key_fn(...)`) is still present
+for forks, handhelds, and the not-yet-implemented Gen-B (RH850 / CY1) path.
 
 ## Why the key function is plug-in rather than built-in
 
@@ -59,22 +63,29 @@ auto rom = flasher.read_full_rom(
 ```
 
 `Flasher` ships with a default `security_key_fn_` set to
-`st::ecu::subaru::ssmcan1_key_stub`, which returns `NotImplemented` with
-a clear error message pointing readers at this doc. Forks that supply a
-real key function never see the stub.
+`st::ecu::subaru::ssmcan1_key_stub`. The name is retained for source
+compatibility, but the function is no longer a stub — it computes the
+real 16-round Feistel against the in-tree round-key tables. CLI
+`--sa-variant {factory,cobb-ap,fehr-active-l1,fehr-active-l3}` selects
+between the variants below; aftermarket variants share the same Feistel
+structure with different round-key tables (and, for L3, a 5-byte loop-
+reversal patch at flash 0xBE911 + 0xBE9C7..0xBE9CE).
 
-The eras the project plans to support eventually:
+Era / variant catalog:
 
-| Era       | Silicon | Algorithm     | Seed/key bytes | Stub name              |
-|-----------|---------|---------------|----------------|------------------------|
-| pre-2008  | SH7055  | SSMK1         | 4              | `ssmk1_key_stub`       |
-| 2008–2017 | SH7058  | SSMCAN1       | 4              | `ssmcan1_key_stub`     |
-| 2018+     | RH850   | CY1 (AES-CBC) | 16             | `cy1_aes_key_stub`     |
+| Era       | Silicon | Algorithm     | Seed/key bytes | Variant in tree                                                       | Status         |
+|-----------|---------|---------------|----------------|-----------------------------------------------------------------------|----------------|
+| pre-2008  | SH7055  | SSMK1         | 4              | `ssmk1_key_stub`                                                      | ⬜ not yet     |
+| 2008–2017 | SH7058  | SSMCAN1 (L1)  | 4              | `ssmcan1_key_stub` (factory)                                          | ✅ shipped     |
+| 2008–2017 | SH7058  | SSMCAN1 (L1)  | 4              | `ssmcan1_l1_cobb_ap` (= alias `ssmcan1_l1_fehr_active`)               | ✅ shipped     |
+| 2008–2017 | SH7058  | SSMCAN1 (L3)  | 4              | `ssmcan1_l3_cobb_ap` (= alias `ssmcan1_l3_fehr_active`)               | ✅ shipped     |
+| 2018+     | RH850   | CY1 (AES-CBC) | 16             | `cy1_aes_key_stub`                                                    | ⬜ not yet     |
 
 The CY1 algorithm is publicly known (jglim/UnlockECU/SubaruSecurityAccess2018CY1.cs,
 MIT) and could be implemented in-tree without contamination — we just
-haven't yet. SSMK1 and SSMCAN1 don't have license-compatible references
-we've found.
+haven't yet. SSMK1 doesn't have a license-compatible reference we've
+found, but the analyst-mode workflow that recovered SSMCAN1 would apply
+here too once pre-2008 ROM dumps are in hand.
 
 ## Algorithm structure recovered (2026-05-24)
 

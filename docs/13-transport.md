@@ -2,7 +2,7 @@
 
 This document captures the design for Phase 3 (comms and datalogging). The Phase 2 calibration side (ROM I/O, definitions, editing, projects) is complete; everything below describes how SubuwuTuner talks to a real ECU through a real adapter.
 
-Status today (2026-05-17) — the **shapes** are real and locked under unit tests; the **platform wiring** to actual hardware fills in when the developer's OBDX Pro VX adapter (and a Tactrix OP2.0 for the second-source path) lands on the bench:
+Status today (2026-05-26) — the **shapes** are real and locked under unit tests. OBDX Pro VX is in hand (2026-05-24), so the **platform wiring** to actual hardware (libusb CDC channel + J2534 DLL dynamic-load shim) is the active task; Tactrix OP2.0 remains the second-source path:
 
 | Piece | Status |
 |---|---|

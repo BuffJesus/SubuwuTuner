@@ -35,9 +35,9 @@ Six phases. Each ends with a demoable artifact and a "ship gate" that must pass 
 
 **Gate:** ✅ done — `project-new` → `project-edit` → save → reopen round-trips work; covered by integration tests.
 
-## Phase 3 — Comms & datalogging (5–7 weeks) 🟡 in progress
+## Phase 3 — Comms & datalogging (5–7 weeks) ✅ done hardware-free / 🔒 live validation hardware-gated
 
-Substantial architecture landed this session; the platform USB / DLL layer + real-hardware validation gate on adapter arrival.
+Architecture, protocol catalog, and datalogger pipeline are complete end-to-end via MockTransport. Platform USB / DLL layer + real-hardware validation gate on adapter arrival; OBDX Pro VX is now in hand (2026-05-24), so the gate is actionable.
 
 - ✅ `st::transport::ITransport` interface + `MockTransport`
 - ✅ J2534 v04.04 ABI types + status decoder + `J2534Library` wrapper (`44896d4`)
@@ -57,9 +57,9 @@ Substantial architecture landed this session; the platform USB / DLL layer + rea
 
 **Gate:** 🔒 hardware-blocked. Code paths are real + unit-tested (108 transport tests across the trio + factory + discovery). When OBDX Pro VX adapter arrives, the path to first ROM dump is: implement one platform `IByteChannel` (libusb on Windows ~1 file), wire it into `obdx::Transport`, run `subuwutuner-cli rom-pull --transport obdx --device <COM>`.
 
-## Phase 4 — Flashing (6–10 weeks, the dangerous one) 🟡 skeletons done
+## Phase 4 — Flashing (6–10 weeks, the dangerous one) ✅ done hardware-free / 🔒 live validation hardware-gated
 
-Per the prior handoff, "Phases 0–4 done hardware-free." Orchestrator + Manifest + journal + policy gate + checksum-type field all exist; the actual algorithms (vendor-specific checksum repair, seed/key derivation, brick recovery) need hardware to develop + validate against.
+Orchestrator + Manifest + journal + policy gate + checksum-type field all exist and are end-to-end test-covered; SecurityAccess is fully recovered for the A-series (factory + aftermarket variants in tree). Vendor-specific checksum repair + brick recovery need hardware to validate against.
 
 - ✅ `Flasher::read_full_rom` via `ITransport` + UDS RequestDownload/TransferData (mock-trace exercised)
 - ✅ FlashPlan + sector model (`st::flash`)
@@ -67,8 +67,9 @@ Per the prior handoff, "Phases 0–4 done hardware-free." Orchestrator + Manifes
 - ✅ Policy + mutation gate (`docs/06` + `st::policy`)
 - ✅ `checksum_type` field in pack `[pack]` table (added `58a821f`); enum mirrors RR's ChecksumSTD / ALT / ALT2 family
 - ✅ `IChecksumRepair` seam + `make_checksum_repair` factory + `apply_checksum_repair(span, Definition)` wrapper + CLI `checksum-verify` / `checksum-repair` exit-3-on-NotImplemented (every concrete kind still returns NotImplemented with an RR citation pointer)
+- ✅ **Seed/key authentication (SecurityAccess)** — A-series SSMCAN1 fully recovered: factory 16-round Feistel (`ssmcan1_key_stub`), COBB-AP L1 + L3 variants (`ssmcan1_l{1,3}_cobb_ap`), Fehr-active aliases. CLI-selectable via `--sa-variant`. See `docs/23-security-access.md` for the full catalog.
+- ✅ **Optional gated 0xB6 bulk-transfer write path** — compile-flagged + runtime-flagged. See `docs/26-bulk-reflash-cipher.md`.
 - ⬜ Checksum-repair implementations (subaru_std, subaru_alt, subaru_alt2) — seam ready; algorithms still need byte-validation against a known stock dump
-- ⬜ Seed/key authentication — no SSM seed/key code exists in RomRaider per this session's findings doc; we'll derive it from forum threads + bench captures
 - 🔒 Brick protection bootstrap + recovery shim — bench rig prerequisite
 - 🔒 Delta-only flashing + dry-run mode — same
 - ⬜ Patch insertion layer (`src/feature_patch/`) — for Phase 5 features; needs real ECU vector tables

@@ -21,18 +21,18 @@ definitions/    defgen-generated ECU packs (Path B: off-tree; see docs/17)
 fixtures/   demo-pack/, demo.stune/, samples/*.stmod, demo-trace.hex
 tests/unit/<module>/   Catch2 v3
 tools/defgen/tests/    Python tests
-docs/       design — read first; numbered 00–18
+docs/       design — read first; numbered 00–27
 ```
 
 For module-by-module detail, read the headers under `src/<module>/include/` and the corresponding `tests/unit/<module>/`. For CLI surface, run `subuwutuner-cli --help`.
 
-## Status snapshot (as of 2026-05-17)
+## Status snapshot (as of 2026-05-26)
 
-Phase 0/1/2 done. Phase 3 protocol framing complete (SSM + full UDS catalog incl. flashing flow) and datalogger pipeline end-to-end via MockTransport. Phase 4 flash orchestrator (`st::flash`) end-to-end hardware-free incl. delta detection, per-sector erase/write/verify, dry-run, manifest, journal-based resume. v1.1 auto-tune kernels (MAF + knock-pull) shipped with CSV readers, smoothing, lint, CLI, and project-integration via `edit::History`. CAN reverse-engineering toolkit replay-path complete (Frame + .asc I/O, DBC parser/emitter/decoder, BaselineModel + ChangeDetector, .cdb bundle, five CLI subcommands). Phase 5 custom-features: `st::feature::Graph` + `st::feature::ir` (lower, dump, lint, RT-budget cost) shipped; designer canvas + sample graphs in `fixtures/samples/`; codegen (SH-2A for VA, RH850 for VB) is future work and structurally the biggest open feature. GUI: docking, themes (Dark/Light, **purple accent** `(0.55, 0.35, 0.85)`), autotune modals, Flash… modal with policy gate, Stats panel, status-bar profile chip, jurisdiction-profile persistence.
+Phase 0/1/2 done. Phase 3 protocol framing complete (SSM + full UDS catalog incl. flashing flow + OBD-II Mode 0x09 vehicle-info) and datalogger pipeline end-to-end via MockTransport. Phase 4 flash orchestrator (`st::flash`) end-to-end hardware-free incl. delta detection, per-sector erase/write/verify, dry-run, manifest, journal-based resume; optional gated 0xB6 bulk-transfer write path (see `docs/26`). SecurityAccess: factory SSMCAN1 (Gen-A 16-round Feistel) + COBB-AP / Fehr-active L1+L3 variants in tree, CLI-selectable via `--sa-variant`. v1.1 auto-tune kernels (MAF + knock-pull) shipped with CSV readers, smoothing, lint, CLI, and project-integration via `edit::History`. CAN reverse-engineering toolkit replay-path complete (Frame + .asc I/O, DBC parser/emitter/decoder, BaselineModel + ChangeDetector, .cdb bundle, five CLI subcommands). Phase 5 custom-features: `st::feature::Graph` + `st::feature::ir` (lower, dump, lint, RT-budget cost) shipped; **SH-2A codegen for VA shipped** (designer canvas + sample graphs in `fixtures/samples/`); RH850 codegen for VB is now the single biggest open feature in the tree. GUI: docking, themes (Dark/Light, **purple accent** `(0.55, 0.35, 0.85)`), autotune modals, Flash… modal with policy gate, Stats panel, status-bar profile chip, jurisdiction-profile persistence, Settings dialog.
 
 **Path B distribution posture in effect** (per `docs/17`): public repo does NOT bundle `definitions/va/` or `definitions/vb/`. Definitions are user-supplied at runtime.
 
-**Hardware gates still open** (waiting on user's OBDX Pro VX adapter): Phase 1 ship gate (≥20 maps from a real definition pack on a real ROM), SSM/UDS validation against real ECUs, BLAKE3 upgrade for flash hashing, HIL tests against junkyard ECUs (docs/08 Tier 4).
+**Hardware gates** (OBDX Pro VX in hand 2026-05-24 — these are now actionable, not blocked): Phase 1 ship gate (≥20 maps from a real definition pack on a real ROM), SSM/UDS validation against real ECUs, BLAKE3 upgrade for flash hashing, HIL tests against junkyard ECUs (docs/08 Tier 4).
 
 ## Quick orientation for common tasks
 

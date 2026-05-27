@@ -26,7 +26,7 @@ Brick protection is a first-class subsystem with a written threat model:
 
 - Recovery shim is installed and **verified by reading it back** before any subsequent write
 - Recovery strategy is **ISA-family specific** — see below
-- Every flash operation publishes a tamper-evident manifest (BLAKE3 over sector hashes) that the user can keep
+- Every flash operation publishes a tamper-evident manifest (currently CRC32 over sector hashes; BLAKE3 upgrade is staged for after the bench rig validates it — see `docs/03` tech-stack §Hashing) that the user can keep
 - If the host machine dies mid-flash, the next boot of SubuwuTuner offers to resume from the manifest
 
 ### 4a. Recovery strategy by ISA family

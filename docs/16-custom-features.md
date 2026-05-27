@@ -4,12 +4,15 @@ A **custom feature** is a piece of new ECU behavior the user authors visually, t
 
 > **Terminology bridge.** If you're coming from the RomRaider / ECUFlash world, this is the equivalent of what those tools call **"software patches"** or **"ECU patches"** — hand-written SH-2A assembly snippets injected at known ROM offsets to add behaviors like 2-step / flat-foot shift / clutch kill that aren't in the stock cal. SubuwuTuner's contribution is the *authoring layer above* those patches: a visual node-graph designer + IR + linter + codegen that produces the same byte-level output without requiring the user to write assembly directly. The output `.stmod` is the SubuwuTuner-native equivalent of a hand-rolled ECUFlash patch file, and it flashes through the same `st::flash` pipeline as any other ROM change.
 
-This document captures the design. Phase 5 work is in progress: the
-authoring data model, IR lowerer, SH-2A codegen, CLI, and `.stmod`
-file format have shipped end-to-end. **Flashing** is not yet wired —
-patch insertion (`src/feature_patch/`) and real-hardware validation
-gate on bench-rig work. See *Current state* below for the granular
-matrix.
+This document captures the design. Phase 5 status: the authoring data
+model, IR lowerer, **SH-2A codegen for VA** (18 primitives recognized;
+fan-out dedup; FPU bridge for Float ops; address-gate refuses splices
+outside declared writable regions), CLI (`feature-compile`), and `.stmod`
+file format have shipped end-to-end. **The single biggest remaining open
+feature** is the patch-insertion layer (`src/feature_patch/` — finds free
+RAM, writes the hook table, splices into existing vector tables), plus
+RH850 codegen for VB. Both gate on bench-rig work against a real ECU
+vector table. See *Current state* below for the granular matrix.
 
 ## Stance on third-party prior art
 

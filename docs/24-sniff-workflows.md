@@ -6,7 +6,7 @@
 
 The Y-cable + OBDX-Pro-VX-in-LISTEN-ONLY rig described in `docs/23` is general-purpose. SecurityAccess capture is the most license-load-bearing use (because it unblocks ROM dumps without GPL contamination), but the same rig can pull a tune off the wire during a flash, locate live RAM addresses for cal tables by watching what an active tuner-tool polls, and characterise unknown ECU behaviour by observing how the OEM-blessed tools session-shape their requests.
 
-Status: **all workflows in this doc are hardware-gated.** Capture path (`sniff` subcommand, listen-only mode, ISO-TP-aware extractor) is shipped and tested against MockTransport. Verification on a real car waits on the OBDX Pro VX (ETA 2026-05-22 — 2026-05-25). Until hardware lands this doc is a plan, not a tested workflow.
+Status: **all workflows in this doc are hardware-gated.** Capture path (`sniff` subcommand, listen-only mode, ISO-TP-aware extractor) is shipped and tested against MockTransport. OBDX Pro VX is in hand (2026-05-24) and the install-flow captures + B6 cipher recovery have run end-to-end against real CAN logs (see `Findings/communication-protocols/cobb-install-flow.md`); live-car verification of the documented workflows is in progress.
 
 ## Shared hardware setup
 

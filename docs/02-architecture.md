@@ -61,7 +61,9 @@ Every layer depends only on layers below it. The domain model has no ImGui or US
 | `st::transport::native` | SOF/seq/opcode/LEN/CRC16 framing for the standalone-master handheld | `native::Transport`, `native` codec |
 | `st::ecu::ssm` | Subaru SSM (K-Line + CAN-encapsulated) | `SsmClient` |
 | `st::ecu::uds` | ISO 14229 UDS / KWP-on-CAN | `UdsClient` |
-| `st::flash` | Erase/program/verify + brick guard + checksum repair seam | `Flasher`, `FlashPlan`, `FlashReport`, `IChecksumRepair`, `make_checksum_repair`, `apply_checksum_repair` |
+| `st::ecu::subaru_security` | SecurityAccess key derivation: factory SSMCAN1 + COBB-AP + Fehr-active variants | `ssmcan1_key_stub`, `ssmcan1_l{1,3}_cobb_ap`, alias `ssmcan1_l{1,3}_fehr_active` |
+| `st::ecu::bulk_reflash` | Optional gated 0xB6 bulk-transfer cipher (`ST_ENABLE_BULK_REFLASH_CIPHER`, see `docs/26`) | `feistel_block`, `encrypt_bytes`, `decrypt_bytes`, `arm`/`is_armed`/`disarm` |
+| `st::flash` | Erase/program/verify + brick guard + checksum repair seam + optional gated 0xB6 write path | `Flasher`, `FlashPlan`, `FlashReport`, `IChecksumRepair`, `make_checksum_repair`, `apply_checksum_repair`, `ErrorCode::PolicyDenied` |
 | `st::log` | Datalogging (SPSC ring + I/O thread + sinks) | `LogStream`, `LogSession`, `LogChannel`, `CsvSink` |
 | `st::can` | CAN frames + .asc trace I/O | `Frame`, `AscReader`, `AscWriter` |
 | `st::dbc` | DBC parser / emitter / decoder | `Database`, `Message`, `Signal` |
