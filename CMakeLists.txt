@@ -13,6 +13,10 @@ option(ST_BUILD_TESTS    "Build unit tests"                ON)
 option(ST_BUILD_CLI      "Build the subuwutuner-cli tool"  ON)
 option(ST_BUILD_GUI      "Build the subuwutuner-gui tool"  ON)
 option(ST_WARNINGS_AS_ERRORS "Treat warnings as errors"    ON)
+option(ST_ENABLE_BULK_REFLASH_CIPHER
+    "Compile the optional 0xB6 Subaru bulk-transfer cipher (write-path capability). \
+Off by default; see docs/26-bulk-reflash-cipher.md for the two-step arming model and rationale."
+    OFF)
 set(ST_SANITIZE "" CACHE STRING
     "Semicolon-separated sanitizers to enable (e.g. address;undefined). Linux/Mac only.")
 

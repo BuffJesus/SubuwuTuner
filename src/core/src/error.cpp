@@ -47,6 +47,8 @@ std::string_view to_string(ErrorCode code) noexcept {
         return "ECU rejected request";
     case ErrorCode::SeedKeyFailed:
         return "seed/key authentication failed";
+    case ErrorCode::PolicyDenied:
+        return "policy denied";
     }
     return "unrecognised error code";
 }

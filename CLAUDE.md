@@ -56,6 +56,7 @@ Phase 0/1/2 done. Phase 3 protocol framing complete (SSM + full UDS catalog incl
 | Reason about auto-update / installer / release channel | `docs/22-auto-update.md` |
 | Reason about SecurityAccess (UDS 0x27) / seed-key plug-in | `docs/23-security-access.md` |
 | Reason about Y-cable sniffing (during-flash capture, datalog RAM-poll discovery, protocol learning, feature RE for LC / FFS / rev limit) | `docs/24-sniff-workflows.md` |
+| Reason about the optional 0xB6 bulk-transfer write path (off by default) | `docs/26-bulk-reflash-cipher.md` |
 | Reason about the user's specific Fehr e-tune (cal delta vs factory, SA L1/L35 status, patch manifests) | `docs/27-fehr-analysis-2026-05-26.md` |
 | Look up a tuning term | `docs/10-glossary.md` |
 

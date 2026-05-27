@@ -44,6 +44,9 @@ enum class ErrorCode : std::uint16_t {
     // 5xx — ECU protocol (reserved for st::ecu)
     EcuRejected = 500,
     SeedKeyFailed = 501,
+
+    // 6xx — policy decisions (build/runtime gates, profile refusals)
+    PolicyDenied = 600,
 };
 
 [[nodiscard]] std::string_view to_string(ErrorCode code) noexcept;

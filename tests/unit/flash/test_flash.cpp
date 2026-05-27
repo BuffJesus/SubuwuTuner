@@ -9,6 +9,10 @@
 #include "st/transport.hpp"
 #include "st/transport/mock.hpp"
 
+#ifdef ST_ENABLE_BULK_REFLASH_CIPHER
+#include "st/ecu/bulk_reflash_cipher.hpp"
+#endif
+
 #include "../_helpers/erase_opt.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -617,8 +621,22 @@ TEST_CASE("Flasher::execute full single-sector flash with verify", "[flash][exec
 // execute -- Subaru 0xB6 bulk-transfer path
 // ---------------------------------------------------------------------
 
-TEST_CASE("Flasher::execute uses 0xB6 when data_format=0x04 (Subaru ciphertext)",
-          "[flash][execute][b6]") {
+TEST_CASE("Flasher::execute refuses data_format=0x04 by default (PolicyDenied)",
+          "[flash][execute][b6][policy]") {
+    // The 0xB6 Subaru-bulk-transfer write path requires the bulk-reflash
+    // cipher to be compiled in (ST_ENABLE_BULK_REFLASH_CIPHER) AND armed
+    // at runtime. Under the default build neither holds; under the flag-
+    // on build, the cipher is compiled in but unarmed at process start.
+    // Either way the orchestrator gets as far as RequestDownload, then
+    // bails with PolicyDenied before issuing any 0xB6 frame. The bail()
+    // lambda still restores CommControl on the way out so the bus doesn't
+    // stay muted. See docs/26-bulk-reflash-cipher.md.
+#ifdef ST_ENABLE_BULK_REFLASH_CIPHER
+    // Reset arm state in case an earlier test in the same process armed
+    // the cipher. Arming is process-scoped, so test order would otherwise
+    // matter here.
+    st::ecu::bulk_reflash::disarm();
+#endif
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
 
@@ -631,13 +649,62 @@ TEST_CASE("Flasher::execute uses 0xB6 when data_format=0x04 (Subaru ciphertext)"
     expect(t,
            uds::build_routine_control(uds::kRcStart, uds::kRidEraseMemory, erase_opt(addr, size)),
            {0x71, 0x01, 0xFF, 0x00});
-    // RequestDownload with data_format = 0x04 (Subaru ciphertext).
+    expect(t, uds::build_request_download(0x04, addr, size), {0x74, 0x20, 0x00, 0x10});
+    // bail() emits CC restore.
+    expect(t, {0x28, 0x00, 0x03}, {0x68, 0x00});
+
+    flash::FlashPlan plan;
+    plan.data_format = flash::kDataFormatSubaruCiphertext;
+    plan.block_size_hint = 4;
+    plan.verify_chunk_size = 0x100;
+    plan.writes.push_back({{addr, size}, data});
+
+    flash::Flasher f{t};
+    auto const r = f.execute(plan);
+    REQUIRE_FALSE(r.ok());
+    REQUIRE(r.error.has_value());
+    REQUIRE(r.error->code() == st::ErrorCode::PolicyDenied);
+    REQUIRE(r.report.sectors.size() == 1);
+    auto const &so = r.report.sectors[0];
+    // Got past erase + RequestDownload, but no chunk was transferred.
+    REQUIRE(so.erased);
+    REQUIRE(so.downloaded);
+    REQUIRE_FALSE(so.transferred);
+    REQUIRE(r.report.bytes_transferred == 0);
+    REQUIRE(r.report.restored_bus);
+    REQUIRE(t.exhausted());
+}
+
+#ifdef ST_ENABLE_BULK_REFLASH_CIPHER
+
+TEST_CASE("Flasher::execute uses 0xB6 with encrypted payload when cipher is armed",
+          "[flash][execute][b6]") {
+    // With the build flag ON and the runtime arm in place, the orchestrator
+    // encrypts each chunk through `bulk_reflash::encrypt_bytes()` before
+    // emitting 0xB6. The expected wire bytes are computed symbolically from
+    // the same in-tree cipher so this test stays valid if the cipher
+    // constants ever change.
+    st::ecu::bulk_reflash::arm();
+
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    constexpr std::uint32_t addr = 0x006000;
+    constexpr std::uint32_t size = 8;
+    std::vector<std::uint8_t> const data{0xF1, 0x35, 0xFA, 0x11, 0x94, 0x14, 0x78, 0xD7};
+
+    expect(t, {0x10, 0x02}, {0x50, 0x02});
+    expect(t, {0x28, 0x03, 0x03}, {0x68, 0x03});
+    expect(t,
+           uds::build_routine_control(uds::kRcStart, uds::kRidEraseMemory, erase_opt(addr, size)),
+           {0x71, 0x01, 0xFF, 0x00});
     expect(t, uds::build_request_download(0x04, addr, size), {0x74, 0x20, 0x00, 0x10});
 
-    // Two 0xB6 transfers — each carries an explicit absolute address.
-    // First: addr=0x006000, 4 bytes; second: addr=0x006004, 4 bytes.
-    expect(t, uds::build_subaru_bulk_transfer(0x006000, {data.data(), 4}), {0xF6});
-    expect(t, uds::build_subaru_bulk_transfer(0x006004, {data.data() + 4, 4}), {0xF6});
+    // Two 0xB6 transfers, payload encrypted block-by-block.
+    auto const ct0 = st::ecu::bulk_reflash::encrypt_bytes({data.data(), 4});
+    auto const ct1 = st::ecu::bulk_reflash::encrypt_bytes({data.data() + 4, 4});
+    expect(t, uds::build_subaru_bulk_transfer(0x006000, ct0), {0xF6});
+    expect(t, uds::build_subaru_bulk_transfer(0x006004, ct1), {0xF6});
 
     expect(t, uds::build_request_transfer_exit(), {0x77});
     expect(t, uds::build_routine_control(uds::kRcStart, uds::kRidCheckProgrammingDependencies),
@@ -648,7 +715,7 @@ TEST_CASE("Flasher::execute uses 0xB6 when data_format=0x04 (Subaru ciphertext)"
 
     flash::FlashPlan plan;
     plan.data_format = flash::kDataFormatSubaruCiphertext;
-    plan.block_size_hint = 4; // cap chunk size so we get 2 B6 transfers
+    plan.block_size_hint = 4;
     plan.verify_chunk_size = 0x100;
     plan.writes.push_back({{addr, size}, data});
 
@@ -662,6 +729,8 @@ TEST_CASE("Flasher::execute uses 0xB6 when data_format=0x04 (Subaru ciphertext)"
     REQUIRE(r.report.bytes_transferred == size);
     REQUIRE(t.exhausted());
 }
+
+#endif // ST_ENABLE_BULK_REFLASH_CIPHER
 
 // ---------------------------------------------------------------------
 // execute -- brick-safe sector ordering via integrity_check_offset

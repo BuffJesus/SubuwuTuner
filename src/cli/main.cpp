@@ -9,6 +9,7 @@
 #include "st/defs.hpp"
 #include "st/defs/pack_registry.hpp"
 #include "st/discover.hpp"
+#include "st/ecu/bulk_reflash_cipher.hpp"
 #include "st/ecu/ssm.hpp"
 #include "st/ecu/subaru_security.hpp"
 #include "st/edit.hpp"
@@ -79,6 +80,10 @@ constexpr std::string_view kUsage =
     "OPTIONS:\n"
     "    -h, --help              Print this help and exit\n"
     "    -V, --version           Print version and exit\n"
+    "    --enable-bulk-reflash-cipher\n"
+    "                            Arm an optional advanced write path for this\n"
+    "                            invocation. Off by default. See\n"
+    "                            docs/26-bulk-reflash-cipher.md.\n"
     "\n"
     "COMMANDS:\n"
     "    pack-list [<dir>] [--quiet]\n"
@@ -10520,6 +10525,35 @@ int cmd_config(int argc, char *argv[]) {
 }
 
 int main(int argc, char *argv[]) {
+    // Pre-pass: pluck out global options that can appear anywhere in argv
+    // and that the subcommand dispatchers shouldn't see. Currently:
+    // --enable-bulk-reflash-cipher. We compact argv in place after stripping.
+    {
+        bool wants_bulk_reflash_cipher = false;
+        int write = 1;  // argv[0] (program name) stays put
+        for (int read = 1; read < argc; ++read) {
+            if (std::string_view{argv[read]} == "--enable-bulk-reflash-cipher") {
+                wants_bulk_reflash_cipher = true;
+                continue;  // strip from argv
+            }
+            argv[write++] = argv[read];
+        }
+        argc = write;
+
+        if (wants_bulk_reflash_cipher) {
+#ifdef ST_ENABLE_BULK_REFLASH_CIPHER
+            st::ecu::bulk_reflash::arm();
+#else
+            // Flag accepted but no-op in this build. We don't hard-error
+            // because the user might invoke an unrelated command. Any
+            // operation that actually needs the capability will refuse
+            // with a docs reference at that point.
+            std::fprintf(stderr,
+                         "subuwutuner-cli: --enable-bulk-reflash-cipher: not built in\n");
+#endif
+        }
+    }
+
     if (argc <= 1) {
         print_usage();
         return 0;

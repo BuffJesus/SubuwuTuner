@@ -6,6 +6,7 @@
 #include "st/core/crc32.hpp"
 #include "st/core/error.hpp"
 #include "st/core/result.hpp"
+#include "st/ecu/bulk_reflash_cipher.hpp"
 
 #include <toml++/toml.hpp>
 
@@ -567,13 +568,31 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *
                 if (use_b6) {
                     std::uint32_t const chunk_addr =
                         w.sector.address + static_cast<std::uint32_t>(offset);
-                    if (auto s = client_.subaru_bulk_transfer(chunk_addr, chunk); !s.has_value()) {
+                    // data_format=0x04 path is gated. See
+                    // docs/26-bulk-reflash-cipher.md.
+#ifdef ST_ENABLE_BULK_REFLASH_CIPHER
+                    if (!st::ecu::bulk_reflash::is_armed()) {
+                        commit_outcome(outcome);
+                        return bail(ErrorCode::PolicyDenied,
+                                    "flash: data_format=0x04 not armed; see "
+                                    "docs/26-bulk-reflash-cipher.md");
+                    }
+                    auto const encrypted = st::ecu::bulk_reflash::encrypt_bytes(chunk);
+                    std::span<std::uint8_t const> wire{encrypted.data(), encrypted.size()};
+                    if (auto s = client_.subaru_bulk_transfer(chunk_addr, wire); !s.has_value()) {
                         report.bytes_transferred += offset;
                         commit_outcome(outcome);
                         return bail(s.error().code(), "flash: subaru_bulk_transfer at " +
                                                           hex_addr(chunk_addr) + " failed: " +
                                                           std::string{s.error().message()});
                     }
+#else
+                    (void)chunk_addr;
+                    commit_outcome(outcome);
+                    return bail(ErrorCode::PolicyDenied,
+                                "flash: data_format=0x04 not built in; see "
+                                "docs/26-bulk-reflash-cipher.md");
+#endif
                 } else {
                     if (auto s = client_.transfer_data(counter, chunk); !s.has_value()) {
                         report.bytes_transferred += offset;

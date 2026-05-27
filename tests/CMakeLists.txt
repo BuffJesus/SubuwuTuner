@@ -39,6 +39,7 @@ add_executable(st_unit_tests
     unit/ecu/test_subaru_security.cpp
     unit/ecu/test_uds.cpp
     unit/ecu/test_uds_pdu_atomicity.cpp
+    unit/ecu/test_bulk_reflash_cipher.cpp
     unit/log/test_log.cpp
     unit/log/test_knock_dashboard.cpp
     unit/log/test_adaptive_history.cpp

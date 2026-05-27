@@ -14,6 +14,7 @@ SubuwuTuner reads, edits, datalogs, and reflashes the calibration on supported S
 - **Open auto-tune** — MAF / knock-pull / closed-loop algorithms shipped first-party (v1.1)
 - **Jurisdiction-aware, not paternalistic** — first-run profile picker, engine-safety warnings stay strict
 - **Real brick protection** — bench-tested recovery shim subsystem, not a marketing bullet
+- **Optional 0xB6 bulk-transfer write path** — off by default behind a two-layer gate (build flag `ST_ENABLE_BULK_REFLASH_CIPHER` + runtime `--enable-bulk-reflash-cipher`); see [`docs/26-bulk-reflash-cipher.md`](docs/26-bulk-reflash-cipher.md)
 - **Cross-platform on day one** — Windows, macOS (Intel + Apple Silicon), Linux (x64 + arm64). Editing, datalogging, project work, auto-tune, and the CAN toolkit run on all three; some adapter-specific flashing paths are Windows-only (see [Platform feature matrix](#platform-feature-matrix) below).
 
 v1.0 targets VA (2015–2021) and VB (2022+) WRX manual transmission. v1.x expands to STI, AT variants, older EJ-powered cars, BRZ/86, and the rest of the Subaru lineup. See [`docs/04-roadmap.md`](docs/04-roadmap.md).
