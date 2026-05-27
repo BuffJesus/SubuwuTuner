@@ -119,7 +119,7 @@ These came out of the audit against `docs/05-improvements.md` and the external c
 8. ⬜ **README platform-feature matrix** — explicit "what works on which OS" table, particularly flagging J2534 flashing as Windows-only.
 9. ⬜ **OFL font licenses in `NOTICE`** — Inter and JetBrains Mono ship as binary blobs; license text must accompany the binary.
 10. ⬜ **CI performance gate** — fail the build on cold-start time / idle-RAM regression past the §1 thresholds (currently aspirational; tracked, not enforced).
-11. ⬜ **Property-based tests** on the codec layer (SSM framing, DVI codec, native SOF/seq/CRC) and the UDS state machine. RapidCheck (or in-tree property harness) — example-based Catch2 will miss bit-flip / reorder cases.
+11. ✅ **Property-based tests** on the codec layer + UDS framing — in-tree harness at `tests/unit/_helpers/property.hpp` (deterministic seeded PRNG, no external dep). Coverage: DVI codec (`test_obdx_dvi_properties.cpp`, 8 cases), SSM framing (`test_ssm_properties.cpp`, 8 cases), native SOF/seq/CRC-16 (`test_native_properties.cpp`, 11 cases), UDS framing + NRC dispatch + robustness across the whole parser catalog (`test_uds_properties.cpp`, 17 cases). Each parser is verified against: build/parse roundtrip, negative-response (any NRC) rejection, mismatched-echo rejection (wrong DID / wrong session / wrong counter), and adversarial-random-bytes robustness (no crash, only clean errors). ⬜ UDS state-machine sequence properties (the orchestrator-level state, not the framing) still remain.
 
 ## Personas — who each milestone serves
 
