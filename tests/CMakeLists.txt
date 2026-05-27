@@ -54,6 +54,15 @@ add_executable(st_unit_tests
     unit/flash/test_checksum.cpp
     unit/flash/test_cancellation_invariants.cpp
     unit/flash/test_read_full_rom_sa_v4_port.cpp
+    unit/flash/test_brick_recovery_fixture.cpp
+    # Bench-rig fixture sources (header + impl). The header lives
+    # under tests/_helpers/; .cpp's compile into st_unit_tests so the
+    # MockBenchPower + BrickRecoveryFixture unit tests can link.
+    # When a real IBenchPower concrete lands (NumatoBenchPower etc.)
+    # it ships under tests/hil/ behind the ST_BUILD_HIL_TESTS gate
+    # below — st_unit_tests never sees the real-hardware sources.
+    _helpers/mock_bench_power.cpp
+    _helpers/brick_recovery_fixture.cpp
     unit/autotune/test_autotune.cpp
     unit/autotune/test_autotune_csv.cpp
     unit/autotune/test_autotune_lint.cpp
@@ -109,6 +118,26 @@ if(PRIVATE_TEST_SOURCES)
     target_sources(st_unit_tests PRIVATE ${PRIVATE_TEST_SOURCES})
     message(STATUS "Private integration tests staged: "
                    "${PRIVATE_TEST_SOURCES}")
+endif()
+
+# Hardware-in-the-loop tests — gated behind ST_BUILD_HIL_TESTS. The
+# default (OFF) keeps st_unit_tests free of any real-hardware code
+# paths so CI runners + dev machines without a bench can build + run
+# the suite as usual. With the option ON, the HIL sources under
+# tests/hil/ get added to st_unit_tests and any concrete IBenchPower
+# (NumatoBenchPower etc., not yet shipped) gets linked in. See
+# tests/hil/README.md for the runbook + docs/28 for the bench rig.
+option(ST_BUILD_HIL_TESTS
+    "Compile tests/hil/* into st_unit_tests for real-hardware runs. \
+Requires a bench ECU + OBDX adapter + USB relay. Off by default."
+    OFF)
+if(ST_BUILD_HIL_TESTS)
+    file(GLOB HIL_TEST_SOURCES CONFIGURE_DEPENDS
+         "${CMAKE_CURRENT_SOURCE_DIR}/hil/*.cpp")
+    if(HIL_TEST_SOURCES)
+        target_sources(st_unit_tests PRIVATE ${HIL_TEST_SOURCES})
+        message(STATUS "HIL tests enabled (${HIL_TEST_SOURCES})")
+    endif()
 endif()
 
 # Catch2's discovery integrates each TEST_CASE as an individual ctest entry.
