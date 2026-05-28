@@ -278,6 +278,9 @@ Result<Table> parse_table(toml::table const &t) {
     if (auto const v = t["notes"].value<std::string>(); v.has_value()) {
         tab.notes = *v;
     }
+    if (auto const v = t["role"].value<std::string>(); v.has_value() && !v->empty()) {
+        tab.role = *v;
+    }
     tab.emissions_relevant = optional_value<bool>(t, "emissions_relevant", false);
     tab.engine_safety_critical = optional_value<bool>(t, "engine_safety_critical", false);
 
@@ -1387,6 +1390,16 @@ Scaling const *Definition::find_scaling(std::string_view id) const noexcept {
 Table const *Definition::find_table(std::string_view id) const noexcept {
     auto it =
         std::find_if(tables_.begin(), tables_.end(), [&](Table const &t) { return t.id == id; });
+    return it == tables_.end() ? nullptr : &*it;
+}
+
+Table const *Definition::find_table_by_role(std::string_view role) const noexcept {
+    if (role.empty()) {
+        return nullptr;
+    }
+    auto it = std::find_if(tables_.begin(), tables_.end(), [&](Table const &t) {
+        return t.role.has_value() && *t.role == role;
+    });
     return it == tables_.end() ? nullptr : &*it;
 }
 

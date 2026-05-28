@@ -268,11 +268,20 @@ emissions_relevant = true
 
 Notes on the schema choices:
 
-- `dimensions` = 1, 2, or 3. A 1D table has only `axis_x`; a 3D table adds `axis_z`.
+- `dimensions` = 0, 1, 2, or 3. A 0D table is a single scalar value; a 1D table has only `axis_x`; a 3D table adds `axis_z`.
 - `axis_x` / `axis_y` reference `id` values defined in `axes.toml`. The loader resolves them.
 - `scaling` references an `id` from `scalings.toml`.
 - `emissions_relevant` drives the `EmissionsLinter` jurisdiction-profile UI (see `06-legal-ethics.md`). Default `false`.
 - `engine_safety_critical` is **always** consulted regardless of jurisdiction profile. Editing one of these maps triggers the dangerous-tune linter.
+- `role` is an **optional** canonical string identifying *what kind of tuning surface* this table is, independent of the pack's own `id`. Packs are free to leave it unset. Where set, downstream consumers (the §11 panels in `docs/05-improvements.md` — cold-start, EBCS, knock, adaptive history) can resolve "the table this suggestion targets" via `Definition::find_table_by_role(role)` instead of pattern-matching on names. Example:
+
+  ```toml
+  [[table]]
+  id   = "ol_fuel_enrichment_vs_ect"
+  role = "coldstart.open_loop_fuel_vs_ect"
+  ```
+
+  The role vocabulary is dotted-namespace, lowercase, snake-case: `<domain>.<concept>`. The mapping table per platform lives in `tools/defgen/` so packs don't have to hand-roll the strings; it stays opt-in for packs that don't want to.
 
 ## `dtcs.toml` — diagnostic-code enable bitmaps
 
@@ -440,5 +449,6 @@ unresolved — there is no filesystem context to search.
 - `dimensions == 1` ⇒ no `axis_y`; `dimensions == 2` ⇒ `axis_x` and `axis_y`; `dimensions == 3` ⇒ all three.
 - `precision >= 0`, `min <= max` on all scalings.
 - `emissions_relevant` and `engine_safety_critical` are booleans (no fuzzy "maybe").
+- `role` is an optional canonical string. Absence is meaningful (no role declared). Packs are not required to populate it; the §11 suggestion-to-edit affordance simply stays inactive on tables without a role.
 
 Failures produce a structured `Error` listing every violation, not just the first.

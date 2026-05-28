@@ -191,6 +191,15 @@ struct Table {
     std::optional<std::string> notes;
     bool emissions_relevant{false};
     bool engine_safety_critical{false};
+
+    // Canonical role string for cross-pack table identity (e.g.
+    // "coldstart.open_loop_fuel_vs_ect"). Optional. Packs that don't
+    // tag their tables are unaffected — the suggestion-to-edit
+    // affordance in the §11 panels (cold-start / EBCS / knock /
+    // adaptive-history) simply stays inactive on those tables. See
+    // docs/05-improvements.md §11 + docs/11-definition-format.md for
+    // the role vocabulary and the per-platform mapping.
+    std::optional<std::string> role;
 };
 
 // A datalogger PID — addressed via SSM, scaled the same way as table values.
@@ -398,6 +407,13 @@ public:
     [[nodiscard]] Axis const *find_axis(std::string_view id) const noexcept;
     [[nodiscard]] Scaling const *find_scaling(std::string_view id) const noexcept;
     [[nodiscard]] Table const *find_table(std::string_view id) const noexcept;
+    // Find a table by its canonical `role` string (e.g.
+    // "coldstart.open_loop_fuel_vs_ect"). Returns the first matching
+    // table in pack-declared order, or nullptr if no table carries
+    // that role. Tables without a role are skipped. Used by the §11
+    // panels to resolve a suggested edit to the right table on the
+    // user's loaded pack without name-pattern guessing.
+    [[nodiscard]] Table const *find_table_by_role(std::string_view role) const noexcept;
     [[nodiscard]] Pid const *find_pid(std::string_view id) const noexcept;
     [[nodiscard]] Switch const *find_switch(std::string_view id) const noexcept;
     [[nodiscard]] DtcBitmap const *find_dtc_bitmap(std::string_view id) const noexcept;

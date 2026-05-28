@@ -195,6 +195,109 @@ TEST_CASE("Definition parses identifications, axes, scalings, tables, pids", "[d
     REQUIRE(d.find_pid("rpm") != nullptr);
 }
 
+TEST_CASE("Table.role is optional and round-trips through TOML", "[defs][parse][role]") {
+    // Two tables; one tagged with a role, the other intentionally
+    // role-less. find_table_by_role should locate the tagged one and
+    // return nullptr for both unknown roles and the empty-string query.
+    auto const dr = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "role-test"
+endianness = "big"
+
+[[scaling]]
+id        = "rpm_x1"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint16_be"
+
+[[axis]]
+id        = "rpm_16"
+type      = "static"
+address   = 0x00040000
+length    = 16
+data_type = "uint16_be"
+scaling   = "rpm_x1"
+
+[[table]]
+id        = "ol_fuel_enrichment_vs_ect"
+name      = "Open-loop fuel enrichment vs ECT"
+category  = "fuel"
+dimensions = 1
+address   = 0x00050000
+data_type = "uint16_be"
+scaling   = "rpm_x1"
+axis_x    = "rpm_16"
+role      = "coldstart.open_loop_fuel_vs_ect"
+
+[[table]]
+id        = "miscellaneous_no_role_tagged"
+name      = "An untagged table"
+category  = "misc"
+dimensions = 1
+address   = 0x00050100
+data_type = "uint16_be"
+scaling   = "rpm_x1"
+axis_x    = "rpm_16"
+)toml");
+    INFO("parse error: " << (dr.has_value() ? "(none)" : dr.error().to_string()));
+    REQUIRE(dr.has_value());
+    auto const &d = *dr;
+
+    auto const *tagged = d.find_table("ol_fuel_enrichment_vs_ect");
+    REQUIRE(tagged != nullptr);
+    REQUIRE(tagged->role.has_value());
+    REQUIRE(*tagged->role == "coldstart.open_loop_fuel_vs_ect");
+
+    auto const *untagged = d.find_table("miscellaneous_no_role_tagged");
+    REQUIRE(untagged != nullptr);
+    REQUIRE_FALSE(untagged->role.has_value());
+
+    REQUIRE(d.find_table_by_role("coldstart.open_loop_fuel_vs_ect") == tagged);
+    REQUIRE(d.find_table_by_role("never.declared.role") == nullptr);
+    // Defensive: empty query never matches even if a pack erroneously
+    // declared role = "" (parse_table treats empty strings as absent).
+    REQUIRE(d.find_table_by_role("") == nullptr);
+}
+
+TEST_CASE("Table.role treats empty string in TOML as absent", "[defs][parse][role]") {
+    // A pack author writing `role = ""` should land in the same state
+    // as omitting the field, not a sentinel match. Otherwise the empty
+    // string becomes a no-op match-anything for `find_table_by_role`.
+    auto const dr = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "role-empty-test"
+endianness = "big"
+
+[[scaling]]
+id        = "rpm_x1"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint16_be"
+
+[[axis]]
+id        = "rpm_16"
+type      = "static"
+address   = 0x00040000
+length    = 16
+data_type = "uint16_be"
+scaling   = "rpm_x1"
+
+[[table]]
+id         = "t"
+dimensions = 1
+address    = 0x00050000
+data_type  = "uint16_be"
+scaling    = "rpm_x1"
+axis_x     = "rpm_16"
+role       = ""
+)toml");
+    INFO("parse error: " << (dr.has_value() ? "(none)" : dr.error().to_string()));
+    REQUIRE(dr.has_value());
+    auto const *t = dr->find_table("t");
+    REQUIRE(t != nullptr);
+    REQUIRE_FALSE(t->role.has_value());
+}
+
 TEST_CASE("Definition::validate accepts a fully consistent pack", "[defs][validate]") {
     auto const dr = st::Definition::from_toml_string(kPackWithEverything);
     REQUIRE(dr.has_value());

@@ -15,21 +15,23 @@ mytune.stune/
 └── working.bin           # required — current edited ROM (mutates with every edit)
 ```
 
-A project with edit history and a flash record adds:
+A project with edit history adds one file:
 
 ```
 mytune.stune/
 ├── project.toml
 ├── source.bin
 ├── working.bin
-├── history/              # optional — edit-history journal (one TOML file per ByteEdit)
-│   ├── 00000-set-cell.toml
-│   ├── 00001-smooth.toml
-│   └── …
-└── flash/                # optional — flash session records
-    ├── 2026-05-17-1330-manifest.toml      # tamper-evident manifest (CRC32 today; BLAKE3 staged after bench-rig validation, see docs/03 §Hashing)
-    └── 2026-05-17-1330-journal.toml       # crash-safe per-sector journal
+└── edits.toml            # optional — written by save_working_rom()
+                          # when history_.size() > 0; safe to delete
+                          # (loses undo history but not the ROM bytes)
 ```
+
+Flash session records (manifest + crash-recovery journal) are written
+to wherever the caller sets `FlashPlan::journal_path` — they are NOT
+auto-routed into the `.stune` directory today. A future change may
+relocate them under `<project.stune>/flash/` for shop-handoff
+workflows; see "Future extensions" below.
 
 The `fixtures/demo.stune/` directory in the repo is the canonical synthetic example.
 
@@ -39,8 +41,13 @@ The `fixtures/demo.stune/` directory in the repo is the canonical synthetic exam
 [project]
 schema_version = 1                          # required; bumps on incompatible changes
 display_name   = "My VA WRX street tune"    # required; shown in GUI title bar
-created        = "2026-05-12T03:29:40Z"     # required; ISO 8601 UTC
-notes          = ""                         # optional; free-form
+created        = "2026-05-12T03:29:40Z"     # required; ISO 8601 UTC, second precision
+notes          = ""                         # optional; free-form, multi-line OK
+policy_profile = "motorsport-only"          # required; one of policy::profile_name() —
+                                            # motorsport-only | street | street-emissions-aware.
+                                            # Defaults to motorsport-only on fresh create()
+                                            # per docs/06-legal-ethics.md §1's first-run default.
+                                            # Drives flash-time linting and the status-bar chip.
 
 [project.source_rom]
 path  = "source.bin"                        # relative to project directory
@@ -123,4 +130,5 @@ These deliberately don't live in `.stune` because they'd defeat the version-cont
 
 - `docs/02-architecture.md` — `st::project::Project` is the in-memory representation
 - `docs/11-definition-format.md` — the pack format that `project.definition.path` points at
-- `docs/05-improvements.md` §4b — how `flash/*.toml` powers crash-recovery and cancellation safety
+- `docs/05-improvements.md` §4b — how the flash manifest + journal pair powers crash-recovery and cancellation safety
+- `src/project/src/project.cpp` — authoritative emitters / parsers (`render_project_toml`, `render_history_toml`, `parse_history_toml`)
