@@ -3699,7 +3699,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "base_timing_idle_group_n_conditions_not_met_below_speed_threshold"
-name                   = "Base Timing Idle Group N Conditions Not Met Below Speed Threshold"
+name                   = "Base Timing Idle (Group N Conditions Not Met)(Below Speed Threshold)"
 category               = "ignition timing - advance"
 dimensions             = 2
 address                = 0x00029692
@@ -3713,7 +3713,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "base_timing_idle_group_n_conditions_not_met_above_speed_threshold"
-name                   = "Base Timing Idle Group N Conditions Not Met Above Speed Threshold"
+name                   = "Base Timing Idle (Group N Conditions Not Met)(Above Speed Threshold)"
 category               = "ignition timing - advance"
 dimensions             = 2
 address                = 0x0002965E
@@ -3727,7 +3727,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "base_timing_idle_vehicle_speed_threshold_group_n_conditions_not_met"
-name                   = "Base Timing Idle Vehicle Speed Threshold Group N Conditions Not Met"
+name                   = "Base Timing Idle Vehicle Speed Threshold (Group N Conditions Not Met)"
 category               = "ignition timing - advance"
 dimensions             = 1
 address                = 0x0000B795

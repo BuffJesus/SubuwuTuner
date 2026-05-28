@@ -1186,10 +1186,24 @@ def _extract_table(t_el: ET.Element, pack: Pack, seen_scaling_ids: set[str]) -> 
         ))
         dims = 1
 
+    # Category resolution. RomRaider has two equivalent conventions:
+    #   (a) explicit `<table category="Boost Control - Target">` attribute
+    #   (b) hierarchy encoded in the name itself: "Boost Control - Target -
+    #       Boost Compensation (ECT)" — segments split on " - ", leaf is
+    #       the actual table name, the prefix is the category path.
+    # When (a) is missing but (b) is present we derive category from the
+    # name and trim the display name to just the leaf so the GUI tree
+    # doesn't show the category path repeated in every row.
+    display_name = _display_name(name, table_slug)
     category = (t_el.get("category") or "").strip().lower()
+    if not category and " - " in display_name:
+        parts = [p.strip() for p in display_name.split(" - ")]
+        if len(parts) >= 2 and all(parts):
+            category = " - ".join(parts[:-1]).lower()
+            display_name = parts[-1]
     table = TableRecord(
         id=table_slug,
-        name=_display_name(name, table_slug),
+        name=display_name,
         category=category,
         dimensions=dims,
         address=address,
@@ -1336,12 +1350,17 @@ def _axis_from_element(el: ET.Element,
 def _is_factual_name(name: str) -> bool:
     """Allow short, technical-looking names; strip flowery descriptions.
 
-    The clean-room rule is to leave descriptive text out. A short identifier-
-    like name (e.g. "Boost Target", "RPM Axis") is borderline; we keep it
-    and trust the user to override if they want. A long sentence-like name
-    we drop.
+    The clean-room rule is to leave descriptive text out. Identifier-like
+    names (e.g. "Boost Target", "Airflow - Turbo - Wastegate - Wastegate
+    Duty Maximum") are factual table tags used industry-wide; we keep
+    them. Long sentence-like prose with punctuation we drop.
+
+    The 256-char cap exists to catch genuine OEM description text that
+    occasionally leaks into the `name` attribute. Real RomRaider names
+    rarely exceed 100 chars; the cap leaves headroom for the longer
+    dashed-hierarchy names without admitting paragraph-shaped prose.
     """
-    return len(name) <= 64 and "." not in name and "," not in name
+    return len(name) <= 256 and "." not in name and "," not in name
 
 
 def _display_name(name: str, slug: str) -> str:

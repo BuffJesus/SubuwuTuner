@@ -3088,8 +3088,8 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p2004_tgv_intake_manifold_runner_1_stuck_open"
-name                   = "(P2004) TGV - INTAKE MANIFOLD RUNNER 1 STUCK OPEN"
-category               = ""
+name                   = "INTAKE MANIFOLD RUNNER 1 STUCK OPEN"
+category               = "(p2004) tgv"
 dimensions             = 0
 address                = 0x000A0F62
 data_type              = "uint16_be"
@@ -3100,8 +3100,8 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p2005_tgv_intake_manifold_runner_2_stuck_open"
-name                   = "(P2005) TGV - INTAKE MANIFOLD RUNNER 2 STUCK OPEN"
-category               = ""
+name                   = "INTAKE MANIFOLD RUNNER 2 STUCK OPEN"
+category               = "(p2005) tgv"
 dimensions             = 0
 address                = 0x000A0F64
 data_type              = "uint16_be"
@@ -3112,8 +3112,8 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p2006_tgv_intake_manifold_runner_1_stuck_closed"
-name                   = "(P2006) TGV - INTAKE MANIFOLD RUNNER 1 STUCK CLOSED"
-category               = ""
+name                   = "INTAKE MANIFOLD RUNNER 1 STUCK CLOSED"
+category               = "(p2006) tgv"
 dimensions             = 0
 address                = 0x000A0F63
 data_type              = "uint16_be"
@@ -3124,8 +3124,8 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p2007_tgv_intake_manifold_runner_2_stuck_closed"
-name                   = "(P2007) TGV - INTAKE MANIFOLD RUNNER 2 STUCK CLOSED"
-category               = ""
+name                   = "INTAKE MANIFOLD RUNNER 2 STUCK CLOSED"
+category               = "(p2007) tgv"
 dimensions             = 0
 address                = 0x000A0F65
 data_type              = "uint16_be"
@@ -3136,8 +3136,8 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p2009_tgv_intake_manifold_runner_1_circuit_low"
-name                   = "(P2009) TGV - INTAKE MANIFOLD RUNNER 1 CIRCUIT LOW"
-category               = ""
+name                   = "INTAKE MANIFOLD RUNNER 1 CIRCUIT LOW"
+category               = "(p2009) tgv"
 dimensions             = 0
 address                = 0x000A0F6E
 data_type              = "uint16_be"
@@ -3148,8 +3148,8 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "p2012_tgv_intake_manifold_runner_2_circuit_low"
-name                   = "(P2012) TGV - INTAKE MANIFOLD RUNNER 2 CIRCUIT LOW"
-category               = ""
+name                   = "INTAKE MANIFOLD RUNNER 2 CIRCUIT LOW"
+category               = "(p2012) tgv"
 dimensions             = 0
 address                = 0x000A0F6F
 data_type              = "uint16_be"
@@ -3508,7 +3508,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "u0155_lost_communication_with_instrument_panel_cluster_ipc_control_module"
-name                   = "U0155 Lost Communication With Instrument Panel Cluster Ipc Control Module"
+name                   = "(U0155) LOST COMMUNICATION WITH INSTRUMENT PANEL CLUSTER (IPC) CONTROL MODULE"
 category               = ""
 dimensions             = 0
 address                = 0x000A0FAE
@@ -3544,7 +3544,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "u0423_invalid_data_received_from_instrument_panel_cluster_control_module"
-name                   = "U0423 Invalid Data Received From Instrument Panel Cluster Control Module"
+name                   = "(U0423) INVALID DATA RECEIVED FROM INSTRUMENT PANEL CLUSTER CONTROL MODULE"
 category               = ""
 dimensions             = 0
 address                = 0x000A0FAD

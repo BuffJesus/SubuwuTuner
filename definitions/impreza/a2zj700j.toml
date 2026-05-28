@@ -3778,7 +3778,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "knock_correction_advance_max_primary_knock_conditions_high_iam"
-name                   = "Knock Correction Advance Max Primary Knock Conditions High Iam"
+name                   = "Knock Correction Advance Max Primary (Knock Conditions High)(IAM)"
 category               = "ignition timing - advance"
 dimensions             = 2
 address                = 0x0005EFEC

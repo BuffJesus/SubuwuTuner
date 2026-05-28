@@ -2653,7 +2653,7 @@ scaling   = "rpm_x"
 
 [[axis]]
 id        = "requested_torque_accelerator_pedal_to_requested_torque_base_rpm"
-name      = "Requested Torque Accelerator Pedal To Requested Torque Base Rpm"
+name      = "'Requested Torque (Accelerator Pedal)' to 'Requested Torque Base (RPM)'"
 unit      = ""
 type      = "static"
 address   = 0x000DCC6C
@@ -2675,7 +2675,7 @@ scaling   = "rpm_x"
 
 [[axis]]
 id        = "requested_torque_accelerator_pedal_to_requested_torque_base_rpm_len23"
-name      = "Requested Torque Accelerator Pedal To Requested Torque Base Rpm"
+name      = "'Requested Torque (Accelerator Pedal)' to 'Requested Torque Base (RPM)'"
 unit      = ""
 type      = "static"
 address   = 0x000DCFE8
@@ -2697,7 +2697,7 @@ scaling   = "rpm_x"
 
 [[axis]]
 id        = "requested_torque_accelerator_pedal_to_requested_torque_base_rpm_len23_v2"
-name      = "Requested Torque Accelerator Pedal To Requested Torque Base Rpm"
+name      = "'Requested Torque (Accelerator Pedal)' to 'Requested Torque Base (RPM)'"
 unit      = ""
 type      = "static"
 address   = 0x000DD364
@@ -5120,7 +5120,7 @@ engine_safety_critical = false
 
 [[table]]
 id                     = "target_throttle_plate_position_non_cruise_requested_torque_ratio"
-name                   = "Target Throttle Plate Position Non Cruise Requested Torque Ratio"
+name                   = "Target Throttle Plate Position Non-Cruise (Requested Torque Ratio)"
 category               = "drive-by-wire throttle (dbw)"
 dimensions             = 2
 address                = 0x000DD084

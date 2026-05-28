@@ -1252,8 +1252,21 @@ class DisplayNameFallbackTest(unittest.TestCase):
         self.assertEqual(defgen._display_name("Boost Target", "boost_target"),
                          "Boost Target")
 
-    def test_long_name_falls_back_to_titlecased_slug(self):
-        long_name = "A" * 70  # > 64 chars
+    def test_dashed_hierarchy_name_is_kept(self):
+        # The forum-sourced VA/VB WRX XMLs use dashed-hierarchy names like
+        # "Airflow - Turbo - PI Control - Integral Positive - IAT
+        # Compensation" (67 chars). The old 64-char cap rejected these and
+        # emitted the title-cased slug ("Airflow Turbo Pi Control Integral
+        # Positive Iat Compensation") with the dashes and proper casing
+        # destroyed. The 256-char cap keeps real OEM names intact.
+        long_factual = ("Airflow - Turbo - PI Control - Integral Positive - "
+                        "IAT Compensation")
+        slug = defgen._slugify(long_factual)
+        self.assertEqual(defgen._display_name(long_factual, slug),
+                         long_factual)
+
+    def test_truly_long_name_falls_back_to_titlecased_slug(self):
+        long_name = "A" * 300  # > 256 chars; genuine prose territory
         slug = "boost_target_high_octane"
         self.assertEqual(defgen._display_name(long_name, slug),
                          "Boost Target High Octane")
@@ -1272,7 +1285,9 @@ class DisplayNameFallbackTest(unittest.TestCase):
 
     def test_empty_slug_yields_empty_string(self):
         # Defensive: if the slug somehow ended up empty too, don't crash.
-        self.assertEqual(defgen._display_name("A" * 70, ""), "")
+        # Name length must exceed the 256-char cap so we actually hit the
+        # fallback branch where slug is consulted.
+        self.assertEqual(defgen._display_name("A" * 300, ""), "")
 
     def test_table_with_rejected_name_uses_titlecased_slug(self):
         # End-to-end: a DTC table whose name contains a period should still
@@ -1309,6 +1324,59 @@ class DisplayNameFallbackTest(unittest.TestCase):
         packs = defgen.parse_rom_xml(xml)
         axis = next(a for a in packs[0].axes if a.id == "rpm_primary_axis")
         self.assertEqual(axis.name, "Rpm Primary Axis")
+
+
+class CategoryDerivedFromNameTest(unittest.TestCase):
+    """The forum-sourced VA/VB WRX XMLs lack a `<table category="...">`
+    attribute; the category hierarchy is encoded directly in the `name`
+    attribute, separated by ' - '. When no explicit category is given
+    we derive it from the name prefix and trim the display name to the
+    leaf segment so the GUI tree groups properly."""
+
+    def _parse(self, name: str, explicit_category: str | None = None) -> object:
+        cat_attr = (f' category="{explicit_category}"'
+                    if explicit_category is not None else "")
+        xml = f"""<roms><rom>
+          <romid><xmlid>X</xmlid><internalidaddress>0x0</internalidaddress>
+            <internalidstring>X</internalidstring></romid>
+          <table type="2D" name="{name}"{cat_attr}
+                 storageaddress="0x100" storagetype="uint8" endian="big">
+            <scaling units="" expression="x" to_byte="x" format="0"
+                     endian="big" storagetype="uint8"/>
+          </table>
+        </rom></roms>"""
+        return defgen.parse_rom_xml(xml)[0].tables[0]
+
+    def test_dashed_name_yields_category_plus_leaf_name(self):
+        t = self._parse("Airflow - Turbo - Wastegate - Wastegate Duty Maximum")
+        self.assertEqual(t.category, "airflow - turbo - wastegate")
+        self.assertEqual(t.name, "Wastegate Duty Maximum")
+
+    def test_two_segment_name_yields_one_segment_category(self):
+        t = self._parse("Boost Control - Requested Torque")
+        self.assertEqual(t.category, "boost control")
+        self.assertEqual(t.name, "Requested Torque")
+
+    def test_explicit_category_wins_over_name_derivation(self):
+        # When the XML carries both, the explicit attribute takes priority
+        # and the name stays unmodified — derivation is a fallback only.
+        t = self._parse("Airflow - Turbo - Wastegate - WG Duty",
+                        explicit_category="Boost")
+        self.assertEqual(t.category, "boost")
+        self.assertEqual(t.name, "Airflow - Turbo - Wastegate - WG Duty")
+
+    def test_name_without_dash_leaves_category_empty(self):
+        t = self._parse("WastegateDutyMaximum")
+        self.assertEqual(t.category, "")
+        self.assertEqual(t.name, "WastegateDutyMaximum")
+
+    def test_empty_segments_do_not_split(self):
+        # Defensive: `" - foo"` and `"foo - "` shouldn't produce a blank
+        # category half — leave the name alone in those edge cases.
+        t = self._parse("foo -  - bar")
+        # The middle empty segment makes `all(parts)` false; no split.
+        self.assertEqual(t.category, "")
+        self.assertEqual(t.name, "foo -  - bar")
 
 
 class ApplyToPackTest(unittest.TestCase):
