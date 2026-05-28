@@ -71,6 +71,7 @@ add_executable(st_unit_tests
     unit/feature/test_feature_ir.cpp
     unit/feature_codegen/test_feature_codegen.cpp
     unit/feature_codegen/test_sh2a.cpp
+    unit/feature_codegen/test_rh850.cpp
     unit/feature_codegen/test_address_gate.cpp
 )
 

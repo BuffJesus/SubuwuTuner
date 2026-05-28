@@ -5,6 +5,7 @@
 
 #include "st/core/error.hpp"
 
+#include "rh850.hpp"
 #include "sh2a.hpp"
 
 #include <toml++/toml.hpp>
@@ -1496,9 +1497,189 @@ Result<PatchObject> Sh2aBackend::compile(ir::Module const &m, Definition const &
     return obj;
 }
 
-Result<PatchObject> Rh850Backend::compile(ir::Module const & /*m*/, Definition const & /*def*/) {
-    return failure(ErrorCode::NotImplemented,
-                   "RH850 backend: instruction emission not yet implemented");
+namespace {
+
+// Append a 16-bit halfword to `code` in little-endian byte order. RH850
+// is little-endian on the bus.
+void emit_le16(std::vector<std::uint8_t> &code, std::uint16_t v) {
+    code.push_back(static_cast<std::uint8_t>(v & 0xFFU));
+    code.push_back(static_cast<std::uint8_t>((v >> 8) & 0xFFU));
+}
+
+// Emit the canonical RH850 "load constant, store to RAM slot" sequence.
+// Layout per the table in rh850.hpp above kStoreSequenceSize. 24 bytes
+// total: 5 × 32-bit (movhi/movea/movhi/movea/st.w) + 2 × 16-bit
+// (jmp [lp], nop pad).
+void emit_rh850_load_const_store(std::vector<std::uint8_t> &code,
+                                 std::uint32_t constant_value,
+                                 std::uint32_t destination_address) {
+    constexpr rh850::Reg kValReg = rh850::Reg::R10;
+    constexpr rh850::Reg kDstReg = rh850::Reg::R11;
+
+    auto const val_split = rh850::split_imm32(constant_value);
+    auto const dst_split = rh850::split_imm32(destination_address);
+
+    // MOVHI val_hi, r0, r10    — r10 = (val & 0xFFFF0000) (with sign-comp)
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, kValReg));
+    emit_le16(code, val_split.hi);
+    // MOVEA val_lo, r10, r10   — r10 = full 32-bit constant
+    emit_le16(code, rh850::enc_movea_hw1(kValReg, kValReg));
+    emit_le16(code, val_split.lo);
+    // MOVHI dst_hi, r0, r11
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, kDstReg));
+    emit_le16(code, dst_split.hi);
+    // MOVEA dst_lo, r11, r11   — r11 = full destination address
+    emit_le16(code, rh850::enc_movea_hw1(kDstReg, kDstReg));
+    emit_le16(code, dst_split.lo);
+    // ST.W r10, 0[r11]         — mem[r11] = r10
+    emit_le16(code, rh850::enc_st_w_hw1(kValReg, kDstReg));
+    emit_le16(code, rh850::enc_st_w_hw2(0));
+    // JMP [lp]                 — return; followed by a NOP for 4-byte
+    // alignment of whatever follows the patch.
+    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+    emit_le16(code, rh850::enc_nop());
+}
+
+} // namespace
+
+Result<PatchObject> Rh850Backend::compile(ir::Module const &m, Definition const &def) {
+    // First pass mirrors the SH-2A backend: every Op is structurally
+    // supported (each has at least one emission path). Per-op semantic
+    // checks happen at Store-emit time below.
+    for (auto const &ins : m.instructions) {
+        switch (ins.op) {
+        case ir::Op::LoadConstant:
+        case ir::Op::LoadHookInput:
+        case ir::Op::CallPrimitive:
+        case ir::Op::StoreHookOutput:
+            break;
+        }
+    }
+
+    // Second pass: walk Stores, group by hook. Same control shape as
+    // Sh2aBackend::compile — we don't share the loop because the SH-2A
+    // version drives an SH-2A-specific FragmentEmitter and pulls in
+    // FPU/multiply-result extraction concerns we don't have here.
+    // Until RH850's primitive/nested-call slices land, the source set
+    // is just LoadConstant.
+    std::map<std::string, HookWork> works;
+    std::vector<std::string> ordered_hooks;
+
+    for (auto const &ins : m.instructions) {
+        if (ins.op != ir::Op::StoreHookOutput)
+            continue;
+
+        if (ins.operands.size() != 1) {
+            return failure(ErrorCode::ParseError, "RH850 backend: StoreHookOutput must have "
+                                                  "exactly one operand");
+        }
+        ir::Instruction const *src = find_producer(m, ins.operands[0]);
+        if (src == nullptr) {
+            return failure(ErrorCode::ParseError, "RH850 backend: StoreHookOutput operand "
+                                                  "does not resolve to any producing instruction "
+                                                  "(invariant: lower() should assign result_id "
+                                                  "to every value-producing op)");
+        }
+
+        // RH850 slice: source must be LoadConstant. LoadHookInput +
+        // CallPrimitive are tracked separately and land in follow-up
+        // bundles. Mirroring SH-2A's NotImplemented shape here means
+        // a caller running the same .stmod against both backends gets
+        // a consistent "this Op isn't ready yet on RH850" message.
+        if (src->op != ir::Op::LoadConstant) {
+            return failure(ErrorCode::NotImplemented,
+                           "RH850 backend: only LoadConstant→StoreHookOutput is supported "
+                           "in this slice; LoadHookInput and CallPrimitive paths land in "
+                           "follow-up bundles. See docs/16 §Current state.");
+        }
+        if (!src->constant_value.has_value()) {
+            return failure(ErrorCode::ParseError, "RH850 backend: LoadConstant has no "
+                                                  "constant_value (lower() invariant violation)");
+        }
+
+        // Resolve target hook. Same field requirements as SH-2A: a
+        // hook needs an ecu_address (splice point) and a free_ram
+        // region (scratch for our output slot).
+        Hook const *hook = find_hook(def, ins.symbol);
+        if (hook == nullptr) {
+            std::string msg{"RH850 backend: hook '"};
+            msg.append(ins.symbol);
+            msg.append("' not declared in the loaded definition pack");
+            return failure(ErrorCode::InvalidArgument, std::move(msg));
+        }
+        if (!hook->ecu_address.has_value()) {
+            std::string msg{"RH850 backend: hook '"};
+            msg.append(ins.symbol);
+            msg.append("' has no ecu_address — pack must declare the "
+                       "splice point for codegen");
+            return failure(ErrorCode::InvalidArgument, std::move(msg));
+        }
+        if (!hook->free_ram_base.has_value() || !hook->free_ram_length.has_value() ||
+            *hook->free_ram_length == 0) {
+            std::string msg{"RH850 backend: hook '"};
+            msg.append(ins.symbol);
+            msg.append("' has no free_ram region — pack must declare "
+                       "scratch RAM for codegen");
+            return failure(ErrorCode::InvalidArgument, std::move(msg));
+        }
+
+        auto it = works.find(hook->id);
+        if (it == works.end()) {
+            HookWork w{};
+            w.hook = hook;
+            w.ram = RamAllocator{*hook->free_ram_base, *hook->free_ram_length};
+            ordered_hooks.push_back(hook->id);
+            it = works.emplace(hook->id, std::move(w)).first;
+        }
+        HookWork &work = it->second;
+
+        // One RAM slot per (hook, output_pin_name). Two writes to the
+        // same pin share the slot; second write overwrites the first
+        // at runtime, which is the intended semantic.
+        auto slot_it = work.pin_slots.find(ins.pin_name);
+        std::uint32_t dst_addr = 0;
+        if (slot_it == work.pin_slots.end()) {
+            auto claim_r = work.ram.claim(4, 4); // 4-byte word
+            if (!claim_r.has_value()) {
+                std::string msg{"RH850 backend: hook '"};
+                msg.append(hook->id);
+                msg.append("' free_ram exhausted while allocating "
+                           "output slot for pin '");
+                msg.append(ins.pin_name);
+                msg.append("'");
+                return failure(ErrorCode::OutOfRange, std::move(msg));
+            }
+            dst_addr = static_cast<std::uint32_t>(claim_r->address);
+            work.claims.push_back(*claim_r);
+            work.pin_slots.emplace(ins.pin_name, dst_addr);
+        } else {
+            dst_addr = slot_it->second;
+        }
+
+        auto u32 = coerce_constant_to_u32(*src);
+        if (!u32.has_value())
+            return failure(u32.error());
+        emit_rh850_load_const_store(work.code, *u32, dst_addr);
+    }
+
+    PatchObject obj{};
+    obj.arch = Arch::Rh850;
+    obj.hooks.reserve(ordered_hooks.size());
+    for (auto const &id : ordered_hooks) {
+        auto const &w = works.at(id);
+        HookPatch hp{};
+        hp.symbol = w.hook->id;
+        hp.splice_address = *w.hook->ecu_address;
+        hp.code = w.code;
+        hp.ram_claims = w.claims;
+        obj.hooks.push_back(std::move(hp));
+    }
+    // Same address gate as SH-2A. An empty PatchObject passes
+    // vacuously (no hooks to check).
+    if (auto s = gate_patch(obj, def); !s.has_value()) {
+        return failure(s.error());
+    }
+    return obj;
 }
 
 // ---- Address gate -------------------------------------------------------

@@ -155,15 +155,23 @@ TEST_CASE("Sh2aBackend reports its arch", "[feature_codegen][sh2a]") {
     REQUIRE(backend.arch() == cg::Arch::Sh2a);
 }
 
-TEST_CASE("Rh850Backend::compile returns NotImplemented", "[feature_codegen][stub][rh850]") {
+TEST_CASE("Rh850Backend reports its arch", "[feature_codegen][rh850]") {
     cg::Rh850Backend backend;
     REQUIRE(backend.arch() == cg::Arch::Rh850);
+}
 
+TEST_CASE("Rh850Backend::compile on an empty module produces an empty PatchObject",
+          "[feature_codegen][rh850]") {
+    // Mirrors the SH-2A "no-op pack" contract: empty input → empty
+    // output, arch tag set. The patch-insertion layer treats an
+    // empty PatchObject as a no-op flash.
+    cg::Rh850Backend backend;
     st::feature::ir::Module m;
     st::Definition def;
     auto r = backend.compile(m, def);
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+    REQUIRE(r.has_value());
+    REQUIRE(r->arch == cg::Arch::Rh850);
+    REQUIRE(r->hooks.empty());
 }
 
 // ---- PatchObject ↔ TOML round-trip --------------------------------

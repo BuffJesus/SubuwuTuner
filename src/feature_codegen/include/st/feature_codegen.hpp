@@ -192,6 +192,22 @@ inline constexpr std::size_t kLoadStoreLiteralPoolOffset = 12;
 inline constexpr std::size_t kLoadStoreLiteralStride = 4;
 } // namespace sh2a
 
+// RH850 layout constants for the LoadConstant→StoreHookOutput slice.
+// Mirrors the sh2a namespace shape so the patch-insertion layer can
+// query either backend's emission size without backend-specific code.
+//
+// Shape: 5 × 32-bit Format VI/VII instructions + 1 × 16-bit Format I
+// JMP + 1 × 16-bit NOP pad = 24 bytes. See src/feature_codegen/src/
+// rh850.hpp for the per-byte breakdown.
+//
+// CAUTION (mirrored from rh850.hpp): RH850 codegen has NOT been
+// validated against a real VB WRX ECU as of v1.x. Treat any PatchObject
+// with `arch == Rh850` as best-effort until the bench rig signs off.
+namespace rh850 {
+inline constexpr std::size_t kStoreSequenceSize = 24;
+inline constexpr std::size_t kJmpOffset = 20;
+} // namespace rh850
+
 // Address gate per docs/16 §Safety #6 + docs/04 ship blocker #3.
 //
 // Verifies that every byte each HookPatch in `p` would write to flash
