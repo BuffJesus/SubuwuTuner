@@ -257,6 +257,11 @@ axis_x    = "rpm_16"
     // Defensive: empty query never matches even if a pack erroneously
     // declared role = "" (parse_table treats empty strings as absent).
     REQUIRE(d.find_table_by_role("") == nullptr);
+
+    // Distinct role + untagged sibling should pass validate() — the
+    // duplicate-role check skips no-role tables and only flags when
+    // two tables share the same non-empty role.
+    REQUIRE(d.validate().has_value());
 }
 
 TEST_CASE("Table.role treats empty string in TOML as absent", "[defs][parse][role]") {
@@ -437,6 +442,51 @@ length  = 0x00010000
     REQUIRE_FALSE(v.has_value());
     REQUIRE(v.error().message().find(
                 "writable_region 'calibration-bank' is defined more than once") !=
+            std::string::npos);
+}
+
+TEST_CASE("Definition::validate flags duplicate table role tags",
+          "[defs][validate][role]") {
+    // Two tables tagged with the same role would silently shadow at
+    // find_table_by_role-time. Catch it at validate-time so packs fail
+    // loudly instead of triggering hard-to-diagnose §11-panel routing
+    // surprises. Tables without a role tag are not flagged.
+    auto const dr = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "demo"
+endianness = "big"
+
+[[table]]
+id        = "first"
+dimensions = 1
+address   = 0x1000
+data_type = "uint8"
+axis_x    = "rpm"
+scaling   = ""
+role      = "coldstart.open_loop_fuel_vs_ect"
+
+[[table]]
+id        = "second"
+dimensions = 1
+address   = 0x2000
+data_type = "uint8"
+axis_x    = "rpm"
+scaling   = ""
+role      = "coldstart.open_loop_fuel_vs_ect"
+
+[[table]]
+id        = "third_no_role"
+dimensions = 1
+address   = 0x3000
+data_type = "uint8"
+axis_x    = "rpm"
+scaling   = ""
+)toml");
+    REQUIRE(dr.has_value());
+    auto const v = dr->validate();
+    REQUIRE_FALSE(v.has_value());
+    REQUIRE(v.error().message().find(
+                "table role 'coldstart.open_loop_fuel_vs_ect' is defined more than once") !=
             std::string::npos);
 }
 

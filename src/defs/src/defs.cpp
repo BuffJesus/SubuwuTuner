@@ -1369,6 +1369,16 @@ Status Definition::validate() const {
     check_duplicates(
         "writable_region", [](WritableRegion const &w) { return std::string_view{w.name}; },
         writable_regions_);
+    // Same hazard for `role`: `find_table_by_role` returns the first
+    // match, so a duplicate would silently shadow the second tagged
+    // table. Tables without a role return std::string_view{} from the
+    // getter and are skipped by the existing key.empty() guard.
+    check_duplicates(
+        "table role",
+        [](Table const &t) {
+            return t.role.has_value() ? std::string_view{*t.role} : std::string_view{};
+        },
+        tables_);
 
     if (!violations.empty()) {
         return failure(ErrorCode::ParseError, std::move(violations));
