@@ -5018,6 +5018,43 @@ void render_table_heatmap(st::Definition::TableData const &td, st::Table const *
     auto const rows = td.values.size();
     auto const cols = td.values.front().size();
 
+    // Scalar (1×1) — an ImPlot heatmap of one cell with no axes carries
+    // no information; render the value plainly and point at Grid view
+    // for editing. Same fallback the grid path takes for dim=0 tables,
+    // so toggling View modes on a scalar doesn't make the panel blank.
+    // Inline centering rather than using text_centered_* — those helpers
+    // are defined further down the file (forward-reference would fail).
+    if (rows == 1 && cols == 1) {
+        int const precision = scal != nullptr ? scal->precision : 0;
+        std::string const unit = (scal != nullptr) ? scal->unit : std::string{};
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "%.*f%s%s", precision, td.values[0][0],
+                      unit.empty() ? "" : " ", unit.c_str());
+        ImVec2 const avail = ImGui::GetContentRegionAvail();
+        ImGui::Dummy(ImVec2(0.0f, avail.y * 0.20f));
+        ImGui::SetWindowFontScale(1.6f);
+        {
+            float const avail_x = ImGui::GetContentRegionAvail().x;
+            float const w = ImGui::CalcTextSize(buf).x;
+            if (w < avail_x) {
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (avail_x - w) * 0.5f);
+            }
+            ImGui::TextUnformatted(buf);
+        }
+        ImGui::SetWindowFontScale(1.0f);
+        ImGui::Dummy(ImVec2(0.0f, 8.0f));
+        {
+            char const *hint = "Scalar table — switch to Grid view to edit.";
+            float const avail_x = ImGui::GetContentRegionAvail().x;
+            float const w = ImGui::CalcTextSize(hint).x;
+            if (w < avail_x) {
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (avail_x - w) * 0.5f);
+            }
+            ImGui::TextDisabled("%s", hint);
+        }
+        return;
+    }
+
     // Flatten row-major into a contiguous buffer; ImPlot's heatmap reads
     // row-major and renders values[0] at the bottom-left by default — we
     // invert the Y axis below so row 0 lines up with the grid view (top).
@@ -5105,14 +5142,28 @@ void render_table_grid(st::Definition::TableData const &td, st::Scaling const *s
                        GridStats const &stats, Selection &selection, Fonts const &fonts,
                        AppState &state, std::vector<std::vector<bool>> const &edited_mask) {
     int const precision = scal != nullptr ? scal->precision : 0;
-    auto const cols = static_cast<int>(td.axis_x.size()) + 1;
-    if (cols < 2) {
-        ImGui::TextDisabled("(table has no X axis)");
+    auto const grid_rows = td.values.size();
+    auto const grid_cols_count = grid_rows == 0 ? std::size_t{0} : td.values.front().size();
+
+    // No values at all → genuinely nothing to render (read_table_values
+    // would normally have errored before we got here, but be defensive).
+    if (grid_cols_count == 0) {
+        ImGui::TextDisabled("(no values)");
         return;
     }
 
-    auto const grid_rows = td.values.size();
-    auto const grid_cols_count = grid_rows == 0 ? std::size_t{0} : td.values.front().size();
+    // Column count: one leftmost label column + one data column per cell.
+    // We use max(axis_x.size(), grid_cols_count) so that:
+    //  - Normal 2D/1D tables (axis_x.size() == grid_cols_count): unchanged.
+    //  - Scalar tables (axis_x empty, grid_cols_count == 1): we still render
+    //    one data column with a synthesized "value" header instead of bailing
+    //    out with a disabled "(no X axis)" hint, which read to the user as
+    //    "no data in the right hand panel" for every dim=0 cell-constant.
+    //  - Pack-malformed cases where axis_x is shorter than the row's data:
+    //    we expose the trailing data with placeholder [n] headers instead
+    //    of silently dropping cells.
+    int const cols =
+        static_cast<int>(std::max(td.axis_x.size(), grid_cols_count)) + 1;
 
     // ---- Keyboard navigation ----
     // Arrow keys move the cursor (collapsing the selection to a single
@@ -5221,9 +5272,20 @@ void render_table_grid(st::Definition::TableData const &td, st::Scaling const *s
 
     ImGui::TableSetupScrollFreeze(1, 1);
     ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 80.0f);
-    for (auto const x : td.axis_x) {
+    // Emit one header per max(axis_x.size(), grid_cols_count). Where axis
+    // values exist they label the column; otherwise we synthesize:
+    //   - "value" when the table is a 1×1 scalar (most common case here)
+    //   - "[n]"   for the n-th unmapped data column on multi-col rows
+    auto const header_cols = static_cast<std::size_t>(cols) - 1;
+    for (std::size_t c = 0; c < header_cols; ++c) {
         char buf[32];
-        std::snprintf(buf, sizeof(buf), "%g", x);
+        if (c < td.axis_x.size()) {
+            std::snprintf(buf, sizeof(buf), "%g", td.axis_x[c]);
+        } else if (header_cols == 1) {
+            std::snprintf(buf, sizeof(buf), "value");
+        } else {
+            std::snprintf(buf, sizeof(buf), "[%zu]", c);
+        }
         ImGui::TableSetupColumn(buf, ImGuiTableColumnFlags_WidthFixed, 80.0f);
     }
     // Custom header row so the axis-X labels can right-align to match
