@@ -233,3 +233,48 @@ TEST_CASE("AsciiRelayBenchPower: response with multi-chunk arrival reassembles c
     REQUIRE(r.has_value());
     REQUIRE(*r == true);
 }
+
+TEST_CASE("LoopbackByteChannel: read_bytes honors timeout when no data queued",
+          "[bench][ascii_relay][loopback]") {
+    // Regression guard: previously the loopback returned an empty vector
+    // instantly when the queue was empty, ignoring the timeout. That
+    // caused AsciiRelayBenchPower::read_until_prompt to burn CPU in its
+    // outer loop until the consumer's own deadline elapsed. Verify the
+    // loopback now actually waits for the timeout.
+    tt::LoopbackByteChannel ch;
+    auto const t_start = std::chrono::steady_clock::now();
+    auto const r = ch.read_bytes(64, std::chrono::milliseconds{40});
+    auto const elapsed = std::chrono::steady_clock::now() - t_start;
+
+    REQUIRE(r.has_value());
+    REQUIRE(r->empty());
+    // 30 ms floor leaves room for sleep_for jitter on busy CI runners
+    // (Windows scheduler ~16ms granularity worst case). We're not
+    // asserting the exact timeout, just that it didn't return instantly.
+    REQUIRE(elapsed >= std::chrono::milliseconds{30});
+}
+
+TEST_CASE("AsciiRelayBenchPower: read times out cleanly when board never responds",
+          "[bench][ascii_relay]") {
+    // End-to-end version of the above: nothing queued, set() should
+    // succeed at write but fail at the read-prompt step with a
+    // TransportTimeout, not spin forever. The total wall time should
+    // approximate response_timeout — not be either instant or hung.
+    tt::LoopbackByteChannel ch;
+    bench::AsciiRelayTimings timings;
+    timings.response_timeout = std::chrono::milliseconds{60};
+    bench::AsciiRelayBenchPower power{ch, bench::AsciiRelayChannels{}, timings};
+
+    auto const t_start = std::chrono::steady_clock::now();
+    auto const status = power.set(bench::Rail::MainPower, true);
+    auto const elapsed = std::chrono::steady_clock::now() - t_start;
+
+    REQUIRE_FALSE(status.has_value());
+    REQUIRE(status.error().code() == st::ErrorCode::TransportTimeout);
+    // Sanity: bounded by the timeout (with generous headroom for
+    // scheduler jitter). Pre-fix this would have spun on CPU for the
+    // same duration — but at least it's bounded now, AND not wasting
+    // a core.
+    REQUIRE(elapsed >= std::chrono::milliseconds{40});
+    REQUIRE(elapsed < std::chrono::milliseconds{500});
+}

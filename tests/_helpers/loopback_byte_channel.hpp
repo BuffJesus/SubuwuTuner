@@ -17,12 +17,17 @@
 // Design choices:
 //   * write_bytes appends to `written_` so tests can assert exact
 //     wire format after the call.
-//   * read_bytes pops from `pending_reads_` (FIFO). Each pending read
-//     is a (bytes, optional_delay) pair so tests can simulate slow
-//     responders. The delay is in test-virtual time — we don't
-//     actually sleep, just decrement the caller-provided timeout.
-//   * Empty pending queue + nonzero timeout returns an empty vector
-//     (matches IByteChannel's "timeout, not an error" contract).
+//   * read_bytes pops from `pending_reads_` (FIFO). Bytes within one
+//     response may be split across multiple read_bytes calls if the
+//     caller asks for fewer than the response carries.
+//   * Empty pending queue: sleep for the requested `timeout`, then
+//     return an empty vector (matches IByteChannel's "timeout, not an
+//     error" contract). Sleeping (rather than returning instantly) is
+//     load-bearing for consumers like `AsciiRelayBenchPower::read_until_
+//     prompt`, whose outer loop relies on read_bytes consuming time
+//     when no data arrives. An instant-return Loopback would let that
+//     loop spin on CPU until the consumer's own deadline elapsed.
+//     Tests should pass short timeouts (≤100ms) to keep CI fast.
 //   * Programmable next-call failure via `inject_next_error` for tests
 //     that exercise the driver's error-handling path.
 
@@ -41,6 +46,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -59,11 +65,17 @@ public:
     }
 
     [[nodiscard]] st::Result<std::vector<std::uint8_t>>
-    read_bytes(std::size_t max_bytes, std::chrono::milliseconds /*timeout*/) override {
+    read_bytes(std::size_t max_bytes, std::chrono::milliseconds timeout) override {
         if (auto pending = take_pending_error(); !pending.has_value()) {
             return st::failure(pending.error());
         }
         if (pending_reads_.empty()) {
+            // Sleep for the full timeout, then return empty. See header
+            // doc for why this is load-bearing for the AsciiRelay
+            // outer-loop spin-loop avoidance.
+            if (timeout.count() > 0) {
+                std::this_thread::sleep_for(timeout);
+            }
             return std::vector<std::uint8_t>{}; // timeout, not an error
         }
         auto &front = pending_reads_.front();
