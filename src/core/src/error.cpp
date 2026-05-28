@@ -43,6 +43,8 @@ std::string_view to_string(ErrorCode code) noexcept {
         return "transport timeout";
     case ErrorCode::TransportNack:
         return "transport negative-acknowledged";
+    case ErrorCode::ProtocolError:
+        return "transport protocol error";
     case ErrorCode::EcuRejected:
         return "ECU rejected request";
     case ErrorCode::SeedKeyFailed:

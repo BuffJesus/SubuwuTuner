@@ -40,6 +40,12 @@ enum class ErrorCode : std::uint16_t {
     TransportUnavailable = 400,
     TransportTimeout = 401,
     TransportNack = 402,
+    // Wire-layer counterparty responded, but the payload shape is not
+    // what we expected for the protocol in use. Distinct from
+    // TransportNack (which is an active negative acknowledgment) and
+    // TransportTimeout (no response at all). E.g. an ASCII-relay board
+    // returning a string we can't parse as "on" / "off" / "0" / "1".
+    ProtocolError = 403,
 
     // 5xx — ECU protocol (reserved for st::ecu)
     EcuRejected = 500,

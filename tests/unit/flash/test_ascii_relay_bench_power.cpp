@@ -158,7 +158,7 @@ TEST_CASE("AsciiRelayBenchPower: get tolerates 1/0 numeric responses",
     REQUIRE(*r_lo == false);
 }
 
-TEST_CASE("AsciiRelayBenchPower: get returns InvalidArgument on unparseable response",
+TEST_CASE("AsciiRelayBenchPower: get returns ProtocolError on unparseable response",
           "[bench][ascii_relay]") {
     tt::LoopbackByteChannel ch;
     bench::AsciiRelayBenchPower power{ch};
@@ -167,7 +167,7 @@ TEST_CASE("AsciiRelayBenchPower: get returns InvalidArgument on unparseable resp
 
     auto const r = power.get(bench::Rail::MainPower);
     REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+    REQUIRE(r.error().code() == st::ErrorCode::ProtocolError);
 }
 
 TEST_CASE("AsciiRelayBenchPower: set propagates write_bytes failure as TransportUnavailable",

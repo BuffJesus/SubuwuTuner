@@ -140,7 +140,7 @@ st::Result<bool> AsciiRelayBenchPower::send_read_command(std::uint8_t channel_nu
     msg += "ascii_relay: unparseable read response: '";
     msg.append(body);
     msg += "'";
-    return st::failure(st::ErrorCode::InvalidArgument, std::move(msg));
+    return st::failure(st::ErrorCode::ProtocolError, std::move(msg));
 }
 
 st::Result<std::string> AsciiRelayBenchPower::read_until_prompt() {
