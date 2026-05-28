@@ -26,7 +26,7 @@
 #include "st/feature_codegen.hpp"
 #include "st/feature_ir.hpp"
 
-#include "../../../src/feature_codegen/src/rh850.hpp"
+#include "rh850.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -207,9 +207,12 @@ inline constexpr Reg kLp = Reg::R31;   // link register / return address
         static_cast<std::uint16_t>(reg1_base));
 }
 
-// Compose the second halfword for ST.W. Combines a 15-bit displacement
-// (range 0..32766, even values only) with the word-size discriminator
-// bit. Caller is expected to range-check disp before calling.
+// Compose the second halfword for ST.W. Combines a 16-bit displacement
+// (even values only — LSB is reused as the word-size discriminator bit)
+// with the size bit. RH850 sign-extends disp16, so the addressable
+// range is -32768..-2 and 0..32766. Caller is expected to range-check
+// before calling; an odd disp value passed here is masked to even by
+// the `& 0xFFFE` and the LSB is forced to 1 unconditionally.
 [[nodiscard]] constexpr std::uint16_t enc_st_w_hw2(std::uint16_t disp) noexcept {
     return static_cast<std::uint16_t>((disp & 0xFFFEU) | 0x0001U);
 }
@@ -264,10 +267,10 @@ struct ImmSplit {
 // `rh850::kJmpOffset` in `st/feature_codegen.hpp`. Per-byte layout:
 //
 //   offset  bytes              instruction
-//   0       [movhi hw1][hi]    MOVHI hi, r0, r10   ; r10 = const_hi
-//   4       [movea hw1][lo]    MOVEA lo, r10, r10  ; r10 = full const
-//   8       [movhi hw1][hi]    MOVHI hi, r0, r11   ; r11 = dst_hi
-//   12      [movea hw1][lo]    MOVEA lo, r11, r11  ; r11 = full dst
+//   0       [movhi hw1][hi]    MOVHI hi, r0, r10   ; r10 = hi << 16
+//   4       [movea hw1][lo]    MOVEA lo, r10, r10  ; r10 = full 32-bit const
+//   8       [movhi hw1][hi]    MOVHI hi, r0, r11   ; r11 = dst_hi << 16
+//   12      [movea hw1][lo]    MOVEA lo, r11, r11  ; r11 = full dst address
 //   16      [st.w hw1][disp]   ST.W r10, 0[r11]    ; mem[r11] = r10
 //   20      [jmp hw1][nop]     JMP [lp] + NOP pad  ; return + align
 //

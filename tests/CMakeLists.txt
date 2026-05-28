@@ -111,6 +111,15 @@ if (MSVC)
     target_compile_definitions(st_unit_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
+# Tests that pin specific encoder bit patterns (e.g. test_rh850.cpp)
+# need direct access to the backend's private impl headers. Exposing
+# the private dir as a test-only include keeps the test free of
+# relative path-walking like "../../../src/feature_codegen/src/...".
+# Only the test binary gets this; the rh850.hpp encoders remain
+# internal to st::feature_codegen for normal callers.
+target_include_directories(st_unit_tests PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/feature_codegen/src")
+
 # Private integration tests — exercise against locally-staged ROM
 # dumps in fixtures/private/. Source files are gitignored
 # (`.gitignore` whitelists only README + template); CONFIGURE_DEPENDS
