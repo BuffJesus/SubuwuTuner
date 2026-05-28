@@ -58,19 +58,33 @@ Three reasons:
 ```
 tests/
 ├── _helpers/
-│   ├── bench_power.hpp          # IBenchPower interface
-│   ├── mock_bench_power.{hpp,cpp}   # MockBenchPower (no hardware)
-│   └── brick_recovery_fixture.{hpp,cpp}   # cycle orchestrator
+│   ├── bench_power.hpp                   # IBenchPower interface
+│   ├── mock_bench_power.{hpp,cpp}        # MockBenchPower (no hardware)
+│   ├── brick_recovery_fixture.{hpp,cpp}  # cycle orchestrator
+│   ├── ascii_relay_bench_power.{hpp,cpp} # real concrete; protocol-only,
+│   │                                     # tested against LoopbackByteChannel
+│   └── loopback_byte_channel.hpp         # in-memory IByteChannel double
 ├── unit/flash/
-│   └── test_brick_recovery_fixture.cpp   # always runs; validates the
-│                                          # fixture using MockBenchPower
-│                                          # + MockTransport
-└── hil/                          # YOU ARE HERE
-    ├── README.md                 # this file
-    └── test_bench_smoke.cpp      # gated; SKIPs unless real hardware present
+│   ├── test_brick_recovery_fixture.cpp     # fixture vs MockBenchPower
+│   └── test_ascii_relay_bench_power.cpp    # driver vs LoopbackByteChannel
+└── hil/                                    # YOU ARE HERE
+    ├── README.md                           # this file
+    ├── test_bench_smoke.cpp                # placeholder smoke test
+    └── test_ascii_relay_hil.cpp            # exercises AsciiRelayBenchPower
+                                            # against a real serial port
 ```
 
-When the first real concrete `IBenchPower` lands (e.g.
-`NumatoBenchPower` driving a Numato Labs 4-channel USB relay board),
-it goes under `tests/hil/` as `numato_bench_power.{hpp,cpp}` and is
-referenced from the HIL tests that need automated power cycling.
+`AsciiRelayBenchPower` is the first real `IBenchPower` concrete. It
+speaks the standard Numato/SainSmart/KMtronic ASCII relay protocol
+("relay on N\r", "relay off N\r", "relay read N\r") and takes any
+`IByteChannel` — a `LoopbackByteChannel` in the unit suite, a
+`make_serial_byte_channel`-produced real serial port in HIL tests.
+That separation is why the class lives under `tests/_helpers/` rather
+than `tests/hil/`: the protocol parsing is hardware-agnostic and
+benefits from CI coverage every commit.
+
+If we later need a board that doesn't speak this protocol (e.g. the
+SainSmart 4-channel automation relay, B009A5246E, which is FTDI
+bit-bang only), a new concrete (`Ft245BitbangBenchPower` or similar)
+ships alongside `AsciiRelayBenchPower` under `tests/_helpers/` and
+its libftdi-needing tests go in `tests/hil/`.

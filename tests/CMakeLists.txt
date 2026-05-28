@@ -55,14 +55,18 @@ add_executable(st_unit_tests
     unit/flash/test_cancellation_invariants.cpp
     unit/flash/test_read_full_rom_sa_v4_port.cpp
     unit/flash/test_brick_recovery_fixture.cpp
+    unit/flash/test_ascii_relay_bench_power.cpp
     # Bench-rig fixture sources (header + impl). The header lives
     # under tests/_helpers/; .cpp's compile into st_unit_tests so the
     # MockBenchPower + BrickRecoveryFixture unit tests can link.
-    # When a real IBenchPower concrete lands (NumatoBenchPower etc.)
-    # it ships under tests/hil/ behind the ST_BUILD_HIL_TESTS gate
-    # below — st_unit_tests never sees the real-hardware sources.
+    # AsciiRelayBenchPower is the first real IBenchPower concrete —
+    # it's protocol-only (takes any IByteChannel, including the
+    # LoopbackByteChannel in _helpers), so it lives here too and runs
+    # in every CI build. tests/hil/ adds hardware-bound coverage on
+    # top by passing a real serial channel to the same class.
     _helpers/mock_bench_power.cpp
     _helpers/brick_recovery_fixture.cpp
+    _helpers/ascii_relay_bench_power.cpp
     unit/autotune/test_autotune.cpp
     unit/autotune/test_autotune_csv.cpp
     unit/autotune/test_autotune_lint.cpp
