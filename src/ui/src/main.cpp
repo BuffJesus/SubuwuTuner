@@ -4286,7 +4286,20 @@ void render_read_rom_modal(AppState &state) {
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(560.0f, 0.0f), ImGuiCond_Appearing);
+    // FIX (was: SetNextWindowSize + AlwaysAutoResize). The combination
+    // of AlwaysAutoResize + TextWrapped inside the modal created a
+    // shrink loop — each frame the auto-resize measured the wrapped
+    // text's content width (smaller than the natural width), shrank
+    // the window, which forced TextWrapped to wrap tighter on the
+    // next frame, repeat. Visible as the modal walking right-to-left
+    // until it pinned at minimum widget width.
+    //
+    // SizeConstraints with a 560 width floor prevents the shrink
+    // (TextWrapped's wrap width is bounded below) while letting
+    // height grow with content. Matches the pattern render_about_modal
+    // and render_shortcuts_modal already use successfully.
+    ImGui::SetNextWindowSizeConstraints(ImVec2(560.0f, 240.0f),
+                                        ImVec2(560.0f, FLT_MAX));
     if (!ImGui::BeginPopupModal("Read ROM from Car##read_rom_modal", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
