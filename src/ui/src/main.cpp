@@ -83,10 +83,18 @@ inline ImVec4 chip_fg_warn();
 inline ImVec4 chip_fg_caution();
 inline ImVec4 chip_fg_ok();
 inline ImVec4 chip_fg_danger();
+inline ImVec4 chip_fg_info();
 
 // Forward decl for the centered empty-state helper — same forward-
 // decl reason as the chip palette. Panels at lines ~5985+ call this.
 void render_empty_state(char const *title, char const *hint);
+
+// Centering / centered-text helpers — defined in the typography block
+// near render_empty_state. Forward-declared here so modal renders
+// (About modal at ~2841 calls these) can find them.
+void center_cursor_x(float w);
+void text_centered(char const *text, float scale);
+void text_centered_subtle(char const *text);
 
 // Forward decls for the primary-action accent button-color stack.
 // Use in pairs around exactly one ImGui::Button() to render it as
@@ -577,6 +585,7 @@ struct AppState {
     std::size_t selected_z{0};
     bool show_imgui_demo{false};
     bool show_shortcuts_modal{false};
+    bool show_about_modal{false};
     // Phase 5 custom-features designer. Hidden behind View → Debug.
     // Graph data model lives in st::feature; the wiring fields below
     // are transient editor state (only meaningful while the user is
@@ -2840,6 +2849,118 @@ void render_shortcuts_modal(AppState &state) {
     ImGui::EndPopup();
 }
 
+void render_about_modal(AppState &state) {
+    if (state.show_about_modal) {
+        ImGui::OpenPopup("About SubuwuTuner##about_modal");
+        state.show_about_modal = false;
+    }
+    ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(440.0f, 0.0f), ImVec2(680.0f, 600.0f));
+    if (!ImGui::BeginPopupModal("About SubuwuTuner##about_modal", nullptr,
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+
+    // Title cluster — name + version + brand accent rule, mirrors the
+    // welcome panel's typography so the "this is SubuwuTuner" voice is
+    // consistent wherever it appears.
+    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    text_centered("SubuwuTuner", 1.6f);
+    {
+        constexpr float kRuleW = 48.0f;
+        constexpr float kRuleH = 2.0f;
+        center_cursor_x(kRuleW);
+        ImVec2 const p = ImGui::GetCursorScreenPos();
+        auto const a = accent_for(current_theme());
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            p, ImVec2(p.x + kRuleW, p.y + kRuleH),
+            ImGui::GetColorU32(a.base), kRuleH * 0.5f);
+        ImGui::Dummy(ImVec2(kRuleW, kRuleH + 4.0f));
+    }
+    {
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "v%.*s",
+                      static_cast<int>(st::Version::string().size()),
+                      st::Version::string().data());
+        text_centered_subtle(buf);
+    }
+    ImGui::Dummy(ImVec2(0.0f, 4.0f));
+    text_centered_subtle(
+        "A free, open-source Subaru ECU tuning suite in modern C++23.");
+
+    ImGui::Dummy(ImVec2(0.0f, 16.0f));
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Project facts — license, repo, build info. Two-column layout
+    // (label / value) gives the eye a stable left rail to scan.
+    if (ImGui::BeginTable("##about_facts", 2,
+                          ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+        ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
+
+        auto const row = [](char const *label, char const *value) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            text_subtle("%s", label);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(value);
+        };
+
+        row("License",   "Apache-2.0 (see LICENSE)");
+        row("Source",    "https://github.com/BuffJesus/SubuwuTuner");
+        row("Built",     __DATE__ " " __TIME__);
+#if defined(__clang__)
+        row("Compiler",  "Clang " __clang_version__);
+#elif defined(__GNUC__)
+        {
+            char gcc[32];
+            std::snprintf(gcc, sizeof gcc, "GCC %d.%d.%d",
+                          __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+            row("Compiler", gcc);
+        }
+#elif defined(_MSC_VER)
+        {
+            char msvc[32];
+            std::snprintf(msvc, sizeof msvc, "MSVC %d", _MSC_VER);
+            row("Compiler", msvc);
+        }
+#else
+        row("Compiler",  "unknown");
+#endif
+        ImGui::EndTable();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    text_subtle("Bundled libraries");
+    ImGui::BulletText("Dear ImGui — Omar Cornut + contributors (MIT)");
+    ImGui::BulletText("ImPlot — Evan Pezent + contributors (MIT)");
+    ImGui::BulletText("GLFW — Marcus Geelnard + Camilla Lowy (zlib/libpng)");
+    ImGui::BulletText("nativefiledialog-extended — btzy + Frogtoss Games (zlib)");
+    ImGui::BulletText("tomlplusplus — Mark Gillard (MIT)");
+    ImGui::BulletText("Catch2 — Catch Org + contributors (BSL-1.0)");
+    ImGui::Dummy(ImVec2(0.0f, 4.0f));
+    text_subtle("Full text of each license: THIRD_PARTY_NOTICES.md");
+
+    ImGui::Dummy(ImVec2(0.0f, 12.0f));
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    bool const close_clicked = ImGui::Button("Close", ImVec2(120.0f, 0.0f));
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Dismiss.  (Esc)");
+    }
+    bool const want_close = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+    if (close_clicked || want_close) {
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
 // New-project modal. GUI parity with `subuwutuner-cli project-new`:
 // three path inputs (source ROM, def pack folder, target dir) plus an
 // optional display name. Each Browse… button fires NFD and rewrites
@@ -4781,6 +4902,9 @@ void render_menubar(AppState &state) {
             if (ImGui::MenuItem("Keyboard Shortcuts\xE2\x80\xA6")) {
                 state.show_shortcuts_modal = true;
             }
+            if (ImGui::MenuItem("About SubuwuTuner\xE2\x80\xA6")) {
+                state.show_about_modal = true;
+            }
             ImGui::Separator();
             text_subtle("Getting started");
             ImGui::BulletText(
@@ -5645,8 +5769,16 @@ void text_centered_subtle(char const *text) {
 // no DTCs" — wherever a panel needs to acknowledge a void rather than
 // look broken.
 void render_empty_state(char const *title, char const *hint) {
-    ImGui::Dummy(ImVec2(0.0f, 24.0f));
-    text_centered(title);
+    // Adaptive top padding — 24px floor for short panels, 10% of
+    // available height on tall ones so the cluster doesn't pin to
+    // the top edge with a sea of void below. Empirically the 10%
+    // anchor lands the cluster at a comfortable upper-third on
+    // 600-800px panels without feeling lost in 2000px maximized
+    // viewports.
+    float const avail_h = ImGui::GetContentRegionAvail().y;
+    float const top_pad = std::max(24.0f, avail_h * 0.10f);
+    ImGui::Dummy(ImVec2(0.0f, top_pad));
+    text_centered(title, 1.0f);
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
     text_centered_subtle(hint);
 }
@@ -5741,6 +5873,18 @@ inline ImVec4 chip_fg_danger() {
 inline ImVec4 chip_bg_danger() {
     return theme_is_light() ? ImVec4(1.00f, 0.82f, 0.80f, 0.80f)
                             : ImVec4(0.46f, 0.18f, 0.18f, 0.60f);
+}
+// Info — neutral / informational accent in the blue band. Distinct
+// from chip_accent (brand purple) so info-tier indicators don't read
+// as "active selection". Used for non-error/non-warn callouts like
+// chunk indicators, "preview" labels, etc.
+inline ImVec4 chip_fg_info() {
+    return theme_is_light() ? ImVec4(0.10f, 0.32f, 0.62f, 1.0f)
+                            : ImVec4(0.55f, 0.82f, 1.00f, 1.0f);
+}
+inline ImVec4 chip_bg_info() {
+    return theme_is_light() ? ImVec4(0.78f, 0.88f, 1.00f, 0.75f)
+                            : ImVec4(0.14f, 0.26f, 0.42f, 0.55f);
 }
 
 // Cold-start panel — what the user sees before any project is loaded. The
@@ -7505,7 +7649,7 @@ void render_history_panel(AppState &state) {
             // "next to undo" row; muted text for already-undone rows.
             ImGui::TableSetColumnIndex(0);
             if (is_top) {
-                ImGui::TextColored(ImVec4(0.40f, 0.85f, 1.00f, 1.0f), ">%zu", i);
+                ImGui::TextColored(chip_fg_info(), ">%zu", i);
             } else if (is_undone) {
                 ImGui::TextDisabled(" %zu", i);
             } else {
@@ -9731,6 +9875,7 @@ int main(int argc, char *argv[]) {
         render_def_registry_modal(state);
         render_settings_modal(state);
         render_shortcuts_modal(state);
+        render_about_modal(state);
 
         if (state.show_imgui_demo) {
             ImGui::ShowDemoWindow(&state.show_imgui_demo);
