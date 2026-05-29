@@ -9966,6 +9966,14 @@ int cmd_ssm_a8_poll(int argc, char *argv[]) {
     std::vector<std::uint32_t> addresses;
     bool verbose = false;
 
+    // SA-prelude flags (default OFF — preserves the original "just send A8"
+    // behavior on factory ECUs where SSM-A8 isn't gated). Opt in when the
+    // ECU returns NRC 0x33 on every poll, indicating COBB-style lockdown.
+    std::optional<bool> authenticate_flag;
+    std::optional<bool> enter_dsc_flag;
+    std::optional<std::uint8_t> security_level_flag;
+    std::optional<std::string> sa_variant;
+
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         auto const require_arg = [&](char const *name) -> char const * {
@@ -10048,6 +10056,32 @@ int cmd_ssm_a8_poll(int argc, char *argv[]) {
                 }
                 addresses.push_back(val);
             }
+        } else if (a == "--authenticate") {
+            authenticate_flag = true;
+        } else if (a == "--no-authenticate") {
+            authenticate_flag = false;
+        } else if (a == "--enter-dsc") {
+            enter_dsc_flag = true;
+        } else if (a == "--no-enter-dsc") {
+            enter_dsc_flag = false;
+        } else if (a == "--security-level") {
+            auto const *v = require_arg("--security-level");
+            if (v == nullptr)
+                return 2;
+            std::uint32_t val = 0;
+            if (!parse_uint32_arg(v, val) || val == 0 || val > 0xFFU) {
+                std::fputs("ssm-a8-poll: --security-level must be a positive "
+                           "8-bit hex or decimal integer\n",
+                           stderr);
+                return 2;
+            }
+            security_level_flag = static_cast<std::uint8_t>(val);
+        } else if (a == "--sa-variant") {
+            if (auto const *v = require_arg("--sa-variant"); v) {
+                sa_variant = std::string{v};
+            } else {
+                return 2;
+            }
         } else if (a == "--verbose" || a == "-v") {
             verbose = true;
         } else if (a.starts_with("--")) {
@@ -10067,11 +10101,23 @@ int cmd_ssm_a8_poll(int argc, char *argv[]) {
             "                                   [--device <path>] [--dll <path>]\n"
             "                                   [--duration <sec>] [--interval-ms <ms>]\n"
             "                                   [--timeout-ms <ms>] [--verbose|-v]\n"
+            "                                   [--authenticate|--no-authenticate]\n"
+            "                                   [--enter-dsc|--no-enter-dsc]\n"
+            "                                   [--security-level <hex>]\n"
+            "                                   [--sa-variant <name>]\n"
             "\n"
             "Reads one byte per --addr via OEM SSM-0xA8 over ISO-15765 every\n"
             "--interval-ms (default 333). Writes a comment-headered log with\n"
             "per-poll lines '<elapsed_ms>\\t<HH HH ...>' for downstream\n"
-            "correlation against captured COBB F3xx response bytes.\n",
+            "correlation against captured COBB F3xx response bytes.\n"
+            "\n"
+            "If the ECU returns NRC 0x33 on every poll, SSM-A8 is SA-gated\n"
+            "(observed on COBB-tuned ECUs that null-redirect OEM service\n"
+            "handlers). Pass --authenticate to do the UDS DSC + SA dance\n"
+            "before polling starts. --sa-variant names the key function\n"
+            "(default | fehr-active[-l1] | fehr-active-l3; see docs/23).\n"
+            "--security-level overrides the SA level (default tracks the\n"
+            "variant: 0x03 for fehr-active-l3, 0x01 otherwise).\n",
             stderr);
         return 2;
     }
@@ -10087,6 +10133,34 @@ int cmd_ssm_a8_poll(int argc, char *argv[]) {
                      "(expected one of: j2534, obdx, native).\n",
                      transport_kind->c_str());
         return 2;
+    }
+
+    // Resolve SA defaults + the variant key function up front so bad
+    // flags fail fast without opening the transport. Final decision on
+    // whether to run the preamble lives at the open-transport call site.
+    bool const authenticate = authenticate_flag.value_or(false);
+    bool const enter_dsc = enter_dsc_flag.value_or(authenticate);
+    std::uint8_t const security_level = security_level_flag.value_or(
+        (sa_variant.has_value() && *sa_variant == "fehr-active-l3") ? 0x03 : 0x01);
+
+    st::ecu::SecurityKeyFn sa_fn = &st::ecu::subaru::ssmcan1_key_stub;
+    char const *sa_label = "factory L1";
+    if (sa_variant.has_value()) {
+        if (*sa_variant == "default" || *sa_variant == "factory") {
+            // already set above
+        } else if (*sa_variant == "fehr-active" || *sa_variant == "fehr-active-l1") {
+            sa_fn = &st::ecu::subaru::ssmcan1_l1_fehr_active;
+            sa_label = "fehr-active L1";
+        } else if (*sa_variant == "fehr-active-l3") {
+            sa_fn = &st::ecu::subaru::ssmcan1_l3_fehr_active;
+            sa_label = "fehr-active L3";
+        } else {
+            std::fprintf(stderr,
+                         "ssm-a8-poll: --sa-variant '%s' not recognized "
+                         "(expected: default | fehr-active[-l1] | fehr-active-l3).\n",
+                         sa_variant->c_str());
+            return 2;
+        }
     }
 
     // Build the request once and report it back so the user can sanity-
@@ -10114,6 +10188,55 @@ int cmd_ssm_a8_poll(int argc, char *argv[]) {
         return 1;
     }
 
+    // SA preamble. authenticate / enter_dsc / sa_fn / sa_label /
+    // security_level were resolved before the transport opened so bad
+    // flags failed fast. Default authenticate=false leaves the original
+    // "send A8 directly" path intact for factory ECUs.
+    if (enter_dsc || authenticate) {
+        st::ecu::uds::UdsClient uds_client{**t};
+        if (enter_dsc) {
+            if (auto s = uds_client.diagnostic_session_control(
+                    st::ecu::uds::kDscExtendedDiagnostic);
+                !s.has_value()) {
+                std::fprintf(stderr,
+                             "ssm-a8-poll: DSC extendedDiagnostic failed: %s\n",
+                             s.error().to_string().c_str());
+                (void)(*t)->close();
+                return 1;
+            }
+            std::fputs("ssm-a8-poll: entered extendedDiagnosticSession (0x03)\n", stderr);
+        }
+        if (authenticate) {
+            std::fprintf(stderr,
+                         "ssm-a8-poll: SecurityAccess: variant=%s level=0x%02X\n",
+                         sa_label, static_cast<unsigned>(security_level));
+            auto const seed = uds_client.security_access_request_seed(security_level);
+            if (!seed.has_value()) {
+                std::fprintf(stderr, "ssm-a8-poll: requestSeed failed: %s\n",
+                             seed.error().to_string().c_str());
+                (void)(*t)->close();
+                return 1;
+            }
+            auto const key = sa_fn(*seed);
+            if (!key.has_value()) {
+                std::fprintf(stderr, "ssm-a8-poll: SA key fn failed: %s\n",
+                             key.error().to_string().c_str());
+                (void)(*t)->close();
+                return 1;
+            }
+            // sendKey sub_function is requestSeed + 1 per ISO 14229.
+            if (auto s = uds_client.security_access_send_key(
+                    static_cast<std::uint8_t>(security_level + 1), *key);
+                !s.has_value()) {
+                std::fprintf(stderr, "ssm-a8-poll: sendKey failed: %s\n",
+                             s.error().to_string().c_str());
+                (void)(*t)->close();
+                return 1;
+            }
+            std::fputs("ssm-a8-poll: SecurityAccess unlocked\n", stderr);
+        }
+    }
+
     std::ofstream out{*output_path, std::ios::binary};
     if (!out) {
         std::fprintf(stderr, "ssm-a8-poll: cannot open output: %s\n",
@@ -10131,6 +10254,13 @@ int cmd_ssm_a8_poll(int argc, char *argv[]) {
     out << "# transport: " << *transport_kind << "\n";
     out << "# framing: ssm-a8 over iso15765 (tester 0x7E0, ecu 0x7E8, 500 kbps)\n";
     out << "# interval_ms: " << interval_ms << "\n";
+    if (authenticate) {
+        out << "# sa: variant=" << sa_label
+            << " level=0x" << std::hex << static_cast<unsigned>(security_level)
+            << std::dec << "\n";
+    } else {
+        out << "# sa: none\n";
+    }
     out << "# addresses(BE24):";
     for (auto a : addresses) {
         char buf[12];

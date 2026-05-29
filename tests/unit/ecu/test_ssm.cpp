@@ -3,6 +3,8 @@
 
 #include "st/core/error.hpp"
 #include "st/ecu/ssm.hpp"
+#include "st/ecu/subaru_security.hpp"
+#include "st/ecu/uds.hpp"
 #include "st/transport.hpp"
 #include "st/transport/mock.hpp"
 
@@ -535,6 +537,79 @@ TEST_CASE("SsmClient IsoTp sustains repeated multi-address polls",
     REQUIRE(got[0] == std::vector<std::uint8_t>{0x0C, 0xC0, 0x52});
     REQUIRE(got[1] == std::vector<std::uint8_t>{0x0C, 0xD2, 0x52});
     REQUIRE(got[2] == std::vector<std::uint8_t>{0x0D, 0x44, 0x53});
+}
+
+TEST_CASE("ssm-a8-poll SA preamble: DSC + L3 unlock then poll on same transport",
+          "[ssm][client][isotp][poll][sa]") {
+    // Models the cmd_ssm_a8_poll preamble flow when the ECU returns
+    // NRC 0x33 on bare A8 (COBB-tuned ECU lockdown). Pre-unlock with
+    // DSC extendedDiagnosticSession + SA L3 via the captured-validated
+    // Fehr-active L3 seed/key pair, then SSM-A8 polls succeed.
+    //
+    // Real captured pair (memory project_fehr_sa_l3_resolved):
+    //   seed = 0x4ADFFE07 -> key = 0x24243A06
+    std::vector<std::uint8_t> const seed_be{0x4A, 0xDF, 0xFE, 0x07};
+    std::vector<std::uint8_t> const key_be{0x24, 0x24, 0x3A, 0x06};
+
+    st::transport::MockTransport t;
+    REQUIRE(t.open({st::transport::LinkKind::CanIso15765, 500000}).has_value());
+
+    // 1) DSC extendedDiagnostic.
+    t.expect_send_recv({0x10, 0x03}, {0x50, 0x03});
+    // 2) SecurityAccess L3 requestSeed.
+    t.expect_send_recv({0x27, 0x03}, {0x67, 0x03, 0x4A, 0xDF, 0xFE, 0x07});
+    // 3) SecurityAccess L3 sendKey (sub_function = level + 1 = 0x04).
+    t.expect_send_recv({0x27, 0x04, 0x24, 0x24, 0x3A, 0x06}, {0x67, 0x04});
+    // 4) SSM-A8 poll for RPM (hi byte of canonical OEM address).
+    std::vector<std::uint32_t> const addrs{0x00000E};
+    auto const a8_req = ssm::build_a8_request(addrs, ssm::Framing::IsoTp);
+    REQUIRE(a8_req.has_value());
+    t.expect_send_recv(*a8_req, {0xE8, 0x82});
+
+    st::ecu::uds::UdsClient uds_client{t};
+    REQUIRE(uds_client.diagnostic_session_control(st::ecu::uds::kDscExtendedDiagnostic).has_value());
+
+    auto const seed = uds_client.security_access_request_seed(0x03, 100ms);
+    REQUIRE(seed.has_value());
+    REQUIRE(*seed == seed_be);
+
+    auto const key = st::ecu::subaru::ssmcan1_l3_fehr_active(*seed);
+    REQUIRE(key.has_value());
+    REQUIRE(*key == key_be);
+
+    REQUIRE(uds_client.security_access_send_key(0x04, *key, 100ms).has_value());
+
+    ssm::SsmClient ssm_client{t, ssm::Framing::IsoTp};
+    auto const polled = ssm_client.read(addrs, 100ms);
+    REQUIRE(polled.has_value());
+    REQUIRE(*polled == std::vector<std::uint8_t>{0x82});
+
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("ssm-a8-poll SA preamble: NRC 0x33 on bare A8 surfaces as EcuRejected",
+          "[ssm][client][isotp][poll][sa][error]") {
+    // The trigger for invoking --authenticate in the field: ECU returns
+    // NRC 0x33 (securityAccessDenied) on every poll attempt. SsmClient
+    // surfaces this as EcuRejected; the CLI logs it inline as a "! ..."
+    // row. Without the SA preamble, every subsequent poll keeps NRCing.
+    std::vector<std::uint32_t> const addrs{0xF8D424, 0xF8D425};  // RPM
+    auto const expected_req = ssm::build_a8_request(addrs, ssm::Framing::IsoTp);
+    REQUIRE(expected_req.has_value());
+
+    st::transport::MockTransport t;
+    t.expect_send_recv(*expected_req, {0x7F, 0xA8, 0x33});
+    t.expect_send_recv(*expected_req, {0x7F, 0xA8, 0x33});
+    REQUIRE(t.open({st::transport::LinkKind::CanIso15765, 500000}).has_value());
+
+    ssm::SsmClient client{t, ssm::Framing::IsoTp};
+
+    for (int i = 0; i < 2; ++i) {
+        auto const r = client.read(addrs, 100ms);
+        REQUIRE_FALSE(r.has_value());
+        REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+    }
+    REQUIRE(t.exhausted());
 }
 
 TEST_CASE("SsmClient IsoTp poll loop tolerates mid-stream NRC and continues",

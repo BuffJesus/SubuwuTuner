@@ -114,10 +114,23 @@ The script is self-testing — `python tools/cross_ref_ssm_a8.py --self-test` pl
 
 ## SecurityAccess gating (NRC 0x33)
 
-The OEM SSM-A8 path is canonical and not SA-gated stock. Some tuner-packs flip this — the empirical 2017 WRX finding is that COBB's calibration framework null-redirects 86 OEM service handlers in its lockdown. If the smoke test returns NRC 0x33 on every poll, two workarounds in order of preference:
+The OEM SSM-A8 path is canonical and not SA-gated stock. Some tuner-packs flip this — the empirical 2017 WRX finding is that COBB's calibration framework redirects a swath of OEM service handlers as part of its lockdown. If the smoke test returns NRC 0x33 on every poll, opt into the SA preamble:
 
-1. **Run on a factory or uninstalled ECU.** SSM-A8 will be open stock. A junkyard ECU on the bench rig per `docs/28` is the cleanest place to do this work anyway.
-2. **Pre-unlock SecurityAccess.** `src/ecu/subaru_security.hpp` ships the in-tree SA variants (including `ssmcan1_l3_fehr_active` per `docs/23`), but `cmd_ssm_a8_poll` does not currently wire SA negotiation — it sends A8 frames directly. Extending it follows the established pattern in `cmd_rom_pull` (same `main.cpp`): add `--authenticate / --sa-variant <name>` flags, lift the SA-variant lookup, and call the SA negotiation right after `transport.open()`. Tracked as a follow-on; until it lands, fall back to option 1.
+```sh
+subuwutuner-cli ssm-a8-poll \
+    --transport <kind> --output <FILE.log> \
+    --addr <hex>[,<hex>...] \
+    --authenticate --sa-variant fehr-active-l3
+```
+
+The preamble does, before the poll loop starts:
+
+1. `DiagnosticSessionControl 0x10 0x03` (extendedDiagnosticSession).
+2. `SecurityAccess 0x27 <level>` requestSeed.
+3. `<sa_variant_fn>(seed)` computes the key.
+4. `SecurityAccess 0x27 <level+1> <key>` sendKey.
+
+If the SA preamble fails (NRC on requestSeed or sendKey), the poll loop is not entered and the CLI exits non-zero. Diagnose by trying the other variants (`--sa-variant default | fehr-active | fehr-active-l3`) or falling back to a factory / uninstalled ECU on the bench rig per `docs/28`. The validated default level tracks the variant: 0x03 for `fehr-active-l3`, 0x01 otherwise; override with `--security-level <hex>`. See `docs/23-security-access.md` for the SA algorithm catalog and which variant fits which tune state.
 
 ## Limitations and design tradeoffs
 
