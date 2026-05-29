@@ -121,6 +121,15 @@ constexpr float kSpaceXL = 24.0f;
 void push_primary_button_colors();
 void pop_primary_button_colors();
 
+// Forward decl for the toast notification helper. Defined alongside
+// render_toasts in the file-bottom render block. Sites that surface
+// transient non-modal feedback (save success, project open OK, etc)
+// call this; modal failures still go inline per
+// feedback_modal_inline_errors.
+struct AppState;
+enum class ToastKind : std::uint8_t;
+void enqueue_toast(AppState &state, ToastKind kind, std::string text);
+
 struct Fonts {
     ImFont *ui = nullptr;   // Sans for UI chrome (menus, labels, panels)
     ImFont *mono = nullptr; // Monospace for grids, hex, log output
@@ -546,6 +555,21 @@ enum class ConfirmAction {
     Quit,
 };
 
+// Transient on-screen feedback — replaces the older "set status_msg
+// and let it linger forever" pattern for non-modal success / info
+// callouts. Toasts stack bottom-right above the status bar, auto-
+// expire after kToastLifetime, fade in the last kToastFadeWindow.
+// Modal failures still go inline per the modal-inline-errors rule
+// (memory feedback_modal_inline_errors); toasts are for surfaces
+// the user isn't already looking at.
+enum class ToastKind : std::uint8_t { Info, Success, Warn, Danger };
+
+struct Toast {
+    std::string text;
+    ToastKind kind;
+    std::chrono::steady_clock::time_point expires_at;
+};
+
 // ===========================================================================
 // Adapter picker (shared between Read-ROM and future Write-ROM flows)
 // ===========================================================================
@@ -663,6 +687,12 @@ struct AppState {
     // "Try the demo project" button when this is set; absent in
     // installs that didn't ship the demo. See resolve_demo_project_path.
     std::optional<std::filesystem::path> demo_project_path;
+
+    // Stacked transient feedback (Saved., Loaded foo.stune, Apply
+    // failed: …). Rendered by render_toasts at the bottom-right
+    // above the status bar; auto-expire. Bounded so a burst of
+    // notifications doesn't tile the screen.
+    std::vector<Toast> toasts;
     // Phase 5 custom-features designer. Hidden behind View → Debug.
     // Graph data model lives in st::feature; the wiring fields below
     // are transient editor state (only meaningful while the user is
@@ -1013,7 +1043,9 @@ struct AppState {
     void try_open_project(std::filesystem::path const &path) {
         auto r = st::Project::open(path);
         if (!r.has_value()) {
-            status_msg = "Failed to open " + path.string() + ": " + r.error().to_string();
+            auto const err = "Failed to open " + path.string() + ": " + r.error().to_string();
+            status_msg = err;
+            enqueue_toast(*this, ToastKind::Danger, err);
             project.reset();
             selected_table_id.clear();
             current_table_data.reset();
@@ -1030,6 +1062,11 @@ struct AppState {
         // prior "Saved 3m ago" reading was for the previous project.
         dirty = false;
         last_save_iso.reset();
+        // Success toast — the user just clicked "Open Project" or a
+        // recent and the silent project-appears-in-the-grid was easy
+        // to miss. Filename keeps it specific to which project loaded.
+        enqueue_toast(*this, ToastKind::Success,
+                      std::string{"Loaded "} + path.filename().string());
         // Successful open → bump in recents so the welcome panel shows
         // this project at the top next cold start.
         push_recent(recents, path);
@@ -1123,10 +1160,21 @@ void save_project(AppState &state) {
         return;
     }
     if (auto s = state.project->save_working_rom(); !s.has_value()) {
-        state.status_msg = "Save failed: " + s.error().to_string();
+        // Failure: keep status_msg for persistent visibility AND fire
+        // a danger toast for the immediate "this just happened" beat.
+        // The user might be staring at the save button when this fires;
+        // the toast confirms they triggered something.
+        auto const err = "Save failed: " + s.error().to_string();
+        state.status_msg = err;
+        enqueue_toast(state, ToastKind::Danger, err);
         return;
     }
-    state.status_msg = "Saved.";
+    // Success: status bar already shows "Saved Nm ago" + last_save_iso
+    // tooltip, so the persistent status_msg is redundant. Toast does the
+    // transient confirmation and disappears on its own — no stale
+    // "Saved." sticking around for minutes after.
+    state.status_msg.clear();
+    enqueue_toast(state, ToastKind::Success, "Saved.");
     state.dirty = false;
     state.last_save_iso = iso8601_utc_now();
 }
@@ -9620,6 +9668,132 @@ void tick_status_msg(AppState &state) {
     }
 }
 
+// Toast tuning. Lifetime + fade kept short so toasts feel responsive
+// (a 4-second window is long enough to read a one-line message, short
+// enough not to cover the workspace). Max stack caps a burst of
+// notifications from tiling the screen — oldest drop off first.
+constexpr std::chrono::milliseconds kToastLifetime{4000};
+constexpr std::chrono::milliseconds kToastFadeWindow{500};
+constexpr std::size_t kToastMaxStack = 5;
+constexpr float kToastWidth = 320.0f;
+constexpr float kToastVerticalGap = 8.0f;
+
+void enqueue_toast(AppState &state, ToastKind kind, std::string text) {
+    state.toasts.push_back({
+        std::move(text),
+        kind,
+        std::chrono::steady_clock::now() + kToastLifetime,
+    });
+    // Drop oldest if we've exceeded the visible cap.
+    if (state.toasts.size() > kToastMaxStack) {
+        state.toasts.erase(state.toasts.begin());
+    }
+}
+
+// Toast colors by kind — composes the existing theme-aware chip
+// palette so toasts inherit the same dark/light contrast story.
+inline ImVec4 toast_fg(ToastKind k) {
+    switch (k) {
+    case ToastKind::Success:
+        return chip_fg_ok();
+    case ToastKind::Warn:
+        return chip_fg_warn();
+    case ToastKind::Danger:
+        return chip_fg_danger();
+    case ToastKind::Info:
+    default:
+        return chip_fg_info();
+    }
+}
+
+inline ImVec4 toast_bg(ToastKind k) {
+    switch (k) {
+    case ToastKind::Success:
+        return chip_bg_ok();
+    case ToastKind::Warn:
+        return chip_bg_warn();
+    case ToastKind::Danger:
+        return chip_bg_danger();
+    case ToastKind::Info:
+    default:
+        return chip_bg_info();
+    }
+}
+
+void render_toasts(AppState &state) {
+    auto const now = std::chrono::steady_clock::now();
+
+    // GC expired toasts first so we don't waste a frame's worth of
+    // window setup on something we're about to drop.
+    std::erase_if(state.toasts,
+                  [&](Toast const &t) { return t.expires_at <= now; });
+    if (state.toasts.empty()) {
+        return;
+    }
+
+    auto const *const vp = ImGui::GetMainViewport();
+    float const right_x = vp->WorkPos.x + vp->WorkSize.x;
+    float const bottom_y =
+        vp->WorkPos.y + vp->WorkSize.y - static_cast<float>(kStatusBarHeight);
+
+    // Stack newest-at-bottom (closest to the status bar) and grow
+    // upward. anchor=(0,1) means SetNextWindowPos specifies the
+    // bottom-LEFT corner of the toast.
+    float y_cursor = bottom_y - kToastVerticalGap;
+
+    for (std::size_t i = 0; i < state.toasts.size(); ++i) {
+        // Iterate from end (newest) backward to front (oldest).
+        auto const &t = state.toasts[state.toasts.size() - 1 - i];
+
+        // Compute fade alpha — linear ramp during the last
+        // kToastFadeWindow before expiry.
+        auto const remaining = t.expires_at - now;
+        float alpha = 1.0f;
+        if (remaining < kToastFadeWindow) {
+            float const num = std::chrono::duration<float>(remaining).count();
+            float const den = std::chrono::duration<float>(kToastFadeWindow).count();
+            alpha = std::clamp(num / den, 0.0f, 1.0f);
+        }
+
+        // Estimate height from wrapped-text size so the bottom anchor
+        // lands consistently on the very first frame (otherwise
+        // ImGui's auto-resize would briefly render at zero size).
+        // 24px = 2*WindowPadding.y; the chip-style frame padding is
+        // implicit in the WindowPadding chosen by the active style.
+        ImVec2 const text_sz = ImGui::CalcTextSize(
+            t.text.c_str(), nullptr, /*hide_text_after_hash=*/false,
+            kToastWidth - 24.0f);
+        float const toast_h = text_sz.y + 20.0f;
+
+        ImGui::SetNextWindowPos(
+            ImVec2(right_x - kToastWidth - kToastVerticalGap, y_cursor),
+            ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+        ImGui::SetNextWindowSize(ImVec2(kToastWidth, toast_h), ImGuiCond_Always);
+
+        ImVec4 const bg = toast_bg(t.kind);
+        ImVec4 const fg = toast_fg(t.kind);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(bg.x, bg.y, bg.z, bg.w * alpha));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(fg.x, fg.y, fg.z, fg.w * alpha));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 6.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+
+        char wid[32];
+        std::snprintf(wid, sizeof wid, "##toast_%zu", i);
+        ImGui::Begin(wid, nullptr,
+                     ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                         ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
+                         ImGuiWindowFlags_NoDocking);
+        ImGui::TextWrapped("%s", t.text.c_str());
+        ImGui::End();
+
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor(2);
+
+        y_cursor -= toast_h + kToastVerticalGap;
+    }
+}
+
 void render_status_bar(AppState &state) {
     auto const *vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(
@@ -10013,6 +10187,11 @@ int main(int argc, char *argv[]) {
         render_ebcs_panel(state);
         render_features_designer(state);
         render_status_bar(state);
+        // Toasts last so they layer over panels + the status bar's
+        // window (each toast is its own undecorated viewport-anchored
+        // window). Render order doesn't matter for modals — those
+        // dim the background regardless.
+        render_toasts(state);
         render_unsaved_modal(state);
         render_csv_import_modal(state);
         render_new_project_modal(state);
