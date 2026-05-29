@@ -9592,8 +9592,18 @@ void render_status_bar(AppState &state) {
                 }
                 chip(buf, chip_fg_muted(), chip_bg_muted());
                 if (ImGui::IsItemHovered()) {
+                    // Human-friendly absolute timestamp — strip the
+                    // ISO 'T' separator and trailing 'Z', append "UTC".
+                    // "2026-05-29T14:23:51Z" → "2026-05-29 14:23:51 UTC".
+                    std::string when = *state.last_save_iso;
+                    if (auto const t = when.find('T'); t != std::string::npos) {
+                        when[t] = ' ';
+                    }
+                    if (!when.empty() && when.back() == 'Z') {
+                        when.pop_back();
+                    }
                     ImGui::SetTooltip("Last save: %s UTC.\nAll edits are on disk.",
-                                      state.last_save_iso->c_str());
+                                      when.c_str());
                 }
             } else {
                 chip("Clean", chip_fg_muted(), chip_bg_muted());
