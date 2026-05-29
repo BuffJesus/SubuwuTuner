@@ -96,6 +96,23 @@ void center_cursor_x(float w);
 void text_centered(char const *text, float scale);
 void text_centered_subtle(char const *text);
 
+// Vertical-rhythm scale. Use these in `ImGui::Dummy({0, kSpaceX})`
+// instead of raw pixel values so the rhythm stays consistent and a
+// single edit can re-tune the whole app's whitespace. Most callsites
+// pick S (default row gap) or M (between paragraph-equivalents);
+// L / XL anchor major section breaks and welcome-style breathing
+// room.
+//
+// Off-grid values (2 / 8 / 12 / 14 / 18 / 28 px) stay as raw literals
+// at their callsites — those are per-callsite visual tuning, not steps
+// on this rhythm scale. Don't "fix" them to the nearest canonical
+// without checking the rendered result.
+constexpr float kSpaceXS = 4.0f;
+constexpr float kSpaceS  = 6.0f;
+constexpr float kSpaceM  = 10.0f;
+constexpr float kSpaceL  = 16.0f;
+constexpr float kSpaceXL = 24.0f;
+
 // Forward decls for the primary-action accent button-color stack.
 // Use in pairs around exactly one ImGui::Button() to render it as
 // the modal's primary action (brand purple, matches the welcome-
@@ -1633,9 +1650,9 @@ void render_unsaved_modal(AppState &state) {
         ConfirmAction const what = state.next_action;
 
         ImGui::TextUnformatted("You have unsaved edits in this project.");
-        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceS));
         text_subtle("%s", modal_subtitle(what));
-        ImGui::Dummy(ImVec2(0.0f, 16.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceL));
 
         // Keyboard shortcuts: Enter = the safe default (Save).
         // Esc = the safe undo (Cancel). Destructive Discard
@@ -2215,7 +2232,7 @@ void render_kp_autotune_modal(AppState &state) {
     ImGui::InputTextWithHint("##kp_at_table", "snake_case id of the 2D ignition timing table",
                              state.kp_at_table_id, sizeof state.kp_at_table_id);
 
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
     ImGui::TextUnformatted("Log CSV");
     {
         float const avail = ImGui::GetContentRegionAvail().x;
@@ -2238,7 +2255,7 @@ void render_kp_autotune_modal(AppState &state) {
         }
     }
 
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
     ImGui::TextUnformatted("RPM axis");
     ImGui::SetNextItemWidth(180.0f);
     char const *const rpm_items[] = {"y (default Subaru)", "x"};
@@ -2273,7 +2290,7 @@ void render_kp_autotune_modal(AppState &state) {
     }
     ImGui::PopItemWidth();
 
-    ImGui::Dummy(ImVec2(0.0f, 4.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
     ImGui::Checkbox("enable add-back pass (opt-in)", &state.kp_at_enable_add_back);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("docs/12 §Knock-based ignition pull add-back: raise\n"
@@ -2500,7 +2517,7 @@ void render_maf_autotune_modal(AppState &state) {
     ImGui::InputTextWithHint("##maf_at_table", "snake_case id of the 1D MAF scaling table",
                              state.maf_at_table_id, sizeof state.maf_at_table_id);
 
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
     ImGui::TextUnformatted("Log CSV");
     {
         float const avail = ImGui::GetContentRegionAvail().x;
@@ -2865,7 +2882,7 @@ void render_about_modal(AppState &state) {
     // Title cluster — name + version + brand accent rule, mirrors the
     // welcome panel's typography so the "this is SubuwuTuner" voice is
     // consistent wherever it appears.
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
     text_centered("SubuwuTuner", 1.6f);
     {
         constexpr float kRuleW = 48.0f;
@@ -2885,11 +2902,11 @@ void render_about_modal(AppState &state) {
                       st::Version::string().data());
         text_centered_subtle(buf);
     }
-    ImGui::Dummy(ImVec2(0.0f, 4.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
     text_centered_subtle(
         "A free, open-source Subaru ECU tuning suite in modern C++23.");
 
-    ImGui::Dummy(ImVec2(0.0f, 16.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceL));
     ImGui::Separator();
     ImGui::Spacing();
 
@@ -2943,7 +2960,7 @@ void render_about_modal(AppState &state) {
     ImGui::BulletText("nativefiledialog-extended — btzy + Frogtoss Games (zlib)");
     ImGui::BulletText("tomlplusplus — Mark Gillard (MIT)");
     ImGui::BulletText("Catch2 — Catch Org + contributors (BSL-1.0)");
-    ImGui::Dummy(ImVec2(0.0f, 4.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
     text_subtle("Full text of each license: THIRD_PARTY_NOTICES.md");
 
     ImGui::Dummy(ImVec2(0.0f, 12.0f));
@@ -3013,7 +3030,7 @@ void render_new_project_modal(AppState &state) {
             state.status_msg = std::string{"Source dialog error: "} + NFD::GetError();
         }
     }
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
 
     // Definition-pack row: custom because it needs two pickers
     // (multi-file directory layout vs. single-file pack).
@@ -3126,7 +3143,7 @@ void render_new_project_modal(AppState &state) {
         }
         ImGui::TextColored(color, "%s%s", prefix, state.np_match_message.c_str());
     }
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
 
     if (path_row("Project directory", state.np_dir_path, sizeof state.np_dir_path, "dir",
                  "Pick the empty target directory. project.toml,\n"
@@ -3277,18 +3294,18 @@ void render_flash_modal(AppState &state) {
     ImGui::Text("Sectors: %zu   Bytes: %zu   Profile: %s", pending->plan.writes.size(),
                 pending->total_bytes, pname.c_str());
     ImGui::Separator();
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
 
     // Engine-safety is a hard refusal across every profile.
     if (!d.engine_safety_tables.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
         ImGui::TextUnformatted("REFUSED: engine-safety-critical tables in plan");
         ImGui::PopStyleColor();
-        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
         for (auto const &id : d.engine_safety_tables) {
             ImGui::BulletText("%s", id.c_str());
         }
-        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
         text_subtle("Engine-safety violations block in every profile (docs/06).");
         ImGui::Dummy(ImVec2(0.0f, 12.0f));
         if (ImGui::Button("Close", ImVec2(120.0f, 0.0f)) ||
@@ -3308,10 +3325,10 @@ void render_flash_modal(AppState &state) {
             ImGui::BulletText("%s", id.c_str());
         }
         ImGui::Unindent();
-        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceS));
     } else {
         text_subtle("No emissions-flagged tables touched.");
-        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceS));
     }
 
     // Action-specific UI: silent / confirm / confirm+reason.
@@ -3868,7 +3885,7 @@ void render_settings_modal(AppState &state) {
                 ? ""
                 : "\n(not present — defaults in use until first Save)");
     }
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
 
     float const avail = ImGui::GetContentRegionAvail().x;
     float const btn_w = 96.0f;
@@ -3893,7 +3910,7 @@ void render_settings_modal(AppState &state) {
             "loose <id>.toml overrides. See docs/17 and docs/25.");
     }
 
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
     ImGui::TextUnformatted("ROM dump root");
     ImGui::SetNextItemWidth(input_w);
     ImGui::InputText("##settings_rom_root", state.settings_rom_dump_root_input,
@@ -3914,9 +3931,9 @@ void render_settings_modal(AppState &state) {
             "(not Program Files).");
     }
 
-    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceM));
     ImGui::Separator();
-    ImGui::Dummy(ImVec2(0.0f, 4.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
 
     // Button-row convention (matches unsaved_modal, csv_import_modal,
     // autotune modals, new_project_modal):
@@ -3990,7 +4007,7 @@ void render_settings_modal(AppState &state) {
     }
 
     if (!state.settings_status_msg.empty()) {
-        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceS));
         ImGui::PushStyleColor(ImGuiCol_Text, state.settings_status_color);
         ImGui::TextWrapped("%s", state.settings_status_msg.c_str());
         ImGui::PopStyleColor();
@@ -4184,17 +4201,17 @@ void render_read_rom_modal(AppState &state) {
     if (state.read_rom_state == AppState::ReadRomState::Idle) {
         ImGui::TextUnformatted("Pulls a ROM dump from the connected ECU via the");
         ImGui::TextUnformatted("OBDX/J2534/native adapter. Read-only — no ECU writes.");
-        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
         ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_caution());
         ImGui::TextWrapped("Before clicking Read: ignition must be in ACC or RUN "
                            "(engine off is fine), nothing else (e.g. COBB AccessPort) "
                            "plugged into the OBD-II port, OBDX in the port. ECU is "
                            "asleep with key out — it won't answer.");
         ImGui::PopStyleColor();
-        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceS));
 
         bool const adapter_ready = render_adapter_picker(state.read_rom_adapter);
-        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
         ImGui::InputText("Base address (hex)", state.read_rom_base_addr_hex,
                          sizeof state.read_rom_base_addr_hex);
         ImGui::InputText("Size (hex)", state.read_rom_size_hex, sizeof state.read_rom_size_hex);
@@ -4260,13 +4277,13 @@ void render_read_rom_modal(AppState &state) {
 
         // Pre-run errors (typically a parse failure from a previous click).
         if (!state.read_rom_error_msg.empty()) {
-            ImGui::Dummy(ImVec2(0.0f, 6.0f));
+            ImGui::Dummy(ImVec2(0.0f, kSpaceS));
             ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
             ImGui::TextWrapped("%s", state.read_rom_error_msg.c_str());
             ImGui::PopStyleColor();
         }
 
-        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceM));
 
         bool const start_disabled = !adapter_ready;
         ImGui::BeginDisabled(start_disabled);
@@ -4475,12 +4492,12 @@ void render_read_rom_modal(AppState &state) {
         std::snprintf(overlay, sizeof overlay, "0x%X / 0x%X  (%.1f%%)", done, total,
                       static_cast<double>(100.0f * frac));
         ImGui::ProgressBar(frac, ImVec2(-1.0f, 0.0f), overlay);
-        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceS));
         ImGui::Text("Elapsed: %s", elapsed_str().c_str());
-        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceM));
         text_subtle("Reading is slow (10-30 KB/s typical on SSM).");
         text_subtle("A 2 MB ROM usually takes 4-15 minutes.");
-        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceM));
         if (ImGui::Button("Cancel read", ImVec2(160.0f, 0.0f))) {
             state.read_rom_cancel->store(true, std::memory_order_release);
         }
@@ -4495,7 +4512,7 @@ void render_read_rom_modal(AppState &state) {
         ImGui::PopStyleColor();
         ImGui::Text("Got %zu bytes in %s.", state.read_rom_bytes_result.size(),
                     elapsed_str().c_str());
-        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceM));
 
         if (ImGui::Button("Save .bin...", ImVec2(160.0f, 0.0f))) {
             NFD::UniquePath out_path;
@@ -4540,7 +4557,7 @@ void render_read_rom_modal(AppState &state) {
             ImGui::CloseCurrentPopup();
         }
         if (!state.read_rom_error_msg.empty()) {
-            ImGui::Dummy(ImVec2(0.0f, 6.0f));
+            ImGui::Dummy(ImVec2(0.0f, kSpaceS));
             ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
             ImGui::TextWrapped("%s", state.read_rom_error_msg.c_str());
             ImGui::PopStyleColor();
@@ -4554,12 +4571,12 @@ void render_read_rom_modal(AppState &state) {
         ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
         ImGui::TextUnformatted("Read failed.");
         ImGui::PopStyleColor();
-        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
         ImGui::TextWrapped("%s", state.read_rom_error_msg.c_str());
-        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceM));
     } else if (state.read_rom_state == AppState::ReadRomState::Cancelled) {
         ImGui::TextUnformatted("Read cancelled.");
-        ImGui::Dummy(ImVec2(0.0f, 10.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceM));
     }
     if (ImGui::Button("Back", ImVec2(120.0f, 0.0f)) ||
         ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
@@ -5779,7 +5796,7 @@ void render_empty_state(char const *title, char const *hint) {
     float const top_pad = std::max(24.0f, avail_h * 0.10f);
     ImGui::Dummy(ImVec2(0.0f, top_pad));
     text_centered(title, 1.0f);
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
     text_centered_subtle(hint);
 }
 
@@ -5947,14 +5964,14 @@ void render_welcome_panel(AppState &state) {
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Pick a .stune project directory.  (Ctrl+O)");
     }
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
     text_centered_subtle("Ctrl+O");
 
     // New-project CTA. Slightly smaller than Open Project so the
     // welcome panel keeps its primary-action / secondary-action
     // hierarchy — opening an existing project is the more common
     // first move.
-    ImGui::Dummy(ImVec2(0.0f, 10.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceM));
     constexpr float kSecondaryW = 200.0f;
     center_cursor_x(kSecondaryW);
     if (ImGui::Button("New project…", ImVec2(kSecondaryW, 30.0f))) {
@@ -6002,7 +6019,7 @@ void render_welcome_panel(AppState &state) {
             dl->AddLine(ImVec2(p.x, p.y + 2.0f), ImVec2(p.x + kRowW, p.y + 2.0f), col);
             ImGui::Dummy(ImVec2(kRowW, 4.0f));
         }
-        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
 
         // Snapshot indices to act on — modifying recents inside the
         // iteration (via try_open_project) would invalidate iterators.
@@ -6060,7 +6077,7 @@ void render_welcome_panel(AppState &state) {
                 ImGui::SetCursorPosX(button_left_x);
             }
             text_subtle("%s", subtitle.c_str());
-            ImGui::Dummy(ImVec2(0.0f, 6.0f));
+            ImGui::Dummy(ImVec2(0.0f, kSpaceS));
             ImGui::PopID();
         }
         ImGui::EndGroup();
@@ -6100,7 +6117,7 @@ void render_welcome_panel(AppState &state) {
             dl->AddLine(ImVec2(p.x, p.y + 2.0f), ImVec2(p.x + kRowW, p.y + 2.0f), col);
             ImGui::Dummy(ImVec2(kRowW, 4.0f));
         }
-        ImGui::Dummy(ImVec2(0.0f, 4.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
         for (auto const *line : kWhatsNew) {
             text_subtle("\xE2\x80\xA2  %s", line);
             ImGui::Dummy(ImVec2(0.0f, 2.0f));
@@ -6110,7 +6127,7 @@ void render_welcome_panel(AppState &state) {
 
     // Footer: version + a small Help shortcut. Subtle enough to not
     // compete with the CTAs above, present enough to be discoverable.
-    ImGui::Dummy(ImVec2(0.0f, 24.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXL));
     {
         char buf[64];
         std::snprintf(buf, sizeof buf, "SubuwuTuner %.*s",
