@@ -84,6 +84,10 @@ inline ImVec4 chip_fg_caution();
 inline ImVec4 chip_fg_ok();
 inline ImVec4 chip_fg_danger();
 
+// Forward decl for the centered empty-state helper — same forward-
+// decl reason as the chip palette. Panels at lines ~5985+ call this.
+void render_empty_state(char const *title, char const *hint);
+
 struct Fonts {
     ImFont *ui = nullptr;   // Sans for UI chrome (menus, labels, panels)
     ImFont *mono = nullptr; // Monospace for grids, hex, log output
@@ -4836,8 +4840,9 @@ void render_sidebar(AppState &state) {
         // Quiet empty state. The welcome panel on the right owns the
         // primary Open Project CTA; the sidebar just acknowledges that
         // tables will appear here once a project is loaded.
-        ImGui::Dummy(ImVec2(0.0f, 8.0f));
-        text_subtle("Tables will appear here.");
+        render_empty_state(
+            "No project",
+            "Open one (Ctrl+O) to browse its calibration tables here.");
         ImGui::End();
         return;
     }
@@ -4872,11 +4877,11 @@ void render_sidebar(AppState &state) {
     }
 
     if (!filter.empty() && matched == 0) {
-        ImGui::Dummy(ImVec2(0.0f, 8.0f));
-        ImGui::TextWrapped("No tables match \"%s\".", state.table_filter);
-        ImGui::Dummy(ImVec2(0.0f, 4.0f));
-        text_subtle("Try a shorter prefix, or clear the filter "
-                    "(Esc).");
+        char title[80];
+        std::snprintf(title, sizeof title, "No tables match \"%s\"", state.table_filter);
+        render_empty_state(
+            title,
+            "Try a shorter prefix, or press Esc to clear the filter.");
         ImGui::End();
         return;
     }
@@ -5645,6 +5650,20 @@ void text_centered_subtle(char const *text) {
     text_subtle("%s", text);
 }
 
+// Centered empty-state for panels that have no data to show. Title is
+// regular weight (reads as a heading); hint is subtle (reads as a
+// caption). Top padding lifts the cluster off the panel's top edge so
+// it doesn't read as a terse one-liner stuck against the title bar.
+// Use for "no project loaded", "select a table first", "pack declares
+// no DTCs" — wherever a panel needs to acknowledge a void rather than
+// look broken.
+void render_empty_state(char const *title, char const *hint) {
+    ImGui::Dummy(ImVec2(0.0f, 24.0f));
+    text_centered(title);
+    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+    text_centered_subtle(hint);
+}
+
 // Small framed "tag" used to highlight a per-table attribute (unit, safety
 // flag, …) without it competing with the title. Looks like a button but
 // stays purely visual: the return value is ignored and the hover/active
@@ -5991,18 +6010,24 @@ void render_stats_panel(AppState &state) {
         return;
     }
     if (!state.project.has_value()) {
-        text_subtle("No project loaded.");
+        render_empty_state(
+            "No project",
+            "Open one (Ctrl+O) to see table statistics here.");
         ImGui::End();
         return;
     }
     if (state.selected_table_id.empty() || !state.current_table_data.has_value()) {
-        text_subtle("Select a table to see its stats.");
+        render_empty_state(
+            "Pick a table",
+            "Select one in the Tables panel — min / mean / max and a value histogram show up here.");
         ImGui::End();
         return;
     }
     auto const *table = state.project->definition().find_table(state.selected_table_id);
     if (table == nullptr) {
-        text_subtle("Selected table not found in pack.");
+        render_empty_state(
+            "Table not found",
+            "The selected table id isn't in the loaded pack. Pick another from the Tables panel.");
         ImGui::End();
         return;
     }
@@ -7189,13 +7214,17 @@ void render_dtcs_panel(AppState &state) {
         return;
     }
     if (!state.project.has_value()) {
-        text_subtle("No project loaded.");
+        render_empty_state(
+            "No project",
+            "Open one (Ctrl+O) to view its declared DTCs and toggle them.");
         ImGui::End();
         return;
     }
     auto const &def = state.project->definition();
     if (def.dtcs().empty()) {
-        text_subtle("This pack declares no DTC bitmaps.");
+        render_empty_state(
+            "No DTCs in this pack",
+            "Toggleable DTCs need pack-side support — see docs/11-definition-format.md.");
         ImGui::End();
         return;
     }
@@ -7327,7 +7356,9 @@ void render_history_panel(AppState &state) {
         return;
     }
     if (!state.project.has_value()) {
-        text_subtle("No project loaded.");
+        render_empty_state(
+            "No project",
+            "Open one (Ctrl+O) to see your edit history here. Ctrl+Z and Ctrl+Shift+Z navigate it.");
         ImGui::End();
         return;
     }
@@ -7347,7 +7378,12 @@ void render_history_panel(AppState &state) {
 
     if (records.empty()) {
         ImGui::Separator();
-        text_subtle("(no edits yet)");
+        // Empty-but-project-loaded: keep the header + filter visible
+        // above so the user sees the panel is "alive" — just no rows
+        // yet. The empty-state hint says how to fill it.
+        render_empty_state(
+            "No edits yet",
+            "Click a cell in the table grid and type a new value. Every change is an undoable history step.");
         ImGui::End();
         return;
     }
@@ -8846,8 +8882,16 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         return;
     }
     if (!state.current_table_data.has_value()) {
-        ImGui::TextWrapped("Could not read table '%s' from the working ROM.",
-                           state.selected_table_id.c_str());
+        // Soft error: table exists in the pack but its bytes can't be
+        // read from the working ROM. Usually a pack/ROM-version
+        // mismatch or an address that's out of bounds for this ROM
+        // size. Phrased as guidance, not a stack trace.
+        char hint[256];
+        std::snprintf(hint, sizeof hint,
+                      "'%s' is declared in the pack but its bytes don't decode against the loaded ROM. "
+                      "Check the pack matches this ROM's CID.",
+                      state.selected_table_id.c_str());
+        render_empty_state("Couldn't read this table", hint);
         ImGui::End();
         return;
     }
