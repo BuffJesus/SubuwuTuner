@@ -603,6 +603,13 @@ struct AppState {
     bool show_imgui_demo{false};
     bool show_shortcuts_modal{false};
     bool show_about_modal{false};
+
+    // ISO 8601 UTC timestamp of the most recent save_project() success in
+    // this session. Drives the "Saved 3 minutes ago" status-bar reading;
+    // empty until the first save, which falls back to a plain "Clean"
+    // chip (the project on disk is still saved — it just wasn't saved
+    // by this session).
+    std::optional<std::string> last_save_iso;
     // Phase 5 custom-features designer. Hidden behind View → Debug.
     // Graph data model lives in st::feature; the wiring fields below
     // are transient editor state (only meaningful while the user is
@@ -958,6 +965,7 @@ struct AppState {
             selected_table_id.clear();
             current_table_data.reset();
             selection.reset();
+            last_save_iso.reset();
             return;
         }
         project = std::move(*r);
@@ -965,8 +973,10 @@ struct AppState {
         selected_table_id.clear();
         current_table_data.reset();
         selection.reset();
-        // New project = clean state.
+        // New project = clean state. last_save_iso resets too — any
+        // prior "Saved 3m ago" reading was for the previous project.
         dirty = false;
+        last_save_iso.reset();
         // Successful open → bump in recents so the welcome panel shows
         // this project at the top next cold start.
         push_recent(recents, path);
@@ -1008,6 +1018,7 @@ struct AppState {
         selected_z = 0;
         status_msg.clear();
         dirty = false;
+        last_save_iso.reset();
     }
 
     // --- Pack registry browser ---------------------------------------------
@@ -1064,6 +1075,7 @@ void save_project(AppState &state) {
     }
     state.status_msg = "Saved.";
     state.dirty = false;
+    state.last_save_iso = iso8601_utc_now();
 }
 
 // Writes the currently-selected table to `path` as a CSV in the same
@@ -4927,6 +4939,9 @@ void render_menubar(AppState &state) {
             ImGui::BulletText(
                 "File \xE2\x86\x92 Open Project\xE2\x80\xA6 (Ctrl+O) to pick a .stune directory.");
             ImGui::BulletText("Or pass one on the command line: subuwutuner-gui my.stune");
+            ImGui::BulletText(
+                "No project of your own? Open the bundled fixtures/demo.stune/ to "
+                "explore the UI.");
             ImGui::Separator();
             text_subtle("Editing");
             ImGui::BulletText("Click cells to select; Shift-click to extend.");
@@ -9562,9 +9577,29 @@ void render_status_bar(AppState &state) {
                                   "Ctrl+S to save the .stune project.");
             }
         } else {
-            chip("Clean", chip_fg_muted(), chip_bg_muted());
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("All edits are saved to disk.");
+            // After a successful save this session, swap the generic
+            // "Clean" reading for "Saved <relative time>" — at-a-glance
+            // freshness. Before the first save (project just opened),
+            // fall back to "Clean" since the project on disk is still
+            // saved, we just don't have a session-local timestamp.
+            if (state.last_save_iso.has_value()) {
+                auto const rel = format_relative_time(*state.last_save_iso);
+                char buf[48];
+                if (rel.empty()) {
+                    std::snprintf(buf, sizeof buf, "Saved");
+                } else {
+                    std::snprintf(buf, sizeof buf, "Saved %s", rel.c_str());
+                }
+                chip(buf, chip_fg_muted(), chip_bg_muted());
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Last save: %s UTC.\nAll edits are on disk.",
+                                      state.last_save_iso->c_str());
+                }
+            } else {
+                chip("Clean", chip_fg_muted(), chip_bg_muted());
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("All edits are saved to disk.");
+                }
             }
         }
 
