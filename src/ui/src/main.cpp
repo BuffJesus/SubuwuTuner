@@ -3378,7 +3378,11 @@ void render_flash_modal(AppState &state) {
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(560.0f, 0.0f), ImGuiCond_Appearing);
+    // Width floor prevents the AlwaysAutoResize+TextWrapped shrink
+    // loop (same bug fixed in render_read_rom_modal). Flash modal
+    // has TextWrapped at the REFUSED branches.
+    ImGui::SetNextWindowSizeConstraints(ImVec2(560.0f, 240.0f),
+                                        ImVec2(560.0f, FLT_MAX));
     if (!ImGui::BeginPopupModal("Flash...##flash_modal", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
@@ -3988,7 +3992,11 @@ void render_settings_modal(AppState &state) {
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(640.0f, 0.0f), ImGuiCond_Appearing);
+    // Width floor prevents the AlwaysAutoResize+TextWrapped shrink
+    // loop (same bug fixed in render_read_rom_modal). Settings
+    // modal renders TextWrapped for the post-save status_msg.
+    ImGui::SetNextWindowSizeConstraints(ImVec2(640.0f, 200.0f),
+                                        ImVec2(640.0f, FLT_MAX));
     if (!ImGui::BeginPopupModal("Settings##settings_modal", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
@@ -9765,21 +9773,34 @@ void tick_status_msg(AppState &state) {
     }
 }
 
-// Toast tuning. Lifetime + fade kept short so toasts feel responsive
-// (a 4-second window is long enough to read a one-line message, short
-// enough not to cover the workspace). Max stack caps a burst of
-// notifications from tiling the screen — oldest drop off first.
-constexpr std::chrono::milliseconds kToastLifetime{4000};
+// Toast tuning. Lifetimes vary by kind — successes and info dismiss
+// fast (a glance is enough), warn lingers, danger sticks the
+// longest because the user usually needs to read it + decide what
+// to do. Max stack caps a burst of notifications from tiling the
+// screen — oldest drop off first.
 constexpr std::chrono::milliseconds kToastFadeWindow{500};
 constexpr std::size_t kToastMaxStack = 5;
 constexpr float kToastWidth = 320.0f;
 constexpr float kToastVerticalGap = 8.0f;
 
+inline std::chrono::milliseconds toast_lifetime_for(ToastKind k) {
+    switch (k) {
+    case ToastKind::Danger:
+        return std::chrono::milliseconds{8000};
+    case ToastKind::Warn:
+        return std::chrono::milliseconds{6000};
+    case ToastKind::Success:
+    case ToastKind::Info:
+    default:
+        return std::chrono::milliseconds{4000};
+    }
+}
+
 void enqueue_toast(AppState &state, ToastKind kind, std::string text) {
     state.toasts.push_back({
         std::move(text),
         kind,
-        std::chrono::steady_clock::now() + kToastLifetime,
+        std::chrono::steady_clock::now() + toast_lifetime_for(kind),
     });
     // Drop oldest if we've exceeded the visible cap.
     if (state.toasts.size() > kToastMaxStack) {
@@ -9838,9 +9859,15 @@ void render_toasts(AppState &state) {
     // bottom-LEFT corner of the toast.
     float y_cursor = bottom_y - kToastVerticalGap;
 
+    // Click-to-dismiss: collect indices to remove after the loop so
+    // we don't invalidate iteration order while rendering. Index
+    // is into the original toasts vector (newest at .back()).
+    std::vector<std::size_t> dismiss_indices;
+
     for (std::size_t i = 0; i < state.toasts.size(); ++i) {
         // Iterate from end (newest) backward to front (oldest).
-        auto const &t = state.toasts[state.toasts.size() - 1 - i];
+        std::size_t const toast_idx = state.toasts.size() - 1 - i;
+        auto const &t = state.toasts[toast_idx];
 
         // Compute fade alpha — linear ramp during the last
         // kToastFadeWindow before expiry.
@@ -9882,12 +9909,38 @@ void render_toasts(AppState &state) {
                          ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
                          ImGuiWindowFlags_NoDocking);
         ImGui::TextWrapped("%s", t.text.c_str());
+
+        // Click-to-dismiss: any click anywhere on the toast window
+        // queues it for removal. The user might want to dismiss a
+        // sticky danger toast they've already read; this avoids
+        // waiting 8s for it to fade. The hover changes the cursor
+        // to a pointer to signal interactivity.
+        if (ImGui::IsWindowHovered()) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                dismiss_indices.push_back(toast_idx);
+            }
+        }
+
         ImGui::End();
 
         ImGui::PopStyleVar(2);
         ImGui::PopStyleColor(2);
 
         y_cursor -= toast_h + kToastVerticalGap;
+    }
+
+    // Apply dismissals in reverse so indices stay valid through the
+    // erases. (Iterated newest-first above, so dismiss_indices is
+    // already in descending order — but sort for safety.)
+    if (!dismiss_indices.empty()) {
+        std::sort(dismiss_indices.begin(), dismiss_indices.end(), std::greater<>{});
+        for (auto idx : dismiss_indices) {
+            if (idx < state.toasts.size()) {
+                state.toasts.erase(state.toasts.begin() +
+                                   static_cast<std::ptrdiff_t>(idx));
+            }
+        }
     }
 }
 
