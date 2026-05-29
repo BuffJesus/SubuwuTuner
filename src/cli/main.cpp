@@ -10317,8 +10317,15 @@ int cmd_ssm_a8_poll(int argc, char *argv[]) {
 
         // Schedule next poll on a fixed grid (not "interval since last
         // response") so jitter doesn't pile up. If a single poll
-        // overran the interval, skip ahead instead of running flat-out.
+        // overran the interval, reset the grid to (now + interval) so
+        // we don't run flat-out catching up — a struggling bus would
+        // otherwise see N back-to-back zero-sleep polls after one slow
+        // response, making things worse.
         next_poll += std::chrono::milliseconds{interval_ms};
+        if (next_poll < std::chrono::steady_clock::now()) {
+            next_poll =
+                std::chrono::steady_clock::now() + std::chrono::milliseconds{interval_ms};
+        }
         auto const sleep_until_time = std::max(next_poll, std::chrono::steady_clock::now());
         while (!g_ssm_a8_poll_stop.load(std::memory_order_acquire) &&
                std::chrono::steady_clock::now() < sleep_until_time) {
