@@ -11182,8 +11182,18 @@ int main(int argc, char *argv[]) {
         return cmd_feature_compile(argc - 2, argv + 2);
     }
     if (cmd == "autotune") {
+        // Match the `config` subcommand-help shape: list all known
+        // subcommands when none was passed, point at the top-level
+        // --help for the full per-subcommand flag set.
         if (argc < 3) {
-            std::fputs("autotune: missing subcommand. Try 'autotune maf'.\n", stderr);
+            std::fputs("Usage: subuwutuner-cli autotune <subcommand> [args]\n"
+                       "\n"
+                       "Subcommands:\n"
+                       "  maf          MAF-scaling correction from a CSV log\n"
+                       "  knock-pull   Knock-pull (ignition retract) from a CSV log\n"
+                       "\n"
+                       "Run `subuwutuner-cli --help` for the full flag set on each.\n",
+                       stderr);
             return 2;
         }
         std::string_view const sub{argv[2]};
@@ -11193,7 +11203,10 @@ int main(int argc, char *argv[]) {
         if (sub == "knock-pull") {
             return cmd_autotune_knock_pull(argc - 3, argv + 3);
         }
-        std::fprintf(stderr, "autotune: unknown subcommand: %s\n", argv[2]);
+        std::fprintf(stderr,
+                     "autotune: unknown subcommand: %s\n"
+                     "Run `subuwutuner-cli autotune` for the list of subcommands.\n",
+                     argv[2]);
         return 2;
     }
 
