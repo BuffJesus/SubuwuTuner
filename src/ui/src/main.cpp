@@ -183,6 +183,52 @@ std::filesystem::path settings_config_path() {
     return config_dir_root() / "settings.txt";
 }
 
+// Locate the bundled fixtures/demo.stune project relative to argv[0].
+// Returns nullopt if no candidate directory contains a project.toml.
+// Candidate priority:
+//   1. <exe-dir>/../../../fixtures/demo.stune  (CMake dev build tree:
+//      build/<preset>/bin/exe → repo/fixtures)
+//   2. <exe-dir>/../fixtures/demo.stune        (typical install
+//      layout with bin/ and fixtures/ as siblings)
+//   3. <exe-dir>/fixtures/demo.stune           (flat install layout)
+//
+// argv[0] on Unix may be a bare name resolved via PATH; weakly_canonical
+// handles both that case and "./subuwutuner-gui" with the same call.
+// On Windows it's typically a full backslash path. Either way, errors
+// downgrade to nullopt — the demo button just doesn't render.
+std::optional<std::filesystem::path>
+resolve_demo_project_path(char const *argv0) {
+    namespace fs = std::filesystem;
+    if (argv0 == nullptr || argv0[0] == '\0') {
+        return std::nullopt;
+    }
+    std::error_code ec;
+    fs::path const exe = fs::weakly_canonical(fs::path{argv0}, ec);
+    if (ec) {
+        return std::nullopt;
+    }
+    fs::path const exe_dir = exe.parent_path();
+    std::array<fs::path, 3> const candidates{
+        exe_dir / ".." / ".." / ".." / "fixtures" / "demo.stune",
+        exe_dir / ".." / "fixtures" / "demo.stune",
+        exe_dir / "fixtures" / "demo.stune",
+    };
+    for (auto const &c : candidates) {
+        std::error_code dir_ec;
+        if (!fs::is_directory(c, dir_ec) || dir_ec) {
+            continue;
+        }
+        std::error_code file_ec;
+        if (!fs::exists(c / "project.toml", file_ec) || file_ec) {
+            continue;
+        }
+        std::error_code canon_ec;
+        auto canon = fs::weakly_canonical(c, canon_ec);
+        return canon_ec ? c : canon;
+    }
+    return std::nullopt;
+}
+
 std::string iso8601_utc_now() {
     auto const now = std::chrono::system_clock::now();
     auto const t = std::chrono::system_clock::to_time_t(now);
@@ -610,6 +656,13 @@ struct AppState {
     // chip (the project on disk is still saved — it just wasn't saved
     // by this session).
     std::optional<std::string> last_save_iso;
+
+    // Path to the bundled fixtures/demo.stune project, resolved at
+    // startup from argv[0] (best-effort, depends on the install
+    // layout — dev tree, packaged, etc). Welcome panel renders a
+    // "Try the demo project" button when this is set; absent in
+    // installs that didn't ship the demo. See resolve_demo_project_path.
+    std::optional<std::filesystem::path> demo_project_path;
     // Phase 5 custom-features designer. Hidden behind View → Debug.
     // Graph data model lives in st::feature; the wiring fields below
     // are transient editor state (only meaningful while the user is
@@ -6001,6 +6054,27 @@ void render_welcome_panel(AppState &state) {
                           "create a new .stune project directory.");
     }
 
+    // "Try the demo project" CTA — third tier, only renders when
+    // the resolver actually located fixtures/demo.stune at startup
+    // (dev tree or install layout that ships fixtures alongside the
+    // binary). One click → open the bundled project, no file dialog,
+    // no required ROM dump. Highest leverage on a fresh first-run
+    // experience; quietly absent when not available so packaged
+    // installs without the demo don't show a broken button.
+    if (state.demo_project_path.has_value()) {
+        ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+        constexpr float kTertiaryW = 200.0f;
+        center_cursor_x(kTertiaryW);
+        if (ImGui::Button("Try the demo project", ImVec2(kTertiaryW, 28.0f))) {
+            request_action(state, ConfirmAction::OpenRecent,
+                           *state.demo_project_path);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Open the bundled fixtures/demo.stune project.\n%s",
+                              state.demo_project_path->string().c_str());
+        }
+    }
+
     // First-run-only pack hint. Answers "what do I need to start?"
     // without forcing the user to open the New Project modal first
     // to find out. Hidden once the user has any recents — they've
@@ -6008,7 +6082,14 @@ void render_welcome_panel(AppState &state) {
     if (!has_recents) {
         ImGui::Dummy(ImVec2(0.0f, 18.0f));
         text_centered_subtle("First time? You'll need an ECU ROM dump + a definition pack.");
-        text_centered_subtle("The repo ships fixtures/demo.stune/ as a ready-to-open project.");
+        if (!state.demo_project_path.has_value()) {
+            // Only mention the demo as a follow-up hint when the
+            // button itself isn't already on screen — otherwise the
+            // text duplicates the CTA right above it.
+            text_centered_subtle("The repo ships fixtures/demo.stune/ as a ready-to-open project.");
+        } else {
+            text_centered_subtle("Or click \"Try the demo project\" above to explore the UI now.");
+        }
     }
 
     // Recents block. Empty list → render nothing here; first-run users
@@ -9854,6 +9935,11 @@ int main(int argc, char *argv[]) {
     AppState state;
     state.recents = load_recents();
     state.settings = load_settings();
+    // Best-effort lookup of the bundled fixtures/demo.stune. Welcome
+    // panel renders a "Try the demo project" button when set; absent
+    // in installs that didn't ship the demo (the call returns
+    // nullopt and the button just doesn't render).
+    state.demo_project_path = resolve_demo_project_path(argc >= 1 ? argv[0] : nullptr);
     // Apply the persisted theme before any user-visible frame renders.
     apply_theme(state.settings.theme);
     std::string_view const arg1 = (argc >= 2) ? argv[1] : "";
