@@ -74,6 +74,13 @@ namespace {
 #endif
 void text_subtle(char const *fmt, ...);
 
+// Forward decls for the theme-aware chip palette — defined alongside
+// the chip() helper below. Forward-declared here so always-visible
+// widgets (the sidebar S/E badges) can call them without juggling the
+// large block of widget-render functions in between.
+inline ImVec4 chip_fg_warn();
+inline ImVec4 chip_fg_caution();
+
 struct Fonts {
     ImFont *ui = nullptr;   // Sans for UI chrome (menus, labels, panels)
     ImFont *mono = nullptr; // Monospace for grids, hex, log output
@@ -300,6 +307,25 @@ inline AccentTriple accent_for(Theme t) noexcept {
                 ImVec4(0.40f, 0.20f, 0.70f, 1.00f)};
     }
     return {accent_purple, ImVec4(0.62f, 0.45f, 0.90f, 1.00f), ImVec4(0.70f, 0.55f, 0.95f, 1.00f)};
+}
+
+// File-local current-theme cache, updated by apply_theme() at the top
+// of the function so any helper that needs theme-aware colors can read
+// it without threading Theme through every call site. Chip palettes
+// (chip_fg_warn etc) and badge tints use this; widget-internal ImGui
+// style colors are still the source of truth for native widgets.
+namespace {
+Theme g_current_theme{Theme::Dark};
+}
+
+inline Theme current_theme() noexcept {
+    return g_current_theme;
+}
+
+// True when the active theme renders against a light surface — useful
+// for picking foreground colors that need to flip dark to stay legible.
+inline bool theme_is_light() noexcept {
+    return g_current_theme == Theme::Light;
 }
 
 struct Settings {
@@ -3597,6 +3623,11 @@ void apply_palette_light(ImGuiStyle &s) {
 // alpha; force fully-opaque WindowBg so detached panels don't show
 // through to the desktop.
 void apply_theme(Theme t) {
+    // Cache for chip helpers (chip_fg_warn etc) that need theme-aware
+    // colors without threading Theme through every call site. ImGui is
+    // single-threaded so no race.
+    g_current_theme = t;
+
     auto &s = ImGui::GetStyle();
     apply_style_shape(s);
     if (t == Theme::Light)
@@ -4853,8 +4884,13 @@ void render_sidebar(AppState &state) {
                 ImGui::GetWindowContentRegionMax().x - w - ImGui::GetStyle().FramePadding.x;
             ImGui::SameLine();
             ImGui::SetCursorPosX(right_x);
-            ImVec4 const color = t.engine_safety_critical ? ImVec4(1.00f, 0.86f, 0.55f, 1.0f)
-                                                          : ImVec4(0.96f, 0.94f, 0.65f, 1.0f);
+            // Theme-aware via the same fg colors the chip palette uses:
+            // S (engine-safety) shares chip_fg_warn (amber band), E
+            // (emissions) shares chip_fg_caution (yellow band). In light
+            // theme these flip to dark amber / dark olive so they stay
+            // legible against the pale-blue panel background.
+            ImVec4 const color =
+                t.engine_safety_critical ? chip_fg_warn() : chip_fg_caution();
             ImGui::TextColored(color, "%s", buf);
         }
         if (row_hovered) {
@@ -4871,9 +4907,9 @@ void render_sidebar(AppState &state) {
                 text_subtle("category: %s", t.category.c_str());
             }
             if (t.engine_safety_critical) {
-                ImGui::TextColored(ImVec4(1.00f, 0.86f, 0.55f, 1.0f), "engine safety critical");
+                ImGui::TextColored(chip_fg_warn(), "engine safety critical");
             } else if (t.emissions_relevant) {
-                ImGui::TextColored(ImVec4(0.96f, 0.94f, 0.65f, 1.0f), "emissions-relevant");
+                ImGui::TextColored(chip_fg_caution(), "emissions-relevant");
             }
             ImGui::EndTooltip();
         }
@@ -5569,42 +5605,63 @@ void chip(char const *text, ImVec4 fg, ImVec4 bg) {
 }
 
 // Common chip palettes — kept centrally so future flags pick from a small,
-// coherent set rather than each call site rolling its own RGB.
+// coherent set rather than each call site rolling its own RGB. Each pair
+// (fg, bg) is theme-aware: dark variants are pale-fg on dark-tint-bg, light
+// variants flip to dark-fg on pale-tint-bg so contrast holds on white. The
+// alpha on bg composites against WindowBg, so the chips read as tinted
+// surfaces rather than slabs.
+//
+// Accent uses the brand purple from accent_for() — same purple as
+// ButtonActive / HeaderActive / TabSelectedOverline / the welcome-panel
+// accent rule, so when an "active" chip lights up it matches the rest of
+// the active-element language.
 inline ImVec4 chip_fg_accent() {
-    return ImVec4(0.79f, 0.88f, 1.00f, 1.0f);
+    return theme_is_light() ? ImVec4(0.32f, 0.18f, 0.55f, 1.0f)
+                            : ImVec4(0.92f, 0.84f, 1.00f, 1.0f);
 }
 inline ImVec4 chip_bg_accent() {
-    return ImVec4(0.16f, 0.28f, 0.48f, 0.55f);
+    return theme_is_light() ? ImVec4(0.85f, 0.78f, 0.96f, 0.80f)
+                            : ImVec4(0.32f, 0.20f, 0.50f, 0.55f);
 }
 inline ImVec4 chip_fg_warn() {
-    return ImVec4(1.00f, 0.86f, 0.55f, 1.0f);
+    return theme_is_light() ? ImVec4(0.55f, 0.32f, 0.05f, 1.0f)
+                            : ImVec4(1.00f, 0.86f, 0.55f, 1.0f);
 }
 inline ImVec4 chip_bg_warn() {
-    return ImVec4(0.42f, 0.30f, 0.08f, 0.60f);
+    return theme_is_light() ? ImVec4(1.00f, 0.90f, 0.65f, 0.78f)
+                            : ImVec4(0.42f, 0.30f, 0.08f, 0.60f);
 }
 inline ImVec4 chip_fg_caution() {
-    return ImVec4(0.96f, 0.94f, 0.65f, 1.0f);
+    return theme_is_light() ? ImVec4(0.46f, 0.40f, 0.05f, 1.0f)
+                            : ImVec4(0.96f, 0.94f, 0.65f, 1.0f);
 }
 inline ImVec4 chip_bg_caution() {
-    return ImVec4(0.34f, 0.32f, 0.08f, 0.55f);
+    return theme_is_light() ? ImVec4(1.00f, 0.96f, 0.70f, 0.75f)
+                            : ImVec4(0.34f, 0.32f, 0.08f, 0.55f);
 }
 inline ImVec4 chip_fg_muted() {
-    return ImVec4(0.78f, 0.80f, 0.82f, 1.0f);
+    return theme_is_light() ? ImVec4(0.32f, 0.36f, 0.42f, 1.0f)
+                            : ImVec4(0.78f, 0.80f, 0.82f, 1.0f);
 }
 inline ImVec4 chip_bg_muted() {
-    return ImVec4(0.22f, 0.24f, 0.28f, 0.55f);
+    return theme_is_light() ? ImVec4(0.82f, 0.85f, 0.90f, 0.75f)
+                            : ImVec4(0.22f, 0.24f, 0.28f, 0.55f);
 }
 inline ImVec4 chip_fg_ok() {
-    return ImVec4(0.70f, 0.94f, 0.72f, 1.0f);
+    return theme_is_light() ? ImVec4(0.10f, 0.40f, 0.15f, 1.0f)
+                            : ImVec4(0.70f, 0.94f, 0.72f, 1.0f);
 }
 inline ImVec4 chip_bg_ok() {
-    return ImVec4(0.14f, 0.34f, 0.18f, 0.55f);
+    return theme_is_light() ? ImVec4(0.75f, 0.93f, 0.78f, 0.75f)
+                            : ImVec4(0.14f, 0.34f, 0.18f, 0.55f);
 }
 inline ImVec4 chip_fg_danger() {
-    return ImVec4(1.00f, 0.75f, 0.72f, 1.0f);
+    return theme_is_light() ? ImVec4(0.58f, 0.10f, 0.10f, 1.0f)
+                            : ImVec4(1.00f, 0.75f, 0.72f, 1.0f);
 }
 inline ImVec4 chip_bg_danger() {
-    return ImVec4(0.46f, 0.18f, 0.18f, 0.60f);
+    return theme_is_light() ? ImVec4(1.00f, 0.82f, 0.80f, 0.80f)
+                            : ImVec4(0.46f, 0.18f, 0.18f, 0.60f);
 }
 
 // Cold-start panel — what the user sees before any project is loaded. The
@@ -5642,7 +5699,10 @@ void render_welcome_panel(AppState &state) {
         center_cursor_x(kRuleW);
         ImVec2 const p = ImGui::GetCursorScreenPos();
         auto *const dl = ImGui::GetWindowDrawList();
-        auto const [accent, accent_hover, accent_active] = accent_for(state.settings.theme);
+        // Read from current_theme() not state.settings.theme — the
+        // global is what apply_theme() actually wrote, so this matches
+        // the ImGui style colors the surrounding widgets are using.
+        auto const [accent, accent_hover, accent_active] = accent_for(current_theme());
         (void)accent_hover;
         (void)accent_active;
         ImU32 const col = ImGui::GetColorU32(accent);
