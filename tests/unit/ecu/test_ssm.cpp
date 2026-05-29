@@ -495,3 +495,76 @@ TEST_CASE("SsmClient with IsoTp framing emits bare-payload frames", "[ssm][clien
     REQUIRE(*r == std::vector<std::uint8_t>{0x42});
     REQUIRE(t.exhausted());
 }
+
+TEST_CASE("SsmClient IsoTp sustains repeated multi-address polls",
+          "[ssm][client][isotp][poll]") {
+    // Models the wire shape the `ssm-a8-poll` CLI emits: the same
+    // multi-address A8 request goes out each cycle; the ECU response
+    // is a fresh value per byte each time. The CLI poll loop drives
+    // SsmClient::read() in a fixed-interval loop and expects the
+    // per-cycle responses to come back in request order.
+    std::vector<std::uint32_t> const addrs{0x00000E, 0x00000F, 0x000008};
+    auto const expected_req = ssm::build_a8_request(addrs, ssm::Framing::IsoTp);
+    REQUIRE(expected_req.has_value());
+    REQUIRE(*expected_req ==
+            std::vector<std::uint8_t>{0xA8, 0x00, 0x00, 0x00, 0x0E, 0x00, 0x00, 0x0F, 0x00, 0x00,
+                                      0x08});
+
+    std::vector<std::vector<std::uint8_t>> const cycles{
+        {0xE8, 0x0C, 0xC0, 0x52},  // RPM hi/lo, coolant raw — idle-ish
+        {0xE8, 0x0C, 0xD2, 0x52},  // RPM ticked up
+        {0xE8, 0x0D, 0x44, 0x53},  // RPM higher, coolant +1
+    };
+
+    st::transport::MockTransport t;
+    for (auto const &resp : cycles) {
+        t.expect_send_recv(*expected_req, resp);
+    }
+    REQUIRE(t.open({st::transport::LinkKind::CanIso15765, 500000}).has_value());
+
+    ssm::SsmClient client{t, ssm::Framing::IsoTp};
+    std::vector<std::vector<std::uint8_t>> got;
+    for (std::size_t i = 0; i < cycles.size(); ++i) {
+        auto const r = client.read(addrs, 100ms);
+        REQUIRE(r.has_value());
+        REQUIRE(r->size() == addrs.size());
+        got.push_back(*r);
+    }
+    REQUIRE(t.exhausted());
+
+    REQUIRE(got[0] == std::vector<std::uint8_t>{0x0C, 0xC0, 0x52});
+    REQUIRE(got[1] == std::vector<std::uint8_t>{0x0C, 0xD2, 0x52});
+    REQUIRE(got[2] == std::vector<std::uint8_t>{0x0D, 0x44, 0x53});
+}
+
+TEST_CASE("SsmClient IsoTp poll loop tolerates mid-stream NRC and continues",
+          "[ssm][client][isotp][poll][error]") {
+    // The CLI poll loop logs NRC errors inline ('! <msg>' rows) and
+    // keeps polling. This test confirms SsmClient::read() returns a
+    // non-fatal EcuRejected on a `7F <nrc>` response without poisoning
+    // the underlying transport for the next request.
+    std::vector<std::uint32_t> const addrs{0x000008};
+    auto const expected_req = ssm::build_a8_request(addrs, ssm::Framing::IsoTp);
+    REQUIRE(expected_req.has_value());
+
+    st::transport::MockTransport t;
+    t.expect_send_recv(*expected_req, {0xE8, 0x40});           // good
+    t.expect_send_recv(*expected_req, {0x7F, 0x12});           // NRC subFnNotSupported
+    t.expect_send_recv(*expected_req, {0xE8, 0x42});           // good again
+    REQUIRE(t.open({st::transport::LinkKind::CanIso15765, 500000}).has_value());
+
+    ssm::SsmClient client{t, ssm::Framing::IsoTp};
+
+    auto const r1 = client.read(addrs, 100ms);
+    REQUIRE(r1.has_value());
+    REQUIRE(*r1 == std::vector<std::uint8_t>{0x40});
+
+    auto const r2 = client.read(addrs, 100ms);
+    REQUIRE_FALSE(r2.has_value());
+
+    auto const r3 = client.read(addrs, 100ms);
+    REQUIRE(r3.has_value());
+    REQUIRE(*r3 == std::vector<std::uint8_t>{0x42});
+
+    REQUIRE(t.exhausted());
+}

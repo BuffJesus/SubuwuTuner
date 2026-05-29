@@ -392,6 +392,27 @@ constexpr std::string_view kUsage =
     "                            Use case: SecurityAccess seed/key capture (run\n"
     "                            during a COBB connect cycle) for downstream feeding\n"
     "                            into tools/extract_subaru_sa.py.\n"
+    "    ssm-a8-poll --transport <kind> --output <FILE.log>\n"
+    "                --addr <hex>[,<hex>...] [--addr <hex> ...]\n"
+    "                [--device <path>] [--dll <path>] [--duration <sec>]\n"
+    "                [--interval-ms <ms>] [--timeout-ms <ms>] [--verbose]\n"
+    "                            OEM Subaru SSM Command 0xA8 (Read-Multi-Address)\n"
+    "                            over ISO-15765 (tester 0x7E0, ECU 0x7E8, 500 kbps).\n"
+    "                            Reads one byte per --addr from ECU RAM, repeatedly\n"
+    "                            at --interval-ms (default 333 ms, ~3 Hz). For\n"
+    "                            multi-byte fields (e.g. RPM u16 at SSM 0x00000E),\n"
+    "                            pass each byte as a separate --addr; the downstream\n"
+    "                            correlator assembles them. Stops on Ctrl+C or after\n"
+    "                            --duration seconds. Output is a header-commented\n"
+    "                            log: per-poll lines '<elapsed_ms>\\t<HH HH ...>'\n"
+    "                            with one hex byte per address in request order.\n"
+    "                            Use case: cross-correlate captured COBB F3xx\n"
+    "                            response bytes against direct OEM RAM reads to\n"
+    "                            recover the byte-to-RAM-address map without ROM\n"
+    "                            disassembly (see fixtures/private/findings_dmann_\n"
+    "                            sniff_20260528/NEXT-SESSION-RECIPE.md). May be\n"
+    "                            SA-gated on COBB-tuned ECUs; if denied, retry on\n"
+    "                            a factory / uninstalled ECU or unlock SSM first.\n"
     "    rom-pull --addr <hex> --size <hex> --output <FILE.bin>\n"
     "             (--trace <FILE.uds> | --transport <kind> [--dll <path>]\n"
     "                                   [--device <path>])\n"
@@ -9924,6 +9945,279 @@ int cmd_sniff(int argc, char *argv[]) {
     return 0;
 }
 
+// SIGINT handler for cmd_ssm_a8_poll. Same shape as cmd_sniff — atomic
+// flag flipped from the signal handler, polled by the main loop. Kept
+// command-local so it doesn't bleed into other commands.
+namespace {
+std::atomic<bool> g_ssm_a8_poll_stop{false};
+void ssm_a8_poll_sigint_handler(int /*sig*/) {
+    g_ssm_a8_poll_stop.store(true, std::memory_order_release);
+}
+} // namespace
+
+int cmd_ssm_a8_poll(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::optional<std::filesystem::path> output_path;
+    std::optional<std::uint32_t> duration_seconds;
+    std::uint32_t interval_ms = 333;  // ~3 Hz, matches COBB AP F3xx cadence
+    std::uint32_t timeout_ms = 500;
+    std::vector<std::uint32_t> addresses;
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "ssm-a8-poll: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--output" || a == "-o") {
+            if (auto const *v = require_arg("--output"); v)
+                output_path = std::filesystem::path{v};
+            else
+                return 2;
+        } else if (a == "--duration") {
+            auto const *v = require_arg("--duration");
+            if (v == nullptr)
+                return 2;
+            std::uint32_t val = 0;
+            if (!parse_uint32_arg(v, val) || val == 0) {
+                std::fputs("ssm-a8-poll: --duration must be a positive integer (seconds)\n",
+                           stderr);
+                return 2;
+            }
+            duration_seconds = val;
+        } else if (a == "--interval-ms") {
+            auto const *v = require_arg("--interval-ms");
+            if (v == nullptr)
+                return 2;
+            std::uint32_t val = 0;
+            if (!parse_uint32_arg(v, val) || val == 0) {
+                std::fputs("ssm-a8-poll: --interval-ms must be a positive integer\n", stderr);
+                return 2;
+            }
+            interval_ms = val;
+        } else if (a == "--timeout-ms") {
+            auto const *v = require_arg("--timeout-ms");
+            if (v == nullptr)
+                return 2;
+            std::uint32_t val = 0;
+            if (!parse_uint32_arg(v, val) || val == 0) {
+                std::fputs("ssm-a8-poll: --timeout-ms must be a positive integer\n", stderr);
+                return 2;
+            }
+            timeout_ms = val;
+        } else if (a == "--addr") {
+            // Accept repeated --addr AND comma-separated lists in one
+            // flag, so the natural FastECU-style multi-monitor recipe
+            // ('--addr 0xE,0xF,0x8,0x9,0xFE7') is as ergonomic as the
+            // long form.
+            auto const *v = require_arg("--addr");
+            if (v == nullptr)
+                return 2;
+            for (auto const &tok : split_csv_list(v)) {
+                if (tok.empty()) {
+                    std::fputs("ssm-a8-poll: --addr contains an empty token\n", stderr);
+                    return 2;
+                }
+                std::uint32_t val = 0;
+                if (!parse_uint32_arg(tok.c_str(), val) || val > st::ecu::ssm::kMaxAddress) {
+                    std::fprintf(stderr,
+                                 "ssm-a8-poll: --addr '%s' is not a 24-bit hex/decimal address\n",
+                                 tok.c_str());
+                    return 2;
+                }
+                addresses.push_back(val);
+            }
+        } else if (a == "--verbose" || a == "-v") {
+            verbose = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "ssm-a8-poll: unknown option: %s\n", argv[i]);
+            return 2;
+        } else {
+            std::fprintf(stderr, "ssm-a8-poll: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || !output_path.has_value() || addresses.empty()) {
+        std::fputs(
+            "ssm-a8-poll: missing --transport / --output / --addr\n"
+            "Usage: subuwutuner-cli ssm-a8-poll --transport <kind> --output <FILE.log>\n"
+            "                                   --addr <hex>[,<hex>...] [--addr <hex> ...]\n"
+            "                                   [--device <path>] [--dll <path>]\n"
+            "                                   [--duration <sec>] [--interval-ms <ms>]\n"
+            "                                   [--timeout-ms <ms>] [--verbose|-v]\n"
+            "\n"
+            "Reads one byte per --addr via OEM SSM-0xA8 over ISO-15765 every\n"
+            "--interval-ms (default 333). Writes a comment-headered log with\n"
+            "per-poll lines '<elapsed_ms>\\t<HH HH ...>' for downstream\n"
+            "correlation against captured COBB F3xx response bytes.\n",
+            stderr);
+        return 2;
+    }
+
+    if (verbose) {
+        st::transport::obdx::set_trace_enabled(true);
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr,
+                     "ssm-a8-poll: --transport '%s' not recognized "
+                     "(expected one of: j2534, obdx, native).\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+
+    // Build the request once and report it back so the user can sanity-
+    // check the wire bytes before the loop fires — same A8 frame every
+    // poll, MockTransport-friendly for tests.
+    auto const req = st::ecu::ssm::build_a8_request(addresses, st::ecu::ssm::Framing::IsoTp);
+    if (!req.has_value()) {
+        std::fprintf(stderr, "ssm-a8-poll: cannot build A8 request: %s\n",
+                     req.error().to_string().c_str());
+        return 1;
+    }
+
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "ssm-a8-poll: %s\n", t.error().to_string().c_str());
+        return 1;
+    }
+    st::transport::LinkConfig link{};
+    link.kind = st::transport::LinkKind::CanIso15765;
+    link.baud = 500000;
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "ssm-a8-poll: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    std::ofstream out{*output_path, std::ios::binary};
+    if (!out) {
+        std::fprintf(stderr, "ssm-a8-poll: cannot open output: %s\n",
+                     output_path->string().c_str());
+        (void)(*t)->close();
+        return 1;
+    }
+
+    // Header. Schema-versioned so a downstream consumer can refuse on
+    // unrecognized format bumps. Address list goes in a single comment
+    // line for grep-ability; per-poll lines carry only the bytes (one
+    // per address, request order) so the file stays compact at high
+    // poll rates.
+    out << "# subuwutuner ssm-a8-poll log v1\n";
+    out << "# transport: " << *transport_kind << "\n";
+    out << "# framing: ssm-a8 over iso15765 (tester 0x7E0, ecu 0x7E8, 500 kbps)\n";
+    out << "# interval_ms: " << interval_ms << "\n";
+    out << "# addresses(BE24):";
+    for (auto a : addresses) {
+        char buf[12];
+        std::snprintf(buf, sizeof buf, " 0x%06X", static_cast<unsigned>(a));
+        out << buf;
+    }
+    out << "\n";
+    out << "# format: <elapsed_ms>\\t<HH HH ...>  (one byte per address, request order)\n";
+
+    st::ecu::ssm::SsmClient client{**t, st::ecu::ssm::Framing::IsoTp};
+
+    g_ssm_a8_poll_stop.store(false, std::memory_order_release);
+    auto const prev_handler = std::signal(SIGINT, ssm_a8_poll_sigint_handler);
+
+    std::fprintf(stderr,
+                 "ssm-a8-poll: polling %zu address%s every %u ms to %s — Ctrl+C to stop%s\n",
+                 addresses.size(), addresses.size() == 1 ? "" : "es",
+                 static_cast<unsigned>(interval_ms), output_path->string().c_str(),
+                 duration_seconds
+                     ? (" (auto-stop in " + std::to_string(*duration_seconds) + "s)").c_str()
+                     : "");
+
+    auto const start_time = std::chrono::steady_clock::now();
+    auto const deadline =
+        duration_seconds
+            ? std::optional<std::chrono::steady_clock::time_point>{
+                  start_time + std::chrono::seconds{*duration_seconds}}
+            : std::nullopt;
+
+    std::uint64_t polls_ok = 0;
+    std::uint64_t polls_err = 0;
+    auto next_poll = start_time;
+
+    while (!g_ssm_a8_poll_stop.load(std::memory_order_acquire)) {
+        if (deadline && std::chrono::steady_clock::now() >= *deadline)
+            break;
+
+        auto const r =
+            client.read(addresses, std::chrono::milliseconds{timeout_ms});
+        auto const now = std::chrono::steady_clock::now();
+        auto const elapsed_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
+
+        if (r.has_value()) {
+            ++polls_ok;
+            out << elapsed_ms << '\t' << hex_bytes_line(*r) << '\n';
+        } else {
+            ++polls_err;
+            // Log errors inline so the correlator can skip them without
+            // losing time-position. '!' prefix distinguishes from data
+            // rows (which start with a decimal digit).
+            out << elapsed_ms << "\t! " << r.error().to_string() << '\n';
+        }
+
+        // Schedule next poll on a fixed grid (not "interval since last
+        // response") so jitter doesn't pile up. If a single poll
+        // overran the interval, skip ahead instead of running flat-out.
+        next_poll += std::chrono::milliseconds{interval_ms};
+        auto const sleep_until_time = std::max(next_poll, std::chrono::steady_clock::now());
+        while (!g_ssm_a8_poll_stop.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < sleep_until_time) {
+            if (deadline && std::chrono::steady_clock::now() >= *deadline)
+                break;
+            // Wake every 50 ms so Ctrl+C / deadline get noticed promptly.
+            auto const slice = std::min<std::chrono::steady_clock::duration>(
+                std::chrono::milliseconds{50},
+                sleep_until_time - std::chrono::steady_clock::now());
+            std::this_thread::sleep_for(slice);
+        }
+    }
+
+    (void)std::signal(SIGINT, prev_handler);
+    (void)(*t)->close();
+
+    auto const total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - start_time)
+                              .count();
+    out << "# polled " << polls_ok << " times, " << polls_err << " errors, in " << total_ms
+        << " ms\n";
+
+    std::fprintf(stderr,
+                 "ssm-a8-poll: %" PRIu64 " polls (%" PRIu64 " errors) in %lld ms -> %s\n",
+                 polls_ok, polls_err, static_cast<long long>(total_ms),
+                 output_path->string().c_str());
+    return polls_err > 0 && polls_ok == 0 ? 1 : 0;
+}
+
 int cmd_lint_graph(int argc, char *argv[]) {
     if (argc < 1) {
         std::fputs("lint-graph: missing path\n", stderr);
@@ -10719,6 +11013,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "sniff") {
         return cmd_sniff(argc - 2, argv + 2);
+    }
+    if (cmd == "ssm-a8-poll") {
+        return cmd_ssm_a8_poll(argc - 2, argv + 2);
     }
     if (cmd == "rdbi") {
         return cmd_rdbi(argc - 2, argv + 2);
