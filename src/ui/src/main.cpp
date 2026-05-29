@@ -1626,7 +1626,7 @@ void render_unsaved_modal(AppState &state) {
         constexpr float kBtnW = 180.0f;
         // Save is the default action (Enter) and the safe path — give it
         // accent fill so the eye lands on it first.
-        auto const a_save = accent_for(state.settings.theme);
+        auto const a_save = accent_for(current_theme());
         ImGui::PushStyleColor(ImGuiCol_Button, a_save.base);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_save.hover);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_save.active);
@@ -1829,7 +1829,7 @@ void render_csv_import_modal(AppState &state) {
     bool const want_cancel = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
 
     constexpr float kBtnW = 160.0f;
-    auto const a_csv = accent_for(state.settings.theme);
+    auto const a_csv = accent_for(current_theme());
     ImGui::PushStyleColor(ImGuiCol_Button, a_csv.base);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_csv.hover);
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_csv.active);
@@ -2410,9 +2410,15 @@ void render_kp_autotune_modal(AppState &state) {
 
     bool const have_preview = state.kp_at_result.has_value();
     bool const want_cancel = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+    // Enter triggers Apply only when a preview exists — matches the
+    // visual disabled-button state so the keyboard shortcut doesn't
+    // bypass the "preview first" guard.
+    bool const want_apply = have_preview &&
+                            (ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false) ||
+                             ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, /*repeat=*/false));
     bool apply_clicked = false;
     {
-        auto const a_btn = accent_for(state.settings.theme);
+        auto const a_btn = accent_for(current_theme());
         ImGui::PushStyleColor(ImGuiCol_Button, a_btn.base);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_btn.hover);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_btn.active);
@@ -2425,7 +2431,7 @@ void render_kp_autotune_modal(AppState &state) {
                 ImGui::SetTooltip("Run Preview first.");
             } else {
                 ImGui::SetTooltip("Commit the proposal as a single undoable\n"
-                                  "edit on the target table.");
+                                  "edit on the target table.  (Enter)");
             }
         }
     }
@@ -2444,7 +2450,7 @@ void render_kp_autotune_modal(AppState &state) {
         state.kp_at_status_msg.clear();
     };
 
-    if (apply_clicked && have_preview) {
+    if ((apply_clicked && have_preview) || want_apply) {
         if (auto err = apply_knock_pull_proposal(state); err.has_value()) {
             state.kp_at_status_msg = *err;
         } else {
@@ -2669,9 +2675,12 @@ void render_maf_autotune_modal(AppState &state) {
 
     bool const have_preview = state.maf_at_result.has_value();
     bool const want_cancel = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+    bool const want_apply = have_preview &&
+                            (ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false) ||
+                             ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, /*repeat=*/false));
     bool apply_clicked = false;
     {
-        auto const a_btn = accent_for(state.settings.theme);
+        auto const a_btn = accent_for(current_theme());
         ImGui::PushStyleColor(ImGuiCol_Button, a_btn.base);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_btn.hover);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_btn.active);
@@ -2684,7 +2693,7 @@ void render_maf_autotune_modal(AppState &state) {
                 ImGui::SetTooltip("Run Preview first.");
             } else {
                 ImGui::SetTooltip("Commit the proposal as a single undoable\n"
-                                  "edit on the target table.");
+                                  "edit on the target table.  (Enter)");
             }
         }
     }
@@ -2701,7 +2710,7 @@ void render_maf_autotune_modal(AppState &state) {
         state.maf_at_status_msg.clear();
     };
 
-    if (apply_clicked && have_preview) {
+    if ((apply_clicked && have_preview) || want_apply) {
         if (auto err = apply_maf_autotune_proposal(state); err.has_value()) {
             state.maf_at_status_msg = *err;
         } else {
@@ -3039,7 +3048,7 @@ void render_new_project_modal(AppState &state) {
     bool const want_cancel = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
     bool create_clicked = false;
     {
-        auto const a_btn = accent_for(state.settings.theme);
+        auto const a_btn = accent_for(current_theme());
         ImGui::PushStyleColor(ImGuiCol_Button, a_btn.base);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_btn.hover);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_btn.active);
@@ -3224,12 +3233,27 @@ void render_flash_modal(AppState &state) {
     // Buttons. "Send to ECU" is intentionally never enabled in this build:
     // the GUI doesn't have a transport binding yet. The dry-run "Verify"
     // button completes the gate workflow without contacting hardware.
-    ImGui::BeginDisabled(!ready_to_send);
-    if (ImGui::Button("Verify policy", ImVec2(140.0f, 0.0f))) {
+    //
+    // Verify gets accent treatment + 160 wide to match the primary-action
+    // convention across every other modal. No Enter shortcut on purpose:
+    // this modal sits adjacent to the "actually flash bytes" workflow
+    // (CLI today, in-app later) so accidental Enter-on-focus would feel
+    // unsafe even though Verify itself sends nothing.
+    bool verify_clicked = false;
+    {
+        auto const a_btn = accent_for(current_theme());
+        ImGui::PushStyleColor(ImGuiCol_Button, a_btn.base);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_btn.hover);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_btn.active);
+        ImGui::BeginDisabled(!ready_to_send);
+        verify_clicked = ImGui::Button("Verify policy", ImVec2(160.0f, 0.0f));
+        ImGui::EndDisabled();
+        ImGui::PopStyleColor(3);
+    }
+    if (verify_clicked) {
         state.status_msg = "Flash plan cleared policy gate (" + pname + ").";
         ImGui::CloseCurrentPopup();
     }
-    ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         if (ready_to_send) {
             ImGui::SetTooltip("Acknowledge that the plan cleared the policy gate.\n"
@@ -3779,7 +3803,29 @@ void render_settings_modal(AppState &state) {
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0.0f, 4.0f));
 
-    if (ImGui::Button("Save", ImVec2(110.0f, 0.0f))) {
+    // Button-row convention (matches unsaved_modal, csv_import_modal,
+    // autotune modals, new_project_modal):
+    //   primary: 160 wide, accent-filled, Enter shortcut, tooltip
+    //   secondary/destructive: ~140 wide, no accent, tooltip
+    //   cancel/close: ~110 wide, Esc shortcut, tooltip
+    bool const want_save = ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false) ||
+                           ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, /*repeat=*/false);
+    bool const want_close = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+
+    bool save_clicked = false;
+    {
+        auto const a_save = accent_for(current_theme());
+        ImGui::PushStyleColor(ImGuiCol_Button, a_save.base);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_save.hover);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_save.active);
+        save_clicked = ImGui::Button("Save", ImVec2(160.0f, 0.0f));
+        ImGui::PopStyleColor(3);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Write definitions_root and rom_dump_root\n"
+                              "to settings.toml.  (Enter)");
+        }
+    }
+    if (save_clicked || want_save) {
         auto cfg_r = st::config::Config::load();
         if (!cfg_r.has_value()) {
             state.settings_status_msg =
@@ -3792,7 +3838,7 @@ void render_settings_modal(AppState &state) {
             if (s.has_value()) {
                 state.settings_status_msg =
                     "Saved to " + cfg_r->source_path().string();
-                state.settings_status_color = ImVec4(0.4f, 0.85f, 0.4f, 1.0f);
+                state.settings_status_color = chip_fg_ok();
                 // Invalidate the registry modal's cached scan so the
                 // next open re-walks against the new definitions_root.
                 state.def_registry_scanned = false;
@@ -3816,10 +3862,18 @@ void render_settings_modal(AppState &state) {
                       defs.paths().rom_dump_root.string().c_str());
         state.settings_status_msg =
             "Defaults restored in form (click Save to persist).";
-        state.settings_status_color = ImVec4(0.95f, 0.85f, 0.4f, 1.0f);
+        state.settings_status_color = chip_fg_warn();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Populate the form with built-in defaults.\n"
+                          "Click Save to persist them.");
     }
     ImGui::SameLine();
-    if (ImGui::Button("Close", ImVec2(110.0f, 0.0f))) {
+    bool const close_clicked = ImGui::Button("Close", ImVec2(110.0f, 0.0f));
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Close without persisting any pending changes.  (Esc)");
+    }
+    if (close_clicked || want_close) {
         ImGui::CloseCurrentPopup();
     }
 
@@ -5289,7 +5343,7 @@ void render_table_grid(st::Definition::TableData const &td, st::Scaling const *s
         ImGui::PushFont(fonts.mono);
     }
     ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(1.0f, 0.5f));
-    auto const a_hdr = accent_for(state.settings.theme);
+    auto const a_hdr = accent_for(current_theme());
     ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(a_hdr.base.x, a_hdr.base.y, a_hdr.base.z, 0.55f));
     ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
                           ImVec4(a_hdr.hover.x, a_hdr.hover.y, a_hdr.hover.z, 0.40f));
@@ -8008,7 +8062,7 @@ void render_features_designer(AppState &state) {
     // Pin appearance constants — derived from the active accent. The
     // pin fill matches the type's category (today only Float/Int/Bool
     // share one color; future work could vary).
-    auto const accent = accent_for(state.settings.theme);
+    auto const accent = accent_for(current_theme());
     ImU32 const pin_fill = ImGui::GetColorU32(accent.base);
     ImU32 const pin_brd = ImGui::GetColorU32(ImGuiCol_Border);
     ImU32 const node_bg = ImGui::GetColorU32(ImGuiCol_FrameBg);
