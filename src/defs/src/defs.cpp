@@ -85,6 +85,18 @@ std::vector<int> int_array(toml::table const &t, std::string_view key) {
     return out;
 }
 
+// Format a toml++ source region as "(line N)" when the parser tracked
+// it (always true for tables parsed from text via toml::parse, false
+// for nodes constructed in-memory). Empty suffix on no source so the
+// caller can append unconditionally without dangling parentheses.
+std::string source_suffix(toml::node const &node) {
+    auto const &src = node.source();
+    if (src.begin.line == 0 && src.begin.column == 0) {
+        return {};
+    }
+    return " (line " + std::to_string(src.begin.line) + ")";
+}
+
 Result<toml::table> parse_toml(std::string_view text) {
     try {
         return toml::parse(text);
@@ -175,7 +187,7 @@ Result<Axis> parse_axis(toml::table const &t) {
     if (auto const v = t["id"].value<std::string>(); v.has_value()) {
         a.id = *v;
     } else {
-        return failure(ErrorCode::ParseError, "[[axis]] missing id");
+        return failure(ErrorCode::ParseError, "[[axis]] missing id" + source_suffix(t));
     }
     a.name = optional_value<std::string>(t, "name", {});
     a.unit = optional_value<std::string>(t, "unit", {});
@@ -196,7 +208,7 @@ Result<Scaling> parse_scaling(toml::table const &t) {
     if (auto const v = t["id"].value<std::string>(); v.has_value()) {
         s.id = *v;
     } else {
-        return failure(ErrorCode::ParseError, "[[scaling]] missing id");
+        return failure(ErrorCode::ParseError, "[[scaling]] missing id" + source_suffix(t));
     }
     auto const formula = optional_value<std::string>(t, "formula", "linear");
     if (formula == "linear") {
@@ -253,7 +265,7 @@ Result<Table> parse_table(toml::table const &t) {
     if (auto const v = t["id"].value<std::string>(); v.has_value()) {
         tab.id = *v;
     } else {
-        return failure(ErrorCode::ParseError, "[[table]] missing id");
+        return failure(ErrorCode::ParseError, "[[table]] missing id" + source_suffix(t));
     }
     tab.name = optional_value<std::string>(t, "name", {});
     tab.category = optional_value<std::string>(t, "category", {});
@@ -296,7 +308,7 @@ Result<Pid> parse_pid(toml::table const &t) {
     if (auto const v = t["id"].value<std::string>(); v.has_value()) {
         p.id = *v;
     } else {
-        return failure(ErrorCode::ParseError, "[[pid]] missing id");
+        return failure(ErrorCode::ParseError, "[[pid]] missing id" + source_suffix(t));
     }
     p.name = optional_value<std::string>(t, "name", {});
     p.ssm_address = static_cast<std::size_t>(optional_value<std::int64_t>(t, "ssm_address", 0));
@@ -317,7 +329,7 @@ Result<Switch> parse_switch(toml::table const &t) {
     if (auto const v = t["id"].value<std::string>(); v.has_value()) {
         s.id = *v;
     } else {
-        return failure(ErrorCode::ParseError, "[[switch]] missing id");
+        return failure(ErrorCode::ParseError, "[[switch]] missing id" + source_suffix(t));
     }
     s.name = optional_value<std::string>(t, "name", {});
     s.ssm_address = static_cast<std::size_t>(optional_value<std::int64_t>(t, "ssm_address", 0));
@@ -334,7 +346,7 @@ Result<DtcBitmap> parse_dtc_bitmap(toml::table const &t) {
     if (auto const v = t["id"].value<std::string>(); v.has_value()) {
         b.id = *v;
     } else {
-        return failure(ErrorCode::ParseError, "[[dtc_bitmap]] missing id");
+        return failure(ErrorCode::ParseError, "[[dtc_bitmap]] missing id" + source_suffix(t));
     }
     b.name = optional_value<std::string>(t, "name", {});
     b.address = static_cast<std::size_t>(optional_value<std::int64_t>(t, "address", 0));
@@ -352,7 +364,7 @@ Result<Dtc> parse_dtc(toml::table const &t) {
     if (auto const v = t["code"].value<std::string>(); v.has_value()) {
         d.code = *v;
     } else {
-        return failure(ErrorCode::ParseError, "[[dtc]] missing code");
+        return failure(ErrorCode::ParseError, "[[dtc]] missing code" + source_suffix(t));
     }
     d.name = optional_value<std::string>(t, "name", {});
     if (auto const v = t["bitmap_id"].value<std::string>(); v.has_value()) {

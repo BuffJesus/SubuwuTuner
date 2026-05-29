@@ -49,7 +49,10 @@ from typing import Optional
 
 _THIS = Path(__file__).resolve()
 _spec = importlib.util.spec_from_file_location("sniff_common", _THIS.parent / "sniff_common.py")
-assert _spec is not None and _spec.loader is not None
+if _spec is None or _spec.loader is None:
+    raise RuntimeError(
+        f"Could not load sniff_common.py from {_THIS.parent} "
+        f"(spec_from_file_location returned None)")
 sniff_common = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = sniff_common
 _spec.loader.exec_module(sniff_common)

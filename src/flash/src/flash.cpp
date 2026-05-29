@@ -598,7 +598,9 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *
                         report.bytes_transferred += offset;
                         commit_outcome(outcome);
                         return bail(s.error().code(),
-                                    "flash: transfer_data counter=" + std::to_string(counter) +
+                                    "flash: transfer_data sector=" + hex_addr(w.sector.address) +
+                                        " counter=" + std::to_string(counter) +
+                                        " offset=" + std::to_string(offset) +
                                         " failed: " + std::string{s.error().message()});
                     }
                     counter = static_cast<std::uint8_t>(counter + 1U);
@@ -638,7 +640,9 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *
                     outcome.verified = false;
                     commit_outcome(outcome);
                     return bail(readback.error().code(),
-                                "flash: verify read-back failed: " +
+                                "flash: verify read-back failed at " +
+                                    hex_addr(w.sector.address) + " (" +
+                                    std::to_string(w.sector.length) + " bytes): " +
                                     std::string{readback.error().message()});
                 }
                 outcome.verified = (readback->size() == w.data.size() &&
