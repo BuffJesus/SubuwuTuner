@@ -144,9 +144,85 @@ The interesting part isn't the address list, it's correlating polls to driving c
 
 Addresses whose value distribution **changes** between phases are the candidates for that feature's live state. The Workflow-4 feature recipes below all reduce to this loop.
 
+### Cross-referencing the tuner-tool's CSV against the sniff
+
+The "what tuner-tool was polling" question above tells you *which* RAM
+addresses get touched but not *which monitor name* sits at each address.
+If the active tuner-tool exports a labeled datalog CSV (COBB AP CSV,
+EcuTek log, etc.), you can recover the address-to-monitor mapping by
+joining the CSV against the sniff capture in time.
+
+The CSV gives you: per-row timestamp + labelled monitor values. The
+sniff gives you: per-frame timestamp + raw poll-response bytes. The
+join requires a per-log **time anchor** between sniff time and the
+CSV's internal time (the AP CSV starts at t=0 when the user pressed
+"log", no wall-clock).
+
+Practical anchor: find a strongly-varying CSV column (engine RPM is
+ideal — fast dynamic range during a WOT pull) and search for a sniff
+byte position whose value trajectory matches the CSV column's curve
+over some sniff time window. The offset `sniff_t = csv_t + Δ` that
+maximizes Pearson r² between the two curves is the per-log time anchor.
+
+Once anchored, every other monitor in the CSV becomes a target:
+
+1. For each AP CSV column `M` and each candidate `(DID, byte_offset,
+   encoding)` in the captured polled-DID response:
+2. Build `(raw_value, csv_value)` pairs across the anchored polls.
+3. Fit `csv_value = a × raw + b` via OLS. Score by r².
+4. Reject candidates whose extrapolated **idle-state prediction**
+   differs from the CSV's idle value by more than ~10% of the
+   monitor's dynamic range. (Many bytes correlate with RPM during
+   driving but don't sit at the right value at idle; this culls them.)
+5. Prefer candidates whose slope is close to a canonical Subaru
+   scaling factor (×0.25, ×0.0625, ×0.0145, etc.) — non-canonical
+   slopes are usually correlation-only fits.
+6. Enforce 1-to-1 monitor↔byte assignment: greedy by descending
+   score, but no two monitors can claim overlapping bytes in the same
+   DID payload.
+
+This methodology recovers the polled-byte layout *without needing a
+ROM disassembly*. It complements the disassembly path: when the
+disassembly arrives, it's the ground truth; the empirical layout is
+how you know which monitors to look for in the handler.
+
+**Bootstrapping the very first anchor**: the methodology is
+chicken-and-egg — you need a verified RPM byte to find the anchor,
+but you need the anchor to verify RPM. Resolve by checking two
+extreme states. Engine idle (low RPM, ~800) and engine WOT peak
+(~6000+ RPM) both have known CSV values. For any candidate byte
+position + scaling, decode the value at the sniff's globally
+quietest period (engine off / cranking) and at the sniff's most
+RPM-correlated peak. If both extremes match the CSV's idle and WOT
+values respectively, you've found RPM. Lock it in, then find the
+per-log anchor offsets.
+
 ### Caveats
 
-- COBB / EcuTek poll over UDS (`22 <DID>`) for the standardised quantities (RPM, MAP, AFR via OBD-II PIDs) and over RMBA (`23 <addr>`) for the bespoke ones. Subaru-specific values are almost always the RMBA path. The extractor must distinguish.
+- COBB / EcuTek poll over UDS (`22 <DID>`) for everything. The DIDs
+  in the OEM-reserved space (~0x0000–0x00FF) carry the standardised
+  quantities; the DIDs in proprietary ranges (e.g. 0xF3xx for COBB
+  AP) carry batches of multiple monitors packed into one ~80-byte
+  response. RMBA (`23 <addr>`) shows up for one-off RAM reads (e.g.
+  during a flash dump) but is rare in normal datalogging on modern
+  AP firmware.
+- **Multi-byte ISO-TP reassembly is adapter-firmware dependent.** The
+  OBDX VX with its default `AutoProcess` flag reassembles
+  multi-frame responses automatically — each line in the sniff log
+  contains the full payload, not the constituent 8-byte CAN frames.
+  This is convenient for analysis but means a future firmware change
+  could silently break multi-frame captures. If you see only First
+  Frames (length byte starts with `0x1`) without their continuation
+  frames, the reassembly is off and you'll need to glue Consecutive
+  Frames (`0x21`, `0x22`, …) together yourself.
+- **Frame drops cap your usable polls per log.** A daily-driver
+  laptop sniffing through a USB-serial adapter under contention
+  (bus busy, other USB activity) can lose 80%+ of polls during
+  high-cadence chassis CAN. Mitigation: drop the chassis CAN noise
+  with `--filter "0x7E0,0x7E8"` (note the quotes — see "Quote
+  PowerShell CLI args with hex / commas" in the field doc), use a
+  dedicated capture machine, or fall back to a J2534 transport
+  that buffers in adapter firmware rather than over the host USB.
 - The address space varies by silicon era. SH7058 RAM is 0xFFFF0000–0xFFFFFFFF; RH850 is different. The extractor should annotate which silicon the addresses fit.
 - Polling interval is tuner-tool-dependent and tunable. Don't assume 100 ms is universal.
 
