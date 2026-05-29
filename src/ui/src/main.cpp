@@ -75,11 +75,14 @@ namespace {
 void text_subtle(char const *fmt, ...);
 
 // Forward decls for the theme-aware chip palette — defined alongside
-// the chip() helper below. Forward-declared here so always-visible
-// widgets (the sidebar S/E badges) can call them without juggling the
-// large block of widget-render functions in between.
+// the chip() helper below. Forward-declared here so widget-render
+// functions (which sit early in the file) can call them for inline
+// status text colors. Modal/inline use is the larger consumer; the
+// sidebar S/E badges were the original trigger.
 inline ImVec4 chip_fg_warn();
 inline ImVec4 chip_fg_caution();
+inline ImVec4 chip_fg_ok();
+inline ImVec4 chip_fg_danger();
 
 struct Fonts {
     ImFont *ui = nullptr;   // Sans for UI chrome (menus, labels, panels)
@@ -1746,7 +1749,7 @@ void render_csv_import_modal(AppState &state) {
     if (!parsed.warnings.empty()) {
         ImGui::Spacing();
         for (auto const &w : parsed.warnings) {
-            ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f), "warning: %s", w.message.c_str());
+            ImGui::TextColored(chip_fg_warn(), "warning: %s", w.message.c_str());
         }
     }
 
@@ -1805,9 +1808,9 @@ void render_csv_import_modal(AppState &state) {
                 double const b = before_td->values[e.row][e.col];
                 double const eps = 0.5 * std::pow(10.0, -prec);
                 if (e.value > b + eps)
-                    color = ImVec4(0.5f, 0.95f, 0.5f, 1.0f);
+                    color = chip_fg_ok();
                 else if (e.value < b - eps)
-                    color = ImVec4(0.95f, 0.55f, 0.55f, 1.0f);
+                    color = chip_fg_danger();
             }
             ImGui::TextColored(color, "%.*f", prec, e.value);
         }
@@ -1849,7 +1852,7 @@ void render_csv_import_modal(AppState &state) {
     // popup on apply failure — only on success or explicit cancel.
     if (!state.csv_import_apply_error.empty()) {
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.94f, 0.40f, 0.40f, 1.00f), "Apply failed:  %s",
+        ImGui::TextColored(chip_fg_danger(), "Apply failed:  %s",
                            state.csv_import_apply_error.c_str());
         text_subtle("The preview is preserved — fix the underlying issue and "
                     "click Apply again, or Cancel to discard.");
@@ -2310,7 +2313,7 @@ void render_kp_autotune_modal(AppState &state) {
 
     if (!state.kp_at_status_msg.empty()) {
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "Preview failed: %s",
+        ImGui::TextColored(chip_fg_danger(), "Preview failed: %s",
                            state.kp_at_status_msg.c_str());
     }
 
@@ -2379,9 +2382,9 @@ void render_kp_autotune_modal(AppState &state) {
                     if (std::abs(delta) < 0.0001) {
                         ImGui::TextDisabled(".");
                     } else if (delta < 0.0) {
-                        ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.55f, 1.0f), "%+.2f", delta);
+                        ImGui::TextColored(chip_fg_danger(), "%+.2f", delta);
                     } else {
-                        ImGui::TextColored(ImVec4(0.5f, 0.95f, 0.5f, 1.0f), "%+.2f", delta);
+                        ImGui::TextColored(chip_fg_ok(), "%+.2f", delta);
                     }
                 }
             }
@@ -2391,7 +2394,7 @@ void render_kp_autotune_modal(AppState &state) {
         // Lint findings, if any.
         if (!state.kp_at_lints.empty()) {
             ImGui::Spacing();
-            ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f),
+            ImGui::TextColored(chip_fg_warn(),
                                "Lint findings (%zu):", state.kp_at_lints.size());
             for (auto const &v : state.kp_at_lints) {
                 ImGui::BulletText("cell %zu — %s\n    %s", v.cell_index, pretty_lint_kind(v.kind),
@@ -2573,7 +2576,7 @@ void render_maf_autotune_modal(AppState &state) {
 
     if (!state.maf_at_status_msg.empty()) {
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "Preview failed: %s",
+        ImGui::TextColored(chip_fg_danger(), "Preview failed: %s",
                            state.maf_at_status_msg.c_str());
     }
 
@@ -2629,9 +2632,9 @@ void render_maf_autotune_modal(AppState &state) {
                 if (c.confidence == 0.0) {
                     color = ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
                 } else if (c.proposed_value > c.current_value) {
-                    color = ImVec4(0.5f, 0.95f, 0.5f, 1.0f);
+                    color = chip_fg_ok();
                 } else if (c.proposed_value < c.current_value) {
-                    color = ImVec4(0.95f, 0.55f, 0.55f, 1.0f);
+                    color = chip_fg_danger();
                 }
                 ImGui::TextColored(color, "%.4f", c.proposed_value);
 
@@ -2650,7 +2653,7 @@ void render_maf_autotune_modal(AppState &state) {
         // Lint findings, if any.
         if (!state.maf_at_lints.empty()) {
             ImGui::Spacing();
-            ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f),
+            ImGui::TextColored(chip_fg_warn(),
                                "Lint findings (%zu):", state.maf_at_lints.size());
             for (auto const &v : state.maf_at_lints) {
                 ImGui::BulletText("cells %zu..%zu — %s\n    %s", v.cell_index, v.cell_index + 1,
@@ -2985,7 +2988,7 @@ void render_new_project_modal(AppState &state) {
             prefix = "\xE2\x9A\xA0 "; // ⚠
             break;
         case AppState::NpMatchStatus::LoadFailed:
-            color = ImVec4(0.92f, 0.45f, 0.45f, 1.0f);
+            color = chip_fg_danger();
             prefix = "\xE2\x9C\x97 "; // ✗
             break;
         case AppState::NpMatchStatus::None:
@@ -3022,7 +3025,7 @@ void render_new_project_modal(AppState &state) {
     // bottom of the modal. Kept compact (one red line) — detailed
     // diagnostics go in tooltips on the offending field.
     if (!state.np_create_error.empty()) {
-        ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f), "\xE2\x9C\x97 Create failed: %s",
+        ImGui::TextColored(chip_fg_danger(), "\xE2\x9C\x97 Create failed: %s",
                            state.np_create_error.c_str());
         ImGui::Spacing();
     }
@@ -3151,7 +3154,7 @@ void render_flash_modal(AppState &state) {
 
     // Engine-safety is a hard refusal across every profile.
     if (!d.engine_safety_tables.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.55f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
         ImGui::TextUnformatted("REFUSED: engine-safety-critical tables in plan");
         ImGui::PopStyleColor();
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
@@ -3209,7 +3212,7 @@ void render_flash_modal(AppState &state) {
     case A::Block:
         // Distinct from the engine-safety branch above: profile-level
         // Block, e.g. a hypothetical future strict profile.
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.55f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
         ImGui::TextUnformatted("REFUSED by policy.");
         ImGui::PopStyleColor();
         ready_to_send = false;
@@ -3702,7 +3705,7 @@ void render_settings_modal(AppState &state) {
         } else {
             state.settings_status_msg =
                 "Load failed: " + cfg_r.error().to_string();
-            state.settings_status_color = ImVec4(1.0f, 0.55f, 0.55f, 1.0f);
+            state.settings_status_color = chip_fg_danger();
         }
         state.settings_loaded_once = true;
     }
@@ -3781,7 +3784,7 @@ void render_settings_modal(AppState &state) {
         if (!cfg_r.has_value()) {
             state.settings_status_msg =
                 "Load failed: " + cfg_r.error().to_string();
-            state.settings_status_color = ImVec4(1.0f, 0.55f, 0.55f, 1.0f);
+            state.settings_status_color = chip_fg_danger();
         } else {
             cfg_r->paths().definitions_root = state.settings_def_root_input;
             cfg_r->paths().rom_dump_root = state.settings_rom_dump_root_input;
@@ -3798,7 +3801,7 @@ void render_settings_modal(AppState &state) {
             } else {
                 state.settings_status_msg =
                     "Save failed: " + s.error().to_string();
-                state.settings_status_color = ImVec4(1.0f, 0.55f, 0.55f, 1.0f);
+                state.settings_status_color = chip_fg_danger();
             }
         }
     }
@@ -4016,7 +4019,7 @@ void render_read_rom_modal(AppState &state) {
         ImGui::TextUnformatted("Pulls a ROM dump from the connected ECU via the");
         ImGui::TextUnformatted("OBDX/J2534/native adapter. Read-only — no ECU writes.");
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.85f, 0.55f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_caution());
         ImGui::TextWrapped("Before clicking Read: ignition must be in ACC or RUN "
                            "(engine off is fine), nothing else (e.g. COBB AccessPort) "
                            "plugged into the OBD-II port, OBDX in the port. ECU is "
@@ -4092,7 +4095,7 @@ void render_read_rom_modal(AppState &state) {
         // Pre-run errors (typically a parse failure from a previous click).
         if (!state.read_rom_error_msg.empty()) {
             ImGui::Dummy(ImVec2(0.0f, 6.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.55f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
             ImGui::TextWrapped("%s", state.read_rom_error_msg.c_str());
             ImGui::PopStyleColor();
         }
@@ -4321,7 +4324,7 @@ void render_read_rom_modal(AppState &state) {
 
     // --------- Done: save .bin + offer to open as project ---------
     if (state.read_rom_state == AppState::ReadRomState::Done) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.85f, 0.55f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_ok());
         ImGui::TextUnformatted("Read complete.");
         ImGui::PopStyleColor();
         ImGui::Text("Got %zu bytes in %s.", state.read_rom_bytes_result.size(),
@@ -4372,7 +4375,7 @@ void render_read_rom_modal(AppState &state) {
         }
         if (!state.read_rom_error_msg.empty()) {
             ImGui::Dummy(ImVec2(0.0f, 6.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.55f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
             ImGui::TextWrapped("%s", state.read_rom_error_msg.c_str());
             ImGui::PopStyleColor();
         }
@@ -4382,7 +4385,7 @@ void render_read_rom_modal(AppState &state) {
 
     // --------- Failed / Cancelled: surface + back-to-Idle ---------
     if (state.read_rom_state == AppState::ReadRomState::Failed) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.55f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
         ImGui::TextUnformatted("Read failed.");
         ImGui::PopStyleColor();
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
@@ -5633,7 +5636,7 @@ inline ImVec4 chip_bg_warn() {
 }
 inline ImVec4 chip_fg_caution() {
     return theme_is_light() ? ImVec4(0.46f, 0.40f, 0.05f, 1.0f)
-                            : ImVec4(0.96f, 0.94f, 0.65f, 1.0f);
+                            : chip_fg_caution();
 }
 inline ImVec4 chip_bg_caution() {
     return theme_is_light() ? ImVec4(1.00f, 0.96f, 0.70f, 0.75f)
@@ -6076,7 +6079,7 @@ void render_knock_dashboard_panel(AppState &state) {
         }
     }
     if (!state.knock_load_error.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
         ImGui::TextWrapped("%s", state.knock_load_error.c_str());
         ImGui::PopStyleColor();
     }
@@ -6320,7 +6323,7 @@ void render_adaptive_history_panel(AppState &state) {
         }
     }
     if (!state.ah_load_error.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
         ImGui::TextWrapped("%s", state.ah_load_error.c_str());
         ImGui::PopStyleColor();
     }
@@ -6579,7 +6582,7 @@ void render_coldstart_panel(AppState &state) {
         }
     }
     if (!state.cs_load_error.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
         ImGui::TextWrapped("%s", state.cs_load_error.c_str());
         ImGui::PopStyleColor();
     }
@@ -6907,7 +6910,7 @@ void render_ebcs_panel(AppState &state) {
         }
     }
     if (!state.ebcs_load_error.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
         ImGui::TextWrapped("%s", state.ebcs_load_error.c_str());
         ImGui::PopStyleColor();
     }
@@ -7218,7 +7221,7 @@ void render_dtcs_panel(AppState &state) {
             ImGui::TextUnformatted(d.code.c_str());
             if (d.emissions_relevant) {
                 ImGui::SameLine();
-                ImGui::TextColored(ImVec4(0.96f, 0.94f, 0.65f, 1.0f), "E");
+                ImGui::TextColored(chip_fg_caution(), "E");
             }
 
             ImGui::TableSetColumnIndex(2);
@@ -7238,7 +7241,7 @@ void render_dtcs_panel(AppState &state) {
                 ImGui::Text("Address:   0x%08zX + %zu", bm->address, d.byte_offset);
                 ImGui::Text("Bit:       %d", d.bit);
                 if (d.emissions_relevant) {
-                    ImGui::TextColored(ImVec4(0.96f, 0.94f, 0.65f, 1.0f), "emissions-relevant");
+                    ImGui::TextColored(chip_fg_caution(), "emissions-relevant");
                 }
                 ImGui::EndTooltip();
             }
@@ -7463,13 +7466,18 @@ void render_history_panel(AppState &state) {
                 auto const *table = state.project->definition().find_table(te->table_id);
                 if (table != nullptr) {
                     if (table->engine_safety_critical) {
-                        ImGui::TextColored(ImVec4(1.00f, 0.40f, 0.40f, 1.0f), "S");
+                        ImGui::TextColored(chip_fg_warn(), "S");
                         had_flag = true;
                     }
                     if (table->emissions_relevant) {
                         if (had_flag)
                             ImGui::SameLine();
-                        ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f), "E");
+                        // E uses chip_fg_caution to match the sidebar's
+                        // S/E badge convention (S = warn band, E = caution
+                        // band). The history-panel E was previously the
+                        // amber warn shade, drifting from the sidebar; the
+                        // theme-aware migration is the right time to align.
+                        ImGui::TextColored(chip_fg_caution(), "E");
                         had_flag = true;
                     }
                 }
@@ -7571,7 +7579,7 @@ void render_features_designer(AppState &state) {
         state.features_wiring_blocked = false;
     }
 
-    ImGui::TextColored(ImVec4(0.96f, 0.84f, 0.30f, 1.0f), "\xE2\x9A\xA0 Phase 5 preview.");
+    ImGui::TextColored(chip_fg_warn(), "\xE2\x9A\xA0 Phase 5 preview.");
     text_subtle("Editor, IR, SH-2A codegen, and .stmod persistence "
                 "all shipped. Patch insertion + flashing wait on the "
                 "bench rig — see docs/16.");
@@ -7814,7 +7822,7 @@ void render_features_designer(AppState &state) {
     }
     if (ImGui::BeginPopup("##features_status_popup")) {
         if (!validate_result.has_value()) {
-            ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f), "Structural error");
+            ImGui::TextColored(chip_fg_danger(), "Structural error");
             ImGui::Separator();
             ImGui::TextWrapped("%s", validate_result.error().to_string().c_str());
         } else if (!lint_findings.empty()) {
@@ -7831,7 +7839,7 @@ void render_features_designer(AppState &state) {
     }
 
     if (!state.features_wire_error.empty()) {
-        ImGui::TextColored(ImVec4(0.92f, 0.45f, 0.45f, 1.0f), "wire: %s",
+        ImGui::TextColored(chip_fg_danger(), "wire: %s",
                            state.features_wire_error.c_str());
     }
     text_subtle("Click a node or edge to select; Shift+click "
