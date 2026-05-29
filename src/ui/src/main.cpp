@@ -1022,6 +1022,14 @@ struct AppState {
     // returns NotImplemented, so the user has to either plug in a key
     // function or leave this off (and accept that RMBA will fail).
     bool read_rom_authenticate{true};
+    // SA variant index for the SecurityAccess key-fn dropdown in
+    // the Read ROM modal. Same vocabulary as the CLI's --sa-variant
+    // flag: 0 = factory L1 (ssmcan1_key_stub), 1 = COBB-AP L1
+    // (ssmcan1_l1_cobb_ap), 2 = COBB-AP L3 (ssmcan1_l3_cobb_ap).
+    // Default 0 keeps the historical behavior — factory ECUs work
+    // out of the box; COBB-tuned cars need the user to pick L1 or L3
+    // (the dropdown's tooltip points at the SA-gating diagnostic).
+    int read_rom_sa_variant_idx{0};
     // Worker state. The atomics live in shared_ptr storage so the worker
     // can outlive a destruct of AppState without crashing (defensive — in
     // practice we always join before tearing down).
@@ -4401,6 +4409,51 @@ void render_read_rom_modal(AppState &state) {
                 "does not gate ReadByAddress behind seed/key.");
         }
 
+        // SA-variant picker — surfaces the CLI's --sa-variant flag in
+        // the GUI. Factory ECUs work with the default; COBB-tuned ECUs
+        // need the COBB-AP key tables (the AP-install patches the SA
+        // round-key constants in flash, so the factory algorithm
+        // returns NRC 0x35 invalidKey on those cars). Pick L3 if the
+        // ECU also gates RMBA at SA level 3 — the dropdown bumps the
+        // security_level alongside the key fn.
+        ImGui::BeginDisabled(!state.read_rom_authenticate);
+        constexpr char const *kSaVariantNames[] = {
+            "Factory L1",
+            "COBB-AP L1",
+            "COBB-AP L3",
+        };
+        ImGui::SetNextItemWidth(220.0f);
+        ImGui::Combo("SA variant##read_rom_sa_variant", &state.read_rom_sa_variant_idx,
+                     kSaVariantNames, IM_ARRAYSIZE(kSaVariantNames));
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            if (!state.read_rom_authenticate) {
+                ImGui::SetTooltip("Turn on Authenticate to pick a SA variant.");
+            } else {
+                ImGui::SetTooltip(
+                    "Which SecurityAccess key function to use.\n"
+                    "\n"
+                    "Factory L1 — stock SH7058 / SSMCAN1 round-key table.\n"
+                    "  Use on factory ECUs. NRC 0x35 invalidKey on any\n"
+                    "  ECU that's had a COBB AccessPort install (the AP\n"
+                    "  patches the round-key constants in flash).\n"
+                    "\n"
+                    "COBB-AP L1 — the COBB-AccessPort-substituted L1\n"
+                    "  round-key table (recovered 2026-05-26 from\n"
+                    "  captured install logs). Use on COBB-tuned ECUs.\n"
+                    "  Equivalent to CLI: --sa-variant fehr-active.\n"
+                    "\n"
+                    "COBB-AP L3 — same algorithm, deeper diagnostic\n"
+                    "  level (0x03 instead of 0x01). Pick this when the\n"
+                    "  ECU rejects L1 (NRC 0x35) on a COBB-AP install\n"
+                    "  — some firmwares route RMBA past L3 specifically.\n"
+                    "  Equivalent to CLI: --sa-variant fehr-active-l3.\n"
+                    "\n"
+                    "If you don't know: try Factory L1 first. NRC 0x35\n"
+                    "→ switch to COBB-AP L1. Still 0x35 → COBB-AP L3.");
+            }
+        }
+
         // Pre-run errors (typically a parse failure from a previous click).
         if (!state.read_rom_error_msg.empty()) {
             ImGui::Dummy(ImVec2(0.0f, kSpaceS));
@@ -4457,13 +4510,35 @@ void render_read_rom_modal(AppState &state) {
                 int const protocol = state.read_rom_protocol;
                 bool const verbose = state.read_rom_verbose;
                 bool const authenticate = state.read_rom_authenticate;
+                // Resolve the SA variant dropdown selection into a key
+                // function + security_level pair. The CLI's --sa-variant
+                // pairs the same way (level 0x03 only for the L3
+                // variant). Done on the UI thread so the worker doesn't
+                // need to know about the dropdown index encoding.
+                st::ecu::SecurityKeyFn sa_fn = &st::ecu::subaru::ssmcan1_key_stub;
+                std::uint8_t security_level = 0x01;
+                switch (state.read_rom_sa_variant_idx) {
+                case 1:
+                    sa_fn = &st::ecu::subaru::ssmcan1_l1_cobb_ap;
+                    security_level = 0x01;
+                    break;
+                case 2:
+                    sa_fn = &st::ecu::subaru::ssmcan1_l3_cobb_ap;
+                    security_level = 0x03;
+                    break;
+                case 0:
+                default:
+                    // already set
+                    break;
+                }
                 auto bytes_done_sp = state.read_rom_bytes_done;
                 auto total_sp = state.read_rom_total_bytes;
                 auto cancel_sp = state.read_rom_cancel;
 
                 state.read_rom_worker = std::thread([st_ptr, spec, trace_mode, trace_path_str,
                                                      base_addr, size, max_chunk, protocol, verbose,
-                                                     authenticate, bytes_done_sp, total_sp,
+                                                     authenticate, sa_fn, security_level,
+                                                     bytes_done_sp, total_sp,
                                                      cancel_sp]() mutable {
                     // Owning storage. Trace-mode keeps a stack MockTransport;
                     // real-mode owns the unique_ptr from the factory.
@@ -4546,6 +4621,14 @@ void render_read_rom_modal(AppState &state) {
                                                  ? st::ecu::ssm::Framing::IsoTp
                                                  : st::ecu::ssm::Framing::KLine;
                     st::flash::Flasher flasher{*chosen, ssm_framing};
+                    // Install the picked SA key function before the
+                    // first SecurityAccess exchange. Skipped in trace
+                    // mode (the trace replays the exact captured key
+                    // bytes; an alternate fn would produce different
+                    // wire bytes and fail the expect_send_recv).
+                    if (!trace_mode && authenticate) {
+                        flasher.set_security_key_fn(sa_fn);
+                    }
                     auto const progress_cb =
                         [bytes_done_sp, total_sp](st::flash::Flasher::ReadProgress p) {
                             bytes_done_sp->store(p.bytes_done, std::memory_order_release);
@@ -4561,7 +4644,8 @@ void render_read_rom_modal(AppState &state) {
                                             std::chrono::milliseconds{1500}, progress_cb,
                                             cancel_sp.get(),
                                             /*enter_diagnostic_session=*/!trace_mode,
-                                            /*authenticate=*/authenticate && !trace_mode);
+                                            /*authenticate=*/authenticate && !trace_mode,
+                                            security_level);
                     if (!result.has_value()) {
                         if (result.error().code() == st::ErrorCode::Cancelled) {
                             if (verbose) {
