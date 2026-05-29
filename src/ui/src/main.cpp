@@ -88,6 +88,14 @@ inline ImVec4 chip_fg_danger();
 // decl reason as the chip palette. Panels at lines ~5985+ call this.
 void render_empty_state(char const *title, char const *hint);
 
+// Forward decls for the primary-action accent button-color stack.
+// Use in pairs around exactly one ImGui::Button() to render it as
+// the modal's primary action (brand purple, matches the welcome-
+// panel accent rule + status-bar profile chip + tab-selected
+// overline). Modals at lines 1626+ call these.
+void push_primary_button_colors();
+void pop_primary_button_colors();
+
 struct Fonts {
     ImFont *ui = nullptr;   // Sans for UI chrome (menus, labels, panels)
     ImFont *mono = nullptr; // Monospace for grids, hex, log output
@@ -1630,12 +1638,9 @@ void render_unsaved_modal(AppState &state) {
         constexpr float kBtnW = 180.0f;
         // Save is the default action (Enter) and the safe path — give it
         // accent fill so the eye lands on it first.
-        auto const a_save = accent_for(current_theme());
-        ImGui::PushStyleColor(ImGuiCol_Button, a_save.base);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_save.hover);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_save.active);
+        push_primary_button_colors();
         bool const save_clicked = ImGui::Button(modal_save_label(what), ImVec2(kBtnW, 0.0f));
-        ImGui::PopStyleColor(3);
+        pop_primary_button_colors();
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Write the working ROM + edits to disk, "
                               "then proceed.  (Enter)");
@@ -1833,12 +1838,9 @@ void render_csv_import_modal(AppState &state) {
     bool const want_cancel = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
 
     constexpr float kBtnW = 160.0f;
-    auto const a_csv = accent_for(current_theme());
-    ImGui::PushStyleColor(ImGuiCol_Button, a_csv.base);
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_csv.hover);
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_csv.active);
+    push_primary_button_colors();
     bool const apply_clicked = ImGui::Button("Apply edits", ImVec2(kBtnW, 0.0f));
-    ImGui::PopStyleColor(3);
+    pop_primary_button_colors();
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Apply the CSV as a single bulk edit. "
                           "Undoable via Ctrl+Z.  (Enter)");
@@ -2422,14 +2424,11 @@ void render_kp_autotune_modal(AppState &state) {
                              ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, /*repeat=*/false));
     bool apply_clicked = false;
     {
-        auto const a_btn = accent_for(current_theme());
-        ImGui::PushStyleColor(ImGuiCol_Button, a_btn.base);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_btn.hover);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_btn.active);
+        push_primary_button_colors();
         ImGui::BeginDisabled(!have_preview);
         apply_clicked = ImGui::Button("Apply proposal", ImVec2(160.0f, 0.0f));
         ImGui::EndDisabled();
-        ImGui::PopStyleColor(3);
+        pop_primary_button_colors();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             if (!have_preview) {
                 ImGui::SetTooltip("Run Preview first.");
@@ -2684,14 +2683,11 @@ void render_maf_autotune_modal(AppState &state) {
                              ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, /*repeat=*/false));
     bool apply_clicked = false;
     {
-        auto const a_btn = accent_for(current_theme());
-        ImGui::PushStyleColor(ImGuiCol_Button, a_btn.base);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_btn.hover);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_btn.active);
+        push_primary_button_colors();
         ImGui::BeginDisabled(!have_preview);
         apply_clicked = ImGui::Button("Apply proposal", ImVec2(160.0f, 0.0f));
         ImGui::EndDisabled();
-        ImGui::PopStyleColor(3);
+        pop_primary_button_colors();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             if (!have_preview) {
                 ImGui::SetTooltip("Run Preview first.");
@@ -3052,14 +3048,11 @@ void render_new_project_modal(AppState &state) {
     bool const want_cancel = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
     bool create_clicked = false;
     {
-        auto const a_btn = accent_for(current_theme());
-        ImGui::PushStyleColor(ImGuiCol_Button, a_btn.base);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_btn.hover);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_btn.active);
+        push_primary_button_colors();
         ImGui::BeginDisabled(!can_create);
         create_clicked = ImGui::Button("Create", ImVec2(160.0f, 0.0f));
         ImGui::EndDisabled();
-        ImGui::PopStyleColor(3);
+        pop_primary_button_colors();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             if (!have_source || !have_def || !have_dir) {
                 ImGui::SetTooltip("Source ROM, definition pack, and "
@@ -3245,14 +3238,11 @@ void render_flash_modal(AppState &state) {
     // unsafe even though Verify itself sends nothing.
     bool verify_clicked = false;
     {
-        auto const a_btn = accent_for(current_theme());
-        ImGui::PushStyleColor(ImGuiCol_Button, a_btn.base);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_btn.hover);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_btn.active);
+        push_primary_button_colors();
         ImGui::BeginDisabled(!ready_to_send);
         verify_clicked = ImGui::Button("Verify policy", ImVec2(160.0f, 0.0f));
         ImGui::EndDisabled();
-        ImGui::PopStyleColor(3);
+        pop_primary_button_colors();
     }
     if (verify_clicked) {
         state.status_msg = "Flash plan cleared policy gate (" + pname + ").";
@@ -3818,12 +3808,9 @@ void render_settings_modal(AppState &state) {
 
     bool save_clicked = false;
     {
-        auto const a_save = accent_for(current_theme());
-        ImGui::PushStyleColor(ImGuiCol_Button, a_save.base);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a_save.hover);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, a_save.active);
+        push_primary_button_colors();
         save_clicked = ImGui::Button("Save", ImVec2(160.0f, 0.0f));
-        ImGui::PopStyleColor(3);
+        pop_primary_button_colors();
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Write definitions_root and rom_dump_root\n"
                               "to settings.toml.  (Enter)");
@@ -5662,6 +5649,22 @@ void render_empty_state(char const *title, char const *hint) {
     text_centered(title);
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
     text_centered_subtle(hint);
+}
+
+// Push the brand-accent triple onto ImGui's button color stack. Call
+// in pairs around exactly one ImGui::Button to render it as the
+// primary action — same purple the welcome panel accent rule + the
+// status-bar profile chip + tab-selected overline use. Reads from
+// current_theme() so dark/light renders the right contrast variant.
+void push_primary_button_colors() {
+    auto const a = accent_for(current_theme());
+    ImGui::PushStyleColor(ImGuiCol_Button, a.base);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, a.hover);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, a.active);
+}
+
+void pop_primary_button_colors() {
+    ImGui::PopStyleColor(3);
 }
 
 // Small framed "tag" used to highlight a per-table attribute (unit, safety
