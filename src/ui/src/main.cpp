@@ -3049,8 +3049,18 @@ void render_about_modal(AppState &state) {
         row("License",   "Apache-2.0 (see LICENSE)");
         row("Source",    "https://github.com/BuffJesus/SubuwuTuner");
         row("Built",     __DATE__ " " __TIME__);
+        // Compiler name + version, formatted to match the GCC/MSVC
+        // shape so the modal's value column stays a stable width.
+        // __clang_version__ expands to a verbose string like
+        // "19.1.0 (https://github.com/llvm/llvm-project ...)" that
+        // would wrap awkwardly; major.minor.patch keeps parity.
 #if defined(__clang__)
-        row("Compiler",  "Clang " __clang_version__);
+        {
+            char clang[32];
+            std::snprintf(clang, sizeof clang, "Clang %d.%d.%d",
+                          __clang_major__, __clang_minor__, __clang_patchlevel__);
+            row("Compiler", clang);
+        }
 #elif defined(__GNUC__)
         {
             char gcc[32];
@@ -3488,7 +3498,7 @@ void render_flash_modal(AppState &state) {
         break;
     }
 
-    ImGui::Dummy(ImVec2(0.0f, 14.0f));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceL));
 
     // Buttons. "Send to ECU" is intentionally never enabled in this build:
     // the GUI doesn't have a transport binding yet. The dry-run "Verify"
@@ -5340,25 +5350,40 @@ void render_sidebar(AppState &state) {
         if (group_matched == 0)
             continue;
 
-        char header[96];
+        // The visible label embeds the table count. The ID hash uses
+        // the category name only (via ImGui's `###` separator: text
+        // before is shown, text after is the stable ID hash). Without
+        // this split the ID would change every time the count
+        // changes — applying a filter, loading a different pack —
+        // and ImGui::TreeNode would lose the user's collapse state
+        // because the new ID has no stored entry. With `###cat_<name>`
+        // the ID stays stable across filter / pack / count changes,
+        // so the collapse state persists for as long as imgui.ini is
+        // writable (across sessions).
+        char tn_label[180];
         if (filter.empty()) {
-            std::snprintf(header, sizeof header, "%.*s (%zu)", static_cast<int>(g.name.size()),
-                          g.name.data(), g.indices.size());
+            std::snprintf(tn_label, sizeof tn_label, "%.*s (%zu)###cat_%.*s",
+                          static_cast<int>(g.name.size()), g.name.data(),
+                          g.indices.size(),
+                          static_cast<int>(g.name.size()), g.name.data());
         } else {
-            std::snprintf(header, sizeof header, "%.*s (%zu of %zu)",
-                          static_cast<int>(g.name.size()), g.name.data(), group_matched,
-                          g.indices.size());
+            std::snprintf(tn_label, sizeof tn_label, "%.*s (%zu of %zu)###cat_%.*s",
+                          static_cast<int>(g.name.size()), g.name.data(),
+                          group_matched, g.indices.size(),
+                          static_cast<int>(g.name.size()), g.name.data());
         }
 
         // When filtering, force the group open so matches are always
         // visible. Otherwise default-open on first run; the user can
-        // collapse manually and that state persists via imgui.ini.
+        // collapse manually and the state persists via imgui.ini
+        // (across sessions, thanks to the stable `###cat_<name>` ID
+        // suffix above).
         if (!filter.empty()) {
             ImGui::SetNextItemOpen(true, ImGuiCond_Always);
         }
         ImGuiTreeNodeFlags const tn_flags =
             ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
-        if (ImGui::TreeNodeEx(header, tn_flags)) {
+        if (ImGui::TreeNodeEx(tn_label, tn_flags)) {
             for (auto idx : g.indices) {
                 auto const &t = def.tables()[idx];
                 if (!table_matches(t))
@@ -6233,7 +6258,7 @@ void render_welcome_panel(AppState &state) {
     // to find out. Hidden once the user has any recents — they've
     // clearly figured out the flow by then.
     if (!has_recents) {
-        ImGui::Dummy(ImVec2(0.0f, 18.0f));
+        ImGui::Dummy(ImVec2(0.0f, kSpaceL));
         text_centered_subtle("First time? You'll need an ECU ROM dump + a definition pack.");
         if (!state.demo_project_path.has_value()) {
             // Only mention the demo as a follow-up hint when the
@@ -6371,6 +6396,45 @@ void render_welcome_panel(AppState &state) {
             text_subtle("\xE2\x80\xA2  %s", line);
             ImGui::Dummy(ImVec2(0.0f, 2.0f));
         }
+        ImGui::EndGroup();
+    }
+
+    // Tip-of-the-launch — one rotating hint surfacing a non-obvious
+    // affordance the user might not have discovered yet. Picked once
+    // per process launch (static-init seeded from system_clock), so
+    // a single welcome-panel visit shows the same tip but quitting
+    // + relaunching cycles through them. Subtle text, no chrome —
+    // sits between "What's new" and the footer.
+    {
+        static constexpr std::array<char const *, 9> kTips = {
+            "Press Ctrl+F to filter the table list — handy on packs with hundreds of tables.",
+            "Right-click any table cell for Copy / Paste / Reset to Source.",
+            "Toolbar buttons (+5%, -5%, Smooth, Interpolate) act on the current selection.",
+            "Hover any table name in the sidebar for its address + dimensions.",
+            "S badge = engine-safety-critical. E badge = emissions-relevant.",
+            "Ctrl+Enter while editing a cell fills every selected cell with the typed value.",
+            "Pass a .stune directory on the command line to skip the welcome screen.",
+            "View \xE2\x86\x92 Theme to flip between Dark and Light. Same brand purple in both.",
+            "View \xE2\x86\x92 Stats Panel for min / mean / max + a value histogram of the current table.",
+        };
+        static std::size_t const tip_idx = []() {
+            auto const now = std::chrono::system_clock::now().time_since_epoch().count();
+            return std::hash<long long>{}(now) % kTips.size();
+        }();
+
+        ImGui::Dummy(ImVec2(0.0f, has_recents ? 18.0f : kSpaceXL));
+        constexpr float kTipW = 480.0f;
+        center_cursor_x(kTipW);
+        ImGui::BeginGroup();
+        // "Tip:" prefix in brand-accent text, the tip itself in subtle —
+        // the eye picks up the cue without the line shouting compared
+        // to "What's new" above.
+        auto const [accent, accent_hover, accent_active] = accent_for(current_theme());
+        (void)accent_hover;
+        (void)accent_active;
+        ImGui::TextColored(accent, "Tip:");
+        ImGui::SameLine();
+        text_subtle("%s", kTips[tip_idx]);
         ImGui::EndGroup();
     }
 
