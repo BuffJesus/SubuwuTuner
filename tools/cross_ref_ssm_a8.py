@@ -188,7 +188,8 @@ def pearson_r2(xs: list[float], ys: list[float]) -> float:
     Returns 0 if either series has no variance or fewer than 5 paired
     samples — keeps the score conservative on starvation cases."""
     n = len(xs)
-    assert n == len(ys), "series length mismatch"
+    if n != len(ys):
+        raise ValueError(f"series length mismatch: xs={n}, ys={len(ys)}")
     if n < 5:
         return 0.0
     mx, my = mean(xs), mean(ys)

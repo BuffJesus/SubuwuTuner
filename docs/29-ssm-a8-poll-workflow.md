@@ -139,11 +139,24 @@ If the SA preamble fails (NRC on requestSeed or sendKey), the poll loop is not e
 - **Featureless-series rejection is heuristic.** A real signal that happens to have a near-uniform distribution across the captured trajectory will get filtered out. In practice, real engine signals always have plateaus; if you suspect a real mapping was lost to the filter, pass `--no-reject-featureless` and inspect the higher-R² candidates manually.
 - **Same-vehicle requirement.** Both captures must come from the same ECU on the same vehicle. The tuner-pack's per-monitor transforms are calibration-dependent; cross-vehicle mapping is a separate problem.
 
+## At-the-car sanity check
+
+After the smoke poll (or any partial capture), eyeball physical values without doing big-endian arithmetic in your head:
+
+```sh
+python tools/decode_ssm_log.py \
+    --log <FILE.log> --hypothesis <FILE.tsv> \
+    --mode summary
+```
+
+Prints `min / mean / max` per column the hypothesis maps. Switch to `--mode tail --n 5` for the most-recent five polls decoded inline, or `--mode rows --col RPM,Coolant` for every poll filtered to just the columns you want to verify. The hypothesis TSV is the same format `correlate_ssm_to_cobb.py` consumes (one row per logical column, `ssm_addr_24b / width / scaling_expr`).
+
 ## Companion files
 
 - `src/cli/main.cpp` — `cmd_ssm_a8_poll` (CLI surface) and `cmd_sniff` (the passive-capture counterpart).
 - `src/ecu/ssm.hpp` / `ssm.cpp` — protocol layer; `SsmClient` with `Framing::IsoTp` is the production path for this workflow.
-- `tools/cross_ref_ssm_a8.py` — offline correlator + `--self-test`.
+- `tools/cross_ref_ssm_a8.py` — offline rank-quantile correlator (brute discovery; no hypothesis required) + `--self-test`.
+- `tools/decode_ssm_log.py` — single-log decoder via a hypothesis TSV (sanity check / summary stats) + `--self-test`.
 - `docs/24-sniff-workflows.md` — sniff capture rig + log format the correlator consumes.
 - `docs/23-security-access.md` — SA negotiation reference for the §6 fallback.
 - `docs/28-bench-rig-build.md` — clean-ECU rig for the factory-ECU fallback.
