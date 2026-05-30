@@ -15,10 +15,12 @@
 // that picks the right backend by the loaded definition pack's
 // platform.
 //
-// The backends themselves currently return NotImplemented — the
-// scaffolding lands first so parallel work on SH-2A and RH850 has a
-// shared seam. Per docs/16 §"Architectural fit", we never need to
-// *parse* SH-2A or RH850 — only emit.
+// Coverage today: SH-2A is full (LoadConstant, LoadHookInput,
+// CallPrimitive over the add_int/select primitive set, all wired
+// through StoreHookOutput). RH850 is partial — LoadConstant and
+// LoadHookInput slices ship; CallPrimitive returns NotImplemented
+// pending the next bundle. Per docs/16 §"Architectural fit", we
+// never need to *parse* SH-2A or RH850 — only emit.
 
 #ifndef ST_FEATURE_CODEGEN_HPP
 #define ST_FEATURE_CODEGEN_HPP
@@ -142,14 +144,16 @@ public:
 
     // Compile a lowered IR module into a target-architecture
     // PatchObject. The Definition supplies hook splice addresses,
-    // free_ram regions, and primitive signatures. NotImplemented
-    // while backends are stubs.
+    // free_ram regions, and primitive signatures. Backends return
+    // NotImplemented for any IR shape they don't yet cover (see the
+    // per-backend coverage notes in the file banner).
     [[nodiscard]] virtual Result<PatchObject> compile(ir::Module const &m,
                                                       Definition const &def) = 0;
 };
 
-// SH-2A backend for VA WRX (et al.). Currently a stub — `compile`
-// always returns NotImplemented. Full implementation: a later bundle.
+// SH-2A backend for VA WRX (et al.). Full coverage today: LoadConstant,
+// LoadHookInput, CallPrimitive over the add_int/select primitive set,
+// all wired through StoreHookOutput.
 class Sh2aBackend final : public IBackend {
 public:
     [[nodiscard]] Arch arch() const noexcept override {
@@ -158,8 +162,9 @@ public:
     [[nodiscard]] Result<PatchObject> compile(ir::Module const &m, Definition const &def) override;
 };
 
-// RH850 backend for VB WRX (et al.). Currently a stub — `compile`
-// always returns NotImplemented. Full implementation: a later bundle.
+// RH850 backend for VB WRX (et al.). Partial coverage today: LoadConstant
+// and LoadHookInput slices ship (each wired through StoreHookOutput);
+// CallPrimitive returns NotImplemented pending the next bundle.
 class Rh850Backend final : public IBackend {
 public:
     [[nodiscard]] Arch arch() const noexcept override {
