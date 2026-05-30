@@ -934,14 +934,14 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, Primi
                                                 Hook const * /*target_hook*/, std::uint32_t &out) {
     Hook const *src_hook = find_hook(def, load_ins.symbol);
     if (src_hook == nullptr) {
-        std::string msg{"SH-2A backend: LoadHookInput hook '"};
+        std::string msg{"codegen: LoadHookInput hook '"};
         msg.append(load_ins.symbol);
         msg.append("' not declared in the loaded definition pack");
         return failure(ErrorCode::InvalidArgument, std::move(msg));
     }
     HookSignal const *pin = find_hook_input(*src_hook, load_ins.pin_name);
     if (pin == nullptr) {
-        std::string msg{"SH-2A backend: hook '"};
+        std::string msg{"codegen: hook '"};
         msg.append(src_hook->id);
         msg.append("' does not declare input pin '");
         msg.append(load_ins.pin_name);
@@ -949,7 +949,7 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, Primi
         return failure(ErrorCode::InvalidArgument, std::move(msg));
     }
     if (!pin->address.has_value()) {
-        std::string msg{"SH-2A backend: hook input '"};
+        std::string msg{"codegen: hook input '"};
         msg.append(src_hook->id);
         msg.append(".");
         msg.append(pin->name);
@@ -1540,6 +1540,64 @@ void emit_rh850_load_const_store(std::vector<std::uint8_t> &code,
     emit_le16(code, rh850::enc_nop());
 }
 
+// Emit the RH850 "load from hook input, store to RAM slot" sequence —
+// the LoadHookInput → StoreHookOutput slice. Shape:
+//
+//   offset  bytes              instruction
+//   0       [movhi hw1][hi]    MOVHI hi, r0, r12    ; r12 = source_hi << 16
+//   4       [movea hw1][lo]    MOVEA lo, r12, r12   ; r12 = source_address
+//   8       [ld.w hw1][disp]   LD.W 0[r12], r10     ; r10 = mem[r12]
+//   12      [movhi hw1][hi]    MOVHI hi, r0, r11    ; r11 = dst_hi << 16
+//   16      [movea hw1][lo]    MOVEA lo, r11, r11   ; r11 = dst_address
+//   20      [st.w hw1][disp]   ST.W r10, 0[r11]     ; mem[r11] = r10
+//   24      [jmp hw1][nop]     JMP [lp] + NOP pad   ; return + align
+//
+// Total: 6 × 32-bit + 1 × 16-bit JMP + 1 × 16-bit NOP = 28 bytes. The
+// extra 4 bytes vs the load-constant shape come from materializing the
+// source address (separate register from the destination so we don't
+// have to spill/reload across the LD.W).
+//
+// Register allocation:
+//   r10 — value-in-transit (LD.W writes here, ST.W reads from here)
+//   r11 — destination address (after MOVHI+MOVEA)
+//   r12 — source address (after MOVHI+MOVEA, before LD.W)
+//
+// All three are caller-saved per the RH850 ABI; no save/restore needed
+// since the patch is leaf code (no outbound calls).
+void emit_rh850_load_hook_store(std::vector<std::uint8_t> &code,
+                                std::uint32_t source_address,
+                                std::uint32_t destination_address) {
+    constexpr rh850::Reg kValReg = rh850::Reg::R10;
+    constexpr rh850::Reg kDstReg = rh850::Reg::R11;
+    constexpr rh850::Reg kSrcReg = rh850::Reg::R12;
+
+    auto const src_split = rh850::split_imm32(source_address);
+    auto const dst_split = rh850::split_imm32(destination_address);
+
+    // MOVHI src_hi, r0, r12
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, kSrcReg));
+    emit_le16(code, src_split.hi);
+    // MOVEA src_lo, r12, r12   — r12 = full source address
+    emit_le16(code, rh850::enc_movea_hw1(kSrcReg, kSrcReg));
+    emit_le16(code, src_split.lo);
+    // LD.W 0[r12], r10         — r10 = mem[r12]
+    emit_le16(code, rh850::enc_ld_w_hw1(kSrcReg, kValReg));
+    emit_le16(code, rh850::enc_ld_w_hw2(0));
+    // MOVHI dst_hi, r0, r11
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, kDstReg));
+    emit_le16(code, dst_split.hi);
+    // MOVEA dst_lo, r11, r11   — r11 = full destination address
+    emit_le16(code, rh850::enc_movea_hw1(kDstReg, kDstReg));
+    emit_le16(code, dst_split.lo);
+    // ST.W r10, 0[r11]         — mem[r11] = r10
+    emit_le16(code, rh850::enc_st_w_hw1(kValReg, kDstReg));
+    emit_le16(code, rh850::enc_st_w_hw2(0));
+    // JMP [lp]                 — return; followed by a NOP for 4-byte
+    // alignment of whatever follows the patch.
+    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+    emit_le16(code, rh850::enc_nop());
+}
+
 } // namespace
 
 Result<PatchObject> Rh850Backend::compile(ir::Module const &m, Definition const &def) {
@@ -1581,18 +1639,21 @@ Result<PatchObject> Rh850Backend::compile(ir::Module const &m, Definition const 
                                                   "to every value-producing op)");
         }
 
-        // RH850 slice: source must be LoadConstant. LoadHookInput +
-        // CallPrimitive are tracked separately and land in follow-up
-        // bundles. Mirroring SH-2A's NotImplemented shape here means
-        // a caller running the same .stmod against both backends gets
-        // a consistent "this Op isn't ready yet on RH850" message.
-        if (src->op != ir::Op::LoadConstant) {
+        // RH850 slice: source must be LoadConstant OR LoadHookInput.
+        // CallPrimitive is tracked separately and lands in a follow-up
+        // bundle (the SH-2A FragmentEmitter + primitive shape table
+        // are non-trivial to mirror). Mirroring SH-2A's NotImplemented
+        // shape here means a caller running the same .stmod against
+        // both backends gets a consistent "this Op isn't ready yet on
+        // RH850" message.
+        if (src->op != ir::Op::LoadConstant && src->op != ir::Op::LoadHookInput) {
             return failure(ErrorCode::NotImplemented,
-                           "RH850 backend: only LoadConstant→StoreHookOutput is supported "
-                           "in this slice; LoadHookInput and CallPrimitive paths land in "
-                           "follow-up bundles. See docs/16 §Current state.");
+                           "RH850 backend: only LoadConstant→StoreHookOutput and "
+                           "LoadHookInput→StoreHookOutput are supported in this slice; "
+                           "CallPrimitive paths land in a follow-up bundle. See "
+                           "docs/16 §Current state.");
         }
-        if (!src->constant_value.has_value()) {
+        if (src->op == ir::Op::LoadConstant && !src->constant_value.has_value()) {
             return failure(ErrorCode::ParseError, "RH850 backend: LoadConstant has no "
                                                   "constant_value (lower() invariant violation)");
         }
@@ -1656,10 +1717,21 @@ Result<PatchObject> Rh850Backend::compile(ir::Module const &m, Definition const 
             dst_addr = slot_it->second;
         }
 
-        auto u32 = coerce_constant_to_u32(*src);
-        if (!u32.has_value())
-            return failure(u32.error());
-        emit_rh850_load_const_store(work.code, *u32, dst_addr);
+        if (src->op == ir::Op::LoadConstant) {
+            auto u32 = coerce_constant_to_u32(*src);
+            if (!u32.has_value())
+                return failure(u32.error());
+            emit_rh850_load_const_store(work.code, *u32, dst_addr);
+        } else {
+            // LoadHookInput. Resolve the source pin → firmware
+            // address via the shared (now arch-neutral) resolver,
+            // then emit the LD.W→ST.W sequence.
+            std::uint32_t pin_addr = 0;
+            if (auto s = resolve_hook_input_address(def, *src, hook, pin_addr); !s.has_value()) {
+                return failure(s.error());
+            }
+            emit_rh850_load_hook_store(work.code, pin_addr, dst_addr);
+        }
     }
 
     PatchObject obj{};

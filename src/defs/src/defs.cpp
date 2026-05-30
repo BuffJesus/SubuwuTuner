@@ -159,7 +159,8 @@ Result<Pack> parse_pack(toml::node const &node) {
     p.includes = string_array(*t, "includes");
     if (p.endianness != "big" && p.endianness != "little") {
         return failure(ErrorCode::ParseError,
-                       "[pack].endianness must be 'big' or 'little', got: " + p.endianness);
+                       "[pack].endianness must be 'big' or 'little', got: " + p.endianness +
+                           source_suffix(*t));
     }
     return p;
 }
@@ -174,7 +175,8 @@ Result<Identification> parse_identification(toml::table const &t) {
     id.cid_scan = optional_value<bool>(t, "cid_scan", false);
     if (id.cid_match.empty()) {
         return failure(ErrorCode::ParseError,
-                       "[[identification]] cid_match is required (name: " + id.name + ")");
+                       "[[identification]] cid_match is required (name: " + id.name + ")" +
+                           source_suffix(t));
     }
     if (id.cid_length == 0) {
         id.cid_length = id.cid_match.size();
@@ -223,11 +225,14 @@ Result<Scaling> parse_scaling(toml::table const &t) {
         if (pw.breakpoints.empty() || pw.values.empty()) {
             return failure(ErrorCode::ParseError,
                            "piecewise scaling '" + s.id +
-                               "' requires non-empty breakpoints and values");
+                               "' requires non-empty breakpoints and values" +
+                               source_suffix(t));
         }
         if (pw.breakpoints.size() != pw.values.size()) {
-            return failure(ErrorCode::ParseError, "piecewise scaling '" + s.id +
-                                                      "' breakpoints/values must be same length");
+            return failure(ErrorCode::ParseError,
+                           "piecewise scaling '" + s.id +
+                               "' breakpoints/values must be same length" +
+                               source_suffix(t));
         }
         s.formula = std::move(pw);
     } else if (formula == "subaru_afr_enrichment") {
@@ -245,7 +250,8 @@ Result<Scaling> parse_scaling(toml::table const &t) {
         inv.numerator = optional_value<double>(t, "numerator", 1.0);
         s.formula = inv;
     } else {
-        return failure(ErrorCode::ParseError, "scaling '" + s.id + "' unknown formula: " + formula);
+        return failure(ErrorCode::ParseError,
+                       "scaling '" + s.id + "' unknown formula: " + formula + source_suffix(t));
     }
     s.unit = optional_value<std::string>(t, "unit", {});
     s.min = optional_value<double>(t, "min", 0.0);
@@ -298,7 +304,8 @@ Result<Table> parse_table(toml::table const &t) {
 
     if (tab.dimensions < 0 || tab.dimensions > 3) {
         return failure(ErrorCode::ParseError,
-                       "table '" + tab.id + "' dimensions must be 0, 1, 2, or 3");
+                       "table '" + tab.id + "' dimensions must be 0, 1, 2, or 3" +
+                           source_suffix(t));
     }
     return tab;
 }
@@ -335,7 +342,8 @@ Result<Switch> parse_switch(toml::table const &t) {
     s.ssm_address = static_cast<std::size_t>(optional_value<std::int64_t>(t, "ssm_address", 0));
     s.bit = static_cast<int>(optional_value<std::int64_t>(t, "bit", 0));
     if (s.bit < 0 || s.bit > 7) {
-        return failure(ErrorCode::ParseError, "[[switch]] '" + s.id + "' bit must be 0..7");
+        return failure(ErrorCode::ParseError,
+                       "[[switch]] '" + s.id + "' bit must be 0..7" + source_suffix(t));
     }
     s.default_log = optional_value<bool>(t, "default_log", false);
     return s;
@@ -370,12 +378,14 @@ Result<Dtc> parse_dtc(toml::table const &t) {
     if (auto const v = t["bitmap_id"].value<std::string>(); v.has_value()) {
         d.bitmap_id = *v;
     } else {
-        return failure(ErrorCode::ParseError, "[[dtc]] '" + d.code + "' missing bitmap_id");
+        return failure(ErrorCode::ParseError,
+                       "[[dtc]] '" + d.code + "' missing bitmap_id" + source_suffix(t));
     }
     d.byte_offset = static_cast<std::size_t>(optional_value<std::int64_t>(t, "byte_offset", 0));
     d.bit = static_cast<int>(optional_value<std::int64_t>(t, "bit", 0));
     if (d.bit < 0 || d.bit > 7) {
-        return failure(ErrorCode::ParseError, "[[dtc]] '" + d.code + "' bit must be 0..7");
+        return failure(ErrorCode::ParseError,
+                       "[[dtc]] '" + d.code + "' bit must be 0..7" + source_suffix(t));
     }
     d.emissions_relevant = optional_value<bool>(t, "emissions_relevant", false);
     return d;
@@ -387,25 +397,28 @@ Result<HookSignal> parse_signal(toml::node const &n, std::string_view kind,
     auto const prefix =
         "[[" + std::string{kind} + "]] '" + std::string{owner_id} + "' " + std::string{side};
     if (t == nullptr) {
-        return failure(ErrorCode::ParseError, prefix + " entry is not a table (expected "
-                                                       "{ name = ..., type = ..., ... })");
+        return failure(ErrorCode::ParseError,
+                       prefix + " entry is not a table (expected "
+                                "{ name = ..., type = ..., ... })" + source_suffix(n));
     }
     HookSignal s;
     if (auto const v = (*t)["name"].value<std::string>(); v.has_value() && !v->empty()) {
         s.name = *v;
     } else {
-        return failure(ErrorCode::ParseError, prefix + " entry missing name");
+        return failure(ErrorCode::ParseError,
+                       prefix + " entry missing name" + source_suffix(*t));
     }
     s.label = optional_value<std::string>(*t, "label", {});
     if (auto const v = (*t)["type"].value<std::string>(); v.has_value()) {
         s.type = *v;
     } else {
-        return failure(ErrorCode::ParseError, prefix + " entry '" + s.name + "' missing type");
+        return failure(ErrorCode::ParseError,
+                       prefix + " entry '" + s.name + "' missing type" + source_suffix(*t));
     }
     if (s.type != "float" && s.type != "int" && s.type != "bool") {
-        return failure(ErrorCode::ParseError, prefix + " entry '" + s.name +
-                                                  "' type must be float|int|bool, got '" + s.type +
-                                                  "'");
+        return failure(ErrorCode::ParseError,
+                       prefix + " entry '" + s.name + "' type must be float|int|bool, got '" +
+                           s.type + "'" + source_suffix(*t));
     }
     s.unit = optional_value<std::string>(*t, "unit", {});
     if (auto const v = (*t)["address"].value<std::int64_t>(); v.has_value()) {
@@ -419,7 +432,7 @@ Result<Hook> parse_hook(toml::table const &t) {
     if (auto const v = t["id"].value<std::string>(); v.has_value() && !v->empty()) {
         h.id = *v;
     } else {
-        return failure(ErrorCode::ParseError, "[[hook]] missing id");
+        return failure(ErrorCode::ParseError, "[[hook]] missing id" + source_suffix(t));
     }
     h.display_name = optional_value<std::string>(t, "display_name", {});
     h.description = optional_value<std::string>(t, "description", {});
@@ -460,7 +473,8 @@ Result<WritableRegion> parse_writable_region(toml::table const &t) {
     if (auto const v = t["name"].value<std::string>(); v.has_value() && !v->empty()) {
         w.name = *v;
     } else {
-        return failure(ErrorCode::ParseError, "[[writable_region]] missing name");
+        return failure(ErrorCode::ParseError,
+                       "[[writable_region]] missing name" + source_suffix(t));
     }
     if (auto const v = t["kind"].value<std::string>(); v.has_value() && !v->empty()) {
         w.kind = *v;
@@ -470,12 +484,14 @@ Result<WritableRegion> parse_writable_region(toml::table const &t) {
             msg.append("' has unknown kind '");
             msg.append(w.kind);
             msg.append("' (expected: calibration | code | data)");
+            msg.append(source_suffix(t));
             return failure(ErrorCode::ParseError, std::move(msg));
         }
     } else {
         std::string msg{"[[writable_region]] '"};
         msg.append(w.name);
         msg.append("' missing kind (expected: calibration | code | data)");
+        msg.append(source_suffix(t));
         return failure(ErrorCode::ParseError, std::move(msg));
     }
     if (auto const v = t["address"].value<std::int64_t>(); v.has_value()) {

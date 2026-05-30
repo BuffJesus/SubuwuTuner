@@ -139,10 +139,13 @@ Result<MafTuneResult> tune_maf(std::span<double const> axis,
     }
     if (opts.gain < 0.0 || !std::isfinite(opts.gain)) {
         return failure(ErrorCode::InvalidArgument,
-                       "autotune: gain must be a non-negative finite number");
+                       "autotune: gain must be a non-negative finite number, got " +
+                           std::to_string(opts.gain));
     }
     if (opts.max_delta_pct < 0.0 || !std::isfinite(opts.max_delta_pct)) {
-        return failure(ErrorCode::InvalidArgument, "autotune: max_delta_pct must be non-negative");
+        return failure(ErrorCode::InvalidArgument,
+                       "autotune: max_delta_pct must be a non-negative finite number, got " +
+                           std::to_string(opts.max_delta_pct));
     }
     // Verify the axis is sorted ascending; the nearest-cell routine
     // does not require it, but downstream consumers (linter,
@@ -312,22 +315,30 @@ Result<KnockPullResult> tune_knock_pull(std::span<double const> rpm_axis,
     }
     if (opts.pull_step_degrees < 0.0 || !std::isfinite(opts.pull_step_degrees)) {
         return failure(ErrorCode::InvalidArgument,
-                       "autotune: pull_step_degrees must be non-negative");
+                       "autotune: pull_step_degrees must be a non-negative finite number, got " +
+                           std::to_string(opts.pull_step_degrees));
     }
     if (opts.trigger_degrees < 0.0 || !std::isfinite(opts.trigger_degrees)) {
         return failure(ErrorCode::InvalidArgument,
-                       "autotune: trigger_degrees must be non-negative");
+                       "autotune: trigger_degrees must be a non-negative finite number, got " +
+                           std::to_string(opts.trigger_degrees));
     }
     for (std::size_t i = 1; i < rpm_axis.size(); ++i) {
         if (!(rpm_axis[i - 1] <= rpm_axis[i])) {
             return failure(ErrorCode::InvalidArgument,
-                           "autotune: RPM axis must be sorted ascending");
+                           "autotune: RPM axis must be sorted ascending; index " +
+                               std::to_string(i) + " breaks the order (" +
+                               std::to_string(rpm_axis[i - 1]) + " > " +
+                               std::to_string(rpm_axis[i]) + ")");
         }
     }
     for (std::size_t i = 1; i < load_axis.size(); ++i) {
         if (!(load_axis[i - 1] <= load_axis[i])) {
             return failure(ErrorCode::InvalidArgument,
-                           "autotune: load axis must be sorted ascending");
+                           "autotune: load axis must be sorted ascending; index " +
+                               std::to_string(i) + " breaks the order (" +
+                               std::to_string(load_axis[i - 1]) + " > " +
+                               std::to_string(load_axis[i]) + ")");
         }
     }
 

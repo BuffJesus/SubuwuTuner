@@ -218,8 +218,9 @@ inline constexpr Reg kLp = Reg::R31;   // link register / return address
 }
 
 // LD.W disp[reg1], reg2 — reg2 = mem[reg1 + sign_extend(disp16 & 0xFFFE)].
-// Format VII, opcode 0b111100. Symmetric to ST.W. Used by LoadHookInput
-// emissions once the slice for that lands (not in this bundle's slice).
+// Format VII, opcode 0b111100. Symmetric to ST.W. Used by
+// emit_rh850_load_hook_store to read the LoadHookInput source value
+// before storing it to the output RAM slot.
 //
 // Same disp-LSB convention as ST.W: LSB = 1 → word access.
 [[nodiscard]] constexpr std::uint16_t enc_ld_w_hw1(Reg reg1_base, Reg reg2_dst) noexcept {

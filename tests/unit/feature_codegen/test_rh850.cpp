@@ -387,11 +387,13 @@ TEST_CASE("Rh850Backend::compile refuses a Store to an undeclared hook",
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("Rh850Backend::compile returns NotImplemented for LoadHookInput sources",
+TEST_CASE("Rh850Backend::compile rejects LoadHookInput with no declared input pin",
           "[rh850][compile][error]") {
-    // RH850's slice is LoadConstant only; LoadHookInput is a follow-up
-    // bundle. Verify the error message is specific so users get a
-    // clear "this isn't ready yet" rather than a confusing parse error.
+    // kPackOneHookToml declares only outputs on its hook. LoadHookInput
+    // for an undeclared input pin should fail with InvalidArgument from
+    // resolve_hook_input_address — clear "pack didn't declare this pin"
+    // rather than the old generic NotImplemented (now the slice is
+    // implemented, see the success test below).
     auto const def = load_pack(kPackOneHookToml);
     ir::Module m;
 
@@ -413,7 +415,83 @@ TEST_CASE("Rh850Backend::compile returns NotImplemented for LoadHookInput source
     cg::Rh850Backend backend;
     auto r = backend.compile(m, def);
     REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("Rh850Backend::compile emits LoadHookInput→StoreHookOutput slice",
+          "[rh850][compile][load_hook_input]") {
+    // A hook with one input (rpm at firmware address 0xFFFF8400) and one
+    // output. Wire LoadHookInput → StoreHookOutput and verify the patch
+    // is 28 bytes (kLoadStoreSequenceSize) with the expected JMP at
+    // offset 24 (kLoadStoreJmpOffset).
+    constexpr std::string_view kPackWithInputToml = R"toml(
+[pack]
+schema_version = 1
+id             = "rh850-with-input"
+endianness     = "little"
+
+[[writable_region]]
+name    = "test-cal"
+kind    = "calibration"
+address = 0x000A0000
+length  = 0x00010000
+
+[[hook]]
+id              = "load_hook_input_test"
+ecu_address     = 0x000ABCD0
+free_ram        = { base = 0x40000000, length = 256 }
+inputs = [
+  { name = "rpm", type = "int", address = 0xFFFF8400 },
+]
+outputs = [
+  { name = "echoed_rpm", type = "int" },
+]
+)toml";
+
+    auto const def = load_pack(kPackWithInputToml);
+    ir::Module m;
+
+    ir::Instruction lhi{};
+    lhi.op = ir::Op::LoadHookInput;
+    lhi.result_type = st::feature::PinType::Int;
+    lhi.result_id = 1;
+    lhi.symbol = "load_hook_input_test";
+    lhi.pin_name = "rpm";
+    m.instructions.push_back(std::move(lhi));
+
+    ir::Instruction store{};
+    store.op = ir::Op::StoreHookOutput;
+    store.symbol = "load_hook_input_test";
+    store.pin_name = "echoed_rpm";
+    store.operands.push_back(1);
+    m.instructions.push_back(std::move(store));
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    INFO("compile error: " << (r.has_value() ? std::string{"(none)"} : r.error().to_string()));
+    REQUIRE(r.has_value());
+    REQUIRE(r->arch == cg::Arch::Rh850);
+    REQUIRE(r->hooks.size() == 1);
+
+    auto const &hp = r->hooks[0];
+    REQUIRE(hp.symbol == "load_hook_input_test");
+    REQUIRE(hp.code.size() == cg::rh850::kLoadStoreSequenceSize);
+
+    // JMP [lp] at kLoadStoreJmpOffset, NOP pad at kLoadStoreJmpOffset+2.
+    auto const jmp_lo = hp.code[cg::rh850::kLoadStoreJmpOffset];
+    auto const jmp_hi = hp.code[cg::rh850::kLoadStoreJmpOffset + 1];
+    auto const jmp_word = static_cast<std::uint16_t>(jmp_lo | (jmp_hi << 8));
+    REQUIRE(jmp_word == cg::rh850::enc_jmp_reg(cg::rh850::kLp));
+
+    auto const nop_lo = hp.code[cg::rh850::kLoadStoreJmpOffset + 2];
+    auto const nop_hi = hp.code[cg::rh850::kLoadStoreJmpOffset + 3];
+    auto const nop_word = static_cast<std::uint16_t>(nop_lo | (nop_hi << 8));
+    REQUIRE(nop_word == cg::rh850::enc_nop());
+
+    // Exactly one RAM claim for the output pin — 4 bytes, aligned to 4.
+    REQUIRE(hp.ram_claims.size() == 1);
+    REQUIRE(hp.ram_claims[0].size == 4);
+    REQUIRE(hp.ram_claims[0].address % 4 == 0);
 }
 
 TEST_CASE("Rh850Backend::compile rejects a Store with no producing instruction",

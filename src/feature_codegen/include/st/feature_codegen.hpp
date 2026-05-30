@@ -206,6 +206,15 @@ inline constexpr std::size_t kLoadStoreLiteralStride = 4;
 namespace rh850 {
 inline constexpr std::size_t kStoreSequenceSize = 24;
 inline constexpr std::size_t kJmpOffset = 20;
+
+// LoadHookInput → StoreHookOutput slice. 28 bytes — 6 × 32-bit
+// instructions (MOVHI+MOVEA pair for source addr, LD.W, MOVHI+MOVEA
+// pair for dest addr, ST.W) + 2 × 16-bit (JMP [lp], NOP pad). The
+// extra 4 bytes vs kStoreSequenceSize come from materializing the
+// source address (separate register so the LD.W doesn't clobber it).
+// JMP lands at offset 24.
+inline constexpr std::size_t kLoadStoreSequenceSize = 28;
+inline constexpr std::size_t kLoadStoreJmpOffset = 24;
 } // namespace rh850
 
 // Address gate per docs/16 §Safety #6 + docs/04 ship blocker #3.
