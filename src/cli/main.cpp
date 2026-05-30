@@ -9010,14 +9010,14 @@ int cmd_transport_list(int argc, char *argv[]) {
                     "--dll \"<DLL path above>\" ...\n");
     }
     std::puts("");
-    std::puts("Other transport families (not yet implemented):");
+    std::puts("Other transport families:");
     std::puts("  - OBDX Pro VX (USB CDC + DVI codec):  "
-              "--transport obdx --device <port>");
+              "--transport obdx --device <port>   [shipped — runs via the");
+    std::puts("                                                              "
+              "    platform serial byte channel]");
     std::puts("  - Doc-18 handheld (USB CDC + native): "
-              "--transport native --device <port>");
-    std::puts("  Both wait on platform USB CDC IByteChannel (libusb on "
-              "Windows + Linux,");
-    std::puts("  native CDC on macOS) — see docs/13-transport.md.");
+              "--transport native --device <port> [shipped — same byte chan]");
+    std::puts("  See docs/13-transport.md for the byte-channel design.");
     return 0;
 }
 
@@ -9259,10 +9259,10 @@ int cmd_rom_pull(int argc, char *argv[]) {
         chosen = &mock;
     } else {
         // --transport path. parse kind, build a TransportSpec, ask
-        // the factory. The factory currently returns NotImplemented
-        // for every concrete kind because the platform layer isn't
-        // wired yet; surface the error verbatim so the user sees
-        // exactly what's missing.
+        // the factory. obdx + native go through the platform serial
+        // byte channel today; j2534 still routes through the
+        // NotImplemented J2534Library::load() — surface either error
+        // verbatim so the user sees exactly what's missing.
         auto const kind = st::transport::parse_kind(*transport_kind);
         if (!kind.has_value()) {
             std::fprintf(stderr,
