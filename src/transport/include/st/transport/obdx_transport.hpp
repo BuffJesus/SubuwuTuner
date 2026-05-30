@@ -8,9 +8,10 @@
 //
 // Like j2534::Transport (2f0d054), the byte channel is abstracted
 // behind a tiny interface so tests can inject a fake without
-// touching USB. Real-hardware byte channels (libusb on Windows/
-// Linux, native CDC on macOS) land alongside the OBDX adapter
-// when it arrives.
+// touching USB. Real-hardware byte channel today is the
+// platform serial port (`serial_byte_channel_win.cpp` /
+// `serial_byte_channel_posix.cpp`) — the VX exposes a USB CDC ACM
+// virtual COM port, so a raw libusb backend has not been needed.
 //
 // At open() the Transport drives the OBDX-specific handshake:
 //   1. ELM mode (boot default): write `AT @1\r`, read until `>`,
@@ -19,19 +20,20 @@
 //   2. Write `DX DP 1\r`, read until `>` — last ELM-mode response.
 //      Adapter is now in DVI binary mode.
 //   3. Send a DVI SetProtocol request (opcode 0x31) configuring
-//      the bus per LinkConfig. The exact sub-op + payload bytes
-//      need verification against the VT v1.06 PDF when adapter
-//      arrives; for now we emit the request shape + leave the
-//      payload as TODO bytes.
+//      the bus per LinkConfig. Payload shape per VT v1.06 §3.10.1
+//      is `[SUB=0x01][PROTO]`; PROTO maps from `LinkConfig::kind`
+//      in `set_protocol_payload()`. Bus baud + CAN IDs are NOT
+//      carried by SetProtocol — they come from SetBusVoltage /
+//      SetCanID frames that open() drives right after.
+//   4. Send EnableNetwork (§3.10.2 — also opcode 0x31, SUB=0x02,
+//      STATE=0x01). Without this the adapter accepts SetProtocol
+//      but silently drops every ECU response.
 //
 // At close() the Transport sends a DVI SoftReboot (opcode 0x25)
 // which returns the adapter to ELM mode for the next consumer.
 //
-// Out of scope for this slice (same shape as j2534::Transport):
-//   - Streaming (start_streaming / stop_streaming return
-//     NotImplemented). Wires up with the datalogger I/O thread.
-//   - Platform USB CDC IDeviceChannel implementations (libusb +
-//     CDC native). Lands when the adapter arrives.
+// Streaming (start_streaming / stop_streaming) is wired up — see
+// obdx_transport.cpp §RX thread.
 
 #ifndef ST_TRANSPORT_OBDX_TRANSPORT_HPP
 #define ST_TRANSPORT_OBDX_TRANSPORT_HPP
