@@ -155,13 +155,16 @@ Result<edit::Snapshot> parse_snapshot(toml::table const &t) {
     if (rows == nullptr) {
         return failure(ErrorCode::ParseError, "edit snapshot missing values array");
     }
+    std::size_t row_idx = 0;
     for (auto const &row_node : *rows) {
         auto const *row_arr = row_node.as_array();
         if (row_arr == nullptr) {
-            return failure(ErrorCode::ParseError, "edit snapshot row is not an array");
+            return failure(ErrorCode::ParseError, "edit snapshot row " +
+                                                      std::to_string(row_idx) + " is not an array");
         }
         std::vector<double> row;
         row.reserve(row_arr->size());
+        std::size_t col_idx = 0;
         for (auto const &cell : *row_arr) {
             if (auto v = cell.value<double>(); v.has_value()) {
                 row.push_back(*v);
@@ -169,10 +172,13 @@ Result<edit::Snapshot> parse_snapshot(toml::table const &t) {
                 row.push_back(static_cast<double>(*i));
             } else {
                 return failure(ErrorCode::ParseError,
-                               "edit snapshot cell is neither float nor int");
+                               "edit snapshot cell at row " + std::to_string(row_idx) + ", col " +
+                                   std::to_string(col_idx) + " is neither float nor int");
             }
+            ++col_idx;
         }
         s.values.push_back(std::move(row));
+        ++row_idx;
     }
     return s;
 }
@@ -195,10 +201,13 @@ Result<edit::History> parse_history_toml(std::string_view text) {
 
     std::vector<edit::Edit> edits;
     if (auto const *arr = tbl["edit"].as_array(); arr != nullptr) {
+        std::size_t edit_idx = 0;
         for (auto const &el : *arr) {
             auto const *et = el.as_table();
             if (et == nullptr) {
-                return failure(ErrorCode::ParseError, "[[edit]] element is not a table");
+                return failure(ErrorCode::ParseError,
+                               "[[edit]] element at index " + std::to_string(edit_idx) +
+                                   " is not a table");
             }
             edit::Edit e;
             e.description = (*et)["description"].value_or<std::string>("");
@@ -211,11 +220,14 @@ Result<edit::History> parse_history_toml(std::string_view text) {
             if (byte_arr != nullptr) {
                 edit::ByteEdit b;
                 b.changes.reserve(byte_arr->size());
+                std::size_t change_idx = 0;
                 for (auto const &cn : *byte_arr) {
                     auto const *ct = cn.as_table();
                     if (ct == nullptr) {
                         return failure(ErrorCode::ParseError,
-                                       "[[edit.byte_changes]] element is not a table");
+                                       "[[edit.byte_changes]] element at index " +
+                                           std::to_string(change_idx) + " (edit #" +
+                                           std::to_string(edit_idx) + ") is not a table");
                     }
                     edit::ByteEdit::Change c{};
                     c.address =
@@ -223,12 +235,18 @@ Result<edit::History> parse_history_toml(std::string_view text) {
                     auto const before_raw = (*ct)["before"].value_or<std::int64_t>(-1);
                     auto const after_raw = (*ct)["after"].value_or<std::int64_t>(-1);
                     if (before_raw < 0 || before_raw > 255 || after_raw < 0 || after_raw > 255) {
-                        return failure(ErrorCode::ParseError, "[[edit.byte_changes]] before/after "
-                                                              "must be 0..255");
+                        return failure(ErrorCode::ParseError,
+                                       "[[edit.byte_changes]] before/after must be 0..255 "
+                                       "(edit #" +
+                                           std::to_string(edit_idx) + " change #" +
+                                           std::to_string(change_idx) +
+                                           " got before=" + std::to_string(before_raw) +
+                                           " after=" + std::to_string(after_raw) + ")");
                     }
                     c.before = static_cast<std::uint8_t>(before_raw);
                     c.after = static_cast<std::uint8_t>(after_raw);
                     b.changes.push_back(c);
+                    ++change_idx;
                 }
                 e.payload = std::move(b);
             } else {
@@ -238,8 +256,10 @@ Result<edit::History> parse_history_toml(std::string_view text) {
                 auto const *before_t = (*et)["before"].as_table();
                 auto const *after_t = (*et)["after"].as_table();
                 if (before_t == nullptr || after_t == nullptr) {
-                    return failure(ErrorCode::ParseError,
-                                   "[[edit]] missing [edit.before] or [edit.after]");
+                    return failure(ErrorCode::ParseError, "[[edit]] #" +
+                                                              std::to_string(edit_idx) +
+                                                              " missing [edit.before] or "
+                                                              "[edit.after]");
                 }
                 auto before_r = parse_snapshot(*before_t);
                 if (!before_r.has_value())
@@ -252,6 +272,7 @@ Result<edit::History> parse_history_toml(std::string_view text) {
                 e.payload = std::move(t);
             }
             edits.push_back(std::move(e));
+            ++edit_idx;
         }
     }
 

@@ -17,13 +17,23 @@ namespace {
 
 Status validate_rect(Definition::TableData const &td, Rect r) noexcept {
     if (td.values.empty() || td.values[0].empty()) {
-        return failure(ErrorCode::OutOfRange, "table has no cells");
+        return failure(ErrorCode::OutOfRange, "edit: table has no cells");
     }
     if (r.r_start > r.r_end || r.c_start > r.c_end) {
-        return failure(ErrorCode::InvalidArgument, "rect start exceeds end");
+        return failure(ErrorCode::InvalidArgument,
+                       "edit: rect start exceeds end (rows " +
+                           std::to_string(r.r_start) + ".." + std::to_string(r.r_end) +
+                           ", cols " + std::to_string(r.c_start) + ".." +
+                           std::to_string(r.c_end) + ")");
     }
     if (r.r_end >= td.values.size() || r.c_end >= td.values[0].size()) {
-        return failure(ErrorCode::OutOfRange, "rect extends past table");
+        return failure(ErrorCode::OutOfRange,
+                       "edit: rect extends past table (rect rows " +
+                           std::to_string(r.r_start) + ".." + std::to_string(r.r_end) +
+                           ", cols " + std::to_string(r.c_start) + ".." +
+                           std::to_string(r.c_end) + "; table is " +
+                           std::to_string(td.values.size()) + "x" +
+                           std::to_string(td.values[0].size()) + ")");
     }
     return ok();
 }
@@ -172,12 +182,18 @@ Status restore(Definition::TableData &td, Snapshot const &s) {
     if (auto vr = validate_rect(td, s.rect); !vr.has_value())
         return vr;
     if (s.values.size() != s.rect.rows()) {
-        return failure(ErrorCode::InvalidArgument, "snapshot row count does not match its rect");
+        return failure(ErrorCode::InvalidArgument,
+                       "edit: snapshot row count " + std::to_string(s.values.size()) +
+                           " does not match its rect (" + std::to_string(s.rect.rows()) +
+                           " rows expected)");
     }
     for (std::size_t i = 0; i < s.rect.rows(); ++i) {
         if (s.values[i].size() != s.rect.cols()) {
             return failure(ErrorCode::InvalidArgument,
-                           "snapshot column count does not match its rect");
+                           "edit: snapshot row " + std::to_string(i) + " column count " +
+                               std::to_string(s.values[i].size()) +
+                               " does not match its rect (" +
+                               std::to_string(s.rect.cols()) + " cols expected)");
         }
         for (std::size_t j = 0; j < s.rect.cols(); ++j) {
             td.values[s.rect.r_start + i][s.rect.c_start + j] = s.values[i][j];
