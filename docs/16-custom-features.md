@@ -8,11 +8,14 @@ This document captures the design. Phase 5 status: the authoring data
 model, IR lowerer, **SH-2A codegen for VA** (18 primitives recognized;
 fan-out dedup; FPU bridge for Float ops; address-gate refuses splices
 outside declared writable regions), CLI (`feature-compile`), and `.stmod`
-file format have shipped end-to-end. **The single biggest remaining open
-feature** is the patch-insertion layer (`src/feature_patch/` — finds free
-RAM, writes the hook table, splices into existing vector tables), plus
-RH850 codegen for VB. Both gate on bench-rig work against a real ECU
-vector table. See *Current state* below for the granular matrix.
+file format have shipped end-to-end. **RH850 codegen for VB** now covers
+2 of 3 IR shapes (LoadConstant → StoreHookOutput and LoadHookInput →
+StoreHookOutput); CallPrimitive is the remaining slice. **The single
+biggest remaining open feature** is the patch-insertion layer
+(`src/feature_patch/` — finds free RAM, writes the hook table, splices
+into existing vector tables). All of the above gate on bench-rig work
+against a real ECU vector table for hardware validation. See *Current
+state* below for the granular matrix.
 
 ## Stance on third-party prior art
 
@@ -33,7 +36,7 @@ Status legend: ✅ shipped · 🟡 partial · ⬜ not yet.
 | **Node library** | Hooks (splice points + sensor reads) and primitives (pure computation), both pack-declared. The library is per-platform and lives in the definition pack so a 2020 WRX and a 2008 STI can expose different hooks. | ✅ |
 | **Type system** | Pin types — `Float`, `Int`, `Bool`, plus per-pin `unit` strings. Edges must type-match AND unit-match (empty unit acts as wildcard); the editor refuses invalid wires before compile time. Dimensional analysis stays string-equality for v1.x. | ✅ |
 | **Compiler (SH-2A)** | Graph → IR → SH-2A machine code → PatchObject. Covers Int arithmetic (add/sub/mul), Int compares (lt/gt/eq), Bool ops (and/or/not), select (int/bool/float), Float arithmetic via FPU (FADD/FSUB/FMUL/FDIV), Float compares (FCMP/EQ + FCMP/GT). Handles nested CallPrimitive trees with SSA spill, cross-hook value flow, and fan-out dedup. | ✅ |
-| **Compiler (RH850)** | Stub backend that returns NotImplemented. VB WRX support waits until SH-2A is bench-validated. | ⬜ |
+| **Compiler (RH850)** | LoadConstant → StoreHookOutput (24 bytes, 5×32-bit + JMP+NOP) and LoadHookInput → StoreHookOutput (28 bytes, 6×32-bit + JMP+NOP) slices ship. CallPrimitive is the remaining gap — SH-2A's FPU bridge + primitive shape table need an RH850 analog. Encodings sourced from public Renesas reference (RH850G3K SW Architecture User's Manual) but NOT yet validated against a real VB WRX ECU. Any RH850 PatchObject is "best effort" until the bench-rig signs off. | 🟡 |
 | **CLI** | `subuwutuner-cli feature-compile <stmod> --def <pack> [--arch sh2a\|rh850] [--format hex\|toml\|raw\|stmod] [--output <file>] [--validate-only]`. Plus `dump-ir`, `lint-graph`, `lint-ir`. `--format=stmod` bundles graph + patch in a single TOML; `--validate-only` runs parse + lower + compile and exits 0/non-zero without producing output — for CI / pre-commit hooks. | ✅ |
 | **Patch format** | `.stmod` — TOML document carrying both the source graph (`[graph]` + `[[node]]` + `[[edge]]`) and the compiled patch (`[patch]` + `[[patch.hook]]` + `[[patch.hook.ram_claim]]`). Single-file, diffable, round-trippable. Signable is a future concern. | ✅ |
 | **Linter** | `feature::lint(Graph)` flags undriven inputs + orphan nodes; `feature::ir::lint(Module)` flags duplicate hook overrides + RT-budget overruns. Per-primitive cycle costs in `estimate_cost` (e.g. `divide_int` = 18 cycles, `add_int` = 1) — derived from public SH-2A spec; bench profiling will refine. Unknown symbols default to 3 cycles. | ✅ |
@@ -450,7 +453,7 @@ conservative. Actual progress:
 | One codegen backend (SH-2A) | 2–3 wk | shipped: Int + Bool + control flow + Float + Float compares + cross-hook flow + fan-out dedup + `divide_int` (FPU bridge) + `sqrt_float` (FSQRT). Open gaps: table-lookup primitives, per-ISA cycle costs. |
 | Patch insertion + free-RAM management | 1–2 wk | not started — bench-rig-blocked. Needs a real ECU's vector table and the firmware's known free-RAM map to develop against. |
 | Sample packs + docs | 1 wk | 4 samples ship (3 compile end-to-end, 1 waits on `flex_fuel_scale` curve primitive). This doc you're reading is the design + current-state ref. |
-| Second backend (RH850) | 2–3 wk | not started; stub returns NotImplemented. Per the original recommendation, RH850 drops first under timing pressure — VA users get custom features, VB waits a release. |
+| Second backend (RH850) | 2–3 wk | partial: LoadConstant + LoadHookInput slices shipped (24 + 28 B respectively, encoded against the public Renesas reference). CallPrimitive slice still open — needs an RH850 analog of SH-2A's FPU bridge + primitive shape table. Bench-rig HIL is the gate before any RH850 PatchObject reaches a real ECU. |
 
 The pieces that REMAIN before custom features ship to a user:
 
