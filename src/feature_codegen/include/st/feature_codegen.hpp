@@ -17,10 +17,13 @@
 //
 // Coverage today: SH-2A is full (LoadConstant, LoadHookInput,
 // CallPrimitive over the add_int/select primitive set, all wired
-// through StoreHookOutput). RH850 is partial — LoadConstant and
-// LoadHookInput slices ship; CallPrimitive returns NotImplemented
-// pending the next bundle. Per docs/16 §"Architectural fit", we
-// never need to *parse* SH-2A or RH850 — only emit.
+// through StoreHookOutput). RH850 covers all three IR shapes — the
+// CallPrimitive slice currently supports add_int, subtract_int,
+// and_bool, or_bool, not_bool with leaf operands (LoadConstant /
+// LoadHookInput); nested primitives and the remaining primitive set
+// (multiply/divide, compares, select, Float/FPU) land in follow-up
+// bundles. Per docs/16 §"Architectural fit", we never need to *parse*
+// SH-2A or RH850 — only emit.
 
 #ifndef ST_FEATURE_CODEGEN_HPP
 #define ST_FEATURE_CODEGEN_HPP
@@ -162,9 +165,13 @@ public:
     [[nodiscard]] Result<PatchObject> compile(ir::Module const &m, Definition const &def) override;
 };
 
-// RH850 backend for VB WRX (et al.). Partial coverage today: LoadConstant
-// and LoadHookInput slices ship (each wired through StoreHookOutput);
-// CallPrimitive returns NotImplemented pending the next bundle.
+// RH850 backend for VB WRX (et al.). Partial coverage today: all three
+// IR shapes are wired — LoadConstant→Store, LoadHookInput→Store, and
+// CallPrimitive→Store. The CallPrimitive slice currently recognizes
+// add_int, subtract_int, and_bool, or_bool, and not_bool with leaf
+// operands; multiply/divide, Int compares, select, Float/FPU
+// primitives, and nested CallPrimitive operands all still return
+// NotImplemented.
 class Rh850Backend final : public IBackend {
 public:
     [[nodiscard]] Arch arch() const noexcept override {
@@ -220,6 +227,27 @@ inline constexpr std::size_t kJmpOffset = 20;
 // JMP lands at offset 24.
 inline constexpr std::size_t kLoadStoreSequenceSize = 28;
 inline constexpr std::size_t kLoadStoreJmpOffset = 24;
+
+// CallPrimitive binary leaf-operand slice — used by add_int,
+// subtract_int, and_bool, or_bool (anything that's a Format-I 16-bit
+// reg-reg op over two materialized operands). Patch size depends on
+// operand kinds: each Constant operand needs MOVHI+MOVEA (8 bytes);
+// each HookInputPointer operand needs MOVHI+MOVEA + LD.W (12 bytes).
+// The rest is fixed: 2-byte op + 2-byte alignment NOP + 8-byte MOVHI+
+// MOVEA for destination addr + 4-byte ST.W + 2-byte JMP + 2-byte tail
+// NOP = 20 bytes overhead. `not_bool` is unary but XORs against a
+// loaded constant 1, so it lands on the same size envelope.
+//
+//   kBinaryIntArithSizeCC : both operands Constant
+//   kBinaryIntArithSizeCH : op1 Constant, op2 HookInputPointer
+//   kBinaryIntArithSizeHC : op1 HookInputPointer, op2 Constant
+//   kBinaryIntArithSizeHH : both HookInputPointer
+//
+// All four are 4-aligned.
+inline constexpr std::size_t kBinaryIntArithSizeCC = 36;
+inline constexpr std::size_t kBinaryIntArithSizeCH = 40;
+inline constexpr std::size_t kBinaryIntArithSizeHC = 40;
+inline constexpr std::size_t kBinaryIntArithSizeHH = 44;
 } // namespace rh850
 
 // Address gate per docs/16 §Safety #6 + docs/04 ship blocker #3.

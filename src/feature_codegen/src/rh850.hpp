@@ -155,6 +155,68 @@ inline constexpr Reg kLp = Reg::R31;   // link register / return address
         (kOpcode << 5U) | static_cast<std::uint16_t>(reg1));
 }
 
+// ADD reg1, reg2 — reg2 = reg2 + reg1 (destructive two-operand form;
+// `reg1` is the source, `reg2` is both source and destination). Format
+// I, opcode 0b001110. CallPrimitive lowerings materialize both operands
+// into scratch regs (r10 + r11), then ADD r11, r10 leaves the sum in
+// r10 for the ST.W to the output slot.
+[[nodiscard]] constexpr std::uint16_t enc_add_reg(Reg reg1, Reg reg2) noexcept {
+    constexpr std::uint16_t kOpcode = 0b001110U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg2) << 11U) |
+        (kOpcode << 5U) |
+        static_cast<std::uint16_t>(reg1));
+}
+
+// SUB reg1, reg2 — reg2 = reg2 - reg1 (destructive two-operand form).
+// Format I, opcode 0b001101. Note operand order: in `subtract_int(a,
+// b)` we want `a - b`, so the lowering loads `a` into reg2 and `b`
+// into reg1, then SUB reg1, reg2 → reg2 = a - b.
+[[nodiscard]] constexpr std::uint16_t enc_sub_reg(Reg reg1, Reg reg2) noexcept {
+    constexpr std::uint16_t kOpcode = 0b001101U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg2) << 11U) |
+        (kOpcode << 5U) |
+        static_cast<std::uint16_t>(reg1));
+}
+
+// AND reg1, reg2 — reg2 = reg2 & reg1 (bitwise AND, destructive).
+// Format I, opcode 0b001010. Because the codegen normalizes Bool
+// values to 0 or 1 in 32-bit slots (see coerce_constant_to_u32 +
+// MOVT in SH-2A), bitwise AND on two normalized Bools is exactly
+// logical AND. Used to lower `and_bool`.
+[[nodiscard]] constexpr std::uint16_t enc_and_reg(Reg reg1, Reg reg2) noexcept {
+    constexpr std::uint16_t kOpcode = 0b001010U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg2) << 11U) |
+        (kOpcode << 5U) |
+        static_cast<std::uint16_t>(reg1));
+}
+
+// OR reg1, reg2 — reg2 = reg2 | reg1 (bitwise OR, destructive).
+// Format I, opcode 0b001000. Same 0/1-normalization argument as AND:
+// bitwise OR on normalized Bools = logical OR. Lowers `or_bool`.
+[[nodiscard]] constexpr std::uint16_t enc_or_reg(Reg reg1, Reg reg2) noexcept {
+    constexpr std::uint16_t kOpcode = 0b001000U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg2) << 11U) |
+        (kOpcode << 5U) |
+        static_cast<std::uint16_t>(reg1));
+}
+
+// XOR reg1, reg2 — reg2 = reg2 ^ reg1 (bitwise XOR, destructive).
+// Format I, opcode 0b001001. Used to lower `not_bool` as `x XOR 1`
+// (correct for the 0/1-normalized representation; a bitwise NOT
+// instruction would produce 0xFFFFFFFF/0xFFFFFFFE which is wrong for
+// the bool invariant).
+[[nodiscard]] constexpr std::uint16_t enc_xor_reg(Reg reg1, Reg reg2) noexcept {
+    constexpr std::uint16_t kOpcode = 0b001001U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg2) << 11U) |
+        (kOpcode << 5U) |
+        static_cast<std::uint16_t>(reg1));
+}
+
 // --- Format VI (32-bit imm + reg + reg) ------------------------------
 
 // Each Format VI emitter returns the FIRST 16-bit halfword. The caller
@@ -262,10 +324,14 @@ struct ImmSplit {
     return ImmSplit{hi, lo};
 }
 
-// Layout constants for the canonical "load constant, store to RAM
-// slot" sequence emitted by the LoadConstant slice are exposed on the
-// public API surface — see `rh850::kStoreSequenceSize` and
-// `rh850::kJmpOffset` in `st/feature_codegen.hpp`. Per-byte layout:
+// Layout constants for all current RH850 emission shapes are exposed
+// on the public API surface in `st/feature_codegen.hpp`:
+//
+//   kStoreSequenceSize / kJmpOffset           — LoadConstant→Store
+//   kLoadStoreSequenceSize / kLoadStoreJmpOffset — LoadHookInput→Store
+//   kBinaryIntArithSize{CC,CH,HC,HH}          — CallPrimitive add/sub
+//
+// Per-byte layout for LoadConstant→Store:
 //
 //   offset  bytes              instruction
 //   0       [movhi hw1][hi]    MOVHI hi, r0, r10   ; r10 = hi << 16

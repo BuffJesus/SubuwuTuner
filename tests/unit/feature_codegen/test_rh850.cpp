@@ -31,6 +31,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <string_view>
 
 namespace cg = st::feature::codegen;
@@ -165,6 +167,45 @@ TEST_CASE("rh850::enc_movea_hw1 places reg/opcode bits correctly",
     // movea imm, r10, r10 → reg1 = 10, reg2 = 10, opcode = 0b110001 (=0x31)
     // Bits: (10<<11) | (0x31<<5) | 10 = 0x5000 | 0x620 | 10 = 0x562A
     REQUIRE(cg::rh850::enc_movea_hw1(cg::rh850::Reg::R10, cg::rh850::Reg::R10) == 0x562A);
+}
+
+TEST_CASE("rh850::enc_add_reg encodes the register fields correctly",
+          "[rh850][encoder]") {
+    // add r11, r10 → reg1 = 11, reg2 = 10, opcode = 0b001110 (= 0x0E)
+    // Bits: (10<<11) | (0x0E<<5) | 11 = 0x5000 | 0x1C0 | 11 = 0x51CB
+    REQUIRE(cg::rh850::enc_add_reg(cg::rh850::Reg::R11, cg::rh850::Reg::R10) == 0x51CB);
+
+    // add r0, r0 (degenerate but legal)
+    // Bits: 0 | (0x0E<<5) | 0 = 0x01C0
+    REQUIRE(cg::rh850::enc_add_reg(cg::rh850::Reg::R0, cg::rh850::Reg::R0) == 0x01C0);
+}
+
+TEST_CASE("rh850::enc_sub_reg encodes the register fields correctly",
+          "[rh850][encoder]") {
+    // sub r11, r10 → reg1 = 11, reg2 = 10, opcode = 0b001101 (= 0x0D)
+    // Bits: (10<<11) | (0x0D<<5) | 11 = 0x5000 | 0x1A0 | 11 = 0x51AB
+    REQUIRE(cg::rh850::enc_sub_reg(cg::rh850::Reg::R11, cg::rh850::Reg::R10) == 0x51AB);
+}
+
+TEST_CASE("rh850::enc_and_reg encodes the register fields correctly",
+          "[rh850][encoder]") {
+    // and r11, r10 → reg1 = 11, reg2 = 10, opcode = 0b001010 (= 0x0A)
+    // Bits: (10<<11) | (0x0A<<5) | 11 = 0x5000 | 0x140 | 11 = 0x514B
+    REQUIRE(cg::rh850::enc_and_reg(cg::rh850::Reg::R11, cg::rh850::Reg::R10) == 0x514B);
+}
+
+TEST_CASE("rh850::enc_or_reg encodes the register fields correctly",
+          "[rh850][encoder]") {
+    // or r11, r10 → reg1 = 11, reg2 = 10, opcode = 0b001000 (= 0x08)
+    // Bits: (10<<11) | (0x08<<5) | 11 = 0x5000 | 0x100 | 11 = 0x510B
+    REQUIRE(cg::rh850::enc_or_reg(cg::rh850::Reg::R11, cg::rh850::Reg::R10) == 0x510B);
+}
+
+TEST_CASE("rh850::enc_xor_reg encodes the register fields correctly",
+          "[rh850][encoder]") {
+    // xor r11, r10 → reg1 = 11, reg2 = 10, opcode = 0b001001 (= 0x09)
+    // Bits: (10<<11) | (0x09<<5) | 11 = 0x5000 | 0x120 | 11 = 0x512B
+    REQUIRE(cg::rh850::enc_xor_reg(cg::rh850::Reg::R11, cg::rh850::Reg::R10) == 0x512B);
 }
 
 TEST_CASE("rh850::enc_st_w_hw1 places reg/opcode bits correctly",
@@ -511,6 +552,437 @@ TEST_CASE("Rh850Backend::compile rejects a Store with no producing instruction",
     auto r = backend.compile(m, def);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+// ---- CallPrimitive (binary int arithmetic) ----------------------------
+
+namespace {
+
+// Pack with one hook that declares two int inputs (rpm, map) and one
+// int output — enough for any add_int / subtract_int permutation that
+// mixes Constant and HookInputPointer operands.
+constexpr std::string_view kPackTwoInputsToml = R"toml(
+[pack]
+schema_version = 1
+id             = "rh850-two-inputs"
+endianness     = "little"
+
+[[writable_region]]
+name    = "test-cal"
+kind    = "calibration"
+address = 0x000A0000
+length  = 0x00010000
+
+[[hook]]
+id              = "binop_test"
+ecu_address     = 0x000ABCD0
+free_ram        = { base = 0x40000000, length = 256 }
+inputs = [
+  { name = "rpm", type = "int", address = 0xFFFF8400 },
+  { name = "map", type = "int", address = 0xFFFF8410 },
+]
+outputs = [
+  { name = "result", type = "int" },
+]
+)toml";
+
+// Build a Module that compiles `result = symbol(a, b)` where each
+// operand is either a LoadConstant (PinType::Int) or a LoadHookInput
+// (pin name from the pack). The caller chooses which by passing nullopt
+// (→ LoadConstant from `constant_value`) or a non-empty string
+// (→ LoadHookInput from that pin name).
+ir::Module make_binop_module(std::string_view symbol,
+                             std::optional<std::int32_t> op1_const,
+                             std::string_view op1_pin,
+                             std::optional<std::int32_t> op2_const,
+                             std::string_view op2_pin) {
+    ir::Module m;
+
+    ir::Instruction op1{};
+    if (op1_const.has_value()) {
+        op1.op = ir::Op::LoadConstant;
+        op1.result_type = st::feature::PinType::Int;
+        op1.result_id = 1;
+        op1.constant_value = static_cast<double>(*op1_const);
+    } else {
+        op1.op = ir::Op::LoadHookInput;
+        op1.result_type = st::feature::PinType::Int;
+        op1.result_id = 1;
+        op1.symbol = "binop_test";
+        op1.pin_name = std::string{op1_pin};
+    }
+    m.instructions.push_back(std::move(op1));
+
+    ir::Instruction op2{};
+    if (op2_const.has_value()) {
+        op2.op = ir::Op::LoadConstant;
+        op2.result_type = st::feature::PinType::Int;
+        op2.result_id = 2;
+        op2.constant_value = static_cast<double>(*op2_const);
+    } else {
+        op2.op = ir::Op::LoadHookInput;
+        op2.result_type = st::feature::PinType::Int;
+        op2.result_id = 2;
+        op2.symbol = "binop_test";
+        op2.pin_name = std::string{op2_pin};
+    }
+    m.instructions.push_back(std::move(op2));
+
+    ir::Instruction call{};
+    call.op = ir::Op::CallPrimitive;
+    call.result_type = st::feature::PinType::Int;
+    call.result_id = 3;
+    call.symbol = std::string{symbol};
+    call.operands.push_back(1);
+    call.operands.push_back(2);
+    m.instructions.push_back(std::move(call));
+
+    ir::Instruction store{};
+    store.op = ir::Op::StoreHookOutput;
+    store.result_type = st::feature::PinType::Int;
+    store.symbol = "binop_test";
+    store.pin_name = "result";
+    store.operands.push_back(3);
+    m.instructions.push_back(std::move(store));
+
+    return m;
+}
+
+} // namespace
+
+TEST_CASE("Rh850Backend::compile emits add_int with two Constant operands",
+          "[rh850][compile][call_primitive]") {
+    auto const def = load_pack(kPackTwoInputsToml);
+    auto const m = make_binop_module("add_int", 1234, "", 5678, "");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    INFO("compile error: " << (r.has_value() ? std::string{"(none)"} : r.error().to_string()));
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+
+    auto const &hp = r->hooks[0];
+    REQUIRE(hp.code.size() == cg::rh850::kBinaryIntArithSizeCC);
+    REQUIRE(hp.ram_claims.size() == 1);
+    REQUIRE(hp.ram_claims[0].size == 4);
+
+    // Tail: JMP [lp] at size-4, NOP at size-2 (little-endian halfwords).
+    auto const jmp_lo = hp.code[hp.code.size() - 4];
+    auto const jmp_hi = hp.code[hp.code.size() - 3];
+    auto const jmp_word = static_cast<std::uint16_t>(jmp_lo | (jmp_hi << 8));
+    REQUIRE(jmp_word == cg::rh850::enc_jmp_reg(cg::rh850::kLp));
+}
+
+TEST_CASE("Rh850Backend::compile emits add_int with mixed Constant + HookInput",
+          "[rh850][compile][call_primitive]") {
+    auto const def = load_pack(kPackTwoInputsToml);
+
+    // C + H — op1 constant, op2 hook input.
+    auto const m_ch = make_binop_module("add_int", 100, "", std::nullopt, "rpm");
+    cg::Rh850Backend backend;
+    auto r_ch = backend.compile(m_ch, def);
+    INFO("CH compile error: "
+         << (r_ch.has_value() ? std::string{"(none)"} : r_ch.error().to_string()));
+    REQUIRE(r_ch.has_value());
+    REQUIRE(r_ch->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeCH);
+
+    // H + C — op1 hook input, op2 constant.
+    auto const m_hc = make_binop_module("add_int", std::nullopt, "rpm", 50, "");
+    auto r_hc = backend.compile(m_hc, def);
+    REQUIRE(r_hc.has_value());
+    REQUIRE(r_hc->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeHC);
+}
+
+TEST_CASE("Rh850Backend::compile emits add_int with two HookInput operands",
+          "[rh850][compile][call_primitive]") {
+    auto const def = load_pack(kPackTwoInputsToml);
+    auto const m = make_binop_module("add_int", std::nullopt, "rpm", std::nullopt, "map");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeHH);
+
+    // Patch must be 4-byte aligned regardless of operand kinds.
+    REQUIRE(r->hooks[0].code.size() % 4 == 0);
+}
+
+TEST_CASE("Rh850Backend::compile emits subtract_int (operand order: a - b)",
+          "[rh850][compile][call_primitive]") {
+    auto const def = load_pack(kPackTwoInputsToml);
+    auto const m = make_binop_module("subtract_int", 200, "", 50, "");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeCC);
+
+    // Same size as add_int with the same operand kinds — the ADD/SUB
+    // is a single 16-bit instruction in both cases. The opcode difference
+    // is covered by the encoder unit tests above.
+}
+
+TEST_CASE("Rh850Backend::compile rejects multiply_int (not yet in slice)",
+          "[rh850][compile][call_primitive][error]") {
+    auto const def = load_pack(kPackTwoInputsToml);
+    auto const m = make_binop_module("multiply_int", 3, "", 4, "");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+}
+
+// ---- Bool primitives ---------------------------------------------------
+
+namespace {
+
+// Same shape as kPackTwoInputsToml but with Bool inputs for the
+// boolean primitive cases.
+constexpr std::string_view kPackBoolInputsToml = R"toml(
+[pack]
+schema_version = 1
+id             = "rh850-bool-inputs"
+endianness     = "little"
+
+[[writable_region]]
+name    = "test-cal"
+kind    = "calibration"
+address = 0x000A0000
+length  = 0x00010000
+
+[[hook]]
+id              = "bool_test"
+ecu_address     = 0x000ABCD0
+free_ram        = { base = 0x40000000, length = 256 }
+inputs = [
+  { name = "flag_a", type = "bool", address = 0xFFFF8500 },
+  { name = "flag_b", type = "bool", address = 0xFFFF8510 },
+]
+outputs = [
+  { name = "result", type = "bool" },
+]
+)toml";
+
+ir::Module make_bool_binop_module(std::string_view symbol, bool op1_const, bool op2_const) {
+    ir::Module m;
+
+    ir::Instruction op1{};
+    op1.op = ir::Op::LoadConstant;
+    op1.result_type = st::feature::PinType::Bool;
+    op1.result_id = 1;
+    op1.constant_value = op1_const ? 1.0 : 0.0;
+    m.instructions.push_back(std::move(op1));
+
+    ir::Instruction op2{};
+    op2.op = ir::Op::LoadConstant;
+    op2.result_type = st::feature::PinType::Bool;
+    op2.result_id = 2;
+    op2.constant_value = op2_const ? 1.0 : 0.0;
+    m.instructions.push_back(std::move(op2));
+
+    ir::Instruction call{};
+    call.op = ir::Op::CallPrimitive;
+    call.result_type = st::feature::PinType::Bool;
+    call.result_id = 3;
+    call.symbol = std::string{symbol};
+    call.operands.push_back(1);
+    call.operands.push_back(2);
+    m.instructions.push_back(std::move(call));
+
+    ir::Instruction store{};
+    store.op = ir::Op::StoreHookOutput;
+    store.result_type = st::feature::PinType::Bool;
+    store.symbol = "bool_test";
+    store.pin_name = "result";
+    store.operands.push_back(3);
+    m.instructions.push_back(std::move(store));
+
+    return m;
+}
+
+} // namespace
+
+TEST_CASE("Rh850Backend::compile emits and_bool (binary bool)",
+          "[rh850][compile][call_primitive][bool]") {
+    auto const def = load_pack(kPackBoolInputsToml);
+    auto const m = make_bool_binop_module("and_bool", true, false);
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    INFO("and_bool compile error: "
+         << (r.has_value() ? std::string{"(none)"} : r.error().to_string()));
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    // Same shape as binary int arithmetic — 36 bytes for two constants.
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeCC);
+}
+
+TEST_CASE("Rh850Backend::compile emits or_bool (binary bool)",
+          "[rh850][compile][call_primitive][bool]") {
+    auto const def = load_pack(kPackBoolInputsToml);
+    auto const m = make_bool_binop_module("or_bool", true, false);
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeCC);
+}
+
+TEST_CASE("Rh850Backend::compile emits not_bool (unary bool, XOR-with-1)",
+          "[rh850][compile][call_primitive][bool]") {
+    auto const def = load_pack(kPackBoolInputsToml);
+
+    // Module: not_bool(LoadConstant(true)) → Store
+    ir::Module m;
+
+    ir::Instruction op{};
+    op.op = ir::Op::LoadConstant;
+    op.result_type = st::feature::PinType::Bool;
+    op.result_id = 1;
+    op.constant_value = 1.0;
+    m.instructions.push_back(std::move(op));
+
+    ir::Instruction call{};
+    call.op = ir::Op::CallPrimitive;
+    call.result_type = st::feature::PinType::Bool;
+    call.result_id = 2;
+    call.symbol = "not_bool";
+    call.operands.push_back(1);
+    m.instructions.push_back(std::move(call));
+
+    ir::Instruction store{};
+    store.op = ir::Op::StoreHookOutput;
+    store.symbol = "bool_test";
+    store.pin_name = "result";
+    store.operands.push_back(2);
+    m.instructions.push_back(std::move(store));
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    INFO("not_bool compile error: "
+         << (r.has_value() ? std::string{"(none)"} : r.error().to_string()));
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    // Same 36-byte shape as binary CC (one operand load + one constant
+    // load + XOR + dst addr materialize + ST.W + JMP).
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeCC);
+    REQUIRE(r->hooks[0].code.size() % 4 == 0);
+}
+
+TEST_CASE("Rh850Backend::compile rejects compare_lt_int (not yet in slice)",
+          "[rh850][compile][call_primitive][error]") {
+    auto const def = load_pack(kPackTwoInputsToml);
+    auto const m = make_binop_module("compare_lt_int", 1, "", 2, "");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+}
+
+TEST_CASE("Rh850Backend::compile rejects unknown CallPrimitive symbol",
+          "[rh850][compile][call_primitive][error]") {
+    auto const def = load_pack(kPackTwoInputsToml);
+    auto const m = make_binop_module("teleport_fuel", 1, "", 2, "");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+}
+
+TEST_CASE("Rh850Backend::compile rejects type-mismatched primitive operand",
+          "[rh850][compile][call_primitive][error]") {
+    // add_int expects Int operands; feed it a Bool LoadConstant and
+    // confirm the type-check refuses with ParseError.
+    auto const def = load_pack(kPackTwoInputsToml);
+    ir::Module m;
+
+    ir::Instruction op1{};
+    op1.op = ir::Op::LoadConstant;
+    op1.result_type = st::feature::PinType::Bool;
+    op1.result_id = 1;
+    op1.constant_value = 1.0;
+    m.instructions.push_back(std::move(op1));
+
+    ir::Instruction op2{};
+    op2.op = ir::Op::LoadConstant;
+    op2.result_type = st::feature::PinType::Int;
+    op2.result_id = 2;
+    op2.constant_value = 5.0;
+    m.instructions.push_back(std::move(op2));
+
+    ir::Instruction call{};
+    call.op = ir::Op::CallPrimitive;
+    call.result_type = st::feature::PinType::Int;
+    call.result_id = 3;
+    call.symbol = "add_int";
+    call.operands.push_back(1);
+    call.operands.push_back(2);
+    m.instructions.push_back(std::move(call));
+
+    ir::Instruction store{};
+    store.op = ir::Op::StoreHookOutput;
+    store.symbol = "binop_test";
+    store.pin_name = "result";
+    store.operands.push_back(3);
+    m.instructions.push_back(std::move(store));
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ParseError);
+}
+
+TEST_CASE("Rh850Backend::compile rejects nested CallPrimitive operand",
+          "[rh850][compile][call_primitive][error]") {
+    // Build (a + b) + c — the inner add_int feeds the outer add_int.
+    // First slice rejects this with NotImplemented; flatten or wait.
+    auto const def = load_pack(kPackTwoInputsToml);
+    ir::Module m;
+
+    auto const make_const = [](ir::ValueId id, std::int32_t v) {
+        ir::Instruction ins{};
+        ins.op = ir::Op::LoadConstant;
+        ins.result_type = st::feature::PinType::Int;
+        ins.result_id = id;
+        ins.constant_value = static_cast<double>(v);
+        return ins;
+    };
+    m.instructions.push_back(make_const(1, 1));
+    m.instructions.push_back(make_const(2, 2));
+    m.instructions.push_back(make_const(3, 3));
+
+    ir::Instruction inner{};
+    inner.op = ir::Op::CallPrimitive;
+    inner.result_type = st::feature::PinType::Int;
+    inner.result_id = 4;
+    inner.symbol = "add_int";
+    inner.operands.push_back(1);
+    inner.operands.push_back(2);
+    m.instructions.push_back(std::move(inner));
+
+    ir::Instruction outer{};
+    outer.op = ir::Op::CallPrimitive;
+    outer.result_type = st::feature::PinType::Int;
+    outer.result_id = 5;
+    outer.symbol = "add_int";
+    outer.operands.push_back(4); // nested
+    outer.operands.push_back(3);
+    m.instructions.push_back(std::move(outer));
+
+    ir::Instruction store{};
+    store.op = ir::Op::StoreHookOutput;
+    store.symbol = "binop_test";
+    store.pin_name = "result";
+    store.operands.push_back(5);
+    m.instructions.push_back(std::move(store));
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
 }
 
 // ---- select_backend -----------------------------------------------------

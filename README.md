@@ -2,7 +2,7 @@
 
 A comprehensive, free, open-source **Subaru ECU tuning suite** written in modern C++23.
 
-**Status:** pre-1.0, active development. Phases 0–4 complete hardware-free (rom/defs/edit/project, transport + ECU protocols, datalogger, flash orchestrator with optional gated 0xB6 path); Phase 5 design + IR + SH-2A codegen for VA shipped, RH850 codegen for VB partial (LoadConstant + LoadHookInput slices ship, CallPrimitive remaining). Bench-validation against a real ECU is the open gate before v1.0.
+**Status:** pre-1.0, active development. Phases 0–4 complete hardware-free (rom/defs/edit/project, transport + ECU protocols, datalogger, flash orchestrator with optional gated 0xB6 path); Phase 5 design + IR + SH-2A codegen for VA shipped, RH850 codegen for VB partial (LoadConstant + LoadHookInput slices ship; CallPrimitive slice covers add_int, subtract_int, and_bool, or_bool, not_bool; multiply/divide, compares, select, Float/FPU still pending). Bench-validation against a real ECU is the open gate before v1.0.
 
 ## What this is
 

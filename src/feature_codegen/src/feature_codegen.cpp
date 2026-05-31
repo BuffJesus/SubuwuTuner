@@ -974,14 +974,14 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, Primi
 //           policy decision that lands with a future bundle.
 [[nodiscard]] Result<std::uint32_t> coerce_constant_to_u32(ir::Instruction const &load_ins) {
     if (!load_ins.constant_value.has_value()) {
-        return failure(ErrorCode::ParseError, "SH-2A backend: LoadConstant has no "
+        return failure(ErrorCode::ParseError, "codegen: LoadConstant has no "
                                               "constant_value (lower() invariant violation)");
     }
     double const v = *load_ins.constant_value;
     switch (load_ins.result_type) {
     case PinType::Int: {
         if (v < -2147483648.0 || v > 2147483647.0) {
-            std::string msg{"SH-2A backend: LoadConstant value "};
+            std::string msg{"codegen: LoadConstant value "};
             msg.append(std::to_string(v));
             msg.append(" out of int32 range");
             return failure(ErrorCode::ParseError, std::move(msg));
@@ -1003,7 +1003,7 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, Primi
         // whether it came from a LoadConstant or a compare_*.
         return v > 0.5 ? std::uint32_t{1} : std::uint32_t{0};
     }
-    return failure(ErrorCode::NotImplemented, "SH-2A backend: unknown PinType for LoadConstant");
+    return failure(ErrorCode::NotImplemented, "codegen: unknown PinType for LoadConstant");
 }
 
 // Locate the producing Instruction for `value_id`. Returns nullptr
@@ -1540,6 +1540,236 @@ void emit_rh850_load_const_store(std::vector<std::uint8_t> &code,
     emit_le16(code, rh850::enc_nop());
 }
 
+// Materialize a single PrimitiveOperand into `target_reg` on RH850.
+//
+//   Constant         : MOVHI+MOVEA the literal directly into target_reg
+//                      (8 bytes, no scratch needed).
+//   HookInputPointer : MOVHI+MOVEA the address into scratch_reg, then
+//                      LD.W 0[scratch_reg], target_reg (12 bytes).
+//
+// `target_reg` and `scratch_reg` must be distinct in the HookInputPointer
+// case — otherwise the address materialization clobbers what we're about
+// to load. The caller is responsible for pairing them.
+void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
+                                       PrimitiveOperand const &op,
+                                       rh850::Reg target_reg,
+                                       rh850::Reg scratch_reg) {
+    auto const split = rh850::split_imm32(op.value);
+    if (op.kind == PrimitiveOperand::Kind::Constant) {
+        emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, target_reg));
+        emit_le16(code, split.hi);
+        emit_le16(code, rh850::enc_movea_hw1(target_reg, target_reg));
+        emit_le16(code, split.lo);
+        return;
+    }
+    // HookInputPointer (or future SSA RAM-slot pointer). Materialize
+    // the address into scratch_reg first, then dereference.
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, scratch_reg));
+    emit_le16(code, split.hi);
+    emit_le16(code, rh850::enc_movea_hw1(scratch_reg, scratch_reg));
+    emit_le16(code, split.lo);
+    emit_le16(code, rh850::enc_ld_w_hw1(scratch_reg, target_reg));
+    emit_le16(code, rh850::enc_ld_w_hw2(0));
+}
+
+// Emit an RH850 binary-int-arithmetic CallPrimitive fragment for
+// `add_int` or `subtract_int`. Shape:
+//
+//   load op1 → r10     (MOVHI+MOVEA, or MOVHI+MOVEA+LD.W via r12 scratch)
+//   load op2 → r11     (same, scratch r12)
+//   ADD/SUB r11, r10   (16-bit, result lands in r10)
+//   NOP                (2-byte pad to restore 4-alignment after the
+//                       lone 16-bit ADD/SUB above)
+//   MOVHI dst_hi, r0, r12; MOVEA dst_lo, r12, r12   (r12 = dst_addr)
+//   ST.W r10, 0[r12]   (mem[dst_addr] = result)
+//   JMP [lp] + tail NOP
+//
+// Total size: 36/40/40/44 bytes depending on operand-kind combinations,
+// always 4-aligned. Caller does not need to pad.
+//
+// Operand order for SUB: `subtract_int(a, b)` is "a - b". RH850 SUB
+// reg1, reg2 computes reg2 = reg2 - reg1. So we load `a` into r10
+// (reg2 in the SUB encoding) and `b` into r11 (reg1), and SUB r11, r10
+// leaves r10 = a - b.
+void emit_rh850_binary_int_arith(std::vector<std::uint8_t> &code, std::string_view symbol,
+                                 PrimitiveOperand const &op1, PrimitiveOperand const &op2,
+                                 std::uint32_t dst_addr) {
+    constexpr rh850::Reg kAReg = rh850::Reg::R10;   // op1 / result
+    constexpr rh850::Reg kBReg = rh850::Reg::R11;   // op2
+    constexpr rh850::Reg kScratch = rh850::Reg::R12; // address scratch
+
+    emit_rh850_load_primitive_operand(code, op1, kAReg, kScratch);
+    emit_rh850_load_primitive_operand(code, op2, kBReg, kScratch);
+
+    if (symbol == "add_int") {
+        emit_le16(code, rh850::enc_add_reg(kBReg, kAReg));
+    } else if (symbol == "subtract_int") {
+        emit_le16(code, rh850::enc_sub_reg(kBReg, kAReg));
+    } else if (symbol == "and_bool") {
+        // Bool values are 0/1-normalized — bitwise AND is logical AND.
+        emit_le16(code, rh850::enc_and_reg(kBReg, kAReg));
+    } else {
+        // or_bool — the only remaining symbol routed here.
+        emit_le16(code, rh850::enc_or_reg(kBReg, kAReg));
+    }
+
+    // Pad to keep the byte stream 4-aligned. Every other instruction
+    // we emit is 4 bytes; the lone 16-bit ADD/SUB above puts us off
+    // by 2. One NOP restores alignment and matches the LoadConstant
+    // / LoadHookInput shapes that already terminate aligned.
+    emit_le16(code, rh850::enc_nop());
+
+    // Materialize dst_addr into r12, then ST.W r10, 0[r12].
+    auto const dst_split = rh850::split_imm32(dst_addr);
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, kScratch));
+    emit_le16(code, dst_split.hi);
+    emit_le16(code, rh850::enc_movea_hw1(kScratch, kScratch));
+    emit_le16(code, dst_split.lo);
+    emit_le16(code, rh850::enc_st_w_hw1(kAReg, kScratch));
+    emit_le16(code, rh850::enc_st_w_hw2(0));
+
+    // JMP [lp] + tail NOP.
+    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+    emit_le16(code, rh850::enc_nop());
+}
+
+// Emit an RH850 unary-bool CallPrimitive fragment for `not_bool`.
+// Computes `result = x XOR 1` — correct for the 0/1-normalized Bool
+// invariant the codegen maintains. Bitwise NOT would yield
+// 0xFFFFFFFF/0xFFFFFFFE, breaking the invariant for downstream
+// consumers; XOR-with-1 stays inside {0, 1}.
+//
+// Shape:
+//   load op → r10                (8 or 12 bytes)
+//   load constant 1 → r11        (8 bytes — always Constant)
+//   XOR r11, r10                 (2 bytes, result in r10)
+//   NOP pad                      (2 bytes, 4-align)
+//   MOVHI+MOVEA dst → r12        (8 bytes)
+//   ST.W r10, 0[r12]             (4 bytes)
+//   JMP [lp] + NOP tail          (4 bytes)
+//
+// Total: 36 (C) or 40 (H) bytes, 4-aligned.
+void emit_rh850_not_bool(std::vector<std::uint8_t> &code, PrimitiveOperand const &op,
+                         std::uint32_t dst_addr) {
+    constexpr rh850::Reg kAReg = rh850::Reg::R10;
+    constexpr rh850::Reg kBReg = rh850::Reg::R11;
+    constexpr rh850::Reg kScratch = rh850::Reg::R12;
+
+    emit_rh850_load_primitive_operand(code, op, kAReg, kScratch);
+    // Load constant 1 into r11. Reuses the same Constant materialization
+    // path with split_imm32(1) = {hi=0, lo=1}.
+    PrimitiveOperand const one{PrimitiveOperand::Kind::Constant, 1U};
+    emit_rh850_load_primitive_operand(code, one, kBReg, kScratch);
+
+    // XOR r11, r10 → r10 = x ^ 1.
+    emit_le16(code, rh850::enc_xor_reg(kBReg, kAReg));
+    // 4-byte alignment pad.
+    emit_le16(code, rh850::enc_nop());
+
+    auto const dst_split = rh850::split_imm32(dst_addr);
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, kScratch));
+    emit_le16(code, dst_split.hi);
+    emit_le16(code, rh850::enc_movea_hw1(kScratch, kScratch));
+    emit_le16(code, dst_split.lo);
+    emit_le16(code, rh850::enc_st_w_hw1(kAReg, kScratch));
+    emit_le16(code, rh850::enc_st_w_hw2(0));
+
+    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+    emit_le16(code, rh850::enc_nop());
+}
+
+// Resolve a CallPrimitive's operand by ValueId into a PrimitiveOperand.
+// RH850 first-slice variant: only LoadConstant and LoadHookInput
+// producers are accepted; nested CallPrimitive operands return
+// NotImplemented (handled by a follow-up bundle). Mirrors
+// `operand_from_producer` shape but with RH850-tagged error messages
+// — the SH-2A version stays put for SH-2A callers.
+[[nodiscard]] Result<PrimitiveOperand>
+rh850_operand_from_producer(Definition const &def, ir::Module const &m, ir::ValueId value_id,
+                            Hook const *target_hook, PinType expected_operand_type) {
+    ir::Instruction const *prod = find_producer(m, value_id);
+    if (prod == nullptr) {
+        return failure(ErrorCode::ParseError, "RH850 backend: primitive operand does not "
+                                              "resolve to any producing instruction");
+    }
+    if (prod->result_type != expected_operand_type) {
+        std::string msg{"RH850 backend: primitive operand of type "};
+        msg.append(pin_type_name(prod->result_type));
+        msg.append(" does not match expected operand type ");
+        msg.append(pin_type_name(expected_operand_type));
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    if (prod->op == ir::Op::LoadConstant) {
+        auto u32 = coerce_constant_to_u32(*prod);
+        if (!u32.has_value())
+            return failure(u32.error());
+        return PrimitiveOperand{PrimitiveOperand::Kind::Constant, *u32};
+    }
+    if (prod->op == ir::Op::LoadHookInput) {
+        std::uint32_t addr = 0;
+        if (auto s = resolve_hook_input_address(def, *prod, target_hook, addr); !s.has_value()) {
+            return failure(s.error());
+        }
+        return PrimitiveOperand{PrimitiveOperand::Kind::HookInputPointer, addr};
+    }
+    if (prod->op == ir::Op::CallPrimitive) {
+        return failure(ErrorCode::NotImplemented,
+                       "RH850 backend: nested CallPrimitive operands are "
+                       "not supported in this slice — flatten the graph or "
+                       "wait for the next bundle");
+    }
+    return failure(ErrorCode::NotImplemented, "RH850 backend: primitive operand has unsupported "
+                                              "producer op");
+}
+
+// Validate an RH850 CallPrimitive: recognized symbol within the slice
+// (add_int / subtract_int only), operand count + result type per the
+// shared `primitive_shape` table. Rejects with NotImplemented for known
+// primitives that the RH850 slice doesn't cover yet (e.g. multiply_int,
+// compare_lt_int) so the user gets a clear "wait for next bundle"
+// instead of a generic shape mismatch.
+[[nodiscard]] Status rh850_validate_call_primitive(ir::Instruction const &prim) {
+    PrimitiveShape const *shape = primitive_shape(prim.symbol);
+    if (shape == nullptr) {
+        std::string msg{"RH850 backend: CallPrimitive '"};
+        msg.append(prim.symbol);
+        msg.append("' is not a recognized primitive symbol");
+        return failure(ErrorCode::NotImplemented, std::move(msg));
+    }
+    // Per-symbol gate. Extend this set as new slices land.
+    bool const supported =
+        (prim.symbol == "add_int" || prim.symbol == "subtract_int" ||
+         prim.symbol == "and_bool" || prim.symbol == "or_bool" ||
+         prim.symbol == "not_bool");
+    if (!supported) {
+        std::string msg{"RH850 backend: CallPrimitive '"};
+        msg.append(prim.symbol);
+        msg.append("' is not yet covered by the RH850 slice (supported: "
+                   "add_int, subtract_int, and_bool, or_bool, not_bool). "
+                   "See docs/16 §Current state.");
+        return failure(ErrorCode::NotImplemented, std::move(msg));
+    }
+    if (prim.operands.size() != shape->arity) {
+        std::string msg{"RH850 backend: "};
+        msg.append(prim.symbol);
+        msg.append(" requires exactly ");
+        msg.append(std::to_string(shape->arity));
+        msg.append(" operands, got ");
+        msg.append(std::to_string(prim.operands.size()));
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    if (prim.result_type != shape->result_type) {
+        std::string msg{"RH850 backend: "};
+        msg.append(prim.symbol);
+        msg.append(" expects result type ");
+        msg.append(pin_type_name(shape->result_type));
+        msg.append(", got ");
+        msg.append(pin_type_name(prim.result_type));
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    return ok();
+}
+
 // Emit the RH850 "load from hook input, store to RAM slot" sequence —
 // the LoadHookInput → StoreHookOutput slice. Shape:
 //
@@ -1639,19 +1869,16 @@ Result<PatchObject> Rh850Backend::compile(ir::Module const &m, Definition const 
                                                   "to every value-producing op)");
         }
 
-        // RH850 slice: source must be LoadConstant OR LoadHookInput.
-        // CallPrimitive is tracked separately and lands in a follow-up
-        // bundle (the SH-2A FragmentEmitter + primitive shape table
-        // are non-trivial to mirror). Mirroring SH-2A's NotImplemented
-        // shape here means a caller running the same .stmod against
-        // both backends gets a consistent "this Op isn't ready yet on
-        // RH850" message.
-        if (src->op != ir::Op::LoadConstant && src->op != ir::Op::LoadHookInput) {
-            return failure(ErrorCode::NotImplemented,
-                           "RH850 backend: only LoadConstant→StoreHookOutput and "
-                           "LoadHookInput→StoreHookOutput are supported in this slice; "
-                           "CallPrimitive paths land in a follow-up bundle. See "
-                           "docs/16 §Current state.");
+        // RH850 slice: source must be LoadConstant, LoadHookInput, or a
+        // supported CallPrimitive. Unsupported CallPrimitive symbols
+        // (e.g. multiply_int, compare_lt_int) get a precise
+        // NotImplemented from rh850_validate_call_primitive below;
+        // anything else (Store from Store, malformed IR) trips here.
+        if (src->op != ir::Op::LoadConstant && src->op != ir::Op::LoadHookInput &&
+            src->op != ir::Op::CallPrimitive) {
+            return failure(ErrorCode::NotImplemented, "RH850 backend: StoreHookOutput source must "
+                                                      "be a LoadConstant, LoadHookInput, or "
+                                                      "CallPrimitive in this slice");
         }
         if (src->op == ir::Op::LoadConstant && !src->constant_value.has_value()) {
             return failure(ErrorCode::ParseError, "RH850 backend: LoadConstant has no "
@@ -1722,7 +1949,7 @@ Result<PatchObject> Rh850Backend::compile(ir::Module const &m, Definition const 
             if (!u32.has_value())
                 return failure(u32.error());
             emit_rh850_load_const_store(work.code, *u32, dst_addr);
-        } else {
+        } else if (src->op == ir::Op::LoadHookInput) {
             // LoadHookInput. Resolve the source pin → firmware
             // address via the shared (now arch-neutral) resolver,
             // then emit the LD.W→ST.W sequence.
@@ -1731,6 +1958,38 @@ Result<PatchObject> Rh850Backend::compile(ir::Module const &m, Definition const 
                 return failure(s.error());
             }
             emit_rh850_load_hook_store(work.code, pin_addr, dst_addr);
+        } else {
+            // CallPrimitive. RH850 first slice supports add_int /
+            // subtract_int with leaf (LoadConstant / LoadHookInput)
+            // operands only — nested-primitive operands are rejected
+            // explicitly by rh850_operand_from_producer with a
+            // "wait for next bundle" message.
+            if (auto s = rh850_validate_call_primitive(*src); !s.has_value()) {
+                return failure(s.error());
+            }
+            PrimitiveShape const *shape = primitive_shape(src->symbol);
+            // Unreachable: rh850_validate_call_primitive checked above.
+            if (shape == nullptr) {
+                return failure(ErrorCode::ParseError, "RH850 backend: primitive symbol lookup "
+                                                      "regressed after validation");
+            }
+            std::vector<PrimitiveOperand> operands;
+            operands.reserve(shape->arity);
+            for (std::size_t i = 0; i < shape->arity; ++i) {
+                auto op = rh850_operand_from_producer(def, m, src->operands[i], hook,
+                                                      shape->operand_types[i]);
+                if (!op.has_value())
+                    return failure(op.error());
+                operands.push_back(*op);
+            }
+            // Binary primitives share one fragment shape; unary
+            // `not_bool` has its own emitter (XOR-with-1).
+            if (src->symbol == "not_bool") {
+                emit_rh850_not_bool(work.code, operands[0], dst_addr);
+            } else {
+                emit_rh850_binary_int_arith(work.code, src->symbol, operands[0], operands[1],
+                                            dst_addr);
+            }
         }
     }
 

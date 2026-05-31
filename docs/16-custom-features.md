@@ -9,9 +9,12 @@ model, IR lowerer, **SH-2A codegen for VA** (18 primitives recognized;
 fan-out dedup; FPU bridge for Float ops; address-gate refuses splices
 outside declared writable regions), CLI (`feature-compile`), and `.stmod`
 file format have shipped end-to-end. **RH850 codegen for VB** now covers
-2 of 3 IR shapes (LoadConstant → StoreHookOutput and LoadHookInput →
-StoreHookOutput); CallPrimitive is the remaining slice. **The single
-biggest remaining open feature** is the patch-insertion layer
+all 3 IR shapes — LoadConstant→Store, LoadHookInput→Store, and a
+CallPrimitive slice covering 5 primitives (add_int, subtract_int,
+and_bool, or_bool, not_bool with leaf operands). Multiply/divide, Int
+compares, select, the Float/FPU bridge, and nested CallPrimitive
+operands still land in follow-up RH850 bundles.
+**The single biggest remaining open feature** is the patch-insertion layer
 (`src/feature_patch/` — finds free RAM, writes the hook table, splices
 into existing vector tables). All of the above gate on bench-rig work
 against a real ECU vector table for hardware validation. See *Current
@@ -36,7 +39,7 @@ Status legend: ✅ shipped · 🟡 partial · ⬜ not yet.
 | **Node library** | Hooks (splice points + sensor reads) and primitives (pure computation), both pack-declared. The library is per-platform and lives in the definition pack so a 2020 WRX and a 2008 STI can expose different hooks. | ✅ |
 | **Type system** | Pin types — `Float`, `Int`, `Bool`, plus per-pin `unit` strings. Edges must type-match AND unit-match (empty unit acts as wildcard); the editor refuses invalid wires before compile time. Dimensional analysis stays string-equality for v1.x. | ✅ |
 | **Compiler (SH-2A)** | Graph → IR → SH-2A machine code → PatchObject. Covers Int arithmetic (add/sub/mul), Int compares (lt/gt/eq), Bool ops (and/or/not), select (int/bool/float), Float arithmetic via FPU (FADD/FSUB/FMUL/FDIV), Float compares (FCMP/EQ + FCMP/GT). Handles nested CallPrimitive trees with SSA spill, cross-hook value flow, and fan-out dedup. | ✅ |
-| **Compiler (RH850)** | LoadConstant → StoreHookOutput (24 bytes, 5×32-bit + JMP+NOP) and LoadHookInput → StoreHookOutput (28 bytes, 6×32-bit + JMP+NOP) slices ship. CallPrimitive is the remaining gap — SH-2A's FPU bridge + primitive shape table need an RH850 analog. Encodings sourced from public Renesas reference (RH850G3K SW Architecture User's Manual) but NOT yet validated against a real VB WRX ECU. Any RH850 PatchObject is "best effort" until the bench-rig signs off. | 🟡 |
+| **Compiler (RH850)** | All three IR shapes wired. LoadConstant→Store (24 bytes) and LoadHookInput→Store (28 bytes) cover the load/store slices. CallPrimitive slice covers `add_int`, `subtract_int`, `and_bool`, `or_bool`, `not_bool` over leaf operands (LoadConstant / LoadHookInput) — emission is 36/40/44 bytes depending on operand kinds, 4-aligned. `not_bool` lowers as `x XOR 1` to preserve the 0/1-normalized Bool invariant. Multiply/divide, Int compares, select, the FPU bridge, and nested CallPrimitive operands return NotImplemented pending follow-up bundles. Encodings sourced from public Renesas reference (RH850G3K SW Architecture User's Manual) cross-verified against the markok314/qemu RH850 instmap; NOT yet validated against a real VB WRX ECU. Any RH850 PatchObject is "best effort" until the bench-rig signs off. | 🟡 |
 | **CLI** | `subuwutuner-cli feature-compile <stmod> --def <pack> [--arch sh2a\|rh850] [--format hex\|toml\|raw\|stmod] [--output <file>] [--validate-only]`. Plus `dump-ir`, `lint-graph`, `lint-ir`. `--format=stmod` bundles graph + patch in a single TOML; `--validate-only` runs parse + lower + compile and exits 0/non-zero without producing output — for CI / pre-commit hooks. | ✅ |
 | **Patch format** | `.stmod` — TOML document carrying both the source graph (`[graph]` + `[[node]]` + `[[edge]]`) and the compiled patch (`[patch]` + `[[patch.hook]]` + `[[patch.hook.ram_claim]]`). Single-file, diffable, round-trippable. Signable is a future concern. | ✅ |
 | **Linter** | `feature::lint(Graph)` flags undriven inputs + orphan nodes; `feature::ir::lint(Module)` flags duplicate hook overrides + RT-budget overruns. Per-primitive cycle costs in `estimate_cost` (e.g. `divide_int` = 18 cycles, `add_int` = 1) — derived from public SH-2A spec; bench profiling will refine. Unknown symbols default to 3 cycles. | ✅ |
