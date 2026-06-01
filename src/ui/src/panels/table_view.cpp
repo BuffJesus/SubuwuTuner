@@ -945,8 +945,14 @@ void render_table_view(AppState &state, Fonts const &fonts) {
 
     ImGui::SameLine(0.0f, 24.0f);
 
+    // MDL2 icon codepoints for the toolbar (loaded via merged-mode font
+    // in theme.cpp's load_icon_font_merged):
+    //   E7A7 Undo            \xEE\x9E\xA7
+    //   E7A6 Redo            \xEE\x9E\xA6
+    //   E74E Save (floppy)   \xEE\x9D\x8E
+    //   E945 LightningBolt   \xEE\xA5\x85  — "flash to ECU"
     ImGui::BeginDisabled(!can_undo);
-    if (ImGui::Button("Undo")) {
+    if (ImGui::Button("\xEE\x9E\xA7 Undo")) {
         do_undo(state);
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -955,7 +961,7 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::BeginDisabled(!can_redo);
-    if (ImGui::Button("Redo")) {
+    if (ImGui::Button("\xEE\x9E\xA6 Redo")) {
         do_redo(state);
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -965,7 +971,7 @@ void render_table_view(AppState &state, Fonts const &fonts) {
 
     ImGui::SameLine(0.0f, 24.0f);
     ImGui::BeginDisabled(!state.dirty);
-    if (ImGui::Button("Save")) {
+    if (ImGui::Button("\xEE\x9D\x8E Save")) {
         save_project(state);
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -982,7 +988,7 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     // and "blocked by policy" branches.
     ImGui::SameLine();
     ImGui::BeginDisabled(!state.project.has_value());
-    if (ImGui::Button("Flash...")) {
+    if (ImGui::Button("\xEE\xA5\x85 Flash...")) {
         state.show_flash_modal = true;
         state.flash_confirm_checked = false;
         state.flash_reason[0] = '\0';
