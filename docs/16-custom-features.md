@@ -5,7 +5,7 @@ A **custom feature** is a piece of new ECU behavior the user authors visually, t
 > **Terminology bridge.** If you're coming from the RomRaider / ECUFlash world, this is the equivalent of what those tools call **"software patches"** or **"ECU patches"** — hand-written SH-2A assembly snippets injected at known ROM offsets to add behaviors like 2-step / flat-foot shift / clutch kill that aren't in the stock cal. SubuwuTuner's contribution is the *authoring layer above* those patches: a visual node-graph designer + IR + linter + codegen that produces the same byte-level output without requiring the user to write assembly directly. The output `.stmod` is the SubuwuTuner-native equivalent of a hand-rolled ECUFlash patch file, and it flashes through the same `st::flash` pipeline as any other ROM change.
 
 This document captures the design. Phase 5 status: the authoring data
-model, IR lowerer, **SH-2A codegen for VA** (21 primitives recognized;
+model, IR lowerer, **SH-2A codegen for VA** (22 primitives recognized;
 fan-out dedup; FPU bridge for Float ops; address-gate refuses splices
 outside declared writable regions), CLI (`feature-compile`), and `.stmod`
 file format have shipped end-to-end. **RH850 codegen for VB** now covers
@@ -43,7 +43,7 @@ Status legend: ✅ shipped · 🟡 partial · ⬜ not yet.
 | **CLI** | `subuwutuner-cli feature-compile <stmod> --def <pack> [--arch sh2a\|rh850] [--format hex\|toml\|raw\|stmod] [--output <file>] [--validate-only]`. Plus `dump-ir`, `lint-graph`, `lint-ir`. `--format=stmod` bundles graph + patch in a single TOML; `--validate-only` runs parse + lower + compile and exits 0/non-zero without producing output — for CI / pre-commit hooks. | ✅ |
 | **Patch format** | `.stmod` — TOML document carrying both the source graph (`[graph]` + `[[node]]` + `[[edge]]`) and the compiled patch (`[patch]` + `[[patch.hook]]` + `[[patch.hook.ram_claim]]`). Single-file, diffable, round-trippable. Signable is a future concern. | ✅ |
 | **Linter** | `feature::lint(Graph)` flags undriven inputs + orphan nodes; `feature::ir::lint(Module)` flags duplicate hook overrides + RT-budget overruns. Per-primitive cycle costs in `estimate_cost` (e.g. `divide_int` = 18 cycles, `add_int` = 1) — derived from public SH-2A spec; bench profiling will refine. Unknown symbols default to 3 cycles. | ✅ |
-| **Sample packs** | `clutch-kill` (Bool-only synthetic smoke), `flat-foot-shift` (3-sensor AND chain), `launch-control` (4-sensor 3-compare AND tree), `map-selector-int` (`divide_int` end-to-end smoke). Compile end-to-end through SH-2A. `flex-fuel` exists but blocks on a curve-table primitive. | 🟡 |
+| **Sample packs** | `clutch-kill` (Bool-only synthetic smoke), `flat-foot-shift` (3-sensor AND chain), `launch-control` (4-sensor 3-compare AND tree), `map-selector-int` (`divide_int` end-to-end smoke), `flex-fuel` (`flex_fuel_scale` 1-input curve → `multiply_float` override path). All five compile end-to-end through SH-2A. | ✅ |
 | **Patch insertion** | Finding free RAM, writing the hook table, splicing into existing interrupt vectors. Bench-rig-blocked — requires a real ECU to develop against. | ⬜ |
 | **Flashing** | Loading a `.stmod` and burning the patch to an ECU. Gates on Patch insertion + Phase 3 transport. | ⬜ |
 
@@ -419,7 +419,7 @@ subuwutuner-cli feature-compile fixtures/samples/<name>.stmod \
 | `flat-foot-shift.stmod` | 124 | Clutch + throttle + RPM read from 3 different hooks, threshold compares with default-value constants, AND chain into `ignition_cut.cut_active`. Exercises cross-hook value flow + Float compares. | ✅ |
 | `launch-control.stmod` | 184 | 4 sensor reads, 3 Float compares, 3 ANDs. Same general shape as flat-foot but one stage wider. | ✅ |
 | `map-selector-int.stmod` | 40 | `LoadConstant(int)` × 2 → `divide_int` → store into `set_active_map.map_index`. Exercises the SH-2A FPU bridge (FLOAT → FDIV → FTRC) and the Int store path end-to-end. | ✅ |
-| `flex-fuel.stmod` | — | Read ethanol-content sensor → flex-fuel-scale curve → multiply commanded fuel pulse width → write back. **Blocked** on the `flex_fuel_scale` curve primitive (codegen has no table-lookup primitive yet). | ⬜ |
+| `flex-fuel.stmod` | 80 | Read ethanol-content sensor → `flex_fuel_scale` curve (E0=1.00 → E85=1.28 linear, hardcoded) → multiply commanded fuel pulse width → write back. The 1-arity curve form fits the existing 3-slot primitive-shape table; a general N-point lookup primitive lands in a future bundle. | ✅ |
 
 All five rehydrate cleanly into the designer canvas via `File → Open`
 once a project with the demo pack is loaded.

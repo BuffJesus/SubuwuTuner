@@ -7,6 +7,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <bit>
 #include <cstdint>
 #include <string_view>
 
@@ -2110,6 +2111,74 @@ TEST_CASE("Sh2aBackend: sqrt_float rejects wrong arity",
     // by validate_call_primitive before the emitter runs.
     m.instructions.push_back(
         call_primitive(3, "sqrt_float", {1, 2}, st::feature::PinType::Float));
+    m.instructions.push_back(store("after_fuel_calc", "commanded_pw_override", 3));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(std::string{r.error().message()}.find("requires exactly 1 operand") !=
+            std::string::npos);
+}
+
+TEST_CASE("Sh2aBackend: flex_fuel_scale compiles single-input Float curve",
+          "[feature_codegen][sh2a][float][flex_fuel_scale]") {
+    // flex_fuel_scale is a 1-arity Float→Float primitive with a hardcoded
+    // E0=1.00, E85=1.28 linear curve baked into the emitter. Verify
+    // compile succeeds and the emission carries the expected slope +
+    // intercept constants in its literal pool.
+    auto def = st::Definition::from_toml_string(kPackFloatHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module m;
+    m.instructions.push_back(load_const_float(1, 50.0)); // E50 input
+    m.instructions.push_back(
+        call_primitive(2, "flex_fuel_scale", {1}, st::feature::PinType::Float));
+    m.instructions.push_back(store("after_fuel_calc", "commanded_pw_override", 2));
+
+    auto r = backend.compile(m, *def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    auto const &code = r->hooks[0].code;
+
+    // Spot-check: the literal pool must contain the slope (0.28/85 as
+    // float32) and intercept (1.0 as float32). Both as big-endian 32-bit
+    // words because the test pack declares endianness=big.
+    constexpr float kExpectedSlope = 0.28F / 85.0F;
+    constexpr float kExpectedIntercept = 1.0F;
+    std::uint32_t const slope_be = std::bit_cast<std::uint32_t>(kExpectedSlope);
+    std::uint32_t const intercept_be = std::bit_cast<std::uint32_t>(kExpectedIntercept);
+
+    auto find_be32 = [&](std::uint32_t target) {
+        for (std::size_t i = 0; i + 4 <= code.size(); ++i) {
+            std::uint32_t const w =
+                (static_cast<std::uint32_t>(code[i]) << 24) |
+                (static_cast<std::uint32_t>(code[i + 1]) << 16) |
+                (static_cast<std::uint32_t>(code[i + 2]) << 8) |
+                static_cast<std::uint32_t>(code[i + 3]);
+            if (w == target)
+                return true;
+        }
+        return false;
+    };
+
+    INFO("expected slope=" << std::hex << slope_be
+                            << " intercept=" << intercept_be);
+    REQUIRE(find_be32(slope_be));
+    REQUIRE(find_be32(intercept_be));
+}
+
+TEST_CASE("Sh2aBackend: flex_fuel_scale rejects wrong arity",
+          "[feature_codegen][sh2a][float][flex_fuel_scale][error]") {
+    auto def = st::Definition::from_toml_string(kPackFloatHookToml);
+    REQUIRE(def.has_value());
+
+    cg::Sh2aBackend backend;
+    ir::Module m;
+    m.instructions.push_back(load_const_float(1, 50.0));
+    m.instructions.push_back(load_const_float(2, 1.0));
+    // Two operands — arity-check must reject before the emitter runs.
+    m.instructions.push_back(
+        call_primitive(3, "flex_fuel_scale", {1, 2}, st::feature::PinType::Float));
     m.instructions.push_back(store("after_fuel_calc", "commanded_pw_override", 3));
 
     auto r = backend.compile(m, *def);

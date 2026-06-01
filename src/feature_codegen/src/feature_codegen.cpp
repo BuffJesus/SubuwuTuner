@@ -719,6 +719,57 @@ void emit_sqrt_float_fragment(FragmentEmitter &fe, PrimitiveOperand op, std::uin
     emit_store_fr_to(fe, sh2a::FReg::FR0, dst);
 }
 
+// Body fragment for `flex_fuel_scale(ethanol_pct)` → store. Computes
+// a linear fuel-multiplier curve approximating the well-known E0=1.00,
+// E85≈1.28 stoich-shift baseline:
+//
+//   scale = 1.0 + ethanol_pct × (0.28 / 85.0)
+//         = 1.0 + ethanol_pct × 0.003294...
+//
+// Outside the [0, 85] range the linear extrapolation continues — at
+// E100 the formula gives ≈1.329, which is consistent with the AFR-shift
+// chemistry but conservative compared to real-world flex-fuel maps
+// (which often deliberately overshoot for cooling margin). Users
+// authoring production flex-fuel calibrations should layer a compare
+// → select for the safety upper-bound and gate on coolant temperature
+// per the sample's commentary.
+//
+// IR contract: arity 1, Float in → Float out. Constants are baked in;
+// no extra operands needed. A future "table-lookup" primitive will
+// supersede this with caller-provided breakpoints + values, but for
+// v1.x this baked curve unblocks the flex-fuel sample without needing
+// to grow the operand-shape table beyond its 3-slot maximum.
+//
+// Two FPU ops + two literal-pool loads. Latency ~6 cycles on the FPU.
+void emit_flex_fuel_scale_fragment(FragmentEmitter &fe, PrimitiveOperand op, std::uint32_t dst) {
+    // Reciprocal-slope baked as float32: 0.28f / 85.0f.
+    // Using float division at compile time would suffice, but the
+    // explicit constant keeps the bit pattern deterministic across
+    // host compilers + makes the value easy to audit in the literal
+    // pool.
+    constexpr float kSlope = 0.28F / 85.0F; // 0.003294117...
+    constexpr float kIntercept = 1.0F;
+
+    std::uint32_t const slope_bits = std::bit_cast<std::uint32_t>(kSlope);
+    std::uint32_t const intercept_bits = std::bit_cast<std::uint32_t>(kIntercept);
+
+    PrimitiveOperand const slope_op{PrimitiveOperand::Kind::Constant, slope_bits};
+    PrimitiveOperand const intercept_op{PrimitiveOperand::Kind::Constant, intercept_bits};
+
+    // FR0 = ethanol_pct
+    load_operand_into_fr(fe, op, sh2a::FReg::FR0);
+    // FR1 = slope (literal)
+    load_operand_into_fr(fe, slope_op, sh2a::FReg::FR1);
+    // FR1 = FR1 * FR0 = ethanol_pct * slope
+    fe.fmul(sh2a::FReg::FR0, sh2a::FReg::FR1);
+    // FR0 = intercept (literal)
+    load_operand_into_fr(fe, intercept_op, sh2a::FReg::FR0);
+    // FR1 = FR1 + FR0 = ethanol_pct * slope + 1.0
+    fe.fadd(sh2a::FReg::FR0, sh2a::FReg::FR1);
+    // Store FR1 → dst.
+    emit_store_fr_to(fe, sh2a::FReg::FR1, dst);
+}
+
 // Body fragment for `divide_int(op1, op2)` → store. SH-2A's iterative
 // integer divide (DIV0S + 32× DIV1) is encoding-tricky and has corner
 // cases (INT_MIN / -1 overflow, signed-vs-unsigned modes) that we'd
@@ -866,6 +917,10 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, Primi
         emit_sqrt_float_fragment(fe, operands[0], dst);
         return ok();
     }
+    if (symbol == "flex_fuel_scale") {
+        emit_flex_fuel_scale_fragment(fe, operands[0], dst);
+        return ok();
+    }
     if (symbol == "compare_lt_float") {
         emit_cmp_lt_float_fragment(fe, operands[0], operands[1], dst);
         return ok();
@@ -887,7 +942,7 @@ void emit_cmp_eq_float_fragment(FragmentEmitter &fe, PrimitiveOperand op1, Primi
                "select_bool, select_float, add_float, "
                "subtract_float, multiply_float, divide_float, "
                "sqrt_float, compare_lt_float, compare_gt_float, "
-               "compare_eq_float)");
+               "compare_eq_float, flex_fuel_scale)");
     return failure(ErrorCode::NotImplemented, std::move(msg));
 }
 
@@ -1110,6 +1165,13 @@ struct PrimitiveShape {
         {"multiply_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
         {"divide_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
         {"sqrt_float", {1, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
+        // flex_fuel_scale — fixed E0=1.00, E85=1.28 linear curve; arity
+        // 1 (ethanol_pct in, fuel scale out). Future bundle generalizes
+        // to N-point lookup tables via a separate `curve_float` primitive
+        // — for v1.x this fixed-curve form unblocks the flex-fuel sample
+        // without growing the operand-shape table's 3-slot maximum.
+        {"flex_fuel_scale",
+         {1, {PinType::Float, PinType::Float, PinType::Float}, PinType::Float}},
         {"compare_lt_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},
         {"compare_gt_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},
         {"compare_eq_float", {2, {PinType::Float, PinType::Float, PinType::Float}, PinType::Bool}},
@@ -1137,8 +1199,8 @@ struct PrimitiveShape {
                    "and_bool, or_bool, not_bool, select_int, "
                    "select_bool, select_float, add_float, "
                    "subtract_float, multiply_float, divide_float, "
-                   "compare_lt_float, compare_gt_float, "
-                   "compare_eq_float)");
+                   "sqrt_float, compare_lt_float, compare_gt_float, "
+                   "compare_eq_float, flex_fuel_scale)");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
     if (prim.operands.size() != shape->arity) {

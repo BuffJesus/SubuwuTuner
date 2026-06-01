@@ -37,8 +37,8 @@ label = "Flex-fuel scale curve"
 x     = 288.0
 y     = 48.0
 pins  = [
-  { id = 0, name = "ethanol_pct",  type = "float", direction = "input",  unit = "%" },
-  { id = 1, name = "Fuel scale", type = "float", direction = "output", unit = "" }
+  { id = 0, name = "ethanol_pct", label = "Ethanol %",  type = "float", direction = "input",  unit = "%" },
+  { id = 1, name = "scale",       label = "Fuel scale", type = "float", direction = "output", unit = "" }
 ]
 
 [[node]]
@@ -61,11 +61,11 @@ x     = 768.0
 y     = 48.0
 phase_break = true
 pins  = [
-  { id = 0, name = "Engine RPM",        type = "float", direction = "output", unit = "rpm" },
-  { id = 1, name = "Engine load",       type = "float", direction = "output", unit = "%" },
-  { id = 2, name = "Commanded fuel PW", type = "float", direction = "output", unit = "ms" },
-  { id = 3, name = "Coolant temp",      type = "float", direction = "output", unit = "°C" },
-  { id = 4, name = "Override fuel PW",  type = "float", direction = "input",  unit = "ms" }
+  { id = 0, name = "rpm",                    label = "Engine RPM",       type = "float", direction = "output", unit = "rpm" },
+  { id = 1, name = "load",                   label = "Engine load",      type = "float", direction = "output", unit = "%"   },
+  { id = 2, name = "commanded_pw",           label = "Commanded fuel PW", type = "float", direction = "output", unit = "ms"  },
+  { id = 3, name = "coolant_temp",           label = "Coolant temp",     type = "float", direction = "output", unit = "°C"  },
+  { id = 4, name = "commanded_pw_override",  label = "Override fuel PW", type = "float", direction = "input",  unit = "ms"  },
 ]
 
 # Ethanol % → flex_fuel_scale.ethanol_pct

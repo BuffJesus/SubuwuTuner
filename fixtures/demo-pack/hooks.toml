@@ -24,10 +24,13 @@ description  = "After the ECU has computed commanded injector pulse width"
 ecu_address  = 0x000ABCD0
 free_ram     = { base = 0x40000000, length = 256 }
 inputs = [
-  { name = "rpm",          label = "Engine RPM",       type = "float", unit = "rpm" },
-  { name = "load",         label = "Engine load",      type = "float", unit = "%"   },
-  { name = "commanded_pw", label = "Commanded fuel PW", type = "float", unit = "ms"  },
-  { name = "coolant_temp", label = "Coolant temp",     type = "float", unit = "°C"  },
+  # Demo addresses — in a real pack, hook splice points expose values
+  # via registers/stack, not fixed RAM. These let the demo samples
+  # compile end-to-end via the existing LoadHookInput-by-address path.
+  { name = "rpm",          label = "Engine RPM",       type = "float", unit = "rpm", address = 0x000F2100 },
+  { name = "load",         label = "Engine load",      type = "float", unit = "%",   address = 0x000F2110 },
+  { name = "commanded_pw", label = "Commanded fuel PW", type = "float", unit = "ms", address = 0x000F2120 },
+  { name = "coolant_temp", label = "Coolant temp",     type = "float", unit = "°C",  address = 0x000F2130 },
 ]
 outputs = [
   { name = "commanded_pw_override", label = "Override fuel PW", type = "float", unit = "ms" },
