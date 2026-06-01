@@ -30,6 +30,14 @@ std::string hex_byte(std::uint8_t b) {
     return std::string{buf};
 }
 
+// Hex-format a 16-bit value as "0xXXXX" — same rationale as hex_byte.
+// Used for DIDs (RDBI/WDBI) and any other 16-bit identifier.
+std::string hex_word(std::uint16_t w) {
+    char buf[8];
+    std::snprintf(buf, sizeof buf, "0x%04X", static_cast<unsigned>(w));
+    return std::string{buf};
+}
+
 [[nodiscard]] Status reject_if_negative(std::span<std::uint8_t const> resp,
                                         std::uint8_t expected_sid) {
     if (resp.size() >= 3 && resp[0] == kNegativeResponse) {
@@ -121,10 +129,12 @@ Result<std::vector<std::uint8_t>> parse_rdbi_response(std::span<std::uint8_t con
     }
     auto const got_did = read_be16(resp[1], resp[2]);
     if (got_did != expected_did) {
-        return failure(ErrorCode::ParseError,
-                       "UDS RDBI DID mismatch: expected 0x" +
-                           std::to_string(static_cast<unsigned>(expected_did)) + " got 0x" +
-                           std::to_string(static_cast<unsigned>(got_did)));
+        // Prior message ran the DIDs through std::to_string, which is
+        // decimal, so a 0xF190 DID printed as "0x61840". Fixed via
+        // hex_word().
+        return failure(ErrorCode::ParseError, "UDS RDBI DID mismatch: expected " +
+                                                  hex_word(expected_did) + " got " +
+                                                  hex_word(got_did));
     }
     return std::vector<std::uint8_t>(resp.begin() + 3, resp.end());
 }
@@ -160,7 +170,9 @@ Status parse_wdbi_response(std::span<std::uint8_t const> resp, std::uint16_t exp
     }
     auto const got_did = read_be16(resp[1], resp[2]);
     if (got_did != expected_did) {
-        return failure(ErrorCode::ParseError, "UDS WDBI DID mismatch");
+        return failure(ErrorCode::ParseError, "UDS WDBI DID mismatch: expected " +
+                                                  hex_word(expected_did) + " got " +
+                                                  hex_word(got_did));
     }
     return ok();
 }
@@ -181,10 +193,16 @@ Result<std::vector<std::uint8_t>> parse_security_access_seed(std::span<std::uint
         return failure(ErrorCode::ParseError, "UDS SA seed response too short");
     }
     if (resp[0] != kSidSecurityAccess + kPositiveResponseOffset) {
-        return failure(ErrorCode::EcuRejected, "UDS SA unexpected SID");
+        return failure(ErrorCode::EcuRejected, "UDS SA seed unexpected SID: " + hex_byte(resp[0]) +
+                                                   " (expected " +
+                                                   hex_byte(kSidSecurityAccess +
+                                                            kPositiveResponseOffset) +
+                                                   ")");
     }
     if (resp[1] != expected_sub_function) {
-        return failure(ErrorCode::ParseError, "UDS SA sub-function mismatch");
+        return failure(ErrorCode::ParseError, "UDS SA seed sub-function mismatch: expected " +
+                                                  hex_byte(expected_sub_function) + " got " +
+                                                  hex_byte(resp[1]));
     }
     return std::vector<std::uint8_t>(resp.begin() + 2, resp.end());
 }
@@ -207,10 +225,16 @@ Status parse_security_access_key_ack(std::span<std::uint8_t const> resp,
         return failure(ErrorCode::ParseError, "UDS SA key ack too short");
     }
     if (resp[0] != kSidSecurityAccess + kPositiveResponseOffset) {
-        return failure(ErrorCode::EcuRejected, "UDS SA unexpected SID");
+        return failure(ErrorCode::EcuRejected, "UDS SA key-ack unexpected SID: " +
+                                                   hex_byte(resp[0]) + " (expected " +
+                                                   hex_byte(kSidSecurityAccess +
+                                                            kPositiveResponseOffset) +
+                                                   ")");
     }
     if (resp[1] != expected_sub_function) {
-        return failure(ErrorCode::ParseError, "UDS SA sub-function mismatch");
+        return failure(ErrorCode::ParseError, "UDS SA key-ack sub-function mismatch: expected " +
+                                                  hex_byte(expected_sub_function) + " got " +
+                                                  hex_byte(resp[1]));
     }
     return ok();
 }
