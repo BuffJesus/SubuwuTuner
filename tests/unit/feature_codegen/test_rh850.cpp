@@ -215,6 +215,31 @@ TEST_CASE("rh850::enc_not_reg encodes the register fields correctly",
     REQUIRE(cg::rh850::enc_not_reg(cg::rh850::Reg::R11, cg::rh850::Reg::R10) == 0x502B);
 }
 
+TEST_CASE("rh850::enc_cmp_reg encodes the register fields correctly",
+          "[rh850][encoder]") {
+    // cmp r11, r10 → reg1 = 11, reg2 = 10, opcode = 0b001111 (= 0x0F)
+    // Bits: (10<<11) | (0x0F<<5) | 11 = 0x5000 | 0x1E0 | 11 = 0x51EB
+    REQUIRE(cg::rh850::enc_cmp_reg(cg::rh850::Reg::R11, cg::rh850::Reg::R10) == 0x51EB);
+}
+
+TEST_CASE("rh850::enc_setf_hw1 places reg/opcode/cond bits correctly",
+          "[rh850][encoder]") {
+    // SETF LT, r10 → reg2 = 10, opcode = 0b111111 (= 0x3F),
+    // cond = LT (0b0110), encoded into bits[4:1] as 0b1100.
+    // hw1 = (10<<11) | (0x3F<<5) | (0x6<<1) = 0x5000 | 0x7E0 | 0xC = 0x57EC
+    REQUIRE(cg::rh850::enc_setf_hw1(cg::rh850::Cond::LT, cg::rh850::Reg::R10) == 0x57EC);
+
+    // SETF GT, r10 → cond = 0b1111, encoded as 0b11110.
+    REQUIRE(cg::rh850::enc_setf_hw1(cg::rh850::Cond::GT, cg::rh850::Reg::R10) == 0x57FE);
+
+    // SETF Z (equal), r10 → cond = 0b0010, encoded as 0b00100.
+    REQUIRE(cg::rh850::enc_setf_hw1(cg::rh850::Cond::Z, cg::rh850::Reg::R10) == 0x57E4);
+}
+
+TEST_CASE("rh850::enc_setf_hw2 is reserved-zero", "[rh850][encoder]") {
+    REQUIRE(cg::rh850::enc_setf_hw2() == 0x0000);
+}
+
 TEST_CASE("rh850::enc_st_w_hw1 places reg/opcode bits correctly",
           "[rh850][encoder]") {
     // st.w r10, disp[r11] → reg2 = 10 (src), reg1 = 11 (base), opcode = 0b111101 (=0x3D)
@@ -740,6 +765,173 @@ TEST_CASE("Rh850Backend::compile rejects multiply_int (not yet in slice)",
     REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
 }
 
+// ---- Int compares (Int inputs, Bool output) ----------------------------
+
+namespace {
+
+// Pack fixture for int-compare tests. Same `rpm` / `map` Int inputs as
+// kPackTwoInputsToml but the hook output is Bool so compare_*_int
+// (Int × Int → Bool) is type-correct.
+constexpr char const *kPackIntInBoolOutToml = R"toml(
+[pack]
+id = "compare_test_pack"
+display_name = "Compare test pack"
+
+[[writable_region]]
+name    = "test-cal"
+kind    = "calibration"
+address = 0x000A0000
+length  = 0x00010000
+
+[[hook]]
+id              = "binop_test"
+ecu_address     = 0x000ABCD0
+free_ram        = { base = 0x40000000, length = 256 }
+inputs = [
+  { name = "rpm", type = "int", address = 0xFFFF8200 },
+  { name = "map", type = "int", address = 0xFFFF8210 },
+]
+outputs = [
+  { name = "result", type = "bool" },
+]
+)toml";
+
+// Same as make_binop_module but the CallPrimitive + StoreHookOutput
+// result type is Bool — for compare_*_int primitives that consume two
+// Int operands and produce a Bool.
+ir::Module make_int_compare_module(std::string_view symbol,
+                                   std::optional<std::int32_t> op1_const,
+                                   std::string_view op1_pin,
+                                   std::optional<std::int32_t> op2_const,
+                                   std::string_view op2_pin) {
+    ir::Module m;
+
+    ir::Instruction op1{};
+    if (op1_const.has_value()) {
+        op1.op = ir::Op::LoadConstant;
+        op1.result_type = st::feature::PinType::Int;
+        op1.result_id = 1;
+        op1.constant_value = static_cast<double>(*op1_const);
+    } else {
+        op1.op = ir::Op::LoadHookInput;
+        op1.result_type = st::feature::PinType::Int;
+        op1.result_id = 1;
+        op1.symbol = "binop_test";
+        op1.pin_name = std::string{op1_pin};
+    }
+    m.instructions.push_back(std::move(op1));
+
+    ir::Instruction op2{};
+    if (op2_const.has_value()) {
+        op2.op = ir::Op::LoadConstant;
+        op2.result_type = st::feature::PinType::Int;
+        op2.result_id = 2;
+        op2.constant_value = static_cast<double>(*op2_const);
+    } else {
+        op2.op = ir::Op::LoadHookInput;
+        op2.result_type = st::feature::PinType::Int;
+        op2.result_id = 2;
+        op2.symbol = "binop_test";
+        op2.pin_name = std::string{op2_pin};
+    }
+    m.instructions.push_back(std::move(op2));
+
+    ir::Instruction call{};
+    call.op = ir::Op::CallPrimitive;
+    call.result_type = st::feature::PinType::Bool; // Int × Int → Bool
+    call.result_id = 3;
+    call.symbol = std::string{symbol};
+    call.operands.push_back(1);
+    call.operands.push_back(2);
+    m.instructions.push_back(std::move(call));
+
+    ir::Instruction store{};
+    store.op = ir::Op::StoreHookOutput;
+    store.result_type = st::feature::PinType::Bool;
+    store.symbol = "binop_test";
+    store.pin_name = "result";
+    store.operands.push_back(3);
+    m.instructions.push_back(std::move(store));
+
+    return m;
+}
+
+} // namespace
+
+TEST_CASE("Rh850Backend::compile emits compare_lt_int with two Constant operands",
+          "[rh850][compile][call_primitive][int_compare]") {
+    auto const def = load_pack(kPackIntInBoolOutToml);
+    auto const m = make_int_compare_module("compare_lt_int", 100, "", 200, "");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    INFO("compile error: " << (r.has_value() ? std::string{"(none)"} : r.error().to_string()));
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+
+    auto const &hp = r->hooks[0];
+    REQUIRE(hp.code.size() == cg::rh850::kIntCompareSizeCC);
+    REQUIRE(hp.code.size() % 4 == 0);
+    REQUIRE(hp.ram_claims.size() == 1);
+    REQUIRE(hp.ram_claims[0].size == 4);
+
+    // Tail: JMP [lp] at size-4 (little-endian halfword).
+    auto const jmp_lo = hp.code[hp.code.size() - 4];
+    auto const jmp_hi = hp.code[hp.code.size() - 3];
+    auto const jmp_word = static_cast<std::uint16_t>(jmp_lo | (jmp_hi << 8));
+    REQUIRE(jmp_word == cg::rh850::enc_jmp_reg(cg::rh850::kLp));
+}
+
+TEST_CASE("Rh850Backend::compile emits compare_lt_int with mixed Constant + HookInput",
+          "[rh850][compile][call_primitive][int_compare]") {
+    auto const def = load_pack(kPackIntInBoolOutToml);
+
+    auto const m_ch = make_int_compare_module("compare_lt_int", 100, "", std::nullopt, "rpm");
+    cg::Rh850Backend backend;
+    auto r_ch = backend.compile(m_ch, def);
+    REQUIRE(r_ch.has_value());
+    REQUIRE(r_ch->hooks[0].code.size() == cg::rh850::kIntCompareSizeCH);
+
+    auto const m_hc = make_int_compare_module("compare_lt_int", std::nullopt, "rpm", 50, "");
+    auto r_hc = backend.compile(m_hc, def);
+    REQUIRE(r_hc.has_value());
+    REQUIRE(r_hc->hooks[0].code.size() == cg::rh850::kIntCompareSizeHC);
+}
+
+TEST_CASE("Rh850Backend::compile emits compare_lt_int with two HookInput operands",
+          "[rh850][compile][call_primitive][int_compare]") {
+    auto const def = load_pack(kPackIntInBoolOutToml);
+    auto const m = make_int_compare_module("compare_lt_int", std::nullopt, "rpm",
+                                           std::nullopt, "map");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kIntCompareSizeHH);
+    REQUIRE(r->hooks[0].code.size() % 4 == 0);
+}
+
+TEST_CASE("Rh850Backend::compile emits compare_gt_int / compare_eq_int (same shape)",
+          "[rh850][compile][call_primitive][int_compare]") {
+    auto const def = load_pack(kPackIntInBoolOutToml);
+
+    auto const m_gt = make_int_compare_module("compare_gt_int", 5, "", 3, "");
+    auto const m_eq = make_int_compare_module("compare_eq_int", 7, "", 7, "");
+
+    cg::Rh850Backend backend;
+    auto r_gt = backend.compile(m_gt, def);
+    REQUIRE(r_gt.has_value());
+    REQUIRE(r_gt->hooks[0].code.size() == cg::rh850::kIntCompareSizeCC);
+
+    auto r_eq = backend.compile(m_eq, def);
+    REQUIRE(r_eq.has_value());
+    REQUIRE(r_eq->hooks[0].code.size() == cg::rh850::kIntCompareSizeCC);
+
+    // The three compares share the byte-level fragment shape — only the
+    // SETF condition code differs. Per-condition encoding is verified
+    // in the encoder unit tests above.
+}
+
 // ---- Bool primitives ---------------------------------------------------
 
 namespace {
@@ -877,16 +1069,8 @@ TEST_CASE("Rh850Backend::compile emits not_bool (unary bool, XOR-with-1)",
     REQUIRE(r->hooks[0].code.size() % 4 == 0);
 }
 
-TEST_CASE("Rh850Backend::compile rejects compare_lt_int (not yet in slice)",
-          "[rh850][compile][call_primitive][error]") {
-    auto const def = load_pack(kPackTwoInputsToml);
-    auto const m = make_binop_module("compare_lt_int", 1, "", 2, "");
-
-    cg::Rh850Backend backend;
-    auto r = backend.compile(m, def);
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
-}
+// (compare_lt_int landed in the RH850 slice 2026-06-01 — coverage is
+// the four compile-pass tests in the int_compare section above.)
 
 // ---- select_* primitives (branchless mask-merge) -----------------------
 

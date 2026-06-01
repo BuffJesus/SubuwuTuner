@@ -1709,6 +1709,82 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
     return ok();
 }
 
+// Emit an RH850 int-compare CallPrimitive fragment for
+// `compare_lt_int` / `compare_gt_int` / `compare_eq_int`. Shape:
+//
+//   load op1 → r10     (a)
+//   load op2 → r11     (b)
+//   CMP  r11, r10      (16-bit Format I — flags = (r10 - r11) = (a - b))
+//   SETF cccc, r10     (32-bit Format IV — r10 = (cond) ? 1 : 0)
+//   NOP                (alignment pad: 2 + 4 + 2 = 8 ≡ 0 mod 4)
+//   MOVHI dst_hi, r0, r12; MOVEA dst_lo, r12, r12   (r12 = dst_addr)
+//   ST.W r10, 0[r12]
+//   JMP [lp] + tail NOP
+//
+// Operand order mirrors the binary-arith fragment so the load order is
+// invariant across "leaf-operand binary primitive" shapes: op1 → r10
+// (a), op2 → r11 (b). CMP r11, r10 puts (a - b) into the flags; the
+// signed-comparison condition codes (LT / GT / E) then read directly:
+//   compare_lt_int(a, b) — true iff a < b iff (a - b) < 0   → SETF LT
+//   compare_gt_int(a, b) — true iff a > b iff (a - b) > 0   → SETF GT
+//   compare_eq_int(a, b) — true iff a == b iff (a - b) == 0 → SETF E
+//
+// VERIFICATION: as with the rest of the RH850 slice, these encodings
+// are sourced from public Renesas references (R01US0165) but have not
+// been validated against a real VB WRX ECU. Bench-rig round-trip
+// (compile → flash → read-back → byte-identical) is the gating step
+// before any RH850 PatchObject reaches a real ECU.
+[[nodiscard]] Status emit_rh850_int_compare(std::vector<std::uint8_t> &code,
+                                            std::string_view symbol,
+                                            PrimitiveOperand const &op1,
+                                            PrimitiveOperand const &op2,
+                                            std::uint32_t dst_addr) {
+    constexpr rh850::Reg kAReg = rh850::Reg::R10;    // op1 (a) / result
+    constexpr rh850::Reg kBReg = rh850::Reg::R11;    // op2 (b)
+    constexpr rh850::Reg kScratch = rh850::Reg::R12; // address scratch
+
+    emit_rh850_load_primitive_operand(code, op1, kAReg, kScratch);
+    emit_rh850_load_primitive_operand(code, op2, kBReg, kScratch);
+
+    // CMP r11, r10  → flags = (r10 - r11) = (a - b).
+    emit_le16(code, rh850::enc_cmp_reg(kBReg, kAReg));
+
+    rh850::Cond cond{};
+    if (symbol == "compare_lt_int") {
+        cond = rh850::Cond::LT;
+    } else if (symbol == "compare_gt_int") {
+        cond = rh850::Cond::GT;
+    } else if (symbol == "compare_eq_int") {
+        cond = rh850::Cond::Z;
+    } else {
+        std::string msg{"RH850 backend: emit_rh850_int_compare called with "
+                        "unsupported symbol '"};
+        msg.append(symbol);
+        msg.append("' — validator/dispatch out of sync");
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    // SETF cccc, r10 — 32-bit Format IV. r10 = (cond) ? 1 : 0.
+    emit_le16(code, rh850::enc_setf_hw1(cond, kAReg));
+    emit_le16(code, rh850::enc_setf_hw2());
+
+    // Pad to restore 4-alignment: CMP (2) + SETF (4) + NOP (2) = 8.
+    emit_le16(code, rh850::enc_nop());
+
+    // Materialize dst_addr into r12, then ST.W r10, 0[r12].
+    auto const dst_split = rh850::split_imm32(dst_addr);
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, kScratch));
+    emit_le16(code, dst_split.hi);
+    emit_le16(code, rh850::enc_movea_hw1(kScratch, kScratch));
+    emit_le16(code, dst_split.lo);
+    emit_le16(code, rh850::enc_st_w_hw1(kAReg, kScratch));
+    emit_le16(code, rh850::enc_st_w_hw2(0));
+
+    // JMP [lp] + tail NOP.
+    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+    emit_le16(code, rh850::enc_nop());
+    return ok();
+}
+
 // Emit an RH850 3-operand branchless select fragment for
 // `select_int`, `select_bool`, `select_float`.
 //
@@ -1888,14 +1964,17 @@ rh850_operand_from_producer(Definition const &def, ir::Module const &m, ir::Valu
         (prim.symbol == "add_int" || prim.symbol == "subtract_int" ||
          prim.symbol == "and_bool" || prim.symbol == "or_bool" ||
          prim.symbol == "not_bool" || prim.symbol == "select_int" ||
-         prim.symbol == "select_bool" || prim.symbol == "select_float");
+         prim.symbol == "select_bool" || prim.symbol == "select_float" ||
+         prim.symbol == "compare_lt_int" || prim.symbol == "compare_gt_int" ||
+         prim.symbol == "compare_eq_int");
     if (!supported) {
         std::string msg{"RH850 backend: CallPrimitive '"};
         msg.append(prim.symbol);
         msg.append("' is not yet covered by the RH850 slice (supported: "
                    "add_int, subtract_int, and_bool, or_bool, not_bool, "
-                   "select_int, select_bool, select_float). See docs/16 "
-                   "§Current state.");
+                   "select_int, select_bool, select_float, "
+                   "compare_lt_int, compare_gt_int, compare_eq_int). "
+                   "See docs/16 §Current state.");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
     if (prim.operands.size() != shape->arity) {
@@ -2133,13 +2212,20 @@ Result<PatchObject> Rh850Backend::compile(ir::Module const &m, Definition const 
             }
             // Dispatch by arity / shape:
             //   arity 1 → not_bool (XOR-with-1)
-            //   arity 2 → binary leaf-operand (add/sub/and/or)
+            //   arity 2 → binary leaf-operand (add/sub/and/or) OR int-compare
             //   arity 3 → select (branchless mask-merge)
             if (src->symbol == "not_bool") {
                 emit_rh850_not_bool(work.code, operands[0], dst_addr);
             } else if (src->symbol == "select_int" || src->symbol == "select_bool" ||
                        src->symbol == "select_float") {
                 emit_rh850_select(work.code, operands[0], operands[1], operands[2], dst_addr);
+            } else if (src->symbol == "compare_lt_int" || src->symbol == "compare_gt_int" ||
+                       src->symbol == "compare_eq_int") {
+                if (auto s = emit_rh850_int_compare(work.code, src->symbol, operands[0],
+                                                    operands[1], dst_addr);
+                    !s.has_value()) {
+                    return failure(s.error());
+                }
             } else {
                 if (auto s = emit_rh850_binary_int_arith(work.code, src->symbol, operands[0],
                                                         operands[1], dst_addr);

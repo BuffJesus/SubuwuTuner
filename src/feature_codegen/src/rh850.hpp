@@ -229,6 +229,57 @@ inline constexpr Reg kLp = Reg::R31;   // link register / return address
         static_cast<std::uint16_t>(reg1));
 }
 
+// CMP reg1, reg2 — sets condition flags from (reg2 - reg1). No general-
+// purpose register result; the flags feed SETF / conditional-branch
+// instructions. Format I, opcode 0b001111. Lowers the int-compare
+// primitives (compare_lt_int / compare_gt_int / compare_eq_int) — CMP
+// sets the appropriate flag bits, then SETF materializes the bool.
+[[nodiscard]] constexpr std::uint16_t enc_cmp_reg(Reg reg1, Reg reg2) noexcept {
+    constexpr std::uint16_t kOpcode = 0b001111U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg2) << 11U) |
+        (kOpcode << 5U) |
+        static_cast<std::uint16_t>(reg1));
+}
+
+// Condition codes for SETF / conditional-branch instructions. The four
+// codes the int-compare slice needs are the signed-comparison ones:
+//   LT = signed less than          (compare_lt_int)
+//   GT = signed greater than       (compare_gt_int)
+//   E  = equal                     (compare_eq_int)
+// Bit layout per the V850/RH850 condition-code table (R01US0165):
+enum class Cond : std::uint8_t {
+    V = 0b0000,  // overflow
+    L = 0b0001,  // C/L: unsigned less than
+    Z = 0b0010,  // E: equal
+    NH = 0b0011, // not higher (unsigned ≤)
+    S = 0b0100,  // N: negative
+    T = 0b0101,  // always true
+    LT = 0b0110, // signed less than
+    LE = 0b0111, // signed less or equal
+    NV = 0b1000, // no overflow
+    NL = 0b1001, // NC/NL: unsigned greater or equal
+    NZ = 0b1010, // NE: not equal
+    H = 0b1011,  // higher unsigned
+    NS = 0b1100, // P: positive
+    SA = 0b1101, // F: always false (saturated)
+    GE = 0b1110, // signed greater or equal
+    GT = 0b1111, // signed greater
+};
+
+// SETF cccc, reg2 — reg2 = (condition cccc is true) ? 1 : 0.
+// Format IV (32-bit). hw1 = [reg2(5)][0b111111(6)][cccc(4)|0(1)]; hw2
+// is reserved 0x0000. The low bit of hw1's 5-bit "reg1 slot" is
+// reserved-zero per the V850/RH850 encoding — cccc occupies bits[4:1].
+[[nodiscard]] constexpr std::uint16_t enc_setf_hw1(Cond cccc, Reg reg2) noexcept {
+    constexpr std::uint16_t kOpcode = 0b111111U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg2) << 11U) |
+        (kOpcode << 5U) |
+        (static_cast<std::uint16_t>(static_cast<std::uint8_t>(cccc) & 0xFU) << 1U));
+}
+[[nodiscard]] constexpr std::uint16_t enc_setf_hw2() noexcept { return 0x0000U; }
+
 // --- Format VI (32-bit imm + reg + reg) ------------------------------
 
 // Each Format VI emitter returns the FIRST 16-bit halfword. The caller

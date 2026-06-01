@@ -249,6 +249,19 @@ inline constexpr std::size_t kBinaryIntArithSizeCC = 36;
 inline constexpr std::size_t kBinaryIntArithSizeCH = 40;
 inline constexpr std::size_t kBinaryIntArithSizeHC = 40;
 inline constexpr std::size_t kBinaryIntArithSizeHH = 44;
+
+// CallPrimitive int-compare slice — compare_lt_int / compare_gt_int /
+// compare_eq_int. Same operand-load envelope as the binary arith slice
+// plus a SETF (4 bytes 32-bit Format IV) where add_int has a 16-bit
+// Format-I ADD. Net +4 bytes per shape.
+//   kIntCompareSizeCC : both operands Constant
+//   kIntCompareSizeCH : op1 Constant, op2 HookInputPointer
+//   kIntCompareSizeHC : op1 HookInputPointer, op2 Constant
+//   kIntCompareSizeHH : both HookInputPointer
+inline constexpr std::size_t kIntCompareSizeCC = 40;
+inline constexpr std::size_t kIntCompareSizeCH = 44;
+inline constexpr std::size_t kIntCompareSizeHC = 44;
+inline constexpr std::size_t kIntCompareSizeHH = 48;
 } // namespace rh850
 
 // Address gate per docs/16 §Safety #6 + docs/04 ship blocker #3.
