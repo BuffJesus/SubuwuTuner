@@ -31,16 +31,18 @@ These are the testable safety properties around `std::stop_token` cancellation. 
 | Crash-mid-flash recovery | Open a `.stune`, start a flash, kill the process between PDU N and N+1, reopen; assert the project's journal flags the ECU as in-programming-session and `Project::open()` offers `plan_resume()` or clean session exit. |
 | Resume idempotence | Run `plan_resume()` twice in a row on the same manifest; assert second call is a no-op (no double-write of completed sectors). |
 
-The tests live at `tests/unit/flash/test_cancellation_invariants.cpp` (TBD) and `tests/unit/ecu/test_uds_pdu_atomicity.cpp` (TBD). New test files block on `src/flash/` and `src/ecu/uds/` carrying the matching guard logic — the spec lands first, the enforcement code lands with the tests.
+The tests live at `tests/unit/flash/test_cancellation_invariants.cpp` and `tests/unit/ecu/test_uds_pdu_atomicity.cpp` — both shipped per Phase 4 (`docs/04`).
 
-### Tier 3 — Fuzzing (nightly + on parser-touching PRs)
+### Tier 3 — Fuzzing (planned; not yet implemented)
 
-- libFuzzer harnesses on:
-  - ROM loader (random binaries, malformed)
-  - `.stune` project loader (zip with junk inside)
-  - TOML definition loader (malformed)
-  - Datalog CSV replay
-- Corpus is checked in; new findings auto-PR'd by the fuzz job
+Planned libFuzzer harnesses (`tests/fuzz/`, not yet shipped — see `docs/03` §"Earlier plan listed … libFuzzer … None of them shipped"):
+
+- ROM loader (random binaries, malformed)
+- `.stune` project loader (directory walker fed pathological inputs — junk files, broken TOML, hostile symlinks)
+- TOML definition loader (malformed)
+- Datalog CSV replay
+
+Corpus will be checked in alongside; new findings auto-PR'd by the fuzz job once Tier 3 lands.
 
 ### Tier 4 — Hardware-in-the-loop (HIL) (nightly + before release)
 

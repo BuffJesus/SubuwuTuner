@@ -115,3 +115,9 @@ A new category of material has appeared upstream of the public-repo distribution
 The decision is forward-looking and equally valid for either answer. This document is updated to record the question; the implementation in `src/` does not change until the answer lands.
 
 ## 8 — References
+
+- `docs/06-legal-ethics.md` — jurisdiction profiles, emissions stance, the broader legal posture this policy sits inside.
+- `docs/15-clean-room-engineering.md` — the analyst / implementer wall; this doc is the *distribution* axis, the wall is the *provenance* axis. They're orthogonal.
+- `docs/23-security-access.md` — the SA plug-in seam is the reference pattern for the "load user-supplied data at runtime" posture this policy adopts for definitions.
+- `docs/install.md` — the user-facing workflow for supplying a definition pack at runtime.
+- 17 U.S.C. § 1201 — the DMCA anti-circumvention provision driving the §1201 axis in §4 and §6.

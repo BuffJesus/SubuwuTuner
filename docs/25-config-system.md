@@ -5,9 +5,15 @@
 > per-directory pickers in the NSIS installer and the post-install
 > Settings dialogs in the GUI/CLI.
 
-**Status:** design only. Not implemented. Phase 1 (single-install-root via
-`cmake --install` + CPack ZIP/NSIS) shipped in commits `f9b9885` /
-`73a2908` / `1911f1f` on 2026-05-24. Phase 2 builds on top.
+**Status:** core `st::config` shipped — `Paths { definitions_root,
+rom_dump_root }`, layered precedence (CLI flag → env var → config file →
+built-in defaults), atomic save, `load()` / `load_from()` / `defaults()` /
+`save()`. Phase 1 packaging (single-install-root via `cmake --install` +
+CPack ZIP/NSIS) shipped in commits `f9b9885` / `73a2908` / `1911f1f` on
+2026-05-24. Still pending: NSIS custom pages for path picking,
+`subuwutuner-cli config` subcommand, GUI Settings dialog wiring to
+`st::config::Config::save()`, and the `[security_access].handheld_serial`
+key — see §11 below.
 
 ## 1 — Why this exists
 

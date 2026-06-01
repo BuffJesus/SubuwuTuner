@@ -76,7 +76,7 @@ What the wall actually consists of, mechanically:
 | Separate working directories | The analyst's checkout of `atlas-public-main/` or any decompiled artifacts lives on the analyst's machine in a directory the implementer's tooling does not index. |
 | Time delay | A spec written today is not implemented from until at least 24 hours later, ideally longer. Mechanically forces re-reading the spec rather than working from short-term memory of the source. |
 | Editor / tab hygiene | When implementing, no editor tab or terminal session has any reference file open. Close the reference repo, close the decompile, restart the editor. |
-| Audit log | `SubuwuTuner-specs/AUDIT.md` records, per spec: date written, references consulted, author, and a hash of the finished spec. (See [§10 Provenance](#11--provenance-and-audit-trail).) |
+| Audit log | `SubuwuTuner-specs/AUDIT.md` records, per spec: date written, references consulted, author, and a hash of the finished spec. (See [§11 Provenance and audit trail](#11--provenance-and-audit-trail).) |
 
 The wall is **not** "I am being careful." It is mechanical separation that survives forgetting.
 

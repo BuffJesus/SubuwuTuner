@@ -77,9 +77,10 @@ license         = "Apache-2.0"
 
 Post-write checksum repair is a Phase 4 concern, but the pack should already
 carry the selector so `defgen` can populate it from upstream data and we don't
-have to revisit every pack later. Mirrors RomRaider's `maps/checksum/` family
-(`ChecksumSTD`, `ChecksumALT`, `ChecksumALT2`, `ChecksumCOPY`, `ChecksumBYTEXOR`,
-…) and ECUFlash's `<checksummodule>` strings (`subarudbw`, …):
+have to revisit every pack later. Mirrors the `<checksum module="…">` strings
+used in RomRaider's public definition XML (`ChecksumSTD`, `ChecksumALT`,
+`ChecksumALT2`, `ChecksumCOPY`, `ChecksumBYTEXOR`, …) and ECUFlash's
+`<checksummodule>` strings (`subarudbw`, …):
 
 | `checksum_type` | Meaning |
 |---|---|
@@ -91,10 +92,9 @@ have to revisit every pack later. Mirrors RomRaider's `maps/checksum/` family
 `st::flash::make_checksum_repair` resolves this string to an
 `IChecksumRepair` instance via the factory; `apply_checksum_repair(span,
 def)` is the one-call wrapper. The three concrete kinds
-(`subaru_std`/`subaru_alt`/`subaru_alt2`) stub-return `NotImplemented`
-with citation pointers to RomRaider's `ChecksumSTD` family — algorithm
-implementation waits on a known-good stock dump for byte validation
-(see docs/04 §"Phase 4").
+(`subaru_std`/`subaru_alt`/`subaru_alt2`) stub-return `NotImplemented`;
+algorithm implementation waits on a known-good stock dump for byte
+validation (see docs/04 §"Phase 4").
 
 ## `[[identification]]` — CID detection
 

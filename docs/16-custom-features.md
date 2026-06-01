@@ -457,7 +457,7 @@ conservative. Actual progress:
 | One codegen backend (SH-2A) | 2–3 wk | shipped: Int + Bool + control flow + Float + Float compares + cross-hook flow + fan-out dedup + `divide_int` (FPU bridge) + `sqrt_float` (FSQRT). Open gaps: table-lookup primitives, per-ISA cycle costs. |
 | Patch insertion + free-RAM management | 1–2 wk | not started — bench-rig-blocked. Needs a real ECU's vector table and the firmware's known free-RAM map to develop against. |
 | Sample packs + docs | 1 wk | 4 samples ship (3 compile end-to-end, 1 waits on `flex_fuel_scale` curve primitive). This doc you're reading is the design + current-state ref. |
-| Second backend (RH850) | 2–3 wk | partial: LoadConstant + LoadHookInput slices shipped (24 + 28 B respectively, encoded against the public Renesas reference). CallPrimitive slice still open — needs an RH850 analog of SH-2A's FPU bridge + primitive shape table. Bench-rig HIL is the gate before any RH850 PatchObject reaches a real ECU. |
+| Second backend (RH850) | 2–3 wk | partial: LoadConstant + LoadHookInput slices shipped (24 + 28 B respectively, encoded against the public Renesas reference). CallPrimitive slice partially shipped — 8 leaf-operand primitives (`add_int`, `subtract_int`, `and_bool`, `or_bool`, `not_bool`, `select_int`, `select_bool`, `select_float`). Multiply/divide, Int compares, Float/FPU, and nested CallPrimitive operands still open — need an RH850 analog of SH-2A's FPU bridge + primitive shape table. Bench-rig HIL is the gate before any RH850 PatchObject reaches a real ECU. |
 
 The pieces that REMAIN before custom features ship to a user:
 

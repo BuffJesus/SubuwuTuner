@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-Modern Subaru ECUs (SH7058 silicon, 2008–2017; RH850 silicon, 2018+) gate
+Modern Subaru ECUs (SH-2A silicon — SH7055/58/59 — 2008–2017; RH850 silicon, 2018+) gate
 ReadMemoryByAddress and most flash services behind UDS SecurityAccess
 (SID 0x27). To dump a stock ROM, SubuwuTuner has to:
 
@@ -79,7 +79,7 @@ Era / variant catalog:
 | 2008–2017 | SH7058  | SSMCAN1 (L1)  | 4              | `ssmcan1_key_stub` (factory)                                          | ✅ shipped     |
 | 2008–2017 | SH7058  | SSMCAN1 (L1)  | 4              | `ssmcan1_l1_cobb_ap` (= alias `ssmcan1_l1_fehr_active`)               | ✅ shipped     |
 | 2008–2017 | SH7058  | SSMCAN1 (L3)  | 4              | `ssmcan1_l3_cobb_ap` (= alias `ssmcan1_l3_fehr_active`)               | ✅ shipped     |
-| 2018+     | RH850   | CY1 (AES-CBC) | 16             | `cy1_aes_key_stub`                                                    | ⬜ not yet     |
+| 2018+     | RH850   | CY1 (AES-128 ECB) | 16             | `cy1_aes_key_stub`                                                    | ⬜ not yet     |
 
 The CY1 algorithm is publicly known (jglim/UnlockECU/SubaruSecurityAccess2018CY1.cs,
 MIT) and could be implemented in-tree without contamination — we just
@@ -129,7 +129,7 @@ AP, EcuTek, ECUFlash, etc.) already paired to their car:
 # Terminal 1: start the sniffer. LISTEN-ONLY mode — the VX never
 # transmits, so the active tool gets its bus all to itself.
 subuwutuner-cli sniff \
-    --transport obdx --device COM3 \
+    --transport obdx --device COM5 \
     --output capture.log \
     --filter 0x7E0,0x7E8
 

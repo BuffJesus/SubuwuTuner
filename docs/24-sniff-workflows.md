@@ -34,7 +34,7 @@ Output format is one frame per line: `<elapsed_ms> 0xCANID <hex bytes>`. Plain-t
 
 ```sh
 subuwutuner-cli sniff \
-    --transport obdx --device COM3 \
+    --transport obdx --device COM5 \
     --output flash-capture.log \
     --filter 0x7E0,0x7E8
 ```
@@ -55,7 +55,7 @@ The frames of interest, in order:
 
 ### Extract
 
-A planned extractor (`tools/extract_uds_transfer.py`, **not yet written**) walks the capture, ISO-TP-reassembles each direction, pairs each `34 …` declaration with its subsequent `36 …` blocks, and emits:
+The extractor `tools/extract_uds_transfer.py` walks the capture, ISO-TP-reassembles each direction, pairs each `34 …` declaration with its subsequent `36 …` blocks, and emits:
 
 ```json
 {
@@ -104,7 +104,7 @@ When COBB AP / EcuTek / ECUFlash show a live "Boost Target" gauge, they poll a f
 
 ```sh
 subuwutuner-cli sniff \
-    --transport obdx --device COM3 \
+    --transport obdx --device COM5 \
     --output datalog-sniff.log \
     --filter 0x7E0,0x7E8 \
     --duration 60
@@ -114,7 +114,7 @@ While capturing, run the tuner-tool's datalogger with whatever PIDs you want to 
 
 ### Extract
 
-A planned extractor (`tools/extract_rmba_polls.py`, **not yet written**) walks the capture and emits:
+The extractor `tools/extract_rmba_polls.py` walks the capture and emits:
 
 ```json
 {
@@ -246,7 +246,7 @@ Wide-net, no ID filter:
 
 ```sh
 subuwutuner-cli sniff \
-    --transport obdx --device COM3 \
+    --transport obdx --device COM5 \
     --output protocol-learn.log \
     --duration 120
 ```
@@ -255,7 +255,7 @@ Drive the OEM tool through whatever operation you're trying to characterise. Rec
 
 ### Extract
 
-`tools/decode_uds_capture.py` (**planned**) walks the capture and emits a human-readable timeline:
+`tools/decode_uds_capture.py` walks the capture and emits a human-readable timeline:
 
 ```
 00.000  → 7E0  10 02                   DiagnosticSessionControl programmingSession
@@ -343,9 +343,9 @@ Every workflow ends in JSON the rest of the toolchain can consume:
 
 | Workflow | Extractor (status)               | Output schema                  | Downstream consumer                                   |
 |----------|----------------------------------|--------------------------------|-------------------------------------------------------|
-| 1        | `tools/extract_uds_transfer.py` (**TODO**) | `subuwutuner.flash.v1`         | `st::rom::load_buffer` → `st::edit` for delta tuning  |
-| 2        | `tools/extract_rmba_polls.py` (**TODO**)   | `subuwutuner.poll.v1`          | Definition annotator: enrich `definitions/<era>/*.toml` with RAM shadow addresses |
-| 3        | `tools/decode_uds_capture.py` (**TODO**)    | Plain-text timeline + anomaly list | `docs/13-transport.md` updates; ECU-quirk database    |
+| 1        | `tools/extract_uds_transfer.py` (shipped) | `subuwutuner.flash.v1`         | `st::rom::load_buffer` → `st::edit` for delta tuning  |
+| 2        | `tools/extract_rmba_polls.py` (shipped)   | `subuwutuner.poll.v1`          | Definition annotator: enrich `definitions/<era>/*.toml` with RAM shadow addresses |
+| 3        | `tools/decode_uds_capture.py` (shipped)    | Plain-text timeline + anomaly list | `docs/13-transport.md` updates; ECU-quirk database    |
 | 4        | (combination of 2 + manual diff)  | Per-feature notes              | Definition pack: new tables / new annotations         |
 
 Workflow 1's payload bytes drop straight into the existing ROM-loading path; the others feed back into the definition packs and protocol docs.

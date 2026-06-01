@@ -7,7 +7,7 @@ Six phases. Each ends with a demoable artifact and a "ship gate" that must pass 
 
 ## Phase 0 — Foundations (2–3 weeks) ✅ done
 
-- ✅ Repo skeleton, CMake presets, vcpkg manifest, CI on Win/Mac/Linux
+- ✅ Repo skeleton, CMake presets, FetchContent deps, CI on Win/Mac/Linux (vcpkg manifest mode deferred — `docs/07`)
 - ✅ `st::core` (`Result`, `Error`, units, `Span`)
 - ✅ Catch2 wired up, **1100+ tests green** (was sized at 50 originally)
 - ✅ `subuwutuner-cli` binary with version + 60+ subcommands
@@ -65,8 +65,8 @@ Orchestrator + Manifest + journal + policy gate + checksum-type field all exist 
 - ✅ FlashPlan + sector model (`st::flash`)
 - ✅ Manifest + journal + `plan_resume` for crash-safe writes
 - ✅ Policy + mutation gate (`docs/06` + `st::policy`)
-- ✅ `checksum_type` field in pack `[pack]` table (added `58a821f`); enum mirrors RR's ChecksumSTD / ALT / ALT2 family
-- ✅ `IChecksumRepair` seam + `make_checksum_repair` factory + `apply_checksum_repair(span, Definition)` wrapper + CLI `checksum-verify` / `checksum-repair` exit-3-on-NotImplemented (every concrete kind still returns NotImplemented with an RR citation pointer)
+- ✅ `checksum_type` field in pack `[pack]` table (added `58a821f`); enum mirrors the `<checksum module="…">` strings in RomRaider's public definition XML (`ChecksumSTD` / `ALT` / `ALT2` …)
+- ✅ `IChecksumRepair` seam + `make_checksum_repair` factory + `apply_checksum_repair(span, Definition)` wrapper + CLI `checksum-verify` / `checksum-repair` exit-3-on-NotImplemented (every concrete kind still returns NotImplemented; algorithm impls wait on a known-good stock dump for byte validation)
 - ✅ **Seed/key authentication (SecurityAccess)** — A-series SSMCAN1 fully recovered: factory 16-round Feistel (`ssmcan1_key_stub`), COBB-AP L1 + L3 variants (`ssmcan1_l{1,3}_cobb_ap`), Fehr-active aliases. CLI-selectable via `--sa-variant`. See `docs/23-security-access.md` for the full catalog.
 - ✅ **Optional gated 0xB6 bulk-transfer write path** — compile-flagged + runtime-flagged. See `docs/26-bulk-reflash-cipher.md`.
 - ⬜ Checksum-repair implementations (subaru_std, subaru_alt, subaru_alt2) — seam ready; algorithms still need byte-validation against a known stock dump
@@ -76,9 +76,9 @@ Orchestrator + Manifest + journal + policy gate + checksum-type field all exist 
 
 **Gate:** 🔒 100 successful flash cycles on a junkyard ECU bench rig — zero bricks, zero corrupted images. **No customer ever flashes a car until this gate is met.** Hardware-blocked.
 
-## Phase 5 — Custom features (4–6 weeks) 🟢 design + IR + SH-2A codegen for VA shipped; RH850 codegen for VB partial; patch insertion remaining
+## Phase 5 — Custom features (4–6 weeks) 🟡 design + IR + SH-2A codegen for VA shipped; RH850 codegen for VB partial; patch insertion remaining
 
-Heavy progress — what was sized at 4–6 weeks for the editor + IR + one backend shipped much faster. RH850 codegen for VB is now partial: all 3 IR shapes wired with a 5-primitive CallPrimitive slice (add_int, subtract_int, and_bool, or_bool, not_bool). The remaining RH850 slices (multiply/divide, Int compares, select, Float/FPU, nested CallPrimitive) and the patch-insertion layer + end-to-end flashing all gate on Phase 4 hardware validation. See `docs/16-custom-features.md` for the granular current-state matrix.
+Heavy progress — what was sized at 4–6 weeks for the editor + IR + one backend shipped much faster. RH850 codegen for VB is now partial: all 3 IR shapes wired with an 8-primitive CallPrimitive slice (`add_int`, `subtract_int`, `and_bool`, `or_bool`, `not_bool`, `select_int`, `select_bool`, `select_float`). The remaining RH850 slices (multiply/divide, Int compares, Float/FPU, nested CallPrimitive) and the patch-insertion layer + end-to-end flashing all gate on Phase 4 hardware validation. See `docs/16-custom-features.md` for the granular current-state matrix.
 
 - ✅ Visual node-graph editor with pin labels + per-pin defaults + wire dragging + pin-context menus; promoted out of `View → Debug` to top-level `View → Custom features designer (preview)` (`0cc5c1b`)
 - ✅ Graph data model (`st::feature::Graph`) + IR lowerer (`st::feature::ir::Module`) + graph-level + IR-level linters

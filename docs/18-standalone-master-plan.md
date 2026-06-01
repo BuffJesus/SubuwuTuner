@@ -263,8 +263,8 @@ typical FA-DIT WRX pack:
 
 Map switching is the one exception. Switching the "active tune" is a
 full flash cycle, not a RAM write, because the entire calibration
-needs to change atomically. That's identical to how COBB does it
-internally — the AccessPort writes ~2 MB to flash on a map change,
+needs to change atomically. That matches what we observe on the wire
+when an AccessPort performs a map change — ~2 MB written to flash,
 not a RAM toggle. The handheld surfaces map-switching as a flash
 button, with the same brick-protection + brownout interlock as any
 other flash from `docs/05` §4.

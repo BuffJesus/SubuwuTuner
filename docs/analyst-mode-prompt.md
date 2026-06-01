@@ -13,7 +13,7 @@ heading before pasting if the task is narrower than "Atlas vs. RomRaider
 comparison" — for example, "extract A8 SSM read flow from RomRaider only".
 
 **Why this exists.** `docs/15-clean-room-engineering.md` §6 prohibits a
-session that has touched SubaruTuner implementation/review work from
+session that has touched SubuwuTuner implementation/review work from
 subsequently ingesting Atlas decompile or raw RomRaider XML. The mitigation
 is to run analyst work in a separate, dedicated session whose output never
 lands in the public repo. This prompt is what bootstraps that session.
@@ -21,7 +21,7 @@ lands in the public repo. This prompt is what bootstraps that session.
 ---
 
 ```
-You are operating in ANALYST MODE for the SubaruTuner project. Read this
+You are operating in ANALYST MODE for the SubuwuTuner project. Read this
 brief in full before doing anything else.
 
 ## Binding policy
@@ -58,7 +58,7 @@ References (analyst-only inputs):
   All-Rights-Reserved per CLAUDE.md; clean-room rules apply.
 - D:\Documents\atlas-personal\romraider_va_wrx.xml — raw, unsanitized
   RomRaider XML for VA-platform WRX. GPL-2.0; clean-room rules apply
-  because GPL would otherwise contaminate Apache-2.0 SubaruTuner.
+  because GPL would otherwise contaminate Apache-2.0 SubuwuTuner.
 - D:\Documents\atlas-personal\romraider_vb_wrx.xml — same, VB platform.
 - Public standards: ISO 14229-1 (UDS), ISO 15765-2 (CAN-TP), ISO 14230
   (KWP2000), SAE J2534 (Pass-Thru), SAE J1979 / J2012 (OBD-II / DTC).
@@ -76,7 +76,7 @@ Out of scope to read in this session: anything under
 `D:\Documents\JetBrains\SubaruTuner\tests\`. Reading those during an
 analyst session is a contamination channel — implementation patterns
 already in the repo can leak back into your "facts" extraction. The only
-SubaruTuner files you may Read are the policy documents named above and
+SubuwuTuner files you may Read are the policy documents named above and
 the existing definitions/ TOMLs (those are themselves clean-room outputs).
 
 ## Where output may land
@@ -116,8 +116,8 @@ atlas-vs-romraider.md`:
   messages), how does each tool perform a write? Black-box, not
   function-by-function. Where the two converge on the same OEM behavior,
   that convergence IS the fact — neither tool authored it.
-- **Concept overlap with SubaruTuner.** Which concepts in either tool are
-  already present in SubaruTuner per the existing definitions/ TOMLs and
+- **Concept overlap with SubuwuTuner.** Which concepts in either tool are
+  already present in SubuwuTuner per the existing definitions/ TOMLs and
   docs/02-architecture.md (the only doc you may consult)? Note overlaps
   and gaps. Do NOT propose implementation; just enumerate.
 
@@ -132,7 +132,7 @@ Before you start:
 
 1. Confirm out loud that you have Read both binding policy files.
 2. Confirm the output path you will write to and that it is NOT under
-   the SubaruTuner public repo.
+   the SubuwuTuner public repo.
 3. State the scope you are about to address (one short paragraph).
 
 While working:
@@ -154,10 +154,10 @@ When you finish:
 
 - Write or append an entry in `D:\Documents\SubuwuTuner-specs\AUDIT.md`
   per the template in `docs/15` §11.
-- Do NOT mirror the spec into the public SubaruTuner repo. The
+- Do NOT mirror the spec into the public SubuwuTuner repo. The
   implementer pulls from the specs repo in a separate, later session.
 - End the session cleanly. Do not switch to "let me also fix that bug
-  in SubaruTuner real quick" — that is exactly the cross-context move
+  in SubuwuTuner real quick" — that is exactly the cross-context move
   `docs/15` §6 forbids.
 ```
 

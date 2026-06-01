@@ -2,7 +2,7 @@
 
 Auto-tuning is one of the features where being a *headless, scriptable, modern-language* tool pays off structurally rather than just nicely. The math involved is statistics, not machine learning; the bottleneck in existing tools has historically been UI ergonomics and data-quality gating, not the algorithm itself.
 
-This document captures the planned design. Auto-tune is **not** a v1.0 feature — it lands in v1.1 or v1.2 once Phase 3 datalogging is solid and we have a beta cycle of feedback on manual editing.
+This document captures the design. Auto-tune is **not** a v1.0 feature: **MAF + knock-pull kernels shipped as v1.1** (CSV reader + smoothing + lint + CLI + GUI modals, end-to-end via `edit::History`); closed-loop trim integration, boost-trim, and idle-target trim remain v1.2 design.
 
 ## Scope of "auto-tune"
 
@@ -191,8 +191,8 @@ CSV; required columns differ per kernel — `subuwutuner-cli autotune maf
 --help` documents the exact set.
 
 Same algorithms surfaced in the GUI as the MAF and Knock-Pull modals
-(see `render_maf_autotune_modal` / `render_kp_autotune_modal` in
-`src/ui/src/main.cpp`) with the diff summary above and a per-cell
+(see `render_maf_autotune_modal` / `render_kp_autotune_modal` under
+`src/ui/src/modals/`) with the diff summary above and a per-cell
 heatmap-style ledger.
 
 ## Why this matters
