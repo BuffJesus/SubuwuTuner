@@ -41,6 +41,12 @@ std::vector<ShortcutGroup> const &shortcuts_reference() {
              {"Ctrl+Z", "Undo last edit"},
              {"Ctrl+Shift+Z", "Redo (alt: Ctrl+Y)"},
          }},
+        {"Workspaces",
+         {
+             {"Ctrl+1", "Switch to Tune workspace"},
+             {"Ctrl+2", "Switch to Datalog workspace"},
+             {"Ctrl+3", "Switch to Features workspace"},
+         }},
         {"Table grid",
          {
              {"Arrows", "Move cursor cell"},

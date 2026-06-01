@@ -50,6 +50,27 @@ bool theme_is_light() noexcept {
 
 namespace {
 
+// ImGui's default glyph range is Basic Latin + Latin-1. The workspace
+// rail uses ▦ (U+25A6 Geometric Shapes), ◈ (U+25C8 Geometric Shapes),
+// ⚡ (U+26A1 Misc Symbols), and various typography callers reach into
+// General Punctuation (·, …, → etc.) + Arrows. Without these ranges
+// in the loaded atlas, the glyph slots resolve to '?' tofu. Build a
+// merged range table once and reuse for every font load below.
+ImWchar const *extended_glyph_ranges() {
+    static ImWchar const ranges[] = {
+        0x0020, 0x00FF, // Basic Latin + Latin-1 Supplement
+        0x2010, 0x2027, // General Punctuation (–, —, …, ·)
+        0x2190, 0x21FF, // Arrows (→ ↔ ↻ ↩)
+        0x2500, 0x257F, // Box Drawing
+        0x2580, 0x259F, // Block Elements
+        0x25A0, 0x25FF, // Geometric Shapes (▦ ◈ ●)
+        0x2600, 0x26FF, // Miscellaneous Symbols (⚡ ⚠ ✓ ✗)
+        0x2700, 0x27BF, // Dingbats (✔ ✘)
+        0,
+    };
+    return ranges;
+}
+
 // Probe a few candidate paths and load the first one that exists. Returns
 // nullptr if none was loadable, in which case ImGui's default font is used.
 ImFont *load_first_existing(std::initializer_list<char const *> candidates, float size_px) {
@@ -62,7 +83,9 @@ ImFont *load_first_existing(std::initializer_list<char const *> candidates, floa
         if (!std::filesystem::exists(path, ec)) {
             continue;
         }
-        if (auto *f = io.Fonts->AddFontFromFileTTF(path, size_px); f != nullptr) {
+        if (auto *f = io.Fonts->AddFontFromFileTTF(path, size_px, nullptr,
+                                                   extended_glyph_ranges());
+            f != nullptr) {
             return f;
         }
     }
@@ -70,6 +93,41 @@ ImFont *load_first_existing(std::initializer_list<char const *> candidates, floa
 }
 
 } // namespace
+
+// Merge a system icon font into the main UI font atlas so callers can
+// reach into the Windows icon set with private-use codepoints inline
+// (workspace rail uses MDL2_EDIT / _LINE_CHART / _LIGHTNING etc.).
+// MergeMode merges glyphs from this font into the previously-loaded
+// font's atlas — they render as one continuous font from ImGui's
+// perspective. Falls back silently when the system font isn't present
+// (Mac/Linux today); cross-platform icon coverage is a follow-up that
+// would bundle Lucide or FontAwesome under assets/fonts/.
+void load_icon_font_merged(float size_px) {
+    static ImWchar const icon_ranges[] = {
+        0xE700, 0xF8FF, // MDL2 + Fluent icon glyphs (Private Use Area)
+        0,
+    };
+    ImFontConfig cfg;
+    cfg.MergeMode = true;
+    cfg.PixelSnapH = true;
+    // Glyphs sit slightly tall against the body font baseline by default;
+    // nudge them up so the centerline matches.
+    cfg.GlyphMinAdvanceX = size_px; // make each icon square-cell
+    cfg.GlyphOffset.y = 1.0f;
+
+    auto &io = ImGui::GetIO();
+    char const *const candidates[] = {
+        "C:/Windows/Fonts/SegoeIcons.ttf", // Win 11 — Segoe Fluent Icons
+        "C:/Windows/Fonts/segmdl2.ttf",    // Win 10 — Segoe MDL2 Assets
+    };
+    for (auto const *path : candidates) {
+        std::error_code ec;
+        if (!std::filesystem::exists(path, ec))
+            continue;
+        if (io.Fonts->AddFontFromFileTTF(path, size_px, &cfg, icon_ranges) != nullptr)
+            return;
+    }
+}
 
 Fonts load_fonts() {
     Fonts f;
@@ -84,6 +142,10 @@ Fonts load_fonts() {
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         },
         15.0f);
+    // Merge MDL2 / Fluent icons into the UI font atlas so panels can
+    // use icon codepoints inline. Merged-mode add must follow the
+    // primary AddFontFromFileTTF call.
+    load_icon_font_merged(15.0f);
 
     // Mono — for grids, hex dumps, log output where alignment matters.
     f.mono = load_first_existing(

@@ -26,7 +26,7 @@ namespace st::ui {
 // Shared layout dimensions. Used by dockspace / workspace rail / status
 // bar / toasts — multiple .cpps once split, so inline constexpr here.
 inline constexpr float kStatusBarHeight = 26.0f;
-inline constexpr float kWorkspaceRailWidth = 56.0f;
+inline constexpr float kWorkspaceRailWidth = 64.0f;
 
 // Returns the dockspace's central node ID, or 0 if the tree hasn't been
 // built yet. Datalog/features panels call this in their Begin() so

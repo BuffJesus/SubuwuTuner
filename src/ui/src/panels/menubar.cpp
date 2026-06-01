@@ -367,6 +367,8 @@ void render_menubar(AppState &state) {
                 "Ctrl+K opens the command palette — search every action + table.");
             ImGui::BulletText("Ctrl+F focuses the table-filter box.  Esc clears it.");
             ImGui::BulletText("Filter matches both the table's name and its snake_case id.");
+            ImGui::BulletText(
+                "Ctrl+1 / Ctrl+2 / Ctrl+3 switch Tune / Datalog / Features workspaces.");
             ImGui::Separator();
             text_subtle("Viewing");
             ImGui::BulletText("Switch View: Grid \xE2\x86\x94 Heatmap to inspect a map two ways.");

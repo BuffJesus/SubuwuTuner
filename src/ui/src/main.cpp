@@ -218,6 +218,17 @@ int main(int argc, char *argv[]) {
         if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_K)) {
             open_command_palette(state);
         }
+        // Workspace switches — Ctrl+1 = Tune, Ctrl+2 = Datalog, Ctrl+3
+        // = Features. Mirrors the left-rail click ordering.
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_1)) {
+            apply_workspace_mode(state, WorkspaceMode::Tune);
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_2)) {
+            apply_workspace_mode(state, WorkspaceMode::Datalog);
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_3)) {
+            apply_workspace_mode(state, WorkspaceMode::Features);
+        }
 
         tick_status_msg(state);
         render_menubar(state);

@@ -120,71 +120,94 @@ void render_workspace_rail(AppState &state) {
     ImGui::Begin("##workspace_rail", nullptr, flags);
     ImGui::PopStyleVar(3);
 
-    constexpr float kBtnW = 48.0f;
-    constexpr float kBtnH = 44.0f;
-    auto const draw_workspace = [&](WorkspaceMode mode, char const *label,
-                                    char const *tooltip) {
+    constexpr float kBtnW = 56.0f; // rail 64 minus 4px padding each side
+    constexpr float kBtnH = 56.0f; // extra height for icon-over-caption stack
+    constexpr float kStripeW = 3.0f;
+    constexpr float kIconScale = 1.55f; // icon drawn larger than caption
+
+    // Segoe MDL2 Assets / Fluent Icons codepoints (private-use area
+    // U+E700–U+F8FF), loaded as a merged font in theme.cpp's load_fonts.
+    // UTF-8 encoded inline so the literals are portable in source.
+    // - E70F  Edit (pencil)       → Tune  (calibration editing)
+    // - E9D9  LineChart           → Log   (datalog signals)
+    // - E945  Lightning           → Feat  (custom features)
+    char const *const kIconEdit = "\xEE\x9C\x8F";
+    char const *const kIconChart = "\xEE\xA7\x99";
+    char const *const kIconLightning = "\xEE\xA5\x85";
+
+    auto const accent_base = accent_for(current_theme()).base;
+    auto const draw_workspace = [&](WorkspaceMode mode, char const *icon,
+                                    char const *caption, char const *tooltip) {
         bool const is_active = (state.workspace_mode == mode);
-        if (is_active) {
-            push_primary_button_colors();
-        }
-        if (ImGui::Button(label, ImVec2(kBtnW, kBtnH))) {
+        ImGui::PushID(caption);
+        ImVec2 const cursor_screen = ImGui::GetCursorScreenPos();
+        if (ImGui::Button("##ws", ImVec2(kBtnW, kBtnH))) {
             apply_workspace_mode(state, mode);
         }
+        bool const hovered = ImGui::IsItemHovered();
+
+        auto *const dl = ImGui::GetWindowDrawList();
+        // Active-edge stripe — sits OUTSIDE the button on the rail's
+        // left edge, vertically inset so the corners breathe. Previous
+        // implementation used push_primary_button_colors() for the active
+        // state, which collided with hover styling (active+hover landed
+        // in the same shade so the user lost the "selected" signal under
+        // the cursor). A 3px brand-purple stripe reads unambiguously.
         if (is_active) {
-            pop_primary_button_colors();
+            float const x0 = cursor_screen.x - kStripeW - 1.0f;
+            float const x1 = cursor_screen.x - 1.0f;
+            float const y0 = cursor_screen.y + 6.0f;
+            float const y1 = cursor_screen.y + kBtnH - 6.0f;
+            dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1),
+                              ImGui::GetColorU32(accent_base), kStripeW * 0.5f);
         }
-        if (ImGui::IsItemHovered()) {
+
+        // Icon (top half, ~1.55× scale) + caption (bottom half, normal
+        // scale). Caption stays so the rail self-documents — first-run
+        // users don't have to recognize the MDL2 glyph to know what's
+        // what. Active state colors both icon + caption with the
+        // brand accent.
+        ImFont *const font = ImGui::GetFont();
+        float const base_size = ImGui::GetFontSize();
+        float const icon_size = base_size * kIconScale;
+        ImVec2 const icon_sz = font->CalcTextSizeA(icon_size, FLT_MAX, 0.0f, icon);
+        ImVec2 const caption_sz = ImGui::CalcTextSize(caption);
+
+        constexpr float kStackGap = 2.0f;
+        float const stack_h = icon_sz.y + kStackGap + caption_sz.y;
+        float const button_center_y = cursor_screen.y + kBtnH * 0.5f;
+        float const icon_y = button_center_y - stack_h * 0.5f;
+        float const caption_y = icon_y + icon_sz.y + kStackGap;
+        float const button_center_x = cursor_screen.x + kBtnW * 0.5f;
+
+        ImU32 const text_col = is_active
+                                   ? ImGui::GetColorU32(accent_base)
+                                   : ImGui::GetColorU32(ImGuiCol_Text);
+        dl->AddText(font, icon_size,
+                    ImVec2(button_center_x - icon_sz.x * 0.5f, icon_y), text_col, icon);
+        dl->AddText(ImVec2(button_center_x - caption_sz.x * 0.5f, caption_y), text_col,
+                    caption);
+
+        if (hovered) {
             ImGui::SetTooltip("%s", tooltip);
         }
+        ImGui::PopID();
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
     };
 
-    draw_workspace(WorkspaceMode::Tune, "Tune",
-                   "Tune workspace.\n"
+    draw_workspace(WorkspaceMode::Tune, kIconEdit, "Tune",
+                   "Tune workspace.  (Ctrl+1)\n"
                    "Tables · Table · Stats · History · DTCs.");
-    draw_workspace(WorkspaceMode::Datalog, "Log",
-                   "Datalog workspace.\n"
+    draw_workspace(WorkspaceMode::Datalog, kIconChart, "Log",
+                   "Datalog workspace.  (Ctrl+2)\n"
                    "Knock Dashboard · Adaptive History · Cold-Start · EBCS.");
-    draw_workspace(WorkspaceMode::Features, "Feat",
-                   "Custom Features workspace.\n"
+    draw_workspace(WorkspaceMode::Features, kIconLightning, "Feat",
+                   "Custom Features workspace.  (Ctrl+3)\n"
                    "Node-graph designer for rev limiters, FFS, etc.");
 
-    // Push the Flash quick-action to the bottom of the rail. Spacer
-    // soaks up the remaining vertical room; the button below it sits
-    // just above the status bar gap.
-    float const remaining =
-        ImGui::GetContentRegionAvail().y - kBtnH - 8.0f;
-    if (remaining > 0.0f) {
-        ImGui::Dummy(ImVec2(0.0f, remaining));
-    }
-    // Visual divider above the Flash button so it reads as a separate
-    // category from the workspace cluster above.
-    {
-        ImVec2 const p = ImGui::GetCursorScreenPos();
-        auto *const dl = ImGui::GetWindowDrawList();
-        ImU32 const col = ImGui::GetColorU32(ImGuiCol_Separator);
-        dl->AddLine(ImVec2(p.x + 4.0f, p.y), ImVec2(p.x + kBtnW - 4.0f, p.y), col);
-        ImGui::Dummy(ImVec2(0.0f, 4.0f));
-    }
-    // Flash quick-action — not a workspace, just a launcher for the
-    // policy-gated flash modal. Disabled without a project; tooltip
-    // explains why.
-    ImGui::BeginDisabled(!state.project.has_value());
-    if (ImGui::Button("Flash", ImVec2(kBtnW, kBtnH))) {
-        state.show_flash_modal = true;
-        state.flash_confirm_checked = false;
-        state.flash_reason[0] = '\0';
-    }
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        if (state.project.has_value()) {
-            ImGui::SetTooltip("Flash the working ROM to the ECU.\n"
-                              "Opens the policy-gated flash modal.");
-        } else {
-            ImGui::SetTooltip("No project open — open one first (Ctrl+O).");
-        }
-    }
+    // Flash used to live at the bottom of the rail. Removed 2026-06-01
+    // because the rail is a workspace switcher and Flash is a one-shot
+    // (not a workspace); it lives on the table-view toolbar + File menu.
     ImGui::End();
 }
 // Per-workspace dock layouts. Each WorkspaceMode owns its own central-
