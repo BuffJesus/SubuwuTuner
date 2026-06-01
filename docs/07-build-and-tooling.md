@@ -10,6 +10,7 @@ SubuwuTuner/
 ├── CMakePresets.json
 ├── .clang-format
 ├── .clang-tidy
+├── .githooks/pre-commit               opt-in via `git config core.hooksPath .githooks`
 ├── docs/                              (this folder)
 ├── src/
 │   ├── core/                          Result<T>, Error, version
@@ -82,7 +83,17 @@ A single workflow at `.github/workflows/ci.yml` with two top-level jobs:
 
 Per matrix entry: configure → build → ctest → smoke-test (`subuwutuner-cli --version` + `--help`) → upload test logs + CMake error logs on failure.
 
-The `clang-format` job is intentionally non-blocking until a pre-commit hook is in place to keep submitters out of CI loops. The handoff is to flip it to required after the hook lands.
+The `clang-format` job is intentionally non-blocking until contributors are reliably running the **pre-commit hook** below. The handoff is to flip CI to required once that's the common path.
+
+### Pre-commit hook
+
+`.githooks/pre-commit` is a portable `/bin/sh` script that runs `clang-format --dry-run --Werror` over staged `*.{cpp,hpp,h,cc,cxx,hxx}` files. Opt-in per clone:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+When `clang-format` isn't on PATH the hook fails closed with install instructions for Ubuntu / macOS / Windows (`winget install LLVM.LLVM` or MSYS2 `clang-tools-extra`). Override the binary name via `CLANG_FORMAT=clang-format-18 git commit ...`. Bypass once via `git commit --no-verify` — reserve for WIP commits you intend to fix up before pushing.
 
 No `cppcheck`, no `clang-tidy`-in-CI, no `fuzz` job today — the configs (`.clang-tidy`, `.clang-format`) are checked in for local + editor use, and the warnings policy below leans on the compilers themselves.
 

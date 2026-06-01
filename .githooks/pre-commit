@@ -1,0 +1,57 @@
+#!/bin/sh
+# SubuwuTuner pre-commit hook — runs clang-format in dry-run mode over
+# staged C/C++ source files. Refuses the commit if any file would change.
+#
+# To enable for this clone:
+#     git config core.hooksPath .githooks
+#
+# To bypass once (e.g. WIP commit you intend to fix up):
+#     git commit --no-verify
+#
+# See docs/07-build-and-tooling.md §"Pre-commit hook" for the rationale.
+
+set -e
+
+# Resolve clang-format. Honor an explicit override via CLANG_FORMAT for
+# users who installed a non-default binary name (e.g. clang-format-18).
+CLANG_FORMAT="${CLANG_FORMAT:-clang-format}"
+
+if ! command -v "$CLANG_FORMAT" >/dev/null 2>&1; then
+    echo "pre-commit: $CLANG_FORMAT not found in PATH" >&2
+    echo "  Install:" >&2
+    echo "    Ubuntu/Debian: sudo apt install clang-format" >&2
+    echo "    macOS:         brew install clang-format" >&2
+    echo "    Windows:       winget install LLVM.LLVM" >&2
+    echo "                 (or MSYS2: pacman -S mingw-w64-x86_64-clang-tools-extra)" >&2
+    echo "  Override binary: CLANG_FORMAT=clang-format-18 git commit ..." >&2
+    echo "  Bypass once:     git commit --no-verify" >&2
+    exit 1
+fi
+
+# Staged C/C++ files (added / copied / modified / renamed).
+files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.cpp' '*.hpp' '*.h' '*.cc' '*.cxx' '*.hxx' 2>/dev/null || true)
+
+if [ -z "$files" ]; then
+    exit 0
+fi
+
+fail=0
+for f in $files; do
+    # Skip files that disappeared between staging and now (rare but
+    # possible with mid-commit edits).
+    [ -f "$f" ] || continue
+    if ! "$CLANG_FORMAT" --dry-run --Werror "$f" >/dev/null 2>&1; then
+        echo "pre-commit: clang-format would change: $f" >&2
+        fail=1
+    fi
+done
+
+if [ "$fail" -ne 0 ]; then
+    echo "" >&2
+    echo "Fix with:" >&2
+    echo "    clang-format -i <files>" >&2
+    echo "Then 'git add' and re-commit. To bypass: git commit --no-verify" >&2
+    exit 1
+fi
+
+exit 0
