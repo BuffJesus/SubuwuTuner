@@ -167,7 +167,7 @@ bool parse_message_header(std::string_view line, Message &msg, std::string &err)
 
     auto name_tok = next_token(line, pos);
     if (name_tok.empty()) {
-        err = "BO_: missing name";
+        err = "BO_ id=" + std::to_string(msg.id) + ": missing name";
         return false;
     }
     // The name token ends with ':' followed by length. The trailing
@@ -180,7 +180,8 @@ bool parse_message_header(std::string_view line, Message &msg, std::string &err)
         name_str.assign(name_tok.data(), name_tok.size());
         auto const colon = next_token(line, pos);
         if (colon != ":") {
-            err = "BO_: missing ':' after name";
+            err = "BO_ '" + name_str + "': missing ':' after name (got '" + std::string{colon} +
+                  "')";
             return false;
         }
     }
@@ -188,7 +189,7 @@ bool parse_message_header(std::string_view line, Message &msg, std::string &err)
 
     auto const len_tok = next_token(line, pos);
     if (!parse_size(len_tok, msg.length)) {
-        err = "BO_: bad length '" + std::string{len_tok} + "'";
+        err = "BO_ '" + msg.name + "': bad length '" + std::string{len_tok} + "'";
         return false;
     }
 
@@ -219,7 +220,7 @@ bool parse_signal_row(std::string_view line, Signal &sig, std::string &err) {
 
     auto const colon = next_token(line, pos);
     if (colon != ":") {
-        err = "SG_: missing ':' after name";
+        err = "SG_ '" + sig.name + "': missing ':' after name (got '" + std::string{colon} + "')";
         return false;
     }
 
@@ -229,23 +230,28 @@ bool parse_signal_row(std::string_view line, Signal &sig, std::string &err) {
         auto const pipe = bits_tok.find('|');
         auto const at = bits_tok.find('@');
         if (pipe == std::string_view::npos || at == std::string_view::npos || pipe >= at) {
-            err = "SG_: bad bit-layout '" + std::string{bits_tok} + "'";
+            err = "SG_ '" + sig.name + "': bad bit-layout '" + std::string{bits_tok} + "'";
             return false;
         }
         auto const start_sv = bits_tok.substr(0, pipe);
         auto const len_sv = bits_tok.substr(pipe + 1, at - pipe - 1);
         if (!parse_size(start_sv, sig.start_bit) || !parse_size(len_sv, sig.length_bits)) {
-            err = "SG_: bad start|length '" + std::string{bits_tok} + "'";
+            err = "SG_ '" + sig.name + "': bad start|length '" + std::string{bits_tok} + "'";
             return false;
         }
         if (at + 2 > bits_tok.size()) {
-            err = "SG_: missing byte-order/sign after '@'";
+            err = "SG_ '" + sig.name + "': missing byte-order/sign after '@' in '" +
+                  std::string{bits_tok} + "'";
             return false;
         }
         char const order_c = bits_tok[at + 1];
         char const sign_c = bits_tok[at + 2];
         if (order_c != '0' && order_c != '1') {
-            err = "SG_: bad byte-order '" + std::string{order_c, order_c} + "'";
+            // Previously emitted a doubled char (`std::string{c, c}` is
+            // an initializer_list ctor producing a 2-char string).
+            // Report the single offending character now.
+            err = "SG_ '" + sig.name + "': bad byte-order '" + std::string(1, order_c) +
+                  "' (expected '0' for Motorola or '1' for Intel)";
             return false;
         }
         sig.byte_order = (order_c == '1') ? ByteOrder::Intel : ByteOrder::Motorola;
@@ -254,7 +260,8 @@ bool parse_signal_row(std::string_view line, Signal &sig, std::string &err) {
         } else if (sign_c == '-') {
             sig.sign = SignKind::Signed;
         } else {
-            err = "SG_: bad sign marker";
+            err = "SG_ '" + sig.name + "': bad sign marker '" + std::string(1, sign_c) +
+                  "' (expected '+' for unsigned or '-' for signed)";
             return false;
         }
     }
@@ -263,18 +270,20 @@ bool parse_signal_row(std::string_view line, Signal &sig, std::string &err) {
     {
         auto const tup_tok = next_token(line, pos);
         if (tup_tok.size() < 5 || tup_tok.front() != '(' || tup_tok.back() != ')') {
-            err = "SG_: bad (factor,offset) '" + std::string{tup_tok} + "'";
+            err = "SG_ '" + sig.name + "': bad (factor,offset) '" + std::string{tup_tok} + "'";
             return false;
         }
         auto const inner = tup_tok.substr(1, tup_tok.size() - 2);
         auto const comma = inner.find(',');
         if (comma == std::string_view::npos) {
-            err = "SG_: missing ',' in (factor,offset)";
+            err = "SG_ '" + sig.name + "': missing ',' in (factor,offset)='" +
+                  std::string{tup_tok} + "'";
             return false;
         }
         if (!parse_double(inner.substr(0, comma), sig.factor) ||
             !parse_double(inner.substr(comma + 1), sig.offset)) {
-            err = "SG_: non-numeric factor/offset";
+            err = "SG_ '" + sig.name + "': non-numeric factor/offset in '" +
+                  std::string{tup_tok} + "'";
             return false;
         }
     }
@@ -283,25 +292,26 @@ bool parse_signal_row(std::string_view line, Signal &sig, std::string &err) {
     {
         auto const rng_tok = next_token(line, pos);
         if (rng_tok.size() < 5 || rng_tok.front() != '[' || rng_tok.back() != ']') {
-            err = "SG_: bad [min|max] '" + std::string{rng_tok} + "'";
+            err = "SG_ '" + sig.name + "': bad [min|max] '" + std::string{rng_tok} + "'";
             return false;
         }
         auto const inner = rng_tok.substr(1, rng_tok.size() - 2);
         auto const pipe = inner.find('|');
         if (pipe == std::string_view::npos) {
-            err = "SG_: missing '|' in [min|max]";
+            err = "SG_ '" + sig.name + "': missing '|' in [min|max]='" + std::string{rng_tok} +
+                  "'";
             return false;
         }
         if (!parse_double(inner.substr(0, pipe), sig.min_value) ||
             !parse_double(inner.substr(pipe + 1), sig.max_value)) {
-            err = "SG_: non-numeric min/max";
+            err = "SG_ '" + sig.name + "': non-numeric min/max in '" + std::string{rng_tok} + "'";
             return false;
         }
     }
 
     // "unit"
     if (!next_quoted(line, pos, sig.unit)) {
-        err = "SG_: missing quoted unit";
+        err = "SG_ '" + sig.name + "': missing quoted unit";
         return false;
     }
 

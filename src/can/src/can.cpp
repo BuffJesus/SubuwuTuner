@@ -172,13 +172,13 @@ bool try_parse_frame_line(std::string_view line, Frame &out, std::string &err) {
     auto const chan_tok = next_token(line, pos);
     std::uint32_t chan = 0;
     if (!parse_decimal_u32(chan_tok, chan) || chan == 0) {
-        err = "missing or non-numeric channel";
+        err = "missing or non-numeric channel (got '" + std::string{chan_tok} + "')";
         return false;
     }
 
     auto id_tok = next_token(line, pos);
     if (id_tok.empty()) {
-        err = "missing CAN id";
+        err = "missing CAN id after channel " + std::to_string(chan);
         return false;
     }
     bool extended = false;
@@ -188,7 +188,7 @@ bool try_parse_frame_line(std::string_view line, Frame &out, std::string &err) {
     }
     std::uint32_t can_id = 0;
     if (!parse_hex_u32(id_tok, can_id)) {
-        err = "bad CAN id '" + std::string{id_tok} + "'";
+        err = "bad CAN id '" + std::string{id_tok} + "' on channel " + std::to_string(chan);
         return false;
     }
 
@@ -212,7 +212,11 @@ bool try_parse_frame_line(std::string_view line, Frame &out, std::string &err) {
     auto const dlc_tok = next_token(line, pos);
     std::uint32_t dlc_u = 0;
     if (!parse_decimal_u32(dlc_tok, dlc_u) || dlc_u > 8) {
-        err = "bad DLC '" + std::string{dlc_tok} + "'";
+        err = "bad DLC '" + std::string{dlc_tok} + "' on id=0x" + [&]() {
+            char buf[12];
+            std::snprintf(buf, sizeof(buf), "%X", can_id);
+            return std::string{buf};
+        }() + " (expected 0-8)";
         return false;
     }
 
@@ -229,7 +233,8 @@ bool try_parse_frame_line(std::string_view line, Frame &out, std::string &err) {
             auto const tok = next_token(line, pos);
             std::uint8_t byte = 0;
             if (!parse_hex_u8(tok, byte)) {
-                err = "bad data byte '" + std::string{tok} + "'";
+                err = "bad data byte '" + std::string{tok} + "' at index " + std::to_string(i) +
+                      " of " + std::to_string(f.dlc);
                 return false;
             }
             f.data[i] = byte;
