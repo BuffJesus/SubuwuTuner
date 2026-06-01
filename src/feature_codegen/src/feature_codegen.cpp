@@ -1591,9 +1591,17 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
 // reg1, reg2 computes reg2 = reg2 - reg1. So we load `a` into r10
 // (reg2 in the SUB encoding) and `b` into r11 (reg1), and SUB r11, r10
 // leaves r10 = a - b.
-void emit_rh850_binary_int_arith(std::vector<std::uint8_t> &code, std::string_view symbol,
-                                 PrimitiveOperand const &op1, PrimitiveOperand const &op2,
-                                 std::uint32_t dst_addr) {
+//
+// Returns ParseError if `symbol` is not one of the four explicitly-
+// dispatched binary primitives — this catches a future
+// `rh850_validate_call_primitive` extension that forgets to add a
+// matching dispatch arm here (previously fell through to OR, which
+// would have silently miscompiled the new primitive).
+[[nodiscard]] Status emit_rh850_binary_int_arith(std::vector<std::uint8_t> &code,
+                                                 std::string_view symbol,
+                                                 PrimitiveOperand const &op1,
+                                                 PrimitiveOperand const &op2,
+                                                 std::uint32_t dst_addr) {
     constexpr rh850::Reg kAReg = rh850::Reg::R10;   // op1 / result
     constexpr rh850::Reg kBReg = rh850::Reg::R11;   // op2
     constexpr rh850::Reg kScratch = rh850::Reg::R12; // address scratch
@@ -1608,9 +1616,14 @@ void emit_rh850_binary_int_arith(std::vector<std::uint8_t> &code, std::string_vi
     } else if (symbol == "and_bool") {
         // Bool values are 0/1-normalized — bitwise AND is logical AND.
         emit_le16(code, rh850::enc_and_reg(kBReg, kAReg));
-    } else {
-        // or_bool — the only remaining symbol routed here.
+    } else if (symbol == "or_bool") {
         emit_le16(code, rh850::enc_or_reg(kBReg, kAReg));
+    } else {
+        std::string msg{"RH850 backend: emit_rh850_binary_int_arith called with "
+                        "unsupported symbol '"};
+        msg.append(symbol);
+        msg.append("' — validator/dispatch out of sync");
+        return failure(ErrorCode::ParseError, std::move(msg));
     }
 
     // Pad to keep the byte stream 4-aligned. Every other instruction
@@ -1631,6 +1644,7 @@ void emit_rh850_binary_int_arith(std::vector<std::uint8_t> &code, std::string_vi
     // JMP [lp] + tail NOP.
     emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
     emit_le16(code, rh850::enc_nop());
+    return ok();
 }
 
 // Emit an RH850 unary-bool CallPrimitive fragment for `not_bool`.
@@ -1987,8 +2001,11 @@ Result<PatchObject> Rh850Backend::compile(ir::Module const &m, Definition const 
             if (src->symbol == "not_bool") {
                 emit_rh850_not_bool(work.code, operands[0], dst_addr);
             } else {
-                emit_rh850_binary_int_arith(work.code, src->symbol, operands[0], operands[1],
-                                            dst_addr);
+                if (auto s = emit_rh850_binary_int_arith(work.code, src->symbol, operands[0],
+                                                        operands[1], dst_addr);
+                    !s.has_value()) {
+                    return failure(s.error());
+                }
             }
         }
     }
