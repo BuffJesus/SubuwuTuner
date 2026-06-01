@@ -500,7 +500,7 @@ constexpr std::string_view kUsage =
     "                            The DLL path printed for each entry is what\n"
     "                            you'd pass to `--transport j2534 --dll <path>`\n"
     "                            once the platform dynload layer lands.\n"
-    "    doctor [--pack-dir <dir>] [--rom <FILE.bin>]\n"
+    "    doctor [--pack-dir <dir>] [--rom <FILE.bin>] [--json]\n"
     "                            Triage the install: tool/build identity, J2534\n"
     "                            adapter registry, definition-pack health, and\n"
     "                            (with --pack-dir + --rom) CID identification.\n"
@@ -510,6 +510,9 @@ constexpr std::string_view kUsage =
     "                            CLI usage. The 'start here' command when an\n"
     "                            install isn't behaving — composes pack-list /\n"
     "                            rom-identify / transport-list, no live link.\n"
+    "                            --json emits one-line `subuwutuner.doctor.v1`\n"
+    "                            JSON to stdout instead of human-readable text;\n"
+    "                            same checks, same exit codes — for CI scripts.\n"
     "    feature-compile <FILE.stmod> --def <pack.toml> [--arch sh2a|rh850]\n"
     "                    [--format hex|toml|raw|stmod] [--output <FILE>]\n"
     "                    [--validate-only]\n"
@@ -9122,9 +9125,277 @@ void doctor_section_rom(DoctorReport &r, std::optional<std::filesystem::path> co
     r.note(DoctorStatus::Ok);
 }
 
+// Minimal JSON-string escape: backslash-quote, backslash, and control chars.
+// Hand-rolled to avoid pulling in a JSON library for a single subcommand's
+// machine-readable output mode. Per RFC 8259 §7 the bare-minimum escapes are
+// `\"`, `\\`, and `\u00XX` for control chars < 0x20.
+void json_escape(std::string &out, std::string_view s) {
+    out.reserve(out.size() + s.size() + 2);
+    out.push_back('"');
+    for (char ch : s) {
+        auto const u = static_cast<unsigned char>(ch);
+        switch (ch) {
+        case '"':
+            out.append("\\\"");
+            break;
+        case '\\':
+            out.append("\\\\");
+            break;
+        case '\n':
+            out.append("\\n");
+            break;
+        case '\r':
+            out.append("\\r");
+            break;
+        case '\t':
+            out.append("\\t");
+            break;
+        default:
+            if (u < 0x20) {
+                char buf[8];
+                std::snprintf(buf, sizeof buf, "\\u%04X", u);
+                out.append(buf);
+            } else {
+                out.push_back(ch);
+            }
+        }
+    }
+    out.push_back('"');
+}
+
+char const *doctor_status_str(DoctorStatus s) noexcept {
+    switch (s) {
+    case DoctorStatus::Info:
+        return "info";
+    case DoctorStatus::Ok:
+        return "ok";
+    case DoctorStatus::Warn:
+        return "warn";
+    case DoctorStatus::Fail:
+        return "fail";
+    }
+    return "unknown";
+}
+
+// `doctor --json` output. Same checks as the text mode but emitted as a single
+// JSON object on stdout (single line, no pretty-print — scripts that want
+// indentation can pipe through `jq`). Exit code is unchanged: 1 on Fail, 0
+// otherwise. Schema is `subuwutuner.doctor.v1` — extending with new fields
+// is non-breaking; renaming or removing existing fields bumps the schema.
+int cmd_doctor_json(std::optional<std::filesystem::path> const &pack_dir,
+                    std::optional<std::filesystem::path> const &rom_path) {
+    DoctorReport report;
+    std::string out;
+    out.reserve(2048);
+    out.append("{\"schema\":\"subuwutuner.doctor.v1\",");
+
+    // tool + version + platform — mirrors the text-mode "System" line content
+    // but as named fields so callers don't have to parse free text.
+    out.append("\"tool\":");
+    json_escape(out, st::Version::name());
+    out.append(",\"version\":");
+    json_escape(out, st::Version::string());
+    out.append(",\"platform\":");
+    json_escape(out, doctor_os_label());
+    out.append(",\"sections\":[");
+
+    bool first_section = true;
+    auto const section_start = [&](char const *name, DoctorStatus s) {
+        if (!first_section)
+            out.append(",");
+        first_section = false;
+        out.append("{\"name\":");
+        json_escape(out, name);
+        out.append(",\"status\":");
+        json_escape(out, doctor_status_str(s));
+    };
+
+    // System section — always Ok, just records the tool identity (already
+    // emitted above as the top-level fields; this section is a placeholder
+    // for symmetry with text mode).
+    section_start("system", DoctorStatus::Ok);
+    out.append("}");
+    report.note(DoctorStatus::Ok);
+
+    // J2534 adapters section. Same Windows/non-Windows branch shape as text
+    // mode but the registered-adapter list ships as a JSON array of objects.
+    {
+        auto const adapters = st::transport::j2534::discover_adapters();
+        if (!adapters.empty()) {
+            section_start("j2534_adapters", DoctorStatus::Ok);
+            out.append(",\"count\":");
+            out.append(std::to_string(adapters.size()));
+            out.append(",\"adapters\":[");
+            for (std::size_t i = 0; i < adapters.size(); ++i) {
+                if (i != 0)
+                    out.append(",");
+                out.append("{\"name\":");
+                json_escape(out, adapters[i].name);
+                out.append(",\"function_library\":");
+                json_escape(out, adapters[i].function_library);
+                out.append("}");
+            }
+            out.append("]}");
+            report.note(DoctorStatus::Ok);
+        } else {
+#if defined(_WIN32)
+            section_start("j2534_adapters", DoctorStatus::Warn);
+            out.append(",\"count\":0,\"adapters\":[]}");
+            report.note(DoctorStatus::Warn, "If you'll use a J2534 adapter (Tactrix OpenPort, "
+                                            "MongoosePro), install the vendor DLL and re-run "
+                                            "`doctor`.");
+#else
+            section_start("j2534_adapters", DoctorStatus::Info);
+            out.append(",\"count\":0,\"adapters\":[]}");
+            report.note(DoctorStatus::Info);
+#endif
+        }
+    }
+
+    // Definition packs section. Walks pack-dir if given; reports load
+    // counts + failure paths as structured fields.
+    std::vector<st::Definition> loaded_packs;
+    if (!pack_dir.has_value()) {
+        section_start("definition_packs", DoctorStatus::Info);
+        out.append("}");
+        report.note(DoctorStatus::Info);
+    } else {
+        std::error_code ec;
+        if (!std::filesystem::is_directory(*pack_dir, ec) || ec) {
+            section_start("definition_packs", DoctorStatus::Fail);
+            out.append(",\"pack_dir\":");
+            json_escape(out, pack_dir->string());
+            out.append(",\"error\":\"not_a_directory\"}");
+            report.note(DoctorStatus::Fail, "Provide a real directory path for --pack-dir.");
+        } else {
+            auto const paths = discover_pack_paths(*pack_dir, "doctor");
+            if (paths.empty()) {
+                section_start("definition_packs", DoctorStatus::Fail);
+                out.append(",\"pack_dir\":");
+                json_escape(out, pack_dir->string());
+                out.append(",\"found\":0,\"loaded\":0,\"failed\":0,\"failure_paths\":[]}");
+                report.note(DoctorStatus::Fail,
+                            "Generate packs from RomRaider XML via tools/defgen, or drop a "
+                            "community pack bundle in there.");
+            } else {
+                std::size_t failed = 0;
+                std::vector<std::string> failure_paths;
+                for (auto const &p : paths) {
+                    auto def = st::Definition::from_file(p);
+                    if (def.has_value()) {
+                        loaded_packs.push_back(std::move(*def));
+                    } else {
+                        ++failed;
+                        failure_paths.push_back(p.string());
+                    }
+                }
+                DoctorStatus const s = loaded_packs.empty() ? DoctorStatus::Fail
+                                       : failed != 0        ? DoctorStatus::Warn
+                                                            : DoctorStatus::Ok;
+                section_start("definition_packs", s);
+                out.append(",\"pack_dir\":");
+                json_escape(out, pack_dir->string());
+                out.append(",\"found\":");
+                out.append(std::to_string(paths.size()));
+                out.append(",\"loaded\":");
+                out.append(std::to_string(loaded_packs.size()));
+                out.append(",\"failed\":");
+                out.append(std::to_string(failed));
+                out.append(",\"failure_paths\":[");
+                for (std::size_t i = 0; i < failure_paths.size(); ++i) {
+                    if (i != 0)
+                        out.append(",");
+                    json_escape(out, failure_paths[i]);
+                }
+                out.append("]}");
+                if (s == DoctorStatus::Fail) {
+                    report.note(s, "Every pack in --pack-dir failed to parse. Run "
+                                   "`pack-list <dir>` for the per-file error messages.");
+                } else if (s == DoctorStatus::Warn) {
+                    report.note(s, "Some packs failed to load. Run `pack-list <dir>` for "
+                                   "per-file errors.");
+                } else {
+                    report.note(s);
+                }
+            }
+        }
+    }
+
+    // ROM identification section.
+    if (!rom_path.has_value()) {
+        section_start("rom_identification", DoctorStatus::Info);
+        out.append("}");
+        report.note(DoctorStatus::Info);
+    } else {
+        auto rom = st::Rom::from_file(*rom_path);
+        if (!rom.has_value()) {
+            section_start("rom_identification", DoctorStatus::Fail);
+            out.append(",\"rom_path\":");
+            json_escape(out, rom_path->string());
+            out.append(",\"error\":");
+            json_escape(out, rom.error().to_string());
+            out.append("}");
+            report.note(DoctorStatus::Fail,
+                        "Check the --rom path; the file must exist and be readable.");
+        } else if (loaded_packs.empty()) {
+            section_start("rom_identification", DoctorStatus::Info);
+            out.append(",\"rom_size\":");
+            out.append(std::to_string(rom->size()));
+            out.append(",\"matches\":[]}");
+            report.note(DoctorStatus::Info);
+        } else {
+            std::vector<std::pair<std::string, std::string>> matches;
+            for (auto const &def : loaded_packs) {
+                if (auto m = def.matches(*rom); m.has_value()) {
+                    matches.emplace_back(def.pack().id, *m);
+                }
+            }
+            DoctorStatus const s = matches.empty() ? DoctorStatus::Fail : DoctorStatus::Ok;
+            section_start("rom_identification", s);
+            out.append(",\"rom_size\":");
+            out.append(std::to_string(rom->size()));
+            out.append(",\"matches\":[");
+            for (std::size_t i = 0; i < matches.size(); ++i) {
+                if (i != 0)
+                    out.append(",");
+                out.append("{\"pack_id\":");
+                json_escape(out, matches[i].first);
+                out.append(",\"cid\":");
+                json_escape(out, matches[i].second);
+                out.append("}");
+            }
+            out.append("]}");
+            if (s == DoctorStatus::Fail) {
+                report.note(s, "No matching definition. The ROM may be an unsupported cal "
+                               "ID, an encrypted / partial dump, or need a new pack via "
+                               "tools/defgen.");
+            } else {
+                report.note(s);
+            }
+        }
+    }
+    out.append("]");
+
+    // Overall status + hints.
+    out.append(",\"overall_status\":");
+    json_escape(out, doctor_status_str(report.worst));
+    out.append(",\"hints\":[");
+    for (std::size_t i = 0; i < report.hints.size(); ++i) {
+        if (i != 0)
+            out.append(",");
+        json_escape(out, report.hints[i]);
+    }
+    out.append("]}");
+    out.push_back('\n');
+
+    std::fputs(out.c_str(), stdout);
+    return report.worst == DoctorStatus::Fail ? 1 : 0;
+}
+
 int cmd_doctor(int argc, char *argv[]) {
     std::optional<std::filesystem::path> pack_dir;
     std::optional<std::filesystem::path> rom_path;
+    bool json_mode = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -9140,10 +9411,16 @@ int cmd_doctor(int argc, char *argv[]) {
                 return 2;
             }
             rom_path = std::filesystem::path{argv[++i]};
+        } else if (a == "--json") {
+            json_mode = true;
         } else {
             std::fprintf(stderr, "doctor: unknown argument: %s\n", argv[i]);
             return 2;
         }
+    }
+
+    if (json_mode) {
+        return cmd_doctor_json(pack_dir, rom_path);
     }
 
     DoctorReport report;
