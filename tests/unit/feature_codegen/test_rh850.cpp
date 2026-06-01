@@ -240,6 +240,34 @@ TEST_CASE("rh850::enc_setf_hw2 is reserved-zero", "[rh850][encoder]") {
     REQUIRE(cg::rh850::enc_setf_hw2() == 0x0000);
 }
 
+TEST_CASE("rh850::enc_mul_hw1 places reg/opcode bits correctly",
+          "[rh850][encoder]") {
+    // mul r11, r10, ... → reg2 = 10, reg1 = 11, opcode = 0b111111 (= 0x3F)
+    // hw1 bits: (10<<11) | (0x3F<<5) | 11 = 0x5000 | 0x7E0 | 11 = 0x57EB
+    REQUIRE(cg::rh850::enc_mul_hw1(cg::rh850::Reg::R11, cg::rh850::Reg::R10) == 0x57EB);
+}
+
+TEST_CASE("rh850::enc_mul_hw2 places reg3 + subop bits correctly",
+          "[rh850][encoder]") {
+    // mul ..., ..., r13 → reg3 = 13, MUL subop = 0x0220.
+    // hw2 bits: (13<<11) | 0x0220 = 0x6800 | 0x0220 = 0x6A20
+    REQUIRE(cg::rh850::enc_mul_hw2(cg::rh850::Reg::R13) == 0x6A20);
+}
+
+TEST_CASE("rh850::enc_div_hw1 shares hw1 layout with MUL",
+          "[rh850][encoder]") {
+    // hw1 is the same Format-XI shape as MUL — only the hw2 subop differs.
+    REQUIRE(cg::rh850::enc_div_hw1(cg::rh850::Reg::R11, cg::rh850::Reg::R10) ==
+            cg::rh850::enc_mul_hw1(cg::rh850::Reg::R11, cg::rh850::Reg::R10));
+}
+
+TEST_CASE("rh850::enc_div_hw2 places reg3 + subop bits correctly",
+          "[rh850][encoder]") {
+    // div ..., ..., r13 → reg3 = 13, DIV subop = 0x02C0.
+    // hw2 bits: (13<<11) | 0x02C0 = 0x6800 | 0x02C0 = 0x6AC0
+    REQUIRE(cg::rh850::enc_div_hw2(cg::rh850::Reg::R13) == 0x6AC0);
+}
+
 TEST_CASE("rh850::enc_st_w_hw1 places reg/opcode bits correctly",
           "[rh850][encoder]") {
     // st.w r10, disp[r11] → reg2 = 10 (src), reg1 = 11 (base), opcode = 0b111101 (=0x3D)
@@ -754,15 +782,68 @@ TEST_CASE("Rh850Backend::compile emits subtract_int (operand order: a - b)",
     // is covered by the encoder unit tests above.
 }
 
-TEST_CASE("Rh850Backend::compile rejects multiply_int (not yet in slice)",
-          "[rh850][compile][call_primitive][error]") {
+// (multiply_int / divide_int landed in the RH850 slice 2026-06-01 —
+// coverage is the four compile-pass tests below.)
+
+TEST_CASE("Rh850Backend::compile emits multiply_int with two Constant operands",
+          "[rh850][compile][call_primitive][mul_div]") {
     auto const def = load_pack(kPackTwoInputsToml);
-    auto const m = make_binop_module("multiply_int", 3, "", 4, "");
+    auto const m = make_binop_module("multiply_int", 7, "", 6, "");
 
     cg::Rh850Backend backend;
     auto r = backend.compile(m, def);
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+    INFO("compile error: " << (r.has_value() ? std::string{"(none)"} : r.error().to_string()));
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+
+    // Same envelope as add_int — MUL is 4 bytes (no pad) where ADD is
+    // 2 bytes + pad; net identical size across the four operand-kind
+    // combinations.
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeCC);
+    REQUIRE(r->hooks[0].code.size() % 4 == 0);
+}
+
+TEST_CASE("Rh850Backend::compile emits multiply_int with mixed Constant + HookInput",
+          "[rh850][compile][call_primitive][mul_div]") {
+    auto const def = load_pack(kPackTwoInputsToml);
+
+    auto const m_ch = make_binop_module("multiply_int", 3, "", std::nullopt, "rpm");
+    cg::Rh850Backend backend;
+    auto r_ch = backend.compile(m_ch, def);
+    REQUIRE(r_ch.has_value());
+    REQUIRE(r_ch->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeCH);
+
+    auto const m_hc = make_binop_module("multiply_int", std::nullopt, "rpm", 4, "");
+    auto r_hc = backend.compile(m_hc, def);
+    REQUIRE(r_hc.has_value());
+    REQUIRE(r_hc->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeHC);
+}
+
+TEST_CASE("Rh850Backend::compile emits multiply_int with two HookInput operands",
+          "[rh850][compile][call_primitive][mul_div]") {
+    auto const def = load_pack(kPackTwoInputsToml);
+    auto const m =
+        make_binop_module("multiply_int", std::nullopt, "rpm", std::nullopt, "map");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeHH);
+    REQUIRE(r->hooks[0].code.size() % 4 == 0);
+}
+
+TEST_CASE("Rh850Backend::compile emits divide_int (operand order: a / b)",
+          "[rh850][compile][call_primitive][mul_div]") {
+    auto const def = load_pack(kPackTwoInputsToml);
+    auto const m = make_binop_module("divide_int", 100, "", 4, "");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeCC);
+
+    // Operand mapping matches subtract_int: load a → r10, b → r11.
+    // DIV r11, r10, r13 then computes r10 = r10 / r11 = a / b.
 }
 
 // ---- Int compares (Int inputs, Bool output) ----------------------------

@@ -230,14 +230,17 @@ inline constexpr std::size_t kLoadStoreSequenceSize = 28;
 inline constexpr std::size_t kLoadStoreJmpOffset = 24;
 
 // CallPrimitive binary leaf-operand slice — used by add_int,
-// subtract_int, and_bool, or_bool (anything that's a Format-I 16-bit
-// reg-reg op over two materialized operands). Patch size depends on
-// operand kinds: each Constant operand needs MOVHI+MOVEA (8 bytes);
-// each HookInputPointer operand needs MOVHI+MOVEA + LD.W (12 bytes).
-// The rest is fixed: 2-byte op + 2-byte alignment NOP + 8-byte MOVHI+
-// MOVEA for destination addr + 4-byte ST.W + 2-byte JMP + 2-byte tail
-// NOP = 20 bytes overhead. `not_bool` is unary but XORs against a
-// loaded constant 1, so it lands on the same size envelope.
+// subtract_int, multiply_int, divide_int, and_bool, or_bool. The
+// 4-bit primitives split by op width: ADD/SUB/AND/OR are 16-bit
+// Format I + a 2-byte align-pad NOP; MUL/DIV are 32-bit Format XI
+// (no pad needed). Total layout is identical: op slot fills the
+// same 4-byte cell either way. Operand kinds drive the size:
+// each Constant operand needs MOVHI+MOVEA (8 bytes); each
+// HookInputPointer operand needs MOVHI+MOVEA + LD.W (12 bytes).
+// The rest is fixed: 4-byte op cell + 8-byte MOVHI+MOVEA for the
+// destination addr + 4-byte ST.W + 2-byte JMP + 2-byte tail NOP =
+// 20 bytes overhead. `not_bool` is unary but XORs against a loaded
+// constant 1, so it lands on the same size envelope.
 //
 //   kBinaryIntArithSizeCC : both operands Constant
 //   kBinaryIntArithSizeCH : op1 Constant, op2 HookInputPointer

@@ -1634,25 +1634,29 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
     emit_le16(code, rh850::enc_ld_w_hw2(0));
 }
 
-// Emit an RH850 binary-int-arithmetic CallPrimitive fragment for
-// `add_int` or `subtract_int`. Shape:
+// Emit an RH850 binary-int-arithmetic CallPrimitive fragment.
+// Shape:
 //
 //   load op1 → r10     (MOVHI+MOVEA, or MOVHI+MOVEA+LD.W via r12 scratch)
 //   load op2 → r11     (same, scratch r12)
-//   ADD/SUB r11, r10   (16-bit, result lands in r10)
-//   NOP                (2-byte pad to restore 4-alignment after the
-//                       lone 16-bit ADD/SUB above)
+//   {ADD,SUB,AND,OR} r11, r10        (16-bit Format I) + NOP pad   — OR
+//   {MUL,DIV} r11, r10, r13          (32-bit Format XI, no pad)
 //   MOVHI dst_hi, r0, r12; MOVEA dst_lo, r12, r12   (r12 = dst_addr)
 //   ST.W r10, 0[r12]   (mem[dst_addr] = result)
 //   JMP [lp] + tail NOP
 //
 // Total size: 36/40/40/44 bytes depending on operand-kind combinations,
-// always 4-aligned. Caller does not need to pad.
+// always 4-aligned. Caller does not need to pad. The 2-byte difference
+// between Format-I (ADD/etc.) and Format-XI (MUL/DIV) is absorbed by a
+// matching change in alignment-pad emission, so all six primitives
+// share the same kBinaryIntArithSize* envelope.
 //
-// Operand order for SUB: `subtract_int(a, b)` is "a - b". RH850 SUB
-// reg1, reg2 computes reg2 = reg2 - reg1. So we load `a` into r10
-// (reg2 in the SUB encoding) and `b` into r11 (reg1), and SUB r11, r10
-// leaves r10 = a - b.
+// Operand order convention: `op(a, b)` always loads a → r10, b → r11.
+//  - SUB r11, r10 computes r10 = r10 - r11 = a - b.
+//  - DIV r11, r10, r13 computes r10 = r10 / r11 = a / b (quotient);
+//    r13 = a % b (remainder, discarded).
+//  - MUL r11, r10, r13 computes r10 = (a * b) low 32 bits; r13 = high
+//    (discarded — Int wraps two's-complement on overflow, same as add).
 //
 // Returns ParseError if `symbol` is not one of the four explicitly-
 // dispatched binary primitives — this catches a future
@@ -1671,6 +1675,13 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
     emit_rh850_load_primitive_operand(code, op1, kAReg, kScratch);
     emit_rh850_load_primitive_operand(code, op2, kBReg, kScratch);
 
+    // ADD/SUB/AND/OR are 16-bit Format I (2 bytes) — they need a
+    // following NOP pad to restore 4-alignment for the dst-addr
+    // MOVHI/MOVEA pair. MUL/DIV are 32-bit Format XI (4 bytes) — no
+    // pad needed. `needs_align_nop` tracks which class the symbol
+    // landed in so the size envelope stays identical across all six
+    // arithmetic primitives.
+    bool needs_align_nop = true;
     if (symbol == "add_int") {
         emit_le16(code, rh850::enc_add_reg(kBReg, kAReg));
     } else if (symbol == "subtract_int") {
@@ -1680,6 +1691,20 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
         emit_le16(code, rh850::enc_and_reg(kBReg, kAReg));
     } else if (symbol == "or_bool") {
         emit_le16(code, rh850::enc_or_reg(kBReg, kAReg));
+    } else if (symbol == "multiply_int") {
+        // MUL r11, r10, r13 — r10 = (r11 * r10) low 32 bits;
+        // r13 holds high 32 bits (discarded — Int wraps two's-complement
+        // on overflow, same convention as add_int).
+        emit_le16(code, rh850::enc_mul_hw1(kBReg, kAReg));
+        emit_le16(code, rh850::enc_mul_hw2(rh850::Reg::R13));
+        needs_align_nop = false;
+    } else if (symbol == "divide_int") {
+        // DIV r11, r10, r13 — r10 = r10 / r11 = a / b (quotient);
+        // r13 holds remainder (discarded). Signed-divide semantics
+        // match int32_t a/b for the language-level operator.
+        emit_le16(code, rh850::enc_div_hw1(kBReg, kAReg));
+        emit_le16(code, rh850::enc_div_hw2(rh850::Reg::R13));
+        needs_align_nop = false;
     } else {
         std::string msg{"RH850 backend: emit_rh850_binary_int_arith called with "
                         "unsupported symbol '"};
@@ -1688,11 +1713,13 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
         return failure(ErrorCode::ParseError, std::move(msg));
     }
 
-    // Pad to keep the byte stream 4-aligned. Every other instruction
-    // we emit is 4 bytes; the lone 16-bit ADD/SUB above puts us off
-    // by 2. One NOP restores alignment and matches the LoadConstant
-    // / LoadHookInput shapes that already terminate aligned.
-    emit_le16(code, rh850::enc_nop());
+    // Pad to keep the byte stream 4-aligned. ADD/SUB/AND/OR are 16-bit
+    // (2 bytes) and need the pad; MUL/DIV are 32-bit (4 bytes) and
+    // skip it. Either way the total stays identical to the documented
+    // kBinaryIntArithSize* envelope.
+    if (needs_align_nop) {
+        emit_le16(code, rh850::enc_nop());
+    }
 
     // Materialize dst_addr into r12, then ST.W r10, 0[r12].
     auto const dst_split = rh850::split_imm32(dst_addr);
@@ -1962,6 +1989,7 @@ rh850_operand_from_producer(Definition const &def, ir::Module const &m, ir::Valu
     // Per-symbol gate. Extend this set as new slices land.
     bool const supported =
         (prim.symbol == "add_int" || prim.symbol == "subtract_int" ||
+         prim.symbol == "multiply_int" || prim.symbol == "divide_int" ||
          prim.symbol == "and_bool" || prim.symbol == "or_bool" ||
          prim.symbol == "not_bool" || prim.symbol == "select_int" ||
          prim.symbol == "select_bool" || prim.symbol == "select_float" ||
@@ -1971,7 +1999,8 @@ rh850_operand_from_producer(Definition const &def, ir::Module const &m, ir::Valu
         std::string msg{"RH850 backend: CallPrimitive '"};
         msg.append(prim.symbol);
         msg.append("' is not yet covered by the RH850 slice (supported: "
-                   "add_int, subtract_int, and_bool, or_bool, not_bool, "
+                   "add_int, subtract_int, multiply_int, divide_int, "
+                   "and_bool, or_bool, not_bool, "
                    "select_int, select_bool, select_float, "
                    "compare_lt_int, compare_gt_int, compare_eq_int). "
                    "See docs/16 §Current state.");

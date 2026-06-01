@@ -280,6 +280,62 @@ enum class Cond : std::uint8_t {
 }
 [[nodiscard]] constexpr std::uint16_t enc_setf_hw2() noexcept { return 0x0000U; }
 
+// --- Format XI (32-bit, 3-register multiply/divide) ------------------
+//
+// V850E2/RH850 added native 32×32→64 multiply + 32÷32 divide via
+// Format XI. The primary opcode (0b111111) overlaps SETF's primary
+// opcode; the disambiguator is hw2's secondary opcode pattern in
+// bits[10:0]. SETF leaves hw2 reserved-zero; Format XI puts a
+// non-zero subop there.
+//
+// Format XI layout:
+//   hw1: [reg2(5)][0b111111(6)][reg1(5)]
+//   hw2: [reg3(5)][subop(11)]
+//
+// MUL r1, r2, r3 (signed):
+//   reg2 ← (reg1 × reg2) low 32 bits  (the value we want)
+//   reg3 ← (reg1 × reg2) high 32 bits (discarded by our codegen — Int
+//          is 32-bit, overflow wraps two's-complement, same as add)
+//   subop = 0b01000100000 = 0x220
+//
+// DIV r1, r2, r3 (signed):
+//   reg2 ← reg2 / reg1 (quotient)
+//   reg3 ← reg2 % reg1 (remainder, discarded)
+//   subop = 0b01011000000 = 0x2C0
+//
+// Operand convention matches the existing binary-arith fragment: load
+// `a` → reg2 (R10), `b` → reg1 (R11), and the result lands in R10.
+// For divide that means `divide_int(a, b)` produces `a / b` — DIV's
+// "reg2 / reg1" semantics align with that load order.
+//
+// PROVISIONAL — same VERIFICATION STATUS as the file header. The
+// secondary-opcode bit patterns are sourced from public Renesas
+// references (R01US0165) but have not been validated against a real
+// VB WRX ECU. Bench-rig round-trip is the gate before any RH850
+// PatchObject reaches a real ECU.
+
+[[nodiscard]] constexpr std::uint16_t enc_mul_hw1(Reg reg1, Reg reg2) noexcept {
+    constexpr std::uint16_t kOpcode = 0b111111U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg2) << 11U) |
+        (kOpcode << 5U) |
+        static_cast<std::uint16_t>(reg1));
+}
+[[nodiscard]] constexpr std::uint16_t enc_mul_hw2(Reg reg3) noexcept {
+    constexpr std::uint16_t kSubOp = 0x0220U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg3) << 11U) | kSubOp);
+}
+
+[[nodiscard]] constexpr std::uint16_t enc_div_hw1(Reg reg1, Reg reg2) noexcept {
+    return enc_mul_hw1(reg1, reg2); // identical primary opcode
+}
+[[nodiscard]] constexpr std::uint16_t enc_div_hw2(Reg reg3) noexcept {
+    constexpr std::uint16_t kSubOp = 0x02C0U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg3) << 11U) | kSubOp);
+}
+
 // --- Format VI (32-bit imm + reg + reg) ------------------------------
 
 // Each Format VI emitter returns the FIRST 16-bit halfword. The caller
