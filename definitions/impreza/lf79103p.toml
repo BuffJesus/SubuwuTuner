@@ -18,11 +18,14 @@ license        = "Apache-2.0"
 
 
 [[identification]]
-name        = "LF79103P"
-cid_address = 0x00000000
-cid_length  = 8
-cid_match   = "LF79103P"
-ecu_part    = ""
+name      = "LF79103P"
+# FA-DIT WRX firmware embeds the CID in a descriptor at a variable
+# per-firmware offset (~0x31C51 in bootloader-stripped dumps, ~0x37C51
+# in full 2MB ROMs — 0x6000 difference is the bootloader). cid_scan
+# lets the loader find it wherever it lives. See docs/11 §"Scan mode".
+cid_scan  = true
+cid_match = "LF79103P"
+ecu_part  = ""
 
 
 [[scaling]]

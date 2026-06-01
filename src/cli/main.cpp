@@ -2698,7 +2698,65 @@ int cmd_project_info(int argc, char *argv[]) {
     std::printf("Definition: pack id %s (%zu table%s)\n", p->definition().pack().id.c_str(),
                 p->definition().tables().size(), p->definition().tables().size() == 1 ? "" : "s");
     auto const cid = p->definition().matches(p->source_rom());
-    std::printf("CID match:  %s\n", cid.has_value() ? cid->c_str() : "(no match)");
+    if (cid.has_value()) {
+        std::printf("CID match:  %s\n", cid->c_str());
+    } else {
+        // "(no match)" is too quiet — the user needs to know whether
+        // the pack is wrong, the ROM is wrong, or both. Surface what
+        // the pack *expected* + scan the ROM for any CID-shaped string
+        // so we can suggest the right pack to load.
+        std::string expected_msg{"(no match"};
+        if (!p->definition().identifications().empty()) {
+            expected_msg += " — pack expects '";
+            expected_msg += p->definition().identifications()[0].cid_match;
+            expected_msg += "'";
+        }
+        // Scan ROM bytes for any 8-char CID-shape (LF/LV/LH/AF/AE/AS
+        // letter pairs followed by 6 alnum chars). One hit is the
+        // probable real CID; multiple hits → just report the count
+        // since picking one is guesswork.
+        auto const bytes = p->source_rom().data();
+        auto const is_cid_start = [](std::uint8_t a, std::uint8_t b) {
+            return (a == 'L' && (b == 'F' || b == 'V' || b == 'H')) ||
+                   (a == 'A' && (b == 'F' || b == 'E' || b == 'S')) ||
+                   (a == 'E' && (b == 'Z' || b == 'P')) ||
+                   (a == 'Z' && b == '1');
+        };
+        auto const is_cid_body = [](std::uint8_t c) {
+            return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z');
+        };
+        std::vector<std::string> found;
+        for (std::size_t i = 0; i + 8 <= bytes.size(); ++i) {
+            if (!is_cid_start(bytes[i], bytes[i + 1]))
+                continue;
+            bool ok = true;
+            for (std::size_t j = 2; j < 8; ++j) {
+                if (!is_cid_body(bytes[i + j])) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok) {
+                std::string s(reinterpret_cast<char const *>(&bytes[i]), 8);
+                if (std::find(found.begin(), found.end(), s) == found.end()) {
+                    found.push_back(s);
+                    if (found.size() >= 3)
+                        break;
+                }
+            }
+        }
+        if (!found.empty()) {
+            expected_msg += "; ROM appears to contain ";
+            for (std::size_t i = 0; i < found.size(); ++i) {
+                if (i > 0)
+                    expected_msg += " / ";
+                expected_msg += "'" + found[i] + "'";
+            }
+            expected_msg += " — wrong pack?";
+        }
+        expected_msg += ")";
+        std::printf("CID match:  %s\n", expected_msg.c_str());
+    }
     std::printf("Profile:    %s\n",
                 std::string{st::policy::profile_name(p->policy_profile())}.c_str());
 
