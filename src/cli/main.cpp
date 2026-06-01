@@ -1012,9 +1012,15 @@ int cmd_dump_axis(int argc, char *argv[]) {
     }
 
     if (!def_path.has_value() || !axis_id.has_value() || !rom_path.has_value()) {
+        std::fputs("dump-axis: missing required arguments:", stderr);
+        if (!def_path.has_value())
+            std::fputs(" --def", stderr);
+        if (!axis_id.has_value())
+            std::fputs(" --axis", stderr);
+        if (!rom_path.has_value())
+            std::fputs(" <FILE>", stderr);
         std::fputs(
-            "dump-axis: missing required arguments\n"
-            "Usage: subuwutuner-cli dump-axis --def <pack.toml> --axis <id> [--csv] <FILE>\n",
+            "\nUsage: subuwutuner-cli dump-axis --def <pack.toml> --axis <id> [--csv] <FILE>\n",
             stderr);
         return 2;
     }
@@ -1128,8 +1134,14 @@ int cmd_dump_table(int argc, char *argv[]) {
     }
 
     if (!def_path.has_value() || !table_id.has_value() || !rom_path.has_value()) {
-        std::fputs("dump-table: missing required arguments\n"
-                   "Usage: subuwutuner-cli dump-table --def <pack.toml> --table <id> <FILE>\n",
+        std::fputs("dump-table: missing required arguments:", stderr);
+        if (!def_path.has_value())
+            std::fputs(" --def", stderr);
+        if (!table_id.has_value())
+            std::fputs(" --table", stderr);
+        if (!rom_path.has_value())
+            std::fputs(" <FILE>", stderr);
+        std::fputs("\nUsage: subuwutuner-cli dump-table --def <pack.toml> --table <id> <FILE>\n",
                    stderr);
         return 2;
     }
@@ -1981,8 +1993,12 @@ int cmd_project_dtc_toggle(int argc, char *argv[], bool enable) {
     }
 
     if (!codes_arg.has_value() || !proj_path.has_value()) {
-        std::fprintf(stderr, "%s: missing required arguments\n", cmd_name);
-        std::fprintf(stderr, "Usage: subuwutuner-cli %s --code P0401[,P0420,...] <dir>\n",
+        std::fprintf(stderr, "%s: missing required arguments:", cmd_name);
+        if (!codes_arg.has_value())
+            std::fputs(" --code", stderr);
+        if (!proj_path.has_value())
+            std::fputs(" <dir>", stderr);
+        std::fprintf(stderr, "\nUsage: subuwutuner-cli %s --code P0401[,P0420,...] <dir>\n",
                      cmd_name);
         return 2;
     }
@@ -2149,8 +2165,14 @@ int cmd_project_edit(int argc, char *argv[]) {
     }
 
     if (!table_id.has_value() || !op.has_value() || !proj_path.has_value()) {
-        std::fputs("project-edit: missing required arguments\n"
-                   "Usage: subuwutuner-cli project-edit --table <id> [--rows A:B] "
+        std::fputs("project-edit: missing required arguments:", stderr);
+        if (!table_id.has_value())
+            std::fputs(" --table", stderr);
+        if (!op.has_value())
+            std::fputs(" OP", stderr);
+        if (!proj_path.has_value())
+            std::fputs(" <dir>", stderr);
+        std::fputs("\nUsage: subuwutuner-cli project-edit --table <id> [--rows A:B] "
                    "[--cols A:B] OP [VALUE] <dir>\n",
                    stderr);
         return 2;
