@@ -119,6 +119,8 @@ add_executable(subuwutuner-gui
     src/panels/toasts.cpp
     src/panels/welcome.cpp
     src/panels/workspace.cpp
+    src/widgets/adapter_picker.cpp
+    src/widgets/widgets.cpp
     src/modals/about.cpp
     src/modals/autotune_knock.cpp
     src/modals/autotune_maf.cpp
