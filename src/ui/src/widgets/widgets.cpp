@@ -213,8 +213,14 @@ ImVec4 chip_bg_warn() {
                             : ImVec4(0.42f, 0.30f, 0.08f, 0.60f);
 }
 ImVec4 chip_fg_caution() {
+    // Pale-yellow on dark, dark-olive on light — same caution band as
+    // chip_bg_caution. Prior to the inline → external-linkage flip, the
+    // dark branch was a recursive call to chip_fg_caution() itself; -O3
+    // elided the UB branch in release inline builds but real recursion
+    // surfaced as a stack overflow once chip_fg_caution gained external
+    // linkage (cross-TU calls from sidebar S/E badges).
     return theme_is_light() ? ImVec4(0.46f, 0.40f, 0.05f, 1.0f)
-                            : chip_fg_caution();
+                            : ImVec4(1.00f, 0.92f, 0.60f, 1.0f);
 }
 ImVec4 chip_bg_caution() {
     return theme_is_light() ? ImVec4(1.00f, 0.96f, 0.70f, 0.75f)
