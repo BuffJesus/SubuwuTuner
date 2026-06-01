@@ -143,7 +143,8 @@ Result<std::uint32_t> Rom::read_u32_le(std::size_t offset) const noexcept {
 
 Result<std::string> Rom::read_ascii(std::size_t offset, std::size_t max_length) const {
     if (offset > bytes_.size()) {
-        return failure(ErrorCode::OutOfRange);
+        return failure(ErrorCode::OutOfRange,
+                       format_oob("read_ascii", offset, max_length, bytes_.size()));
     }
     auto const available = bytes_.size() - offset;
     auto const limit = max_length < available ? max_length : available;
