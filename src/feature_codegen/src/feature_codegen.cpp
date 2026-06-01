@@ -1896,6 +1896,201 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
     return ok();
 }
 
+// Emit an RH850 unary float CallPrimitive fragment for `sqrt_float`.
+// Shape:
+//   load op → r10                          (8 or 12 bytes)
+//   SQRTF.S r10, r10                       (4 bytes Format F:II)
+//   MOVHI dst_hi, r0, r12; MOVEA dst_lo    (r12 = dst_addr)
+//   ST.W r10, 0[r12]
+//   JMP [lp] + tail NOP
+//
+// Format F:II is a 32-bit 2-register form — the reg1 slot of hw1 is
+// forced to zero (R0) by the instruction's mask. Result lands in r10
+// directly so the ST.W tail is byte-identical to the other slices.
+//
+// Domain note: SQRTF.S of a negative operand raises FPU invalid-op,
+// surfaces as NaN result without the FPU exception trap enabled. Pack
+// authors who care about negative inputs should gate with a compare →
+// select; this matches how `divide_float` handles divide-by-zero.
+[[nodiscard]] Status emit_rh850_sqrt_float(std::vector<std::uint8_t> &code,
+                                           PrimitiveOperand const &op,
+                                           std::uint32_t dst_addr) {
+    constexpr rh850::Reg kAReg = rh850::Reg::R10;    // op / result
+    constexpr rh850::Reg kScratch = rh850::Reg::R12; // address scratch
+
+    emit_rh850_load_primitive_operand(code, op, kAReg, kScratch);
+
+    // SQRTF.S r10, r10 — Format F:II.
+    emit_le16(code, rh850::enc_sqrtf_s_hw1(kAReg));
+    emit_le16(code, rh850::enc_sqrtf_s_hw2(kAReg));
+
+    auto const dst_split = rh850::split_imm32(dst_addr);
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, kScratch));
+    emit_le16(code, dst_split.hi);
+    emit_le16(code, rh850::enc_movea_hw1(kScratch, kScratch));
+    emit_le16(code, dst_split.lo);
+    emit_le16(code, rh850::enc_st_w_hw1(kAReg, kScratch));
+    emit_le16(code, rh850::enc_st_w_hw2(0));
+
+    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+    emit_le16(code, rh850::enc_nop());
+    return ok();
+}
+
+// Emit an RH850 float-compare CallPrimitive fragment for
+// `compare_lt_float` / `compare_gt_float` / `compare_eq_float`.
+//
+// RH850 has no float-side SETF; result extraction is a 3-instruction
+// dance:
+//   CMPF.S cccc, reg1, reg2, 0   — FPU.FCB[0] = (reg2 cccc reg1)
+//   TRFSR 0                      — PSW.Z       = FPU.FCB[0]
+//   SETF Z, r10                  — r10         = (PSW.Z == 1) ? 1 : 0
+//
+// Operand semantics with cccc = OLT (ordered less-than):
+//   compare_lt_float(a, b) — load a → r10, b → r11; CMPF.S OLT, r11, r10
+//                            → FCB[0] = (r10 < r11) = (a < b) ✓
+// `compare_gt_float(a, b)` uses the same OLT cccc but loads with the
+// operand registers swapped — load a → r11, b → r10; CMPF.S OLT, r11, r10
+// → FCB[0] = (r10 < r11) = (b < a) = (a > b) ✓
+// `compare_eq_float(a, b)` uses cccc = EQ; commutative, so the load
+// order matches compare_lt (op1 → r10, op2 → r11).
+//
+// "Ordered" cccc variants make NaN inputs yield false, matching the
+// natural reading of compare_lt/gt_float. compare_eq with NaN returns
+// false (NaN != NaN per IEEE 754).
+//
+// VERIFICATION CAVEAT: same as TRFSR — we assume PSW.Z ← FCB[fff]
+// direct copy. If the bench rig shows inversion, swap Cond::Z →
+// Cond::NZ in the SETF below for all three branches.
+[[nodiscard]] Status emit_rh850_float_compare(std::vector<std::uint8_t> &code,
+                                              std::string_view symbol,
+                                              PrimitiveOperand const &op1,
+                                              PrimitiveOperand const &op2,
+                                              std::uint32_t dst_addr) {
+    constexpr rh850::Reg kAReg = rh850::Reg::R10;    // → reg2 in F:III
+    constexpr rh850::Reg kBReg = rh850::Reg::R11;    // → reg1 in F:III
+    constexpr rh850::Reg kScratch = rh850::Reg::R12; // address scratch
+
+    rh850::FloatCond cccc{};
+    bool swap = false;
+    if (symbol == "compare_lt_float") {
+        cccc = rh850::FloatCond::OLT;
+    } else if (symbol == "compare_gt_float") {
+        cccc = rh850::FloatCond::OLT;
+        swap = true; // load a → reg1, b → reg2
+    } else if (symbol == "compare_eq_float") {
+        cccc = rh850::FloatCond::EQ;
+    } else {
+        std::string msg{"RH850 backend: emit_rh850_float_compare called with "
+                        "unsupported symbol '"};
+        msg.append(symbol);
+        msg.append("' — validator/dispatch out of sync");
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+
+    if (swap) {
+        emit_rh850_load_primitive_operand(code, op1, kBReg, kScratch);
+        emit_rh850_load_primitive_operand(code, op2, kAReg, kScratch);
+    } else {
+        emit_rh850_load_primitive_operand(code, op1, kAReg, kScratch);
+        emit_rh850_load_primitive_operand(code, op2, kBReg, kScratch);
+    }
+
+    // CMPF.S cccc, r11 (reg1), r10 (reg2), fff=0 — sets FCB[0].
+    emit_le16(code, rh850::enc_cmpf_s_hw1(kBReg, kAReg));
+    emit_le16(code, rh850::enc_cmpf_s_hw2(cccc, 0));
+
+    // TRFSR 0 — copies FCB[0] to PSW.Z.
+    emit_le16(code, rh850::enc_trfsr_hw1());
+    emit_le16(code, rh850::enc_trfsr_hw2(0));
+
+    // SETF Z, r10 — r10 = (PSW.Z == 1) ? 1 : 0.
+    emit_le16(code, rh850::enc_setf_hw1(rh850::Cond::Z, kAReg));
+    emit_le16(code, rh850::enc_setf_hw2());
+
+    auto const dst_split = rh850::split_imm32(dst_addr);
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, kScratch));
+    emit_le16(code, dst_split.hi);
+    emit_le16(code, rh850::enc_movea_hw1(kScratch, kScratch));
+    emit_le16(code, dst_split.lo);
+    emit_le16(code, rh850::enc_st_w_hw1(kAReg, kScratch));
+    emit_le16(code, rh850::enc_st_w_hw2(0));
+
+    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+    emit_le16(code, rh850::enc_nop());
+    return ok();
+}
+
+// Emit an RH850 flex-fuel-scale CallPrimitive fragment. Single Float
+// operand (ethanol_pct), produces a Float scale factor via the same
+// baked linear curve as the SH-2A path:
+//
+//   scale = 1.0 + ethanol_pct × (0.28 / 85.0)
+//
+// Anchors: E0 → 1.00, E85 → 1.28, E100 → ≈1.329. Same caveats as
+// SH-2A — outside [0, 85] the linear extrapolation continues; pack
+// authors layering a safety clamp should gate with compare → select.
+//
+// Shape (8 instructions, 4-aligned):
+//   load op → r10                                    (8 or 12 bytes)
+//   MOVHI+MOVEA slope_const → r11                    (8 bytes)
+//   MULF.S r11, r10, r10   ; r10 = r10 * slope       (4 bytes)
+//   MOVHI+MOVEA intercept_const → r11                (8 bytes)
+//   ADDF.S r11, r10, r10   ; r10 = r10 + 1.0         (4 bytes)
+//   MOVHI+MOVEA dst → r12                            (8 bytes)
+//   ST.W r10, 0[r12]                                 (4 bytes)
+//   JMP [lp] + tail NOP                              (4 bytes)
+[[nodiscard]] Status emit_rh850_flex_fuel_scale(std::vector<std::uint8_t> &code,
+                                                PrimitiveOperand const &op,
+                                                std::uint32_t dst_addr) {
+    constexpr rh850::Reg kAReg = rh850::Reg::R10;    // op / running result
+    constexpr rh850::Reg kBReg = rh850::Reg::R11;    // constant scratch
+    constexpr rh850::Reg kScratch = rh850::Reg::R12; // address scratch
+
+    // Same baked constants as the SH-2A path. Bit-cast preserves the
+    // exact IEEE 754 pattern across host compilers.
+    constexpr float kSlope = 0.28F / 85.0F;
+    constexpr float kIntercept = 1.0F;
+    std::uint32_t const slope_bits = std::bit_cast<std::uint32_t>(kSlope);
+    std::uint32_t const intercept_bits = std::bit_cast<std::uint32_t>(kIntercept);
+
+    emit_rh850_load_primitive_operand(code, op, kAReg, kScratch);
+
+    // r11 = slope (MOVHI+MOVEA — same shape as a Constant operand).
+    auto const slope_split = rh850::split_imm32(slope_bits);
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, kBReg));
+    emit_le16(code, slope_split.hi);
+    emit_le16(code, rh850::enc_movea_hw1(kBReg, kBReg));
+    emit_le16(code, slope_split.lo);
+
+    // MULF.S r11, r10, r10 — r10 = r10 * slope.
+    emit_le16(code, rh850::enc_mulf_s_hw1(kBReg, kAReg));
+    emit_le16(code, rh850::enc_mulf_s_hw2(kAReg));
+
+    // r11 = intercept.
+    auto const intercept_split = rh850::split_imm32(intercept_bits);
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, kBReg));
+    emit_le16(code, intercept_split.hi);
+    emit_le16(code, rh850::enc_movea_hw1(kBReg, kBReg));
+    emit_le16(code, intercept_split.lo);
+
+    // ADDF.S r11, r10, r10 — r10 = r10 + intercept.
+    emit_le16(code, rh850::enc_addf_s_hw1(kBReg, kAReg));
+    emit_le16(code, rh850::enc_addf_s_hw2(kAReg));
+
+    auto const dst_split = rh850::split_imm32(dst_addr);
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, kScratch));
+    emit_le16(code, dst_split.hi);
+    emit_le16(code, rh850::enc_movea_hw1(kScratch, kScratch));
+    emit_le16(code, dst_split.lo);
+    emit_le16(code, rh850::enc_st_w_hw1(kAReg, kScratch));
+    emit_le16(code, rh850::enc_st_w_hw2(0));
+
+    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+    emit_le16(code, rh850::enc_nop());
+    return ok();
+}
+
 // Emit an RH850 3-operand branchless select fragment for
 // `select_int`, `select_bool`, `select_float`.
 //
@@ -2080,7 +2275,10 @@ rh850_operand_from_producer(Definition const &def, ir::Module const &m, ir::Valu
          prim.symbol == "compare_lt_int" || prim.symbol == "compare_gt_int" ||
          prim.symbol == "compare_eq_int" ||
          prim.symbol == "add_float" || prim.symbol == "subtract_float" ||
-         prim.symbol == "multiply_float" || prim.symbol == "divide_float");
+         prim.symbol == "multiply_float" || prim.symbol == "divide_float" ||
+         prim.symbol == "sqrt_float" || prim.symbol == "compare_lt_float" ||
+         prim.symbol == "compare_gt_float" || prim.symbol == "compare_eq_float" ||
+         prim.symbol == "flex_fuel_scale");
     if (!supported) {
         std::string msg{"RH850 backend: CallPrimitive '"};
         msg.append(prim.symbol);
@@ -2089,7 +2287,9 @@ rh850_operand_from_producer(Definition const &def, ir::Module const &m, ir::Valu
                    "and_bool, or_bool, not_bool, "
                    "select_int, select_bool, select_float, "
                    "compare_lt_int, compare_gt_int, compare_eq_int, "
-                   "add_float, subtract_float, multiply_float, divide_float). "
+                   "add_float, subtract_float, multiply_float, divide_float, "
+                   "sqrt_float, compare_lt_float, compare_gt_float, "
+                   "compare_eq_float, flex_fuel_scale). "
                    "See docs/16 §Current state.");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
@@ -2327,11 +2527,21 @@ Result<PatchObject> Rh850Backend::compile(ir::Module const &m, Definition const 
                 operands.push_back(*op);
             }
             // Dispatch by arity / shape:
-            //   arity 1 → not_bool (XOR-with-1)
-            //   arity 2 → binary leaf-operand (add/sub/and/or) OR int-compare
+            //   arity 1 → not_bool (XOR-with-1), sqrt_float, flex_fuel_scale
+            //   arity 2 → binary leaf-operand (add/sub/and/or) OR int/float compare
             //   arity 3 → select (branchless mask-merge)
             if (src->symbol == "not_bool") {
                 emit_rh850_not_bool(work.code, operands[0], dst_addr);
+            } else if (src->symbol == "sqrt_float") {
+                if (auto s = emit_rh850_sqrt_float(work.code, operands[0], dst_addr);
+                    !s.has_value()) {
+                    return failure(s.error());
+                }
+            } else if (src->symbol == "flex_fuel_scale") {
+                if (auto s = emit_rh850_flex_fuel_scale(work.code, operands[0], dst_addr);
+                    !s.has_value()) {
+                    return failure(s.error());
+                }
             } else if (src->symbol == "select_int" || src->symbol == "select_bool" ||
                        src->symbol == "select_float") {
                 emit_rh850_select(work.code, operands[0], operands[1], operands[2], dst_addr);
@@ -2339,6 +2549,13 @@ Result<PatchObject> Rh850Backend::compile(ir::Module const &m, Definition const 
                        src->symbol == "compare_eq_int") {
                 if (auto s = emit_rh850_int_compare(work.code, src->symbol, operands[0],
                                                     operands[1], dst_addr);
+                    !s.has_value()) {
+                    return failure(s.error());
+                }
+            } else if (src->symbol == "compare_lt_float" || src->symbol == "compare_gt_float" ||
+                       src->symbol == "compare_eq_float") {
+                if (auto s = emit_rh850_float_compare(work.code, src->symbol, operands[0],
+                                                      operands[1], dst_addr);
                     !s.has_value()) {
                     return failure(s.error());
                 }

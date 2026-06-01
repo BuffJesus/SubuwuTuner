@@ -303,6 +303,50 @@ TEST_CASE("rh850::enc_divf_s_hw2 places reg3 + subop bits correctly",
     REQUIRE(cg::rh850::enc_divf_s_hw2(cg::rh850::Reg::R10) == 0x546E);
 }
 
+TEST_CASE("rh850::enc_sqrtf_s_hw1 fixes reg1 to zero (Format F:II)",
+          "[rh850][encoder][fpu]") {
+    // sqrtf.s r10, ... → reg2 = 10, primary opcode 0b111111, reg1 forced 0.
+    // hw1 bits: (10<<11) | (0x3F<<5) | 0 = 0x5000 | 0x07E0 = 0x57E0
+    REQUIRE(cg::rh850::enc_sqrtf_s_hw1(cg::rh850::Reg::R10) == 0x57E0);
+}
+
+TEST_CASE("rh850::enc_sqrtf_s_hw2 places reg3 + subop bits correctly",
+          "[rh850][encoder][fpu]") {
+    // sqrtf.s ..., r10 → reg3 = 10, SQRTF.S subop = 0x044E.
+    // hw2: (10<<11) | 0x044E = 0x544E
+    REQUIRE(cg::rh850::enc_sqrtf_s_hw2(cg::rh850::Reg::R10) == 0x544E);
+}
+
+TEST_CASE("rh850::enc_cmpf_s_hw1 shares Format-F:I hw1 shape with ADDF.S",
+          "[rh850][encoder][fpu]") {
+    // CMPF.S reuses the standard reg1/reg2 slots — same primary opcode
+    // pattern as ADDF.S; only the secondary opcode in hw2 differs.
+    REQUIRE(cg::rh850::enc_cmpf_s_hw1(cg::rh850::Reg::R11, cg::rh850::Reg::R10) ==
+            cg::rh850::enc_addf_s_hw1(cg::rh850::Reg::R11, cg::rh850::Reg::R10));
+}
+
+TEST_CASE("rh850::enc_cmpf_s_hw2 places cccc + fff + base correctly",
+          "[rh850][encoder][fpu]") {
+    // cccc at bits[14:11], fff at bits[3:1], base 0x0420.
+    // OLT (cccc=4), fff=0: (4<<11) | 0x0420 = 0x2420
+    REQUIRE(cg::rh850::enc_cmpf_s_hw2(cg::rh850::FloatCond::OLT, 0) == 0x2420);
+    // EQ (cccc=2), fff=0: (2<<11) | 0x0420 = 0x1420
+    REQUIRE(cg::rh850::enc_cmpf_s_hw2(cg::rh850::FloatCond::EQ, 0) == 0x1420);
+    // OLT (cccc=4), fff=3 (used in {3-bit slot}, shifted left 1): (4<<11) | (3<<1) | 0x0420 = 0x2426
+    REQUIRE(cg::rh850::enc_cmpf_s_hw2(cg::rh850::FloatCond::OLT, 3) == 0x2426);
+}
+
+TEST_CASE("rh850::enc_trfsr_hw1 is the fixed 0x07E0 base", "[rh850][encoder][fpu]") {
+    REQUIRE(cg::rh850::enc_trfsr_hw1() == 0x07E0);
+}
+
+TEST_CASE("rh850::enc_trfsr_hw2 places fff bits", "[rh850][encoder][fpu]") {
+    // fff at bits[3:1], base 0x0400. fff=0 → 0x0400; fff=2 → 0x0404.
+    REQUIRE(cg::rh850::enc_trfsr_hw2(0) == 0x0400);
+    REQUIRE(cg::rh850::enc_trfsr_hw2(2) == 0x0404);
+    REQUIRE(cg::rh850::enc_trfsr_hw2(7) == 0x040E);
+}
+
 TEST_CASE("rh850::enc_st_w_hw1 places reg/opcode bits correctly",
           "[rh850][encoder]") {
     // st.w r10, disp[r11] → reg2 = 10 (src), reg1 = 11 (base), opcode = 0b111101 (=0x3D)
@@ -1634,6 +1678,273 @@ TEST_CASE("Rh850Backend::compile rejects nested CallPrimitive operand",
     auto r = backend.compile(m, def);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+}
+
+// ---- Unary float primitives (sqrt_float, flex_fuel_scale) -------------
+
+namespace {
+
+// Pack fixture for unary-Float primitives. Single Float input, single
+// Float output. Same shape as kPackFloatInputsToml but one input
+// suffices.
+constexpr char const *kPackFloatUnaryToml = R"toml(
+[pack]
+id = "float_unary_pack"
+display_name = "Float unary test pack"
+
+[[writable_region]]
+name    = "test-cal"
+kind    = "calibration"
+address = 0x000A0000
+length  = 0x00010000
+
+[[hook]]
+id              = "unary_test"
+ecu_address     = 0x000ABCD0
+free_ram        = { base = 0x40000000, length = 256 }
+inputs = [
+  { name = "ethanol_pct", type = "float", address = 0xFFFF8400 },
+]
+outputs = [
+  { name = "result", type = "float" },
+]
+)toml";
+
+ir::Module make_float_unary_module(std::string_view symbol,
+                                   std::optional<double> op_const,
+                                   std::string_view op_pin) {
+    ir::Module m;
+
+    ir::Instruction op{};
+    if (op_const.has_value()) {
+        op.op = ir::Op::LoadConstant;
+        op.result_type = st::feature::PinType::Float;
+        op.result_id = 1;
+        op.constant_value = *op_const;
+    } else {
+        op.op = ir::Op::LoadHookInput;
+        op.result_type = st::feature::PinType::Float;
+        op.result_id = 1;
+        op.symbol = "unary_test";
+        op.pin_name = std::string{op_pin};
+    }
+    m.instructions.push_back(std::move(op));
+
+    ir::Instruction call{};
+    call.op = ir::Op::CallPrimitive;
+    call.result_type = st::feature::PinType::Float;
+    call.result_id = 2;
+    call.symbol = std::string{symbol};
+    call.operands.push_back(1);
+    m.instructions.push_back(std::move(call));
+
+    ir::Instruction store{};
+    store.op = ir::Op::StoreHookOutput;
+    store.result_type = st::feature::PinType::Float;
+    store.symbol = "unary_test";
+    store.pin_name = "result";
+    store.operands.push_back(2);
+    m.instructions.push_back(std::move(store));
+
+    return m;
+}
+
+} // namespace
+
+TEST_CASE("Rh850Backend::compile emits sqrt_float with a Constant operand",
+          "[rh850][compile][call_primitive][fpu]") {
+    auto const def = load_pack(kPackFloatUnaryToml);
+    auto const m = make_float_unary_module("sqrt_float", 4.0, "");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    INFO("compile error: " << (r.has_value() ? std::string{"(none)"} : r.error().to_string()));
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kUnaryFloatSizeC);
+    REQUIRE(r->hooks[0].code.size() % 4 == 0);
+}
+
+TEST_CASE("Rh850Backend::compile emits sqrt_float with a HookInput operand",
+          "[rh850][compile][call_primitive][fpu]") {
+    auto const def = load_pack(kPackFloatUnaryToml);
+    auto const m = make_float_unary_module("sqrt_float", std::nullopt, "ethanol_pct");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kUnaryFloatSizeH);
+}
+
+TEST_CASE("Rh850Backend::compile emits flex_fuel_scale with a Constant operand",
+          "[rh850][compile][call_primitive][fpu][flex_fuel]") {
+    auto const def = load_pack(kPackFloatUnaryToml);
+    // E15 → expected ≈ 1.049, but we're only verifying the byte envelope.
+    auto const m = make_float_unary_module("flex_fuel_scale", 15.0, "");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    INFO("compile error: " << (r.has_value() ? std::string{"(none)"} : r.error().to_string()));
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kFlexFuelScaleSizeC);
+    REQUIRE(r->hooks[0].code.size() % 4 == 0);
+}
+
+TEST_CASE("Rh850Backend::compile emits flex_fuel_scale with a HookInput operand",
+          "[rh850][compile][call_primitive][fpu][flex_fuel]") {
+    auto const def = load_pack(kPackFloatUnaryToml);
+    auto const m = make_float_unary_module("flex_fuel_scale", std::nullopt, "ethanol_pct");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kFlexFuelScaleSizeH);
+}
+
+// ---- Float compares (Float inputs, Bool output) -----------------------
+
+namespace {
+
+// Pack fixture for float-compare tests. Two Float inputs, single Bool
+// output — the compare_*_float result-type shape.
+constexpr char const *kPackFloatInBoolOutToml = R"toml(
+[pack]
+id = "float_compare_pack"
+display_name = "Float compare test pack"
+
+[[writable_region]]
+name    = "test-cal"
+kind    = "calibration"
+address = 0x000A0000
+length  = 0x00010000
+
+[[hook]]
+id              = "fcmp_test"
+ecu_address     = 0x000ABCD0
+free_ram        = { base = 0x40000000, length = 256 }
+inputs = [
+  { name = "afr",        type = "float", address = 0xFFFF8500 },
+  { name = "target_afr", type = "float", address = 0xFFFF8510 },
+]
+outputs = [
+  { name = "result", type = "bool" },
+]
+)toml";
+
+ir::Module make_float_compare_module(std::string_view symbol,
+                                     std::optional<double> op1_const,
+                                     std::string_view op1_pin,
+                                     std::optional<double> op2_const,
+                                     std::string_view op2_pin) {
+    ir::Module m;
+
+    ir::Instruction op1{};
+    if (op1_const.has_value()) {
+        op1.op = ir::Op::LoadConstant;
+        op1.result_type = st::feature::PinType::Float;
+        op1.result_id = 1;
+        op1.constant_value = *op1_const;
+    } else {
+        op1.op = ir::Op::LoadHookInput;
+        op1.result_type = st::feature::PinType::Float;
+        op1.result_id = 1;
+        op1.symbol = "fcmp_test";
+        op1.pin_name = std::string{op1_pin};
+    }
+    m.instructions.push_back(std::move(op1));
+
+    ir::Instruction op2{};
+    if (op2_const.has_value()) {
+        op2.op = ir::Op::LoadConstant;
+        op2.result_type = st::feature::PinType::Float;
+        op2.result_id = 2;
+        op2.constant_value = *op2_const;
+    } else {
+        op2.op = ir::Op::LoadHookInput;
+        op2.result_type = st::feature::PinType::Float;
+        op2.result_id = 2;
+        op2.symbol = "fcmp_test";
+        op2.pin_name = std::string{op2_pin};
+    }
+    m.instructions.push_back(std::move(op2));
+
+    ir::Instruction call{};
+    call.op = ir::Op::CallPrimitive;
+    call.result_type = st::feature::PinType::Bool; // Float × Float → Bool
+    call.result_id = 3;
+    call.symbol = std::string{symbol};
+    call.operands.push_back(1);
+    call.operands.push_back(2);
+    m.instructions.push_back(std::move(call));
+
+    ir::Instruction store{};
+    store.op = ir::Op::StoreHookOutput;
+    store.result_type = st::feature::PinType::Bool;
+    store.symbol = "fcmp_test";
+    store.pin_name = "result";
+    store.operands.push_back(3);
+    m.instructions.push_back(std::move(store));
+
+    return m;
+}
+
+} // namespace
+
+TEST_CASE("Rh850Backend::compile emits compare_lt_float with two Constant operands",
+          "[rh850][compile][call_primitive][fpu][float_compare]") {
+    auto const def = load_pack(kPackFloatInBoolOutToml);
+    auto const m = make_float_compare_module("compare_lt_float", 1.5, "", 2.0, "");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    INFO("compile error: " << (r.has_value() ? std::string{"(none)"} : r.error().to_string()));
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kFloatCompareSizeCC);
+    REQUIRE(r->hooks[0].code.size() % 4 == 0);
+}
+
+TEST_CASE("Rh850Backend::compile emits compare_lt_float with mixed Constant + HookInput",
+          "[rh850][compile][call_primitive][fpu][float_compare]") {
+    auto const def = load_pack(kPackFloatInBoolOutToml);
+
+    auto const m_ch = make_float_compare_module("compare_lt_float", 1.0, "", std::nullopt, "afr");
+    cg::Rh850Backend backend;
+    auto r_ch = backend.compile(m_ch, def);
+    REQUIRE(r_ch.has_value());
+    REQUIRE(r_ch->hooks[0].code.size() == cg::rh850::kFloatCompareSizeCH);
+
+    auto const m_hc = make_float_compare_module("compare_lt_float", std::nullopt, "afr", 1.0, "");
+    auto r_hc = backend.compile(m_hc, def);
+    REQUIRE(r_hc.has_value());
+    REQUIRE(r_hc->hooks[0].code.size() == cg::rh850::kFloatCompareSizeHC);
+}
+
+TEST_CASE("Rh850Backend::compile emits compare_lt_float with two HookInput operands",
+          "[rh850][compile][call_primitive][fpu][float_compare]") {
+    auto const def = load_pack(kPackFloatInBoolOutToml);
+    auto const m = make_float_compare_module("compare_lt_float", std::nullopt, "afr",
+                                             std::nullopt, "target_afr");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kFloatCompareSizeHH);
+}
+
+TEST_CASE("Rh850Backend::compile emits compare_gt_float / compare_eq_float (same shape)",
+          "[rh850][compile][call_primitive][fpu][float_compare]") {
+    auto const def = load_pack(kPackFloatInBoolOutToml);
+
+    cg::Rh850Backend backend;
+    for (auto const *symbol : {"compare_gt_float", "compare_eq_float"}) {
+        INFO("symbol: " << symbol);
+        auto const m = make_float_compare_module(symbol, 1.5, "", 2.0, "");
+        auto r = backend.compile(m, def);
+        REQUIRE(r.has_value());
+        REQUIRE(r->hooks[0].code.size() == cg::rh850::kFloatCompareSizeCC);
+    }
 }
 
 // ---- select_backend -----------------------------------------------------

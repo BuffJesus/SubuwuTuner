@@ -265,6 +265,55 @@ inline constexpr std::size_t kIntCompareSizeCC = 40;
 inline constexpr std::size_t kIntCompareSizeCH = 44;
 inline constexpr std::size_t kIntCompareSizeHC = 44;
 inline constexpr std::size_t kIntCompareSizeHH = 48;
+
+// CallPrimitive unary float slice — `sqrt_float`. First genuinely-
+// unary primitive on the RH850 side (not_bool fakes the binary
+// envelope by XORing against a loaded constant 1). SQRTF.S is a
+// 32-bit Format F:II (2-register) FPU instruction; no alignment pad
+// needed. Shape:
+//   load op → r10 (8 or 12 bytes)
+//   SQRTF.S r10, r10              (4 bytes)
+//   MOVHI+MOVEA dst → r12         (8 bytes)
+//   ST.W r10, 0[r12]              (4 bytes)
+//   JMP [lp] + tail NOP           (4 bytes)
+inline constexpr std::size_t kUnaryFloatSizeC = 28;
+inline constexpr std::size_t kUnaryFloatSizeH = 32;
+
+// CallPrimitive float-compare slice — `compare_lt_float` /
+// `compare_gt_float` / `compare_eq_float`. Two binary operands like
+// the int-compare path, but the result-extract requires three
+// instructions instead of one because RH850 has no float-compare
+// equivalent of SETF: CMPF.S sets an FPU condition bit, TRFSR copies
+// it to PSW.Z, then SETF Z materializes it into the destination GPR.
+//   load op1 → r10   (8 or 12)
+//   load op2 → r11   (8 or 12)
+//   CMPF.S cccc, r11, r10, 0      (4 bytes Format F:III)
+//   TRFSR 0                       (4 bytes Format F)
+//   SETF Z, r10                   (4 bytes Format IV)
+//   MOVHI+MOVEA dst → r12         (8 bytes)
+//   ST.W r10, 0[r12]              (4 bytes)
+//   JMP [lp] + tail NOP           (4 bytes)
+// Net +4 bytes per shape vs kIntCompareSize* (the extra TRFSR).
+// All four sizes are 4-aligned.
+inline constexpr std::size_t kFloatCompareSizeCC = 44;
+inline constexpr std::size_t kFloatCompareSizeCH = 48;
+inline constexpr std::size_t kFloatCompareSizeHC = 48;
+inline constexpr std::size_t kFloatCompareSizeHH = 52;
+
+// CallPrimitive flex-fuel-scale slice — `flex_fuel_scale(ethanol_pct)`.
+// Single operand in, single Float out. Constants for slope (0.28/85.0)
+// and intercept (1.0) are baked into the emit — no extra graph operands
+// needed. Two FPU ops chained:
+//   load op → r10                 (8 or 12)
+//   MOVHI+MOVEA slope_const → r11 (8 bytes — always Constant)
+//   MULF.S r11, r10, r10          (4 bytes)
+//   MOVHI+MOVEA intercept_const → r11 (8 bytes)
+//   ADDF.S r11, r10, r10          (4 bytes)
+//   MOVHI+MOVEA dst → r12         (8 bytes)
+//   ST.W r10, 0[r12]              (4 bytes)
+//   JMP [lp] + tail NOP           (4 bytes)
+inline constexpr std::size_t kFlexFuelScaleSizeC = 48;
+inline constexpr std::size_t kFlexFuelScaleSizeH = 52;
 } // namespace rh850
 
 // Address gate per docs/16 §Safety #6 + docs/04 ship blocker #3.

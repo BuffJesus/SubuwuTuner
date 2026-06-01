@@ -399,6 +399,85 @@ enum class Cond : std::uint8_t {
         (static_cast<std::uint16_t>(reg3) << 11U) | kSubOp);
 }
 
+// SQRTF.S r2, r3 — Format F:II (32-bit, 2-register). reg3 ← sqrt(reg2).
+// Same primary opcode (0b111111) as Format F:I; the reg1 slot of hw1
+// is forced to zero (R0) by the mask 0x07ff. Secondary opcode 0x044e.
+[[nodiscard]] constexpr std::uint16_t enc_sqrtf_s_hw1(Reg reg2) noexcept {
+    constexpr std::uint16_t kOpcode = 0b111111U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg2) << 11U) | (kOpcode << 5U));
+}
+[[nodiscard]] constexpr std::uint16_t enc_sqrtf_s_hw2(Reg reg3) noexcept {
+    constexpr std::uint16_t kSubOp = 0x044EU;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg3) << 11U) | kSubOp);
+}
+
+// FloatCond — IEEE 754 compare conditions (cccc field of CMPF.S).
+// The "O" prefix means "ordered" (NaN operand → false); "U" means
+// "unordered" (NaN operand → true). For our compare_*_float primitives
+// the ordered variants give the intuitive behavior — NaN in either
+// operand makes the compare yield false.
+enum class FloatCond : std::uint8_t {
+    F = 0,    // always false
+    UN = 1,   // unordered (NaN in either operand)
+    EQ = 2,   // equal (ordered)
+    UEQ = 3,  // unordered or equal
+    OLT = 4,  // ordered less than
+    ULT = 5,  // unordered or less than
+    OLE = 6,  // ordered less or equal
+    ULE = 7,  // unordered or less or equal
+    SF = 8,   // signaling false
+    NGLE = 9,
+    SEQ = 10,
+    NGL = 11,
+    LT = 12, // alias for compatibility, behaves like OLT on most cores
+    NGE = 13,
+    LE = 14, // alias for OLE
+    NGT = 15,
+};
+
+// CMPF.S cccc, reg1, reg2, fff — sets FPU condition bit FCB[fff]
+// based on the comparison `reg2 cond reg1`. Format F:III (32-bit).
+//
+// hw1: [reg2(5)][0b111111(6)][reg1(5)]                — standard shape
+// hw2: [cccc(4)][reserved(1)][secondary(7)][fff(3)][reserved(1)]
+//      with base = 0x0420 = 0b00000_100_0010_0000
+//
+// Encoded fields fit within the bits-not-set in the mask 0x87f1 = the
+// hw2 bits cccc occupies (bits[14:11], i.e. the R3 slot) and fff
+// occupies (bits[3:1]). hw1's reg2/reg1 stay in the standard slots.
+[[nodiscard]] constexpr std::uint16_t enc_cmpf_s_hw1(Reg reg1, Reg reg2) noexcept {
+    return enc_addf_s_hw1(reg1, reg2);
+}
+[[nodiscard]] constexpr std::uint16_t enc_cmpf_s_hw2(FloatCond cccc,
+                                                     std::uint8_t fff) noexcept {
+    constexpr std::uint16_t kBase = 0x0420U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(static_cast<std::uint8_t>(cccc) & 0xFU) << 11U) |
+        (static_cast<std::uint16_t>(fff & 0x7U) << 1U) | kBase);
+}
+
+// TRFSR fff — copies FPU condition bit FCB[fff] to PSW.Z so a
+// subsequent SETF can materialize it into a GPR. Format F (32-bit,
+// no register operands). Base 0x07e0 / 0x0400; fff at bits[3:1] of
+// hw2 (same slot as in CMPF.S).
+//
+// VERIFICATION CAVEAT: V850/RH850 references diverge on whether
+// TRFSR sets PSW.Z to FCB[fff] directly or to its complement. We
+// emit assuming direct copy (PSW.Z ← FCB[fff]) so a follow-on
+// `SETF Z, r10` materializes the original compare result. If bench-
+// rig data shows inversion, swap to `SETF NZ` in the compare emit.
+[[nodiscard]] constexpr std::uint16_t enc_trfsr_hw1() noexcept {
+    constexpr std::uint16_t kBase = 0x07E0U;
+    return kBase;
+}
+[[nodiscard]] constexpr std::uint16_t enc_trfsr_hw2(std::uint8_t fff) noexcept {
+    constexpr std::uint16_t kBase = 0x0400U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(fff & 0x7U) << 1U) | kBase);
+}
+
 // --- Format VI (32-bit imm + reg + reg) ------------------------------
 
 // Each Format VI emitter returns the FIRST 16-bit halfword. The caller
