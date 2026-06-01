@@ -731,7 +731,9 @@ Result<double> read_typed(Rom const &rom, std::size_t offset, DataType dt) {
         return static_cast<double>(bits_to_float(*r));
     }
     }
-    return failure(ErrorCode::InvalidArgument, "unknown DataType");
+    return failure(ErrorCode::InvalidArgument,
+                   "unknown DataType enum value " +
+                       std::to_string(static_cast<int>(dt)));
 }
 
 double apply_scaling(double raw, Scaling const &s) noexcept {
@@ -908,7 +910,9 @@ Status write_typed(Rom &rom, std::size_t offset, DataType dt, double value) {
         return rom.write_u32_le(offset, bits);
     }
     }
-    return failure(ErrorCode::InvalidArgument, "unknown DataType");
+    return failure(ErrorCode::InvalidArgument,
+                   "unknown DataType enum value " +
+                       std::to_string(static_cast<int>(dt)));
 }
 
 // ---- Definition ----------------------------------------------------------
