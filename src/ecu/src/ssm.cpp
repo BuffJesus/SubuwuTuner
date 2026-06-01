@@ -29,11 +29,21 @@ Result<std::vector<std::uint8_t>> build_a8_request(std::span<std::uint32_t const
     if (addresses.empty()) {
         return failure(ErrorCode::InvalidArgument, "SSM read needs at least one address");
     }
+    auto const hex24 = [](unsigned long v) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "0x%06lX", v & 0xFFFFFFUL);
+        return std::string{buf};
+    };
     for (auto const a : addresses) {
         if (a > kMaxAddress) {
+            // Render the address as hex — std::to_string emits decimal,
+            // which made the bare-minimum overflow input 0x01000000 print
+            // as "0x16777216" (same bug-class as the SSM/UDS hex_byte
+            // fixes in 011bc5c).
             return failure(ErrorCode::InvalidArgument,
-                           "SSM address exceeds 24-bit range: 0x" +
-                               std::to_string(static_cast<unsigned long>(a)));
+                           "SSM address exceeds 24-bit range (max " +
+                               hex24(static_cast<unsigned long>(kMaxAddress)) + "): " +
+                               hex24(static_cast<unsigned long>(a)));
         }
     }
     // Payload length = CMD(1) + PAD(1) + 3*N.
