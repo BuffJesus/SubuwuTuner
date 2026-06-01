@@ -8114,12 +8114,14 @@ void render_history_panel(AppState &state) {
     ImGui::End();
 }
 
-// Phase 5 placeholder — custom-features node-graph designer. Data
-// model lives in st::feature::Graph and is fully implemented; the
-// canvas here is intentionally a stub. Future work (multi-session)
-// builds out: a grid-backed canvas with pan/zoom, node rendering
-// keyed off the pack's hook declarations, drag-to-connect with
-// type-checked edges, undo/redo via st::edit::History.
+// Phase 5 custom-features node-graph designer. Data model lives in
+// st::feature::Graph; this canvas wires it up interactively.
+// Shipped surface: grid-backed canvas with pan/zoom; node rendering
+// keyed off the pack's hook + primitive declarations; drag-to-connect
+// with type-checked edges; per-pin defaults via right-click menu;
+// .stmod load/save + clipboard JSON; in-canvas compile preview against
+// the selected backend (sh2a / rh850). Still preview (no auto-layout,
+// no undo through st::edit::History yet — Ctrl+Z scope is per-canvas).
 void render_features_designer(AppState &state) {
     if (!state.show_features_designer) {
         return;
