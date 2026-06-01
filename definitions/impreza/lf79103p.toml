@@ -6545,3 +6545,86 @@ data_type              = "float32_be"
 scaling                = "x_200000_0_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
+
+
+# =============================================================================
+# DTC bitmap scaffold — PLACEHOLDER ADDRESSES, replace before flashing
+# =============================================================================
+#
+# `tools/defgen` does not extract DTC bitmap data from the source RomRaider
+# XML (the XML usually doesn't carry it — DTC suppression is typically a
+# separate side tool in that ecosystem). The entries below are stub scaffolding
+# so the GUI DTC panel + `subuwutuner-cli project-{enable,disable}-dtc` have
+# something to show against this pack. **Every byte_offset / bitmap address
+# below is a placeholder.** Real addresses must be recovered via Ghidra
+# disassembly of the DTC-handling code in this ROM.
+#
+# Procedure to populate real values:
+#   1. Open the LF79103P dump in Ghidra
+#   2. Find the DTC enable/disable handler — typically reachable via a
+#      consistent function-call pattern from the DTC-set code paths (the
+#      P0xxx setter routines all dispatch through a small set of helpers)
+#   3. The handler typically masks a byte at (bitmap_base + byte_offset)
+#      with (1 << bit) to set/clear the enable bit
+#   4. Replace `address` below with the real bitmap base; replace each
+#      [[dtc]] byte_offset + bit with the real coordinates
+#   5. Drop the "(PLACEHOLDER)" suffix from `name` once verified
+#
+# Until populated with real values, the GUI Disable DTC button will still
+# work mechanically (it writes bytes at the listed address+offset) but the
+# ECU will ignore the change because the bytes don't actually control any
+# DTC. Project-history undo recovers any accidental writes.
+#
+# Schema reference: docs/11-definition-format.md §"DTC bitmaps".
+
+[[dtc_bitmap]]
+id           = "primary_dtc_enable_placeholder"
+name         = "Primary DTC enable bitmap (PLACEHOLDER — needs Ghidra RE)"
+address      = 0x001F0000   # placeholder; replace via Ghidra DTC-handler trace
+length_bytes = 64
+endianness   = "big"
+
+# Catalyst efficiency — primary cat removal target for tuners.
+[[dtc]]
+code               = "P0420"
+name               = "Catalyst System Efficiency Below Threshold Bank 1 (PLACEHOLDER)"
+bitmap_id          = "primary_dtc_enable_placeholder"
+byte_offset        = 0
+bit                = 0
+emissions_relevant = true
+
+# Direct-injection HPFP fault — common after FA20DIT mods.
+[[dtc]]
+code               = "P008B"
+name               = "Low Pressure Fuel System Pressure Too High (PLACEHOLDER)"
+bitmap_id          = "primary_dtc_enable_placeholder"
+byte_offset        = 0
+bit                = 1
+emissions_relevant = false
+
+# Wastegate solenoid — surfaces during boost-by-gear tuning.
+[[dtc]]
+code               = "P0244"
+name               = "Turbocharger Wastegate Solenoid A Range/Performance (PLACEHOLDER)"
+bitmap_id          = "primary_dtc_enable_placeholder"
+byte_offset        = 0
+bit                = 2
+emissions_relevant = false
+
+# Tumble Generator Valve — frequently disabled on intake mods.
+[[dtc]]
+code               = "P2610"
+name               = "Tumble Generator Valve Performance (PLACEHOLDER)"
+bitmap_id          = "primary_dtc_enable_placeholder"
+byte_offset        = 0
+bit                = 3
+emissions_relevant = true
+
+# OBD-II readiness sentinel — disabling this hides incomplete monitors.
+[[dtc]]
+code               = "P0606"
+name               = "ECM Processor Performance (PLACEHOLDER)"
+bitmap_id          = "primary_dtc_enable_placeholder"
+byte_offset        = 0
+bit                = 4
+emissions_relevant = false
