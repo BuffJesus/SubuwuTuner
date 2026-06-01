@@ -119,6 +119,8 @@ add_executable(subuwutuner-gui
     src/panels/toasts.cpp
     src/panels/welcome.cpp
     src/panels/workspace.cpp
+    src/persistence.cpp
+    src/theme.cpp
     src/widgets/adapter_picker.cpp
     src/widgets/widgets.cpp
     src/modals/about.cpp
