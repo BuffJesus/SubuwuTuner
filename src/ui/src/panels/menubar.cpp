@@ -1,0 +1,386 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The SubuwuTuner Authors
+//
+// Top main menu bar — File / Edit / View / Tools / Help. Routes
+// gesture intents to actions.hpp + project_io.hpp + the per-modal
+// "show this" flags on AppState. View → Reset window layout calls
+// into request_layout_reset() (declared in panels.hpp, defined
+// alongside the dockspace).
+
+#include "panels/panels.hpp"
+
+#include "actions.hpp"
+#include "app_state.hpp"
+#include "persistence.hpp"
+#include "project_io.hpp"
+#include "theme.hpp"
+#include "widgets/widgets.hpp"
+
+#include "st/core/version.hpp"
+#include "st/policy.hpp"
+
+#include <imgui.h>
+
+#include <cstddef>
+#include <cstdio>
+#include <string>
+
+namespace st::ui {
+
+void render_menubar(AppState &state) {
+    bool const has_project = state.project.has_value();
+    bool const can_undo = has_project && state.project->history().can_undo();
+    bool const can_redo = has_project && state.project->history().can_redo();
+
+    // Tooltip on a menu item even when it's disabled — so the user
+    // understands WHY it's grayed out rather than just seeing the
+    // affordance and wondering. AllowWhenDisabled is the hover flag
+    // that makes IsItemHovered fire on a disabled item.
+    auto const disabled_tip = [](char const *body) {
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("%s", body);
+        }
+    };
+
+    if (ImGui::BeginMainMenuBar()) {
+        if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("New Project\xE2\x80\xA6")) {
+                request_action(state, ConfirmAction::NewProject);
+            }
+            if (ImGui::MenuItem("Open Project\xE2\x80\xA6", "Ctrl+O")) {
+                request_action(state, ConfirmAction::OpenDialog);
+            }
+            if (ImGui::MenuItem("Save Project", "Ctrl+S", false, has_project)) {
+                save_project(state);
+            }
+            if (!has_project) {
+                disabled_tip("No project open — there's nothing to save.\n"
+                             "Open a project first (Ctrl+O).");
+            }
+            if (ImGui::MenuItem("Close Project", nullptr, false, has_project)) {
+                request_action(state, ConfirmAction::Close);
+            }
+            if (!has_project) {
+                disabled_tip("No project open.");
+            }
+            ImGui::Separator();
+            // CSV import/export — same `# pack_id` / `# table` /
+            // `row,col,value` format as project-export-csv / -edit-csv,
+            // and same parser, so the two surfaces round-trip with each
+            // other.
+            bool const can_csv = has_project && !state.selected_table_id.empty();
+            if (ImGui::MenuItem("Import CSV into Table\xE2\x80\xA6", nullptr, false, can_csv)) {
+                import_csv_into_current_table_dialog(state);
+            }
+            if (!can_csv) {
+                disabled_tip("Select a table first.\n"
+                             "Imports a row,col,value CSV as a single bulk edit\n"
+                             "(undoable via Ctrl+Z).");
+            }
+            if (ImGui::MenuItem("Export Table as CSV\xE2\x80\xA6", nullptr, false, can_csv)) {
+                export_current_table_csv_dialog(state, /*diff_only=*/false);
+            }
+            if (!can_csv) {
+                disabled_tip("Select a table first.");
+            }
+            if (ImGui::MenuItem("Export Table Edits as CSV\xE2\x80\xA6", nullptr, false, can_csv)) {
+                export_current_table_csv_dialog(state, /*diff_only=*/true);
+            }
+            if (!can_csv) {
+                disabled_tip("Select a table first.\n"
+                             "Emits only cells changed from the source — "
+                             "share-able tune diff.");
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
+                request_action(state, ConfirmAction::Quit);
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Edit", has_project)) {
+            if (ImGui::MenuItem("Undo", "Ctrl+Z", false, can_undo)) {
+                do_undo(state);
+            }
+            if (has_project && !can_undo) {
+                disabled_tip("Nothing to undo — no edits have been made.");
+            }
+            if (ImGui::MenuItem("Redo", "Ctrl+Shift+Z", false, can_redo)) {
+                do_redo(state);
+            }
+            if (has_project && !can_redo) {
+                disabled_tip("Nothing to redo.\n"
+                             "Use Undo first, then Redo to step forward.");
+            }
+            ImGui::Separator();
+            bool const has_selection = state.selection.enabled;
+            if (ImGui::MenuItem("Copy", "Ctrl+C", false, has_selection)) {
+                do_copy_selection(state);
+            }
+            if (has_project && !has_selection) {
+                disabled_tip("Select cells in the grid first.");
+            }
+            if (ImGui::MenuItem("Paste", "Ctrl+V", false, has_selection)) {
+                paste_clipboard_at_cursor(state);
+            }
+            if (has_project && !has_selection) {
+                disabled_tip("Select a target cell, then paste TSV from the\n"
+                             "clipboard at the cursor.");
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Reset to Source", nullptr, false, has_selection)) {
+                reset_selection_to_source(state);
+            }
+            if (has_project && !has_selection) {
+                disabled_tip("Reverts the selected cells to their source-ROM\n"
+                             "values (undoable).");
+            }
+            ImGui::Separator();
+            // Auto-Tune submenu. Groups the kernel-driven proposal flows so
+            // future additions (LTFT, cold-start, etc.) don't sprawl the
+            // Edit menu. Disabled-with-tooltip mirrors the rest of Edit.
+            if (ImGui::BeginMenu("Auto-Tune", has_project)) {
+                if (ImGui::MenuItem("MAF\xE2\x80\xA6")) {
+                    // Default the target table to whatever the user has open
+                    // — saves a step when they're already looking at the MAF
+                    // scaling. They can still type a different id.
+                    std::snprintf(state.maf_at_table_id, sizeof state.maf_at_table_id, "%s",
+                                  state.selected_table_id.c_str());
+                    state.maf_at_status_msg.clear();
+                    state.maf_at_result.reset();
+                    state.maf_at_lints.clear();
+                    state.maf_at_table_data.reset();
+                    state.show_maf_autotune_modal = true;
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Runs the docs/12 MAF auto-tune kernel against\n"
+                                      "a CSV datalog and applies the proposal as a\n"
+                                      "single undoable edit.");
+                }
+                if (ImGui::MenuItem("Knock Pull\xE2\x80\xA6")) {
+                    std::snprintf(state.kp_at_table_id, sizeof state.kp_at_table_id, "%s",
+                                  state.selected_table_id.c_str());
+                    state.kp_at_status_msg.clear();
+                    state.kp_at_result.reset();
+                    state.kp_at_lints.clear();
+                    state.kp_at_table_data.reset();
+                    state.kp_at_rpm_axis_values.clear();
+                    state.kp_at_load_axis_values.clear();
+                    state.show_kp_autotune_modal = true;
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Runs the docs/12 knock-based ignition pull\n"
+                                      "kernel against a CSV datalog and applies the\n"
+                                      "2D proposal as a single undoable edit.");
+                }
+                ImGui::EndMenu();
+            }
+            if (!has_project) {
+                disabled_tip("Open a project first.\n"
+                             "Kernels run against a CSV datalog and apply\n"
+                             "their proposal as a single undoable edit.");
+            }
+            ImGui::EndMenu();
+        }
+        if (!has_project && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            // Edit menu itself is disabled (BeginMenu second arg = false).
+            ImGui::SetTooltip("No project open — open one to enable editing.");
+        }
+        if (ImGui::BeginMenu("Tools")) {
+            if (ImGui::MenuItem("Read ROM from Car\xE2\x80\xA6")) {
+                // Open the modal in Idle state. Leftover bytes_result from
+                // a previous successful run get cleared so the modal opens
+                // on the form, not on the post-read save dialog.
+                state.read_rom_state = AppState::ReadRomState::Idle;
+                state.read_rom_error_msg.clear();
+                state.read_rom_bytes_result.clear();
+                state.show_read_rom_modal = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Dump the ECU's current calibration via the connected\n"
+                                  "USB adapter (OBDX / J2534 / Native). Read-only — no\n"
+                                  "ECU writes. Saves to a .bin you can then open as a\n"
+                                  "new project via File \xE2\x86\x92 New Project\xE2\x80\xA6");
+            }
+            // Future: "Write ROM to Car..." (see plan comment above
+            // render_read_rom_modal). Wired after OBDX adapter validation
+            // + battery / ignition preflight checks land.
+            ImGui::Separator();
+            if (ImGui::MenuItem("Browse Definitions\xE2\x80\xA6")) {
+                state.show_def_registry_modal = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Walk a definitions directory via PackRegistry and\n"
+                    "list every pack found (loose + zipped). Useful\n"
+                    "for verifying a ship-time install layout where\n"
+                    "<platform>.zip archives replace loose .toml files.");
+            }
+            if (ImGui::MenuItem("Settings\xE2\x80\xA6")) {
+                state.show_settings_modal = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Edit the runtime config that PackRegistry and\n"
+                    "rom-pull consult for default paths. Lives at\n"
+                    "%%APPDATA%%\\SubuwuTuner\\config.toml. Equivalent\n"
+                    "to running `subuwutuner-cli config set` from a\n"
+                    "shell. See docs/25 for precedence rules.");
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("View")) {
+            bool const is_grid = state.view_mode == TableViewMode::Grid;
+            bool const is_heat = state.view_mode == TableViewMode::Heatmap;
+            if (ImGui::MenuItem("Grid", nullptr, is_grid, has_project)) {
+                state.view_mode = TableViewMode::Grid;
+            }
+            if (ImGui::MenuItem("Heatmap", nullptr, is_heat, has_project)) {
+                state.view_mode = TableViewMode::Heatmap;
+            }
+            ImGui::Separator();
+            // Panel visibility. Sidebar + Table are always-on (primary
+            // navigation); Stats and DTCs are secondary panels the user
+            // may want hidden when working in the table grid full-screen.
+            ImGui::MenuItem("Stats Panel", nullptr, &state.show_stats_panel);
+            ImGui::MenuItem("DTCs Panel", nullptr, &state.show_dtcs_panel);
+            ImGui::MenuItem("History Panel", nullptr, &state.show_history_panel);
+            ImGui::MenuItem("Knock Dashboard", nullptr,
+                            &state.show_knock_dashboard_panel);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Per-cylinder knock dashboard. Load a CSV datalog,\n"
+                                  "map RPM / load / per-cyl FLKC + FBKC columns,\n"
+                                  "compute a windowed snapshot, view strip charts.\n"
+                                  "See docs/05-improvements.md §11.");
+            }
+            ImGui::MenuItem("Adaptive History", nullptr,
+                            &state.show_adaptive_history_panel);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Long-cycle LTFT / DAM / idle-adapt drift charts.\n"
+                                  "Load a CSV with timestamps + per-signal columns,\n"
+                                  "bucket by time (day default), view drift slope.\n"
+                                  "See docs/05-improvements.md §11.");
+            }
+            ImGui::MenuItem("Cold-Start Analysis", nullptr, &state.show_coldstart_panel);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Phase-classify + ECT-bin a cold-start datalog.\n"
+                                  "Compares observed lambda to a user-defined target\n"
+                                  "curve at each ECT bucket. See docs/05 §11.");
+            }
+            ImGui::MenuItem("EBCS PID Assistant", nullptr, &state.show_ebcs_panel);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Detect tip-in events in a boost log; characterize each\n"
+                                  "step response (rise / overshoot / settling); produce\n"
+                                  "heuristic Kp/Ki/Kd gain-adjustment suggestions.\n"
+                                  "Advisory only — verify on a dyno. See docs/05 §11.");
+            }
+            ImGui::Separator();
+            if (ImGui::BeginMenu("Theme")) {
+                bool const is_dark = state.settings.theme == Theme::Dark;
+                bool const is_light = state.settings.theme == Theme::Light;
+                if (ImGui::MenuItem("Dark", nullptr, is_dark) && !is_dark) {
+                    state.settings.theme = Theme::Dark;
+                    apply_theme(Theme::Dark);
+                    save_settings(state.settings);
+                }
+                if (ImGui::MenuItem("Light", nullptr, is_light) && !is_light) {
+                    state.settings.theme = Theme::Light;
+                    apply_theme(Theme::Light);
+                    save_settings(state.settings);
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Reset window layout")) {
+                request_layout_reset();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Discard the current dock arrangement and rebuild the\n"
+                                  "default layout (Tables left, central tab strip with\n"
+                                  "Table + datalog panels, Stats/History/DTCs right).\n"
+                                  "Useful if a panel got stuck floating off-screen.");
+            }
+            ImGui::Separator();
+            // Custom features designer — Phase 5 user-facing surface.
+            // Promoted out of Debug to top-level so users actually
+            // discover it; the audit flagged that hiding it next to
+            // the ImGui demo made it read as a developer escape hatch.
+            ImGui::MenuItem("Custom Features Designer", nullptr,
+                            &state.show_features_designer);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Phase 5 node-graph editor for authoring custom\n"
+                                  "features (rev limiters, flat-foot shift, etc.).\n"
+                                  "Graph + IR + SH-2A codegen are implemented;\n"
+                                  "wire-up to flash lands in Phase 5 patch insertion.");
+            }
+            ImGui::Separator();
+            // Dev-only escape hatch. Tucked one level deeper so the
+            // ImGui example isn't a peer of the user-facing view modes.
+            if (ImGui::BeginMenu("Debug")) {
+                ImGui::MenuItem("ImGui demo window", nullptr, &state.show_imgui_demo);
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Help")) {
+            ImGui::Text("SubuwuTuner %.*s", static_cast<int>(st::Version::string().size()),
+                        st::Version::string().data());
+            ImGui::Separator();
+            if (ImGui::MenuItem("Command Palette\xE2\x80\xA6", "Ctrl+K")) {
+                open_command_palette(state);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Search every menu action, panel toggle, recent\n"
+                                  "project, and table in the loaded pack from one\n"
+                                  "input. Highest-leverage shortcut in the app.");
+            }
+            if (ImGui::MenuItem("Keyboard Shortcuts\xE2\x80\xA6")) {
+                state.show_shortcuts_modal = true;
+            }
+            if (ImGui::MenuItem("About SubuwuTuner\xE2\x80\xA6")) {
+                state.show_about_modal = true;
+            }
+            ImGui::Separator();
+            text_subtle("Getting started");
+            ImGui::BulletText(
+                "File \xE2\x86\x92 Open Project\xE2\x80\xA6 (Ctrl+O) to pick a .stune directory.");
+            ImGui::BulletText("Or pass one on the command line: subuwutuner-gui my.stune");
+            ImGui::BulletText(
+                "No project of your own? Open the bundled fixtures/demo.stune/ to "
+                "explore the UI.");
+            ImGui::Separator();
+            text_subtle("Editing");
+            ImGui::BulletText("Click cells to select; Shift-click to extend.");
+            ImGui::BulletText("Arrow keys move the cursor; Shift+arrows extend.");
+            ImGui::BulletText(
+                "F2 or double-click a cell to type a new value.  Enter commits, Esc cancels.");
+            ImGui::BulletText(
+                "Ctrl+Enter while editing fills every selected cell with the typed value.");
+            ImGui::BulletText(
+                "Ctrl+C / Ctrl+V copy and paste the selection as tab-separated values.");
+            ImGui::BulletText("Right-click any cell for Copy / Paste / Reset to Source.");
+            ImGui::BulletText(
+                "Toolbar buttons (+5%%, -5%%, Smooth, Interpolate) act on the selection.");
+            ImGui::BulletText("Ctrl+Z / Ctrl+Shift+Z to undo / redo.  Ctrl+S to save.");
+            ImGui::Separator();
+            text_subtle("Navigation");
+            ImGui::BulletText(
+                "Ctrl+K opens the command palette — search every action + table.");
+            ImGui::BulletText("Ctrl+F focuses the table-filter box.  Esc clears it.");
+            ImGui::BulletText("Filter matches both the table's name and its snake_case id.");
+            ImGui::Separator();
+            text_subtle("Viewing");
+            ImGui::BulletText("Switch View: Grid \xE2\x86\x94 Heatmap to inspect a map two ways.");
+            ImGui::BulletText("For 3D tables, pick a Z slice above the grid.");
+            ImGui::Separator();
+            text_subtle("Documentation");
+            ImGui::BulletText("Repo:    https://github.com/BuffJesus/SubuwuTuner");
+            ImGui::BulletText(
+                "Design:  docs/00-overview.md \xE2\x80\xA6 docs/16-custom-features.md");
+            ImGui::BulletText("License: Apache 2.0 (see LICENSE in the repo root)");
+            ImGui::EndMenu();
+        }
+        ImGui::EndMainMenuBar();
+    }
+}
+
+} // namespace st::ui

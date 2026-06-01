@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The SubuwuTuner Authors
+//
+// Recents + settings + config-dir paths. One-line-per-entry plain-text
+// persistence next to imgui.ini. Decisions sit in main.cpp's anon
+// namespace today; this header is the seam future per-file moves use.
+
+#ifndef ST_UI_PERSISTENCE_HPP
+#define ST_UI_PERSISTENCE_HPP
+
+#include "st/policy.hpp"
+
+#include <cstddef>
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace st::ui {
+
+struct RecentEntry {
+    std::string opened_at; // ISO 8601 UTC, e.g. "2026-05-12T15:30:00Z"
+    std::filesystem::path path;
+};
+
+inline constexpr std::size_t kRecentsCap = 8;
+
+enum class Theme { Dark, Light };
+
+char const *theme_name(Theme t) noexcept;
+std::optional<Theme> parse_theme(std::string_view s) noexcept;
+
+struct Settings {
+    st::policy::Profile default_policy_profile{st::policy::Profile::MotorsportOnly};
+    Theme theme{Theme::Dark};
+};
+
+std::filesystem::path config_dir_root();
+std::filesystem::path recents_config_path();
+std::filesystem::path settings_config_path();
+
+std::optional<std::filesystem::path> resolve_demo_project_path(char const *argv0);
+
+std::string iso8601_utc_now();
+std::string format_relative_time(std::string const &iso);
+
+std::vector<RecentEntry> load_recents();
+void save_recents(std::vector<RecentEntry> const &recents);
+void push_recent(std::vector<RecentEntry> &recents, std::filesystem::path const &path);
+
+Settings load_settings();
+void save_settings(Settings const &s);
+
+} // namespace st::ui
+
+#endif

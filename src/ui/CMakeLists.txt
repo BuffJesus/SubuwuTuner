@@ -103,8 +103,40 @@ endif()
 
 add_executable(subuwutuner-gui
     src/main.cpp
+    src/panels/adaptive_history.cpp
+    src/panels/coldstart.cpp
+    src/panels/command_palette.cpp
+    src/panels/dtcs.cpp
+    src/panels/ebcs.cpp
+    src/panels/features_designer.cpp
+    src/panels/history.cpp
+    src/panels/knock_dashboard.cpp
+    src/panels/menubar.cpp
+    src/panels/sidebar.cpp
+    src/panels/stats.cpp
+    src/panels/status_bar.cpp
+    src/panels/table_view.cpp
+    src/panels/toasts.cpp
+    src/panels/welcome.cpp
+    src/panels/workspace.cpp
+    src/modals/about.cpp
+    src/modals/autotune_knock.cpp
+    src/modals/autotune_maf.cpp
+    src/modals/csv_import.cpp
+    src/modals/def_registry.cpp
+    src/modals/flash.cpp
+    src/modals/new_project.cpp
+    src/modals/read_rom.cpp
+    src/modals/settings.cpp
+    src/modals/shortcuts.cpp
+    src/modals/unsaved.cpp
     ${_subuwutuner_resources}
 )
+
+# Lets per-folder headers (panels/, modals/, widgets/) include each other
+# with flat paths like `#include "app_state.hpp"` from any depth — saves
+# the per-cpp move steps from having to walk `../` to find shared headers.
+target_include_directories(subuwutuner-gui PRIVATE src)
 
 target_link_libraries(subuwutuner-gui
     PRIVATE
