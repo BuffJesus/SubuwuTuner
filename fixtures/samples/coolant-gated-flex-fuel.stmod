@@ -1,0 +1,175 @@
+# Coolant-gated flex-fuel — production-shape composition sample.
+#
+# What it does:
+#   1. Read ethanol percentage from the flex-fuel sensor
+#   2. Compute the fuel scale via the flex_fuel_scale curve
+#      (E0=1.00 → E85=1.28, hardcoded linear)
+#   3. Read coolant temperature from the after_fuel_calc hook
+#   4. Compare coolant against a 60°C warmup threshold
+#   5. select_float(coolant > 60, flex_scale, 1.0) — apply flex
+#      scaling only when warm, leave fuel untouched during cold-start
+#   6. Multiply the gated scale into the commanded fuel pulse width
+#
+# Why the gate: flex-fuel commanded AFR shifts (E85's ~9.8:1 vs E0's
+# 14.7:1) are designed for warmed-up combustion. During cold-soak +
+# warmup the engine needs richer fueling than ANY steady-state AFR
+# target — the OEM's open-loop cold-start enrichment is already
+# doing the right thing, and layering flex-fuel scaling on top
+# disturbs that. Gating on coolant temp keeps the OEM cold-start
+# path untouched until the engine is warm enough that the flex
+# correction is safe to apply.
+#
+# Sensor pattern: this is the *general* compensation shape — read a
+# gating sensor, compute a multiplier, select between the multiplier
+# and an identity (1.0) based on a gate condition, multiply into the
+# OEM commanded value. The same shape covers:
+#   - IAT-gated octane correction (cold IAT → no boost adder)
+#   - Knock-gated timing pull (no knock → no pull)
+#   - DPF-regen-gated EGR shutdown
+#
+# Pairs with fixtures/demo-pack. SH-2A codegen handles every primitive
+# in this graph (flex_fuel_scale + compare_gt_float + select_float +
+# multiply_float). RH850 codegen handles select_float but not yet
+# compare_gt_float or flex_fuel_scale; this sample is sh2a-only until
+# those slices land.
+
+[graph]
+schema_version = 1
+
+# --- Ethanol % sensor read ---------------------------------------------------
+[[node]]
+id    = 1
+kind  = "hook.read_ethanol_pct"
+label = "Ethanol content"
+x     = 48.0
+y     = 48.0
+phase_break = true
+pins = [
+  { id = 0, name = "ethanol_pct", label = "Ethanol %", type = "float", direction = "output", unit = "%" },
+]
+
+# --- Flex-fuel curve ---------------------------------------------------------
+[[node]]
+id    = 2
+kind  = "primitive.flex_fuel_scale"
+label = "Flex-fuel scale curve"
+x     = 288.0
+y     = 48.0
+pins = [
+  { id = 0, name = "ethanol_pct", label = "Ethanol %",  type = "float", direction = "input",  unit = "%" },
+  { id = 1, name = "scale",       label = "Fuel scale", type = "float", direction = "output", unit = "" },
+]
+
+# --- After fuel calc splice point (RPM, load, commanded PW, coolant) --------
+[[node]]
+id    = 3
+kind  = "hook.after_fuel_calc"
+label = "After fuel calc"
+x     = 48.0
+y     = 240.0
+phase_break = true
+pins = [
+  { id = 0, name = "rpm",                    label = "Engine RPM",       type = "float", direction = "output", unit = "rpm" },
+  { id = 1, name = "load",                   label = "Engine load",      type = "float", direction = "output", unit = "%"   },
+  { id = 2, name = "commanded_pw",           label = "Commanded fuel PW", type = "float", direction = "output", unit = "ms"  },
+  { id = 3, name = "coolant_temp",           label = "Coolant temp",     type = "float", direction = "output", unit = "°C"  },
+  { id = 4, name = "commanded_pw_override",  label = "Override fuel PW", type = "float", direction = "input",  unit = "ms"  },
+]
+
+# --- Gate: coolant > 60°C threshold -----------------------------------------
+# 60 °C is a conservative warmup floor — most Subaru OEM closed-loop
+# transitions happen by ~55 °C; gating at 60 °C ensures the engine is
+# fully in steady-state fueling before flex correction lands. The
+# threshold lives on pin `b` as the pin default — IR lowerer materializes
+# this as a LoadConstant; no separate constant node needed.
+[[node]]
+id    = 6
+kind  = "primitive.compare_gt_float"
+label = "Coolant > 60°C"
+x     = 528.0
+y     = 240.0
+pins = [
+  { id = 0, name = "a",   label = "Coolant", type = "float", direction = "input",  unit = "" },
+  { id = 1, name = "b",   label = "60°C",    type = "float", direction = "input",  unit = "", default = 60.0 },
+  { id = 2, name = "out", label = "Warm?",   type = "bool",  direction = "output", unit = "" },
+]
+
+# --- Select: warm ? flex_scale : 1.0 ----------------------------------------
+# The "cold-engine bypass" 1.0 is a pin default on false_val.
+[[node]]
+id    = 7
+kind  = "primitive.select_float"
+label = "Gate flex scaling"
+x     = 768.0
+y     = 240.0
+pins = [
+  { id = 0, name = "cond",      label = "Warm?",   type = "bool",  direction = "input",  unit = "" },
+  { id = 1, name = "true_val",  label = "Flex on", type = "float", direction = "input",  unit = "" },
+  { id = 2, name = "false_val", label = "Bypass",  type = "float", direction = "input",  unit = "", default = 1.0 },
+  { id = 3, name = "out",       label = "Scale",   type = "float", direction = "output", unit = "" },
+]
+
+# --- Multiply: gated_scale * commanded_pw -----------------------------------
+[[node]]
+id    = 8
+kind  = "primitive.multiply_float"
+label = "Apply scale"
+x     = 1008.0
+y     = 240.0
+pins = [
+  { id = 0, name = "a",   label = "Gated scale",  type = "float", direction = "input",  unit = "" },
+  { id = 1, name = "b",   label = "Commanded PW", type = "float", direction = "input",  unit = "" },
+  { id = 2, name = "out", label = "Override PW",  type = "float", direction = "output", unit = "" },
+]
+
+# ---------- edges ----------
+
+# Ethanol % → flex_fuel_scale.ethanol_pct
+[[edge]]
+from_node = 1
+from_pin  = 0
+to_node   = 2
+to_pin    = 0
+
+# coolant_temp → compare_gt_float.a (threshold on .b is the pin default)
+[[edge]]
+from_node = 3
+from_pin  = 3
+to_node   = 6
+to_pin    = 0
+
+# warm? → select_float.cond
+[[edge]]
+from_node = 6
+from_pin  = 2
+to_node   = 7
+to_pin    = 0
+
+# flex_fuel_scale.scale → select_float.true_val
+# (false_val 1.0 is the pin default — cold-engine bypass)
+[[edge]]
+from_node = 2
+from_pin  = 1
+to_node   = 7
+to_pin    = 1
+
+# select_float.out → multiply_float.a
+[[edge]]
+from_node = 7
+from_pin  = 3
+to_node   = 8
+to_pin    = 0
+
+# commanded_pw → multiply_float.b
+[[edge]]
+from_node = 3
+from_pin  = 2
+to_node   = 8
+to_pin    = 1
+
+# multiply_float.out → after_fuel_calc.commanded_pw_override
+[[edge]]
+from_node = 8
+from_pin  = 2
+to_node   = 3
+to_pin    = 4
