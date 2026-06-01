@@ -1736,6 +1736,90 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
     return ok();
 }
 
+// Emit an RH850 single-precision FP arithmetic CallPrimitive fragment
+// for `add_float`, `subtract_float`, `multiply_float`, `divide_float`.
+// Shape:
+//
+//   load op1 → r10            (IEEE 754 bits as ordinary 32-bit value)
+//   load op2 → r11            (same)
+//   {ADDF,SUBF,MULF,DIVF}.S r11, r10, r10   (32-bit Format F:I — dest
+//                              shares the kAReg slot so the surrounding
+//                              ST.W r10 / JMP tail is byte-identical to
+//                              the int-arith path)
+//   MOVHI dst_hi, r0, r12; MOVEA dst_lo, r12, r12   (r12 = dst_addr)
+//   ST.W r10, 0[r12]
+//   JMP [lp] + tail NOP
+//
+// Total size: identical envelope to kBinaryIntArithSize* — the FPU op
+// is 4 bytes (no alignment pad needed) where ADD/SUB is 2 + pad.
+//
+// Operand semantics, matching the int-arith convention:
+//   add_float(a, b)      → ADDF.S r11, r10, r10  → r10 = r10 + r11
+//   subtract_float(a, b) → SUBF.S r11, r10, r10  → r10 = r10 - r11
+//   multiply_float(a, b) → MULF.S r11, r10, r10  → r10 = r10 * r11
+//   divide_float(a, b)   → DIVF.S r11, r10, r10  → r10 = r10 / r11
+//
+// LoadConstant operands carry IEEE 754 bit patterns produced by
+// coerce_constant_to_u32 (PinType::Float branch — std::bit_cast<u32>
+// of the host float). LoadHookInput operands are pack-author's
+// responsibility: the source ROM/RAM word at the input's address must
+// hold a single-precision IEEE 754 bit pattern, not an integer.
+//
+// VERIFICATION: per the RH850 file header, FPU encoding has not been
+// validated against a real VB WRX ECU. Two pre-conditions before
+// shipping any float PatchObject to hardware:
+//   1. Confirm the VB ECU's RH850 core has a single-precision FPU
+//      (G3M/G3MH/G4MH yes, G3K no). Compiling against an FPU-less
+//      core would land undefined-instruction traps in the patch.
+//   2. Bench-rig round-trip on the chosen core variant.
+[[nodiscard]] Status emit_rh850_binary_float_arith(std::vector<std::uint8_t> &code,
+                                                   std::string_view symbol,
+                                                   PrimitiveOperand const &op1,
+                                                   PrimitiveOperand const &op2,
+                                                   std::uint32_t dst_addr) {
+    constexpr rh850::Reg kAReg = rh850::Reg::R10;    // op1 → reg2 in F:I, also reg3 (dest)
+    constexpr rh850::Reg kBReg = rh850::Reg::R11;    // op2 → reg1 in F:I
+    constexpr rh850::Reg kScratch = rh850::Reg::R12; // address scratch
+
+    emit_rh850_load_primitive_operand(code, op1, kAReg, kScratch);
+    emit_rh850_load_primitive_operand(code, op2, kBReg, kScratch);
+
+    if (symbol == "add_float") {
+        emit_le16(code, rh850::enc_addf_s_hw1(kBReg, kAReg));
+        emit_le16(code, rh850::enc_addf_s_hw2(kAReg));
+    } else if (symbol == "subtract_float") {
+        emit_le16(code, rh850::enc_subf_s_hw1(kBReg, kAReg));
+        emit_le16(code, rh850::enc_subf_s_hw2(kAReg));
+    } else if (symbol == "multiply_float") {
+        emit_le16(code, rh850::enc_mulf_s_hw1(kBReg, kAReg));
+        emit_le16(code, rh850::enc_mulf_s_hw2(kAReg));
+    } else if (symbol == "divide_float") {
+        emit_le16(code, rh850::enc_divf_s_hw1(kBReg, kAReg));
+        emit_le16(code, rh850::enc_divf_s_hw2(kAReg));
+    } else {
+        std::string msg{"RH850 backend: emit_rh850_binary_float_arith called with "
+                        "unsupported symbol '"};
+        msg.append(symbol);
+        msg.append("' — validator/dispatch out of sync");
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+
+    // No alignment pad — Format F:I is 32-bit (4 bytes), already aligned.
+
+    // Materialize dst_addr into r12, then ST.W r10, 0[r12].
+    auto const dst_split = rh850::split_imm32(dst_addr);
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, kScratch));
+    emit_le16(code, dst_split.hi);
+    emit_le16(code, rh850::enc_movea_hw1(kScratch, kScratch));
+    emit_le16(code, dst_split.lo);
+    emit_le16(code, rh850::enc_st_w_hw1(kAReg, kScratch));
+    emit_le16(code, rh850::enc_st_w_hw2(0));
+
+    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+    emit_le16(code, rh850::enc_nop());
+    return ok();
+}
+
 // Emit an RH850 int-compare CallPrimitive fragment for
 // `compare_lt_int` / `compare_gt_int` / `compare_eq_int`. Shape:
 //
@@ -1994,7 +2078,9 @@ rh850_operand_from_producer(Definition const &def, ir::Module const &m, ir::Valu
          prim.symbol == "not_bool" || prim.symbol == "select_int" ||
          prim.symbol == "select_bool" || prim.symbol == "select_float" ||
          prim.symbol == "compare_lt_int" || prim.symbol == "compare_gt_int" ||
-         prim.symbol == "compare_eq_int");
+         prim.symbol == "compare_eq_int" ||
+         prim.symbol == "add_float" || prim.symbol == "subtract_float" ||
+         prim.symbol == "multiply_float" || prim.symbol == "divide_float");
     if (!supported) {
         std::string msg{"RH850 backend: CallPrimitive '"};
         msg.append(prim.symbol);
@@ -2002,7 +2088,8 @@ rh850_operand_from_producer(Definition const &def, ir::Module const &m, ir::Valu
                    "add_int, subtract_int, multiply_int, divide_int, "
                    "and_bool, or_bool, not_bool, "
                    "select_int, select_bool, select_float, "
-                   "compare_lt_int, compare_gt_int, compare_eq_int). "
+                   "compare_lt_int, compare_gt_int, compare_eq_int, "
+                   "add_float, subtract_float, multiply_float, divide_float). "
                    "See docs/16 §Current state.");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
@@ -2252,6 +2339,13 @@ Result<PatchObject> Rh850Backend::compile(ir::Module const &m, Definition const 
                        src->symbol == "compare_eq_int") {
                 if (auto s = emit_rh850_int_compare(work.code, src->symbol, operands[0],
                                                     operands[1], dst_addr);
+                    !s.has_value()) {
+                    return failure(s.error());
+                }
+            } else if (src->symbol == "add_float" || src->symbol == "subtract_float" ||
+                       src->symbol == "multiply_float" || src->symbol == "divide_float") {
+                if (auto s = emit_rh850_binary_float_arith(work.code, src->symbol, operands[0],
+                                                           operands[1], dst_addr);
                     !s.has_value()) {
                     return failure(s.error());
                 }

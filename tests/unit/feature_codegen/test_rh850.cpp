@@ -268,6 +268,41 @@ TEST_CASE("rh850::enc_div_hw2 places reg3 + subop bits correctly",
     REQUIRE(cg::rh850::enc_div_hw2(cg::rh850::Reg::R13) == 0x6AC0);
 }
 
+TEST_CASE("rh850::enc_addf_s_hw1 shares Format-XI hw1 shape with MUL",
+          "[rh850][encoder][fpu]") {
+    // Same hw1 shape: primary opcode 0b111111, reg fields where MUL puts them.
+    REQUIRE(cg::rh850::enc_addf_s_hw1(cg::rh850::Reg::R11, cg::rh850::Reg::R10) ==
+            cg::rh850::enc_mul_hw1(cg::rh850::Reg::R11, cg::rh850::Reg::R10));
+}
+
+TEST_CASE("rh850::enc_addf_s_hw2 places reg3 + subop bits correctly",
+          "[rh850][encoder][fpu]") {
+    // addf.s ..., ..., r10 → reg3 = 10, ADDF.S subop = 0x0460.
+    // hw2 bits: (10<<11) | 0x0460 = 0x5000 | 0x0460 = 0x5460
+    REQUIRE(cg::rh850::enc_addf_s_hw2(cg::rh850::Reg::R10) == 0x5460);
+}
+
+TEST_CASE("rh850::enc_subf_s_hw2 places reg3 + subop bits correctly",
+          "[rh850][encoder][fpu]") {
+    // subf.s ..., ..., r10 → reg3 = 10, SUBF.S subop = 0x0462.
+    // hw2: (10<<11) | 0x0462 = 0x5462
+    REQUIRE(cg::rh850::enc_subf_s_hw2(cg::rh850::Reg::R10) == 0x5462);
+}
+
+TEST_CASE("rh850::enc_mulf_s_hw2 places reg3 + subop bits correctly",
+          "[rh850][encoder][fpu]") {
+    // mulf.s ..., ..., r10 → reg3 = 10, MULF.S subop = 0x0464.
+    // hw2: (10<<11) | 0x0464 = 0x5464
+    REQUIRE(cg::rh850::enc_mulf_s_hw2(cg::rh850::Reg::R10) == 0x5464);
+}
+
+TEST_CASE("rh850::enc_divf_s_hw2 places reg3 + subop bits correctly",
+          "[rh850][encoder][fpu]") {
+    // divf.s ..., ..., r10 → reg3 = 10, DIVF.S subop = 0x046E.
+    // hw2: (10<<11) | 0x046E = 0x546E
+    REQUIRE(cg::rh850::enc_divf_s_hw2(cg::rh850::Reg::R10) == 0x546E);
+}
+
 TEST_CASE("rh850::enc_st_w_hw1 places reg/opcode bits correctly",
           "[rh850][encoder]") {
     // st.w r10, disp[r11] → reg2 = 10 (src), reg1 = 11 (base), opcode = 0b111101 (=0x3D)
@@ -844,6 +879,160 @@ TEST_CASE("Rh850Backend::compile emits divide_int (operand order: a / b)",
 
     // Operand mapping matches subtract_int: load a → r10, b → r11.
     // DIV r11, r10, r13 then computes r10 = r10 / r11 = a / b.
+}
+
+// ---- Float arithmetic (Float in, Float out, FPU) -----------------------
+
+namespace {
+
+// Pack fixture for float-arith tests. Same shape as kPackTwoInputsToml
+// but with Float inputs + output so add_float / subtract_float /
+// multiply_float / divide_float are type-correct.
+constexpr char const *kPackFloatInputsToml = R"toml(
+[pack]
+id = "float_test_pack"
+display_name = "Float test pack"
+
+[[writable_region]]
+name    = "test-cal"
+kind    = "calibration"
+address = 0x000A0000
+length  = 0x00010000
+
+[[hook]]
+id              = "binop_test"
+ecu_address     = 0x000ABCD0
+free_ram        = { base = 0x40000000, length = 256 }
+inputs = [
+  { name = "mass_air_flow", type = "float", address = 0xFFFF8300 },
+  { name = "intake_temp",   type = "float", address = 0xFFFF8310 },
+]
+outputs = [
+  { name = "result", type = "float" },
+]
+)toml";
+
+// Same shape as make_binop_module but Float-typed throughout. Constants
+// pass as double; coerce_constant_to_u32's Float branch bit-casts to
+// IEEE 754 single-precision.
+ir::Module make_float_binop_module(std::string_view symbol,
+                                   std::optional<double> op1_const,
+                                   std::string_view op1_pin,
+                                   std::optional<double> op2_const,
+                                   std::string_view op2_pin) {
+    ir::Module m;
+
+    ir::Instruction op1{};
+    if (op1_const.has_value()) {
+        op1.op = ir::Op::LoadConstant;
+        op1.result_type = st::feature::PinType::Float;
+        op1.result_id = 1;
+        op1.constant_value = *op1_const;
+    } else {
+        op1.op = ir::Op::LoadHookInput;
+        op1.result_type = st::feature::PinType::Float;
+        op1.result_id = 1;
+        op1.symbol = "binop_test";
+        op1.pin_name = std::string{op1_pin};
+    }
+    m.instructions.push_back(std::move(op1));
+
+    ir::Instruction op2{};
+    if (op2_const.has_value()) {
+        op2.op = ir::Op::LoadConstant;
+        op2.result_type = st::feature::PinType::Float;
+        op2.result_id = 2;
+        op2.constant_value = *op2_const;
+    } else {
+        op2.op = ir::Op::LoadHookInput;
+        op2.result_type = st::feature::PinType::Float;
+        op2.result_id = 2;
+        op2.symbol = "binop_test";
+        op2.pin_name = std::string{op2_pin};
+    }
+    m.instructions.push_back(std::move(op2));
+
+    ir::Instruction call{};
+    call.op = ir::Op::CallPrimitive;
+    call.result_type = st::feature::PinType::Float;
+    call.result_id = 3;
+    call.symbol = std::string{symbol};
+    call.operands.push_back(1);
+    call.operands.push_back(2);
+    m.instructions.push_back(std::move(call));
+
+    ir::Instruction store{};
+    store.op = ir::Op::StoreHookOutput;
+    store.result_type = st::feature::PinType::Float;
+    store.symbol = "binop_test";
+    store.pin_name = "result";
+    store.operands.push_back(3);
+    m.instructions.push_back(std::move(store));
+
+    return m;
+}
+
+} // namespace
+
+TEST_CASE("Rh850Backend::compile emits add_float with two Constant operands",
+          "[rh850][compile][call_primitive][fpu]") {
+    auto const def = load_pack(kPackFloatInputsToml);
+    auto const m = make_float_binop_module("add_float", 1.5, "", 2.25, "");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    INFO("compile error: " << (r.has_value() ? std::string{"(none)"} : r.error().to_string()));
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+    // FP arith fits the same envelope as int — Format F:I is 4 bytes
+    // (no pad) where ADD is 2 + pad.
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeCC);
+    REQUIRE(r->hooks[0].code.size() % 4 == 0);
+}
+
+TEST_CASE("Rh850Backend::compile emits add_float with mixed Constant + HookInput",
+          "[rh850][compile][call_primitive][fpu]") {
+    auto const def = load_pack(kPackFloatInputsToml);
+
+    auto const m_ch =
+        make_float_binop_module("add_float", 0.5, "", std::nullopt, "mass_air_flow");
+    cg::Rh850Backend backend;
+    auto r_ch = backend.compile(m_ch, def);
+    REQUIRE(r_ch.has_value());
+    REQUIRE(r_ch->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeCH);
+
+    auto const m_hc =
+        make_float_binop_module("add_float", std::nullopt, "mass_air_flow", 0.5, "");
+    auto r_hc = backend.compile(m_hc, def);
+    REQUIRE(r_hc.has_value());
+    REQUIRE(r_hc->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeHC);
+}
+
+TEST_CASE("Rh850Backend::compile emits add_float with two HookInput operands",
+          "[rh850][compile][call_primitive][fpu]") {
+    auto const def = load_pack(kPackFloatInputsToml);
+    auto const m = make_float_binop_module("add_float", std::nullopt, "mass_air_flow",
+                                           std::nullopt, "intake_temp");
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeHH);
+}
+
+TEST_CASE("Rh850Backend::compile emits subtract_float / multiply_float / divide_float "
+          "(same shape)",
+          "[rh850][compile][call_primitive][fpu]") {
+    auto const def = load_pack(kPackFloatInputsToml);
+
+    cg::Rh850Backend backend;
+    for (auto const *symbol : {"subtract_float", "multiply_float", "divide_float"}) {
+        INFO("symbol: " << symbol);
+        auto const m = make_float_binop_module(symbol, 3.0, "", 2.0, "");
+        auto r = backend.compile(m, def);
+        REQUIRE(r.has_value());
+        REQUIRE(r->hooks[0].code.size() == cg::rh850::kBinaryIntArithSizeCC);
+    }
 }
 
 // ---- Int compares (Int inputs, Bool output) ----------------------------

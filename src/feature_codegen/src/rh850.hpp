@@ -336,6 +336,69 @@ enum class Cond : std::uint8_t {
         (static_cast<std::uint16_t>(reg3) << 11U) | kSubOp);
 }
 
+// --- Format F:I (32-bit, 3-register single-precision FP arithmetic) --
+//
+// V850E2v3+ / RH850 added an IEEE 754 single-precision FPU. The FPU
+// instructions share Format XI's primary opcode (0b111111) and
+// disambiguate via the hw2 secondary opcode. Operands are general-
+// purpose registers — RH850's basic single-precision FPU does NOT
+// have a separate register file; 32-bit IEEE 754 bit patterns sit in
+// regular GPRs and the FP instructions reinterpret them as floats.
+//
+// Format F:I layout (same shape as Format XI):
+//   hw1: [reg2(5)][0b111111(6)][reg1(5)]
+//   hw2: [reg3(5)][secondary_opcode(11)]
+//
+// Operand semantics:
+//   ADDF.S r1, r2, r3 → r3 = r1 + r2   (commutative; subop 0x460)
+//   SUBF.S r1, r2, r3 → r3 = r2 - r1   (subop 0x462)
+//   MULF.S r1, r2, r3 → r3 = r1 * r2   (commutative; subop 0x464)
+//   DIVF.S r1, r2, r3 → r3 = r2 / r1   (subop 0x46E; r1 != r0)
+//
+// PROVISIONAL — same VERIFICATION STATUS as the file header. The
+// secondary-opcode bit patterns are sourced from the public Renesas
+// RH850 architecture reference (R01US0165), cross-checked against the
+// binutils v850-opc.c opcode table. No real-ECU FPU round-trip yet —
+// VB WRX FPU presence depends on the specific RH850 core variant
+// (G3M/G3MH/G4MH have FPU; G3K does not). Identify the core before
+// shipping any float PatchObject.
+
+[[nodiscard]] constexpr std::uint16_t enc_addf_s_hw1(Reg reg1, Reg reg2) noexcept {
+    constexpr std::uint16_t kOpcode = 0b111111U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg2) << 11U) | (kOpcode << 5U) |
+        static_cast<std::uint16_t>(reg1));
+}
+[[nodiscard]] constexpr std::uint16_t enc_addf_s_hw2(Reg reg3) noexcept {
+    constexpr std::uint16_t kSubOp = 0x0460U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg3) << 11U) | kSubOp);
+}
+[[nodiscard]] constexpr std::uint16_t enc_subf_s_hw1(Reg reg1, Reg reg2) noexcept {
+    return enc_addf_s_hw1(reg1, reg2);
+}
+[[nodiscard]] constexpr std::uint16_t enc_subf_s_hw2(Reg reg3) noexcept {
+    constexpr std::uint16_t kSubOp = 0x0462U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg3) << 11U) | kSubOp);
+}
+[[nodiscard]] constexpr std::uint16_t enc_mulf_s_hw1(Reg reg1, Reg reg2) noexcept {
+    return enc_addf_s_hw1(reg1, reg2);
+}
+[[nodiscard]] constexpr std::uint16_t enc_mulf_s_hw2(Reg reg3) noexcept {
+    constexpr std::uint16_t kSubOp = 0x0464U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg3) << 11U) | kSubOp);
+}
+[[nodiscard]] constexpr std::uint16_t enc_divf_s_hw1(Reg reg1, Reg reg2) noexcept {
+    return enc_addf_s_hw1(reg1, reg2);
+}
+[[nodiscard]] constexpr std::uint16_t enc_divf_s_hw2(Reg reg3) noexcept {
+    constexpr std::uint16_t kSubOp = 0x046EU;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg3) << 11U) | kSubOp);
+}
+
 // --- Format VI (32-bit imm + reg + reg) ------------------------------
 
 // Each Format VI emitter returns the FIRST 16-bit halfword. The caller
