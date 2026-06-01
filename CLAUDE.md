@@ -43,7 +43,7 @@ Phase 0/1/2 done. Phase 3 protocol framing complete (SSM + full UDS catalog incl
 | Set up CMake, vcpkg, CI | `docs/07-build-and-tooling.md` |
 | Decide on a GUI framework | `docs/03-tech-stack.md` |
 | Plan a phase or milestone | `docs/04-roadmap.md` |
-| Reason about brick-protection or flash safety | `docs/05-improvements.md` §4, `docs/08-testing-strategy.md` Tier 4 |
+| Reason about brick-protection or flash safety | `docs/05-improvements.md` §4, `docs/31-brick-protection-by-isa.md` (per-ISA recipes), `docs/08-testing-strategy.md` Tier 4 |
 | Reason about emissions / jurisdiction policy | `docs/06-legal-ethics.md` |
 | Reason about clean-room IP boundaries | `docs/15-clean-room-engineering.md` |
 | Reason about auto-tune | `docs/12-auto-tuning.md` |

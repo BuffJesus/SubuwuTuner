@@ -43,7 +43,7 @@ The bench rig validates **the actual recovery path per family**, not a generic "
 - **SH parts:** intentionally brick → trigger serial boot mode → recover via host tool → confirm. Document whether the mode pin is reachable via the OBD-II connector or requires opening the ECU case (the difference between "recoverable on the side of the road" and "shop-only recovery").
 - **RH850 parts:** intentionally brick the primary bank → cold-boot → confirm secondary-bank shim takes over → re-flash primary → confirm normal boot resumes.
 
-Single-bank ≠ dual-bank; treating them as one design is how tuners brick cars they thought were protected. Per-family recovery recipes live in `docs/19a-brick-protection-by-isa.md` (TBD; tracked as a v1.0 ship blocker per `04-roadmap.md`).
+Single-bank ≠ dual-bank; treating them as one design is how tuners brick cars they thought were protected. Per-family recovery recipes live in `docs/31-brick-protection-by-isa.md` — concrete FCU register map, sector allow-list, deliberate-brick + serial-boot recovery procedure for SH-2A; dual-bank atomic-swap design for RH850 with open bench-rig items called out. Tracked as a v1.0 ship blocker per `04-roadmap.md`.
 
 **Facts staged for the recipes (2026-05-24).** Analyst-mode RE of the plaintext A-series and B-series ROMs has produced:
 
