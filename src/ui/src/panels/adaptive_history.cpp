@@ -99,7 +99,7 @@ void render_adaptive_history_panel(AppState &state) {
     }
 
     ImGui::Spacing();
-    if (ImGui::Button("Compute snapshot##ah")) {
+    if (ImGui::Button("\xEE\x9D\xA8  Compute snapshot##ah")) {
         state.ah_load_error.clear();
         if (state.ah_log_path[0] == '\0') {
             state.ah_load_error = "Pick a CSV log first.";

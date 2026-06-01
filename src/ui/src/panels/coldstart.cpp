@@ -111,7 +111,7 @@ void render_coldstart_panel(AppState &state) {
     }
 
     ImGui::Spacing();
-    if (ImGui::Button("Compute snapshot##cs")) {
+    if (ImGui::Button("\xEE\x9D\xA8  Compute snapshot##cs")) {
         state.cs_load_error.clear();
         state.cs_target_curve_parsed.clear();
         // Parse target curve.

@@ -120,7 +120,7 @@ void render_knock_dashboard_panel(AppState &state) {
 
     ImGui::Spacing();
     // ---- Compute button ----------------------------------------------
-    if (ImGui::Button("Compute snapshot")) {
+    if (ImGui::Button("\xEE\x9D\xA8  Compute snapshot")) {
         state.knock_load_error.clear();
         if (state.knock_log_path[0] == '\0') {
             state.knock_load_error = "Pick a CSV log first.";

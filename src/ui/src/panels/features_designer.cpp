@@ -108,7 +108,7 @@ void render_features_designer(AppState &state) {
         state.project.has_value() && (!state.project->definition().hooks().empty() ||
                                       !state.project->definition().primitives().empty());
     if (have_palette) {
-        if (ImGui::Button("Insert \xE2\x96\xBE")) {
+        if (ImGui::Button("\xEE\x9C\x90  Insert \xE2\x96\xBE")) {
             ImGui::OpenPopup("##features_palette");
         }
         if (ImGui::BeginPopup("##features_palette")) {
@@ -231,7 +231,7 @@ void render_features_designer(AppState &state) {
         }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Clear graph")) {
+    if (ImGui::Button("\xEE\x9D\x9A  Clear graph")) {
         state.features_graph = st::feature::Graph{};
         state.features_wiring_active = false;
         state.features_wire_error.clear();
@@ -241,12 +241,12 @@ void render_features_designer(AppState &state) {
         state.features_band_active = false;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Reset view")) {
+    if (ImGui::Button("\xEE\x9C\xAC  Reset view")) {
         state.features_view_offset = ImVec2(0.0f, 0.0f);
         state.features_view_scale = 1.0f;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Save…")) {
+    if (ImGui::Button("\xEE\x9D\x8E  Save…")) {
         nfdu8filteritem_t filters[1] = {{"SubuwuTuner mod (TOML)", "stmod"}};
         NFD::UniquePathU8 out;
         nfdresult_t const r = NFD::SaveDialog(out, filters, 1, nullptr, "graph.stmod");
@@ -261,7 +261,7 @@ void render_features_designer(AppState &state) {
         }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Load…")) {
+    if (ImGui::Button("\xEE\x86\x97  Load…")) {
         nfdu8filteritem_t filters[1] = {{"SubuwuTuner mod (TOML)", "stmod"}};
         NFD::UniquePathU8 out;
         nfdresult_t const r = NFD::OpenDialog(out, filters, 1);

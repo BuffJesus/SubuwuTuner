@@ -44,20 +44,23 @@ void render_menubar(AppState &state) {
 
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("New Project\xE2\x80\xA6")) {
+            // MDL2 icon prefixes — same idiom as the table-view toolbar.
+            //   E710 Add    E197 OpenFile    E74E Save    E711 Cancel
+            //   E11B OpenFile (CSV)          E7E8 ChromeClose (Quit)
+            if (ImGui::MenuItem("\xEE\x9C\x90  New Project\xE2\x80\xA6")) {
                 request_action(state, ConfirmAction::NewProject);
             }
-            if (ImGui::MenuItem("Open Project\xE2\x80\xA6", "Ctrl+O")) {
+            if (ImGui::MenuItem("\xEE\x86\x97  Open Project\xE2\x80\xA6", "Ctrl+O")) {
                 request_action(state, ConfirmAction::OpenDialog);
             }
-            if (ImGui::MenuItem("Save Project", "Ctrl+S", false, has_project)) {
+            if (ImGui::MenuItem("\xEE\x9D\x8E  Save Project", "Ctrl+S", false, has_project)) {
                 save_project(state);
             }
             if (!has_project) {
                 disabled_tip("No project open — there's nothing to save.\n"
                              "Open a project first (Ctrl+O).");
             }
-            if (ImGui::MenuItem("Close Project", nullptr, false, has_project)) {
+            if (ImGui::MenuItem("\xEE\x9C\x91  Close Project", nullptr, false, has_project)) {
                 request_action(state, ConfirmAction::Close);
             }
             if (!has_project) {
@@ -69,7 +72,8 @@ void render_menubar(AppState &state) {
             // and same parser, so the two surfaces round-trip with each
             // other.
             bool const can_csv = has_project && !state.selected_table_id.empty();
-            if (ImGui::MenuItem("Import CSV into Table\xE2\x80\xA6", nullptr, false, can_csv)) {
+            if (ImGui::MenuItem("\xEE\x84\x9B  Import CSV into Table\xE2\x80\xA6", nullptr,
+                                false, can_csv)) {
                 import_csv_into_current_table_dialog(state);
             }
             if (!can_csv) {
@@ -77,13 +81,15 @@ void render_menubar(AppState &state) {
                              "Imports a row,col,value CSV as a single bulk edit\n"
                              "(undoable via Ctrl+Z).");
             }
-            if (ImGui::MenuItem("Export Table as CSV\xE2\x80\xA6", nullptr, false, can_csv)) {
+            if (ImGui::MenuItem("\xEE\x9D\xA8  Export Table as CSV\xE2\x80\xA6", nullptr,
+                                false, can_csv)) {
                 export_current_table_csv_dialog(state, /*diff_only=*/false);
             }
             if (!can_csv) {
                 disabled_tip("Select a table first.");
             }
-            if (ImGui::MenuItem("Export Table Edits as CSV\xE2\x80\xA6", nullptr, false, can_csv)) {
+            if (ImGui::MenuItem("\xEE\x9D\xA8  Export Table Edits as CSV\xE2\x80\xA6", nullptr,
+                                false, can_csv)) {
                 export_current_table_csv_dialog(state, /*diff_only=*/true);
             }
             if (!can_csv) {
@@ -92,19 +98,20 @@ void render_menubar(AppState &state) {
                              "share-able tune diff.");
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
+            if (ImGui::MenuItem("\xEE\x9F\xA8  Quit", "Ctrl+Q")) {
                 request_action(state, ConfirmAction::Quit);
             }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Edit", has_project)) {
-            if (ImGui::MenuItem("Undo", "Ctrl+Z", false, can_undo)) {
+            // E7A7 Undo  E7A6 Redo  E8C8 Copy  E77F Paste  E72C Refresh
+            if (ImGui::MenuItem("\xEE\x9E\xA7  Undo", "Ctrl+Z", false, can_undo)) {
                 do_undo(state);
             }
             if (has_project && !can_undo) {
                 disabled_tip("Nothing to undo — no edits have been made.");
             }
-            if (ImGui::MenuItem("Redo", "Ctrl+Shift+Z", false, can_redo)) {
+            if (ImGui::MenuItem("\xEE\x9E\xA6  Redo", "Ctrl+Shift+Z", false, can_redo)) {
                 do_redo(state);
             }
             if (has_project && !can_redo) {
@@ -113,13 +120,13 @@ void render_menubar(AppState &state) {
             }
             ImGui::Separator();
             bool const has_selection = state.selection.enabled;
-            if (ImGui::MenuItem("Copy", "Ctrl+C", false, has_selection)) {
+            if (ImGui::MenuItem("\xEE\xA3\x88  Copy", "Ctrl+C", false, has_selection)) {
                 do_copy_selection(state);
             }
             if (has_project && !has_selection) {
                 disabled_tip("Select cells in the grid first.");
             }
-            if (ImGui::MenuItem("Paste", "Ctrl+V", false, has_selection)) {
+            if (ImGui::MenuItem("\xEE\x9D\xBF  Paste", "Ctrl+V", false, has_selection)) {
                 paste_clipboard_at_cursor(state);
             }
             if (has_project && !has_selection) {
@@ -127,7 +134,7 @@ void render_menubar(AppState &state) {
                              "clipboard at the cursor.");
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Reset to Source", nullptr, false, has_selection)) {
+            if (ImGui::MenuItem("\xEE\x9C\xAC  Reset to Source", nullptr, false, has_selection)) {
                 reset_selection_to_source(state);
             }
             if (has_project && !has_selection) {
@@ -138,7 +145,7 @@ void render_menubar(AppState &state) {
             // Auto-Tune submenu. Groups the kernel-driven proposal flows so
             // future additions (LTFT, cold-start, etc.) don't sprawl the
             // Edit menu. Disabled-with-tooltip mirrors the rest of Edit.
-            if (ImGui::BeginMenu("Auto-Tune", has_project)) {
+            if (ImGui::BeginMenu("\xEE\xA5\x90  Auto-Tune", has_project)) {
                 if (ImGui::MenuItem("MAF\xE2\x80\xA6")) {
                     // Default the target table to whatever the user has open
                     // — saves a step when they're already looking at the MAF
@@ -186,7 +193,8 @@ void render_menubar(AppState &state) {
             ImGui::SetTooltip("No project open — open one to enable editing.");
         }
         if (ImGui::BeginMenu("Tools")) {
-            if (ImGui::MenuItem("Read ROM from Car\xE2\x80\xA6")) {
+            // E896 Download  E8B7 Folder  E713 Settings/gear
+            if (ImGui::MenuItem("\xEE\xA2\x96  Read ROM from Car\xE2\x80\xA6")) {
                 // Open the modal in Idle state. Leftover bytes_result from
                 // a previous successful run get cleared so the modal opens
                 // on the form, not on the post-read save dialog.
@@ -205,7 +213,7 @@ void render_menubar(AppState &state) {
             // render_read_rom_modal). Wired after OBDX adapter validation
             // + battery / ignition preflight checks land.
             ImGui::Separator();
-            if (ImGui::MenuItem("Browse Definitions\xE2\x80\xA6")) {
+            if (ImGui::MenuItem("\xEE\xA2\xB7  Browse Definitions\xE2\x80\xA6")) {
                 state.show_def_registry_modal = true;
             }
             if (ImGui::IsItemHovered()) {
@@ -215,7 +223,7 @@ void render_menubar(AppState &state) {
                     "for verifying a ship-time install layout where\n"
                     "<platform>.zip archives replace loose .toml files.");
             }
-            if (ImGui::MenuItem("Settings\xE2\x80\xA6")) {
+            if (ImGui::MenuItem("\xEE\x9C\x93  Settings\xE2\x80\xA6")) {
                 state.show_settings_modal = true;
             }
             if (ImGui::IsItemHovered()) {
@@ -290,7 +298,7 @@ void render_menubar(AppState &state) {
                 ImGui::EndMenu();
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Reset window layout")) {
+            if (ImGui::MenuItem("\xEE\x9C\xAC  Reset window layout")) {
                 request_layout_reset();
             }
             if (ImGui::IsItemHovered()) {
@@ -325,7 +333,8 @@ void render_menubar(AppState &state) {
             ImGui::Text("SubuwuTuner %.*s", static_cast<int>(st::Version::string().size()),
                         st::Version::string().data());
             ImGui::Separator();
-            if (ImGui::MenuItem("Command Palette\xE2\x80\xA6", "Ctrl+K")) {
+            // E721 Search  E92E Keyboard  E946 Info
+            if (ImGui::MenuItem("\xEE\x9C\xA1  Command Palette\xE2\x80\xA6", "Ctrl+K")) {
                 open_command_palette(state);
             }
             if (ImGui::IsItemHovered()) {
@@ -333,10 +342,10 @@ void render_menubar(AppState &state) {
                                   "project, and table in the loaded pack from one\n"
                                   "input. Highest-leverage shortcut in the app.");
             }
-            if (ImGui::MenuItem("Keyboard Shortcuts\xE2\x80\xA6")) {
+            if (ImGui::MenuItem("\xEE\xA4\xAE  Keyboard Shortcuts\xE2\x80\xA6")) {
                 state.show_shortcuts_modal = true;
             }
-            if (ImGui::MenuItem("About SubuwuTuner\xE2\x80\xA6")) {
+            if (ImGui::MenuItem("\xEE\xA5\x86  About SubuwuTuner\xE2\x80\xA6")) {
                 state.show_about_modal = true;
             }
             ImGui::Separator();

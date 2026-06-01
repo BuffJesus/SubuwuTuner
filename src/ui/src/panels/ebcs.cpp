@@ -102,7 +102,7 @@ void render_ebcs_panel(AppState &state) {
     }
 
     ImGui::Spacing();
-    if (ImGui::Button("Analyze##ebcs")) {
+    if (ImGui::Button("\xEE\x9D\xA8  Analyze##ebcs")) {
         state.ebcs_load_error.clear();
         if (state.ebcs_log_path[0] == '\0') {
             state.ebcs_load_error = "Pick a CSV log first.";
