@@ -77,6 +77,7 @@ add_executable(st_unit_tests
     unit/feature_codegen/test_sh2a.cpp
     unit/feature_codegen/test_rh850.cpp
     unit/feature_codegen/test_address_gate.cpp
+    unit/feature_patch/test_manifest.cpp
 )
 
 target_link_libraries(st_unit_tests
@@ -98,6 +99,7 @@ target_link_libraries(st_unit_tests
         st::policy
         st::feature
         st::feature_codegen
+        st::feature_patch
         st::warnings
         st::sanitizers
         st::platform
