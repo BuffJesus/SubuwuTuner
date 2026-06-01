@@ -2323,8 +2323,14 @@ int cmd_project_edit_csv(int argc, char *argv[]) {
         }
     }
     if (!proj_path.has_value() || !table_id.has_value() || !csv_path.has_value()) {
-        std::fputs("project-edit-csv: missing required arguments\n"
-                   "Usage: subuwutuner-cli project-edit-csv <dir> "
+        std::fputs("project-edit-csv: missing required arguments:", stderr);
+        if (!proj_path.has_value())
+            std::fputs(" <dir>", stderr);
+        if (!table_id.has_value())
+            std::fputs(" --table", stderr);
+        if (!csv_path.has_value())
+            std::fputs(" --from", stderr);
+        std::fputs("\nUsage: subuwutuner-cli project-edit-csv <dir> "
                    "--table <id> --from <FILE.csv> [--dry-run]\n"
                    "  CSV format: optional header row, then one edit per row\n"
                    "  in the shape `row,col,value` (engineering units; the\n"
@@ -2492,8 +2498,12 @@ int cmd_project_export_csv(int argc, char *argv[]) {
         }
     }
     if (!proj_path.has_value() || !table_id.has_value()) {
-        std::fputs("project-export-csv: missing required arguments\n"
-                   "Usage: subuwutuner-cli project-export-csv <dir> "
+        std::fputs("project-export-csv: missing required arguments:", stderr);
+        if (!proj_path.has_value())
+            std::fputs(" <dir>", stderr);
+        if (!table_id.has_value())
+            std::fputs(" --table", stderr);
+        std::fputs("\nUsage: subuwutuner-cli project-export-csv <dir> "
                    "--table <id> [--diff-only] [--output <FILE.csv>]\n"
                    "  Emits the table's working-ROM cells in the "
                    "`row,col,value` format that project-edit-csv consumes.\n"
@@ -2622,8 +2632,14 @@ int cmd_project_new(int argc, char *argv[]) {
     }
 
     if (!source_path.has_value() || !def_path.has_value() || !proj_path.has_value()) {
-        std::fputs("project-new: missing required arguments\n"
-                   "Usage: subuwutuner-cli project-new --source <rom> --def <pack> "
+        std::fputs("project-new: missing required arguments:", stderr);
+        if (!source_path.has_value())
+            std::fputs(" --source", stderr);
+        if (!def_path.has_value())
+            std::fputs(" --def", stderr);
+        if (!proj_path.has_value())
+            std::fputs(" <dir>", stderr);
+        std::fputs("\nUsage: subuwutuner-cli project-new --source <rom> --def <pack> "
                    "[--name <name>] <dir>\n",
                    stderr);
         return 2;
@@ -3025,8 +3041,14 @@ int cmd_project_autotune_maf(int argc, char *argv[]) {
         }
     }
     if (!project_dir.has_value() || !table_id.has_value() || !log_path.has_value()) {
-        std::fputs("project-autotune-maf: missing required arguments\n"
-                   "Usage: subuwutuner-cli project-autotune-maf <dir>\n"
+        std::fputs("project-autotune-maf: missing required arguments:", stderr);
+        if (!project_dir.has_value())
+            std::fputs(" <dir>", stderr);
+        if (!table_id.has_value())
+            std::fputs(" --table", stderr);
+        if (!log_path.has_value())
+            std::fputs(" --log", stderr);
+        std::fputs("\nUsage: subuwutuner-cli project-autotune-maf <dir>\n"
                    "       --table <id> --log <CSV>\n"
                    "       [--gain <num>] [--max-delta <pct>]\n"
                    "       [--min-samples-per-cell <N>] [--require-open-loop]\n"
@@ -3356,8 +3378,14 @@ int cmd_project_autotune_knock_pull(int argc, char *argv[]) {
         }
     }
     if (!project_dir.has_value() || !table_id.has_value() || !log_path.has_value()) {
-        std::fputs("project-autotune-knock-pull: missing required arguments\n"
-                   "Usage: subuwutuner-cli project-autotune-knock-pull <dir>\n"
+        std::fputs("project-autotune-knock-pull: missing required arguments:", stderr);
+        if (!project_dir.has_value())
+            std::fputs(" <dir>", stderr);
+        if (!table_id.has_value())
+            std::fputs(" --table", stderr);
+        if (!log_path.has_value())
+            std::fputs(" --log", stderr);
+        std::fputs("\nUsage: subuwutuner-cli project-autotune-knock-pull <dir>\n"
                    "       --table <id> --log <CSV>\n"
                    "       [--rpm-axis x|y]\n"
                    "       [--trigger-degrees D] [--pull-step-degrees D]\n"
@@ -3673,8 +3701,18 @@ int cmd_table_edit(int argc, char *argv[]) {
 
     if (!def_path.has_value() || !table_id.has_value() || !op.has_value() ||
         !rom_path.has_value() || !output_path.has_value()) {
-        std::fputs("table-edit: missing required arguments\n", stderr);
-        std::fputs("Usage: subuwutuner-cli table-edit --def <pack.toml> --table <id>\n"
+        std::fputs("table-edit: missing required arguments:", stderr);
+        if (!def_path.has_value())
+            std::fputs(" --def", stderr);
+        if (!table_id.has_value())
+            std::fputs(" --table", stderr);
+        if (!op.has_value())
+            std::fputs(" OP", stderr);
+        if (!rom_path.has_value())
+            std::fputs(" <FILE>", stderr);
+        if (!output_path.has_value())
+            std::fputs(" --output", stderr);
+        std::fputs("\nUsage: subuwutuner-cli table-edit --def <pack.toml> --table <id>\n"
                    "       [--rows A:B] [--cols A:B] OP [VALUE] <FILE> --output <OUT>\n",
                    stderr);
         return 2;
@@ -3809,8 +3847,14 @@ int cmd_rom_diff(int argc, char *argv[]) {
     }
 
     if (!def_path.has_value() || !rom_a.has_value() || !rom_b.has_value()) {
-        std::fputs("rom-diff: missing required arguments\n"
-                   "Usage: subuwutuner-cli rom-diff --def <pack.toml> <A.bin> <B.bin>\n",
+        std::fputs("rom-diff: missing required arguments:", stderr);
+        if (!def_path.has_value())
+            std::fputs(" --def", stderr);
+        if (!rom_a.has_value())
+            std::fputs(" <A.bin>", stderr);
+        if (!rom_b.has_value())
+            std::fputs(" <B.bin>", stderr);
+        std::fputs("\nUsage: subuwutuner-cli rom-diff --def <pack.toml> <A.bin> <B.bin>\n",
                    stderr);
         return 2;
     }
@@ -3944,8 +3988,12 @@ int cmd_project_diff(int argc, char *argv[]) {
         }
     }
     if (!proj_a.has_value() || !proj_b.has_value()) {
-        std::fputs("project-diff: missing required arguments\n"
-                   "Usage: subuwutuner-cli project-diff <A.stune> <B.stune> "
+        std::fputs("project-diff: missing required arguments:", stderr);
+        if (!proj_a.has_value())
+            std::fputs(" <A.stune>", stderr);
+        if (!proj_b.has_value())
+            std::fputs(" <B.stune>", stderr);
+        std::fputs("\nUsage: subuwutuner-cli project-diff <A.stune> <B.stune> "
                    "[--table <id>] [--profile P] [--verbose]\n"
                    "  Compares two projects' working ROMs table-by-table.\n"
                    "  Both must reference the same pack id. With --profile,\n"
@@ -4876,9 +4924,13 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
     }
 
     if (!log_path.has_value() || !flkc_cols_arg.has_value()) {
+        std::fputs("knock-snapshot: missing required arguments:", stderr);
+        if (!log_path.has_value())
+            std::fputs(" --log", stderr);
+        if (!flkc_cols_arg.has_value())
+            std::fputs(" --flkc-cols", stderr);
         std::fputs(
-            "knock-snapshot: missing required arguments\n"
-            "Usage: subuwutuner-cli knock-snapshot --log <CSV> --flkc-cols <a,b,c,d>\n"
+            "\nUsage: subuwutuner-cli knock-snapshot --log <CSV> --flkc-cols <a,b,c,d>\n"
             "                                      [--fbkc-cols <a,b,c,d>] [--rpm-col <name>]\n"
             "                                      [--load-col <name>] [--cylinders N]\n"
             "                                      [--window-seconds N] [--sample-rate-hz N]\n"
@@ -5097,9 +5149,13 @@ int cmd_adaptive_history(int argc, char *argv[]) {
     }
 
     if (!log_path.has_value() || !ts_col.has_value()) {
+        std::fputs("adaptive-history: missing required arguments:", stderr);
+        if (!log_path.has_value())
+            std::fputs(" --log", stderr);
+        if (!ts_col.has_value())
+            std::fputs(" --timestamp-col", stderr);
         std::fputs(
-            "adaptive-history: missing required arguments\n"
-            "Usage: subuwutuner-cli adaptive-history --log <CSV> --timestamp-col <name>\n"
+            "\nUsage: subuwutuner-cli adaptive-history --log <CSV> --timestamp-col <name>\n"
             "                                        [--ltft-col <name>] [--dam-col <name>]\n"
             "                                        [--idle-adapt-col <name>] [--bucket-seconds "
             "N]\n"
@@ -5377,8 +5433,16 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
 
     if (!log_path.has_value() || !ts_col.has_value() || !ect_col.has_value() ||
         !rpm_col.has_value()) {
-        std::fputs("coldstart-analyze: missing required arguments\n"
-                   "Usage: subuwutuner-cli coldstart-analyze --log <CSV>\n"
+        std::fputs("coldstart-analyze: missing required arguments:", stderr);
+        if (!log_path.has_value())
+            std::fputs(" --log", stderr);
+        if (!ts_col.has_value())
+            std::fputs(" --timestamp-col", stderr);
+        if (!ect_col.has_value())
+            std::fputs(" --ect-col", stderr);
+        if (!rpm_col.has_value())
+            std::fputs(" --rpm-col", stderr);
+        std::fputs("\nUsage: subuwutuner-cli coldstart-analyze --log <CSV>\n"
                    "         --timestamp-col <name> --ect-col <name> --rpm-col <name>\n"
                    "         [--iat-col <name>] [--observed-lambda-col <name>]\n"
                    "         [--commanded-lambda-col <name>] [--timing-col <name>]\n"
@@ -5677,8 +5741,18 @@ int cmd_ebcs_analyze(int argc, char *argv[]) {
 
     if (!log_path.has_value() || !ts_col.has_value() || !target_col.has_value() ||
         !actual_col.has_value() || !throttle_col.has_value()) {
-        std::fputs("ebcs-analyze: missing required arguments\n"
-                   "Usage: subuwutuner-cli ebcs-analyze --log <CSV>\n"
+        std::fputs("ebcs-analyze: missing required arguments:", stderr);
+        if (!log_path.has_value())
+            std::fputs(" --log", stderr);
+        if (!ts_col.has_value())
+            std::fputs(" --timestamp-col", stderr);
+        if (!target_col.has_value())
+            std::fputs(" --target-boost-col", stderr);
+        if (!actual_col.has_value())
+            std::fputs(" --actual-boost-col", stderr);
+        if (!throttle_col.has_value())
+            std::fputs(" --throttle-col", stderr);
+        std::fputs("\nUsage: subuwutuner-cli ebcs-analyze --log <CSV>\n"
                    "         --timestamp-col <name> --target-boost-col <name>\n"
                    "         --actual-boost-col <name> --throttle-col <name>\n"
                    "         [--wgdc-col <name>] [--rpm-col <name>]\n"
@@ -5894,8 +5968,14 @@ int cmd_log(int argc, char *argv[]) {
     };
 
     if (!def_path.has_value() || !pid_list_arg.has_value() || !trace_path.has_value()) {
-        std::fputs("log: missing required arguments\n", stderr);
-        std::fputs("Usage: subuwutuner-cli log --def <pack> --pid <id[,id...]>\n"
+        std::fputs("log: missing required arguments:", stderr);
+        if (!def_path.has_value())
+            std::fputs(" --def", stderr);
+        if (!pid_list_arg.has_value())
+            std::fputs(" --pid", stderr);
+        if (!trace_path.has_value())
+            std::fputs(" --trace", stderr);
+        std::fputs("\nUsage: subuwutuner-cli log --def <pack> --pid <id[,id...]>\n"
                    "       --trace <file> [--output <csv>]\n",
                    stderr);
         return 2;
@@ -6276,8 +6356,14 @@ int cmd_autotune_maf(int argc, char *argv[]) {
     bool const axis_given = axis_arg.has_value() || axis_file.has_value();
     bool const current_given = current_arg.has_value() || current_file.has_value();
     if (!log_path.has_value() || !axis_given || !current_given) {
-        std::fputs("autotune maf: missing required arguments\n", stderr);
-        std::fputs("Usage: subuwutuner-cli autotune maf "
+        std::fputs("autotune maf: missing required arguments:", stderr);
+        if (!log_path.has_value())
+            std::fputs(" --log", stderr);
+        if (!axis_given)
+            std::fputs(" (--axis | --axis-file)", stderr);
+        if (!current_given)
+            std::fputs(" (--current | --current-file)", stderr);
+        std::fputs("\nUsage: subuwutuner-cli autotune maf "
                    "--log <csv> (--axis <v,v,…> | --axis-file <path>)\n"
                    "       (--current <gs,gs,…> | --current-file <path>)\n"
                    "       [--gain 0.5] [--max-delta 8%] "
@@ -6656,8 +6742,16 @@ int cmd_autotune_knock_pull(int argc, char *argv[]) {
     bool const load_given = load_axis_arg.has_value() || load_axis_file.has_value();
     bool const current_given = current_arg.has_value() || current_file.has_value();
     if (!log_path.has_value() || !rpm_given || !load_given || !current_given) {
-        std::fputs("autotune knock-pull: missing required arguments\n", stderr);
-        std::fputs("Usage: subuwutuner-cli autotune knock-pull "
+        std::fputs("autotune knock-pull: missing required arguments:", stderr);
+        if (!log_path.has_value())
+            std::fputs(" --log", stderr);
+        if (!rpm_given)
+            std::fputs(" (--rpm-axis | --rpm-axis-file)", stderr);
+        if (!load_given)
+            std::fputs(" (--load-axis | --load-axis-file)", stderr);
+        if (!current_given)
+            std::fputs(" (--current-timing | --current-timing-file)", stderr);
+        std::fputs("\nUsage: subuwutuner-cli autotune knock-pull "
                    "--log <csv>\n"
                    "       (--rpm-axis <r,r,…> | --rpm-axis-file <path>)\n"
                    "       (--load-axis <l,l,…> | --load-axis-file <path>)\n"
@@ -7036,9 +7130,12 @@ int cmd_can_diff(int argc, char *argv[]) {
         }
     }
     if (!a_path.has_value() || !b_path.has_value()) {
-        std::fputs("can-diff: missing required arguments\n"
-                   "Usage: subuwutuner-cli can-diff <A.asc> <B.asc>\n",
-                   stderr);
+        std::fputs("can-diff: missing required arguments:", stderr);
+        if (!a_path.has_value())
+            std::fputs(" <A.asc>", stderr);
+        if (!b_path.has_value())
+            std::fputs(" <B.asc>", stderr);
+        std::fputs("\nUsage: subuwutuner-cli can-diff <A.asc> <B.asc>\n", stderr);
         return 2;
     }
 
@@ -7511,9 +7608,13 @@ int cmd_can_decode(int argc, char *argv[]) {
         }
     }
     if (!dbc_path.has_value() || !asc_path.has_value()) {
+        std::fputs("can-decode: missing required arguments:", stderr);
+        if (!dbc_path.has_value())
+            std::fputs(" --dbc", stderr);
+        if (!asc_path.has_value())
+            std::fputs(" <FILE.asc>", stderr);
         std::fputs(
-            "can-decode: missing required arguments\n"
-            "Usage: subuwutuner-cli can-decode --dbc <FILE.dbc> <FILE.asc> [--output <csv>]\n",
+            "\nUsage: subuwutuner-cli can-decode --dbc <FILE.dbc> <FILE.asc> [--output <csv>]\n",
             stderr);
         return 2;
     }
@@ -7839,8 +7940,12 @@ int cmd_flash_delta(int argc, char *argv[]) {
         }
     }
     if (!source_path.has_value() || !target_path.has_value()) {
-        std::fputs("flash-delta: missing required arguments\n"
-                   "Usage: subuwutuner-cli flash-delta <SOURCE.bin> <TARGET.bin>\n"
+        std::fputs("flash-delta: missing required arguments:", stderr);
+        if (!source_path.has_value())
+            std::fputs(" <SOURCE.bin>", stderr);
+        if (!target_path.has_value())
+            std::fputs(" <TARGET.bin>", stderr);
+        std::fputs("\nUsage: subuwutuner-cli flash-delta <SOURCE.bin> <TARGET.bin>\n"
                    "       [--sector-size <N>] [--base-address <addr>] [--output <plan.toml>]\n",
                    stderr);
         return 2;
@@ -7926,8 +8031,12 @@ int cmd_flash_resume(int argc, char *argv[]) {
         }
     }
     if (!plan_path.has_value() || !journal_path.has_value()) {
-        std::fputs("flash-resume: missing required arguments\n"
-                   "Usage: subuwutuner-cli flash-resume <ORIGINAL.plan.toml> "
+        std::fputs("flash-resume: missing required arguments:", stderr);
+        if (!plan_path.has_value())
+            std::fputs(" <ORIGINAL.plan.toml>", stderr);
+        if (!journal_path.has_value())
+            std::fputs(" <JOURNAL.manifest.toml>", stderr);
+        std::fputs("\nUsage: subuwutuner-cli flash-resume <ORIGINAL.plan.toml> "
                    "<JOURNAL.manifest.toml> [--output <resumed.plan.toml>]\n",
                    stderr);
         return 2;
@@ -8415,8 +8524,12 @@ int cmd_flash_apply(int argc, char *argv[]) {
         }
     }
     if (!plan_path.has_value() || !trace_path.has_value()) {
-        std::fputs("flash-apply: missing required arguments\n"
-                   "Usage: subuwutuner-cli flash-apply --plan <FILE.toml> "
+        std::fputs("flash-apply: missing required arguments:", stderr);
+        if (!plan_path.has_value())
+            std::fputs(" --plan", stderr);
+        if (!trace_path.has_value())
+            std::fputs(" --trace", stderr);
+        std::fputs("\nUsage: subuwutuner-cli flash-apply --plan <FILE.toml> "
                    "--trace <FILE.uds>\n"
                    "       [--journal <FILE.toml>] [--manifest <FILE.toml>]\n"
                    "       [--data-format <hex>] [--integrity-check-offset <hex>]\n"
@@ -8709,8 +8822,12 @@ int cmd_flash_trace(int argc, char *argv[]) {
         }
     }
     if (!plan_path.has_value() || !output_path.has_value()) {
-        std::fputs("flash-trace: missing required arguments\n"
-                   "Usage: subuwutuner-cli flash-trace --plan <FILE.toml> "
+        std::fputs("flash-trace: missing required arguments:", stderr);
+        if (!plan_path.has_value())
+            std::fputs(" --plan", stderr);
+        if (!output_path.has_value())
+            std::fputs(" --output", stderr);
+        std::fputs("\nUsage: subuwutuner-cli flash-trace --plan <FILE.toml> "
                    "--output <FILE.uds>\n",
                    stderr);
         return 2;
