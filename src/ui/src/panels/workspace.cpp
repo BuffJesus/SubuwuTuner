@@ -40,6 +40,8 @@ void apply_workspace_mode(AppState &state, WorkspaceMode mode) {
     state.workspace_mode = mode;
     switch (mode) {
     case WorkspaceMode::Tune:
+        state.show_tables_panel = true;
+        state.show_table_view_panel = true;
         state.show_stats_panel = true;
         state.show_history_panel = true;
         state.show_dtcs_panel = true;
@@ -50,6 +52,12 @@ void apply_workspace_mode(AppState &state, WorkspaceMode mode) {
         state.show_features_designer = false;
         break;
     case WorkspaceMode::Datalog:
+        // Tables + Table both hide — Datalog is the log-analysis
+        // workspace, not the editor. The datalog quartet (Knock /
+        // Adaptive / Cold-Start / EBCS) owns the full work area
+        // with DTCs in a bottom strip for code cross-reference.
+        state.show_tables_panel = false;
+        state.show_table_view_panel = false;
         state.show_stats_panel = false;
         state.show_history_panel = false;
         // DTCs stays — datalog workflows frequently cross-reference
@@ -62,6 +70,10 @@ void apply_workspace_mode(AppState &state, WorkspaceMode mode) {
         state.show_features_designer = false;
         break;
     case WorkspaceMode::Features:
+        // Full-bleed designer. Sidebar + Table editor + everything else
+        // off so the canvas owns every pixel.
+        state.show_tables_panel = false;
+        state.show_table_view_panel = false;
         state.show_stats_panel = false;
         state.show_history_panel = false;
         state.show_dtcs_panel = false;
@@ -208,18 +220,15 @@ void build_workspace_layout(WorkspaceMode const mode, ImGuiID const dockspace_id
         break;
     }
     case WorkspaceMode::Datalog: {
-        // Tables left narrower (16%) — datalog panels need width for
-        // charts. Central area is a tabbed strip of the four datalog
-        // panels (Knock / Adaptive / Cold-Start / EBCS); DTCs gets the
-        // bottom strip for cross-referencing active codes against
-        // observed signals.
-        ImGuiID left = 0;
-        ImGuiID middle = 0;
-        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.16f, &left, &middle);
+        // Full-width datalog work area — Knock / Adaptive / Cold-Start
+        // / EBCS as a tab strip in the central node, DTCs as a bottom
+        // strip for active-code cross-reference against observed
+        // signals. Tables + Table editor are suppressed at the panel
+        // level for this mode (show_tables_panel /
+        // show_table_view_panel both false).
         ImGuiID bottom = 0;
         ImGuiID top = 0;
-        ImGui::DockBuilderSplitNode(middle, ImGuiDir_Down, 0.22f, &bottom, &top);
-        ImGui::DockBuilderDockWindow("Tables", left);
+        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Down, 0.22f, &bottom, &top);
         ImGui::DockBuilderDockWindow("Knock Dashboard###Knock Dashboard (Preview)", top);
         ImGui::DockBuilderDockWindow("Adaptive History###Adaptive History (Preview)", top);
         ImGui::DockBuilderDockWindow(
@@ -232,10 +241,10 @@ void build_workspace_layout(WorkspaceMode const mode, ImGuiID const dockspace_id
     case WorkspaceMode::Features: {
         // Full-bleed canvas. The node graph needs every pixel; no
         // sidebar, no side rails. Features Designer takes the whole
-        // dockspace as the central node. Other always-on windows
-        // (Tables, Table) are flagged hidden via the mode-switch's
-        // visibility flips — they're not docked here but the workspace
-        // rail click also zeroed their show_*_panel flags.
+        // dockspace as the central node. Tables + Table windows are
+        // suppressed at the panel level via show_tables_panel /
+        // show_table_view_panel — apply_workspace_mode flips both
+        // false for this mode.
         ImGui::DockBuilderDockWindow(
             "Custom Features Designer###Custom Features Designer (Preview)", dockspace_id);
         break;

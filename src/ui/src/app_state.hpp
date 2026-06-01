@@ -255,10 +255,15 @@ struct AppState {
     // against DTC code (P0401) or name.
     char dtc_filter[128]{};
 
-    // Visibility toggles for the secondary panels. The Sidebar and Table
-    // panels are always-on (closing them would orphan the user); these
+    // Visibility toggles. The Sidebar (Tables) and Table panels are the
+    // tuning workspace's primary surface — default on, hidden only by
+    // workspace switches (Features mode hides both; Datalog hides Table
+    // because its central area is the datalog panel tab strip).
+    // Secondary panels (Stats, History, DTCs, datalog quartet, designer)
     // are as-needed and are exposed via View menu checkboxes + the
     // standard dock tab-close X.
+    bool show_tables_panel{true};
+    bool show_table_view_panel{true};
     bool show_stats_panel{true};
     bool show_dtcs_panel{true};
     bool show_history_panel{true};

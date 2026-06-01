@@ -599,6 +599,9 @@ void render_table_grid(st::Definition::TableData const &td, st::Scaling const *s
 } // namespace
 
 void render_table_view(AppState &state, Fonts const &fonts) {
+    if (!state.show_table_view_panel) {
+        return;
+    }
     ImGui::Begin("Table");
 
     if (!state.project.has_value()) {

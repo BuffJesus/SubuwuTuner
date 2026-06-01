@@ -23,6 +23,9 @@
 namespace st::ui {
 
 void render_sidebar(AppState &state) {
+    if (!state.show_tables_panel) {
+        return;
+    }
     ImGui::Begin("Tables");
 
     if (!state.project.has_value()) {
