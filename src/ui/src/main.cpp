@@ -1,13 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The SubuwuTuner Authors
 //
-// subuwutuner-gui — Dear ImGui front-end.
-//
-// Opens a .stune project passed as argv[1], renders a dockable sidebar of
-// tables, and shows the selected table as a read-only grid. Editing,
-// project-management menus, and file-open dialogs land in follow-ups; this
-// pass lays the polish foundation: docking + viewports, tuned palette,
-// system-font probing.
+// subuwutuner-gui — Dear ImGui front-end. Bootstrap only:
+// GLFW + ImGui + ImPlot context setup, font + theme load, the main
+// render loop, and the per-frame keyboard-shortcut router. Everything
+// substantive lives in:
+//   - panels/         per-panel renderers + chrome (menubar, sidebar,
+//                     workspace rail, dockspace, command palette,
+//                     status bar, toasts)
+//   - modals/         per-modal renderers (about, settings, flash,
+//                     read_rom, autotune_*, csv_import, …)
+//   - widgets/        text / chip / empty-state / button helpers +
+//                     the adapter-picker sub-form
+//   - actions.*       undo/redo, copy/paste, the action router,
+//                     CSV import
+//   - app_state.*     AppState type + try_open_project /
+//                     select_table / close_project
+//   - project_io.*    Open/Save/CSV file-dialog wrappers
+//   - persistence.*   config dir + recents + settings text files
+//   - theme.*         brand-purple palette + apply_theme + font load
 
 #include "st/autotune.hpp"
 #include "st/core/version.hpp"
@@ -29,197 +40,32 @@
 
 #include "icon_data.hpp"
 
-// Shared UI headers — checkpoint 1 of the main.cpp split. Struct/enum
-// definitions live here; function implementations are still in this
-// file until the per-modal / per-panel moves land.
-#include "app_state.hpp"
-#include "persistence.hpp"
-#include "theme.hpp"
 #include "actions.hpp"
-#include "project_io.hpp"
-#include "widgets/widgets.hpp"
-#include "widgets/adapter_picker.hpp"
+#include "app_state.hpp"
 #include "modals/modals.hpp"
 #include "panels/panels.hpp"
+#include "persistence.hpp"
+#include "project_io.hpp"
+#include "theme.hpp"
+#include "widgets/widgets.hpp"
 
-// ImGui + backends.
 #include <GLFW/glfw3.h>
-
-#include <algorithm>
-#include <array>
-#include <atomic>
-#include <chrono>
-#include <cmath>
-#include <cstdarg>
-#include <cstdio>
-#include <cstdlib>
-#include <ctime>
-#include <filesystem>
-#include <fstream>
-#include <functional>
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
-#include <imgui_internal.h> // DockBuilder*
 #include <implot.h>
-#include <ios>
-#include <limits>
-#include <memory>
 #include <nfd.hpp>
-#include <optional>
+
+#include <cstdio>
+#include <functional>
 #include <string>
 #include <string_view>
-#include <system_error>
-#include <thread>
-#include <unordered_set>
-#include <utility>
-#include <vector>
-
-// Everything below is wrapped in `namespace st::ui { ... }` for
-// checkpoint 1 of the split. Header decls (in app_state.hpp etc.) are
-// at st::ui scope; main.cpp's function bodies sit directly in st::ui
-// so they satisfy those decls with external linkage. The only inner
-// anonymous namespace kept is the one around g_current_theme (a true
-// file-local cache variable). Per-file anon namespaces come back when
-// each modal / panel moves to its own .cpp.
 
 namespace st::ui {
-
-// Widget primitives moved to widgets/widgets.cpp (decls in widgets/widgets.hpp).
-// Toast helpers moved to panels/toasts.cpp (decls in panels/panels.hpp).
-
-// ---------------------------------------------------------------------
-// Recents — one-line-per-entry config persisted between cold starts.
-// Lives next to other user-config in the OS-conventional location:
-//   Windows: %LOCALAPPDATA%\SubuwuTuner\recents.txt
-//   Mac:     ~/Library/Application Support/SubuwuTuner/recents.txt
-//   Linux:   $XDG_CONFIG_HOME/subuwutuner/recents.txt
-//            (fallback: $HOME/.config/subuwutuner/recents.txt)
-//
-// Format: one entry per line, "<ISO-8601 UTC>\t<absolute path>".
-// Cap at 8 entries; most recent first. A malformed line is silently
-// skipped — recents are a convenience, not a source of truth.
-// ---------------------------------------------------------------------
-
-
-// Selection, TableViewMode, WorkspaceMode, ConfirmAction, ToastKind,
-// Toast, AdapterPickerState moved to app_state.hpp.
-
-// Adapter picker helpers (render_adapter_picker / adapter_picker_to_spec /
-// adapter_is_trace_mode) stay file-local for now — their bodies use ImGui +
-// transport-factory details. Header is widgets/adapter_picker.hpp.
-
-// AppState moved to app_state.hpp.
-//
-// The three methods that have non-trivial bodies (try_open_project,
-// AppState methods moved to app_state.cpp.
-// project-IO dialogs (open/save/csv) moved to project_io.cpp.
-// actions (apply_parsed_csv_edits, apply_history_step, paste, reset,
-// undo/redo, execute/request_action, copy_rect_to_clipboard, parse_tsv)
-// moved to actions.cpp.
-
-
-// render_unsaved_modal moved to modals/unsaved.cpp (along with
-// modal_save_label, modal_discard_label, modal_subtitle as file-local).
-// render_csv_import_modal moved to modals/csv_import.cpp.
-// render_maf_autotune_modal moved to modals/autotune_maf.cpp (along
-// with run_maf_autotune_preview + apply_maf_autotune_proposal helpers).
-// render_kp_autotune_modal moved to modals/autotune_knock.cpp (along
-// with run_knock_pull_preview + apply_knock_pull_proposal helpers).
-// render_flash_modal moved to modals/flash.cpp (along with PendingFlash
-// + build_pending_flash as file-local).
-// render_shortcuts_modal moved to modals/shortcuts.cpp (along with
-// ShortcutRow, ShortcutGroup, shortcuts_reference as file-local).
-// render_about_modal moved to modals/about.cpp.
-// render_new_project_modal moved to modals/new_project.cpp.
 
 void glfw_error_callback(int err, char const *desc) {
     std::fprintf(stderr, "GLFW error %d: %s\n", err, desc);
 }
-
-
-// Case-insensitive substring search. Used by the sidebar table filter
-// to match against both human-readable name and the snake_case id.
-// Empty needle matches everything (so an empty filter shows the full
-// list). ASCII-only — calibration table names use ASCII identifiers.
-
-
-// ===========================================================================
-// Read-ROM-from-car modal
-// ===========================================================================
-//
-// Renders the Tools → Read ROM from Car flow. State machine drives the body:
-// Idle (form) → Running (progress) → Done (save dialog) / Failed (error) /
-// Cancelled (status note). All long-running work runs on `state.read_rom_worker`;
-// the modal just polls atomics + status enum on every frame.
-//
-// ----- v1.1 Write-ROM plan (NOT IMPLEMENTED — design notes only) -----
-//
-// The flash side of this same UX is meaningfully more dangerous than the
-// read side, and the existing render_flash_modal already covers most of
-// it for file-based flashing. The "Write ROM to Car" GUI button would be
-// a thin wrapper that:
-//
-//   1. Routes through the same render_flash_modal policy gate (engine-
-//      safety hard-stop + emissions confirmation + tuner-reason field).
-//   2. Adds a "Pick adapter" sub-form identical to this read modal's
-//      (transport kind + device/DLL path) — could literally share the
-//      ImGui code via a render_adapter_picker(state) helper.
-//   3. Adds a brick-protection confirmation (docs/05 §4): battery > 12.0V
-//      via a UDS PID poll, ignition state check, etc.
-//   4. Background-threads Flasher::execute(plan), with the same atomic
-//      progress + cancel pattern this read modal uses. Flasher::execute
-//      already emits a structured FlashReport per step — surface that
-//      as a per-sector ledger in the modal body.
-//   5. Verify pass (the existing post-erase-write loop in execute()
-//      already does this). Failure path: keep partial-flash report
-//      visible + offer "Resume from journal" if applicable.
-//
-// Scope to defer:
-//   - Resume-from-journal UI is its own modal/dialog.
-//   - Vehicle-state precondition checks (battery, ignition, transmission
-//      in N/P) need new transport calls + a "preflight checks passed"
-//      panel. Hardware-gated — wire after OBDX arrives.
-// render_settings_modal moved to modals/settings.cpp.
-// render_def_registry_modal moved to modals/def_registry.cpp.
-// render_read_rom_modal moved to modals/read_rom.cpp.
-// open_command_palette + render_command_palette moved to panels/command_palette.cpp
-// (PaletteCommand / PaletteCommandKind / build_palette_commands /
-// dispatch_palette_command are file-local there).
-
-// render_menubar moved to panels/menubar.cpp.
-// render_sidebar moved to panels/sidebar.cpp.
-// render_workspace_rail + render_dockspace_host + apply_workspace_mode
-// + build_workspace_layout moved to panels/workspace.cpp (g_request_dock_reset
-// is now file-local there; request_layout_reset is exposed via panels.hpp).
-
-
-// render_welcome_panel moved to panels/welcome.cpp.
-// render_stats_panel moved to panels/stats.cpp.
-// render_knock_dashboard_panel moved to panels/knock_dashboard.cpp.
-// render_adaptive_history_panel moved to panels/adaptive_history.cpp.
-// render_coldstart_panel moved to panels/coldstart.cpp.
-// render_ebcs_panel moved to panels/ebcs.cpp.
-// render_dtcs_panel moved to panels/dtcs.cpp.
-// render_history_panel moved to panels/history.cpp.
-// render_features_designer moved to panels/features_designer.cpp.
-// render_table_view moved to panels/table_view.cpp (along with
-// GridStats, compute_stats, heatmap_color, text_right_aligned,
-// render_table_heatmap, render_table_grid as file-local helpers).
-
-
-// Status-bar TTL pass. Called once per frame before render_status_bar
-// to fade out stale transient messages. Detects "new message" via a
-// shadow string + per-message timestamp; after ~5s of the same
-// content, clears it. Call sites just write to state.status_msg — no
-// per-callsite TTL bookkeeping. Edge cases:
-//  - Two consecutive identical messages (e.g. "Saved." twice) only
-//    reset the timer on STRING change. That's the right trade-off:
-//    rapid duplicate writes are usually the same event, and the
-//    alternative (timer reset on every frame the string is set) would
-//    pin the message forever.
-//  - Time source is ImGui::GetTime() (wall-clock seconds since app
-//    start, monotonic). No allocations, no calls outside ImGui.
 
 // Render-frame callable shared between the main loop and GLFW's window-refresh
 // callback. Windows enters a modal resize loop while the user drags a border;
@@ -228,7 +74,7 @@ void glfw_error_callback(int err, char const *desc) {
 // refresh callback that GLFW dispatches during the modal loop.
 //
 // Lifted to outer st::ui scope so main() (at global scope) can address it
-// after the anon namespace closes.
+// after the namespace closes.
 std::function<void()> g_render_frame;
 
 } // namespace st::ui
