@@ -72,7 +72,7 @@ std::optional<PendingFlash> build_pending_flash(AppState const &state) {
 
 void render_flash_modal(AppState &state) {
     if (state.show_flash_modal) {
-        ImGui::OpenPopup("Flash...##flash_modal");
+        ImGui::OpenPopup("\xEE\xA5\x85  Flash...##flash_modal");
         state.show_flash_modal = false;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
@@ -82,7 +82,7 @@ void render_flash_modal(AppState &state) {
     // has TextWrapped at the REFUSED branches.
     ImGui::SetNextWindowSizeConstraints(ImVec2(560.0f, 240.0f),
                                         ImVec2(560.0f, FLT_MAX));
-    if (!ImGui::BeginPopupModal("Flash...##flash_modal", nullptr,
+    if (!ImGui::BeginPopupModal("\xEE\xA5\x85  Flash...##flash_modal", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }

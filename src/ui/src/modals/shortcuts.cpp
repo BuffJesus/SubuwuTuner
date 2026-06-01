@@ -95,13 +95,13 @@ std::vector<ShortcutGroup> const &shortcuts_reference() {
 
 void render_shortcuts_modal(AppState &state) {
     if (state.show_shortcuts_modal) {
-        ImGui::OpenPopup("Keyboard shortcuts##shortcuts_modal");
+        ImGui::OpenPopup("\xEE\xA4\xAE  Keyboard shortcuts##shortcuts_modal");
         state.show_shortcuts_modal = false;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSizeConstraints(ImVec2(560.0f, 380.0f), ImVec2(900.0f, 720.0f));
-    if (!ImGui::BeginPopupModal("Keyboard shortcuts##shortcuts_modal", nullptr,
+    if (!ImGui::BeginPopupModal("\xEE\xA4\xAE  Keyboard shortcuts##shortcuts_modal", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }

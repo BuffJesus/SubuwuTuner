@@ -76,12 +76,12 @@ char const *modal_subtitle(ConfirmAction a) noexcept {
 
 void render_unsaved_modal(AppState &state) {
     if (state.show_unsaved_modal) {
-        ImGui::OpenPopup("Unsaved changes##unsaved");
+        ImGui::OpenPopup("\xEE\x9E\xBA  Unsaved changes##unsaved");
         state.show_unsaved_modal = false;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal("Unsaved changes##unsaved", nullptr,
+    if (ImGui::BeginPopupModal("\xEE\x9E\xBA  Unsaved changes##unsaved", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
         ConfirmAction const what = state.next_action;
 

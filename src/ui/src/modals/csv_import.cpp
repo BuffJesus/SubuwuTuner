@@ -21,13 +21,13 @@ namespace st::ui {
 
 void render_csv_import_modal(AppState &state) {
     if (state.show_csv_import_modal) {
-        ImGui::OpenPopup("Import CSV##csv_import_modal");
+        ImGui::OpenPopup("\xEE\x84\x9B  Import CSV##csv_import_modal");
         state.show_csv_import_modal = false;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSizeConstraints(ImVec2(560.0f, 320.0f), ImVec2(900.0f, 700.0f));
-    if (!ImGui::BeginPopupModal("Import CSV##csv_import_modal", nullptr,
+    if (!ImGui::BeginPopupModal("\xEE\x84\x9B  Import CSV##csv_import_modal", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }

@@ -57,8 +57,11 @@ void render_status_bar(AppState &state) {
         }
 
         ImGui::SameLine();
+        // MDL2 prefix icons:
+        //   E70F Edit (pencil)   — unsaved edits
+        //   E930 Completed       — saved / clean (filled circle + check)
         if (dirty) {
-            chip("Unsaved edits", chip_fg_warn(), chip_bg_warn());
+            chip("\xEE\x9C\x8F  Unsaved edits", chip_fg_warn(), chip_bg_warn());
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("In-memory edits have not been written to disk.\n"
                                   "Ctrl+S to save the .stune project.");
@@ -71,11 +74,11 @@ void render_status_bar(AppState &state) {
             // saved, we just don't have a session-local timestamp.
             if (state.last_save_iso.has_value()) {
                 auto const rel = format_relative_time(*state.last_save_iso);
-                char buf[48];
+                char buf[64];
                 if (rel.empty()) {
-                    std::snprintf(buf, sizeof buf, "Saved");
+                    std::snprintf(buf, sizeof buf, "\xEE\xA4\xB0  Saved");
                 } else {
-                    std::snprintf(buf, sizeof buf, "Saved %s", rel.c_str());
+                    std::snprintf(buf, sizeof buf, "\xEE\xA4\xB0  Saved %s", rel.c_str());
                 }
                 chip(buf, chip_fg_muted(), chip_bg_muted());
                 if (ImGui::IsItemHovered()) {
@@ -93,7 +96,7 @@ void render_status_bar(AppState &state) {
                                       when.c_str());
                 }
             } else {
-                chip("Clean", chip_fg_muted(), chip_bg_muted());
+                chip("\xEE\xA4\xB0  Clean", chip_fg_muted(), chip_bg_muted());
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("All edits are saved to disk.");
                 }
@@ -109,10 +112,9 @@ void render_status_bar(AppState &state) {
             auto const profile = state.project->policy_profile();
             auto const profile_str = std::string{st::policy::profile_name(profile)};
             bool const is_default = profile == st::policy::Profile::MotorsportOnly;
-            // Appended "▾" makes the chip read as a menu trigger
-            // without needing a hover. The chip helper renders text
-            // verbatim, so the glyph is part of the label.
-            auto const chip_label = profile_str + "  \xE2\x96\xBE";
+            // Leading E72E Lock — jurisdiction profile gates flash-time
+            // policy. Trailing ▾ keeps the menu-trigger affordance.
+            auto const chip_label = "\xEE\x9C\xAE  " + profile_str + "  \xE2\x96\xBE";
             if (is_default) {
                 chip(chip_label.c_str(), chip_fg_muted(), chip_bg_muted());
             } else {
@@ -207,8 +209,9 @@ void render_status_bar(AppState &state) {
                     }
                 }
                 if (disabled > 0) {
-                    char buf[48];
-                    std::snprintf(buf, sizeof buf, "%zu DTC off", disabled);
+                    char buf[64];
+                    // E7BA Warning — DTCs disabled is a soft warning.
+                    std::snprintf(buf, sizeof buf, "\xEE\x9E\xBA  %zu DTC off", disabled);
                     ImGui::SameLine();
                     chip(buf, chip_fg_muted(), chip_bg_muted());
                     if (ImGui::IsItemHovered()) {

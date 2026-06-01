@@ -26,7 +26,7 @@ namespace st::ui {
 
 void render_settings_modal(AppState &state) {
     if (state.show_settings_modal) {
-        ImGui::OpenPopup("Settings##settings_modal");
+        ImGui::OpenPopup("\xEE\x9C\x93  Settings##settings_modal");
         state.show_settings_modal = false;
         // Refresh from disk every time the modal opens so concurrent
         // edits via the CLI `config set` subcommand don't get clobbered.
@@ -53,7 +53,7 @@ void render_settings_modal(AppState &state) {
     // modal renders TextWrapped for the post-save status_msg.
     ImGui::SetNextWindowSizeConstraints(ImVec2(640.0f, 200.0f),
                                         ImVec2(640.0f, FLT_MAX));
-    if (!ImGui::BeginPopupModal("Settings##settings_modal", nullptr,
+    if (!ImGui::BeginPopupModal("\xEE\x9C\x93  Settings##settings_modal", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }

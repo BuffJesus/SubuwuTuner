@@ -44,7 +44,7 @@ namespace st::ui {
 
 void render_read_rom_modal(AppState &state) {
     if (state.show_read_rom_modal) {
-        ImGui::OpenPopup("Read ROM from Car##read_rom_modal");
+        ImGui::OpenPopup("\xEE\xA2\x96  Read ROM from Car##read_rom_modal");
         state.show_read_rom_modal = false;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
@@ -63,7 +63,7 @@ void render_read_rom_modal(AppState &state) {
     // and render_shortcuts_modal already use successfully.
     ImGui::SetNextWindowSizeConstraints(ImVec2(560.0f, 240.0f),
                                         ImVec2(560.0f, FLT_MAX));
-    if (!ImGui::BeginPopupModal("Read ROM from Car##read_rom_modal", nullptr,
+    if (!ImGui::BeginPopupModal("\xEE\xA2\x96  Read ROM from Car##read_rom_modal", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }

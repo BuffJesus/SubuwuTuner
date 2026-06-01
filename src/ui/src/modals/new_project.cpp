@@ -31,13 +31,13 @@ namespace st::ui {
 
 void render_new_project_modal(AppState &state) {
     if (state.show_new_project_modal) {
-        ImGui::OpenPopup("New project##new_project_modal");
+        ImGui::OpenPopup("\xEE\x9C\x90  New project##new_project_modal");
         state.show_new_project_modal = false;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSizeConstraints(ImVec2(520.0f, 280.0f), ImVec2(900.0f, 600.0f));
-    if (!ImGui::BeginPopupModal("New project##new_project_modal", nullptr,
+    if (!ImGui::BeginPopupModal("\xEE\x9C\x90  New project##new_project_modal", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }

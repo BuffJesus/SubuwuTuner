@@ -21,13 +21,13 @@ namespace st::ui {
 
 void render_about_modal(AppState &state) {
     if (state.show_about_modal) {
-        ImGui::OpenPopup("About SubuwuTuner##about_modal");
+        ImGui::OpenPopup("\xEE\xA5\x86  About SubuwuTuner##about_modal");
         state.show_about_modal = false;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSizeConstraints(ImVec2(440.0f, 0.0f), ImVec2(680.0f, 600.0f));
-    if (!ImGui::BeginPopupModal("About SubuwuTuner##about_modal", nullptr,
+    if (!ImGui::BeginPopupModal("\xEE\xA5\x86  About SubuwuTuner##about_modal", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }

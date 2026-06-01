@@ -170,13 +170,13 @@ std::optional<std::string> apply_maf_autotune_proposal(AppState &state) {
 
 void render_maf_autotune_modal(AppState &state) {
     if (state.show_maf_autotune_modal) {
-        ImGui::OpenPopup("Autotune MAF##maf_autotune_modal");
+        ImGui::OpenPopup("\xEE\xA5\x90  Autotune MAF##maf_autotune_modal");
         state.show_maf_autotune_modal = false;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSizeConstraints(ImVec2(640.0f, 380.0f), ImVec2(1100.0f, 800.0f));
-    if (!ImGui::BeginPopupModal("Autotune MAF##maf_autotune_modal", nullptr,
+    if (!ImGui::BeginPopupModal("\xEE\xA5\x90  Autotune MAF##maf_autotune_modal", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }

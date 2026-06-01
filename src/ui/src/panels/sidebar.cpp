@@ -113,8 +113,12 @@ void render_sidebar(AppState &state) {
         // Snake-case IDs are developer-facing — surface them in the
         // tooltip instead.
         char const *label = t.name.empty() ? t.id.c_str() : t.name.c_str();
+        // MDL2 E80A GridView — small leading icon so every table row
+        // reads as a data-grid affordance even when scanning quickly.
+        char row_label[256];
+        std::snprintf(row_label, sizeof row_label, "\xEE\xA0\x8A  %s", label);
         ImGui::PushID(t.id.c_str());
-        if (ImGui::Selectable(label, selected, ImGuiSelectableFlags_AllowOverlap)) {
+        if (ImGui::Selectable(row_label, selected, ImGuiSelectableFlags_AllowOverlap)) {
             state.select_table(t.id);
         }
         // Capture Selectable hover state BEFORE drawing the badge — the
@@ -193,14 +197,19 @@ void render_sidebar(AppState &state) {
         // the ID stays stable across filter / pack / count changes,
         // so the collapse state persists for as long as imgui.ini is
         // writable (across sessions).
-        char tn_label[180];
+        // MDL2 E8B7 Folder — leads the category header so the group
+        // hierarchy reads at a glance. The ### suffix keeps the ImGui
+        // ID stable on the category name only, so the leading icon
+        // doesn't churn the collapse state when the count changes.
+        char tn_label[200];
         if (filter.empty()) {
-            std::snprintf(tn_label, sizeof tn_label, "%.*s (%zu)###cat_%.*s",
+            std::snprintf(tn_label, sizeof tn_label, "\xEE\xA2\xB7  %.*s (%zu)###cat_%.*s",
                           static_cast<int>(g.name.size()), g.name.data(),
                           g.indices.size(),
                           static_cast<int>(g.name.size()), g.name.data());
         } else {
-            std::snprintf(tn_label, sizeof tn_label, "%.*s (%zu of %zu)###cat_%.*s",
+            std::snprintf(tn_label, sizeof tn_label,
+                          "\xEE\xA2\xB7  %.*s (%zu of %zu)###cat_%.*s",
                           static_cast<int>(g.name.size()), g.name.data(),
                           group_matched, g.indices.size(),
                           static_cast<int>(g.name.size()), g.name.data());

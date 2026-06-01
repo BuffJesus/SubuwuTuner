@@ -28,13 +28,13 @@ namespace st::ui {
 
 void render_def_registry_modal(AppState &state) {
     if (state.show_def_registry_modal) {
-        ImGui::OpenPopup("Browse Definitions##def_registry_modal");
+        ImGui::OpenPopup("\xEE\xA2\xB7  Browse Definitions##def_registry_modal");
         state.show_def_registry_modal = false;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(700.0f, 520.0f), ImGuiCond_Appearing);
-    if (!ImGui::BeginPopupModal("Browse Definitions##def_registry_modal",
+    if (!ImGui::BeginPopupModal("\xEE\xA2\xB7  Browse Definitions##def_registry_modal",
                                 nullptr, ImGuiWindowFlags_None)) {
         return;
     }

@@ -198,13 +198,13 @@ std::optional<std::string> apply_knock_pull_proposal(AppState &state) {
 
 void render_kp_autotune_modal(AppState &state) {
     if (state.show_kp_autotune_modal) {
-        ImGui::OpenPopup("Autotune knock pull##kp_autotune_modal");
+        ImGui::OpenPopup("\xEE\xA5\x90  Autotune knock pull##kp_autotune_modal");
         state.show_kp_autotune_modal = false;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSizeConstraints(ImVec2(680.0f, 420.0f), ImVec2(1200.0f, 900.0f));
-    if (!ImGui::BeginPopupModal("Autotune knock pull##kp_autotune_modal", nullptr,
+    if (!ImGui::BeginPopupModal("\xEE\xA5\x90  Autotune knock pull##kp_autotune_modal", nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }
