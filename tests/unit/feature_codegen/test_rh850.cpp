@@ -208,6 +208,13 @@ TEST_CASE("rh850::enc_xor_reg encodes the register fields correctly",
     REQUIRE(cg::rh850::enc_xor_reg(cg::rh850::Reg::R11, cg::rh850::Reg::R10) == 0x512B);
 }
 
+TEST_CASE("rh850::enc_not_reg encodes the register fields correctly",
+          "[rh850][encoder]") {
+    // not r11, r10 → reg1 = 11, reg2 = 10, opcode = 0b000001 (= 0x01)
+    // Bits: (10<<11) | (0x01<<5) | 11 = 0x5000 | 0x020 | 11 = 0x502B
+    REQUIRE(cg::rh850::enc_not_reg(cg::rh850::Reg::R11, cg::rh850::Reg::R10) == 0x502B);
+}
+
 TEST_CASE("rh850::enc_st_w_hw1 places reg/opcode bits correctly",
           "[rh850][encoder]") {
     // st.w r10, disp[r11] → reg2 = 10 (src), reg1 = 11 (base), opcode = 0b111101 (=0x3D)
@@ -879,6 +886,196 @@ TEST_CASE("Rh850Backend::compile rejects compare_lt_int (not yet in slice)",
     auto r = backend.compile(m, def);
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+}
+
+// ---- select_* primitives (branchless mask-merge) -----------------------
+
+TEST_CASE("Rh850Backend::compile emits select_int (3-operand)",
+          "[rh850][compile][call_primitive][select]") {
+    // select_int(cond, true_val, false_val) → Int
+    auto const def = load_pack(kPackBoolInputsToml);
+    ir::Module m;
+
+    ir::Instruction cond{};
+    cond.op = ir::Op::LoadConstant;
+    cond.result_type = st::feature::PinType::Bool;
+    cond.result_id = 1;
+    cond.constant_value = 1.0; // pick true_val
+    m.instructions.push_back(std::move(cond));
+
+    ir::Instruction tv{};
+    tv.op = ir::Op::LoadConstant;
+    tv.result_type = st::feature::PinType::Int;
+    tv.result_id = 2;
+    tv.constant_value = 100.0;
+    m.instructions.push_back(std::move(tv));
+
+    ir::Instruction fv{};
+    fv.op = ir::Op::LoadConstant;
+    fv.result_type = st::feature::PinType::Int;
+    fv.result_id = 3;
+    fv.constant_value = 200.0;
+    m.instructions.push_back(std::move(fv));
+
+    ir::Instruction call{};
+    call.op = ir::Op::CallPrimitive;
+    call.result_type = st::feature::PinType::Int;
+    call.result_id = 4;
+    call.symbol = "select_int";
+    call.operands.push_back(1);
+    call.operands.push_back(2);
+    call.operands.push_back(3);
+    m.instructions.push_back(std::move(call));
+
+    ir::Instruction store{};
+    store.op = ir::Op::StoreHookOutput;
+    store.symbol = "bool_test";
+    store.pin_name = "result";
+    store.operands.push_back(4);
+    m.instructions.push_back(std::move(store));
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    INFO("select_int compile error: "
+         << (r.has_value() ? std::string{"(none)"} : r.error().to_string()));
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+
+    // Patch must be 4-byte aligned; spot-check the JMP at the end.
+    auto const &code = r->hooks[0].code;
+    REQUIRE(code.size() % 4 == 0);
+    auto const jmp_lo = code[code.size() - 4];
+    auto const jmp_hi = code[code.size() - 3];
+    auto const jmp_word = static_cast<std::uint16_t>(jmp_lo | (jmp_hi << 8));
+    REQUIRE(jmp_word == cg::rh850::enc_jmp_reg(cg::rh850::kLp));
+
+    // Verify the patch includes a NOT instruction (Format I opcode 0x01)
+    // — distinctive of the select pattern; not present in any of the
+    // simpler primitives.
+    bool seen_not = false;
+    for (std::size_t i = 0; i + 1 < code.size(); i += 2) {
+        std::uint16_t const halfword =
+            static_cast<std::uint16_t>(code[i]) |
+            static_cast<std::uint16_t>(static_cast<std::uint16_t>(code[i + 1]) << 8);
+        // Any reg1, reg2 combination of NOT — match the opcode field
+        // in bits 5..10 only.
+        if (((halfword >> 5) & 0x3F) == 0x01) {
+            seen_not = true;
+            break;
+        }
+    }
+    REQUIRE(seen_not);
+}
+
+TEST_CASE("Rh850Backend::compile emits select_bool (3-operand bool)",
+          "[rh850][compile][call_primitive][select]") {
+    auto const def = load_pack(kPackBoolInputsToml);
+    ir::Module m;
+
+    auto const mk_bool = [](ir::ValueId id, bool v) {
+        ir::Instruction ins{};
+        ins.op = ir::Op::LoadConstant;
+        ins.result_type = st::feature::PinType::Bool;
+        ins.result_id = id;
+        ins.constant_value = v ? 1.0 : 0.0;
+        return ins;
+    };
+    m.instructions.push_back(mk_bool(1, true));
+    m.instructions.push_back(mk_bool(2, true));
+    m.instructions.push_back(mk_bool(3, false));
+
+    ir::Instruction call{};
+    call.op = ir::Op::CallPrimitive;
+    call.result_type = st::feature::PinType::Bool;
+    call.result_id = 4;
+    call.symbol = "select_bool";
+    call.operands = {1, 2, 3};
+    m.instructions.push_back(std::move(call));
+
+    ir::Instruction store{};
+    store.op = ir::Op::StoreHookOutput;
+    store.symbol = "bool_test";
+    store.pin_name = "result";
+    store.operands.push_back(4);
+    m.instructions.push_back(std::move(store));
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks[0].code.size() % 4 == 0);
+}
+
+TEST_CASE("Rh850Backend::compile emits select_float (3-operand float)",
+          "[rh850][compile][call_primitive][select]") {
+    // select_float shares the same byte-level fragment shape as
+    // select_int — both manipulate 32-bit words via mask/AND/OR. The
+    // codegen doesn't reinterpret the bytes; the firmware does.
+    auto const def = load_pack(kPackBoolInputsToml);
+    ir::Module m;
+
+    ir::Instruction cond{};
+    cond.op = ir::Op::LoadConstant;
+    cond.result_type = st::feature::PinType::Bool;
+    cond.result_id = 1;
+    cond.constant_value = 0.0;
+    m.instructions.push_back(std::move(cond));
+
+    auto const mk_float = [](ir::ValueId id, double v) {
+        ir::Instruction ins{};
+        ins.op = ir::Op::LoadConstant;
+        ins.result_type = st::feature::PinType::Float;
+        ins.result_id = id;
+        ins.constant_value = v;
+        return ins;
+    };
+    m.instructions.push_back(mk_float(2, 1.5));
+    m.instructions.push_back(mk_float(3, 2.5));
+
+    ir::Instruction call{};
+    call.op = ir::Op::CallPrimitive;
+    call.result_type = st::feature::PinType::Float;
+    call.result_id = 4;
+    call.symbol = "select_float";
+    call.operands = {1, 2, 3};
+    m.instructions.push_back(std::move(call));
+
+    // The bool_test hook's `result` is Bool, but we just need any
+    // output pin with a free RAM slot — wire to commanded_pw_override
+    // via a custom pack that has a Float-typed output.
+    constexpr std::string_view kFloatOutPack = R"toml(
+[pack]
+schema_version = 1
+id             = "rh850-float-out"
+endianness     = "little"
+
+[[writable_region]]
+name    = "test-cal"
+kind    = "calibration"
+address = 0x000A0000
+length  = 0x00010000
+
+[[hook]]
+id              = "f_out"
+ecu_address     = 0x000ABCD0
+free_ram        = { base = 0x40000000, length = 256 }
+outputs = [
+  { name = "out", type = "float" },
+]
+)toml";
+
+    auto const f_def = load_pack(kFloatOutPack);
+    ir::Instruction store{};
+    store.op = ir::Op::StoreHookOutput;
+    store.symbol = "f_out";
+    store.pin_name = "out";
+    store.operands.push_back(4);
+    m.instructions.push_back(std::move(store));
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, f_def);
+    INFO("select_float error: " << (r.has_value() ? "(none)" : r.error().to_string()));
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks[0].code.size() % 4 == 0);
 }
 
 TEST_CASE("Rh850Backend::compile rejects unknown CallPrimitive symbol",

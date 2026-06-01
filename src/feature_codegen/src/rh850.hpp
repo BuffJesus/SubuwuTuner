@@ -145,6 +145,18 @@ inline constexpr Reg kLp = Reg::R31;   // link register / return address
     return enc_mov_reg(Reg::R0, Reg::R0);
 }
 
+// NOT reg1, reg2 — reg2 = ~reg1 (bitwise complement of reg1, stored
+// into reg2). Format I, opcode 0b000001. Used by the branchless
+// `select_*` lowering: after computing mask = -cond (0 or 0xFFFFFFFF),
+// NOT mask gives the inverse mask for the false-branch AND.
+[[nodiscard]] constexpr std::uint16_t enc_not_reg(Reg reg1, Reg reg2) noexcept {
+    constexpr std::uint16_t kOpcode = 0b000001U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg2) << 11U) |
+        (kOpcode << 5U) |
+        static_cast<std::uint16_t>(reg1));
+}
+
 // JMP [reg1] — unconditional indirect jump to address held in reg1.
 // Format I, opcode 0b000110, reg2 field = 0 (unused). `jmp [lp]` is
 // the canonical "return from subroutine" sequence the codegen emits

@@ -84,7 +84,7 @@ Heavy progress — what was sized at 4–6 weeks for the editor + IR + one backe
 - ✅ Graph data model (`st::feature::Graph`) + IR lowerer (`st::feature::ir::Module`) + graph-level + IR-level linters
 - ✅ SH-2A codegen: Int arithmetic (add/sub/mul/`divide_int` via FPU bridge), Int compares, Bool ops, select (int/bool/float), Float arithmetic via FPU (FADD/FSUB/FMUL/FDIV), `sqrt_float`, Float compares (FCMP/EQ/GT), `flex_fuel_scale` (E0=1.00 → E85=1.28 hardcoded linear curve), cross-hook value flow, fan-out dedup. **22 primitives recognized.**
 - 🟡 General curve / table-lookup primitives — `flex_fuel_scale` lands as a 1-arity hardcoded curve; an N-point lookup primitive with pack-supplied breakpoints + values still pending
-- 🟡 RH850 codegen for VB — all 3 IR shapes wired; CallPrimitive slice covers `add_int`, `subtract_int`, `and_bool`, `or_bool`, `not_bool` with leaf operands. Multiply/divide, Int compares, select, Float/FPU, and nested CallPrimitive operands remaining
+- 🟡 RH850 codegen for VB — all 3 IR shapes wired; CallPrimitive slice covers `add_int`, `subtract_int`, `and_bool`, `or_bool`, `not_bool`, `select_int`, `select_bool`, `select_float` with leaf operands. Multiply/divide, Int compares, Float/FPU, and nested CallPrimitive operands remaining
 - ✅ `[[hook]]` + `[[primitive]]` schema in def packs with `name` (codegen-canonical) + `label` (display) split per pin
 - ✅ Linter: type-checks via Graph::connect / IR lowerer; RT-budget runs against per-primitive cycle costs derived from public SH-2A spec + FPU latencies (e.g. `divide_int` = 18, `add_int` = 1). Bench profiling will refine.
 - ✅ `.stmod` format = TOML `[graph]` + `[patch]` halves, single file, round-trippable via `feature::from_toml` + `feature_codegen::patch_from_toml` (`92daa48`)

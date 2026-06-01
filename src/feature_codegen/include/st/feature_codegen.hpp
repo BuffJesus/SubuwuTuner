@@ -19,11 +19,12 @@
 // CallPrimitive over the add_int/select primitive set, all wired
 // through StoreHookOutput). RH850 covers all three IR shapes — the
 // CallPrimitive slice currently supports add_int, subtract_int,
-// and_bool, or_bool, not_bool with leaf operands (LoadConstant /
-// LoadHookInput); nested primitives and the remaining primitive set
-// (multiply/divide, compares, select, Float/FPU) land in follow-up
-// bundles. Per docs/16 §"Architectural fit", we never need to *parse*
-// SH-2A or RH850 — only emit.
+// and_bool, or_bool, not_bool, select_int, select_bool, select_float
+// with leaf operands (LoadConstant / LoadHookInput); nested
+// primitives and the remaining primitive set (multiply/divide,
+// Int compares, Float/FPU) land in follow-up bundles. Per docs/16
+// §"Architectural fit", we never need to *parse* SH-2A or RH850 —
+// only emit.
 
 #ifndef ST_FEATURE_CODEGEN_HPP
 #define ST_FEATURE_CODEGEN_HPP
@@ -168,10 +169,10 @@ public:
 // RH850 backend for VB WRX (et al.). Partial coverage today: all three
 // IR shapes are wired — LoadConstant→Store, LoadHookInput→Store, and
 // CallPrimitive→Store. The CallPrimitive slice currently recognizes
-// add_int, subtract_int, and_bool, or_bool, and not_bool with leaf
-// operands; multiply/divide, Int compares, select, Float/FPU
-// primitives, and nested CallPrimitive operands all still return
-// NotImplemented.
+// add_int, subtract_int, and_bool, or_bool, not_bool, select_int,
+// select_bool, select_float with leaf operands; multiply/divide,
+// Int compares, Float/FPU primitives, and nested CallPrimitive
+// operands all still return NotImplemented.
 class Rh850Backend final : public IBackend {
 public:
     [[nodiscard]] Arch arch() const noexcept override {

@@ -1709,6 +1709,77 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
     return ok();
 }
 
+// Emit an RH850 3-operand branchless select fragment for
+// `select_int`, `select_bool`, `select_float`.
+//
+// Strategy (works for any 32-bit operand kind because we manipulate
+// bits, not values):
+//
+//   1. Load cond → r10  (Bool: 0 or 1)
+//   2. Load true_val → r11
+//   3. Load false_val → r12
+//   4. MOV r0 → r13      ; r13 = 0
+//   5. SUB r10, r13      ; r13 = 0 - cond = -cond (0 or 0xFFFFFFFF)
+//   6. AND r13, r11      ; r11 = true_val & mask
+//   7. NOT r13, r13      ; r13 = ~mask
+//   8. AND r13, r12      ; r12 = false_val & ~mask
+//   9. OR  r12, r11      ; r11 = result
+//  10. MOVHI+MOVEA dst → r13
+//  11. ST.W r11, 0[r13]
+//  12. JMP [lp] + NOP tail
+//
+// Six Format-I 16-bit ops between the operand loads and the dst
+// materialize — alignment is preserved if we emit them as 12 bytes
+// (3 instructions×4 bytes would be 12, but each Format-I is 2 bytes,
+// so 6 × 2 = 12 bytes, naturally 4-aligned). No pad NOP needed.
+//
+// Operand kinds: Constant operands materialize via MOVHI+MOVEA (8
+// bytes each); HookInputPointer operands need MOVHI+MOVEA + LD.W
+// (12 bytes each). Each operand uses its own scratch (r14) for the
+// pointer materialization since r10/r11/r12 hold the live values.
+//
+// Bool invariant: this only steers correctly when cond ∈ {0, 1}. The
+// codegen normalizes Bool LoadConstants to 0/1 via coerce_constant_to_u32,
+// and Bool HookInputPointer values are pack-author's responsibility
+// — same contract as not_bool's XOR-with-1.
+void emit_rh850_select(std::vector<std::uint8_t> &code, PrimitiveOperand const &cond,
+                       PrimitiveOperand const &true_val, PrimitiveOperand const &false_val,
+                       std::uint32_t dst_addr) {
+    constexpr rh850::Reg kCondReg = rh850::Reg::R10;
+    constexpr rh850::Reg kTrueReg = rh850::Reg::R11;
+    constexpr rh850::Reg kFalseReg = rh850::Reg::R12;
+    constexpr rh850::Reg kMaskReg = rh850::Reg::R13; // mask = -cond, then ~mask
+    constexpr rh850::Reg kScratch = rh850::Reg::R14; // address scratch for loads/store
+
+    emit_rh850_load_primitive_operand(code, cond, kCondReg, kScratch);
+    emit_rh850_load_primitive_operand(code, true_val, kTrueReg, kScratch);
+    emit_rh850_load_primitive_operand(code, false_val, kFalseReg, kScratch);
+
+    // mask = 0 - cond.
+    emit_le16(code, rh850::enc_mov_reg(rh850::kZero, kMaskReg));    // r13 = 0
+    emit_le16(code, rh850::enc_sub_reg(kCondReg, kMaskReg));        // r13 -= cond
+    // true_val &= mask
+    emit_le16(code, rh850::enc_and_reg(kMaskReg, kTrueReg));        // r11 &= r13
+    // r13 = ~mask
+    emit_le16(code, rh850::enc_not_reg(kMaskReg, kMaskReg));        // r13 = ~r13
+    // false_val &= ~mask
+    emit_le16(code, rh850::enc_and_reg(kMaskReg, kFalseReg));       // r12 &= r13
+    // result = true_val | false_val (only one of the two is non-zero)
+    emit_le16(code, rh850::enc_or_reg(kFalseReg, kTrueReg));        // r11 |= r12
+
+    // Materialize dst_addr into r13, then ST.W r11, 0[r13].
+    auto const dst_split = rh850::split_imm32(dst_addr);
+    emit_le16(code, rh850::enc_movhi_hw1(rh850::kZero, kMaskReg));
+    emit_le16(code, dst_split.hi);
+    emit_le16(code, rh850::enc_movea_hw1(kMaskReg, kMaskReg));
+    emit_le16(code, dst_split.lo);
+    emit_le16(code, rh850::enc_st_w_hw1(kTrueReg, kMaskReg));
+    emit_le16(code, rh850::enc_st_w_hw2(0));
+
+    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+    emit_le16(code, rh850::enc_nop());
+}
+
 // Emit an RH850 unary-bool CallPrimitive fragment for `not_bool`.
 // Computes `result = x XOR 1` — correct for the 0/1-normalized Bool
 // invariant the codegen maintains. Bitwise NOT would yield
@@ -1816,13 +1887,15 @@ rh850_operand_from_producer(Definition const &def, ir::Module const &m, ir::Valu
     bool const supported =
         (prim.symbol == "add_int" || prim.symbol == "subtract_int" ||
          prim.symbol == "and_bool" || prim.symbol == "or_bool" ||
-         prim.symbol == "not_bool");
+         prim.symbol == "not_bool" || prim.symbol == "select_int" ||
+         prim.symbol == "select_bool" || prim.symbol == "select_float");
     if (!supported) {
         std::string msg{"RH850 backend: CallPrimitive '"};
         msg.append(prim.symbol);
         msg.append("' is not yet covered by the RH850 slice (supported: "
-                   "add_int, subtract_int, and_bool, or_bool, not_bool). "
-                   "See docs/16 §Current state.");
+                   "add_int, subtract_int, and_bool, or_bool, not_bool, "
+                   "select_int, select_bool, select_float). See docs/16 "
+                   "§Current state.");
         return failure(ErrorCode::NotImplemented, std::move(msg));
     }
     if (prim.operands.size() != shape->arity) {
@@ -2058,10 +2131,15 @@ Result<PatchObject> Rh850Backend::compile(ir::Module const &m, Definition const 
                     return failure(op.error());
                 operands.push_back(*op);
             }
-            // Binary primitives share one fragment shape; unary
-            // `not_bool` has its own emitter (XOR-with-1).
+            // Dispatch by arity / shape:
+            //   arity 1 → not_bool (XOR-with-1)
+            //   arity 2 → binary leaf-operand (add/sub/and/or)
+            //   arity 3 → select (branchless mask-merge)
             if (src->symbol == "not_bool") {
                 emit_rh850_not_bool(work.code, operands[0], dst_addr);
+            } else if (src->symbol == "select_int" || src->symbol == "select_bool" ||
+                       src->symbol == "select_float") {
+                emit_rh850_select(work.code, operands[0], operands[1], operands[2], dst_addr);
             } else {
                 if (auto s = emit_rh850_binary_int_arith(work.code, src->symbol, operands[0],
                                                         operands[1], dst_addr);
