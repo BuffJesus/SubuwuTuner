@@ -36,6 +36,7 @@ This folder contains the design and planning documents for **SubuwuTuner**, a co
 30. [29-ssm-a8-poll-workflow.md](29-ssm-a8-poll-workflow.md) — Live OEM SSM-0xA8 RAM polling over ISO-15765: `ssm-a8-poll` CLI + offline correlator for recovering tuner-pack DID byte layouts without ROM disasm
 31. [30-patch-insertion.md](30-patch-insertion.md) — Patch insertion layer design (`src/feature_patch/`): manifest format, ROM-allocator, splice mechanics (SH-2A short/long-form + RH850 dual-bank gate), end-to-end `PatchObject → PatchedRom`
 32. [31-brick-protection-by-isa.md](31-brick-protection-by-isa.md) — Per-ISA recovery recipes (SH-2A single-bank serial-boot vs RH850 dual-bank atomic-swap); bench-rig validation plan per ISA; safety properties common to both; ship blocker #1
+33. [32-live-datalogger.md](32-live-datalogger.md) — Live gauge-cluster GUI design (LiveBuffer SPSC ring, LogSession multi-sink fan-out, ImPlot mini-lines, recording-while-gauging); CSV-replay panels stay; Phase 3 live deliverable
 
 ## Status
 

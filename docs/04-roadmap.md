@@ -51,9 +51,9 @@ Architecture, protocol catalog, and datalogger pipeline are complete end-to-end 
 - 🔒 Platform USB CDC `IByteChannel` impl (libusb on Win/Linux, native CDC on macOS) — bench-blocked
 - 🔒 Platform DLL dynamic-load for `J2534Library::load()` (`LoadLibraryA` / `dlopen`) — adapter-blocked
 - ⬜ ELM327 backend over serial — deferred (low-priority; ELM is read-only by policy and the existing adapters cover the v1.0 surface)
-- ⬜ Streaming on concrete Transports — `start_streaming` / `stop_streaming` stubbed `NotImplemented` on all three. Lands with the datalogger I/O thread + ring buffer.
-- ⬜ Live gauge cluster (4–8 gauges) + CSV log export — design exists in `docs/13`; impl waits on streaming
-- ⬜ Sustained 50 Hz logging across 20 PIDs — same
+- 🟡 Streaming on concrete Transports — OBDX shipped (sniff-mode + live-streaming wired 2026-05-23). j2534 still `NotImplemented` (platform DLL dynload pending); native still `NotImplemented` (doc-18 handheld lower priority).
+- 🟡 Live gauge cluster (4–8 gauges) + CSV log export — design landed at `docs/32-live-datalogger.md` (LiveBuffer SPSC ring + LogSession multi-sink fan-out + ImPlot mini-lines + record-while-gauging); implementation queued in 5 hardware-free steps. CsvSink + LogSession + OBDX streaming all ship today.
+- 🟡 Sustained 50 Hz logging across 20 PIDs — pipeline supports it (per `docs/32` §Sustained 100 Hz target); hardware validation gated on `docs/32` impl + bench/car run
 
 **Gate:** 🔒 hardware-blocked. Code paths are real + unit-tested (108 transport tests across the trio + factory + discovery). When OBDX Pro VX adapter arrives, the path to first ROM dump is: implement one platform `IByteChannel` (libusb on Windows ~1 file), wire it into `obdx::Transport`, run `subuwutuner-cli rom-pull --transport obdx --device <COM>`.
 

@@ -61,6 +61,7 @@ Phase 0/1/2 done. Phase 3 protocol framing complete (SSM + full UDS catalog incl
 | Reason about / execute the junkyard-ECU bench-rig assembly (FSM pin references, power-on sequence, first read, brick-recovery loop) | `docs/28-bench-rig-build.md` |
 | Reason about SSM-A8 RAM polling + correlator (recovering tuner-pack DID byte layouts without ROM disasm; `ssm-a8-poll` CLI + `tools/cross_ref_ssm_a8.py`) | `docs/29-ssm-a8-poll-workflow.md` |
 | Reason about / implement the patch insertion layer (`src/feature_patch/`) — manifest format, ROM-allocator, SH-2A + RH850 splice mechanics, end-to-end `PatchObject → PatchedRom` | `docs/30-patch-insertion.md` |
+| Reason about / implement the live datalogger gauge cluster (LiveBuffer SPSC ring, LogSession multi-sink fan-out, ImPlot mini-lines, record-while-gauging) | `docs/32-live-datalogger.md` |
 | Look up a tuning term | `docs/10-glossary.md` |
 
 ## Stance on emissions / jurisdiction
