@@ -5,7 +5,7 @@ A **custom feature** is a piece of new ECU behavior the user authors visually, t
 > **Terminology bridge.** If you're coming from the RomRaider / ECUFlash world, this is the equivalent of what those tools call **"software patches"** or **"ECU patches"** — hand-written SH-2A assembly snippets injected at known ROM offsets to add behaviors like 2-step / flat-foot shift / clutch kill that aren't in the stock cal. SubuwuTuner's contribution is the *authoring layer above* those patches: a visual node-graph designer + IR + linter + codegen that produces the same byte-level output without requiring the user to write assembly directly. The output `.stmod` is the SubuwuTuner-native equivalent of a hand-rolled ECUFlash patch file, and it flashes through the same `st::flash` pipeline as any other ROM change.
 
 This document captures the design. Phase 5 status: the authoring data
-model, IR lowerer, **SH-2A codegen for VA** (18 primitives recognized;
+model, IR lowerer, **SH-2A codegen for VA** (21 primitives recognized;
 fan-out dedup; FPU bridge for Float ops; address-gate refuses splices
 outside declared writable regions), CLI (`feature-compile`), and `.stmod`
 file format have shipped end-to-end. **RH850 codegen for VB** now covers

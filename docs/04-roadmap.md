@@ -9,8 +9,8 @@ Six phases. Each ends with a demoable artifact and a "ship gate" that must pass 
 
 - ✅ Repo skeleton, CMake presets, vcpkg manifest, CI on Win/Mac/Linux
 - ✅ `st::core` (`Result`, `Error`, units, `Span`)
-- ✅ Catch2 wired up, **700+ tests green** (was sized at 50 originally)
-- ✅ `subuwutuner-cli` binary with version + 40+ subcommands
+- ✅ Catch2 wired up, **1100+ tests green** (was sized at 50 originally)
+- ✅ `subuwutuner-cli` binary with version + 60+ subcommands
 
 **Gate:** green CI on all three OSes; binary runs. ✅
 
@@ -76,13 +76,13 @@ Orchestrator + Manifest + journal + policy gate + checksum-type field all exist 
 
 **Gate:** 🔒 100 successful flash cycles on a junkyard ECU bench rig — zero bricks, zero corrupted images. **No customer ever flashes a car until this gate is met.** Hardware-blocked.
 
-## Phase 5 — Custom features (4–6 weeks) 🟢 design + IR + SH-2A codegen for VA shipped; patch insertion + RH850 codegen remaining
+## Phase 5 — Custom features (4–6 weeks) 🟢 design + IR + SH-2A codegen for VA shipped; RH850 codegen for VB partial; patch insertion remaining
 
-Heavy progress this session — what was sized at 4–6 weeks for the editor + IR + one backend shipped much faster. Delivery path (patch insertion + RH850 codegen + flashing) waits on Phase 4 hardware. See `docs/16-custom-features.md` for the granular current-state matrix and the recommendation to drop RH850 first under timing pressure.
+Heavy progress — what was sized at 4–6 weeks for the editor + IR + one backend shipped much faster. RH850 codegen for VB is now partial: all 3 IR shapes wired with a 5-primitive CallPrimitive slice (add_int, subtract_int, and_bool, or_bool, not_bool). The remaining RH850 slices (multiply/divide, Int compares, select, Float/FPU, nested CallPrimitive) and the patch-insertion layer + end-to-end flashing all gate on Phase 4 hardware validation. See `docs/16-custom-features.md` for the granular current-state matrix.
 
 - ✅ Visual node-graph editor with pin labels + per-pin defaults + wire dragging + pin-context menus; promoted out of `View → Debug` to top-level `View → Custom features designer (preview)` (`0cc5c1b`)
 - ✅ Graph data model (`st::feature::Graph`) + IR lowerer (`st::feature::ir::Module`) + graph-level + IR-level linters
-- ✅ SH-2A codegen: Int arithmetic (add/sub/mul/`divide_int` via FPU bridge), Int compares, Bool ops, select (int/bool/float), Float arithmetic via FPU (FADD/FSUB/FMUL/FDIV), Float compares (FCMP/EQ/GT), cross-hook value flow, fan-out dedup. **18 primitives recognized.**
+- ✅ SH-2A codegen: Int arithmetic (add/sub/mul/`divide_int` via FPU bridge), Int compares, Bool ops, select (int/bool/float), Float arithmetic via FPU (FADD/FSUB/FMUL/FDIV), `sqrt_float`, Float compares (FCMP/EQ/GT), cross-hook value flow, fan-out dedup. **21 primitives recognized.**
 - ⬜ Curve / table-lookup primitives (e.g. `flex_fuel_scale`) — needs pack-format extension for breakpoints + values
 - 🟡 RH850 codegen for VB — all 3 IR shapes wired; CallPrimitive slice covers `add_int`, `subtract_int`, `and_bool`, `or_bool`, `not_bool` with leaf operands. Multiply/divide, Int compares, select, Float/FPU, and nested CallPrimitive operands remaining
 - ✅ `[[hook]]` + `[[primitive]]` schema in def packs with `name` (codegen-canonical) + `label` (display) split per pin
