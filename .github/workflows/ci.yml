@@ -113,6 +113,15 @@ jobs:
           ./build/${{ matrix.preset }}/bin/subuwutuner-cli --version
           ./build/${{ matrix.preset }}/bin/subuwutuner-cli --help
 
+      - name: Performance gate — binary sizes (Unix)
+        if: matrix.os != 'windows-2022'
+        run: bash scripts/check-binary-sizes.sh build/${{ matrix.preset }}/bin
+
+      - name: Performance gate — binary sizes (Windows)
+        if: matrix.os == 'windows-2022'
+        shell: bash
+        run: bash scripts/check-binary-sizes.sh build/${{ matrix.preset }}/bin
+
       - name: Upload test artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
