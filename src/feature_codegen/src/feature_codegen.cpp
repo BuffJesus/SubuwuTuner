@@ -1667,7 +1667,8 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
                                                  std::string_view symbol,
                                                  PrimitiveOperand const &op1,
                                                  PrimitiveOperand const &op2,
-                                                 std::uint32_t dst_addr) {
+                                                 std::uint32_t dst_addr,
+                                                 bool with_tail = true) {
     constexpr rh850::Reg kAReg = rh850::Reg::R10;   // op1 / result
     constexpr rh850::Reg kBReg = rh850::Reg::R11;   // op2
     constexpr rh850::Reg kScratch = rh850::Reg::R12; // address scratch
@@ -1730,9 +1731,10 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
     emit_le16(code, rh850::enc_st_w_hw1(kAReg, kScratch));
     emit_le16(code, rh850::enc_st_w_hw2(0));
 
-    // JMP [lp] + tail NOP.
-    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
-    emit_le16(code, rh850::enc_nop());
+    if (with_tail) {
+        emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+        emit_le16(code, rh850::enc_nop());
+    }
     return ok();
 }
 
@@ -1776,7 +1778,8 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
                                                    std::string_view symbol,
                                                    PrimitiveOperand const &op1,
                                                    PrimitiveOperand const &op2,
-                                                   std::uint32_t dst_addr) {
+                                                   std::uint32_t dst_addr,
+                                                   bool with_tail = true) {
     constexpr rh850::Reg kAReg = rh850::Reg::R10;    // op1 → reg2 in F:I, also reg3 (dest)
     constexpr rh850::Reg kBReg = rh850::Reg::R11;    // op2 → reg1 in F:I
     constexpr rh850::Reg kScratch = rh850::Reg::R12; // address scratch
@@ -1815,8 +1818,10 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
     emit_le16(code, rh850::enc_st_w_hw1(kAReg, kScratch));
     emit_le16(code, rh850::enc_st_w_hw2(0));
 
-    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
-    emit_le16(code, rh850::enc_nop());
+    if (with_tail) {
+        emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+        emit_le16(code, rh850::enc_nop());
+    }
     return ok();
 }
 
@@ -1849,7 +1854,8 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
                                             std::string_view symbol,
                                             PrimitiveOperand const &op1,
                                             PrimitiveOperand const &op2,
-                                            std::uint32_t dst_addr) {
+                                            std::uint32_t dst_addr,
+                                            bool with_tail = true) {
     constexpr rh850::Reg kAReg = rh850::Reg::R10;    // op1 (a) / result
     constexpr rh850::Reg kBReg = rh850::Reg::R11;    // op2 (b)
     constexpr rh850::Reg kScratch = rh850::Reg::R12; // address scratch
@@ -1890,9 +1896,11 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
     emit_le16(code, rh850::enc_st_w_hw1(kAReg, kScratch));
     emit_le16(code, rh850::enc_st_w_hw2(0));
 
-    // JMP [lp] + tail NOP.
-    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
-    emit_le16(code, rh850::enc_nop());
+    // JMP [lp] + tail NOP (omitted for nested non-root primitives).
+    if (with_tail) {
+        emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+        emit_le16(code, rh850::enc_nop());
+    }
     return ok();
 }
 
@@ -1914,7 +1922,8 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
 // select; this matches how `divide_float` handles divide-by-zero.
 [[nodiscard]] Status emit_rh850_sqrt_float(std::vector<std::uint8_t> &code,
                                            PrimitiveOperand const &op,
-                                           std::uint32_t dst_addr) {
+                                           std::uint32_t dst_addr,
+                                           bool with_tail = true) {
     constexpr rh850::Reg kAReg = rh850::Reg::R10;    // op / result
     constexpr rh850::Reg kScratch = rh850::Reg::R12; // address scratch
 
@@ -1932,8 +1941,10 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
     emit_le16(code, rh850::enc_st_w_hw1(kAReg, kScratch));
     emit_le16(code, rh850::enc_st_w_hw2(0));
 
-    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
-    emit_le16(code, rh850::enc_nop());
+    if (with_tail) {
+        emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+        emit_le16(code, rh850::enc_nop());
+    }
     return ok();
 }
 
@@ -1966,7 +1977,8 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
                                               std::string_view symbol,
                                               PrimitiveOperand const &op1,
                                               PrimitiveOperand const &op2,
-                                              std::uint32_t dst_addr) {
+                                              std::uint32_t dst_addr,
+                                              bool with_tail = true) {
     constexpr rh850::Reg kAReg = rh850::Reg::R10;    // → reg2 in F:III
     constexpr rh850::Reg kBReg = rh850::Reg::R11;    // → reg1 in F:III
     constexpr rh850::Reg kScratch = rh850::Reg::R12; // address scratch
@@ -2016,8 +2028,10 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
     emit_le16(code, rh850::enc_st_w_hw1(kAReg, kScratch));
     emit_le16(code, rh850::enc_st_w_hw2(0));
 
-    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
-    emit_le16(code, rh850::enc_nop());
+    if (with_tail) {
+        emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+        emit_le16(code, rh850::enc_nop());
+    }
     return ok();
 }
 
@@ -2042,7 +2056,8 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
 //   JMP [lp] + tail NOP                              (4 bytes)
 [[nodiscard]] Status emit_rh850_flex_fuel_scale(std::vector<std::uint8_t> &code,
                                                 PrimitiveOperand const &op,
-                                                std::uint32_t dst_addr) {
+                                                std::uint32_t dst_addr,
+                                                bool with_tail = true) {
     constexpr rh850::Reg kAReg = rh850::Reg::R10;    // op / running result
     constexpr rh850::Reg kBReg = rh850::Reg::R11;    // constant scratch
     constexpr rh850::Reg kScratch = rh850::Reg::R12; // address scratch
@@ -2086,8 +2101,10 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
     emit_le16(code, rh850::enc_st_w_hw1(kAReg, kScratch));
     emit_le16(code, rh850::enc_st_w_hw2(0));
 
-    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
-    emit_le16(code, rh850::enc_nop());
+    if (with_tail) {
+        emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+        emit_le16(code, rh850::enc_nop());
+    }
     return ok();
 }
 
@@ -2126,7 +2143,7 @@ void emit_rh850_load_primitive_operand(std::vector<std::uint8_t> &code,
 // — same contract as not_bool's XOR-with-1.
 void emit_rh850_select(std::vector<std::uint8_t> &code, PrimitiveOperand const &cond,
                        PrimitiveOperand const &true_val, PrimitiveOperand const &false_val,
-                       std::uint32_t dst_addr) {
+                       std::uint32_t dst_addr, bool with_tail = true) {
     constexpr rh850::Reg kCondReg = rh850::Reg::R10;
     constexpr rh850::Reg kTrueReg = rh850::Reg::R11;
     constexpr rh850::Reg kFalseReg = rh850::Reg::R12;
@@ -2158,8 +2175,10 @@ void emit_rh850_select(std::vector<std::uint8_t> &code, PrimitiveOperand const &
     emit_le16(code, rh850::enc_st_w_hw1(kTrueReg, kMaskReg));
     emit_le16(code, rh850::enc_st_w_hw2(0));
 
-    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
-    emit_le16(code, rh850::enc_nop());
+    if (with_tail) {
+        emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+        emit_le16(code, rh850::enc_nop());
+    }
 }
 
 // Emit an RH850 unary-bool CallPrimitive fragment for `not_bool`.
@@ -2179,7 +2198,7 @@ void emit_rh850_select(std::vector<std::uint8_t> &code, PrimitiveOperand const &
 //
 // Total: 36 (C) or 40 (H) bytes, 4-aligned.
 void emit_rh850_not_bool(std::vector<std::uint8_t> &code, PrimitiveOperand const &op,
-                         std::uint32_t dst_addr) {
+                         std::uint32_t dst_addr, bool with_tail = true) {
     constexpr rh850::Reg kAReg = rh850::Reg::R10;
     constexpr rh850::Reg kBReg = rh850::Reg::R11;
     constexpr rh850::Reg kScratch = rh850::Reg::R12;
@@ -2203,19 +2222,35 @@ void emit_rh850_not_bool(std::vector<std::uint8_t> &code, PrimitiveOperand const
     emit_le16(code, rh850::enc_st_w_hw1(kAReg, kScratch));
     emit_le16(code, rh850::enc_st_w_hw2(0));
 
-    emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
-    emit_le16(code, rh850::enc_nop());
+    if (with_tail) {
+        emit_le16(code, rh850::enc_jmp_reg(rh850::kLp));
+        emit_le16(code, rh850::enc_nop());
+    }
 }
 
 // Resolve a CallPrimitive's operand by ValueId into a PrimitiveOperand.
-// RH850 first-slice variant: only LoadConstant and LoadHookInput
-// producers are accepted; nested CallPrimitive operands return
-// NotImplemented (handled by a follow-up bundle). Mirrors
-// `operand_from_producer` shape but with RH850-tagged error messages
-// — the SH-2A version stays put for SH-2A callers.
+// Two modes, selected by whether `slots` is non-null:
+//
+//   slots == nullptr → flat mode. Only LoadConstant + LoadHookInput
+//                      producers are accepted; CallPrimitive producers
+//                      get a NotImplemented (the caller is on the flat
+//                      dispatch path and didn't allocate intermediate
+//                      slots).
+//   slots != nullptr → nested mode. CallPrimitive producers are
+//                      accepted and resolved as HookInputPointer reads
+//                      from the RAM slot the nested driver already
+//                      allocated for that producer. Mechanically
+//                      identical to a HookInputPointer at the byte
+//                      level — semantically it's a load from scratch
+//                      RAM rather than a firmware variable.
+//
+// Mirrors the SH-2A `operand_from_producer` shape. The pointer-vs-
+// reference asymmetry vs SH-2A (which takes slots by const-ref) keeps
+// the existing flat-mode callers unchanged.
 [[nodiscard]] Result<PrimitiveOperand>
 rh850_operand_from_producer(Definition const &def, ir::Module const &m, ir::ValueId value_id,
-                            Hook const *target_hook, PinType expected_operand_type) {
+                            Hook const *target_hook, PinType expected_operand_type,
+                            std::unordered_map<ir::ValueId, std::uint32_t> const *slots = nullptr) {
     ir::Instruction const *prod = find_producer(m, value_id);
     if (prod == nullptr) {
         return failure(ErrorCode::ParseError, "RH850 backend: primitive operand does not "
@@ -2242,6 +2277,15 @@ rh850_operand_from_producer(Definition const &def, ir::Module const &m, ir::Valu
         return PrimitiveOperand{PrimitiveOperand::Kind::HookInputPointer, addr};
     }
     if (prod->op == ir::Op::CallPrimitive) {
+        if (slots != nullptr) {
+            auto it = slots->find(value_id);
+            if (it == slots->end()) {
+                return failure(ErrorCode::ParseError,
+                               "RH850 backend: nested primitive operand has no "
+                               "RAM slot (walk should have allocated one)");
+            }
+            return PrimitiveOperand{PrimitiveOperand::Kind::HookInputPointer, it->second};
+        }
         return failure(ErrorCode::NotImplemented,
                        "RH850 backend: nested CallPrimitive operands are "
                        "not supported in this slice — flatten the graph or "
@@ -2251,12 +2295,12 @@ rh850_operand_from_producer(Definition const &def, ir::Module const &m, ir::Valu
                                               "producer op");
 }
 
-// Validate an RH850 CallPrimitive: recognized symbol within the slice
-// (add_int / subtract_int only), operand count + result type per the
-// shared `primitive_shape` table. Rejects with NotImplemented for known
-// primitives that the RH850 slice doesn't cover yet (e.g. multiply_int,
-// compare_lt_int) so the user gets a clear "wait for next bundle"
-// instead of a generic shape mismatch.
+// Validate an RH850 CallPrimitive: recognized symbol within the slice,
+// operand count + result type per the shared `primitive_shape` table.
+// Rejects with NotImplemented for known primitives the RH850 slice
+// doesn't cover yet (the supported list is the 22-primitive SH-2A
+// parity set; anything outside that — future curve-lookup,
+// fixed-point, etc. — trips this gate before codegen runs).
 [[nodiscard]] Status rh850_validate_call_primitive(ir::Instruction const &prim) {
     PrimitiveShape const *shape = primitive_shape(prim.symbol);
     if (shape == nullptr) {
@@ -2310,6 +2354,140 @@ rh850_operand_from_producer(Definition const &def, ir::Module const &m, ir::Valu
         msg.append(", got ");
         msg.append(pin_type_name(prim.result_type));
         return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    return ok();
+}
+
+// Unified RH850 primitive dispatch — picks the right emit by symbol.
+// Mirrors SH-2A's `emit_primitive_fragment` shape so the nested driver
+// has a single emission entry point. `with_tail` controls whether the
+// fragment ends in JMP[lp]+NOP (the patch terminator) or just runs off
+// the end into the next fragment (intermediate primitive in a nested
+// tree). Operand count is trusted to match the symbol's arity —
+// rh850_validate_call_primitive is the gate for that.
+[[nodiscard]] Status emit_rh850_primitive_fragment(std::vector<std::uint8_t> &code,
+                                                   std::string_view symbol,
+                                                   std::vector<PrimitiveOperand> const &operands,
+                                                   std::uint32_t dst, bool with_tail) {
+    if (symbol == "not_bool") {
+        emit_rh850_not_bool(code, operands[0], dst, with_tail);
+        return ok();
+    }
+    if (symbol == "sqrt_float") {
+        return emit_rh850_sqrt_float(code, operands[0], dst, with_tail);
+    }
+    if (symbol == "flex_fuel_scale") {
+        return emit_rh850_flex_fuel_scale(code, operands[0], dst, with_tail);
+    }
+    if (symbol == "select_int" || symbol == "select_bool" || symbol == "select_float") {
+        emit_rh850_select(code, operands[0], operands[1], operands[2], dst, with_tail);
+        return ok();
+    }
+    if (symbol == "compare_lt_int" || symbol == "compare_gt_int" || symbol == "compare_eq_int") {
+        return emit_rh850_int_compare(code, symbol, operands[0], operands[1], dst, with_tail);
+    }
+    if (symbol == "compare_lt_float" || symbol == "compare_gt_float" ||
+        symbol == "compare_eq_float") {
+        return emit_rh850_float_compare(code, symbol, operands[0], operands[1], dst, with_tail);
+    }
+    if (symbol == "add_float" || symbol == "subtract_float" || symbol == "multiply_float" ||
+        symbol == "divide_float") {
+        return emit_rh850_binary_float_arith(code, symbol, operands[0], operands[1], dst,
+                                             with_tail);
+    }
+    // Default — binary int arith (add/sub/mul/div + and/or covered here too).
+    return emit_rh850_binary_int_arith(code, symbol, operands[0], operands[1], dst, with_tail);
+}
+
+// Emit an RH850 Store rooted at a (possibly nested) CallPrimitive tree.
+// Walks the tree bottom-up: each interior primitive (non-root) gets a
+// 4-byte RAM slot for its result and emits a fragment that stores into
+// that slot (no JMP tail — execution falls through to the next
+// primitive's load). The root primitive's fragment stores to the
+// caller's `dst_addr` and includes the JMP[lp]+NOP terminator.
+//
+// The walk handles arbitrary nesting depth as long as every interior
+// node is a supported CallPrimitive. Shared SSA values (fan-out: one
+// nested primitive's result feeding multiple consumers) are deduped via
+// `visited` — the producer fragment emits exactly once and all
+// consumers read the same slot, mirroring the SH-2A nested driver's
+// behavior.
+//
+// For the degenerate single-primitive case (no nested operands), this
+// produces output byte-identical to the flat-mode emit it replaces:
+// one fragment with terminator, no RAM slots beyond the existing
+// output-pin slot.
+[[nodiscard]] Status emit_rh850_nested_call_primitive(Definition const &def, ir::Module const &m,
+                                                      ir::Instruction const &root_prim,
+                                                      Hook const *hook, RamAllocator &ram,
+                                                      std::vector<RamClaim> &claims,
+                                                      std::vector<std::uint8_t> &out_code,
+                                                      std::uint32_t dst_addr) {
+    std::unordered_map<ir::ValueId, std::uint32_t> slots;
+    std::unordered_set<ir::ValueId> visited;
+    std::vector<ir::Instruction const *> emit_order;
+
+    auto const walk = [&](auto &self_ref, ir::Instruction const *prim, bool is_root) -> Status {
+        if (!is_root && visited.find(prim->result_id) != visited.end()) {
+            return ok(); // already walked via another consumer
+        }
+        if (auto s = rh850_validate_call_primitive(*prim); !s.has_value()) {
+            return failure(s.error());
+        }
+        for (auto operand_id : prim->operands) {
+            ir::Instruction const *prod = find_producer(m, operand_id);
+            if (prod == nullptr) {
+                return failure(ErrorCode::ParseError, "RH850 backend: nested operand does not "
+                                                      "resolve to any producing instruction");
+            }
+            if (prod->op == ir::Op::CallPrimitive) {
+                if (auto s = self_ref(self_ref, prod, /*is_root=*/false); !s.has_value()) {
+                    return failure(s.error());
+                }
+            }
+        }
+        if (!is_root) {
+            auto claim_r = ram.claim(4, 4);
+            if (!claim_r.has_value()) {
+                std::string msg{"RH850 backend: hook '"};
+                msg.append(hook->id);
+                msg.append("' free_ram exhausted while allocating slot "
+                           "for nested primitive result");
+                return failure(ErrorCode::OutOfRange, std::move(msg));
+            }
+            slots[prim->result_id] = static_cast<std::uint32_t>(claim_r->address);
+            claims.push_back(*claim_r);
+            visited.insert(prim->result_id);
+        }
+        emit_order.push_back(prim);
+        return ok();
+    };
+    if (auto s = walk(walk, &root_prim, /*is_root=*/true); !s.has_value()) {
+        return failure(s.error());
+    }
+
+    for (ir::Instruction const *prim : emit_order) {
+        PrimitiveShape const *shape = primitive_shape(prim->symbol);
+        if (shape == nullptr) {
+            return failure(ErrorCode::ParseError, "RH850 backend: primitive symbol lookup "
+                                                  "regressed after validation");
+        }
+        std::vector<PrimitiveOperand> operands;
+        operands.reserve(shape->arity);
+        for (std::size_t i = 0; i < shape->arity; ++i) {
+            auto op = rh850_operand_from_producer(def, m, prim->operands[i], hook,
+                                                  shape->operand_types[i], &slots);
+            if (!op.has_value())
+                return failure(op.error());
+            operands.push_back(*op);
+        }
+        bool const is_root = (prim == &root_prim);
+        std::uint32_t const this_dest = is_root ? dst_addr : slots.at(prim->result_id);
+        if (auto s = emit_rh850_primitive_fragment(out_code, prim->symbol, operands, this_dest,
+                                                   /*with_tail=*/is_root);
+            !s.has_value()) {
+            return failure(s.error());
+        }
     }
     return ok();
 }
@@ -2503,75 +2681,16 @@ Result<PatchObject> Rh850Backend::compile(ir::Module const &m, Definition const 
             }
             emit_rh850_load_hook_store(work.code, pin_addr, dst_addr);
         } else {
-            // CallPrimitive. RH850 first slice supports add_int /
-            // subtract_int with leaf (LoadConstant / LoadHookInput)
-            // operands only — nested-primitive operands are rejected
-            // explicitly by rh850_operand_from_producer with a
-            // "wait for next bundle" message.
-            if (auto s = rh850_validate_call_primitive(*src); !s.has_value()) {
+            // CallPrimitive Store source. The nested driver handles both
+            // the flat case (no nested operands, one fragment with
+            // terminator — byte-identical to the prior per-symbol
+            // dispatch) and the nested case (allocates an intermediate
+            // RAM slot per non-root primitive, emits each in topological
+            // order, JMP[lp]+NOP on the root only).
+            if (auto s = emit_rh850_nested_call_primitive(def, m, *src, hook, work.ram,
+                                                          work.claims, work.code, dst_addr);
+                !s.has_value()) {
                 return failure(s.error());
-            }
-            PrimitiveShape const *shape = primitive_shape(src->symbol);
-            // Unreachable: rh850_validate_call_primitive checked above.
-            if (shape == nullptr) {
-                return failure(ErrorCode::ParseError, "RH850 backend: primitive symbol lookup "
-                                                      "regressed after validation");
-            }
-            std::vector<PrimitiveOperand> operands;
-            operands.reserve(shape->arity);
-            for (std::size_t i = 0; i < shape->arity; ++i) {
-                auto op = rh850_operand_from_producer(def, m, src->operands[i], hook,
-                                                      shape->operand_types[i]);
-                if (!op.has_value())
-                    return failure(op.error());
-                operands.push_back(*op);
-            }
-            // Dispatch by arity / shape:
-            //   arity 1 → not_bool (XOR-with-1), sqrt_float, flex_fuel_scale
-            //   arity 2 → binary leaf-operand (add/sub/and/or) OR int/float compare
-            //   arity 3 → select (branchless mask-merge)
-            if (src->symbol == "not_bool") {
-                emit_rh850_not_bool(work.code, operands[0], dst_addr);
-            } else if (src->symbol == "sqrt_float") {
-                if (auto s = emit_rh850_sqrt_float(work.code, operands[0], dst_addr);
-                    !s.has_value()) {
-                    return failure(s.error());
-                }
-            } else if (src->symbol == "flex_fuel_scale") {
-                if (auto s = emit_rh850_flex_fuel_scale(work.code, operands[0], dst_addr);
-                    !s.has_value()) {
-                    return failure(s.error());
-                }
-            } else if (src->symbol == "select_int" || src->symbol == "select_bool" ||
-                       src->symbol == "select_float") {
-                emit_rh850_select(work.code, operands[0], operands[1], operands[2], dst_addr);
-            } else if (src->symbol == "compare_lt_int" || src->symbol == "compare_gt_int" ||
-                       src->symbol == "compare_eq_int") {
-                if (auto s = emit_rh850_int_compare(work.code, src->symbol, operands[0],
-                                                    operands[1], dst_addr);
-                    !s.has_value()) {
-                    return failure(s.error());
-                }
-            } else if (src->symbol == "compare_lt_float" || src->symbol == "compare_gt_float" ||
-                       src->symbol == "compare_eq_float") {
-                if (auto s = emit_rh850_float_compare(work.code, src->symbol, operands[0],
-                                                      operands[1], dst_addr);
-                    !s.has_value()) {
-                    return failure(s.error());
-                }
-            } else if (src->symbol == "add_float" || src->symbol == "subtract_float" ||
-                       src->symbol == "multiply_float" || src->symbol == "divide_float") {
-                if (auto s = emit_rh850_binary_float_arith(work.code, src->symbol, operands[0],
-                                                           operands[1], dst_addr);
-                    !s.has_value()) {
-                    return failure(s.error());
-                }
-            } else {
-                if (auto s = emit_rh850_binary_int_arith(work.code, src->symbol, operands[0],
-                                                        operands[1], dst_addr);
-                    !s.has_value()) {
-                    return failure(s.error());
-                }
             }
         }
     }

@@ -1630,10 +1630,14 @@ TEST_CASE("Rh850Backend::compile rejects type-mismatched primitive operand",
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("Rh850Backend::compile rejects nested CallPrimitive operand",
-          "[rh850][compile][call_primitive][error]") {
-    // Build (a + b) + c — the inner add_int feeds the outer add_int.
-    // First slice rejects this with NotImplemented; flatten or wait.
+TEST_CASE("Rh850Backend::compile emits nested CallPrimitive — (a + b) + c",
+          "[rh850][compile][call_primitive][nested]") {
+    // (a + b) + c. The inner add_int's result feeds the outer add_int's
+    // first operand. The nested driver allocates one RAM slot for the
+    // inner result, emits the inner fragment storing into that slot
+    // (no JMP tail), then the outer fragment reads the slot as a
+    // HookInputPointer-equivalent operand and stores to the output
+    // pin's slot with JMP+NOP terminator.
     auto const def = load_pack(kPackTwoInputsToml);
     ir::Module m;
 
@@ -1676,8 +1680,104 @@ TEST_CASE("Rh850Backend::compile rejects nested CallPrimitive operand",
 
     cg::Rh850Backend backend;
     auto r = backend.compile(m, def);
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+    INFO("compile error: " << (r.has_value() ? std::string{"(none)"} : r.error().to_string()));
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+
+    auto const &hp = r->hooks[0];
+    // Two fragments concatenated:
+    //   inner add_int(1, 2) → slot:    kBinaryIntArithSizeCC - 4 (no tail)
+    //   outer add_int(slot, 3) → dst:  kBinaryIntArithSizeHC (HookInput-shaped op1)
+    REQUIRE(hp.code.size() == (cg::rh850::kBinaryIntArithSizeCC - 4) +
+                                  cg::rh850::kBinaryIntArithSizeHC);
+    REQUIRE(hp.code.size() % 4 == 0);
+
+    // Two RAM claims: one for the output pin (4 bytes), one for the
+    // inner add_int's intermediate result (4 bytes). Order is
+    // pin-slot-first because the Store-walk allocates the output pin
+    // before recursing into the source primitive.
+    REQUIRE(hp.ram_claims.size() == 2);
+    REQUIRE(hp.ram_claims[0].size == 4);
+    REQUIRE(hp.ram_claims[1].size == 4);
+    REQUIRE(hp.ram_claims[0].address != hp.ram_claims[1].address);
+
+    // Tail: JMP[lp] in the last 4 bytes (root fragment terminator).
+    auto const jmp_lo = hp.code[hp.code.size() - 4];
+    auto const jmp_hi = hp.code[hp.code.size() - 3];
+    auto const jmp_word = static_cast<std::uint16_t>(jmp_lo | (jmp_hi << 8));
+    REQUIRE(jmp_word == cg::rh850::enc_jmp_reg(cg::rh850::kLp));
+}
+
+TEST_CASE("Rh850Backend::compile emits nested CallPrimitive across mixed primitives",
+          "[rh850][compile][call_primitive][nested]") {
+    // select_int(compare_lt_int(a, b), a, b) — the classic min(a, b).
+    // Exercises:
+    //   - nested primitive of a different result-type (Bool from
+    //     compare_lt_int feeding the Bool cond input of select_int)
+    //   - fan-out: `a` is read twice (by compare_lt and by select), but
+    //     they're both LoadHookInput — no slot needed, just two
+    //     identical resolves
+    //   - the nested driver's symbol-agnostic dispatch through
+    //     emit_rh850_primitive_fragment
+    auto const def = load_pack(kPackTwoInputsToml);
+    ir::Module m;
+
+    auto const make_hook_input = [](ir::ValueId id, std::string_view pin) {
+        ir::Instruction ins{};
+        ins.op = ir::Op::LoadHookInput;
+        ins.result_type = st::feature::PinType::Int;
+        ins.result_id = id;
+        ins.symbol = "binop_test";
+        ins.pin_name = std::string{pin};
+        return ins;
+    };
+    m.instructions.push_back(make_hook_input(1, "rpm"));
+    m.instructions.push_back(make_hook_input(2, "map"));
+
+    // cmp = compare_lt_int(rpm, map)  — Bool
+    ir::Instruction cmp{};
+    cmp.op = ir::Op::CallPrimitive;
+    cmp.result_type = st::feature::PinType::Bool;
+    cmp.result_id = 3;
+    cmp.symbol = "compare_lt_int";
+    cmp.operands.push_back(1);
+    cmp.operands.push_back(2);
+    m.instructions.push_back(std::move(cmp));
+
+    // min = select_int(cmp, rpm, map)  — Int
+    ir::Instruction sel{};
+    sel.op = ir::Op::CallPrimitive;
+    sel.result_type = st::feature::PinType::Int;
+    sel.result_id = 4;
+    sel.symbol = "select_int";
+    sel.operands.push_back(3); // nested compare_lt_int
+    sel.operands.push_back(1);
+    sel.operands.push_back(2);
+    m.instructions.push_back(std::move(sel));
+
+    // Need an Int output pin for the result of select_int; the
+    // kPackTwoInputsToml pack's `result` output is Int.
+    ir::Instruction store{};
+    store.op = ir::Op::StoreHookOutput;
+    store.result_type = st::feature::PinType::Int;
+    store.symbol = "binop_test";
+    store.pin_name = "result";
+    store.operands.push_back(4);
+    m.instructions.push_back(std::move(store));
+
+    cg::Rh850Backend backend;
+    auto r = backend.compile(m, def);
+    INFO("compile error: " << (r.has_value() ? std::string{"(none)"} : r.error().to_string()));
+    REQUIRE(r.has_value());
+    REQUIRE(r->hooks.size() == 1);
+
+    auto const &hp = r->hooks[0];
+    REQUIRE(hp.code.size() % 4 == 0);
+
+    // Two RAM claims: output pin slot + compare_lt_int intermediate slot.
+    REQUIRE(hp.ram_claims.size() == 2);
+    REQUIRE(hp.ram_claims[0].size == 4);
+    REQUIRE(hp.ram_claims[1].size == 4);
 }
 
 // ---- Unary float primitives (sqrt_float, flex_fuel_scale) -------------
