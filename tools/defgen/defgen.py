@@ -478,6 +478,21 @@ class TableRecord:
         return _emit_table("[[table]]", body)
 
 
+# CID prefixes that defgen emits with cid_scan=true by default.
+# Per docs/11 §"Scan mode", FA-DIT WRX firmware (LF*/LV*/LH*/AF*/AE*
+# families) embeds the CID descriptor at a per-firmware variable offset
+# — hardcoded cid_address values from the source XML are wrong for
+# every dump that wasn't the exact one the XML was authored against
+# (including any bootloader-stripped / full-2MB variation). Scan mode
+# makes the loader find the descriptor wherever it lives.
+_CID_SCAN_PREFIXES: tuple[str, ...] = ("LF", "LV", "LH", "AF", "AE")
+
+
+def _should_default_scan(cid_match: str) -> bool:
+    s = cid_match.strip().upper()
+    return any(s.startswith(p) for p in _CID_SCAN_PREFIXES)
+
+
 @dataclass
 class IdentificationRecord:
     name: str
@@ -485,15 +500,23 @@ class IdentificationRecord:
     cid_length: int
     cid_match: str
     ecu_part: str = ""
+    cid_scan: bool = False
 
     def to_toml(self) -> str:
-        return _emit_table("[[identification]]", {
-            "name":        self.name,
-            "cid_address": _hex(self.cid_address),
-            "cid_length":  self.cid_length,
-            "cid_match":   self.cid_match,
-            "ecu_part":    self.ecu_part,
-        })
+        # In scan mode, cid_address is ignored by the loader (docs/11
+        # §"Scan mode"). Omit it from the emitted TOML so it's not
+        # misleading + so a future re-import / hand-tune sees only the
+        # fields the loader actually consults.
+        body: dict[str, str | int] = {"name": self.name}
+        if self.cid_scan:
+            body["cid_scan"]  = True
+            body["cid_match"] = self.cid_match
+        else:
+            body["cid_address"] = _hex(self.cid_address)
+            body["cid_length"]  = self.cid_length
+            body["cid_match"]   = self.cid_match
+        body["ecu_part"] = self.ecu_part
+        return _emit_table("[[identification]]", body)
 
 
 @dataclass
@@ -928,12 +951,17 @@ def _rom_to_pack(rom: ET.Element) -> Pack | None:
     cid_addr = _parse_hex_address(romid.findtext("internalidaddress"))
     cid_str  = romid.findtext("internalidstring") or ""
     if cid_str.strip():
+        # FA-DIT WRX family CIDs live at variable per-firmware offsets;
+        # default to scan mode so the loader finds them anywhere in the
+        # ROM. cid_address from the XML is preserved in the record (we
+        # still pass it through) but to_toml omits it under scan mode.
         pack.identifications.append(IdentificationRecord(
             name=xmlid,
             cid_address=cid_addr,
             cid_length=len(cid_str),
             cid_match=cid_str,
             ecu_part=(romid.findtext("ecuid") or "").strip(),
+            cid_scan=_should_default_scan(cid_str),
         ))
 
     # Top-level scalings (often outside any table)

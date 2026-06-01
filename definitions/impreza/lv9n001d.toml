@@ -20,8 +20,7 @@ includes       = ["../pids.toml"]
 
 [[identification]]
 name        = "LV9N001D"
-cid_address = 0x0002AA1C
-cid_length  = 8
+cid_scan     = true
 cid_match   = "LV9N001D"
 ecu_part    = "8B145A7007"
 
