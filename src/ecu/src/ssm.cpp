@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <span>
 #include <string>
 #include <vector>
@@ -78,18 +79,37 @@ Result<std::vector<std::uint8_t>> build_a8_request(std::span<std::uint32_t const
     return out;
 }
 
+namespace {
+// Format a single byte as two-digit uppercase hex. Used by the SSM
+// diagnostic messages — `"0x" + std::to_string(byte)` would print the
+// byte as decimal (e.g. 0xCA → "0x202"), which was the prior bug.
+std::string hex_byte(unsigned b) {
+    char buf[5];
+    std::snprintf(buf, sizeof(buf), "%02X", b & 0xFFU);
+    return std::string{buf};
+}
+} // namespace
+
 Result<std::vector<std::uint8_t>> parse_a8_response(std::span<std::uint8_t const> resp,
                                                     std::size_t expected_n, Framing framing) {
     if (framing == Framing::KLine) {
         // Minimum response: header + src + dst + len + rsp + csum = 6 bytes for zero data.
         if (resp.size() < 6) {
-            return failure(ErrorCode::ParseError, "SSM response too short");
+            return failure(ErrorCode::ParseError, "SSM response too short: got " +
+                                                      std::to_string(resp.size()) +
+                                                      " bytes, need ≥6");
         }
         if (resp[0] != kHeader) {
-            return failure(ErrorCode::ParseError, "SSM response: bad header");
+            return failure(ErrorCode::ParseError, "SSM response: bad header byte 0x" +
+                                                      hex_byte(resp[0]) + " (expected 0x" +
+                                                      hex_byte(kHeader) + ")");
         }
         if (resp[1] != kSrcTool || resp[2] != kDestEcu) {
-            return failure(ErrorCode::ParseError, "SSM response: bad addressing");
+            return failure(ErrorCode::ParseError, "SSM response: bad addressing: src=0x" +
+                                                      hex_byte(resp[1]) + " dst=0x" +
+                                                      hex_byte(resp[2]) + " (expected src=0x" +
+                                                      hex_byte(kSrcTool) + " dst=0x" +
+                                                      hex_byte(kDestEcu) + ")");
         }
 
         std::size_t const declared_len = resp[3];
@@ -102,28 +122,27 @@ Result<std::vector<std::uint8_t>> parse_a8_response(std::span<std::uint8_t const
                                ")");
         }
 
-        // Verify checksum over [header .. last-payload-byte].
+        // Verify checksum over [header .. last-payload-byte]. The prior
+        // formatter rendered both bytes as decimal despite the "0x"
+        // prefix — fixed via hex_byte().
         auto const csum_computed = ssm_checksum(resp.subspan(0, resp.size() - 1));
         auto const csum_given = resp.back();
         if (csum_computed != csum_given) {
-            return failure(ErrorCode::BadChecksum,
-                           "SSM response: checksum 0x" +
-                               std::to_string(static_cast<unsigned>(csum_given)) +
-                               " != computed 0x" +
-                               std::to_string(static_cast<unsigned>(csum_computed)));
+            return failure(ErrorCode::BadChecksum, "SSM response: checksum 0x" +
+                                                       hex_byte(csum_given) + " != computed 0x" +
+                                                       hex_byte(csum_computed));
         }
 
         auto const rsp_byte = resp[4];
         if (rsp_byte == kNegativeResponse) {
             std::uint8_t const nrc = declared_len >= 2 ? resp[5] : 0xFFU;
             return failure(ErrorCode::EcuRejected,
-                           "SSM negative response, NRC=0x" +
-                               std::to_string(static_cast<unsigned>(nrc)));
+                           "SSM negative response, NRC=0x" + hex_byte(nrc));
         }
         if (rsp_byte != kRespReadByAddress) {
             return failure(ErrorCode::EcuRejected,
-                           "SSM unexpected response byte: 0x" +
-                               std::to_string(static_cast<unsigned>(rsp_byte)));
+                           "SSM unexpected response byte: 0x" + hex_byte(rsp_byte) +
+                               " (expected 0x" + hex_byte(kRespReadByAddress) + ")");
         }
 
         // Data bytes = declared_len - 1 (the RSP byte).
@@ -148,13 +167,12 @@ Result<std::vector<std::uint8_t>> parse_a8_response(std::span<std::uint8_t const
     if (rsp_byte == kNegativeResponse) {
         std::uint8_t const nrc = resp.size() >= 2 ? resp[1] : 0xFFU;
         return failure(ErrorCode::EcuRejected,
-                       "SSM/CAN negative response, NRC=0x" +
-                           std::to_string(static_cast<unsigned>(nrc)));
+                       "SSM/CAN negative response, NRC=0x" + hex_byte(nrc));
     }
     if (rsp_byte != kRespReadByAddress) {
         return failure(ErrorCode::EcuRejected,
-                       "SSM/CAN unexpected response byte: 0x" +
-                           std::to_string(static_cast<unsigned>(rsp_byte)));
+                       "SSM/CAN unexpected response byte: 0x" + hex_byte(rsp_byte) +
+                           " (expected 0x" + hex_byte(kRespReadByAddress) + ")");
     }
     std::size_t const data_n = resp.size() - 1;
     if (data_n != expected_n) {

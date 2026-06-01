@@ -65,24 +65,46 @@ Result<Rom> Rom::from_file(std::filesystem::path const &path, std::size_t max_by
     return Rom{std::move(bytes)};
 }
 
+namespace {
+// Shared OOB-error formatter for Rom reads. `op` names the width
+// ("u16", "u32", "slice"); `offset`/`length` describe the requested
+// range; `rom_size` is the actual ROM byte count. Keeps the four
+// read_* + slice paths from each rebuilding the same string.
+std::string format_oob(char const *op, std::size_t offset, std::size_t length,
+                       std::size_t rom_size) {
+    std::string msg{"Rom::"};
+    msg += op;
+    msg += ": offset=";
+    msg += std::to_string(offset);
+    if (length > 1) {
+        msg += " length=";
+        msg += std::to_string(length);
+    }
+    msg += " exceeds rom size ";
+    msg += std::to_string(rom_size);
+    return msg;
+}
+} // namespace
+
 Result<std::span<std::uint8_t const>> Rom::slice(std::size_t offset,
                                                  std::size_t length) const noexcept {
     if (offset > bytes_.size() || length > bytes_.size() - offset) {
-        return failure(ErrorCode::OutOfRange);
+        return failure(ErrorCode::OutOfRange, format_oob("slice", offset, length, bytes_.size()));
     }
     return std::span<std::uint8_t const>{bytes_.data() + offset, length};
 }
 
 Result<std::uint8_t> Rom::read_u8(std::size_t offset) const noexcept {
     if (offset >= bytes_.size()) {
-        return failure(ErrorCode::OutOfRange);
+        return failure(ErrorCode::OutOfRange, format_oob("read_u8", offset, 1, bytes_.size()));
     }
     return bytes_[offset];
 }
 
 Result<std::uint16_t> Rom::read_u16_be(std::size_t offset) const noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 2) {
-        return failure(ErrorCode::OutOfRange);
+        return failure(ErrorCode::OutOfRange,
+                       format_oob("read_u16_be", offset, 2, bytes_.size()));
     }
     return static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes_[offset]) << 8U) |
                                       static_cast<std::uint16_t>(bytes_[offset + 1]));
@@ -90,7 +112,8 @@ Result<std::uint16_t> Rom::read_u16_be(std::size_t offset) const noexcept {
 
 Result<std::uint32_t> Rom::read_u32_be(std::size_t offset) const noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 4) {
-        return failure(ErrorCode::OutOfRange);
+        return failure(ErrorCode::OutOfRange,
+                       format_oob("read_u32_be", offset, 4, bytes_.size()));
     }
     return (static_cast<std::uint32_t>(bytes_[offset]) << 24U) |
            (static_cast<std::uint32_t>(bytes_[offset + 1]) << 16U) |
@@ -100,7 +123,8 @@ Result<std::uint32_t> Rom::read_u32_be(std::size_t offset) const noexcept {
 
 Result<std::uint16_t> Rom::read_u16_le(std::size_t offset) const noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 2) {
-        return failure(ErrorCode::OutOfRange);
+        return failure(ErrorCode::OutOfRange,
+                       format_oob("read_u16_le", offset, 2, bytes_.size()));
     }
     return static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes_[offset + 1]) << 8U) |
                                       static_cast<std::uint16_t>(bytes_[offset]));
@@ -108,7 +132,8 @@ Result<std::uint16_t> Rom::read_u16_le(std::size_t offset) const noexcept {
 
 Result<std::uint32_t> Rom::read_u32_le(std::size_t offset) const noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 4) {
-        return failure(ErrorCode::OutOfRange);
+        return failure(ErrorCode::OutOfRange,
+                       format_oob("read_u32_le", offset, 4, bytes_.size()));
     }
     return (static_cast<std::uint32_t>(bytes_[offset + 3]) << 24U) |
            (static_cast<std::uint32_t>(bytes_[offset + 2]) << 16U) |
@@ -141,7 +166,7 @@ Result<std::string> Rom::read_ascii(std::size_t offset, std::size_t max_length) 
 
 Status Rom::write_u8(std::size_t offset, std::uint8_t value) noexcept {
     if (offset >= bytes_.size()) {
-        return failure(ErrorCode::OutOfRange);
+        return failure(ErrorCode::OutOfRange, format_oob("write_u8", offset, 1, bytes_.size()));
     }
     bytes_[offset] = value;
     return ok();
@@ -149,7 +174,8 @@ Status Rom::write_u8(std::size_t offset, std::uint8_t value) noexcept {
 
 Status Rom::write_u16_be(std::size_t offset, std::uint16_t value) noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 2) {
-        return failure(ErrorCode::OutOfRange);
+        return failure(ErrorCode::OutOfRange,
+                       format_oob("write_u16_be", offset, 2, bytes_.size()));
     }
     bytes_[offset] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
     bytes_[offset + 1] = static_cast<std::uint8_t>(value & 0xFFU);
@@ -158,7 +184,8 @@ Status Rom::write_u16_be(std::size_t offset, std::uint16_t value) noexcept {
 
 Status Rom::write_u16_le(std::size_t offset, std::uint16_t value) noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 2) {
-        return failure(ErrorCode::OutOfRange);
+        return failure(ErrorCode::OutOfRange,
+                       format_oob("write_u16_le", offset, 2, bytes_.size()));
     }
     bytes_[offset] = static_cast<std::uint8_t>(value & 0xFFU);
     bytes_[offset + 1] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);
@@ -167,7 +194,8 @@ Status Rom::write_u16_le(std::size_t offset, std::uint16_t value) noexcept {
 
 Status Rom::write_u32_be(std::size_t offset, std::uint32_t value) noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 4) {
-        return failure(ErrorCode::OutOfRange);
+        return failure(ErrorCode::OutOfRange,
+                       format_oob("write_u32_be", offset, 4, bytes_.size()));
     }
     bytes_[offset] = static_cast<std::uint8_t>((value >> 24U) & 0xFFU);
     bytes_[offset + 1] = static_cast<std::uint8_t>((value >> 16U) & 0xFFU);
@@ -178,7 +206,8 @@ Status Rom::write_u32_be(std::size_t offset, std::uint32_t value) noexcept {
 
 Status Rom::write_u32_le(std::size_t offset, std::uint32_t value) noexcept {
     if (offset > bytes_.size() || bytes_.size() - offset < 4) {
-        return failure(ErrorCode::OutOfRange);
+        return failure(ErrorCode::OutOfRange,
+                       format_oob("write_u32_le", offset, 4, bytes_.size()));
     }
     bytes_[offset] = static_cast<std::uint8_t>(value & 0xFFU);
     bytes_[offset + 1] = static_cast<std::uint8_t>((value >> 8U) & 0xFFU);

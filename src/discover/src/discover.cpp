@@ -517,7 +517,16 @@ Result<IdBaseline> parse_baseline_entry(toml::table const &t) {
                 break;
             auto const opt = el.value<std::int64_t>();
             if (!opt.has_value() || *opt < 0 || *opt > 255) {
-                return failure(ErrorCode::ParseError, "cdb: bad mode_values entry");
+                std::string msg{"cdb: bad mode_values entry at index "};
+                msg += std::to_string(i);
+                if (opt.has_value()) {
+                    msg += " value=";
+                    msg += std::to_string(*opt);
+                    msg += " (must be 0..255)";
+                } else {
+                    msg += " (not an integer)";
+                }
+                return failure(ErrorCode::ParseError, std::move(msg));
             }
             ib.mode_value[i++] = static_cast<std::uint8_t>(*opt);
         }
@@ -549,6 +558,14 @@ Result<DiscoveryEvent> parse_event_entry(toml::table const &t) {
         e.description = *d;
     }
 
+    auto const id_tag = [&]() {
+        return " (can_id=0x" + [&]() {
+            char buf[12];
+            std::snprintf(buf, sizeof(buf), "%X", e.can_id);
+            return std::string{buf};
+        }() + ")";
+    };
+
     if (e.kind == DiscoveryEvent::Kind::NewId) {
         if (auto const *after = t["after"].as_array(); after != nullptr) {
             std::size_t i = 0;
@@ -557,7 +574,16 @@ Result<DiscoveryEvent> parse_event_entry(toml::table const &t) {
                     break;
                 auto const opt = el.value<std::int64_t>();
                 if (!opt.has_value() || *opt < 0 || *opt > 255) {
-                    return failure(ErrorCode::ParseError, "cdb: bad after byte in new_id event");
+                    std::string msg{"cdb: bad after byte at index "};
+                    msg += std::to_string(i);
+                    msg += " in new_id event";
+                    msg += id_tag();
+                    if (opt.has_value()) {
+                        msg += " value=" + std::to_string(*opt) + " (must be 0..255)";
+                    } else {
+                        msg += " (not an integer)";
+                    }
+                    return failure(ErrorCode::ParseError, std::move(msg));
                 }
                 e.after[i++] = static_cast<std::uint8_t>(*opt);
             }
@@ -566,20 +592,48 @@ Result<DiscoveryEvent> parse_event_entry(toml::table const &t) {
         std::vector<std::uint8_t> bytes;
         std::vector<std::uint8_t> before;
         std::vector<std::uint8_t> after;
-        if (!toml_to_byte_vector(t["bytes"].as_array(), bytes) ||
-            !toml_to_byte_vector(t["before"].as_array(), before) ||
-            !toml_to_byte_vector(t["after"].as_array(), after)) {
-            return failure(ErrorCode::ParseError,
-                           "cdb: change event has malformed bytes/before/after");
+        bool const ok_bytes = toml_to_byte_vector(t["bytes"].as_array(), bytes);
+        bool const ok_before = toml_to_byte_vector(t["before"].as_array(), before);
+        bool const ok_after = toml_to_byte_vector(t["after"].as_array(), after);
+        if (!ok_bytes || !ok_before || !ok_after) {
+            std::string msg{"cdb: change event"};
+            msg += id_tag();
+            msg += " has malformed";
+            bool first = true;
+            auto add = [&](char const *name) {
+                msg += first ? " " : "/";
+                msg += name;
+                first = false;
+            };
+            if (!ok_bytes)
+                add("bytes");
+            if (!ok_before)
+                add("before");
+            if (!ok_after)
+                add("after");
+            return failure(ErrorCode::ParseError, std::move(msg));
         }
         if (bytes.size() != before.size() || bytes.size() != after.size()) {
-            return failure(ErrorCode::ParseError,
-                           "cdb: change event bytes/before/after length mismatch");
+            std::string msg{"cdb: change event"};
+            msg += id_tag();
+            msg += " bytes/before/after length mismatch (bytes=";
+            msg += std::to_string(bytes.size());
+            msg += " before=";
+            msg += std::to_string(before.size());
+            msg += " after=";
+            msg += std::to_string(after.size());
+            msg += ")";
+            return failure(ErrorCode::ParseError, std::move(msg));
         }
         for (std::size_t k = 0; k < bytes.size(); ++k) {
             auto const idx = bytes[k];
             if (idx >= 8) {
-                return failure(ErrorCode::ParseError, "cdb: byte index out of range");
+                std::string msg{"cdb: change event"};
+                msg += id_tag();
+                msg += " byte index ";
+                msg += std::to_string(static_cast<int>(idx));
+                msg += " out of range (must be 0..7)";
+                return failure(ErrorCode::ParseError, std::move(msg));
             }
             e.changed_byte_indices.push_back(idx);
             e.before[idx] = before[k];
