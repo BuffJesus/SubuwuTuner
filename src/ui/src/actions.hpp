@@ -11,6 +11,7 @@
 
 #include "app_state.hpp"
 
+#include "st/audit.hpp"
 #include "st/edit.hpp"
 
 #include <algorithm>
@@ -73,10 +74,26 @@ void apply_op(AppState &state, std::string label, Op &&op) {
         return;
     }
 
+    // Capture the label + cell count before moving `label` into the
+    // history record — audit hook uses both. Cell count comes from
+    // the rect inclusive on both ends.
+    std::string const audited_label = label;
+    std::size_t const audited_cells = rect.rows() * rect.cols();
     state.project->history().record(st::edit::Edit::table(
         state.selected_table_id, std::move(*before), std::move(*after), std::move(label)));
     state.status_msg.clear();
     state.dirty = true;
+    // Audit the edit (analyst Issue #8). Per-toolbar-op resolution —
+    // can be noisy when the user clicks +5% twenty times in a row, but
+    // the audit panel's kind-chip filter (commit 2b12599) lets users
+    // collapse the project.edit_committed group when they don't want
+    // the noise. Better noise than blind spot for a tuning workflow.
+    if (state.audit_log.has_value()) {
+        (void)state.audit_log->log(
+            st::audit::EntryKind::EditCommitted, "ui.editor", audited_label,
+            {{"table", state.selected_table_id},
+             {"cells", std::to_string(audited_cells)}});
+    }
 }
 
 void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forward);
