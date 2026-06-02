@@ -17,10 +17,12 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace st::ui {
 
@@ -52,6 +54,57 @@ void render_history_panel(AppState &state) {
     ImGui::InputTextWithHint("##history_filter", "Filter by table id or op…", state.history_filter,
                              sizeof state.history_filter);
     std::string_view const filter{state.history_filter};
+
+    // Op-kind filter chips. Extract a "kind" from each record's
+    // description by lopping off everything from the first ' (' onward
+    // — "autotune knock-pull (45 pulled)" → "autotune knock-pull". One
+    // chip per distinct kind in the current records. Active chip
+    // becomes the text filter; re-click clears.
+    auto const op_kind_of = [](std::string_view desc) -> std::string_view {
+        auto const paren = desc.find(" (");
+        return paren == std::string_view::npos ? desc : desc.substr(0, paren);
+    };
+    if (!records.empty()) {
+        std::vector<std::string_view> kinds_seen;
+        for (auto const &r : records) {
+            auto const kn = op_kind_of(r.description);
+            if (kn.empty())
+                continue;
+            bool dup = false;
+            for (auto k : kinds_seen) {
+                if (k == kn) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (!dup) {
+                kinds_seen.push_back(kn);
+            }
+        }
+        std::sort(kinds_seen.begin(), kinds_seen.end());
+        for (auto kn : kinds_seen) {
+            std::string const kn_str{kn};
+            bool const active = (std::string_view{state.history_filter} == kn);
+            if (active) {
+                push_primary_button_colors();
+            }
+            ImGui::PushID(kn_str.c_str());
+            if (ImGui::SmallButton(kn_str.c_str())) {
+                if (active) {
+                    state.history_filter[0] = '\0';
+                } else {
+                    std::snprintf(state.history_filter, sizeof state.history_filter, "%s",
+                                  kn_str.c_str());
+                }
+            }
+            ImGui::PopID();
+            if (active) {
+                pop_primary_button_colors();
+            }
+            ImGui::SameLine();
+        }
+        ImGui::NewLine();
+    }
 
     if (records.empty()) {
         ImGui::Separator();
