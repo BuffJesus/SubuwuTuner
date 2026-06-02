@@ -12,6 +12,7 @@
 #include "panels/panels.hpp" // apply_workspace_mode, enqueue_toast
 #include "project_io.hpp"    // open_project_dialog
 
+#include "st/audit.hpp"
 #include "st/edit.hpp"
 
 #include <imgui.h>
@@ -88,6 +89,16 @@ std::optional<std::string> apply_parsed_csv_edits(AppState &state,
         state.current_table_data = std::move(*td);
     }
     state.dirty = true;
+    // Audit the bulk import (analyst Issue #8). CSV apply can mutate
+    // hundreds of cells at once — a high-signal event the timeline
+    // should capture alongside save / autotune / read.
+    if (state.audit_log.has_value()) {
+        (void)state.audit_log->log(
+            st::audit::EntryKind::EditCommitted, "ui.csv_import",
+            std::string{descbuf},
+            {{"table", table->id},
+             {"cells", std::to_string(parsed.cells.size())}});
+    }
 
     std::string status = "Imported " + std::to_string(parsed.cells.size()) + " cell" +
                          (parsed.cells.size() == 1 ? "" : "s") + " into " + table->id + ".";
