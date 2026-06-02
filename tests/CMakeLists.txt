@@ -80,6 +80,7 @@ add_executable(st_unit_tests
     unit/feature_patch/test_manifest.cpp
     unit/feature_patch/test_rom_allocator.cpp
     unit/feature_patch/test_splice_sh2a.cpp
+    unit/feature_patch/test_splice_rh850.cpp
 )
 
 target_link_libraries(st_unit_tests

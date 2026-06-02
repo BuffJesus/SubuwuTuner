@@ -88,4 +88,34 @@ sh2a_bra_disp12(std::uint32_t splice_address, std::uint32_t patch_address) noexc
 inline constexpr std::int32_t kSh2aBraMinByteOffset = -4092; // PC + 4 + (-2048 * 2)
 inline constexpr std::int32_t kSh2aBraMaxByteOffset = 4098;  // PC + 4 + (2047 * 2)
 
+// Emit the RH850 splice from `splice_address` to `patch_address`.
+// Tries short form first (JR disp22, 4 bytes, reach ±~2 MB from PC).
+// Falls back to long form (MOVHI + MOVEA + JMP [reg]) — NOT YET
+// IMPLEMENTED; returns NotImplemented with a descriptive message in
+// this slice.
+//
+// RH850 JR semantics:
+//   - JR disp22 target = PC + disp22, where PC is the JR
+//     instruction's address and disp22 is a signed 22-bit byte
+//     displacement with implicit LSB = 0 (steps by 2).
+//   - Range: [-2097152, +2097150] bytes from PC.
+//
+// Both addresses must be 2-aligned; returns InvalidArgument
+// otherwise. The dual-bank gate (RH850 mustn't splice into the
+// currently-executing bank) lives at a higher layer — `PatchInserter`
+// in the next bundle — because bank state is a runtime property the
+// splice encoder can't see.
+[[nodiscard]] Result<SpliceBytes> emit_rh850_splice(std::uint32_t splice_address,
+                                                    std::uint32_t patch_address);
+
+// RH850 JR displacement helper (exposed for tests + diagnostics).
+// Returns the signed 22-bit byte displacement that JR at
+// `splice_address` would need to reach `patch_address`, or nullopt
+// if the gap doesn't fit or the addresses are not 2-aligned.
+[[nodiscard]] std::optional<std::int32_t>
+rh850_jr_disp22(std::uint32_t splice_address, std::uint32_t patch_address) noexcept;
+
+inline constexpr std::int32_t kRh850JrMinByteOffset = -2097152;
+inline constexpr std::int32_t kRh850JrMaxByteOffset = 2097150;
+
 } // namespace st::feature_patch
