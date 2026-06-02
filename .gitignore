@@ -137,6 +137,12 @@ SubuwuTuner*.zip
 # fixtures/demo.stune/).
 fixtures/projects/
 
+# Runtime artifacts written into a project dir at launch (audit logs are
+# append-only NDJSON per docs/audit; we don't want test runs of the GUI
+# to pollute the committed demo project).
+fixtures/demo.stune/audit.log
+fixtures/demo.stune/edits.toml
+
 # Generated docs
 site/
 docs-build/

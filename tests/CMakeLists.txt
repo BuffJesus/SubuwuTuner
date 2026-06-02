@@ -17,6 +17,7 @@ add_executable(st_unit_tests
     unit/core/test_error.cpp
     unit/core/test_version.cpp
     unit/core/test_crc32.cpp
+    unit/core/test_ext_interfaces.cpp
     unit/config/test_config.cpp
     unit/rom/test_rom.cpp
     unit/defs/test_defs.cpp
@@ -53,6 +54,7 @@ add_executable(st_unit_tests
     unit/discover/test_discover.cpp
     unit/flash/test_flash.cpp
     unit/flash/test_checksum.cpp
+    unit/flash/test_backup_store.cpp
     unit/flash/test_cancellation_invariants.cpp
     unit/flash/test_read_full_rom_sa_v4_port.cpp
     unit/flash/test_brick_recovery_fixture.cpp
@@ -72,6 +74,7 @@ add_executable(st_unit_tests
     unit/autotune/test_autotune_csv.cpp
     unit/autotune/test_autotune_lint.cpp
     unit/policy/test_policy.cpp
+    unit/policy/test_flash_preflight.cpp
     unit/feature/test_feature.cpp
     unit/feature/test_feature_ir.cpp
     unit/feature_codegen/test_feature_codegen.cpp

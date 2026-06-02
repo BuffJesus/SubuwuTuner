@@ -1,6 +1,7 @@
 add_library(st_flash STATIC
     src/flash.cpp
     src/checksum.cpp
+    src/backup_store.cpp
 )
 add_library(st::flash ALIAS st_flash)
 
