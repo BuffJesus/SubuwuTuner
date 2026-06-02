@@ -249,7 +249,10 @@ constexpr std::string_view kUsage =
     "                            transport. Refuses on engine-safety violations\n"
     "                            and on emissions edits without the confirmation/\n"
     "                            reason the active profile demands.\n"
-    "    pack-info <DEF>         Print metadata + counts for a definition pack.\n"
+    "    pack-info [--json] <DEF>\n"
+    "                            Print metadata + counts for a definition pack.\n"
+    "                            --json emits a one-line subuwutuner.pack-info.v1\n"
+    "                            object for CI scripts.\n"
     "    table-list <DEF> [--category C] [--emissions] [--safety-critical]\n"
     "                            List tables in a pack with optional filters.\n"
     "    primitive-list <DEF> [--type int|float|bool]\n"
@@ -1422,13 +1425,168 @@ int cmd_project_step(int argc, char *argv[], bool forward) {
     return 0;
 }
 
+// `pack-info --json`. Schema subuwutuner.pack-info.v1. Same fields the
+// text mode surfaces, structured for CI consumption. Validation result
+// included as `validation: {ok: bool, message: string?}`.
+int cmd_pack_info_json(std::filesystem::path const &path) {
+    auto const def = st::Definition::from_file(resolve_def_path(path));
+    if (!def.has_value()) {
+        std::string out{"{\"schema\":\"subuwutuner.pack-info.v1\",\"path\":"};
+        json_escape(out, path.string());
+        out.append(",\"error\":");
+        json_escape(out, def.error().to_string());
+        out.append("}\n");
+        std::fputs(out.c_str(), stdout);
+        return 1;
+    }
+    auto const &pack = def->pack();
+    std::string out;
+    out.reserve(2048);
+    out.append("{\"schema\":\"subuwutuner.pack-info.v1\",\"path\":");
+    json_escape(out, path.string());
+    out.append(",\"schema_version\":");
+    out.append(std::to_string(pack.schema_version));
+    out.append(",\"id\":");
+    json_escape(out, pack.id);
+    out.append(",\"display_name\":");
+    json_escape(out, pack.display_name);
+    out.append(",\"platform\":");
+    json_escape(out, pack.platform);
+    out.append(",\"transmission\":");
+    json_escape(out, pack.transmission);
+    out.append(",\"years\":[");
+    for (std::size_t i = 0; i < pack.years.size(); ++i) {
+        if (i != 0)
+            out.append(",");
+        out.append(std::to_string(pack.years[i]));
+    }
+    out.append("],\"endianness\":");
+    json_escape(out, pack.endianness);
+    out.append(",\"expected_rom_size\":");
+    out.append(std::to_string(pack.rom_size_bytes));
+    out.append(",\"checksum_type\":");
+    json_escape(out, pack.checksum_type);
+    out.append(",\"license\":");
+    json_escape(out, pack.license);
+    if (pack.extends.has_value()) {
+        out.append(",\"extends\":");
+        json_escape(out, *pack.extends);
+    } else {
+        out.append(",\"extends\":null");
+    }
+    out.append(",\"includes\":[");
+    for (std::size_t i = 0; i < pack.includes.size(); ++i) {
+        if (i != 0)
+            out.append(",");
+        json_escape(out, pack.includes[i]);
+    }
+    out.append("]");
+
+    // Identifications.
+    out.append(",\"identifications\":[");
+    for (std::size_t i = 0; i < def->identifications().size(); ++i) {
+        auto const &id = def->identifications()[i];
+        if (i != 0)
+            out.append(",");
+        out.append("{\"name\":");
+        json_escape(out, id.name);
+        out.append(",\"cid_match\":");
+        json_escape(out, id.cid_match);
+        if (id.cid_scan) {
+            out.append(",\"cid_scan\":true,\"cid_address\":null");
+        } else {
+            out.append(",\"cid_scan\":false,\"cid_address\":");
+            out.append(std::to_string(id.cid_address));
+        }
+        out.append("}");
+    }
+    out.append("]");
+
+    // Counts.
+    std::size_t emissions_tables = 0;
+    std::size_t safety_tables = 0;
+    for (auto const &t : def->tables()) {
+        if (t.emissions_relevant)
+            ++emissions_tables;
+        if (t.engine_safety_critical)
+            ++safety_tables;
+    }
+    std::size_t emissions_dtcs = 0;
+    for (auto const &d : def->dtcs()) {
+        if (d.emissions_relevant)
+            ++emissions_dtcs;
+    }
+    out.append(",\"counts\":{");
+    out.append("\"axes\":");
+    out.append(std::to_string(def->axes().size()));
+    out.append(",\"scalings\":");
+    out.append(std::to_string(def->scalings().size()));
+    out.append(",\"tables\":");
+    out.append(std::to_string(def->tables().size()));
+    out.append(",\"tables_emissions\":");
+    out.append(std::to_string(emissions_tables));
+    out.append(",\"tables_engine_safety\":");
+    out.append(std::to_string(safety_tables));
+    out.append(",\"pids\":");
+    out.append(std::to_string(def->pids().size()));
+    out.append(",\"switches\":");
+    out.append(std::to_string(def->switches().size()));
+    out.append(",\"dtc_bitmaps\":");
+    out.append(std::to_string(def->dtc_bitmaps().size()));
+    out.append(",\"dtcs\":");
+    out.append(std::to_string(def->dtcs().size()));
+    out.append(",\"dtcs_emissions\":");
+    out.append(std::to_string(emissions_dtcs));
+    out.append(",\"hooks\":");
+    out.append(std::to_string(def->hooks().size()));
+    out.append(",\"primitives\":");
+    out.append(std::to_string(def->primitives().size()));
+    out.append("}");
+
+    // Validation.
+    auto const validity = def->validate();
+    out.append(",\"validation\":{\"ok\":");
+    if (validity.has_value()) {
+        out.append("true,\"message\":null}");
+    } else {
+        out.append("false,\"message\":");
+        json_escape(out, std::string{validity.error().message()});
+        out.append("}");
+    }
+    out.append("}\n");
+    std::fputs(out.c_str(), stdout);
+    return validity.has_value() ? 0 : 1;
+}
+
 int cmd_pack_info(int argc, char *argv[]) {
     if (argc < 1) {
         std::fputs("pack-info: missing path\n", stderr);
-        std::fputs("Usage: subuwutuner-cli pack-info <DEF>\n", stderr);
+        std::fputs("Usage: subuwutuner-cli pack-info [--json] <DEF>\n", stderr);
         return 2;
     }
-    std::filesystem::path const path{argv[0]};
+    bool json_mode = false;
+    std::filesystem::path path;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--json") {
+            json_mode = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "pack-info: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (path.empty()) {
+            path = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "pack-info: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (path.empty()) {
+        std::fputs("pack-info: missing path\n", stderr);
+        return 2;
+    }
+    if (json_mode) {
+        return cmd_pack_info_json(path);
+    }
     auto const def = st::Definition::from_file(resolve_def_path(path));
     if (!def.has_value()) {
         return print_def_load_error("pack-info", path, def.error());
