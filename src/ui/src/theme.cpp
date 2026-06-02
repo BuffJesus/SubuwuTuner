@@ -60,16 +60,29 @@ ImWchar const *extended_glyph_ranges() {
     static ImWchar const ranges[] = {
         0x0020, 0x00FF, // Basic Latin + Latin-1 Supplement
         0x2010, 0x2027, // General Punctuation (–, —, …, ·)
+        0x2070, 0x209F, // Super-/Subscripts (¹ ² ³ ₀ ₁)
+        0x20A0, 0x20CF, // Currency Symbols (€)
+        0x2122, 0x2122, // Trademark ™
         0x2190, 0x21FF, // Arrows (→ ↔ ↻ ↩)
+        0x2200, 0x22FF, // Mathematical Operators (∑ ∆ √)
+        0x2300, 0x23FF, // Misc Technical (⌘ ⌫ ⏎)
         0x2500, 0x257F, // Box Drawing
         0x2580, 0x259F, // Block Elements
         0x25A0, 0x25FF, // Geometric Shapes (▦ ◈ ●)
         0x2600, 0x26FF, // Miscellaneous Symbols (⚡ ⚠ ✓ ✗)
-        0x2700, 0x27BF, // Dingbats (✔ ✘)
+        0x2700, 0x27BF, // Dingbats (✔ ✘ ✅)
+        0x2B00, 0x2BFF, // Misc Symbols + Arrows (⬜ ⬛ ⭐)
         0,
     };
     return ranges;
 }
+
+// Emoji ranges live in the supplementary planes (U+1F000+). ImGui's
+// default ImWchar is 16-bit and can't address codepoints above
+// U+FFFF — we stay on BMP coverage and accept tofu for non-BMP
+// emoji. The help modal's markdown renderer trims those at render
+// time so docs that use ✅ 🟡 ⬜ 🔒 don't surface tofu (✅ and ⬜
+// are BMP and render fine; 🟡 and 🔒 are non-BMP and get filtered).
 
 // Probe a few candidate paths and load the first one that exists. Returns
 // nullptr if none was loadable, in which case ImGui's default font is used.
@@ -129,6 +142,50 @@ void load_icon_font_merged(float size_px) {
     }
 }
 
+// Merge Segoe UI Symbol into the body atlas for the BMP symbol /
+// dingbat / arrows ranges. Inter has no glyphs for ✅ ⬜ → ↻ etc.,
+// so without this merge the ranges declared in extended_glyph_ranges
+// resolve to '?' tofu in the docs viewer. Segoe UI Symbol covers
+// these reliably on every supported Windows version. Falls back
+// silently when the font isn't present (Mac/Linux today).
+void load_symbol_font_merged(float size_px) {
+    static ImWchar const symbol_ranges[] = {
+        0x2010, 0x2027, // General Punctuation
+        0x2070, 0x209F, // Super-/Subscripts
+        0x20A0, 0x20CF, // Currency
+        0x2122, 0x2122, // Trademark
+        0x2190, 0x21FF, // Arrows
+        0x2200, 0x22FF, // Math
+        0x2300, 0x23FF, // Misc Technical
+        0x2500, 0x257F, // Box Drawing
+        0x2580, 0x259F, // Block Elements
+        0x25A0, 0x25FF, // Geometric Shapes
+        0x2600, 0x26FF, // Misc Symbols
+        0x2700, 0x27BF, // Dingbats
+        0x2B00, 0x2BFF, // Misc Symbols + Arrows
+        0,
+    };
+    ImFontConfig cfg;
+    cfg.MergeMode = true;
+    cfg.PixelSnapH = true;
+    cfg.GlyphMinAdvanceX = 0.0f; // proportional — these aren't square icons
+    cfg.GlyphOffset.y = 0.0f;
+    auto &io = ImGui::GetIO();
+    char const *const candidates[] = {
+        "C:/Windows/Fonts/seguisym.ttf", // Segoe UI Symbol (Win 7+)
+        "C:/Windows/Fonts/seguiemj.ttf", // Segoe UI Emoji (fallback)
+        "/System/Library/Fonts/Apple Symbols.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    };
+    for (auto const *path : candidates) {
+        std::error_code ec;
+        if (!std::filesystem::exists(path, ec))
+            continue;
+        if (io.Fonts->AddFontFromFileTTF(path, size_px, &cfg, symbol_ranges) != nullptr)
+            return;
+    }
+}
+
 Fonts load_fonts() {
     Fonts f;
     // UI font — sans for menus, panels, labels. Tries Inter from a bundled
@@ -146,6 +203,10 @@ Fonts load_fonts() {
     // use icon codepoints inline. Merged-mode add must follow the
     // primary AddFontFromFileTTF call.
     load_icon_font_merged(15.0f);
+    // Merge Segoe UI Symbol for the BMP symbol / dingbat / arrow
+    // ranges that Inter lacks. Without this the help modal renders
+    // ✅ ⬜ → ↻ as '?' fallbacks.
+    load_symbol_font_merged(15.0f);
 
     // Mono — for grids, hex dumps, log output where alignment matters.
     f.mono = load_first_existing(

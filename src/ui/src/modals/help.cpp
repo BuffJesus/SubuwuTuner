@@ -97,6 +97,43 @@ std::string_view trim(std::string_view s) {
     return s;
 }
 
+// Strip 4-byte UTF-8 sequences from a string. These encode codepoints
+// above U+FFFF — supplementary planes, mostly emoji — which ImGui's
+// 16-bit ImWchar default build can't render. Without this, the docs'
+// 🟡 / 🔒 / 🔥 etc. show as tofu in the help modal. We replace each
+// 4-byte sequence with a placeholder ASCII glyph rather than dropping
+// it entirely so the surrounding text alignment stays intact and the
+// reader sees that *something* was meant to be there.
+std::string strip_non_bmp(std::string_view s) {
+    std::string out;
+    out.reserve(s.size());
+    for (std::size_t i = 0; i < s.size();) {
+        auto const b = static_cast<unsigned char>(s[i]);
+        std::size_t len = 1;
+        if ((b & 0x80) == 0) {
+            len = 1;
+        } else if ((b & 0xE0) == 0xC0) {
+            len = 2;
+        } else if ((b & 0xF0) == 0xE0) {
+            len = 3;
+        } else if ((b & 0xF8) == 0xF0) {
+            len = 4;
+        }
+        if (len == 4) {
+            // Replace the whole emoji sequence with a single asterisk
+            // — narrow placeholder that reads as "thing was here" in
+            // bullet contexts.
+            out.push_back('*');
+        } else {
+            for (std::size_t j = 0; j < len && i + j < s.size(); ++j) {
+                out.push_back(s[i + j]);
+            }
+        }
+        i += len;
+    }
+    return out;
+}
+
 // Parse the glossary markdown table into (term, definition) pairs. The
 // glossary uses a single `| Term | Meaning |` table; rows before the
 // separator and rows with the bold-markdown wrap (**term**) get
@@ -265,6 +302,8 @@ void render_markdown(std::string_view body) {
                         if (text.size() >= 4 && text.starts_with("**") && text.ends_with("**")) {
                             text = text.substr(2, text.size() - 4);
                         }
+                        // Same non-BMP filter as the line renderer.
+                        text = strip_non_bmp(text);
                         ImGui::TextWrapped("%s", text.c_str());
                     }
                 }
@@ -298,33 +337,37 @@ void render_markdown(std::string_view body) {
             ImGui::Spacing();
             continue;
         }
-        if (line.starts_with("# ")) {
-            text_centered(std::string{line.substr(2)}.c_str(), 1.4f);
+        // Strip non-BMP UTF-8 sequences (emoji above U+FFFF) — ImGui's
+        // default ImWchar is 16-bit and renders them as tofu. Done per
+        // line at render time so the docs on disk stay verbatim.
+        std::string const safe = strip_non_bmp(line);
+        if (safe.starts_with("# ")) {
+            text_centered(safe.c_str() + 2, 1.4f);
             ImGui::Separator();
             continue;
         }
-        if (line.starts_with("## ")) {
+        if (safe.starts_with("## ")) {
             ImGui::Dummy(ImVec2(0.0f, kSpaceS));
             ImGui::PushFont(ImGui::GetFont());
             ImGui::PushStyleColor(ImGuiCol_Text, accent_for(current_theme()).base);
-            ImGui::TextUnformatted(line.data() + 3, line.data() + line.size());
+            ImGui::TextUnformatted(safe.c_str() + 3);
             ImGui::PopStyleColor();
             ImGui::PopFont();
             ImGui::Separator();
             continue;
         }
-        if (line.starts_with("### ")) {
+        if (safe.starts_with("### ")) {
             ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
-            ImGui::TextUnformatted(line.data() + 4, line.data() + line.size());
+            ImGui::TextUnformatted(safe.c_str() + 4);
             continue;
         }
-        if (line.starts_with("- ") || line.starts_with("* ")) {
+        if (safe.starts_with("- ") || safe.starts_with("* ")) {
             ImGui::Bullet();
             ImGui::SameLine();
-            ImGui::TextWrapped("%.*s", static_cast<int>(line.size()) - 2, line.data() + 2);
+            ImGui::TextWrapped("%s", safe.c_str() + 2);
             continue;
         }
-        ImGui::TextWrapped("%.*s", static_cast<int>(line.size()), line.data());
+        ImGui::TextWrapped("%s", safe.c_str());
     }
     flush_table();
 }
