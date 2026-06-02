@@ -106,12 +106,24 @@ jobs:
         run: |
           ./build/${{ matrix.preset }}/bin/subuwutuner-cli.exe --version
           ./build/${{ matrix.preset }}/bin/subuwutuner-cli.exe --help
+          # Pack-validation smoke — see Unix variant above for details.
+          ./build/${{ matrix.preset }}/bin/subuwutuner-cli.exe pack-info `
+            --json fixtures/demo-pack/pack.toml | Out-Null
 
       - name: Smoke-test CLI (Unix)
         if: matrix.os != 'windows-2022'
         run: |
           ./build/${{ matrix.preset }}/bin/subuwutuner-cli --version
           ./build/${{ matrix.preset }}/bin/subuwutuner-cli --help
+          # Pack-validation smoke: pack-info runs Definition::validate()
+          # on load. Fails exit 1 on any validation error — guards the
+          # demo pack against drift. The --json mode also exercises the
+          # subuwutuner.pack-info.v1 JSON emitter so CI scripts that
+          # depend on it stay green. (Per the 2026-06-01 analyst review
+          # in fixtures/private/findings_reviews_2026-06-01/, this is
+          # the QW-J "pack lint" smoke gate.)
+          ./build/${{ matrix.preset }}/bin/subuwutuner-cli pack-info \
+            --json fixtures/demo-pack/pack.toml > /dev/null
 
       - name: Performance gate — binary sizes (Unix)
         if: matrix.os != 'windows-2022'

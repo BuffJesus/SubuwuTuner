@@ -37,6 +37,7 @@ This folder contains the design and planning documents for **SubuwuTuner**, a co
 31. [30-patch-insertion.md](30-patch-insertion.md) — Patch insertion layer design (`src/feature_patch/`): manifest format, ROM-allocator, splice mechanics (SH-2A short/long-form + RH850 dual-bank gate), end-to-end `PatchObject → PatchedRom`
 32. [31-brick-protection-by-isa.md](31-brick-protection-by-isa.md) — Per-ISA recovery recipes (SH-2A single-bank serial-boot vs RH850 dual-bank atomic-swap); bench-rig validation plan per ISA; safety properties common to both; ship blocker #1
 33. [32-live-datalogger.md](32-live-datalogger.md) — Live gauge-cluster GUI design (LiveBuffer SPSC ring, LogSession multi-sink fan-out, ImPlot mini-lines, recording-while-gauging); CSV-replay panels stay; Phase 3 live deliverable
+34. [33-analyst-review-triage-2026-06-01.md](33-analyst-review-triage-2026-06-01.md) — Triage of the external analyst review (13 docs at `fixtures/private/findings_reviews_2026-06-01/`); identifies what's already shipped vs real gaps; sequences forward-looking recommendations
 
 ## Status
 

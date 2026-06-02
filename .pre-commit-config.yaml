@@ -1,0 +1,41 @@
+# Pre-commit hooks — stop format drift at commit time, before CI.
+#
+# The CI `clang-format (required)` lane in .github/workflows/ci.yml is
+# the authoritative gate; this hook is the local-mirror so contributors
+# don't burn a CI run on a format-only failure. Same clang-format
+# version (18.1.8) on both sides.
+#
+# Install (one-time per clone):
+#   pip install --user pre-commit
+#   pre-commit install
+#
+# After that, `git commit` runs the hook automatically. To run against
+# the whole tree on demand:
+#   pre-commit run --all-files
+#
+# Bypass with --no-verify (e.g. work-in-progress commits on a feature
+# branch); CI will still catch the drift before merge.
+
+repos:
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v18.1.8
+    hooks:
+      - id: clang-format
+        # Match the CI lane's scope exactly: src/ + tests/ C/C++ files.
+        # imgui_lib, generated files, and _deps stay untouched.
+        files: ^(src|tests)/.*\.(cpp|hpp|h)$
+        exclude: ^src/ui/src/icon_data\.hpp$  # auto-generated RGBA literal
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$|\.toml$'  # tomlplusplus + markdown intentional ws
+      - id: end-of-file-fixer
+        exclude: ^src/ui/src/icon_data\.hpp$|\.bin$|\.atlas$|\.ico$|\.png$
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        exclude: '\.bat$|\.ps1$'  # Windows scripts use CRLF
