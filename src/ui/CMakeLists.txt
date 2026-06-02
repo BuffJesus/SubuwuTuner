@@ -104,6 +104,7 @@ endif()
 add_executable(subuwutuner-gui
     src/main.cpp
     src/panels/adaptive_history.cpp
+    src/panels/audit.cpp
     src/panels/coldstart.cpp
     src/panels/command_palette.cpp
     src/panels/dtcs.cpp
@@ -160,6 +161,7 @@ target_link_libraries(subuwutuner-gui
         st::policy
         st::project
         st::autotune
+        st::audit
         st::feature
         st::log
         st::profile

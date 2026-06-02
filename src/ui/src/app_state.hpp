@@ -21,6 +21,7 @@
 #include "st/log/coldstart.hpp"
 #include "st/log/ebcs.hpp"
 #include "st/log/knock_dashboard.hpp"
+#include "st/audit.hpp"
 #include "st/log/live_buffer.hpp"
 #include "st/profile.hpp"
 #include "st/project.hpp"
@@ -387,6 +388,19 @@ struct AppState {
     std::string compare_error_msg;
     float compare_epsilon{0.0f};
     bool compare_include_identical{false};
+
+    // Audit log viewer panel (analyst Issue #8). Reads the project's
+    // <project>/audit.log via st::audit::read_all() into entries, with
+    // a free-text filter and a single column-sort flag (newest-first
+    // by default — matches the CLI's `audit show` order). loaded
+    // turns true on first successful read so the panel can distinguish
+    // "fresh open, nothing read yet" from "read but log is empty".
+    bool show_audit_panel{false};
+    std::vector<st::audit::Entry> audit_entries;
+    std::string audit_error_msg;
+    bool audit_loaded{false};
+    char audit_filter[128]{};
+    bool audit_newest_first{true};
     // Track which TableDelta has its details expanded — std::string-keyed
     // by table_id. Survives across recomputes so the user doesn't lose
     // their expansion when they re-run a compare.

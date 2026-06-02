@@ -299,6 +299,15 @@ void render_menubar(AppState &state) {
                                   "as the `subuwutuner-cli diff` subcommand.\n"
                                   "See docs/33 + analyst Issue #4.");
             }
+            ImGui::MenuItem("Audit log", nullptr, &state.show_audit_panel);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Read-only viewer for <project>/audit.log.\n"
+                                  "Surfaces every recorded ECU operation with\n"
+                                  "per-entry CRC32 verification — bad checksums\n"
+                                  "render as red 'BAD' chips so tampering is\n"
+                                  "visible instead of silently dropped.\n"
+                                  "See analyst Issue #8.");
+            }
             ImGui::Separator();
             if (ImGui::BeginMenu("Theme")) {
                 bool const is_dark = state.settings.theme == Theme::Dark;
