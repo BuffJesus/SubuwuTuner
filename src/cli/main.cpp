@@ -583,6 +583,11 @@ constexpr std::string_view kUsage =
     "                            profiles (or %APPDATA%/SubuwuTuner/profiles on\n"
     "                            Windows). See docs/33 + analyst Issue #7.\n"
     "    audit show <project-dir> [--json]\n"
+    "    changelog show [--all]\n"
+    "                            Print CHANGELOG.md's [Unreleased] section (or the\n"
+    "                            whole file with --all). Mirrors the welcome panel's\n"
+    "                            \"What's new\" parser so CLI + GUI render the same\n"
+    "                            content. Useful for release-prep scripts.\n"
     "    audit append <project-dir> --kind <name> --description \"text\"\n"
     "                              [--source <text>] [--field key=value ...]\n"
     "                            Append one entry. kind is a wire-format name\n"
@@ -3306,6 +3311,102 @@ int cmd_project_add_rom(int argc, char *argv[]) {
 // [[rom]] additional entry — in either text or JSON shape. Companion
 // to project-add-rom: confirms what's in the project without firing
 // up the GUI.
+// Print CHANGELOG.md's [Unreleased] section to stdout. Mirrors the
+// welcome panel's parser (welcome.cpp::parse_unreleased) so what the
+// CLI prints matches what the GUI shows. Useful for release-prep
+// scripts: `subuwutuner-cli changelog show > release-notes.md`.
+int cmd_changelog_show(int argc, char *argv[]) {
+    bool unreleased_only = true;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--all" || a == "--full") {
+            unreleased_only = false;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "changelog show: unknown option: %s\n", argv[i]);
+            return 2;
+        } else {
+            std::fprintf(stderr, "changelog show: extra positional: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    // Resolve CHANGELOG.md alongside the CLI binary. Same candidate
+    // ladder the GUI uses (dev tree, sibling install, flat install)
+    // but rooted via argv0 — readResolveDocsDir-style logic inlined
+    // here since the CLI doesn't link the UI helpers.
+    auto resolve = []() -> std::filesystem::path {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        // exe_path() is available on the CLI through… actually
+        // there isn't a portable wrapper, so just look in cwd then
+        // bail out. The GUI uses argv0 because the binary location
+        // is known at launch; for the CLI users typically invoke
+        // from the repo or install dir.
+        std::array<fs::path, 3> candidates{
+            fs::path{"CHANGELOG.md"},
+            fs::path{".."} / "CHANGELOG.md",
+            fs::path{"../.."} / "CHANGELOG.md",
+        };
+        for (auto const &c : candidates) {
+            if (fs::exists(c, ec) && !ec) {
+                return c;
+            }
+        }
+        return {};
+    };
+    auto const path = resolve();
+    if (path.empty()) {
+        std::fputs("changelog show: CHANGELOG.md not found in current dir or parents.\n"
+                   "  Run from the repo root or an install dir that ships CHANGELOG.md.\n",
+                   stderr);
+        return 1;
+    }
+    std::ifstream in{path, std::ios::binary};
+    if (!in) {
+        std::fprintf(stderr, "changelog show: cannot open %s\n", path.string().c_str());
+        return 1;
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    auto const body = std::move(ss).str();
+    if (!unreleased_only) {
+        std::fputs(body.c_str(), stdout);
+        return 0;
+    }
+    // [Unreleased] section only — walk the body, capturing the lines
+    // between "## [Unreleased]" and the next "## " heading.
+    bool in_section = false;
+    std::size_t i = 0;
+    while (i < body.size()) {
+        std::size_t line_end = body.find('\n', i);
+        if (line_end == std::string::npos) {
+            line_end = body.size();
+        }
+        std::string_view line{body.data() + i, line_end - i};
+        std::size_t const next = line_end + 1;
+        if (line.starts_with("## ")) {
+            if (line.find("[Unreleased]") != std::string_view::npos) {
+                in_section = true;
+                std::fputs(std::string{line}.c_str(), stdout);
+                std::fputc('\n', stdout);
+                i = next;
+                continue;
+            } else if (in_section) {
+                break; // hit the next section heading — stop.
+            }
+        }
+        if (in_section) {
+            std::fputs(std::string{line}.c_str(), stdout);
+            std::fputc('\n', stdout);
+        }
+        i = next;
+    }
+    if (!in_section) {
+        std::fputs("changelog show: no [Unreleased] section found in CHANGELOG.md\n", stderr);
+        return 1;
+    }
+    return 0;
+}
+
 int cmd_project_list_roms(int argc, char *argv[]) {
     std::optional<std::filesystem::path> proj_dir;
     bool json_mode = false;
@@ -12633,6 +12734,14 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-list-roms") {
         return cmd_project_list_roms(argc - 2, argv + 2);
+    }
+    if (cmd == "changelog") {
+        if (argc < 3 || std::string_view{argv[2]} != "show") {
+            std::fputs("changelog: missing subcommand. Try `changelog show [--all]`.\n",
+                       stderr);
+            return 2;
+        }
+        return cmd_changelog_show(argc - 3, argv + 3);
     }
     if (cmd == "project-history") {
         return cmd_project_history(argc - 2, argv + 2);
