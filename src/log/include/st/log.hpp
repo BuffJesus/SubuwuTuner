@@ -22,6 +22,8 @@
 
 namespace st::log {
 
+class LiveBuffer; // forward decl — full definition in st/log/live_buffer.hpp
+
 // LogStream is the single-producer / single-consumer lock-free ring at the
 // heart of Phase 3 datalogging. The transport's I/O thread is the producer
 // (it pushes one Sample per ECU response); the UI thread, the CSV sink, or
@@ -137,6 +139,21 @@ public:
                std::size_t ring_capacity = 1024,
                ecu::ssm::Framing ssm_framing = ecu::ssm::Framing::KLine);
 
+    // Attach a LiveBuffer the I/O thread should fan out per-channel
+    // samples into, in addition to the LogStream the existing
+    // consumer-pull pattern uses. Must be called BEFORE start() —
+    // once the I/O thread is running, the attach list is read
+    // without synchronization. The buffer must outlive the
+    // LogSession (the gauge-cluster panel owns the buffer and keeps
+    // it alive across session lifecycle in practice).
+    //
+    // Multiple LiveBuffers can be attached (every fan-out target
+    // receives every sample). Empty/null pointers are skipped.
+    // Channel count of each attached buffer must equal this session's
+    // channel count; otherwise attach() returns InvalidArgument and
+    // the buffer is not registered.
+    [[nodiscard]] Status attach_live_buffer(LiveBuffer *buffer);
+
     LogSession(LogSession const &) = delete;
     LogSession &operator=(LogSession const &) = delete;
     LogSession(LogSession &&) = delete;
@@ -200,6 +217,11 @@ private:
     std::atomic<std::uint64_t> io_errors_{0};
 
     std::chrono::steady_clock::time_point start_time_{};
+
+    // Attached fan-out targets. Read by the I/O thread without
+    // synchronization; the attach API enforces "before start()" so
+    // there's no concurrent access.
+    std::vector<LiveBuffer *> attached_buffers_;
 };
 
 // Streams datalog samples to an ostream in standard CSV: a header row of

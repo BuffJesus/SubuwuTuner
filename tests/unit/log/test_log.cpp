@@ -591,3 +591,134 @@ TEST_CASE("LogSession with IsoTp framing emits bare-payload frames",
     }
     REQUIRE(seen == std::vector<double>{0x42, 0x55});
 }
+
+// ---- LiveBuffer fan-out (docs/32 step 2) ------------------------------
+
+#include "st/log/live_buffer.hpp"
+
+TEST_CASE("LogSession::attach_live_buffer rejects null", "[log][session][live_buffer]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    std::vector<log_ns::LogChannel> const channels{
+        {"iat", 0x1000, st::DataType::Uint8, std::nullopt},
+    };
+    log_ns::LogSession session{t, channels, 16};
+    auto r = session.attach_live_buffer(nullptr);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("LogSession::attach_live_buffer rejects channel-count mismatch",
+          "[log][session][live_buffer]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    std::vector<log_ns::LogChannel> const channels{
+        {"iat", 0x1000, st::DataType::Uint8, std::nullopt},
+        {"ect", 0x1001, st::DataType::Uint8, std::nullopt},
+    };
+    log_ns::LogSession session{t, channels, 16};
+
+    log_ns::LiveBuffer wrong_size{5, 64}; // 5 channels, session has 2
+    auto r = session.attach_live_buffer(&wrong_size);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("LogSession::attach_live_buffer rejects attach-after-start",
+          "[log][session][live_buffer]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    std::vector<log_ns::LogChannel> const channels{
+        {"iat", 0x1000, st::DataType::Uint8, std::nullopt},
+    };
+    log_ns::LogSession session{t, channels, 16};
+    REQUIRE(session.start().has_value());
+
+    log_ns::LiveBuffer buf{1, 64};
+    auto r = session.attach_live_buffer(&buf);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+    auto const &msg = r.error().to_string();
+    REQUIRE(msg.find("before start") != std::string::npos);
+
+    session.stop();
+}
+
+TEST_CASE("LogSession fans out samples to attached LiveBuffer",
+          "[log][session][live_buffer]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    std::vector<log_ns::LogChannel> const channels{
+        {"iat", 0x1000, st::DataType::Uint8, std::nullopt},
+        {"ect", 0x1001, st::DataType::Uint8, std::nullopt},
+    };
+    auto const req = a8_request_for(channels);
+    // Three cycles, two channels each.
+    t.expect_send_recv(req, a8_response({0x10, 0x20}));
+    t.expect_send_recv(req, a8_response({0x30, 0x40}));
+    t.expect_send_recv(req, a8_response({0x50, 0x60}));
+
+    log_ns::LogSession session{t, channels, 16};
+    log_ns::LiveBuffer buf{2, 64};
+    REQUIRE(session.attach_live_buffer(&buf).has_value());
+
+    REQUIRE(session.start().has_value());
+    REQUIRE(wait_until(1000ms, [&] { return t.remaining() == 0; }));
+    REQUIRE(wait_until(200ms, [&] { return session.io_errors() > 0; }));
+    session.stop();
+
+    REQUIRE(session.cycles_completed() == 3);
+
+    // Stream got all 3 samples (consumer-pull path still works).
+    std::int64_t ts = 0;
+    std::vector<double> out(2, 0.0);
+    std::vector<std::pair<double, double>> seen_stream;
+    while (session.stream().try_pop(ts, out)) {
+        seen_stream.emplace_back(out[0], out[1]);
+    }
+    REQUIRE(seen_stream.size() == 3);
+
+    // LiveBuffer got the same 3 samples per channel (fan-out path).
+    REQUIRE(buf.pushed_count(0) == 3);
+    REQUIRE(buf.pushed_count(1) == 3);
+    auto snap_iat = buf.snapshot(0, 3);
+    REQUIRE(snap_iat.size() == 3);
+    REQUIRE(snap_iat[0].value == 0x10);
+    REQUIRE(snap_iat[1].value == 0x30);
+    REQUIRE(snap_iat[2].value == 0x50);
+    auto snap_ect = buf.snapshot(1, 3);
+    REQUIRE(snap_ect.size() == 3);
+    REQUIRE(snap_ect[0].value == 0x20);
+    REQUIRE(snap_ect[1].value == 0x40);
+    REQUIRE(snap_ect[2].value == 0x60);
+}
+
+TEST_CASE("LogSession fan-out to multiple LiveBuffers",
+          "[log][session][live_buffer]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    std::vector<log_ns::LogChannel> const channels{
+        {"iat", 0x1000, st::DataType::Uint8, std::nullopt},
+    };
+    auto const req = a8_request_for(channels);
+    t.expect_send_recv(req, a8_response({0xAA}));
+    t.expect_send_recv(req, a8_response({0xBB}));
+
+    log_ns::LogSession session{t, channels, 16};
+    log_ns::LiveBuffer buf_a{1, 64};
+    log_ns::LiveBuffer buf_b{1, 64};
+    REQUIRE(session.attach_live_buffer(&buf_a).has_value());
+    REQUIRE(session.attach_live_buffer(&buf_b).has_value());
+
+    REQUIRE(session.start().has_value());
+    REQUIRE(wait_until(1000ms, [&] { return t.remaining() == 0; }));
+    REQUIRE(wait_until(200ms, [&] { return session.io_errors() > 0; }));
+    session.stop();
+
+    REQUIRE(buf_a.pushed_count(0) == 2);
+    REQUIRE(buf_b.pushed_count(0) == 2);
+    REQUIRE(buf_a.latest(0)->value == 0xBB);
+    REQUIRE(buf_b.latest(0)->value == 0xBB);
+}

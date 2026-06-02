@@ -7,6 +7,9 @@
 #include "st/core/result.hpp"
 #include "st/defs.hpp"
 #include "st/ecu/ssm.hpp"
+#include "st/log/live_buffer.hpp"
+
+#include <string>
 
 #include <algorithm>
 #include <atomic>
@@ -272,8 +275,39 @@ void LogSession::io_loop(std::chrono::milliseconds timeout) noexcept {
                                std::chrono::steady_clock::now() - start_time_)
                                .count();
         (void)stream_.try_push(ts_ns, sample);
+        // Fan out per-channel samples to any attached LiveBuffers.
+        // attached_buffers_ is read without synchronization — safe
+        // because attach_live_buffer enforces "before start()".
+        for (auto *buf : attached_buffers_) {
+            if (buf == nullptr)
+                continue;
+            for (std::size_t i = 0; i < sample.size(); ++i) {
+                buf->push(i, ts_ns, sample[i]);
+            }
+        }
         cycles_completed_.fetch_add(1, std::memory_order_relaxed);
     }
+}
+
+Status LogSession::attach_live_buffer(LiveBuffer *buffer) {
+    if (buffer == nullptr) {
+        return failure(ErrorCode::InvalidArgument,
+                       "LogSession::attach_live_buffer: buffer is null");
+    }
+    if (running_.load(std::memory_order_acquire)) {
+        return failure(ErrorCode::InvalidArgument,
+                       "LogSession::attach_live_buffer: must be called before start() "
+                       "(the I/O thread reads the attach list without synchronization)");
+    }
+    if (buffer->channel_count() != channels_.size()) {
+        std::string msg{"LogSession::attach_live_buffer: buffer channel_count "};
+        msg.append(std::to_string(buffer->channel_count()));
+        msg.append(" != session channel count ");
+        msg.append(std::to_string(channels_.size()));
+        return failure(ErrorCode::InvalidArgument, std::move(msg));
+    }
+    attached_buffers_.push_back(buffer);
+    return ok();
 }
 
 // =====================================================================
