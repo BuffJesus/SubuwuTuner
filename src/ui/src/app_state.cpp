@@ -25,6 +25,7 @@ void AppState::try_open_project(std::filesystem::path const &path) {
         status_msg = err;
         enqueue_toast(*this, ToastKind::Danger, err);
         project.reset();
+        audit_log.reset();
         selected_table_id.clear();
         current_table_data.reset();
         selection.reset();
@@ -38,6 +39,19 @@ void AppState::try_open_project(std::filesystem::path const &path) {
     selection.reset();
     dirty = false;
     last_save_iso.reset();
+    // Open the audit log handle for this project (analyst Issue #8).
+    // Failure is non-fatal — the project still loads, just without
+    // audit subscription. The audit panel surfaces past entries from
+    // any prior session even if this open fails.
+    audit_log.reset();
+    if (auto al = st::audit::AuditLog::open(project->dir() / "audit.log");
+        al.has_value()) {
+        audit_log.emplace(std::move(*al));
+        (void)audit_log->log(st::audit::EntryKind::ProjectOpened, "ui",
+                             "Project opened",
+                             {{"dir", project->dir().string()},
+                              {"display_name", project->display_name()}});
+    }
     enqueue_toast(*this, ToastKind::Success,
                   std::string{"Loaded "} + path.filename().string());
     push_recent(recents, path);
@@ -68,6 +82,7 @@ void AppState::select_table(std::string const &id) {
 
 void AppState::close_project() {
     project.reset();
+    audit_log.reset();
     selected_table_id.clear();
     current_table_data.reset();
     selection.reset();

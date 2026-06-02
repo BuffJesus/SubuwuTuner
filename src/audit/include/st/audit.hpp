@@ -63,6 +63,16 @@ enum class EntryKind : std::uint8_t {
     DatalogStarted,
     DatalogStopped,
     ChecksumRecomputed,
+    // Project-lifecycle hooks (analyst Issue #8). Appended by the GUI
+    // (and CLI verbs that operate on projects) so audit.log captures
+    // user-initiated mutations as they happen, not just transport-level
+    // events. AutotuneCommitted is the highest-signal one: it's the
+    // moment a knock-pull / MAF run lands in the project's edit
+    // history, irreversibly changing the working ROM bytes.
+    ProjectOpened,
+    ProjectSaved,
+    EditCommitted,
+    AutotuneCommitted,
 };
 
 [[nodiscard]] std::string_view kind_name(EntryKind k) noexcept;

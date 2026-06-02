@@ -12,6 +12,7 @@
 #include "panels/panels.hpp" // enqueue_toast
 #include "persistence.hpp"
 
+#include "st/audit.hpp"
 #include "st/edit.hpp"
 
 #include <imgui.h>
@@ -53,6 +54,11 @@ void save_project(AppState &state) {
         auto const err = "Save failed: " + s.error().to_string();
         state.status_msg = err;
         enqueue_toast(state, ToastKind::Danger, err);
+        if (state.audit_log.has_value()) {
+            (void)state.audit_log->log(st::audit::EntryKind::Custom, "ui",
+                                        "Project save failed",
+                                        {{"error", s.error().to_string()}});
+        }
         return;
     }
     // Success: status bar already shows "Saved Nm ago" + last_save_iso
@@ -63,6 +69,12 @@ void save_project(AppState &state) {
     enqueue_toast(state, ToastKind::Success, "Saved.");
     state.dirty = false;
     state.last_save_iso = iso8601_utc_now();
+    if (state.audit_log.has_value()) {
+        (void)state.audit_log->log(
+            st::audit::EntryKind::ProjectSaved, "ui", "Project saved",
+            {{"display_name", state.project->display_name()},
+             {"dir", state.project->dir().string()}});
+    }
 }
 
 // Writes the currently-selected table to `path` as a CSV in the same

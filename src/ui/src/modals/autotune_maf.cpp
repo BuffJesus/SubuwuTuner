@@ -163,6 +163,14 @@ std::optional<std::string> apply_maf_autotune_proposal(AppState &state) {
     state.dirty = true;
     state.status_msg = "Autotune MAF applied: " + std::to_string(modified) + " cell" +
                        (modified == 1 ? "" : "s") + " changed on " + table->id + ".";
+    if (state.audit_log.has_value()) {
+        (void)state.audit_log->log(
+            st::audit::EntryKind::AutotuneCommitted, "autotune.maf",
+            std::string{descbuf},
+            {{"table", table->id},
+             {"cells_modified", std::to_string(modified)},
+             {"log_path", state.maf_at_log_path}});
+    }
     return std::nullopt;
 }
 

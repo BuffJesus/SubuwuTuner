@@ -191,6 +191,15 @@ std::optional<std::string> apply_knock_pull_proposal(AppState &state) {
     state.status_msg = "Autotune knock-pull applied: " + std::to_string(pulled) + " pulled" +
                        (added > 0 ? (", " + std::to_string(added) + " added-back") : "") + " on " +
                        table->id + ".";
+    if (state.audit_log.has_value()) {
+        (void)state.audit_log->log(
+            st::audit::EntryKind::AutotuneCommitted, "autotune.knock",
+            std::string{descbuf},
+            {{"table", table->id},
+             {"pulled", std::to_string(pulled)},
+             {"added_back", std::to_string(added)},
+             {"log_path", state.kp_at_log_path}});
+    }
     return std::nullopt;
 }
 

@@ -406,6 +406,14 @@ struct AppState {
     bool audit_loaded{false};
     char audit_filter[128]{};
     bool audit_newest_first{true};
+    // Project-scoped audit log handle. Lifecycle:
+    //   try_open_project  → AuditLog::open on <project>/audit.log;
+    //                        ProjectOpened entry appended
+    //   save_project      → ProjectSaved entry appended
+    //   close_project     → handle reset (destructor closes the file)
+    // Failures are non-fatal — open errors land as a status message and
+    // the project still loads; we just don't audit until next session.
+    std::optional<st::audit::AuditLog> audit_log;
 
     // In-app help modal (analyst Issues #12 + #22). Two-pane: topic
     // list on the left, rendered markdown on the right. Topics are
