@@ -225,7 +225,12 @@ void render_sidebar(AppState &state) {
         }
         ImGuiTreeNodeFlags const tn_flags =
             ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
-        if (ImGui::TreeNodeEx(tn_label, tn_flags)) {
+        bool const opened = ImGui::TreeNodeEx(tn_label, tn_flags);
+        // Glossary hover on the category header — many category strings
+        // (Table, Datalog, DTC, Flash, Scaling) match glossary entries
+        // and the user has the header right there to hover.
+        glossary_tooltip_for(state, g.name);
+        if (opened) {
             for (auto idx : g.indices) {
                 auto const &t = def.tables()[idx];
                 if (!table_matches(t))
