@@ -250,6 +250,11 @@ constexpr std::string_view kUsage =
     "                            pack has tables, source CRC matches recorded value,\n"
     "                            [[rom]] entries resolve, audit.log integrity is OK.\n"
     "                            Exits 1 on the first failure — gateable from CI.\n"
+    "    stats <dir> --table <id> [--source|--working] [--json]\n"
+    "                            Print min/max/mean/stddev/p10/p50/p90/cells/edited\n"
+    "                            for one table. Same shape as the GUI Stats panel.\n"
+    "                            Defaults to --working; --source reads the unmodified\n"
+    "                            ROM if you want pre-edit baseline.\n"
     "    project-history <dir> [--table <id>] [--limit N]\n"
     "                            List the project's edit history with cursor\n"
     "                            position and per-edit emissions/safety flags.\n"
@@ -3502,6 +3507,170 @@ int cmd_changelog_show(int argc, char *argv[]) {
 // the repo before merge), portable handoffs ("does this .stune work
 // on the receiver's machine?"), and post-flash sanity ("did the
 // roundtrip break anything?").
+// Print min/max/mean/stddev/percentiles for a single table — same
+// shape as the GUI Stats panel. Useful for scripted summaries
+// ("how big is the working-vs-source delta on this map?") without
+// firing up the GUI.
+int cmd_stats(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> proj_dir;
+    std::optional<std::string> table_id;
+    bool json_mode = false;
+    bool use_source = false;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const need_val = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "stats: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--table") {
+            if (auto const *v = need_val("--table"); v)
+                table_id = std::string{v};
+            else
+                return 2;
+        } else if (a == "--source") {
+            use_source = true;
+        } else if (a == "--working") {
+            use_source = false;
+        } else if (a == "--json") {
+            json_mode = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "stats: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!proj_dir.has_value()) {
+            proj_dir = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "stats: extra positional: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!proj_dir.has_value() || !table_id.has_value()) {
+        std::fputs("stats: missing required arguments\n"
+                   "Usage: subuwutuner-cli stats <project-dir> --table <id> "
+                   "[--source | --working] [--json]\n",
+                   stderr);
+        return 2;
+    }
+    auto proj = st::Project::open(*proj_dir);
+    if (!proj.has_value()) {
+        std::fprintf(stderr, "stats: %s\n", proj.error().to_string().c_str());
+        return 1;
+    }
+    auto const *tbl = proj->definition().find_table(*table_id);
+    if (tbl == nullptr) {
+        std::fprintf(stderr, "stats: table '%s' not found in pack\n", table_id->c_str());
+        return 1;
+    }
+    auto const &rom = use_source ? proj->source_rom() : proj->working_rom();
+    auto td = proj->definition().read_table_values(rom, *tbl);
+    if (!td.has_value()) {
+        std::fprintf(stderr, "stats: %s\n", td.error().to_string().c_str());
+        return 1;
+    }
+    std::vector<double> cells;
+    for (auto const &row : td->values) {
+        for (auto v : row) {
+            cells.push_back(v);
+        }
+    }
+    if (cells.empty()) {
+        std::fprintf(stderr, "stats: table '%s' has zero cells\n", table_id->c_str());
+        return 1;
+    }
+    double const mn = *std::min_element(cells.begin(), cells.end());
+    double const mx = *std::max_element(cells.begin(), cells.end());
+    double const sum = std::accumulate(cells.begin(), cells.end(), 0.0);
+    double const mean = sum / static_cast<double>(cells.size());
+    double sq = 0.0;
+    for (auto v : cells) {
+        double const d = v - mean;
+        sq += d * d;
+    }
+    double const stddev = cells.size() > 1
+                              ? std::sqrt(sq / static_cast<double>(cells.size() - 1))
+                              : 0.0;
+    auto percentile = [&cells](double p) -> double {
+        std::vector<double> tmp = cells;
+        std::size_t const idx = static_cast<std::size_t>(std::clamp(
+            p * static_cast<double>(tmp.size()), 0.0,
+            static_cast<double>(tmp.size() - 1)));
+        std::nth_element(tmp.begin(), tmp.begin() + static_cast<std::ptrdiff_t>(idx),
+                         tmp.end());
+        return tmp[idx];
+    };
+    double const p10 = percentile(0.10);
+    double const p50 = percentile(0.50);
+    double const p90 = percentile(0.90);
+    // edited count = working cells differing from source. Only meaningful
+    // when we're reading the working ROM. Recompute the source table to
+    // compare (cheap for any GUI-sized table).
+    std::size_t edited = 0;
+    if (!use_source) {
+        auto src_td = proj->definition().read_table_values(proj->source_rom(), *tbl);
+        if (src_td.has_value() && src_td->values.size() == td->values.size()) {
+            for (std::size_t r = 0; r < td->values.size(); ++r) {
+                if (src_td->values[r].size() != td->values[r].size())
+                    continue;
+                for (std::size_t c = 0; c < td->values[r].size(); ++c) {
+                    if (src_td->values[r][c] != td->values[r][c])
+                        ++edited;
+                }
+            }
+        }
+    }
+    auto const *scal = proj->definition().find_scaling(tbl->scaling);
+    std::string const unit = scal != nullptr ? scal->unit : std::string{};
+    if (json_mode) {
+        std::string out;
+        out.append("{\"schema\":\"subuwutuner.stats.v1\",\"table\":");
+        json_escape(out, tbl->id);
+        out.append(",\"rom\":");
+        out.append(use_source ? "\"source\"" : "\"working\"");
+        out.append(",\"unit\":");
+        json_escape(out, unit);
+        char num[64];
+        auto emit = [&](char const *key, double v) {
+            out.append(",\"");
+            out.append(key);
+            out.append("\":");
+            std::snprintf(num, sizeof num, "%g", v);
+            out.append(num);
+        };
+        emit("min", mn);
+        emit("max", mx);
+        emit("mean", mean);
+        emit("stddev", stddev);
+        emit("p10", p10);
+        emit("p50", p50);
+        emit("p90", p90);
+        out.append(",\"cells\":");
+        out.append(std::to_string(cells.size()));
+        out.append(",\"edited\":");
+        out.append(std::to_string(edited));
+        out.append("}\n");
+        std::fputs(out.c_str(), stdout);
+    } else {
+        std::printf("Table:   %s\n", tbl->id.c_str());
+        std::printf("ROM:     %s\n", use_source ? "source" : "working");
+        if (!unit.empty())
+            std::printf("Unit:    %s\n", unit.c_str());
+        std::printf("min:     %g\n", mn);
+        std::printf("max:     %g\n", mx);
+        std::printf("mean:    %g\n", mean);
+        std::printf("stddev:  %g\n", stddev);
+        std::printf("p10:     %g\n", p10);
+        std::printf("p50:     %g\n", p50);
+        std::printf("p90:     %g\n", p90);
+        std::printf("cells:   %zu\n", cells.size());
+        if (!use_source) {
+            std::printf("edited:  %zu (vs source)\n", edited);
+        }
+    }
+    return 0;
+}
+
 int cmd_project_validate(int argc, char *argv[]) {
     std::optional<std::filesystem::path> proj_dir;
     bool json_mode = false;
@@ -12976,6 +13145,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-validate") {
         return cmd_project_validate(argc - 2, argv + 2);
+    }
+    if (cmd == "stats") {
+        return cmd_stats(argc - 2, argv + 2);
     }
     if (cmd == "changelog") {
         if (argc < 3 || std::string_view{argv[2]} != "show") {
