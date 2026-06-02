@@ -502,6 +502,40 @@ void render_help_modal(AppState &state) {
 
     // Two-pane: sidebar + content.
     std::string_view const filter{state.help_filter};
+
+    // Arrow-key navigation through the visible (filter-passing) topics.
+    // Build the visible-index list first so Up/Down wrap correctly when
+    // the filter narrows the set.
+    std::vector<int> visible_indices;
+    visible_indices.reserve(state.help_topics.size());
+    for (std::size_t i = 0; i < state.help_topics.size(); ++i) {
+        if (topic_matches_filter(state.help_topics[i], filter)) {
+            visible_indices.push_back(static_cast<int>(i));
+        }
+    }
+    if (!visible_indices.empty()) {
+        // Only respond to arrows when the topic filter input isn't
+        // capturing keyboard — typing in the search field should move
+        // the caret, not the topic selection.
+        bool const arrow_eligible = !ImGui::GetIO().WantTextInput;
+        if (arrow_eligible &&
+            (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true) ||
+             ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))) {
+            auto const cur = std::find(visible_indices.begin(), visible_indices.end(),
+                                       state.help_active_topic);
+            int pos = static_cast<int>(cur == visible_indices.end()
+                                           ? 0
+                                           : (cur - visible_indices.begin()));
+            int const n = static_cast<int>(visible_indices.size());
+            if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)) {
+                pos = (pos + 1) % n;
+            } else {
+                pos = (pos - 1 + n) % n;
+            }
+            state.help_active_topic = visible_indices[static_cast<std::size_t>(pos)];
+        }
+    }
+
     if (ImGui::BeginChild("##help_sidebar", ImVec2(240.0f, -1.0f), true)) {
         for (std::size_t i = 0; i < state.help_topics.size(); ++i) {
             auto const &t = state.help_topics[i];
@@ -511,6 +545,11 @@ void render_help_modal(AppState &state) {
             bool const selected = (state.help_active_topic == static_cast<int>(i));
             if (ImGui::Selectable(t.title.c_str(), selected)) {
                 state.help_active_topic = static_cast<int>(i);
+            }
+            // Auto-scroll to keep the active row visible when arrow keys
+            // walk the selection past the viewport edge.
+            if (selected && ImGui::IsItemVisible() == false) {
+                ImGui::SetScrollHereY(0.5f);
             }
             text_subtle("%s", t.id.c_str());
             ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
