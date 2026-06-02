@@ -4,6 +4,7 @@ add_library(st_log STATIC
     src/adaptive_history.cpp
     src/coldstart.cpp
     src/ebcs.cpp
+    src/live_buffer.cpp
 )
 add_library(st::log ALIAS st_log)
 
