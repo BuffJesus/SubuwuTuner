@@ -10,6 +10,7 @@
 #include "st/defs.hpp"
 #include "st/defs/pack_registry.hpp"
 #include "st/diff.hpp"
+#include "st/profile.hpp"
 #include "st/discover.hpp"
 #include "st/ecu/bulk_reflash_cipher.hpp"
 #include "st/ecu/ssm.hpp"
@@ -561,6 +562,14 @@ constexpr std::string_view kUsage =
     "                            sets the per-module cycle budget (0 disables;\n"
     "                            default 200). Exit 0 normally, 3 with --strict\n"
     "                            on any finding.\n"
+    "    profile list|show|import|export [--dir <dir>] [ARGS...]\n"
+    "                            VehicleProfile registry — one .stprofile per\n"
+    "                            ECU/car the user tunes. Subcommands: list (all\n"
+    "                            profiles in --dir or default), show <id-or-\n"
+    "                            path>, import <FILE.stprofile>, export <id>\n"
+    "                            <FILE>. Default dir: ~/.config/subuwutuner/\n"
+    "                            profiles (or %APPDATA%/SubuwuTuner/profiles on\n"
+    "                            Windows). See docs/33 + analyst Issue #7.\n"
     "    audit show <project-dir> [--json]\n"
     "                            Read the per-project audit.log (cross-session\n"
     "                            ECU-touch log) and print one entry per line.\n"
@@ -12483,6 +12492,135 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "config") {
         return cmd_config(argc - 2, argv + 2);
+    }
+    if (cmd == "profile") {
+        if (argc < 3) {
+            std::fputs("profile: missing subcommand. Try `profile list|show|import|export`.\n",
+                       stderr);
+            return 2;
+        }
+        std::string_view const sub{argv[2]};
+        auto const profile_dir_opt = [&]() -> std::filesystem::path {
+            // Allow --dir <path> override via the remaining args (cheap
+            // scan; subcommands do their own arg parse below).
+            for (int i = 3; i + 1 < argc; ++i) {
+                if (std::string_view{argv[i]} == "--dir") {
+                    return std::filesystem::path{argv[i + 1]};
+                }
+            }
+            return st::profile::default_profile_dir();
+        }();
+
+        if (sub == "list") {
+            auto profiles = st::profile::list(profile_dir_opt);
+            if (!profiles.has_value()) {
+                std::fprintf(stderr, "profile list: %s\n",
+                             profiles.error().to_string().c_str());
+                return 1;
+            }
+            std::printf("Profile dir: %s\n", profile_dir_opt.string().c_str());
+            std::printf("%zu profile%s\n", profiles->size(),
+                        profiles->size() == 1 ? "" : "s");
+            for (auto const &p : *profiles) {
+                std::printf("  %s — %s\n", p.id.c_str(),
+                            p.display_name.empty() ? "(no display name)"
+                                                   : p.display_name.c_str());
+                if (!p.ecus.empty() && !p.ecus[0].cal_id.empty()) {
+                    std::printf("       ecu: %s (%s)\n", p.ecus[0].cal_id.c_str(),
+                                p.ecus[0].ecu_part.c_str());
+                }
+            }
+            return 0;
+        }
+        if (sub == "show") {
+            if (argc < 4) {
+                std::fputs("profile show: missing <id-or-path>\n"
+                           "Usage: subuwutuner-cli profile show <id-or-path> "
+                           "[--dir <dir>]\n",
+                           stderr);
+                return 2;
+            }
+            std::filesystem::path src{argv[3]};
+            if (!src.has_extension())
+                src = profile_dir_opt / (src.string() + ".stprofile");
+            auto p = st::profile::load(src);
+            if (!p.has_value()) {
+                std::fprintf(stderr, "profile show: %s\n", p.error().to_string().c_str());
+                return 1;
+            }
+            std::printf("Profile:     %s\n", p->id.c_str());
+            std::printf("Display:     %s\n", p->display_name.c_str());
+            if (!p->vin.empty())
+                std::printf("VIN:         %s\n", p->vin.c_str());
+            if (!p->year.empty() || !p->make.empty() || !p->model.empty()) {
+                std::printf("Vehicle:     %s %s %s\n", p->year.c_str(), p->make.c_str(),
+                            p->model.c_str());
+            }
+            if (!p->transmission.empty())
+                std::printf("Trans:       %s\n", p->transmission.c_str());
+            if (!p->transport_hint.empty())
+                std::printf("Transport:   %s\n", p->transport_hint.c_str());
+            for (auto const &e : p->ecus) {
+                std::printf("ECU:         %s — cal %s, part %s, pack %s\n", e.role.c_str(),
+                            e.cal_id.c_str(), e.ecu_part.c_str(), e.pack_id.c_str());
+            }
+            if (p->last_flash.has_value()) {
+                auto const &lf = *p->last_flash;
+                std::printf("Last flash:  %s\n", lf.timestamp_iso.c_str());
+                std::printf("             src CRC32 0x%08X, target CRC32 0x%08X\n",
+                            lf.source_rom_crc32, lf.target_rom_crc32);
+                if (!lf.backup_path.empty())
+                    std::printf("             backup: %s\n", lf.backup_path.c_str());
+                if (!lf.operator_notes.empty())
+                    std::printf("             notes:  %s\n", lf.operator_notes.c_str());
+            }
+            if (!p->notes.empty())
+                std::printf("Notes:       %s\n", p->notes.c_str());
+            return 0;
+        }
+        if (sub == "import") {
+            if (argc < 4) {
+                std::fputs("profile import: missing <FILE.stprofile>\n", stderr);
+                return 2;
+            }
+            std::filesystem::path src{argv[3]};
+            auto p = st::profile::load(src);
+            if (!p.has_value()) {
+                std::fprintf(stderr, "profile import: %s\n", p.error().to_string().c_str());
+                return 1;
+            }
+            auto const dst = profile_dir_opt / (p->id + ".stprofile");
+            if (auto s = st::profile::save(*p, dst); !s.has_value()) {
+                std::fprintf(stderr, "profile import: %s\n", s.error().to_string().c_str());
+                return 1;
+            }
+            std::printf("Imported profile '%s' → %s\n", p->id.c_str(), dst.string().c_str());
+            return 0;
+        }
+        if (sub == "export") {
+            if (argc < 5) {
+                std::fputs("profile export: missing <id> <FILE.stprofile>\n", stderr);
+                return 2;
+            }
+            std::string const id{argv[3]};
+            std::filesystem::path const dst{argv[4]};
+            auto src = profile_dir_opt / (id + ".stprofile");
+            auto p = st::profile::load(src);
+            if (!p.has_value()) {
+                std::fprintf(stderr, "profile export: %s\n", p.error().to_string().c_str());
+                return 1;
+            }
+            if (auto s = st::profile::save(*p, dst); !s.has_value()) {
+                std::fprintf(stderr, "profile export: %s\n", s.error().to_string().c_str());
+                return 1;
+            }
+            std::printf("Exported '%s' → %s\n", id.c_str(), dst.string().c_str());
+            return 0;
+        }
+        std::fprintf(stderr, "profile: unknown subcommand '%s' "
+                             "(try list / show / import / export)\n",
+                     argv[2]);
+        return 2;
     }
     if (cmd == "audit") {
         if (argc < 3) {
