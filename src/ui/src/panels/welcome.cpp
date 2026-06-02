@@ -271,13 +271,34 @@ void render_welcome_panel(AppState &state) {
         }
         ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
 
+        // Filter input — only shown when there are more than a handful
+        // of recents (else it's just noise). Substring-matched against
+        // basename + full path, case-insensitive.
+        constexpr std::size_t kRecentsFilterThreshold = 4;
+        if (state.recents.size() >= kRecentsFilterThreshold) {
+            ImGui::SetNextItemWidth(kRowW);
+            ImGui::InputTextWithHint("##recents_filter",
+                                     "Filter recents…",
+                                     state.recents_filter,
+                                     sizeof state.recents_filter);
+            ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+        }
+        std::string_view const recents_filter{state.recents_filter};
+
         // Snapshot indices to act on — modifying recents inside the
         // iteration (via try_open_project) would invalidate iterators.
         std::optional<std::size_t> clicked_idx;
+        std::size_t shown = 0;
         for (std::size_t i = 0; i < state.recents.size(); ++i) {
             auto const &e = state.recents[i];
             auto const basename =
                 e.path.filename().empty() ? e.path.string() : e.path.filename().string();
+            if (!recents_filter.empty() &&
+                !icontains(basename, recents_filter) &&
+                !icontains(e.path.string(), recents_filter)) {
+                continue;
+            }
+            ++shown;
             std::error_code ec;
             bool const exists = std::filesystem::exists(e.path, ec);
 
@@ -329,6 +350,9 @@ void render_welcome_panel(AppState &state) {
             text_subtle("%s", subtitle.c_str());
             ImGui::Dummy(ImVec2(0.0f, kSpaceS));
             ImGui::PopID();
+        }
+        if (!recents_filter.empty()) {
+            text_subtle("Showing %zu of %zu recents.", shown, state.recents.size());
         }
         ImGui::EndGroup();
 

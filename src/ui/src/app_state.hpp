@@ -252,6 +252,10 @@ struct AppState {
     // Loaded once at startup, persisted on every successful open. See
     // recents_config_path() for the on-disk location.
     std::vector<RecentEntry> recents;
+    // Filter input for the welcome panel's Recent projects list.
+    // Only renders when the list has ≥4 entries (else the filter
+    // is more clutter than help).
+    char recents_filter[128]{};
     Settings settings;
 
     // Sidebar filter. Substring-matched (case-insensitive) against table
