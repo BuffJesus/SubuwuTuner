@@ -70,11 +70,17 @@ enum class PaletteCommandKind : std::uint8_t {
     ToggleColdstart,
     ToggleEbcs,
     ToggleFeatures,
+    ToggleGaugeCluster,
+    ToggleCompare,
+    ToggleAudit,
     ResetLayout,
     ThemeDark,
     ThemeLight,
     Shortcuts,
     About,
+    HelpTopics,
+    WelcomeWizard,
+    Flash,
     OpenRecent, // payload = absolute path
     OpenTable,  // payload = table id
 };
@@ -181,6 +187,15 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
     push(PaletteCommandKind::ToggleFeatures,
          toggle_label(state.show_features_designer, "Custom Features Designer").c_str(),
          "Features", "View");
+    push(PaletteCommandKind::ToggleGaugeCluster,
+         toggle_label(state.show_gauge_cluster_panel, "Gauge Cluster").c_str(),
+         "Datalog", "View");
+    push(PaletteCommandKind::ToggleCompare,
+         toggle_label(state.show_compare_panel, "Compare ROMs").c_str(),
+         "Diff", "View");
+    push(PaletteCommandKind::ToggleAudit,
+         toggle_label(state.show_audit_panel, "Audit log").c_str(),
+         "Project", "View");
     push(PaletteCommandKind::ResetLayout, "Reset window layout",
          "Rebuild the default dock arrangement", "View");
     // Theme — show the inactive one. No point listing "Theme: Dark" when
@@ -191,8 +206,18 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
         push(PaletteCommandKind::ThemeDark, "Switch to Dark theme", "", "View");
     }
 
+    // Tools — surfaces that aren't panels but still high-traffic.
+    if (has_project) {
+        push(PaletteCommandKind::Flash, "Flash…",
+             "Preview the flash plan + policy gate", "Tools");
+    }
+
     // Help.
     push(PaletteCommandKind::Shortcuts, "Keyboard shortcuts…", "", "Help");
+    push(PaletteCommandKind::HelpTopics, "Topics & Glossary…",
+         "Open the in-app help browser", "Help");
+    push(PaletteCommandKind::WelcomeWizard, "Run welcome wizard…",
+         "Re-pick jurisdiction / units / theme / demo project", "Help");
     push(PaletteCommandKind::About, "About SubuwuTuner…", "", "Help");
 
     // Recents — surface every entry; let the matcher narrow them down.
@@ -346,6 +371,15 @@ void dispatch_palette_command(AppState &state, PaletteCommand const &cmd) {
     case PaletteCommandKind::ToggleFeatures:
         state.show_features_designer = !state.show_features_designer;
         break;
+    case PaletteCommandKind::ToggleGaugeCluster:
+        state.show_gauge_cluster_panel = !state.show_gauge_cluster_panel;
+        break;
+    case PaletteCommandKind::ToggleCompare:
+        state.show_compare_panel = !state.show_compare_panel;
+        break;
+    case PaletteCommandKind::ToggleAudit:
+        state.show_audit_panel = !state.show_audit_panel;
+        break;
     case PaletteCommandKind::ResetLayout:
         request_layout_reset();
         break;
@@ -364,6 +398,18 @@ void dispatch_palette_command(AppState &state, PaletteCommand const &cmd) {
         break;
     case PaletteCommandKind::About:
         state.show_about_modal = true;
+        break;
+    case PaletteCommandKind::HelpTopics:
+        state.show_help_modal = true;
+        break;
+    case PaletteCommandKind::WelcomeWizard:
+        state.show_first_run_wizard = true;
+        state.first_run_step = 0;
+        break;
+    case PaletteCommandKind::Flash:
+        state.show_flash_modal = true;
+        state.flash_confirm_checked = false;
+        state.flash_reason[0] = '\0';
         break;
     case PaletteCommandKind::OpenRecent:
         request_action(state, ConfirmAction::OpenRecent,
