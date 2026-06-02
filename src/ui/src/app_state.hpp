@@ -548,6 +548,12 @@ struct AppState {
     // entry every frame until the user dismisses the modal back to
     // Idle. Reset when the state machine returns to Idle.
     bool read_rom_outcome_audited{false};
+    // Suggested slug for the "Add to project" Done-screen action.
+    // Default pre-fills from a timestamp on first entry to Done so
+    // the user has a sensible name to confirm or override. Empty
+    // when the modal hasn't reached Done yet this session.
+    char read_rom_save_slug[64]{};
+    bool read_rom_save_slug_initialized{false};
     AdapterPickerState read_rom_adapter{};
     char read_rom_base_addr_hex[32]{"0x0"};
     char read_rom_size_hex[32]{"0x200000"};

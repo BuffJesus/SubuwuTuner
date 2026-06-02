@@ -10,6 +10,7 @@
 #include "modals/modals.hpp"
 
 #include "app_state.hpp"
+#include "panels/panels.hpp" // enqueue_toast
 #include "widgets/adapter_picker.hpp"
 #include "widgets/widgets.hpp"
 
@@ -541,6 +542,106 @@ void render_read_rom_modal(AppState &state) {
         ImGui::Text("Got %zu bytes in %s.", state.read_rom_bytes_result.size(),
                     elapsed_str().c_str());
         ImGui::Dummy(ImVec2(0.0f, kSpaceM));
+
+        // "Add to current project" — closes the read→compare loop
+        // (analyst Issue #10 read slice). Only meaningful when a
+        // project is open. Pre-populate the slug with a timestamp the
+        // first time we reach Done so the user has something sensible
+        // to confirm or override.
+        if (!state.read_rom_save_slug_initialized) {
+            auto const now = std::chrono::system_clock::now();
+            auto const t = std::chrono::system_clock::to_time_t(now);
+            std::tm tm{};
+#if defined(_WIN32)
+            gmtime_s(&tm, &t);
+#else
+            gmtime_r(&t, &tm);
+#endif
+            std::strftime(state.read_rom_save_slug, sizeof state.read_rom_save_slug,
+                          "read-%Y%m%dT%H%M%SZ", &tm);
+            state.read_rom_save_slug_initialized = true;
+        }
+        if (state.project.has_value()) {
+            ImGui::SetNextItemWidth(220.0f);
+            ImGui::InputText("Project slug##read_save_slug",
+                             state.read_rom_save_slug,
+                             sizeof state.read_rom_save_slug);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Used both as the [[rom]] entry id and the filename\n"
+                    "(<project>/<slug>.bin). Must be unique within the project.");
+            }
+            ImGui::SameLine();
+            bool const slug_ok = state.read_rom_save_slug[0] != '\0';
+            ImGui::BeginDisabled(!slug_ok);
+            if (ImGui::Button("Add to project", ImVec2(150.0f, 0.0f))) {
+                std::string const slug{state.read_rom_save_slug};
+                auto const dest = state.project->dir() / (slug + ".bin");
+                std::error_code ec;
+                if (std::filesystem::exists(dest, ec)) {
+                    state.read_rom_error_msg =
+                        "File already exists in project: " + dest.string() +
+                        " (pick a different slug).";
+                } else {
+                    std::ofstream fh{dest, std::ios::binary};
+                    if (!fh) {
+                        state.read_rom_error_msg =
+                            "Failed to open output file for write: " + dest.string();
+                    } else {
+                        fh.write(reinterpret_cast<char const *>(
+                                     state.read_rom_bytes_result.data()),
+                                 static_cast<std::streamsize>(
+                                     state.read_rom_bytes_result.size()));
+                        if (!fh) {
+                            state.read_rom_error_msg = "Write failed (disk full?).";
+                        } else {
+                            auto rom_loaded = st::Rom::from_file(dest);
+                            if (!rom_loaded.has_value()) {
+                                state.read_rom_error_msg =
+                                    "Re-read after write failed: " +
+                                    rom_loaded.error().to_string();
+                            } else {
+                                st::Project::AdditionalRom entry;
+                                entry.id = slug;
+                                entry.display_name = slug;
+                                entry.path_rel = slug + ".bin";
+                                entry.notes = "Pulled via Read ROM modal";
+                                entry.rom = std::move(*rom_loaded);
+                                if (auto s = state.project->add_additional_rom(
+                                        std::move(entry));
+                                    !s.has_value()) {
+                                    state.read_rom_error_msg =
+                                        "Add to project: " + s.error().to_string();
+                                } else if (auto sv = state.project->save_metadata();
+                                           !sv.has_value()) {
+                                    state.read_rom_error_msg =
+                                        "Save project: " + sv.error().to_string();
+                                } else {
+                                    if (state.audit_log.has_value()) {
+                                        (void)state.audit_log->log(
+                                            st::audit::EntryKind::Custom, "ui.read_rom",
+                                            "ROM added to project as [[rom]]",
+                                            {{"id", slug},
+                                             {"path", slug + ".bin"}});
+                                    }
+                                    enqueue_toast(state, ToastKind::Success,
+                                                  "Added '" + slug +
+                                                      "' to project. Open Compare → "
+                                                      "Project ROMs to use it.");
+                                    state.read_rom_bytes_result.clear();
+                                    state.read_rom_state = AppState::ReadRomState::Idle;
+                                    state.read_rom_save_slug_initialized = false;
+                                    state.read_rom_error_msg.clear();
+                                    ImGui::CloseCurrentPopup();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            ImGui::EndDisabled();
+            ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+        }
 
         if (ImGui::Button("Save .bin...", ImVec2(160.0f, 0.0f))) {
             NFD::UniquePath out_path;
