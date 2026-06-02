@@ -346,6 +346,14 @@ void render_compare_panel(AppState &state) {
         ImGui::Dummy(ImVec2(0.0f, kSpaceS));
         text_subtle("Project ROMs — click an arrow button to slot a project ROM into A or B "
                     "without leaving the project dir.");
+        // Surface any project-toml warnings — [[rom]] entries that
+        // were declared but couldn't load. Better than silently
+        // dropping; user can fix the path or remove the entry.
+        for (auto const &w : state.project->additional_rom_warnings()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_caution());
+            ImGui::TextWrapped("%s", w.c_str());
+            ImGui::PopStyleColor();
+        }
         auto const row_btns = [&](char const *label, char const *sentinel, char const *id_suffix) {
             ImGui::PushID(id_suffix);
             ImGui::AlignTextToFramePadding();

@@ -167,11 +167,13 @@ void load_help_topics(AppState &state) {
     state.help_topics.clear();
     state.help_error_msg.clear();
     state.glossary_terms.clear();
+    state.glossary_loaded = false;
     if (!state.docs_dir.has_value()) {
         state.help_error_msg = "docs/ directory not found alongside the binary. "
                                "In dev tree, run from the build dir so docs/ "
                                "resolves up from <build>/bin.";
         state.help_loaded = true;
+        state.glossary_loaded = true; // mark settled-empty so tooltip path stops retrying
         return;
     }
     for (auto const &src : kTopicSources) {
@@ -186,9 +188,14 @@ void load_help_topics(AppState &state) {
         t.body = std::move(body);
         if (t.id == "10-glossary.md") {
             parse_glossary(t.body, state.glossary_terms);
+            state.glossary_loaded = true;
         }
         state.help_topics.push_back(std::move(t));
     }
+    // Ensure the flag flips even if the glossary file was missing —
+    // the lazy-loader in widgets.cpp checks this to decide whether
+    // to re-attempt the file read on every hover.
+    state.glossary_loaded = true;
     if (state.help_active_topic >= static_cast<int>(state.help_topics.size())) {
         state.help_active_topic = 0;
     }

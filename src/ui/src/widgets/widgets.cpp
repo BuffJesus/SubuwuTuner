@@ -323,15 +323,20 @@ std::string_view trim_ws(std::string_view s) {
 // here because widgets/ can't depend on modals/. If glossary parsing
 // ever grows non-trivial, extract to its own translation unit.
 void ensure_glossary_loaded(AppState &state) {
-    if (!state.glossary_terms.empty()) {
+    if (state.glossary_loaded) {
         return;
     }
     if (!state.docs_dir.has_value()) {
+        // Mark loaded so we don't retry the resolve_docs_dir lookup
+        // on every hover; the glossary just stays empty on this
+        // install layout.
+        state.glossary_loaded = true;
         return;
     }
     auto const path = *state.docs_dir / "10-glossary.md";
     std::ifstream in{path, std::ios::binary};
     if (!in) {
+        state.glossary_loaded = true;
         return;
     }
     std::ostringstream ss;
@@ -385,11 +390,7 @@ void ensure_glossary_loaded(AppState &state) {
         }
         state.glossary_terms.emplace_back(std::move(term), std::move(defn));
     }
-    // Mark loaded even if zero rows landed — prevents re-reading
-    // unparseable files every hover. Push a sentinel only if empty.
-    if (state.glossary_terms.empty()) {
-        state.glossary_terms.emplace_back("", "");
-    }
+    state.glossary_loaded = true;
 }
 
 // Case-insensitive equality.
@@ -417,8 +418,6 @@ void glossary_tooltip_for(AppState &state, std::string_view term) {
     }
     ensure_glossary_loaded(state);
     for (auto const &[t, d] : state.glossary_terms) {
-        if (t.empty()) // sentinel from empty-load — skip
-            continue;
         if (ieq(t, term)) {
             ImGui::BeginTooltip();
             ImGui::PushStyleColor(ImGuiCol_Text, accent_for(current_theme()).base);

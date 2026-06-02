@@ -432,10 +432,12 @@ struct AppState {
     std::string help_error_msg;
     char help_filter[128]{};
     // Parsed glossary terms (from docs/10-glossary.md). Populated
-    // lazily on first help-modal open so the term → definition map is
-    // available for both the Glossary topic body and (future) tooltip
-    // popovers anchored to UI labels.
+    // lazily on first help-modal open OR first glossary_tooltip_for
+    // hover. glossary_loaded gates the load; using a flag instead of
+    // an empty-vector sentinel keeps "loaded but legitimately empty"
+    // distinguishable from "never loaded yet".
     std::vector<std::pair<std::string, std::string>> glossary_terms;
+    bool glossary_loaded{false};
     // Track which TableDelta has its details expanded — std::string-keyed
     // by table_id. Survives across recomputes so the user doesn't lose
     // their expansion when they re-run a compare.

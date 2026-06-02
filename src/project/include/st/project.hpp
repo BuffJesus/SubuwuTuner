@@ -158,6 +158,14 @@ public:
         return additional_roms_;
     }
 
+    // Warnings collected from [[rom]] parsing when an entry was
+    // dropped — missing file, missing id, etc. Surfaces user-visible
+    // signal for "the project.toml declares this ROM but it didn't
+    // load" without making the whole open() fail.
+    [[nodiscard]] std::vector<std::string> const &additional_rom_warnings() const noexcept {
+        return additional_rom_warnings_;
+    }
+
 private:
     Project() = default;
 
@@ -178,6 +186,7 @@ private:
     Definition def_;
     edit::History history_;
     std::vector<AdditionalRom> additional_roms_;
+    std::vector<std::string> additional_rom_warnings_;
 };
 
 // CSV bulk-edit parser. Shared between the CLI's `project-edit-csv` and

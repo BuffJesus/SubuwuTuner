@@ -518,14 +518,23 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
     // moved or deleted.
     if (auto const *arr = tbl["rom"].as_array(); arr != nullptr) {
         p.additional_roms_.reserve(arr->size());
+        std::size_t entry_idx = 0;
         for (auto const &node : *arr) {
+            ++entry_idx;
             auto const *rt = node.as_table();
-            if (rt == nullptr)
+            if (rt == nullptr) {
+                p.additional_rom_warnings_.push_back(
+                    "[[rom]] entry #" + std::to_string(entry_idx) +
+                    " is not a table; skipped");
                 continue;
+            }
             Project::AdditionalRom entry;
             entry.id = (*rt)["id"].value_or<std::string>("");
             if (entry.id.empty()) {
-                continue; // id is required — silently skip malformed entries
+                p.additional_rom_warnings_.push_back(
+                    "[[rom]] entry #" + std::to_string(entry_idx) +
+                    " missing required field 'id'; skipped");
+                continue;
             }
             entry.display_name = (*rt)["display_name"].value_or<std::string>("");
             if (entry.display_name.empty()) {
@@ -535,11 +544,18 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
             entry.crc32 = static_cast<std::uint32_t>(
                 (*rt)["crc32"].value_or<std::int64_t>(0));
             entry.path_rel = get_path(*rt, "path");
-            if (entry.path_rel.empty())
+            if (entry.path_rel.empty()) {
+                p.additional_rom_warnings_.push_back(
+                    "[[rom]] '" + entry.id + "' missing required field 'path'; skipped");
                 continue;
+            }
             auto rom_r = Rom::from_file(project_dir / entry.path_rel);
-            if (!rom_r.has_value())
-                continue; // file missing / read failure → skip this entry
+            if (!rom_r.has_value()) {
+                p.additional_rom_warnings_.push_back(
+                    "[[rom]] '" + entry.id + "' could not load '" + entry.path_rel.string() +
+                    "': " + rom_r.error().to_string() + "; skipped");
+                continue;
+            }
             entry.rom = std::move(*rom_r);
             p.additional_roms_.push_back(std::move(entry));
         }
