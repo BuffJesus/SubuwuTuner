@@ -49,6 +49,19 @@ void render_read_rom_modal(AppState &state) {
     if (state.show_read_rom_modal) {
         ImGui::OpenPopup("\xEE\xA2\x96  Read ROM from Car##read_rom_modal");
         state.show_read_rom_modal = false;
+        // Pre-fill Size from the active project's pack on open. Saves
+        // the user from typing "0x180000" or "0x200000" per platform.
+        // Only overrides the default "0x200000" — leaves a user-edited
+        // value alone (the previous read's setting is usually still
+        // what they want for the next read on the same ECU).
+        if (state.project.has_value() &&
+            std::string_view{state.read_rom_size_hex} == "0x200000") {
+            auto const sz = state.project->definition().pack().rom_size_bytes;
+            if (sz > 0) {
+                std::snprintf(state.read_rom_size_hex, sizeof state.read_rom_size_hex,
+                              "0x%zX", sz);
+            }
+        }
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));

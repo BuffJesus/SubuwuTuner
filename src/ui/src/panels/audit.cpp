@@ -27,6 +27,7 @@
 #include "st/audit.hpp"
 
 #include <imgui.h>
+#include <nfd.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -36,6 +37,7 @@
 #include <cstdio>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 
@@ -174,6 +176,46 @@ void render_audit_panel(AppState &state) {
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Re-read the project's audit.log from disk.");
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(state.audit_entries.empty());
+    if (ImGui::Button("Export NDJSON…##audit_export")) {
+        NFD::UniquePath out;
+        nfdfilteritem_t const filters[] = {{"NDJSON", "ndjson"}, {"Log", "log"}};
+        nfdresult_t const r =
+            NFD::SaveDialog(out, filters, 2, nullptr, "audit-export.ndjson");
+        if (r == NFD_OKAY) {
+            std::filesystem::path const target{out.get()};
+            std::ofstream fh{target, std::ios::binary};
+            if (!fh) {
+                state.audit_error_msg = "Export: cannot open " + target.string();
+            } else {
+                // Re-serialize each cached entry — keeps the wire shape
+                // identical to st::audit::AuditLog::append output, and
+                // also recomputes the CRC32 so a tampered on-disk line
+                // gets exported with a fresh checksum (or rejected up
+                // front if checksum_valid is false; we still write it
+                // so the user has the same data they were viewing).
+                for (auto const &e : state.audit_entries) {
+                    fh << st::audit::serialize_entry(e) << '\n';
+                }
+                if (!fh) {
+                    state.audit_error_msg = "Export: write failed";
+                } else {
+                    enqueue_toast(state, ToastKind::Success,
+                                  "Exported " + std::to_string(state.audit_entries.size()) +
+                                      " entries to " + target.string());
+                }
+            }
+        } else if (r == NFD_ERROR) {
+            state.audit_error_msg = std::string{"Export dialog: "} + NFD::GetError();
+        }
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Write every cached entry to a .ndjson file (one\n"
+                          "JSON object per line). Useful for sharing the\n"
+                          "audit timeline with support / e-tuner / CI.");
     }
     ImGui::SameLine();
     ImGui::Checkbox("Newest first", &state.audit_newest_first);
