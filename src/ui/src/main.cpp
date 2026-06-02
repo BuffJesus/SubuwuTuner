@@ -164,6 +164,7 @@ int main(int argc, char *argv[]) {
     // nullopt and the button just doesn't render).
     state.demo_project_path = resolve_demo_project_path(argc >= 1 ? argv[0] : nullptr);
     state.docs_dir = resolve_docs_dir(argc >= 1 ? argv[0] : nullptr);
+    state.changelog_path = resolve_changelog_path(argc >= 1 ? argv[0] : nullptr);
     // Apply the persisted theme before any user-visible frame renders.
     apply_theme(state.settings.theme);
     // First-run wizard auto-trigger ONLY when --reset-config was just

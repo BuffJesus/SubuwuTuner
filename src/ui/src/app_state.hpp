@@ -183,6 +183,22 @@ struct AppState {
     // once at startup via resolve_docs_dir(argv[0]); nullopt when no
     // candidate location contained 00-overview.md.
     std::optional<std::filesystem::path> docs_dir;
+    // Path to CHANGELOG.md alongside the binary. Welcome panel parses
+    // the [Unreleased] section out of it for the "What's new" block,
+    // replacing the previously-hardcoded array.
+    std::optional<std::filesystem::path> changelog_path;
+    // Cached "What's new" entries parsed from CHANGELOG.md's
+    // [Unreleased] section. Each entry pairs a section heading
+    // (Added, Tooling, Documentation, etc.) with one bullet body.
+    // Populated lazily on first welcome-panel render; loaded flag
+    // gates the lazy load so a missing CHANGELOG doesn't retry every
+    // frame.
+    struct WhatsNewItem {
+        std::string section; // "Added" / "Tooling" / "Documentation" / ...
+        std::string body;
+    };
+    std::vector<WhatsNewItem> whats_new;
+    bool whats_new_loaded{false};
 
     // Stacked transient feedback (Saved., Loaded foo.stune, Apply
     // failed: …). Rendered by render_toasts at the bottom-right

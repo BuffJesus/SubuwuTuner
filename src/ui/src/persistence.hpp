@@ -61,6 +61,10 @@ std::optional<std::filesystem::path> resolve_demo_project_path(char const *argv0
 // nullopt when no candidate contains overview.md.
 std::optional<std::filesystem::path> resolve_docs_dir(char const *argv0);
 
+// Locate CHANGELOG.md alongside the binary. Same candidate ladder.
+// Returns nullopt when no candidate dir contains a CHANGELOG.md.
+std::optional<std::filesystem::path> resolve_changelog_path(char const *argv0);
+
 std::string iso8601_utc_now();
 std::string format_relative_time(std::string const &iso);
 

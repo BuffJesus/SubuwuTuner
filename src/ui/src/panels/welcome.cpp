@@ -24,12 +24,91 @@
 #include <cstddef>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <optional>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <system_error>
 
 namespace st::ui {
+
+namespace {
+
+// Parse the [Unreleased] section out of CHANGELOG.md. Each bullet
+// becomes a WhatsNewItem tagged with the surrounding `### Section`
+// heading. Stops at the next `## ` heading (Pre-Unreleased,
+// Released, etc.). Best-effort — malformed files just produce
+// fewer items.
+void parse_unreleased(std::string_view body,
+                      std::vector<AppState::WhatsNewItem> &out) {
+    out.clear();
+    bool in_unreleased = false;
+    std::string current_section = "Changes";
+    std::size_t i = 0;
+    while (i < body.size()) {
+        std::size_t line_end = body.find('\n', i);
+        if (line_end == std::string_view::npos) {
+            line_end = body.size();
+        }
+        std::string_view line{body.data() + i, line_end - i};
+        i = line_end + 1;
+        if (!line.empty() && line.back() == '\r') {
+            line.remove_suffix(1);
+        }
+        if (line.starts_with("## ")) {
+            in_unreleased = (line.find("[Unreleased]") != std::string_view::npos);
+            current_section = "Changes";
+            continue;
+        }
+        if (!in_unreleased) {
+            continue;
+        }
+        if (line.starts_with("### ")) {
+            current_section = std::string{line.substr(4)};
+            continue;
+        }
+        if (line.starts_with("- ") || line.starts_with("* ")) {
+            AppState::WhatsNewItem item;
+            item.section = current_section;
+            item.body = std::string{line.substr(2)};
+            // Strip markdown back-tick code spans for readability —
+            // text_subtle doesn't render markdown, just plain text.
+            std::string clean;
+            clean.reserve(item.body.size());
+            bool in_code = false;
+            for (char c : item.body) {
+                if (c == '`') {
+                    in_code = !in_code;
+                    continue;
+                }
+                clean.push_back(c);
+            }
+            item.body = std::move(clean);
+            out.push_back(std::move(item));
+        }
+    }
+}
+
+void load_whats_new(AppState &state) {
+    state.whats_new.clear();
+    if (!state.changelog_path.has_value()) {
+        state.whats_new_loaded = true;
+        return;
+    }
+    std::ifstream in{*state.changelog_path, std::ios::binary};
+    if (!in) {
+        state.whats_new_loaded = true;
+        return;
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    parse_unreleased(ss.str(), state.whats_new);
+    state.whats_new_loaded = true;
+}
+
+} // namespace
 
 void render_welcome_panel(AppState &state) {
     ImVec2 const avail = ImGui::GetContentRegionAvail();
@@ -265,17 +344,15 @@ void render_welcome_panel(AppState &state) {
         text_centered_subtle(state.status_msg.c_str());
     }
 
-    // What's new — short list of recent additions, refreshed when a
-    // feature lands. Kept brief on purpose: the welcome panel reads
-    // best when it stays uncluttered. Tucked beneath recents so first-
-    // run users see CTAs first.
-    static constexpr std::array<char const *, 4> kWhatsNew = {
-        "SSM-A8 RAM polling + offline correlator — subuwutuner-cli ssm-a8-poll",
-        "CAN reverse-engineering toolkit (.asc / .dbc, BaselineModel + decoder)",
-        "Custom features designer — Tools \xE2\x86\x92 Feature graph (SH-2A codegen)",
-        "Autotune kernels (MAF + knock pull) with project-integration — Edit menu",
-    };
-    {
+    // What's new — parsed from CHANGELOG.md's [Unreleased] section so
+    // the welcome panel always shows the actual unreleased changelog
+    // without anyone hand-curating the list. Falls back gracefully
+    // when CHANGELOG.md isn't alongside the binary (packaged install
+    // without docs, dev build run from an odd dir).
+    if (!state.whats_new_loaded) {
+        load_whats_new(state);
+    }
+    if (!state.whats_new.empty()) {
         ImGui::Dummy(ImVec2(0.0f, has_recents ? 22.0f : 28.0f));
         constexpr float kRowW = 480.0f;
         center_cursor_x(kRowW);
@@ -289,8 +366,24 @@ void render_welcome_panel(AppState &state) {
             ImGui::Dummy(ImVec2(kRowW, 4.0f));
         }
         ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
-        for (auto const *line : kWhatsNew) {
-            text_subtle("\xE2\x80\xA2  %s", line);
+        // Cap to first N items so the welcome panel doesn't grow
+        // unbounded when [Unreleased] balloons. CHANGELOG.md itself
+        // remains the full reference.
+        constexpr std::size_t kMaxWhatsNew = 6;
+        std::string last_section;
+        for (std::size_t k = 0; k < std::min(state.whats_new.size(), kMaxWhatsNew); ++k) {
+            auto const &item = state.whats_new[k];
+            if (item.section != last_section) {
+                if (k > 0) {
+                    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+                }
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                                      accent_for(current_theme()).base);
+                ImGui::Text("%s", item.section.c_str());
+                ImGui::PopStyleColor();
+                last_section = item.section;
+            }
+            text_subtle("\xE2\x80\xA2  %s", item.body.c_str());
             ImGui::Dummy(ImVec2(0.0f, 2.0f));
         }
         ImGui::EndGroup();
