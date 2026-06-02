@@ -123,6 +123,24 @@ void render_stats_panel(AppState &state) {
     stat_row("max", static_cast<double>(max));
     stat_row("mean", mean);
     stat_row("stddev", stddev);
+    // Percentiles (p10 / p50 / p90) — surface "what's the spike vs.
+    // the typical value" without forcing the user to eyeball the
+    // histogram. p50 = median; p10/p90 bracket the bulk of the
+    // distribution. Computed via nth_element on a copy so the cell
+    // order in `cells` (which the histogram still uses) doesn't get
+    // shuffled.
+    auto percentile = [&cells](double p) -> double {
+        std::vector<float> tmp = cells;
+        std::size_t const idx = static_cast<std::size_t>(
+            std::clamp(p * static_cast<double>(tmp.size()), 0.0,
+                       static_cast<double>(tmp.size() - 1)));
+        std::nth_element(tmp.begin(), tmp.begin() + static_cast<std::ptrdiff_t>(idx),
+                         tmp.end());
+        return static_cast<double>(tmp[idx]);
+    };
+    stat_row("p10", percentile(0.10));
+    stat_row("p50", percentile(0.50));
+    stat_row("p90", percentile(0.90));
     ImGui::Text("cells:  %zu", cells.size());
     ImGui::Text("edited: %zu", edited);
 
@@ -131,15 +149,19 @@ void render_stats_panel(AppState &state) {
     // stat_row layout above plus the table id + scaling for context.
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
     if (ImGui::SmallButton("Copy stats##stats_copy")) {
-        char buf[512];
+        char buf[768];
         std::snprintf(buf, sizeof buf,
                       "table\t%s\nunit\t%s\nmin\t%.*f\nmax\t%.*f\nmean\t%.*f\n"
-                      "stddev\t%.*f\ncells\t%zu\nedited\t%zu\n",
+                      "stddev\t%.*f\np10\t%.*f\np50\t%.*f\np90\t%.*f\n"
+                      "cells\t%zu\nedited\t%zu\n",
                       table->id.c_str(), unit.empty() ? "" : unit.c_str(),
                       prec, static_cast<double>(min),
                       prec, static_cast<double>(max),
                       prec, mean,
                       prec, stddev,
+                      prec, percentile(0.10),
+                      prec, percentile(0.50),
+                      prec, percentile(0.90),
                       cells.size(), edited);
         ImGui::SetClipboardText(buf);
     }
