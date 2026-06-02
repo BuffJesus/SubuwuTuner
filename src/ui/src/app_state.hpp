@@ -16,6 +16,7 @@
 #include "st/defs/pack_registry.hpp"
 #include "st/edit.hpp"
 #include "st/feature.hpp"
+#include "st/diff.hpp"
 #include "st/log/adaptive_history.hpp"
 #include "st/log/coldstart.hpp"
 #include "st/log/ebcs.hpp"
@@ -34,6 +35,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -362,6 +364,24 @@ struct AppState {
     int gauge_demo_hz{50};
     // History window the mini-line plot shows, in seconds.
     float gauge_history_seconds{30.0f};
+
+    // Compare panel — st::diff-backed two-pane workflow (analyst Issue #4
+    // / docs/33). ROM A defaults to the project's source.bin (set on
+    // panel open); ROM B is user-picked via the file dialog. compare_result
+    // caches the last computed DiffSet so the panel re-renders without
+    // re-running compare() every frame; recomputed on the toolbar's
+    // "Compare" button.
+    bool show_compare_panel{false};
+    char compare_rom_a_path[1024]{};
+    char compare_rom_b_path[1024]{};
+    std::optional<st::diff::DiffSet> compare_result;
+    std::string compare_error_msg;
+    float compare_epsilon{0.0f};
+    bool compare_include_identical{false};
+    // Track which TableDelta has its details expanded — std::string-keyed
+    // by table_id. Survives across recomputes so the user doesn't lose
+    // their expansion when they re-run a compare.
+    std::unordered_set<std::string> compare_expanded_tables;
 
     // History-panel filter buffer. Substring-matched (case-insensitive)
     // against the edit's table_id.

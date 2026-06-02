@@ -107,6 +107,7 @@ add_executable(subuwutuner-gui
     src/panels/coldstart.cpp
     src/panels/command_palette.cpp
     src/panels/dtcs.cpp
+    src/panels/compare.cpp
     src/panels/ebcs.cpp
     src/panels/features_designer.cpp
     src/panels/gauge_cluster.cpp
@@ -152,6 +153,7 @@ target_link_libraries(subuwutuner-gui
         st::config
         st::rom
         st::defs
+        st::diff
         st::edit
         st::flash
         st::policy

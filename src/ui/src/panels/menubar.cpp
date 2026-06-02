@@ -290,6 +290,15 @@ void render_menubar(AppState &state) {
                                   "a connected ECU; real-transport hookup lands as a\n"
                                   "follow-up. See docs/32-live-datalogger.md.");
             }
+            ImGui::MenuItem("Compare ROMs", nullptr, &state.show_compare_panel);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Two-pane structured ROM diff. Picks per-table\n"
+                                  "cell-level changes against the open project's\n"
+                                  "pack. Click 'Open in editor' on a changed table\n"
+                                  "to jump to it in the Table viewer. Same engine\n"
+                                  "as the `subuwutuner-cli diff` subcommand.\n"
+                                  "See docs/33 + analyst Issue #4.");
+            }
             ImGui::Separator();
             if (ImGui::BeginMenu("Theme")) {
                 bool const is_dark = state.settings.theme == Theme::Dark;
