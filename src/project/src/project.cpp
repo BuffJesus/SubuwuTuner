@@ -324,6 +324,23 @@ std::string render_project_toml(Project const &p, std::uint32_t source_crc32,
     ss << "\n";
     ss << "[security_access]\n";
     emit_string("handheld_serial", p.handheld_serial());
+
+    // Additional ROMs (Issue #10). Same forward-compat rule: array of
+    // tables; older loaders ignore. Each entry is its own [[rom]]
+    // table so the file stays grep-friendly.
+    for (auto const &r : p.additional_roms()) {
+        ss << "\n";
+        ss << "[[rom]]\n";
+        emit_string("id          ", r.id);
+        emit_string("display_name", r.display_name);
+        emit_string("path        ", r.path_rel.generic_string());
+        if (r.crc32 != 0) {
+            ss << "crc32        = " << r.crc32 << "\n";
+        }
+        if (!r.notes.empty()) {
+            emit_string("notes       ", r.notes);
+        }
+    }
     return std::move(ss).str();
 }
 
@@ -492,6 +509,41 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
     if (!def.has_value())
         return failure(def.error());
     p.def_ = std::move(*def);
+
+    // Additional ROMs (Issue #10 — multi-ROM read slice). Optional
+    // [[rom]] array; each entry references a ROM file relative to the
+    // project dir. Failures here are non-fatal: load whatever we can,
+    // skip entries with missing files. The user's main source+working
+    // workflow keeps working even if a referenced extra ROM has been
+    // moved or deleted.
+    if (auto const *arr = tbl["rom"].as_array(); arr != nullptr) {
+        p.additional_roms_.reserve(arr->size());
+        for (auto const &node : *arr) {
+            auto const *rt = node.as_table();
+            if (rt == nullptr)
+                continue;
+            Project::AdditionalRom entry;
+            entry.id = (*rt)["id"].value_or<std::string>("");
+            if (entry.id.empty()) {
+                continue; // id is required — silently skip malformed entries
+            }
+            entry.display_name = (*rt)["display_name"].value_or<std::string>("");
+            if (entry.display_name.empty()) {
+                entry.display_name = entry.id;
+            }
+            entry.notes = (*rt)["notes"].value_or<std::string>("");
+            entry.crc32 = static_cast<std::uint32_t>(
+                (*rt)["crc32"].value_or<std::int64_t>(0));
+            entry.path_rel = get_path(*rt, "path");
+            if (entry.path_rel.empty())
+                continue;
+            auto rom_r = Rom::from_file(project_dir / entry.path_rel);
+            if (!rom_r.has_value())
+                continue; // file missing / read failure → skip this entry
+            entry.rom = std::move(*rom_r);
+            p.additional_roms_.push_back(std::move(entry));
+        }
+    }
 
     // edits.toml is optional. If present, restore the edit history so
     // cross-session undo works.

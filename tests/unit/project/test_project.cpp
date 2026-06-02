@@ -757,6 +757,111 @@ path = ")toml"} + pack_dir.generic_string() + "\"\n";
     REQUIRE(p->display_name() == "legacy");
 }
 
+TEST_CASE("Project::additional_roms parses [[rom]] entries from project.toml",
+          "[project][open][additional_roms]") {
+    // Multi-ROM read slice (analyst Issue #10). A project may declare
+    // extra ROMs alongside source/working; Project::open loads them into
+    // additional_roms() for the Compare panel to consume. Schema stays
+    // at v1 because the array is additive — older loaders ignore.
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const proj_dir = td.path / "multi.stune";
+    std::filesystem::create_directories(proj_dir);
+    write_bytes(proj_dir / "source.bin", make_rom_bytes());
+    write_bytes(proj_dir / "working.bin", make_rom_bytes());
+    auto alt_bytes = make_rom_bytes();
+    alt_bytes[10] = 0xAA; // make it distinguishable from source
+    write_bytes(proj_dir / "alt-tune.bin", alt_bytes);
+    auto missing_bytes = make_rom_bytes();
+    (void)missing_bytes;
+    // Note: "missing-tune.bin" is intentionally NOT written — the
+    // parser must drop that entry silently.
+
+    std::string const toml_text = std::string{R"toml(
+[project]
+schema_version = 1
+display_name   = "multi-rom test"
+
+[project.source_rom]
+path  = "source.bin"
+crc32 = 0
+
+[project.working_rom]
+path  = "working.bin"
+crc32 = 0
+
+[project.definition]
+path = ")toml"} + pack_dir.generic_string() + R"toml("
+
+[[rom]]
+id           = "alt-tune"
+display_name = "Alternate tune"
+path         = "alt-tune.bin"
+notes        = "Snapshot pre-autotune"
+
+[[rom]]
+id    = "missing-tune"
+path  = "missing-tune.bin"
+
+[[rom]]
+display_name = "no id, should be skipped"
+path         = "alt-tune.bin"
+)toml";
+    write_text(proj_dir / "project.toml", toml_text);
+
+    auto p = st::Project::open(proj_dir);
+    REQUIRE(p.has_value());
+    auto const &roms = p->additional_roms();
+    // alt-tune loaded; missing-tune dropped (file absent); third entry dropped (no id).
+    REQUIRE(roms.size() == 1);
+    REQUIRE(roms[0].id == "alt-tune");
+    REQUIRE(roms[0].display_name == "Alternate tune");
+    REQUIRE(roms[0].notes == "Snapshot pre-autotune");
+    REQUIRE(roms[0].rom.size() == 64);
+    REQUIRE(roms[0].rom.data()[10] == 0xAA);
+}
+
+TEST_CASE("Project::additional_roms round-trips through save_metadata",
+          "[project][open][additional_roms]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "rt.stune";
+
+    auto pc = st::Project::create(proj_dir, rom_path, pack_dir, "rt");
+    REQUIRE(pc.has_value());
+
+    // Hand-write a [[rom]] entry to project.toml + place the referenced
+    // file, then reopen and save_metadata — the round-trip should
+    // preserve the entry.
+    write_bytes(proj_dir / "extra.bin", make_rom_bytes());
+    std::ifstream in{proj_dir / "project.toml"};
+    std::ostringstream existing;
+    existing << in.rdbuf();
+    in.close();
+    std::ofstream out{proj_dir / "project.toml"};
+    out << existing.str();
+    out << R"toml(
+[[rom]]
+id           = "extra"
+display_name = "Extra ROM"
+path         = "extra.bin"
+)toml";
+    out.close();
+
+    auto p = st::Project::open(proj_dir);
+    REQUIRE(p.has_value());
+    REQUIRE(p->additional_roms().size() == 1);
+    REQUIRE(p->save_metadata().has_value());
+
+    auto p2 = st::Project::open(proj_dir);
+    REQUIRE(p2.has_value());
+    REQUIRE(p2->additional_roms().size() == 1);
+    REQUIRE(p2->additional_roms()[0].id == "extra");
+    REQUIRE(p2->additional_roms()[0].display_name == "Extra ROM");
+}
+
 TEST_CASE("Project::handheld_serial preserves empty on default save / reopen",
           "[project][handheld_serial]") {
     // A project that never sets a handheld serial must round-trip with the

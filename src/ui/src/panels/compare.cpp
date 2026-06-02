@@ -35,7 +35,11 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace st::ui {
@@ -48,11 +52,74 @@ namespace {
 // path; works even when the project's source file has been renamed
 // or moved relative to the .stune dir.
 inline constexpr char const *kProjectSourceSentinel = "<project source>";
+inline constexpr char const *kProjectWorkingSentinel = "<project working>";
+inline constexpr char const *kProjectRomSentinelPrefix = "<project:";
+
+// Resolve a ROM path or sentinel against the active project. Returns
+// pointer-to-Rom for an in-memory source / working / additional-rom
+// reference, or nullopt (with a loaded Rom in `out_loaded`) for a
+// disk path. Failure populates `error_msg` and returns nullopt-with-no-out.
+struct RomResolution {
+    Rom const *in_memory{nullptr};
+    std::optional<Rom> loaded;
+    bool ok{false};
+};
+
+RomResolution resolve_rom_input(AppState const &state, char const *path,
+                                std::string &error_msg, char const *label) {
+    RomResolution out;
+    std::string_view const sv{path};
+    if (sv.empty() || sv == kProjectSourceSentinel) {
+        if (!state.project.has_value()) {
+            error_msg = std::string{label} + ": no project loaded.";
+            return out;
+        }
+        out.in_memory = &state.project->source_rom();
+        out.ok = true;
+        return out;
+    }
+    if (sv == kProjectWorkingSentinel) {
+        if (!state.project.has_value()) {
+            error_msg = std::string{label} + ": no project loaded.";
+            return out;
+        }
+        out.in_memory = &state.project->working_rom();
+        out.ok = true;
+        return out;
+    }
+    if (sv.starts_with(kProjectRomSentinelPrefix) && sv.ends_with(">")) {
+        if (!state.project.has_value()) {
+            error_msg = std::string{label} + ": no project loaded.";
+            return out;
+        }
+        std::string_view const id =
+            sv.substr(std::strlen(kProjectRomSentinelPrefix),
+                      sv.size() - std::strlen(kProjectRomSentinelPrefix) - 1);
+        for (auto const &r : state.project->additional_roms()) {
+            if (r.id == id) {
+                out.in_memory = &r.rom;
+                out.ok = true;
+                return out;
+            }
+        }
+        error_msg = std::string{label} + ": project has no [[rom]] entry id '" +
+                    std::string{id} + "'.";
+        return out;
+    }
+    auto loaded = st::Rom::from_file(std::filesystem::path{path});
+    if (!loaded.has_value()) {
+        error_msg = std::string{label} + ": " + loaded.error().to_string();
+        return out;
+    }
+    out.loaded = std::move(*loaded);
+    out.ok = true;
+    return out;
+}
 
 // Run the compare; populate state.compare_result on success or
-// compare_error_msg on failure. ROM A uses the project source when
-// compare_rom_a_path == kProjectSourceSentinel; otherwise both ROMs
-// come from disk.
+// compare_error_msg on failure. ROM A and ROM B both support sentinel
+// strings (<project source>, <project working>, <project:rom_id>) in
+// addition to plain disk paths.
 void recompute_compare(AppState &state) {
     state.compare_error_msg.clear();
     state.compare_result.reset();
@@ -67,31 +134,22 @@ void recompute_compare(AppState &state) {
         return;
     }
 
-    bool const use_project_source =
-        (std::string{state.compare_rom_a_path} == kProjectSourceSentinel) ||
-        (state.compare_rom_a_path[0] == '\0');
-
-    std::optional<st::Rom> rom_a_loaded;
-    if (!use_project_source) {
-        auto rom_a = st::Rom::from_file(state.compare_rom_a_path);
-        if (!rom_a.has_value()) {
-            state.compare_error_msg = std::string{"ROM A: "} + rom_a.error().to_string();
-            return;
-        }
-        rom_a_loaded = std::move(*rom_a);
-    }
-    Rom const &rom_a_ref = use_project_source ? state.project->source_rom() : *rom_a_loaded;
-
-    auto rom_b = st::Rom::from_file(state.compare_rom_b_path);
-    if (!rom_b.has_value()) {
-        state.compare_error_msg = std::string{"ROM B: "} + rom_b.error().to_string();
+    auto rom_a = resolve_rom_input(state, state.compare_rom_a_path,
+                                   state.compare_error_msg, "ROM A");
+    if (!rom_a.ok)
         return;
-    }
+    auto rom_b = resolve_rom_input(state, state.compare_rom_b_path,
+                                   state.compare_error_msg, "ROM B");
+    if (!rom_b.ok)
+        return;
+
+    Rom const &rom_a_ref = rom_a.in_memory ? *rom_a.in_memory : *rom_a.loaded;
+    Rom const &rom_b_ref = rom_b.in_memory ? *rom_b.in_memory : *rom_b.loaded;
 
     st::diff::Options opts;
     opts.cell_epsilon = static_cast<double>(state.compare_epsilon);
     opts.include_identical = state.compare_include_identical;
-    auto result = st::diff::compare(rom_a_ref, *rom_b, state.project->definition(), opts);
+    auto result = st::diff::compare(rom_a_ref, rom_b_ref, state.project->definition(), opts);
     if (!result.has_value()) {
         state.compare_error_msg = result.error().to_string();
         return;
@@ -276,6 +334,59 @@ void render_compare_panel(AppState &state) {
     if (ImGui::Button("Browse…##cmp_b")) {
         pick_rom_into(state.compare_rom_b_path, sizeof state.compare_rom_b_path,
                       state.compare_error_msg);
+    }
+
+    // Project ROMs (Issue #10 read slice). Lists the project's source +
+    // working + any [[rom]] entries from project.toml. Click → A / → B
+    // wires the sentinel into the corresponding path field so the
+    // compare reads the in-memory bytes instead of round-tripping
+    // through disk. Hidden when no project is loaded (else there's
+    // nothing to pick from).
+    if (state.project.has_value()) {
+        ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+        text_subtle("Project ROMs — click an arrow button to slot a project ROM into A or B "
+                    "without leaving the project dir.");
+        auto const row_btns = [&](char const *label, char const *sentinel, char const *id_suffix) {
+            ImGui::PushID(id_suffix);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(label);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("\xE2\x86\x92 A")) {
+                std::snprintf(state.compare_rom_a_path, sizeof state.compare_rom_a_path, "%s",
+                              sentinel);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("\xE2\x86\x92 B")) {
+                std::snprintf(state.compare_rom_b_path, sizeof state.compare_rom_b_path, "%s",
+                              sentinel);
+            }
+            ImGui::PopID();
+        };
+        row_btns("Project source (read-only)", kProjectSourceSentinel, "src");
+        row_btns("Project working (with edits)", kProjectWorkingSentinel, "wrk");
+        for (auto const &r : state.project->additional_roms()) {
+            std::string const sentinel = std::string{"<project:"} + r.id + ">";
+            char id_suffix[96];
+            std::snprintf(id_suffix, sizeof id_suffix, "ar_%s", r.id.c_str());
+            ImGui::PushID(id_suffix);
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("%s", r.display_name.empty() ? r.id.c_str() : r.display_name.c_str());
+            if (!r.id.empty()) {
+                ImGui::SameLine();
+                text_subtle("(%s)", r.id.c_str());
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("\xE2\x86\x92 A")) {
+                std::snprintf(state.compare_rom_a_path, sizeof state.compare_rom_a_path, "%s",
+                              sentinel.c_str());
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("\xE2\x86\x92 B")) {
+                std::snprintf(state.compare_rom_b_path, sizeof state.compare_rom_b_path, "%s",
+                              sentinel.c_str());
+            }
+            ImGui::PopID();
+        }
     }
 
     ImGui::Spacing();

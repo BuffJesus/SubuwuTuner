@@ -35,10 +35,28 @@ namespace st {
 // The Project type owns the loaded source ROM, working ROM, and Definition.
 // Editing the working ROM in memory is done via st::edit + st::defs as
 // usual; save_working_rom() persists the in-memory bytes back to disk.
+//
+// Additional ROMs (analyst Issue #10 — multi-ROM project model, read
+// slice). A project can optionally carry extra ROM files under [[rom]]
+// entries in project.toml; these are typically alternate calibrations
+// the user wants to compare against source/working without standing
+// up a second project. v1 ships READ-ONLY: the Compare panel can
+// pick from them, but per-ROM edit::History isolation is still future
+// work. Schema stays at v1 because the [[rom]] array is additive —
+// projects without it round-trip unchanged.
 
 class Project {
 public:
     static constexpr int kSchemaVersion = 1;
+
+    struct AdditionalRom {
+        std::string id;                // slug used in TOML + UI ids
+        std::string display_name;
+        std::filesystem::path path_rel;
+        std::string notes;
+        std::uint32_t crc32{0};
+        Rom rom{Rom::from_bytes({})};
+    };
 
     [[nodiscard]] static Result<Project> create(std::filesystem::path const &project_dir,
                                                 std::filesystem::path const &source_rom_path,
@@ -132,6 +150,14 @@ public:
         return source_crc32_;
     }
 
+    // Read-only access to extra ROMs declared in project.toml as
+    // [[rom]] entries (Issue #10 read slice). Empty when project.toml
+    // declares none. Returned vector is sized once on Project::open;
+    // adding ROMs at runtime is a follow-up.
+    [[nodiscard]] std::vector<AdditionalRom> const &additional_roms() const noexcept {
+        return additional_roms_;
+    }
+
 private:
     Project() = default;
 
@@ -151,6 +177,7 @@ private:
     Rom working_{Rom::from_bytes({})};
     Definition def_;
     edit::History history_;
+    std::vector<AdditionalRom> additional_roms_;
 };
 
 // CSV bulk-edit parser. Shared between the CLI's `project-edit-csv` and
