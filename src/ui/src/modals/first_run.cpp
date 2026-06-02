@@ -312,8 +312,13 @@ void render_first_run_modal(AppState &state) {
             save_settings(state.settings);
             g_wizard_open = false;
             if (state.first_run_offer_demo) {
-                if (auto const demo = resolve_demo_project_path(nullptr); demo.has_value()) {
-                    state.try_open_project(*demo);
+                // resolve_demo_project_path needs argv[0]; the wizard
+                // has no access to it here. main() does the resolve at
+                // startup and caches the result on AppState — use that
+                // instead of re-resolving with nullptr (which always
+                // returns nullopt).
+                if (state.demo_project_path.has_value()) {
+                    state.try_open_project(*state.demo_project_path);
                 } else {
                     enqueue_toast(state, ToastKind::Info,
                                   "Demo project not found alongside the binary. Use File → "
