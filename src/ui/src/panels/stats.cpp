@@ -126,6 +126,29 @@ void render_stats_panel(AppState &state) {
     ImGui::Text("cells:  %zu", cells.size());
     ImGui::Text("edited: %zu", edited);
 
+    // Copy to clipboard — small TSV block the user can paste into a
+    // notes app, spreadsheet, or forum reply. Format mirrors the
+    // stat_row layout above plus the table id + scaling for context.
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+    if (ImGui::SmallButton("Copy stats##stats_copy")) {
+        char buf[512];
+        std::snprintf(buf, sizeof buf,
+                      "table\t%s\nunit\t%s\nmin\t%.*f\nmax\t%.*f\nmean\t%.*f\n"
+                      "stddev\t%.*f\ncells\t%zu\nedited\t%zu\n",
+                      table->id.c_str(), unit.empty() ? "" : unit.c_str(),
+                      prec, static_cast<double>(min),
+                      prec, static_cast<double>(max),
+                      prec, mean,
+                      prec, stddev,
+                      cells.size(), edited);
+        ImGui::SetClipboardText(buf);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Copy a small TSV block of these stats to the\n"
+                          "clipboard — paste anywhere (spreadsheet, forum,\n"
+                          "notes app, support thread).");
+    }
+
     ImGui::Separator();
     text_subtle("histogram");
     if (ImPlot::BeginPlot("##stats_hist", ImVec2(-FLT_MIN, 160.0f),
