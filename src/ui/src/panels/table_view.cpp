@@ -436,7 +436,35 @@ void render_table_grid(st::Definition::TableData const &td, st::Scaling const *s
         for (std::size_t c = 0; c < td.values[r].size(); ++c) {
             double const v = td.values[r][c];
             ImGui::TableNextColumn();
-            ImU32 const bg = heatmap_color(v, stats.min, stats.max);
+            // Background: knock overlay wins when active (analyst Issue
+            // #16) — it carries safety-critical signal (observed knock
+            // on a cell) that should never be hidden under value heat.
+            // Without it, fall back to the value heatmap.
+            ImU32 bg = 0u;
+            std::optional<st::autotune::KnockCellProposal> knock_for_cell;
+            if (state.show_knock_overlay && state.kp_at_result.has_value() &&
+                std::string_view{state.kp_at_table_id} == state.selected_table_id) {
+                auto const &res = *state.kp_at_result;
+                std::size_t const flat = r * res.cols + c;
+                if (flat < res.cells.size()) {
+                    auto const &cell = res.cells[flat];
+                    knock_for_cell = cell;
+                    if (cell.pulled) {
+                        // Strong red: sustained knock, autotune pulled
+                        // timing from this cell.
+                        bg = IM_COL32(190, 50, 50, 160);
+                    } else if (cell.samples_used > 0) {
+                        // Faint green: cell saw samples, no sustained
+                        // knock observed. Confidence affordance — the
+                        // tune is validated here, not just untouched.
+                        bg = IM_COL32(60, 130, 70, 75);
+                    }
+                    // else: zero samples → no override, value heatmap shows
+                }
+            }
+            if (bg == 0u) {
+                bg = heatmap_color(v, stats.min, stats.max);
+            }
             if (bg != 0u) {
                 ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, bg);
             }
@@ -516,6 +544,25 @@ void render_table_grid(st::Definition::TableData const &td, st::Scaling const *s
                         std::snprintf(state.edit_buf, sizeof state.edit_buf, "%.*f", precision, v);
                         state.editing_cell = true;
                         state.editor_just_opened = true;
+                    }
+                }
+                // Knock overlay (Issue #16) — show per-cell metrics on
+                // hover when active. Same precondition that drives the
+                // cell background tint above; this just makes the
+                // numbers reachable without leaving the Table panel.
+                if (knock_for_cell.has_value() && ImGui::IsItemHovered()) {
+                    auto const &k = *knock_for_cell;
+                    if (k.pulled) {
+                        ImGui::SetTooltip("Knock pulled — %zu samples, mean FBKC %.2f deg\n"
+                                          "current %.2f  ->  proposed %.2f",
+                                          k.samples_used,
+                                          static_cast<double>(k.mean_feedback_knock),
+                                          static_cast<double>(k.current_value),
+                                          static_cast<double>(k.proposed_value));
+                    } else if (k.samples_used > 0) {
+                        ImGui::SetTooltip("Clean — %zu samples, mean FBKC %.2f deg",
+                                          k.samples_used,
+                                          static_cast<double>(k.mean_feedback_knock));
                     }
                 }
                 // Right-click selects the cell (if not already in the
@@ -1020,6 +1067,34 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Color-coded heatmap rendered against the real axis values.\n"
                           "Reading-only view; switch back to Grid to edit.");
+    }
+
+    // Knock overlay toggle (analyst Issue #16). Only meaningful when the
+    // active table matches the last knock-pull autotune run AND we're
+    // looking at the Grid view (heatmap-on-heatmap reads as noise).
+    bool const knock_overlay_available =
+        state.kp_at_result.has_value() &&
+        std::string_view{state.kp_at_table_id} == state.selected_table_id &&
+        state.view_mode == TableViewMode::Grid;
+    ImGui::SameLine(0.0f, 24.0f);
+    ImGui::BeginDisabled(!knock_overlay_available);
+    if (ImGui::Checkbox("Knock overlay", &state.show_knock_overlay)) {
+        // No side-effect on toggle; render path reads the flag.
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        if (knock_overlay_available) {
+            ImGui::SetTooltip("Paint per-cell knock-event heat over the grid:\n"
+                              "  faint green = samples observed, no pull\n"
+                              "  strong red  = sustained knock (cell pulled)\n"
+                              "Source: the last Knock Pull autotune run.");
+        } else if (!state.kp_at_result.has_value()) {
+            ImGui::SetTooltip("Run Edit → Knock Pull autotune against a CSV log\n"
+                              "to populate the per-cell knock heat for this table.");
+        } else {
+            ImGui::SetTooltip("Switch to the table the knock autotune was run\n"
+                              "against, or rerun the autotune for this table.");
+        }
     }
 
     ImGui::Separator();

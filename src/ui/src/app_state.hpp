@@ -471,6 +471,15 @@ struct AppState {
     std::vector<double> kp_at_load_axis_values;
     std::string kp_at_status_msg;
 
+    // Knock overlay on table editor (analyst Issue #16). When toggled on
+    // and the active table id matches kp_at_table_id, render_table_grid
+    // paints a per-cell heat layer on top of the value heatmap: faint
+    // green where samples landed but no pull, strong red on pulled
+    // cells. Pairs with #15 — same "log data ↔ table" hooking, just on
+    // top of the grid instead of via right-click jump. Toggle lives in
+    // the table view toolbar and disables itself when no kp_at_result.
+    bool show_knock_overlay{false};
+
     // Read-ROM-from-car modal.
     bool show_read_rom_modal{false};
     enum class ReadRomState : std::uint8_t {
