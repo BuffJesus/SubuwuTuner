@@ -424,6 +424,98 @@ void render_compare_panel(AppState &state) {
         recompute_compare(state);
     }
     ImGui::SameLine();
+    // Export Markdown — companion to the CSV exporter. Markdown is the
+    // shareable format for forum posts and PR descriptions. Rendered
+    // inline here rather than in st::diff because the shape is
+    // UI-presentation, not a library concern.
+    ImGui::BeginDisabled(!state.compare_result.has_value());
+    if (ImGui::Button("Export Markdown…", ImVec2(150.0f, 0.0f))) {
+        NFD::UniquePath out;
+        nfdfilteritem_t const filters[] = {{"Markdown", "md"}};
+        nfdresult_t const r =
+            NFD::SaveDialog(out, filters, 1, nullptr, "rom-diff.md");
+        if (r == NFD_OKAY) {
+            std::filesystem::path const target{out.get()};
+            std::ofstream fh{target, std::ios::binary};
+            if (!fh) {
+                state.compare_error_msg = "Export Markdown: cannot open " + target.string();
+            } else {
+                auto const &d = *state.compare_result;
+                fh << "# ROM diff\n\n";
+                fh << "- **Pack**: `" << d.pack_id << "`\n";
+                fh << "- **Tables compared**: " << d.tables_compared
+                   << " (" << d.tables_changed << " changed)\n";
+                fh << "- **Cells changed**: " << d.total_cells_changed
+                   << " of " << d.total_cells_compared << "\n";
+                fh << "- **ROM A CRC32**: `0x" << std::hex << d.rom_a_crc32 << std::dec << "`\n";
+                fh << "- **ROM B CRC32**: `0x" << std::hex << d.rom_b_crc32 << std::dec << "`\n\n";
+                if (d.identical()) {
+                    fh << "_All tables identical between ROM A and ROM B._\n";
+                } else {
+                    fh << "## Changed tables\n\n";
+                    for (auto const &t : d.tables) {
+                        if (!t.changed())
+                            continue;
+                        fh << "### `" << t.table_id << "`";
+                        if (!t.table_name.empty() && t.table_name != t.table_id)
+                            fh << " — " << t.table_name;
+                        fh << "\n\n";
+                        if (t.engine_safety_critical)
+                            fh << "> **Engine-safety critical.**\n\n";
+                        if (t.emissions_relevant)
+                            fh << "> Emissions-relevant table.\n\n";
+                        fh << t.cells_changed << " of " << t.total_cells
+                           << " cells changed. ";
+                        char stats_buf[128];
+                        std::snprintf(stats_buf, sizeof stats_buf,
+                                      "max |Δ| = %.6g, mean |Δ| = %.6g.\n\n",
+                                      t.max_abs_delta, t.mean_abs_delta);
+                        fh << stats_buf;
+                        if (!t.changes.empty()) {
+                            fh << "| Row | Col | A | B | Δ |\n";
+                            fh << "|---:|---:|---:|---:|---:|\n";
+                            for (auto const &c : t.changes) {
+                                char row_buf[256];
+                                std::snprintf(row_buf, sizeof row_buf,
+                                              "| %zu | %zu | %g | %g | %+g |\n",
+                                              c.row, c.col, c.value_a, c.value_b,
+                                              c.delta());
+                                fh << row_buf;
+                            }
+                            fh << "\n";
+                        }
+                    }
+                }
+                if (!d.skipped.empty()) {
+                    fh << "## Skipped tables\n\n";
+                    for (auto const &s : d.skipped) {
+                        fh << "- `" << s.table_id << "` — " << s.reason << "\n";
+                    }
+                }
+                if (!fh) {
+                    state.compare_error_msg = "Export Markdown: write failed";
+                } else {
+                    enqueue_toast(state, ToastKind::Success,
+                                  "Wrote " + target.string());
+                }
+            }
+        } else if (r == NFD_ERROR) {
+            state.compare_error_msg =
+                std::string{"Export Markdown dialog error: "} + NFD::GetError();
+        }
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        if (state.compare_result.has_value()) {
+            ImGui::SetTooltip(
+                "Write a shareable Markdown summary of the diff.\n"
+                "Headings + tables per changed entry — paste into a\n"
+                "PR description, forum post, or support thread.");
+        } else {
+            ImGui::SetTooltip("Run Compare first to enable export.");
+        }
+    }
+    ImGui::SameLine();
     // Export CSV — write the cached compare_result to a file. Useful
     // for sharing tune diffs in PRs, attaching to support threads,
     // or feeding into downstream analysis. Uses st::diff::render_csv
