@@ -79,6 +79,7 @@ add_executable(st_unit_tests
     unit/feature_codegen/test_address_gate.cpp
     unit/feature_patch/test_manifest.cpp
     unit/feature_patch/test_rom_allocator.cpp
+    unit/feature_patch/test_splice_sh2a.cpp
 )
 
 target_link_libraries(st_unit_tests
