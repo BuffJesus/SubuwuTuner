@@ -240,6 +240,11 @@ constexpr std::string_view kUsage =
     "                            [[rom]] entry is written to project.toml. The GUI\n"
     "                            Compare panel can then pick this ROM by slug\n"
     "                            without a file dialog (analyst Issue #10).\n"
+    "    project-list-roms <dir> [--json]\n"
+    "                            List every ROM declared by the project — source,\n"
+    "                            working, and each [[rom]] additional entry. Surfaces\n"
+    "                            any project.toml parse warnings (missing files,\n"
+    "                            empty ids).\n"
     "    project-history <dir> [--table <id>] [--limit N]\n"
     "                            List the project's edit history with cursor\n"
     "                            position and per-edit emissions/safety flags.\n"
@@ -3286,6 +3291,113 @@ int cmd_project_add_rom(int argc, char *argv[]) {
     }
     std::printf("Added ROM '%s' (path: %s) to project %s\n", rom_id->c_str(),
                 dest_filename.c_str(), proj_dir->string().c_str());
+    return 0;
+}
+
+// List every ROM declared by a project — source, working, and each
+// [[rom]] additional entry — in either text or JSON shape. Companion
+// to project-add-rom: confirms what's in the project without firing
+// up the GUI.
+int cmd_project_list_roms(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> proj_dir;
+    bool json_mode = false;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--json") {
+            json_mode = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "project-list-roms: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!proj_dir.has_value()) {
+            proj_dir = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "project-list-roms: extra positional: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!proj_dir.has_value()) {
+        std::fputs("project-list-roms: missing <dir>\n"
+                   "Usage: subuwutuner-cli project-list-roms <dir> [--json]\n",
+                   stderr);
+        return 2;
+    }
+    auto proj = st::Project::open(*proj_dir);
+    if (!proj.has_value()) {
+        std::fprintf(stderr, "project-list-roms: %s\n", proj.error().to_string().c_str());
+        return 1;
+    }
+    auto const &source = proj->source_rom();
+    auto const &working = proj->working_rom();
+    auto const &extras = proj->additional_roms();
+    if (json_mode) {
+        std::string out;
+        out.reserve(512);
+        out.append("{\"schema\":\"subuwutuner.project-list-roms.v1\",\"project_dir\":");
+        json_escape(out, proj_dir->string());
+        out.append(",\"source\":{\"path\":\"source.bin\",\"size\":");
+        out.append(std::to_string(source.size()));
+        out.append(",\"crc32\":");
+        out.append(std::to_string(source.crc32()));
+        out.append("},\"working\":{\"path\":\"working.bin\",\"size\":");
+        out.append(std::to_string(working.size()));
+        out.append(",\"crc32\":");
+        out.append(std::to_string(working.crc32()));
+        out.append("},\"additional\":[");
+        for (std::size_t i = 0; i < extras.size(); ++i) {
+            if (i > 0)
+                out.append(",");
+            auto const &r = extras[i];
+            out.append("{\"id\":");
+            json_escape(out, r.id);
+            out.append(",\"display_name\":");
+            json_escape(out, r.display_name);
+            out.append(",\"path\":");
+            json_escape(out, r.path_rel.generic_string());
+            out.append(",\"size\":");
+            out.append(std::to_string(r.rom.size()));
+            out.append(",\"crc32\":");
+            out.append(std::to_string(r.rom.crc32()));
+            out.append(",\"notes\":");
+            json_escape(out, r.notes);
+            out.append("}");
+        }
+        out.append("],\"warnings\":[");
+        auto const &warnings = proj->additional_rom_warnings();
+        for (std::size_t i = 0; i < warnings.size(); ++i) {
+            if (i > 0)
+                out.append(",");
+            json_escape(out, warnings[i]);
+        }
+        out.append("]}\n");
+        std::fputs(out.c_str(), stdout);
+    } else {
+        std::printf("Project: %s\n", proj_dir->string().c_str());
+        std::printf("  source   path=source.bin   size=%zu (0x%zX)  crc32=0x%08X\n",
+                    source.size(), source.size(), source.crc32());
+        std::printf("  working  path=working.bin  size=%zu (0x%zX)  crc32=0x%08X\n",
+                    working.size(), working.size(), working.crc32());
+        if (extras.empty()) {
+            std::printf("  (no [[rom]] additional entries — use `project-add-rom` to "
+                        "register one)\n");
+        }
+        for (auto const &r : extras) {
+            std::printf("  %-8s path=%s  size=%zu  crc32=0x%08X\n", r.id.c_str(),
+                        r.path_rel.string().c_str(), r.rom.size(), r.rom.crc32());
+            if (!r.display_name.empty() && r.display_name != r.id) {
+                std::printf("           name=%s\n", r.display_name.c_str());
+            }
+            if (!r.notes.empty()) {
+                std::printf("           notes=%s\n", r.notes.c_str());
+            }
+        }
+        auto const &warnings = proj->additional_rom_warnings();
+        if (!warnings.empty()) {
+            std::printf("\nWarnings (%zu):\n", warnings.size());
+            for (auto const &w : warnings) {
+                std::printf("  %s\n", w.c_str());
+            }
+        }
+    }
     return 0;
 }
 
@@ -12510,6 +12622,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-add-rom") {
         return cmd_project_add_rom(argc - 2, argv + 2);
+    }
+    if (cmd == "project-list-roms") {
+        return cmd_project_list_roms(argc - 2, argv + 2);
     }
     if (cmd == "project-history") {
         return cmd_project_history(argc - 2, argv + 2);
