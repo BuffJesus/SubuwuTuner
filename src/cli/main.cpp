@@ -583,6 +583,14 @@ constexpr std::string_view kUsage =
     "                            profiles (or %APPDATA%/SubuwuTuner/profiles on\n"
     "                            Windows). See docs/33 + analyst Issue #7.\n"
     "    audit show <project-dir> [--json]\n"
+    "    audit append <project-dir> --kind <name> --description \"text\"\n"
+    "                              [--source <text>] [--field key=value ...]\n"
+    "                            Append one entry. kind is a wire-format name\n"
+    "                            (e.g. project.saved, flash.started, custom).\n"
+    "                            Unknown kinds get serialized as 'custom' with\n"
+    "                            the requested name preserved as a field. Useful\n"
+    "                            for cron / CI / external tooling — handles the\n"
+    "                            CRC32 + timestamp like the in-process callers.\n"
     "                            Read the per-project audit.log (cross-session\n"
     "                            ECU-touch log) and print one entry per line.\n"
     "                            Tampered entries (CRC32 mismatch) get a\n"
@@ -12871,12 +12879,105 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "audit") {
         if (argc < 3) {
-            std::fputs("audit: missing subcommand. Try `audit show <project>`.\n", stderr);
+            std::fputs("audit: missing subcommand. Try `audit show <project>` or "
+                       "`audit append <project> --kind <name> --description <text>`.\n",
+                       stderr);
             return 2;
         }
         std::string_view const sub{argv[2]};
+        if (sub == "append") {
+            // audit append <project-dir> --kind <name> --description <text>
+            //                            [--source <text>] [--field key=value ...]
+            std::optional<std::filesystem::path> project_dir;
+            std::string kind_name = "custom";
+            std::string description;
+            std::string source = "cli.audit_append";
+            std::vector<std::pair<std::string, std::string>> fields;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view const a{argv[i]};
+                auto const need_val = [&](char const *name) -> char const * {
+                    if (i + 1 >= argc) {
+                        std::fprintf(stderr, "audit append: %s requires a value\n", name);
+                        return nullptr;
+                    }
+                    return argv[++i];
+                };
+                if (a == "--kind") {
+                    if (auto const *v = need_val("--kind"); v)
+                        kind_name = std::string{v};
+                    else
+                        return 2;
+                } else if (a == "--description" || a == "--desc") {
+                    if (auto const *v = need_val("--description"); v)
+                        description = std::string{v};
+                    else
+                        return 2;
+                } else if (a == "--source") {
+                    if (auto const *v = need_val("--source"); v)
+                        source = std::string{v};
+                    else
+                        return 2;
+                } else if (a == "--field") {
+                    if (auto const *v = need_val("--field"); v) {
+                        std::string_view const kv{v};
+                        auto const eq = kv.find('=');
+                        if (eq == std::string_view::npos) {
+                            std::fprintf(stderr,
+                                         "audit append: --field expects key=value, got '%s'\n", v);
+                            return 2;
+                        }
+                        fields.emplace_back(std::string{kv.substr(0, eq)},
+                                            std::string{kv.substr(eq + 1)});
+                    } else {
+                        return 2;
+                    }
+                } else if (a.starts_with("--")) {
+                    std::fprintf(stderr, "audit append: unknown option: %s\n", argv[i]);
+                    return 2;
+                } else if (!project_dir.has_value()) {
+                    project_dir = std::filesystem::path{argv[i]};
+                } else {
+                    std::fprintf(stderr, "audit append: extra positional: %s\n", argv[i]);
+                    return 2;
+                }
+            }
+            if (!project_dir.has_value() || description.empty()) {
+                std::fputs("audit append: missing required arguments\n"
+                           "Usage: subuwutuner-cli audit append <project-dir> \\\n"
+                           "         --kind <kind-name>  (default: custom)\n"
+                           "         --description \"What happened\"  (required)\n"
+                           "         [--source <text>]  (default: cli.audit_append)\n"
+                           "         [--field key=value]  (repeatable)\n",
+                           stderr);
+                return 2;
+            }
+            std::error_code ec;
+            if (!std::filesystem::is_directory(*project_dir, ec) || ec) {
+                std::fprintf(stderr, "audit append: not a project dir: %s\n",
+                             project_dir->string().c_str());
+                return 1;
+            }
+            auto const log_path = *project_dir / "audit.log";
+            auto log_r = st::audit::AuditLog::open(log_path);
+            if (!log_r.has_value()) {
+                std::fprintf(stderr, "audit append: %s\n",
+                             log_r.error().to_string().c_str());
+                return 1;
+            }
+            auto const kind = st::audit::kind_from_name(kind_name);
+            auto status = log_r->log(kind, std::move(source), std::move(description),
+                                     std::move(fields));
+            if (!status.has_value()) {
+                std::fprintf(stderr, "audit append: %s\n",
+                             status.error().to_string().c_str());
+                return 1;
+            }
+            std::printf("Appended to %s\n", log_path.string().c_str());
+            return 0;
+        }
         if (sub != "show") {
-            std::fprintf(stderr, "audit: unknown subcommand '%s' (try 'show')\n", argv[2]);
+            std::fprintf(stderr, "audit: unknown subcommand '%s' (try 'show' or 'append')\n",
+                         argv[2]);
             return 2;
         }
         // audit show <project-dir> [--json]
