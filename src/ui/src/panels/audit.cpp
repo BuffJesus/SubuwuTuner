@@ -27,10 +27,13 @@
 #include "st/audit.hpp"
 
 #include <imgui.h>
+#include <implot.h>
 #include <nfd.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cfloat>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -330,6 +333,77 @@ void render_audit_panel(AppState &state) {
         ImGui::PopStyleColor();
     } else {
         text_subtle("%zu entries", state.audit_entries.size());
+    }
+
+    // Timeline sparkline — bar chart of entry count per time bucket
+    // across the visible range. Bucket count is fixed at 40 so the
+    // sparkline is dense enough to read but doesn't dominate the
+    // panel. Skips when there are too few entries to plot meaningfully
+    // (one bar would just be noise).
+    if (state.audit_entries.size() >= 3) {
+        std::int64_t t_min = state.audit_entries.front().timestamp_ns;
+        std::int64_t t_max = t_min;
+        for (auto const &e : state.audit_entries) {
+            if (e.timestamp_ns < t_min)
+                t_min = e.timestamp_ns;
+            if (e.timestamp_ns > t_max)
+                t_max = e.timestamp_ns;
+        }
+        if (t_max > t_min) {
+            constexpr int kBuckets = 40;
+            std::array<double, kBuckets> counts{};
+            std::array<double, kBuckets> xs{};
+            auto const span = static_cast<double>(t_max - t_min);
+            for (auto const &e : state.audit_entries) {
+                auto const rel = static_cast<double>(e.timestamp_ns - t_min);
+                int b = static_cast<int>(rel * kBuckets / span);
+                if (b < 0)
+                    b = 0;
+                if (b >= kBuckets)
+                    b = kBuckets - 1;
+                counts[static_cast<std::size_t>(b)] += 1.0;
+            }
+            for (int i = 0; i < kBuckets; ++i) {
+                xs[static_cast<std::size_t>(i)] = static_cast<double>(i);
+            }
+            ImPlotFlags const flags = ImPlotFlags_NoTitle | ImPlotFlags_NoMenus |
+                                      ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText |
+                                      ImPlotFlags_NoBoxSelect;
+            if (ImPlot::BeginPlot("##audit_sparkline", ImVec2(-FLT_MIN, 60.0f), flags)) {
+                ImPlot::SetupAxes(nullptr, nullptr,
+                                  ImPlotAxisFlags_NoTickLabels |
+                                      ImPlotAxisFlags_NoTickMarks |
+                                      ImPlotAxisFlags_NoGridLines |
+                                      ImPlotAxisFlags_NoMenus,
+                                  ImPlotAxisFlags_AutoFit |
+                                      ImPlotAxisFlags_NoTickLabels |
+                                      ImPlotAxisFlags_NoTickMarks |
+                                      ImPlotAxisFlags_NoGridLines |
+                                      ImPlotAxisFlags_NoMenus);
+                ImPlot::SetupAxisLimits(ImAxis_X1, -0.5, kBuckets - 0.5, ImPlotCond_Always);
+                ImPlotSpec bar_spec;
+                bar_spec.FillColor = ImVec4(0.55f, 0.35f, 0.85f, 0.70f);
+                bar_spec.LineColor = ImVec4(0.55f, 0.35f, 0.85f, 1.0f);
+                ImPlot::PlotBars("##bars", xs.data(), counts.data(), kBuckets, 0.85,
+                                 bar_spec);
+                ImPlot::EndPlot();
+            }
+            // Range labels under the sparkline.
+            auto const iso_short = [](std::int64_t ns) -> std::string {
+                std::time_t const t = ns / 1'000'000'000;
+                std::tm tm{};
+#if defined(_WIN32)
+                gmtime_s(&tm, &t);
+#else
+                gmtime_r(&t, &tm);
+#endif
+                char buf[24];
+                std::strftime(buf, sizeof buf, "%Y-%m-%d %H:%M", &tm);
+                return std::string{buf};
+            };
+            text_subtle("%s  →  %s  (UTC)", iso_short(t_min).c_str(),
+                        iso_short(t_max).c_str());
+        }
     }
     ImGui::Separator();
 
