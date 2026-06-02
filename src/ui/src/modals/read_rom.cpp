@@ -671,6 +671,7 @@ void render_read_rom_modal(AppState &state) {
                         // Reset to Idle and close the popup.
                         state.read_rom_bytes_result.clear();
                         state.read_rom_state = AppState::ReadRomState::Idle;
+                        state.read_rom_save_slug_initialized = false;
                         state.read_rom_error_msg.clear();
                         ImGui::CloseCurrentPopup();
                     }
@@ -683,6 +684,7 @@ void render_read_rom_modal(AppState &state) {
         if (ImGui::Button("Discard", ImVec2(120.0f, 0.0f))) {
             state.read_rom_bytes_result.clear();
             state.read_rom_state = AppState::ReadRomState::Idle;
+            state.read_rom_save_slug_initialized = false;
             ImGui::CloseCurrentPopup();
         }
         if (!state.read_rom_error_msg.empty()) {
