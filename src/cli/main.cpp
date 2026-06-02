@@ -538,7 +538,7 @@ constexpr std::string_view kUsage =
     "                            sets the per-module cycle budget (0 disables;\n"
     "                            default 200). Exit 0 normally, 3 with --strict\n"
     "                            on any finding.\n"
-    "    transport-list\n"
+    "    transport-list [--json]\n"
     "                            List J2534 v04.04 vendor DLLs registered on\n"
     "                            this host (HKLM\\Software\\PassThruSupport.04.04\n"
     "                            + the Wow6432Node mirror). Read-only — never\n"
@@ -9828,11 +9828,60 @@ int cmd_doctor(int argc, char *argv[]) {
     return report.worst == DoctorStatus::Fail ? 1 : 0;
 }
 
+int cmd_transport_list_json() {
+    auto const adapters = st::transport::j2534::discover_adapters();
+    std::string out;
+    out.reserve(512);
+    out.append("{\"schema\":\"subuwutuner.transport-list.v1\",\"j2534\":{");
+    out.append("\"count\":");
+    out.append(std::to_string(adapters.size()));
+    out.append(",\"adapters\":[");
+    for (std::size_t i = 0; i < adapters.size(); ++i) {
+        if (i != 0)
+            out.append(",");
+        auto const &a = adapters[i];
+        out.append("{\"name\":");
+        json_escape(out, a.name);
+        out.append(",\"function_library\":");
+        json_escape(out, a.function_library);
+        out.append(",\"vendor\":");
+        json_escape(out, a.vendor);
+        out.append(",\"protocols\":");
+        json_escape(out, st::transport::j2534::format_protocols_supported(a.protocols_supported));
+        out.append(",\"registry_view\":");
+        json_escape(out, st::transport::j2534::registry_view_name(a.view));
+        out.append(",\"subkey\":");
+        json_escape(out, a.subkey);
+        out.append("}");
+    }
+    out.append("]},");
+    // Other transport families always ship as available with --device <port>;
+    // we report them so callers know the full set without scraping help text.
+    out.append("\"other_transports\":[");
+    out.append("{\"id\":\"obdx\",\"description\":\"OBDX Pro VX (USB CDC + DVI codec)\","
+               "\"requires\":\"--device <port>\"},");
+    out.append("{\"id\":\"native\",\"description\":\"Doc-18 handheld (USB CDC + native)\","
+               "\"requires\":\"--device <port>\"},");
+    out.append("{\"id\":\"mock\",\"description\":\"MockTransport for trace replay\","
+               "\"requires\":\"--trace <file>\"}");
+    out.append("]}\n");
+    std::fputs(out.c_str(), stdout);
+    return 0;
+}
+
 int cmd_transport_list(int argc, char *argv[]) {
-    (void)argv;
-    if (argc != 0) {
-        std::fputs("transport-list: takes no arguments\n", stderr);
-        return 2;
+    bool json_mode = false;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--json") {
+            json_mode = true;
+        } else {
+            std::fprintf(stderr, "transport-list: unknown argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (json_mode) {
+        return cmd_transport_list_json();
     }
     auto const adapters = st::transport::j2534::discover_adapters();
     if (adapters.empty()) {
