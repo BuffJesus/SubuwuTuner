@@ -27,6 +27,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -175,6 +176,81 @@ compare(Rom const &a, Rom const &b, Definition const &def, Options const &opts =
 // pretty-printing. Skip lists are always emitted (even if empty) so
 // scripts can rely on the key shape.
 [[nodiscard]] std::string render_json(DiffSet const &d);
+
+// ---- CompareSession persistence (analyst Issue #5) ---------------------
+//
+// `.stcompare` files hold the inputs to a saved diff session: the two
+// ROM paths + CRC32s + sizes, the pack id, the compare options, and
+// any user annotations. The DiffSet itself is NOT cached — it's
+// recomputed on load (same inputs → same output, deterministically).
+// The hash-verify on load is the safety property: if either ROM has
+// changed on disk since the session was saved, load_compare_session
+// returns InvalidArgument with a precise "ROM A CRC32 mismatch"
+// message rather than silently producing a different diff.
+//
+// File format is TOML (matches the .stune convention). Annotations
+// are flat triples (table_id, row, col, text) so the format extends
+// cleanly when the GUI grows per-cell-comment threads.
+
+struct CompareAnnotation {
+    std::string table_id;
+    std::size_t row{0};
+    std::size_t col{0};
+    std::string text;
+};
+
+inline constexpr int kCompareSessionSchemaVersion = 1;
+
+struct CompareSession {
+    int schema_version{kCompareSessionSchemaVersion};
+
+    // ROM inputs. Paths are stored as the user picked them (absolute
+    // or relative); CRC32 + size let the loader verify the on-disk
+    // file still matches.
+    std::string rom_a_path;
+    std::uint32_t rom_a_crc32{0};
+    std::size_t rom_a_size{0};
+    std::string rom_b_path;
+    std::uint32_t rom_b_crc32{0};
+    std::size_t rom_b_size{0};
+
+    // The pack id the compare ran against. Loader resolves to a path
+    // via the caller-supplied lookup (typically the project's
+    // definition or a pack-dir scan).
+    std::string pack_id;
+
+    // Options the original compare used. Reusing them on load
+    // guarantees the recomputed DiffSet matches what was saved.
+    Options options;
+
+    // Optional ISO-8601 timestamp of when the session was created.
+    std::string created_at;
+
+    // User annotations against specific cells. May be empty.
+    std::vector<CompareAnnotation> annotations;
+};
+
+// Write a session to disk as TOML. Caller passes a populated
+// CompareSession (typically built by capturing the inputs from a
+// successful compare() call + the user's annotations).
+[[nodiscard]] Status save_compare_session(CompareSession const &session,
+                                          std::filesystem::path const &path);
+
+// Read a .stcompare file. Does NOT load the ROMs or run compare();
+// caller drives that. Use verify_compare_inputs() afterwards to
+// confirm the on-disk ROMs still match the recorded CRC32s before
+// re-running compare().
+[[nodiscard]] Result<CompareSession>
+load_compare_session(std::filesystem::path const &path);
+
+// Verify both ROMs referenced by a CompareSession still exist on
+// disk with the recorded CRC32 + size. Returns InvalidArgument with
+// a precise "ROM A CRC32 mismatch: expected 0xXXXX got 0xYYYY"
+// message on any drift. Paths are resolved against `base_dir` when
+// relative (typically the .stcompare's parent dir).
+[[nodiscard]] Status
+verify_compare_inputs(CompareSession const &session,
+                      std::filesystem::path const &base_dir);
 
 } // namespace st::diff
 

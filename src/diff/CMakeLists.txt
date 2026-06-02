@@ -19,6 +19,7 @@ target_link_libraries(st_diff
         st::rom
         st::defs
     PRIVATE
+        tomlplusplus::tomlplusplus
         st::warnings
         st::sanitizers
 )

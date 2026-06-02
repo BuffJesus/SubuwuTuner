@@ -179,13 +179,24 @@ constexpr std::string_view kUsage =
     "                            table. Reports which tables changed and by how\n"
     "                            much (max delta, mean absolute delta).\n"
     "    diff --pack <pack.toml> [--format text|csv|json] [--output FILE]\n"
-    "         [--include-identical] [--include-unchanged] <A.bin> <B.bin>\n"
+    "         [--include-identical] [--include-unchanged] [--save SESSION.stcompare]\n"
+    "         <A.bin> <B.bin>\n"
     "                            Structured ROM compare via st::diff. Per-cell\n"
     "                            change list (not just aggregate stats), plus\n"
     "                            text / CSV / JSON output formats for scripting.\n"
+    "                            --save also writes a .stcompare session file\n"
+    "                            (analyst Issue #5): inputs + options preserved\n"
+    "                            for hash-verified replay via `diff-load`.\n"
     "                            Exit code: 0 identical, 1 on any change, 2 on\n"
     "                            CLI usage error. JSON schema:\n"
     "                            subuwutuner.diff.v1.\n"
+    "    diff-load --pack <pack.toml> [--format text|csv|json] [--output FILE]\n"
+    "              <SESSION.stcompare>\n"
+    "                            Open a saved .stcompare session, verify both\n"
+    "                            ROMs still match their recorded CRC32, recompute\n"
+    "                            the diff with the session's saved options, and\n"
+    "                            render. Text-mode also prints any saved\n"
+    "                            annotations. Exit codes match `diff`.\n"
     "    table-edit --def <pack.toml> --table <id> [--rows A:B] [--cols A:B]\n"
     "               OP [VALUE] <FILE> --output <OUT>\n"
     "                            Edit a table in <FILE> and write the result to\n"
@@ -4330,6 +4341,7 @@ int cmd_diff(int argc, char *argv[]) {
     std::optional<std::filesystem::path> rom_a;
     std::optional<std::filesystem::path> rom_b;
     std::optional<std::filesystem::path> output_path;
+    std::optional<std::filesystem::path> save_session_path;
     std::string format = "text";
     bool include_identical = false;
     bool include_unchanged_csv = false;
@@ -4361,6 +4373,12 @@ int cmd_diff(int argc, char *argv[]) {
                 return 2;
             }
             output_path = std::filesystem::path{argv[++i]};
+        } else if (a == "--save") {
+            if (i + 1 >= argc) {
+                std::fputs("diff: --save requires a .stcompare path\n", stderr);
+                return 2;
+            }
+            save_session_path = std::filesystem::path{argv[++i]};
         } else if (a == "--include-identical") {
             include_identical = true;
         } else if (a == "--include-unchanged") {
@@ -4439,8 +4457,182 @@ int cmd_diff(int argc, char *argv[]) {
         std::fputs(rendered.c_str(), stdout);
     }
 
+    // Optional --save: write a .stcompare session file alongside.
+    // Records the inputs + options (the DiffSet is regenerated on
+    // load) plus the always-empty annotations array. The GUI Compare
+    // panel grows annotations over time; the CLI just round-trips
+    // them.
+    if (save_session_path.has_value()) {
+        st::diff::CompareSession session;
+        session.rom_a_path = std::filesystem::absolute(*rom_a).string();
+        session.rom_a_crc32 = a->crc32();
+        session.rom_a_size = a->size();
+        session.rom_b_path = std::filesystem::absolute(*rom_b).string();
+        session.rom_b_crc32 = b->crc32();
+        session.rom_b_size = b->size();
+        session.pack_id = def->pack().id;
+        session.options.cell_epsilon = static_cast<double>(opts.cell_epsilon);
+        session.options.include_identical = opts.include_identical;
+        // ISO-8601 UTC. snprintf with time_t avoids the std::format
+        // chrono path which isn't universally available on MinGW.
+        std::time_t const now = std::time(nullptr);
+        std::tm tm_utc{};
+#if defined(_WIN32)
+        gmtime_s(&tm_utc, &now);
+#else
+        gmtime_r(&now, &tm_utc);
+#endif
+        char ts[32];
+        std::strftime(ts, sizeof ts, "%Y-%m-%dT%H:%M:%SZ", &tm_utc);
+        session.created_at = ts;
+        if (auto s = st::diff::save_compare_session(session, *save_session_path);
+            !s.has_value()) {
+            std::fprintf(stderr, "diff: --save failed: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+    }
+
     // Exit 0 if identical, 1 if any table changed (caller can gate
     // CI / scripts on the exit code without parsing the output).
+    return result->identical() ? 0 : 1;
+}
+
+// `diff-load` — open a saved .stcompare session, verify the input
+// ROMs still match their recorded CRC32, recompute the DiffSet, and
+// render in the requested format. Pack is resolved via --pack
+// (override the session's recorded pack_id if you've moved the pack
+// since saving).
+int cmd_diff_load(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> session_path;
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::filesystem::path> output_path;
+    std::string format = "text";
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--pack" || a == "--def") {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "diff-load: %.*s requires a path\n",
+                             static_cast<int>(a.size()), a.data());
+                return 2;
+            }
+            def_path = std::filesystem::path{argv[++i]};
+        } else if (a == "--format") {
+            if (i + 1 >= argc) {
+                std::fputs("diff-load: --format requires text|csv|json\n", stderr);
+                return 2;
+            }
+            format = std::string{argv[++i]};
+            if (format != "text" && format != "csv" && format != "json") {
+                std::fprintf(stderr, "diff-load: unknown --format '%s'\n", format.c_str());
+                return 2;
+            }
+        } else if (a == "--output" || a == "-o") {
+            if (i + 1 >= argc) {
+                std::fputs("diff-load: --output requires a path\n", stderr);
+                return 2;
+            }
+            output_path = std::filesystem::path{argv[++i]};
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "diff-load: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!session_path.has_value()) {
+            session_path = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "diff-load: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!session_path.has_value() || !def_path.has_value()) {
+        std::fputs("diff-load: missing required arguments:", stderr);
+        if (!session_path.has_value())
+            std::fputs(" <SESSION.stcompare>", stderr);
+        if (!def_path.has_value())
+            std::fputs(" --pack", stderr);
+        std::fputs("\nUsage: subuwutuner-cli diff-load --pack <pack.toml> "
+                   "[--format text|csv|json] [--output FILE] "
+                   "<SESSION.stcompare>\n",
+                   stderr);
+        return 2;
+    }
+
+    auto session = st::diff::load_compare_session(*session_path);
+    if (!session.has_value()) {
+        std::fprintf(stderr, "diff-load: %s\n", session.error().to_string().c_str());
+        return 1;
+    }
+    auto const base_dir = std::filesystem::absolute(*session_path).parent_path();
+    if (auto v = st::diff::verify_compare_inputs(*session, base_dir); !v.has_value()) {
+        std::fprintf(stderr, "diff-load: %s\n", v.error().to_string().c_str());
+        return 1;
+    }
+
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
+    if (!def.has_value()) {
+        return print_def_load_error("diff-load", *def_path, def.error());
+    }
+    if (def->pack().id != session->pack_id) {
+        std::fprintf(stderr, "diff-load: warning: pack id mismatch — session was saved "
+                             "against '%s', --pack provides '%s'. Recomputing anyway.\n",
+                     session->pack_id.c_str(), def->pack().id.c_str());
+    }
+
+    auto const resolve_input = [&](std::string const &p) -> std::filesystem::path {
+        std::filesystem::path pp{p};
+        if (pp.is_absolute())
+            return pp;
+        return base_dir / pp;
+    };
+    auto rom_a = st::Rom::from_file(resolve_input(session->rom_a_path));
+    auto rom_b = st::Rom::from_file(resolve_input(session->rom_b_path));
+    if (!rom_a.has_value() || !rom_b.has_value()) {
+        std::fputs("diff-load: ROM read failed (verify passed but file vanished mid-load?)\n",
+                   stderr);
+        return 1;
+    }
+    auto result = st::diff::compare(*rom_a, *rom_b, *def, session->options);
+    if (!result.has_value()) {
+        std::fprintf(stderr, "diff-load: %s\n", result.error().to_string().c_str());
+        return 1;
+    }
+
+    std::string rendered;
+    if (format == "text") {
+        rendered = st::diff::render_text(*result);
+        if (!session->annotations.empty()) {
+            rendered.append("\nAnnotations:\n");
+            for (auto const &an : session->annotations) {
+                rendered.append("  ");
+                rendered.append(an.table_id);
+                rendered.append("[");
+                rendered.append(std::to_string(an.row));
+                rendered.append(",");
+                rendered.append(std::to_string(an.col));
+                rendered.append("]: ");
+                rendered.append(an.text);
+                rendered.append("\n");
+            }
+        }
+    } else if (format == "csv") {
+        rendered = st::diff::render_csv(*result);
+    } else {
+        rendered = st::diff::render_json(*result);
+        rendered.push_back('\n');
+    }
+
+    if (output_path.has_value()) {
+        std::ofstream out{*output_path, std::ios::binary};
+        if (!out) {
+            std::fprintf(stderr, "diff-load: cannot open --output: %s\n",
+                         output_path->string().c_str());
+            return 1;
+        }
+        out.write(rendered.data(), static_cast<std::streamsize>(rendered.size()));
+    } else {
+        std::fputs(rendered.c_str(), stdout);
+    }
     return result->identical() ? 0 : 1;
 }
 
@@ -12073,6 +12265,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "diff") {
         return cmd_diff(argc - 2, argv + 2);
+    }
+    if (cmd == "diff-load") {
+        return cmd_diff_load(argc - 2, argv + 2);
     }
     if (cmd == "table-edit") {
         return cmd_table_edit(argc - 2, argv + 2);

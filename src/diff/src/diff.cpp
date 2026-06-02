@@ -3,9 +3,12 @@
 
 #include "st/diff.hpp"
 
+#include <toml++/toml.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
 #include <sstream>
 #include <string>
 
@@ -374,6 +377,232 @@ std::string render_json(DiffSet const &d) {
     }
     out.append("]}");
     return out;
+}
+
+// ---- CompareSession persistence ----------------------------------------
+
+namespace {
+
+// Helper for the few `as_*` accesses we need from tomlplusplus.
+template <typename T>
+[[nodiscard]] std::optional<T> get(toml::table const &tbl, std::string_view key) {
+    auto const node = tbl.get(key);
+    if (node == nullptr)
+        return std::nullopt;
+    auto const v = node->value<T>();
+    if (!v.has_value())
+        return std::nullopt;
+    return *v;
+}
+
+} // namespace
+
+Status save_compare_session(CompareSession const &session,
+                            std::filesystem::path const &path) {
+    toml::table root;
+
+    toml::table session_tbl;
+    session_tbl.insert("schema_version", static_cast<std::int64_t>(session.schema_version));
+    if (!session.created_at.empty()) {
+        session_tbl.insert("created_at", session.created_at);
+    }
+    session_tbl.insert("pack_id", session.pack_id);
+
+    toml::table rom_a_tbl;
+    rom_a_tbl.insert("path", session.rom_a_path);
+    rom_a_tbl.insert("crc32", static_cast<std::int64_t>(session.rom_a_crc32));
+    rom_a_tbl.insert("size", static_cast<std::int64_t>(session.rom_a_size));
+    session_tbl.insert("rom_a", std::move(rom_a_tbl));
+
+    toml::table rom_b_tbl;
+    rom_b_tbl.insert("path", session.rom_b_path);
+    rom_b_tbl.insert("crc32", static_cast<std::int64_t>(session.rom_b_crc32));
+    rom_b_tbl.insert("size", static_cast<std::int64_t>(session.rom_b_size));
+    session_tbl.insert("rom_b", std::move(rom_b_tbl));
+
+    toml::table opts_tbl;
+    opts_tbl.insert("cell_epsilon", session.options.cell_epsilon);
+    opts_tbl.insert("include_identical", session.options.include_identical);
+    opts_tbl.insert("include_cell_list", session.options.include_cell_list);
+    session_tbl.insert("options", std::move(opts_tbl));
+
+    if (!session.annotations.empty()) {
+        toml::array ann_arr;
+        for (auto const &a : session.annotations) {
+            toml::table ann;
+            ann.insert("table_id", a.table_id);
+            ann.insert("row", static_cast<std::int64_t>(a.row));
+            ann.insert("col", static_cast<std::int64_t>(a.col));
+            ann.insert("text", a.text);
+            ann_arr.push_back(std::move(ann));
+        }
+        session_tbl.insert("annotations", std::move(ann_arr));
+    }
+
+    root.insert("stcompare", std::move(session_tbl));
+
+    std::ofstream out{path, std::ios::binary};
+    if (!out) {
+        std::string msg{"save_compare_session: cannot open output: "};
+        msg.append(path.string());
+        return failure(ErrorCode::IoFailure, std::move(msg));
+    }
+    out << root;
+    return ok();
+}
+
+Result<CompareSession> load_compare_session(std::filesystem::path const &path) {
+    toml::table parsed;
+    try {
+        parsed = toml::parse_file(path.string());
+    } catch (toml::parse_error const &e) {
+        std::string msg{"load_compare_session: TOML parse: "};
+        msg.append(e.description());
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+
+    auto const stcompare = parsed["stcompare"].as_table();
+    if (stcompare == nullptr) {
+        return failure(ErrorCode::ParseError,
+                       "load_compare_session: missing [stcompare] table");
+    }
+
+    CompareSession session;
+    session.schema_version = static_cast<int>(
+        get<std::int64_t>(*stcompare, "schema_version").value_or(kCompareSessionSchemaVersion));
+    if (session.schema_version > kCompareSessionSchemaVersion) {
+        std::string msg{"load_compare_session: file schema_version "};
+        msg.append(std::to_string(session.schema_version));
+        msg.append(" newer than supported ");
+        msg.append(std::to_string(kCompareSessionSchemaVersion));
+        msg.append(" — upgrade SubuwuTuner to read this session");
+        return failure(ErrorCode::ParseError, std::move(msg));
+    }
+    session.pack_id = get<std::string>(*stcompare, "pack_id").value_or(std::string{});
+    session.created_at = get<std::string>(*stcompare, "created_at").value_or(std::string{});
+
+    auto const load_rom_tbl = [&](char const *key, std::string &path_out,
+                                  std::uint32_t &crc_out,
+                                  std::size_t &size_out) -> Status {
+        auto const tbl = (*stcompare)[key].as_table();
+        if (tbl == nullptr) {
+            std::string msg{"load_compare_session: missing [stcompare."};
+            msg.append(key);
+            msg.append("] table");
+            return failure(ErrorCode::ParseError, std::move(msg));
+        }
+        path_out = get<std::string>(*tbl, "path").value_or(std::string{});
+        crc_out = static_cast<std::uint32_t>(
+            get<std::int64_t>(*tbl, "crc32").value_or(0));
+        size_out = static_cast<std::size_t>(
+            get<std::int64_t>(*tbl, "size").value_or(0));
+        if (path_out.empty()) {
+            std::string msg{"load_compare_session: [stcompare."};
+            msg.append(key);
+            msg.append("] missing path");
+            return failure(ErrorCode::ParseError, std::move(msg));
+        }
+        return ok();
+    };
+    if (auto s = load_rom_tbl("rom_a", session.rom_a_path, session.rom_a_crc32,
+                              session.rom_a_size);
+        !s.has_value()) {
+        return failure(s.error());
+    }
+    if (auto s = load_rom_tbl("rom_b", session.rom_b_path, session.rom_b_crc32,
+                              session.rom_b_size);
+        !s.has_value()) {
+        return failure(s.error());
+    }
+
+    if (auto const opts = (*stcompare)["options"].as_table(); opts != nullptr) {
+        session.options.cell_epsilon =
+            get<double>(*opts, "cell_epsilon").value_or(0.0);
+        session.options.include_identical =
+            get<bool>(*opts, "include_identical").value_or(false);
+        session.options.include_cell_list =
+            get<bool>(*opts, "include_cell_list").value_or(true);
+    }
+
+    if (auto const ann_arr = (*stcompare)["annotations"].as_array(); ann_arr != nullptr) {
+        for (auto const &node : *ann_arr) {
+            auto const ann_tbl = node.as_table();
+            if (ann_tbl == nullptr)
+                continue;
+            CompareAnnotation a;
+            a.table_id = get<std::string>(*ann_tbl, "table_id").value_or(std::string{});
+            a.row = static_cast<std::size_t>(
+                get<std::int64_t>(*ann_tbl, "row").value_or(0));
+            a.col = static_cast<std::size_t>(
+                get<std::int64_t>(*ann_tbl, "col").value_or(0));
+            a.text = get<std::string>(*ann_tbl, "text").value_or(std::string{});
+            session.annotations.push_back(std::move(a));
+        }
+    }
+
+    return session;
+}
+
+Status verify_compare_inputs(CompareSession const &session,
+                             std::filesystem::path const &base_dir) {
+    auto const resolve = [&](std::string const &p) -> std::filesystem::path {
+        std::filesystem::path pp{p};
+        if (pp.is_absolute())
+            return pp;
+        return base_dir / pp;
+    };
+
+    auto const check = [&](char const *which, std::string const &path_str,
+                           std::uint32_t expected_crc,
+                           std::size_t expected_size) -> Status {
+        auto const resolved = resolve(path_str);
+        auto rom = Rom::from_file(resolved);
+        if (!rom.has_value()) {
+            std::string msg{"verify_compare_inputs: "};
+            msg.append(which);
+            msg.append(": cannot read ");
+            msg.append(resolved.string());
+            msg.append(" — ");
+            msg.append(rom.error().to_string());
+            return failure(ErrorCode::InvalidArgument, std::move(msg));
+        }
+        if (rom->size() != expected_size) {
+            std::string msg{"verify_compare_inputs: "};
+            msg.append(which);
+            msg.append(": size mismatch (expected ");
+            msg.append(std::to_string(expected_size));
+            msg.append(", got ");
+            msg.append(std::to_string(rom->size()));
+            msg.append(")");
+            return failure(ErrorCode::InvalidArgument, std::move(msg));
+        }
+        auto const actual_crc = rom->crc32();
+        if (actual_crc != expected_crc) {
+            char buf[24];
+            std::string msg{"verify_compare_inputs: "};
+            msg.append(which);
+            msg.append(": CRC32 mismatch (expected ");
+            std::snprintf(buf, sizeof buf, "0x%08X", expected_crc);
+            msg.append(buf);
+            msg.append(", got ");
+            std::snprintf(buf, sizeof buf, "0x%08X", actual_crc);
+            msg.append(buf);
+            msg.append(") — ROM has changed since the session was saved");
+            return failure(ErrorCode::InvalidArgument, std::move(msg));
+        }
+        return ok();
+    };
+    if (auto s = check("ROM A", session.rom_a_path, session.rom_a_crc32,
+                       session.rom_a_size);
+        !s.has_value()) {
+        return failure(s.error());
+    }
+    if (auto s = check("ROM B", session.rom_b_path, session.rom_b_crc32,
+                       session.rom_b_size);
+        !s.has_value()) {
+        return failure(s.error());
+    }
+    return ok();
 }
 
 } // namespace st::diff
