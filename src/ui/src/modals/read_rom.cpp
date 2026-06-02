@@ -17,6 +17,7 @@
 #include "st/audit.hpp"
 #include "st/core/crc32.hpp"
 #include "st/core/result.hpp"
+#include "st/profile.hpp"
 #include "st/ecu/security_key.hpp"
 #include "st/ecu/ssm.hpp"
 #include "st/flash.hpp"
@@ -28,7 +29,9 @@
 #include <imgui.h>
 #include <nfd.hpp>
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cfloat>
 #include <chrono>
 #include <cstdint>
@@ -60,6 +63,35 @@ void render_read_rom_modal(AppState &state) {
             if (sz > 0) {
                 std::snprintf(state.read_rom_size_hex, sizeof state.read_rom_size_hex,
                               "0x%zX", sz);
+            }
+        }
+        // Pre-fill SA variant from the active vehicle profile's
+        // transport_hint. Looks for substrings the user is likely to
+        // have typed when documenting which adapter / variant they use
+        // ("cobb-ap-l1", "cobb l3", "fehr-active-l3", etc). Best-effort
+        // match; falls through to keeping the current dropdown value
+        // when nothing recognizable shows up.
+        if (!state.settings.active_vehicle_profile_id.empty()) {
+            auto const profile_path = st::profile::default_profile_dir() /
+                                      (state.settings.active_vehicle_profile_id + ".stprofile");
+            auto const loaded = st::profile::load(profile_path);
+            if (loaded.has_value()) {
+                auto hint = loaded->transport_hint;
+                std::transform(hint.begin(), hint.end(), hint.begin(),
+                               [](unsigned char c) { return std::tolower(c); });
+                // Order matters — match more specific strings first
+                // (l3 before plain "cobb") so the index lands on the
+                // right variant.
+                if (hint.find("cobb") != std::string::npos &&
+                    (hint.find("l3") != std::string::npos ||
+                     hint.find("level-3") != std::string::npos)) {
+                    state.read_rom_sa_variant_idx = 2;
+                } else if (hint.find("cobb") != std::string::npos) {
+                    state.read_rom_sa_variant_idx = 1;
+                } else if (hint.find("factory") != std::string::npos ||
+                           hint.find("stock") != std::string::npos) {
+                    state.read_rom_sa_variant_idx = 0;
+                }
             }
         }
     }
