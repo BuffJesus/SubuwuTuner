@@ -177,26 +177,82 @@ void draw_demo(AppState &state) {
 
 } // namespace
 
+// Static "wizard is open" flag — survives across frames while the
+// wizard's main window is rendering. Toggle on when state.show_first_run_wizard
+// fires; toggle off on Skip / Finish / window-X / Escape.
+static bool g_wizard_open = false;
+
 void render_first_run_modal(AppState &state) {
+    // ImGui::BeginPopupModal at this call site reliably opens the
+    // popup stack (dim background draws, IsPopupOpen=1) but the
+    // popup's window content never renders — Z-order pathology
+    // specific to this site. Reproduced across multiple shape
+    // variants (NoSavedSettings on/off, SetNextWindowViewport on/off,
+    // ASCII-only ID, fixed size, forced opaque bg). A plain
+    // ImGui::Begin works at the same site with the same content. So
+    // skip popup-modal entirely: render a dim overlay window
+    // underneath, then the wizard window on top. Mimics modal UX
+    // (background dimmed, wizard focused) without the broken popup
+    // path. Tracked further in handoff notes; this is the practical
+    // fix that ships the wizard.
     if (state.show_first_run_wizard) {
-        ImGui::OpenPopup("\xEE\x9D\xA8  Welcome to SubuwuTuner##first_run");
+        g_wizard_open = true;
         state.show_first_run_wizard = false;
     }
-    // Pin the popup to the main viewport so multi-viewport mode
-    // doesn't detach it into its own OS window (which can land hidden
-    // behind the main window — the screenshot bug from 2026-06-01
-    // night: input blocked, no visible modal, popup detached + hidden).
-    // Set BEFORE position so SetNextWindowPos applies in main-viewport
-    // coordinates, not OS-screen coordinates.
-    ImGuiViewport const *main_vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowViewport(main_vp->ID);
-    ImVec2 const center = main_vp->GetCenter();
+    if (!g_wizard_open) {
+        return;
+    }
+
+    ImGuiViewport *vp = ImGui::GetMainViewport();
+
+    // Dim background overlay covering the main viewport. Sits in
+    // front of the dockspace + every panel so it dims them AND
+    // absorbs clicks (anything outside the wizard rect goes here and
+    // does nothing). Critically, DO NOT add NoBringToFrontOnFocus —
+    // that's the dockspace pattern, which pins the window at the
+    // back of the Z stack. We want the opposite.
+    ImGui::SetNextWindowPos(vp->Pos);
+    ImGui::SetNextWindowSize(vp->Size);
+    ImGui::SetNextWindowBgAlpha(0.40f);
+    ImGui::SetNextWindowViewport(vp->ID);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    if (ImGui::Begin("##wizard_dim_overlay", nullptr,
+                     ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                         ImGuiWindowFlags_NoScrollWithMouse |
+                         ImGuiWindowFlags_NoSavedSettings |
+                         ImGuiWindowFlags_NoDocking |
+                         ImGuiWindowFlags_NoNavFocus |
+                         ImGuiWindowFlags_NoFocusOnAppearing)) {
+        // Empty body — the window's purpose is the dim background fill.
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(2);
+
+    // Wizard window itself — centered, focused, opaque.
+    ImVec2 const center = vp->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(580.0f, 380.0f),
-                                        ImVec2(580.0f, FLT_MAX));
-    if (!ImGui::BeginPopupModal("\xEE\x9D\xA8  Welcome to SubuwuTuner##first_run", nullptr,
-                                ImGuiWindowFlags_AlwaysAutoResize |
-                                    ImGuiWindowFlags_NoSavedSettings)) {
+    ImGui::SetNextWindowSize(ImVec2(580.0f, 0.0f), ImGuiCond_Appearing);
+    ImGui::SetNextWindowBgAlpha(1.0f);
+    ImGui::SetNextWindowFocus();
+    ImGui::SetNextWindowViewport(vp->ID);
+    bool open = true;
+    if (!ImGui::Begin("\xEE\x9D\xA8  Welcome to SubuwuTuner##first_run", &open,
+                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking |
+                          ImGuiWindowFlags_NoSavedSettings |
+                          ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::End();
+        return;
+    }
+    if (!open) {
+        // Window-X = Skip wizard.
+        state.settings.first_run_complete = true;
+        save_settings(state.settings);
+        g_wizard_open = false;
+        ImGui::End();
+        enqueue_toast(state, ToastKind::Info,
+                      "Wizard skipped — defaults kept. Reopen via Help → Welcome wizard.");
         return;
     }
 
@@ -236,11 +292,10 @@ void render_first_run_modal(AppState &state) {
         }
         ImGui::SameLine();
     }
-    // Skip wizard — useful for users who want to dive straight in.
     if (ImGui::Button("Skip wizard")) {
         state.settings.first_run_complete = true;
         save_settings(state.settings);
-        ImGui::CloseCurrentPopup();
+        g_wizard_open = false;
         enqueue_toast(state, ToastKind::Info,
                       "Wizard skipped — defaults kept. Reopen via Help → Welcome wizard.");
     }
@@ -255,7 +310,7 @@ void render_first_run_modal(AppState &state) {
         if (ImGui::Button("\xEE\x9C\xBE  Finish", ImVec2(140.0f, 0.0f))) {
             state.settings.first_run_complete = true;
             save_settings(state.settings);
-            ImGui::CloseCurrentPopup();
+            g_wizard_open = false;
             if (state.first_run_offer_demo) {
                 if (auto const demo = resolve_demo_project_path(nullptr); demo.has_value()) {
                     state.try_open_project(*demo);
@@ -272,7 +327,7 @@ void render_first_run_modal(AppState &state) {
     }
     pop_primary_button_colors();
 
-    ImGui::EndPopup();
+    ImGui::End();
 }
 
 } // namespace st::ui

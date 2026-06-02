@@ -131,13 +131,10 @@ void render_welcome_panel(AppState &state) {
         }
     }
 
-    // Welcome-wizard discovery button — opt-in trigger for the
-    // first-run setup flow. Auto-trigger from main() was removed
-    // after the 2026-06-01 invisible-modal bug; this is the
-    // discoverable replacement. Renders only on the empty welcome
-    // (no recents) since returning users have already made their
-    // jurisdiction / theme picks.
-    if (!has_recents) {
+    // Welcome-wizard discovery button. Always visible on the welcome
+    // panel — returning users may want to re-run setup. Mirrors the
+    // Help → Welcome wizard menu item but more discoverable.
+    {
         ImGui::Dummy(ImVec2(0.0f, kSpaceS));
         constexpr float kWizW = 200.0f;
         center_cursor_x(kWizW);
