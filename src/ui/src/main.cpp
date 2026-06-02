@@ -246,6 +246,13 @@ int main(int argc, char *argv[]) {
         if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_K)) {
             open_command_palette(state);
         }
+        // F1 opens the in-app help / glossary modal. Universal "show
+        // help" key — always wins, even when a text field has focus.
+        // F1 isn't a typeable character, so consuming it globally
+        // doesn't conflict with any field-local handler.
+        if (ImGui::IsKeyPressed(ImGuiKey_F1, false)) {
+            state.show_help_modal = true;
+        }
         // Workspace switches — Ctrl+1 = Tune, Ctrl+2 = Datalog, Ctrl+3
         // = Features. Mirrors the left-rail click ordering.
         if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_1)) {
