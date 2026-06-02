@@ -336,6 +336,22 @@ void render_compare_panel(AppState &state) {
                       state.compare_error_msg);
     }
 
+    // Swap A ↔ B. Convenience over retyping both fields when the user
+    // realizes they had the diff inverted (positive delta vs negative
+    // depends on which way you point the compare). U+21C4 ⇄ Rightwards
+    // Arrow Over Leftwards Arrow.
+    if (ImGui::Button("\xE2\x87\x84  Swap A \xE2\x86\x94 B", ImVec2(160.0f, 0.0f))) {
+        char tmp[sizeof state.compare_rom_a_path];
+        std::snprintf(tmp, sizeof tmp, "%s", state.compare_rom_a_path);
+        std::snprintf(state.compare_rom_a_path, sizeof state.compare_rom_a_path, "%s",
+                      state.compare_rom_b_path);
+        std::snprintf(state.compare_rom_b_path, sizeof state.compare_rom_b_path, "%s", tmp);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Swap the contents of the ROM A and ROM B fields.\n"
+                          "Useful when the diff sign reads the wrong way around.");
+    }
+
     // Project ROMs (Issue #10 read slice). Lists the project's source +
     // working + any [[rom]] entries from project.toml. Click → A / → B
     // wires the sentinel into the corresponding path field so the
