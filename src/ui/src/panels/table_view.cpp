@@ -1030,6 +1030,52 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     }
     ImGui::EndDisabled();
 
+    // Copy table — writes the entire grid to clipboard as TSV.
+    // Axis-Y label column on the left, axis-X label header row on
+    // top. Pastes cleanly into a spreadsheet or markdown editor.
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!state.project.has_value() || !state.current_table_data.has_value());
+    if (ImGui::Button("\xEE\xA2\xB4 Copy table")) { // E8B4 Copy
+        auto const &td = *state.current_table_data;
+        std::string tsv;
+        tsv.reserve(td.values.size() * (td.values.empty() ? 0 : td.values[0].size()) * 8);
+        // Header row: empty corner + axis_x labels (when present).
+        if (!td.axis_x.empty()) {
+            tsv.push_back('\t');
+            for (std::size_t c = 0; c < td.axis_x.size(); ++c) {
+                if (c > 0)
+                    tsv.push_back('\t');
+                char buf[32];
+                std::snprintf(buf, sizeof buf, "%.*f", precision, td.axis_x[c]);
+                tsv.append(buf);
+            }
+            tsv.push_back('\n');
+        }
+        for (std::size_t r = 0; r < td.values.size(); ++r) {
+            if (r < td.axis_y.size()) {
+                char buf[32];
+                std::snprintf(buf, sizeof buf, "%.*f", precision, td.axis_y[r]);
+                tsv.append(buf);
+            }
+            tsv.push_back('\t');
+            for (std::size_t c = 0; c < td.values[r].size(); ++c) {
+                if (c > 0)
+                    tsv.push_back('\t');
+                char buf[32];
+                std::snprintf(buf, sizeof buf, "%.*f", precision, td.values[r][c]);
+                tsv.append(buf);
+            }
+            tsv.push_back('\n');
+        }
+        ImGui::SetClipboardText(tsv.c_str());
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Copy the entire grid to clipboard as TSV.\n"
+                          "Axis-Y labels in the first column, axis-X in\n"
+                          "the header row. Pastes cleanly into a spreadsheet.");
+    }
+
     // Flash button — opens the policy-gate modal. Enabled whenever there's
     // a project loaded; the modal itself handles the "nothing to flash"
     // and "blocked by policy" branches.
