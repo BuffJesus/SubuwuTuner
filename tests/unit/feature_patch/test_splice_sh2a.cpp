@@ -75,17 +75,48 @@ TEST_CASE("emit_sh2a_splice handles backward branches",
     REQUIRE(r->bytes[3] == 0x09);
 }
 
-TEST_CASE("emit_sh2a_splice surfaces NotImplemented for out-of-range targets",
+TEST_CASE("emit_sh2a_splice falls back to long-form for out-of-range targets",
           "[feature_patch][splice_sh2a][emit][long-form]") {
-    // 64 KB forward — well past BRA's 4 KB reach.
+    // 64 KB forward — well past BRA's 4 KB reach. Long-form takes
+    // over with the 12-byte MOV.L + JMP @R0 + delay-slot NOP + pad
+    // NOP + inline 4-byte literal.
     auto r = fp::emit_sh2a_splice(0x00010000, 0x00020000);
+    REQUIRE(r.has_value());
+    REQUIRE(r->form == fp::SpliceForm::Sh2aLongJmp);
+    REQUIRE(r->splice_address == 0x00010000);
+    REQUIRE(r->patch_address == 0x00020000);
+    REQUIRE(r->bytes.size() == 12);
+
+    // MOV.L @(1, PC), R0 = 0xD001 (BE: D0 01)
+    REQUIRE(r->bytes[0] == 0xD0);
+    REQUIRE(r->bytes[1] == 0x01);
+    // JMP @R0 = 0x402B (BE: 40 2B)
+    REQUIRE(r->bytes[2] == 0x40);
+    REQUIRE(r->bytes[3] == 0x2B);
+    // NOP delay slot = 0x0009 (BE: 00 09)
+    REQUIRE(r->bytes[4] == 0x00);
+    REQUIRE(r->bytes[5] == 0x09);
+    // NOP pad = 0x0009 (BE: 00 09)
+    REQUIRE(r->bytes[6] == 0x00);
+    REQUIRE(r->bytes[7] == 0x09);
+    // Inline literal: patch_address = 0x00020000 in BE.
+    REQUIRE(r->bytes[8] == 0x00);
+    REQUIRE(r->bytes[9] == 0x02);
+    REQUIRE(r->bytes[10] == 0x00);
+    REQUIRE(r->bytes[11] == 0x00);
+}
+
+TEST_CASE("emit_sh2a_splice long-form requires 4-aligned splice address",
+          "[feature_patch][splice_sh2a][emit][long-form][error]") {
+    // splice at 0x10002 (2-aligned but not 4-aligned), patch far
+    // away (forces long-form). Long-form's MOV.L literal math
+    // assumes 4-aligned splice; we reject with InvalidArgument
+    // rather than emit incorrect bytes.
+    auto r = fp::emit_sh2a_splice(0x00010002, 0x00020000);
     REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
     auto const &msg = r.error().to_string();
-    // Error should name the actual displacement + the BRA range.
-    REQUIRE(msg.find("displacement") != std::string::npos);
-    REQUIRE(msg.find("BRA range") != std::string::npos);
-    REQUIRE(msg.find("long-form") != std::string::npos);
+    REQUIRE(msg.find("4-aligned") != std::string::npos);
 }
 
 TEST_CASE("emit_sh2a_splice rejects unaligned splice or patch addresses",
@@ -109,10 +140,11 @@ TEST_CASE("emit_sh2a_splice handles BRA range boundaries",
     REQUIRE(r_max->bytes[0] == 0xA7);
     REQUIRE(r_max->bytes[1] == 0xFF);
 
-    // 2 bytes past: long form (NotImplemented in this slice).
+    // 2 bytes past: falls into long-form (12 bytes).
     auto r_past = fp::emit_sh2a_splice(0x00010000, 0x00010000 + 4100);
-    REQUIRE_FALSE(r_past.has_value());
-    REQUIRE(r_past.error().code() == st::ErrorCode::NotImplemented);
+    REQUIRE(r_past.has_value());
+    REQUIRE(r_past->form == fp::SpliceForm::Sh2aLongJmp);
+    REQUIRE(r_past->bytes.size() == 12);
 
     // Backward min: 4092 bytes back — last in-range target.
     auto r_min = fp::emit_sh2a_splice(0x00010000, 0x00010000 - 4092);

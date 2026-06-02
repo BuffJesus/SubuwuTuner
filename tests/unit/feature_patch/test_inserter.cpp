@@ -153,19 +153,28 @@ TEST_CASE("PatchInserter::apply surfaces ROM allocator exhaustion",
     REQUIRE(msg.find("128") != std::string::npos);
 }
 
-TEST_CASE("PatchInserter::apply surfaces out-of-range splice as NotImplemented",
-          "[feature_patch][inserter][error][long-form]") {
-    // SH-2A: splice at 0x1000, region forced far away at 0x8000 — 0x7000
-    // byte gap, well past BRA's ±~4 KB. Short-form fails; long-form
-    // isn't implemented yet → NotImplemented.
+TEST_CASE("PatchInserter::apply uses long-form splice for far targets",
+          "[feature_patch][inserter][long-form]") {
+    // SH-2A: splice at 0x1000, region at 0x8000 — 0x7000 gap, past
+    // BRA's ±~4 KB. Long-form 12-byte sequence takes over (MOV.L +
+    // JMP @R0 + delay-slot NOP + pad NOP + inline 4-byte literal).
     auto patch = make_one_hook_patch(cg::Arch::Sh2a, 0x1000, {0x00, 0x09});
     auto r = fp::apply(patch, make_synthetic_rom(),
                        {{fp::RomRegion{"code", 0x8000, 0x100}}});
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
-    auto const &msg = r.error().to_string();
-    REQUIRE(msg.find("test_hook") != std::string::npos);
-    REQUIRE(msg.find("long-form") != std::string::npos);
+    INFO("apply error: "
+         << (r.has_value() ? std::string{"(none)"} : r.error().to_string()));
+    REQUIRE(r.has_value());
+    // Splice bytes at 0x1000: MOV.L @(1,PC), R0 = 0xD001 (BE: D0 01).
+    REQUIRE(r->bytes[0x1000] == 0xD0);
+    REQUIRE(r->bytes[0x1001] == 0x01);
+    // JMP @R0 = 0x402B (BE: 40 2B).
+    REQUIRE(r->bytes[0x1002] == 0x40);
+    REQUIRE(r->bytes[0x1003] == 0x2B);
+    // Inline literal at splice+8 = patch_address = 0x8000.
+    REQUIRE(r->bytes[0x1008] == 0x00);
+    REQUIRE(r->bytes[0x1009] == 0x00);
+    REQUIRE(r->bytes[0x100A] == 0x80);
+    REQUIRE(r->bytes[0x100B] == 0x00);
 }
 
 TEST_CASE("PatchInserter::apply handles multi-hook patches",

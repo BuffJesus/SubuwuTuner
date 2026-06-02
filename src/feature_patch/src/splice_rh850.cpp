@@ -43,6 +43,80 @@ void emit_le16(std::vector<std::uint8_t> &out, std::uint16_t value) {
     out.push_back(static_cast<std::uint8_t>((value >> 8U) & 0xFFU));
 }
 
+// MOVHI imm16, reg1, reg2 — Format VI; reg2 = (imm16 << 16) | (reg1
+// upper 16 bits maybe sign-extended). For the splice we use reg1=0
+// (R0, always zero) so the result is just imm16 << 16. Encoding per
+// the public Renesas reference: 0b110001 opcode in hw1 + imm16 in hw2.
+// hw1 = (reg2 << 11) | (0b110001 << 5) | reg1; reg1=0, scratch reg=1.
+[[nodiscard]] constexpr std::uint16_t enc_movhi_hw1(std::uint8_t reg1, std::uint8_t reg2) noexcept {
+    constexpr std::uint16_t kOpcode = 0b110001U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg2) << 11U) | (kOpcode << 5U) | reg1);
+}
+
+// MOVEA imm16, reg1, reg2 — Format VI; reg2 = reg1 + sign-ext(imm16).
+// Encoding 0b110000 + same shape as MOVHI. Used to add the low 16
+// bits of the target address to the upper-shifted result of MOVHI.
+[[nodiscard]] constexpr std::uint16_t enc_movea_hw1(std::uint8_t reg1, std::uint8_t reg2) noexcept {
+    constexpr std::uint16_t kOpcode = 0b110000U;
+    return static_cast<std::uint16_t>(
+        (static_cast<std::uint16_t>(reg2) << 11U) | (kOpcode << 5U) | reg1);
+}
+
+// JMP [reg1] — Format I, opcode 0b000110, reg2 field zero. Same
+// encoder as feature_codegen/src/rh850.hpp::enc_jmp_reg; inlined
+// here to keep feature_patch independent of that header.
+[[nodiscard]] constexpr std::uint16_t enc_jmp_reg(std::uint8_t reg) noexcept {
+    constexpr std::uint16_t kOpcode = 0b000110U;
+    return static_cast<std::uint16_t>((kOpcode << 5U) | reg);
+}
+
+// split_imm32 — MOVHI uses the high 16 bits of a 32-bit address as
+// the upper-shifted immediate; MOVEA's low 16 bits are sign-extended
+// when added, so if bit 15 of the low half is set we need to bump
+// the high half by 1 to compensate. Standard RH850 32-bit-immediate
+// materialization pattern; mirrors what's in feature_codegen.
+struct Imm32Split {
+    std::uint16_t hi;
+    std::uint16_t lo;
+};
+[[nodiscard]] constexpr Imm32Split split_imm32(std::uint32_t value) noexcept {
+    auto const lo = static_cast<std::uint16_t>(value & 0xFFFFU);
+    auto hi = static_cast<std::uint16_t>((value >> 16U) & 0xFFFFU);
+    if ((lo & 0x8000U) != 0U) {
+        // MOVEA will sign-extend lo — compensate by pre-incrementing hi.
+        hi = static_cast<std::uint16_t>(hi + 1U);
+    }
+    return {hi, lo};
+}
+
+// Emit the RH850 long-form splice: MOVHI + MOVEA + JMP [reg], 10
+// bytes total. Reaches any 32-bit address. Uses R1 as scratch for
+// the materialized address — R1 is caller-save on the RH850 ABI
+// and not in the codegen's reserved working-register set
+// (r10..r14), so trampoline use here doesn't conflict with the
+// patch body's register state.
+//
+// CAVEAT: 10 bytes of original ROM at splice_addr are displaced.
+// Same preserve-or-flag caveat as the SH-2A long form.
+[[nodiscard]] SpliceBytes emit_rh850_long_splice(std::uint32_t splice_address,
+                                                 std::uint32_t patch_address) {
+    constexpr std::uint8_t kZero = 0;
+    constexpr std::uint8_t kScratch = 1;
+    auto const sp = split_imm32(patch_address);
+    SpliceBytes out{};
+    out.form = SpliceForm::Rh850LongJmp;
+    out.splice_address = splice_address;
+    out.patch_address = patch_address;
+    out.bytes.reserve(10);
+    emit_le16(out.bytes, enc_movhi_hw1(kZero, kScratch));
+    emit_le16(out.bytes, sp.hi);
+    emit_le16(out.bytes, enc_movea_hw1(kScratch, kScratch));
+    emit_le16(out.bytes, sp.lo);
+    emit_le16(out.bytes, enc_jmp_reg(kScratch));
+    return out;
+}
+
 } // namespace
 
 std::optional<std::int32_t> rh850_jr_disp22(std::uint32_t splice_address,
@@ -84,18 +158,12 @@ Result<SpliceBytes> emit_rh850_splice(std::uint32_t splice_address,
         return out;
     }
 
-    // Long form (MOVHI + MOVEA + JMP [reg], 12 bytes) lands in the
-    // next bundle. Same shape as the existing emit_rh850_*
-    // fragments' JMP[lp] tail in feature_codegen but standalone
-    // for splice use; needs a dual-bank-aware guard on the target.
-    auto const signed_gap = static_cast<std::int64_t>(patch_address) -
-                            static_cast<std::int64_t>(splice_address);
-    std::string msg{"emit_rh850_splice: splice→patch displacement "};
-    msg.append(std::to_string(signed_gap));
-    msg.append(" bytes is outside JR range [-2097152, 2097150] — "
-               "long-form (MOVHI + MOVEA + JMP [reg]) not yet "
-               "implemented in this slice");
-    return failure(ErrorCode::NotImplemented, std::move(msg));
+    // Long form: MOVHI + MOVEA + JMP [reg], 10 bytes total. Reaches
+    // any 32-bit address. RH850 has no delay slots, so no NOP is
+    // required after JMP. The 10-byte length leaves bytes at
+    // splice_addr+10 and +11 unmodified — they may still hold the
+    // original ROM bytes, but execution never reaches them post-JMP.
+    return emit_rh850_long_splice(splice_address, patch_address);
 }
 
 } // namespace st::feature_patch

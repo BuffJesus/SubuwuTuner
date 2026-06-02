@@ -26,10 +26,66 @@ namespace {
     return 0x0009U;
 }
 
+// MOV.L @(disp, PC), Rn — 8-bit unsigned disp, target =
+// ((PC + 4) & ~3) + disp*4. Encoding 1101 nnnn dddddddd; for our
+// long-form splice we always use R0 (n=0) and disp=1 (literal lives
+// at splice_addr+8). Encoding for {R0, disp=1} = 0xD001.
+[[nodiscard]] constexpr std::uint16_t enc_mov_l_at_pc_r0(std::uint8_t disp) noexcept {
+    return static_cast<std::uint16_t>(0xD000U | disp);
+}
+
+// JMP @Rn — 0100 nnnn 0010 1011 = 0x402B | (n << 8). For R0: 0x402B.
+[[nodiscard]] constexpr std::uint16_t enc_jmp_at_reg(std::uint8_t reg) noexcept {
+    return static_cast<std::uint16_t>(0x402BU | (static_cast<std::uint16_t>(reg) << 8U));
+}
+
 // SH-2A is big-endian on the wire. Write a u16 in BE order.
 void emit_be16(std::vector<std::uint8_t> &out, std::uint16_t value) {
     out.push_back(static_cast<std::uint8_t>((value >> 8U) & 0xFFU));
     out.push_back(static_cast<std::uint8_t>(value & 0xFFU));
+}
+
+// Write a u32 in BE order (for the inline literal).
+void emit_be32(std::vector<std::uint8_t> &out, std::uint32_t value) {
+    out.push_back(static_cast<std::uint8_t>((value >> 24U) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((value >> 16U) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((value >> 8U) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>(value & 0xFFU));
+}
+
+// Emit the SH-2A long-form splice: a 12-byte sequence that reaches
+// any 32-bit address. Requires splice_addr to be 4-aligned so the
+// inline literal pool entry is naturally 4-aligned at splice_addr+8.
+//
+// Layout:
+//   splice_addr+0 : MOV.L @(1, PC), R0   ; load patch_addr from offset 8
+//   splice_addr+2 : JMP @R0
+//   splice_addr+4 : NOP                  ; delay slot
+//   splice_addr+6 : NOP                  ; pad for 4-aligned literal
+//   splice_addr+8 : .long patch_address
+//
+// MOV.L's PC-relative target is `((PC + 4) & ~3) + disp*4`. With
+// splice_addr 4-aligned, PC=splice_addr, (PC+4) is already 4-aligned,
+// disp=1 → literal at splice_addr+8 ✓.
+//
+// CAVEAT: 12 bytes of original ROM at splice_addr are displaced.
+// The inserter does NOT preserve those displaced instructions today
+// — anyone splicing into the middle of a function with significant
+// post-splice code needs to flag this. Mid-function splice
+// preserve-and-prepend logic is queued for a follow-up bundle.
+[[nodiscard]] SpliceBytes emit_sh2a_long_splice(std::uint32_t splice_address,
+                                                std::uint32_t patch_address) {
+    SpliceBytes out{};
+    out.form = SpliceForm::Sh2aLongJmp;
+    out.splice_address = splice_address;
+    out.patch_address = patch_address;
+    out.bytes.reserve(12);
+    emit_be16(out.bytes, enc_mov_l_at_pc_r0(1));
+    emit_be16(out.bytes, enc_jmp_at_reg(0));
+    emit_be16(out.bytes, enc_nop()); // delay slot
+    emit_be16(out.bytes, enc_nop()); // pad
+    emit_be32(out.bytes, patch_address);
+    return out;
 }
 
 } // namespace
@@ -74,21 +130,21 @@ Result<SpliceBytes> emit_sh2a_splice(std::uint32_t splice_address,
         return out;
     }
 
-    // Long form needs the literal-pool + JMP @R0 pattern + the
-    // displaced-instruction analyzer. Lands in the next bundle; in
-    // the meantime, surface a precise error so a caller knows exactly
-    // why the splice can't be emitted yet.
-    auto const signed_gap = static_cast<std::int64_t>(patch_address) -
-                            static_cast<std::int64_t>(splice_address) - 4;
-    std::string msg{"emit_sh2a_splice: splice→patch displacement "};
-    msg.append(std::to_string(signed_gap));
-    msg.append(" bytes is outside BRA range [");
-    msg.append(std::to_string(kSh2aBraMinByteOffset));
-    msg.append(", ");
-    msg.append(std::to_string(kSh2aBraMaxByteOffset));
-    msg.append("] — long-form (MOV.L + JMP @Rn + literal pool) "
-               "not yet implemented in this slice");
-    return failure(ErrorCode::NotImplemented, std::move(msg));
+    // Long form: MOV.L + JMP @R0 + delay-slot NOP + pad NOP + 4-byte
+    // inline literal. 12 bytes total. Requires splice_address to be
+    // 4-aligned so the inline literal-pool entry sits at a 4-aligned
+    // address (the MOV.L disp8 math assumes PC+4 already-aligned).
+    if ((splice_address & 0x3U) != 0U) {
+        std::string msg{"emit_sh2a_splice: long-form requires 4-aligned splice_address "
+                        "(got 0x"};
+        char buf[16];
+        std::snprintf(buf, sizeof buf, "%08X", splice_address);
+        msg.append(buf);
+        msg.append(") — short-form BRA is out of range and long-form's "
+                   "literal-pool math requires 4-byte alignment");
+        return failure(ErrorCode::InvalidArgument, std::move(msg));
+    }
+    return emit_sh2a_long_splice(splice_address, patch_address);
 }
 
 } // namespace st::feature_patch

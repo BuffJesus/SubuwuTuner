@@ -92,16 +92,44 @@ TEST_CASE("emit_rh850_splice branch-to-self is valid and stable",
     REQUIRE(r->bytes[3] == 0x00);
 }
 
-TEST_CASE("emit_rh850_splice surfaces NotImplemented for out-of-range targets",
+TEST_CASE("emit_rh850_splice falls back to long-form for out-of-range targets",
           "[feature_patch][splice_rh850][emit][long-form]") {
-    // 4 MB forward — past JR's ±2 MB reach.
+    // 4 MB forward — past JR's ±2 MB reach. Long-form takes over
+    // with the 10-byte MOVHI + MOVEA + JMP [reg] sequence.
     auto r = fp::emit_rh850_splice(0x00010000, 0x00410000);
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
-    auto const &msg = r.error().to_string();
-    REQUIRE(msg.find("displacement") != std::string::npos);
-    REQUIRE(msg.find("JR range") != std::string::npos);
-    REQUIRE(msg.find("long-form") != std::string::npos);
+    REQUIRE(r.has_value());
+    REQUIRE(r->form == fp::SpliceForm::Rh850LongJmp);
+    REQUIRE(r->splice_address == 0x00010000);
+    REQUIRE(r->patch_address == 0x00410000);
+    REQUIRE(r->bytes.size() == 10);
+    // MOVHI 0x0041, r0, r1 — split_imm32(0x00410000):
+    //   low = 0x0000 (bit 15 clear → no hi compensation)
+    //   hi  = 0x0041
+    // hw1: enc_movhi(reg1=0, reg2=1) = (1 << 11) | (0b110001 << 5) | 0
+    //    = 0x0800 | 0x0620 = 0x0E20. LE bytes: 20 0E.
+    REQUIRE(r->bytes[0] == 0x20);
+    REQUIRE(r->bytes[1] == 0x0E);
+    // hw2 = hi = 0x0041. LE: 41 00.
+    REQUIRE(r->bytes[2] == 0x41);
+    REQUIRE(r->bytes[3] == 0x00);
+}
+
+TEST_CASE("emit_rh850_splice long-form materializes low-half with bit-15 compensation",
+          "[feature_patch][splice_rh850][emit][long-form][sign-ext]") {
+    // patch_address with bit 15 of low half set → split_imm32 pre-
+    // increments the high half so MOVEA's sign-extension nets correct.
+    // 0x00FFFF80: low = 0xFF80 (bit 15 set), hi raw = 0x00FF; after
+    // compensation hi = 0x0100.
+    // Splice 4MB+ away so we're in long-form territory.
+    auto r = fp::emit_rh850_splice(0x00010000, 0x00FFFF80);
+    REQUIRE(r.has_value());
+    REQUIRE(r->form == fp::SpliceForm::Rh850LongJmp);
+    // hw1 already validated by the previous test; verify hw2 hi-comp.
+    REQUIRE(r->bytes[2] == 0x00); // hi low byte (post-comp = 0x0100)
+    REQUIRE(r->bytes[3] == 0x01); // hi high byte
+    // MOVEA hw2 = lo (signed). 0xFF80. LE: 80 FF.
+    REQUIRE(r->bytes[6] == 0x80);
+    REQUIRE(r->bytes[7] == 0xFF);
 }
 
 TEST_CASE("emit_rh850_splice rejects unaligned splice or patch addresses",
@@ -122,8 +150,9 @@ TEST_CASE("emit_rh850_splice exercises the JR boundary cases",
     REQUIRE(r_max.has_value());
     REQUIRE(r_max->form == fp::SpliceForm::Rh850ShortJr);
 
-    // 2 bytes past: long form (NotImplemented in this slice).
+    // 2 bytes past: falls into long-form (10 bytes).
     auto r_past = fp::emit_rh850_splice(0x00010000, 0x00010000 + 2097152);
-    REQUIRE_FALSE(r_past.has_value());
-    REQUIRE(r_past.error().code() == st::ErrorCode::NotImplemented);
+    REQUIRE(r_past.has_value());
+    REQUIRE(r_past->form == fp::SpliceForm::Rh850LongJmp);
+    REQUIRE(r_past->bytes.size() == 10);
 }
