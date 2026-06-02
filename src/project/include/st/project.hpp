@@ -166,6 +166,14 @@ public:
         return additional_rom_warnings_;
     }
 
+    // Add an additional ROM to the in-memory project. Caller must
+    // have already populated `entry.rom` (the loaded bytes) and
+    // `entry.path_rel` (relative to dir()). Does NOT copy the file —
+    // the caller is responsible for ensuring the path is reachable.
+    // Save with save_metadata() to persist the [[rom]] entry.
+    // Returns InvalidArgument when id is empty or already in use.
+    [[nodiscard]] Status add_additional_rom(AdditionalRom entry);
+
 private:
     Project() = default;
 

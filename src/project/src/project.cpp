@@ -605,6 +605,28 @@ Status Project::save_metadata() const {
     return write_file(dir_ / "project.toml", toml_text);
 }
 
+Status Project::add_additional_rom(AdditionalRom entry) {
+    if (entry.id.empty()) {
+        return failure(ErrorCode::InvalidArgument,
+                       "additional rom id must not be empty");
+    }
+    for (auto const &r : additional_roms_) {
+        if (r.id == entry.id) {
+            return failure(ErrorCode::InvalidArgument,
+                           "additional rom id '" + entry.id +
+                               "' already exists in this project");
+        }
+    }
+    if (entry.display_name.empty()) {
+        entry.display_name = entry.id;
+    }
+    if (entry.crc32 == 0) {
+        entry.crc32 = entry.rom.crc32();
+    }
+    additional_roms_.push_back(std::move(entry));
+    return {};
+}
+
 // --------------------------------------------------------------------------
 // parse_edit_csv — bulk-edit CSV parser shared by the CLI and the GUI.
 //

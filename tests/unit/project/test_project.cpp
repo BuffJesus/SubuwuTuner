@@ -862,6 +862,47 @@ path         = "extra.bin"
     REQUIRE(p2->additional_roms()[0].display_name == "Extra ROM");
 }
 
+TEST_CASE("Project::add_additional_rom rejects empty id and duplicates",
+          "[project][additional_roms][add]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "add.stune";
+    auto pc = st::Project::create(proj_dir, rom_path, pack_dir, "add");
+    REQUIRE(pc.has_value());
+
+    st::Project::AdditionalRom entry;
+    entry.path_rel = "ignored";
+    entry.rom = st::Rom::from_bytes(make_rom_bytes());
+
+    // Empty id is rejected.
+    auto const empty_id = pc->add_additional_rom(entry);
+    REQUIRE_FALSE(empty_id.has_value());
+    REQUIRE(empty_id.error().code() == st::ErrorCode::InvalidArgument);
+    REQUIRE(pc->additional_roms().empty());
+
+    // First add with a real id succeeds.
+    entry.id = "tune-a";
+    REQUIRE(pc->add_additional_rom(entry).has_value());
+    REQUIRE(pc->additional_roms().size() == 1);
+    REQUIRE(pc->additional_roms()[0].id == "tune-a");
+    // display_name defaulted from id.
+    REQUIRE(pc->additional_roms()[0].display_name == "tune-a");
+    // crc32 backfilled from the rom bytes.
+    REQUIRE(pc->additional_roms()[0].crc32 != 0);
+
+    // Same id rejected.
+    st::Project::AdditionalRom dup;
+    dup.id = "tune-a";
+    dup.path_rel = "other";
+    dup.rom = st::Rom::from_bytes(make_rom_bytes());
+    auto const dup_r = pc->add_additional_rom(dup);
+    REQUIRE_FALSE(dup_r.has_value());
+    REQUIRE(dup_r.error().code() == st::ErrorCode::InvalidArgument);
+    REQUIRE(pc->additional_roms().size() == 1); // unchanged
+}
+
 TEST_CASE("Project::handheld_serial preserves empty on default save / reopen",
           "[project][handheld_serial]") {
     // A project that never sets a handheld serial must round-trip with the

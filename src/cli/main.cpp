@@ -233,6 +233,13 @@ constexpr std::string_view kUsage =
     "                            Set the project's jurisdiction profile (see\n"
     "                            docs/06-legal-ethics.md). Valid: motorsport-only,\n"
     "                            alberta-ca, eu-roadworthy, california-us.\n"
+    "    project-add-rom <dir> --id <slug> --path <rom-file>\n"
+    "                          [--display-name \"Name\"] [--notes \"...\"]\n"
+    "                            Add an additional ROM to the project. The file is\n"
+    "                            copied into the project dir as <slug>.bin and a\n"
+    "                            [[rom]] entry is written to project.toml. The GUI\n"
+    "                            Compare panel can then pick this ROM by slug\n"
+    "                            without a file dialog (analyst Issue #10).\n"
     "    project-history <dir> [--table <id>] [--limit N]\n"
     "                            List the project's edit history with cursor\n"
     "                            position and per-edit emissions/safety flags.\n"
@@ -3157,6 +3164,128 @@ int cmd_project_info(int argc, char *argv[]) {
             std::printf("Byte edits:     %zu (e.g. DTC enable-bit toggles)\n", byte_edit_count);
         }
     }
+    return 0;
+}
+
+// Add an [[rom]] entry to an existing project. Copies the source ROM
+// file into the project dir (named `<id>.bin`) so the project stays
+// self-contained, then appends the AdditionalRom + persists via
+// save_metadata. Analyst Issue #10 read-slice ergonomics — without
+// this the user has to hand-edit project.toml + drop the file in
+// themselves.
+int cmd_project_add_rom(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> proj_dir;
+    std::optional<std::string> rom_id;
+    std::optional<std::filesystem::path> rom_src;
+    std::optional<std::string> display_name;
+    std::optional<std::string> notes;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "project-add-rom: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--id") {
+            if (auto const *v = require("--id"); v)
+                rom_id = std::string{v};
+            else
+                return 2;
+        } else if (a == "--path") {
+            if (auto const *v = require("--path"); v)
+                rom_src = std::filesystem::path{v};
+            else
+                return 2;
+        } else if (a == "--display-name") {
+            if (auto const *v = require("--display-name"); v)
+                display_name = std::string{v};
+            else
+                return 2;
+        } else if (a == "--notes") {
+            if (auto const *v = require("--notes"); v)
+                notes = std::string{v};
+            else
+                return 2;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "project-add-rom: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!proj_dir.has_value()) {
+            proj_dir = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "project-add-rom: extra positional: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!proj_dir.has_value() || !rom_id.has_value() || !rom_src.has_value()) {
+        std::fputs("project-add-rom: missing required arguments\n"
+                   "Usage: subuwutuner-cli project-add-rom <dir> --id <slug> --path <rom-file>\n"
+                   "                                       [--display-name \"Pretty name\"]\n"
+                   "                                       [--notes \"Free-form notes\"]\n"
+                   "  The ROM is copied into the project dir as <slug>.bin so the project\n"
+                   "  stays self-contained.\n",
+                   stderr);
+        return 2;
+    }
+    std::error_code ec;
+    if (!std::filesystem::exists(*rom_src, ec) || ec) {
+        std::fprintf(stderr, "project-add-rom: source ROM does not exist: %s\n",
+                     rom_src->string().c_str());
+        return 1;
+    }
+    auto proj = st::Project::open(*proj_dir);
+    if (!proj.has_value()) {
+        std::fprintf(stderr, "project-add-rom: %s\n", proj.error().to_string().c_str());
+        return 1;
+    }
+    // Reject duplicate id early — open() will have surfaced any
+    // existing [[rom]] entries via additional_roms() already.
+    for (auto const &r : proj->additional_roms()) {
+        if (r.id == *rom_id) {
+            std::fprintf(stderr, "project-add-rom: id '%s' already exists in this project\n",
+                         rom_id->c_str());
+            return 1;
+        }
+    }
+    // Copy the source ROM into <project>/<id>.bin so the project is
+    // portable. If a file with that name already exists, refuse — the
+    // user probably forgot --id and we'd overwrite something useful.
+    std::string const dest_filename = *rom_id + ".bin";
+    auto const dest_path = *proj_dir / dest_filename;
+    if (std::filesystem::exists(dest_path, ec)) {
+        std::fprintf(stderr, "project-add-rom: destination file already exists: %s\n",
+                     dest_path.string().c_str());
+        return 1;
+    }
+    std::filesystem::copy_file(*rom_src, dest_path,
+                               std::filesystem::copy_options::none, ec);
+    if (ec) {
+        std::fprintf(stderr, "project-add-rom: copy failed: %s\n", ec.message().c_str());
+        return 1;
+    }
+    auto rom_loaded = st::Rom::from_file(dest_path);
+    if (!rom_loaded.has_value()) {
+        std::fprintf(stderr, "project-add-rom: re-read after copy failed: %s\n",
+                     rom_loaded.error().to_string().c_str());
+        return 1;
+    }
+    st::Project::AdditionalRom entry;
+    entry.id = *rom_id;
+    entry.display_name = display_name.value_or(*rom_id);
+    entry.path_rel = dest_filename;
+    entry.notes = notes.value_or("");
+    entry.rom = std::move(*rom_loaded);
+    if (auto s = proj->add_additional_rom(std::move(entry)); !s.has_value()) {
+        std::fprintf(stderr, "project-add-rom: %s\n", s.error().to_string().c_str());
+        return 1;
+    }
+    if (auto s = proj->save_metadata(); !s.has_value()) {
+        std::fprintf(stderr, "project-add-rom: save: %s\n", s.error().to_string().c_str());
+        return 1;
+    }
+    std::printf("Added ROM '%s' (path: %s) to project %s\n", rom_id->c_str(),
+                dest_filename.c_str(), proj_dir->string().c_str());
     return 0;
 }
 
@@ -12378,6 +12507,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-set-profile") {
         return cmd_project_set_profile(argc - 2, argv + 2);
+    }
+    if (cmd == "project-add-rom") {
+        return cmd_project_add_rom(argc - 2, argv + 2);
     }
     if (cmd == "project-history") {
         return cmd_project_history(argc - 2, argv + 2);
