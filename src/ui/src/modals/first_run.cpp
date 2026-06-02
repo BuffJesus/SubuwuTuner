@@ -182,12 +182,21 @@ void render_first_run_modal(AppState &state) {
         ImGui::OpenPopup("\xEE\x9D\xA8  Welcome to SubuwuTuner##first_run");
         state.show_first_run_wizard = false;
     }
-    ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
+    // Pin the popup to the main viewport so multi-viewport mode
+    // doesn't detach it into its own OS window (which can land hidden
+    // behind the main window — the screenshot bug from 2026-06-01
+    // night: input blocked, no visible modal, popup detached + hidden).
+    // Set BEFORE position so SetNextWindowPos applies in main-viewport
+    // coordinates, not OS-screen coordinates.
+    ImGuiViewport const *main_vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowViewport(main_vp->ID);
+    ImVec2 const center = main_vp->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSizeConstraints(ImVec2(580.0f, 380.0f),
                                         ImVec2(580.0f, FLT_MAX));
     if (!ImGui::BeginPopupModal("\xEE\x9D\xA8  Welcome to SubuwuTuner##first_run", nullptr,
-                                ImGuiWindowFlags_AlwaysAutoResize)) {
+                                ImGuiWindowFlags_AlwaysAutoResize |
+                                    ImGuiWindowFlags_NoSavedSettings)) {
         return;
     }
 

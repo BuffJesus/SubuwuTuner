@@ -165,14 +165,19 @@ int main(int argc, char *argv[]) {
     state.demo_project_path = resolve_demo_project_path(argc >= 1 ? argv[0] : nullptr);
     // Apply the persisted theme before any user-visible frame renders.
     apply_theme(state.settings.theme);
-    // First-run wizard auto-trigger. Once the user finishes (or skips)
-    // the wizard, first_run_complete sticks to true and this branch
-    // never fires again — unless --reset-config above just cleared it.
-    if (!state.settings.first_run_complete) {
+    // First-run wizard auto-trigger ONLY when --reset-config was just
+    // used. On normal launches the wizard is opt-in via Help →
+    // Welcome wizard or the welcome panel's "Run welcome wizard"
+    // button — the auto-trigger pattern caused an invisible-modal
+    // bug on 2026-06-01 night where multi-viewport popup detach
+    // hid the wizard behind the main window, blocking input. The
+    // viewport-pin fix in first_run.cpp prevents the detach; this
+    // change removes the surprise of a forced auto-open for users
+    // who upgraded from a build without the feature.
+    if (reset_requested) {
         state.show_first_run_wizard = true;
         state.first_run_step = 0;
     }
-    (void)reset_requested; // reserved for diagnostics if needed later
     std::string_view const arg1 = (argc >= 2) ? argv[1] : "";
     if (arg1 == "-h" || arg1 == "--help" || arg1 == "/?") {
         std::fputs("Usage: subuwutuner-gui [PROJECT.stune]\n"

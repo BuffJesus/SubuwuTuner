@@ -131,6 +131,27 @@ void render_welcome_panel(AppState &state) {
         }
     }
 
+    // Welcome-wizard discovery button — opt-in trigger for the
+    // first-run setup flow. Auto-trigger from main() was removed
+    // after the 2026-06-01 invisible-modal bug; this is the
+    // discoverable replacement. Renders only on the empty welcome
+    // (no recents) since returning users have already made their
+    // jurisdiction / theme picks.
+    if (!has_recents) {
+        ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+        constexpr float kWizW = 200.0f;
+        center_cursor_x(kWizW);
+        if (ImGui::Button("Run welcome wizard\xE2\x80\xA6", ImVec2(kWizW, 28.0f))) {
+            state.show_first_run_wizard = true;
+            state.first_run_step = 0;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Five-step setup: jurisdiction profile, units,\n"
+                              "theme, demo project. Re-openable any time via\n"
+                              "Help → Welcome wizard.");
+        }
+    }
+
     // First-run-only pack hint. Answers "what do I need to start?"
     // without forcing the user to open the New Project modal first
     // to find out. Hidden once the user has any recents — they've
