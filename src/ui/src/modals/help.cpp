@@ -437,8 +437,14 @@ void render_help_modal(AppState &state) {
     }
 
     // Filter input — searches title + body for the active topic list.
+    // Ctrl+F (when the help modal is the focused window) focuses this
+    // input — standard "find in document" gesture so the user doesn't
+    // have to click into the search box.
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_F)) {
+        ImGui::SetKeyboardFocusHere();
+    }
     ImGui::SetNextItemWidth(-120.0f);
-    ImGui::InputTextWithHint("##help_filter", "Search topics…",
+    ImGui::InputTextWithHint("##help_filter", "Search topics… (Ctrl+F)",
                              state.help_filter, sizeof state.help_filter);
     ImGui::SameLine();
     if (ImGui::Button("Reload", ImVec2(110.0f, 0.0f))) {

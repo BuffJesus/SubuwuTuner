@@ -228,7 +228,11 @@ int main(int argc, char *argv[]) {
         // when a project is open; harmless otherwise (the next
         // render_sidebar call will reset the flag without acting on
         // it).
-        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_F)) {
+        // Skip when the help modal owns Ctrl+F (find-in-doc gesture
+        // takes precedence over the sidebar-filter shortcut while the
+        // modal is on screen).
+        if (!state.show_help_modal &&
+            ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_F)) {
             state.focus_table_filter = true;
         }
         if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z)) {
