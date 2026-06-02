@@ -85,6 +85,100 @@ void render_knock_dashboard_panel(AppState &state) {
     if (ImGui::CollapsingHeader("Column mapping", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::SetNextItemWidth(160.0f);
         ImGui::SliderInt("Cylinders", &state.knock_cylinder_count, 1, 6);
+        ImGui::SameLine();
+        // Auto-detect — peek at the CSV header row and fill any column
+        // fields that match common patterns. Doesn't override
+        // user-typed values; only fills empties. Saves the typing
+        // pass for the common case where the log uses standard
+        // RomRaider / EcuTek field names.
+        ImGui::BeginDisabled(state.knock_log_path[0] == '\0');
+        if (ImGui::SmallButton("Auto-detect")) {
+            std::ifstream in{state.knock_log_path, std::ios::binary};
+            if (in) {
+                std::string header_line;
+                std::getline(in, header_line);
+                if (!header_line.empty() && header_line.back() == '\r') {
+                    header_line.pop_back();
+                }
+                // Split on comma; trim whitespace; lowercase compare.
+                std::vector<std::string> headers;
+                std::size_t s = 0;
+                while (s <= header_line.size()) {
+                    std::size_t e = header_line.find(',', s);
+                    if (e == std::string::npos)
+                        e = header_line.size();
+                    std::string h = header_line.substr(s, e - s);
+                    while (!h.empty() && (h.front() == ' ' || h.front() == '\t' ||
+                                          h.front() == '"'))
+                        h.erase(h.begin());
+                    while (!h.empty() && (h.back() == ' ' || h.back() == '\t' ||
+                                          h.back() == '"'))
+                        h.pop_back();
+                    headers.push_back(std::move(h));
+                    if (e == header_line.size())
+                        break;
+                    s = e + 1;
+                }
+                auto const find_match = [&](auto pred) -> char const * {
+                    for (auto const &h : headers) {
+                        std::string lower = h;
+                        std::transform(lower.begin(), lower.end(), lower.begin(),
+                                       [](unsigned char c) { return std::tolower(c); });
+                        if (pred(lower))
+                            return h.c_str();
+                    }
+                    return nullptr;
+                };
+                std::size_t matches = 0;
+                auto fill = [&](char *buf, std::size_t cap, char const *src) {
+                    if (buf[0] != '\0' || src == nullptr)
+                        return;
+                    std::snprintf(buf, cap, "%s", src);
+                    ++matches;
+                };
+                // RPM = column containing "rpm" or "engine speed".
+                fill(state.knock_rpm_col, sizeof state.knock_rpm_col,
+                     find_match([](std::string const &h) {
+                         return h.find("rpm") != std::string::npos ||
+                                h.find("engine speed") != std::string::npos;
+                     }));
+                // Load = column containing "load" (but not "fuel load
+                // estimate" or similar derivatives — first hit wins).
+                fill(state.knock_load_col, sizeof state.knock_load_col,
+                     find_match([](std::string const &h) {
+                         return h.find("load") != std::string::npos;
+                     }));
+                // Per-cylinder FBKC / FLKC.
+                for (int c = 0; c < state.knock_cylinder_count; ++c) {
+                    std::string const tag = std::to_string(c + 1);
+                    fill(state.knock_fbkc_cols[c], sizeof state.knock_fbkc_cols[c],
+                         find_match([&tag](std::string const &h) {
+                             return h.find("fbkc") != std::string::npos &&
+                                    h.find(tag) != std::string::npos;
+                         }));
+                    fill(state.knock_flkc_cols[c], sizeof state.knock_flkc_cols[c],
+                         find_match([&tag](std::string const &h) {
+                             return h.find("flkc") != std::string::npos &&
+                                    h.find(tag) != std::string::npos;
+                         }));
+                }
+                state.knock_load_error = matches > 0
+                                             ? "Auto-detect: filled " +
+                                                   std::to_string(matches) + " column field(s)."
+                                             : "Auto-detect: no header matches found.";
+            } else {
+                state.knock_load_error = "Auto-detect: cannot open " +
+                                          std::string{state.knock_log_path};
+            }
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip(
+                "Peek at the CSV's header row and fill empty column\n"
+                "fields with matches against common patterns (rpm,\n"
+                "load, fbkc_N, flkc_N). Only touches empty fields —\n"
+                "your typed values are preserved.");
+        }
         ImGui::SetNextItemWidth(160.0f);
         ImGui::InputText("RPM column", state.knock_rpm_col, sizeof state.knock_rpm_col);
         ImGui::SameLine();
