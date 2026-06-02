@@ -211,7 +211,7 @@ constexpr std::string_view kUsage =
     "                            Create a new .stune project directory containing\n"
     "                            a copy of the source ROM, an editable working\n"
     "                            ROM, and a reference to the definition pack.\n"
-    "    project-info [--json] <dir>\n"
+    "    project-info [--json] [--audit-summary] <dir>\n"
     "                            Print metadata + current working-ROM CRC32 for\n"
     "                            a .stune project. --json emits a one-line\n"
     "                            subuwutuner.project-info.v1 object for CI scripts.\n"
@@ -3017,15 +3017,19 @@ int cmd_project_info_json(std::filesystem::path const &dir) {
 int cmd_project_info(int argc, char *argv[]) {
     if (argc < 1) {
         std::fputs("project-info: missing project directory\n", stderr);
-        std::fputs("Usage: subuwutuner-cli project-info [--json] <dir>\n", stderr);
+        std::fputs("Usage: subuwutuner-cli project-info [--json] [--audit-summary] <dir>\n",
+                   stderr);
         return 2;
     }
     bool json_mode = false;
+    bool audit_summary = false;
     std::filesystem::path dir;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         if (a == "--json") {
             json_mode = true;
+        } else if (a == "--audit-summary") {
+            audit_summary = true;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "project-info: unknown option: %s\n", argv[i]);
             return 2;
@@ -3185,6 +3189,82 @@ int cmd_project_info(int argc, char *argv[]) {
         }
         if (byte_edit_count > 0) {
             std::printf("Byte edits:     %zu (e.g. DTC enable-bit toggles)\n", byte_edit_count);
+        }
+    }
+    if (audit_summary) {
+        std::printf("\nAudit summary:\n");
+        auto const log_path = dir / "audit.log";
+        if (!std::filesystem::exists(log_path)) {
+            std::printf("  (no audit.log — nothing recorded yet)\n");
+            return 0;
+        }
+        auto entries = st::audit::read_all(log_path);
+        if (!entries.has_value()) {
+            std::fprintf(stderr, "project-info: audit read: %s\n",
+                         entries.error().to_string().c_str());
+            return 1;
+        }
+        if (entries->empty()) {
+            std::printf("  (audit.log present but empty)\n");
+            return 0;
+        }
+        // Bucket by kind name, also track first / last timestamp.
+        struct Bucket {
+            std::string kind;
+            std::size_t count{0};
+            std::int64_t first_ns{0};
+            std::int64_t last_ns{0};
+        };
+        std::vector<Bucket> buckets;
+        std::size_t bad = 0;
+        for (auto const &e : *entries) {
+            if (!e.checksum_valid)
+                ++bad;
+            auto const kn = std::string{st::audit::kind_name(e.kind)};
+            auto it = std::find_if(buckets.begin(), buckets.end(),
+                                   [&](Bucket const &b) { return b.kind == kn; });
+            if (it == buckets.end()) {
+                buckets.push_back({kn, 1, e.timestamp_ns, e.timestamp_ns});
+            } else {
+                ++it->count;
+                if (e.timestamp_ns < it->first_ns)
+                    it->first_ns = e.timestamp_ns;
+                if (e.timestamp_ns > it->last_ns)
+                    it->last_ns = e.timestamp_ns;
+            }
+        }
+        std::sort(buckets.begin(), buckets.end(),
+                  [](Bucket const &a, Bucket const &b) {
+                      if (a.count != b.count)
+                          return a.count > b.count; // desc by count
+                      return a.kind < b.kind;
+                  });
+        auto const iso = [](std::int64_t ns) -> std::string {
+            std::time_t const t = ns / 1'000'000'000;
+            std::tm tm{};
+#if defined(_WIN32)
+            gmtime_s(&tm, &t);
+#else
+            gmtime_r(&t, &tm);
+#endif
+            char buf[32];
+            std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", &tm);
+            return std::string{buf};
+        };
+        std::printf("  Entries:        %zu\n", entries->size());
+        if (bad > 0) {
+            std::printf("  Bad checksum:   %zu  (integrity FAILED — see `audit verify`)\n",
+                        bad);
+        }
+        std::printf("  Kinds:\n");
+        for (auto const &b : buckets) {
+            if (b.count > 1 && b.first_ns != b.last_ns) {
+                std::printf("    %-32s %4zu  %s … %s\n", b.kind.c_str(), b.count,
+                            iso(b.first_ns).c_str(), iso(b.last_ns).c_str());
+            } else {
+                std::printf("    %-32s %4zu  %s\n", b.kind.c_str(), b.count,
+                            iso(b.last_ns).c_str());
+            }
         }
     }
     return 0;
