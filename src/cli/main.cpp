@@ -245,6 +245,11 @@ constexpr std::string_view kUsage =
     "                            working, and each [[rom]] additional entry. Surfaces\n"
     "                            any project.toml parse warnings (missing files,\n"
     "                            empty ids).\n"
+    "    project-validate <dir> [--json]\n"
+    "                            Health check: project.toml loads, both ROMs read,\n"
+    "                            pack has tables, source CRC matches recorded value,\n"
+    "                            [[rom]] entries resolve, audit.log integrity is OK.\n"
+    "                            Exits 1 on the first failure — gateable from CI.\n"
     "    project-history <dir> [--table <id>] [--limit N]\n"
     "                            List the project's edit history with cursor\n"
     "                            position and per-edit emissions/safety flags.\n"
@@ -3490,6 +3495,155 @@ int cmd_changelog_show(int argc, char *argv[]) {
         return 1;
     }
     return 0;
+}
+
+// One-shot health check for a project — pass/fail per check, exit
+// 1 on the first failure. Useful for CI (validate every project in
+// the repo before merge), portable handoffs ("does this .stune work
+// on the receiver's machine?"), and post-flash sanity ("did the
+// roundtrip break anything?").
+int cmd_project_validate(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> proj_dir;
+    bool json_mode = false;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--json") {
+            json_mode = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "project-validate: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!proj_dir.has_value()) {
+            proj_dir = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "project-validate: extra positional: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!proj_dir.has_value()) {
+        std::fputs("project-validate: missing <dir>\n"
+                   "Usage: subuwutuner-cli project-validate <dir> [--json]\n",
+                   stderr);
+        return 2;
+    }
+    struct Check {
+        std::string name;
+        bool ok{true};
+        std::string detail;
+    };
+    std::vector<Check> checks;
+    auto check = [&](std::string name, bool ok, std::string detail = "") {
+        checks.push_back({std::move(name), ok, std::move(detail)});
+    };
+    // 1. project.toml exists.
+    auto const manifest = *proj_dir / "project.toml";
+    bool const manifest_ok = std::filesystem::exists(manifest);
+    check("project.toml exists", manifest_ok, manifest.string());
+    if (!manifest_ok) {
+        // Skip remaining checks — nothing else makes sense without a manifest.
+        for (auto const &c : checks) {
+            std::printf("%s  %s%s%s\n", c.ok ? "[OK]   " : "[FAIL] ", c.name.c_str(),
+                        c.detail.empty() ? "" : "  — ",
+                        c.detail.c_str());
+        }
+        return 1;
+    }
+    // 2. Project::open succeeds (covers source.bin / working.bin / pack load).
+    auto proj_r = st::Project::open(*proj_dir);
+    bool const project_ok = proj_r.has_value();
+    check("Project::open succeeds", project_ok,
+          project_ok ? "" : proj_r.error().to_string());
+    if (!project_ok) {
+        for (auto const &c : checks) {
+            std::printf("%s  %s%s%s\n", c.ok ? "[OK]   " : "[FAIL] ", c.name.c_str(),
+                        c.detail.empty() ? "" : "  — ",
+                        c.detail.c_str());
+        }
+        return 1;
+    }
+    auto const &proj = *proj_r;
+    // 3. source ROM CRC32 matches the recorded value (tampering /
+    //    accidental overwrite detection).
+    bool const src_crc_ok =
+        proj.source_rom().crc32() == proj.source_crc32_at_create();
+    check("source.bin CRC32 matches recorded", src_crc_ok,
+          src_crc_ok ? "" :
+              "current 0x" + std::to_string(proj.source_rom().crc32()) +
+              " vs recorded 0x" + std::to_string(proj.source_crc32_at_create()));
+    // 4. Definition pack loaded with tables.
+    bool const pack_ok = !proj.definition().tables().empty();
+    check("definition pack has tables", pack_ok,
+          pack_ok ? "" : "pack reports zero tables — pack path / parse problem?");
+    // 5. Additional ROMs all resolved.
+    auto const &warns = proj.additional_rom_warnings();
+    bool const extras_ok = warns.empty();
+    check("[[rom]] entries resolve", extras_ok,
+          extras_ok ? "" : std::to_string(warns.size()) +
+                                " warning(s) — first: " + warns.front());
+    // 6. edits.toml — optional, but if present it must load (we already
+    //    proved that via Project::open above, since open() restores history
+    //    or fails).
+    auto const edits_path = *proj_dir / "edits.toml";
+    if (std::filesystem::exists(edits_path)) {
+        check("edits.toml loads", true,
+              std::to_string(proj.history().records().size()) + " records");
+    }
+    // 7. Audit log integrity — same checksum walk audit verify does.
+    auto const log_path = *proj_dir / "audit.log";
+    if (std::filesystem::exists(log_path)) {
+        auto entries = st::audit::read_all(log_path);
+        if (!entries.has_value()) {
+            check("audit.log readable", false, entries.error().to_string());
+        } else {
+            std::size_t bad = 0;
+            for (auto const &e : *entries) {
+                if (!e.checksum_valid)
+                    ++bad;
+            }
+            check("audit.log CRC32 integrity", bad == 0,
+                  bad == 0 ? std::to_string(entries->size()) + " entries OK"
+                           : std::to_string(bad) + " bad entr" +
+                                 (bad == 1 ? "y" : "ies") +
+                                 " of " + std::to_string(entries->size()));
+        }
+    }
+    // Output.
+    std::size_t failed = 0;
+    for (auto const &c : checks) {
+        if (!c.ok)
+            ++failed;
+    }
+    if (json_mode) {
+        std::string out;
+        out.append("{\"schema\":\"subuwutuner.project-validate.v1\",\"project_dir\":");
+        json_escape(out, proj_dir->string());
+        out.append(",\"failed\":");
+        out.append(std::to_string(failed));
+        out.append(",\"checks\":[");
+        for (std::size_t i = 0; i < checks.size(); ++i) {
+            if (i > 0)
+                out.append(",");
+            out.append("{\"name\":");
+            json_escape(out, checks[i].name);
+            out.append(",\"ok\":");
+            out.append(checks[i].ok ? "true" : "false");
+            out.append(",\"detail\":");
+            json_escape(out, checks[i].detail);
+            out.append("}");
+        }
+        out.append("]}\n");
+        std::fputs(out.c_str(), stdout);
+    } else {
+        std::printf("Project: %s\n", proj_dir->string().c_str());
+        for (auto const &c : checks) {
+            std::printf("  %s  %s%s%s\n",
+                        c.ok ? "[OK]  " : "[FAIL]",
+                        c.name.c_str(),
+                        c.detail.empty() ? "" : "  — ",
+                        c.detail.c_str());
+        }
+        std::printf("\n%zu of %zu checks failed.\n", failed, checks.size());
+    }
+    return failed == 0 ? 0 : 1;
 }
 
 int cmd_project_list_roms(int argc, char *argv[]) {
@@ -12819,6 +12973,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-list-roms") {
         return cmd_project_list_roms(argc - 2, argv + 2);
+    }
+    if (cmd == "project-validate") {
+        return cmd_project_validate(argc - 2, argv + 2);
     }
     if (cmd == "changelog") {
         if (argc < 3 || std::string_view{argv[2]} != "show") {
