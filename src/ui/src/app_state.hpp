@@ -178,6 +178,11 @@ struct AppState {
     // "Try the demo project" button when this is set; absent in
     // installs that didn't ship the demo.
     std::optional<std::filesystem::path> demo_project_path;
+    // Path to docs/ directory containing the markdown topics surfaced
+    // in the in-app help modal (analyst Issues #12 + #22). Resolved
+    // once at startup via resolve_docs_dir(argv[0]); nullopt when no
+    // candidate location contained 00-overview.md.
+    std::optional<std::filesystem::path> docs_dir;
 
     // Stacked transient feedback (Saved., Loaded foo.stune, Apply
     // failed: …). Rendered by render_toasts at the bottom-right
@@ -401,6 +406,28 @@ struct AppState {
     bool audit_loaded{false};
     char audit_filter[128]{};
     bool audit_newest_first{true};
+
+    // In-app help modal (analyst Issues #12 + #22). Two-pane: topic
+    // list on the left, rendered markdown on the right. Topics are
+    // markdown files under <docs_dir>/; help_loaded_topics caches
+    // {filename, body} once when the modal first opens so the
+    // contents don't get re-read every frame.
+    bool show_help_modal{false};
+    struct HelpTopic {
+        std::string id;      // filename stem ("00-overview", "10-glossary")
+        std::string title;   // derived from the first `# ` heading
+        std::string body;    // full markdown text
+    };
+    std::vector<HelpTopic> help_topics;
+    int help_active_topic{0};
+    bool help_loaded{false};
+    std::string help_error_msg;
+    char help_filter[128]{};
+    // Parsed glossary terms (from docs/10-glossary.md). Populated
+    // lazily on first help-modal open so the term → definition map is
+    // available for both the Glossary topic body and (future) tooltip
+    // popovers anchored to UI labels.
+    std::vector<std::pair<std::string, std::string>> glossary_terms;
     // Track which TableDelta has its details expanded — std::string-keyed
     // by table_id. Survives across recomputes so the user doesn't lose
     // their expansion when they re-run a compare.

@@ -372,6 +372,18 @@ void render_menubar(AppState &state) {
             if (ImGui::MenuItem("\xEE\xA4\xAE  Keyboard Shortcuts\xE2\x80\xA6")) {
                 state.show_shortcuts_modal = true;
             }
+            // E946 Info — the in-app help-topic browser. Reads project
+            // docs/ markdown at runtime (resolve_docs_dir) so the same
+            // content drives both the docs/ tree and the app.
+            if (ImGui::MenuItem("\xEE\xA5\x86  Topics & Glossary\xE2\x80\xA6")) {
+                state.show_help_modal = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Browse project documentation (overview,\n"
+                                  "glossary, roadmap) without leaving the app.\n"
+                                  "Reads from docs/ alongside the binary.\n"
+                                  "Analyst Issues #12 + #22.");
+            }
             // E700 GlobalNavButton — reuse as a "guided welcome"
             // affordance until a more on-brand icon is needed.
             if (ImGui::MenuItem("\xEE\x9C\xA0  Welcome wizard\xE2\x80\xA6")) {

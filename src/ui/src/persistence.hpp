@@ -55,6 +55,12 @@ std::filesystem::path settings_config_path();
 
 std::optional<std::filesystem::path> resolve_demo_project_path(char const *argv0);
 
+// Locate the project's docs/ directory relative to argv[0]. Same
+// candidate ladder as resolve_demo_project_path — dev tree, sibling
+// install, flat install — but anchored to docs/00-overview.md. Returns
+// nullopt when no candidate contains overview.md.
+std::optional<std::filesystem::path> resolve_docs_dir(char const *argv0);
+
 std::string iso8601_utc_now();
 std::string format_relative_time(std::string const &iso);
 

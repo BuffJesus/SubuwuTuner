@@ -25,6 +25,7 @@ void render_settings_modal(AppState &state);
 void render_def_registry_modal(AppState &state);
 void render_read_rom_modal(AppState &state);
 void render_first_run_modal(AppState &state);
+void render_help_modal(AppState &state);
 
 } // namespace st::ui
 

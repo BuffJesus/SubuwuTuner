@@ -108,6 +108,39 @@ resolve_demo_project_path(char const *argv0) {
     return std::nullopt;
 }
 
+std::optional<std::filesystem::path>
+resolve_docs_dir(char const *argv0) {
+    namespace fs = std::filesystem;
+    if (argv0 == nullptr || argv0[0] == '\0') {
+        return std::nullopt;
+    }
+    std::error_code ec;
+    fs::path const exe = fs::weakly_canonical(fs::path{argv0}, ec);
+    if (ec) {
+        return std::nullopt;
+    }
+    fs::path const exe_dir = exe.parent_path();
+    std::array<fs::path, 3> const candidates{
+        exe_dir / ".." / ".." / ".." / "docs",
+        exe_dir / ".." / "docs",
+        exe_dir / "docs",
+    };
+    for (auto const &c : candidates) {
+        std::error_code dir_ec;
+        if (!fs::is_directory(c, dir_ec) || dir_ec) {
+            continue;
+        }
+        std::error_code file_ec;
+        if (!fs::exists(c / "00-overview.md", file_ec) || file_ec) {
+            continue;
+        }
+        std::error_code canon_ec;
+        auto canon = fs::weakly_canonical(c, canon_ec);
+        return canon_ec ? c : canon;
+    }
+    return std::nullopt;
+}
+
 std::string iso8601_utc_now() {
     auto const now = std::chrono::system_clock::now();
     auto const t = std::chrono::system_clock::to_time_t(now);

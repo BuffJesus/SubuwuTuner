@@ -163,6 +163,7 @@ int main(int argc, char *argv[]) {
     // in installs that didn't ship the demo (the call returns
     // nullopt and the button just doesn't render).
     state.demo_project_path = resolve_demo_project_path(argc >= 1 ? argv[0] : nullptr);
+    state.docs_dir = resolve_docs_dir(argc >= 1 ? argv[0] : nullptr);
     // Apply the persisted theme before any user-visible frame renders.
     apply_theme(state.settings.theme);
     // First-run wizard auto-trigger ONLY when --reset-config was just
@@ -296,6 +297,7 @@ int main(int argc, char *argv[]) {
         render_first_run_modal(state);
         render_shortcuts_modal(state);
         render_about_modal(state);
+        render_help_modal(state);
         // Command palette rendered last so it stacks above every other
         // modal — Ctrl+K is meant as a global escape hatch.
         render_command_palette(state);
