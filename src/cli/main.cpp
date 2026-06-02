@@ -187,8 +187,10 @@ constexpr std::string_view kUsage =
     "                            Create a new .stune project directory containing\n"
     "                            a copy of the source ROM, an editable working\n"
     "                            ROM, and a reference to the definition pack.\n"
-    "    project-info <dir>      Print metadata + current working-ROM CRC32 for\n"
-    "                            a .stune project.\n"
+    "    project-info [--json] <dir>\n"
+    "                            Print metadata + current working-ROM CRC32 for\n"
+    "                            a .stune project. --json emits a one-line\n"
+    "                            subuwutuner.project-info.v1 object for CI scripts.\n"
     "    project-edit --table <id> [--rows A:B] [--cols A:B] OP [VALUE] <dir>\n"
     "                            Apply an edit to a project's working ROM and\n"
     "                            update project.toml. Same OPs as table-edit.\n"
@@ -2866,13 +2868,112 @@ int cmd_project_new(int argc, char *argv[]) {
     return 0;
 }
 
+// `project-info --json`. Schema subuwutuner.project-info.v1. Captures
+// the structured project state for CI scripts (have edits landed?
+// does the working ROM differ from source? did source.bin change?).
+// Skips the prose-heavy CID-suggestion heuristic from text mode —
+// that's for interactive diagnosis, not scripting.
+int cmd_project_info_json(std::filesystem::path const &dir) {
+    auto p = st::Project::open(dir);
+    if (!p.has_value()) {
+        std::string out{"{\"schema\":\"subuwutuner.project-info.v1\",\"path\":"};
+        json_escape(out, dir.string());
+        out.append(",\"error\":");
+        json_escape(out, p.error().to_string());
+        out.append("}\n");
+        std::fputs(out.c_str(), stdout);
+        return 1;
+    }
+
+    std::string out;
+    out.reserve(1024);
+    out.append("{\"schema\":\"subuwutuner.project-info.v1\",\"path\":");
+    json_escape(out, dir.string());
+    out.append(",\"name\":");
+    json_escape(out, p->display_name());
+    out.append(",\"notes\":");
+    json_escape(out, p->notes());
+
+    out.append(",\"source_rom\":{\"size\":");
+    out.append(std::to_string(p->source_rom().size()));
+    out.append(",\"crc32\":");
+    out.append(std::to_string(p->source_rom().crc32()));
+    out.append(",\"crc32_at_create\":");
+    out.append(std::to_string(p->source_crc32_at_create()));
+    out.append(",\"changed_since_create\":");
+    out.append(p->source_rom().crc32() != p->source_crc32_at_create() ? "true" : "false");
+    out.append("}");
+
+    out.append(",\"working_rom\":{\"size\":");
+    out.append(std::to_string(p->working_rom().size()));
+    out.append(",\"crc32\":");
+    out.append(std::to_string(p->working_rom().crc32()));
+    out.append(",\"differs_from_source\":");
+    out.append(p->source_rom().crc32() != p->working_rom().crc32() ? "true" : "false");
+    out.append("}");
+
+    out.append(",\"definition\":{\"pack_id\":");
+    json_escape(out, p->definition().pack().id);
+    out.append(",\"table_count\":");
+    out.append(std::to_string(p->definition().tables().size()));
+    out.append("}");
+
+    auto const cid = p->definition().matches(p->source_rom());
+    if (cid.has_value()) {
+        out.append(",\"cid_match\":");
+        json_escape(out, *cid);
+    } else {
+        out.append(",\"cid_match\":null");
+    }
+    out.append(",\"profile\":");
+    json_escape(out, std::string{st::policy::profile_name(p->policy_profile())});
+
+    auto const &records = p->history().records();
+    auto const cursor = p->history().cursor();
+    out.append(",\"history\":{\"edit_count\":");
+    out.append(std::to_string(records.size()));
+    out.append(",\"cursor\":");
+    out.append(std::to_string(cursor));
+    out.append(",\"redo_steps_available\":");
+    out.append(std::to_string(records.size() > cursor ? records.size() - cursor : 0U));
+    out.append(",\"can_undo\":");
+    out.append(cursor > 0 ? "true" : "false");
+    out.append(",\"can_redo\":");
+    out.append(cursor < records.size() ? "true" : "false");
+    out.append("}}\n");
+    std::fputs(out.c_str(), stdout);
+    return 0;
+}
+
 int cmd_project_info(int argc, char *argv[]) {
     if (argc < 1) {
         std::fputs("project-info: missing project directory\n", stderr);
-        std::fputs("Usage: subuwutuner-cli project-info <dir>\n", stderr);
+        std::fputs("Usage: subuwutuner-cli project-info [--json] <dir>\n", stderr);
         return 2;
     }
-    std::filesystem::path const dir{argv[0]};
+    bool json_mode = false;
+    std::filesystem::path dir;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--json") {
+            json_mode = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "project-info: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (dir.empty()) {
+            dir = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "project-info: extra argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (dir.empty()) {
+        std::fputs("project-info: missing project directory\n", stderr);
+        return 2;
+    }
+    if (json_mode) {
+        return cmd_project_info_json(dir);
+    }
 
     auto p = st::Project::open(dir);
     if (!p.has_value()) {
