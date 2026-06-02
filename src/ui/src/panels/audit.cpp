@@ -184,6 +184,59 @@ void render_audit_panel(AppState &state) {
     ImGui::SetNextItemWidth(240.0f);
     ImGui::InputTextWithHint("##audit_filter", "Filter (kind/source/description)…",
                              state.audit_filter, sizeof state.audit_filter);
+    ImGui::SameLine();
+    if (ImGui::Button("\xEE\x9D\x84  Clear##audit_filter_clear")) { // E704 Clear
+        state.audit_filter[0] = '\0';
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Clear the filter input.");
+    }
+
+    // Kind-filter chips. One per kind actually present in the loaded
+    // entries — keeps the toolbar from showing 18 unused buttons on a
+    // 3-event log. Click a chip → it becomes the filter string;
+    // re-click to revert. The same chip → text-input round-trip is
+    // intentional: the text filter already does substring matching
+    // against kind names, so chips are a discoverability layer on top.
+    if (!state.audit_entries.empty()) {
+        std::vector<std::string_view> kinds_seen;
+        for (auto const &e : state.audit_entries) {
+            auto const kn = st::audit::kind_name(e.kind);
+            bool dup = false;
+            for (auto k : kinds_seen) {
+                if (k == kn) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (!dup) {
+                kinds_seen.push_back(kn);
+            }
+        }
+        std::sort(kinds_seen.begin(), kinds_seen.end());
+        for (auto kn : kinds_seen) {
+            std::string const kn_str{kn};
+            bool const active = (std::string_view{state.audit_filter} == kn);
+            if (active) {
+                push_primary_button_colors();
+            }
+            ImGui::PushID(kn_str.c_str());
+            if (ImGui::SmallButton(kn_str.c_str())) {
+                if (active) {
+                    state.audit_filter[0] = '\0';
+                } else {
+                    std::snprintf(state.audit_filter, sizeof state.audit_filter, "%s",
+                                  kn_str.c_str());
+                }
+            }
+            ImGui::PopID();
+            if (active) {
+                pop_primary_button_colors();
+            }
+            ImGui::SameLine();
+        }
+        ImGui::NewLine();
+    }
 
     // ---- Status line ------------------------------------------------
     if (!state.audit_error_msg.empty()) {
