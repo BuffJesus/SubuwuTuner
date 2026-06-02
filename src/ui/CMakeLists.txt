@@ -133,6 +133,7 @@ add_executable(subuwutuner-gui
     src/modals/autotune_maf.cpp
     src/modals/csv_import.cpp
     src/modals/def_registry.cpp
+    src/modals/first_run.cpp
     src/modals/flash.cpp
     src/modals/new_project.cpp
     src/modals/read_rom.cpp

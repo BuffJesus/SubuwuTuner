@@ -499,6 +499,17 @@ struct AppState {
     void select_table(std::string const &id);
     void close_project();
 
+    // First-run wizard (analyst Issue #13). Auto-opens when
+    // settings.first_run_complete is false; users can re-trigger via
+    // Help → Welcome wizard or --reset-config on the command line.
+    // step counts up Welcome → Jurisdiction → Units → Theme → Demo
+    // open; the final step writes settings + flips first_run_complete.
+    bool show_first_run_wizard{false};
+    int first_run_step{0};
+    bool first_run_offer_demo{true};
+    enum class UnitSystem : std::uint8_t { Metric, Imperial };
+    UnitSystem first_run_units{UnitSystem::Metric};
+
     // Settings modal (Tools -> Settings...).
     bool show_settings_modal{false};
     char settings_def_root_input[1024]{};

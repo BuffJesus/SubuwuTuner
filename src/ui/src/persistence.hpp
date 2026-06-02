@@ -34,6 +34,11 @@ std::optional<Theme> parse_theme(std::string_view s) noexcept;
 struct Settings {
     st::policy::Profile default_policy_profile{st::policy::Profile::MotorsportOnly};
     Theme theme{Theme::Dark};
+    // Set true once the first-run wizard (Help → Welcome wizard, or
+    // automatic on first launch) has been completed. False on fresh
+    // install triggers the wizard. `subuwutuner-gui --reset-config`
+    // flips this back to false on disk.
+    bool first_run_complete{false};
 };
 
 std::filesystem::path config_dir_root();

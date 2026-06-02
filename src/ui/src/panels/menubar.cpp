@@ -363,6 +363,17 @@ void render_menubar(AppState &state) {
             if (ImGui::MenuItem("\xEE\xA4\xAE  Keyboard Shortcuts\xE2\x80\xA6")) {
                 state.show_shortcuts_modal = true;
             }
+            // E700 GlobalNavButton — reuse as a "guided welcome"
+            // affordance until a more on-brand icon is needed.
+            if (ImGui::MenuItem("\xEE\x9C\xA0  Welcome wizard\xE2\x80\xA6")) {
+                state.show_first_run_wizard = true;
+                state.first_run_step = 0;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Re-run the first-launch wizard (jurisdiction,\n"
+                                  "units, theme, demo project). Settings update\n"
+                                  "on Finish; Skip leaves current settings alone.");
+            }
             if (ImGui::MenuItem("\xEE\xA5\x86  About SubuwuTuner\xE2\x80\xA6")) {
                 state.show_about_modal = true;
             }

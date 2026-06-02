@@ -147,6 +147,17 @@ int main(int argc, char *argv[]) {
     AppState state;
     state.recents = load_recents();
     state.settings = load_settings();
+    // --reset-config flips first_run_complete on disk and re-launches
+    // the wizard on next paint. Honored before any other arg checks.
+    bool reset_requested = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string_view{argv[i]} == "--reset-config") {
+            reset_requested = true;
+            state.settings.first_run_complete = false;
+            save_settings(state.settings);
+            break;
+        }
+    }
     // Best-effort lookup of the bundled fixtures/demo.stune. Welcome
     // panel renders a "Try the demo project" button when set; absent
     // in installs that didn't ship the demo (the call returns
@@ -154,6 +165,14 @@ int main(int argc, char *argv[]) {
     state.demo_project_path = resolve_demo_project_path(argc >= 1 ? argv[0] : nullptr);
     // Apply the persisted theme before any user-visible frame renders.
     apply_theme(state.settings.theme);
+    // First-run wizard auto-trigger. Once the user finishes (or skips)
+    // the wizard, first_run_complete sticks to true and this branch
+    // never fires again — unless --reset-config above just cleared it.
+    if (!state.settings.first_run_complete) {
+        state.show_first_run_wizard = true;
+        state.first_run_step = 0;
+    }
+    (void)reset_requested; // reserved for diagnostics if needed later
     std::string_view const arg1 = (argc >= 2) ? argv[1] : "";
     if (arg1 == "-h" || arg1 == "--help" || arg1 == "/?") {
         std::fputs("Usage: subuwutuner-gui [PROJECT.stune]\n"
@@ -162,7 +181,10 @@ int main(int argc, char *argv[]) {
                    stderr);
         return 0;
     }
-    if (!arg1.empty()) {
+    // Skip arg1 if it's a flag we already handled (e.g. --reset-config)
+    // so the project-path-from-argv path doesn't try to open a flag
+    // string as a directory.
+    if (!arg1.empty() && !arg1.starts_with("--")) {
         state.try_open_project(argv[1]);
     } else {
         state.status_msg = "Open a .stune project: File → Open (Ctrl+O).";
@@ -265,6 +287,7 @@ int main(int argc, char *argv[]) {
         render_read_rom_modal(state);
         render_def_registry_modal(state);
         render_settings_modal(state);
+        render_first_run_modal(state);
         render_shortcuts_modal(state);
         render_about_modal(state);
         // Command palette rendered last so it stacks above every other
