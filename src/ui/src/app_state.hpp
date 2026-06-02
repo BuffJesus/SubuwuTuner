@@ -403,6 +403,11 @@ struct AppState {
     bool show_flash_modal{false};
     bool flash_confirm_checked{false};
     char flash_reason[512]{};
+    // Typed-phrase confirmation gate (analyst Issue #14): user must
+    // type the literal phrase "YES FLASH" before the Verify / Send
+    // button enables. Cleared when the modal opens so an old
+    // confirmation can't carry forward.
+    char flash_typed_phrase[64]{};
 
     // CSV import preview modal.
     bool show_csv_import_modal{false};

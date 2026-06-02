@@ -271,4 +271,31 @@ ImVec4 chip_bg_info() {
 // panel's title text on the same line.
 void preview_pill() { chip("Preview", chip_fg_info(), chip_bg_info()); }
 
+bool typed_phrase_gate(char *buffer, std::size_t buffer_size,
+                       char const *required_phrase, char const *id_suffix) {
+    // Layout: instruction text with the phrase highlighted in caution,
+    // input field, ✓/✗ marker. Caller positions the whole block.
+    ImGui::TextUnformatted("Type the phrase to confirm:");
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_caution());
+    ImGui::Text("%s", required_phrase);
+    ImGui::PopStyleColor();
+
+    ImGui::SetNextItemWidth(-60.0f);
+    ImGui::InputText(id_suffix, buffer, buffer_size);
+
+    bool const matches = std::string_view{buffer} == std::string_view{required_phrase};
+    ImGui::SameLine();
+    if (matches) {
+        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_ok());
+        ImGui::TextUnformatted("\xEE\x9C\xBE"); // E73E CheckMark
+        ImGui::PopStyleColor();
+    } else {
+        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_muted());
+        ImGui::TextUnformatted("\xEE\x9C\x91"); // E711 Cancel
+        ImGui::PopStyleColor();
+    }
+    return matches;
+}
+
 } // namespace st::ui

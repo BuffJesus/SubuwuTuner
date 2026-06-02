@@ -74,6 +74,9 @@ void render_flash_modal(AppState &state) {
     if (state.show_flash_modal) {
         ImGui::OpenPopup("\xEE\xA5\x85  Flash...##flash_modal");
         state.show_flash_modal = false;
+        // Reset the typed-phrase gate every time the modal opens —
+        // an old confirmation must not carry across sessions.
+        state.flash_typed_phrase[0] = '\0';
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
@@ -185,6 +188,19 @@ void render_flash_modal(AppState &state) {
         ImGui::PopStyleColor();
         ready_to_send = false;
         break;
+    }
+
+    // Typed-phrase confirmation gate (analyst Issue #14). Layered on
+    // top of the policy-driven checkbox/reason gate above — the user
+    // must ALSO type "YES FLASH" before the Verify button enables.
+    // Stops click-through fatigue from making the existing checkbox
+    // a no-op. Suppressed when the profile already refuses (Block).
+    if (d.overall_action != A::Block) {
+        ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+        bool const phrase_ok = typed_phrase_gate(state.flash_typed_phrase,
+                                                 sizeof state.flash_typed_phrase,
+                                                 "YES FLASH", "##flash_phrase");
+        ready_to_send = ready_to_send && phrase_ok;
     }
 
     ImGui::Dummy(ImVec2(0.0f, kSpaceL));

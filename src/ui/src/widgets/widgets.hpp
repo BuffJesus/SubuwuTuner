@@ -11,6 +11,7 @@
 
 #include <imgui.h>
 
+#include <cstddef>
 #include <string_view>
 
 namespace st::ui {
@@ -65,6 +66,20 @@ ImVec4 chip_bg_info();
 
 // "Preview" pill — used by autotune ledger headings + similar.
 void preview_pill();
+
+// Typed-phrase confirmation gate (analyst Issue #14). Renders an
+// input field labeled with the required phrase and returns true iff
+// the buffer contents match exactly. Modals gate their primary
+// destructive action on this so the user has to actively type
+// (e.g. "YES FLASH"), not just click. Closes the most common
+// click-through-fatigue failure mode for irreversible operations.
+//
+// Returns true only on exact case-sensitive match. Empty input
+// returns false. The widget renders inline (no Begin/End); the
+// caller controls placement.
+[[nodiscard]] bool typed_phrase_gate(char *buffer, std::size_t buffer_size,
+                                     char const *required_phrase,
+                                     char const *id_suffix = "##typed_phrase");
 
 // Case-insensitive substring contains. Used by the sidebar + DTC + history
 // filters; in widgets/ so future panels can reuse without a copy-paste.
