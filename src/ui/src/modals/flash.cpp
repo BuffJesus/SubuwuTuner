@@ -14,6 +14,7 @@
 
 #include "st/flash.hpp"
 #include "st/policy.hpp"
+#include "st/profile.hpp"
 
 #include <imgui.h>
 
@@ -120,6 +121,40 @@ void render_flash_modal(AppState &state) {
     // Header: plan stats.
     ImGui::Text("Sectors: %zu   Bytes: %zu   Profile: %s", pending->plan.writes.size(),
                 pending->total_bytes, pname.c_str());
+
+    // Active vehicle profile context (analyst Issue #7). Looked up
+    // fresh per render — cheap (TOML load of one file) and avoids a
+    // stale-cache footgun where the user edits the profile via CLI
+    // mid-session and the modal still shows old data. Three states:
+    //   - none set       → subtle hint pointing at Settings
+    //   - set + missing  → amber "(missing on disk)" so the user knows
+    //                      the linked profile got deleted/moved
+    //   - set + loaded   → "Vehicle: <name>  ·  <year make model>" plus
+    //                      a transport-hint subline when present
+    if (state.settings.active_vehicle_profile_id.empty()) {
+        text_subtle("No active vehicle profile. Tools → Settings to pick one.");
+    } else {
+        auto const profile_path = st::profile::default_profile_dir() /
+                                  (state.settings.active_vehicle_profile_id + ".stprofile");
+        auto const loaded = st::profile::load(profile_path);
+        if (!loaded.has_value()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_warn());
+            ImGui::Text("Vehicle profile '%s' missing on disk.",
+                        state.settings.active_vehicle_profile_id.c_str());
+            ImGui::PopStyleColor();
+        } else {
+            auto const &vp = *loaded;
+            char const *display = vp.display_name.empty() ? vp.id.c_str()
+                                                          : vp.display_name.c_str();
+            ImGui::Text("Vehicle: %s  ·  %s %s %s%s%s", display,
+                        vp.year.c_str(), vp.make.c_str(), vp.model.c_str(),
+                        vp.transmission.empty() ? "" : "  ·  ",
+                        vp.transmission.c_str());
+            if (!vp.transport_hint.empty()) {
+                text_subtle("Transport hint: %s", vp.transport_hint.c_str());
+            }
+        }
+    }
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0.0f, kSpaceS));
 

@@ -260,6 +260,8 @@ Settings load_settings() {
             }
         } else if (key == "first_run_complete") {
             s.first_run_complete = (val == "true" || val == "1");
+        } else if (key == "active_vehicle_profile_id") {
+            s.active_vehicle_profile_id = std::string{val};
         }
     }
     return s;
@@ -275,6 +277,7 @@ void save_settings(Settings const &s) {
     out << "default_policy_profile=" << st::policy::profile_name(s.default_policy_profile) << '\n';
     out << "theme=" << theme_name(s.theme) << '\n';
     out << "first_run_complete=" << (s.first_run_complete ? "true" : "false") << '\n';
+    out << "active_vehicle_profile_id=" << s.active_vehicle_profile_id << '\n';
 }
 
 // Move `path` to the front of `recents`, deduplicating by canonical

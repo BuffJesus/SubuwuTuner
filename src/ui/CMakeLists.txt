@@ -162,6 +162,7 @@ target_link_libraries(subuwutuner-gui
         st::autotune
         st::feature
         st::log
+        st::profile
         imgui_lib
         implot_lib
         nfd

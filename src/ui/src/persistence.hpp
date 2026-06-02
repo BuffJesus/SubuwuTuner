@@ -39,6 +39,14 @@ struct Settings {
     // install triggers the wizard. `subuwutuner-gui --reset-config`
     // flips this back to false on disk.
     bool first_run_complete{false};
+    // Active vehicle profile id (analyst Issue #7). Points into the
+    // `.stprofile` files under st::profile::default_profile_dir().
+    // Empty when no profile has been picked. The GUI uses this to
+    // surface vehicle context in modals (Flash, Read ROM) and to
+    // default transport selection. Profile creation/editing happens
+    // via the CLI (`subuwutuner-cli profile ...`) in v1; the GUI just
+    // selects from the dir.
+    std::string active_vehicle_profile_id;
 };
 
 std::filesystem::path config_dir_root();

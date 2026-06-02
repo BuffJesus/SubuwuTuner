@@ -10,9 +10,11 @@
 #include "modals/modals.hpp"
 
 #include "app_state.hpp"
+#include "persistence.hpp" // save_settings
 #include "widgets/widgets.hpp"
 
 #include "st/config.hpp"
+#include "st/profile.hpp"
 
 #include <imgui.h>
 #include <nfd.hpp>
@@ -21,6 +23,7 @@
 #include <cfloat>
 #include <cstdio>
 #include <filesystem>
+#include <string>
 
 namespace st::ui {
 
@@ -45,6 +48,16 @@ void render_settings_modal(AppState &state) {
             state.settings_status_color = chip_fg_danger();
         }
         state.settings_loaded_once = true;
+        // Re-scan vehicle profiles every open — cheap (small dir) and
+        // covers the user creating a new profile via the CLI while the
+        // GUI is running.
+        if (auto profs = st::profile::list(st::profile::default_profile_dir());
+            profs.has_value()) {
+            state.settings_profiles_cache = std::move(*profs);
+        } else {
+            state.settings_profiles_cache.clear();
+        }
+        state.settings_profiles_loaded = true;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
@@ -114,6 +127,82 @@ void render_settings_modal(AppState &state) {
             "Default destination for rom-pull captures when no\n"
             "--output is given. Must be writable by the running user\n"
             "(not Program Files).");
+    }
+
+    ImGui::Dummy(ImVec2(0.0f, kSpaceM));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+
+    // -------- Active vehicle profile (analyst Issue #7) --------------
+    // Picker over .stprofile files in default_profile_dir(). Selecting
+    // a profile writes settings.toml immediately — no separate Save
+    // because the active-profile id is GUI state, not part of the
+    // installer paths the Save button below covers.
+    ImGui::TextUnformatted("Active vehicle profile");
+    auto const &profs = state.settings_profiles_cache;
+    auto const current_idx = [&]() -> int {
+        if (state.settings.active_vehicle_profile_id.empty())
+            return -1;
+        for (int i = 0; i < static_cast<int>(profs.size()); ++i) {
+            if (profs[static_cast<std::size_t>(i)].id == state.settings.active_vehicle_profile_id)
+                return i;
+        }
+        return -1;
+    }();
+    char const *current_label = "(none)";
+    std::string current_label_buf;
+    if (current_idx >= 0) {
+        auto const &p = profs[static_cast<std::size_t>(current_idx)];
+        current_label_buf = p.display_name.empty() ? p.id
+                                                  : (p.display_name + " — " + p.id);
+        current_label = current_label_buf.c_str();
+    } else if (!state.settings.active_vehicle_profile_id.empty()) {
+        current_label_buf = state.settings.active_vehicle_profile_id + " (missing on disk)";
+        current_label = current_label_buf.c_str();
+    }
+    ImGui::SetNextItemWidth(input_w);
+    if (ImGui::BeginCombo("##settings_active_profile", current_label)) {
+        bool const none_sel = state.settings.active_vehicle_profile_id.empty();
+        if (ImGui::Selectable("(none)", none_sel)) {
+            state.settings.active_vehicle_profile_id.clear();
+            save_settings(state.settings);
+        }
+        for (auto const &p : profs) {
+            std::string const label = p.display_name.empty() ? p.id
+                                                            : (p.display_name + " — " + p.id);
+            bool const sel = (p.id == state.settings.active_vehicle_profile_id);
+            if (ImGui::Selectable(label.c_str(), sel)) {
+                state.settings.active_vehicle_profile_id = p.id;
+                save_settings(state.settings);
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Refresh##profiles", ImVec2(btn_w, 0.0f))) {
+        if (auto r = st::profile::list(st::profile::default_profile_dir());
+            r.has_value()) {
+            state.settings_profiles_cache = std::move(*r);
+        }
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Re-scan %s for .stprofile files.",
+                          st::profile::default_profile_dir().string().c_str());
+    }
+    if (current_idx >= 0) {
+        auto const &p = profs[static_cast<std::size_t>(current_idx)];
+        text_subtle("%s %s %s%s%s%s%s",
+                    p.year.empty() ? "" : p.year.c_str(),
+                    p.make.empty() ? "" : p.make.c_str(),
+                    p.model.empty() ? "" : p.model.c_str(),
+                    p.transmission.empty() ? "" : "  ·  ",
+                    p.transmission.c_str(),
+                    p.transport_hint.empty() ? "" : "  ·  ",
+                    p.transport_hint.c_str());
+    } else {
+        text_subtle("Manage profiles via `subuwutuner-cli profile create/import/show`. "
+                    "Profiles dir: %s",
+                    st::profile::default_profile_dir().string().c_str());
     }
 
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));

@@ -22,6 +22,7 @@
 #include "st/log/ebcs.hpp"
 #include "st/log/knock_dashboard.hpp"
 #include "st/log/live_buffer.hpp"
+#include "st/profile.hpp"
 #include "st/project.hpp"
 
 #include <imgui.h> // ImVec2 / ImVec4 in features-designer + settings fields
@@ -534,6 +535,13 @@ struct AppState {
     bool settings_loaded_once{false};
     std::string settings_status_msg;
     ImVec4 settings_status_color{1.0f, 1.0f, 1.0f, 1.0f};
+    // Vehicle profiles enumerated from st::profile::default_profile_dir()
+    // when the Settings modal opens (analyst Issue #7). Cached for the
+    // session so the combo doesn't disk-walk every frame. Use
+    // refresh_vehicle_profiles() to force a re-scan after CLI creates a
+    // new profile mid-session.
+    std::vector<st::profile::VehicleProfile> settings_profiles_cache;
+    bool settings_profiles_loaded{false};
 
     // Pack-registry browser modal (Tools -> Browse Definitions).
     bool show_def_registry_modal{false};
