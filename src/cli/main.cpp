@@ -596,6 +596,11 @@ constexpr std::string_view kUsage =
     "                            the requested name preserved as a field. Useful\n"
     "                            for cron / CI / external tooling — handles the\n"
     "                            CRC32 + timestamp like the in-process callers.\n"
+    "    audit verify <project-dir> [--json]\n"
+    "                            Walk audit.log and report any entries whose\n"
+    "                            stored CRC32 doesn't match the recomputed value.\n"
+    "                            Exits 1 when any bad entry is found so CI can\n"
+    "                            gate on log integrity.\n"
     "                            Read the per-project audit.log (cross-session\n"
     "                            ECU-touch log) and print one entry per line.\n"
     "                            Tampered entries (CRC32 mismatch) get a\n"
@@ -13084,8 +13089,94 @@ int main(int argc, char *argv[]) {
             std::printf("Appended to %s\n", log_path.string().c_str());
             return 0;
         }
+        if (sub == "verify") {
+            // audit verify <project-dir> [--json]
+            // Walks every entry and reports any whose on-disk CRC32
+            // doesn't match the recomputed value. Exit nonzero when
+            // any entry fails so CI / cron can gate on integrity.
+            std::optional<std::filesystem::path> project_dir;
+            bool json_mode = false;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view const a{argv[i]};
+                if (a == "--json") {
+                    json_mode = true;
+                } else if (a.starts_with("--")) {
+                    std::fprintf(stderr, "audit verify: unknown option: %s\n", argv[i]);
+                    return 2;
+                } else if (!project_dir.has_value()) {
+                    project_dir = std::filesystem::path{argv[i]};
+                } else {
+                    std::fprintf(stderr, "audit verify: extra positional: %s\n", argv[i]);
+                    return 2;
+                }
+            }
+            if (!project_dir.has_value()) {
+                std::fputs("audit verify: missing <project-dir>\n", stderr);
+                return 2;
+            }
+            auto const log_path = *project_dir / "audit.log";
+            if (!std::filesystem::exists(log_path)) {
+                if (json_mode) {
+                    std::printf("{\"schema\":\"subuwutuner.audit-verify.v1\","
+                                "\"log_path\":\"%s\",\"present\":false,\"entries\":0,"
+                                "\"bad_checksum\":0}\n",
+                                log_path.string().c_str());
+                } else {
+                    std::printf("Audit log: %s\n  (not present — verify OK)\n",
+                                log_path.string().c_str());
+                }
+                return 0;
+            }
+            auto entries = st::audit::read_all(log_path);
+            if (!entries.has_value()) {
+                std::fprintf(stderr, "audit verify: %s\n",
+                             entries.error().to_string().c_str());
+                return 1;
+            }
+            std::size_t bad = 0;
+            std::vector<std::size_t> bad_indices;
+            for (std::size_t i = 0; i < entries->size(); ++i) {
+                if (!(*entries)[i].checksum_valid) {
+                    ++bad;
+                    bad_indices.push_back(i);
+                }
+            }
+            if (json_mode) {
+                std::string out;
+                out.append("{\"schema\":\"subuwutuner.audit-verify.v1\",\"log_path\":");
+                json_escape(out, log_path.string());
+                out.append(",\"present\":true,\"entries\":");
+                out.append(std::to_string(entries->size()));
+                out.append(",\"bad_checksum\":");
+                out.append(std::to_string(bad));
+                out.append(",\"bad_indices\":[");
+                for (std::size_t j = 0; j < bad_indices.size(); ++j) {
+                    if (j > 0)
+                        out.append(",");
+                    out.append(std::to_string(bad_indices[j]));
+                }
+                out.append("]}\n");
+                std::fputs(out.c_str(), stdout);
+            } else {
+                std::printf("Audit log: %s\n", log_path.string().c_str());
+                std::printf("  Entries:        %zu\n", entries->size());
+                std::printf("  Bad checksum:   %zu\n", bad);
+                if (bad > 0) {
+                    std::printf("  Affected lines (0-indexed):");
+                    for (auto idx : bad_indices) {
+                        std::printf(" %zu", idx);
+                    }
+                    std::printf("\n");
+                    std::printf("  Result: TAMPERED OR CORRUPTED\n");
+                } else {
+                    std::printf("  Result: OK\n");
+                }
+            }
+            return bad == 0 ? 0 : 1;
+        }
         if (sub != "show") {
-            std::fprintf(stderr, "audit: unknown subcommand '%s' (try 'show' or 'append')\n",
+            std::fprintf(stderr,
+                         "audit: unknown subcommand '%s' (try 'show', 'append', or 'verify')\n",
                          argv[2]);
             return 2;
         }
