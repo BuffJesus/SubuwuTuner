@@ -406,6 +406,12 @@ struct AppState {
     bool audit_loaded{false};
     char audit_filter[128]{};
     bool audit_newest_first{true};
+    // Cached file_time on the last successful audit.log read. The
+    // panel polls this each frame and auto-reloads when the value
+    // changes — so events appended elsewhere in the GUI (project
+    // save, ROM read, autotune commit) surface immediately instead
+    // of waiting for the user to click Refresh.
+    std::filesystem::file_time_type audit_log_mtime{};
     // Project-scoped audit log handle. Lifecycle:
     //   try_open_project  → AuditLog::open on <project>/audit.log;
     //                        ProjectOpened entry appended

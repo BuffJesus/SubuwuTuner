@@ -91,6 +91,7 @@ void load_audit_log(AppState &state) {
     state.audit_entries.clear();
     state.audit_error_msg.clear();
     state.audit_loaded = false;
+    state.audit_log_mtime = std::filesystem::file_time_type{};
     if (!state.project.has_value()) {
         state.audit_error_msg = "No project loaded — open a .stune project to view its audit log.";
         return;
@@ -107,6 +108,33 @@ void load_audit_log(AppState &state) {
     }
     state.audit_entries = std::move(*r);
     state.audit_loaded = true;
+    std::error_code ec;
+    state.audit_log_mtime = std::filesystem::last_write_time(log_path, ec);
+    if (ec) {
+        state.audit_log_mtime = std::filesystem::file_time_type{};
+    }
+}
+
+// Poll the audit log's mtime against the cached value; reload when it
+// changed. Cheap (single stat per frame). Triggered each frame the
+// panel is visible so events appended elsewhere in the GUI surface
+// without the user having to click Refresh.
+void maybe_auto_refresh_audit(AppState &state) {
+    if (!state.audit_loaded || !state.project.has_value()) {
+        return;
+    }
+    auto const log_path = state.project->dir() / "audit.log";
+    std::error_code ec;
+    if (!std::filesystem::exists(log_path, ec) || ec) {
+        return;
+    }
+    auto const mtime_now = std::filesystem::last_write_time(log_path, ec);
+    if (ec) {
+        return;
+    }
+    if (mtime_now != state.audit_log_mtime) {
+        load_audit_log(state);
+    }
 }
 
 } // namespace
@@ -124,10 +152,13 @@ void render_audit_panel(AppState &state) {
     }
 
     // First-open: auto-load if a project is open. Subsequent re-shows
-    // keep the cached entries until the user clicks Refresh — a long
-    // log shouldn't re-read on every panel toggle.
+    // keep the cached entries; an mtime poll below picks up changes
+    // appended elsewhere in the GUI without forcing a full reload on
+    // every frame.
     if (!state.audit_loaded && state.audit_error_msg.empty()) {
         load_audit_log(state);
+    } else {
+        maybe_auto_refresh_audit(state);
     }
 
     // ---- Header / toolbar -------------------------------------------
