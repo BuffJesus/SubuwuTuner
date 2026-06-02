@@ -135,16 +135,18 @@ constexpr std::string_view kUsage =
     "                            collection without needing a ROM in hand.\n"
     "                            --quiet suppresses load-failure noise for\n"
     "                            unparseable packs.\n"
-    "    rom-identify <FILE.bin> --pack-dir <dir> [--quiet]\n"
+    "    rom-identify <FILE.bin> --pack-dir <dir> [--quiet] [--json]\n"
     "                            Walk a directory of definition packs (recursive\n"
     "                            scan for nested pack.toml files) and report which\n"
     "                            ones match the ROM's CID. For \"I just got this\n"
     "                            ROM, which pack do I use?\" Prints one line per\n"
     "                            matching pack with the matched identification\n"
     "                            name; --quiet suppresses the load-failure noise\n"
-    "                            for packs that don't parse cleanly. Exit 0 on\n"
-    "                            ≥1 match, 1 on zero matches, 2 on argument\n"
-    "                            errors.\n"
+    "                            for packs that don't parse cleanly. --json emits\n"
+    "                            a one-line subuwutuner.rom-identify.v1 object\n"
+    "                            with the full matches[] + failed[] arrays for\n"
+    "                            CI scripts. Exit 0 on ≥1 match, 1 on zero\n"
+    "                            matches, 2 on argument errors.\n"
     "    checksum-repair <FILE.bin> --def <pack> --output <FILE.bin>\n"
     "                            Run the pack's declared checksum_type repair\n"
     "                            algorithm against the ROM and write the result\n"
@@ -5049,6 +5051,7 @@ int cmd_rom_identify(int argc, char *argv[]) {
     std::optional<std::filesystem::path> rom_path;
     std::optional<std::filesystem::path> pack_dir;
     bool quiet = false;
+    bool json_mode = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -5060,6 +5063,8 @@ int cmd_rom_identify(int argc, char *argv[]) {
             pack_dir = std::filesystem::path{argv[++i]};
         } else if (a == "--quiet" || a == "-q") {
             quiet = true;
+        } else if (a == "--json") {
+            json_mode = true;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "rom-identify: unknown option: %s\n", argv[i]);
             return 2;
@@ -5099,38 +5104,105 @@ int cmd_rom_identify(int argc, char *argv[]) {
         return 1;
     }
 
+    // Structured collector — populated for both text and JSON paths,
+    // since the JSON renderer happens after the scan loop.
+    struct MatchEntry {
+        std::string pack_path;
+        std::string pack_id;
+        std::string display_name;
+        std::string cid;
+    };
+    struct FailedEntry {
+        std::string pack_path;
+        std::string error;
+    };
+    std::vector<MatchEntry> matches;
+    std::vector<FailedEntry> failed_list;
     std::size_t loaded = 0;
-    std::size_t failed = 0;
-    std::size_t matched = 0;
+
     for (auto const &path : pack_paths) {
         auto const def = st::Definition::from_file(path);
         if (!def.has_value()) {
-            ++failed;
-            if (!quiet) {
+            failed_list.push_back({path.string(), def.error().to_string()});
+            if (!quiet && !json_mode) {
                 std::fprintf(stderr, "  (skip) %s — load failed: %s\n", path.string().c_str(),
                              def.error().to_string().c_str());
             }
             continue;
         }
         ++loaded;
-        auto const match = def->matches(*rom);
-        if (match.has_value()) {
-            ++matched;
-            std::printf("MATCH  %s\n", path.string().c_str());
-            std::printf("       (identification: %s)\n", match->c_str());
-            if (!def->pack().display_name.empty()) {
-                std::printf("       (display name:   %s)\n", def->pack().display_name.c_str());
+        if (auto const match = def->matches(*rom); match.has_value()) {
+            matches.push_back({path.string(), def->pack().id, def->pack().display_name, *match});
+            if (!json_mode) {
+                std::printf("MATCH  %s\n", path.string().c_str());
+                std::printf("       (identification: %s)\n", match->c_str());
+                if (!def->pack().display_name.empty()) {
+                    std::printf("       (display name:   %s)\n",
+                                def->pack().display_name.c_str());
+                }
             }
         }
     }
 
-    std::printf("\n%zu pack%s scanned, %zu loaded, %zu match%s\n", pack_paths.size(),
-                pack_paths.size() == 1 ? "" : "s", loaded, matched, matched == 1 ? "" : "es");
-    if (failed != 0) {
-        std::printf("(%zu pack%s failed to load%s)\n", failed, failed == 1 ? "" : "s",
-                    quiet ? " — rerun without --quiet to see errors" : "");
+    if (json_mode) {
+        std::string out;
+        out.reserve(1024);
+        out.append("{\"schema\":\"subuwutuner.rom-identify.v1\",\"rom\":{\"path\":");
+        json_escape(out, rom_path->string());
+        out.append(",\"size\":");
+        out.append(std::to_string(rom->size()));
+        out.append(",\"crc32\":");
+        out.append(std::to_string(rom->crc32()));
+        out.append("},\"pack_dir\":");
+        json_escape(out, pack_dir->string());
+        out.append(",\"counts\":{\"scanned\":");
+        out.append(std::to_string(pack_paths.size()));
+        out.append(",\"loaded\":");
+        out.append(std::to_string(loaded));
+        out.append(",\"matched\":");
+        out.append(std::to_string(matches.size()));
+        out.append(",\"failed\":");
+        out.append(std::to_string(failed_list.size()));
+        out.append("},\"matches\":[");
+        for (std::size_t i = 0; i < matches.size(); ++i) {
+            if (i != 0)
+                out.append(",");
+            auto const &m = matches[i];
+            out.append("{\"pack_path\":");
+            json_escape(out, m.pack_path);
+            out.append(",\"pack_id\":");
+            json_escape(out, m.pack_id);
+            out.append(",\"display_name\":");
+            json_escape(out, m.display_name);
+            out.append(",\"cid\":");
+            json_escape(out, m.cid);
+            out.append("}");
+        }
+        out.append("],\"failed\":[");
+        for (std::size_t i = 0; i < failed_list.size(); ++i) {
+            if (i != 0)
+                out.append(",");
+            auto const &f = failed_list[i];
+            out.append("{\"pack_path\":");
+            json_escape(out, f.pack_path);
+            out.append(",\"error\":");
+            json_escape(out, f.error);
+            out.append("}");
+        }
+        out.append("]}\n");
+        std::fputs(out.c_str(), stdout);
+    } else {
+        std::printf("\n%zu pack%s scanned, %zu loaded, %zu match%s\n", pack_paths.size(),
+                    pack_paths.size() == 1 ? "" : "s", loaded, matches.size(),
+                    matches.size() == 1 ? "" : "es");
+        if (!failed_list.empty()) {
+            std::printf("(%zu pack%s failed to load%s)\n", failed_list.size(),
+                        failed_list.size() == 1 ? "" : "s",
+                        quiet ? " — rerun without --quiet to see errors" : "");
+        }
     }
-    return matched == 0 ? 1 : 0;
+
+    return matches.empty() ? 1 : 0;
 }
 
 int cmd_checksum_repair(int argc, char *argv[]) {
