@@ -85,6 +85,7 @@ add_executable(st_unit_tests
     unit/feature_patch/test_inserter.cpp
     unit/feature_patch/test_flash_bridge.cpp
     unit/diff/test_diff.cpp
+    unit/audit/test_audit.cpp
 )
 
 target_link_libraries(st_unit_tests
@@ -108,6 +109,7 @@ target_link_libraries(st_unit_tests
         st::feature_codegen
         st::feature_patch
         st::diff
+        st::audit
         st::warnings
         st::sanitizers
         st::platform

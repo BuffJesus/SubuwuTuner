@@ -21,6 +21,7 @@ target_link_libraries(subuwutuner-cli
         st::feature
         st::feature_codegen
         st::diff
+        st::audit
         st::policy
         st::warnings
         st::sanitizers

@@ -6,6 +6,7 @@
 #include "st/config.hpp"
 #include "st/core/version.hpp"
 #include "st/dbc.hpp"
+#include "st/audit.hpp"
 #include "st/defs.hpp"
 #include "st/defs/pack_registry.hpp"
 #include "st/diff.hpp"
@@ -560,6 +561,13 @@ constexpr std::string_view kUsage =
     "                            sets the per-module cycle budget (0 disables;\n"
     "                            default 200). Exit 0 normally, 3 with --strict\n"
     "                            on any finding.\n"
+    "    audit show <project-dir> [--json]\n"
+    "                            Read the per-project audit.log (cross-session\n"
+    "                            ECU-touch log) and print one entry per line.\n"
+    "                            Tampered entries (CRC32 mismatch) get a\n"
+    "                            [TAMPERED] prefix. --json emits the full\n"
+    "                            subuwutuner.audit.v1 array for CI scoring.\n"
+    "                            See docs/05 §4 / analyst Issue #8.\n"
     "    transport-list [--json]\n"
     "                            List J2534 v04.04 vendor DLLs registered on\n"
     "                            this host (HKLM\\Software\\PassThruSupport.04.04\n"
@@ -12475,6 +12483,92 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "config") {
         return cmd_config(argc - 2, argv + 2);
+    }
+    if (cmd == "audit") {
+        if (argc < 3) {
+            std::fputs("audit: missing subcommand. Try `audit show <project>`.\n", stderr);
+            return 2;
+        }
+        std::string_view const sub{argv[2]};
+        if (sub != "show") {
+            std::fprintf(stderr, "audit: unknown subcommand '%s' (try 'show')\n", argv[2]);
+            return 2;
+        }
+        // audit show <project-dir> [--json]
+        std::optional<std::filesystem::path> project_dir;
+        bool json_mode = false;
+        for (int i = 3; i < argc; ++i) {
+            std::string_view const a{argv[i]};
+            if (a == "--json") {
+                json_mode = true;
+            } else if (a.starts_with("--")) {
+                std::fprintf(stderr, "audit show: unknown option: %s\n", argv[i]);
+                return 2;
+            } else if (!project_dir.has_value()) {
+                project_dir = std::filesystem::path{argv[i]};
+            } else {
+                std::fprintf(stderr, "audit show: extra positional argument: %s\n", argv[i]);
+                return 2;
+            }
+        }
+        if (!project_dir.has_value()) {
+            std::fputs("audit show: missing <project-dir>\n", stderr);
+            return 2;
+        }
+        auto const log_path = *project_dir / "audit.log";
+        auto entries = st::audit::read_all(log_path);
+        if (!entries.has_value()) {
+            std::fprintf(stderr, "audit show: %s\n", entries.error().to_string().c_str());
+            return 1;
+        }
+        if (json_mode) {
+            std::string out;
+            out.reserve(1024);
+            out.append("{\"schema\":\"subuwutuner.audit.v1\",\"project_dir\":");
+            json_escape(out, project_dir->string());
+            out.append(",\"log_path\":");
+            json_escape(out, log_path.string());
+            out.append(",\"count\":");
+            out.append(std::to_string(entries->size()));
+            out.append(",\"entries\":[");
+            for (std::size_t i = 0; i < entries->size(); ++i) {
+                if (i != 0)
+                    out.append(",");
+                // Re-serialize each entry through the canonical
+                // serializer to ensure on-wire identity.
+                out.append(st::audit::serialize_entry((*entries)[i]));
+            }
+            out.append("]}\n");
+            std::fputs(out.c_str(), stdout);
+        } else {
+            std::printf("Audit log: %s\n", log_path.string().c_str());
+            std::printf("%zu entries\n\n", entries->size());
+            for (auto const &e : *entries) {
+                // Format the ns timestamp as ISO-8601 UTC for human reading.
+                auto const seconds = e.timestamp_ns / 1'000'000'000LL;
+                std::time_t const tt = static_cast<std::time_t>(seconds);
+                std::tm tm_utc{};
+#if defined(_WIN32)
+                gmtime_s(&tm_utc, &tt);
+#else
+                gmtime_r(&tt, &tm_utc);
+#endif
+                char ts[24];
+                std::strftime(ts, sizeof ts, "%Y-%m-%dT%H:%M:%SZ", &tm_utc);
+                char const *tag = e.checksum_valid ? "    " : "[TAMPERED] ";
+                std::printf("%s%s  %.*s  %s\n", tag, ts,
+                            static_cast<int>(st::audit::kind_name(e.kind).size()),
+                            st::audit::kind_name(e.kind).data(),
+                            e.description.c_str());
+                if (!e.source.empty()) {
+                    std::printf("            source: %s\n", e.source.c_str());
+                }
+                for (auto const &[k, v] : e.fields) {
+                    std::printf("            %s = %s\n", k.c_str(), v.c_str());
+                }
+            }
+        }
+        return 0;
     }
     if (cmd == "flash-trace") {
         return cmd_flash_trace(argc - 2, argv + 2);
