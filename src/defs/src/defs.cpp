@@ -328,6 +328,7 @@ Result<Pid> parse_pid(toml::table const &t) {
     p.scaling = optional_value<std::string>(t, "scaling", {});
     p.unit = optional_value<std::string>(t, "unit", {});
     p.default_log = optional_value<bool>(t, "default_log", false);
+    p.produces_table = optional_value<std::string>(t, "produces_table", {});
     return p;
 }
 

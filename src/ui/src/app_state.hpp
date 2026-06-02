@@ -358,6 +358,14 @@ struct AppState {
         double warn_below; // shade below this (amber) — for AFR-style channels
         double display_min; // y-axis low bound
         double display_max; // y-axis high bound
+        // Producing-table cross-reference (analyst Issue #15). Right-click
+        // the gauge cell → "Jump to table…" → state.select_table(this id) +
+        // workspace switch to Tune. Empty for sensor-input channels (RPM,
+        // IAT, TPS — no controlling table); set on output channels whose
+        // value the ECU computes from a lookup table. In real-transport
+        // mode this gets populated from Pid::produces_table at session
+        // start; v1 demo channels are hardcoded.
+        char const *produces_table{nullptr};
     };
     // Demo cadence (samples / second). Live mode reads this from the
     // pack's [[log_channel]] cycle hint once that's defined.

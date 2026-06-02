@@ -20,6 +20,7 @@
 
 #include "panels/panels.hpp"
 
+#include "actions.hpp" // jump_to_table
 #include "app_state.hpp"
 #include "widgets/widgets.hpp"
 
@@ -46,10 +47,14 @@ namespace {
 // when the demo session creates the buffer. When real-transport mode
 // lands these become pack-driven from [[log_channel]] entries.
 inline constexpr AppState::GaugeMeta kDemoChannels[] = {
-    {"RPM", "rpm", 6800.0, 5500.0, 0.0, 600.0, 7200.0},
-    {"MAP", "kPa", 250.0, 200.0, 0.0, 0.0, 300.0},
-    {"TPS", "%", 100.0, 90.0, 0.0, 0.0, 100.0},
-    {"IAT", "°C", 70.0, 60.0, 0.0, -20.0, 90.0},
+    {"RPM", "rpm", 6800.0, 5500.0, 0.0, 600.0, 7200.0, nullptr},
+    // MAP value is what boost target controls — wire the cross-reference
+    // to the demo pack's "boost_target_high_octane" so right-click "Jump
+    // to table…" lands on a real demo-pack entry. Sensor channels below
+    // leave produces_table null.
+    {"MAP", "kPa", 250.0, 200.0, 0.0, 0.0, 300.0, "boost_target_high_octane"},
+    {"TPS", "%", 100.0, 90.0, 0.0, 0.0, 100.0, nullptr},
+    {"IAT", "°C", 70.0, 60.0, 0.0, -20.0, 90.0, nullptr},
 };
 inline constexpr std::size_t kDemoChannelCount =
     sizeof(kDemoChannels) / sizeof(kDemoChannels[0]);
@@ -261,6 +266,34 @@ void render_one_gauge(AppState &state, std::size_t channel_idx,
                     meta.redline);
     } else {
         text_subtle("range %g–%g", meta.display_min, meta.display_max);
+    }
+
+    // Right-click → context menu. "Jump to table…" surfaces when the
+    // channel has a producing-table mapping (analyst Issue #15) and a
+    // project is open. ImGuiPopupFlags_MouseButtonRight is the default
+    // for BeginPopupContextWindow, made explicit here.
+    if (ImGui::BeginPopupContextWindow("##gauge_ctx", ImGuiPopupFlags_MouseButtonRight)) {
+        ImGui::TextDisabled("%s", meta.name);
+        ImGui::Separator();
+        bool const has_producer = meta.produces_table != nullptr &&
+                                  meta.produces_table[0] != '\0';
+        if (has_producer) {
+            char label[128];
+            std::snprintf(label, sizeof label, "Jump to table  \xE2\x86\x92  %s",
+                          meta.produces_table);
+            bool const have_project = state.project.has_value();
+            ImGui::BeginDisabled(!have_project);
+            if (ImGui::MenuItem(label)) {
+                jump_to_table(state, meta.produces_table);
+            }
+            ImGui::EndDisabled();
+            if (!have_project && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip("Open a project first to navigate to its tables.");
+            }
+        } else {
+            ImGui::MenuItem("Jump to table (no mapping)", nullptr, false, false);
+        }
+        ImGui::EndPopup();
     }
 
     ImGui::PopID();

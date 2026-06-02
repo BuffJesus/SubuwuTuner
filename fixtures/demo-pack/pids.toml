@@ -17,3 +17,17 @@ data_type   = "uint8"
 scaling     = "iat_c"
 unit        = "C"
 default_log = true
+
+[[pid]]
+id             = "boost_actual"
+name           = "Manifold absolute pressure"
+ssm_address    = 0x00000D
+length         = 1
+data_type      = "uint8"
+scaling        = "boost_kpa"
+unit           = "kPa"
+default_log    = true
+# Live-to-table cross-ref (Issue #15): right-click the gauge for this
+# channel → jump to the boost target map. Demonstrates the link from
+# observed output (live MAP) to the table that drives it.
+produces_table = "boost_target_high_octane"

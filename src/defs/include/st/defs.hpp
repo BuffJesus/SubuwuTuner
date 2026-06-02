@@ -203,6 +203,11 @@ struct Table {
 };
 
 // A datalogger PID — addressed via SSM, scaled the same way as table values.
+// `produces_table` (optional) names the table whose output this PID surfaces
+// — e.g. a "Boost target (actual)" PID can declare produces_table =
+// "boost_target_high_octane". Live-to-table cross-reference (analyst Issue
+// #15): right-click a gauge → jump to the producing table. Empty when the
+// channel is a sensor reading with no controlling table (RPM, IAT, …).
 struct Pid {
     std::string id;
     std::string name;
@@ -212,6 +217,7 @@ struct Pid {
     std::string scaling;
     std::string unit;
     bool default_log{false};
+    std::string produces_table;
 };
 
 // A single-bit status flag in an SSM RAM byte. RomRaider numbers bits with

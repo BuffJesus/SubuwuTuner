@@ -91,6 +91,16 @@ void copy_rect_to_clipboard(st::Definition::TableData const &td, st::edit::Rect 
 void execute_action(AppState &state, ConfirmAction action, std::filesystem::path const &path);
 void request_action(AppState &state, ConfirmAction action, std::filesystem::path path = {});
 
+// Cross-reference jump from a non-table panel (gauge cluster, knock
+// overlay, log viewer) to the Table editor on a specific table id.
+// Switches workspace to Tune if not already, selects the table, focuses
+// the Table window, and toasts a not-in-this-pack result if the id is
+// missing. Returns true when the jump landed on a real table; false on
+// "no project" / "table id unknown" — caller can use this to disable a
+// menu item if desired (we render the menu unconditionally and let the
+// toast carry the failure since the user's intent is still legible).
+bool jump_to_table(AppState &state, std::string_view table_id);
+
 // CSV-import application. Modal preview consumes the parsed result and
 // commits it through this entry point.
 std::optional<std::string> apply_parsed_csv_edits(AppState &state,

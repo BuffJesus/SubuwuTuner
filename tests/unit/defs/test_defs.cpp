@@ -195,6 +195,51 @@ TEST_CASE("Definition parses identifications, axes, scalings, tables, pids", "[d
     REQUIRE(d.find_pid("rpm") != nullptr);
 }
 
+TEST_CASE("Pid.produces_table is optional and round-trips through TOML",
+          "[defs][parse][pid][produces_table]") {
+    // Live-to-table cross-reference (analyst Issue #15). PIDs that
+    // declare a producing table get the gauge-cluster right-click
+    // affordance. Optional → defaults to empty when unset, preserved
+    // verbatim when set.
+    auto const dr = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "produces-table-test"
+endianness = "big"
+
+[[scaling]]
+id        = "rpm_x1"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint16_be"
+
+[[pid]]
+id          = "rpm"
+ssm_address = 0x000008
+length      = 2
+data_type   = "uint16_be"
+scaling     = "rpm_x1"
+
+[[pid]]
+id             = "boost_actual"
+ssm_address    = 0x00000D
+length         = 1
+data_type      = "uint8"
+scaling        = "rpm_x1"
+produces_table = "boost_target_high_octane"
+)toml");
+    REQUIRE(dr.has_value());
+    auto const &d = *dr;
+    REQUIRE(d.pids().size() == 2);
+
+    auto const *rpm = d.find_pid("rpm");
+    REQUIRE(rpm != nullptr);
+    REQUIRE(rpm->produces_table.empty());
+
+    auto const *boost = d.find_pid("boost_actual");
+    REQUIRE(boost != nullptr);
+    REQUIRE(boost->produces_table == "boost_target_high_octane");
+}
+
 TEST_CASE("Table.role is optional and round-trips through TOML", "[defs][parse][role]") {
     // Two tables; one tagged with a role, the other intentionally
     // role-less. find_table_by_role should locate the tagged one and

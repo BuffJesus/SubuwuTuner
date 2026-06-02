@@ -9,7 +9,8 @@
 #include "actions.hpp"
 
 #include "app_state.hpp"
-#include "project_io.hpp" // open_project_dialog
+#include "panels/panels.hpp" // apply_workspace_mode, enqueue_toast
+#include "project_io.hpp"    // open_project_dialog
 
 #include "st/edit.hpp"
 
@@ -423,6 +424,41 @@ std::vector<std::vector<double>> parse_tsv(std::string_view text) {
         i = line_end;
     }
     return grid;
+}
+
+// Cross-reference jump from a gauge / overlay / log row → Table editor.
+// Pre-jump validation: a project must be open and the named table must
+// exist in its definition. Failures land as toasts so the user sees
+// *why* the click did nothing — silent no-ops are the second-worst UX
+// outcome after a crash. On success: workspace switches to Tune (so the
+// Table panel is visible), the selection is moved, and the Table window
+// is focus-requested so it surfaces in front of whatever the user had
+// docked over it.
+bool jump_to_table(AppState &state, std::string_view table_id) {
+    if (table_id.empty()) {
+        return false;
+    }
+    std::string const id{table_id};
+    if (!state.project.has_value()) {
+        enqueue_toast(state, ToastKind::Warn,
+                      "No project loaded — open a tune first, then try again.");
+        return false;
+    }
+    if (state.project->definition().find_table(id) == nullptr) {
+        enqueue_toast(state, ToastKind::Warn,
+                      "Table '" + id + "' isn't in this pack — channel and pack don't match.");
+        return false;
+    }
+    if (state.workspace_mode != WorkspaceMode::Tune) {
+        apply_workspace_mode(state, WorkspaceMode::Tune);
+    }
+    state.select_table(id);
+    // Focus the Table window so the editor surfaces. ImGui matches the
+    // raw title string passed to Begin(...) here — render_table_view
+    // uses "Table" with no id-suffix, so the literal does too.
+    ImGui::SetWindowFocus("Table");
+    enqueue_toast(state, ToastKind::Info, "Jumped to '" + id + "'.");
+    return true;
 }
 
 } // namespace st::ui
