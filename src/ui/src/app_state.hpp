@@ -627,6 +627,14 @@ struct AppState {
     // new profile mid-session.
     std::vector<st::profile::VehicleProfile> settings_profiles_cache;
     bool settings_profiles_loaded{false};
+    // Project metadata editor buffers (analyst polish — display_name +
+    // notes were previously only settable via project-new CLI). Loaded
+    // from the currently-open Project each time the Settings modal
+    // opens; flushed via Project::save_metadata on Save. Empty when
+    // no project is open.
+    char settings_project_display_name[256]{};
+    char settings_project_notes[1024]{};
+    bool settings_project_dirty{false};
 
     // Pack-registry browser modal (Tools -> Browse Definitions).
     bool show_def_registry_modal{false};

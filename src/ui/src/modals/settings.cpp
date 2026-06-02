@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 
@@ -48,6 +49,21 @@ void render_settings_modal(AppState &state) {
             state.settings_status_color = chip_fg_danger();
         }
         state.settings_loaded_once = true;
+        // Project metadata buffers — load from the currently open
+        // project. Empty when no project is loaded; the editor section
+        // below renders a hint in that case.
+        if (state.project.has_value()) {
+            std::snprintf(state.settings_project_display_name,
+                          sizeof state.settings_project_display_name, "%s",
+                          state.project->display_name().c_str());
+            std::snprintf(state.settings_project_notes,
+                          sizeof state.settings_project_notes, "%s",
+                          state.project->notes().c_str());
+        } else {
+            state.settings_project_display_name[0] = '\0';
+            state.settings_project_notes[0] = '\0';
+        }
+        state.settings_project_dirty = false;
         // Re-scan vehicle profiles every open — cheap (small dir) and
         // covers the user creating a new profile via the CLI while the
         // GUI is running.
@@ -82,6 +98,29 @@ void render_settings_modal(AppState &state) {
             std::filesystem::exists(st::config::default_config_path())
                 ? ""
                 : "\n(not present — defaults in use until first Save)");
+    }
+    ImGui::SameLine();
+    // Reveal in OS file browser — mirrors the audit panel's reveal
+    // button. Disabled when the config file hasn't been created yet
+    // (default-paths-in-use state).
+    bool const cfg_exists = std::filesystem::exists(st::config::default_config_path());
+    ImGui::BeginDisabled(!cfg_exists);
+    if (ImGui::SmallButton("Reveal##cfg_reveal")) {
+        std::string cmd;
+#if defined(_WIN32)
+        cmd = "explorer /select,\"" + cfg_path + "\"";
+#elif defined(__APPLE__)
+        cmd = "open -R \"" + cfg_path + "\"";
+#else
+        cmd = "xdg-open \"" + st::config::default_config_path().parent_path().string() + "\"";
+#endif
+        (void)std::system(cmd.c_str());
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip(cfg_exists
+                              ? "Reveal config.toml in the OS file browser."
+                              : "Click Save first to create the config file.");
     }
     ImGui::Dummy(ImVec2(0.0f, kSpaceS));
 
@@ -207,6 +246,34 @@ void render_settings_modal(AppState &state) {
 
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
     ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+
+    // -------- Project metadata --------------------------------------
+    // Display name + notes for the currently-open project. Empty when
+    // no project is loaded. Edits flush on the modal's Save button
+    // alongside the installer-paths so a single Save persists everything.
+    ImGui::TextUnformatted("Project metadata");
+    if (state.project.has_value()) {
+        ImGui::SetNextItemWidth(input_w);
+        if (ImGui::InputText("Display name##settings_proj_display",
+                             state.settings_project_display_name,
+                             sizeof state.settings_project_display_name)) {
+            state.settings_project_dirty = true;
+        }
+        ImGui::SetNextItemWidth(input_w);
+        if (ImGui::InputTextMultiline("Notes##settings_proj_notes",
+                                      state.settings_project_notes,
+                                      sizeof state.settings_project_notes,
+                                      ImVec2(input_w, 80.0f))) {
+            state.settings_project_dirty = true;
+        }
+        text_subtle("Stored in <project>/project.toml. Saved when you click Save below.");
+    } else {
+        text_subtle("Open a project first to edit its display name + notes.");
+    }
+
+    ImGui::Dummy(ImVec2(0.0f, kSpaceM));
+    ImGui::Separator();
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
 
     // Button-row convention (matches unsaved_modal, csv_import_modal,
@@ -252,6 +319,19 @@ void render_settings_modal(AppState &state) {
                     "Save failed: " + s.error().to_string();
                 state.settings_status_color = chip_fg_danger();
             }
+        }
+        // Project metadata side — independent of the config-file save.
+        // We only write project.toml when the user actually edited the
+        // fields; otherwise leave the on-disk mtime alone.
+        if (state.settings_project_dirty && state.project.has_value()) {
+            state.project->set_display_name(state.settings_project_display_name);
+            state.project->set_notes(state.settings_project_notes);
+            if (auto sp = state.project->save_metadata(); !sp.has_value()) {
+                state.settings_status_msg +=
+                    "  (project metadata save failed: " + sp.error().to_string() + ")";
+                state.settings_status_color = chip_fg_danger();
+            }
+            state.settings_project_dirty = false;
         }
     }
     ImGui::SameLine();
