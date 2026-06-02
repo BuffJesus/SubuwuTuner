@@ -71,6 +71,44 @@ std::optional<double> parse_fraction_or_percent(std::string_view raw);
 
 namespace {
 
+// Minimal JSON-string escape — used by every --json subcommand. Hand-
+// rolled to avoid pulling in a JSON library for output-only use. Per
+// RFC 8259 §7 the bare-minimum escapes are `\"`, `\\`, and `\u00XX`
+// for control chars < 0x20.
+void json_escape(std::string &out, std::string_view s) {
+    out.reserve(out.size() + s.size() + 2);
+    out.push_back('"');
+    for (char ch : s) {
+        auto const u = static_cast<unsigned char>(ch);
+        switch (ch) {
+        case '"':
+            out.append("\\\"");
+            break;
+        case '\\':
+            out.append("\\\\");
+            break;
+        case '\n':
+            out.append("\\n");
+            break;
+        case '\r':
+            out.append("\\r");
+            break;
+        case '\t':
+            out.append("\\t");
+            break;
+        default:
+            if (u < 0x20) {
+                char buf[8];
+                std::snprintf(buf, sizeof buf, "\\u%04X", u);
+                out.append(buf);
+            } else {
+                out.push_back(ch);
+            }
+        }
+    }
+    out.push_back('"');
+}
+
 constexpr std::string_view kUsage =
     "subuwutuner-cli — headless ECU calibration tool\n"
     "\n"
@@ -122,10 +160,13 @@ constexpr std::string_view kUsage =
     "                            1 = invalid (would be repaired on flash); 3 =\n"
     "                            algorithm not yet implemented for the declared\n"
     "                            kind. Read-only — never modifies the ROM file.\n"
-    "    rom-info [--def <pack.toml>] <FILE>\n"
+    "    rom-info [--def <pack.toml>] [--json] <FILE>\n"
     "                            Print size, CRC32, embedded ASCII strings of a ROM.\n"
     "                            With --def, also identify the ROM against the pack\n"
-    "                            and summarize its tables.\n"
+    "                            and summarize its tables. --json emits a one-line\n"
+    "                            subuwutuner.rom-info.v1 object instead (skips the\n"
+    "                            ASCII listing — text mode is for exploratory\n"
+    "                            browsing, JSON for CI scripts).\n"
     "    dump-axis --def <pack.toml> --axis <id> [--csv] <FILE>\n"
     "                            Read the named axis from the ROM via the pack and\n"
     "                            print its scaled values, one per line.\n"
@@ -4686,9 +4727,122 @@ int cmd_checksum_verify(int argc, char *argv[]) {
     return 1;
 }
 
+// Extract the printable Subaru CID from a ROM if present, or empty.
+// Mirrors print_subaru_cid's validation logic without printing.
+[[nodiscard]] std::string extract_subaru_cid(st::Rom const &rom) {
+    if (rom.size() < kSubaruCidOffset + kSubaruCidLength) {
+        return {};
+    }
+    auto const data = rom.data();
+    bool in_trailing_nul = false;
+    std::string cid;
+    cid.reserve(kSubaruCidLength);
+    for (std::size_t i = 0; i < kSubaruCidLength; ++i) {
+        auto const b = data[kSubaruCidOffset + i];
+        if (in_trailing_nul) {
+            if (b != 0)
+                return {};
+            continue;
+        }
+        if (b == 0 && i > 0) {
+            in_trailing_nul = true;
+            continue;
+        }
+        if (b < 0x20 || b > 0x7E)
+            return {};
+        cid.push_back(static_cast<char>(b));
+    }
+    return cid;
+}
+
+// `rom-info --json` emit. Schema subuwutuner.rom-info.v1. Mirrors the
+// text-mode fields a CI script would gate on (size, crc32, CID,
+// pack-match) but skips the ASCII-string listing — too noisy for
+// machine consumption, the text mode covers exploratory browsing.
+int cmd_rom_info_json(std::filesystem::path const &rom_path,
+                      std::optional<std::filesystem::path> const &def_path) {
+    auto const rom = st::Rom::from_file(rom_path);
+    if (!rom.has_value()) {
+        // Emit a minimal error-shape JSON so callers can still parse.
+        std::string out{"{\"schema\":\"subuwutuner.rom-info.v1\","
+                        "\"file\":"};
+        json_escape(out, rom_path.string());
+        out.append(",\"error\":");
+        json_escape(out, rom.error().to_string());
+        out.append("}\n");
+        std::fputs(out.c_str(), stdout);
+        return 1;
+    }
+
+    std::string out;
+    out.reserve(1024);
+    out.append("{\"schema\":\"subuwutuner.rom-info.v1\",\"file\":");
+    json_escape(out, rom_path.string());
+    out.append(",\"size\":");
+    out.append(std::to_string(rom->size()));
+    out.append(",\"crc32\":");
+    out.append(std::to_string(rom->crc32()));
+    {
+        auto const cid = extract_subaru_cid(*rom);
+        if (!cid.empty()) {
+            out.append(",\"subaru_cid\":");
+            json_escape(out, cid);
+        } else {
+            out.append(",\"subaru_cid\":null");
+        }
+    }
+
+    if (def_path.has_value()) {
+        auto const def = st::Definition::from_file(resolve_def_path(*def_path));
+        if (!def.has_value()) {
+            out.append(",\"pack\":{\"path\":");
+            json_escape(out, def_path->string());
+            out.append(",\"error\":");
+            json_escape(out, def.error().to_string());
+            out.append("}}\n");
+            std::fputs(out.c_str(), stdout);
+            return 1;
+        }
+        auto const &pack = def->pack();
+        out.append(",\"pack\":{\"path\":");
+        json_escape(out, def_path->string());
+        out.append(",\"id\":");
+        json_escape(out, pack.id);
+        out.append(",\"display_name\":");
+        json_escape(out, pack.display_name);
+        out.append(",\"platform\":");
+        json_escape(out, pack.platform);
+        out.append(",\"expected_rom_size\":");
+        out.append(std::to_string(pack.rom_size_bytes));
+        out.append(",\"size_mismatch\":");
+        out.append((pack.rom_size_bytes != 0 && rom->size() != pack.rom_size_bytes) ? "true"
+                                                                                    : "false");
+        auto const info = def->match_info(*rom);
+        if (info.has_value()) {
+            out.append(",\"match\":{\"name\":");
+            json_escape(out, info->name);
+            out.append(",\"offset\":");
+            out.append(std::to_string(info->offset));
+            out.append(",\"scanned\":");
+            out.append(info->scanned ? "true" : "false");
+            out.append("}");
+        } else {
+            out.append(",\"match\":null");
+        }
+        out.append("}");
+    } else {
+        out.append(",\"pack\":null");
+    }
+
+    out.append("}\n");
+    std::fputs(out.c_str(), stdout);
+    return 0;
+}
+
 int cmd_rom_info(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
     std::optional<std::filesystem::path> rom_path;
+    bool json_mode = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -4698,6 +4852,8 @@ int cmd_rom_info(int argc, char *argv[]) {
                 return 2;
             }
             def_path = std::filesystem::path{argv[++i]};
+        } else if (a == "--json") {
+            json_mode = true;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "rom-info: unknown option: %s\n", argv[i]);
             return 2;
@@ -4711,8 +4867,13 @@ int cmd_rom_info(int argc, char *argv[]) {
 
     if (!rom_path.has_value()) {
         std::fputs("rom-info: missing ROM path\n", stderr);
-        std::fputs("Usage: subuwutuner-cli rom-info [--def <pack.toml>] <FILE>\n", stderr);
+        std::fputs("Usage: subuwutuner-cli rom-info [--def <pack.toml>] [--json] <FILE>\n",
+                   stderr);
         return 2;
+    }
+
+    if (json_mode) {
+        return cmd_rom_info_json(*rom_path, def_path);
     }
 
     auto const rom = st::Rom::from_file(*rom_path);
@@ -9123,44 +9284,6 @@ void doctor_section_rom(DoctorReport &r, std::optional<std::filesystem::path> co
         std::printf("       - %s  (%s)\n", id.c_str(), name.c_str());
     }
     r.note(DoctorStatus::Ok);
-}
-
-// Minimal JSON-string escape: backslash-quote, backslash, and control chars.
-// Hand-rolled to avoid pulling in a JSON library for a single subcommand's
-// machine-readable output mode. Per RFC 8259 §7 the bare-minimum escapes are
-// `\"`, `\\`, and `\u00XX` for control chars < 0x20.
-void json_escape(std::string &out, std::string_view s) {
-    out.reserve(out.size() + s.size() + 2);
-    out.push_back('"');
-    for (char ch : s) {
-        auto const u = static_cast<unsigned char>(ch);
-        switch (ch) {
-        case '"':
-            out.append("\\\"");
-            break;
-        case '\\':
-            out.append("\\\\");
-            break;
-        case '\n':
-            out.append("\\n");
-            break;
-        case '\r':
-            out.append("\\r");
-            break;
-        case '\t':
-            out.append("\\t");
-            break;
-        default:
-            if (u < 0x20) {
-                char buf[8];
-                std::snprintf(buf, sizeof buf, "\\u%04X", u);
-                out.append(buf);
-            } else {
-                out.push_back(ch);
-            }
-        }
-    }
-    out.push_back('"');
 }
 
 char const *doctor_status_str(DoctorStatus s) noexcept {
