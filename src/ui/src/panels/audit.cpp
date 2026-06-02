@@ -35,6 +35,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -176,6 +177,34 @@ void render_audit_panel(AppState &state) {
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Re-read the project's audit.log from disk.");
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!state.project.has_value());
+    if (ImGui::Button("Open log location##audit_reveal")) {
+        // Open the project dir in the OS file explorer, selecting the
+        // audit.log file when possible. Windows: explorer /select,
+        // <path>. macOS: open -R. Linux: xdg-open the parent.
+        if (state.project.has_value()) {
+            auto const log_path = state.project->dir() / "audit.log";
+            std::string cmd;
+#if defined(_WIN32)
+            cmd = "explorer /select,\"" + log_path.string() + "\"";
+#elif defined(__APPLE__)
+            cmd = "open -R \"" + log_path.string() + "\"";
+#else
+            cmd = "xdg-open \"" + state.project->dir().string() + "\"";
+#endif
+            // std::system inherits the parent's stdio + blocks until
+            // the shell returns. Explorer/Finder/xdg-open spawn and
+            // detach quickly, so this is fine for a one-shot reveal.
+            (void)std::system(cmd.c_str());
+        }
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Reveal <project>/audit.log in the OS file\n"
+                          "browser. Useful for archiving / mailing /\n"
+                          "tail-following from a terminal.");
     }
     ImGui::SameLine();
     ImGui::BeginDisabled(state.audit_entries.empty());
