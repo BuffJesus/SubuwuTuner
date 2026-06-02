@@ -12,6 +12,7 @@
 #include "app_state.hpp"
 #include "widgets/widgets.hpp"
 
+#include "st/audit.hpp"
 #include "st/defs.hpp"
 #include "st/edit.hpp"
 
@@ -21,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace st::ui {
 
@@ -55,6 +57,90 @@ void render_dtcs_panel(AppState &state) {
     }
     text_subtle("%zu DTC(s), %zu emissions-flagged", def.dtcs().size(), emissions_total);
     glossary_tooltip_for(state, "DTC");
+
+    // Bulk-toggle row — covers the two common workflows:
+    //   "Disable all emissions"  — emissions-delete; rolls all
+    //                              emissions-flagged DTCs OFF in one
+    //                              ByteEdit so Ctrl+Z reverses the
+    //                              entire batch.
+    //   "Enable all"             — restore to "everything reporting"
+    //                              (factory-ish state).
+    auto const bulk_toggle = [&](char const *label, bool emissions_only,
+                                 bool enable, char const *desc_prefix) {
+        std::vector<st::edit::ByteEdit::Change> changes;
+        std::vector<std::string> codes;
+        codes.reserve(def.dtcs().size());
+        for (auto const &d : def.dtcs()) {
+            if (emissions_only && !d.emissions_relevant)
+                continue;
+            auto const *bm = def.find_dtc_bitmap(d.bitmap_id);
+            if (bm == nullptr)
+                continue;
+            auto const cur = st::is_dtc_enabled(state.project->working_rom(), *bm, d);
+            if (!cur.has_value())
+                continue;
+            if (*cur == enable)
+                continue; // already in the desired state — skip
+            auto change = st::set_dtc_enabled(state.project->working_rom(), *bm, d, enable);
+            if (!change.has_value())
+                continue;
+            if (change->before != change->after) {
+                changes.push_back({change->address, change->before, change->after});
+                codes.push_back(d.code);
+            }
+        }
+        if (changes.empty()) {
+            enqueue_toast(state, ToastKind::Info,
+                          std::string{label} + ": nothing to change.");
+            return;
+        }
+        std::string desc{desc_prefix};
+        desc += " (" + std::to_string(codes.size()) + " DTC";
+        if (codes.size() != 1)
+            desc += "s";
+        desc += ")";
+        state.project->history().record(
+            st::edit::Edit::bytes(std::move(changes), std::move(desc)));
+        state.dirty = true;
+        state.status_msg = std::string{label} + ": " +
+                           std::to_string(codes.size()) + " DTC(s) toggled.";
+        if (state.audit_log.has_value()) {
+            (void)state.audit_log->log(
+                st::audit::EntryKind::EditCommitted, "ui.dtcs",
+                std::string{desc_prefix},
+                {{"count", std::to_string(codes.size())},
+                 {"scope", emissions_only ? "emissions" : "all"}});
+        }
+    };
+    if (ImGui::SmallButton("Disable all emissions")) {
+        bulk_toggle("Disable all emissions", /*emissions_only=*/true, /*enable=*/false,
+                    "disable all emissions DTCs");
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Roll every emissions-flagged DTC to OFF in one\n"
+                          "history step. Ctrl+Z reverses the whole batch.\n"
+                          "Common emissions-delete workflow.");
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Enable all")) {
+        bulk_toggle("Enable all", /*emissions_only=*/false, /*enable=*/true,
+                    "enable all DTCs");
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Roll every DTC to ON in one history step.\n"
+                          "Useful to restore factory-ish reporting state.");
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Disable all")) {
+        bulk_toggle("Disable all", /*emissions_only=*/false, /*enable=*/false,
+                    "disable all DTCs");
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Roll every DTC to OFF in one history step.\n"
+                          "Aggressive — silences EVERY trouble code,\n"
+                          "not just emissions.");
+    }
+
     ImGui::Separator();
 
     // Filter input — substring against the code or name. Same shape as the
