@@ -423,6 +423,47 @@ void render_compare_panel(AppState &state) {
     if (ImGui::Button("\xEE\x9C\xA0  Compare", ImVec2(120.0f, 0.0f))) { // E700 GlobalNav
         recompute_compare(state);
     }
+    ImGui::SameLine();
+    // Export CSV — write the cached compare_result to a file. Useful
+    // for sharing tune diffs in PRs, attaching to support threads,
+    // or feeding into downstream analysis. Uses st::diff::render_csv
+    // so the wire format matches `subuwutuner-cli diff --format csv`.
+    ImGui::BeginDisabled(!state.compare_result.has_value());
+    if (ImGui::Button("Export CSV…", ImVec2(120.0f, 0.0f))) {
+        NFD::UniquePath out;
+        nfdfilteritem_t const filters[] = {{"CSV", "csv"}};
+        nfdresult_t const r =
+            NFD::SaveDialog(out, filters, 1, nullptr, "rom-diff.csv");
+        if (r == NFD_OKAY) {
+            std::filesystem::path const target{out.get()};
+            std::ofstream fh{target, std::ios::binary};
+            if (!fh) {
+                state.compare_error_msg = "Export CSV: cannot open " + target.string();
+            } else {
+                auto const csv = st::diff::render_csv(*state.compare_result,
+                                                      state.compare_include_identical);
+                fh << csv;
+                if (!fh) {
+                    state.compare_error_msg = "Export CSV: write failed";
+                } else {
+                    enqueue_toast(state, ToastKind::Success,
+                                  "Wrote " + target.string());
+                }
+            }
+        } else if (r == NFD_ERROR) {
+            state.compare_error_msg =
+                std::string{"Export CSV dialog error: "} + NFD::GetError();
+        }
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        if (state.compare_result.has_value()) {
+            ImGui::SetTooltip("Write the current diff to a CSV file.\n"
+                              "Same format as `subuwutuner-cli diff --format csv`.");
+        } else {
+            ImGui::SetTooltip("Run Compare first to enable export.");
+        }
+    }
 
     if (!state.compare_error_msg.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
