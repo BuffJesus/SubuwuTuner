@@ -109,6 +109,7 @@ add_executable(subuwutuner-gui
     src/panels/dtcs.cpp
     src/panels/ebcs.cpp
     src/panels/features_designer.cpp
+    src/panels/gauge_cluster.cpp
     src/panels/history.cpp
     src/panels/knock_dashboard.cpp
     src/panels/menubar.cpp

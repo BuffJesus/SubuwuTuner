@@ -281,6 +281,15 @@ void render_menubar(AppState &state) {
                                   "heuristic Kp/Ki/Kd gain-adjustment suggestions.\n"
                                   "Advisory only — verify on a dyno. See docs/05 §11.");
             }
+            ImGui::MenuItem("Gauge Cluster (live)", nullptr,
+                            &state.show_gauge_cluster_panel);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Live gauge cluster with headline values + ImPlot\n"
+                                  "mini-line history per channel. v1 ships with a\n"
+                                  "synthetic demo data feed so the panel works without\n"
+                                  "a connected ECU; real-transport hookup lands as a\n"
+                                  "follow-up. See docs/32-live-datalogger.md.");
+            }
             ImGui::Separator();
             if (ImGui::BeginMenu("Theme")) {
                 bool const is_dark = state.settings.theme == Theme::Dark;

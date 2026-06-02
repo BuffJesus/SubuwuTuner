@@ -247,6 +247,7 @@ int main(int argc, char *argv[]) {
         render_adaptive_history_panel(state);
         render_coldstart_panel(state);
         render_ebcs_panel(state);
+        render_gauge_cluster_panel(state);
         render_features_designer(state);
         render_status_bar(state);
         // Toasts last so they layer over panels + the status bar's

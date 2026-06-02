@@ -58,6 +58,7 @@ void render_knock_dashboard_panel(AppState &state);
 void render_adaptive_history_panel(AppState &state);
 void render_coldstart_panel(AppState &state);
 void render_ebcs_panel(AppState &state);
+void render_gauge_cluster_panel(AppState &state);
 void render_dtcs_panel(AppState &state);
 void render_history_panel(AppState &state);
 void render_features_designer(AppState &state);

@@ -20,6 +20,7 @@
 #include "st/log/coldstart.hpp"
 #include "st/log/ebcs.hpp"
 #include "st/log/knock_dashboard.hpp"
+#include "st/log/live_buffer.hpp"
 #include "st/project.hpp"
 
 #include <imgui.h> // ImVec2 / ImVec4 in features-designer + settings fields
@@ -331,6 +332,36 @@ struct AppState {
     int ebcs_ts_unit{0};
     std::optional<st::log::ebcs::BoostSnapshot> ebcs_snapshot;
     std::string ebcs_compute_msg;
+
+    // Live gauge cluster panel — docs/32-live-datalogger.md.
+    // The buffer is held by unique_ptr so it can be constructed
+    // lazily (channels picked + capacity sized at session-start
+    // time, not main()-time). The demo session is a worker thread
+    // that injects synthetic samples for development + visual
+    // smoke-tests until the real-transport hookup lands.
+    bool show_gauge_cluster_panel{false};
+    std::unique_ptr<st::log::LiveBuffer> gauge_buffer;
+    std::atomic<bool> gauge_demo_running{false};
+    std::atomic<bool> gauge_demo_stop{false};
+    std::thread gauge_demo_thread;
+    std::string gauge_status_msg;
+    // Per-channel display metadata for the 4 demo channels (RPM, MAP,
+    // TPS, IAT). When the real-transport hookup lands these become
+    // pack-driven (LogChannel + future redline/warn fields).
+    struct GaugeMeta {
+        char const *name;
+        char const *units;
+        double redline;    // shade above this in the mini-line band
+        double warn_above; // shade between this and redline (amber)
+        double warn_below; // shade below this (amber) — for AFR-style channels
+        double display_min; // y-axis low bound
+        double display_max; // y-axis high bound
+    };
+    // Demo cadence (samples / second). Live mode reads this from the
+    // pack's [[log_channel]] cycle hint once that's defined.
+    int gauge_demo_hz{50};
+    // History window the mini-line plot shows, in seconds.
+    float gauge_history_seconds{30.0f};
 
     // History-panel filter buffer. Substring-matched (case-insensitive)
     // against the edit's table_id.
