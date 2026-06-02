@@ -54,6 +54,7 @@ void render_dtcs_panel(AppState &state) {
             ++emissions_total;
     }
     text_subtle("%zu DTC(s), %zu emissions-flagged", def.dtcs().size(), emissions_total);
+    glossary_tooltip_for(state, "DTC");
     ImGui::Separator();
 
     // Filter input — substring against the code or name. Same shape as the

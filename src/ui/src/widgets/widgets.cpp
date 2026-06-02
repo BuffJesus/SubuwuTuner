@@ -21,7 +21,13 @@
 #include <cctype>
 #include <cstdarg>
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace st::ui {
 
@@ -296,6 +302,136 @@ bool typed_phrase_gate(char *buffer, std::size_t buffer_size,
         ImGui::PopStyleColor();
     }
     return matches;
+}
+
+namespace {
+
+// Strip ASCII whitespace from both ends of a string_view.
+std::string_view trim_ws(std::string_view s) {
+    while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
+        s.remove_prefix(1);
+    while (!s.empty() && (s.back() == ' ' || s.back() == '\t'))
+        s.remove_suffix(1);
+    return s;
+}
+
+// Lazy-load the glossary from docs/10-glossary.md into state.
+// Idempotent: returns immediately when already loaded. No-op when
+// state.docs_dir wasn't resolved (packaged install without docs).
+//
+// Mirrors the parser in modals/help.cpp::parse_glossary — duplicated
+// here because widgets/ can't depend on modals/. If glossary parsing
+// ever grows non-trivial, extract to its own translation unit.
+void ensure_glossary_loaded(AppState &state) {
+    if (!state.glossary_terms.empty()) {
+        return;
+    }
+    if (!state.docs_dir.has_value()) {
+        return;
+    }
+    auto const path = *state.docs_dir / "10-glossary.md";
+    std::ifstream in{path, std::ios::binary};
+    if (!in) {
+        return;
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    auto const body = std::move(ss).str();
+    std::size_t i = 0;
+    while (i < body.size()) {
+        std::size_t line_end = body.find('\n', i);
+        if (line_end == std::string::npos) {
+            line_end = body.size();
+        }
+        std::string_view line{body.data() + i, line_end - i};
+        i = line_end + 1;
+        if (!line.empty() && line.back() == '\r') {
+            line.remove_suffix(1);
+        }
+        if (line.size() < 3 || line.front() != '|') {
+            continue;
+        }
+        bool sep_only = true;
+        for (char c : line) {
+            if (c != '|' && c != '-' && c != ':' && c != ' ' && c != '\t') {
+                sep_only = false;
+                break;
+            }
+        }
+        if (sep_only) {
+            continue;
+        }
+        std::vector<std::string_view> cells;
+        std::size_t start = 1;
+        for (std::size_t j = 1; j < line.size(); ++j) {
+            if (line[j] == '|') {
+                cells.push_back(line.substr(start, j - start));
+                start = j + 1;
+            }
+        }
+        if (cells.size() < 2) {
+            continue;
+        }
+        std::string term{trim_ws(cells[0])};
+        std::string defn{trim_ws(cells[1])};
+        if (term.size() >= 4 && term.starts_with("**") && term.ends_with("**")) {
+            term = term.substr(2, term.size() - 4);
+        }
+        std::string lower = term;
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        if (lower == "term" || lower == "meaning" || term.empty() || defn.empty()) {
+            continue;
+        }
+        state.glossary_terms.emplace_back(std::move(term), std::move(defn));
+    }
+    // Mark loaded even if zero rows landed — prevents re-reading
+    // unparseable files every hover. Push a sentinel only if empty.
+    if (state.glossary_terms.empty()) {
+        state.glossary_terms.emplace_back("", "");
+    }
+}
+
+// Case-insensitive equality.
+bool ieq(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(a[i])) !=
+            std::tolower(static_cast<unsigned char>(b[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+void glossary_tooltip_for(AppState &state, std::string_view term) {
+    if (!ImGui::IsItemHovered()) {
+        return;
+    }
+    if (term.empty()) {
+        return;
+    }
+    ensure_glossary_loaded(state);
+    for (auto const &[t, d] : state.glossary_terms) {
+        if (t.empty()) // sentinel from empty-load — skip
+            continue;
+        if (ieq(t, term)) {
+            ImGui::BeginTooltip();
+            ImGui::PushStyleColor(ImGuiCol_Text, accent_for(current_theme()).base);
+            ImGui::TextUnformatted(t.c_str());
+            ImGui::PopStyleColor();
+            ImGui::Separator();
+            ImGui::PushTextWrapPos(420.0f);
+            ImGui::TextUnformatted(d.c_str());
+            ImGui::PopTextWrapPos();
+            ImGui::EndTooltip();
+            return;
+        }
+    }
 }
 
 } // namespace st::ui

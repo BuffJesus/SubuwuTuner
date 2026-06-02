@@ -85,6 +85,18 @@ void preview_pill();
 // filters; in widgets/ so future panels can reuse without a copy-paste.
 bool icontains(std::string_view hay, std::string_view needle) noexcept;
 
+// Glossary tooltip popover (analyst Issue #22). Call after a text /
+// label item that might describe a tuning term. When the user hovers
+// the previous item AND the term matches an entry in the project's
+// glossary (parsed lazily from <docs_dir>/10-glossary.md), pops a
+// markdown-rendered definition as an ImGui tooltip. Silent no-op if
+// the term isn't in the glossary or docs aren't located. Defined in
+// widgets.cpp; declared here in widgets.hpp because the AppState-
+// dependent helper would otherwise pull app_state.hpp into every
+// translation unit.
+struct AppState;
+void glossary_tooltip_for(AppState &state, std::string_view term);
+
 // Map an autotune lint-kind enum to a fix-oriented phrase for end-user
 // display. Library-side `lint_kind_name` returns kebab-cased technical
 // terms; this wrapper produces something the tuner can act on.

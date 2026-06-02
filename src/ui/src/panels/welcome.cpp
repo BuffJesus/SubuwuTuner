@@ -77,6 +77,7 @@ void render_welcome_panel(AppState &state) {
     }
 
     text_centered_subtle("Open a Subaru ECU tune to read, edit, and flash.");
+    glossary_tooltip_for(state, "ECU");
     ImGui::Dummy(ImVec2(0.0f, 28.0f));
 
     constexpr float kBtnW = 240.0f;

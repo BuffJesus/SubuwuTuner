@@ -53,6 +53,7 @@ void render_knock_dashboard_panel(AppState &state) {
     ImGui::SameLine();
     text_subtle("Per-cylinder knock from a CSV datalog. "
                 "See docs/05-improvements.md §11.");
+    glossary_tooltip_for(state, "Datalog");
     ImGui::Separator();
 
     // ---- Log + Browse -------------------------------------------------
