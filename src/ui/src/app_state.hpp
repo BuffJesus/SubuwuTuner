@@ -409,6 +409,13 @@ struct AppState {
     std::string compare_error_msg;
     float compare_epsilon{0.0f};
     bool compare_include_identical{false};
+    // Category / safety filter chip (sprint 3). Empty = no filter.
+    // Reserved values:
+    //   "@safety"     — engine-safety-critical tables only
+    //   "@emissions"  — emissions-relevant tables only
+    //   "@flagged"    — either flag set
+    // Any other value matches Table::category from the pack.
+    char compare_filter_chip[64]{};
 
     // Audit log viewer panel (analyst Issue #8). Reads the project's
     // <project>/audit.log via st::audit::read_all() into entries, with

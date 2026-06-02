@@ -586,6 +586,67 @@ void render_compare_panel(AppState &state) {
     // Changed-tables tree.
     if (!d.tables.empty()) {
         ImGui::Spacing();
+
+        // Filter chips. @safety / @emissions / @flagged are always
+        // surfaced because they're universally meaningful. Category
+        // chips are derived from changed-tables' Table::category in
+        // the loaded pack — so a project's actual table categorization
+        // drives the chip set without code changes.
+        auto const chip_button = [&](char const *label, char const *val) {
+            bool const active = (std::string_view{state.compare_filter_chip} == val);
+            if (active) {
+                push_primary_button_colors();
+            }
+            ImGui::PushID(val);
+            if (ImGui::SmallButton(label)) {
+                if (active) {
+                    state.compare_filter_chip[0] = '\0';
+                } else {
+                    std::snprintf(state.compare_filter_chip,
+                                  sizeof state.compare_filter_chip, "%s", val);
+                }
+            }
+            ImGui::PopID();
+            if (active) {
+                pop_primary_button_colors();
+            }
+            ImGui::SameLine();
+        };
+        chip_button("All", "");
+        chip_button("Safety-critical", "@safety");
+        chip_button("Emissions", "@emissions");
+        chip_button("Either flag", "@flagged");
+        // Category chips — one per distinct Table::category present in
+        // the changed tables (looked up against the live pack so a pack
+        // swap reflows them).
+        std::vector<std::string_view> categories;
+        if (state.project.has_value()) {
+            auto const &def = state.project->definition();
+            for (auto const &td : d.tables) {
+                if (!td.changed() && !state.compare_include_identical)
+                    continue;
+                auto const *tbl = def.find_table(td.table_id);
+                if (tbl == nullptr || tbl->category.empty())
+                    continue;
+                bool dup = false;
+                for (auto c : categories) {
+                    if (c == tbl->category) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (!dup) {
+                    categories.push_back(tbl->category);
+                }
+            }
+            std::sort(categories.begin(), categories.end());
+        }
+        for (auto cat : categories) {
+            std::string const cat_str{cat};
+            chip_button(cat_str.c_str(), cat_str.c_str());
+        }
+        ImGui::NewLine();
+
         // Sort by cells_changed desc so the biggest changes float to
         // the top; ties broken by table_id for stability across renders.
         std::vector<st::diff::TableDelta const *> sorted;
@@ -601,6 +662,8 @@ void render_compare_panel(AppState &state) {
                   });
 
         std::string open_id;
+        std::string_view const chip{state.compare_filter_chip};
+        std::size_t shown = 0;
         for (auto const *t : sorted) {
             // include_identical=true surfaces unchanged tables too;
             // collapse them into a "(no changes)" line so the user can
@@ -608,9 +671,32 @@ void render_compare_panel(AppState &state) {
             if (!t->changed() && !state.compare_include_identical) {
                 continue;
             }
+            // Chip filter — applied before render. Empty chip lets
+            // everything through.
+            if (!chip.empty()) {
+                bool pass = false;
+                if (chip == "@safety") {
+                    pass = t->engine_safety_critical;
+                } else if (chip == "@emissions") {
+                    pass = t->emissions_relevant;
+                } else if (chip == "@flagged") {
+                    pass = t->engine_safety_critical || t->emissions_relevant;
+                } else if (state.project.has_value()) {
+                    auto const *tbl =
+                        state.project->definition().find_table(t->table_id);
+                    pass = (tbl != nullptr && tbl->category == chip);
+                }
+                if (!pass)
+                    continue;
+            }
+            ++shown;
             if (render_table_row(state, *t)) {
                 open_id = t->table_id;
             }
+        }
+        if (!chip.empty()) {
+            text_subtle("%zu of %zu changed tables match the filter.", shown,
+                        d.tables_changed);
         }
         // Defer the select_table call until after the loop so we don't
         // mutate state mid-render (select_table may rebuild the side
