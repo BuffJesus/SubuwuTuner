@@ -13,6 +13,8 @@
 #include "widgets/adapter_picker.hpp"
 #include "widgets/widgets.hpp"
 
+#include "st/audit.hpp"
+#include "st/core/crc32.hpp"
 #include "st/core/result.hpp"
 #include "st/ecu/security_key.hpp"
 #include "st/ecu/ssm.hpp"
@@ -75,6 +77,48 @@ void render_read_rom_modal(AppState &state) {
     if (state.read_rom_worker.joinable() &&
         state.read_rom_state != AppState::ReadRomState::Running) {
         state.read_rom_worker.join();
+    }
+
+    // Outcome audit hook (analyst Issue #8). Fires once per Done /
+    // Failed / Cancelled transition. The read_rom_outcome_audited
+    // flag prevents re-appending the same entry every frame while the
+    // user reviews the completed-modal screen.
+    if (!state.read_rom_outcome_audited && state.audit_log.has_value() &&
+        (state.read_rom_state == AppState::ReadRomState::Done ||
+         state.read_rom_state == AppState::ReadRomState::Failed ||
+         state.read_rom_state == AppState::ReadRomState::Cancelled)) {
+        state.read_rom_outcome_audited = true;
+        st::audit::EntryKind kind = st::audit::EntryKind::RomReadCompleted;
+        std::string description = "ECU ROM read completed";
+        std::vector<std::pair<std::string, std::string>> fields;
+        if (state.read_rom_state == AppState::ReadRomState::Done) {
+            char bytes_buf[24];
+            std::snprintf(bytes_buf, sizeof bytes_buf, "%zu",
+                          state.read_rom_bytes_result.size());
+            fields.emplace_back("bytes", bytes_buf);
+            if (!state.read_rom_bytes_result.empty()) {
+                auto const crc = st::crc32(state.read_rom_bytes_result);
+                char crc_buf[16];
+                std::snprintf(crc_buf, sizeof crc_buf, "0x%08X", crc);
+                fields.emplace_back("crc32", crc_buf);
+            }
+        } else if (state.read_rom_state == AppState::ReadRomState::Failed) {
+            kind = st::audit::EntryKind::RomReadFailed;
+            description = "ECU ROM read failed";
+            if (!state.read_rom_error_msg.empty()) {
+                fields.emplace_back("error", state.read_rom_error_msg);
+            }
+        } else {
+            kind = st::audit::EntryKind::RomReadCancelled;
+            description = "ECU ROM read cancelled by user";
+        }
+        (void)state.audit_log->log(kind, "ui.read_rom", std::move(description),
+                                    std::move(fields));
+    }
+    // Reset the audited flag when the modal returns to Idle so a
+    // subsequent read fires its own outcome entry.
+    if (state.read_rom_state == AppState::ReadRomState::Idle) {
+        state.read_rom_outcome_audited = false;
     }
 
     auto const elapsed_str = [&] {
@@ -258,7 +302,26 @@ void render_read_rom_modal(AppState &state) {
                 state.read_rom_total_bytes = std::make_shared<std::atomic<std::uint32_t>>(size);
                 state.read_rom_cancel = std::make_shared<std::atomic<bool>>(false);
                 state.read_rom_state = AppState::ReadRomState::Running;
+                state.read_rom_outcome_audited = false;
                 state.read_rom_start_time = std::chrono::steady_clock::now();
+                // Append the read-started entry on the UI thread before
+                // we hand off to the worker (analyst Issue #8). Worker
+                // thread can't touch audit_log safely — the AuditLog
+                // class is documented not thread-safe for concurrent
+                // append. UI thread fires the outcome entry on join.
+                if (state.audit_log.has_value()) {
+                    char fields_addr[24];
+                    char fields_size[24];
+                    std::snprintf(fields_addr, sizeof fields_addr, "0x%08X", base_addr);
+                    std::snprintf(fields_size, sizeof fields_size, "0x%X", size);
+                    (void)state.audit_log->log(
+                        st::audit::EntryKind::RomReadStarted, "ui.read_rom",
+                        "ECU ROM read started",
+                        {{"base_address", fields_addr},
+                         {"size_bytes", fields_size},
+                         {"protocol", state.read_rom_protocol == 0 ? "SSM" : "UDS"},
+                         {"adapter", trace_mode ? "trace-replay" : "live"}});
+                }
 
                 AppState *st_ptr = &state;
                 int const max_chunk = state.read_rom_max_chunk;

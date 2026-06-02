@@ -73,6 +73,15 @@ enum class EntryKind : std::uint8_t {
     ProjectSaved,
     EditCommitted,
     AutotuneCommitted,
+    // ROM-read-from-car lifecycle (analyst Issue #8, GUI slice). The
+    // counterpart to Flash* — captures every read operation against
+    // the connected ECU. RomReadCompleted records the read size +
+    // CRC32 so post-hoc verification of "did we ever pull this ROM"
+    // doesn't depend on disk artifacts.
+    RomReadStarted,
+    RomReadCompleted,
+    RomReadFailed,
+    RomReadCancelled,
 };
 
 [[nodiscard]] std::string_view kind_name(EntryKind k) noexcept;

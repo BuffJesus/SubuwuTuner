@@ -46,6 +46,10 @@ constexpr KindNamePair kKindNames[] = {
     {EntryKind::ProjectSaved, "project.saved"},
     {EntryKind::EditCommitted, "project.edit_committed"},
     {EntryKind::AutotuneCommitted, "project.autotune_committed"},
+    {EntryKind::RomReadStarted, "rom.read_started"},
+    {EntryKind::RomReadCompleted, "rom.read_completed"},
+    {EntryKind::RomReadFailed, "rom.read_failed"},
+    {EntryKind::RomReadCancelled, "rom.read_cancelled"},
 };
 
 void json_escape(std::string &out, std::string_view s) {

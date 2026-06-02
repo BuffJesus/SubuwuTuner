@@ -542,6 +542,12 @@ struct AppState {
         Cancelled,
     };
     ReadRomState read_rom_state{ReadRomState::Idle};
+    // One-shot flag set when the read-rom modal has already appended
+    // an audit entry for the current Done/Failed/Cancelled outcome
+    // (analyst Issue #8). Without this we'd append the same outcome
+    // entry every frame until the user dismisses the modal back to
+    // Idle. Reset when the state machine returns to Idle.
+    bool read_rom_outcome_audited{false};
     AdapterPickerState read_rom_adapter{};
     char read_rom_base_addr_hex[32]{"0x0"};
     char read_rom_size_hex[32]{"0x200000"};
