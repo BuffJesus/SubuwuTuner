@@ -4,6 +4,7 @@ add_library(st_feature_patch STATIC
     src/splice_sh2a.cpp
     src/splice_rh850.cpp
     src/inserter.cpp
+    src/flash_bridge.cpp
 )
 add_library(st::feature_patch ALIAS st_feature_patch)
 
@@ -21,6 +22,7 @@ target_link_libraries(st_feature_patch
     PUBLIC
         st::core
         st::feature_codegen
+        st::flash
     PRIVATE
         st::warnings
         st::sanitizers

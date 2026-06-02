@@ -82,6 +82,7 @@ add_executable(st_unit_tests
     unit/feature_patch/test_splice_sh2a.cpp
     unit/feature_patch/test_splice_rh850.cpp
     unit/feature_patch/test_inserter.cpp
+    unit/feature_patch/test_flash_bridge.cpp
 )
 
 target_link_libraries(st_unit_tests
