@@ -8,6 +8,7 @@
 #include "st/dbc.hpp"
 #include "st/defs.hpp"
 #include "st/defs/pack_registry.hpp"
+#include "st/diff.hpp"
 #include "st/discover.hpp"
 #include "st/ecu/bulk_reflash_cipher.hpp"
 #include "st/ecu/ssm.hpp"
@@ -177,6 +178,14 @@ constexpr std::string_view kUsage =
     "                            Compare two ROMs of the same definition table-by-\n"
     "                            table. Reports which tables changed and by how\n"
     "                            much (max delta, mean absolute delta).\n"
+    "    diff --pack <pack.toml> [--format text|csv|json] [--output FILE]\n"
+    "         [--include-identical] [--include-unchanged] <A.bin> <B.bin>\n"
+    "                            Structured ROM compare via st::diff. Per-cell\n"
+    "                            change list (not just aggregate stats), plus\n"
+    "                            text / CSV / JSON output formats for scripting.\n"
+    "                            Exit code: 0 identical, 1 on any change, 2 on\n"
+    "                            CLI usage error. JSON schema:\n"
+    "                            subuwutuner.diff.v1.\n"
     "    table-edit --def <pack.toml> --table <id> [--rows A:B] [--cols A:B]\n"
     "               OP [VALUE] <FILE> --output <OUT>\n"
     "                            Edit a table in <FILE> and write the result to\n"
@@ -4307,6 +4316,132 @@ int cmd_rom_diff(int argc, char *argv[]) {
         std::printf("\n");
     }
     return 0;
+}
+
+// `diff` — structured ROM compare via st::diff. Sister to the
+// existing rom-diff (which is text-summary-only). Supports
+// --format text|csv|json and exits non-zero when ROMs differ so a
+// CI script can gate on the result without parsing prose. Per the
+// analyst Issue #4 / I-03+I-04 + docs/33 triage, this is the
+// CLI-side of the Compare workflow; the GUI Compare panel is the
+// next slice.
+int cmd_diff(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::filesystem::path> rom_a;
+    std::optional<std::filesystem::path> rom_b;
+    std::optional<std::filesystem::path> output_path;
+    std::string format = "text";
+    bool include_identical = false;
+    bool include_unchanged_csv = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--pack" || a == "--def") {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "diff: %.*s requires a path\n",
+                             static_cast<int>(a.size()), a.data());
+                return 2;
+            }
+            def_path = std::filesystem::path{argv[++i]};
+        } else if (a == "--format") {
+            if (i + 1 >= argc) {
+                std::fputs("diff: --format requires text|csv|json\n", stderr);
+                return 2;
+            }
+            format = std::string{argv[++i]};
+            if (format != "text" && format != "csv" && format != "json") {
+                std::fprintf(stderr, "diff: unknown --format '%s' "
+                                     "(expected text|csv|json)\n",
+                             format.c_str());
+                return 2;
+            }
+        } else if (a == "--output" || a == "-o") {
+            if (i + 1 >= argc) {
+                std::fputs("diff: --output requires a path\n", stderr);
+                return 2;
+            }
+            output_path = std::filesystem::path{argv[++i]};
+        } else if (a == "--include-identical") {
+            include_identical = true;
+        } else if (a == "--include-unchanged") {
+            include_unchanged_csv = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "diff: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!rom_a.has_value()) {
+            rom_a = std::filesystem::path{argv[i]};
+        } else if (!rom_b.has_value()) {
+            rom_b = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "diff: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!def_path.has_value() || !rom_a.has_value() || !rom_b.has_value()) {
+        std::fputs("diff: missing required arguments:", stderr);
+        if (!def_path.has_value())
+            std::fputs(" --pack", stderr);
+        if (!rom_a.has_value())
+            std::fputs(" <A.bin>", stderr);
+        if (!rom_b.has_value())
+            std::fputs(" <B.bin>", stderr);
+        std::fputs("\nUsage: subuwutuner-cli diff --pack <pack.toml> "
+                   "[--format text|csv|json] [--output FILE] "
+                   "[--include-identical] [--include-unchanged] "
+                   "<A.bin> <B.bin>\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
+    if (!def.has_value()) {
+        return print_def_load_error("diff", *def_path, def.error());
+    }
+    auto const a = st::Rom::from_file(*rom_a);
+    if (!a.has_value()) {
+        std::fprintf(stderr, "diff: a: %s\n", a.error().to_string().c_str());
+        return 1;
+    }
+    auto const b = st::Rom::from_file(*rom_b);
+    if (!b.has_value()) {
+        std::fprintf(stderr, "diff: b: %s\n", b.error().to_string().c_str());
+        return 1;
+    }
+
+    st::diff::Options opts;
+    opts.include_identical = include_identical;
+    auto result = st::diff::compare(*a, *b, *def, opts);
+    if (!result.has_value()) {
+        std::fprintf(stderr, "diff: %s\n", result.error().to_string().c_str());
+        return 1;
+    }
+
+    std::string rendered;
+    if (format == "text") {
+        rendered = st::diff::render_text(*result);
+    } else if (format == "csv") {
+        rendered = st::diff::render_csv(*result, include_unchanged_csv);
+    } else { // json — already validated above
+        rendered = st::diff::render_json(*result);
+        rendered.push_back('\n');
+    }
+
+    if (output_path.has_value()) {
+        std::ofstream out{*output_path, std::ios::binary};
+        if (!out) {
+            std::fprintf(stderr, "diff: cannot open --output: %s\n",
+                         output_path->string().c_str());
+            return 1;
+        }
+        out.write(rendered.data(), static_cast<std::streamsize>(rendered.size()));
+    } else {
+        std::fputs(rendered.c_str(), stdout);
+    }
+
+    // Exit 0 if identical, 1 if any table changed (caller can gate
+    // CI / scripts on the exit code without parsing the output).
+    return result->identical() ? 0 : 1;
 }
 
 int cmd_project_diff(int argc, char *argv[]) {
@@ -11935,6 +12070,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "rom-diff") {
         return cmd_rom_diff(argc - 2, argv + 2);
+    }
+    if (cmd == "diff") {
+        return cmd_diff(argc - 2, argv + 2);
     }
     if (cmd == "table-edit") {
         return cmd_table_edit(argc - 2, argv + 2);

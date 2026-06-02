@@ -20,6 +20,7 @@ target_link_libraries(subuwutuner-cli
         st::autotune
         st::feature
         st::feature_codegen
+        st::diff
         st::policy
         st::warnings
         st::sanitizers

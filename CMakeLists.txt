@@ -74,6 +74,7 @@ add_subdirectory(src/policy)
 add_subdirectory(src/feature)
 add_subdirectory(src/feature_codegen)
 add_subdirectory(src/feature_patch)
+add_subdirectory(src/diff)
 
 if(ST_BUILD_CLI)
     add_subdirectory(src/cli)

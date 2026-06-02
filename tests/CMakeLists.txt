@@ -84,6 +84,7 @@ add_executable(st_unit_tests
     unit/feature_patch/test_splice_rh850.cpp
     unit/feature_patch/test_inserter.cpp
     unit/feature_patch/test_flash_bridge.cpp
+    unit/diff/test_diff.cpp
 )
 
 target_link_libraries(st_unit_tests
@@ -106,6 +107,7 @@ target_link_libraries(st_unit_tests
         st::feature
         st::feature_codegen
         st::feature_patch
+        st::diff
         st::warnings
         st::sanitizers
         st::platform
