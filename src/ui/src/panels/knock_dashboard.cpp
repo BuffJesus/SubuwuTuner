@@ -18,10 +18,12 @@
 #include <implot.h>
 #include <nfd.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -226,6 +228,81 @@ void render_knock_dashboard_panel(AppState &state) {
     if (!state.knock_compute_msg.empty() && state.knock_snapshot.has_value()) {
         ImGui::SameLine();
         text_subtle("%s", state.knock_compute_msg.c_str());
+    }
+
+    // Export snapshot CSV — one summary row per cylinder plus per-
+    // cylinder strip-sample columns. Useful for sharing the
+    // before-tune knock state with a co-tuner or attaching to a
+    // forum thread.
+    if (state.knock_snapshot.has_value()) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Export CSV##knock_export")) {
+            NFD::UniquePath out;
+            nfdfilteritem_t const filters[] = {{"CSV", "csv"}};
+            nfdresult_t const r =
+                NFD::SaveDialog(out, filters, 1, nullptr, "knock-snapshot.csv");
+            if (r == NFD_OKAY) {
+                std::filesystem::path const target{out.get()};
+                std::ofstream fh{target, std::ios::binary};
+                if (!fh) {
+                    state.knock_load_error =
+                        "Export: cannot open " + target.string();
+                } else {
+                    auto const &snap = *state.knock_snapshot;
+                    fh << "# subuwutuner.knock-snapshot.v1\n";
+                    fh << "# window_seconds=" << snap.window_seconds
+                       << ", samples_considered=" << snap.samples_considered
+                       << ", samples_gated_out=" << snap.samples_gated_out << "\n";
+                    fh << "cyl,current_flkc,current_fbkc,mean_flkc_window,"
+                          "min_flkc_window,event_count_window,delta_from_cyl_mean,"
+                          "strip_flkc_count,strip_fbkc_count\n";
+                    int const cyls = static_cast<int>(snap.cylinder_count);
+                    for (int c = 0; c < cyls; ++c) {
+                        auto const &p = snap.per_cyl[static_cast<std::size_t>(c)];
+                        char row[256];
+                        std::snprintf(row, sizeof row,
+                                      "%d,%g,%g,%g,%g,%u,%g,%zu,%zu\n",
+                                      c + 1, p.current_flkc, p.current_fbkc,
+                                      p.mean_flkc_window, p.min_flkc_window,
+                                      p.event_count_window, p.delta_from_cyl_mean,
+                                      p.strip_flkc.size(), p.strip_fbkc.size());
+                        fh << row;
+                    }
+                    // Per-strip rows — wide-format. Each line is
+                    // (cyl, sample_idx, flkc, fbkc) so the file can be
+                    // sliced in spreadsheets / pandas without parsing
+                    // a nested column layout.
+                    fh << "\n# per-sample strip data\n";
+                    fh << "cyl,sample_idx,flkc,fbkc\n";
+                    for (int c = 0; c < cyls; ++c) {
+                        auto const &p = snap.per_cyl[static_cast<std::size_t>(c)];
+                        std::size_t const n =
+                            std::max(p.strip_flkc.size(), p.strip_fbkc.size());
+                        for (std::size_t i = 0; i < n; ++i) {
+                            double const flkc = i < p.strip_flkc.size() ? p.strip_flkc[i] : 0.0;
+                            double const fbkc = i < p.strip_fbkc.size() ? p.strip_fbkc[i] : 0.0;
+                            char row[160];
+                            std::snprintf(row, sizeof row, "%d,%zu,%g,%g\n", c + 1, i,
+                                          flkc, fbkc);
+                            fh << row;
+                        }
+                    }
+                    if (!fh) {
+                        state.knock_load_error = "Export: write failed";
+                    } else {
+                        enqueue_toast(state, ToastKind::Success,
+                                      "Wrote " + target.string());
+                    }
+                }
+            } else if (r == NFD_ERROR) {
+                state.knock_load_error =
+                    std::string{"Export dialog: "} + NFD::GetError();
+            }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Write the current snapshot as CSV — per-cylinder\n"
+                              "summary block + per-sample strip data block.");
+        }
     }
 
     // ---- Grid of per-cyl strip charts --------------------------------
