@@ -13578,8 +13578,53 @@ int main(int argc, char *argv[]) {
             std::printf("Exported '%s' → %s\n", id.c_str(), dst.string().c_str());
             return 0;
         }
+        if (sub == "delete") {
+            if (argc < 4) {
+                std::fputs("profile delete: missing <id>\n"
+                           "Usage: subuwutuner-cli profile delete <id> [--dir <dir>] "
+                           "[--yes]\n",
+                           stderr);
+                return 2;
+            }
+            std::string id{argv[3]};
+            bool confirmed = false;
+            for (int i = 4; i < argc; ++i) {
+                std::string_view const a{argv[i]};
+                if (a == "--yes") {
+                    confirmed = true;
+                } else if (a == "--dir") {
+                    if (i + 1 >= argc) {
+                        std::fprintf(stderr, "profile delete: --dir requires a value\n");
+                        return 2;
+                    }
+                    ++i; // already consumed via the up-front --dir scan
+                } else if (a.starts_with("--")) {
+                    std::fprintf(stderr, "profile delete: unknown option: %s\n", argv[i]);
+                    return 2;
+                }
+            }
+            if (!confirmed) {
+                std::fputs("profile delete: refusing without --yes confirmation.\n"
+                           "  Re-run with --yes to delete the file.\n",
+                           stderr);
+                return 2;
+            }
+            auto const target = profile_dir_opt / (id + ".stprofile");
+            std::error_code ec;
+            if (!std::filesystem::exists(target, ec)) {
+                std::fprintf(stderr, "profile delete: not found: %s\n",
+                             target.string().c_str());
+                return 1;
+            }
+            if (!std::filesystem::remove(target, ec) || ec) {
+                std::fprintf(stderr, "profile delete: %s\n", ec.message().c_str());
+                return 1;
+            }
+            std::printf("Deleted %s\n", target.string().c_str());
+            return 0;
+        }
         std::fprintf(stderr, "profile: unknown subcommand '%s' "
-                             "(try list / show / import / export)\n",
+                             "(try list / show / import / export / delete)\n",
                      argv[2]);
         return 2;
     }
