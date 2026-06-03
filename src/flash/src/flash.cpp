@@ -3,6 +3,7 @@
 
 #include "st/flash.hpp"
 
+#include "st/audit.hpp"
 #include "st/core/crc32.hpp"
 #include "st/core/error.hpp"
 #include "st/core/result.hpp"
@@ -345,6 +346,63 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *
     FlashReport report{};
     report.sectors.reserve(plan.writes.size());
 
+    // Audit hook helpers — no-op when audit_log_ is null. Each emits one
+    // entry; the per-event fields are kept small and stable so log
+    // consumers can filter on "sectors" / "bytes_planned" / "address"
+    // without parsing the description string.
+    std::size_t bytes_planned = 0;
+    for (auto const &w : plan.writes) {
+        bytes_planned += w.data.size();
+    }
+    auto const audit_flash_started = [&]() {
+        if (audit_log_ == nullptr)
+            return;
+        (void)audit_log_->log(
+            audit::EntryKind::FlashStarted, "flash", "Flash execute() entered",
+            {{"sectors", std::to_string(plan.writes.size())},
+             {"bytes_planned", std::to_string(bytes_planned)},
+             {"data_format", std::to_string(static_cast<int>(plan.data_format))},
+             {"dry_run", plan.dry_run ? "true" : "false"},
+             {"verify", plan.verify_after_write ? "true" : "false"}});
+    };
+    auto const audit_sector_written = [&](Sector const &sec, bool verified) {
+        if (audit_log_ == nullptr)
+            return;
+        (void)audit_log_->log(audit::EntryKind::FlashSectorWritten, "flash",
+                              "Sector " + hex_addr(sec.address) + " written",
+                              {{"address", hex_addr(sec.address)},
+                               {"length", std::to_string(sec.length)},
+                               {"verified", verified ? "true" : "false"}});
+    };
+    auto const audit_flash_completed = [&]() {
+        if (audit_log_ == nullptr)
+            return;
+        (void)audit_log_->log(
+            audit::EntryKind::FlashCompleted, "flash",
+            "Flash execute() completed successfully",
+            {{"sectors", std::to_string(report.sectors.size())},
+             {"bytes_transferred", std::to_string(report.bytes_transferred)},
+             {"verified", report.all_sectors_verified() ? "true" : "false"}});
+    };
+    auto const audit_flash_failed = [&](std::string const &msg) {
+        if (audit_log_ == nullptr)
+            return;
+        (void)audit_log_->log(
+            audit::EntryKind::FlashFailed, "flash", msg,
+            {{"sectors_done", std::to_string(report.sectors.size())},
+             {"bytes_transferred", std::to_string(report.bytes_transferred)}});
+    };
+    auto const audit_flash_cancelled = [&](std::string const &msg) {
+        if (audit_log_ == nullptr)
+            return;
+        (void)audit_log_->log(
+            audit::EntryKind::FlashCancelled, "flash", msg,
+            {{"sectors_done", std::to_string(report.sectors.size())},
+             {"bytes_transferred", std::to_string(report.bytes_transferred)}});
+    };
+
+    audit_flash_started();
+
     // Failure-path helper: package the in-progress report + an Error
     // into an ExecuteOutcome and return. Keeps the original failure
     // sites readable while guaranteeing the partial report is never
@@ -366,6 +424,14 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *
                 s.has_value()) {
                 report.restored_bus = true;
             }
+        }
+        // Mirror the failure into the audit log before tearing down the
+        // partial state. Cancelled goes to its own kind because consumers
+        // typically treat user-cancel and ECU-rejection differently.
+        if (code == ErrorCode::Cancelled) {
+            audit_flash_cancelled(message);
+        } else {
+            audit_flash_failed(message);
         }
         ExecuteOutcome out;
         out.report = std::move(report);
@@ -651,6 +717,7 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *
             }
 
             commit_outcome(outcome);
+            audit_sector_written(outcome.sector, outcome.verified);
         }
     }
 
@@ -663,6 +730,8 @@ ExecuteOutcome Flasher::execute(FlashPlan const &plan, std::atomic<bool> const *
             report.restored_bus = true;
         }
     }
+
+    audit_flash_completed();
 
     ExecuteOutcome out;
     out.report = std::move(report);

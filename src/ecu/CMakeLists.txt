@@ -27,6 +27,7 @@ target_link_libraries(st_ecu
     PUBLIC
         st::core
         st::transport
+        st::audit
     PRIVATE
         st::warnings
         st::sanitizers

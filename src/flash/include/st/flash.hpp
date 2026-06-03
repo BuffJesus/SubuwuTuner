@@ -13,6 +13,10 @@
 #include "st/policy.hpp"
 #include "st/transport.hpp"
 
+namespace st::audit {
+class AuditLog;
+} // namespace st::audit
+
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -230,6 +234,23 @@ public:
         security_key_fn_ = std::move(fn);
     }
 
+    // Wire an audit log into the Flasher. When set (non-null), execute()
+    // emits FlashStarted at the top, FlashSectorWritten after each
+    // sector's check_deps_passed, FlashCompleted on success,
+    // FlashFailed on a non-cancellation error, and FlashCancelled when
+    // the user-flipped cancel flag aborts. SecurityAccessUnlocked is
+    // emitted by the underlying UdsClient (also routed here via the
+    // same log pointer) on a successful SA send_key.
+    //
+    // Null pointer (the default) keeps the Flasher audit-quiet —
+    // every audit code path is a no-op when audit_log_ is null, so
+    // existing callers see zero behavior change. AuditLog must outlive
+    // the Flasher.
+    void set_audit_log(audit::AuditLog *log) noexcept {
+        audit_log_ = log;
+        client_.set_audit_log(log);
+    }
+
     // Read a contiguous span of ECU memory via ReadMemoryByAddress,
     // chunked into `max_chunk_size`-byte requests. Returns the
     // concatenated bytes in the requested order. Errors at any chunk
@@ -343,6 +364,7 @@ private:
     ecu::uds::UdsClient client_;
     ecu::ssm::SsmClient ssm_client_;
     ecu::SecurityKeyFn security_key_fn_;
+    audit::AuditLog *audit_log_{nullptr};
 };
 
 // =====================================================================

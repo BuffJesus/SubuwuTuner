@@ -10,7 +10,12 @@
 #include <chrono>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
+
+namespace st::audit {
+class AuditLog;
+} // namespace st::audit
 
 namespace st::ecu::uds {
 
@@ -264,6 +269,27 @@ class UdsClient {
 public:
     explicit UdsClient(transport::ITransport &t) noexcept : transport_{&t} {}
 
+    // Wire an audit log into the client. When set (non-null), the client
+    // emits SecurityAccessUnlocked entries on a successful
+    // security_access_send_key. Null pointer (the default) keeps the
+    // client audit-quiet — every code path is a no-op when audit_log_
+    // is null, so existing callers see zero behavior change.
+    //
+    // `source` is the value written into the audit Entry's `source`
+    // field; defaults to "uds". Override when multiple UDS clients
+    // share one log (e.g. "uds:flash" vs "uds:ssm-a8-prelude") so
+    // entries can be grepped by subsystem.
+    //
+    // The AuditLog must outlive the UdsClient. Threading: append() on
+    // AuditLog is not safe for concurrent calls from multiple threads;
+    // callers serialise via their own mutex or per-subsystem handles.
+    void set_audit_log(audit::AuditLog *log) noexcept {
+        audit_log_ = log;
+    }
+    void set_audit_source(std::string source) {
+        audit_source_ = std::move(source);
+    }
+
     [[nodiscard]] Result<std::vector<std::uint8_t>>
     read_data_by_identifier(std::uint16_t did,
                             std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
@@ -358,6 +384,8 @@ public:
 
 private:
     transport::ITransport *transport_;
+    audit::AuditLog *audit_log_{nullptr};
+    std::string audit_source_{"uds"};
 };
 
 } // namespace st::ecu::uds

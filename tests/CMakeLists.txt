@@ -89,6 +89,7 @@ add_executable(st_unit_tests
     unit/feature_patch/test_flash_bridge.cpp
     unit/diff/test_diff.cpp
     unit/audit/test_audit.cpp
+    unit/audit/test_audit_subscribers.cpp
     unit/profile/test_profile.cpp
 )
 

@@ -3,6 +3,7 @@
 
 #include "st/ecu/uds.hpp"
 
+#include "st/audit.hpp"
 #include "st/core/error.hpp"
 #include "st/core/result.hpp"
 #include "st/transport.hpp"
@@ -708,7 +709,17 @@ Status UdsClient::security_access_send_key(std::uint8_t sub_function,
     auto const resp = transport_->send_recv(req, timeout);
     if (!resp.has_value())
         return failure(resp.error());
-    return parse_security_access_key_ack(resp->data, sub_function);
+    auto status = parse_security_access_key_ack(resp->data, sub_function);
+    if (status.has_value() && audit_log_ != nullptr) {
+        // Wire-level "SA unlocked" — fires only on a positive key ACK.
+        // The level reported is the sendKey sub-function; tools that
+        // care about the requestSeed level can subtract 1.
+        (void)audit_log_->log(audit::EntryKind::SecurityAccessUnlocked, audit_source_,
+                              "UDS SecurityAccess unlocked at sub-function " + hex_byte(sub_function),
+                              {{"sub_function", hex_byte(sub_function)},
+                               {"key_bytes", std::to_string(key.size())}});
+    }
+    return status;
 }
 
 Status UdsClient::diagnostic_session_control(std::uint8_t session,
