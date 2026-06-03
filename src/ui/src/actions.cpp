@@ -99,11 +99,18 @@ std::optional<std::string> apply_parsed_csv_edits(AppState &state,
     // hundreds of cells at once — a high-signal event the timeline
     // should capture alongside save / autotune / read.
     if (state.audit_log.has_value()) {
+        std::vector<std::pair<std::string, std::string>> fields{
+            {"table", table->id},
+            {"cells", std::to_string(parsed.cells.size())}};
+        // Issue #10 sweep — CSV import targets active_rom_mut() through
+        // apply_op; annotate so the audit timeline doesn't blur imports
+        // across different ROMs.
+        if (!state.active_rom_id.empty() && state.active_rom_id != "working") {
+            fields.emplace_back("rom", state.active_rom_id);
+        }
         (void)state.audit_log->log(
             st::audit::EntryKind::EditCommitted, "ui.csv_import",
-            std::string{descbuf},
-            {{"table", table->id},
-             {"cells", std::to_string(parsed.cells.size())}});
+            std::string{descbuf}, std::move(fields));
     }
 
     std::string status = "Imported " + std::to_string(parsed.cells.size()) + " cell" +

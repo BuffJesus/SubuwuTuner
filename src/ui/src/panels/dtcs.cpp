@@ -127,11 +127,19 @@ void render_dtcs_panel(AppState &state) {
         state.status_msg = std::string{label} + ": " +
                            std::to_string(codes.size()) + " DTC(s) toggled.";
         if (state.audit_log.has_value()) {
+            std::vector<std::pair<std::string, std::string>> fields{
+                {"count", std::to_string(codes.size())},
+                {"scope", emissions_only ? "emissions" : "all"}};
+            // Mirror apply_op's audit shape — include the active rom id
+            // when the user is targeting an additional slot, so DTC
+            // bulk toggles on different ROMs don't blur together in
+            // the audit timeline.
+            if (!state.active_rom_id.empty() && state.active_rom_id != "working") {
+                fields.emplace_back("rom", state.active_rom_id);
+            }
             (void)state.audit_log->log(
                 st::audit::EntryKind::EditCommitted, "ui.dtcs",
-                std::string{desc_prefix},
-                {{"count", std::to_string(codes.size())},
-                 {"scope", emissions_only ? "emissions" : "all"}});
+                std::string{desc_prefix}, std::move(fields));
         }
     };
     if (ImGui::SmallButton("Disable all emissions")) {

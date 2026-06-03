@@ -122,6 +122,23 @@ void render_flash_modal(AppState &state) {
     ImGui::Text("Sectors: %zu   Bytes: %zu   Profile: %s", pending->plan.writes.size(),
                 pending->total_bytes, pname.c_str());
 
+    // Issue #10 sweep: when the user is viewing a non-working ROM
+    // (additional or source), the Flash modal still operates on the
+    // working slot — that's the only ROM the project allows edits to
+    // and therefore the only one with a sensible flash plan. Surface
+    // this so the user is not confused into thinking the modal will
+    // write the additional ROM they were just inspecting.
+    if (!state.viewing_working_rom()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_caution());
+        ImGui::TextWrapped(
+            "Note: flashing the WORKING ROM. You are currently viewing '%s' "
+            "(read-only); switch via View → Active ROM to confirm what will "
+            "land on the ECU.",
+            state.active_rom_id.empty() ? "working" : state.active_rom_id.c_str());
+        ImGui::PopStyleColor();
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+    }
+
     // Active vehicle profile context (analyst Issue #7). Looked up
     // fresh per render — cheap (TOML load of one file) and avoids a
     // stale-cache footgun where the user edits the profile via CLI

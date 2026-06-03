@@ -202,13 +202,20 @@ std::optional<std::string> apply_knock_pull_proposal(AppState &state) {
                        (added > 0 ? (", " + std::to_string(added) + " added-back") : "") + " on " +
                        table->id + ".";
     if (state.audit_log.has_value()) {
+        std::vector<std::pair<std::string, std::string>> fields{
+            {"table", table->id},
+            {"pulled", std::to_string(pulled)},
+            {"added_back", std::to_string(added)},
+            {"log_path", state.kp_at_log_path}};
+        // Active-rom-aware audit (Issue #10 sweep): autotune commits
+        // against the active editable slot; capture which one so the
+        // audit timeline doesn't blur multi-ROM workflows.
+        if (!state.active_rom_id.empty() && state.active_rom_id != "working") {
+            fields.emplace_back("rom", state.active_rom_id);
+        }
         (void)state.audit_log->log(
             st::audit::EntryKind::AutotuneCommitted, "autotune.knock",
-            std::string{descbuf},
-            {{"table", table->id},
-             {"pulled", std::to_string(pulled)},
-             {"added_back", std::to_string(added)},
-             {"log_path", state.kp_at_log_path}});
+            std::string{descbuf}, std::move(fields));
     }
     return std::nullopt;
 }

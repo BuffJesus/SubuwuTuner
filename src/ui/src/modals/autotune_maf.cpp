@@ -175,12 +175,18 @@ std::optional<std::string> apply_maf_autotune_proposal(AppState &state) {
     state.status_msg = "Autotune MAF applied: " + std::to_string(modified) + " cell" +
                        (modified == 1 ? "" : "s") + " changed on " + table->id + ".";
     if (state.audit_log.has_value()) {
+        std::vector<std::pair<std::string, std::string>> fields{
+            {"table", table->id},
+            {"cells_modified", std::to_string(modified)},
+            {"log_path", state.maf_at_log_path}};
+        // Issue #10 sweep — autotune lands on the active editable slot
+        // via active_rom_mut(); annotate the entry accordingly.
+        if (!state.active_rom_id.empty() && state.active_rom_id != "working") {
+            fields.emplace_back("rom", state.active_rom_id);
+        }
         (void)state.audit_log->log(
             st::audit::EntryKind::AutotuneCommitted, "autotune.maf",
-            std::string{descbuf},
-            {{"table", table->id},
-             {"cells_modified", std::to_string(modified)},
-             {"log_path", state.maf_at_log_path}});
+            std::string{descbuf}, std::move(fields));
     }
     return std::nullopt;
 }

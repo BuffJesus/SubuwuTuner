@@ -98,10 +98,20 @@ write_current_table_csv(AppState const &state, std::filesystem::path const &path
     if (table == nullptr) {
         return "Table '" + state.selected_table_id + "' not found in pack.";
     }
+    // Export the ROM the user is currently looking at (Issue #10
+    // sweep). When the active slot is an additional ROM, exporting
+    // working_rom() would surface bytes that don't match the on-screen
+    // grid — confusing the "I see this, share this" mental model.
+    // view_rom() resolves through active_rom_id; nullptr fallback only
+    // triggers when there's no project (we returned above).
+    auto const *read_rom = state.view_rom();
+    if (read_rom == nullptr) {
+        return std::string{"No project loaded."};
+    }
     auto const working_td =
-        state.project->definition().read_table_values(state.project->working_rom(), *table);
+        state.project->definition().read_table_values(*read_rom, *table);
     if (!working_td.has_value()) {
-        return "read working: " + working_td.error().to_string();
+        return "read active ROM: " + working_td.error().to_string();
     }
     std::optional<st::Definition::TableData> source_td;
     if (diff_only) {
@@ -193,9 +203,16 @@ void import_csv_into_current_table_dialog(AppState &state) {
         state.status_msg = "Table not in pack.";
         return;
     }
-    auto td = state.project->definition().read_table_values(state.project->working_rom(), *table);
+    // CSV import targets the editable slot via apply_op — use the
+    // active editable ROM for sizing too. Source is read-only so the
+    // import path stays gated by active_rom_mut() at the apply step.
+    st::Rom const *editable_rom = state.project->active_rom_mut();
+    if (editable_rom == nullptr) {
+        editable_rom = &state.project->working_rom();
+    }
+    auto td = state.project->definition().read_table_values(*editable_rom, *table);
     if (!td.has_value()) {
-        state.status_msg = "Import failed: read working: " + td.error().to_string();
+        state.status_msg = "Import failed: read active: " + td.error().to_string();
         return;
     }
     std::size_t const rows = td->values.size();
