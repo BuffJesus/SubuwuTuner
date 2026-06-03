@@ -148,7 +148,7 @@ void render_stats_panel(AppState &state) {
     // notes app, spreadsheet, or forum reply. Format mirrors the
     // stat_row layout above plus the table id + scaling for context.
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
-    if (ImGui::SmallButton("Copy stats##stats_copy")) {
+    if (ImGui::SmallButton("Copy TSV##stats_copy_tsv")) {
         char buf[768];
         std::snprintf(buf, sizeof buf,
                       "table\t%s\nunit\t%s\nmin\t%.*f\nmax\t%.*f\nmean\t%.*f\n"
@@ -166,9 +166,42 @@ void render_stats_panel(AppState &state) {
         ImGui::SetClipboardText(buf);
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Copy a small TSV block of these stats to the\n"
-                          "clipboard — paste anywhere (spreadsheet, forum,\n"
-                          "notes app, support thread).");
+        ImGui::SetTooltip("TSV: paste into a spreadsheet (Excel /\n"
+                          "Sheets) — columns auto-split on tab.");
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Copy MD##stats_copy_md")) {
+        char buf[1024];
+        std::snprintf(buf, sizeof buf,
+                      "**Table:** `%s`%s%s\n\n"
+                      "| Stat | Value |\n"
+                      "|---|---:|\n"
+                      "| min    | %.*f |\n"
+                      "| max    | %.*f |\n"
+                      "| mean   | %.*f |\n"
+                      "| stddev | %.*f |\n"
+                      "| p10    | %.*f |\n"
+                      "| p50    | %.*f |\n"
+                      "| p90    | %.*f |\n"
+                      "| cells  | %zu |\n"
+                      "| edited | %zu |\n",
+                      table->id.c_str(),
+                      unit.empty() ? "" : "  ·  unit: ",
+                      unit.empty() ? "" : unit.c_str(),
+                      prec, static_cast<double>(min),
+                      prec, static_cast<double>(max),
+                      prec, mean,
+                      prec, stddev,
+                      prec, percentile(0.10),
+                      prec, percentile(0.50),
+                      prec, percentile(0.90),
+                      cells.size(), edited);
+        ImGui::SetClipboardText(buf);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Markdown: paste into a forum post / PR\n"
+                          "description / Slack message — renders\n"
+                          "as a proper table.");
     }
 
     ImGui::Separator();
