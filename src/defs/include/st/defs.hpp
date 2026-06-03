@@ -421,6 +421,16 @@ public:
     // user's loaded pack without name-pattern guessing.
     [[nodiscard]] Table const *find_table_by_role(std::string_view role) const noexcept;
     [[nodiscard]] Pid const *find_pid(std::string_view id) const noexcept;
+
+    // Inverse mapping for the Issue #15 live-to-table cross-reference:
+    // return every Pid whose `produces_table` field names `table_id`.
+    // The Table panel uses this to surface a "Logged by: <pid list>"
+    // chip so the user can see which channels feed the table they're
+    // editing. Returns pointers into the Definition's storage; valid
+    // for the Definition's lifetime. Empty when no PIDs are mapped
+    // (typical for tables with no live counterpart).
+    [[nodiscard]] std::vector<Pid const *>
+    find_pids_producing(std::string_view table_id) const noexcept;
     [[nodiscard]] Switch const *find_switch(std::string_view id) const noexcept;
     [[nodiscard]] DtcBitmap const *find_dtc_bitmap(std::string_view id) const noexcept;
     [[nodiscard]] Dtc const *find_dtc(std::string_view code) const noexcept;

@@ -771,6 +771,43 @@ void render_table_view(AppState &state, Fonts const &fonts) {
                   "governs warnings; engine-safety refusals still apply.");
     }
 
+    // Issue #15 inverse cross-reference: PIDs that name THIS table in
+    // their `produces_table` field. The forward direction (gauge ->
+    // table) ships via the gauge cluster's right-click menu; the
+    // inverse direction (this table -> which channels log it) belongs
+    // here so a tuner knows "this map drives the boost gauge". Chip
+    // tooltip enumerates the pid ids — typical mapping is one pid per
+    // table, but the inverse iteration is general so packs that wire
+    // multiple sample paths (e.g. requested vs actual boost) surface
+    // both.
+    if (tbl != nullptr) {
+        auto const producers = state.project->definition().find_pids_producing(tbl->id);
+        if (!producers.empty()) {
+            char chip_text[64];
+            if (producers.size() == 1) {
+                std::snprintf(chip_text, sizeof chip_text, "Logged by: %s",
+                              producers[0]->id.c_str());
+            } else {
+                std::snprintf(chip_text, sizeof chip_text, "Logged by: %zu channels",
+                              producers.size());
+            }
+            std::string tooltip = "Channels that emit this table's output:\n";
+            for (auto const *p : producers) {
+                tooltip += "  - ";
+                tooltip += p->id;
+                if (!p->name.empty() && p->name != p->id) {
+                    tooltip += "  (";
+                    tooltip += p->name;
+                    tooltip += ")";
+                }
+                tooltip += "\n";
+            }
+            tooltip += "Right-click the matching gauge in the Gauge Cluster\n"
+                       "panel to jump back to this table.";
+            place_chip(chip_text, chip_fg_accent(), chip_bg_accent(), tooltip.c_str());
+        }
+    }
+
     // For 3D tables, project the chosen Z slice into a 2D view that the
     // renderers and stats can consume uniformly. The edit infrastructure
     // (Rect / Snapshot / History) is 2D-only, so editing is gated off for

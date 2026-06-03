@@ -8,6 +8,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -238,6 +239,94 @@ produces_table = "boost_target_high_octane"
     auto const *boost = d.find_pid("boost_actual");
     REQUIRE(boost != nullptr);
     REQUIRE(boost->produces_table == "boost_target_high_octane");
+}
+
+TEST_CASE("Definition::find_pids_producing returns the inverse mapping",
+          "[defs][pid][produces_table][inverse]") {
+    // Issue #15 — Table panel uses this to surface a "Logged by:" chip.
+    // The inverse iteration must include duplicates (two pids producing
+    // the same table → two entries) and skip pids whose produces_table
+    // is empty or names a different table. Pack omits the table itself
+    // (find_pids_producing is a pure inverse lookup; the table existence
+    // check is in validate()).
+    auto const dr = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "pids-producing-test"
+endianness = "big"
+
+[[scaling]]
+id        = "raw"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint8"
+
+[[pid]]
+id             = "boost_actual"
+ssm_address    = 0x10
+length         = 1
+data_type      = "uint8"
+scaling        = "raw"
+produces_table = "boost_target_high_octane"
+
+[[pid]]
+id             = "boost_requested"
+ssm_address    = 0x11
+length         = 1
+data_type      = "uint8"
+scaling        = "raw"
+produces_table = "boost_target_high_octane"
+
+[[pid]]
+id          = "rpm"
+ssm_address = 0x12
+length      = 1
+data_type   = "uint8"
+scaling     = "raw"
+)toml");
+    REQUIRE(dr.has_value());
+    auto const &d = *dr;
+
+    auto const both = d.find_pids_producing("boost_target_high_octane");
+    REQUIRE(both.size() == 2);
+    std::vector<std::string> ids;
+    for (auto const *p : both) {
+        ids.push_back(p->id);
+    }
+    std::sort(ids.begin(), ids.end());
+    REQUIRE(ids[0] == "boost_actual");
+    REQUIRE(ids[1] == "boost_requested");
+
+    REQUIRE(d.find_pids_producing("rpm").empty());
+    REQUIRE(d.find_pids_producing("unknown_table").empty());
+    REQUIRE(d.find_pids_producing("").empty());
+}
+
+TEST_CASE("Definition::validate rejects pid produces_table pointing at unknown table",
+          "[defs][validate][produces_table]") {
+    auto const dr = st::Definition::from_toml_string(R"toml(
+[pack]
+id         = "produces-table-validate"
+endianness = "big"
+
+[[scaling]]
+id        = "raw"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint8"
+
+[[pid]]
+id             = "boost_actual"
+ssm_address    = 0x10
+length         = 1
+data_type      = "uint8"
+scaling        = "raw"
+produces_table = "does_not_exist"
+)toml");
+    REQUIRE(dr.has_value());
+    auto const v = dr->validate();
+    REQUIRE_FALSE(v.has_value());
+    REQUIRE(std::string{v.error().message()}.find("produces_table") != std::string::npos);
+    REQUIRE(std::string{v.error().message()}.find("does_not_exist") != std::string::npos);
 }
 
 TEST_CASE("Table.role is optional and round-trips through TOML", "[defs][parse][role]") {

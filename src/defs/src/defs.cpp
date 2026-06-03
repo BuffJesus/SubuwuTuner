@@ -1343,6 +1343,14 @@ Status Definition::validate() const {
         if (!p.scaling.empty() && find_scaling(p.scaling) == nullptr) {
             note("pid '" + p.id + "' references unknown scaling '" + p.scaling + "'");
         }
+        // Issue #15 — validate the live-to-table cross-reference. A
+        // pid pointing at a non-existent table makes the gauge cluster
+        // emit a "table not in pack" toast when the user right-clicks
+        // it. Catch typos at load time.
+        if (!p.produces_table.empty() && find_table(p.produces_table) == nullptr) {
+            note("pid '" + p.id + "' produces_table references unknown table '" +
+                 p.produces_table + "'");
+        }
     }
     for (auto const &id : ids_) {
         // cid_scan mode searches the whole ROM, so cid_address is
@@ -1449,6 +1457,20 @@ Table const *Definition::find_table_by_role(std::string_view role) const noexcep
 Pid const *Definition::find_pid(std::string_view id) const noexcept {
     auto it = std::find_if(pids_.begin(), pids_.end(), [&](Pid const &p) { return p.id == id; });
     return it == pids_.end() ? nullptr : &*it;
+}
+
+std::vector<Pid const *>
+Definition::find_pids_producing(std::string_view table_id) const noexcept {
+    std::vector<Pid const *> out;
+    if (table_id.empty()) {
+        return out;
+    }
+    for (auto const &p : pids_) {
+        if (p.produces_table == table_id) {
+            out.push_back(&p);
+        }
+    }
+    return out;
 }
 
 Switch const *Definition::find_switch(std::string_view id) const noexcept {
