@@ -150,6 +150,33 @@ public:
         return source_crc32_;
     }
 
+    // Active-ROM identifier (Issue #10 — multi-ROM read-side foundation).
+    // Empty string means "the working slot is active" (the default
+    // behavior every project has had since v1). The reserved tokens
+    // "working" and "source" address the built-in slots; any other
+    // non-empty value must match an id in additional_roms().
+    //
+    // Persisted in project.toml as [project] active_rom_id = "...".
+    // Round-trips through Project::open / save_metadata. Read-side CLI
+    // verbs honor it as their default when their own --rom flag is
+    // absent. Edit-side routing through this slot is future work.
+    [[nodiscard]] std::string const &active_rom_id() const noexcept {
+        return active_rom_id_;
+    }
+
+    // Set the active ROM id. Validates against the built-in slot names
+    // and the current additional_roms() list. Empty string and the
+    // tokens "working" and "source" always succeed; any other value
+    // must match an additional id or InvalidArgument is returned.
+    // Caller persists the change via save_metadata().
+    [[nodiscard]] Status set_active_rom_id(std::string_view id);
+
+    // Resolve an id to a ROM pointer for read-side consumers. Accepts
+    // the same vocabulary as set_active_rom_id ("" → working_rom,
+    // "working" → working_rom, "source" → source_rom, additional id →
+    // its loaded Rom). Returns nullptr for unknown ids.
+    [[nodiscard]] Rom const *find_rom_by_id(std::string_view id) const noexcept;
+
     // Read-only access to extra ROMs declared in project.toml as
     // [[rom]] entries (Issue #10 read slice). Empty when project.toml
     // declares none. Returned vector is sized once on Project::open;
@@ -195,6 +222,7 @@ private:
     edit::History history_;
     std::vector<AdditionalRom> additional_roms_;
     std::vector<std::string> additional_rom_warnings_;
+    std::string active_rom_id_; // "" = working slot (the v1 default)
 };
 
 // CSV bulk-edit parser. Shared between the CLI's `project-edit-csv` and

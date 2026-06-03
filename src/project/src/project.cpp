@@ -304,6 +304,10 @@ std::string render_project_toml(Project const &p, std::uint32_t source_crc32,
     emit_string("created       ", created);
     emit_string("notes         ", p.notes());
     emit_string("policy_profile", policy::profile_name(p.policy_profile()));
+    // active_rom_id is emitted unconditionally so an empty value
+    // round-trips identically to an absent field; older loaders that
+    // don't know the key silently ignore it.
+    emit_string("active_rom_id ", p.active_rom_id());
     ss << "\n";
     ss << "[project.source_rom]\n";
     emit_string("path  ", source_rel.generic_string());
@@ -471,6 +475,13 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
     // else: default is MotorsportOnly via member init — silently OK for
     // older projects that pre-date the field.
 
+    p.active_rom_id_ = (*project)["active_rom_id"].value_or<std::string>("");
+    // Don't validate against additional_roms_ here — that vector hasn't
+    // been populated yet at this point in open(). A stale id that no
+    // longer matches an additional rom is tolerated: read-side
+    // consumers fall back to the working slot when find_rom_by_id
+    // returns nullptr.
+
     if (auto const *sa = tbl["security_access"].as_table(); sa != nullptr) {
         p.handheld_serial_ = (*sa)["handheld_serial"].value_or<std::string>("");
     }
@@ -605,10 +616,52 @@ Status Project::save_metadata() const {
     return write_file(dir_ / "project.toml", toml_text);
 }
 
+Rom const *Project::find_rom_by_id(std::string_view id) const noexcept {
+    if (id.empty() || id == "working") {
+        return &working_;
+    }
+    if (id == "source") {
+        return &source_;
+    }
+    for (auto const &r : additional_roms_) {
+        if (r.id == id) {
+            return &r.rom;
+        }
+    }
+    return nullptr;
+}
+
+Status Project::set_active_rom_id(std::string_view id) {
+    if (id.empty() || id == "working" || id == "source") {
+        active_rom_id_.assign(id);
+        return {};
+    }
+    for (auto const &r : additional_roms_) {
+        if (r.id == id) {
+            active_rom_id_.assign(id);
+            return {};
+        }
+    }
+    return failure(ErrorCode::InvalidArgument,
+                   "no ROM with id '" + std::string{id} +
+                       "' in this project (use 'working', 'source', or an id from "
+                       "additional_roms())");
+}
+
 Status Project::add_additional_rom(AdditionalRom entry) {
     if (entry.id.empty()) {
         return failure(ErrorCode::InvalidArgument,
                        "additional rom id must not be empty");
+    }
+    // Reserved ids: find_rom_by_id privileges these for the built-in
+    // slots, so accepting an additional ROM under the same id would
+    // create an unreachable record. Reject early with a clear
+    // explanation instead.
+    if (entry.id == "source" || entry.id == "working") {
+        return failure(ErrorCode::InvalidArgument,
+                       "additional rom id '" + entry.id +
+                           "' is reserved (use a different slug — 'source' and "
+                           "'working' name the built-in project ROM slots)");
     }
     for (auto const &r : additional_roms_) {
         if (r.id == entry.id) {

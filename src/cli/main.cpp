@@ -256,6 +256,10 @@ constexpr std::string_view kUsage =
     "                            pack has tables, source CRC matches recorded value,\n"
     "                            [[rom]] entries resolve, audit.log integrity is OK.\n"
     "                            Exits 1 on the first failure — gateable from CI.\n"
+    "    project-set-active-rom <dir> <id>\n"
+    "                            Designate which ROM read-side verbs target by default.\n"
+    "                            id: 'working' (default), 'source', or an additional\n"
+    "                            ROM id from `project-list-roms`. Pass '' to reset.\n"
     "    stats <dir> --table <id> [--source|--working] [--json]\n"
     "                            Print min/max/mean/stddev/p10/p50/p90/cells/edited\n"
     "                            for one table. Same shape as the GUI Stats panel.\n"
@@ -3013,6 +3017,11 @@ int cmd_project_info_json(std::filesystem::path const &dir) {
     out.append(",\"profile\":");
     json_escape(out, std::string{st::policy::profile_name(p->policy_profile())});
 
+    // active_rom: empty string in the field maps to "working" so JSON
+    // consumers don't need to special-case the default.
+    out.append(",\"active_rom\":");
+    json_escape(out, p->active_rom_id().empty() ? std::string{"working"} : p->active_rom_id());
+
     auto const &records = p->history().records();
     auto const cursor = p->history().cursor();
     out.append(",\"history\":{\"edit_count\":");
@@ -3151,6 +3160,13 @@ int cmd_project_info(int argc, char *argv[]) {
     }
     std::printf("Profile:    %s\n",
                 std::string{st::policy::profile_name(p->policy_profile())}.c_str());
+
+    {
+        auto const &active = p->active_rom_id();
+        std::printf("Active ROM: %s%s\n",
+                    active.empty() ? "working" : active.c_str(),
+                    active.empty() ? " (default)" : "");
+    }
 
     // Edit-history summary. Collapse per-table edits to a flag set so
     // the user sees at-a-glance which tables have been touched + whether
@@ -3619,6 +3635,7 @@ int cmd_completion(int argc, char *argv[]) {
         "project-new", "project-info", "project-edit", "project-edit-csv",
         "project-export-csv", "project-set-profile", "project-add-rom",
         "project-list-roms", "project-validate", "project-clone",
+        "project-set-active-rom",
         "project-history", "project-flash", "project-diff",
         "project-autotune-maf", "project-autotune-knock-pull",
         "pack-info", "primitive-list", "hook-list", "pack-dtcs",
@@ -3854,7 +3871,11 @@ int cmd_stats(int argc, char *argv[]) {
     std::optional<std::filesystem::path> proj_dir;
     std::optional<std::string> table_id;
     bool json_mode = false;
-    bool use_source = false;
+    // rom_arg: explicit per-invocation override.
+    //   "source" / "working" / additional id, or unset → project default.
+    // --source / --working are kept as ergonomic shortcuts but route
+    // through the same find_rom_by_id() path as --rom for consistency.
+    std::optional<std::string> rom_arg;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         auto const need_val = [&](char const *name) -> char const * {
@@ -3870,9 +3891,14 @@ int cmd_stats(int argc, char *argv[]) {
             else
                 return 2;
         } else if (a == "--source") {
-            use_source = true;
+            rom_arg = std::string{"source"};
         } else if (a == "--working") {
-            use_source = false;
+            rom_arg = std::string{"working"};
+        } else if (a == "--rom") {
+            if (auto const *v = need_val("--rom"); v)
+                rom_arg = std::string{v};
+            else
+                return 2;
         } else if (a == "--json") {
             json_mode = true;
         } else if (a.starts_with("--")) {
@@ -3888,7 +3914,7 @@ int cmd_stats(int argc, char *argv[]) {
     if (!proj_dir.has_value() || !table_id.has_value()) {
         std::fputs("stats: missing required arguments\n"
                    "Usage: subuwutuner-cli stats <project-dir> --table <id> "
-                   "[--source | --working] [--json]\n",
+                   "[--rom <id> | --source | --working] [--json]\n",
                    stderr);
         return 2;
     }
@@ -3902,7 +3928,17 @@ int cmd_stats(int argc, char *argv[]) {
         std::fprintf(stderr, "stats: table '%s' not found in pack\n", table_id->c_str());
         return 1;
     }
-    auto const &rom = use_source ? proj->source_rom() : proj->working_rom();
+    // Resolve which ROM to read. Precedence: explicit flag this
+    // invocation → project's persisted active_rom_id → working slot.
+    std::string const rom_id = rom_arg.has_value() ? *rom_arg : proj->active_rom_id();
+    auto const *rom_ptr = proj->find_rom_by_id(rom_id);
+    if (rom_ptr == nullptr) {
+        std::fprintf(stderr, "stats: no ROM with id '%s' in this project\n", rom_id.c_str());
+        return 1;
+    }
+    auto const &rom = *rom_ptr;
+    bool const use_source = (rom_id == "source");
+    std::string const rom_label = rom_id.empty() ? "working" : rom_id;
     auto td = proj->definition().read_table_values(rom, *tbl);
     if (!td.has_value()) {
         std::fprintf(stderr, "stats: %s\n", td.error().to_string().c_str());
@@ -3942,11 +3978,16 @@ int cmd_stats(int argc, char *argv[]) {
     double const p10 = percentile(0.10);
     double const p50 = percentile(0.50);
     double const p90 = percentile(0.90);
-    // edited count = working cells differing from source. Only meaningful
-    // when we're reading the working ROM. Recompute the source table to
-    // compare (cheap for any GUI-sized table).
+    // edited count = active-ROM cells differing from source. Only
+    // meaningful when the active slot is not source itself. Recompute
+    // the source table to compare (cheap for any GUI-sized table).
+    // For an additional ROM the count represents how it differs from
+    // source — useful as a "how heavily-tuned is this calibration?"
+    // signal even though the additional ROM has no edit history of
+    // its own yet.
     std::size_t edited = 0;
-    if (!use_source) {
+    bool const compute_edited = !use_source;
+    if (compute_edited) {
         auto src_td = proj->definition().read_table_values(proj->source_rom(), *tbl);
         if (src_td.has_value() && src_td->values.size() == td->values.size()) {
             for (std::size_t r = 0; r < td->values.size(); ++r) {
@@ -3966,7 +4007,7 @@ int cmd_stats(int argc, char *argv[]) {
         out.append("{\"schema\":\"subuwutuner.stats.v1\",\"table\":");
         json_escape(out, tbl->id);
         out.append(",\"rom\":");
-        out.append(use_source ? "\"source\"" : "\"working\"");
+        json_escape(out, rom_label);
         out.append(",\"unit\":");
         json_escape(out, unit);
         char num[64];
@@ -3986,13 +4027,15 @@ int cmd_stats(int argc, char *argv[]) {
         emit("p90", p90);
         out.append(",\"cells\":");
         out.append(std::to_string(cells.size()));
-        out.append(",\"edited\":");
-        out.append(std::to_string(edited));
+        if (compute_edited) {
+            out.append(",\"edited\":");
+            out.append(std::to_string(edited));
+        }
         out.append("}\n");
         std::fputs(out.c_str(), stdout);
     } else {
         std::printf("Table:   %s\n", tbl->id.c_str());
-        std::printf("ROM:     %s\n", use_source ? "source" : "working");
+        std::printf("ROM:     %s\n", rom_label.c_str());
         if (!unit.empty())
             std::printf("Unit:    %s\n", unit.c_str());
         std::printf("min:     %g\n", mn);
@@ -4003,7 +4046,7 @@ int cmd_stats(int argc, char *argv[]) {
         std::printf("p50:     %g\n", p50);
         std::printf("p90:     %g\n", p90);
         std::printf("cells:   %zu\n", cells.size());
-        if (!use_source) {
+        if (compute_edited) {
             std::printf("edited:  %zu (vs source)\n", edited);
         }
     }
@@ -4290,6 +4333,48 @@ int cmd_project_set_profile(int argc, char *argv[]) {
         return 1;
     }
     std::printf("Profile set to: %s\n", std::string{st::policy::profile_name(*parsed)}.c_str());
+    return 0;
+}
+
+// project-set-active-rom <dir> <id>
+//   Issue #10 multi-ROM foundation: pick which ROM read-side verbs
+//   target by default. "" / "working" → working slot (default);
+//   "source" → the immutable source ROM; any other id must match an
+//   entry from `project-list-roms`.
+int cmd_project_set_active_rom(int argc, char *argv[]) {
+    if (argc < 2) {
+        std::fputs("project-set-active-rom: missing arguments\n"
+                   "Usage: subuwutuner-cli project-set-active-rom <dir> <id>\n"
+                   "  id: 'working' (default), 'source', or an additional ROM id\n"
+                   "      (see `project-list-roms`). Pass '' to reset to the\n"
+                   "      working slot.\n",
+                   stderr);
+        return 2;
+    }
+    std::filesystem::path const dir{argv[0]};
+    std::string_view const id_arg{argv[1]};
+
+    auto p = st::Project::open(dir);
+    if (!p.has_value()) {
+        std::fprintf(stderr, "project-set-active-rom: %s\n", p.error().to_string().c_str());
+        return 1;
+    }
+    if (auto s = p->set_active_rom_id(id_arg); !s.has_value()) {
+        std::fprintf(stderr, "project-set-active-rom: %s\n", s.error().to_string().c_str());
+        if (!p->additional_roms().empty()) {
+            std::fputs("Available additional ROM ids:\n", stderr);
+            for (auto const &r : p->additional_roms()) {
+                std::fprintf(stderr, "  %s\n", r.id.c_str());
+            }
+        }
+        return 2;
+    }
+    if (auto s = p->save_metadata(); !s.has_value()) {
+        std::fprintf(stderr, "project-set-active-rom: %s\n", s.error().to_string().c_str());
+        return 1;
+    }
+    auto const &active = p->active_rom_id();
+    std::printf("Active ROM set to: %s\n", active.empty() ? "working" : active.c_str());
     return 0;
 }
 
@@ -13484,6 +13569,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-validate") {
         return cmd_project_validate(argc - 2, argv + 2);
+    }
+    if (cmd == "project-set-active-rom") {
+        return cmd_project_set_active_rom(argc - 2, argv + 2);
     }
     if (cmd == "stats") {
         return cmd_stats(argc - 2, argv + 2);

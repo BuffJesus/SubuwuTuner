@@ -901,6 +901,163 @@ TEST_CASE("Project::add_additional_rom rejects empty id and duplicates",
     REQUIRE_FALSE(dup_r.has_value());
     REQUIRE(dup_r.error().code() == st::ErrorCode::InvalidArgument);
     REQUIRE(pc->additional_roms().size() == 1); // unchanged
+
+    // Reserved ids — "source" and "working" would shadow the built-in
+    // slots that find_rom_by_id privileges. Both must be rejected.
+    for (auto const *reserved : {"source", "working"}) {
+        st::Project::AdditionalRom r;
+        r.id = reserved;
+        r.path_rel = "ignored";
+        r.rom = st::Rom::from_bytes(make_rom_bytes());
+        auto const got = pc->add_additional_rom(r);
+        REQUIRE_FALSE(got.has_value());
+        REQUIRE(got.error().code() == st::ErrorCode::InvalidArgument);
+    }
+    REQUIRE(pc->additional_roms().size() == 1); // still unchanged
+}
+
+TEST_CASE("Project::find_rom_by_id resolves built-in and additional slots",
+          "[project][active_rom][find]") {
+    // The read-side primitive that every CLI --rom and (eventually) GUI
+    // active-ROM switch funnels through. "" and "working" both alias
+    // to the working slot so existing code paths keep working. "source"
+    // hits the immutable copy. An additional id hits its loaded Rom.
+    // An unknown id returns nullptr so callers can produce a clean
+    // error message instead of crashing.
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "find.stune";
+    auto p = st::Project::create(proj_dir, rom_path, pack_dir, "find");
+    REQUIRE(p.has_value());
+
+    REQUIRE(p->find_rom_by_id("") == &p->working_rom());
+    REQUIRE(p->find_rom_by_id("working") == &p->working_rom());
+    REQUIRE(p->find_rom_by_id("source") == &p->source_rom());
+    REQUIRE(p->find_rom_by_id("nope") == nullptr);
+
+    st::Project::AdditionalRom entry;
+    entry.id = "tune-a";
+    entry.path_rel = "ignored";
+    entry.rom = st::Rom::from_bytes(make_rom_bytes());
+    REQUIRE(p->add_additional_rom(entry).has_value());
+
+    auto const *r = p->find_rom_by_id("tune-a");
+    REQUIRE(r != nullptr);
+    REQUIRE(r->size() == 64);
+}
+
+TEST_CASE("Project::set_active_rom_id validates against built-ins and additional ids",
+          "[project][active_rom][set]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "set.stune";
+    auto p = st::Project::create(proj_dir, rom_path, pack_dir, "set");
+    REQUIRE(p.has_value());
+
+    // Default is the empty string = working slot.
+    REQUIRE(p->active_rom_id().empty());
+
+    REQUIRE(p->set_active_rom_id("working").has_value());
+    REQUIRE(p->active_rom_id() == "working");
+    REQUIRE(p->set_active_rom_id("source").has_value());
+    REQUIRE(p->active_rom_id() == "source");
+    REQUIRE(p->set_active_rom_id("").has_value());
+    REQUIRE(p->active_rom_id().empty());
+
+    auto const bad = p->set_active_rom_id("never-added");
+    REQUIRE_FALSE(bad.has_value());
+    REQUIRE(bad.error().code() == st::ErrorCode::InvalidArgument);
+    // Failed set must NOT mutate the persisted id.
+    REQUIRE(p->active_rom_id().empty());
+
+    st::Project::AdditionalRom entry;
+    entry.id = "tune-b";
+    entry.path_rel = "ignored";
+    entry.rom = st::Rom::from_bytes(make_rom_bytes());
+    REQUIRE(p->add_additional_rom(entry).has_value());
+    REQUIRE(p->set_active_rom_id("tune-b").has_value());
+    REQUIRE(p->active_rom_id() == "tune-b");
+}
+
+TEST_CASE("Project::active_rom_id round-trips through save_metadata + open",
+          "[project][active_rom][persist]") {
+    // The setter only mutates in-memory state; save_metadata persists
+    // it to project.toml, and Project::open restores it. A project
+    // that never set the field reopens with an empty id (the working
+    // default), matching the v1 behavior.
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "persist.stune";
+
+    {
+        auto p = st::Project::create(proj_dir, rom_path, pack_dir, "persist");
+        REQUIRE(p.has_value());
+        REQUIRE(p->set_active_rom_id("source").has_value());
+        REQUIRE(p->save_metadata().has_value());
+    }
+    {
+        auto p = st::Project::open(proj_dir);
+        REQUIRE(p.has_value());
+        REQUIRE(p->active_rom_id() == "source");
+    }
+    {
+        // Reset back to default; round-trip should bring back an
+        // empty id, not "working".
+        auto p = st::Project::open(proj_dir);
+        REQUIRE(p.has_value());
+        REQUIRE(p->set_active_rom_id("").has_value());
+        REQUIRE(p->save_metadata().has_value());
+    }
+    {
+        auto p = st::Project::open(proj_dir);
+        REQUIRE(p.has_value());
+        REQUIRE(p->active_rom_id().empty());
+    }
+}
+
+TEST_CASE("Project::active_rom_id with stale additional id is tolerated on open",
+          "[project][active_rom][persist]") {
+    // If a user removes a [[rom]] entry from project.toml while the
+    // active_rom_id still names it, open() must succeed (the
+    // working-slot fallback in find_rom_by_id handles the read-side
+    // case). The id stays in the field so the user can see it was
+    // there — they can run project-set-active-rom to reset.
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const proj_dir = td.path / "stale.stune";
+    std::filesystem::create_directories(proj_dir);
+    write_bytes(proj_dir / "source.bin", make_rom_bytes());
+    write_bytes(proj_dir / "working.bin", make_rom_bytes());
+
+    std::string const toml_text = std::string{R"toml(
+[project]
+schema_version = 1
+display_name   = "stale"
+active_rom_id  = "ghost"
+
+[project.source_rom]
+path  = "source.bin"
+crc32 = 0
+
+[project.working_rom]
+path  = "working.bin"
+crc32 = 0
+
+[project.definition]
+path = ")toml"} + pack_dir.generic_string() + R"toml("
+)toml";
+    write_text(proj_dir / "project.toml", toml_text);
+
+    auto p = st::Project::open(proj_dir);
+    REQUIRE(p.has_value());
+    REQUIRE(p->active_rom_id() == "ghost");
+    REQUIRE(p->find_rom_by_id(p->active_rom_id()) == nullptr);
 }
 
 TEST_CASE("Project::handheld_serial preserves empty on default save / reopen",
