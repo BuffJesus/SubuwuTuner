@@ -43,6 +43,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -417,6 +418,47 @@ void render_audit_panel(AppState &state) {
         return;
     }
 
+    // Time-range slider — [start, end] clip on top of text/chip
+    // filters. Values are normalized [0..1] across the full span;
+    // converted to ns at filter time. Drag either knob to narrow.
+    {
+        ImGui::PushItemWidth(140.0f);
+        ImGui::DragFloatRange2("Range", &state.audit_range_start, &state.audit_range_end,
+                               0.005f, 0.0f, 1.0f, "%.2f");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Reset##audit_range_reset")) {
+            state.audit_range_start = 0.0f;
+            state.audit_range_end = 1.0f;
+        }
+        ImGui::PopItemWidth();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Reset to the full timestamp span.");
+        }
+    }
+
+    // Convert range knobs to nanosecond bounds.
+    std::int64_t range_t_lo = std::numeric_limits<std::int64_t>::min();
+    std::int64_t range_t_hi = std::numeric_limits<std::int64_t>::max();
+    if (state.audit_range_start > 0.0f || state.audit_range_end < 1.0f) {
+        std::int64_t t_min = state.audit_entries.front().timestamp_ns;
+        std::int64_t t_max = t_min;
+        for (auto const &e : state.audit_entries) {
+            if (e.timestamp_ns < t_min)
+                t_min = e.timestamp_ns;
+            if (e.timestamp_ns > t_max)
+                t_max = e.timestamp_ns;
+        }
+        if (t_max > t_min) {
+            auto const span = static_cast<double>(t_max - t_min);
+            range_t_lo =
+                t_min + static_cast<std::int64_t>(
+                            static_cast<double>(state.audit_range_start) * span);
+            range_t_hi =
+                t_min + static_cast<std::int64_t>(
+                            static_cast<double>(state.audit_range_end) * span);
+        }
+    }
+
     // Build the visible-row index list once per render — filter +
     // sort. ImGuiTableSortSpecs would be overkill for one column.
     std::string_view const filter{state.audit_filter};
@@ -424,6 +466,9 @@ void render_audit_panel(AppState &state) {
     indices.reserve(state.audit_entries.size());
     for (std::size_t i = 0; i < state.audit_entries.size(); ++i) {
         auto const &e = state.audit_entries[i];
+        if (e.timestamp_ns < range_t_lo || e.timestamp_ns > range_t_hi) {
+            continue;
+        }
         if (!filter.empty()) {
             auto const kind = st::audit::kind_name(e.kind);
             if (!contains_ci(kind, filter) && !contains_ci(e.source, filter) &&

@@ -436,6 +436,11 @@ struct AppState {
     bool audit_loaded{false};
     char audit_filter[128]{};
     bool audit_newest_first{true};
+    // Time-range clip applied on top of the text + chip filters.
+    // [0..1] floats relative to the full timestamp span of the
+    // loaded entries. Default (0,1) shows everything.
+    float audit_range_start{0.0f};
+    float audit_range_end{1.0f};
     // Cached file_time on the last successful audit.log read. The
     // panel polls this each frame and auto-reloads when the value
     // changes — so events appended elsewhere in the GUI (project

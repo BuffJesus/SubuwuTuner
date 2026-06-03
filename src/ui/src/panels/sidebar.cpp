@@ -53,6 +53,30 @@ void render_sidebar(AppState &state) {
     ImGui::InputTextWithHint("##table_filter", "Filter tables…  (Ctrl+F)", state.table_filter,
                              sizeof state.table_filter, ImGuiInputTextFlags_EscapeClearsAll);
 
+    // Quick-jump shortcuts: E → first emissions-relevant table,
+    // S → first engine-safety-critical table. Only fires when the
+    // sidebar window is focused AND no text-input is active. Useful
+    // for jumping straight to the most-common flagged categories
+    // without typing or scrolling.
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+        !ImGui::GetIO().WantTextInput) {
+        if (ImGui::IsKeyPressed(ImGuiKey_E, false)) {
+            for (auto const &t : def.tables()) {
+                if (t.emissions_relevant) {
+                    state.select_table(t.id);
+                    break;
+                }
+            }
+        } else if (ImGui::IsKeyPressed(ImGuiKey_S, false)) {
+            for (auto const &t : def.tables()) {
+                if (t.engine_safety_critical) {
+                    state.select_table(t.id);
+                    break;
+                }
+            }
+        }
+    }
+
     std::string_view const filter{state.table_filter};
     // Count matches once so the active-filter header line can report
     // "N of M". When the filter is empty, the count is noise — the tree

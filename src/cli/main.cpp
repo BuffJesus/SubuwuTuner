@@ -3522,6 +3522,87 @@ int cmd_changelog_show(int argc, char *argv[]) {
 // referenced [[rom]] additional files. Skips audit.log — a clone is
 // a fresh timeline. Rewrites the cloned project.toml's display_name
 // when --name is provided.
+// Print a shell-completion script. bash and zsh covered; output is
+// the full subcommand list so `subuwutuner-cli <tab>` works after
+// sourcing. Intentionally minimal — no per-subcommand flag completion
+// since the help/--help surface is already discoverable.
+int cmd_completion(int argc, char *argv[]) {
+    if (argc < 1) {
+        std::fputs("completion: missing shell name (bash|zsh)\n", stderr);
+        return 2;
+    }
+    std::string_view const shell{argv[0]};
+    // Keep this list manually synchronized with the dispatcher above.
+    // Worth the duplication — completion has to be a fast string
+    // scan, not a full subcommand-table walk.
+    static char const *const kSubcommands[] = {
+        "rom-info", "rom-diff", "rom-pull", "rom-identify",
+        "dump-table", "dump-axis", "table-edit", "table-list",
+        "project-new", "project-info", "project-edit", "project-edit-csv",
+        "project-export-csv", "project-set-profile", "project-add-rom",
+        "project-list-roms", "project-validate", "project-clone",
+        "project-history", "project-flash", "project-diff",
+        "project-autotune-maf", "project-autotune-knock-pull",
+        "pack-info", "primitive-list", "hook-list", "pack-dtcs",
+        "stats", "diff", "diff-load", "audit", "profile", "config",
+        "changelog", "log", "ssm-a8-poll", "doctor", "transport-list",
+        "uds-test", "feature-graph",
+        nullptr,
+    };
+    if (shell == "bash") {
+        std::printf("# subuwutuner-cli bash completion\n");
+        std::printf("# Install: subuwutuner-cli completion bash > "
+                    "~/.local/share/bash-completion/completions/subuwutuner-cli\n");
+        std::printf("# Or:      source <(subuwutuner-cli completion bash)\n\n");
+        std::printf("_subuwutuner_cli() {\n");
+        std::printf("  local cur prev opts\n");
+        std::printf("  COMPREPLY=()\n");
+        std::printf("  cur=\"${COMP_WORDS[COMP_CWORD]}\"\n");
+        std::printf("  if [ ${COMP_CWORD} -eq 1 ]; then\n");
+        std::printf("    opts=\"");
+        for (auto const *s : kSubcommands) {
+            if (s == nullptr)
+                break;
+            std::printf("%s ", s);
+        }
+        std::printf("\"\n");
+        std::printf("    COMPREPLY=($(compgen -W \"${opts}\" -- ${cur}))\n");
+        std::printf("    return 0\n");
+        std::printf("  fi\n");
+        std::printf("  COMPREPLY=($(compgen -f -- ${cur}))\n");
+        std::printf("}\n");
+        std::printf("complete -F _subuwutuner_cli subuwutuner-cli\n");
+        return 0;
+    }
+    if (shell == "zsh") {
+        std::printf("# subuwutuner-cli zsh completion\n");
+        std::printf("# Install: subuwutuner-cli completion zsh > "
+                    "${fpath[1]}/_subuwutuner-cli\n");
+        std::printf("# Or:      source <(subuwutuner-cli completion zsh)\n\n");
+        std::printf("#compdef subuwutuner-cli\n\n");
+        std::printf("_subuwutuner_cli() {\n");
+        std::printf("  local -a subcommands\n");
+        std::printf("  subcommands=(");
+        for (auto const *s : kSubcommands) {
+            if (s == nullptr)
+                break;
+            std::printf("'%s' ", s);
+        }
+        std::printf(")\n");
+        std::printf("  if (( CURRENT == 2 )); then\n");
+        std::printf("    _describe 'subcommand' subcommands\n");
+        std::printf("  else\n");
+        std::printf("    _files\n");
+        std::printf("  fi\n");
+        std::printf("}\n");
+        std::printf("_subuwutuner_cli\n");
+        return 0;
+    }
+    std::fprintf(stderr, "completion: unknown shell '%.*s' (try bash or zsh)\n",
+                 static_cast<int>(shell.size()), shell.data());
+    return 2;
+}
+
 int cmd_project_clone(int argc, char *argv[]) {
     std::optional<std::filesystem::path> src_dir;
     std::optional<std::filesystem::path> dst_dir;
@@ -13331,6 +13412,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "project-clone") {
         return cmd_project_clone(argc - 2, argv + 2);
+    }
+    if (cmd == "completion") {
+        return cmd_completion(argc - 2, argv + 2);
     }
     if (cmd == "changelog") {
         if (argc < 3 || std::string_view{argv[2]} != "show") {
