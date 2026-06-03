@@ -24,6 +24,7 @@
 #include "app_state.hpp"
 #include "widgets/widgets.hpp"
 
+#include "actions.hpp" // jump_to_table
 #include "st/audit.hpp"
 
 #include <imgui.h>
@@ -474,13 +475,41 @@ void render_audit_panel(AppState &state) {
         ImGui::TextUnformatted(e.source.c_str());
 
         ImGui::TableNextColumn();
-        ImGui::TextUnformatted(e.description.c_str());
-        if (!e.fields.empty() && ImGui::IsItemHovered()) {
-            ImGui::BeginTooltip();
-            for (auto const &[k, v] : e.fields) {
-                ImGui::Text("%s = %s", k.c_str(), v.c_str());
+        // Description rendered as a Selectable so double-click can drive
+        // a "jump to table" action when the entry's fields carry a
+        // table id. Most entries don't (project.opened etc.) and the
+        // selectable is just inert decoration for them.
+        std::string const *table_field = nullptr;
+        for (auto const &[k, v] : e.fields) {
+            if (k == "table" && !v.empty()) {
+                table_field = &v;
+                break;
             }
-            ImGui::EndTooltip();
+        }
+        ImGui::PushID(static_cast<int>(idx));
+        if (ImGui::Selectable(e.description.c_str(), false,
+                              ImGuiSelectableFlags_AllowDoubleClick)) {
+            if (table_field != nullptr && ImGui::IsMouseDoubleClicked(0)) {
+                jump_to_table(state, *table_field);
+            }
+        }
+        ImGui::PopID();
+        if (ImGui::IsItemHovered()) {
+            if (!e.fields.empty()) {
+                ImGui::BeginTooltip();
+                for (auto const &[k, v] : e.fields) {
+                    ImGui::Text("%s = %s", k.c_str(), v.c_str());
+                }
+                if (table_field != nullptr) {
+                    ImGui::Separator();
+                    text_subtle("Double-click → open '%s' in editor.",
+                                table_field->c_str());
+                }
+                ImGui::EndTooltip();
+            } else if (table_field != nullptr) {
+                ImGui::SetTooltip("Double-click → open '%s' in editor.",
+                                  table_field->c_str());
+            }
         }
 
         ImGui::TableNextColumn();
