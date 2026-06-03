@@ -67,7 +67,9 @@ void render_dtcs_panel(AppState &state) {
     bool const editing_allowed = state.viewing_working_rom();
     if (!editing_allowed) {
         ImGui::TextDisabled(
-            "(read-only — switch View → Active ROM → Working to toggle)");
+            "(showing '%s' ROM, read-only — switch View → Active ROM "
+            "→ Working to toggle)",
+            state.active_rom_id.c_str());
     }
     ImGui::BeginDisabled(!editing_allowed);
 
@@ -164,7 +166,15 @@ void render_dtcs_panel(AppState &state) {
                              sizeof state.dtc_filter, ImGuiInputTextFlags_EscapeClearsAll);
     std::string_view const filter{state.dtc_filter};
 
-    auto const &rom = state.project->working_rom();
+    // Display read flows through view_rom: when the user is viewing
+    // source / an additional ROM, the checkbox column reflects THAT
+    // ROM's DTC state. Toggles always target working — but the
+    // surrounding BeginDisabled (set at the top of the function on
+    // editing_allowed) prevents Checkbox writes from firing when
+    // viewing != working, so the read/write split stays coherent.
+    auto const *view_rom_ptr = state.view_rom();
+    auto const &rom = (view_rom_ptr != nullptr) ? *view_rom_ptr
+                                                : state.project->working_rom();
     if (ImGui::BeginTable("dtc_table", 3,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                               ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit)) {

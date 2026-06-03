@@ -286,44 +286,18 @@ void render_menubar(AppState &state) {
             // the new view ROM so the grid updates in place. Editing
             // is gated to working — see table_view.cpp's editing_allowed.
             if (ImGui::BeginMenu("Active ROM", has_project)) {
-                auto const switch_to = [&state](std::string const &id) {
-                    if (!state.project.has_value()) {
-                        return;
-                    }
-                    if (auto s = state.project->set_active_rom_id(id); !s.has_value()) {
-                        state.status_msg = "Active ROM: " + s.error().to_string();
-                        return;
-                    }
-                    state.active_rom_id = state.project->active_rom_id();
-                    if (auto s = state.project->save_metadata(); !s.has_value()) {
-                        state.status_msg = "Active ROM saved in memory but "
-                                           "save_metadata failed: " +
-                                           s.error().to_string();
-                    }
-                    // Cancel any in-flight inline cell editor — the
-                    // ROM under it just changed.
-                    state.editing_cell = false;
-                    state.editor_just_opened = false;
-                    if (!state.selected_table_id.empty()) {
-                        state.select_table(state.selected_table_id);
-                    }
-                    auto const &active = state.active_rom_id;
-                    enqueue_toast(state, ToastKind::Info,
-                                  std::string{"Active ROM: "} +
-                                      (active.empty() ? "working" : active));
-                };
                 bool const is_working = state.viewing_working_rom();
                 bool const is_source = state.active_rom_id == "source";
                 if (ImGui::MenuItem("Working (editing)", nullptr, is_working) &&
                     !is_working) {
-                    switch_to("working");
+                    set_active_view_rom(state, "working");
                 }
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("Edits target this slot.");
                 }
                 if (ImGui::MenuItem("Source (read-only)", nullptr, is_source) &&
                     !is_source) {
-                    switch_to("source");
+                    set_active_view_rom(state, "source");
                 }
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("The immutable source ROM captured at\n"
@@ -339,7 +313,7 @@ void render_menubar(AppState &state) {
                             r.display_name.empty() ? r.id : r.display_name;
                         if (ImGui::MenuItem(label.c_str(), nullptr, is_active) &&
                             !is_active) {
-                            switch_to(r.id);
+                            set_active_view_rom(state, r.id);
                         }
                     }
                 }

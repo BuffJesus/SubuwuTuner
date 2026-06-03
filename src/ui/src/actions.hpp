@@ -112,6 +112,14 @@ void reset_selection_to_source(AppState &state);
 void do_undo(AppState &state);
 void do_redo(AppState &state);
 void do_copy_selection(AppState &state);
+
+// Switch which ROM the GUI's read-side surfaces display (Issue #10
+// active-ROM helper, shared between View → Active ROM and the
+// command palette). Validates id, persists via save_metadata,
+// mirrors into AppState, cancels any in-flight cell editor, and
+// re-reads the current table so the grid updates in place.
+// Toast on success; status_msg on failure.
+void set_active_view_rom(AppState &state, std::string const &id);
 void copy_rect_to_clipboard(st::Definition::TableData const &td, st::edit::Rect const &rect,
                             int precision);
 

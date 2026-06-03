@@ -286,6 +286,35 @@ void reset_selection_to_source(AppState &state) {
     });
 }
 
+void set_active_view_rom(AppState &state, std::string const &id) {
+    if (!state.project.has_value()) {
+        return;
+    }
+    if (auto s = state.project->set_active_rom_id(id); !s.has_value()) {
+        state.status_msg = "Active ROM: " + s.error().to_string();
+        return;
+    }
+    state.active_rom_id = state.project->active_rom_id();
+    if (auto s = state.project->save_metadata(); !s.has_value()) {
+        // Memory state already updated; surface the disk-write failure but
+        // don't roll back — the in-memory switch is still useful for this
+        // session even if the project file couldn't be rewritten.
+        state.status_msg = "Active ROM saved in memory but save_metadata failed: " +
+                           s.error().to_string();
+    }
+    // Cancel any in-flight inline cell editor — the ROM under it
+    // just changed, so the typed buffer references stale values.
+    state.editing_cell = false;
+    state.editor_just_opened = false;
+    if (!state.selected_table_id.empty()) {
+        state.select_table(state.selected_table_id);
+    }
+    auto const &active = state.active_rom_id;
+    enqueue_toast(state, ToastKind::Info,
+                  std::string{"Active ROM: "} +
+                      (active.empty() ? "working" : active));
+}
+
 void do_undo(AppState &state) {
     if (!state.project.has_value()) {
         return;

@@ -81,8 +81,9 @@ enum class PaletteCommandKind : std::uint8_t {
     HelpTopics,
     WelcomeWizard,
     Flash,
-    OpenRecent, // payload = absolute path
-    OpenTable,  // payload = table id
+    OpenRecent,      // payload = absolute path
+    OpenTable,       // payload = table id
+    SwitchActiveRom, // payload = "working" / "source" / additional id
 };
 
 struct PaletteCommand {
@@ -159,6 +160,30 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
     if (has_project) {
         push(PaletteCommandKind::ViewGrid, "Table view: Grid", "", "View");
         push(PaletteCommandKind::ViewHeatmap, "Table view: Heatmap", "", "View");
+        // Active-ROM switches — only the inactive slots are listed so
+        // the palette doesn't offer "switch to <current>" no-ops.
+        bool const is_working_active = state.viewing_working_rom();
+        bool const is_source_active = state.active_rom_id == "source";
+        if (!is_working_active) {
+            push(PaletteCommandKind::SwitchActiveRom,
+                 "View: Switch to Working ROM (editing)", "Active ROM", "View",
+                 "working");
+        }
+        if (!is_source_active) {
+            push(PaletteCommandKind::SwitchActiveRom,
+                 "View: Switch to Source ROM (read-only)", "Active ROM", "View",
+                 "source");
+        }
+        for (auto const &r : state.project->additional_roms()) {
+            if (state.active_rom_id == r.id) {
+                continue;
+            }
+            std::string const display =
+                r.display_name.empty() ? r.id : r.display_name;
+            std::string label = "View: Switch to " + display + " (read-only)";
+            push(PaletteCommandKind::SwitchActiveRom, label.c_str(), "Active ROM",
+                 "View", r.id);
+        }
     }
     // Panel toggles — useful even without a project (panels render their
     // own empty states). Label says "Show" / "Hide" based on current state
@@ -419,6 +444,9 @@ void dispatch_palette_command(AppState &state, PaletteCommand const &cmd) {
         if (state.project.has_value()) {
             state.select_table(cmd.payload);
         }
+        break;
+    case PaletteCommandKind::SwitchActiveRom:
+        set_active_view_rom(state, cmd.payload);
         break;
     }
 }

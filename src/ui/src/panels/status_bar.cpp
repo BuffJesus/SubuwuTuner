@@ -9,6 +9,7 @@
 
 #include "panels/panels.hpp"
 
+#include "actions.hpp" // set_active_view_rom
 #include "app_state.hpp"
 #include "persistence.hpp"
 #include "widgets/widgets.hpp"
@@ -184,6 +185,31 @@ void render_status_bar(AppState &state) {
                                       "motorsport-only — this setting is GUI-only for now.");
                 }
                 ImGui::EndPopup();
+            }
+        }
+
+        // Active-ROM chip — only renders when the active slot is NOT
+        // working (the default). Surfaces "you are looking at a non-
+        // editable ROM" so the user doesn't wonder why the edit
+        // toolbar greyed out. Accent color since it represents a
+        // non-default posture. Click resets to working in one step.
+        if (!state.viewing_working_rom()) {
+            ImGui::SameLine();
+            std::string const id = state.active_rom_id;
+            // E946 Info icon — neutral "you should know this" cue,
+            // matches the chip vocabulary already in use.
+            std::string const chip_label = "\xEE\xA5\x86  ROM: " + id;
+            chip(chip_label.c_str(), chip_fg_accent(), chip_bg_accent());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Reading from the '%s' ROM (read-only).\n"
+                                  "Edit affordances are disabled while this\n"
+                                  "slot is active.\n"
+                                  "Click to switch back to the working ROM.",
+                                  id.c_str());
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            }
+            if (ImGui::IsItemClicked()) {
+                set_active_view_rom(state, "working");
             }
         }
 
