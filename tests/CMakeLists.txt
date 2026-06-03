@@ -90,6 +90,7 @@ add_executable(st_unit_tests
     unit/diff/test_diff.cpp
     unit/audit/test_audit.cpp
     unit/audit/test_audit_subscribers.cpp
+    unit/cli/test_cli_integration.cpp
     unit/profile/test_profile.cpp
 )
 
@@ -128,6 +129,23 @@ target_link_libraries(st_unit_tests
 if (MSVC)
     target_compile_definitions(st_unit_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
+
+# Wire the CLI binary path + demo-fixture path into the test target so
+# the CLI integration smoke (test_cli_integration.cpp) can locate the
+# real subuwutuner-cli binary regardless of build dir. A build-time
+# dependency on subuwutuner-cli guarantees the binary exists before
+# tests start; if the consumer of this CMakeLists configured with
+# tests-only (no CLI target), the integration cases self-skip via
+# is_cli_available().
+if (TARGET subuwutuner-cli)
+    add_dependencies(st_unit_tests subuwutuner-cli)
+    # $<TARGET_FILE> is a generator expression — resolved at build
+    # time per-config (Debug / Release / etc).
+    target_compile_definitions(st_unit_tests PRIVATE
+        ST_CLI_BINARY_PATH="$<TARGET_FILE:subuwutuner-cli>")
+endif()
+target_compile_definitions(st_unit_tests PRIVATE
+    ST_FIXTURE_DEMO_STUNE="${CMAKE_SOURCE_DIR}/fixtures/demo.stune")
 
 # Tests that pin specific encoder bit patterns (e.g. test_rh850.cpp)
 # need direct access to the backend's private impl headers. Exposing
