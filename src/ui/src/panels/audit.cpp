@@ -538,6 +538,21 @@ void render_audit_panel(AppState &state) {
                 jump_to_table(state, *table_field);
             }
         }
+        // Right-click context menu — single-entry NDJSON copy. Useful
+        // for quoting one event in a support thread or chat.
+        if (ImGui::BeginPopupContextItem("##audit_row_ctx")) {
+            if (ImGui::MenuItem("Copy as NDJSON")) {
+                auto const line = st::audit::serialize_entry(e);
+                ImGui::SetClipboardText(line.c_str());
+            }
+            if (table_field != nullptr) {
+                ImGui::Separator();
+                if (ImGui::MenuItem("Jump to table")) {
+                    jump_to_table(state, *table_field);
+                }
+            }
+            ImGui::EndPopup();
+        }
         ImGui::PopID();
         if (ImGui::IsItemHovered()) {
             if (!e.fields.empty()) {

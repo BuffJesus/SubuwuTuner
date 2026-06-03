@@ -3526,6 +3526,84 @@ int cmd_changelog_show(int argc, char *argv[]) {
 // the full subcommand list so `subuwutuner-cli <tab>` works after
 // sourcing. Intentionally minimal — no per-subcommand flag completion
 // since the help/--help surface is already discoverable.
+// Case-insensitive substring search across table id + name + category.
+// One match per line in text mode; JSON envelope in JSON mode.
+int cmd_table_grep(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> proj_dir;
+    std::optional<std::string> pattern;
+    bool json_mode = false;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--json") {
+            json_mode = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "table-grep: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!proj_dir.has_value()) {
+            proj_dir = std::filesystem::path{argv[i]};
+        } else if (!pattern.has_value()) {
+            pattern = std::string{argv[i]};
+        } else {
+            std::fprintf(stderr, "table-grep: extra positional: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!proj_dir.has_value() || !pattern.has_value()) {
+        std::fputs("table-grep: missing arguments\n"
+                   "Usage: subuwutuner-cli table-grep <project-dir> <pattern> [--json]\n",
+                   stderr);
+        return 2;
+    }
+    auto proj = st::Project::open(*proj_dir);
+    if (!proj.has_value()) {
+        std::fprintf(stderr, "table-grep: %s\n", proj.error().to_string().c_str());
+        return 1;
+    }
+    std::string needle = *pattern;
+    std::transform(needle.begin(), needle.end(), needle.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    auto const has_substring = [&needle](std::string_view hay) {
+        std::string lower{hay};
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        return lower.find(needle) != std::string::npos;
+    };
+    std::vector<st::Table const *> matches;
+    for (auto const &t : proj->definition().tables()) {
+        if (has_substring(t.id) || has_substring(t.name) || has_substring(t.category)) {
+            matches.push_back(&t);
+        }
+    }
+    if (json_mode) {
+        std::string out;
+        out.append("{\"schema\":\"subuwutuner.table-grep.v1\",\"pattern\":");
+        json_escape(out, *pattern);
+        out.append(",\"matches\":[");
+        for (std::size_t i = 0; i < matches.size(); ++i) {
+            if (i > 0)
+                out.append(",");
+            out.append("{\"id\":");
+            json_escape(out, matches[i]->id);
+            out.append(",\"name\":");
+            json_escape(out, matches[i]->name);
+            out.append(",\"category\":");
+            json_escape(out, matches[i]->category);
+            out.append("}");
+        }
+        out.append("]}\n");
+        std::fputs(out.c_str(), stdout);
+    } else {
+        for (auto const *t : matches) {
+            std::printf("%-40s  %-30s  [%s]\n", t->id.c_str(), t->name.c_str(),
+                        t->category.empty() ? "-" : t->category.c_str());
+        }
+        if (matches.empty()) {
+            std::fprintf(stderr, "(no matches for '%s')\n", pattern->c_str());
+        }
+    }
+    return matches.empty() ? 1 : 0;
+}
+
 int cmd_completion(int argc, char *argv[]) {
     if (argc < 1) {
         std::fputs("completion: missing shell name (bash|zsh)\n", stderr);
@@ -13416,6 +13494,9 @@ int main(int argc, char *argv[]) {
     if (cmd == "completion") {
         return cmd_completion(argc - 2, argv + 2);
     }
+    if (cmd == "table-grep") {
+        return cmd_table_grep(argc - 2, argv + 2);
+    }
     if (cmd == "changelog") {
         if (argc < 3 || std::string_view{argv[2]} != "show") {
             std::fputs("changelog: missing subcommand. Try `changelog show [--all]`.\n",
@@ -13621,6 +13702,75 @@ int main(int argc, char *argv[]) {
             }
             if (!p->notes.empty())
                 std::printf("Notes:       %s\n", p->notes.c_str());
+            return 0;
+        }
+        if (sub == "create") {
+            // profile create --id <slug> [--display-name "..."] [--year ...]
+            //                [--make ...] [--model ...] [--transmission ...]
+            //                [--transport-hint ...] [--dir <dir>]
+            st::profile::VehicleProfile vp;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view const a{argv[i]};
+                auto const need_val = [&](char const *name) -> char const * {
+                    if (i + 1 >= argc) {
+                        std::fprintf(stderr, "profile create: %s requires a value\n", name);
+                        return nullptr;
+                    }
+                    return argv[++i];
+                };
+                if (a == "--id") {
+                    if (auto const *v = need_val("--id"); v) vp.id = std::string{v};
+                    else return 2;
+                } else if (a == "--display-name") {
+                    if (auto const *v = need_val("--display-name"); v) vp.display_name = std::string{v};
+                    else return 2;
+                } else if (a == "--year") {
+                    if (auto const *v = need_val("--year"); v) vp.year = std::string{v};
+                    else return 2;
+                } else if (a == "--make") {
+                    if (auto const *v = need_val("--make"); v) vp.make = std::string{v};
+                    else return 2;
+                } else if (a == "--model") {
+                    if (auto const *v = need_val("--model"); v) vp.model = std::string{v};
+                    else return 2;
+                } else if (a == "--transmission") {
+                    if (auto const *v = need_val("--transmission"); v) vp.transmission = std::string{v};
+                    else return 2;
+                } else if (a == "--transport-hint") {
+                    if (auto const *v = need_val("--transport-hint"); v) vp.transport_hint = std::string{v};
+                    else return 2;
+                } else if (a == "--notes") {
+                    if (auto const *v = need_val("--notes"); v) vp.notes = std::string{v};
+                    else return 2;
+                } else if (a == "--dir") {
+                    if (auto const *v = need_val("--dir"); v) (void)v; // consumed by up-front scan
+                    else return 2;
+                } else if (a.starts_with("--")) {
+                    std::fprintf(stderr, "profile create: unknown option: %s\n", argv[i]);
+                    return 2;
+                }
+            }
+            if (vp.id.empty()) {
+                std::fputs("profile create: --id is required\n", stderr);
+                return 2;
+            }
+            if (vp.display_name.empty()) {
+                vp.display_name = vp.id;
+            }
+            vp.created_iso = "";
+            vp.updated_iso = "";
+            std::filesystem::create_directories(profile_dir_opt);
+            auto const target = profile_dir_opt / (vp.id + ".stprofile");
+            if (std::filesystem::exists(target)) {
+                std::fprintf(stderr, "profile create: already exists: %s\n",
+                             target.string().c_str());
+                return 1;
+            }
+            if (auto s = st::profile::save(vp, target); !s.has_value()) {
+                std::fprintf(stderr, "profile create: %s\n", s.error().to_string().c_str());
+                return 1;
+            }
+            std::printf("Created %s\n", target.string().c_str());
             return 0;
         }
         if (sub == "import") {

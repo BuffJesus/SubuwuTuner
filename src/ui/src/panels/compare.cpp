@@ -23,6 +23,7 @@
 
 #include "panels/panels.hpp"
 
+#include "actions.hpp" // jump_to_table
 #include "app_state.hpp"
 #include "widgets/widgets.hpp"
 
@@ -597,6 +598,55 @@ void render_compare_panel(AppState &state) {
         ImGui::End();
         return;
     }
+
+    // Jump to first change — finds the changed table with the most
+    // cell deltas (after the active chip filter) and calls
+    // jump_to_table on it. Ctrl+G binding triggers the same path so
+    // keyboard-driven users can sweep the diff list without scrolling.
+    auto const jump_to_biggest = [&]() {
+        auto const &d = *state.compare_result;
+        st::diff::TableDelta const *winner = nullptr;
+        std::string_view const chip{state.compare_filter_chip};
+        for (auto const &t : d.tables) {
+            if (!t.changed())
+                continue;
+            if (!chip.empty()) {
+                bool pass = false;
+                if (chip == "@safety") {
+                    pass = t.engine_safety_critical;
+                } else if (chip == "@emissions") {
+                    pass = t.emissions_relevant;
+                } else if (chip == "@flagged") {
+                    pass = t.engine_safety_critical || t.emissions_relevant;
+                } else if (state.project.has_value()) {
+                    auto const *tbl =
+                        state.project->definition().find_table(t.table_id);
+                    pass = (tbl != nullptr && tbl->category == chip);
+                }
+                if (!pass)
+                    continue;
+            }
+            if (winner == nullptr || t.cells_changed > winner->cells_changed) {
+                winner = &t;
+            }
+        }
+        if (winner != nullptr) {
+            jump_to_table(state, winner->table_id);
+        }
+    };
+    if (ImGui::Button("\xEE\xAE\x86  Jump to biggest change", ImVec2(220.0f, 0.0f))) {
+        jump_to_biggest();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Open the most-changed table in the editor.\n"
+                          "Honors the active chip filter.  (Ctrl+G)");
+    }
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+        ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_G)) {
+        jump_to_biggest();
+    }
+    ImGui::SameLine();
+    text_subtle("Ctrl+G");
 
     auto const &d = *state.compare_result;
 
