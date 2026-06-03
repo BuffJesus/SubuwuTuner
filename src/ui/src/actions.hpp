@@ -36,6 +36,16 @@ void apply_op(AppState &state, std::string label, Op &&op) {
         !state.selection.enabled) {
         return;
     }
+    // Defense-in-depth (Issue #10): edits target working_rom
+    // unconditionally. UI surfaces should already gate the call sites
+    // when active_rom_id != working, but if a command-palette entry,
+    // menu item, or keyboard shortcut slips through, refuse here.
+    if (!state.viewing_working_rom()) {
+        state.status_msg = label +
+                           ": cannot edit while a non-working ROM is active "
+                           "(View → Active ROM → Working).";
+        return;
+    }
     auto &td = *state.current_table_data;
     auto const rect = state.selection.as_rect();
 

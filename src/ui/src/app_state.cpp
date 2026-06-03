@@ -30,6 +30,7 @@ void AppState::try_open_project(std::filesystem::path const &path) {
         current_table_data.reset();
         selection.reset();
         last_save_iso.reset();
+        active_rom_id.clear();
         return;
     }
     project = std::move(*r);
@@ -39,6 +40,10 @@ void AppState::try_open_project(std::filesystem::path const &path) {
     selection.reset();
     dirty = false;
     last_save_iso.reset();
+    // Sync the GUI's view selection from whatever the project
+    // persisted. New / older projects come back with "" = working,
+    // which keeps the v1 behavior.
+    active_rom_id = project->active_rom_id();
     // Open the audit log handle for this project (analyst Issue #8).
     // Failure is non-fatal — the project still loads, just without
     // audit subscription. The audit panel surfaces past entries from
@@ -74,7 +79,11 @@ void AppState::select_table(std::string const &id) {
     if (table == nullptr) {
         return;
     }
-    auto td = project->definition().read_table_values(project->working_rom(), *table);
+    auto const *rom = view_rom();
+    if (rom == nullptr) {
+        return;
+    }
+    auto td = project->definition().read_table_values(*rom, *table);
     if (td.has_value()) {
         current_table_data = std::move(*td);
     }
@@ -90,6 +99,7 @@ void AppState::close_project() {
     status_msg.clear();
     dirty = false;
     last_save_iso.reset();
+    active_rom_id.clear();
 }
 
 } // namespace st::ui

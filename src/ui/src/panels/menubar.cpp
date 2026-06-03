@@ -29,8 +29,15 @@ namespace st::ui {
 
 void render_menubar(AppState &state) {
     bool const has_project = state.project.has_value();
-    bool const can_undo = has_project && state.project->history().can_undo();
-    bool const can_redo = has_project && state.project->history().can_redo();
+    // Undo/redo gated on viewing_working_rom (Issue #10): the history
+    // applies to working_rom only, so when the user is viewing source
+    // or an additional ROM the menu items disable instead of
+    // invisibly mutating the working slot.
+    bool const editing_allowed = state.viewing_working_rom();
+    bool const can_undo = has_project && editing_allowed &&
+                          state.project->history().can_undo();
+    bool const can_redo = has_project && editing_allowed &&
+                          state.project->history().can_redo();
 
     // Tooltip on a menu item even when it's disabled — so the user
     // understands WHY it's grayed out rather than just seeing the
@@ -109,43 +116,64 @@ void render_menubar(AppState &state) {
                 do_undo(state);
             }
             if (has_project && !can_undo) {
-                disabled_tip("Nothing to undo — no edits have been made.");
+                disabled_tip(editing_allowed
+                                 ? "Nothing to undo — no edits have been made."
+                                 : "Switch View → Active ROM → Working first; undo "
+                                   "only applies to the working slot.");
             }
             if (ImGui::MenuItem("\xEE\x9E\xA6  Redo", "Ctrl+Shift+Z", false, can_redo)) {
                 do_redo(state);
             }
             if (has_project && !can_redo) {
-                disabled_tip("Nothing to redo.\n"
-                             "Use Undo first, then Redo to step forward.");
+                disabled_tip(editing_allowed
+                                 ? "Nothing to redo.\n"
+                                   "Use Undo first, then Redo to step forward."
+                                 : "Switch View → Active ROM → Working first; redo "
+                                   "only applies to the working slot.");
             }
             ImGui::Separator();
             bool const has_selection = state.selection.enabled;
+            // Copy is read-only — works against any ROM view. Paste +
+            // Reset mutate working_rom and gate on editing_allowed.
             if (ImGui::MenuItem("\xEE\xA3\x88  Copy", "Ctrl+C", false, has_selection)) {
                 do_copy_selection(state);
             }
             if (has_project && !has_selection) {
                 disabled_tip("Select cells in the grid first.");
             }
-            if (ImGui::MenuItem("\xEE\x9D\xBF  Paste", "Ctrl+V", false, has_selection)) {
+            bool const can_paste = has_selection && editing_allowed;
+            if (ImGui::MenuItem("\xEE\x9D\xBF  Paste", "Ctrl+V", false, can_paste)) {
                 paste_clipboard_at_cursor(state);
             }
-            if (has_project && !has_selection) {
-                disabled_tip("Select a target cell, then paste TSV from the\n"
-                             "clipboard at the cursor.");
+            if (has_project && !can_paste) {
+                disabled_tip(editing_allowed
+                                 ? "Select a target cell, then paste TSV from the\n"
+                                   "clipboard at the cursor."
+                                 : "Switch View → Active ROM → Working first; paste "
+                                   "writes to the working slot.");
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("\xEE\x9C\xAC  Reset to Source", nullptr, false, has_selection)) {
+            bool const can_reset = has_selection && editing_allowed;
+            if (ImGui::MenuItem("\xEE\x9C\xAC  Reset to Source", nullptr, false, can_reset)) {
                 reset_selection_to_source(state);
             }
-            if (has_project && !has_selection) {
-                disabled_tip("Reverts the selected cells to their source-ROM\n"
-                             "values (undoable).");
+            if (has_project && !can_reset) {
+                disabled_tip(editing_allowed
+                                 ? "Reverts the selected cells to their source-ROM\n"
+                                   "values (undoable)."
+                                 : "Switch View → Active ROM → Working first; reset "
+                                   "writes to the working slot.");
             }
             ImGui::Separator();
             // Auto-Tune submenu. Groups the kernel-driven proposal flows so
             // future additions (LTFT, cold-start, etc.) don't sprawl the
             // Edit menu. Disabled-with-tooltip mirrors the rest of Edit.
-            if (ImGui::BeginMenu("\xEE\xA5\x90  Auto-Tune", has_project)) {
+            // Auto-tune kernels apply their proposals via
+            // write_table_values bound to working_rom (autotune_maf.cpp,
+            // autotune_knock.cpp). Gate the submenu off when a non-
+            // working ROM is active so the modal can't open against a
+            // ROM that the apply path can't write to.
+            if (ImGui::BeginMenu("\xEE\xA5\x90  Auto-Tune", has_project && editing_allowed)) {
                 if (ImGui::MenuItem("MAF\xE2\x80\xA6")) {
                     // Default the target table to whatever the user has open
                     // — saves a step when they're already looking at the MAF
@@ -180,6 +208,10 @@ void render_menubar(AppState &state) {
                                       "2D proposal as a single undoable edit.");
                 }
                 ImGui::EndMenu();
+            }
+            if (has_project && !editing_allowed) {
+                disabled_tip("Switch View → Active ROM → Working first; auto-tune "
+                             "kernels apply their proposals to the working slot.");
             }
             if (!has_project) {
                 disabled_tip("Open a project first.\n"
@@ -244,6 +276,77 @@ void render_menubar(AppState &state) {
             }
             if (ImGui::MenuItem("Heatmap", nullptr, is_heat, has_project)) {
                 state.view_mode = TableViewMode::Heatmap;
+            }
+            ImGui::Separator();
+            // Active ROM picker (Issue #10 read-side foundation). Lists
+            // the built-in working + source slots plus every additional
+            // ROM in the project. Selecting an entry persists via
+            // Project::set_active_rom_id + save_metadata, mirrors the
+            // value into AppState, and re-reads the current table from
+            // the new view ROM so the grid updates in place. Editing
+            // is gated to working — see table_view.cpp's editing_allowed.
+            if (ImGui::BeginMenu("Active ROM", has_project)) {
+                auto const switch_to = [&state](std::string const &id) {
+                    if (!state.project.has_value()) {
+                        return;
+                    }
+                    if (auto s = state.project->set_active_rom_id(id); !s.has_value()) {
+                        state.status_msg = "Active ROM: " + s.error().to_string();
+                        return;
+                    }
+                    state.active_rom_id = state.project->active_rom_id();
+                    if (auto s = state.project->save_metadata(); !s.has_value()) {
+                        state.status_msg = "Active ROM saved in memory but "
+                                           "save_metadata failed: " +
+                                           s.error().to_string();
+                    }
+                    // Cancel any in-flight inline cell editor — the
+                    // ROM under it just changed.
+                    state.editing_cell = false;
+                    state.editor_just_opened = false;
+                    if (!state.selected_table_id.empty()) {
+                        state.select_table(state.selected_table_id);
+                    }
+                    auto const &active = state.active_rom_id;
+                    enqueue_toast(state, ToastKind::Info,
+                                  std::string{"Active ROM: "} +
+                                      (active.empty() ? "working" : active));
+                };
+                bool const is_working = state.viewing_working_rom();
+                bool const is_source = state.active_rom_id == "source";
+                if (ImGui::MenuItem("Working (editing)", nullptr, is_working) &&
+                    !is_working) {
+                    switch_to("working");
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Edits target this slot.");
+                }
+                if (ImGui::MenuItem("Source (read-only)", nullptr, is_source) &&
+                    !is_source) {
+                    switch_to("source");
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("The immutable source ROM captured at\n"
+                                      "project creation. Edit toolbar disables\n"
+                                      "while this slot is active.");
+                }
+                if (state.project.has_value() &&
+                    !state.project->additional_roms().empty()) {
+                    ImGui::Separator();
+                    for (auto const &r : state.project->additional_roms()) {
+                        bool const is_active = state.active_rom_id == r.id;
+                        std::string const label =
+                            r.display_name.empty() ? r.id : r.display_name;
+                        if (ImGui::MenuItem(label.c_str(), nullptr, is_active) &&
+                            !is_active) {
+                            switch_to(r.id);
+                        }
+                    }
+                }
+                ImGui::EndMenu();
+            }
+            if (!has_project) {
+                disabled_tip("Open a project to choose which ROM the grid reads.");
             }
             ImGui::Separator();
             // Panel visibility. Sidebar + Table are always-on (primary

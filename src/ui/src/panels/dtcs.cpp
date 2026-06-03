@@ -58,6 +58,19 @@ void render_dtcs_panel(AppState &state) {
     text_subtle("%zu DTC(s), %zu emissions-flagged", def.dtcs().size(), emissions_total);
     glossary_tooltip_for(state, "DTC");
 
+    // Issue #10: DTC reads + writes target working_rom. When a non-
+    // working ROM is active the bulk row + per-row checkbox lock out;
+    // the list still renders so the user can see what the WORKING
+    // tune has set, just read-only against accidental mutation. A
+    // future polish could swap the read side to view_rom and label
+    // the panel "viewing source DTCs" when applicable.
+    bool const editing_allowed = state.viewing_working_rom();
+    if (!editing_allowed) {
+        ImGui::TextDisabled(
+            "(read-only — switch View → Active ROM → Working to toggle)");
+    }
+    ImGui::BeginDisabled(!editing_allowed);
+
     // Bulk-toggle row — covers the two common workflows:
     //   "Disable all emissions"  — emissions-delete; rolls all
     //                              emissions-flagged DTCs OFF in one
@@ -244,6 +257,7 @@ void render_dtcs_panel(AppState &state) {
 
     ImGui::Spacing();
     text_subtle("Toggles record as ByteEdits; Ctrl+Z reverses each.");
+    ImGui::EndDisabled();
     ImGui::End();
 }
 

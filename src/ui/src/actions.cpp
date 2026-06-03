@@ -191,6 +191,11 @@ void paste_clipboard_at_cursor(AppState &state) {
         !state.selection.enabled) {
         return;
     }
+    if (!state.viewing_working_rom()) {
+        state.status_msg = "Paste: only available while editing the working ROM "
+                           "(View → Active ROM → Working).";
+        return;
+    }
     char const *clip = ImGui::GetClipboardText();
     if (clip == nullptr || *clip == '\0')
         return;
@@ -248,6 +253,11 @@ void reset_selection_to_source(AppState &state) {
         !state.selection.enabled) {
         return;
     }
+    if (!state.viewing_working_rom()) {
+        state.status_msg = "Reset to source: only available while editing the "
+                           "working ROM (View → Active ROM → Working).";
+        return;
+    }
     auto const *tbl = state.project->definition().find_table(state.selected_table_id);
     if (tbl == nullptr) {
         state.status_msg = "Reset: table missing from pack";
@@ -280,6 +290,14 @@ void do_undo(AppState &state) {
     if (!state.project.has_value()) {
         return;
     }
+    // Undo/redo mutates working_rom via apply_history_step. Gate on
+    // the active-ROM check so the working slot doesn't change
+    // invisibly while the user is looking at source / an additional
+    // ROM (Issue #10).
+    if (!state.viewing_working_rom()) {
+        state.status_msg = "Undo: switch View → Active ROM → Working first.";
+        return;
+    }
     auto const *e = state.project->history().undo();
     if (e != nullptr) {
         apply_history_step(state, *e, /*forward=*/false);
@@ -288,6 +306,10 @@ void do_undo(AppState &state) {
 
 void do_redo(AppState &state) {
     if (!state.project.has_value()) {
+        return;
+    }
+    if (!state.viewing_working_rom()) {
+        state.status_msg = "Redo: switch View → Active ROM → Working first.";
         return;
     }
     auto const *e = state.project->history().redo();

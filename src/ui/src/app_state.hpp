@@ -158,6 +158,14 @@ struct AppState {
     double status_msg_seen_at{0.0};
     std::string selected_table_id;
     std::optional<st::Definition::TableData> current_table_data;
+    // Issue #10 read-side foundation. Mirrors Project::active_rom_id()
+    // so the GUI can switch the table-grid + selection reads to source
+    // / an additional ROM without changing the edit slot (working_rom).
+    // Empty = working slot (the v1 default; edits enabled).
+    // Synced from project->active_rom_id() on try_open_project; reset
+    // by close_project. Writes go through View → Active ROM, which
+    // also calls Project::set_active_rom_id + save_metadata.
+    std::string active_rom_id;
     Selection selection;
     TableViewMode view_mode{TableViewMode::Grid};
     std::size_t selected_z{0};
@@ -620,6 +628,34 @@ struct AppState {
     void try_open_project(std::filesystem::path const &path);
     void select_table(std::string const &id);
     void close_project();
+
+    // Return the ROM the GUI's read-side surfaces (table grid, copy,
+    // reset preview) should be displaying. Resolves active_rom_id
+    // through Project::find_rom_by_id; falls back to working_rom for
+    // a stale id (e.g. user deleted an additional ROM via CLI mid-
+    // session) so the grid stays renderable.
+    //
+    // Returns nullptr only when no project is open. The edit
+    // writeback path (apply_op) deliberately bypasses this and stays
+    // on working_rom — edit-side routing through the active slot is
+    // future sprint work.
+    [[nodiscard]] st::Rom const *view_rom() const noexcept {
+        if (!project.has_value()) {
+            return nullptr;
+        }
+        if (auto const *r = project->find_rom_by_id(active_rom_id); r != nullptr) {
+            return r;
+        }
+        return &project->working_rom();
+    }
+
+    // True when edits should be allowed (active_rom_id targets the
+    // working slot). Both the empty string and the literal "working"
+    // address that slot; anything else routes reads to a read-only
+    // snapshot and the edit toolbar must gate off.
+    [[nodiscard]] bool viewing_working_rom() const noexcept {
+        return active_rom_id.empty() || active_rom_id == "working";
+    }
 
     // First-run wizard (analyst Issue #13). Auto-opens when
     // settings.first_run_complete is false; users can re-trigger via
