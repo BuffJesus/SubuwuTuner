@@ -248,13 +248,39 @@ std::vector<RecentEntry> load_recents() {
         return out;
     std::string line;
     while (std::getline(in, line) && out.size() < kRecentsCap) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        // On-disk format: `<opened_at>\t<path>` for legacy entries OR
+        // `<opened_at>\t<path>\t<flags>` for new pin-aware entries.
+        // The trailing field is a comma-separated bag of name=value
+        // pairs (just `pinned=1` for now). Unknown keys are ignored so
+        // we can add more fields later without a schema bump.
         auto const tab = line.find('\t');
         if (tab == std::string::npos || tab == 0 || tab + 1 == line.size()) {
             continue;
         }
+        auto const second_tab = line.find('\t', tab + 1);
         RecentEntry e;
         e.opened_at = line.substr(0, tab);
-        e.path = std::filesystem::path{line.substr(tab + 1)};
+        if (second_tab == std::string::npos) {
+            e.path = std::filesystem::path{line.substr(tab + 1)};
+        } else {
+            e.path = std::filesystem::path{line.substr(tab + 1, second_tab - tab - 1)};
+            auto const flags = std::string_view{line}.substr(second_tab + 1);
+            std::size_t pos = 0;
+            while (pos < flags.size()) {
+                auto const comma = flags.find(',', pos);
+                auto const tok = flags.substr(pos, comma - pos);
+                if (tok == "pinned=1") {
+                    e.pinned = true;
+                }
+                if (comma == std::string_view::npos) {
+                    break;
+                }
+                pos = comma + 1;
+            }
+        }
         out.push_back(std::move(e));
     }
     return out;
@@ -270,7 +296,17 @@ void save_recents(std::vector<RecentEntry> const &recents) {
     if (!out)
         return;
     for (auto const &e : recents) {
-        out << e.opened_at << '\t' << e.path.generic_string() << '\n';
+        // Forward-compat note: builds older than 2026-06-03 read a
+        // 2-field format (opened_at\tpath). The 3rd field below makes
+        // those older builds parse `path\tpinned=1` as the entire path,
+        // showing a missing entry. Users downgrading delete recents.txt
+        // to recover. The format is one-way upgrade-safe; load_recents
+        // above accepts both shapes for the forward path.
+        out << e.opened_at << '\t' << e.path.generic_string();
+        if (e.pinned) {
+            out << '\t' << "pinned=1";
+        }
+        out << '\n';
     }
 }
 
@@ -348,6 +384,18 @@ void push_recent(std::vector<RecentEntry> &recents, std::filesystem::path const 
     std::error_code ec;
     auto const canon = std::filesystem::weakly_canonical(path, ec);
     auto const compare_to = canon.empty() ? path : canon;
+    // Preserve the pinned flag from any existing entry pointing at the
+    // same path — `push_recent` is called every time the user opens a
+    // project, and we don't want to silently strip pin state.
+    bool was_pinned = false;
+    for (auto const &e : recents) {
+        std::error_code ec2;
+        auto const ec_path = std::filesystem::weakly_canonical(e.path, ec2);
+        if ((ec_path.empty() ? e.path : ec_path) == compare_to && e.pinned) {
+            was_pinned = true;
+            break;
+        }
+    }
     // Remove any existing entry pointing at the same canonical path.
     recents.erase(std::remove_if(recents.begin(), recents.end(),
                                  [&](RecentEntry const &e) {
@@ -361,9 +409,20 @@ void push_recent(std::vector<RecentEntry> &recents, std::filesystem::path const 
     RecentEntry e;
     e.opened_at = iso8601_utc_now();
     e.path = compare_to;
+    e.pinned = was_pinned;
     recents.insert(recents.begin(), std::move(e));
-    if (recents.size() > kRecentsCap)
-        recents.resize(kRecentsCap);
+    // Cap the list, but never evict pinned entries — they survive the
+    // kRecentsCap LRU. Unpinned-only LIFO trim: keep walking from the
+    // back, drop the first unpinned entry past the cap.
+    while (recents.size() > kRecentsCap) {
+        auto it = std::find_if(recents.rbegin(), recents.rend(),
+                               [](RecentEntry const &r) { return !r.pinned; });
+        if (it == recents.rend()) {
+            break; // every entry is pinned — leave the list as-is
+        }
+        // Erase reverse_iterator → forward iterator dance.
+        recents.erase(std::next(it).base());
+    }
 }
 
 } // namespace st::ui

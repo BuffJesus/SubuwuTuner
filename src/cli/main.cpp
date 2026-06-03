@@ -3644,13 +3644,33 @@ int cmd_completion(int argc, char *argv[]) {
         "uds-test", "feature-graph",
         nullptr,
     };
+    // Flag completion vocabulary. Reused across bash + zsh handlers.
+    // Common flags that appear across many subcommands — `--json`,
+    // `--profile`, `--dry-run`, `--yes`, `--pack-dir`, etc. We bias
+    // toward flags that benefit from completion (paths, named modes)
+    // and skip ones that take freeform strings.
+    static char const *const kCommonFlags[] = {
+        "--json", "--help", "--version",
+        "--dry-run", "--yes", "--verbose", "--quiet",
+        "--profile", "--pack-dir", "--def", "--def-dir",
+        "--rom", "--source-rom", "--working-rom",
+        "--output", "--format", "--table", "--code",
+        "--device", "--transport", "--sa-variant",
+        "--authenticate", "--listen-only", "--filter",
+        "--kind", "--desc", "--since", "--until",
+        "--id", "--display-name", "--year", "--make",
+        "--model", "--transmission", "--dir",
+        "--all", "--audit-summary", "--validate-only", "--arch",
+        nullptr,
+    };
+
     if (shell == "bash") {
         std::printf("# subuwutuner-cli bash completion\n");
         std::printf("# Install: subuwutuner-cli completion bash > "
                     "~/.local/share/bash-completion/completions/subuwutuner-cli\n");
         std::printf("# Or:      source <(subuwutuner-cli completion bash)\n\n");
         std::printf("_subuwutuner_cli() {\n");
-        std::printf("  local cur prev opts\n");
+        std::printf("  local cur opts flags\n");
         std::printf("  COMPREPLY=()\n");
         std::printf("  cur=\"${COMP_WORDS[COMP_CWORD]}\"\n");
         std::printf("  if [ ${COMP_CWORD} -eq 1 ]; then\n");
@@ -3662,6 +3682,21 @@ int cmd_completion(int argc, char *argv[]) {
         }
         std::printf("\"\n");
         std::printf("    COMPREPLY=($(compgen -W \"${opts}\" -- ${cur}))\n");
+        std::printf("    return 0\n");
+        std::printf("  fi\n");
+        // After the subcommand, flag completion kicks in when the
+        // current word starts with `-` — same pattern git-completion
+        // uses. Path completion still works when the user is typing a
+        // path arg.
+        std::printf("  if [[ \"${cur}\" == -* ]]; then\n");
+        std::printf("    flags=\"");
+        for (auto const *s : kCommonFlags) {
+            if (s == nullptr)
+                break;
+            std::printf("%s ", s);
+        }
+        std::printf("\"\n");
+        std::printf("    COMPREPLY=($(compgen -W \"${flags}\" -- ${cur}))\n");
         std::printf("    return 0\n");
         std::printf("  fi\n");
         std::printf("  COMPREPLY=($(compgen -f -- ${cur}))\n");
@@ -3676,7 +3711,7 @@ int cmd_completion(int argc, char *argv[]) {
         std::printf("# Or:      source <(subuwutuner-cli completion zsh)\n\n");
         std::printf("#compdef subuwutuner-cli\n\n");
         std::printf("_subuwutuner_cli() {\n");
-        std::printf("  local -a subcommands\n");
+        std::printf("  local -a subcommands flags\n");
         std::printf("  subcommands=(");
         for (auto const *s : kSubcommands) {
             if (s == nullptr)
@@ -3684,8 +3719,17 @@ int cmd_completion(int argc, char *argv[]) {
             std::printf("'%s' ", s);
         }
         std::printf(")\n");
+        std::printf("  flags=(");
+        for (auto const *s : kCommonFlags) {
+            if (s == nullptr)
+                break;
+            std::printf("'%s' ", s);
+        }
+        std::printf(")\n");
         std::printf("  if (( CURRENT == 2 )); then\n");
         std::printf("    _describe 'subcommand' subcommands\n");
+        std::printf("  elif [[ \"${words[CURRENT]}\" == -* ]]; then\n");
+        std::printf("    _describe 'flag' flags\n");
         std::printf("  else\n");
         std::printf("    _files\n");
         std::printf("  fi\n");

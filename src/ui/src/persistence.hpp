@@ -22,6 +22,11 @@ namespace st::ui {
 struct RecentEntry {
     std::string opened_at; // ISO 8601 UTC, e.g. "2026-05-12T15:30:00Z"
     std::filesystem::path path;
+    // Pin/star (UX polish backlog from 2026-06-02 handoff). When true
+    // the welcome panel renders the entry at the top of the list with
+    // a ★ glyph and survives the kRecentsCap LRU eviction. Persisted
+    // to disk alongside the other fields.
+    bool pinned{false};
 };
 
 inline constexpr std::size_t kRecentsCap = 8;

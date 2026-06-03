@@ -286,15 +286,28 @@ void render_welcome_panel(AppState &state) {
         std::string_view const recents_filter{state.recents_filter};
 
         // Build visible-indices list for keyboard nav (filter-aware).
+        // Pinned entries surface first (stable order — pin/unpin
+        // doesn't shuffle within their group); unpinned entries
+        // follow in LRU order. Matches the on-disk LIFO trim in
+        // push_recent so the index never reorders without a deliberate
+        // user gesture.
         std::vector<std::size_t> visible;
         visible.reserve(state.recents.size());
-        for (std::size_t i = 0; i < state.recents.size(); ++i) {
+        auto const matches_filter = [&](std::size_t i) {
             auto const &e = state.recents[i];
             auto const basename =
                 e.path.filename().empty() ? e.path.string() : e.path.filename().string();
-            if (recents_filter.empty() ||
-                icontains(basename, recents_filter) ||
-                icontains(e.path.string(), recents_filter)) {
+            return recents_filter.empty() ||
+                   icontains(basename, recents_filter) ||
+                   icontains(e.path.string(), recents_filter);
+        };
+        for (std::size_t i = 0; i < state.recents.size(); ++i) {
+            if (state.recents[i].pinned && matches_filter(i)) {
+                visible.push_back(i);
+            }
+        }
+        for (std::size_t i = 0; i < state.recents.size(); ++i) {
+            if (!state.recents[i].pinned && matches_filter(i)) {
                 visible.push_back(i);
             }
         }
@@ -322,15 +335,17 @@ void render_welcome_panel(AppState &state) {
             clicked_idx = visible[static_cast<std::size_t>(state.recents_selected_idx)];
         }
         std::size_t shown = 0;
-        for (std::size_t i = 0; i < state.recents.size(); ++i) {
+        // Walk the precomputed `visible` index permutation rather than
+        // state.recents directly: pinned-first ordering must match the
+        // keyboard-nav `visible` list exactly, otherwise arrow keys
+        // would highlight a row that doesn't correspond to what got
+        // rendered.
+        std::optional<std::size_t> pin_toggle_idx; // captured for post-loop mutation
+        for (std::size_t vidx = 0; vidx < visible.size(); ++vidx) {
+            std::size_t const i = visible[vidx];
             auto const &e = state.recents[i];
             auto const basename =
                 e.path.filename().empty() ? e.path.string() : e.path.filename().string();
-            if (!recents_filter.empty() &&
-                !icontains(basename, recents_filter) &&
-                !icontains(e.path.string(), recents_filter)) {
-                continue;
-            }
             ++shown;
             std::error_code ec;
             bool const exists = std::filesystem::exists(e.path, ec);
@@ -348,17 +363,31 @@ void render_welcome_panel(AppState &state) {
             // Each row is a button with two-line content (basename on
             // top, dimmed full path beneath). Dead entries are
             // disabled — visible so the user knows the project moved
-            // rather than silently dropped.
+            // rather than silently dropped. Pin toggle sits on the
+            // right edge — small width, share the row's vertical
+            // budget so the layout stays one-line.
             float const button_left_x = ImGui::GetCursorPosX();
+            constexpr float kPinW = 28.0f;
+            float const body_w = kRowW - kPinW - 4.0f;
             ImGui::BeginDisabled(!exists);
-            if (ImGui::Button(basename.c_str(), ImVec2(kRowW, 0.0f))) {
+            // Decorate the visible label with a ★ glyph for pinned
+            // entries so the user spots them at a glance. The button
+            // id stays the path-derived ImGui::PushID so click handlers
+            // don't conflict.
+            std::string display_label = e.pinned ? (std::string{"\xE2\x98\x85  "} + basename)
+                                                 : basename;
+            if (ImGui::Button(display_label.c_str(), ImVec2(body_w, 0.0f))) {
                 clicked_idx = i;
             }
             ImGui::EndDisabled();
             if (kb_selected) {
                 pop_primary_button_colors();
             }
-
+            // Row tooltip MUST be queried while the row button is still
+            // the most-recent ImGui item — before the SameLine + pin
+            // button shift `IsItemHovered` onto the pin glyph. Doing it
+            // after `pop_primary_button_colors()` is safe; the pop only
+            // restores style state.
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                 if (exists) {
                     ImGui::SetTooltip("%s\nOpened %s", e.path.string().c_str(),
@@ -368,6 +397,18 @@ void render_welcome_panel(AppState &state) {
                                       "have moved.\nOpen Project… to locate it manually.",
                                       e.path.string().c_str());
                 }
+            }
+            ImGui::SameLine(0.0f, 4.0f);
+            // Pin/unpin toggle. ★ when pinned, ☆ when not. Always
+            // enabled — the user might want to pin a project whose
+            // file moved (un-pin to clean up the list).
+            char const *pin_glyph = e.pinned ? "\xE2\x98\x85" : "\xE2\x98\x86";
+            if (ImGui::Button(pin_glyph, ImVec2(kPinW, 0.0f))) {
+                pin_toggle_idx = i;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(e.pinned ? "Unpin: this entry will roll off when\nolder than 8 unpinned recents."
+                                           : "Pin: keep this entry at the top of\nthe recents list across sessions.");
             }
             // Subtitle: dimmed full path + relative time, aligned under
             // the row. Center inside the button's kRowW span so the
@@ -401,6 +442,11 @@ void render_welcome_panel(AppState &state) {
         }
         ImGui::EndGroup();
 
+        if (pin_toggle_idx.has_value() && *pin_toggle_idx < state.recents.size()) {
+            state.recents[*pin_toggle_idx].pinned =
+                !state.recents[*pin_toggle_idx].pinned;
+            save_recents(state.recents);
+        }
         if (clicked_idx.has_value()) {
             // Capture by value: try_open_project mutates recents.
             auto const path = state.recents[*clicked_idx].path;
