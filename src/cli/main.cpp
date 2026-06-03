@@ -245,6 +245,12 @@ constexpr std::string_view kUsage =
     "                            working, and each [[rom]] additional entry. Surfaces\n"
     "                            any project.toml parse warnings (missing files,\n"
     "                            empty ids).\n"
+    "    project-clone <src-dir> <dst-dir> [--name \"New name\"]\n"
+    "                            Duplicate a project. Copies source.bin, working.bin,\n"
+    "                            edits.toml, definitions/ (when in-tree), and any\n"
+    "                            [[rom]] additional files. Skips audit.log so the\n"
+    "                            clone starts with a fresh timeline. Optional --name\n"
+    "                            rewrites the display_name in the cloned project.toml.\n"
     "    project-validate <dir> [--json]\n"
     "                            Health check: project.toml loads, both ROMs read,\n"
     "                            pack has tables, source CRC matches recorded value,\n"
@@ -3511,6 +3517,180 @@ int cmd_changelog_show(int argc, char *argv[]) {
 // shape as the GUI Stats panel. Useful for scripted summaries
 // ("how big is the working-vs-source delta on this map?") without
 // firing up the GUI.
+// Duplicate a project to a new dir. Copies source.bin, working.bin,
+// project.toml, edits.toml, definitions/ (when in-tree), and any
+// referenced [[rom]] additional files. Skips audit.log — a clone is
+// a fresh timeline. Rewrites the cloned project.toml's display_name
+// when --name is provided.
+int cmd_project_clone(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> src_dir;
+    std::optional<std::filesystem::path> dst_dir;
+    std::optional<std::string> new_name;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const need_val = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "project-clone: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--name") {
+            if (auto const *v = need_val("--name"); v)
+                new_name = std::string{v};
+            else
+                return 2;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "project-clone: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!src_dir.has_value()) {
+            src_dir = std::filesystem::path{argv[i]};
+        } else if (!dst_dir.has_value()) {
+            dst_dir = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "project-clone: extra positional: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (!src_dir.has_value() || !dst_dir.has_value()) {
+        std::fputs("project-clone: missing arguments\n"
+                   "Usage: subuwutuner-cli project-clone <src-dir> <dst-dir> "
+                   "[--name \"New display name\"]\n",
+                   stderr);
+        return 2;
+    }
+    std::error_code ec;
+    if (!std::filesystem::is_directory(*src_dir, ec) || ec) {
+        std::fprintf(stderr, "project-clone: src is not a directory: %s\n",
+                     src_dir->string().c_str());
+        return 1;
+    }
+    if (std::filesystem::exists(*dst_dir, ec)) {
+        std::fprintf(stderr, "project-clone: dst already exists: %s\n",
+                     dst_dir->string().c_str());
+        return 1;
+    }
+    // Open source to validate + get the AdditionalRom path list before
+    // copying. If the source project is broken (CRC mismatch, etc), we
+    // surface that early rather than producing a broken clone.
+    auto src_proj = st::Project::open(*src_dir);
+    if (!src_proj.has_value()) {
+        std::fprintf(stderr, "project-clone: source open: %s\n",
+                     src_proj.error().to_string().c_str());
+        return 1;
+    }
+    std::filesystem::create_directories(*dst_dir, ec);
+    if (ec) {
+        std::fprintf(stderr, "project-clone: mkdir: %s\n", ec.message().c_str());
+        return 1;
+    }
+    // File list to copy. We do this deterministically (not via
+    // copy_options::recursive) so audit.log is excluded and we have
+    // explicit control over each entry.
+    std::vector<std::string> to_copy{"project.toml", "source.bin", "working.bin"};
+    if (std::filesystem::exists(*src_dir / "edits.toml")) {
+        to_copy.emplace_back("edits.toml");
+    }
+    for (auto const &r : src_proj->additional_roms()) {
+        to_copy.push_back(r.path_rel.string());
+    }
+    // definitions/ sub-dir if the project references an in-tree pack.
+    if (std::filesystem::is_directory(*src_dir / "definitions")) {
+        // Whole-dir copy preserving structure.
+        std::filesystem::copy(*src_dir / "definitions", *dst_dir / "definitions",
+                              std::filesystem::copy_options::recursive, ec);
+        if (ec) {
+            std::fprintf(stderr, "project-clone: copy definitions/: %s\n",
+                         ec.message().c_str());
+            return 1;
+        }
+    }
+    for (auto const &rel : to_copy) {
+        std::filesystem::copy_file(*src_dir / rel, *dst_dir / rel,
+                                   std::filesystem::copy_options::none, ec);
+        if (ec) {
+            std::fprintf(stderr, "project-clone: copy %s: %s\n", rel.c_str(),
+                         ec.message().c_str());
+            return 1;
+        }
+    }
+    // Rewrite the project.toml's definition path to absolute so a
+    // sibling-relative pack reference doesn't break in the new dir.
+    // Best-effort: read the file, replace the line, write it back. Done
+    // before reopen-for-rename so the clone can actually load.
+    {
+        std::ifstream in{*dst_dir / "project.toml", std::ios::binary};
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        std::string text = std::move(ss).str();
+        in.close();
+        // Resolve the source pack path against the source dir.
+        auto const src_pack_path = std::filesystem::weakly_canonical(
+            *src_dir / std::filesystem::path{[&]() {
+                // Find `path = "..."` under [project.definition].
+                auto const sec = text.find("[project.definition]");
+                if (sec == std::string::npos)
+                    return std::string{};
+                auto const eq = text.find("path", sec);
+                if (eq == std::string::npos)
+                    return std::string{};
+                auto const q1 = text.find('"', eq);
+                if (q1 == std::string::npos)
+                    return std::string{};
+                auto const q2 = text.find('"', q1 + 1);
+                if (q2 == std::string::npos)
+                    return std::string{};
+                return text.substr(q1 + 1, q2 - q1 - 1);
+            }()},
+            ec);
+        if (!ec && !src_pack_path.empty()) {
+            // Replace the path string with the absolute resolved path.
+            auto const sec = text.find("[project.definition]");
+            if (sec != std::string::npos) {
+                auto const eq = text.find("path", sec);
+                if (eq != std::string::npos) {
+                    auto const q1 = text.find('"', eq);
+                    auto const q2 = text.find('"', q1 + 1);
+                    if (q1 != std::string::npos && q2 != std::string::npos) {
+                        // generic_string() so the embedded backslashes
+                        // get normalized — TOML accepts forward slashes
+                        // on Windows and the original style was forward.
+                        text.replace(q1 + 1, q2 - q1 - 1,
+                                     src_pack_path.generic_string());
+                        std::ofstream out{*dst_dir / "project.toml", std::ios::binary};
+                        out << text;
+                    }
+                }
+            }
+        }
+    }
+    // Rewrite display_name in the clone via Project::open + save_metadata.
+    // Cheaper than hand-rolling a TOML edit + keeps formatting consistent
+    // with what the in-process callers produce.
+    if (new_name.has_value()) {
+        auto cloned = st::Project::open(*dst_dir);
+        if (!cloned.has_value()) {
+            std::fprintf(stderr, "project-clone: reopen for rename: %s\n",
+                         cloned.error().to_string().c_str());
+            return 1;
+        }
+        cloned->set_display_name(*new_name);
+        if (auto s = cloned->save_metadata(); !s.has_value()) {
+            std::fprintf(stderr, "project-clone: save renamed: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+    }
+    std::printf("Cloned %s → %s%s%s\n", src_dir->string().c_str(),
+                dst_dir->string().c_str(),
+                new_name.has_value() ? "  (renamed: " : "",
+                new_name.has_value() ? new_name->c_str() : "");
+    if (new_name.has_value()) {
+        std::printf(")\n");
+    }
+    return 0;
+}
+
 int cmd_stats(int argc, char *argv[]) {
     std::optional<std::filesystem::path> proj_dir;
     std::optional<std::string> table_id;
@@ -13148,6 +13328,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "stats") {
         return cmd_stats(argc - 2, argv + 2);
+    }
+    if (cmd == "project-clone") {
+        return cmd_project_clone(argc - 2, argv + 2);
     }
     if (cmd == "changelog") {
         if (argc < 3 || std::string_view{argv[2]} != "show") {
