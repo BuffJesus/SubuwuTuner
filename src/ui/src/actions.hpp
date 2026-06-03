@@ -36,14 +36,16 @@ void apply_op(AppState &state, std::string label, Op &&op) {
         !state.selection.enabled) {
         return;
     }
-    // Defense-in-depth (Issue #10): edits target working_rom
-    // unconditionally. UI surfaces should already gate the call sites
-    // when active_rom_id != working, but if a command-palette entry,
-    // menu item, or keyboard shortcut slips through, refuse here.
-    if (!state.viewing_working_rom()) {
+    // Edits route through the active slot (Issue #10 phase 3). The
+    // working slot is the v1 default; an additional ROM is editable
+    // with its own per-ROM history; source is immutable
+    // (active_rom_mut returns nullptr). UI surfaces gate the call
+    // sites for source already; this is the defense-in-depth check.
+    st::Rom *target_rom = state.project->active_rom_mut();
+    if (target_rom == nullptr) {
         state.status_msg = label +
-                           ": cannot edit while a non-working ROM is active "
-                           "(View → Active ROM → Working).";
+                           ": this ROM is read-only "
+                           "(switch View → Active ROM to an editable slot).";
         return;
     }
     auto &td = *state.current_table_data;
@@ -76,8 +78,7 @@ void apply_op(AppState &state, std::string label, Op &&op) {
         return;
     }
 
-    auto wb =
-        state.project->definition().write_table_values(state.project->working_rom(), *tbl, td);
+    auto wb = state.project->definition().write_table_values(*target_rom, *tbl, td);
     if (!wb.has_value()) {
         (void)st::edit::restore(td, *before);
         state.status_msg = label + ": writeback: " + wb.error().to_string();
@@ -89,7 +90,7 @@ void apply_op(AppState &state, std::string label, Op &&op) {
     // the rect inclusive on both ends.
     std::string const audited_label = label;
     std::size_t const audited_cells = rect.rows() * rect.cols();
-    state.project->history().record(st::edit::Edit::table(
+    state.project->active_history().record(st::edit::Edit::table(
         state.selected_table_id, std::move(*before), std::move(*after), std::move(label)));
     state.status_msg.clear();
     state.dirty = true;
@@ -99,10 +100,18 @@ void apply_op(AppState &state, std::string label, Op &&op) {
     // collapse the project.edit_committed group when they don't want
     // the noise. Better noise than blind spot for a tuning workflow.
     if (state.audit_log.has_value()) {
+        std::vector<std::pair<std::string, std::string>> fields{
+            {"table", state.selected_table_id},
+            {"cells", std::to_string(audited_cells)}};
+        // Include the active rom id when it's not the default so the
+        // audit timeline doesn't conflate edits to working vs an
+        // additional ROM under the same EditCommitted kind.
+        if (!state.active_rom_id.empty() && state.active_rom_id != "working") {
+            fields.emplace_back("rom", state.active_rom_id);
+        }
         (void)state.audit_log->log(
             st::audit::EntryKind::EditCommitted, "ui.editor", audited_label,
-            {{"table", state.selected_table_id},
-             {"cells", std::to_string(audited_cells)}});
+            std::move(fields));
     }
 }
 

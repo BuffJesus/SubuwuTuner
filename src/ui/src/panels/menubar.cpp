@@ -29,15 +29,15 @@ namespace st::ui {
 
 void render_menubar(AppState &state) {
     bool const has_project = state.project.has_value();
-    // Undo/redo gated on viewing_working_rom (Issue #10): the history
-    // applies to working_rom only, so when the user is viewing source
-    // or an additional ROM the menu items disable instead of
-    // invisibly mutating the working slot.
-    bool const editing_allowed = state.viewing_working_rom();
+    // Edits route through the active slot (Issue #10 phase 3). Each
+    // ROM has its own per-ROM history; source is the only slot
+    // where editing_allowed is false.
+    bool const editing_allowed =
+        has_project && state.project->active_rom_mut() != nullptr;
     bool const can_undo = has_project && editing_allowed &&
-                          state.project->history().can_undo();
+                          state.project->active_history().can_undo();
     bool const can_redo = has_project && editing_allowed &&
-                          state.project->history().can_redo();
+                          state.project->active_history().can_redo();
 
     // Tooltip on a menu item even when it's disabled — so the user
     // understands WHY it's grayed out rather than just seeing the
@@ -117,9 +117,10 @@ void render_menubar(AppState &state) {
             }
             if (has_project && !can_undo) {
                 disabled_tip(editing_allowed
-                                 ? "Nothing to undo — no edits have been made."
-                                 : "Switch View → Active ROM → Working first; undo "
-                                   "only applies to the working slot.");
+                                 ? "Nothing to undo — no edits have been made\n"
+                                   "to the active ROM."
+                                 : "Source ROM is read-only. Switch View →\n"
+                                   "Active ROM to an editable slot first.");
             }
             if (ImGui::MenuItem("\xEE\x9E\xA6  Redo", "Ctrl+Shift+Z", false, can_redo)) {
                 do_redo(state);
@@ -128,8 +129,8 @@ void render_menubar(AppState &state) {
                 disabled_tip(editing_allowed
                                  ? "Nothing to redo.\n"
                                    "Use Undo first, then Redo to step forward."
-                                 : "Switch View → Active ROM → Working first; redo "
-                                   "only applies to the working slot.");
+                                 : "Source ROM is read-only. Switch View →\n"
+                                   "Active ROM to an editable slot first.");
             }
             ImGui::Separator();
             bool const has_selection = state.selection.enabled;
@@ -149,8 +150,8 @@ void render_menubar(AppState &state) {
                 disabled_tip(editing_allowed
                                  ? "Select a target cell, then paste TSV from the\n"
                                    "clipboard at the cursor."
-                                 : "Switch View → Active ROM → Working first; paste "
-                                   "writes to the working slot.");
+                                 : "Source ROM is read-only. Switch View →\n"
+                                   "Active ROM to an editable slot first.");
             }
             ImGui::Separator();
             bool const can_reset = has_selection && editing_allowed;
@@ -161,18 +162,18 @@ void render_menubar(AppState &state) {
                 disabled_tip(editing_allowed
                                  ? "Reverts the selected cells to their source-ROM\n"
                                    "values (undoable)."
-                                 : "Switch View → Active ROM → Working first; reset "
-                                   "writes to the working slot.");
+                                 : "Source ROM is read-only. Switch View →\n"
+                                   "Active ROM to an editable slot first.");
             }
             ImGui::Separator();
             // Auto-Tune submenu. Groups the kernel-driven proposal flows so
             // future additions (LTFT, cold-start, etc.) don't sprawl the
             // Edit menu. Disabled-with-tooltip mirrors the rest of Edit.
-            // Auto-tune kernels apply their proposals via
-            // write_table_values bound to working_rom (autotune_maf.cpp,
-            // autotune_knock.cpp). Gate the submenu off when a non-
-            // working ROM is active so the modal can't open against a
-            // ROM that the apply path can't write to.
+            // Auto-tune kernels apply their proposals to the active
+            // slot (Issue #10 phase 3 — autotune_maf.cpp,
+            // autotune_knock.cpp). Gate the submenu off only when the
+            // active slot is read-only (source); additional ROMs are
+            // editable now with their own per-ROM history.
             if (ImGui::BeginMenu("\xEE\xA5\x90  Auto-Tune", has_project && editing_allowed)) {
                 if (ImGui::MenuItem("MAF\xE2\x80\xA6")) {
                     // Default the target table to whatever the user has open
@@ -210,8 +211,8 @@ void render_menubar(AppState &state) {
                 ImGui::EndMenu();
             }
             if (has_project && !editing_allowed) {
-                disabled_tip("Switch View → Active ROM → Working first; auto-tune "
-                             "kernels apply their proposals to the working slot.");
+                disabled_tip("Source ROM is read-only. Switch View → Active\n"
+                             "ROM to an editable slot first.");
             }
             if (!has_project) {
                 disabled_tip("Open a project first.\n"
@@ -288,12 +289,12 @@ void render_menubar(AppState &state) {
             if (ImGui::BeginMenu("Active ROM", has_project)) {
                 bool const is_working = state.viewing_working_rom();
                 bool const is_source = state.active_rom_id == "source";
-                if (ImGui::MenuItem("Working (editing)", nullptr, is_working) &&
+                if (ImGui::MenuItem("Working", nullptr, is_working) &&
                     !is_working) {
                     set_active_view_rom(state, "working");
                 }
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Edits target this slot.");
+                    ImGui::SetTooltip("The project's primary editable slot.");
                 }
                 if (ImGui::MenuItem("Source (read-only)", nullptr, is_source) &&
                     !is_source) {
@@ -301,8 +302,8 @@ void render_menubar(AppState &state) {
                 }
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("The immutable source ROM captured at\n"
-                                      "project creation. Edit toolbar disables\n"
-                                      "while this slot is active.");
+                                      "project creation. Edit affordances\n"
+                                      "disable while this slot is active.");
                 }
                 if (state.project.has_value() &&
                     !state.project->additional_roms().empty()) {

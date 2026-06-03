@@ -568,6 +568,27 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
                 continue;
             }
             entry.rom = std::move(*rom_r);
+            // Per-ROM history is optional. <id>.edits.toml lives
+            // alongside the ROM bytes; absence = empty history (the
+            // common case for a freshly-registered additional). A
+            // parse failure on the history file is non-fatal: the
+            // ROM still loads, the history starts empty, and the
+            // user gets a warning. This matches the additional-rom
+            // shape where bad metadata doesn't sink the whole open.
+            auto const hist_path = project_dir / (entry.id + ".edits.toml");
+            if (std::filesystem::exists(hist_path, ec) && !ec) {
+                std::ifstream hin{hist_path};
+                std::ostringstream hcontents;
+                hcontents << hin.rdbuf();
+                auto hist_r = parse_history_toml(hcontents.str());
+                if (hist_r.has_value()) {
+                    entry.history = std::move(*hist_r);
+                } else {
+                    p.additional_rom_warnings_.push_back(
+                        "[[rom]] '" + entry.id + "' edits.toml failed to parse: " +
+                        hist_r.error().to_string() + "; history reset to empty");
+                }
+            }
             p.additional_roms_.push_back(std::move(entry));
         }
     }
@@ -631,6 +652,49 @@ Rom const *Project::find_rom_by_id(std::string_view id) const noexcept {
     return nullptr;
 }
 
+edit::History const &Project::active_history() const noexcept {
+    // Walk additional_roms_ first so an additional id that happens to
+    // share a name with the (legal) empty/working/source vocabulary
+    // can't slip through — add_additional_rom rejects those slugs, but
+    // a fall-through is the right shape regardless.
+    if (!active_rom_id_.empty() && active_rom_id_ != "working" &&
+        active_rom_id_ != "source") {
+        for (auto const &r : additional_roms_) {
+            if (r.id == active_rom_id_) {
+                return r.history;
+            }
+        }
+    }
+    return history_;
+}
+
+edit::History &Project::active_history() noexcept {
+    if (!active_rom_id_.empty() && active_rom_id_ != "working" &&
+        active_rom_id_ != "source") {
+        for (auto &r : additional_roms_) {
+            if (r.id == active_rom_id_) {
+                return r.history;
+            }
+        }
+    }
+    return history_;
+}
+
+Rom *Project::active_rom_mut() noexcept {
+    if (active_rom_id_.empty() || active_rom_id_ == "working") {
+        return &working_;
+    }
+    if (active_rom_id_ == "source") {
+        return nullptr; // immutable by contract
+    }
+    for (auto &r : additional_roms_) {
+        if (r.id == active_rom_id_) {
+            return &r.rom;
+        }
+    }
+    return nullptr;
+}
+
 Status Project::set_active_rom_id(std::string_view id) {
     if (id.empty() || id == "working" || id == "source") {
         active_rom_id_.assign(id);
@@ -646,6 +710,104 @@ Status Project::set_active_rom_id(std::string_view id) {
                    "no ROM with id '" + std::string{id} +
                        "' in this project (use 'working', 'source', or an id from "
                        "additional_roms())");
+}
+
+Status Project::save_active_rom() {
+    // Working slot keeps the v1 file layout (working.bin + edits.toml)
+    // so opening a project that only ever edited working stays
+    // byte-identical on disk.
+    if (active_rom_id_.empty() || active_rom_id_ == "working") {
+        return save_working_rom();
+    }
+    if (active_rom_id_ == "source") {
+        // Source is immutable. Asking to save it is a programmer
+        // error — UI surfaces gate this off before the call. Reject
+        // explicitly rather than silently no-op so a stray call site
+        // surfaces in tests.
+        return failure(ErrorCode::InvalidArgument,
+                       "save_active_rom: source ROM is immutable");
+    }
+    // Additional ROM. Locate by id, write its bytes to path_rel, write
+    // its history alongside as <id>.edits.toml. CRC32 in the in-
+    // memory record is refreshed so save_metadata emits the current
+    // value into project.toml.
+    AdditionalRom *target = nullptr;
+    for (auto &r : additional_roms_) {
+        if (r.id == active_rom_id_) {
+            target = &r;
+            break;
+        }
+    }
+    if (target == nullptr) {
+        return failure(ErrorCode::InvalidArgument,
+                       "save_active_rom: no additional ROM with id '" +
+                           active_rom_id_ + "'");
+    }
+
+    auto const rom_path = dir_ / target->path_rel;
+    {
+        std::ofstream out{rom_path, std::ios::binary};
+        if (!out) {
+            return failure(ErrorCode::IoFailure, "cannot open: " + rom_path.string());
+        }
+        out.write(reinterpret_cast<char const *>(target->rom.data().data()),
+                  static_cast<std::streamsize>(target->rom.size()));
+        if (!out) {
+            return failure(ErrorCode::IoFailure, "write failed: " + rom_path.string());
+        }
+    }
+    target->crc32 = target->rom.crc32();
+
+    // History toml is optional — only emit when there's something to
+    // record. A pre-existing file for a now-empty history is left in
+    // place so the user can recover it manually; the loader simply
+    // restores an empty cursor in that case. This keeps the
+    // surprise-resistance the working slot already enjoys.
+    if (target->history.size() > 0) {
+        auto const edits_text = render_history_toml(target->history);
+        auto const edits_path = dir_ / (active_rom_id_ + ".edits.toml");
+        if (auto s = write_file(edits_path, edits_text); !s.has_value()) {
+            return s;
+        }
+    }
+    return save_metadata();
+}
+
+Status Project::save_all() {
+    // Always save working — even when history is empty, the user may
+    // have just hit Ctrl+S to "checkpoint" the project. Cheap on a
+    // 2 MB ROM and matches the v1 save_working_rom contract.
+    if (auto s = save_working_rom(); !s.has_value()) {
+        return s;
+    }
+    // Save additional ROMs that carry edit history. A ROM with no
+    // history hasn't been edited via the GUI — skip to avoid
+    // rewriting bytes the loader will read identically.
+    for (auto &r : additional_roms_) {
+        if (r.history.size() == 0) {
+            continue;
+        }
+        auto const rom_path = dir_ / r.path_rel;
+        std::ofstream out{rom_path, std::ios::binary};
+        if (!out) {
+            return failure(ErrorCode::IoFailure, "cannot open: " + rom_path.string());
+        }
+        out.write(reinterpret_cast<char const *>(r.rom.data().data()),
+                  static_cast<std::streamsize>(r.rom.size()));
+        if (!out) {
+            return failure(ErrorCode::IoFailure, "write failed: " + rom_path.string());
+        }
+        auto const edits_text = render_history_toml(r.history);
+        auto const edits_path = dir_ / (r.id + ".edits.toml");
+        if (auto s = write_file(edits_path, edits_text); !s.has_value()) {
+            return s;
+        }
+        // crc32 in the in-memory record was set at registration time;
+        // refresh it so save_metadata below emits the value matching
+        // what we just wrote to disk.
+        r.crc32 = r.rom.crc32();
+    }
+    return save_metadata();
 }
 
 Status Project::add_additional_rom(AdditionalRom entry) {

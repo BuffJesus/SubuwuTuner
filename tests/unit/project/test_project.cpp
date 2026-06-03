@@ -1021,6 +1021,161 @@ TEST_CASE("Project::active_rom_id round-trips through save_metadata + open",
     }
 }
 
+TEST_CASE("AdditionalRom carries an independent edit::History",
+          "[project][active_rom][per_rom_history]") {
+    // Issue #10 phase 3: each ROM in the project has its own undo
+    // stack. Recording on one ROM's history must not leak into
+    // another's, and the default-constructed AdditionalRom comes
+    // with an empty history.
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "perrom.stune";
+    auto p = st::Project::create(proj_dir, rom_path, pack_dir, "perrom");
+    REQUIRE(p.has_value());
+
+    st::Project::AdditionalRom entry;
+    entry.id = "tune-a";
+    entry.path_rel = "tune-a.bin";
+    entry.rom = st::Rom::from_bytes(make_rom_bytes());
+    REQUIRE(p->add_additional_rom(std::move(entry)).has_value());
+    REQUIRE(p->additional_roms()[0].history.size() == 0);
+
+    // Record on working's history.
+    p->history().record(st::edit::Edit::bytes(
+        {{0, 0x00, 0x01}}, std::string{"working edit"}));
+    REQUIRE(p->history().size() == 1);
+    // The additional's history must stay empty — the two stacks are
+    // independent records, not aliased.
+    REQUIRE(p->additional_roms()[0].history.size() == 0);
+}
+
+TEST_CASE("Project::active_history routes to the active slot's history",
+          "[project][active_rom][per_rom_history]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "ah.stune";
+    auto p = st::Project::create(proj_dir, rom_path, pack_dir, "ah");
+    REQUIRE(p.has_value());
+
+    st::Project::AdditionalRom entry;
+    entry.id = "tune-b";
+    entry.path_rel = "tune-b.bin";
+    entry.rom = st::Rom::from_bytes(make_rom_bytes());
+    REQUIRE(p->add_additional_rom(std::move(entry)).has_value());
+
+    // Default active ("") → working history.
+    REQUIRE(&p->active_history() == &p->history());
+    // "working" alias → working history.
+    REQUIRE(p->set_active_rom_id("working").has_value());
+    REQUIRE(&p->active_history() == &p->history());
+    // Source has no editable history; active_history falls back to
+    // working's so display surfaces (history panel) don't go blank.
+    REQUIRE(p->set_active_rom_id("source").has_value());
+    REQUIRE(&p->active_history() == &p->history());
+    // Additional id → that additional's history.
+    REQUIRE(p->set_active_rom_id("tune-b").has_value());
+    REQUIRE(&p->active_history() != &p->history());
+}
+
+TEST_CASE("Project::active_rom_mut is nullptr for source, &slot otherwise",
+          "[project][active_rom][per_rom_history]") {
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "arm.stune";
+    auto p = st::Project::create(proj_dir, rom_path, pack_dir, "arm");
+    REQUIRE(p.has_value());
+
+    st::Project::AdditionalRom entry;
+    entry.id = "tune-c";
+    entry.path_rel = "tune-c.bin";
+    entry.rom = st::Rom::from_bytes(make_rom_bytes());
+    REQUIRE(p->add_additional_rom(std::move(entry)).has_value());
+
+    REQUIRE(p->active_rom_mut() == &p->working_rom());
+    REQUIRE(p->set_active_rom_id("working").has_value());
+    REQUIRE(p->active_rom_mut() == &p->working_rom());
+    REQUIRE(p->set_active_rom_id("source").has_value());
+    REQUIRE(p->active_rom_mut() == nullptr); // immutable by contract
+    REQUIRE(p->set_active_rom_id("tune-c").has_value());
+    REQUIRE(p->active_rom_mut() != nullptr);
+    REQUIRE(p->active_rom_mut() != &p->working_rom());
+}
+
+TEST_CASE("Per-additional history round-trips through save_all + open",
+          "[project][active_rom][per_rom_history][persist]") {
+    // The end-to-end persistence shape: edit an additional ROM, save_all
+    // writes <path_rel> + <id>.edits.toml, reopen restores both. Edits
+    // on working don't leak into the additional, and vice versa.
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "rt.stune";
+
+    {
+        auto p = st::Project::create(proj_dir, rom_path, pack_dir, "rt");
+        REQUIRE(p.has_value());
+
+        st::Project::AdditionalRom entry;
+        entry.id = "tune-rt";
+        entry.path_rel = "tune-rt.bin";
+        entry.rom = st::Rom::from_bytes(make_rom_bytes());
+        REQUIRE(p->add_additional_rom(std::move(entry)).has_value());
+
+        // Record on working — one byte edit.
+        p->history().record(st::edit::Edit::bytes(
+            {{4, 0x00, 0xAA}}, std::string{"working flip @4"}));
+        // Switch active to the additional and record a different edit
+        // on its independent history.
+        REQUIRE(p->set_active_rom_id("tune-rt").has_value());
+        p->active_history().record(st::edit::Edit::bytes(
+            {{8, 0x00, 0xBB}}, std::string{"tune-rt flip @8"}));
+        // Mutate the additional's rom bytes to match (mirror what
+        // apply_history_step would do; the save path doesn't infer).
+        REQUIRE(p->active_rom_mut() != nullptr);
+        REQUIRE(p->active_rom_mut()->write_u8(8, 0xBB).has_value());
+
+        REQUIRE(p->save_all().has_value());
+    }
+
+    // Reopen and verify both histories survived.
+    auto p2 = st::Project::open(proj_dir);
+    REQUIRE(p2.has_value());
+    REQUIRE(p2->history().size() == 1);
+    REQUIRE(p2->history().records()[0].description == "working flip @4");
+    REQUIRE(p2->additional_roms().size() == 1);
+    REQUIRE(p2->additional_roms()[0].history.size() == 1);
+    REQUIRE(p2->additional_roms()[0].history.records()[0].description ==
+            "tune-rt flip @8");
+    REQUIRE(p2->additional_roms()[0].rom.data()[8] == 0xBB);
+}
+
+TEST_CASE("Project::save_active_rom on source returns InvalidArgument",
+          "[project][active_rom][per_rom_history][persist]") {
+    // Source is immutable — calling save_active_rom while it's
+    // selected is a programmer error. UI surfaces gate this off; the
+    // explicit refusal surfaces test failures if a write path leaks
+    // through.
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "src.stune";
+    auto p = st::Project::create(proj_dir, rom_path, pack_dir, "src");
+    REQUIRE(p.has_value());
+
+    REQUIRE(p->set_active_rom_id("source").has_value());
+    auto const r = p->save_active_rom();
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+}
+
 TEST_CASE("Project::active_rom_id with stale additional id is tolerated on open",
           "[project][active_rom][persist]") {
     // If a user removes a [[rom]] entry from project.toml while the

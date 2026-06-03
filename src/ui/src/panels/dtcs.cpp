@@ -58,17 +58,16 @@ void render_dtcs_panel(AppState &state) {
     text_subtle("%zu DTC(s), %zu emissions-flagged", def.dtcs().size(), emissions_total);
     glossary_tooltip_for(state, "DTC");
 
-    // Issue #10: DTC reads + writes target working_rom. When a non-
-    // working ROM is active the bulk row + per-row checkbox lock out;
-    // the list still renders so the user can see what the WORKING
-    // tune has set, just read-only against accidental mutation. A
-    // future polish could swap the read side to view_rom and label
-    // the panel "viewing source DTCs" when applicable.
-    bool const editing_allowed = state.viewing_working_rom();
+    // Issue #10 phase 3: DTC reads flow through view_rom; toggles
+    // route through active_rom_mut + active_history. Source is the
+    // only read-only active slot — the bulk row + per-row checkbox
+    // lock out there. Additional ROMs are editable with their own
+    // per-ROM history.
+    bool const editing_allowed = state.project->active_rom_mut() != nullptr;
     if (!editing_allowed) {
         ImGui::TextDisabled(
             "(showing '%s' ROM, read-only — switch View → Active ROM "
-            "→ Working to toggle)",
+            "to an editable slot to toggle)",
             state.active_rom_id.c_str());
     }
     ImGui::BeginDisabled(!editing_allowed);
@@ -82,6 +81,14 @@ void render_dtcs_panel(AppState &state) {
     //                              (factory-ish state).
     auto const bulk_toggle = [&](char const *label, bool emissions_only,
                                  bool enable, char const *desc_prefix) {
+        // Edits target the active slot's ROM + history (Issue #10).
+        // The surrounding BeginDisabled wrap (editing_allowed) gates
+        // this callable off when active_rom_mut() returns null, so
+        // this should always succeed — defensive null-check anyway.
+        st::Rom *target_rom = state.project->active_rom_mut();
+        if (target_rom == nullptr) {
+            return;
+        }
         std::vector<st::edit::ByteEdit::Change> changes;
         std::vector<std::string> codes;
         codes.reserve(def.dtcs().size());
@@ -91,12 +98,12 @@ void render_dtcs_panel(AppState &state) {
             auto const *bm = def.find_dtc_bitmap(d.bitmap_id);
             if (bm == nullptr)
                 continue;
-            auto const cur = st::is_dtc_enabled(state.project->working_rom(), *bm, d);
+            auto const cur = st::is_dtc_enabled(*target_rom, *bm, d);
             if (!cur.has_value())
                 continue;
             if (*cur == enable)
                 continue; // already in the desired state — skip
-            auto change = st::set_dtc_enabled(state.project->working_rom(), *bm, d, enable);
+            auto change = st::set_dtc_enabled(*target_rom, *bm, d, enable);
             if (!change.has_value())
                 continue;
             if (change->before != change->after) {
@@ -114,7 +121,7 @@ void render_dtcs_panel(AppState &state) {
         if (codes.size() != 1)
             desc += "s";
         desc += ")";
-        state.project->history().record(
+        state.project->active_history().record(
             st::edit::Edit::bytes(std::move(changes), std::move(desc)));
         state.dirty = true;
         state.status_msg = std::string{label} + ": " +
@@ -166,12 +173,9 @@ void render_dtcs_panel(AppState &state) {
                              sizeof state.dtc_filter, ImGuiInputTextFlags_EscapeClearsAll);
     std::string_view const filter{state.dtc_filter};
 
-    // Display read flows through view_rom: when the user is viewing
-    // source / an additional ROM, the checkbox column reflects THAT
-    // ROM's DTC state. Toggles always target working — but the
-    // surrounding BeginDisabled (set at the top of the function on
-    // editing_allowed) prevents Checkbox writes from firing when
-    // viewing != working, so the read/write split stays coherent.
+    // Display read flows through view_rom. With per-ROM history
+    // (Issue #10 phase 3) the checkbox column reflects THAT ROM's
+    // DTC state and toggles edit THAT ROM's bytes + history.
     auto const *view_rom_ptr = state.view_rom();
     auto const &rom = (view_rom_ptr != nullptr) ? *view_rom_ptr
                                                 : state.project->working_rom();
@@ -210,21 +214,29 @@ void render_dtcs_panel(AppState &state) {
             ImGui::PushID(d.code.c_str());
             bool toggled = enabled;
             if (ImGui::Checkbox("##en", &toggled) && toggled != enabled) {
-                auto change = st::set_dtc_enabled(state.project->working_rom(), *bm, d, toggled);
-                if (!change.has_value()) {
-                    state.status_msg = "DTC toggle failed: " + change.error().to_string();
-                } else if (change->before != change->after) {
-                    // Record one ByteEdit per toggle so Ctrl+Z reverses
-                    // each gesture individually. Coalescing into a batch
-                    // (like the CLI does for a `--code A,B,C` list) would
-                    // need a debounce and surface less clearly in the
-                    // history panel — one bit per click is the GUI
-                    // semantic users expect.
-                    std::string desc = (toggled ? "enable DTC " : "disable DTC ") + d.code;
-                    state.project->history().record(st::edit::Edit::bytes(
-                        {{change->address, change->before, change->after}}, std::move(desc)));
-                    state.dirty = true;
-                    state.status_msg = (toggled ? "Enabled " : "Disabled ") + d.code;
+                // editing_allowed (BeginDisabled wrap above) gates this
+                // off when active_rom_mut returns null; we re-check
+                // here for safety.
+                st::Rom *target_rom = state.project->active_rom_mut();
+                if (target_rom == nullptr) {
+                    state.status_msg = "DTC toggle: active ROM is read-only.";
+                } else {
+                    auto change = st::set_dtc_enabled(*target_rom, *bm, d, toggled);
+                    if (!change.has_value()) {
+                        state.status_msg = "DTC toggle failed: " + change.error().to_string();
+                    } else if (change->before != change->after) {
+                        // Record one ByteEdit per toggle so Ctrl+Z reverses
+                        // each gesture individually. Coalescing into a batch
+                        // (like the CLI does for a `--code A,B,C` list) would
+                        // need a debounce and surface less clearly in the
+                        // history panel — one bit per click is the GUI
+                        // semantic users expect.
+                        std::string desc = (toggled ? "enable DTC " : "disable DTC ") + d.code;
+                        state.project->active_history().record(st::edit::Edit::bytes(
+                            {{change->address, change->before, change->after}}, std::move(desc)));
+                        state.dirty = true;
+                        state.status_msg = (toggled ? "Enabled " : "Disabled ") + d.code;
+                    }
                 }
             }
             ImGui::PopID();

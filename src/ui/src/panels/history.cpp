@@ -41,8 +41,11 @@ void render_history_panel(AppState &state) {
         ImGui::End();
         return;
     }
-    auto const &records = state.project->history().records();
-    auto const cursor = state.project->history().cursor();
+    // Each ROM carries its own per-ROM history (Issue #10 phase 3).
+    // The panel renders the active slot's records so switching active
+    // ROM also switches which timeline the user sees.
+    auto const &records = state.project->active_history().records();
+    auto const cursor = state.project->active_history().cursor();
 
     ImGui::Text("%zu edit(s), cursor at %zu", records.size(), cursor);
     if (cursor < records.size()) {
@@ -351,7 +354,7 @@ void render_history_panel(AppState &state) {
     if (has_jump) {
         std::size_t prev = static_cast<std::size_t>(-1);
         while (true) {
-            std::size_t const c = state.project->history().cursor();
+            std::size_t const c = state.project->active_history().cursor();
             if (c == jump_target)
                 break;
             if (c == prev)

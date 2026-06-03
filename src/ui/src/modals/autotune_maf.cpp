@@ -62,7 +62,13 @@ std::optional<std::string> run_maf_autotune_preview(AppState &state) {
     if (!table->axis_x.has_value() || table->axis_x->empty()) {
         return "Table '" + target_table_id + "' has no axis_x.";
     }
-    auto td = state.project->definition().read_table_values(state.project->working_rom(), *table);
+    // Preview reads from the active slot (Issue #10 phase 3) so the
+    // proposal is computed against whichever ROM the user is editing.
+    auto const *read_rom = state.view_rom();
+    if (read_rom == nullptr) {
+        return std::string{"No active ROM to read."};
+    }
+    auto td = state.project->definition().read_table_values(*read_rom, *table);
     if (!td.has_value()) {
         return "read table: " + td.error().to_string();
     }
@@ -147,16 +153,21 @@ std::optional<std::string> apply_maf_autotune_proposal(AppState &state) {
     if (!after.has_value()) {
         return "snapshot after: " + after.error().to_string();
     }
-    if (auto wb = state.project->definition().write_table_values(state.project->working_rom(),
-                                                                 *table, td);
+    st::Rom *target_rom = state.project->active_rom_mut();
+    if (target_rom == nullptr) {
+        return std::string{"Active ROM is read-only — switch View → Active ROM "
+                           "to an editable slot."};
+    }
+    if (auto wb = state.project->definition().write_table_values(*target_rom, *table, td);
         !wb.has_value()) {
         return "writeback: " + wb.error().to_string();
     }
     char descbuf[64];
     std::snprintf(descbuf, sizeof descbuf, "autotune maf (%zu cell%s)", modified,
                   modified == 1 ? "" : "s");
-    state.project->history().record(st::edit::Edit::table(table->id, std::move(*before),
-                                                          std::move(*after), std::string{descbuf}));
+    state.project->active_history().record(st::edit::Edit::table(table->id, std::move(*before),
+                                                                 std::move(*after),
+                                                                 std::string{descbuf}));
     if (table->id == state.selected_table_id) {
         state.current_table_data = std::move(td);
     }

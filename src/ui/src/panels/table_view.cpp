@@ -332,9 +332,10 @@ void render_table_grid(st::Definition::TableData const &td, st::Scaling const *s
         }
         // F2 enters cell edit mode on the cursor cell. Excel's
         // canonical "edit this cell" shortcut. Suppressed when the
-        // grid is showing a read-only ROM (active != working) —
-        // commits flow through apply_op which is bound to working.
-        if (state.viewing_working_rom() &&
+        // active slot is read-only (source); additional ROMs are
+        // editable now via per-ROM history (Issue #10 phase 3).
+        bool const slot_editable = state.project->active_rom_mut() != nullptr;
+        if (slot_editable &&
             ImGui::IsKeyPressed(ImGuiKey_F2, /*repeat=*/false)) {
             std::snprintf(state.edit_buf, sizeof state.edit_buf, "%.*f", precision,
                           (selection.r_cursor < td.values.size() &&
@@ -352,7 +353,7 @@ void render_table_grid(st::Definition::TableData const &td, st::Scaling const *s
         if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_C)) {
             copy_rect_to_clipboard(td, selection.as_rect(), precision);
         }
-        if (state.viewing_working_rom() &&
+        if (slot_editable &&
             ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_V)) {
             paste_clipboard_at_cursor(state);
         }
@@ -545,7 +546,8 @@ void render_table_grid(st::Definition::TableData const &td, st::Scaling const *s
                     // mirroring Excel/Sheets. AllowDoubleClick on the
                     // Selectable above is what lets us see the second
                     // click here.
-                    if (state.viewing_working_rom() && ImGui::IsMouseDoubleClicked(0)) {
+                    if (state.project->active_rom_mut() != nullptr &&
+                        ImGui::IsMouseDoubleClicked(0)) {
                         std::snprintf(state.edit_buf, sizeof state.edit_buf, "%.*f", precision, v);
                         state.editing_cell = true;
                         state.editor_just_opened = true;
@@ -581,7 +583,8 @@ void render_table_grid(st::Definition::TableData const &td, st::Scaling const *s
                 }
                 if (ImGui::BeginPopupContextItem("##cell_ctx")) {
                     bool const has_sel = selection.enabled;
-                    bool const editing_allowed = state.viewing_working_rom();
+                    bool const editing_allowed =
+                        state.project->active_rom_mut() != nullptr;
                     if (ImGui::MenuItem("Copy", "Ctrl+C", false, has_sel)) {
                         copy_rect_to_clipboard(td, selection.as_rect(), precision);
                     }
@@ -948,18 +951,17 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         }
     }
 
-    // Edit toolbar — ops act on the current selection, undo/redo on the
-    // project's history. Buttons are disabled when there's no selection /
-    // nothing to undo, rather than hidden, so the affordances stay visible.
-    // 3D editing is gated off — the edit pipeline assumes a single 2D grid.
-    // Editing is also gated off when the active ROM is anything other
-    // than the working slot (Issue #10): edits always target working_rom,
-    // so allowing the toolbar to fire while the grid is showing source /
-    // an additional ROM would write invisibly.
-    bool const editing_allowed = state.viewing_working_rom();
+    // Edit toolbar — ops act on the current selection, undo/redo on
+    // the active slot's history. Buttons are disabled when there's no
+    // selection / nothing to undo, rather than hidden, so the
+    // affordances stay visible. 3D editing is gated off — the edit
+    // pipeline assumes a single 2D grid. Source ROM is the only
+    // read-only active slot (Issue #10 phase 3): editing_allowed
+    // false → toolbar locks regardless of selection.
+    bool const editing_allowed = state.project->active_rom_mut() != nullptr;
     bool const can_edit = state.selection.enabled && !is_3d && editing_allowed;
-    bool const can_undo = state.project->history().can_undo() && editing_allowed;
-    bool const can_redo = state.project->history().can_redo() && editing_allowed;
+    bool const can_undo = state.project->active_history().can_undo() && editing_allowed;
+    bool const can_redo = state.project->active_history().can_redo() && editing_allowed;
 
     // Hover tooltips need to render even when the button is disabled — wrap
     // BeginDisabled with ImGuiItemFlags_AllowWhenDisabled on hover. When
@@ -969,8 +971,8 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             char const *why = nullptr;
             if (!editing_allowed) {
-                why = "Viewing a non-working ROM (read-only). "
-                      "Switch via View → Active ROM → Working.";
+                why = "Source ROM is read-only. Switch View → Active ROM "
+                      "to an editable slot.";
             } else if (!can_edit && when_disabled != nullptr) {
                 why = when_disabled;
             }

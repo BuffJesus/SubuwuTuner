@@ -46,7 +46,10 @@ void save_project(AppState &state) {
     if (!state.project.has_value()) {
         return;
     }
-    if (auto s = state.project->save_working_rom(); !s.has_value()) {
+    // save_all persists working + every additional with non-empty
+    // history (Issue #10 phase 3). User who edited only the working
+    // slot sees byte-identical disk output as the v1 save_working_rom.
+    if (auto s = state.project->save_all(); !s.has_value()) {
         // Failure: keep status_msg for persistent visibility AND fire
         // a danger toast for the immediate "this just happened" beat.
         // The user might be staring at the save button when this fires;

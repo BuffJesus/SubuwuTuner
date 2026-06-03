@@ -105,8 +105,11 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
     out.reserve(64);
     bool const has_project = state.project.has_value();
     bool const has_selection = state.selection.enabled;
-    bool const can_undo = has_project && state.project->history().can_undo();
-    bool const can_redo = has_project && state.project->history().can_redo();
+    // Undo/redo reflect the active slot's per-ROM history
+    // (Issue #10 phase 3). Source: empty (no edits), additional or
+    // working: the slot's own history.
+    bool const can_undo = has_project && state.project->active_history().can_undo();
+    bool const can_redo = has_project && state.project->active_history().can_redo();
     bool const can_csv = has_project && !state.selected_table_id.empty();
 
     auto push = [&](PaletteCommandKind k, char const *label, char const *hint,
@@ -166,7 +169,7 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
         bool const is_source_active = state.active_rom_id == "source";
         if (!is_working_active) {
             push(PaletteCommandKind::SwitchActiveRom,
-                 "View: Switch to Working ROM (editing)", "Active ROM", "View",
+                 "View: Switch to Working ROM", "Active ROM", "View",
                  "working");
         }
         if (!is_source_active) {
@@ -180,7 +183,7 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
             }
             std::string const display =
                 r.display_name.empty() ? r.id : r.display_name;
-            std::string label = "View: Switch to " + display + " (read-only)";
+            std::string label = "View: Switch to " + display;
             push(PaletteCommandKind::SwitchActiveRom, label.c_str(), "Active ROM",
                  "View", r.id);
         }

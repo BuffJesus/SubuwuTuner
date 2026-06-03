@@ -60,7 +60,12 @@ std::optional<std::string> run_knock_pull_preview(AppState &state) {
                "' has dimensions=" + std::to_string(table->dimensions) +
                "; knock-pull needs a 2D timing table.";
     }
-    auto td = state.project->definition().read_table_values(state.project->working_rom(), *table);
+    // Preview reads from the active slot (Issue #10 phase 3).
+    auto const *read_rom = state.view_rom();
+    if (read_rom == nullptr) {
+        return std::string{"No active ROM to read."};
+    }
+    auto td = state.project->definition().read_table_values(*read_rom, *table);
     if (!td.has_value()) {
         return "read table: " + td.error().to_string();
     }
@@ -173,8 +178,12 @@ std::optional<std::string> apply_knock_pull_proposal(AppState &state) {
     if (!after.has_value()) {
         return "snapshot after: " + after.error().to_string();
     }
-    if (auto wb = state.project->definition().write_table_values(state.project->working_rom(),
-                                                                 *table, td);
+    st::Rom *target_rom = state.project->active_rom_mut();
+    if (target_rom == nullptr) {
+        return std::string{"Active ROM is read-only — switch View → Active ROM "
+                           "to an editable slot."};
+    }
+    if (auto wb = state.project->definition().write_table_values(*target_rom, *table, td);
         !wb.has_value()) {
         return "writeback: " + wb.error().to_string();
     }
@@ -182,8 +191,9 @@ std::optional<std::string> apply_knock_pull_proposal(AppState &state) {
     std::snprintf(descbuf, sizeof descbuf, "autotune knock-pull (%zu pulled%s%s)", pulled,
                   added > 0 ? ", " : "",
                   added > 0 ? (std::to_string(added) + " added-back").c_str() : "");
-    state.project->history().record(st::edit::Edit::table(table->id, std::move(*before),
-                                                          std::move(*after), std::string{descbuf}));
+    state.project->active_history().record(st::edit::Edit::table(table->id, std::move(*before),
+                                                                 std::move(*after),
+                                                                 std::string{descbuf}));
     if (table->id == state.selected_table_id) {
         state.current_table_data = std::move(td);
     }

@@ -51,9 +51,15 @@ std::optional<std::string> apply_parsed_csv_edits(AppState &state,
     if (parsed.cells.empty()) {
         return std::string{"Nothing to apply."};
     }
-    auto td = state.project->definition().read_table_values(state.project->working_rom(), *table);
+    // CSV import targets the active slot (Issue #10 phase 3).
+    st::Rom *target_rom = state.project->active_rom_mut();
+    if (target_rom == nullptr) {
+        return std::string{"This ROM is read-only — switch View → Active ROM "
+                           "to an editable slot."};
+    }
+    auto td = state.project->definition().read_table_values(*target_rom, *table);
     if (!td.has_value()) {
-        return "read working: " + td.error().to_string();
+        return "read active rom: " + td.error().to_string();
     }
     // Bounding rect over all touched cells — same shape the CLI records.
     std::size_t r_min = parsed.cells[0].row, r_max = parsed.cells[0].row;
@@ -75,16 +81,16 @@ std::optional<std::string> apply_parsed_csv_edits(AppState &state,
     if (!after.has_value()) {
         return "snapshot after: " + after.error().to_string();
     }
-    if (auto wb = state.project->definition().write_table_values(state.project->working_rom(),
-                                                                 *table, *td);
+    if (auto wb = state.project->definition().write_table_values(*target_rom, *table, *td);
         !wb.has_value()) {
         return "writeback: " + wb.error().to_string();
     }
     char descbuf[64];
     std::snprintf(descbuf, sizeof descbuf, "csv import (%zu cell%s)", parsed.cells.size(),
                   parsed.cells.size() == 1 ? "" : "s");
-    state.project->history().record(st::edit::Edit::table(table->id, std::move(*before),
-                                                          std::move(*after), std::string{descbuf}));
+    state.project->active_history().record(st::edit::Edit::table(table->id, std::move(*before),
+                                                                 std::move(*after),
+                                                                 std::string{descbuf}));
     if (table->id == state.selected_table_id) {
         state.current_table_data = std::move(*td);
     }
@@ -124,11 +130,22 @@ std::optional<std::string> apply_parsed_csv_edits(AppState &state,
 void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forward) {
     auto const rollback_cursor = [&] {
         if (forward) {
-            (void)state.project->history().undo();
+            (void)state.project->active_history().undo();
         } else {
-            (void)state.project->history().redo();
+            (void)state.project->active_history().redo();
         }
     };
+
+    // Undo/redo target the active slot (Issue #10 phase 3). Caller
+    // (do_undo / do_redo) has already gated on active_rom_mut() so
+    // by the time we get here, this should be non-null. Belt and
+    // braces: bail out gracefully if not.
+    st::Rom *target_rom = state.project->active_rom_mut();
+    if (target_rom == nullptr) {
+        state.status_msg = "history: active ROM is read-only";
+        rollback_cursor();
+        return;
+    }
 
     if (auto const *te = edit.as_table(); te != nullptr) {
         auto const *tbl = state.project->definition().find_table(te->table_id);
@@ -138,7 +155,7 @@ void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forwar
             return;
         }
 
-        auto td = state.project->definition().read_table_values(state.project->working_rom(), *tbl);
+        auto td = state.project->definition().read_table_values(*target_rom, *tbl);
         if (!td.has_value()) {
             state.status_msg = "history re-read: " + td.error().to_string();
             rollback_cursor();
@@ -152,8 +169,7 @@ void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forwar
             return;
         }
 
-        auto wb =
-            state.project->definition().write_table_values(state.project->working_rom(), *tbl, *td);
+        auto wb = state.project->definition().write_table_values(*target_rom, *tbl, *td);
         if (!wb.has_value()) {
             state.status_msg = "history writeback: " + wb.error().to_string();
             rollback_cursor();
@@ -164,10 +180,9 @@ void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forwar
             state.current_table_data = std::move(*td);
         }
     } else if (auto const *be = edit.as_byte(); be != nullptr) {
-        auto &rom = state.project->working_rom();
         for (auto const &c : be->changes) {
             auto const v = forward ? c.after : c.before;
-            if (auto s = rom.write_u8(c.address, v); !s.has_value()) {
+            if (auto s = target_rom->write_u8(c.address, v); !s.has_value()) {
                 char buf[80];
                 std::snprintf(buf, sizeof buf, "history byte writeback @0x%zX: ", c.address);
                 state.status_msg = std::string{buf} + s.error().to_string();
@@ -178,7 +193,7 @@ void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forwar
     }
 
     state.status_msg.clear();
-    // Undo / redo modifies the working ROM in memory; flag dirty so the
+    // Undo / redo modifies the active ROM in memory; flag dirty so the
     // unsaved-changes guard catches an undo-then-quit-without-save.
     state.dirty = true;
 }
@@ -191,9 +206,9 @@ void paste_clipboard_at_cursor(AppState &state) {
         !state.selection.enabled) {
         return;
     }
-    if (!state.viewing_working_rom()) {
-        state.status_msg = "Paste: only available while editing the working ROM "
-                           "(View → Active ROM → Working).";
+    if (state.project->active_rom_mut() == nullptr) {
+        state.status_msg = "Paste: this ROM is read-only "
+                           "(switch View → Active ROM to an editable slot).";
         return;
     }
     char const *clip = ImGui::GetClipboardText();
@@ -253,9 +268,9 @@ void reset_selection_to_source(AppState &state) {
         !state.selection.enabled) {
         return;
     }
-    if (!state.viewing_working_rom()) {
-        state.status_msg = "Reset to source: only available while editing the "
-                           "working ROM (View → Active ROM → Working).";
+    if (state.project->active_rom_mut() == nullptr) {
+        state.status_msg = "Reset to source: this ROM is read-only "
+                           "(switch View → Active ROM to an editable slot).";
         return;
     }
     auto const *tbl = state.project->definition().find_table(state.selected_table_id);
@@ -319,15 +334,15 @@ void do_undo(AppState &state) {
     if (!state.project.has_value()) {
         return;
     }
-    // Undo/redo mutates working_rom via apply_history_step. Gate on
-    // the active-ROM check so the working slot doesn't change
-    // invisibly while the user is looking at source / an additional
-    // ROM (Issue #10).
-    if (!state.viewing_working_rom()) {
-        state.status_msg = "Undo: switch View → Active ROM → Working first.";
+    // Undo/redo route through the active slot's history + ROM
+    // (Issue #10 phase 3). Source is the only read-only active slot;
+    // additional ROMs have their own per-ROM history and undo their
+    // own edits independently of working.
+    if (state.project->active_rom_mut() == nullptr) {
+        state.status_msg = "Undo: this ROM is read-only.";
         return;
     }
-    auto const *e = state.project->history().undo();
+    auto const *e = state.project->active_history().undo();
     if (e != nullptr) {
         apply_history_step(state, *e, /*forward=*/false);
     }
@@ -337,11 +352,11 @@ void do_redo(AppState &state) {
     if (!state.project.has_value()) {
         return;
     }
-    if (!state.viewing_working_rom()) {
-        state.status_msg = "Redo: switch View → Active ROM → Working first.";
+    if (state.project->active_rom_mut() == nullptr) {
+        state.status_msg = "Redo: this ROM is read-only.";
         return;
     }
-    auto const *e = state.project->history().redo();
+    auto const *e = state.project->active_history().redo();
     if (e != nullptr) {
         apply_history_step(state, *e, /*forward=*/true);
     }

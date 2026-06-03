@@ -257,8 +257,11 @@ void render_status_bar(AppState &state) {
         }
 
         ImGui::SameLine();
-        text_subtle("edits %zu / %zu", state.project->history().cursor(),
-                    state.project->history().size());
+        // Edits counter reflects the active slot (Issue #10 phase 3).
+        // Source: always 0/0 (no history). Additional ROMs and
+        // working: their respective per-ROM history.
+        text_subtle("edits %zu / %zu", state.project->active_history().cursor(),
+                    state.project->active_history().size());
 
         // Middle cluster: transient status message. save_project sets
         // this to "Saved."; edit-op errors land here too. Previously

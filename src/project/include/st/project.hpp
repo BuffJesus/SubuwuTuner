@@ -56,6 +56,11 @@ public:
         std::string notes;
         std::uint32_t crc32{0};
         Rom rom{Rom::from_bytes({})};
+        // Per-ROM edit history (Issue #10 phase 3). Persisted at
+        // <project>/<id>.edits.toml alongside the ROM bytes, loaded
+        // on Project::open. Empty for a freshly-registered ROM until
+        // the user edits it through the GUI's active-ROM flow.
+        edit::History history;
     };
 
     [[nodiscard]] static Result<Project> create(std::filesystem::path const &project_dir,
@@ -176,6 +181,48 @@ public:
     // "working" → working_rom, "source" → source_rom, additional id →
     // its loaded Rom). Returns nullptr for unknown ids.
     [[nodiscard]] Rom const *find_rom_by_id(std::string_view id) const noexcept;
+
+    // Edit history for the currently-active slot (Issue #10 phase 3).
+    // "" / "working" / "source" → the project's working-rom history.
+    // Source has no editable history of its own; this returns the
+    // working history so display surfaces (history panel, status-bar
+    // edit counter) stay populated. Edit-side call sites pair this
+    // with active_rom_mut(), which DOES return nullptr for source,
+    // so writes still gate off correctly.
+    // An additional ROM's id → that additional's history.
+    // Unknown id (stale active_rom_id) → working history fallback,
+    // matching find_rom_by_id's behavior for the read side.
+    [[nodiscard]] edit::History const &active_history() const noexcept;
+    [[nodiscard]] edit::History &active_history() noexcept;
+
+    // Writable ROM pointer for the currently-active editable slot.
+    // "" / "working" → &working_ (edits target this slot in the v1
+    // model and still do for the project's default slot).
+    // Additional id → &(additional_roms_[i].rom). Source / unknown id
+    // → nullptr. Callers MUST null-check before writing — a null
+    // return is the contract that means "the active slot is not
+    // editable right now" (currently only true for source).
+    [[nodiscard]] Rom *active_rom_mut() noexcept;
+
+    // Persist the currently-active ROM's bytes + its edit history.
+    // Working: writes working.bin + edits.toml (matches the v1
+    // behavior of save_working_rom — that method is still available
+    // and now delegates here when working is active).
+    // Additional id: writes the additional's bytes to its
+    // path_rel + history to <id>.edits.toml. Also updates the
+    // additional's recorded crc32 in project.toml via save_metadata.
+    // Source: no-op (immutable). Returns InvalidArgument if the
+    // active id is set to an unknown slug.
+    [[nodiscard]] Status save_active_rom();
+
+    // Persist every dirty slot (working + any additional with a non-
+    // empty history). The GUI save flow calls this so the user
+    // doesn't have to manually re-activate each slot before Ctrl+S.
+    // Stops at the first failure and reports it; partially-saved
+    // state is left on disk (matches the v1 save_working_rom error
+    // path). Always emits save_metadata at the end to refresh the
+    // recorded crc32 for each saved slot.
+    [[nodiscard]] Status save_all();
 
     // Read-only access to extra ROMs declared in project.toml as
     // [[rom]] entries (Issue #10 read slice). Empty when project.toml
