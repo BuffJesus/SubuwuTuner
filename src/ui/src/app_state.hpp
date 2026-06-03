@@ -256,6 +256,9 @@ struct AppState {
     // Only renders when the list has ≥4 entries (else the filter
     // is more clutter than help).
     char recents_filter[128]{};
+    // Selected row index for keyboard nav through recents. -1 = none
+    // selected yet (first Up/Down keypress selects index 0).
+    int recents_selected_idx{-1};
     Settings settings;
 
     // Sidebar filter. Substring-matched (case-insensitive) against table

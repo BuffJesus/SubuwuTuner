@@ -285,9 +285,42 @@ void render_welcome_panel(AppState &state) {
         }
         std::string_view const recents_filter{state.recents_filter};
 
+        // Build visible-indices list for keyboard nav (filter-aware).
+        std::vector<std::size_t> visible;
+        visible.reserve(state.recents.size());
+        for (std::size_t i = 0; i < state.recents.size(); ++i) {
+            auto const &e = state.recents[i];
+            auto const basename =
+                e.path.filename().empty() ? e.path.string() : e.path.filename().string();
+            if (recents_filter.empty() ||
+                icontains(basename, recents_filter) ||
+                icontains(e.path.string(), recents_filter)) {
+                visible.push_back(i);
+            }
+        }
+        // Up/Down arrows walk the visible list when no input is active.
+        // Enter opens the selected entry.
+        if (!visible.empty() && !ImGui::GetIO().WantTextInput) {
+            int const n = static_cast<int>(visible.size());
+            if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)) {
+                state.recents_selected_idx =
+                    state.recents_selected_idx < 0 ? 0
+                                                   : (state.recents_selected_idx + 1) % n;
+            } else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)) {
+                state.recents_selected_idx =
+                    state.recents_selected_idx < 0 ? n - 1
+                                                   : (state.recents_selected_idx - 1 + n) % n;
+            }
+        }
         // Snapshot indices to act on — modifying recents inside the
         // iteration (via try_open_project) would invalidate iterators.
         std::optional<std::size_t> clicked_idx;
+        if (state.recents_selected_idx >= 0 &&
+            state.recents_selected_idx < static_cast<int>(visible.size()) &&
+            !ImGui::GetIO().WantTextInput &&
+            ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
+            clicked_idx = visible[static_cast<std::size_t>(state.recents_selected_idx)];
+        }
         std::size_t shown = 0;
         for (std::size_t i = 0; i < state.recents.size(); ++i) {
             auto const &e = state.recents[i];
@@ -303,6 +336,15 @@ void render_welcome_panel(AppState &state) {
             bool const exists = std::filesystem::exists(e.path, ec);
 
             ImGui::PushID(static_cast<int>(i));
+            // Highlight the row that arrow-key navigation last selected
+            // so the user can see where Enter will land.
+            bool const kb_selected =
+                state.recents_selected_idx >= 0 &&
+                state.recents_selected_idx < static_cast<int>(visible.size()) &&
+                visible[static_cast<std::size_t>(state.recents_selected_idx)] == i;
+            if (kb_selected) {
+                push_primary_button_colors();
+            }
             // Each row is a button with two-line content (basename on
             // top, dimmed full path beneath). Dead entries are
             // disabled — visible so the user knows the project moved
@@ -313,6 +355,9 @@ void render_welcome_panel(AppState &state) {
                 clicked_idx = i;
             }
             ImGui::EndDisabled();
+            if (kb_selected) {
+                pop_primary_button_colors();
+            }
 
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                 if (exists) {

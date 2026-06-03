@@ -516,23 +516,27 @@ void render_help_modal(AppState &state) {
     if (!visible_indices.empty()) {
         // Only respond to arrows when the topic filter input isn't
         // capturing keyboard — typing in the search field should move
-        // the caret, not the topic selection.
+        // the caret, not the topic selection. Home/End jump to first/
+        // last visible topic regardless of current position.
         bool const arrow_eligible = !ImGui::GetIO().WantTextInput;
-        if (arrow_eligible &&
-            (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true) ||
-             ImGui::IsKeyPressed(ImGuiKey_UpArrow, true))) {
+        if (arrow_eligible) {
+            int const n = static_cast<int>(visible_indices.size());
             auto const cur = std::find(visible_indices.begin(), visible_indices.end(),
                                        state.help_active_topic);
             int pos = static_cast<int>(cur == visible_indices.end()
                                            ? 0
                                            : (cur - visible_indices.begin()));
-            int const n = static_cast<int>(visible_indices.size());
             if (ImGui::IsKeyPressed(ImGuiKey_DownArrow, true)) {
                 pos = (pos + 1) % n;
-            } else {
+                state.help_active_topic = visible_indices[static_cast<std::size_t>(pos)];
+            } else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow, true)) {
                 pos = (pos - 1 + n) % n;
+                state.help_active_topic = visible_indices[static_cast<std::size_t>(pos)];
+            } else if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) {
+                state.help_active_topic = visible_indices.front();
+            } else if (ImGui::IsKeyPressed(ImGuiKey_End, false)) {
+                state.help_active_topic = visible_indices.back();
             }
-            state.help_active_topic = visible_indices[static_cast<std::size_t>(pos)];
         }
     }
 
@@ -558,6 +562,17 @@ void render_help_modal(AppState &state) {
     ImGui::EndChild();
     ImGui::SameLine();
     if (ImGui::BeginChild("##help_content", ImVec2(0.0f, -1.0f), true)) {
+        // PgUp / PgDn scroll the content pane by one viewport step
+        // when keyboard isn't claimed by an input. Maps to the same
+        // gesture every doc reader uses.
+        if (!ImGui::GetIO().WantTextInput) {
+            float const page = ImGui::GetWindowSize().y * 0.85f;
+            if (ImGui::IsKeyPressed(ImGuiKey_PageDown, true)) {
+                ImGui::SetScrollY(ImGui::GetScrollY() + page);
+            } else if (ImGui::IsKeyPressed(ImGuiKey_PageUp, true)) {
+                ImGui::SetScrollY(ImGui::GetScrollY() - page);
+            }
+        }
         auto const idx = state.help_active_topic;
         if (idx >= 0 && idx < static_cast<int>(state.help_topics.size())) {
             render_markdown(state.help_topics[static_cast<std::size_t>(idx)].body);
