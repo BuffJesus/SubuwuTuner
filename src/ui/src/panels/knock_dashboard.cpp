@@ -179,6 +179,95 @@ void render_knock_dashboard_panel(AppState &state) {
                 "load, fbkc_N, flkc_N). Only touches empty fields —\n"
                 "your typed values are preserved.");
         }
+        ImGui::SameLine();
+        // Save / Load preset — persist the current column mapping to
+        // a small text file the user picks. Tuners reuse the same
+        // logger across many sessions; this skips the re-typing pass.
+        if (ImGui::SmallButton("Save preset…##knock_save_preset")) {
+            NFD::UniquePath out;
+            nfdfilteritem_t const filters[] = {{"Knock preset", "knockcols"}};
+            if (NFD::SaveDialog(out, filters, 1, nullptr, "default.knockcols") ==
+                NFD_OKAY) {
+                std::ofstream fh{out.get(), std::ios::binary};
+                if (fh) {
+                    fh << "# subuwutuner.knock-cols.v1\n";
+                    fh << "cylinders=" << state.knock_cylinder_count << "\n";
+                    fh << "rpm=" << state.knock_rpm_col << "\n";
+                    fh << "load=" << state.knock_load_col << "\n";
+                    for (int c = 0; c < state.knock_cylinder_count; ++c) {
+                        fh << "fbkc_" << (c + 1) << "=" << state.knock_fbkc_cols[c] << "\n";
+                        fh << "flkc_" << (c + 1) << "=" << state.knock_flkc_cols[c] << "\n";
+                    }
+                    state.knock_load_error = "Saved preset to " + std::string{out.get()};
+                }
+            }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Save the current column mapping to a .knockcols file\n"
+                              "for reuse across sessions.");
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Load preset…##knock_load_preset")) {
+            NFD::UniquePath out;
+            nfdfilteritem_t const filters[] = {{"Knock preset", "knockcols"}};
+            if (NFD::OpenDialog(out, filters, 1) == NFD_OKAY) {
+                std::ifstream fh{out.get(), std::ios::binary};
+                std::string line;
+                int loaded = 0;
+                while (std::getline(fh, line)) {
+                    if (!line.empty() && line.back() == '\r')
+                        line.pop_back();
+                    if (line.empty() || line.front() == '#')
+                        continue;
+                    auto const eq = line.find('=');
+                    if (eq == std::string::npos)
+                        continue;
+                    auto const key = line.substr(0, eq);
+                    auto const val = line.substr(eq + 1);
+                    if (key == "cylinders") {
+                        try {
+                            state.knock_cylinder_count =
+                                std::clamp(std::stoi(val), 1, 6);
+                        } catch (...) {
+                        }
+                    } else if (key == "rpm") {
+                        std::snprintf(state.knock_rpm_col, sizeof state.knock_rpm_col,
+                                      "%s", val.c_str());
+                    } else if (key == "load") {
+                        std::snprintf(state.knock_load_col, sizeof state.knock_load_col,
+                                      "%s", val.c_str());
+                    } else if (key.starts_with("fbkc_")) {
+                        try {
+                            int const idx = std::stoi(key.substr(5)) - 1;
+                            if (idx >= 0 && idx < 6) {
+                                std::snprintf(state.knock_fbkc_cols[idx],
+                                              sizeof state.knock_fbkc_cols[idx],
+                                              "%s", val.c_str());
+                            }
+                        } catch (...) {
+                        }
+                    } else if (key.starts_with("flkc_")) {
+                        try {
+                            int const idx = std::stoi(key.substr(5)) - 1;
+                            if (idx >= 0 && idx < 6) {
+                                std::snprintf(state.knock_flkc_cols[idx],
+                                              sizeof state.knock_flkc_cols[idx],
+                                              "%s", val.c_str());
+                            }
+                        } catch (...) {
+                        }
+                    }
+                    ++loaded;
+                }
+                state.knock_load_error =
+                    "Loaded " + std::to_string(loaded) + " preset key(s) from " +
+                    std::string{out.get()};
+            }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Load a previously saved column mapping.\n"
+                              "Overwrites the current field values.");
+        }
         ImGui::SetNextItemWidth(160.0f);
         ImGui::InputText("RPM column", state.knock_rpm_col, sizeof state.knock_rpm_col);
         ImGui::SameLine();
