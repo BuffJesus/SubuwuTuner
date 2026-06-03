@@ -90,20 +90,47 @@ void render_stats_panel(AppState &state) {
     double const stddev =
         cells.size() > 1 ? std::sqrt(sq / static_cast<double>(cells.size() - 1)) : 0.0;
 
-    // Count edited cells (diff working vs source). Cheap: re-read source
-    // table data once per frame. For 1D / 2D tables of moderate size this
-    // is well under a millisecond.
+    // Count cells that differ from the source ROM. Cheap: re-read
+    // source table data once per frame. For 1D / 2D tables of
+    // moderate size this is well under a millisecond.
+    //
+    // When the user is viewing the working slot the comparison is
+    // "edits to date". When viewing source it's always zero (td IS
+    // source). When viewing an additional ROM it's "how heavily-
+    // tuned is this calibration vs stock" — also useful.
+    auto const count_differences =
+        [&](st::Definition::TableData const &lhs,
+            st::Definition::TableData const &rhs) -> std::size_t {
+        std::size_t n = 0;
+        if (lhs.values.size() != rhs.values.size())
+            return n;
+        for (std::size_t r = 0; r < lhs.values.size(); ++r) {
+            if (lhs.values[r].size() != rhs.values[r].size())
+                continue;
+            for (std::size_t c = 0; c < lhs.values[r].size(); ++c) {
+                if (lhs.values[r][c] != rhs.values[r][c])
+                    ++n;
+            }
+        }
+        return n;
+    };
     std::size_t edited = 0;
     auto const source_td =
         state.project->definition().read_table_values(state.project->source_rom(), *table);
-    if (source_td.has_value() && source_td->values.size() == td.values.size()) {
-        for (std::size_t r = 0; r < td.values.size(); ++r) {
-            if (source_td->values[r].size() != td.values[r].size())
-                continue;
-            for (std::size_t c = 0; c < td.values[r].size(); ++c) {
-                if (td.values[r][c] != source_td->values[r][c])
-                    ++edited;
-            }
+    if (source_td.has_value()) {
+        edited = count_differences(td, *source_td);
+    }
+    // Secondary "vs working" delta when the user is viewing a non-
+    // working slot (Issue #10). Skipped when view IS working (the
+    // two would be identical) or source (also redundant — already
+    // covered by the inverse of "edited" against working). Computed
+    // lazily so the working-slot fast path doesn't pay for it.
+    std::optional<std::size_t> delta_vs_working;
+    if (!state.viewing_working_rom() && state.active_rom_id != "source") {
+        auto const working_td = state.project->definition().read_table_values(
+            state.project->working_rom(), *table);
+        if (working_td.has_value()) {
+            delta_vs_working = count_differences(td, *working_td);
         }
     }
 
@@ -142,18 +169,36 @@ void render_stats_panel(AppState &state) {
     stat_row("p50", percentile(0.50));
     stat_row("p90", percentile(0.90));
     ImGui::Text("cells:  %zu", cells.size());
-    ImGui::Text("edited: %zu", edited);
+    if (state.viewing_working_rom()) {
+        ImGui::Text("edited: %zu", edited);
+    } else {
+        // Reframe the label when reading a non-working ROM: "edited"
+        // implies "your edits" which doesn't fit a comparison ROM.
+        ImGui::Text("vs source: %zu", edited);
+        if (delta_vs_working.has_value()) {
+            ImGui::Text("vs working: %zu", *delta_vs_working);
+        }
+    }
 
     // Copy to clipboard — small TSV block the user can paste into a
     // notes app, spreadsheet, or forum reply. Format mirrors the
     // stat_row layout above plus the table id + scaling for context.
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
     if (ImGui::SmallButton("Copy TSV##stats_copy_tsv")) {
-        char buf[768];
+        char buf[896];
+        char const *delta_label = state.viewing_working_rom() ? "edited" : "vs source";
+        // Trailing "vs working" line only appears when viewing a non-
+        // working / non-source ROM. Render it conditionally to keep
+        // the working-slot output identical to the v1 shape.
+        char vs_working[64] = "";
+        if (delta_vs_working.has_value()) {
+            std::snprintf(vs_working, sizeof vs_working, "vs working\t%zu\n",
+                          *delta_vs_working);
+        }
         std::snprintf(buf, sizeof buf,
                       "table\t%s\nunit\t%s\nmin\t%.*f\nmax\t%.*f\nmean\t%.*f\n"
                       "stddev\t%.*f\np10\t%.*f\np50\t%.*f\np90\t%.*f\n"
-                      "cells\t%zu\nedited\t%zu\n",
+                      "cells\t%zu\n%s\t%zu\n%s",
                       table->id.c_str(), unit.empty() ? "" : unit.c_str(),
                       prec, static_cast<double>(min),
                       prec, static_cast<double>(max),
@@ -162,7 +207,7 @@ void render_stats_panel(AppState &state) {
                       prec, percentile(0.10),
                       prec, percentile(0.50),
                       prec, percentile(0.90),
-                      cells.size(), edited);
+                      cells.size(), delta_label, edited, vs_working);
         ImGui::SetClipboardText(buf);
     }
     if (ImGui::IsItemHovered()) {

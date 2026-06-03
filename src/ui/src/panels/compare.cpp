@@ -317,6 +317,18 @@ void render_compare_panel(AppState &state) {
         std::snprintf(state.compare_rom_a_path, sizeof state.compare_rom_a_path, "%s",
                       kProjectSourceSentinel);
     }
+    // ROM B — when the user is viewing an additional ROM (Issue #10)
+    // and B is empty, pre-fill with that ROM so opening Compare is a
+    // zero-click "what's different about this tune vs source" view.
+    // Only fires once; user can clear / overwrite freely.
+    if (state.compare_rom_b_path[0] == '\0' && state.project.has_value() &&
+        !state.active_rom_id.empty() && state.active_rom_id != "working" &&
+        state.active_rom_id != "source") {
+        std::string const sentinel = std::string{kProjectRomSentinelPrefix} +
+                                     state.active_rom_id + ">";
+        std::snprintf(state.compare_rom_b_path, sizeof state.compare_rom_b_path, "%s",
+                      sentinel.c_str());
+    }
 
     ImGui::Text("ROM A (baseline):");
     ImGui::SetNextItemWidth(-160.0f);
