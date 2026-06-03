@@ -541,9 +541,24 @@ void render_audit_panel(AppState &state) {
         // Right-click context menu — single-entry NDJSON copy. Useful
         // for quoting one event in a support thread or chat.
         if (ImGui::BeginPopupContextItem("##audit_row_ctx")) {
+            // Copy disabled on tampered entries — serialize_entry
+            // recomputes CRC32, so emitting a bad-checksum entry that
+            // way would launder the corruption. Forensic users who
+            // need to share the original bytes can hand the audit.log
+            // file directly via the "Open log location" reveal.
+            ImGui::BeginDisabled(!e.checksum_valid);
             if (ImGui::MenuItem("Copy as NDJSON")) {
                 auto const line = st::audit::serialize_entry(e);
                 ImGui::SetClipboardText(line.c_str());
+            }
+            ImGui::EndDisabled();
+            if (!e.checksum_valid && ImGui::IsItemHovered(
+                                          ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip(
+                    "Disabled: this entry's stored CRC32 doesn't match.\n"
+                    "Copying via serialize_entry would emit a fresh CRC\n"
+                    "and hide the tampering. Share the raw audit.log\n"
+                    "file instead (Open log location button).");
             }
             if (table_field != nullptr) {
                 ImGui::Separator();

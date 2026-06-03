@@ -13757,9 +13757,14 @@ int main(int argc, char *argv[]) {
             if (vp.display_name.empty()) {
                 vp.display_name = vp.id;
             }
-            vp.created_iso = "";
-            vp.updated_iso = "";
-            std::filesystem::create_directories(profile_dir_opt);
+            std::error_code ec;
+            std::filesystem::create_directories(profile_dir_opt, ec);
+            if (ec) {
+                std::fprintf(stderr, "profile create: mkdir %s: %s\n",
+                             profile_dir_opt.string().c_str(),
+                             ec.message().c_str());
+                return 1;
+            }
             auto const target = profile_dir_opt / (vp.id + ".stprofile");
             if (std::filesystem::exists(target)) {
                 std::fprintf(stderr, "profile create: already exists: %s\n",
