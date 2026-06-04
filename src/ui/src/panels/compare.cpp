@@ -748,8 +748,25 @@ void render_compare_panel(AppState &state) {
         };
         chip_button("All", "");
         chip_button("Safety-critical", "@safety");
+        // Tooltip on the SmallButton's hover state — fires for the
+        // previous item, which is the chip just rendered.
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Filter to tables tagged engine-safety-critical.\n"
+                              "These are the maps where a wrong edit can\n"
+                              "damage the engine; they always gate at flash\n"
+                              "time regardless of jurisdiction profile.");
+        }
         chip_button("Emissions", "@emissions");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Filter to tables tagged emissions-relevant.\n"
+                              "Treatment depends on the active jurisdiction\n"
+                              "profile (silent / warn / confirm / block).");
+        }
         chip_button("Either flag", "@flagged");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Tables that carry either flag — the union of\n"
+                              "Safety-critical + Emissions.");
+        }
         // Category chips — one per distinct Table::category present in
         // the changed tables (looked up against the live pack so a pack
         // swap reflows them).
