@@ -78,6 +78,7 @@ void render_flash_modal(AppState &state) {
         // Reset the typed-phrase gate every time the modal opens —
         // an old confirmation must not carry across sessions.
         state.flash_typed_phrase[0] = '\0';
+        state.focus_pending_flash = true;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
@@ -224,10 +225,21 @@ void render_flash_modal(AppState &state) {
         text_subtle("Profile '%s' would flag this on save; no flash-time gate.", pname.c_str());
         break;
     case A::Confirm:
+        if (state.focus_pending_flash) {
+            // Land focus on the safety checkbox — Space toggles, Tab
+            // moves to Verify. Per the no-Enter-on-Verify policy
+            // upthread, deliberately NOT focusing the primary button.
+            ImGui::SetKeyboardFocusHere();
+            state.focus_pending_flash = false;
+        }
         ImGui::Checkbox("I confirm flashing these emissions edits", &state.flash_confirm_checked);
         ready_to_send = state.flash_confirm_checked;
         break;
     case A::ConfirmWithReason:
+        if (state.focus_pending_flash) {
+            ImGui::SetKeyboardFocusHere();
+            state.focus_pending_flash = false;
+        }
         ImGui::Checkbox("I confirm flashing these emissions edits", &state.flash_confirm_checked);
         ImGui::TextUnformatted("Reason (required):");
         ImGui::InputTextMultiline("##flash_reason", state.flash_reason, sizeof state.flash_reason,
@@ -243,6 +255,11 @@ void render_flash_modal(AppState &state) {
         ready_to_send = false;
         break;
     }
+    // Clear any leftover focus-pending flag — the Silent / Badge /
+    // Warn / Block branches above have no widget to focus, but we
+    // don't want the flag carrying over to the next modal open under
+    // a different profile.
+    state.focus_pending_flash = false;
 
     // Typed-phrase confirmation gate (analyst Issue #14). Layered on
     // top of the policy-driven checkbox/reason gate above — the user

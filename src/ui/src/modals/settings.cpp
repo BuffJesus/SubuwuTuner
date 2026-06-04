@@ -33,6 +33,7 @@ void render_settings_modal(AppState &state) {
     if (state.show_settings_modal) {
         ImGui::OpenPopup("\xEE\x9C\x93  Settings##settings_modal");
         state.show_settings_modal = false;
+        state.focus_pending_settings = true;
         // Refresh from disk every time the modal opens so concurrent
         // edits via the CLI `config set` subcommand don't get clobbered.
         auto cfg_r = st::config::Config::load();
@@ -140,6 +141,14 @@ void render_settings_modal(AppState &state) {
         if (ImGui::BeginTabItem("Paths")) {
             ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
             ImGui::TextUnformatted("Definitions root");
+            if (state.focus_pending_settings) {
+                // Land focus on the Definitions-root input — the
+                // canonical "configure first" field. Tab cycles
+                // through the row's Folder… button then the ROM
+                // dump root input + button.
+                ImGui::SetKeyboardFocusHere();
+                state.focus_pending_settings = false;
+            }
     ImGui::SetNextItemWidth(input_w);
     ImGui::InputText("##settings_def_root", state.settings_def_root_input,
                      sizeof state.settings_def_root_input);

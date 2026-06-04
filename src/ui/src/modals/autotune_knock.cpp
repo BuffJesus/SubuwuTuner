@@ -226,6 +226,7 @@ void render_kp_autotune_modal(AppState &state) {
     if (state.show_kp_autotune_modal) {
         ImGui::OpenPopup("\xEE\xA5\x90  Autotune knock pull##kp_autotune_modal");
         state.show_kp_autotune_modal = false;
+        state.focus_pending_autotune_knock = true;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
@@ -238,6 +239,10 @@ void render_kp_autotune_modal(AppState &state) {
     // ---- Inputs ------------------------------------------------------
     ImGui::TextUnformatted("Target table");
     ImGui::SetNextItemWidth(-FLT_MIN);
+    if (state.focus_pending_autotune_knock) {
+        ImGui::SetKeyboardFocusHere();
+        state.focus_pending_autotune_knock = false;
+    }
     ImGui::InputTextWithHint("##kp_at_table", "snake_case id of the 2D ignition timing table",
                              state.kp_at_table_id, sizeof state.kp_at_table_id);
 

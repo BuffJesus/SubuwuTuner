@@ -197,6 +197,7 @@ void render_maf_autotune_modal(AppState &state) {
     if (state.show_maf_autotune_modal) {
         ImGui::OpenPopup("\xEE\xA5\x90  Autotune MAF##maf_autotune_modal");
         state.show_maf_autotune_modal = false;
+        state.focus_pending_autotune_maf = true;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
@@ -209,6 +210,12 @@ void render_maf_autotune_modal(AppState &state) {
     // ---- Inputs ------------------------------------------------------
     ImGui::TextUnformatted("Target table");
     ImGui::SetNextItemWidth(-FLT_MIN);
+    if (state.focus_pending_autotune_maf) {
+        // Land keyboard focus on the Target-table input so the user
+        // can start typing the scaling id straight away.
+        ImGui::SetKeyboardFocusHere();
+        state.focus_pending_autotune_maf = false;
+    }
     ImGui::InputTextWithHint("##maf_at_table", "snake_case id of the 1D MAF scaling table",
                              state.maf_at_table_id, sizeof state.maf_at_table_id);
 

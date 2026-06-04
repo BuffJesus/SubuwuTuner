@@ -539,6 +539,8 @@ struct AppState {
     bool focus_pending_csv_import{false};
     bool focus_pending_settings{false};
     bool focus_pending_flash{false};
+    bool focus_pending_autotune_maf{false};
+    bool focus_pending_autotune_knock{false};
     // Within-topic find input (Ctrl+G or the secondary "Find in topic"
     // field next to the topic filter). When non-empty the content pane
     // pre-filters the active topic's body to lines containing this

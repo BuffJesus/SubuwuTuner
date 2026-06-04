@@ -23,6 +23,7 @@ void render_csv_import_modal(AppState &state) {
     if (state.show_csv_import_modal) {
         ImGui::OpenPopup("\xEE\x84\x9B  Import CSV##csv_import_modal");
         state.show_csv_import_modal = false;
+        state.focus_pending_csv_import = true;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
@@ -136,6 +137,14 @@ void render_csv_import_modal(AppState &state) {
 
     constexpr float kBtnW = 160.0f;
     push_primary_button_colors();
+    if (state.focus_pending_csv_import) {
+        // Land focus on the primary action so the visible focus ring
+        // tells the user Enter will Apply. Esc still cancels from
+        // anywhere — the modal-level want_cancel above is window-
+        // scoped, not widget-scoped.
+        ImGui::SetKeyboardFocusHere();
+        state.focus_pending_csv_import = false;
+    }
     bool const apply_clicked = ImGui::Button("Apply edits", ImVec2(kBtnW, 0.0f));
     pop_primary_button_colors();
     if (ImGui::IsItemHovered()) {
