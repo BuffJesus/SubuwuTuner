@@ -625,6 +625,9 @@ constexpr std::string_view kUsage =
     "                            stored CRC32 doesn't match the recomputed value.\n"
     "                            Exits 1 when any bad entry is found so CI can\n"
     "                            gate on log integrity.\n"
+    "    audit stats <project-dir> [--json]\n"
+    "                            Per-kind counts + first/last timestamp + bad-CRC\n"
+    "                            count. Read-only summary for activity surveys.\n"
     "                            Read the per-project audit.log (cross-session\n"
     "                            ECU-touch log) and print one entry per line.\n"
     "                            Tampered entries (CRC32 mismatch) get a\n"
@@ -14090,7 +14093,8 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "audit") {
         if (argc < 3) {
-            std::fputs("audit: missing subcommand. Try `audit show <project>` or "
+            std::fputs("audit: missing subcommand. Try `audit show <project>`, "
+                       "`audit stats <project>`, `audit verify <project>`, or "
                        "`audit append <project> --kind <name> --description <text>`.\n",
                        stderr);
             return 2;
@@ -14271,9 +14275,149 @@ int main(int argc, char *argv[]) {
             }
             return bad == 0 ? 0 : 1;
         }
+        if (sub == "stats") {
+            // audit stats <project-dir> [--json]
+            // Aggregate per-kind counts + bad-checksum count + first/
+            // last timestamp. Read-only summary; no integrity gate
+            // (that's `verify`'s job). Useful "how active is this
+            // project's audit log" snapshot without paging through
+            // every entry.
+            std::optional<std::filesystem::path> project_dir;
+            bool json_mode = false;
+            for (int i = 3; i < argc; ++i) {
+                std::string_view const a{argv[i]};
+                if (a == "--json") {
+                    json_mode = true;
+                } else if (a.starts_with("--")) {
+                    std::fprintf(stderr, "audit stats: unknown option: %s\n", argv[i]);
+                    return 2;
+                } else if (!project_dir.has_value()) {
+                    project_dir = std::filesystem::path{argv[i]};
+                } else {
+                    std::fprintf(stderr, "audit stats: extra positional: %s\n", argv[i]);
+                    return 2;
+                }
+            }
+            if (!project_dir.has_value()) {
+                std::fputs("audit stats: missing <project-dir>\n", stderr);
+                return 2;
+            }
+            auto const log_path = *project_dir / "audit.log";
+            if (!std::filesystem::exists(log_path)) {
+                if (json_mode) {
+                    std::string out;
+                    out.append("{\"schema\":\"subuwutuner.audit-stats.v1\","
+                               "\"log_path\":");
+                    json_escape(out, log_path.string());
+                    out.append(",\"present\":false,\"entries\":0,\"bad_checksum\":0,"
+                               "\"by_kind\":{}}\n");
+                    std::fputs(out.c_str(), stdout);
+                } else {
+                    std::printf("Audit log: %s\n  (not present)\n",
+                                log_path.string().c_str());
+                }
+                return 0;
+            }
+            auto entries = st::audit::read_all(log_path);
+            if (!entries.has_value()) {
+                std::fprintf(stderr, "audit stats: %s\n",
+                             entries.error().to_string().c_str());
+                return 1;
+            }
+            // Aggregate. Tally is small (< 30 kinds), linear is fine.
+            std::vector<std::pair<std::string_view, std::size_t>> by_kind;
+            std::size_t bad = 0;
+            std::int64_t ts_min = 0;
+            std::int64_t ts_max = 0;
+            bool ts_initialized = false;
+            for (auto const &e : *entries) {
+                if (!e.checksum_valid) {
+                    ++bad;
+                }
+                if (!ts_initialized || e.timestamp_ns < ts_min)
+                    ts_min = e.timestamp_ns;
+                if (!ts_initialized || e.timestamp_ns > ts_max)
+                    ts_max = e.timestamp_ns;
+                ts_initialized = true;
+                auto const kn = st::audit::kind_name(e.kind);
+                bool hit = false;
+                for (auto &p : by_kind) {
+                    if (p.first == kn) {
+                        ++p.second;
+                        hit = true;
+                        break;
+                    }
+                }
+                if (!hit) {
+                    by_kind.emplace_back(kn, std::size_t{1});
+                }
+            }
+            // Sort by count desc, kind name asc for ties — stable
+            // ordering across runs.
+            std::sort(by_kind.begin(), by_kind.end(),
+                      [](auto const &x, auto const &y) {
+                          if (x.second != y.second)
+                              return x.second > y.second;
+                          return x.first < y.first;
+                      });
+            if (json_mode) {
+                std::string out;
+                out.append("{\"schema\":\"subuwutuner.audit-stats.v1\",\"log_path\":");
+                json_escape(out, log_path.string());
+                out.append(",\"present\":true,\"entries\":");
+                out.append(std::to_string(entries->size()));
+                out.append(",\"bad_checksum\":");
+                out.append(std::to_string(bad));
+                if (ts_initialized) {
+                    out.append(",\"first_ts_ns\":");
+                    out.append(std::to_string(ts_min));
+                    out.append(",\"last_ts_ns\":");
+                    out.append(std::to_string(ts_max));
+                }
+                out.append(",\"by_kind\":{");
+                for (std::size_t i = 0; i < by_kind.size(); ++i) {
+                    if (i > 0)
+                        out.append(",");
+                    json_escape(out, by_kind[i].first);
+                    out.append(":");
+                    out.append(std::to_string(by_kind[i].second));
+                }
+                out.append("}}\n");
+                std::fputs(out.c_str(), stdout);
+            } else {
+                std::printf("Audit log: %s\n", log_path.string().c_str());
+                std::printf("  Entries:      %zu\n", entries->size());
+                std::printf("  Bad checksum: %zu\n", bad);
+                if (ts_initialized) {
+                    // ISO-8601-ish formatting. Use the same helper if
+                    // available; fall back to bare ns count.
+                    auto fmt = [](std::int64_t ns) {
+                        char buf[40];
+                        std::time_t const sec = ns / 1'000'000'000LL;
+                        std::tm tm{};
+#if defined(_WIN32)
+                        gmtime_s(&tm, &sec);
+#else
+                        gmtime_r(&sec, &tm);
+#endif
+                        std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", &tm);
+                        return std::string{buf};
+                    };
+                    std::printf("  First entry:  %s\n", fmt(ts_min).c_str());
+                    std::printf("  Last entry:   %s\n", fmt(ts_max).c_str());
+                }
+                std::printf("\nBy kind:\n");
+                for (auto const &p : by_kind) {
+                    std::printf("  %-32.*s  %zu\n", static_cast<int>(p.first.size()),
+                                p.first.data(), p.second);
+                }
+            }
+            return 0;
+        }
         if (sub != "show") {
             std::fprintf(stderr,
-                         "audit: unknown subcommand '%s' (try 'show', 'append', or 'verify')\n",
+                         "audit: unknown subcommand '%s' (try 'show', 'append', 'verify', "
+                         "or 'stats')\n",
                          argv[2]);
             return 2;
         }

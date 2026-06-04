@@ -168,6 +168,48 @@ TEST_CASE("CLI table-grep no-match exits non-zero (grep convention)",
     REQUIRE(r.exit_code != 0);
 }
 
+TEST_CASE("CLI audit stats prints per-kind counts on demo project",
+          "[cli][integration][audit][stats]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r =
+        st::test::cli_run("audit stats " + st::test::quote(demo_project()));
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "Audit log:"));
+    REQUIRE(stdout_contains(r, "By kind:"));
+}
+
+TEST_CASE("CLI audit stats --json emits subuwutuner.audit-stats.v1 schema",
+          "[cli][integration][audit][stats][json]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r =
+        st::test::cli_run("audit stats --json " + st::test::quote(demo_project()));
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "subuwutuner.audit-stats.v1"));
+    REQUIRE(stdout_contains(r, "\"present\":true"));
+    REQUIRE(stdout_contains(r, "\"by_kind\":"));
+}
+
+TEST_CASE("CLI audit stats handles a project with no audit log",
+          "[cli][integration][audit][stats]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const scratch = scratch_dir("audit_stats_no_log");
+    fs::create_directories(scratch);
+    auto const r =
+        st::test::cli_run("audit stats " + st::test::quote(scratch.string()));
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    std::error_code ec;
+    fs::remove_all(scratch, ec);
+}
+
 TEST_CASE("CLI audit verify exits 0 on intact demo audit log",
           "[cli][integration][audit][verify]") {
     if (!can_run_cli_tests()) {
