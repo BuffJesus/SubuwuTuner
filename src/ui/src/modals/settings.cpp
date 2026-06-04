@@ -356,6 +356,39 @@ void render_settings_modal(AppState &state) {
     } else {
         text_subtle("Open a project first to edit its display name + notes.");
     }
+
+    // Hidden sidebar categories — discoverable surface for the
+    // affordance shipped in cb921ef. Without this line, a user who
+    // hid a category weeks ago has to right-click the sidebar to
+    // remember the menu lives there.
+    if (state.project.has_value()) {
+        ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+        std::size_t const n_hidden = state.sidebar_hidden_categories.size();
+        ImGui::Text("Hidden sidebar categories: %zu", n_hidden);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(n_hidden == 0);
+        if (ImGui::SmallButton("Reset##settings_unhide_all")) {
+            state.sidebar_hidden_categories.clear();
+            save_sidebar_hidden_categories(state.project->dir(),
+                                           state.sidebar_hidden_categories);
+        }
+        ImGui::EndDisabled();
+        if (n_hidden > 0) {
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Unhide every category. The sidebar will\n"
+                                  "show all categories on the next render.");
+            }
+            // Compact comma-joined preview so the user can recognize
+            // what's hidden without needing to right-click the panel.
+            std::string joined;
+            joined.reserve(64);
+            for (std::size_t i = 0; i < n_hidden; ++i) {
+                if (i > 0) joined.append(", ");
+                joined.append(state.sidebar_hidden_categories[i]);
+            }
+            text_subtle("%s", joined.c_str());
+        }
+    }
             ImGui::EndTabItem();
         }
 
