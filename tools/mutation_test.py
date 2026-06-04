@@ -67,7 +67,11 @@ import sys
 from pathlib import Path
 from typing import Callable
 
-ROOT      = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1]
+# Default build dir matches the developer's local checkout (MinGW).
+# CI runs on Linux preset and overrides via --build-dir. Anyone
+# whose local checkout uses a different preset can pass --build-dir
+# rather than editing this constant.
 BUILD_DIR = ROOT / "build" / "win-mingw"
 
 
@@ -151,19 +155,30 @@ def apply_mutation(lines: list[str], ln: int, col_start: int,
 
 
 def run_tests(target: str, tag_filter: str | None,
-              build_timeout_s: int, test_timeout_s: int) -> str:
+              build_timeout_s: int, test_timeout_s: int,
+              build_dir: Path,
+              verbose: bool = False) -> str:
     """Returns 'KILLED', 'SURVIVED', 'BUILD_FAIL', or 'TIMEOUT'."""
     try:
         build = subprocess.run(
-            ["cmake", "--build", str(BUILD_DIR), "--target", target, "-j"],
+            ["cmake", "--build", str(build_dir), "--target", target, "-j"],
             capture_output=True, text=True, timeout=build_timeout_s)
     except subprocess.TimeoutExpired:
         return "TIMEOUT"
     if build.returncode != 0:
+        if verbose:
+            # Surface the last 20 lines of compiler output so a
+            # BUILD_FAIL cascade can be diagnosed without re-running by
+            # hand. Long compiler dumps would drown the per-mutant
+            # status line; the cap is a deliberate trade-off.
+            tail = "\n".join((build.stderr or build.stdout).splitlines()[-20:])
+            print("\n----- build stderr (last 20 lines) -----")
+            print(tail)
+            print("----- end build stderr -----")
         return "BUILD_FAIL"
-    test_bin = BUILD_DIR / "bin" / f"{target}.exe"
+    test_bin = build_dir / "bin" / f"{target}.exe"
     if not test_bin.exists():
-        test_bin = BUILD_DIR / "bin" / target
+        test_bin = build_dir / "bin" / target
     cmd = [str(test_bin)]
     if tag_filter:
         cmd.append(tag_filter)
@@ -195,6 +210,13 @@ def main():
                     help="Per-mutant test timeout (seconds).")
     p.add_argument("--mutations", default=",".join(m.name for m in MUTATIONS),
                     help="Comma-separated mutation names (default: all).")
+    p.add_argument("--verbose", action="store_true",
+                    help="On BUILD_FAIL, print the last 20 lines of compiler "
+                         "stderr so cascades can be diagnosed in-place.")
+    p.add_argument("--build-dir", type=Path, default=BUILD_DIR,
+                    help="CMake build directory. Defaults to the developer's "
+                         "local win-mingw checkout; CI passes its preset's "
+                         "directory (e.g. 'build/' on the Linux runner).")
     args = p.parse_args()
 
     target_path = (ROOT / args.file).resolve()
@@ -237,7 +259,9 @@ def main():
             mutated = apply_mutation(original_lines, ln, c0, c1, swap)
             target_path.write_text("".join(mutated), encoding="utf-8")
             verdict = run_tests(args.target, args.tag_filter,
-                                 args.build_timeout, args.test_timeout)
+                                 args.build_timeout, args.test_timeout,
+                                 build_dir=args.build_dir,
+                                 verbose=args.verbose)
             print(f"  -> {verdict}")
             results.append(MutantResult(
                 mutation=mut.name, line=ln, original=op,

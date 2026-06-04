@@ -262,3 +262,63 @@ jobs:
             exit 0
           fi
           clang-format --dry-run --Werror "${files[@]}"
+
+  mutation-flash:
+    name: mutation testing (advisory) — st::flash
+    # Advisory lane only: a surviving mutant in st::flash is a real
+    # coverage gap, but it's the kind of thing we'd want to fix in a
+    # follow-up rather than block the merge that surfaced it. Run on
+    # push to main + manual dispatch only (skip per-PR to keep CI fast
+    # and reviewer signal high). When the lane reports zero surviving
+    # mutants for a quarter, flip continue-on-error off and make it a
+    # ship gate; until then the value is the trend over time. Closes
+    # the partial side of analyst Issue #19 (docs/33).
+    if: github.event_name != 'pull_request'
+    needs: build-test
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps + Python
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libgl1-mesa-dev libgtk-3-dev \
+            python3
+          ninja --version
+          python3 --version
+
+      - name: Configure + build st_unit_tests
+        run: |
+          cmake -S . -B build --preset linux-gcc
+          cmake --build build --target st_unit_tests -j
+
+      - name: Mutation pass — Flasher::execute (advisory)
+        # 60-line window inside Flasher::execute. Capped at 20 mutants
+        # so a single CI run finishes inside the job's 30-min budget
+        # even when each rebuild costs 60 s. Verbose mode surfaces the
+        # last 20 lines of compiler output on BUILD_FAIL so a -Werror
+        # / nodiscard cascade is debuggable from the job log without
+        # re-running locally.
+        run: |
+          python3 tools/mutation_test.py \
+            --file src/flash/src/flash.cpp \
+            --line-start 500 \
+            --line-end 560 \
+            --target st_unit_tests \
+            --tag-filter "[flash]" \
+            --max-mutants 20 \
+            --build-timeout 180 \
+            --test-timeout 180 \
+            --build-dir build \
+            --verbose \
+            --mutations swap_eq,swap_lt,swap_gt || true
+          # Exit 0 unconditionally — the lane is advisory; surviving
+          # mutants surface in the job log + summary lines, not the
+          # job's exit code (continue-on-error already caps blast
+          # radius, this belt-and-braces is for the rare case where
+          # the harness itself fails before printing a summary).
