@@ -17,8 +17,10 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace st::ui {
@@ -38,6 +40,32 @@ void render_sidebar(AppState &state) {
             "Open one (Ctrl+O) to browse its calibration tables here.");
         ImGui::End();
         return;
+    }
+
+    // Right-click anywhere in the panel for ordering actions. Single
+    // entry today (reset) — disabled when there's no custom order to
+    // reset, so the affordance is always discoverable even on a fresh
+    // project. Filename ID prevents collision with per-row menus
+    // pushed deeper in the tree.
+    if (ImGui::BeginPopupContextWindow("##tables_panel_ctx",
+                                       ImGuiPopupFlags_MouseButtonRight |
+                                           ImGuiPopupFlags_NoOpenOverItems)) {
+        bool const has_custom_order = !state.sidebar_category_order.empty();
+        ImGui::BeginDisabled(!has_custom_order);
+        if (ImGui::MenuItem("Reset category order")) {
+            state.sidebar_category_order.clear();
+            std::error_code ec;
+            std::filesystem::remove(state.project->dir() / "sidebar_order.txt",
+                                    ec);
+            // remove() failures (file already absent / disk error) are
+            // non-fatal — the in-memory clear above is what matters for
+            // the live UI; persistence will re-sync next save.
+        }
+        ImGui::EndDisabled();
+        if (!has_custom_order) {
+            text_subtle("(no custom order saved)");
+        }
+        ImGui::EndPopup();
     }
 
     auto const &def = state.project->definition();
