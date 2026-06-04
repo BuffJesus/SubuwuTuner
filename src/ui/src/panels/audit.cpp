@@ -95,6 +95,55 @@ bool contains_ci(std::string_view hay, std::string_view needle) {
     return false;
 }
 
+// Composite key for the pin sidecar. audit.log entries are uniquely
+// identifiable by (timestamp_ns, crc32_on_disk) — the timestamp is
+// nanosecond-resolution and the CRC32 protects against same-ns
+// duplicate insertions surviving as the same pin target.
+std::string audit_pin_key(st::audit::Entry const &e) {
+    std::string out;
+    out.reserve(28);
+    out.append(std::to_string(e.timestamp_ns));
+    out.push_back(':');
+    out.append(std::to_string(e.checksum_on_disk));
+    return out;
+}
+
+void load_audit_pinned(AppState &state) {
+    state.audit_pinned_keys.clear();
+    if (!state.project.has_value()) {
+        return;
+    }
+    auto const sidecar = state.project->dir() / "audit.pinned";
+    std::ifstream in{sidecar};
+    if (!in) {
+        return; // absent sidecar = no pins, not an error
+    }
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line.empty()) {
+            continue;
+        }
+        state.audit_pinned_keys.insert(std::move(line));
+    }
+}
+
+void save_audit_pinned(AppState const &state) {
+    if (!state.project.has_value()) {
+        return;
+    }
+    auto const sidecar = state.project->dir() / "audit.pinned";
+    std::ofstream out{sidecar, std::ios::trunc};
+    if (!out) {
+        return; // best-effort — pins survive at runtime even if disk fails
+    }
+    for (auto const &k : state.audit_pinned_keys) {
+        out << k << '\n';
+    }
+}
+
 void load_audit_log(AppState &state) {
     state.audit_entries.clear();
     state.audit_error_msg.clear();
@@ -107,6 +156,7 @@ void load_audit_log(AppState &state) {
     auto const log_path = state.project->dir() / "audit.log";
     if (!std::filesystem::exists(log_path)) {
         state.audit_loaded = true; // genuinely empty, not an error
+        load_audit_pinned(state);
         return;
     }
     auto r = st::audit::read_all(log_path);
@@ -116,6 +166,7 @@ void load_audit_log(AppState &state) {
     }
     state.audit_entries = std::move(*r);
     state.audit_loaded = true;
+    load_audit_pinned(state);
     std::error_code ec;
     state.audit_log_mtime = std::filesystem::last_write_time(log_path, ec);
     if (ec) {
@@ -266,6 +317,33 @@ void render_audit_panel(AppState &state) {
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Clear the filter input.");
+    }
+    ImGui::SameLine();
+    // Pinned-only toggle. Surfaces just the entries the user starred
+    // for review — composes with the text + chip + range filters
+    // (pinned-only applies AFTER them).
+    {
+        bool const active = state.audit_show_pinned_only;
+        if (active) {
+            push_primary_button_colors();
+        }
+        // ★ = pinned-only active; ☆ = show all. Same glyph vocabulary
+        // as the per-row toggle.
+        char const *label = active ? "\xE2\x98\x85  Pinned"
+                                   : "\xE2\x98\x86  Pinned";
+        if (ImGui::Button(label)) {
+            state.audit_show_pinned_only = !state.audit_show_pinned_only;
+        }
+        if (active) {
+            pop_primary_button_colors();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(active
+                                  ? "Showing %zu pinned entries. Click to show all."
+                                  : "Show only pinned entries (%zu pinned across "
+                                    "this project).",
+                              state.audit_pinned_keys.size());
+        }
     }
 
     // Kind-filter chips. One per kind actually present in the loaded
@@ -492,11 +570,12 @@ void render_audit_panel(AppState &state) {
     ImGuiTableFlags const flags = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_BordersOuter |
                                   ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
                                   ImGuiTableFlags_SizingStretchProp;
-    if (!ImGui::BeginTable("##audit_table", 5, flags)) {
+    if (!ImGui::BeginTable("##audit_table", 6, flags)) {
         ImGui::End();
         return;
     }
     ImGui::TableSetupScrollFreeze(0, 1);
+    ImGui::TableSetupColumn("\xE2\x98\x86", ImGuiTableColumnFlags_WidthFixed, 28.0f);
     ImGui::TableSetupColumn("Time (UTC)", ImGuiTableColumnFlags_WidthFixed, 180.0f);
     ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, 180.0f);
     ImGui::TableSetupColumn("Source", ImGuiTableColumnFlags_WidthFixed, 140.0f);
@@ -507,7 +586,38 @@ void render_audit_panel(AppState &state) {
     char ts_buf[32];
     for (std::size_t idx : indices) {
         auto const &e = state.audit_entries[idx];
+        std::string const pin_key = audit_pin_key(e);
+        bool const is_pinned = state.audit_pinned_keys.contains(pin_key);
+        // Pinned-only filter applies after sort + chip + range + text
+        // filters so the user can compose: e.g. "pinned AND emissions
+        // edits in last hour".
+        if (state.audit_show_pinned_only && !is_pinned) {
+            continue;
+        }
         ImGui::TableNextRow();
+        // Pin column. Star toggle on the leftmost cell so it's the
+        // first thing the eye lands on. Always-enabled — even tampered
+        // entries are pinnable (the user might want to flag a
+        // bad-CRC row for later forensic review).
+        ImGui::TableNextColumn();
+        ImGui::PushID(static_cast<int>(idx) ^ 0x70696E00);
+        char const *glyph = is_pinned ? "\xE2\x98\x85" : "\xE2\x98\x86";
+        if (ImGui::SmallButton(glyph)) {
+            if (is_pinned) {
+                state.audit_pinned_keys.erase(pin_key);
+            } else {
+                state.audit_pinned_keys.insert(pin_key);
+            }
+            save_audit_pinned(state);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(is_pinned
+                                  ? "Unpin: this entry won't be highlighted next session."
+                                  : "Pin: keep this entry flagged for review across sessions.\n"
+                                    "Pinned IDs persist to <project>/audit.pinned.");
+        }
+        ImGui::PopID();
+
         ImGui::TableNextColumn();
         format_iso_utc(e.timestamp_ns, ts_buf, sizeof ts_buf);
         ImGui::TextUnformatted(ts_buf);

@@ -455,6 +455,17 @@ struct AppState {
     // save, ROM read, autotune commit) surface immediately instead
     // of waiting for the user to click Refresh.
     std::filesystem::file_time_type audit_log_mtime{};
+    // Pin/star set for audit entries. audit.log itself is append-only
+    // with per-entry CRC32 so we can't mutate it for pin state —
+    // pinned identifiers persist to a sidecar `<project>/audit.pinned`
+    // as `<timestamp_ns>:<crc32_on_disk>` lines. Composite-key strings
+    // are cheap (audit logs top out at hundreds of entries) and
+    // collision-proof under the audit::Entry uniqueness invariant.
+    std::unordered_set<std::string> audit_pinned_keys;
+    // When true, render only entries whose key is in audit_pinned_keys.
+    // Off by default so the audit panel still serves its "what just
+    // happened?" chronological role.
+    bool audit_show_pinned_only{false};
     // Project-scoped audit log handle. Lifecycle:
     //   try_open_project  → AuditLog::open on <project>/audit.log;
     //                        ProjectOpened entry appended
