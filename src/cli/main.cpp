@@ -7154,6 +7154,11 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
         }
     }
 
+    if (json_mode && csv_mode) {
+        std::fputs("knock-snapshot: --json and --csv are mutually exclusive\n", stderr);
+        return 2;
+    }
+
     if (!log_path.has_value() || !flkc_cols_arg.has_value()) {
         std::fputs("knock-snapshot: missing required arguments:", stderr);
         if (!log_path.has_value())
@@ -7964,6 +7969,12 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
         }
     }
 
+    if (json_mode && csv_mode) {
+        std::fputs("coldstart-analyze: --json and --csv are mutually exclusive\n",
+                   stderr);
+        return 2;
+    }
+
     if (!log_path.has_value() || !ts_col.has_value() || !ect_col.has_value() ||
         !rpm_col.has_value()) {
         std::fputs("coldstart-analyze: missing required arguments:", stderr);
@@ -8179,10 +8190,15 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
         std::printf("# mean_lambda_deviation=%.6f\n", s.mean_lambda_deviation);
         std::printf("# target_curve_set=%s\n",
                     methodology.target_lambda_vs_ect.points.empty() ? "false" : "true");
+        // Flat `phase_<name>_samples=` / `phase_<name>_seconds=` keys —
+        // configparser / dotenv / shell-source readers all treat `[…]`
+        // as a section header, which would mis-parse the bracketed
+        // form. Underscores keep the round-trip clean.
         for (std::size_t p = 0; p < st::log::coldstart::kPhaseCount; ++p) {
-            std::printf("# phase[%s].samples=%u\n", phase_names[p],
+            std::printf("# phase_%s_samples=%u\n", phase_names[p],
                         static_cast<unsigned>(s.phase_counts[p]));
-            std::printf("# phase[%s].seconds=%.3f\n", phase_names[p], s.phase_seconds[p]);
+            std::printf("# phase_%s_seconds=%.3f\n", phase_names[p],
+                        s.phase_seconds[p]);
         }
         std::printf("ect_center_c,count,observed_lambda_mean,observed_lambda_min,"
                     "observed_lambda_max,deviation_from_target\n");

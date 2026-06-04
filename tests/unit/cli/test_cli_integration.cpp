@@ -432,7 +432,7 @@ TEST_CASE("CLI coldstart-analyze --csv emits comment metadata + per-bin table",
     REQUIRE(r.spawned);
     REQUIRE(r.exit_code == 0);
     REQUIRE(stdout_contains(r, "# schema=subuwutuner.coldstart-analyze.v1"));
-    REQUIRE(stdout_contains(r, "# phase[PreCrank].samples="));
+    REQUIRE(stdout_contains(r, "# phase_PreCrank_samples="));
     REQUIRE(stdout_contains(r, "ect_center_c,count,observed_lambda_mean"));
 }
 
