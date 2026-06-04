@@ -355,6 +355,10 @@ void render_welcome_panel(AppState &state) {
         // would highlight a row that doesn't correspond to what got
         // rendered.
         std::optional<std::size_t> pin_toggle_idx; // captured for post-loop mutation
+        // Click on a chip → re-validate that recent's pack. Captured
+        // here for post-loop dispatch (project open + save_pack_lint
+        // would invalidate the iteration if applied mid-loop).
+        std::optional<std::size_t> revalidate_idx;
         for (std::size_t vidx = 0; vidx < visible.size(); ++vidx) {
             std::size_t const i = visible[vidx];
             auto const &e = state.recents[i];
@@ -479,7 +483,28 @@ void render_welcome_panel(AppState &state) {
                     } else {
                         ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_caution());
                     }
-                    ImGui::TextUnformatted(chip);
+                    // Clickable chip — Selectable with PushStyleColor
+                    // sets the text color, and dimmed Header /
+                    // HeaderHovered colors keep the chip from looking
+                    // like a sidebar selection cell. Sized exactly to
+                    // the text so the click target hugs the visible
+                    // chip glyph.
+                    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
+                    ImGui::PushStyleColor(ImGuiCol_HeaderHovered,
+                                          ImVec4(1.0f, 1.0f, 1.0f, 0.08f));
+                    ImGui::PushStyleColor(ImGuiCol_HeaderActive,
+                                          ImVec4(1.0f, 1.0f, 1.0f, 0.15f));
+                    if (ImGui::Selectable(chip, false,
+                                          ImGuiSelectableFlags_AllowOverlap,
+                                          ImVec2(chip_w, 0.0f))) {
+                        revalidate_idx = i;
+                    }
+                    ImGui::PopStyleColor(3);
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Click to re-run pack validation against\n"
+                                          "this project's loaded pack. Updates the\n"
+                                          "chip + persists to <project>/pack-lint.toml.");
+                    }
                     ImGui::PopStyleColor();
                 }
             }
@@ -500,6 +525,41 @@ void render_welcome_panel(AppState &state) {
             // Capture by value: try_open_project mutates recents.
             auto const path = state.recents[*clicked_idx].path;
             request_action(state, ConfirmAction::OpenRecent, path);
+        }
+        if (revalidate_idx.has_value() && *revalidate_idx < state.recents.size()) {
+            // Welcome-chip click → re-validate the project's pack
+            // directly, without opening the project (heavy + would
+            // swap the user's view). We need only the Definition;
+            // open it via st::Project to honor the project.toml's
+            // def_path resolution + drop the rest of the load.
+            auto const path = state.recents[*revalidate_idx].path;
+            auto proj = st::Project::open(path);
+            if (proj.has_value()) {
+                auto const v = proj->definition().validate();
+                PackLintSnapshot snap;
+                snap.pack_id = proj->definition().pack().id;
+                snap.last_validated_at = iso8601_utc_now();
+                if (v.has_value()) {
+                    snap.status = 0;
+                } else {
+                    auto const msg = v.error().to_string();
+                    int violations = msg.empty() ? 0 : 1;
+                    for (char c : msg) {
+                        if (c == '\n') ++violations;
+                    }
+                    snap.status = violations;
+                    snap.message = msg;
+                }
+                save_pack_lint(proj->dir(), snap);
+                // Refresh the parallel cache slot so the chip updates
+                // this frame without waiting for a recents-size churn.
+                state.recents_pack_lint[*revalidate_idx] = snap;
+            }
+            // No status_msg on failure — the chip stays as-is, and
+            // attempting to open the project would have failed
+            // visibly anyway. Welcome panel's job here is "give the
+            // user a one-click revalidate", not "diagnose project
+            // load failures".
         }
     }
 
