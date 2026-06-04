@@ -371,6 +371,39 @@ TEST_CASE("CLI changelog show prints [Unreleased] by default",
     REQUIRE(stdout_contains(r, "[Unreleased]"));
 }
 
+TEST_CASE("CLI knock-snapshot --json emits subuwutuner.knock-snapshot.v1 schema",
+          "[cli][integration][knock-snapshot][json]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const csv = fs::path{demo_project()} / ".." / "demo-knock-log.csv";
+    auto const r = st::test::cli_run(
+        "knock-snapshot --log " + st::test::quote(csv.string()) +
+        " --flkc-cols FLKC1,FLKC2,FLKC3,FLKC4 --rpm-col RPM --load-col Load --json");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "subuwutuner.knock-snapshot.v1"));
+    REQUIRE(stdout_contains(r, "\"per_cyl\":["));
+    REQUIRE(stdout_contains(r, "\"cylinder_count\":"));
+}
+
+TEST_CASE("CLI coldstart-analyze --json emits subuwutuner.coldstart-analyze.v1 schema",
+          "[cli][integration][coldstart-analyze][json]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const csv = fs::path{demo_project()} / ".." / "demo-coldstart-log.csv";
+    auto const r = st::test::cli_run(
+        "coldstart-analyze --log " + st::test::quote(csv.string()) +
+        " --timestamp-col ts --ect-col ect --observed-lambda-col obs --rpm-col rpm --json");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "subuwutuner.coldstart-analyze.v1"));
+    REQUIRE(stdout_contains(r, "\"phases\":["));
+    REQUIRE(stdout_contains(r, "\"ect_bins\":["));
+    REQUIRE(stdout_contains(r, "\"target_curve_set\":"));
+}
+
 TEST_CASE("CLI ai-drift classifies the demo adaptive-history CSV",
           "[cli][integration][ai-drift]") {
     if (!can_run_cli_tests()) {

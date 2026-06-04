@@ -376,6 +376,7 @@ constexpr std::string_view kUsage =
     "                      [--min-samples-per-bin N]\n"
     "                      [--timestamp-unit seconds|millis|micros|rows]\n"
     "                      [--target ect:lambda,ect:lambda,...]\n"
+    "                      [--json]\n"
     "                            Phase-classify + ECT-bin a cold-start datalog (engine cold-\n"
     "                            soak → warmup). Reports per-phase sample/time counts, per-\n"
     "                            ECT-bin observed lambda + deviation from a user-supplied\n"
@@ -402,7 +403,7 @@ constexpr std::string_view kUsage =
     "    knock-snapshot --log <CSV> --flkc-cols <a,b,c,d>\n"
     "                   [--fbkc-cols <a,b,c,d>] [--rpm-col <name>] [--load-col <name>]\n"
     "                   [--cylinders N] [--window-seconds N] [--sample-rate-hz N]\n"
-    "                   [--min-rpm N] [--min-load N] [--no-gate]\n"
+    "                   [--min-rpm N] [--min-load N] [--no-gate] [--json]\n"
     "                            Compute a per-cylinder knock dashboard from a CSV\n"
     "                            datalog. --flkc-cols is required (per-cyl fine knock\n"
     "                            learn column names, order = cyl 1..N). --fbkc-cols\n"
@@ -7047,6 +7048,7 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
     std::optional<double> min_rpm_arg;
     std::optional<double> min_load_arg;
     bool no_gate = false;
+    bool json_mode = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -7057,6 +7059,10 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
             }
             return argv[++i];
         };
+        if (a == "--json") {
+            json_mode = true;
+            continue;
+        }
         if (a == "--log") {
             auto *v = need("--log");
             if (!v)
@@ -7254,6 +7260,52 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
         return 1;
     }
     auto const &s = *r;
+
+    if (json_mode) {
+        // subuwutuner.knock-snapshot.v1 — per-cylinder counters + gate
+        // status. Per-cylinder array uses 0-based indexing in JSON
+        // (consistent with array natural order); the text dump shows
+        // 1-based for human reading.
+        // 256-byte buffer covers the longest record (verified by hand
+        // against the per-cyl format string — 6 doubles + 5 keys + 2
+        // bools peaks around 220 chars).
+        std::string out{"{\"schema\":\"subuwutuner.knock-snapshot.v1\",\"log\":"};
+        json_escape(out, log_path->string());
+        char buf[256];
+        std::snprintf(buf, sizeof buf,
+                      ",\"window_seconds\":%.3f,\"sample_rate_hz\":%.3f,"
+                      "\"samples_considered\":%llu,\"samples_gated_out\":%llu,"
+                      "\"gate\":%s,\"cylinder_count\":%u,\"per_cyl\":[",
+                      cfg.window_seconds, cfg.sample_rate_hz,
+                      static_cast<unsigned long long>(s.samples_considered),
+                      static_cast<unsigned long long>(s.samples_gated_out),
+                      cfg.require_load_gate ? "true" : "false",
+                      static_cast<unsigned>(s.cylinder_count));
+        out.append(buf);
+        for (std::uint8_t c = 0; c < s.cylinder_count; ++c) {
+            auto const &p = s.per_cyl[c];
+            bool const has_flkc = mapping.fine_knock_learn[c] != st::log::knock::kNoPid;
+            bool const has_fbkc = mapping.feedback_knock[c] != st::log::knock::kNoPid;
+            if (c > 0) out.append(",");
+            std::snprintf(buf, sizeof buf,
+                          "{\"cyl\":%u,\"has_flkc\":%s,\"has_fbkc\":%s,"
+                          "\"flkc_current\":%.6f,\"flkc_mean_window\":%.6f,"
+                          "\"flkc_min_window\":%.6f,\"fbkc_current\":%.6f,"
+                          "\"events_window\":%u,\"delta_from_cyl_mean\":%.6f}",
+                          static_cast<unsigned>(c + 1),
+                          has_flkc ? "true" : "false", has_fbkc ? "true" : "false",
+                          has_flkc ? p.current_flkc : 0.0,
+                          has_flkc ? p.mean_flkc_window : 0.0,
+                          has_flkc ? p.min_flkc_window : 0.0,
+                          has_fbkc ? p.current_fbkc : 0.0,
+                          static_cast<unsigned>(p.event_count_window),
+                          has_flkc ? p.delta_from_cyl_mean : 0.0);
+            out.append(buf);
+        }
+        out.append("]}\n");
+        std::fputs(out.c_str(), stdout);
+        return 0;
+    }
 
     std::printf("Per-Cylinder Knock Dashboard\n");
     std::printf("============================\n");
@@ -7752,6 +7804,7 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
     // Methodology target curve as comma-separated "ect:lambda" pairs.
     // Example: --target "0:0.82,20:0.88,40:0.93,55:1.00"
     std::optional<std::string> target_curve_arg;
+    bool json_mode = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -7858,6 +7911,8 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
             if (!v)
                 return 2;
             target_curve_arg = v;
+        } else if (a == "--json") {
+            json_mode = true;
         } else {
             std::fprintf(stderr, "coldstart-analyze: unknown option: %s\n", argv[i]);
             return 2;
@@ -8011,6 +8066,55 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
 
     char const *phase_names[6] = {"PreCrank", "Cranking", "InitialFiring",
                                   "HighIdle", "Warmup",   "ClosedLoop"};
+
+    if (json_mode) {
+        // subuwutuner.coldstart-analyze.v1 — phase counts + ECT-bin
+        // observed-lambda series. Same envelope shape as the other
+        // *-analyze --json verbs so consumers can match on the
+        // "schema" key. 256-byte buffer covers the longest snprintf
+        // (verified by counting the longest format string + max
+        // field widths against the format-spec output).
+        std::string out{"{\"schema\":\"subuwutuner.coldstart-analyze.v1\",\"log\":"};
+        json_escape(out, log_path->string());
+        char buf[256];
+        std::snprintf(buf, sizeof buf,
+                      ",\"coldest_ect_c\":%.3f,\"warmest_ect_c\":%.3f,"
+                      "\"samples_considered\":%llu,\"samples_gated_out\":%llu,"
+                      "\"mean_lambda_deviation\":%.6f,\"target_curve_set\":%s,",
+                      s.coldest_ect_c, s.warmest_ect_c,
+                      static_cast<unsigned long long>(s.samples_considered),
+                      static_cast<unsigned long long>(s.samples_gated_out),
+                      s.mean_lambda_deviation,
+                      methodology.target_lambda_vs_ect.points.empty() ? "false" : "true");
+        out.append(buf);
+        out.append("\"phases\":[");
+        for (std::size_t p = 0; p < st::log::coldstart::kPhaseCount; ++p) {
+            if (p > 0) out.append(",");
+            std::snprintf(buf, sizeof buf,
+                          "{\"name\":\"%s\",\"samples\":%u,\"seconds\":%.3f}",
+                          phase_names[p], static_cast<unsigned>(s.phase_counts[p]),
+                          s.phase_seconds[p]);
+            out.append(buf);
+        }
+        out.append("],\"ect_bins\":[");
+        for (std::size_t i = 0; i < s.ect_bins.size(); ++i) {
+            auto const &b = s.ect_bins[i];
+            if (i > 0) out.append(",");
+            std::snprintf(buf, sizeof buf,
+                          "{\"ect_center_c\":%.3f,\"count\":%u,"
+                          "\"observed_lambda_mean\":%.6f,"
+                          "\"observed_lambda_min\":%.6f,"
+                          "\"observed_lambda_max\":%.6f,"
+                          "\"deviation_from_target\":%.6f}",
+                          b.ect_center_c, static_cast<unsigned>(b.count),
+                          b.observed_lambda_mean, b.observed_lambda_min,
+                          b.observed_lambda_max, b.deviation_from_target);
+            out.append(buf);
+        }
+        out.append("]}\n");
+        std::fputs(out.c_str(), stdout);
+        return 0;
+    }
 
     std::printf("Cold-Start Analysis\n");
     std::printf("===================\n");
