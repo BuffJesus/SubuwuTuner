@@ -129,7 +129,16 @@ void render_settings_modal(AppState &state) {
     float const btn_w = 96.0f;
     float const input_w = std::max(120.0f, avail - btn_w - 16.0f);
 
-    ImGui::TextUnformatted("Definitions root");
+    // Tab bar — five sections (Paths / Theme / Profile / Project /
+    // Pack). Carved out of the previously-stacked layout so the
+    // modal doesn't grow unbounded on a small display. The Save +
+    // Restore Defaults + Close row below the bar commits paths AND
+    // project metadata as a single transaction, regardless of which
+    // tab is open — matches the prior single-Save semantics.
+    if (ImGui::BeginTabBar("##settings_tabs", ImGuiTabBarFlags_None)) {
+        if (ImGui::BeginTabItem("Paths")) {
+            ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+            ImGui::TextUnformatted("Definitions root");
     ImGui::SetNextItemWidth(input_w);
     ImGui::InputText("##settings_def_root", state.settings_def_root_input,
                      sizeof state.settings_def_root_input);
@@ -168,20 +177,19 @@ void render_settings_modal(AppState &state) {
             "--output is given. Must be writable by the running user\n"
             "(not Program Files).");
     }
+            ImGui::EndTabItem();
+        }
 
-    ImGui::Dummy(ImVec2(0.0f, kSpaceM));
-    ImGui::Separator();
-    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
-
-    // -------- Theme picker with live preview swatch ------------------
-    // Closes the last item in the 2026-06-02 UX-polish backlog. The
-    // theme also persists via the View → Theme menu + the first-run
-    // wizard; this surface adds a side-by-side preview so the user
-    // can see the accent / chip palette under each theme before
-    // committing. Clicking Dark / Light applies the theme immediately
-    // (apply_theme already mutates the live ImGui style); the Settings
-    // Save button flushes settings.txt to disk.
-    ImGui::TextUnformatted("Theme");
+        // -------- Theme picker with live preview swatch ------------------
+        // Closes the last item in the 2026-06-02 UX-polish backlog. The
+        // theme also persists via the View → Theme menu + the first-run
+        // wizard; this surface adds a side-by-side preview so the user
+        // can see the accent / chip palette under each theme before
+        // committing. Clicking Dark / Light applies the theme immediately
+        // (apply_theme already mutates the live ImGui style); the Settings
+        // Save button flushes settings.txt to disk.
+        if (ImGui::BeginTabItem("Theme")) {
+            ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
     bool const is_dark_now = state.settings.theme == Theme::Dark;
     if (ImGui::RadioButton("Dark##settings_theme_dark", is_dark_now)) {
         state.settings.theme = Theme::Dark;
@@ -236,17 +244,16 @@ void render_settings_modal(AppState &state) {
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
     draw_theme_row(Theme::Dark, "Dark ");
     draw_theme_row(Theme::Light, "Light");
+            ImGui::EndTabItem();
+        }
 
-    ImGui::Dummy(ImVec2(0.0f, kSpaceM));
-    ImGui::Separator();
-    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
-
-    // -------- Active vehicle profile (analyst Issue #7) --------------
-    // Picker over .stprofile files in default_profile_dir(). Selecting
-    // a profile writes settings.toml immediately — no separate Save
-    // because the active-profile id is GUI state, not part of the
-    // installer paths the Save button below covers.
-    ImGui::TextUnformatted("Active vehicle profile");
+        // -------- Active vehicle profile (analyst Issue #7) --------------
+        // Picker over .stprofile files in default_profile_dir(). Selecting
+        // a profile writes settings.toml immediately — no separate Save
+        // because the active-profile id is GUI state, not part of the
+        // installer paths the Save button below covers.
+        if (ImGui::BeginTabItem("Profile")) {
+            ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
     auto const &profs = state.settings_profiles_cache;
     auto const current_idx = [&]() -> int {
         if (state.settings.active_vehicle_profile_id.empty())
@@ -312,16 +319,15 @@ void render_settings_modal(AppState &state) {
                     "Profiles dir: %s",
                     st::profile::default_profile_dir().string().c_str());
     }
+            ImGui::EndTabItem();
+        }
 
-    ImGui::Dummy(ImVec2(0.0f, kSpaceM));
-    ImGui::Separator();
-    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
-
-    // -------- Project metadata --------------------------------------
-    // Display name + notes for the currently-open project. Empty when
-    // no project is loaded. Edits flush on the modal's Save button
-    // alongside the installer-paths so a single Save persists everything.
-    ImGui::TextUnformatted("Project metadata");
+        // -------- Project metadata --------------------------------------
+        // Display name + notes for the currently-open project. Empty when
+        // no project is loaded. Edits flush on the modal's Save button
+        // alongside the installer-paths so a single Save persists everything.
+        if (ImGui::BeginTabItem("Project")) {
+            ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
     if (state.project.has_value()) {
         ImGui::SetNextItemWidth(input_w);
         if (ImGui::InputText("Display name##settings_proj_display",
@@ -340,19 +346,18 @@ void render_settings_modal(AppState &state) {
     } else {
         text_subtle("Open a project first to edit its display name + notes.");
     }
+            ImGui::EndTabItem();
+        }
 
-    ImGui::Dummy(ImVec2(0.0f, kSpaceM));
-    ImGui::Separator();
-    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
-
-    // -------- Validate active pack -----------------------------------
-    // Surfaces `subuwutuner-cli pack-lint` against whatever pack the
-    // currently open project loaded. Pack authors and tuners both want
-    // a "is the loaded pack well-formed?" indicator that doesn't make
-    // them drop to a terminal. Result is cached on AppState so flipping
-    // away and back keeps the last status visible until the user
-    // re-validates.
-    ImGui::TextUnformatted("Active pack");
+        // -------- Validate active pack -----------------------------------
+        // Surfaces `subuwutuner-cli pack-lint` against whatever pack the
+        // currently open project loaded. Pack authors and tuners both want
+        // a "is the loaded pack well-formed?" indicator that doesn't make
+        // them drop to a terminal. Result is cached on AppState so flipping
+        // away and back keeps the last status visible until the user
+        // re-validates.
+        if (ImGui::BeginTabItem("Pack")) {
+            ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
     ImGui::BeginDisabled(!state.project.has_value());
     if (ImGui::Button("Validate pack##settings_pack_lint", ImVec2(160.0f, 0.0f))) {
         auto const v = state.project->definition().validate();
@@ -439,8 +444,12 @@ void render_settings_modal(AppState &state) {
             ImGui::EndChild();
         }
     }
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
 
-    ImGui::Dummy(ImVec2(0.0f, kSpaceM));
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
 
