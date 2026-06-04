@@ -491,6 +491,14 @@ struct AppState {
     bool help_loaded{false};
     std::string help_error_msg;
     char help_filter[128]{};
+    // Within-topic find input (Ctrl+G or the secondary "Find in topic"
+    // field next to the topic filter). When non-empty the content pane
+    // pre-filters the active topic's body to lines containing this
+    // substring (case-insensitive). Markdown structure (tables, lists)
+    // is line-based already so the filter degrades gracefully — but
+    // the user accepts that find-mode is a flat line view, not a
+    // structural one. Empty → normal rendering.
+    char help_body_find[128]{};
     // Parsed glossary terms (from docs/10-glossary.md). Populated
     // lazily on first help-modal open OR first glossary_tooltip_for
     // hover. glossary_loaded gates the load; using a flag instead of

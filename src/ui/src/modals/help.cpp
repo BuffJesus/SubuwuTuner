@@ -486,9 +486,19 @@ void render_help_modal(AppState &state) {
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_F)) {
         ImGui::SetKeyboardFocusHere();
     }
-    ImGui::SetNextItemWidth(-120.0f);
+    ImGui::SetNextItemWidth(-260.0f);
     ImGui::InputTextWithHint("##help_filter", "Search topics… (Ctrl+F)",
                              state.help_filter, sizeof state.help_filter);
+    ImGui::SameLine();
+    // Secondary find: within the active topic's body. Ctrl+G focuses
+    // it — same chord browsers + IDEs use for "find next" / in-text
+    // search, distinct from Ctrl+F which targets the topic list.
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_G)) {
+        ImGui::SetKeyboardFocusHere();
+    }
+    ImGui::SetNextItemWidth(140.0f);
+    ImGui::InputTextWithHint("##help_body_find", "Find in topic (Ctrl+G)",
+                             state.help_body_find, sizeof state.help_body_find);
     ImGui::SameLine();
     if (ImGui::Button("Reload", ImVec2(110.0f, 0.0f))) {
         state.help_loaded = false;
@@ -575,7 +585,66 @@ void render_help_modal(AppState &state) {
         }
         auto const idx = state.help_active_topic;
         if (idx >= 0 && idx < static_cast<int>(state.help_topics.size())) {
-            render_markdown(state.help_topics[static_cast<std::size_t>(idx)].body);
+            std::string_view const body_find{state.help_body_find};
+            auto const &body = state.help_topics[static_cast<std::size_t>(idx)].body;
+            if (body_find.empty()) {
+                render_markdown(body);
+            } else {
+                // Find-in-topic mode: render only lines containing the
+                // needle (case-insensitive). Markdown structure (tables,
+                // lists, headings) degrades to flat per-line rendering —
+                // documented in the AppState comment. The "X of Y lines"
+                // status line at the top lets the user see how narrow
+                // their query landed.
+                auto const to_lower = [](char c) -> char {
+                    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
+                };
+                auto icontains = [&](std::string_view hay, std::string_view needle) {
+                    if (needle.empty() || hay.size() < needle.size())
+                        return false;
+                    for (std::size_t k = 0; k + needle.size() <= hay.size(); ++k) {
+                        bool match = true;
+                        for (std::size_t j = 0; j < needle.size(); ++j) {
+                            if (to_lower(hay[k + j]) != to_lower(needle[j])) {
+                                match = false;
+                                break;
+                            }
+                        }
+                        if (match)
+                            return true;
+                    }
+                    return false;
+                };
+                std::string filtered;
+                filtered.reserve(body.size() / 4);
+                std::size_t total_lines = 0;
+                std::size_t kept_lines = 0;
+                std::size_t pos = 0;
+                while (pos < body.size()) {
+                    std::size_t const eol = body.find('\n', pos);
+                    auto const line_end = (eol == std::string::npos) ? body.size() : eol;
+                    std::string_view const line{body.data() + pos,
+                                                line_end - pos};
+                    ++total_lines;
+                    if (icontains(line, body_find)) {
+                        filtered.append(line);
+                        filtered.push_back('\n');
+                        ++kept_lines;
+                    }
+                    pos = (eol == std::string::npos) ? body.size() : eol + 1;
+                }
+                ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_accent());
+                ImGui::Text("\xEE\x9D\x80  %zu of %zu lines match '%s'",
+                            kept_lines, total_lines, state.help_body_find);
+                ImGui::PopStyleColor();
+                ImGui::Separator();
+                if (kept_lines == 0) {
+                    text_subtle("No matches in this topic. Try a shorter "
+                                "needle or pick another topic.");
+                } else {
+                    render_markdown(filtered);
+                }
+            }
         } else {
             text_subtle("Pick a topic from the sidebar.");
         }
