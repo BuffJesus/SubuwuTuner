@@ -835,6 +835,132 @@ TEST_CASE("Flasher::execute leaves sector order unchanged when integrity_check_o
     REQUIRE(t.exhausted());
 }
 
+TEST_CASE("Flasher::execute reorders when integrity_check_offset is the sector base address",
+          "[flash][execute][brick-safe-ordering][boundary]") {
+    // Lower-bound coverage for the find_if predicate at
+    // src/flash/src/flash.cpp:502:
+    //
+    //   w.sector.address <= off && off < w.sector.address + w.sector.length
+    //
+    // The original brick-safe-ordering test uses an offset strictly
+    // inside a sector (0x2002 inside 0x2000..0x2003), which leaves
+    // both `<= off` and `< off` producing the same result and lets a
+    // sign-flip mutant survive. This test pins the *exact* lower
+    // bound — offset == sector.address — which the correct predicate
+    // catches (`0x2000 <= 0x2000`) and the mutant `< off` misses
+    // (`0x2000 < 0x2000` is false). Surfaced by the 2026-06-04
+    // mutation-testing advisory lane.
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    constexpr std::uint32_t s1 = 0x1000;
+    constexpr std::uint32_t s2 = 0x2000;
+    constexpr std::uint32_t s3 = 0x3000;
+    constexpr std::uint32_t size = 4;
+    std::vector<std::uint8_t> const d1{0x11, 0x11, 0x11, 0x11};
+    std::vector<std::uint8_t> const d2{0x22, 0x22, 0x22, 0x22};
+    std::vector<std::uint8_t> const d3{0x33, 0x33, 0x33, 0x33};
+
+    expect(t, {0x10, 0x02}, {0x50, 0x02});
+    expect(t, {0x28, 0x03, 0x03}, {0x68, 0x03});
+
+    auto queue_sector = [&](std::uint32_t addr, std::vector<std::uint8_t> const &data) {
+        expect(t, uds::build_routine_control(uds::kRcStart, uds::kRidEraseMemory,
+                                             erase_opt(addr, size)),
+               {0x71, 0x01, 0xFF, 0x00});
+        expect(t, uds::build_request_download(0x00, addr, size), {0x74, 0x20, 0x00, 0x10});
+        expect(t, uds::build_transfer_data(1, data), {0x76, 0x01});
+        expect(t, uds::build_request_transfer_exit(), {0x77});
+        expect(t, uds::build_routine_control(uds::kRcStart, uds::kRidCheckProgrammingDependencies),
+               {0x71, 0x01, 0xFF, 0x01});
+    };
+    // Expected execution order: s1, s3, s2 — s2 last because the
+    // integrity offset lands exactly on its base byte.
+    queue_sector(s1, d1);
+    queue_sector(s3, d3);
+    queue_sector(s2, d2);
+    expect(t, {0x28, 0x00, 0x03}, {0x68, 0x00});
+
+    flash::FlashPlan plan;
+    plan.verify_after_write = false;
+    plan.integrity_check_offset = s2; // exact lower bound of sector s2
+    plan.writes.push_back({{s1, size}, d1});
+    plan.writes.push_back({{s2, size}, d2});
+    plan.writes.push_back({{s3, size}, d3});
+
+    flash::Flasher f{t};
+    auto const r = f.execute(plan);
+    REQUIRE(r.ok());
+    REQUIRE(r.report.sectors.size() == 3);
+    REQUIRE(r.report.sectors[0].sector.address == s1);
+    REQUIRE(r.report.sectors[1].sector.address == s3);
+    REQUIRE(r.report.sectors[2].sector.address == s2);
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("Flasher::execute does NOT reorder when integrity_check_offset is the sector's first byte past end",
+          "[flash][execute][brick-safe-ordering][boundary]") {
+    // Upper-bound coverage for the find_if predicate at
+    // src/flash/src/flash.cpp:502:
+    //
+    //   w.sector.address <= off && off < w.sector.address + w.sector.length
+    //
+    // The strict `<` on the upper-bound side means an offset exactly
+    // at `sector.address + sector.length` (the first byte past the
+    // sector) should NOT match the sector. A mutant flipping `<` to
+    // `<=` would erroneously claim the sector contains the integrity
+    // byte and reorder. With three sectors at 0x1000 / 0x2000 / 0x3000
+    // of size 4, offset 0x2004 sits exactly between s2 and s3 — the
+    // correct predicate matches no sector (no rotation), the `<=`
+    // mutant would match s2 (rotate s2 to end, changing order).
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    constexpr std::uint32_t s1 = 0x1000;
+    constexpr std::uint32_t s2 = 0x2000;
+    constexpr std::uint32_t s3 = 0x3000;
+    constexpr std::uint32_t size = 4;
+    std::vector<std::uint8_t> const d1{0x11, 0x11, 0x11, 0x11};
+    std::vector<std::uint8_t> const d2{0x22, 0x22, 0x22, 0x22};
+    std::vector<std::uint8_t> const d3{0x33, 0x33, 0x33, 0x33};
+
+    expect(t, {0x10, 0x02}, {0x50, 0x02});
+    expect(t, {0x28, 0x03, 0x03}, {0x68, 0x03});
+
+    auto queue_sector = [&](std::uint32_t addr, std::vector<std::uint8_t> const &data) {
+        expect(t, uds::build_routine_control(uds::kRcStart, uds::kRidEraseMemory,
+                                             erase_opt(addr, size)),
+               {0x71, 0x01, 0xFF, 0x00});
+        expect(t, uds::build_request_download(0x00, addr, size), {0x74, 0x20, 0x00, 0x10});
+        expect(t, uds::build_transfer_data(1, data), {0x76, 0x01});
+        expect(t, uds::build_request_transfer_exit(), {0x77});
+        expect(t, uds::build_routine_control(uds::kRcStart, uds::kRidCheckProgrammingDependencies),
+               {0x71, 0x01, 0xFF, 0x01});
+    };
+    // Expected execution order matches plan order: s1, s2, s3 (no
+    // reorder because the offset doesn't land in any sector).
+    queue_sector(s1, d1);
+    queue_sector(s2, d2);
+    queue_sector(s3, d3);
+    expect(t, {0x28, 0x00, 0x03}, {0x68, 0x00});
+
+    flash::FlashPlan plan;
+    plan.verify_after_write = false;
+    plan.integrity_check_offset = s2 + size; // exactly one past the end of s2
+    plan.writes.push_back({{s1, size}, d1});
+    plan.writes.push_back({{s2, size}, d2});
+    plan.writes.push_back({{s3, size}, d3});
+
+    flash::Flasher f{t};
+    auto const r = f.execute(plan);
+    REQUIRE(r.ok());
+    REQUIRE(r.report.sectors.size() == 3);
+    REQUIRE(r.report.sectors[0].sector.address == s1);
+    REQUIRE(r.report.sectors[1].sector.address == s2);
+    REQUIRE(r.report.sectors[2].sector.address == s3);
+    REQUIRE(t.exhausted());
+}
+
 // ---------------------------------------------------------------------
 // execute -- NRC propagation
 // ---------------------------------------------------------------------
