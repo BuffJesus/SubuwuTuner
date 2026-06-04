@@ -71,6 +71,12 @@ Every layer depends only on layers below it. The domain model has no ImGui or US
 | `st::autotune` | Docs/12 MAF + knock-pull tuning kernels | `MafTuneOptions`/`Result`, `KnockPullOptions`/`Result`, `LintViolation` |
 | `st::feature` | Custom-feature node graph (designer-canvas source) | `Graph`, `Node`, `Edge`, `Pin`, `feature::ir::Module` |
 | `st::feature::codegen` | Graph → IR → patch bytes (per-ISA backends) | `IBackend`, `Sh2aBackend`, `Rh850Backend`, `PatchObject`, `RamAllocator` |
+| `st::feature_patch` | Patch-insertion layer (manifest, ROM-allocator, hook-table splice — bench-rig gated for real-ECU use) | `PatchedRom`, `ManifestRecord`, `RomAllocator`, `RomClaim` |
+| `st::ai` | Advisory AI surface — currently Tier 1 rules-based drift classifier (see `docs/20`) | `drift::classify`, `DriftDiagnosis`, `Confidence` |
+| `st::audit` | Append-only CRC32-protected audit log with subscriber seam (`UdsClient::set_audit_log`, `Flasher::set_audit_log`) | `AuditLog`, `Entry`, `EntryKind`, `read_all`, `serialize_entry` |
+| `st::profile` | Vehicle-profile registry — `.stprofile` files under `~/.config/subuwutuner/profiles/` | `VehicleProfile`, `list`, `default_profile_dir` |
+| `st::config` | User-config layout (`settings.toml`), persistence rules — see `docs/25` | `Config`, `Paths`, `default_config_path` |
+| `st::diff` | ROM-vs-ROM table-level diff (cell changes + skipped-table reasons + compare-session annotations) | `DiffSet`, `TableDelta`, `CellChange`, `CompareSession` |
 | `st::ui` | GUI shell (Dear ImGui + GLFW + ImPlot) | windows, panels, theme, view code bound to domain |
 | `st::cli` | Headless tool (`subuwutuner-cli`) | argparse + same domain |
 

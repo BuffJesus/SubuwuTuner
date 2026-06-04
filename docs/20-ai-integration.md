@@ -4,7 +4,7 @@ AI in tuning is mostly marketing in 2026. "AI tunes your car" pitches from comme
 
 The short version: AI sits on the *interpretation* side of the workflow, not the *modification* side. It helps the user understand what their car is telling them. It does not decide what bytes to write to the ECU.
 
-This doc is forward-looking. **Nothing in `st::ai` is implemented yet.** v1.0–v1.5 has no AI surface. The earliest landing is v2.0.
+This doc is mostly forward-looking. **Tier 1 (rules-based drift classifier) shipped 2026-05-31** at `src/ai/include/st/ai/drift.hpp` (`5daafc7`) — pure-function rules over an adaptive-history snapshot returning `DriftDiagnosis` (cause + confidence + evidence + alternatives + recommended_checks). CLI surface: `subuwutuner-cli ai-drift --log <CSV> [--json]` (`244437e`); GUI: the adaptive-history panel renders the diagnosis inline (`a76365a`). Pure-domain — no LLM, no network, no auto-apply channel into the write surface. **Tiers 2+ are the forward-looking work** (LLM explanation layer, "explain this log" assistant, the rest of the spectrum below). The earliest landing for Tier 2 is v2.0.
 
 ## The spectrum
 
