@@ -49,6 +49,7 @@ void render_coldstart_panel(AppState &state) {
     ImGui::Separator();
 
     ImGui::Text("Log:");
+    glossary_tooltip_for(state, "Datalog");
     ImGui::SetNextItemWidth(-120.0f);
     ImGui::InputText("##cs_log_path", state.cs_log_path, sizeof state.cs_log_path);
     ImGui::SameLine();

@@ -373,6 +373,7 @@ void render_compare_panel(AppState &state) {
     }
 
     ImGui::Text("ROM A (baseline):");
+    glossary_tooltip_for(state, "ROM");
     ImGui::SetNextItemWidth(-160.0f);
     ImGui::InputText("##cmp_rom_a", state.compare_rom_a_path,
                      sizeof state.compare_rom_a_path);
@@ -383,6 +384,7 @@ void render_compare_panel(AppState &state) {
     }
 
     ImGui::Text("ROM B (compare):");
+    glossary_tooltip_for(state, "ROM");
     ImGui::SetNextItemWidth(-160.0f);
     ImGui::InputText("##cmp_rom_b", state.compare_rom_b_path,
                      sizeof state.compare_rom_b_path);

@@ -121,6 +121,7 @@ void render_flash_modal(AppState &state) {
     // Header: plan stats.
     ImGui::Text("Sectors: %zu   Bytes: %zu   Profile: %s", pending->plan.writes.size(),
                 pending->total_bytes, pname.c_str());
+    glossary_tooltip_for(state, "Flash");
 
     // Issue #10 sweep: when the user is viewing a non-working ROM
     // (additional or source), the Flash modal still operates on the

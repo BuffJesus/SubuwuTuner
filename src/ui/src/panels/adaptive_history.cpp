@@ -49,6 +49,7 @@ void render_adaptive_history_panel(AppState &state) {
     ImGui::Separator();
 
     ImGui::Text("Log:");
+    glossary_tooltip_for(state, "Datalog");
     ImGui::SetNextItemWidth(-120.0f);
     ImGui::InputText("##ah_log_path", state.ah_log_path, sizeof state.ah_log_path);
     ImGui::SameLine();

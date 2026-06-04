@@ -179,7 +179,9 @@ void render_read_rom_modal(AppState &state) {
     // --------- Idle: form entry ---------
     if (state.read_rom_state == AppState::ReadRomState::Idle) {
         ImGui::TextUnformatted("Pulls a ROM dump from the connected ECU via the");
+        glossary_tooltip_for(state, "ROM");
         ImGui::TextUnformatted("OBDX/J2534/native adapter. Read-only — no ECU writes.");
+        glossary_tooltip_for(state, "J2534");
         ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
         ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_caution());
         ImGui::TextWrapped("Before clicking Read: ignition must be in ACC or RUN "

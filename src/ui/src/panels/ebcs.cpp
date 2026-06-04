@@ -45,6 +45,7 @@ void render_ebcs_panel(AppState &state) {
     ImGui::Separator();
 
     ImGui::Text("Log:");
+    glossary_tooltip_for(state, "Datalog");
     ImGui::SetNextItemWidth(-120.0f);
     ImGui::InputText("##ebcs_log_path", state.ebcs_log_path, sizeof state.ebcs_log_path);
     ImGui::SameLine();
