@@ -436,6 +436,31 @@ TEST_CASE("CLI coldstart-analyze --csv emits comment metadata + per-bin table",
     REQUIRE(stdout_contains(r, "ect_center_c,count,observed_lambda_mean"));
 }
 
+TEST_CASE("CLI rom-diff --json emits subuwutuner.rom-diff.v1 schema",
+          "[cli][integration][rom-diff][json]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    // Compare the demo project's source.bin against itself. The schema
+    // shape (header keys + empty changes array) is what we want to
+    // pin — actual diff counts get exercised by the st::diff unit
+    // tests, not the CLI integration suite.
+    auto const pack = fs::path{demo_project()} / ".." / "demo-pack" / "pack.toml";
+    auto const rom = fs::path{demo_project()} / "source.bin";
+    auto const r = st::test::cli_run(
+        "rom-diff --def " + st::test::quote(pack.string()) +
+        " --json " + st::test::quote(rom.string()) + " " +
+        st::test::quote(rom.string()));
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "subuwutuner.rom-diff.v1"));
+    REQUIRE(stdout_contains(r, "\"rom_a\":{"));
+    REQUIRE(stdout_contains(r, "\"rom_b\":{"));
+    REQUIRE(stdout_contains(r, "\"pack\":{\"id\":"));
+    REQUIRE(stdout_contains(r, "\"tables_compared\":"));
+    REQUIRE(stdout_contains(r, "\"changes\":["));
+}
+
 TEST_CASE("CLI ai-drift classifies the demo adaptive-history CSV",
           "[cli][integration][ai-drift]") {
     if (!can_run_cli_tests()) {

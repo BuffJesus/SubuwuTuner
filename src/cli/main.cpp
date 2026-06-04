@@ -179,10 +179,11 @@ constexpr std::string_view kUsage =
     "    dump-table --def <pack.toml> --table <id> [--csv] <FILE>\n"
     "                            Read the named table from the ROM via the pack and\n"
     "                            print it as a labeled grid (or CSV with --csv).\n"
-    "    rom-diff --def <pack.toml> <A.bin> <B.bin>\n"
+    "    rom-diff --def <pack.toml> [--json] [--verbose] <A.bin> <B.bin>\n"
     "                            Compare two ROMs of the same definition table-by-\n"
     "                            table. Reports which tables changed and by how\n"
-    "                            much (max delta, mean absolute delta).\n"
+    "                            much (max delta, mean absolute delta). --json\n"
+    "                            emits a subuwutuner.rom-diff.v1 summary envelope.\n"
     "    diff --pack <pack.toml> [--format text|csv|json] [--output FILE]\n"
     "         [--include-identical] [--include-unchanged] [--save SESSION.stcompare]\n"
     "         <A.bin> <B.bin>\n"
@@ -5546,6 +5547,7 @@ int cmd_rom_diff(int argc, char *argv[]) {
     std::optional<std::filesystem::path> rom_a;
     std::optional<std::filesystem::path> rom_b;
     bool verbose = false;
+    bool json_out = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -5557,6 +5559,8 @@ int cmd_rom_diff(int argc, char *argv[]) {
             def_path = std::filesystem::path{argv[++i]};
         } else if (a == "--verbose" || a == "-v") {
             verbose = true;
+        } else if (a == "--json") {
+            json_out = true;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "rom-diff: unknown option: %s\n", argv[i]);
             return 2;
@@ -5578,7 +5582,8 @@ int cmd_rom_diff(int argc, char *argv[]) {
             std::fputs(" <A.bin>", stderr);
         if (!rom_b.has_value())
             std::fputs(" <B.bin>", stderr);
-        std::fputs("\nUsage: subuwutuner-cli rom-diff --def <pack.toml> <A.bin> <B.bin>\n",
+        std::fputs("\nUsage: subuwutuner-cli rom-diff --def <pack.toml> [--json] "
+                   "[--verbose] <A.bin> <B.bin>\n",
                    stderr);
         return 2;
     }
@@ -5598,16 +5603,8 @@ int cmd_rom_diff(int argc, char *argv[]) {
         return 1;
     }
 
-    std::printf("ROM A: %s  (CRC32=0x%08X, %zu bytes)\n", rom_a->string().c_str(), a->crc32(),
-                a->size());
-    std::printf("ROM B: %s  (CRC32=0x%08X, %zu bytes)\n", rom_b->string().c_str(), b->crc32(),
-                b->size());
-    std::printf("Pack:  %s\n", def->pack().id.c_str());
-
     auto const id_a = def->matches(*a);
     auto const id_b = def->matches(*b);
-    std::printf("Match A: %s\n", id_a.has_value() ? id_a->c_str() : "(no match)");
-    std::printf("Match B: %s\n", id_b.has_value() ? id_b->c_str() : "(no match)");
 
     std::size_t changed_count = 0;
     std::size_t skipped = 0;
@@ -5641,14 +5638,6 @@ int cmd_rom_diff(int argc, char *argv[]) {
                         d->mean_abs_delta, scal != nullptr ? scal->unit : std::string{}});
     }
 
-    std::printf("\nTables compared: %zu  changed: %zu  skipped: %zu\n", def->tables().size(),
-                changed_count, skipped);
-
-    if (rows.empty()) {
-        std::printf("\nNo tables differ.\n");
-        return 0;
-    }
-
     // Sort by max |Δ| descending — the biggest changes lead the
     // output, which is what someone diffing stock vs tuned actually
     // wants to see. Ties (e.g. 0-delta tables that happen to differ
@@ -5658,6 +5647,76 @@ int cmd_rom_diff(int argc, char *argv[]) {
             return lhs.max > rhs.max;
         return lhs.id < rhs.id;
     });
+
+    if (json_out) {
+        // subuwutuner.rom-diff.v1 — summary envelope. For a full
+        // per-cell DiffSet use the `diff` verb (st::diff backend) —
+        // rom-diff stays at the per-table-summary level it had before
+        // this JSON path was added, so dyno scripts that just want
+        // "which tables moved and by how much" keep a stable shape.
+        std::string out{"{\"schema\":\"subuwutuner.rom-diff.v1\",\"rom_a\":{"};
+        out.append("\"path\":");
+        json_escape(out, rom_a->string());
+        char buf[160];
+        std::snprintf(buf, sizeof buf, ",\"crc32\":%u,\"size\":%zu,\"match\":",
+                      a->crc32(), a->size());
+        out.append(buf);
+        if (id_a.has_value()) {
+            json_escape(out, *id_a);
+        } else {
+            out.append("null");
+        }
+        out.append("},\"rom_b\":{\"path\":");
+        json_escape(out, rom_b->string());
+        std::snprintf(buf, sizeof buf, ",\"crc32\":%u,\"size\":%zu,\"match\":",
+                      b->crc32(), b->size());
+        out.append(buf);
+        if (id_b.has_value()) {
+            json_escape(out, *id_b);
+        } else {
+            out.append("null");
+        }
+        out.append("},\"pack\":{\"id\":");
+        json_escape(out, def->pack().id);
+        std::snprintf(buf, sizeof buf, "},\"tables_compared\":%zu,"
+                                       "\"tables_changed\":%zu,\"tables_skipped\":%zu,"
+                                       "\"changes\":[",
+                      def->tables().size(), changed_count, skipped);
+        out.append(buf);
+        for (std::size_t i = 0; i < rows.size(); ++i) {
+            auto const &r = rows[i];
+            if (i > 0) out.push_back(',');
+            out.append("{\"table\":");
+            json_escape(out, r.id);
+            std::snprintf(buf, sizeof buf,
+                          ",\"cells_changed\":%zu,\"cells_total\":%zu,"
+                          "\"max_abs_delta\":%.6f,\"mean_abs_delta\":%.6f,\"unit\":",
+                          r.changed, r.total, r.max, r.mean);
+            out.append(buf);
+            json_escape(out, r.unit);
+            out.append("}");
+        }
+        out.append("]}\n");
+        std::fputs(out.c_str(), stdout);
+        return 0;
+    }
+
+    std::printf("ROM A: %s  (CRC32=0x%08X, %zu bytes)\n", rom_a->string().c_str(), a->crc32(),
+                a->size());
+    std::printf("ROM B: %s  (CRC32=0x%08X, %zu bytes)\n", rom_b->string().c_str(), b->crc32(),
+                b->size());
+    std::printf("Pack:  %s\n", def->pack().id.c_str());
+
+    std::printf("Match A: %s\n", id_a.has_value() ? id_a->c_str() : "(no match)");
+    std::printf("Match B: %s\n", id_b.has_value() ? id_b->c_str() : "(no match)");
+
+    std::printf("\nTables compared: %zu  changed: %zu  skipped: %zu\n", def->tables().size(),
+                changed_count, skipped);
+
+    if (rows.empty()) {
+        std::printf("\nNo tables differ.\n");
+        return 0;
+    }
 
     std::printf("\n%-40s %10s %12s %12s\n", "table", "cells", "max |Δ|", "mean |Δ|");
     for (auto const &r : rows) {
