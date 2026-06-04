@@ -176,7 +176,7 @@ constexpr std::string_view kUsage =
     "    dump-axis --def <pack.toml> --axis <id> [--csv] <FILE>\n"
     "                            Read the named axis from the ROM via the pack and\n"
     "                            print its scaled values, one per line.\n"
-    "    dump-table --def <pack.toml> --table <id> [--csv] <FILE>\n"
+    "    dump-table --def <pack.toml> --table <id> [--csv|--json] <FILE>\n"
     "                            Read the named table from the ROM via the pack and\n"
     "                            print it as a labeled grid (or CSV with --csv).\n"
     "    rom-diff --def <pack.toml> [--json] [--verbose] <A.bin> <B.bin>\n"
@@ -1260,6 +1260,7 @@ int cmd_dump_table(int argc, char *argv[]) {
     std::optional<std::string> table_id;
     std::optional<std::filesystem::path> rom_path;
     bool csv = false;
+    bool json_out = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -1277,6 +1278,8 @@ int cmd_dump_table(int argc, char *argv[]) {
             table_id = std::string{argv[++i]};
         } else if (a == "--csv") {
             csv = true;
+        } else if (a == "--json") {
+            json_out = true;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "dump-table: unknown option: %s\n", argv[i]);
             return 2;
@@ -1288,6 +1291,11 @@ int cmd_dump_table(int argc, char *argv[]) {
         }
     }
 
+    if (csv && json_out) {
+        std::fputs("dump-table: --json and --csv are mutually exclusive\n", stderr);
+        return 2;
+    }
+
     if (!def_path.has_value() || !table_id.has_value() || !rom_path.has_value()) {
         std::fputs("dump-table: missing required arguments:", stderr);
         if (!def_path.has_value())
@@ -1296,7 +1304,8 @@ int cmd_dump_table(int argc, char *argv[]) {
             std::fputs(" --table", stderr);
         if (!rom_path.has_value())
             std::fputs(" <FILE>", stderr);
-        std::fputs("\nUsage: subuwutuner-cli dump-table --def <pack.toml> --table <id> <FILE>\n",
+        std::fputs("\nUsage: subuwutuner-cli dump-table --def <pack.toml> --table <id> "
+                   "[--csv|--json] <FILE>\n",
                    stderr);
         return 2;
     }
@@ -1375,6 +1384,75 @@ int cmd_dump_table(int argc, char *argv[]) {
             std::printf("\n");
         }
     };
+
+    if (json_out) {
+        // subuwutuner.dump-table.v1 — header + axes + values
+        // grid (2D) or slices array (3D). Numbers emit at the
+        // table's scaling precision so JSON consumers see what
+        // the engineering-unit grid actually shows.
+        auto append_num = [precision](std::string &out, double v) {
+            char buf[64];
+            std::snprintf(buf, sizeof buf, "%.*f", precision, v);
+            out.append(buf);
+        };
+        auto append_array = [&](std::string &out, std::vector<double> const &xs_in) {
+            out.push_back('[');
+            for (std::size_t i = 0; i < xs_in.size(); ++i) {
+                if (i > 0) out.push_back(',');
+                append_num(out, xs_in[i]);
+            }
+            out.push_back(']');
+        };
+        auto append_grid = [&](std::string &out, std::vector<std::vector<double>> const &grid) {
+            out.push_back('[');
+            for (std::size_t r = 0; r < grid.size(); ++r) {
+                if (r > 0) out.push_back(',');
+                append_array(out, grid[r]);
+            }
+            out.push_back(']');
+        };
+
+        std::string out{"{\"schema\":\"subuwutuner.dump-table.v1\",\"table\":{\"id\":"};
+        json_escape(out, table->id);
+        out.append(",\"name\":");
+        json_escape(out, table->name);
+        char buf[160];
+        std::snprintf(buf, sizeof buf,
+                      ",\"dimensions\":%d,\"address\":%zu,",
+                      table->dimensions, table->address);
+        out.append(buf);
+        out.append("\"unit\":");
+        json_escape(out, unit);
+        std::snprintf(buf, sizeof buf, ",\"precision\":%d", precision);
+        out.append(buf);
+        if (table->engine_safety_critical) {
+            out.append(",\"engine_safety_critical\":true");
+        }
+        if (table->emissions_relevant) {
+            out.append(",\"emissions_relevant\":true");
+        }
+        out.append("},\"axis_x\":");
+        append_array(out, xs);
+        out.append(",\"axis_y\":");
+        append_array(out, ys);
+        if (table->dimensions == 3) {
+            out.append(",\"axis_z\":");
+            append_array(out, zs);
+            out.append(",\"slices\":[");
+            for (std::size_t z = 0; z < td->slices.size(); ++z) {
+                if (z > 0) out.push_back(',');
+                append_grid(out, td->slices[z]);
+            }
+            out.push_back(']');
+        } else {
+            out.append(",\"values\":");
+            append_grid(out, td->values);
+        }
+        out.push_back('}');
+        out.push_back('\n');
+        std::fputs(out.c_str(), stdout);
+        return 0;
+    }
 
     if (csv) {
         if (table->dimensions == 3) {
