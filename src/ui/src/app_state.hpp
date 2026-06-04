@@ -260,6 +260,13 @@ struct AppState {
     // Loaded once at startup, persisted on every successful open. See
     // recents_config_path() for the on-disk location.
     std::vector<RecentEntry> recents;
+    // Lazily-populated parallel to `recents`: each slot holds the
+    // last pack-lint snapshot read from <recent>/pack-lint.toml, or
+    // an empty optional if no snapshot exists. Welcome panel chips
+    // off this; the cache is invalidated by clearing the vector
+    // whenever `recents` changes. Reading once per recent at first
+    // render is cheaper than per-frame disk hits.
+    std::vector<std::optional<PackLintSnapshot>> recents_pack_lint;
     // Filter input for the welcome panel's Recent projects list.
     // Only renders when the list has ≥4 entries (else the filter
     // is more clutter than help).
@@ -725,6 +732,12 @@ struct AppState {
     int settings_pack_lint_status{-1};
     std::string settings_pack_lint_pack_id;
     std::string settings_pack_lint_message;
+    // ISO 8601 UTC timestamp of the last validation. Loaded from
+    // <project>/pack-lint.toml on open, refreshed every time the
+    // user clicks Validate pack. Empty when the project has never
+    // been validated (status -1 implies empty; status >= 0 means the
+    // timestamp is meaningful).
+    std::string settings_pack_lint_validated_at;
 
     // Pack-registry browser modal (Tools -> Browse Definitions).
     bool show_def_registry_modal{false};

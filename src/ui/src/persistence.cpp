@@ -455,4 +455,111 @@ void save_sidebar_category_order(std::filesystem::path const &project_dir,
     }
 }
 
+// pack-lint.toml format. Hand-rolled rather than going through
+// tomlplusplus — three string fields + one int + an optional
+// multi-line body. Toml-quoting a multi-line message would mean
+// reinventing escape rules; instead the body lives below a sentinel
+// line so the parser can read it verbatim. Anything we don't
+// understand decays to "not yet validated" so a malformed file is
+// indistinguishable from a missing one.
+//
+// Schema:
+//   status              = 0                 # 0 = ok, >0 = violation count
+//   pack_id             = "demo-pack"
+//   last_validated_at   = "2026-06-04T18:23:11Z"
+//   # The message body, when present, follows below the literal
+//   # line `--- message ---` and consumes the rest of the file.
+namespace {
+constexpr char const *kPackLintFilename = "pack-lint.toml";
+constexpr char const *kMessageMarker = "--- message ---";
+
+std::string strip_quotes(std::string_view v) {
+    if (v.size() >= 2 && v.front() == '"' && v.back() == '"') {
+        v.remove_prefix(1);
+        v.remove_suffix(1);
+    }
+    return std::string{v};
+}
+
+std::string_view trim(std::string_view v) {
+    while (!v.empty() && (v.front() == ' ' || v.front() == '\t'))
+        v.remove_prefix(1);
+    while (!v.empty() && (v.back() == ' ' || v.back() == '\t'))
+        v.remove_suffix(1);
+    return v;
+}
+} // namespace
+
+std::optional<PackLintSnapshot>
+load_pack_lint(std::filesystem::path const &project_dir) {
+    auto const path = project_dir / kPackLintFilename;
+    std::ifstream in{path};
+    if (!in)
+        return std::nullopt;
+
+    PackLintSnapshot snap;
+    bool reading_message = false;
+    std::string line;
+    std::string body;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (reading_message) {
+            if (!body.empty())
+                body.push_back('\n');
+            body.append(line);
+            continue;
+        }
+        if (line == kMessageMarker) {
+            reading_message = true;
+            continue;
+        }
+        auto const eq = line.find('=');
+        if (eq == std::string::npos)
+            continue;
+        std::string const key = std::string{trim(std::string_view{line}.substr(0, eq))};
+        std::string const val = std::string{trim(std::string_view{line}.substr(eq + 1))};
+        if (key == "status") {
+            try {
+                snap.status = std::stoi(val);
+            } catch (...) {
+                return std::nullopt;
+            }
+        } else if (key == "pack_id") {
+            snap.pack_id = strip_quotes(val);
+        } else if (key == "last_validated_at") {
+            snap.last_validated_at = strip_quotes(val);
+        }
+    }
+    snap.message = std::move(body);
+    if (snap.status < 0) {
+        // status is the only field we *require* to be meaningful; an
+        // unparseable status means the file isn't a snapshot we wrote.
+        return std::nullopt;
+    }
+    return snap;
+}
+
+void save_pack_lint(std::filesystem::path const &project_dir,
+                    PackLintSnapshot const &snap) {
+    auto const path = project_dir / kPackLintFilename;
+    std::ofstream out{path, std::ios::trunc};
+    if (!out)
+        return;
+    out << "# SubuwuTuner pack-lint snapshot — written by\n";
+    out << "# Settings → Validate pack. Safe to delete (loses the\n";
+    out << "# cached status, never the project itself).\n";
+    out << "status            = " << snap.status << '\n';
+    out << "pack_id           = \"" << snap.pack_id << "\"\n";
+    out << "last_validated_at = \"" << snap.last_validated_at << "\"\n";
+    if (!snap.message.empty()) {
+        out << kMessageMarker << '\n';
+        out << snap.message;
+        if (snap.message.back() != '\n') {
+            out << '\n';
+        }
+    }
+}
+
 } // namespace st::ui

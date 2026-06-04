@@ -375,6 +375,18 @@ void render_settings_modal(AppState &state) {
             state.settings_pack_lint_status = violations;
             state.settings_pack_lint_message = msg;
         }
+        state.settings_pack_lint_validated_at = iso8601_utc_now();
+        // Persist to <project>/pack-lint.toml so the next session can
+        // surface the verdict without re-running the validator, and
+        // so the welcome panel can chip recents with their last
+        // status. Best-effort: disk failure leaves the live UI
+        // populated, just without cross-session carry.
+        PackLintSnapshot snap;
+        snap.status = state.settings_pack_lint_status;
+        snap.pack_id = state.settings_pack_lint_pack_id;
+        snap.last_validated_at = state.settings_pack_lint_validated_at;
+        snap.message = state.settings_pack_lint_message;
+        save_pack_lint(state.project->dir(), snap);
     }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -409,6 +421,13 @@ void render_settings_modal(AppState &state) {
                         state.settings_pack_lint_status == 1 ? "" : "s",
                         state.settings_pack_lint_pack_id.c_str());
             ImGui::PopStyleColor();
+        }
+        if (!state.settings_pack_lint_validated_at.empty()) {
+            ImGui::SameLine();
+            text_subtle("\xC2\xB7  %s",
+                        format_relative_time(state.settings_pack_lint_validated_at).c_str());
+        }
+        if (state.settings_pack_lint_status > 0) {
             // Bounded violation viewport — full text in a scrollable
             // child so a 60-line dump doesn't push Save off-screen.
             // Height caps at ~6 rows; user scrolls for the rest.

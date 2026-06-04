@@ -86,6 +86,26 @@ std::vector<std::string> load_sidebar_category_order(std::filesystem::path const
 void save_sidebar_category_order(std::filesystem::path const &project_dir,
                                  std::vector<std::string> const &order);
 
+// Per-project pack-validation snapshot. Settings → "Validate pack"
+// writes this so the next session can render the chip without re-
+// running the validator, and so the welcome panel can surface a
+// per-recent "Pack ✓ <date>" / "Pack ✗ N issues" hint without the
+// user opening anything. Stored at <project_dir>/pack-lint.toml.
+// Missing file = "not yet validated" (status == -1). All fields
+// are best-effort: a malformed file decays to "not yet validated"
+// rather than failing the project open.
+struct PackLintSnapshot {
+    int status{-1};            // -1 = not validated, 0 = ok, >0 = violation count
+    std::string pack_id;       // the pack id the snapshot was recorded against
+    std::string last_validated_at; // ISO 8601 UTC; empty on a never-validated project
+    std::string message;       // violation body, empty on ok / unvalidated
+};
+
+std::optional<PackLintSnapshot>
+load_pack_lint(std::filesystem::path const &project_dir);
+void save_pack_lint(std::filesystem::path const &project_dir,
+                    PackLintSnapshot const &snap);
+
 Settings load_settings();
 void save_settings(Settings const &s);
 

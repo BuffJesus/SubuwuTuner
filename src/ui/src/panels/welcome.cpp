@@ -249,6 +249,20 @@ void render_welcome_panel(AppState &state) {
     // Recents block. Empty list → render nothing here; first-run users
     // see the original clean welcome.
     if (has_recents) {
+        // Lazily refresh the per-recent pack-lint cache so the chip
+        // under each row stays in sync with the on-disk snapshot
+        // without disk-thrashing every frame. A size mismatch =
+        // recents was mutated (push/pin toggle, push_recent eviction);
+        // refill the cache from disk on that frame only.
+        if (state.recents_pack_lint.size() != state.recents.size()) {
+            state.recents_pack_lint.assign(state.recents.size(), std::nullopt);
+            for (std::size_t i = 0; i < state.recents.size(); ++i) {
+                std::error_code ec;
+                if (std::filesystem::exists(state.recents[i].path, ec)) {
+                    state.recents_pack_lint[i] = load_pack_lint(state.recents[i].path);
+                }
+            }
+        }
         ImGui::Dummy(ImVec2(0.0f, 28.0f));
         // Centered "Recent projects" rule. We draw it inside a fixed-
         // width region so multiple windows / wide screens don't make
@@ -434,6 +448,41 @@ void render_welcome_panel(AppState &state) {
                 ImGui::SetCursorPosX(button_left_x);
             }
             text_subtle("%s", subtitle.c_str());
+            // Pack-lint chip — pulls from the lazily-populated cache so
+            // the welcome panel can answer "is this project's pack
+            // well-formed?" without the user opening it first. Cache
+            // misses cost one small TOML read per recent, only on the
+            // first render after a recents change.
+            if (exists && i < state.recents_pack_lint.size()) {
+                auto const &snap = state.recents_pack_lint[i];
+                if (snap.has_value()) {
+                    char chip[160];
+                    if (snap->status == 0) {
+                        std::snprintf(chip, sizeof chip,
+                                      "\xE2\x9C\x93  Pack OK  \xC2\xB7  %s",
+                                      format_relative_time(snap->last_validated_at).c_str());
+                    } else {
+                        std::snprintf(chip, sizeof chip,
+                                      "\xE2\x9C\x95  Pack: %d issue%s  \xC2\xB7  %s",
+                                      snap->status,
+                                      snap->status == 1 ? "" : "s",
+                                      format_relative_time(snap->last_validated_at).c_str());
+                    }
+                    float const chip_w = ImGui::CalcTextSize(chip).x;
+                    if (chip_w < kRowW) {
+                        ImGui::SetCursorPosX(button_left_x + (kRowW - chip_w) * 0.5f);
+                    } else {
+                        ImGui::SetCursorPosX(button_left_x);
+                    }
+                    if (snap->status == 0) {
+                        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_ok());
+                    } else {
+                        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_caution());
+                    }
+                    ImGui::TextUnformatted(chip);
+                    ImGui::PopStyleColor();
+                }
+            }
             ImGui::Dummy(ImVec2(0.0f, kSpaceS));
             ImGui::PopID();
         }

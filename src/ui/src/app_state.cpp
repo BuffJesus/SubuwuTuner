@@ -65,6 +65,25 @@ void AppState::try_open_project(std::filesystem::path const &path) {
     // user hasn't dragged anything yet. The sidebar falls back to
     // pack-default first-occurrence order in that case.
     sidebar_category_order = load_sidebar_category_order(project->dir());
+    // Restore the prior pack-lint result so the Settings chip + welcome
+    // panel surface the last verdict without forcing the user to
+    // re-validate. Missing or malformed snapshot → "not validated"
+    // (status stays -1) and the rest of the UI behaves as before.
+    settings_pack_lint_status = -1;
+    settings_pack_lint_pack_id.clear();
+    settings_pack_lint_message.clear();
+    settings_pack_lint_validated_at.clear();
+    if (auto snap = load_pack_lint(project->dir()); snap.has_value()) {
+        // Only honor the snapshot when the recorded pack_id matches
+        // the loaded one — pack-id drift (user repointed the project at
+        // a different pack) invalidates the verdict.
+        if (snap->pack_id == project->definition().pack().id) {
+            settings_pack_lint_status = snap->status;
+            settings_pack_lint_pack_id = snap->pack_id;
+            settings_pack_lint_message = snap->message;
+            settings_pack_lint_validated_at = snap->last_validated_at;
+        }
+    }
     auto const &tables = project->definition().tables();
     if (!tables.empty()) {
         select_table(tables.front().id);
