@@ -118,6 +118,32 @@ class MutantResult:
     verdict:   str   # "KILLED" | "SURVIVED" | "BUILD_FAIL" | "TIMEOUT"
 
 
+def _is_in_string_literal(text: str, col: int) -> bool:
+    """Single-line state machine. Walks `text` left-to-right tracking
+    whether we're currently inside a double-quoted C++ string (handling
+    backslash escapes). Returns True iff `col` falls inside a quote.
+    Catches the common case where the harness regex matches `!=` or `>`
+    glyphs inside an error-message literal; mutating those is a wasted
+    cycle because the test suite never asserts on the prose. Doesn't
+    handle raw-string literals (R"(...)" / R"foo(...)foo"), char
+    literals, or multi-line strings — good enough for the 90% case in
+    src/flash."""
+    in_str = False
+    escape = False
+    for i, ch in enumerate(text):
+        if i == col:
+            return in_str
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+    return in_str
+
+
 def find_candidates(lines: list[str], line_start: int, line_end: int,
                     mut: Mutation) -> list[tuple[int, int, int, str]]:
     """For one mutation, return (line_no, col_start, col_end, matched_text)
@@ -139,9 +165,13 @@ def find_candidates(lines: list[str], line_start: int, line_end: int,
                 op_start = m.start(2)
                 op_end   = m.end(2)
                 op       = m.group(2)
+                if _is_in_string_literal(text, op_start):
+                    continue
                 out.append((ln, op_start, op_end, op))
         else:
             for m in re.finditer(mut.pattern, text):
+                if _is_in_string_literal(text, m.start(1)):
+                    continue
                 out.append((ln, m.start(1), m.end(1), m.group(1)))
     return out
 
