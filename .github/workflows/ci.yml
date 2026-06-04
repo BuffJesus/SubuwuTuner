@@ -297,13 +297,12 @@ jobs:
           cmake -S . -B build --preset linux-gcc
           cmake --build build --target st_unit_tests -j
 
-      - name: Mutation pass — Flasher::execute (advisory)
-        # 60-line window inside Flasher::execute. Capped at 20 mutants
-        # so a single CI run finishes inside the job's 30-min budget
-        # even when each rebuild costs 60 s. Verbose mode surfaces the
-        # last 20 lines of compiler output on BUILD_FAIL so a -Werror
-        # / nodiscard cascade is debuggable from the job log without
-        # re-running locally.
+      - name: Mutation pass — Flasher::execute brick-safe ordering
+        # 60-line window covering the brick-safe-ordering sector
+        # reorder + delta-detect setup. As of 92d6d2b + 078911c the
+        # range reports 100% on actionable mutants. The
+        # quarter-clock for "flip continue-on-error off" starts on
+        # this range.
         run: |
           python3 tools/mutation_test.py \
             --file src/flash/src/flash.cpp \
@@ -314,6 +313,61 @@ jobs:
             --max-mutants 20 \
             --build-timeout 180 \
             --test-timeout 180 \
+            --build-dir build \
+            --verbose \
+            --mutations swap_eq,swap_lt,swap_gt || true
+
+      - name: Mutation pass — Flasher::execute plan validation
+        # 100-line window covering plan validation (data.size() vs
+        # sector.length, sector.length > 0). Walks the validator
+        # invariants that prevent malformed plans from reaching the
+        # bus. 100% on the suite as of fdd858a.
+        run: |
+          python3 tools/mutation_test.py \
+            --file src/flash/src/flash.cpp \
+            --line-start 400 \
+            --line-end 499 \
+            --target st_unit_tests \
+            --tag-filter "[flash]" \
+            --max-mutants 20 \
+            --build-timeout 180 \
+            --test-timeout 180 \
+            --build-dir build \
+            --verbose \
+            --mutations swap_eq,swap_lt,swap_gt || true
+
+      - name: Mutation pass — BackupStore slugifier
+        # 10-line window over the slug-character classifier surfaced
+        # 3 actionable survivors (boundary chars Z/z/9) killed by
+        # fdd858a. Tight window — small mutant count, fast cycle.
+        run: |
+          python3 tools/mutation_test.py \
+            --file src/flash/src/backup_store.cpp \
+            --line-start 30 \
+            --line-end 40 \
+            --target st_unit_tests \
+            --tag-filter "[backup_store]" \
+            --max-mutants 15 \
+            --build-timeout 180 \
+            --test-timeout 60 \
+            --build-dir build \
+            --verbose \
+            --mutations swap_eq,swap_lt,swap_gt || true
+
+      - name: Mutation pass — FlashPreflight battery thresholds
+        # 25-line window over the battery-voltage validator
+        # (block_below + warn_below thresholds). Boundary tests
+        # in 488419d brought score to 100%.
+        run: |
+          python3 tools/mutation_test.py \
+            --file src/policy/src/flash_preflight.cpp \
+            --line-start 65 \
+            --line-end 90 \
+            --target st_unit_tests \
+            --tag-filter "[policy]" \
+            --max-mutants 10 \
+            --build-timeout 180 \
+            --test-timeout 60 \
             --build-dir build \
             --verbose \
             --mutations swap_eq,swap_lt,swap_gt || true
