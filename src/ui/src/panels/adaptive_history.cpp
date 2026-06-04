@@ -12,6 +12,7 @@
 #include "app_state.hpp"
 #include "widgets/widgets.hpp"
 
+#include "st/ai/drift.hpp"
 #include "st/log/adaptive_history.hpp"
 
 #include <imgui.h>
@@ -249,6 +250,90 @@ void render_adaptive_history_panel(AppState &state) {
             ImGui::EndTable();
         }
         ImGui::Spacing();
+
+        // Drift diagnosis (Tier-1 rule classifier, st::ai::drift).
+        // Runs once per render frame — `classify` is pure and fast
+        // (no allocations beyond the returned struct), no caching
+        // needed. Renders as a chip + collapsible evidence so the
+        // panel doesn't grow tall by default. Confidence drives the
+        // chip color; description sits next to it.
+        {
+            auto const diag = st::ai::drift::classify(snap);
+            char const *cause_label = diag.cause.empty() ? "no_signal"
+                                                          : diag.cause.c_str();
+            ImVec4 chip_fg;
+            ImVec4 chip_bg;
+            using C = st::ai::drift::Confidence;
+            switch (diag.confidence) {
+            case C::Likely:
+                chip_fg = chip_fg_danger();
+                chip_bg = chip_bg_danger();
+                break;
+            case C::Possible:
+                chip_fg = chip_fg_caution();
+                chip_bg = chip_bg_caution();
+                break;
+            case C::Ambiguous:
+                chip_fg = chip_fg_warn();
+                chip_bg = chip_bg_warn();
+                break;
+            case C::NoSignal:
+            default:
+                chip_fg = chip_fg_muted();
+                chip_bg = chip_bg_muted();
+                break;
+            }
+            // Diagnosis chip + confidence chip side-by-side; the
+            // description prose follows on the same line.
+            char chip_label[96];
+            std::snprintf(chip_label, sizeof chip_label, "Diagnosis: %s",
+                          cause_label);
+            chip(chip_label, chip_fg, chip_bg);
+            ImGui::SameLine();
+            char conf_label[64];
+            auto const cn = st::ai::drift::confidence_name(diag.confidence);
+            std::snprintf(conf_label, sizeof conf_label, "%.*s",
+                          static_cast<int>(cn.size()), cn.data());
+            chip(conf_label, chip_fg, chip_bg);
+            ImGui::SameLine();
+            text_subtle("%s", diag.description.c_str());
+
+            // Evidence + alternatives + recommended-checks land in a
+            // collapsible so the chip line stays uncluttered when the
+            // user just wants the headline. Default-closed for
+            // NoSignal (nothing to investigate) and Possible
+            // (one-piece evidence is in the description); default-
+            // open for Likely / Ambiguous where the user benefits
+            // from seeing alternatives + checks up front.
+            bool const open_default =
+                diag.confidence == C::Likely || diag.confidence == C::Ambiguous;
+            if (open_default) {
+                ImGui::SetNextItemOpen(true, ImGuiCond_Appearing);
+            }
+            if (ImGui::CollapsingHeader("Evidence + recommended checks##ah_drift")) {
+                if (!diag.evidence.empty()) {
+                    ImGui::TextUnformatted("Evidence:");
+                    for (auto const &e : diag.evidence) {
+                        ImGui::BulletText("%s", e.c_str());
+                    }
+                }
+                if (!diag.alternatives.empty()) {
+                    ImGui::Spacing();
+                    ImGui::TextUnformatted("Alternatives:");
+                    for (auto const &alt : diag.alternatives) {
+                        ImGui::BulletText("%s", alt.c_str());
+                    }
+                }
+                if (!diag.recommended_checks.empty()) {
+                    ImGui::Spacing();
+                    ImGui::TextUnformatted("Recommended checks:");
+                    for (auto const &c : diag.recommended_checks) {
+                        ImGui::BulletText("%s", c.c_str());
+                    }
+                }
+            }
+            ImGui::Spacing();
+        }
 
         // One time-series plot per signal that has data.
         ImVec2 const avail = ImGui::GetContentRegionAvail();

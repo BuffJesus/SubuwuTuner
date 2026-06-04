@@ -166,6 +166,7 @@ target_link_libraries(subuwutuner-gui
         st::feature
         st::log
         st::profile
+        st::ai
         imgui_lib
         implot_lib
         nfd
