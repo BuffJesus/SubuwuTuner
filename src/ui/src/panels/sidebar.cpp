@@ -467,9 +467,53 @@ void render_sidebar(AppState &state) {
     // panel to unhide.
     if (hidden_visible_in_pack > 0) {
         ImGui::Separator();
-        text_subtle("%zu categor%s hidden  \xC2\xB7  right-click panel to restore",
+        text_subtle("%zu categor%s hidden",
                     hidden_visible_in_pack,
                     hidden_visible_in_pack == 1 ? "y" : "ies");
+        // Per-category restore chips — finer-grained than the panel
+        // right-click submenu and faster than "Show all then re-hide
+        // some". Click a chip to unhide just that category. Captured
+        // for post-render mutation so we don't shuffle the vector
+        // while iterating.
+        std::optional<std::string> footer_unhide;
+        for (std::size_t i = 0; i < state.sidebar_hidden_categories.size(); ++i) {
+            auto const &cat = state.sidebar_hidden_categories[i];
+            // Skip categories that no longer exist in the loaded pack
+            // (the panel-level "Show hidden category" submenu has the
+            // same hide-stale-entry behavior — restoring a non-pack
+            // category is a no-op anyway). Footer chips mirror that.
+            bool present_in_pack = false;
+            for (auto const &t : def.tables()) {
+                std::string_view const tcat =
+                    t.category.empty() ? std::string_view{"Other"}
+                                        : std::string_view{t.category};
+                if (tcat == cat) {
+                    present_in_pack = true;
+                    break;
+                }
+            }
+            if (!present_in_pack) {
+                continue;
+            }
+            ImGui::PushID(static_cast<int>(i));
+            char label[160];
+            std::snprintf(label, sizeof label, "\xE2\xA4\xB5 %s", cat.c_str());
+            if (ImGui::SmallButton(label)) {
+                footer_unhide = cat;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Restore '%s' to the sidebar.", cat.c_str());
+            }
+            ImGui::PopID();
+            ImGui::SameLine();
+        }
+        // Newline to absorb the trailing SameLine from the last chip.
+        ImGui::NewLine();
+        if (footer_unhide.has_value() && state.project.has_value()) {
+            auto &h = state.sidebar_hidden_categories;
+            h.erase(std::remove(h.begin(), h.end(), *footer_unhide), h.end());
+            save_sidebar_hidden_categories(state.project->dir(), h);
+        }
     }
     ImGui::End();
 }
