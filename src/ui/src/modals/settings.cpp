@@ -343,6 +343,86 @@ void render_settings_modal(AppState &state) {
 
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
     ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+
+    // -------- Validate active pack -----------------------------------
+    // Surfaces `subuwutuner-cli pack-lint` against whatever pack the
+    // currently open project loaded. Pack authors and tuners both want
+    // a "is the loaded pack well-formed?" indicator that doesn't make
+    // them drop to a terminal. Result is cached on AppState so flipping
+    // away and back keeps the last status visible until the user
+    // re-validates.
+    ImGui::TextUnformatted("Active pack");
+    ImGui::BeginDisabled(!state.project.has_value());
+    if (ImGui::Button("Validate pack##settings_pack_lint", ImVec2(160.0f, 0.0f))) {
+        auto const v = state.project->definition().validate();
+        state.settings_pack_lint_pack_id = state.project->definition().pack().id;
+        if (v.has_value()) {
+            state.settings_pack_lint_status = 0;
+            state.settings_pack_lint_message.clear();
+        } else {
+            // One Status carries every violation joined by '\n'.
+            // Count lines so the chip can say "N violations" rather
+            // than "validation failed" — pack authors fix the count
+            // down, not flip a boolean.
+            auto const msg = v.error().to_string();
+            int violations = msg.empty() ? 0 : 1;
+            for (char c : msg) {
+                if (c == '\n') {
+                    ++violations;
+                }
+            }
+            state.settings_pack_lint_status = violations;
+            state.settings_pack_lint_message = msg;
+        }
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        if (state.project.has_value()) {
+            ImGui::SetTooltip("Run Definition::validate() on the currently\n"
+                              "loaded pack. Equivalent to:\n"
+                              "  subuwutuner-cli pack-lint <pack>");
+        } else {
+            ImGui::SetTooltip("Open a project first — Validate works\n"
+                              "against the project's loaded pack.");
+        }
+    }
+    if (state.project.has_value()) {
+        ImGui::SameLine();
+        text_subtle("Pack: %s",
+                    state.project->definition().pack().id.c_str());
+    } else {
+        ImGui::SameLine();
+        text_subtle("(no project loaded)");
+    }
+    if (state.settings_pack_lint_status >= 0) {
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+        if (state.settings_pack_lint_status == 0) {
+            ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_ok());
+            ImGui::Text("\xE2\x9C\x93  OK  \xC2\xB7  %s",
+                        state.settings_pack_lint_pack_id.c_str());
+            ImGui::PopStyleColor();
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
+            ImGui::Text("\xE2\x9C\x95  %d violation%s  \xC2\xB7  %s",
+                        state.settings_pack_lint_status,
+                        state.settings_pack_lint_status == 1 ? "" : "s",
+                        state.settings_pack_lint_pack_id.c_str());
+            ImGui::PopStyleColor();
+            // Bounded violation viewport — full text in a scrollable
+            // child so a 60-line dump doesn't push Save off-screen.
+            // Height caps at ~6 rows; user scrolls for the rest.
+            ImGui::BeginChild("##pack_lint_msg",
+                              ImVec2(0.0f,
+                                     ImGui::GetTextLineHeightWithSpacing() * 6.0f),
+                              ImGuiChildFlags_Borders);
+            ImGui::TextUnformatted(state.settings_pack_lint_message.c_str());
+            ImGui::EndChild();
+        }
+    }
+
+    ImGui::Dummy(ImVec2(0.0f, kSpaceM));
+    ImGui::Separator();
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
 
     // Button-row convention (matches unsaved_modal, csv_import_modal,

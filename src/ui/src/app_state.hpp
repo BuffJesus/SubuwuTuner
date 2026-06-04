@@ -717,6 +717,14 @@ struct AppState {
     char settings_project_display_name[256]{};
     char settings_project_notes[1024]{};
     bool settings_project_dirty{false};
+    // Pack-validation result cache for the Settings → Validate pack
+    // button. Empty until first click; held across modal re-opens so
+    // the user can flip back to confirm without re-running. -1 = not
+    // yet validated, 0 = ok, >0 = violation count (best effort line
+    // count of the multi-line error message).
+    int settings_pack_lint_status{-1};
+    std::string settings_pack_lint_pack_id;
+    std::string settings_pack_lint_message;
 
     // Pack-registry browser modal (Tools -> Browse Definitions).
     bool show_def_registry_modal{false};
