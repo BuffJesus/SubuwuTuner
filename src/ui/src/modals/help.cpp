@@ -254,7 +254,38 @@ void load_help_topics(AppState &state) {
 // pipe tables, plain text. No inline emphasis parsing — leaves **bold**
 // literal because the glossary uses it as a term-emphasis cue and the
 // raw text reads fine in the help pane.
-void render_markdown(std::string_view body) {
+// Scan markdown body for `## ` headings. Returns each heading's
+// rendered title (after stripping non-BMP glyphs and the leading
+// `## `). Used by the help modal's TOC; ordering preserves
+// document order so the index into this vector matches the
+// heading index render_markdown counts during emission.
+std::vector<std::string> extract_section_headings(std::string_view body) {
+    std::vector<std::string> out;
+    std::size_t i = 0;
+    while (i < body.size()) {
+        std::size_t line_end = body.find('\n', i);
+        if (line_end == std::string_view::npos) {
+            line_end = body.size();
+        }
+        std::string_view line{body.data() + i, line_end - i};
+        i = line_end + 1;
+        if (!line.empty() && line.back() == '\r') {
+            line.remove_suffix(1);
+        }
+        if (line.starts_with("## ") && !line.starts_with("### ")) {
+            out.push_back(strip_non_bmp(line.substr(3)));
+        }
+    }
+    return out;
+}
+
+// `scroll_to_heading` is the (zero-based) index of a `## ` heading
+// in the body. When non-negative, render_markdown calls
+// SetScrollHereY at the matching heading so the body pane scrolls
+// to it. -1 disables the request; the help-modal TOC sets this
+// value on click and the renderer clears it via the AppState
+// reference upstream.
+void render_markdown(std::string_view body, int scroll_to_heading = -1) {
     std::vector<std::string_view> table_rows;
     auto flush_table = [&]() {
         if (table_rows.empty()) {
@@ -325,6 +356,7 @@ void render_markdown(std::string_view body) {
     };
 
     std::size_t i = 0;
+    int section_heading_index = 0;
     while (i < body.size()) {
         std::size_t line_end = body.find('\n', i);
         if (line_end == std::string_view::npos) {
@@ -357,7 +389,7 @@ void render_markdown(std::string_view body) {
             ImGui::Separator();
             continue;
         }
-        if (safe.starts_with("## ")) {
+        if (safe.starts_with("## ") && !safe.starts_with("### ")) {
             ImGui::Dummy(ImVec2(0.0f, kSpaceS));
             ImGui::PushFont(ImGui::GetFont());
             ImGui::PushStyleColor(ImGuiCol_Text, accent_for(current_theme()).base);
@@ -365,6 +397,16 @@ void render_markdown(std::string_view body) {
             ImGui::PopStyleColor();
             ImGui::PopFont();
             ImGui::Separator();
+            // TOC click handler: when the caller has requested a
+            // scroll to the Nth section heading and we're rendering
+            // that heading, anchor the viewport here. SetScrollHereY
+            // with ratio=0.0f puts the heading at the top of the
+            // pane — the conventional anchor for "jumped to this
+            // section."
+            if (scroll_to_heading == section_heading_index) {
+                ImGui::SetScrollHereY(0.0f);
+            }
+            ++section_heading_index;
             continue;
         }
         if (safe.starts_with("### ")) {
@@ -613,7 +655,41 @@ void render_help_modal(AppState &state) {
             std::string_view const body_find{state.help_body_find};
             auto const &body = state.help_topics[static_cast<std::size_t>(idx)].body;
             if (body_find.empty()) {
-                render_markdown(body);
+                // TOC: a collapsing left-pane navigator for topics
+                // with 3+ `## ` headings. Cheaper than a sidebar
+                // because long docs (08-testing-strategy, 16-custom-
+                // features, etc.) already paginate; the user wants
+                // to land at "Tier 4" or "RH850 backend" without
+                // scrolling past everything that precedes it.
+                auto const headings = extract_section_headings(body);
+                int requested = -1;
+                if (headings.size() >= 3) {
+                    if (ImGui::CollapsingHeader("Sections")) {
+                        for (std::size_t h = 0; h < headings.size(); ++h) {
+                            // Bullet + clickable label. PushID
+                            // disambiguates duplicate heading names
+                            // (some docs repeat headings under
+                            // different parent sections).
+                            ImGui::PushID(static_cast<int>(h));
+                            ImGui::Bullet();
+                            ImGui::SameLine();
+                            if (ImGui::SmallButton(headings[h].c_str())) {
+                                requested = static_cast<int>(h);
+                            }
+                            ImGui::PopID();
+                        }
+                        ImGui::Separator();
+                    }
+                }
+                if (requested >= 0) {
+                    state.help_scroll_to_heading = requested;
+                }
+                render_markdown(body, state.help_scroll_to_heading);
+                // Consume the request after one render. Without the
+                // clear, every subsequent frame would re-anchor the
+                // scroll position on the same heading and the user
+                // couldn't scroll away.
+                state.help_scroll_to_heading = -1;
             } else {
                 // Find-in-topic mode: render only lines containing the
                 // needle (case-insensitive). Markdown structure (tables,

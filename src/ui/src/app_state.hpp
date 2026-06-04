@@ -795,6 +795,14 @@ struct AppState {
     // timestamp is meaningful).
     std::string settings_pack_lint_validated_at;
 
+    // Help-modal TOC scroll target. Set when the user clicks a
+    // section heading in the collapsing TOC at the top of the
+    // content pane; help.cpp renders the body once with the
+    // request honored, then clears it back to -1. -1 means "no
+    // pending scroll." See render_markdown's scroll_to_heading
+    // parameter.
+    int help_scroll_to_heading{-1};
+
     // Pack-registry browser modal (Tools -> Browse Definitions).
     bool show_def_registry_modal{false};
     char def_registry_root_input[1024]{"definitions"};
