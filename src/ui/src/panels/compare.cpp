@@ -27,7 +27,9 @@
 #include "app_state.hpp"
 #include "widgets/widgets.hpp"
 
+#include "st/audit.hpp"
 #include "st/diff.hpp"
+#include "st/edit.hpp"
 #include "st/rom.hpp"
 
 #include <imgui.h>
@@ -184,12 +186,29 @@ ImVec4 changed_count_color(std::size_t changed, bool is_safety) {
     return chip_fg_caution();
 }
 
-// Render one table row in the changed-tables tree. Returns true when
-// the user clicked the "Open in editor" action.
-[[nodiscard]] bool render_table_row(AppState &state, st::diff::TableDelta const &t) {
+// Result of rendering a table row in the compare diff tree. Callers
+// consume `open_in_editor` (jump-to-table) + `copy_b_to_a` (apply B's
+// values into A's working slot via active_history) after the loop
+// rather than mid-iteration — the actions mutate AppState in ways
+// that would shift the per-frame compare result underneath us.
+struct TableRowAction {
+    bool open_in_editor{false};
+    bool copy_b_to_a{false};
+};
+
+// Render one table row in the changed-tables tree.
+// `editable_a` is non-null when ROM A resolves to the project's
+// working slot — that's the only case where Copy B→A makes sense
+// (additional ROMs are read-only, source is immutable, file paths
+// have no history target). When null the Copy action is hidden.
+// `rom_b_ref` is the source bytes that would land in A; the actual
+// read+write happens at the caller so that one place owns the
+// edit::History invocation.
+[[nodiscard]] TableRowAction render_table_row(AppState &state, st::diff::TableDelta const &t,
+                                              bool a_is_working) {
     ImGui::PushID(t.table_id.c_str());
 
-    bool open_in_editor = false;
+    TableRowAction action;
 
     // Safety / emissions chips — small badges in front of the name.
     if (t.engine_safety_critical) {
@@ -230,7 +249,30 @@ ImVec4 changed_count_color(std::size_t changed, bool is_safety) {
         // Open-in-editor action — jumps to the table in the side panel
         // + central editor.
         if (ImGui::Button("\xEE\x9C\xA9  Open in editor")) { // E709 Edit
-            open_in_editor = true;
+            action.open_in_editor = true;
+        }
+        // Copy B→A — only when A targets the project's working slot.
+        // Engine-safety + emissions cells still pass through the
+        // normal policy gate at flash time; the edit itself is just
+        // a regular history-tracked write so Ctrl+Z reverses it.
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!a_is_working || t.cells_changed == 0);
+        if (ImGui::Button("\xE2\x86\x90  Copy B\xE2\x86\x92""A")) {
+            action.copy_b_to_a = true;
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            if (!a_is_working) {
+                ImGui::SetTooltip("Copy B→A needs ROM A to be the project's working\n"
+                                  "slot (the only writable target). Pick <project\n"
+                                  "working> in the A picker, then re-run Compare.");
+            } else if (t.cells_changed == 0) {
+                ImGui::SetTooltip("No differing cells to copy on this table.");
+            } else {
+                ImGui::SetTooltip("Write B's values for this table into the working ROM.\n"
+                                  "Lands as a single undoable edit (Ctrl+Z reverses).\n"
+                                  "Safety + emissions cells still gate at flash time.");
+            }
         }
         ImGui::SameLine();
         text_subtle("(click to load this table in the Table viewer)");
@@ -286,7 +328,7 @@ ImVec4 changed_count_color(std::size_t changed, bool is_safety) {
     }
 
     ImGui::PopID();
-    return open_in_editor;
+    return action;
 }
 
 } // namespace
@@ -750,7 +792,16 @@ void render_compare_panel(AppState &state) {
                       return x->table_id < y->table_id;
                   });
 
+        // Precompute "is A == project working ROM" once per frame
+        // rather than per-row — it's a path-resolution + pointer
+        // comparison, but cheaper to hoist. The Copy B→A action also
+        // needs B's bytes; we re-resolve them on demand inside the
+        // per-row handler so the diff cache isn't holding stale ROM
+        // pointers across recompute calls.
+        bool const a_is_working =
+            (std::string_view{state.compare_rom_a_path} == kProjectWorkingSentinel);
         std::string open_id;
+        std::string copy_id; // table to apply B→A after the render pass
         std::string_view const chip{state.compare_filter_chip};
         std::size_t shown = 0;
         for (auto const *t : sorted) {
@@ -779,8 +830,12 @@ void render_compare_panel(AppState &state) {
                     continue;
             }
             ++shown;
-            if (render_table_row(state, *t)) {
+            auto const row_action = render_table_row(state, *t, a_is_working);
+            if (row_action.open_in_editor) {
                 open_id = t->table_id;
+            }
+            if (row_action.copy_b_to_a) {
+                copy_id = t->table_id;
             }
         }
         if (!chip.empty()) {
@@ -792,6 +847,81 @@ void render_compare_panel(AppState &state) {
         // panel).
         if (!open_id.empty()) {
             state.select_table(open_id);
+        }
+        // Copy B→A — also deferred. Re-resolves ROM B at apply time
+        // rather than caching the resolved pointer in compare_result
+        // (the diff cache is allowed to hold scaled-cell views; raw
+        // ROM byte references would be a cross-frame lifetime risk).
+        if (!copy_id.empty() && state.project.has_value()) {
+            // Recover the diff metadata for the just-clicked table so
+            // the audit entry can record cell-change count without
+            // re-walking the diff.
+            std::size_t copy_cells = 0;
+            for (auto const &td : d.tables) {
+                if (td.table_id == copy_id) {
+                    copy_cells = td.cells_changed;
+                    break;
+                }
+            }
+            auto const *tbl = state.project->definition().find_table(copy_id);
+            std::string b_err;
+            auto rom_b = resolve_rom_input(state, state.compare_rom_b_path, b_err, "ROM B");
+            if (tbl == nullptr) {
+                state.status_msg = "Copy B→A: table '" + copy_id + "' missing from pack.";
+            } else if (!rom_b.ok) {
+                state.status_msg = "Copy B→A: " + b_err;
+            } else {
+                Rom const &rom_b_ref = rom_b.in_memory ? *rom_b.in_memory : *rom_b.loaded;
+                Rom *target = &state.project->working_rom();
+                auto b_td = state.project->definition().read_table_values(rom_b_ref, *tbl);
+                auto a_td = state.project->definition().read_table_values(*target, *tbl);
+                if (!b_td.has_value()) {
+                    state.status_msg = "Copy B→A: read B: " + b_td.error().to_string();
+                } else if (!a_td.has_value()) {
+                    state.status_msg = "Copy B→A: read A: " + a_td.error().to_string();
+                } else {
+                    auto const rect = st::edit::whole_table(*a_td);
+                    auto before = st::edit::snapshot(*a_td, rect);
+                    auto after = st::edit::snapshot(*b_td, rect);
+                    if (!before.has_value()) {
+                        state.status_msg = "Copy B→A: before snapshot: " +
+                                           before.error().to_string();
+                    } else if (!after.has_value()) {
+                        state.status_msg = "Copy B→A: after snapshot: " +
+                                           after.error().to_string();
+                    } else {
+                        auto wb = state.project->definition().write_table_values(
+                            *target, *tbl, *b_td);
+                        if (!wb.has_value()) {
+                            state.status_msg =
+                                "Copy B→A: writeback: " + wb.error().to_string();
+                        } else {
+                            std::string label =
+                                "Copy B→A on " + copy_id +
+                                " (" + std::to_string(copy_cells) + " cells)";
+                            std::string const audited = label;
+                            state.project->active_history().record(st::edit::Edit::table(
+                                copy_id, std::move(*before), std::move(*after),
+                                std::move(label)));
+                            state.dirty = true;
+                            state.status_msg = audited;
+                            if (state.audit_log.has_value()) {
+                                std::vector<std::pair<std::string, std::string>> fields{
+                                    {"table", copy_id},
+                                    {"cells", std::to_string(copy_cells)},
+                                    {"source", "compare_panel.b_to_a"}};
+                                (void)state.audit_log->log(
+                                    st::audit::EntryKind::EditCommitted,
+                                    "ui.compare", audited, std::move(fields));
+                            }
+                            // Recompute diff so the row's cells_changed
+                            // count flips to 0 (or shows what's still
+                            // different if the user copies again).
+                            recompute_compare(state);
+                        }
+                    }
+                }
+            }
         }
     }
 
