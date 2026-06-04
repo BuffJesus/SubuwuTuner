@@ -66,6 +66,13 @@ void AppState::try_open_project(std::filesystem::path const &path) {
     // pack-default first-occurrence order in that case.
     sidebar_category_order = load_sidebar_category_order(project->dir());
     sidebar_hidden_categories = load_sidebar_hidden_categories(project->dir());
+    {
+        auto const pinned = load_compare_pinned(project->dir());
+        compare_pinned_table_ids.clear();
+        for (auto const &id : pinned) {
+            compare_pinned_table_ids.insert(id);
+        }
+    }
     // Restore the prior pack-lint result so the Settings chip + welcome
     // panel surface the last verdict without forcing the user to
     // re-validate. Missing or malformed snapshot → "not validated"
@@ -126,6 +133,8 @@ void AppState::close_project() {
     active_rom_id.clear();
     sidebar_category_order.clear();
     sidebar_hidden_categories.clear();
+    compare_pinned_table_ids.clear();
+    compare_pinned_only = false;
 }
 
 } // namespace st::ui

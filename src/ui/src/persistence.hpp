@@ -96,6 +96,16 @@ std::vector<std::string> load_sidebar_hidden_categories(std::filesystem::path co
 void save_sidebar_hidden_categories(std::filesystem::path const &project_dir,
                                     std::vector<std::string> const &hidden);
 
+// Compare panel pinned-table set. Persisted at
+// <project_dir>/compare.pinned, one table id per line. Mirrors the
+// audit.pinned sidecar pattern (cb921ef / 2a84616). Survives across
+// sessions so a user can star tables relevant to a tuning question,
+// hand the .stune to an e-tuner, and the star markers travel with
+// the project.
+std::vector<std::string> load_compare_pinned(std::filesystem::path const &project_dir);
+void save_compare_pinned(std::filesystem::path const &project_dir,
+                         std::vector<std::string> const &pinned);
+
 // Per-project pack-validation snapshot. Settings → "Validate pack"
 // writes this so the next session can render the chip without re-
 // running the validator, and so the welcome panel can surface a

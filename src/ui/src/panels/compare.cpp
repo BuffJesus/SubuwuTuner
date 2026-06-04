@@ -194,6 +194,7 @@ ImVec4 changed_count_color(std::size_t changed, bool is_safety) {
 struct TableRowAction {
     bool open_in_editor{false};
     bool copy_b_to_a{false};
+    bool toggle_pin{false};
 };
 
 // Render one table row in the changed-tables tree.
@@ -209,6 +210,24 @@ struct TableRowAction {
     ImGui::PushID(t.table_id.c_str());
 
     TableRowAction action;
+
+    // Pin/star toggle — leftmost column so pinned entries are
+    // visually scannable. ★ when pinned, ☆ when not. Mirrors the
+    // audit panel's 2a84616 pattern; the toggle persists via
+    // save_compare_pinned (deferred to the caller via the action).
+    bool const pinned =
+        state.compare_pinned_table_ids.find(t.table_id) !=
+        state.compare_pinned_table_ids.end();
+    char const *star_glyph = pinned ? "\xE2\x98\x85" : "\xE2\x98\x86";
+    if (ImGui::SmallButton(star_glyph)) {
+        action.toggle_pin = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(pinned
+                              ? "Unpin this table.  (Pinned tables\nshow ★ + survive a Compare re-run.)"
+                              : "Pin this table.  (Pinned tables\nshow ★ + survive a Compare re-run.)");
+    }
+    ImGui::SameLine();
 
     // Safety / emissions chips — small badges in front of the name.
     if (t.engine_safety_critical) {
@@ -767,6 +786,18 @@ void render_compare_panel(AppState &state) {
             ImGui::SetTooltip("Tables that carry either flag — the union of\n"
                               "Safety-critical + Emissions.");
         }
+        // Pinned-only toggle. Separate from chip_filter_chip because
+        // pin is composable with the category / safety filter — a
+        // user can star a handful of tables AND keep filtering by
+        // category. Stays as a Checkbox so the AND semantics read
+        // naturally next to the OR-of-chip selector.
+        ImGui::Checkbox("Pinned only", &state.compare_pinned_only);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Show only tables you've starred (\xE2\x98\x85)\n"
+                              "via the per-row pin button. Composes with the\n"
+                              "category / safety filter — both filters apply.");
+        }
+        ImGui::SameLine();
         // Category chips — one per distinct Table::category present in
         // the changed tables (looked up against the live pack so a pack
         // swap reflows them).
@@ -822,6 +853,7 @@ void render_compare_panel(AppState &state) {
             (std::string_view{state.compare_rom_a_path} == kProjectWorkingSentinel);
         std::string open_id;
         std::string copy_id; // table to apply B→A after the render pass
+        std::string pin_toggle_id; // table whose pin star was clicked
         std::string_view const chip{state.compare_filter_chip};
         std::size_t shown = 0;
         for (auto const *t : sorted) {
@@ -849,6 +881,14 @@ void render_compare_panel(AppState &state) {
                 if (!pass)
                     continue;
             }
+            // Pinned-only filter applies AFTER the chip filter so the
+            // two compose: e.g. "@safety + Pinned only" lists the
+            // user-starred safety-critical entries.
+            if (state.compare_pinned_only &&
+                state.compare_pinned_table_ids.find(t->table_id) ==
+                    state.compare_pinned_table_ids.end()) {
+                continue;
+            }
             ++shown;
             auto const row_action = render_table_row(state, *t, a_is_working);
             if (row_action.open_in_editor) {
@@ -856,6 +896,9 @@ void render_compare_panel(AppState &state) {
             }
             if (row_action.copy_b_to_a) {
                 copy_id = t->table_id;
+            }
+            if (row_action.toggle_pin) {
+                pin_toggle_id = t->table_id;
             }
         }
         if (!chip.empty()) {
@@ -867,6 +910,22 @@ void render_compare_panel(AppState &state) {
         // panel).
         if (!open_id.empty()) {
             state.select_table(open_id);
+        }
+        // Pin toggle — also deferred for the same defer-to-post-loop
+        // reason (the std::unordered_set mutation would invalidate
+        // any concurrent iteration). Persist on each toggle so the
+        // star markers survive a session restart.
+        if (!pin_toggle_id.empty() && state.project.has_value()) {
+            auto it = state.compare_pinned_table_ids.find(pin_toggle_id);
+            if (it != state.compare_pinned_table_ids.end()) {
+                state.compare_pinned_table_ids.erase(it);
+            } else {
+                state.compare_pinned_table_ids.insert(pin_toggle_id);
+            }
+            std::vector<std::string> v(state.compare_pinned_table_ids.begin(),
+                                        state.compare_pinned_table_ids.end());
+            std::sort(v.begin(), v.end()); // stable on-disk order
+            save_compare_pinned(state.project->dir(), v);
         }
         // Copy B→A — also deferred. Re-resolves ROM B at apply time
         // rather than caching the resolved pointer in compare_result

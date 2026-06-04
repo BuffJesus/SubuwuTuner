@@ -494,6 +494,42 @@ void save_sidebar_hidden_categories(std::filesystem::path const &project_dir,
     }
 }
 
+std::vector<std::string>
+load_compare_pinned(std::filesystem::path const &project_dir) {
+    std::vector<std::string> out;
+    auto const path = project_dir / "compare.pinned";
+    std::ifstream in{path};
+    if (!in)
+        return out;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line.empty()) {
+            continue;
+        }
+        out.push_back(std::move(line));
+    }
+    return out;
+}
+
+void save_compare_pinned(std::filesystem::path const &project_dir,
+                         std::vector<std::string> const &pinned) {
+    auto const path = project_dir / "compare.pinned";
+    if (pinned.empty()) {
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+        return;
+    }
+    std::ofstream out{path, std::ios::trunc};
+    if (!out)
+        return;
+    for (auto const &id : pinned) {
+        out << id << '\n';
+    }
+}
+
 // pack-lint.toml format. Hand-rolled rather than going through
 // tomlplusplus — three string fields + one int + an optional
 // multi-line body. Toml-quoting a multi-line message would mean

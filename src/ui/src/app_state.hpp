@@ -581,6 +581,18 @@ struct AppState {
     // by table_id. Survives across recomputes so the user doesn't lose
     // their expansion when they re-run a compare.
     std::unordered_set<std::string> compare_expanded_tables;
+    // Pinned-table set on the Compare panel (mirror of the audit
+    // panel's pin sidecar). Composite-keyed by table_id only —
+    // the pin is per-table, not per-{table, ROM} pair, so a re-run
+    // of Compare against a different ROM B keeps the star markers
+    // travelling with the user's intent ("these are the tables I
+    // care about"). Loaded from <project>/compare.pinned on open;
+    // persisted on each toggle.
+    std::unordered_set<std::string> compare_pinned_table_ids;
+    // Pinned-only filter toggle, mirrors the audit panel's "Pinned"
+    // chip. When true the changed-tables tree skips entries whose
+    // table_id isn't in compare_pinned_table_ids.
+    bool compare_pinned_only{false};
 
     // History-panel filter buffer. Substring-matched (case-insensitive)
     // against the edit's table_id.
