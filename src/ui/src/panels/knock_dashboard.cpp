@@ -50,6 +50,7 @@ void render_knock_dashboard_panel(AppState &state) {
         ImGui::End();
         return;
     }
+    track_help_context(state, AppState::HelpContext::KnockDashboard);
 
     preview_pill();
     ImGui::SameLine();

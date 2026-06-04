@@ -258,6 +258,55 @@ int main(int argc, char *argv[]) {
         // character so consuming it globally doesn't conflict with
         // any field-local handler.
         if (ImGui::IsKeyPressed(ImGuiKey_F1, false)) {
+            if (!state.show_help_modal) {
+                // Per-panel context routing — closes analyst QW-I.
+                // Each panel updates state.help_context each render
+                // when its window is focused; consult that to pick
+                // the topic this F1 should land on.
+                using HC = AppState::HelpContext;
+                char const *topic_id = nullptr;
+                switch (state.help_context) {
+                case HC::FlashModal:
+                    topic_id = "31-brick-protection-by-isa";
+                    break;
+                case HC::ReadRomModal:
+                    topic_id = "23-security-access";
+                    break;
+                case HC::Audit:
+                    topic_id = "08-testing-strategy";
+                    break;
+                case HC::Compare:
+                    topic_id = "21-stune-format";
+                    break;
+                case HC::FeaturesDesigner:
+                    topic_id = "16-custom-features";
+                    break;
+                case HC::AdaptiveHistory:
+                    topic_id = "20-ai-integration";
+                    break;
+                case HC::ColdStart:
+                case HC::Ebcs:
+                case HC::KnockDashboard:
+                    topic_id = "05-improvements";
+                    break;
+                case HC::TableEditor:
+                case HC::Sidebar:
+                    topic_id = "11-definition-format";
+                    break;
+                case HC::SettingsModal:
+                    topic_id = "25-config-system";
+                    break;
+                case HC::FirstRunWizard:
+                case HC::Welcome:
+                    topic_id = "00-overview";
+                    break;
+                default:
+                    break;
+                }
+                if (topic_id != nullptr) {
+                    state.help_initial_topic_id = topic_id;
+                }
+            }
             state.show_help_modal = !state.show_help_modal;
         }
         // Workspace switches — Ctrl+1 = Tune, Ctrl+2 = Datalog, Ctrl+3

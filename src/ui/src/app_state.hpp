@@ -498,6 +498,35 @@ struct AppState {
     bool help_loaded{false};
     std::string help_error_msg;
     char help_filter[128]{};
+    // Per-panel F1 context routing. Set just before show_help_modal
+    // flips to true so the next open lands on the topic relevant to
+    // whatever the user was looking at (Flash modal → brick
+    // protection, audit panel → testing strategy, etc.). Help modal
+    // consumes + clears the field once it has applied the override.
+    // Empty string = "no override, keep the current active topic".
+    std::string help_initial_topic_id;
+    // Last panel/modal F1 routing observed. Updated by panel render
+    // functions each frame (cheap, just an enum compare + assign) so
+    // the F1 handler in main.cpp can pick the right topic without
+    // walking every show_* flag itself.
+    enum class HelpContext {
+        Unknown,
+        Sidebar,
+        TableEditor,
+        AdaptiveHistory,
+        ColdStart,
+        Ebcs,
+        KnockDashboard,
+        FeaturesDesigner,
+        Compare,
+        Audit,
+        Welcome,
+        FlashModal,
+        ReadRomModal,
+        SettingsModal,
+        FirstRunWizard,
+    };
+    HelpContext help_context{HelpContext::Unknown};
     // Within-topic find input (Ctrl+G or the secondary "Find in topic"
     // field next to the topic filter). When non-empty the content pane
     // pre-filters the active topic's body to lines containing this
@@ -761,6 +790,17 @@ struct AppState {
     std::vector<DefRegistryRow> def_registry_rows;
     char def_registry_filter[128]{};
 };
+
+// Panels call this right after ImGui::Begin to advertise their F1
+// routing context. No-op when the window isn't focused so overlapping
+// panels don't fight each other for the most-recent context. Modals
+// always own focus while shown, so they write to state.help_context
+// directly without the focus check.
+inline void track_help_context(AppState &state, AppState::HelpContext ctx) {
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
+        state.help_context = ctx;
+    }
+}
 
 } // namespace st::ui
 

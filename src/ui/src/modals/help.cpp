@@ -51,10 +51,21 @@ struct TopicSource {
     char const *filename;
     char const *fallback_title;
 };
-constexpr std::array<TopicSource, 3> kTopicSources = {{
+constexpr std::array<TopicSource, 14> kTopicSources = {{
     {"00-overview.md", "Overview"},
-    {"10-glossary.md", "Glossary"},
     {"04-roadmap.md", "Roadmap"},
+    {"05-improvements.md", "What makes us different"},
+    {"06-legal-ethics.md", "Legal / ethics"},
+    {"08-testing-strategy.md", "Testing strategy"},
+    {"10-glossary.md", "Glossary"},
+    {"11-definition-format.md", "Definition packs"},
+    {"16-custom-features.md", "Custom features"},
+    {"20-ai-integration.md", "AI advisory"},
+    {"21-stune-format.md", ".stune format"},
+    {"23-security-access.md", "SecurityAccess"},
+    {"25-config-system.md", "Config system"},
+    {"31-brick-protection-by-isa.md", "Brick protection"},
+    {"32-live-datalogger.md", "Live datalogger"},
 }};
 
 std::string read_file_to_string(std::filesystem::path const &p) {
@@ -408,6 +419,20 @@ void render_help_modal(AppState &state) {
     }
     if (!state.help_loaded) {
         load_help_topics(state);
+    }
+    // Per-panel F1 routing: when the F1 handler in main.cpp set an
+    // initial topic id (e.g. flash modal → brick protection), find
+    // it in the loaded topic list and seed help_active_topic. Clear
+    // the field so the next F1 doesn't keep jumping back here on
+    // re-open — the user may have navigated away inside the modal.
+    if (!state.help_initial_topic_id.empty()) {
+        for (std::size_t i = 0; i < state.help_topics.size(); ++i) {
+            if (state.help_topics[i].id == state.help_initial_topic_id) {
+                state.help_active_topic = static_cast<int>(i);
+                break;
+            }
+        }
+        state.help_initial_topic_id.clear();
     }
 
     ImGuiViewport *vp = ImGui::GetMainViewport();

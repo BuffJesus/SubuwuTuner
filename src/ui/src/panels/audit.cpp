@@ -209,6 +209,7 @@ void render_audit_panel(AppState &state) {
         ImGui::End();
         return;
     }
+    track_help_context(state, AppState::HelpContext::Audit);
 
     // First-open: auto-load if a project is open. Subsequent re-shows
     // keep the cached entries; an mtime poll below picks up changes

@@ -344,6 +344,7 @@ void render_compare_panel(AppState &state) {
         ImGui::End();
         return;
     }
+    track_help_context(state, AppState::HelpContext::Compare);
 
     preview_pill();
     ImGui::SameLine();

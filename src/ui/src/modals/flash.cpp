@@ -90,6 +90,7 @@ void render_flash_modal(AppState &state) {
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }
+    state.help_context = AppState::HelpContext::FlashModal;
 
     auto const pending = build_pending_flash(state);
 

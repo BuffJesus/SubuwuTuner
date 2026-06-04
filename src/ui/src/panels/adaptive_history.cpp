@@ -41,6 +41,7 @@ void render_adaptive_history_panel(AppState &state) {
         ImGui::End();
         return;
     }
+    track_help_context(state, AppState::HelpContext::AdaptiveHistory);
 
     preview_pill();
     ImGui::SameLine();

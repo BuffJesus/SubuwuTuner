@@ -53,6 +53,7 @@ void render_features_designer(AppState &state) {
         ImGui::End();
         return;
     }
+    track_help_context(state, AppState::HelpContext::FeaturesDesigner);
 
     // Preview status pill — surfaces the API-may-shift caveat without
     // littering the window title. Sits as a single-line strip above the

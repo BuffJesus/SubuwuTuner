@@ -202,6 +202,7 @@ void render_first_run_modal(AppState &state) {
     if (!g_wizard_open) {
         return;
     }
+    state.help_context = AppState::HelpContext::FirstRunWizard;
 
     ImGuiViewport *vp = ImGui::GetMainViewport();
 

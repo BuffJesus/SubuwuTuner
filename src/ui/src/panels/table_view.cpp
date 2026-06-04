@@ -661,6 +661,9 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         return;
     }
     ImGui::Begin("Table");
+    track_help_context(state,
+                       state.project.has_value() ? AppState::HelpContext::TableEditor
+                                                 : AppState::HelpContext::Welcome);
 
     if (!state.project.has_value()) {
         render_welcome_panel(state);

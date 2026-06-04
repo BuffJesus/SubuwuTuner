@@ -33,6 +33,7 @@ void render_sidebar(AppState &state) {
     }
     ImGui::Begin("Tables");
 
+    track_help_context(state, AppState::HelpContext::Sidebar);
     if (!state.project.has_value()) {
         // Quiet empty state. The welcome panel on the right owns the
         // primary Open Project CTA; the sidebar just acknowledges that

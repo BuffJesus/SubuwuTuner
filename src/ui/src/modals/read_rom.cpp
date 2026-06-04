@@ -115,6 +115,7 @@ void render_read_rom_modal(AppState &state) {
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }
+    state.help_context = AppState::HelpContext::ReadRomModal;
 
     // ----- transition: Running → Done/Failed/Cancelled -----
     // Worker writes the terminal status, we join here so the std::thread

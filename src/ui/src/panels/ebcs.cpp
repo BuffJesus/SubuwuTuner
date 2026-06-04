@@ -37,6 +37,7 @@ void render_ebcs_panel(AppState &state) {
         return;
     }
 
+    track_help_context(state, AppState::HelpContext::Ebcs);
     preview_pill();
     ImGui::SameLine();
     text_subtle("Detect tip-in events; suggest Kp / Ki / Kd direction. "

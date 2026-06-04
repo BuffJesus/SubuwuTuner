@@ -87,6 +87,7 @@ void render_settings_modal(AppState &state) {
                                 ImGuiWindowFlags_AlwaysAutoResize)) {
         return;
     }
+    state.help_context = AppState::HelpContext::SettingsModal;
 
     ImGui::Text("Config file:");
     ImGui::SameLine();

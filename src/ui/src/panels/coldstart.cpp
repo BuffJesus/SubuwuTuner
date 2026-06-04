@@ -41,6 +41,7 @@ void render_coldstart_panel(AppState &state) {
         ImGui::End();
         return;
     }
+    track_help_context(state, AppState::HelpContext::ColdStart);
 
     preview_pill();
     ImGui::SameLine();
