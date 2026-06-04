@@ -246,3 +246,31 @@ TEST_CASE("BackupStore::filename_stem replaces ':' with '-' for Windows portabil
     // Slugify lowercases ASCII and replaces non-alnum with '_'.
     REQUIRE(with_label == "2026-06-01T12-34-56Z-A2WC520N-before_stage_1");
 }
+
+TEST_CASE("BackupStore::filename_stem slugify covers ASCII range boundaries",
+          "[flash][backup_store][boundary]") {
+    // The slug-character classifier in backup_store.cpp checks the
+    // range endpoints ('A', 'Z', 'a', 'z', '0', '9') with `<=`. The
+    // 2026-06-04 mutation lane found that swapping `<=` to `<` on any
+    // of the upper bounds — 'Z', 'z', '9' — leaves the test suite
+    // green because the existing tests don't exercise those exact
+    // characters in label input. Pin them explicitly.
+    auto const slug_caps_Z =
+        BackupStore::filename_stem("2026-06-01T12:00:00Z", "A2WC520N", "AZ");
+    REQUIRE(slug_caps_Z == "2026-06-01T12-00-00Z-A2WC520N-az");
+
+    auto const slug_lower_z =
+        BackupStore::filename_stem("2026-06-01T12:00:00Z", "A2WC520N", "az");
+    REQUIRE(slug_lower_z == "2026-06-01T12-00-00Z-A2WC520N-az");
+
+    auto const slug_digit_9 =
+        BackupStore::filename_stem("2026-06-01T12:00:00Z", "A2WC520N", "09");
+    REQUIRE(slug_digit_9 == "2026-06-01T12-00-00Z-A2WC520N-09");
+
+    // Sanity: the upper-bound exclusion still kicks in for the
+    // first char past each range. '{' is one past 'z'; mutating
+    // `<=` to `<` would have kept 'z' working but added '{'.
+    auto const slug_brace =
+        BackupStore::filename_stem("2026-06-01T12:00:00Z", "A2WC520N", "z{");
+    REQUIRE(slug_brace == "2026-06-01T12-00-00Z-A2WC520N-z");
+}
