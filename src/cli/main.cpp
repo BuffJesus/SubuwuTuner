@@ -376,7 +376,7 @@ constexpr std::string_view kUsage =
     "                      [--min-samples-per-bin N]\n"
     "                      [--timestamp-unit seconds|millis|micros|rows]\n"
     "                      [--target ect:lambda,ect:lambda,...]\n"
-    "                      [--json]\n"
+    "                      [--json] [--csv]\n"
     "                            Phase-classify + ECT-bin a cold-start datalog (engine cold-\n"
     "                            soak → warmup). Reports per-phase sample/time counts, per-\n"
     "                            ECT-bin observed lambda + deviation from a user-supplied\n"
@@ -403,7 +403,7 @@ constexpr std::string_view kUsage =
     "    knock-snapshot --log <CSV> --flkc-cols <a,b,c,d>\n"
     "                   [--fbkc-cols <a,b,c,d>] [--rpm-col <name>] [--load-col <name>]\n"
     "                   [--cylinders N] [--window-seconds N] [--sample-rate-hz N]\n"
-    "                   [--min-rpm N] [--min-load N] [--no-gate] [--json]\n"
+    "                   [--min-rpm N] [--min-load N] [--no-gate] [--json] [--csv]\n"
     "                            Compute a per-cylinder knock dashboard from a CSV\n"
     "                            datalog. --flkc-cols is required (per-cyl fine knock\n"
     "                            learn column names, order = cyl 1..N). --fbkc-cols\n"
@@ -3748,7 +3748,7 @@ int cmd_completion(int argc, char *argv[]) {
     // toward flags that benefit from completion (paths, named modes)
     // and skip ones that take freeform strings.
     static char const *const kCommonFlags[] = {
-        "--json", "--help", "--version",
+        "--json", "--csv", "--help", "--version",
         "--dry-run", "--yes", "--verbose", "--quiet",
         "--profile", "--pack-dir", "--def", "--def-dir",
         "--rom", "--source-rom", "--working-rom",
@@ -7049,6 +7049,7 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
     std::optional<double> min_load_arg;
     bool no_gate = false;
     bool json_mode = false;
+    bool csv_mode = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -7061,6 +7062,10 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
         };
         if (a == "--json") {
             json_mode = true;
+            continue;
+        }
+        if (a == "--csv") {
+            csv_mode = true;
             continue;
         }
         if (a == "--log") {
@@ -7304,6 +7309,43 @@ int cmd_knock_snapshot(int argc, char *argv[]) {
         }
         out.append("]}\n");
         std::fputs(out.c_str(), stdout);
+        return 0;
+    }
+
+    if (csv_mode) {
+        // CSV shape matches the JSON envelope: comment-prefixed
+        // metadata header (pandas read_csv(comment='#') / Excel
+        // Power-Query/text-import both ignore #-prefixed lines), then
+        // a per-cylinder data table. Per-cyl values are zero when the
+        // mapping has no PID for that signal — same convention as the
+        // human-readable text dump.
+        std::printf("# schema=subuwutuner.knock-snapshot.v1\n");
+        std::printf("# log=%s\n", log_path->string().c_str());
+        std::printf("# window_seconds=%.3f\n", cfg.window_seconds);
+        std::printf("# sample_rate_hz=%.3f\n", cfg.sample_rate_hz);
+        std::printf("# samples_considered=%llu\n",
+                    static_cast<unsigned long long>(s.samples_considered));
+        std::printf("# samples_gated_out=%llu\n",
+                    static_cast<unsigned long long>(s.samples_gated_out));
+        std::printf("# gate=%s\n", cfg.require_load_gate ? "true" : "false");
+        std::printf("# cylinder_count=%u\n", static_cast<unsigned>(s.cylinder_count));
+        std::printf(
+            "cyl,has_flkc,has_fbkc,flkc_current,flkc_mean_window,flkc_min_window,"
+            "fbkc_current,events_window,delta_from_cyl_mean\n");
+        for (std::uint8_t c = 0; c < s.cylinder_count; ++c) {
+            auto const &p = s.per_cyl[c];
+            bool const has_flkc = mapping.fine_knock_learn[c] != st::log::knock::kNoPid;
+            bool const has_fbkc = mapping.feedback_knock[c] != st::log::knock::kNoPid;
+            std::printf("%u,%s,%s,%.6f,%.6f,%.6f,%.6f,%u,%.6f\n",
+                        static_cast<unsigned>(c + 1),
+                        has_flkc ? "true" : "false", has_fbkc ? "true" : "false",
+                        has_flkc ? p.current_flkc : 0.0,
+                        has_flkc ? p.mean_flkc_window : 0.0,
+                        has_flkc ? p.min_flkc_window : 0.0,
+                        has_fbkc ? p.current_fbkc : 0.0,
+                        static_cast<unsigned>(p.event_count_window),
+                        has_flkc ? p.delta_from_cyl_mean : 0.0);
+        }
         return 0;
     }
 
@@ -7805,6 +7847,7 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
     // Example: --target "0:0.82,20:0.88,40:0.93,55:1.00"
     std::optional<std::string> target_curve_arg;
     bool json_mode = false;
+    bool csv_mode = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -7913,6 +7956,8 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
             target_curve_arg = v;
         } else if (a == "--json") {
             json_mode = true;
+        } else if (a == "--csv") {
+            csv_mode = true;
         } else {
             std::fprintf(stderr, "coldstart-analyze: unknown option: %s\n", argv[i]);
             return 2;
@@ -8113,6 +8158,40 @@ int cmd_coldstart_analyze(int argc, char *argv[]) {
         }
         out.append("]}\n");
         std::fputs(out.c_str(), stdout);
+        return 0;
+    }
+
+    if (csv_mode) {
+        // CSV shape mirrors knock-snapshot --csv: #-prefixed metadata
+        // header (Pandas / Excel comment-aware) followed by the
+        // per-bin observed-lambda series. Phase counts/seconds get
+        // duplicated as comment lines because they're scalar metadata,
+        // not a per-row series. ECT span and means stay top-of-file so
+        // a `head` of the output is enough to read the run summary.
+        std::printf("# schema=subuwutuner.coldstart-analyze.v1\n");
+        std::printf("# log=%s\n", log_path->string().c_str());
+        std::printf("# coldest_ect_c=%.3f\n", s.coldest_ect_c);
+        std::printf("# warmest_ect_c=%.3f\n", s.warmest_ect_c);
+        std::printf("# samples_considered=%llu\n",
+                    static_cast<unsigned long long>(s.samples_considered));
+        std::printf("# samples_gated_out=%llu\n",
+                    static_cast<unsigned long long>(s.samples_gated_out));
+        std::printf("# mean_lambda_deviation=%.6f\n", s.mean_lambda_deviation);
+        std::printf("# target_curve_set=%s\n",
+                    methodology.target_lambda_vs_ect.points.empty() ? "false" : "true");
+        for (std::size_t p = 0; p < st::log::coldstart::kPhaseCount; ++p) {
+            std::printf("# phase[%s].samples=%u\n", phase_names[p],
+                        static_cast<unsigned>(s.phase_counts[p]));
+            std::printf("# phase[%s].seconds=%.3f\n", phase_names[p], s.phase_seconds[p]);
+        }
+        std::printf("ect_center_c,count,observed_lambda_mean,observed_lambda_min,"
+                    "observed_lambda_max,deviation_from_target\n");
+        for (auto const &b : s.ect_bins) {
+            std::printf("%.3f,%u,%.6f,%.6f,%.6f,%.6f\n", b.ect_center_c,
+                        static_cast<unsigned>(b.count), b.observed_lambda_mean,
+                        b.observed_lambda_min, b.observed_lambda_max,
+                        b.deviation_from_target);
+        }
         return 0;
     }
 

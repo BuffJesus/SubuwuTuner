@@ -404,6 +404,38 @@ TEST_CASE("CLI coldstart-analyze --json emits subuwutuner.coldstart-analyze.v1 s
     REQUIRE(stdout_contains(r, "\"target_curve_set\":"));
 }
 
+TEST_CASE("CLI knock-snapshot --csv emits comment metadata + per-cyl table",
+          "[cli][integration][knock-snapshot][csv]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const csv = fs::path{demo_project()} / ".." / "demo-knock-log.csv";
+    auto const r = st::test::cli_run(
+        "knock-snapshot --log " + st::test::quote(csv.string()) +
+        " --flkc-cols FLKC1,FLKC2,FLKC3,FLKC4 --rpm-col RPM --load-col Load --csv");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "# schema=subuwutuner.knock-snapshot.v1"));
+    REQUIRE(stdout_contains(r, "# cylinder_count="));
+    REQUIRE(stdout_contains(r, "cyl,has_flkc,has_fbkc,flkc_current"));
+}
+
+TEST_CASE("CLI coldstart-analyze --csv emits comment metadata + per-bin table",
+          "[cli][integration][coldstart-analyze][csv]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const csv = fs::path{demo_project()} / ".." / "demo-coldstart-log.csv";
+    auto const r = st::test::cli_run(
+        "coldstart-analyze --log " + st::test::quote(csv.string()) +
+        " --timestamp-col ts --ect-col ect --observed-lambda-col obs --rpm-col rpm --csv");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "# schema=subuwutuner.coldstart-analyze.v1"));
+    REQUIRE(stdout_contains(r, "# phase[PreCrank].samples="));
+    REQUIRE(stdout_contains(r, "ect_center_c,count,observed_lambda_mean"));
+}
+
 TEST_CASE("CLI ai-drift classifies the demo adaptive-history CSV",
           "[cli][integration][ai-drift]") {
     if (!can_run_cli_tests()) {
