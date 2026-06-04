@@ -52,6 +52,7 @@ void render_read_rom_modal(AppState &state) {
     if (state.show_read_rom_modal) {
         ImGui::OpenPopup("\xEE\xA2\x96  Read ROM from Car##read_rom_modal");
         state.show_read_rom_modal = false;
+        state.focus_pending_read_rom = true;
         // Pre-fill Size from the active project's pack on open. Saves
         // the user from typing "0x180000" or "0x200000" per platform.
         // Only overrides the default "0x200000" — leaves a user-edited
@@ -179,6 +180,14 @@ void render_read_rom_modal(AppState &state) {
 
     // --------- Idle: form entry ---------
     if (state.read_rom_state == AppState::ReadRomState::Idle) {
+        if (state.focus_pending_read_rom) {
+            // Lands keyboard focus on the first interactive control
+            // (adapter picker, drawn just below) so Tab + Enter work
+            // from a fresh modal open without the user mousing into
+            // the dialog first.
+            ImGui::SetKeyboardFocusHere();
+            state.focus_pending_read_rom = false;
+        }
         ImGui::TextUnformatted("Pulls a ROM dump from the connected ECU via the");
         glossary_tooltip_for(state, "ROM");
         ImGui::TextUnformatted("OBDX/J2534/native adapter. Read-only — no ECU writes.");

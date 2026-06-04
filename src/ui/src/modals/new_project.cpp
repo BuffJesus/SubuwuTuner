@@ -33,6 +33,7 @@ void render_new_project_modal(AppState &state) {
     if (state.show_new_project_modal) {
         ImGui::OpenPopup("\xEE\x9C\x90  New project##new_project_modal");
         state.show_new_project_modal = false;
+        state.focus_pending_new_project = true;
     }
     ImVec2 const center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
@@ -64,6 +65,14 @@ void render_new_project_modal(AppState &state) {
         return clicked;
     };
 
+    if (state.focus_pending_new_project) {
+        // First interactive widget — the Source ROM input — gets the
+        // initial keyboard focus on modal open. Even though the field
+        // is read-only, focusing it puts a visible caret on the
+        // canonical "start here" row; Tab cycles from there.
+        ImGui::SetKeyboardFocusHere();
+        state.focus_pending_new_project = false;
+    }
     if (path_row("Source ROM", state.np_source_path, sizeof state.np_source_path, "src",
                  "Pick the stock ROM dump (.bin). Copied into the\n"
                  "project as source.bin and never modified.")) {
@@ -229,6 +238,13 @@ void render_new_project_modal(AppState &state) {
     bool const can_create = have_source && have_def && have_dir && !load_failed;
 
     bool const want_cancel = ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false);
+    // Accessibility: Enter as default action when no text input has
+    // focus. ImGui::IsAnyItemActive() gates against re-entering Create
+    // while the user is in the middle of typing in the display-name
+    // field (Enter inside InputText commits the input, not the modal).
+    bool const want_create = !ImGui::IsAnyItemActive() &&
+                             (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+                              ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
     bool create_clicked = false;
     {
         push_primary_button_colors();
@@ -244,7 +260,7 @@ void render_new_project_modal(AppState &state) {
                 ImGui::SetTooltip("Cannot create: ROM or pack failed to "
                                   "load. See message above.");
             } else {
-                ImGui::SetTooltip("Create the project and open it.");
+                ImGui::SetTooltip("Create the project and open it.  (Enter)");
             }
         }
     }
@@ -266,7 +282,7 @@ void render_new_project_modal(AppState &state) {
         state.np_create_error.clear();
     };
 
-    if (create_clicked && can_create) {
+    if ((create_clicked || want_create) && can_create) {
         std::filesystem::path const dir{state.np_dir_path};
         std::string name{state.np_display_name};
         if (name.empty()) {

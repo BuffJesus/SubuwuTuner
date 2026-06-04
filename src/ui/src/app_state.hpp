@@ -527,6 +527,18 @@ struct AppState {
         FirstRunWizard,
     };
     HelpContext help_context{HelpContext::Unknown};
+    // Modal-open keyboard focus one-shot flags. Each modal sets its
+    // flag right after OpenPopup and consumes it inside the popup
+    // body just before its first interactive widget, calling
+    // SetKeyboardFocusHere() so Tab nav lands on a sensible widget
+    // without forcing the user to mouse-click into the dialog.
+    // Accessibility-pass starter — extends to more modals as the
+    // focus-affordance audit catches up.
+    bool focus_pending_new_project{false};
+    bool focus_pending_read_rom{false};
+    bool focus_pending_csv_import{false};
+    bool focus_pending_settings{false};
+    bool focus_pending_flash{false};
     // Within-topic find input (Ctrl+G or the secondary "Find in topic"
     // field next to the topic filter). When non-empty the content pane
     // pre-filters the active topic's body to lines containing this
