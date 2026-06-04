@@ -345,6 +345,89 @@ void render_audit_panel(AppState &state) {
                               state.audit_pinned_keys.size());
         }
     }
+    ImGui::SameLine();
+    // Bulk pin operations. The current text + chip filter defines the
+    // "visible" scope here — the time-range slider lives below the
+    // toolbar so it isn't applied at this layer (the user-visible
+    // toolbar context controls what the toolbar acts on). Disabled
+    // when the log is empty; Clear-all is further gated on whether
+    // any pins exist.
+    ImGui::BeginDisabled(state.audit_entries.empty());
+    if (ImGui::Button("Bulk pins  \xE2\x96\xBE")) { // ▾
+        ImGui::OpenPopup("##audit_bulk_pins");
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Bulk pin / unpin actions against the\n"
+                          "current text + chip filter scope.");
+    }
+    if (ImGui::BeginPopup("##audit_bulk_pins")) {
+        std::string_view const filter_view{state.audit_filter};
+        auto const passes_filter = [&](st::audit::Entry const &e) {
+            if (filter_view.empty()) {
+                return true;
+            }
+            auto const kn = st::audit::kind_name(e.kind);
+            return contains_ci(kn, filter_view) ||
+                   contains_ci(e.source, filter_view) ||
+                   contains_ci(e.description, filter_view);
+        };
+        // Snapshot counts so the menu items read like
+        // "Pin 12 visible" instead of an unqualified verb. Cheap —
+        // audit logs cap in the hundreds.
+        std::size_t visible_total = 0;
+        std::size_t visible_unpinned = 0;
+        std::size_t visible_pinned = 0;
+        for (auto const &e : state.audit_entries) {
+            if (!passes_filter(e)) {
+                continue;
+            }
+            ++visible_total;
+            if (state.audit_pinned_keys.contains(audit_pin_key(e))) {
+                ++visible_pinned;
+            } else {
+                ++visible_unpinned;
+            }
+        }
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "Pin %zu visible", visible_unpinned);
+        ImGui::BeginDisabled(visible_unpinned == 0);
+        if (ImGui::MenuItem(buf)) {
+            for (auto const &e : state.audit_entries) {
+                if (passes_filter(e)) {
+                    state.audit_pinned_keys.insert(audit_pin_key(e));
+                }
+            }
+            save_audit_pinned(state);
+        }
+        ImGui::EndDisabled();
+        std::snprintf(buf, sizeof buf, "Unpin %zu visible", visible_pinned);
+        ImGui::BeginDisabled(visible_pinned == 0);
+        if (ImGui::MenuItem(buf)) {
+            for (auto const &e : state.audit_entries) {
+                if (passes_filter(e)) {
+                    state.audit_pinned_keys.erase(audit_pin_key(e));
+                }
+            }
+            save_audit_pinned(state);
+        }
+        ImGui::EndDisabled();
+        ImGui::Separator();
+        std::snprintf(buf, sizeof buf, "Clear all pins (%zu)",
+                      state.audit_pinned_keys.size());
+        ImGui::BeginDisabled(state.audit_pinned_keys.empty());
+        if (ImGui::MenuItem(buf)) {
+            state.audit_pinned_keys.clear();
+            save_audit_pinned(state);
+        }
+        ImGui::EndDisabled();
+        text_subtle("Filter: %s",
+                    filter_view.empty() ? "(none — acts on all entries)"
+                                        : state.audit_filter);
+        text_subtle("Visible: %zu / %zu", visible_total,
+                    state.audit_entries.size());
+        ImGui::EndPopup();
+    }
 
     // Kind-filter chips. One per kind actually present in the loaded
     // entries — keeps the toolbar from showing 18 unused buttons on a
