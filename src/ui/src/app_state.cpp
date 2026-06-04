@@ -65,6 +65,7 @@ void AppState::try_open_project(std::filesystem::path const &path) {
     // user hasn't dragged anything yet. The sidebar falls back to
     // pack-default first-occurrence order in that case.
     sidebar_category_order = load_sidebar_category_order(project->dir());
+    sidebar_hidden_categories = load_sidebar_hidden_categories(project->dir());
     // Restore the prior pack-lint result so the Settings chip + welcome
     // panel surface the last verdict without forcing the user to
     // re-validate. Missing or malformed snapshot → "not validated"
@@ -124,6 +125,7 @@ void AppState::close_project() {
     last_save_iso.reset();
     active_rom_id.clear();
     sidebar_category_order.clear();
+    sidebar_hidden_categories.clear();
 }
 
 } // namespace st::ui

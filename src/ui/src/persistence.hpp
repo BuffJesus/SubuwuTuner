@@ -86,6 +86,16 @@ std::vector<std::string> load_sidebar_category_order(std::filesystem::path const
 void save_sidebar_category_order(std::filesystem::path const &project_dir,
                                  std::vector<std::string> const &order);
 
+// Sidebar per-category visibility (handoff §UX-polish backlog —
+// caps the long tail of rarely-touched categories on packs that
+// expose a huge surface). Stored at <project_dir>/sidebar_hidden.txt
+// as one category name per line. Absent file = empty vector = all
+// categories visible. Save is best-effort and runs every time the
+// user toggles a category via the sidebar context menu.
+std::vector<std::string> load_sidebar_hidden_categories(std::filesystem::path const &project_dir);
+void save_sidebar_hidden_categories(std::filesystem::path const &project_dir,
+                                    std::vector<std::string> const &hidden);
+
 // Per-project pack-validation snapshot. Settings → "Validate pack"
 // writes this so the next session can render the chip without re-
 // running the validator, and so the welcome panel can surface a

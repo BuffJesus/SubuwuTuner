@@ -15,9 +15,11 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -42,11 +44,12 @@ void render_sidebar(AppState &state) {
         return;
     }
 
-    // Right-click anywhere in the panel for ordering actions. Single
-    // entry today (reset) — disabled when there's no custom order to
-    // reset, so the affordance is always discoverable even on a fresh
-    // project. Filename ID prevents collision with per-row menus
-    // pushed deeper in the tree.
+    // Right-click anywhere in the panel for ordering / visibility
+    // actions. Disabled-but-present entries keep the affordance
+    // discoverable on a fresh project. Filename ID prevents collision
+    // with per-header menus pushed deeper in the tree.
+    std::optional<std::string> requested_unhide;
+    bool requested_unhide_all = false;
     if (ImGui::BeginPopupContextWindow("##tables_panel_ctx",
                                        ImGuiPopupFlags_MouseButtonRight |
                                            ImGuiPopupFlags_NoOpenOverItems)) {
@@ -65,7 +68,41 @@ void render_sidebar(AppState &state) {
         if (!has_custom_order) {
             text_subtle("(no custom order saved)");
         }
+        // Hidden-category submenu. Per-header "Hide" is the way to
+        // suppress a category; this panel-level menu is where the user
+        // surfaces what's hidden + brings it back. Disabled when
+        // nothing is hidden so the entry stays visible-as-affordance.
+        ImGui::Separator();
+        bool const has_hidden = !state.sidebar_hidden_categories.empty();
+        ImGui::BeginDisabled(!has_hidden);
+        if (ImGui::BeginMenu("Show hidden category")) {
+            for (auto const &cat : state.sidebar_hidden_categories) {
+                if (ImGui::MenuItem(cat.c_str())) {
+                    requested_unhide = cat;
+                }
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::MenuItem("Show all categories")) {
+            requested_unhide_all = true;
+        }
+        ImGui::EndDisabled();
+        if (!has_hidden) {
+            text_subtle("(no hidden categories)");
+        }
         ImGui::EndPopup();
+    }
+    // Apply hidden-set mutations from the panel menu before the
+    // render loop reads sidebar_hidden_categories.
+    if (requested_unhide.has_value()) {
+        auto &h = state.sidebar_hidden_categories;
+        h.erase(std::remove(h.begin(), h.end(), *requested_unhide), h.end());
+        save_sidebar_hidden_categories(state.project->dir(), h);
+    }
+    if (requested_unhide_all) {
+        state.sidebar_hidden_categories.clear();
+        save_sidebar_hidden_categories(state.project->dir(),
+                                       state.sidebar_hidden_categories);
     }
 
     auto const &def = state.project->definition();
@@ -261,8 +298,28 @@ void render_sidebar(AppState &state) {
     // are positions in the (already-reordered) `groups` vector.
     int drop_src_index = -1;
     int drop_dst_index = -1;
+    // Per-header context-menu state. Captured + applied post-loop for
+    // the same reason as drag-drop — mutating sidebar_hidden_categories
+    // while iterating groups would shift indices mid-frame.
+    std::optional<std::string> requested_hide;
+    auto const is_hidden = [&](std::string_view cat) {
+        for (auto const &h : state.sidebar_hidden_categories) {
+            if (std::string_view{h} == cat)
+                return true;
+        }
+        return false;
+    };
+    std::size_t hidden_visible_in_pack = 0; // how many hidden cats actually exist in this pack
     for (std::size_t gi = 0; gi < groups.size(); ++gi) {
         auto const &g = groups[gi];
+        // Hidden categories never render. Active filter doesn't override
+        // hiding — if the user opted out of seeing the category, a
+        // substring match for some other table shouldn't drag the
+        // suppressed category back into view.
+        if (is_hidden(g.name)) {
+            ++hidden_visible_in_pack;
+            continue;
+        }
         // Count matches in this group up-front so the header line can
         // report it AND so we can skip an entirely-filtered-out group
         // (don't render an empty TreeNode that just clutters the panel).
@@ -314,6 +371,22 @@ void render_sidebar(AppState &state) {
         ImGuiTreeNodeFlags const tn_flags =
             ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
         bool const opened = ImGui::TreeNodeEx(tn_label, tn_flags);
+        // Per-header context menu — right-click a category header for
+        // the "Hide" action. Uses BeginPopupContextItem on the TreeNode
+        // so the panel-level menu (which has NoOpenOverItems) doesn't
+        // collide. Sole entry; one-action menus are still worth the
+        // popup over a custom modifier because right-click is the
+        // conventional Hide gesture.
+        if (ImGui::BeginPopupContextItem()) {
+            char buf[160];
+            std::snprintf(buf, sizeof buf, "Hide \"%.*s\"",
+                          static_cast<int>(g.name.size()), g.name.data());
+            if (ImGui::MenuItem(buf)) {
+                requested_hide = std::string{g.name};
+            }
+            text_subtle("Reopen from the panel right-click menu");
+            ImGui::EndPopup();
+        }
         // Drag the header to reorder; drop another header on it to
         // place the dragged group before this one. Payload is the
         // source's index into `groups` so the post-loop apply can
@@ -376,6 +449,26 @@ void render_sidebar(AppState &state) {
         }
         save_sidebar_category_order(state.project->dir(),
                                     state.sidebar_category_order);
+    }
+    // Apply per-header Hide selection now that the tree is drawn —
+    // the next frame walks the updated hidden set and suppresses the
+    // category cleanly. Same defer-to-post-loop pattern as drag-drop.
+    if (requested_hide.has_value()) {
+        auto &h = state.sidebar_hidden_categories;
+        if (std::find(h.begin(), h.end(), *requested_hide) == h.end()) {
+            h.push_back(*requested_hide);
+        }
+        save_sidebar_hidden_categories(state.project->dir(), h);
+    }
+    // Footer hint when categories are hidden — without it, a user
+    // who returned to a project they configured weeks ago wouldn't
+    // know why some categories appear missing. Right-click the
+    // panel to unhide.
+    if (hidden_visible_in_pack > 0) {
+        ImGui::Separator();
+        text_subtle("%zu categor%s hidden  \xC2\xB7  right-click panel to restore",
+                    hidden_visible_in_pack,
+                    hidden_visible_in_pack == 1 ? "y" : "ies");
     }
     ImGui::End();
 }

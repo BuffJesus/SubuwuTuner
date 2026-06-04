@@ -514,6 +514,14 @@ struct AppState {
     // <project>/sidebar_order.txt on project open, saved on drag.
     // Empty list = pack default (no user customization yet).
     std::vector<std::string> sidebar_category_order;
+    // Sidebar per-category hidden set. Categories whose name is in
+    // this vector skip rendering entirely (filter-aware: a filtered
+    // search still skips them, since the user opted out of seeing
+    // them). Toggled via the sidebar's per-header right-click menu;
+    // persisted to <project>/sidebar_hidden.txt; cleared on close.
+    // Order doesn't matter (treated as a set) but the underlying
+    // type is vector for cheap cross-frame iteration.
+    std::vector<std::string> sidebar_hidden_categories;
     // Parsed glossary terms (from docs/10-glossary.md). Populated
     // lazily on first help-modal open OR first glossary_tooltip_for
     // hover. glossary_loaded gates the load; using a flag instead of
