@@ -329,6 +329,51 @@ TEST_CASE("CLI changelog show prints [Unreleased] by default",
     REQUIRE(stdout_contains(r, "[Unreleased]"));
 }
 
+TEST_CASE("CLI pack-lint exits 0 on the demo pack",
+          "[cli][integration][pack-lint]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const pack = fs::path{demo_project()} / ".." / "demo-pack" / "pack.toml";
+    auto const r = st::test::cli_run("pack-lint " + st::test::quote(pack.string()));
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "Validation: OK"));
+}
+
+TEST_CASE("CLI pack-lint --json emits subuwutuner.pack-lint.v1 schema",
+          "[cli][integration][pack-lint][json]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const pack = fs::path{demo_project()} / ".." / "demo-pack" / "pack.toml";
+    auto const r = st::test::cli_run("pack-lint --json " + st::test::quote(pack.string()));
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "subuwutuner.pack-lint.v1"));
+    REQUIRE(stdout_contains(r, "\"ok\":true"));
+}
+
+TEST_CASE("CLI pack-lint exits 1 when path doesn't exist",
+          "[cli][integration][pack-lint][error]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run("pack-lint /tmp/does_not_exist_pack.toml");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 1);
+}
+
+TEST_CASE("CLI pack-lint exits 2 on missing arg",
+          "[cli][integration][pack-lint][error]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run("pack-lint");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
 TEST_CASE("CLI project-info --audit-summary surfaces audit bucket counts",
           "[cli][integration][project-info][audit-summary]") {
     if (!can_run_cli_tests()) {

@@ -311,6 +311,10 @@ constexpr std::string_view kUsage =
     "                            Print metadata + counts for a definition pack.\n"
     "                            --json emits a one-line subuwutuner.pack-info.v1\n"
     "                            object for CI scripts.\n"
+    "    pack-lint [--json] <DEF>\n"
+    "                            Load + Definition::validate() a pack and report\n"
+    "                            the result. Exit 0 on clean, 1 on validation\n"
+    "                            failure, 2 on bad CLI usage. --json for CI.\n"
     "    table-list <DEF> [--category C] [--emissions] [--safety-critical]\n"
     "                            List tables in a pack with optional filters.\n"
     "    primitive-list <DEF> [--type int|float|bool]\n"
@@ -1783,6 +1787,88 @@ int cmd_pack_info(int argc, char *argv[]) {
     }
     std::printf("\nValidation: OK\n");
     return 0;
+}
+
+// `pack-lint` — load a pack and report the result of Definition::validate()
+// without printing the rest of the pack-info dump. Pack authors get a
+// fast "is my pack well-formed?" answer that's also script-friendly.
+//
+// Exit codes:
+//   0  pack loaded AND validate() returned ok()
+//   1  pack failed to load OR validate() returned an error
+//   2  bad CLI usage (missing path / unknown option)
+//
+// --json emits a one-line subuwutuner.pack-lint.v1 record so CI can
+// gate without parsing prose.
+int cmd_pack_lint(int argc, char *argv[]) {
+    if (argc < 1) {
+        std::fputs("pack-lint: missing path\n", stderr);
+        std::fputs("Usage: subuwutuner-cli pack-lint [--json] <DEF>\n", stderr);
+        return 2;
+    }
+    bool json_mode = false;
+    std::filesystem::path path;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--json") {
+            json_mode = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "pack-lint: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (path.empty()) {
+            path = std::filesystem::path{argv[i]};
+        } else {
+            std::fprintf(stderr, "pack-lint: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    if (path.empty()) {
+        std::fputs("pack-lint: missing path\n", stderr);
+        return 2;
+    }
+
+    auto const resolved = resolve_def_path(path);
+    auto const def = st::Definition::from_file(resolved);
+    if (!def.has_value()) {
+        if (json_mode) {
+            std::string out{"{\"schema\":\"subuwutuner.pack-lint.v1\",\"path\":"};
+            json_escape(out, path.string());
+            out.append(",\"ok\":false,\"stage\":\"load\",\"error\":");
+            json_escape(out, def.error().to_string());
+            out.append("}\n");
+            std::fputs(out.c_str(), stdout);
+            return 1;
+        }
+        return print_def_load_error("pack-lint", path, def.error());
+    }
+    auto const v = def->validate();
+    if (json_mode) {
+        std::string out{"{\"schema\":\"subuwutuner.pack-lint.v1\",\"path\":"};
+        json_escape(out, path.string());
+        out.append(",\"id\":");
+        json_escape(out, def->pack().id);
+        out.append(",\"tables\":").append(std::to_string(def->tables().size()));
+        out.append(",\"ok\":").append(v.has_value() ? "true" : "false");
+        if (!v.has_value()) {
+            out.append(",\"error\":");
+            json_escape(out, v.error().to_string());
+        }
+        out.append("}\n");
+        std::fputs(out.c_str(), stdout);
+        return v.has_value() ? 0 : 1;
+    }
+    std::printf("Pack: %s\n", def->pack().id.c_str());
+    std::printf("Path: %s\n", path.string().c_str());
+    std::printf("Tables: %zu  Scalings: %zu  PIDs: %zu  Hooks: %zu  Primitives: %zu\n",
+                def->tables().size(), def->scalings().size(), def->pids().size(),
+                def->hooks().size(), def->primitives().size());
+    if (v.has_value()) {
+        std::printf("\nValidation: OK\n");
+        return 0;
+    }
+    std::printf("\nValidation: FAIL\n");
+    std::printf("%s\n", v.error().to_string().c_str());
+    return 1;
 }
 
 namespace {
@@ -3638,7 +3724,7 @@ int cmd_completion(int argc, char *argv[]) {
         "project-set-active-rom",
         "project-history", "project-flash", "project-diff",
         "project-autotune-maf", "project-autotune-knock-pull",
-        "pack-info", "primitive-list", "hook-list", "pack-dtcs",
+        "pack-info", "pack-lint", "primitive-list", "hook-list", "pack-dtcs",
         "stats", "diff", "diff-load", "audit", "profile", "config",
         "changelog", "log", "ssm-a8-poll", "doctor", "transport-list",
         "uds-test", "feature-graph",
@@ -13654,6 +13740,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "pack-info") {
         return cmd_pack_info(argc - 2, argv + 2);
+    }
+    if (cmd == "pack-lint") {
+        return cmd_pack_lint(argc - 2, argv + 2);
     }
     if (cmd == "table-list") {
         return cmd_table_list(argc - 2, argv + 2);
