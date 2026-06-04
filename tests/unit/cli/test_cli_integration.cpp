@@ -436,6 +436,40 @@ TEST_CASE("CLI coldstart-analyze --csv emits comment metadata + per-bin table",
     REQUIRE(stdout_contains(r, "ect_center_c,count,observed_lambda_mean"));
 }
 
+TEST_CASE("CLI dump-axis --json emits subuwutuner.dump-axis.v1 schema",
+          "[cli][integration][dump-axis][json]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const pack = fs::path{demo_project()} / ".." / "demo-pack" / "pack.toml";
+    auto const rom = fs::path{demo_project()} / "source.bin";
+    auto const r = st::test::cli_run(
+        "dump-axis --def " + st::test::quote(pack.string()) +
+        " --axis rpm_axis --json " +
+        st::test::quote(rom.string()));
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "subuwutuner.dump-axis.v1"));
+    REQUIRE(stdout_contains(r, "\"axis\":{\"id\":\"rpm_axis\""));
+    REQUIRE(stdout_contains(r, "\"values\":["));
+    REQUIRE(stdout_contains(r, "\"monotonic\":\"increasing\""));
+}
+
+TEST_CASE("CLI dump-axis rejects --json + --csv combo",
+          "[cli][integration][dump-axis][json][csv]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const pack = fs::path{demo_project()} / ".." / "demo-pack" / "pack.toml";
+    auto const rom = fs::path{demo_project()} / "source.bin";
+    auto const r = st::test::cli_run(
+        "dump-axis --def " + st::test::quote(pack.string()) +
+        " --axis rpm_axis --json --csv " +
+        st::test::quote(rom.string()));
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
 TEST_CASE("CLI dump-table --json emits subuwutuner.dump-table.v1 schema",
           "[cli][integration][dump-table][json]") {
     if (!can_run_cli_tests()) {

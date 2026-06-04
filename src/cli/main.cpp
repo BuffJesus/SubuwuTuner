@@ -173,7 +173,7 @@ constexpr std::string_view kUsage =
     "                            subuwutuner.rom-info.v1 object instead (skips the\n"
     "                            ASCII listing — text mode is for exploratory\n"
     "                            browsing, JSON for CI scripts).\n"
-    "    dump-axis --def <pack.toml> --axis <id> [--csv] <FILE>\n"
+    "    dump-axis --def <pack.toml> --axis <id> [--csv|--json] <FILE>\n"
     "                            Read the named axis from the ROM via the pack and\n"
     "                            print its scaled values, one per line.\n"
     "    dump-table --def <pack.toml> --table <id> [--csv|--json] <FILE>\n"
@@ -1138,6 +1138,7 @@ int cmd_dump_axis(int argc, char *argv[]) {
     std::optional<std::string> axis_id;
     std::optional<std::filesystem::path> rom_path;
     bool csv = false;
+    bool json_out = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -1155,6 +1156,8 @@ int cmd_dump_axis(int argc, char *argv[]) {
             axis_id = std::string{argv[++i]};
         } else if (a == "--csv") {
             csv = true;
+        } else if (a == "--json") {
+            json_out = true;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "dump-axis: unknown option: %s\n", argv[i]);
             return 2;
@@ -1166,6 +1169,11 @@ int cmd_dump_axis(int argc, char *argv[]) {
         }
     }
 
+    if (csv && json_out) {
+        std::fputs("dump-axis: --json and --csv are mutually exclusive\n", stderr);
+        return 2;
+    }
+
     if (!def_path.has_value() || !axis_id.has_value() || !rom_path.has_value()) {
         std::fputs("dump-axis: missing required arguments:", stderr);
         if (!def_path.has_value())
@@ -1175,7 +1183,8 @@ int cmd_dump_axis(int argc, char *argv[]) {
         if (!rom_path.has_value())
             std::fputs(" <FILE>", stderr);
         std::fputs(
-            "\nUsage: subuwutuner-cli dump-axis --def <pack.toml> --axis <id> [--csv] <FILE>\n",
+            "\nUsage: subuwutuner-cli dump-axis --def <pack.toml> --axis <id> "
+            "[--csv|--json] <FILE>\n",
             stderr);
         return 2;
     }
@@ -1210,6 +1219,49 @@ int cmd_dump_axis(int argc, char *argv[]) {
     auto const *scaling = def->find_scaling(axis->scaling);
     auto const unit = (scaling != nullptr ? scaling->unit : axis->unit);
     auto const precision = scaling != nullptr ? scaling->precision : 0;
+
+    if (json_out) {
+        // subuwutuner.dump-axis.v1 — axis header + values array.
+        // Numbers emit at scaling precision to match the engineering
+        // values consumers see in the GUI / dump-table grid.
+        std::string out{"{\"schema\":\"subuwutuner.dump-axis.v1\",\"axis\":{\"id\":"};
+        json_escape(out, axis->id);
+        out.append(",\"unit\":");
+        json_escape(out, unit);
+        char buf[160];
+        std::snprintf(buf, sizeof buf,
+                      ",\"precision\":%d,\"length\":%zu",
+                      precision, values->size());
+        out.append(buf);
+        // Monotonicity check mirrors the text-mode summary so JSON
+        // consumers can gate on the same "is this axis usable for
+        // lookup?" predicate the human-readable summary surfaces.
+        if (values->size() >= 2) {
+            bool strictly_increasing = true;
+            bool strictly_decreasing = true;
+            for (std::size_t i = 1; i < values->size(); ++i) {
+                if ((*values)[i] <= (*values)[i - 1])
+                    strictly_increasing = false;
+                if ((*values)[i] >= (*values)[i - 1])
+                    strictly_decreasing = false;
+            }
+            char const *mono = strictly_increasing   ? "increasing"
+                               : strictly_decreasing ? "decreasing"
+                                                     : "not-monotonic";
+            out.append(",\"monotonic\":\"");
+            out.append(mono);
+            out.append("\"");
+        }
+        out.append("},\"values\":[");
+        for (std::size_t i = 0; i < values->size(); ++i) {
+            if (i > 0) out.push_back(',');
+            std::snprintf(buf, sizeof buf, "%.*f", precision, (*values)[i]);
+            out.append(buf);
+        }
+        out.append("]}\n");
+        std::fputs(out.c_str(), stdout);
+        return 0;
+    }
 
     if (csv) {
         for (std::size_t i = 0; i < values->size(); ++i) {
