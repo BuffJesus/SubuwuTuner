@@ -127,6 +127,39 @@ TEST_CASE("BatteryVoltageOk tiers warn/block correctly",
     }
 }
 
+TEST_CASE("BatteryVoltageOk threshold boundaries — exact-threshold voltage is OK",
+          "[policy][preflight][battery][boundary]") {
+    // The 2026-06-04 mutation lane found that swapping `<` to `<=` on
+    // either threshold survived because no test exercised a voltage
+    // exactly equal to block_below or warn_below. Pin both: at the
+    // exact block threshold the voltage is OK (the predicate is
+    // strictly less-than); the warn threshold is the same.
+    auto ctx = happy_path_ctx();
+
+    // Voltage exactly at the block threshold — NOT a blocker.
+    // Mutating `v < block_below` to `v <= block_below` would
+    // erroneously block at the exact threshold.
+    ctx.battery_voltage_v = 11.5;
+    {
+        auto const r = Pipeline{}.add(make_battery_voltage_ok()).run(ctx);
+        REQUIRE(r.ok());
+        REQUIRE_FALSE(has_blocker_in(r, "battery_voltage"));
+        // Still raises a warning since 11.5 is below the comfortable
+        // 12.0 threshold — that's the existing semantic.
+        REQUIRE(has_warning_in(r, "battery_voltage"));
+    }
+
+    // Voltage exactly at the warn threshold — NOT a warning either.
+    // Mutating `v < warn_below` to `v <= warn_below` would
+    // erroneously warn at the exact threshold.
+    ctx.battery_voltage_v = 12.0;
+    {
+        auto const r = Pipeline{}.add(make_battery_voltage_ok()).run(ctx);
+        REQUIRE(r.ok());
+        REQUIRE(r.items().empty());
+    }
+}
+
 TEST_CASE("IgnitionOn blocks when reported off", "[policy][preflight][ignition]") {
     auto ctx = happy_path_ctx();
     ctx.ignition_on = false;
