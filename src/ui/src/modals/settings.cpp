@@ -11,6 +11,7 @@
 
 #include "app_state.hpp"
 #include "persistence.hpp" // save_settings
+#include "theme.hpp"       // apply_theme, accent_for
 #include "widgets/widgets.hpp"
 
 #include "st/config.hpp"
@@ -167,6 +168,74 @@ void render_settings_modal(AppState &state) {
             "--output is given. Must be writable by the running user\n"
             "(not Program Files).");
     }
+
+    ImGui::Dummy(ImVec2(0.0f, kSpaceM));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+
+    // -------- Theme picker with live preview swatch ------------------
+    // Closes the last item in the 2026-06-02 UX-polish backlog. The
+    // theme also persists via the View → Theme menu + the first-run
+    // wizard; this surface adds a side-by-side preview so the user
+    // can see the accent / chip palette under each theme before
+    // committing. Clicking Dark / Light applies the theme immediately
+    // (apply_theme already mutates the live ImGui style); the Settings
+    // Save button flushes settings.txt to disk.
+    ImGui::TextUnformatted("Theme");
+    bool const is_dark_now = state.settings.theme == Theme::Dark;
+    if (ImGui::RadioButton("Dark##settings_theme_dark", is_dark_now)) {
+        state.settings.theme = Theme::Dark;
+        apply_theme(state.settings.theme);
+        save_settings(state.settings);
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Light##settings_theme_light",
+                           state.settings.theme == Theme::Light)) {
+        state.settings.theme = Theme::Light;
+        apply_theme(state.settings.theme);
+        save_settings(state.settings);
+    }
+    // Side-by-side preview swatches. Each row shows the theme's name,
+    // accent triple (base / hover / active), and the chip palette
+    // colors a tuner sees most often — accent / warn / caution /
+    // danger / ok / muted. Renders both themes regardless of the
+    // active selection so the user can compare without flipping.
+    auto const draw_swatch = [](ImVec4 const &c) {
+        constexpr float kSwatchW = 22.0f;
+        constexpr float kSwatchH = 16.0f;
+        ImVec2 const p = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            p, ImVec2(p.x + kSwatchW, p.y + kSwatchH),
+            ImGui::ColorConvertFloat4ToU32(c), 3.0f);
+        ImGui::Dummy(ImVec2(kSwatchW, kSwatchH));
+    };
+    auto const draw_theme_row = [&](Theme t, char const *label) {
+        // Mark the active theme so the user can see at a glance which
+        // row is rendering the current style.
+        bool const active = state.settings.theme == t;
+        if (active) {
+            ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_accent());
+        }
+        ImGui::Text("%s%s", active ? "\xE2\x96\xB6 " : "  ", label);
+        if (active) {
+            ImGui::PopStyleColor();
+        }
+        auto const acc = accent_for(t);
+        ImGui::SameLine();
+        draw_swatch(acc.base);
+        ImGui::SameLine();
+        draw_swatch(acc.hover);
+        ImGui::SameLine();
+        draw_swatch(acc.active);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Accent triple — base / hover / active.\n"
+                              "Used for primary-action buttons (Save, Apply,\n"
+                              "Compare) + slider grabs + active header rows.");
+        }
+    };
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+    draw_theme_row(Theme::Dark, "Dark ");
+    draw_theme_row(Theme::Light, "Light");
 
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
     ImGui::Separator();
