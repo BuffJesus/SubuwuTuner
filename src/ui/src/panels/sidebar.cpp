@@ -8,6 +8,7 @@
 #include "panels/panels.hpp"
 
 #include "app_state.hpp"
+#include "persistence.hpp" // save_sidebar_category_order
 #include "widgets/widgets.hpp"
 
 #include "st/defs.hpp"
@@ -127,6 +128,35 @@ void render_sidebar(AppState &state) {
         find_or_make(cat).indices.push_back(i);
     }
 
+    // Apply the persisted user ordering on top of the first-occurrence
+    // order. Categories that appear in sidebar_category_order get sorted
+    // to the front in that sequence; the rest follow in their pack
+    // discovery order. Stable for groups whose category name isn't in
+    // the ordering vector — they keep their relative position.
+    if (!state.sidebar_category_order.empty()) {
+        std::vector<Group> reordered;
+        reordered.reserve(groups.size());
+        // First pass: emit groups in the user's preferred order.
+        for (auto const &want : state.sidebar_category_order) {
+            for (std::size_t gi = 0; gi < groups.size(); ++gi) {
+                if (std::string_view{want} == groups[gi].name) {
+                    reordered.push_back(std::move(groups[gi]));
+                    groups[gi].name = {}; // mark consumed
+                    break;
+                }
+            }
+        }
+        // Second pass: any group whose name still has content (i.e.
+        // wasn't in sidebar_category_order) lands in its discovery
+        // position relative to the leftover set.
+        for (auto &g : groups) {
+            if (!g.name.empty()) {
+                reordered.push_back(std::move(g));
+            }
+        }
+        groups = std::move(reordered);
+    }
+
     auto const table_matches = [&](st::Table const &t) {
         return filter.empty() || icontains(t.name, filter) || icontains(t.id, filter);
     };
@@ -198,7 +228,13 @@ void render_sidebar(AppState &state) {
         ImGui::PopID();
     };
 
-    for (auto const &g : groups) {
+    // Drag-and-drop state — captured here so the loop body can post a
+    // requested reorder without mutating `groups` mid-iteration. Indices
+    // are positions in the (already-reordered) `groups` vector.
+    int drop_src_index = -1;
+    int drop_dst_index = -1;
+    for (std::size_t gi = 0; gi < groups.size(); ++gi) {
+        auto const &g = groups[gi];
         // Count matches in this group up-front so the header line can
         // report it AND so we can skip an entirely-filtered-out group
         // (don't render an empty TreeNode that just clutters the panel).
@@ -250,6 +286,25 @@ void render_sidebar(AppState &state) {
         ImGuiTreeNodeFlags const tn_flags =
             ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
         bool const opened = ImGui::TreeNodeEx(tn_label, tn_flags);
+        // Drag the header to reorder; drop another header on it to
+        // place the dragged group before this one. Payload is the
+        // source's index into `groups` so the post-loop apply can
+        // rotate the vector + persist the new ordering.
+        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoDisableHover)) {
+            int const src_idx = static_cast<int>(gi);
+            ImGui::SetDragDropPayload("SUBUWU_SIDEBAR_CATEGORY", &src_idx, sizeof src_idx);
+            ImGui::TextUnformatted(tn_label);
+            ImGui::EndDragDropSource();
+        }
+        if (ImGui::BeginDragDropTarget()) {
+            if (auto const *payload =
+                    ImGui::AcceptDragDropPayload("SUBUWU_SIDEBAR_CATEGORY")) {
+                int const src_idx = *static_cast<int const *>(payload->Data);
+                drop_src_index = src_idx;
+                drop_dst_index = static_cast<int>(gi);
+            }
+            ImGui::EndDragDropTarget();
+        }
         // Glossary hover on the category header — many category strings
         // (Table, Datalog, DTC, Flash, Scaling) match glossary entries
         // and the user has the header right there to hover.
@@ -263,6 +318,36 @@ void render_sidebar(AppState &state) {
             }
             ImGui::TreePop();
         }
+    }
+    // Apply the drag-drop reorder once the loop finishes. Mutating
+    // `groups` mid-frame is fine (it's a local), but the persistence
+    // side mutates AppState + writes disk — defer to post-loop so the
+    // tree's rendering completes consistently.
+    if (drop_src_index >= 0 && drop_dst_index >= 0 &&
+        drop_src_index != drop_dst_index &&
+        drop_src_index < static_cast<int>(groups.size()) &&
+        drop_dst_index < static_cast<int>(groups.size()) &&
+        state.project.has_value()) {
+        // Rebuild the canonical ordering vector from the post-drop
+        // groups list. Capturing the full order (not just the moved
+        // category) means subsequent loads + fallbacks work uniformly
+        // for any later pack that adds new categories.
+        Group moved = std::move(groups[static_cast<std::size_t>(drop_src_index)]);
+        groups.erase(groups.begin() + drop_src_index);
+        int insert_at = drop_dst_index;
+        if (drop_src_index < drop_dst_index) {
+            // Erasing shifted target left by one; preserve the user's
+            // intent ("drop before category X") under that shift.
+            insert_at = drop_dst_index - 1;
+        }
+        groups.insert(groups.begin() + insert_at, std::move(moved));
+        state.sidebar_category_order.clear();
+        state.sidebar_category_order.reserve(groups.size());
+        for (auto const &g2 : groups) {
+            state.sidebar_category_order.emplace_back(g2.name);
+        }
+        save_sidebar_category_order(state.project->dir(),
+                                    state.sidebar_category_order);
     }
     ImGui::End();
 }

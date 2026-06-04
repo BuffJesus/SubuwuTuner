@@ -61,6 +61,10 @@ void AppState::try_open_project(std::filesystem::path const &path) {
                   std::string{"Loaded "} + path.filename().string());
     push_recent(recents, path);
     save_recents(recents);
+    // Load any persisted sidebar category ordering — empty when the
+    // user hasn't dragged anything yet. The sidebar falls back to
+    // pack-default first-occurrence order in that case.
+    sidebar_category_order = load_sidebar_category_order(project->dir());
     auto const &tables = project->definition().tables();
     if (!tables.empty()) {
         select_table(tables.front().id);
@@ -100,6 +104,7 @@ void AppState::close_project() {
     dirty = false;
     last_save_iso.reset();
     active_rom_id.clear();
+    sidebar_category_order.clear();
 }
 
 } // namespace st::ui

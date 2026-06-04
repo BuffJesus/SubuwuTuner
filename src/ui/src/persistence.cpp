@@ -425,4 +425,34 @@ void push_recent(std::vector<RecentEntry> &recents, std::filesystem::path const 
     }
 }
 
+std::vector<std::string> load_sidebar_category_order(std::filesystem::path const &project_dir) {
+    std::vector<std::string> out;
+    auto const path = project_dir / "sidebar_order.txt";
+    std::ifstream in{path};
+    if (!in)
+        return out;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line.empty()) {
+            continue;
+        }
+        out.push_back(std::move(line));
+    }
+    return out;
+}
+
+void save_sidebar_category_order(std::filesystem::path const &project_dir,
+                                 std::vector<std::string> const &order) {
+    auto const path = project_dir / "sidebar_order.txt";
+    std::ofstream out{path, std::ios::trunc};
+    if (!out)
+        return;
+    for (auto const &cat : order) {
+        out << cat << '\n';
+    }
+}
+
 } // namespace st::ui

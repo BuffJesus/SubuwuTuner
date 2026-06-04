@@ -77,6 +77,15 @@ std::vector<RecentEntry> load_recents();
 void save_recents(std::vector<RecentEntry> const &recents);
 void push_recent(std::vector<RecentEntry> &recents, std::filesystem::path const &path);
 
+// Sidebar category-ordering persistence (handoff §UX-polish backlog).
+// Stored at <project_dir>/sidebar_order.txt as one category name per
+// line. Absent file = empty vector = pack default. Save is best-
+// effort; disk failure loses the cross-session preference but never
+// the live runtime ordering.
+std::vector<std::string> load_sidebar_category_order(std::filesystem::path const &project_dir);
+void save_sidebar_category_order(std::filesystem::path const &project_dir,
+                                 std::vector<std::string> const &order);
+
 Settings load_settings();
 void save_settings(Settings const &s);
 

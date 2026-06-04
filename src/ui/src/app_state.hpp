@@ -499,6 +499,14 @@ struct AppState {
     // the user accepts that find-mode is a flat line view, not a
     // structural one. Empty → normal rendering.
     char help_body_find[128]{};
+
+    // Sidebar category ordering (handoff §UX-polish-backlog
+    // "drag-to-reorder categories"). User-pinned order; categories
+    // present here render in this sequence, then unknown ones fall back
+    // to first-occurrence from the pack. Loaded from
+    // <project>/sidebar_order.txt on project open, saved on drag.
+    // Empty list = pack default (no user customization yet).
+    std::vector<std::string> sidebar_category_order;
     // Parsed glossary terms (from docs/10-glossary.md). Populated
     // lazily on first help-modal open OR first glossary_tooltip_for
     // hover. glossary_loaded gates the load; using a flag instead of
