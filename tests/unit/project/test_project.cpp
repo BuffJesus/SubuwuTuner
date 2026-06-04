@@ -1110,8 +1110,8 @@ TEST_CASE("Project::active_rom_mut is nullptr for source, &slot otherwise",
 TEST_CASE("Per-additional history round-trips through save_all + open",
           "[project][active_rom][per_rom_history][persist]") {
     // The end-to-end persistence shape: edit an additional ROM, save_all
-    // writes <path_rel> + <id>.edits.toml, reopen restores both. Edits
-    // on working don't leak into the additional, and vice versa.
+    // writes <path_rel> + histories/<id>.toml, reopen restores both.
+    // Edits on working don't leak into the additional, and vice versa.
     TempDir td;
     auto const pack_dir = make_pack(td.path / "pack");
     auto const rom_path = td.path / "stock.bin";
@@ -1142,6 +1142,13 @@ TEST_CASE("Per-additional history round-trips through save_all + open",
         REQUIRE(p->active_rom_mut()->write_u8(8, 0xBB).has_value());
 
         REQUIRE(p->save_all().has_value());
+
+        // On-disk shape: per-ROM history lives under histories/<id>.toml,
+        // not the legacy root-level <id>.edits.toml.
+        REQUIRE(std::filesystem::exists(proj_dir / "histories" / "tune-rt.toml"));
+        REQUIRE_FALSE(std::filesystem::exists(proj_dir / "tune-rt.edits.toml"));
+        // Working's history keeps the v1 layout at the project root.
+        REQUIRE(std::filesystem::exists(proj_dir / "edits.toml"));
     }
 
     // Reopen and verify both histories survived.
@@ -1154,6 +1161,129 @@ TEST_CASE("Per-additional history round-trips through save_all + open",
     REQUIRE(p2->additional_roms()[0].history.records()[0].description ==
             "tune-rt flip @8");
     REQUIRE(p2->additional_roms()[0].rom.data()[8] == 0xBB);
+}
+
+TEST_CASE("Project::open reads legacy <id>.edits.toml when histories/ subdir absent",
+          "[project][active_rom][per_rom_history][persist][legacy]") {
+    // Pre-2026-06-04 projects stored per-ROM history at
+    // <project>/<id>.edits.toml. The loader still reads that path so
+    // existing on-disk projects open without manual migration.
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "legacy.stune";
+
+    {
+        auto p = st::Project::create(proj_dir, rom_path, pack_dir, "legacy");
+        REQUIRE(p.has_value());
+
+        st::Project::AdditionalRom entry;
+        entry.id = "old-tune";
+        entry.path_rel = "old-tune.bin";
+        entry.rom = st::Rom::from_bytes(make_rom_bytes());
+        REQUIRE(p->add_additional_rom(std::move(entry)).has_value());
+
+        // Write the ROM bytes via save_metadata + manual byte dump so
+        // we don't go through save_all (which would emit the new-path
+        // history). The legacy file is what we're proving the loader
+        // still accepts.
+        REQUIRE(p->save_metadata().has_value());
+        write_bytes(proj_dir / "old-tune.bin", make_rom_bytes());
+    }
+
+    // Hand-write a legacy history file at the project root in the
+    // pre-2026-06-04 location.
+    write_text(proj_dir / "old-tune.edits.toml", R"toml(
+schema_version = 2
+cursor = 1
+
+[[edit]]
+description = "legacy edit"
+[[edit.byte_changes]]
+address = 16
+before  = 0
+after   = 42
+)toml");
+
+    auto p2 = st::Project::open(proj_dir);
+    REQUIRE(p2.has_value());
+    REQUIRE(p2->additional_roms().size() == 1);
+    REQUIRE(p2->additional_roms()[0].history.size() == 1);
+    REQUIRE(p2->additional_roms()[0].history.records()[0].description ==
+            "legacy edit");
+}
+
+TEST_CASE("Saving an additional ROM migrates legacy edits.toml under histories/",
+          "[project][active_rom][per_rom_history][persist][legacy]") {
+    // The migration semantic: when save_active_rom writes to the new
+    // path, any pre-existing legacy file at the root is removed so
+    // both don't coexist (the new file wins on read; leaving the old
+    // one creates a stale-clutter trap).
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "migrate.stune";
+
+    {
+        auto p = st::Project::create(proj_dir, rom_path, pack_dir, "migrate");
+        REQUIRE(p.has_value());
+
+        st::Project::AdditionalRom entry;
+        entry.id = "mig";
+        entry.path_rel = "mig.bin";
+        entry.rom = st::Rom::from_bytes(make_rom_bytes());
+        REQUIRE(p->add_additional_rom(std::move(entry)).has_value());
+        REQUIRE(p->save_metadata().has_value());
+        write_bytes(proj_dir / "mig.bin", make_rom_bytes());
+    }
+
+    // Drop a legacy history file at the project root.
+    write_text(proj_dir / "mig.edits.toml", R"toml(
+schema_version = 2
+cursor = 0
+)toml");
+    REQUIRE(std::filesystem::exists(proj_dir / "mig.edits.toml"));
+
+    // Reopen, edit the additional, save. Migration kicks in.
+    {
+        auto p = st::Project::open(proj_dir);
+        REQUIRE(p.has_value());
+        REQUIRE(p->set_active_rom_id("mig").has_value());
+        p->active_history().record(st::edit::Edit::bytes(
+            {{32, 0x00, 0x77}}, std::string{"post-migration edit"}));
+        REQUIRE(p->active_rom_mut() != nullptr);
+        REQUIRE(p->active_rom_mut()->write_u8(32, 0x77).has_value());
+        REQUIRE(p->save_active_rom().has_value());
+    }
+
+    // Legacy file gone; new file present.
+    REQUIRE_FALSE(std::filesystem::exists(proj_dir / "mig.edits.toml"));
+    REQUIRE(std::filesystem::exists(proj_dir / "histories" / "mig.toml"));
+}
+
+TEST_CASE("add_additional_rom rejects reserved id 'edits'",
+          "[project][active_rom]") {
+    // Carries forward the collision risk flagged in the 2026-06-03
+    // handoff: an additional named "edits" would shadow working's
+    // edits.toml under any future tooling regression that re-derives
+    // history paths from the slot id without the histories/ prefix.
+    TempDir td;
+    auto const pack_dir = make_pack(td.path / "pack");
+    auto const rom_path = td.path / "stock.bin";
+    write_bytes(rom_path, make_rom_bytes());
+    auto const proj_dir = td.path / "reserved.stune";
+    auto p = st::Project::create(proj_dir, rom_path, pack_dir, "reserved");
+    REQUIRE(p.has_value());
+
+    st::Project::AdditionalRom entry;
+    entry.id = "edits";
+    entry.path_rel = "edits.bin";
+    entry.rom = st::Rom::from_bytes(make_rom_bytes());
+    auto const r = p->add_additional_rom(std::move(entry));
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
 TEST_CASE("Project::save_active_rom on source returns InvalidArgument",

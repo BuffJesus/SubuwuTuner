@@ -57,9 +57,12 @@ public:
         std::uint32_t crc32{0};
         Rom rom{Rom::from_bytes({})};
         // Per-ROM edit history (Issue #10 phase 3). Persisted at
-        // <project>/<id>.edits.toml alongside the ROM bytes, loaded
-        // on Project::open. Empty for a freshly-registered ROM until
-        // the user edits it through the GUI's active-ROM flow.
+        // <project>/histories/<id>.toml, loaded on Project::open.
+        // Pre-2026-06-04 projects stored it at <project>/<id>.edits.toml
+        // at the root; the loader still falls back to that path so
+        // legacy projects open without manual migration. Empty for a
+        // freshly-registered ROM until the user edits it through the
+        // GUI's active-ROM flow.
         edit::History history;
     };
 
@@ -209,8 +212,10 @@ public:
     // behavior of save_working_rom — that method is still available
     // and now delegates here when working is active).
     // Additional id: writes the additional's bytes to its
-    // path_rel + history to <id>.edits.toml. Also updates the
-    // additional's recorded crc32 in project.toml via save_metadata.
+    // path_rel + history to histories/<id>.toml (legacy
+    // <id>.edits.toml at the root is removed after a successful
+    // write). Also updates the additional's recorded crc32 in
+    // project.toml via save_metadata.
     // Source: no-op (immutable). Returns InvalidArgument if the
     // active id is set to an unknown slug.
     [[nodiscard]] Status save_active_rom();

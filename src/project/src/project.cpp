@@ -67,6 +67,24 @@ Status copy_bytes(std::filesystem::path const &src, std::filesystem::path const 
     return ok();
 }
 
+// Per-additional-ROM edit history lives under <project>/histories/<id>.toml.
+// The pre-2026-06-04 layout stored these as <project>/<id>.edits.toml at the
+// project root; the loader still reads that path so legacy projects open
+// without manual migration. New writes always go to the subdir form. When
+// a project successfully writes the new-path history, a stale legacy file
+// (if present) is removed to keep the on-disk layout consistent with what
+// the loader will pick next time. Working's history stays at the root
+// edits.toml — that's the v1 shape and the public docs/21 spec.
+std::filesystem::path additional_history_path(std::filesystem::path const &project_dir,
+                                              std::string_view id) {
+    return project_dir / "histories" / (std::string{id} + ".toml");
+}
+
+std::filesystem::path additional_history_path_legacy(std::filesystem::path const &project_dir,
+                                                     std::string_view id) {
+    return project_dir / (std::string{id} + ".edits.toml");
+}
+
 // ---- History serialization ---------------------------------------------
 // edits.toml schema:
 //
@@ -568,15 +586,26 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
                 continue;
             }
             entry.rom = std::move(*rom_r);
-            // Per-ROM history is optional. <id>.edits.toml lives
-            // alongside the ROM bytes; absence = empty history (the
+            // Per-ROM history is optional. Preferred location is
+            // <project>/histories/<id>.toml; pre-2026-06-04 projects
+            // stored it as <project>/<id>.edits.toml and the loader
+            // still falls back to that path so legacy projects open
+            // without manual migration. Absence = empty history (the
             // common case for a freshly-registered additional). A
             // parse failure on the history file is non-fatal: the
             // ROM still loads, the history starts empty, and the
             // user gets a warning. This matches the additional-rom
             // shape where bad metadata doesn't sink the whole open.
-            auto const hist_path = project_dir / (entry.id + ".edits.toml");
-            if (std::filesystem::exists(hist_path, ec) && !ec) {
+            auto hist_path = additional_history_path(project_dir, entry.id);
+            bool have_hist = std::filesystem::exists(hist_path, ec) && !ec;
+            if (!have_hist) {
+                auto const legacy = additional_history_path_legacy(project_dir, entry.id);
+                if (std::filesystem::exists(legacy, ec) && !ec) {
+                    hist_path = legacy;
+                    have_hist = true;
+                }
+            }
+            if (have_hist) {
                 std::ifstream hin{hist_path};
                 std::ostringstream hcontents;
                 hcontents << hin.rdbuf();
@@ -585,7 +614,7 @@ Result<Project> Project::open(std::filesystem::path const &project_dir) {
                     entry.history = std::move(*hist_r);
                 } else {
                     p.additional_rom_warnings_.push_back(
-                        "[[rom]] '" + entry.id + "' edits.toml failed to parse: " +
+                        "[[rom]] '" + entry.id + "' edits history failed to parse: " +
                         hist_r.error().to_string() + "; history reset to empty");
                 }
             }
@@ -765,10 +794,24 @@ Status Project::save_active_rom() {
     // surprise-resistance the working slot already enjoys.
     if (target->history.size() > 0) {
         auto const edits_text = render_history_toml(target->history);
-        auto const edits_path = dir_ / (active_rom_id_ + ".edits.toml");
+        auto const edits_path = additional_history_path(dir_, active_rom_id_);
+        std::error_code ec;
+        std::filesystem::create_directories(edits_path.parent_path(), ec);
+        if (ec) {
+            return failure(ErrorCode::IoFailure,
+                           "cannot create histories dir: " +
+                               edits_path.parent_path().string());
+        }
         if (auto s = write_file(edits_path, edits_text); !s.has_value()) {
             return s;
         }
+        // If a legacy <id>.edits.toml is still at the project root from
+        // a pre-2026-06-04 project, remove it after a successful write
+        // so the loader doesn't have to keep deciding between two on-disk
+        // copies. Failure is non-fatal — the new file wins on read either
+        // way; we just prefer not to leave the user with stale clutter.
+        auto const legacy = additional_history_path_legacy(dir_, active_rom_id_);
+        std::filesystem::remove(legacy, ec);
     }
     return save_metadata();
 }
@@ -798,10 +841,23 @@ Status Project::save_all() {
             return failure(ErrorCode::IoFailure, "write failed: " + rom_path.string());
         }
         auto const edits_text = render_history_toml(r.history);
-        auto const edits_path = dir_ / (r.id + ".edits.toml");
+        auto const edits_path = additional_history_path(dir_, r.id);
+        std::error_code dir_ec;
+        std::filesystem::create_directories(edits_path.parent_path(), dir_ec);
+        if (dir_ec) {
+            return failure(ErrorCode::IoFailure,
+                           "cannot create histories dir: " +
+                               edits_path.parent_path().string());
+        }
         if (auto s = write_file(edits_path, edits_text); !s.has_value()) {
             return s;
         }
+        // Drop the legacy root-level <id>.edits.toml if it's still
+        // there (pre-2026-06-04 layout); the loader prefers the
+        // histories/ copy so leaving the legacy file behind would
+        // diverge over time.
+        std::error_code rm_ec;
+        std::filesystem::remove(additional_history_path_legacy(dir_, r.id), rm_ec);
         // crc32 in the in-memory record was set at registration time;
         // refresh it so save_metadata below emits the value matching
         // what we just wrote to disk.
@@ -818,12 +874,16 @@ Status Project::add_additional_rom(AdditionalRom entry) {
     // Reserved ids: find_rom_by_id privileges these for the built-in
     // slots, so accepting an additional ROM under the same id would
     // create an unreachable record. Reject early with a clear
-    // explanation instead.
-    if (entry.id == "source" || entry.id == "working") {
+    // explanation instead. "edits" is also reserved because the
+    // working slot's history lives at <project>/edits.toml; a future
+    // tooling regression that re-derived per-ROM history paths from
+    // the slot id without the histories/ subdir prefix would collide.
+    if (entry.id == "source" || entry.id == "working" || entry.id == "edits") {
         return failure(ErrorCode::InvalidArgument,
                        "additional rom id '" + entry.id +
                            "' is reserved (use a different slug — 'source' and "
-                           "'working' name the built-in project ROM slots)");
+                           "'working' name the built-in project ROM slots; "
+                           "'edits' collides with working's edits.toml)");
     }
     for (auto const &r : additional_roms_) {
         if (r.id == entry.id) {

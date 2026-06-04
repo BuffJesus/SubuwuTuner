@@ -27,6 +27,32 @@ mytune.stune/
                           # (loses undo history but not the ROM bytes)
 ```
 
+A project that carries additional ROMs (Issue #10 multi-ROM model) keeps
+their bytes at whatever `path` each `[[rom]]` entry in `project.toml`
+declares (typically a sibling `<id>.bin`) and stashes per-ROM edit history
+under a `histories/` subdirectory:
+
+```
+mytune.stune/
+├── project.toml
+├── source.bin
+├── working.bin
+├── edits.toml            # working slot history (unchanged from v1)
+├── tune-b.bin            # additional ROM bytes — path comes from [[rom]].path
+├── tune-c.bin
+└── histories/
+    ├── tune-b.toml       # additional ROM history (one per [[rom]].id)
+    └── tune-c.toml
+```
+
+Pre-2026-06-04 projects stored these as `<id>.edits.toml` at the project
+root. The loader still reads that path so legacy projects open without
+manual migration; the first save through `save_active_rom` /
+`save_all` rewrites under `histories/` and removes the legacy root-level
+file. The id `edits` is reserved (it would otherwise collide with
+working's `edits.toml` under any future tooling regression that
+re-derived history paths from the slot id).
+
 Flash session records (manifest + crash-recovery journal) are written
 to wherever the caller sets `FlashPlan::journal_path` — they are NOT
 auto-routed into the `.stune` directory today. A future change may
