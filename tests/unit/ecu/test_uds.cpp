@@ -499,6 +499,21 @@ TEST_CASE("parse_obd2_vehicle_info_response surfaces an NRC", "[uds][framing][ob
     REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
 }
 
+TEST_CASE("parse_obd2_vehicle_info_response accepts a 3-byte NODI=0 response",
+          "[uds][framing][obd2][boundary]") {
+    // The 2026-06-04 mutation lane found that swapping `<` to `<=` at
+    // the resp.size() < 3 short-header guard survived because no test
+    // exercised the exact size-3 boundary case. A valid response with
+    // NODI=0 (ECU reports zero items for the requested PID) is
+    // [0x49, pid, 0x00] — exactly 3 bytes long. The original
+    // predicate `resp.size() < 3` lets this through; the `<= 3` mutant
+    // would reject it as too short.
+    std::vector<std::uint8_t> const resp{0x49, uds::kObd2PidCvn, 0x00};
+    auto const r = uds::parse_obd2_vehicle_info_response(resp, uds::kObd2PidCvn, 4);
+    REQUIRE(r.has_value());
+    REQUIRE(r->empty());
+}
+
 TEST_CASE("UdsClient::obd2_vehicle_info round-trip via MockTransport",
           "[uds][client][obd2]") {
     st::transport::MockTransport t;
