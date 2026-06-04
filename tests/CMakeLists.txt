@@ -94,6 +94,7 @@ add_executable(st_unit_tests
     unit/audit/test_apply_op_audit_contract.cpp
     unit/cli/test_cli_integration.cpp
     unit/profile/test_profile.cpp
+    unit/ai/test_drift.cpp
 )
 
 target_link_libraries(st_unit_tests
@@ -119,6 +120,7 @@ target_link_libraries(st_unit_tests
         st::diff
         st::audit
         st::profile
+        st::ai
         st::warnings
         st::sanitizers
         st::platform

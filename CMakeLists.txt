@@ -77,6 +77,7 @@ add_subdirectory(src/feature_patch)
 add_subdirectory(src/diff)
 add_subdirectory(src/audit)
 add_subdirectory(src/profile)
+add_subdirectory(src/ai)
 
 if(ST_BUILD_CLI)
     add_subdirectory(src/cli)
