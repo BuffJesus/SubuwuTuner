@@ -263,44 +263,91 @@ void render_audit_panel(AppState &state) {
                           "tail-following from a terminal.");
     }
     ImGui::SameLine();
+    // Export NDJSON. Popup with two scopes — full timeline ("All
+    // entries") or pinned-only ("Pinned only"). The pinned scope
+    // round-trips the bulk-pin → star → share-with-tuner workflow:
+    // user stars the events relevant to a question, hands the e-tuner
+    // a 12-line NDJSON instead of a 400-line dump.
     ImGui::BeginDisabled(state.audit_entries.empty());
-    if (ImGui::Button("Export NDJSON…##audit_export")) {
-        NFD::UniquePath out;
-        nfdfilteritem_t const filters[] = {{"NDJSON", "ndjson"}, {"Log", "log"}};
-        nfdresult_t const r =
-            NFD::SaveDialog(out, filters, 2, nullptr, "audit-export.ndjson");
-        if (r == NFD_OKAY) {
-            std::filesystem::path const target{out.get()};
-            std::ofstream fh{target, std::ios::binary};
-            if (!fh) {
-                state.audit_error_msg = "Export: cannot open " + target.string();
-            } else {
+    if (ImGui::Button("Export NDJSON  \xE2\x96\xBE##audit_export")) { // ▾
+        ImGui::OpenPopup("##audit_export_scope");
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Write entries to a .ndjson file (one JSON\n"
+                          "object per line). Useful for sharing the\n"
+                          "audit timeline with support / e-tuner / CI.");
+    }
+    if (ImGui::BeginPopup("##audit_export_scope")) {
+        // Count pinned entries that are present in the cached log
+        // (sidecar can contain stale ids from a since-trimmed log;
+        // those don't get exported and shouldn't pad the count).
+        std::size_t pinned_in_log = 0;
+        for (auto const &e : state.audit_entries) {
+            if (state.audit_pinned_keys.contains(audit_pin_key(e))) {
+                ++pinned_in_log;
+            }
+        }
+        auto const run_export = [&](bool pinned_only,
+                                    std::string const &default_name) {
+            NFD::UniquePath out;
+            nfdfilteritem_t const filters[] = {{"NDJSON", "ndjson"},
+                                                {"Log", "log"}};
+            nfdresult_t const r = NFD::SaveDialog(out, filters, 2, nullptr,
+                                                  default_name.c_str());
+            if (r == NFD_OKAY) {
+                std::filesystem::path const target{out.get()};
+                std::ofstream fh{target, std::ios::binary};
+                if (!fh) {
+                    state.audit_error_msg =
+                        "Export: cannot open " + target.string();
+                    return;
+                }
                 // Re-serialize each cached entry — keeps the wire shape
                 // identical to st::audit::AuditLog::append output, and
                 // also recomputes the CRC32 so a tampered on-disk line
                 // gets exported with a fresh checksum (or rejected up
                 // front if checksum_valid is false; we still write it
                 // so the user has the same data they were viewing).
+                std::size_t written = 0;
                 for (auto const &e : state.audit_entries) {
+                    if (pinned_only &&
+                        !state.audit_pinned_keys.contains(audit_pin_key(e))) {
+                        continue;
+                    }
                     fh << st::audit::serialize_entry(e) << '\n';
+                    ++written;
                 }
                 if (!fh) {
                     state.audit_error_msg = "Export: write failed";
-                } else {
-                    enqueue_toast(state, ToastKind::Success,
-                                  "Exported " + std::to_string(state.audit_entries.size()) +
-                                      " entries to " + target.string());
+                    return;
                 }
+                enqueue_toast(state, ToastKind::Success,
+                              "Exported " + std::to_string(written) +
+                                  (pinned_only ? " pinned" : "") +
+                                  " entries to " + target.string());
+            } else if (r == NFD_ERROR) {
+                state.audit_error_msg =
+                    std::string{"Export dialog: "} + NFD::GetError();
             }
-        } else if (r == NFD_ERROR) {
-            state.audit_error_msg = std::string{"Export dialog: "} + NFD::GetError();
+        };
+        char label[64];
+        std::snprintf(label, sizeof label, "All entries (%zu)",
+                      state.audit_entries.size());
+        if (ImGui::MenuItem(label)) {
+            run_export(/*pinned_only=*/false, "audit-export.ndjson");
         }
-    }
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Write every cached entry to a .ndjson file (one\n"
-                          "JSON object per line). Useful for sharing the\n"
-                          "audit timeline with support / e-tuner / CI.");
+        std::snprintf(label, sizeof label, "Pinned only (%zu)", pinned_in_log);
+        ImGui::BeginDisabled(pinned_in_log == 0);
+        if (ImGui::MenuItem(label)) {
+            run_export(/*pinned_only=*/true, "audit-pinned.ndjson");
+        }
+        ImGui::EndDisabled();
+        if (pinned_in_log == 0 && state.audit_pinned_keys.size() > 0) {
+            text_subtle("(%zu pinned ids reference entries not in this log)",
+                        state.audit_pinned_keys.size());
+        }
+        ImGui::EndPopup();
     }
     ImGui::SameLine();
     ImGui::Checkbox("Newest first", &state.audit_newest_first);
