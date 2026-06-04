@@ -541,6 +541,11 @@ struct AppState {
     bool focus_pending_flash{false};
     bool focus_pending_autotune_maf{false};
     bool focus_pending_autotune_knock{false};
+    // First-Run wizard focus tracker. -1 means "no step ever focused";
+    // the wizard's render loop compares this against `first_run_step`
+    // and refreshes keyboard focus whenever the step changes (including
+    // on first open). Set back to -1 by close_project / wizard skip.
+    int first_run_focused_step{-1};
     // Within-topic find input (Ctrl+G or the secondary "Find in topic"
     // field next to the topic filter). When non-empty the content pane
     // pre-filters the active topic's body to lines containing this

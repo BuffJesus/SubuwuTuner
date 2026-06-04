@@ -117,8 +117,13 @@ void draw_jurisdiction(AppState &state) {
         {P::CaliforniaUs, "California (USA)",
          "Strictest — blocks emissions edits by default. CARB jurisdiction."},
     }};
+    bool first = true;
     for (auto const &c : choices) {
         bool const selected = state.settings.default_policy_profile == c.profile;
+        if (first && state.first_run_focused_step != state.first_run_step) {
+            ImGui::SetKeyboardFocusHere();
+        }
+        first = false;
         if (ImGui::RadioButton(c.name, selected)) {
             state.settings.default_policy_profile = c.profile;
         }
@@ -135,6 +140,9 @@ void draw_units(AppState &state) {
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
 
     using U = AppState::UnitSystem;
+    if (state.first_run_focused_step != state.first_run_step) {
+        ImGui::SetKeyboardFocusHere();
+    }
     if (ImGui::RadioButton("Metric (°C, kPa, km/h)",
                           state.first_run_units == U::Metric)) {
         state.first_run_units = U::Metric;
@@ -153,6 +161,9 @@ void draw_theme(AppState &state) {
     ImGui::TextWrapped("Light or dark? Toggleable later under View → Theme.");
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
 
+    if (state.first_run_focused_step != state.first_run_step) {
+        ImGui::SetKeyboardFocusHere();
+    }
     if (ImGui::RadioButton("Dark (default — easier on the eyes in a tuning bay)",
                           state.settings.theme == Theme::Dark)) {
         state.settings.theme = Theme::Dark;
@@ -170,6 +181,9 @@ void draw_demo(AppState &state) {
                        "synthetic ROM + pack so you can poke around the table editor without "
                        "needing a real ECU dump.");
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
+    if (state.first_run_focused_step != state.first_run_step) {
+        ImGui::SetKeyboardFocusHere();
+    }
     ImGui::Checkbox("Open the demo project on Finish", &state.first_run_offer_demo);
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
     text_subtle("You can always open it later via File → Open Recent → demo.stune.");
@@ -251,6 +265,7 @@ void render_first_run_modal(AppState &state) {
         state.settings.first_run_complete = true;
         save_settings(state.settings);
         g_wizard_open = false;
+        state.first_run_focused_step = -1;
         ImGui::End();
         enqueue_toast(state, ToastKind::Info,
                       "Wizard skipped — defaults kept. Reopen via Help → Welcome wizard.");
@@ -259,6 +274,10 @@ void render_first_run_modal(AppState &state) {
 
     draw_step_indicator(state.first_run_step);
 
+    // Snapshot step BEFORE the draw_* call so the per-step focus
+    // helpers above can compare against state.first_run_focused_step
+    // and refresh focus on the frame the user lands on a new step.
+    int const step_at_render = state.first_run_step;
     switch (state.first_run_step) {
     case 0:
         draw_welcome(state);
@@ -297,6 +316,7 @@ void render_first_run_modal(AppState &state) {
         state.settings.first_run_complete = true;
         save_settings(state.settings);
         g_wizard_open = false;
+        state.first_run_focused_step = -1;
         enqueue_toast(state, ToastKind::Info,
                       "Wizard skipped — defaults kept. Reopen via Help → Welcome wizard.");
     }
@@ -304,6 +324,13 @@ void render_first_run_modal(AppState &state) {
 
     push_primary_button_colors();
     if (!at_last) {
+        // Step 0 (welcome) has no in-body interactive widget so the
+        // Next button gets focus instead — Enter then advances the
+        // wizard immediately, which is the gesture a returning user
+        // expects on a screen they've read once.
+        if (at_first && state.first_run_focused_step != state.first_run_step) {
+            ImGui::SetKeyboardFocusHere();
+        }
         if (ImGui::Button("Next \xE2\x86\x92", ImVec2(120.0f, 0.0f))) {
             ++state.first_run_step;
         }
@@ -312,6 +339,7 @@ void render_first_run_modal(AppState &state) {
             state.settings.first_run_complete = true;
             save_settings(state.settings);
             g_wizard_open = false;
+            state.first_run_focused_step = -1;
             if (state.first_run_offer_demo) {
                 // resolve_demo_project_path needs argv[0]; the wizard
                 // has no access to it here. main() does the resolve at
@@ -332,6 +360,12 @@ void render_first_run_modal(AppState &state) {
         }
     }
     pop_primary_button_colors();
+    // Mark the step as focused once per landing — must run after the
+    // step body + Next button so the inside-step SetKeyboardFocusHere
+    // calls have already fired this frame against the current step
+    // value. `step_at_render` pins the focus to whatever was drawn
+    // even if Back/Next changed first_run_step during the footer.
+    state.first_run_focused_step = step_at_render;
 
     ImGui::End();
 }
