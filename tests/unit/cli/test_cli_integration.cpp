@@ -371,6 +371,61 @@ TEST_CASE("CLI changelog show prints [Unreleased] by default",
     REQUIRE(stdout_contains(r, "[Unreleased]"));
 }
 
+TEST_CASE("CLI ai-drift classifies the demo adaptive-history CSV",
+          "[cli][integration][ai-drift]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const csv = fs::path{demo_project()} / ".." / "demo-adaptive-history.csv";
+    auto const r = st::test::cli_run(
+        "ai-drift --log " + st::test::quote(csv.string()) +
+        " --timestamp-col ts --ltft-col ltft --dam-col dam --idle-adapt-col iac");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "Drift diagnosis"));
+    REQUIRE(stdout_contains(r, "Confidence:"));
+}
+
+TEST_CASE("CLI ai-drift --json emits subuwutuner.ai-drift.v1 schema",
+          "[cli][integration][ai-drift][json]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const csv = fs::path{demo_project()} / ".." / "demo-adaptive-history.csv";
+    auto const r = st::test::cli_run(
+        "ai-drift --json --log " + st::test::quote(csv.string()) +
+        " --timestamp-col ts --ltft-col ltft --dam-col dam --idle-adapt-col iac");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "subuwutuner.ai-drift.v1"));
+    REQUIRE(stdout_contains(r, "\"cause\":"));
+    REQUIRE(stdout_contains(r, "\"confidence\":"));
+    REQUIRE(stdout_contains(r, "\"evidence\":["));
+}
+
+TEST_CASE("CLI ai-drift rejects unknown column",
+          "[cli][integration][ai-drift][error]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const csv = fs::path{demo_project()} / ".." / "demo-adaptive-history.csv";
+    auto const r = st::test::cli_run(
+        "ai-drift --log " + st::test::quote(csv.string()) +
+        " --timestamp-col ts --ltft-col not_a_real_column");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code != 0);
+}
+
+TEST_CASE("CLI ai-drift exits 2 on missing required args",
+          "[cli][integration][ai-drift][error]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run("ai-drift");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
 TEST_CASE("CLI pack-lint exits 0 on the demo pack",
           "[cli][integration][pack-lint]") {
     if (!can_run_cli_tests()) {

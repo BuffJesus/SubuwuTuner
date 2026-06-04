@@ -22,6 +22,7 @@
 #include "st/flash.hpp"
 #include "st/flash/checksum.hpp"
 #include "st/log.hpp"
+#include "st/ai/drift.hpp"
 #include "st/log/adaptive_history.hpp"
 #include "st/log/coldstart.hpp"
 #include "st/log/ebcs.hpp"
@@ -380,6 +381,13 @@ constexpr std::string_view kUsage =
     "                            ECT-bin observed lambda + deviation from a user-supplied\n"
     "                            target curve. --target points are linearly interpolated\n"
     "                            (sorted ascending by ECT). See docs/05-improvements.md §11.\n"
+    "    ai-drift --log <CSV> --timestamp-col <name>\n"
+    "             [--ltft-col <name>] [--dam-col <name>] [--idle-adapt-col <name>]\n"
+    "             [--json]\n"
+    "                            Tier-1 rule-based drift classifier (docs/20). Loads\n"
+    "                            an adaptive-history CSV, runs classify(), prints a\n"
+    "                            diagnosis (cause + confidence + evidence + alternatives\n"
+    "                            + recommended checks). Pure-domain, no LLM.\n"
     "    adaptive-history --log <CSV> --timestamp-col <name>\n"
     "                     [--ltft-col <name>] [--dam-col <name>] [--idle-adapt-col <name>]\n"
     "                     [--bucket-seconds N] [--timestamp-unit seconds|millis|micros|rows]\n"
@@ -3730,7 +3738,7 @@ int cmd_completion(int argc, char *argv[]) {
         "pack-info", "pack-lint", "primitive-list", "hook-list", "pack-dtcs",
         "stats", "diff", "diff-load", "audit", "profile", "config",
         "changelog", "log", "ssm-a8-poll", "doctor", "transport-list",
-        "uds-test", "feature-graph",
+        "uds-test", "feature-graph", "ai-drift",
         nullptr,
     };
     // Flag completion vocabulary. Reused across bash + zsh handlers.
@@ -7511,6 +7519,219 @@ int cmd_adaptive_history(int argc, char *argv[]) {
         }
     }
 
+    return 0;
+}
+
+// `ai-drift` — load an adaptive-history CSV (same shape as
+// adaptive-history) and run the Tier-1 rule classifier from
+// docs/20. Prints a diagnosis (cause, confidence, evidence,
+// alternatives, recommended checks). --json emits a single
+// subuwutuner.ai-drift.v1 record for machine consumers.
+//
+// The classifier is pure-domain; this verb is just the file-I/O
+// + presentation wrapper. Pinned by tests/unit/ai/test_drift.cpp at
+// the library level — this CLI is also smoke-tested in
+// tests/unit/cli/test_cli_integration.cpp.
+int cmd_ai_drift(int argc, char *argv[]) {
+    std::optional<std::filesystem::path> log_path;
+    std::optional<std::string> ts_col;
+    std::optional<std::string> ltft_col;
+    std::optional<std::string> dam_col;
+    std::optional<std::string> iac_col;
+    std::optional<double> bucket_seconds;
+    std::optional<std::string> ts_unit_arg;
+    bool json_mode = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const need = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "ai-drift: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--log") {
+            auto *v = need("--log");
+            if (!v) return 2;
+            log_path = std::filesystem::path{v};
+        } else if (a == "--timestamp-col") {
+            auto *v = need("--timestamp-col");
+            if (!v) return 2;
+            ts_col = v;
+        } else if (a == "--ltft-col") {
+            auto *v = need("--ltft-col");
+            if (!v) return 2;
+            ltft_col = v;
+        } else if (a == "--dam-col") {
+            auto *v = need("--dam-col");
+            if (!v) return 2;
+            dam_col = v;
+        } else if (a == "--idle-adapt-col") {
+            auto *v = need("--idle-adapt-col");
+            if (!v) return 2;
+            iac_col = v;
+        } else if (a == "--bucket-seconds") {
+            auto *v = need("--bucket-seconds");
+            if (!v) return 2;
+            auto const p = parse_decimal(v);
+            if (!p.has_value()) {
+                std::fprintf(stderr, "ai-drift: --bucket-seconds must be a number (got '%s')\n", v);
+                return 2;
+            }
+            bucket_seconds = *p;
+        } else if (a == "--timestamp-unit") {
+            auto *v = need("--timestamp-unit");
+            if (!v) return 2;
+            ts_unit_arg = v;
+        } else if (a == "--json") {
+            json_mode = true;
+        } else {
+            std::fprintf(stderr, "ai-drift: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!log_path.has_value() || !ts_col.has_value()) {
+        std::fputs("ai-drift: missing required arguments:", stderr);
+        if (!log_path.has_value()) std::fputs(" --log", stderr);
+        if (!ts_col.has_value()) std::fputs(" --timestamp-col", stderr);
+        std::fputs(
+            "\nUsage: subuwutuner-cli ai-drift --log <CSV> --timestamp-col <name>\n"
+            "                                 [--ltft-col <name>] [--dam-col <name>]\n"
+            "                                 [--idle-adapt-col <name>] [--bucket-seconds N]\n"
+            "                                 [--timestamp-unit seconds|millis|micros|rows]\n"
+            "                                 [--json]\n",
+            stderr);
+        return 2;
+    }
+    if (!ltft_col.has_value() && !dam_col.has_value() && !iac_col.has_value()) {
+        std::fputs("ai-drift: at least one of --ltft-col / --dam-col / "
+                   "--idle-adapt-col is required\n", stderr);
+        return 2;
+    }
+
+    // Resolve header → column indices. Reuses the adaptive-history
+    // CSV reader pattern; deliberately kept parallel rather than
+    // factored out so the two verbs evolve independently if their
+    // input requirements diverge.
+    std::vector<std::string> header;
+    {
+        std::string err;
+        if (!read_csv_header(*log_path, header, err)) {
+            std::fprintf(stderr, "%s\n", err.c_str());
+            return 1;
+        }
+    }
+    auto const resolve = [&](std::string_view name, char const *flag) -> std::size_t {
+        std::size_t const idx = find_csv_column(header, name);
+        if (idx == std::string_view::npos) {
+            std::fprintf(stderr, "ai-drift: %s column '%.*s' not in CSV header\n", flag,
+                         static_cast<int>(name.size()), name.data());
+        }
+        return idx;
+    };
+
+    st::log::adaptive::ColumnMapping mapping;
+    bool bad = false;
+    {
+        std::size_t const idx = resolve(*ts_col, "--timestamp-col");
+        if (idx == std::string_view::npos) bad = true;
+        else mapping.timestamp_idx = idx;
+    }
+    if (ltft_col.has_value()) {
+        std::size_t const idx = resolve(*ltft_col, "--ltft-col");
+        if (idx == std::string_view::npos) bad = true;
+        else mapping.signal_idx[static_cast<std::size_t>(st::log::adaptive::SignalKind::Ltft)] = idx;
+    }
+    if (dam_col.has_value()) {
+        std::size_t const idx = resolve(*dam_col, "--dam-col");
+        if (idx == std::string_view::npos) bad = true;
+        else mapping.signal_idx[static_cast<std::size_t>(st::log::adaptive::SignalKind::Dam)] = idx;
+    }
+    if (iac_col.has_value()) {
+        std::size_t const idx = resolve(*iac_col, "--idle-adapt-col");
+        if (idx == std::string_view::npos) bad = true;
+        else mapping.signal_idx[static_cast<std::size_t>(st::log::adaptive::SignalKind::IdleAdapt)] = idx;
+    }
+    if (bad) return 1;
+
+    st::log::adaptive::BucketConfig cfg;
+    if (bucket_seconds.has_value()) cfg.bucket_seconds = *bucket_seconds;
+    if (ts_unit_arg.has_value()) {
+        std::string u = *ts_unit_arg;
+        for (auto &c : u) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (u == "seconds") cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixSeconds;
+        else if (u == "millis") cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixMillis;
+        else if (u == "micros") cfg.timestamp_unit = st::log::adaptive::TimestampUnit::UnixMicros;
+        else if (u == "rows") cfg.timestamp_unit = st::log::adaptive::TimestampUnit::RowIndex;
+        else {
+            std::fprintf(stderr, "ai-drift: unknown --timestamp-unit '%s' "
+                                 "(expected seconds / millis / micros / rows)\n",
+                         ts_unit_arg->c_str());
+            return 2;
+        }
+    }
+
+    auto snapshot = st::log::adaptive::snapshot_from_csv(log_path->string(), mapping, cfg);
+    if (!snapshot.has_value()) {
+        std::fprintf(stderr, "ai-drift: %s\n", snapshot.error().to_string().c_str());
+        return 1;
+    }
+
+    auto const diag = st::ai::drift::classify(*snapshot);
+
+    if (json_mode) {
+        std::string out{"{\"schema\":\"subuwutuner.ai-drift.v1\",\"cause\":"};
+        json_escape(out, diag.cause);
+        out.append(",\"confidence\":");
+        json_escape(out, st::ai::drift::confidence_name(diag.confidence));
+        out.append(",\"description\":");
+        json_escape(out, diag.description);
+        out.append(",\"evidence\":[");
+        for (std::size_t k = 0; k < diag.evidence.size(); ++k) {
+            if (k > 0) out.append(",");
+            json_escape(out, diag.evidence[k]);
+        }
+        out.append("],\"alternatives\":[");
+        for (std::size_t k = 0; k < diag.alternatives.size(); ++k) {
+            if (k > 0) out.append(",");
+            json_escape(out, diag.alternatives[k]);
+        }
+        out.append("],\"recommended_checks\":[");
+        for (std::size_t k = 0; k < diag.recommended_checks.size(); ++k) {
+            if (k > 0) out.append(",");
+            json_escape(out, diag.recommended_checks[k]);
+        }
+        out.append("]}\n");
+        std::fputs(out.c_str(), stdout);
+        return 0;
+    }
+
+    std::printf("Drift diagnosis\n");
+    std::printf("  Cause:      %s\n", diag.cause.c_str());
+    std::printf("  Confidence: %.*s\n",
+                static_cast<int>(st::ai::drift::confidence_name(diag.confidence).size()),
+                st::ai::drift::confidence_name(diag.confidence).data());
+    std::printf("  %s\n", diag.description.c_str());
+    if (!diag.evidence.empty()) {
+        std::printf("\nEvidence:\n");
+        for (auto const &e : diag.evidence) {
+            std::printf("  - %s\n", e.c_str());
+        }
+    }
+    if (!diag.alternatives.empty()) {
+        std::printf("\nAlternatives:\n");
+        for (auto const &a : diag.alternatives) {
+            std::printf("  - %s\n", a.c_str());
+        }
+    }
+    if (!diag.recommended_checks.empty()) {
+        std::printf("\nRecommended checks:\n");
+        for (auto const &c : diag.recommended_checks) {
+            std::printf("  - %s\n", c.c_str());
+        }
+    }
     return 0;
 }
 
@@ -13782,6 +14003,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "adaptive-history") {
         return cmd_adaptive_history(argc - 2, argv + 2);
+    }
+    if (cmd == "ai-drift") {
+        return cmd_ai_drift(argc - 2, argv + 2);
     }
     if (cmd == "coldstart-analyze") {
         return cmd_coldstart_analyze(argc - 2, argv + 2);

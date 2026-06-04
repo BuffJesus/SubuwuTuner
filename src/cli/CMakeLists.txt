@@ -23,6 +23,7 @@ target_link_libraries(subuwutuner-cli
         st::diff
         st::audit
         st::profile
+        st::ai
         st::policy
         st::warnings
         st::sanitizers
