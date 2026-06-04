@@ -167,6 +167,75 @@ jobs:
           # Re-parse with Python's tomllib to catch invalid TOML.
           python -c "import tomllib; tomllib.loads(open('/tmp/syn.toml').read())"
 
+  defgen-freeze:
+    # PyInstaller single-file build of the `defgen` tool — closes
+    # docs/04 pre-1.0 ship blocker #7. End users get a Python-free
+    # binary to drop next to subuwutuner-cli in the installer. The
+    # matrix runs all three OSes because PyInstaller fragments per
+    # platform (each runner produces a binary that only works there);
+    # the Release pipeline grabs the three artifacts and bundles each
+    # into its platform-specific installer.
+    name: defgen freeze (${{ matrix.os }})
+    needs: defgen
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            artifact_name: defgen-windows-x64
+            exe: defgen.exe
+          - os: macos-14
+            artifact_name: defgen-macos-arm64
+            exe: defgen
+          - os: ubuntu-24.04
+            artifact_name: defgen-linux-x64
+            exe: defgen
+    defaults:
+      run:
+        # Git Bash is preinstalled on the Windows runner, so a single
+        # bash script keeps Win/macOS/Linux step bodies identical.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Freeze defgen
+        working-directory: tools/defgen
+        # --clean wipes the prior build cache (matters because Cache@v4
+        # could otherwise stash a stale tree across runs).
+        # --noconfirm skips the "overwrite dist/?" prompt — pyinstaller
+        # exits non-zero on a TTY-less runner if the prompt would fire.
+        run: pyinstaller defgen.spec --clean --noconfirm
+
+      - name: Smoke-test the frozen binary
+        # Mirror the source-mode smoke from the `defgen` job: convert
+        # the synthetic RR XML through the frozen binary and re-parse
+        # the resulting TOML with tomllib. Catches both "binary fails
+        # to spawn" (wrong PyInstaller bundling, missing data/ dir) and
+        # "binary outputs malformed TOML" (would mean the freeze
+        # silently dropped a runtime-imported dep).
+        run: |
+          bin=tools/defgen/dist/${{ matrix.exe }}
+          test -x "$bin" || { echo "frozen binary missing at $bin"; exit 1; }
+          "$bin" tools/defgen/tests/fixtures/minimal_rom.xml -o syn.toml
+          python -c "import tomllib; tomllib.loads(open('syn.toml').read())"
+
+      - name: Upload frozen binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: tools/defgen/dist/${{ matrix.exe }}
+          if-no-files-found: error
+          retention-days: 14
+
   formatting:
     name: clang-format (required)
     runs-on: ubuntu-24.04
