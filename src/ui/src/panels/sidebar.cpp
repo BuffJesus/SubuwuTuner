@@ -69,6 +69,100 @@ void render_sidebar(AppState &state) {
         if (!has_custom_order) {
             text_subtle("(no custom order saved)");
         }
+        // Bulk reorder operations. Both rewrite sidebar_category_order
+        // from scratch using the current pack's distinct categories.
+        // Drag-reorder remains the per-tweak path; these are the
+        // "I want everything alphabetized" / "safety stuff first"
+        // gestures that the drag handle can't express in one step.
+        if (ImGui::BeginMenu("Reorder categories")) {
+            // Compute the distinct-category list inline. The popup is
+            // rare; walking def.tables() each open is cheaper than
+            // caching another vector on state. "Other" is the
+            // first-occurrence bucket the render loop uses for
+            // uncategorized tables — same name here so the persisted
+            // order round-trips through the load path.
+            struct CatInfo {
+                std::string_view name;
+                bool any_safety{false};
+            };
+            std::vector<CatInfo> cats;
+            cats.reserve(8);
+            auto const find_or_make_cat = [&](std::string_view n) -> CatInfo & {
+                for (auto &c : cats) {
+                    if (c.name == n) {
+                        return c;
+                    }
+                }
+                cats.push_back({n, false});
+                return cats.back();
+            };
+            for (auto const &t : state.project->definition().tables()) {
+                std::string_view const cat =
+                    t.category.empty() ? std::string_view{"Other"}
+                                       : std::string_view{t.category};
+                auto &c = find_or_make_cat(cat);
+                if (t.engine_safety_critical) {
+                    c.any_safety = true;
+                }
+            }
+            auto const persist_order = [&]() {
+                save_sidebar_category_order(state.project->dir(),
+                                            state.sidebar_category_order);
+            };
+            if (ImGui::MenuItem("Alphabetize")) {
+                std::vector<std::string> order;
+                order.reserve(cats.size());
+                for (auto const &c : cats) {
+                    order.emplace_back(c.name);
+                }
+                std::sort(order.begin(), order.end());
+                state.sidebar_category_order = std::move(order);
+                persist_order();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Sort categories A–Z. Persists across\n"
+                                  "sessions via sidebar_order.txt.");
+            }
+            // Count safety categories for the menu label — also gates
+            // the disable: a pack with no safety tables or only safety
+            // tables would have a no-op gesture, so hide the action.
+            std::size_t safety_count = 0;
+            for (auto const &c : cats) {
+                if (c.any_safety) {
+                    ++safety_count;
+                }
+            }
+            char buf[64];
+            std::snprintf(buf, sizeof buf, "Group by safety (%zu first)",
+                          safety_count);
+            ImGui::BeginDisabled(safety_count == 0 ||
+                                 safety_count == cats.size());
+            if (ImGui::MenuItem(buf)) {
+                std::vector<std::string> order;
+                order.reserve(cats.size());
+                for (auto const &c : cats) {
+                    if (c.any_safety) {
+                        order.emplace_back(c.name);
+                    }
+                }
+                for (auto const &c : cats) {
+                    if (!c.any_safety) {
+                        order.emplace_back(c.name);
+                    }
+                }
+                state.sidebar_category_order = std::move(order);
+                persist_order();
+            }
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Move safety-critical categories to the top of the\n"
+                    "sidebar. A category counts as safety-critical if any\n"
+                    "of its tables carries the flag. Disabled when none\n"
+                    "or all categories are flagged (no-op).");
+            }
+            ImGui::EndMenu();
+        }
         // Hidden-category submenu. Per-header "Hide" is the way to
         // suppress a category; this panel-level menu is where the user
         // surfaces what's hidden + brings it back. Disabled when
