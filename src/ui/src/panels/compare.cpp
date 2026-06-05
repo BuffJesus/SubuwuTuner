@@ -507,9 +507,21 @@ void render_compare_panel(AppState &state) {
     // inline here rather than in st::diff because the shape is
     // UI-presentation, not a library concern. Shared renderer used
     // by both Export (file) and Copy (clipboard).
-    auto const render_diff_markdown = [](st::diff::DiffSet const &d) -> std::string {
+    //
+    // `pinned_filter` (nullable): when non-null, only changed tables
+    // whose table_id is in the set are emitted. Used by the "Pinned
+    // only" scope of Export Markdown ▾ — the star-pin → hand-to-tuner
+    // workflow. nullptr = no filter, all changed tables emit.
+    auto const render_diff_markdown =
+        [](st::diff::DiffSet const &d,
+           std::unordered_set<std::string> const *pinned_filter = nullptr)
+        -> std::string {
         std::ostringstream ss;
-        ss << "# ROM diff\n\n";
+        ss << "# ROM diff";
+        if (pinned_filter != nullptr) {
+            ss << " (pinned)";
+        }
+        ss << "\n\n";
         ss << "- **Pack**: `" << d.pack_id << "`\n";
         ss << "- **Tables compared**: " << d.tables_compared
            << " (" << d.tables_changed << " changed)\n";
@@ -520,10 +532,18 @@ void render_compare_panel(AppState &state) {
         if (d.identical()) {
             ss << "_All tables identical between ROM A and ROM B._\n";
         } else {
-            ss << "## Changed tables\n\n";
+            ss << "## Changed tables";
+            if (pinned_filter != nullptr) {
+                ss << " (pinned only)";
+            }
+            ss << "\n\n";
             for (auto const &t : d.tables) {
                 if (!t.changed())
                     continue;
+                if (pinned_filter != nullptr &&
+                    pinned_filter->find(t.table_id) == pinned_filter->end()) {
+                    continue;
+                }
                 ss << "### `" << t.table_id << "`";
                 if (!t.table_name.empty() && t.table_name != t.table_id)
                     ss << " — " << t.table_name;
@@ -564,40 +584,93 @@ void render_compare_panel(AppState &state) {
     };
 
     ImGui::BeginDisabled(!state.compare_result.has_value());
-    if (ImGui::Button("Export Markdown…", ImVec2(150.0f, 0.0f))) {
-        NFD::UniquePath out;
-        nfdfilteritem_t const filters[] = {{"Markdown", "md"}};
-        nfdresult_t const r =
-            NFD::SaveDialog(out, filters, 1, nullptr, "rom-diff.md");
-        if (r == NFD_OKAY) {
-            std::filesystem::path const target{out.get()};
-            std::ofstream fh{target, std::ios::binary};
-            if (!fh) {
-                state.compare_error_msg = "Export Markdown: cannot open " + target.string();
-            } else {
-                fh << render_diff_markdown(*state.compare_result);
-                if (!fh) {
-                    state.compare_error_msg = "Export Markdown: write failed";
-                } else {
-                    enqueue_toast(state, ToastKind::Success,
-                                  "Wrote " + target.string());
-                }
-            }
-        } else if (r == NFD_ERROR) {
-            state.compare_error_msg =
-                std::string{"Export Markdown dialog error: "} + NFD::GetError();
-        }
+    if (ImGui::Button("Export Markdown  \xE2\x96\xBE", ImVec2(170.0f, 0.0f))) { // ▾
+        ImGui::OpenPopup("##compare_export_md_scope");
     }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         if (state.compare_result.has_value()) {
             ImGui::SetTooltip(
                 "Write a shareable Markdown summary of the diff.\n"
-                "Headings + tables per changed entry — paste into a\n"
-                "PR description, forum post, or support thread.");
+                "Pick All (every changed table) or Pinned only\n"
+                "(your star-marked subset — round-trips the\n"
+                "share-with-e-tuner workflow).");
         } else {
             ImGui::SetTooltip("Run Compare first to enable export.");
         }
+    }
+    if (state.compare_result.has_value() &&
+        ImGui::BeginPopup("##compare_export_md_scope")) {
+        auto const &d_for_count = *state.compare_result;
+        // Count changed-table intersections with the pinned set. Stale
+        // pin ids (rows referencing tables no longer in this diff)
+        // don't pad the count — same shape audit's a2ebdb4 used.
+        std::size_t pinned_in_diff = 0;
+        for (auto const &t : d_for_count.tables) {
+            if (!t.changed())
+                continue;
+            if (state.compare_pinned_table_ids.find(t.table_id) !=
+                state.compare_pinned_table_ids.end()) {
+                ++pinned_in_diff;
+            }
+        }
+        auto const run_md_export = [&](bool pinned_only,
+                                       std::string const &default_name) {
+            NFD::UniquePath out;
+            nfdfilteritem_t const filters[] = {{"Markdown", "md"}};
+            nfdresult_t const r = NFD::SaveDialog(out, filters, 1, nullptr,
+                                                  default_name.c_str());
+            if (r == NFD_OKAY) {
+                std::filesystem::path const target{out.get()};
+                std::ofstream fh{target, std::ios::binary};
+                if (!fh) {
+                    state.compare_error_msg =
+                        "Export Markdown: cannot open " + target.string();
+                    return;
+                }
+                auto const md = render_diff_markdown(
+                    *state.compare_result,
+                    pinned_only ? &state.compare_pinned_table_ids : nullptr);
+                fh << md;
+                if (!fh) {
+                    state.compare_error_msg = "Export Markdown: write failed";
+                    return;
+                }
+                if (pinned_only) {
+                    enqueue_toast(state, ToastKind::Success,
+                                  "Wrote " + std::to_string(pinned_in_diff) +
+                                      " pinned tables to " + target.string());
+                } else {
+                    enqueue_toast(state, ToastKind::Success,
+                                  "Wrote " + target.string());
+                }
+            } else if (r == NFD_ERROR) {
+                state.compare_error_msg =
+                    std::string{"Export Markdown dialog error: "} + NFD::GetError();
+            }
+        };
+        char buf[80];
+        std::snprintf(buf, sizeof buf, "All changed tables (%zu)",
+                      d_for_count.tables_changed);
+        if (ImGui::MenuItem(buf)) {
+            run_md_export(false, "rom-diff.md");
+        }
+        std::snprintf(buf, sizeof buf, "Pinned only (%zu)", pinned_in_diff);
+        ImGui::BeginDisabled(pinned_in_diff == 0);
+        if (ImGui::MenuItem(buf)) {
+            run_md_export(true, "rom-diff-pinned.md");
+        }
+        ImGui::EndDisabled();
+        // Surface the gap when pinned ids reference tables that aren't
+        // in the current diff (e.g. pack changed, or the diff scope is
+        // narrower than what was starred). Quiet — doesn't gate the
+        // action; just lets the user notice the mismatch.
+        std::size_t const total_pinned = state.compare_pinned_table_ids.size();
+        if (total_pinned > pinned_in_diff) {
+            text_subtle("(%zu pinned ids reference tables not in this diff)",
+                        total_pinned - pinned_in_diff);
+        }
+        ImGui::EndPopup();
     }
     ImGui::SameLine();
     // Copy the same Markdown body to clipboard — no file dialog.
