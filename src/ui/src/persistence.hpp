@@ -52,6 +52,12 @@ struct Settings {
     // via the CLI (`subuwutuner-cli profile ...`) in v1; the GUI just
     // selects from the dir.
     std::string active_vehicle_profile_id;
+    // Last-active help-modal topic id (TopicSource::filename, e.g.
+    // "10-glossary.md"). Restored on the first help-modal open of a
+    // session so the user re-finds whatever they were reading. F1
+    // per-panel routing still overrides this — context wins over
+    // memory. Empty = no prior session, fall through to topic 0.
+    std::string help_active_topic_id;
 };
 
 std::filesystem::path config_dir_root();

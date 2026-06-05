@@ -244,6 +244,18 @@ void load_help_topics(AppState &state) {
     // the lazy-loader in widgets.cpp checks this to decide whether
     // to re-attempt the file read on every hover.
     state.glossary_loaded = true;
+    // Restore the last-active topic from settings if it still resolves.
+    // F1 per-panel routing (set on the modal-open call site) overrides
+    // this — context wins over memory. Empty id = fresh install,
+    // fall through to topic 0.
+    if (!state.settings.help_active_topic_id.empty()) {
+        for (std::size_t i = 0; i < state.help_topics.size(); ++i) {
+            if (state.help_topics[i].id == state.settings.help_active_topic_id) {
+                state.help_active_topic = static_cast<int>(i);
+                break;
+            }
+        }
+    }
     if (state.help_active_topic >= static_cast<int>(state.help_topics.size())) {
         state.help_active_topic = 0;
     }
@@ -519,6 +531,19 @@ void render_help_modal(AppState &state) {
         return;
     }
     if (!open || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        // Persist the active topic so the next session re-opens here.
+        // Skip the disk write when the id hasn't changed — avoids a
+        // settings.txt rewrite on every Esc-close of an unchanged
+        // modal.
+        if (state.help_active_topic >= 0 &&
+            state.help_active_topic < static_cast<int>(state.help_topics.size())) {
+            auto const &id =
+                state.help_topics[static_cast<std::size_t>(state.help_active_topic)].id;
+            if (id != state.settings.help_active_topic_id) {
+                state.settings.help_active_topic_id = id;
+                save_settings(state.settings);
+            }
+        }
         state.show_help_modal = false;
         ImGui::End();
         return;
