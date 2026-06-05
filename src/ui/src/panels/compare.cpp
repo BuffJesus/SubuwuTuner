@@ -798,6 +798,112 @@ void render_compare_panel(AppState &state) {
                               "category / safety filter — both filters apply.");
         }
         ImGui::SameLine();
+        // Bulk pin operations. Scope = current chip filter + the
+        // include_identical toggle; explicitly NOT the "Pinned only"
+        // checkbox (acting on the pinned-only set would make "Pin N
+        // visible" always 0). Mirrors the audit panel pattern from
+        // 5797fc3 — counts snapshot when popup opens so menu labels
+        // read "Pin 12 visible" instead of an unqualified verb.
+        ImGui::BeginDisabled(d.tables.empty());
+        if (ImGui::Button("Bulk pins  \xE2\x96\xBE")) { // ▾
+            ImGui::OpenPopup("##compare_bulk_pins");
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Bulk pin / unpin actions against the\n"
+                              "current chip filter scope. The Pinned-only\n"
+                              "checkbox is excluded — bulk ops act on the\n"
+                              "chip-filtered set.");
+        }
+        if (ImGui::BeginPopup("##compare_bulk_pins")) {
+            std::string_view const bulk_chip{state.compare_filter_chip};
+            auto const passes_filter = [&](st::diff::TableDelta const &t) {
+                if (!t.changed() && !state.compare_include_identical) {
+                    return false;
+                }
+                if (bulk_chip.empty()) {
+                    return true;
+                }
+                if (bulk_chip == "@safety") {
+                    return t.engine_safety_critical;
+                }
+                if (bulk_chip == "@emissions") {
+                    return t.emissions_relevant;
+                }
+                if (bulk_chip == "@flagged") {
+                    return t.engine_safety_critical || t.emissions_relevant;
+                }
+                if (state.project.has_value()) {
+                    auto const *tbl =
+                        state.project->definition().find_table(t.table_id);
+                    return tbl != nullptr && tbl->category == bulk_chip;
+                }
+                return false;
+            };
+            std::size_t visible_total = 0;
+            std::size_t visible_unpinned = 0;
+            std::size_t visible_pinned = 0;
+            for (auto const &t : d.tables) {
+                if (!passes_filter(t)) {
+                    continue;
+                }
+                ++visible_total;
+                if (state.compare_pinned_table_ids.contains(t.table_id)) {
+                    ++visible_pinned;
+                } else {
+                    ++visible_unpinned;
+                }
+            }
+            auto persist_pins = [&]() {
+                if (!state.project.has_value()) {
+                    return;
+                }
+                std::vector<std::string> v(state.compare_pinned_table_ids.begin(),
+                                           state.compare_pinned_table_ids.end());
+                std::sort(v.begin(), v.end()); // stable on-disk order
+                save_compare_pinned(state.project->dir(), v);
+            };
+            char buf[64];
+            std::snprintf(buf, sizeof buf, "Pin %zu visible", visible_unpinned);
+            ImGui::BeginDisabled(visible_unpinned == 0);
+            if (ImGui::MenuItem(buf)) {
+                for (auto const &t : d.tables) {
+                    if (passes_filter(t)) {
+                        state.compare_pinned_table_ids.insert(t.table_id);
+                    }
+                }
+                persist_pins();
+            }
+            ImGui::EndDisabled();
+            std::snprintf(buf, sizeof buf, "Unpin %zu visible", visible_pinned);
+            ImGui::BeginDisabled(visible_pinned == 0);
+            if (ImGui::MenuItem(buf)) {
+                for (auto const &t : d.tables) {
+                    if (passes_filter(t)) {
+                        state.compare_pinned_table_ids.erase(t.table_id);
+                    }
+                }
+                persist_pins();
+            }
+            ImGui::EndDisabled();
+            ImGui::Separator();
+            std::snprintf(buf, sizeof buf, "Clear all pins (%zu)",
+                          state.compare_pinned_table_ids.size());
+            ImGui::BeginDisabled(state.compare_pinned_table_ids.empty());
+            if (ImGui::MenuItem(buf)) {
+                state.compare_pinned_table_ids.clear();
+                if (state.project.has_value()) {
+                    save_compare_pinned(state.project->dir(), {});
+                }
+            }
+            ImGui::EndDisabled();
+            text_subtle("Chip: %s",
+                        bulk_chip.empty() ? "(none — acts on all changed tables)"
+                                          : state.compare_filter_chip);
+            text_subtle("Visible: %zu / %zu", visible_total, d.tables.size());
+            ImGui::EndPopup();
+        }
+        ImGui::SameLine();
         // Category chips — one per distinct Table::category present in
         // the changed tables (looked up against the live pack so a pack
         // swap reflows them).
