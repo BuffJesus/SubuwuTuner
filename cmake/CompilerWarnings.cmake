@@ -27,7 +27,6 @@ set(_msvc_warnings
     /w14906 # string literal cast to LPWSTR
     /w14928 # illegal copy-initialization
     /Zc:__cplusplus
-    /Zc:preprocessor
 )
 
 set(_gcc_clang_warnings
@@ -58,6 +57,12 @@ set(_gcc_only_warnings
 
 if(MSVC)
     target_compile_options(st_warnings INTERFACE ${_msvc_warnings})
+    # /Zc:preprocessor is real-cl only — clang-cl already has a conformant
+    # preprocessor and rejects the flag as -Wunused-command-line-argument,
+    # which under /WX becomes a hard error.
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(st_warnings INTERFACE /Zc:preprocessor)
+    endif()
     if(ST_WARNINGS_AS_ERRORS)
         target_compile_options(st_warnings INTERFACE /WX)
     endif()

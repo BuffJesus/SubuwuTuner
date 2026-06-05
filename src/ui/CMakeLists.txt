@@ -69,7 +69,6 @@ FetchContent_MakeAvailable(implot)
 add_library(implot_lib STATIC
     ${implot_SOURCE_DIR}/implot.cpp
     ${implot_SOURCE_DIR}/implot_items.cpp
-    ${implot_SOURCE_DIR}/implot_demo.cpp
 )
 target_include_directories(implot_lib SYSTEM PUBLIC ${implot_SOURCE_DIR})
 target_link_libraries(implot_lib PUBLIC imgui_lib)
