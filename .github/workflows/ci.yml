@@ -264,20 +264,82 @@ jobs:
           clang-format --dry-run --Werror "${files[@]}"
 
   mutation-flash:
-    name: mutation testing (advisory) — st::flash
-    # Advisory lane only: a surviving mutant in st::flash is a real
-    # coverage gap, but it's the kind of thing we'd want to fix in a
+    name: "mutation testing (advisory) — ${{ matrix.pass_name }}"
+    # Advisory lane: a surviving mutant on a safety-critical line is a
+    # real coverage gap, but the kind of thing we want to fix in a
     # follow-up rather than block the merge that surfaced it. Run on
     # push to main + manual dispatch only (skip per-PR to keep CI fast
     # and reviewer signal high). When the lane reports zero surviving
     # mutants for a quarter, flip continue-on-error off and make it a
     # ship gate; until then the value is the trend over time. Closes
     # the partial side of analyst Issue #19 (docs/33).
+    #
+    # Each entry runs on its own runner so wall-clock = max(passes)
+    # rather than sum(passes). Adds runner-minutes but the budget on
+    # public repos is unlimited and the parallelization unblocks
+    # adding more ranges as the safety-critical surface grows.
     if: github.event_name != 'pull_request'
     needs: build-test
     runs-on: ubuntu-24.04
     continue-on-error: true
-    timeout-minutes: 30
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 60-line window covering Flasher::execute's brick-safe
+          # sector reorder + delta-detect setup. 100% locally as of
+          # 92d6d2b + 078911c. Quarter-clock for "flip continue-on-
+          # error off" started on this range at 0f8f171.
+          - pass_name: "Flasher::execute brick-safe ordering"
+            file: src/flash/src/flash.cpp
+            line_start: 500
+            line_end: 560
+            tag_filter: "[flash]"
+            max_mutants: 20
+            test_timeout: 180
+          # 100-line window covering plan validation invariants
+          # (data.size() vs sector.length, sector.length > 0). 100%
+          # as of fdd858a.
+          - pass_name: "Flasher::execute plan validation"
+            file: src/flash/src/flash.cpp
+            line_start: 400
+            line_end: 499
+            tag_filter: "[flash]"
+            max_mutants: 20
+            test_timeout: 180
+          # 10-line slug-char classifier window. 3 boundary survivors
+          # (Z/z/9) killed by fdd858a.
+          - pass_name: "BackupStore slugifier"
+            file: src/flash/src/backup_store.cpp
+            line_start: 30
+            line_end: 40
+            tag_filter: "[backup_store]"
+            max_mutants: 15
+            test_timeout: 60
+          # 25-line battery-voltage validator (block_below + warn_below
+          # thresholds). 488419d killed all boundary survivors.
+          - pass_name: "FlashPreflight battery thresholds"
+            file: src/policy/src/flash_preflight.cpp
+            line_start: 65
+            line_end: 90
+            tag_filter: "[policy]"
+            max_mutants: 10
+            test_timeout: 60
+          # 499-line window covering the full SubaruSecurity surface:
+          # factory SSMCAN1 Gen-A 16-round Feistel + COBB-AP + Fehr-
+          # active L1+L3. SA codepaths gate every flash write — a
+          # mutation flipping key direction or relaxing a length check
+          # could brick or grant unauthorized writes. 100% locally
+          # per the consolidated handoff. --tag-filter "[sa]" matches
+          # 10 TEST_CASEs without colliding with [save]/[safety].
+          - pass_name: "SubaruSecurity SA Feistel + variants"
+            file: src/ecu/src/subaru_security.cpp
+            line_start: 1
+            line_end: 499
+            tag_filter: "[sa]"
+            max_mutants: 20
+            test_timeout: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -297,106 +359,22 @@ jobs:
           cmake -S . -B build --preset linux-gcc
           cmake --build build --target st_unit_tests -j
 
-      - name: Mutation pass — Flasher::execute brick-safe ordering
-        # 60-line window covering the brick-safe-ordering sector
-        # reorder + delta-detect setup. As of 92d6d2b + 078911c the
-        # range reports 100% on actionable mutants. The
-        # quarter-clock for "flip continue-on-error off" starts on
-        # this range.
+      - name: "Mutation pass — ${{ matrix.pass_name }}"
         run: |
           python3 tools/mutation_test.py \
-            --file src/flash/src/flash.cpp \
-            --line-start 500 \
-            --line-end 560 \
+            --file "${{ matrix.file }}" \
+            --line-start ${{ matrix.line_start }} \
+            --line-end ${{ matrix.line_end }} \
             --target st_unit_tests \
-            --tag-filter "[flash]" \
-            --max-mutants 20 \
+            --tag-filter "${{ matrix.tag_filter }}" \
+            --max-mutants ${{ matrix.max_mutants }} \
             --build-timeout 180 \
-            --test-timeout 180 \
-            --build-dir build \
-            --verbose \
-            --mutations swap_eq,swap_lt,swap_gt || true
-
-      - name: Mutation pass — Flasher::execute plan validation
-        # 100-line window covering plan validation (data.size() vs
-        # sector.length, sector.length > 0). Walks the validator
-        # invariants that prevent malformed plans from reaching the
-        # bus. 100% on the suite as of fdd858a.
-        run: |
-          python3 tools/mutation_test.py \
-            --file src/flash/src/flash.cpp \
-            --line-start 400 \
-            --line-end 499 \
-            --target st_unit_tests \
-            --tag-filter "[flash]" \
-            --max-mutants 20 \
-            --build-timeout 180 \
-            --test-timeout 180 \
-            --build-dir build \
-            --verbose \
-            --mutations swap_eq,swap_lt,swap_gt || true
-
-      - name: Mutation pass — BackupStore slugifier
-        # 10-line window over the slug-character classifier surfaced
-        # 3 actionable survivors (boundary chars Z/z/9) killed by
-        # fdd858a. Tight window — small mutant count, fast cycle.
-        run: |
-          python3 tools/mutation_test.py \
-            --file src/flash/src/backup_store.cpp \
-            --line-start 30 \
-            --line-end 40 \
-            --target st_unit_tests \
-            --tag-filter "[backup_store]" \
-            --max-mutants 15 \
-            --build-timeout 180 \
-            --test-timeout 60 \
-            --build-dir build \
-            --verbose \
-            --mutations swap_eq,swap_lt,swap_gt || true
-
-      - name: Mutation pass — FlashPreflight battery thresholds
-        # 25-line window over the battery-voltage validator
-        # (block_below + warn_below thresholds). Boundary tests
-        # in 488419d brought score to 100%.
-        run: |
-          python3 tools/mutation_test.py \
-            --file src/policy/src/flash_preflight.cpp \
-            --line-start 65 \
-            --line-end 90 \
-            --target st_unit_tests \
-            --tag-filter "[policy]" \
-            --max-mutants 10 \
-            --build-timeout 180 \
-            --test-timeout 60 \
+            --test-timeout ${{ matrix.test_timeout }} \
             --build-dir build \
             --verbose \
             --mutations swap_eq,swap_lt,swap_gt || true
           # Exit 0 unconditionally — the lane is advisory; surviving
           # mutants surface in the job log + summary lines, not the
-          # job's exit code (continue-on-error already caps blast
-          # radius, this belt-and-braces is for the rare case where
-          # the harness itself fails before printing a summary).
-
-      - name: Mutation pass — SubaruSecurity SA Feistel + variants
-        # 499-line window covering the full SubaruSecurity surface:
-        # factory SSMCAN1 Gen-A 16-round Feistel + COBB-AP, Fehr-active
-        # L1+L3 variants. SA codepaths gate every flash write on the
-        # bus — a mutation that flipped a key direction or relaxed a
-        # length check could brick or grant unauthorized writes.
-        # 100% locally as of the 2026-06-04 sprint per the consolidated
-        # handoff table. --tag-filter "[sa]" matches 10 TEST_CASEs
-        # (no accidental collisions — [save] / [safety] don't include
-        # "[sa]" as a substring).
-        run: |
-          python3 tools/mutation_test.py \
-            --file src/ecu/src/subaru_security.cpp \
-            --line-start 1 \
-            --line-end 499 \
-            --target st_unit_tests \
-            --tag-filter "[sa]" \
-            --max-mutants 20 \
-            --build-timeout 180 \
-            --test-timeout 120 \
-            --build-dir build \
-            --verbose \
-            --mutations swap_eq,swap_lt,swap_gt || true
+          # job's exit code. `continue-on-error: true` already caps
+          # blast radius; this belt-and-braces handles the rare case
+          # where the harness itself fails before printing a summary.
