@@ -340,6 +340,50 @@ jobs:
             tag_filter: "[sa]"
             max_mutants: 20
             test_timeout: 120
+          # 600-line window covering the UDS framer surface: OBD2
+          # Mode catalog (incl. Mode 09 size-3 boundary killed by
+          # fe77dc2), UDS service codec, and SA prelude wiring. UDS
+          # framing rides every flash + read-DID call; a survivor
+          # here could let malformed PDUs reach the bus.
+          - pass_name: "UDS framers + OBD2 Mode catalog"
+            file: src/ecu/src/uds.cpp
+            line_start: 1
+            line_end: 600
+            tag_filter: "[uds]"
+            max_mutants: 20
+            test_timeout: 180
+          # 200-line window over the SSM framer + checksum. SSM is
+          # the OEM read-side path used by ssm-a8-poll; mutations to
+          # the checksum or addr encoding would silently corrupt
+          # every captured RAM frame.
+          - pass_name: "SSM framer + checksum"
+            file: src/ecu/src/ssm.cpp
+            line_start: 1
+            line_end: 200
+            tag_filter: "[ssm]"
+            max_mutants: 15
+            test_timeout: 60
+          # 162-line window over the OBDX DVI codec — the wire
+          # framing for our primary in-hand adapter (Pro VX on
+          # COM5). A mutation in the checksum or framing would
+          # silently drop frames on every multi-frame ISO-TP read.
+          - pass_name: "OBDX DVI codec"
+            file: src/transport/src/obdx_dvi.cpp
+            line_start: 1
+            line_end: 162
+            tag_filter: "[obdx_dvi]"
+            max_mutants: 15
+            test_timeout: 60
+          # 180-line window over the flash_preflight body broader
+          # than the 65-90 battery-threshold slice: also catches the
+          # jurisdiction-profile gate + sector-bound preconditions.
+          - pass_name: "FlashPreflight full body"
+            file: src/policy/src/flash_preflight.cpp
+            line_start: 1
+            line_end: 180
+            tag_filter: "[policy]"
+            max_mutants: 15
+            test_timeout: 60
     steps:
       - uses: actions/checkout@v4
 
