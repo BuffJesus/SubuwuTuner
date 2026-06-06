@@ -53,6 +53,35 @@ TEST_CASE("did_payloads() + total_payload_bytes() dispatch by firmware",
     REQUIRE(cb::total_payload_bytes(cb::CobbApFirmware::V1_7_6_0_CCF_Gen3) == 75);
 }
 
+TEST_CASE("Every v1.7.6.0 Verified entry carries an AP monitor_id",
+          "[ecu][cobb][datalog][verified][monitor_id]") {
+    for (auto const &s : cb::ap_v1_7_6_0_layout()) {
+        if (s.verification != cb::CobbVerification::Verified)
+            continue;
+        REQUIRE_FALSE(s.monitor_id.empty());
+        // monitor_id prefix matches ram_authoritative: SSM_* means
+        // OEM-RAM authoritative, RAM_* means COBB-defined candidate.
+        bool const is_ssm = s.monitor_id.starts_with("SSM_");
+        REQUIRE(s.ram_authoritative == is_ssm);
+    }
+}
+
+TEST_CASE("v1.7.6.0 has 6 SSM_* + 6 RAM_* Verified rows",
+          "[ecu][cobb][datalog][verified][monitor_id]") {
+    int ssm = 0;
+    int ram = 0;
+    for (auto const &s : cb::ap_v1_7_6_0_layout()) {
+        if (s.verification != cb::CobbVerification::Verified)
+            continue;
+        if (s.ram_authoritative)
+            ++ssm;
+        else
+            ++ram;
+    }
+    REQUIRE(ssm == 6);
+    REQUIRE(ram == 6);
+}
+
 TEST_CASE("v1.7.6.0 Verified positions all fit within v1.7.6.0 payload widths",
           "[ecu][cobb][datalog][verified][widths]") {
     // Now that v1.7.6.0 F300 is 26 bytes (not 22), the F300:21 u16_le

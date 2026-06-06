@@ -832,3 +832,19 @@ TEST_CASE("CLI cobb-datalog-preset exits 2 on unknown firmware",
     REQUIRE(r.spawned);
     REQUIRE(r.exit_code == 2);
 }
+
+TEST_CASE("CLI cobb-datalog-preset --toml emits Verified-only TOML",
+          "[cli][integration][cobb-datalog-preset][toml]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run("cobb-datalog-preset --toml");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "[[pid]]"));
+    REQUIRE(stdout_contains(r, "monitor_id        = \"SSM_RPM\""));
+    REQUIRE(stdout_contains(r, "monitor_id        = \"RAM_GEAR_POS_EST\""));
+    REQUIRE(stdout_contains(r, "ram_address_status = \"authoritative\""));
+    REQUIRE(stdout_contains(r, "ram_address_status = \"candidate\""));
+    REQUIRE(stdout_contains(r, "# 12 Verified PIDs emitted."));
+}

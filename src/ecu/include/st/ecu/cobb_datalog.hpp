@@ -177,6 +177,21 @@ struct CobbSignalLayout {
     // RAM value before packing into the F3xx payload.
     double              cobb_scale{0.0};
     double              cobb_offset{0.0};
+    // AP-internal monitor identifier from the cfg list (e.g.
+    // "SSM_RPM", "RAM_COMM_FUEL_FINAL"). Stable across AP firmware
+    // versions where the same logical monitor exists — use this as
+    // the cross-firmware join key rather than `name` (which is the
+    // user-facing label and can change). Empty for Hypothesized
+    // entries whose cfg-row hasn't been confirmed.
+    std::string_view    monitor_id;
+    // True when the RAM address is catalog-authoritative (SSM_*
+    // monitor family): COBB reads the OEM SSM-protocol RAM at the
+    // listed address. False = candidate (RAM_* monitor family):
+    // COBB may read the OEM RAM at this address or a COBB-tune-patch
+    // RAM at an unknown address; the wire decode works regardless,
+    // but a SSM-0xA8 fallback for this signal cannot trust the
+    // ram_address without on-car verification.
+    bool                ram_authoritative{false};
 };
 
 // AP firmware version tags. Pre-/post-CCF-Gen2-to-Gen3 transition.
