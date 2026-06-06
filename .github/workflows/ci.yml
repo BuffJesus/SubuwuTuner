@@ -376,3 +376,27 @@ jobs:
           # job's exit code (continue-on-error already caps blast
           # radius, this belt-and-braces is for the rare case where
           # the harness itself fails before printing a summary).
+
+      - name: Mutation pass — SubaruSecurity SA Feistel + variants
+        # 499-line window covering the full SubaruSecurity surface:
+        # factory SSMCAN1 Gen-A 16-round Feistel + COBB-AP, Fehr-active
+        # L1+L3 variants. SA codepaths gate every flash write on the
+        # bus — a mutation that flipped a key direction or relaxed a
+        # length check could brick or grant unauthorized writes.
+        # 100% locally as of the 2026-06-04 sprint per the consolidated
+        # handoff table. --tag-filter "[sa]" matches 10 TEST_CASEs
+        # (no accidental collisions — [save] / [safety] don't include
+        # "[sa]" as a substring).
+        run: |
+          python3 tools/mutation_test.py \
+            --file src/ecu/src/subaru_security.cpp \
+            --line-start 1 \
+            --line-end 499 \
+            --target st_unit_tests \
+            --tag-filter "[sa]" \
+            --max-mutants 20 \
+            --build-timeout 180 \
+            --test-timeout 120 \
+            --build-dir build \
+            --verbose \
+            --mutations swap_eq,swap_lt,swap_gt || true
