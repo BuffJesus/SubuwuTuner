@@ -114,10 +114,13 @@ void load_audit_pinned(AppState &state) {
     if (!state.project.has_value()) {
         return;
     }
-    auto const sidecar = state.project->dir() / "audit.pinned";
+    auto const sidecar =
+        state_sidecar::read_path(state.project->dir(), "audit.pinned");
+    if (sidecar.empty())
+        return; // absent sidecar = no pins, not an error
     std::ifstream in{sidecar};
     if (!in) {
-        return; // absent sidecar = no pins, not an error
+        return;
     }
     std::string line;
     while (std::getline(in, line)) {
@@ -135,7 +138,12 @@ void save_audit_pinned(AppState const &state) {
     if (!state.project.has_value()) {
         return;
     }
-    auto const sidecar = state.project->dir() / "audit.pinned";
+    if (state.audit_pinned_keys.empty()) {
+        state_sidecar::remove_all(state.project->dir(), "audit.pinned");
+        return;
+    }
+    auto const sidecar =
+        state_sidecar::write_path(state.project->dir(), "audit.pinned");
     std::ofstream out{sidecar, std::ios::trunc};
     if (!out) {
         return; // best-effort — pins survive at runtime even if disk fails
@@ -143,6 +151,7 @@ void save_audit_pinned(AppState const &state) {
     for (auto const &k : state.audit_pinned_keys) {
         out << k << '\n';
     }
+    state_sidecar::remove_legacy(state.project->dir(), "audit.pinned");
 }
 
 // Resolve the on-disk path the audit panel reads. Project scope →

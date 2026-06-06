@@ -86,6 +86,41 @@ std::filesystem::path config_dir_root();
 std::filesystem::path recents_config_path();
 std::filesystem::path settings_config_path();
 
+// .stune/state/ subdir migration helpers. Sidecars added after
+// 2026-06-06 live under <project_dir>/state/; older sidecars stay
+// at the root with a legacy-read fallback. Use these helpers from
+// load/save call sites so the migration story is identical
+// everywhere.
+//
+// Scope of the migration: cosmetic/cache sidecars only. audit.log,
+// edits.toml, histories/, and flash.journal stay at the project
+// root — they're user-visible in docs, CLI verbs, and crash-
+// recovery paths.
+namespace state_sidecar {
+
+// Resolve the path the LOADER should read from. Returns state/<name>
+// when it exists; falls back to <project_dir>/<name>. Empty path
+// when neither exists (caller treats as absent).
+std::filesystem::path read_path(std::filesystem::path const &project_dir,
+                                char const *name);
+
+// Resolve the path the WRITER should write to. Always state/<name>;
+// creates the state/ directory if missing. After a successful write,
+// call remove_legacy() to drop the pre-migration file.
+std::filesystem::path write_path(std::filesystem::path const &project_dir,
+                                 char const *name);
+
+// Remove the pre-migration <project_dir>/<name>. Best-effort; no
+// error if absent.
+void remove_legacy(std::filesystem::path const &project_dir, char const *name);
+
+// Remove BOTH the modern and legacy paths. Used by empty-set save
+// (sidebar_hidden / compare.pinned conventions) so the loader's
+// absent-file branch is the canonical empty state.
+void remove_all(std::filesystem::path const &project_dir, char const *name);
+
+} // namespace state_sidecar
+
 // Cross-session per-CID audit sink directory (analyst Issue #8). Lives
 // at `<config>/audit-by-cid/`; each file inside is
 // `<sanitized_cid>.log`. AuditLog::set_per_cid_sink(this) tees every

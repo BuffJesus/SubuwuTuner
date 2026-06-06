@@ -480,9 +480,48 @@ void push_recent(std::vector<RecentEntry> &recents, std::filesystem::path const 
     }
 }
 
+// .stune/state/ subdir migration helpers — see persistence.hpp for
+// the design context.
+namespace state_sidecar {
+
+std::filesystem::path read_path(std::filesystem::path const &project_dir,
+                                char const *name) {
+    auto const modern = project_dir / "state" / name;
+    std::error_code ec;
+    if (std::filesystem::exists(modern, ec))
+        return modern;
+    auto const legacy = project_dir / name;
+    if (std::filesystem::exists(legacy, ec))
+        return legacy;
+    return {};
+}
+
+std::filesystem::path write_path(std::filesystem::path const &project_dir,
+                                  char const *name) {
+    auto const state_dir = project_dir / "state";
+    std::error_code ec;
+    std::filesystem::create_directories(state_dir, ec);
+    return state_dir / name;
+}
+
+void remove_legacy(std::filesystem::path const &project_dir, char const *name) {
+    std::error_code ec;
+    std::filesystem::remove(project_dir / name, ec);
+}
+
+void remove_all(std::filesystem::path const &project_dir, char const *name) {
+    std::error_code ec;
+    std::filesystem::remove(project_dir / name, ec);
+    std::filesystem::remove(project_dir / "state" / name, ec);
+}
+
+} // namespace state_sidecar
+
 std::vector<std::string> load_sidebar_category_order(std::filesystem::path const &project_dir) {
     std::vector<std::string> out;
-    auto const path = project_dir / "sidebar_order.txt";
+    auto const path = state_sidecar::read_path(project_dir, "sidebar_order.txt");
+    if (path.empty())
+        return out;
     std::ifstream in{path};
     if (!in)
         return out;
@@ -501,19 +540,26 @@ std::vector<std::string> load_sidebar_category_order(std::filesystem::path const
 
 void save_sidebar_category_order(std::filesystem::path const &project_dir,
                                  std::vector<std::string> const &order) {
-    auto const path = project_dir / "sidebar_order.txt";
+    if (order.empty()) {
+        state_sidecar::remove_all(project_dir, "sidebar_order.txt");
+        return;
+    }
+    auto const path = state_sidecar::write_path(project_dir, "sidebar_order.txt");
     std::ofstream out{path, std::ios::trunc};
     if (!out)
         return;
     for (auto const &cat : order) {
         out << cat << '\n';
     }
+    state_sidecar::remove_legacy(project_dir, "sidebar_order.txt");
 }
 
 std::vector<std::string>
 load_sidebar_hidden_categories(std::filesystem::path const &project_dir) {
     std::vector<std::string> out;
-    auto const path = project_dir / "sidebar_hidden.txt";
+    auto const path = state_sidecar::read_path(project_dir, "sidebar_hidden.txt");
+    if (path.empty())
+        return out;
     std::ifstream in{path};
     if (!in)
         return out;
@@ -532,27 +578,29 @@ load_sidebar_hidden_categories(std::filesystem::path const &project_dir) {
 
 void save_sidebar_hidden_categories(std::filesystem::path const &project_dir,
                                     std::vector<std::string> const &hidden) {
-    auto const path = project_dir / "sidebar_hidden.txt";
     if (hidden.empty()) {
-        // Empty list = "no hidden categories"; remove the file so the
-        // project root stays tidy and the loader's absent-file path is
-        // the canonical "all visible" representation.
-        std::error_code ec;
-        std::filesystem::remove(path, ec);
+        // Empty list = "no hidden categories"; remove both paths so
+        // the loader's absent-file path is the canonical "all
+        // visible" representation.
+        state_sidecar::remove_all(project_dir, "sidebar_hidden.txt");
         return;
     }
+    auto const path = state_sidecar::write_path(project_dir, "sidebar_hidden.txt");
     std::ofstream out{path, std::ios::trunc};
     if (!out)
         return;
     for (auto const &cat : hidden) {
         out << cat << '\n';
     }
+    state_sidecar::remove_legacy(project_dir, "sidebar_hidden.txt");
 }
 
 std::vector<std::string>
 load_compare_pinned(std::filesystem::path const &project_dir) {
     std::vector<std::string> out;
-    auto const path = project_dir / "compare.pinned";
+    auto const path = state_sidecar::read_path(project_dir, "compare.pinned");
+    if (path.empty())
+        return out;
     std::ifstream in{path};
     if (!in)
         return out;
@@ -571,23 +619,25 @@ load_compare_pinned(std::filesystem::path const &project_dir) {
 
 void save_compare_pinned(std::filesystem::path const &project_dir,
                          std::vector<std::string> const &pinned) {
-    auto const path = project_dir / "compare.pinned";
     if (pinned.empty()) {
-        std::error_code ec;
-        std::filesystem::remove(path, ec);
+        state_sidecar::remove_all(project_dir, "compare.pinned");
         return;
     }
+    auto const path = state_sidecar::write_path(project_dir, "compare.pinned");
     std::ofstream out{path, std::ios::trunc};
     if (!out)
         return;
     for (auto const &id : pinned) {
         out << id << '\n';
     }
+    state_sidecar::remove_legacy(project_dir, "compare.pinned");
 }
 
 std::optional<CompareConfig>
 load_compare_config(std::filesystem::path const &project_dir) {
-    auto const path = project_dir / "compare.config";
+    auto const path = state_sidecar::read_path(project_dir, "compare.config");
+    if (path.empty())
+        return std::nullopt;
     std::ifstream in{path};
     if (!in)
         return std::nullopt;
@@ -624,7 +674,7 @@ load_compare_config(std::filesystem::path const &project_dir) {
 
 void save_compare_config(std::filesystem::path const &project_dir,
                          CompareConfig const &cfg) {
-    auto const path = project_dir / "compare.config";
+    auto const path = state_sidecar::write_path(project_dir, "compare.config");
     std::ofstream out{path, std::ios::trunc};
     if (!out)
         return;
@@ -633,6 +683,7 @@ void save_compare_config(std::filesystem::path const &project_dir,
     out << "epsilon=" << cfg.epsilon << '\n';
     out << "include_identical=" << (cfg.include_identical ? "true" : "false") << '\n';
     out << "filter_chip=" << cfg.filter_chip << '\n';
+    state_sidecar::remove_legacy(project_dir, "compare.config");
 }
 
 // pack-lint.toml format. Hand-rolled rather than going through
@@ -672,7 +723,9 @@ std::string_view trim(std::string_view v) {
 
 std::optional<PackLintSnapshot>
 load_pack_lint(std::filesystem::path const &project_dir) {
-    auto const path = project_dir / kPackLintFilename;
+    auto const path = state_sidecar::read_path(project_dir, kPackLintFilename);
+    if (path.empty())
+        return std::nullopt;
     std::ifstream in{path};
     if (!in)
         return std::nullopt;
@@ -723,7 +776,7 @@ load_pack_lint(std::filesystem::path const &project_dir) {
 
 void save_pack_lint(std::filesystem::path const &project_dir,
                     PackLintSnapshot const &snap) {
-    auto const path = project_dir / kPackLintFilename;
+    auto const path = state_sidecar::write_path(project_dir, kPackLintFilename);
     std::ofstream out{path, std::ios::trunc};
     if (!out)
         return;
@@ -740,6 +793,7 @@ void save_pack_lint(std::filesystem::path const &project_dir,
             out << '\n';
         }
     }
+    state_sidecar::remove_legacy(project_dir, kPackLintFilename);
 }
 
 } // namespace st::ui
