@@ -567,6 +567,11 @@ void render_settings_modal(AppState &state) {
                 (state.settings.ai_provider == AiProvider::OpenAI);
             if (ImGui::RadioButton("Anthropic (Claude)", claude_active)) {
                 state.settings.ai_provider = AiProvider::Anthropic;
+                // Provider flip clears a stale override — a user who
+                // typed "claude-opus-4-7" then switched to OpenAI
+                // would otherwise send that string to OpenAI which
+                // 404s. Empty reverts to the per-provider default.
+                state.settings.ai_model.clear();
                 save_settings(state.settings);
             }
             if (ImGui::IsItemHovered()) {
@@ -577,6 +582,7 @@ void render_settings_modal(AppState &state) {
             ImGui::SameLine();
             if (ImGui::RadioButton("OpenAI (GPT)", openai_active)) {
                 state.settings.ai_provider = AiProvider::OpenAI;
+                state.settings.ai_model.clear();
                 save_settings(state.settings);
             }
             if (ImGui::IsItemHovered()) {
