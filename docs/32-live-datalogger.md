@@ -352,6 +352,23 @@ The AP-internal monitor IDs split into two prefixes:
 Full 49-monitor list at
 `findings/corpus-wide-re-2026-06-06/out/cobb_datalog/COBB_MONITOR_IDS.md`.
 
+**Cross-CID portability**
+
+The byte positions + wire scales for the 12 Verified rows are assumed
+portable across A-series CIDs — Cobb's AP firmware uses one response
+template regardless of which A-series CID answers. RAM addresses, by
+contrast, are per-CID: every `ram_address` value in
+`st::ecu::cobb_datalog` is from the LF79103P catalog. The analyst has
+generated 8 per-CID TOML packs at
+`findings/.../per_cid_packs/cobb_pids_<CID>.toml` (`LF75404H`,
+`LF75404S`, `LF75600H`, `LF79103P`, `LF9C102P`, `LF9D012H`,
+`LF9G003T`, `LF9L000E`) — drop-in for definitions trees. `LF79103P`
+is R²-verified end-to-end; the other 7 are byte-position hypotheses
+that should be confirmed via a one-time sniff before shipping them as
+a default for a different car. `LF75600H` has 3 monitors with no
+high-confidence catalog match (per the analyst's `per_cid_packs/
+README.md`); the other 7 map cleanly.
+
 **Per-byte signal layout (two AP firmware versions)**
 
 Both supported AP firmware versions ship as const-data layouts in

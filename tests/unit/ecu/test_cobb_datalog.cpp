@@ -66,6 +66,21 @@ TEST_CASE("Every v1.7.6.0 Verified entry carries an AP monitor_id",
     }
 }
 
+TEST_CASE("Every Verified RAM address sits in the LF79103P band",
+          "[ecu][cobb][datalog][verified][lf79103p]") {
+    // Guard against accidental cross-CID contamination: the const-
+    // data ram_address values are LF79103P-specific by design. Any
+    // future commit that adds a RAM address from a different CID's
+    // catalog should land in a separate per-CID pack, not the
+    // primary layout. LF79103P RAM lives in 0xFFF80000-0xFFFFFFFF.
+    for (auto const &s : cb::ap_v1_7_6_0_layout()) {
+        if (s.verification != cb::CobbVerification::Verified)
+            continue;
+        REQUIRE(s.ram_address >= 0xFFF80000u);
+        REQUIRE(s.ram_address <= 0xFFFFFFFFu);
+    }
+}
+
 TEST_CASE("v1.7.6.0 has 6 SSM_* + 6 RAM_* Verified rows",
           "[ecu][cobb][datalog][verified][monitor_id]") {
     int ssm = 0;

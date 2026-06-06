@@ -12632,6 +12632,14 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
             std::puts("");
         }
         std::printf("# %zu Verified PIDs emitted.\n", emitted);
+        std::puts("# RAM addresses (`ssm_address`) above are LF79103P-specific.");
+        std::puts("# For other A-series CIDs, the byte positions + wire scales");
+        std::puts("# port directly; the RAM addresses do not. Use the analyst's");
+        std::puts("# per-CID packs at findings/.../per_cid_packs/cobb_pids_<CID>");
+        std::puts("# .toml — supported CIDs: LF75404H, LF75404S, LF75600H,");
+        std::puts("# LF79103P, LF9C102P, LF9D012H, LF9G003T, LF9L000E.");
+        std::puts("# LF75600H has 3 monitors with no high-confidence catalog");
+        std::puts("# match; the other 7 CIDs map cleanly.");
         return 0;
     }
     if (json_mode) {

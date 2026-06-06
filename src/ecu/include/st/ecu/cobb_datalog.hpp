@@ -223,6 +223,21 @@ enum class CobbApFirmware : std::uint8_t {
 //            Cobb may read OEM RAM or a Cobb-patch RAM at a different
 //            address. Verified Cobb-monitor entries here may carry a
 //            ram_address that's a best guess.
+//
+// Cross-CID portability story (analyst 2026-06-06 per_cid_packs/):
+//   - Byte positions + wire scales (factor/offset) are assumed
+//     portable across A-series CIDs — Cobb's AP firmware writes
+//     one response template regardless of which A-series CID
+//     answers. This assumption holds for the 7 LF75404H / LF75404S
+//     / LF79103P / LF9C102P / LF9D012H / LF9G003T / LF9L000E packs
+//     the analyst generated.
+//   - RAM addresses are LF79103P-specific. Every `ram_address`
+//     in this file refers to the LF79103P live-signals catalog.
+//     For other CIDs, look up the same `monitor_id` in that CID's
+//     pack at `findings/.../per_cid_packs/cobb_pids_<CID>.toml`.
+//   - LF75600H is the one A-series CID where 3 of the 12 signals
+//     have no high-confidence catalog match (per-CID README) —
+//     don't assume the LF79103P pack ports cleanly there.
 std::span<CobbSignalLayout const> ap_v1_7_4_2_layout() noexcept;
 std::span<CobbSignalLayout const> ap_v1_7_6_0_layout() noexcept;
 std::span<CobbSignalLayout const> ap_layout(CobbApFirmware fw) noexcept;
