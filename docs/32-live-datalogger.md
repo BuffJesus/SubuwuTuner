@@ -382,19 +382,33 @@ Two independently-sourced axes underpin the const-data:
   addresses matter only for an SSM-A8 fallback path (not currently
   implemented) and may need correction for non-LF79103P deployments.
 
-**Cross-CID portability**
+**Cross-CID portability — use the v2 packs**
 
-The analyst has generated 8 per-CID TOML packs at
-`findings/.../per_cid_packs/cobb_pids_<CID>.toml` (`LF75404H`,
-`LF75404S`, `LF75600H`, `LF79103P`, `LF9C102P`, `LF9D012H`,
-`LF9G003T`, `LF9L000E`) — same 12 PIDs, RAM addresses re-resolved
-per CID. Drop-in for definitions trees. The byte-position axis ports
-directly across the family (one AP response template). `LF75600H`
-has 3 monitors with no high-confidence catalog match (per the
-analyst's `per_cid_packs/README.md`); the other 7 map cleanly. The
-user's car would benefit most from an `lf79101p` base pack + a
-parallel `lf79101p_cobb_f3xx.toml` overlay (not in the current
-707-pack collection).
+After the 2026-06-06 aligned re-fit, the analyst regenerated the
+per-CID packs at `findings/.../per_cid_packs/cobb_pids_v2_<CID>.toml`
+covering 10 A-series CIDs: `LF75404H`, `LF75404S`, `LF75600H`,
+`LF79101P`, `LF79102P`, `LF79103P`, `LF9C102P`, `LF9D012H`,
+`LF9G003T`, `LF9L000E`. Each carries the 36 aligned PIDs with
+RAM addresses re-resolved against that CID's catalog.
+
+Two new identifier base packs are alongside the overlays:
+`lf79101p_identifier.toml` and `lf79102p_identifier.toml` cover the
+user's currently-installed tune state (LF79101P, Fehr-active e-tune)
+and factory state (LF79102P, virgin) respectively — neither was in
+the 707-pack collection before.
+
+**Do NOT deploy the v1 per-CID packs** (`cobb_pids_<CID>.toml`
+without the `v2_` prefix). They were generated from the
+since-superseded v5 layout — byte positions are wrong for 10 of 12
+PIDs. Stale-pack deployment will produce plausible-looking but
+incorrect engineering values.
+
+End-to-end validation: 28 of 36 PIDs in the v2 pack decode within
+5% of the AP CSV's t=0 row (others within ±1 unit absolute; small
+values amplify percent error). See
+`findings/.../scripts/demo_decode_aligned.py`. The full INTEGRATION
+recipe with cp commands lives at
+`findings/.../INTEGRATION_RECIPE.md`.
 
 **Per-byte signal layout (two AP firmware versions)**
 
