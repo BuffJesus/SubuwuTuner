@@ -86,7 +86,7 @@ General engineering literature on engine control, fuel control, knock control, i
 
 - Maintainers do **not** decompile any commercial or closed-source tuning tool when authoring SubuwuTuner.
 - AI assistants used during development are scoped to public, license-clean reference material; protected references (GPL source code, source-available competitors) are explicitly disallowed via `CLAUDE.md`.
-- If a future maintainer needs to consult a protected reference for spec extraction, the work happens in an isolated *analyst session* whose outputs are spec documents (under `D:\Documents\SubuwuTuner-specs\`), never code that enters this repo.
+- If a future maintainer needs to consult a protected reference for spec extraction, the work happens in an isolated *analyst session* whose outputs are spec documents (under `D:\Subuwu\specs\`), never code that enters this repo.
 - The boundary between inspiration and expression is reviewed when this file is updated.
 
 ---

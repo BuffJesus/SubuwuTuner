@@ -1,6 +1,6 @@
 # 17 — Data distribution policy
 
-This document is the project's standing policy on what the public Apache-2.0 release ships and what it does not. It is forward-looking: it describes the rules that govern future first-party content. The historical decision that produced these rules is recorded in `docs/15-clean-room-engineering.md` §13 and in the parallel private audit at `D:\Documents\SubuwuTuner-specs\AUDIT.md`; this document does not re-litigate it.
+This document is the project's standing policy on what the public Apache-2.0 release ships and what it does not. It is forward-looking: it describes the rules that govern future first-party content. The historical decision that produced these rules is recorded in `docs/15-clean-room-engineering.md` §13 and in the parallel private audit at `D:\Subuwu\specs\AUDIT.md`; this document does not re-litigate it.
 
 ## 1 — What ships
 
@@ -77,19 +77,19 @@ Path B is a distribution-boundary change. It does **not** change:
 - **The clean-room methodology.** `docs/15-clean-room-engineering.md` is unchanged in its substance — it remains the operative policy for *implementation* code (`src/`, `tests/`, `tools/`). Path B applies to *bundled data*, not to code.
 - **The auto-tune kernels, flash orchestrator, brick protection, or any other safety-critical subsystem.** These are infrastructure; they ship as before.
 - **The jurisdiction-policy stance** in `docs/06-legal-ethics.md`. SubuwuTuner remains jurisdiction-neutral on emissions; engine-safety lints remain strict regardless of distribution posture.
-- **The analyst-side workflow** in `docs/15` and `docs/analyst-mode-prompt.md`. Analysts may still extract facts from protected references under the rules in `docs/15`; the resulting specs go to `D:\Documents\SubuwuTuner-specs\`. Implementer sessions then build `src/` from those specs. The Path B boundary affects what *bundled data* lands in the public repo, not what the wall mechanism is for.
+- **The analyst-side workflow** in `docs/15` and `docs/analyst-mode-prompt.md`. Analysts may still extract facts from protected references under the rules in `docs/15`; the resulting specs go to `D:\Subuwu\specs\`. Implementer sessions then build `src/` from those specs. The Path B boundary affects what *bundled data* lands in the public repo, not what the wall mechanism is for.
 
 ## 6 — Where bundled data lives — three eras
 
 | Artifact | Pre-Path B (initial state) | Post-Path B (initial commit) | Post-2026-05-19 revision |
 |---|---|---|---|
-| Atlas-derived VA/VB packs (8 + 18 master) | public repo | private master at `D:\Documents\SubuwuTuner-defs-private\` | unchanged — still private (Atlas-derived, fails §1201) |
+| Atlas-derived VA/VB packs (8 + 18 master) | public repo | private master at `D:\Subuwu\defs-private\` | unchanged — still private (Atlas-derived, fails §1201) |
 | Forum-sourced VA/VB packs via `tools/defgen/` | did not exist | did not exist | 25 packs in `definitions/impreza/` (7 LF + 18 LHB) |
 | `definitions/{impreza,forester,legacy,…}/` | public repo (Merp-derived community work) | unchanged — still public | unchanged — still public, now joined by FA-DIT WRX packs |
 | `definitions/pids.toml`, `definitions/ecuparams/` | public repo (community-sourced) | unchanged — still public | unchanged — still public |
 | `fixtures/demo-pack/` | public repo (synthetic, always-available example) | unchanged — still public | unchanged — still public |
 
-The git history of the public repo was rewritten to remove the Atlas-derived `definitions/va/` and `definitions/vb/` directories from all 143 commits as part of the initial Path B implementation. The pre-rewrite mirror is preserved at `D:\Documents\SubuwuTuner-backup-pre-pathb.git` for the developer's reference; it is not a public artifact. The 2026-05-19 forum-sourced VA/VB packs are independent of that rewrite — they're generated fresh from a different (§1201-clean) upstream and live in `definitions/impreza/` rather than a re-instated `definitions/va/`.
+The git history of the public repo was rewritten to remove the Atlas-derived `definitions/va/` and `definitions/vb/` directories from all 143 commits as part of the initial Path B implementation. The pre-rewrite mirror is preserved at `D:\Subuwu\backup-pre-pathb.git` for the developer's reference; it is not a public artifact. The 2026-05-19 forum-sourced VA/VB packs are independent of that rewrite — they're generated fresh from a different (§1201-clean) upstream and live in `definitions/impreza/` rather than a re-instated `definitions/va/`.
 
 ## 7 — Analyst-mode RE outputs (staged 2026-05-24, pending posture decision)
 

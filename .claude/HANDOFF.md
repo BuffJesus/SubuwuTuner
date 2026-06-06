@@ -1,6 +1,6 @@
 # Handoff — 2026-05-24 (Findings tree landed; algorithm structure recovered; staging + doc updates, no commits yet)
 
-**Today's session was triage + private staging + doc updates around `C:\Users\Cornelio\Desktop\Findings\` — the analyst-mode RE output from this week's work on the desktop. Nothing committed yet; the tree is dirty under `fixtures/private/` (gitignored) and four `docs/` files.** The big state change: the Gen-A and Gen-B SecurityAccess primitives have been fully recovered from the plaintext ROMs (Gen-A is a 16-round Feistel with 5-bit-indexed S-box, NOT the fenugrec/nisprog XOR cipher; Gen-B is AES-128 ECB with three universal master keys byte-identical across all 16 B-series CIDs). This explains last night's `tools/solve_ssmcan1.py` linearity-degeneracy finding — the encoded structure was the publicly-described XOR cipher, which is GF(2)-linear; the actual primitive is non-linear via the S-box. The linearity-check diagnostic predicted exactly this.
+**Today's session was triage + private staging + doc updates around `D:\Subuwu\findings\` — the analyst-mode RE output from this week's work on the desktop. Nothing committed yet; the tree is dirty under `fixtures/private/` (gitignored) and four `docs/` files.** The big state change: the Gen-A and Gen-B SecurityAccess primitives have been fully recovered from the plaintext ROMs (Gen-A is a 16-round Feistel with 5-bit-indexed S-box, NOT the fenugrec/nisprog XOR cipher; Gen-B is AES-128 ECB with three universal master keys byte-identical across all 16 B-series CIDs). This explains last night's `tools/solve_ssmcan1.py` linearity-degeneracy finding — the encoded structure was the publicly-described XOR cipher, which is GF(2)-linear; the actual primitive is non-linear via the S-box. The linearity-check diagnostic predicted exactly this.
 
 **Decision the developer owes the project before the next implementation push:** the SA algorithm material has been *recovered from firmware itself* (analyst-mode RE, not GPL source). The original "all clean implementations are GPL-3" argument in `security_key.hpp` for keeping the algorithm out of this Apache-2.0 codebase does not apply to firmware-derived facts. But Path B's §1201 axis (per `docs/17`) is parallel and separate. The new `docs/17` §7 (added today) frames the question; the answer determines whether the next commit drops the Gen-A reference implementation into `src/ecu/src/subaru_security.cpp` or whether it ships as an external plug-in module the way `docs/17` ships definitions.
 
@@ -21,7 +21,7 @@ All changes are staged in working tree only. No `git add` or `git commit` yet �
 
 ### 1. Findings tree triage
 
-`C:\Users\Cornelio\Desktop\Findings\` is the user's analyst-mode RE output from this week's desktop work. Vendor-neutral framing throughout ("ECU family", "calibration ID", "Generation A / B"; no Subaru / Atlas / RomRaider mentions). The output style matches what `docs/analyst-mode-prompt.md` is designed to produce. Contents reviewed against the IP boundaries in `CLAUDE.md`:
+`D:\Subuwu\findings\` is the user's analyst-mode RE output from this week's desktop work. Vendor-neutral framing throughout ("ECU family", "calibration ID", "Generation A / B"; no Subaru / Atlas / RomRaider mentions). The output style matches what `docs/analyst-mode-prompt.md` is designed to produce. Contents reviewed against the IP boundaries in `CLAUDE.md`:
 
 - **Algorithm constants and structure** are described as extracted from the firmware images themselves (byte-search across all 8 A-series ROMs locates the L1 round-key table verbatim; per-CID flash addresses tabulated). That puts them in the analyst-mode-output category, not the GPL-contamination category.
 - **The `communication-protocols/uds-catalog.md` upstream phrasing** ("Compiled from the request / response class set in the firmware project files, one Java class per SID; the SID-to-class binding lives in a single registry table") suggests an analyst-mode session that touched the off-limits `atlas-decompiled/` tree. The vendor-neutral framing is the right output style for analyst mode under that scenario, but it's worth confirming the upstream provenance before any in-tree reference impl ships. Stays private until that confirmation.
@@ -232,7 +232,7 @@ C++ side: morning batch added +5 sniff transport tests + +4 SA preamble tests; c
 - `subuwutuner-gui.exe` — 14.84 MB (icon + sniff + SA wiring), built 2026-05-23 18:23
 - `subuwutuner-cli.exe` — 5.96 MB (new `sniff` + `rdbi` subcommands), built 2026-05-23 18:37
 
-Both at `D:\Documents\JetBrains\SubaruTuner\build\win-mingw\bin\`. Syncthing should have propagated to the laptop.
+Both at `D:\Subuwu\code\build\win-mingw\bin\`. Syncthing should have propagated to the laptop.
 
 ## Commit log (pushed, `0ccf9e0..0e5cddc`)
 
@@ -325,7 +325,7 @@ The state described below was superseded by today's work, but the prose around m
 
 ## Earlier today AM — OBDX CAN ID prefix + filter setup (now committed in commit 1 of the bundle above)
 
-The morning's deep-dive into the OBDX Pro Developers Reference Manual v3.00 (`C:\Users\Cornelio\Desktop\OBDX-Pro-Developers-Reference-Manual.pdf`) revealed the two transport bugs above. Key sections used:
+The morning's deep-dive into the OBDX Pro Developers Reference Manual v3.00 (`D:\Subuwu\findings\external-refs\OBDX-Pro-Developers-Reference-Manual.pdf` — moved from the loose Desktop root during the 2026-06-04 cleanup) revealed the two transport bugs above. Key sections used:
 
 - **§3.2 Checksum Calculation** — sum + bitwise NOT (same as VT). Codec was already correct.
 - **§3.4 Receive from Network Normal (0x08)** — adapter→PC push. CAN format: `08 [LEN] [4B BE CAN ID] [bus payload incl. PCI] [CHK]`. Filters default to OFF.

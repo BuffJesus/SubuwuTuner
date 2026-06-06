@@ -47,7 +47,7 @@ Corpus will be checked in alongside; new findings auto-PR'd by the fuzz job once
 ### Tier 4 — Hardware-in-the-loop (HIL) (nightly + before release)
 
 - Two junkyard ECUs (one VA, one VB) wired to a bench rig with a J2534 device
-- **Authoritative wiring reference**: 2017 WRX (FA20DIT) FSM extract — ECM I/O signal table (FSM ~p.2171), power-supply circuit (FSM p.6723–6736), ground circuit (FSM p.6751–6760), CAN bus diagram (FSM p.6805–6807), full ECM schematic (FSM p.6846–6877), immobilizer diagram (FSM p.6936–6939). Bench-priority sequence: verify the harness against the ECM I/O signal table terminal-by-terminal **before applying power**. The extract lives at `C:\Users\Cornelio\Desktop\Findings\2017_WRX_FA_ECU_Bench_Reference.pdf`. **Step-by-step assembly runbook**: `docs/28-bench-rig-build.md`.
+- **Authoritative wiring reference**: 2017 WRX (FA20DIT) FSM extract — ECM I/O signal table (FSM ~p.2171), power-supply circuit (FSM p.6723–6736), ground circuit (FSM p.6751–6760), CAN bus diagram (FSM p.6805–6807), full ECM schematic (FSM p.6846–6877), immobilizer diagram (FSM p.6936–6939). Bench-priority sequence: verify the harness against the ECM I/O signal table terminal-by-terminal **before applying power**. The extract lives at `D:\Subuwu\findings\2017_WRX_FA_ECU_Bench_Reference.pdf`. **Step-by-step assembly runbook**: `docs/28-bench-rig-build.md`.
 - Automated suite:
   - Full read → write → verify cycle
   - **Brick-recovery validation**: pull power mid-flash, verify recovery shim restores

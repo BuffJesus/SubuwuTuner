@@ -21,7 +21,7 @@ Pre-1.0 entries describe substantial state changes rather than strict semver rel
 - CI smoke now exercises `pack-info --json fixtures/demo-pack/pack.toml` on every matrix lane — guards the demo pack against drift + exercises the `subuwutuner.pack-info.v1` JSON emitter.
 
 ### Documentation
-- External multi-file design + gap analysis under `C:\Users\Cornelio\Desktop\Findings\` (`00_reference_scan.md` through `12_final_summary.md`). Not part of the public repo; informs the v1.0 roadmap.
+- External multi-file design + gap analysis under `D:\Subuwu\findings\` (`00_reference_scan.md` through `12_final_summary.md`). Not part of the public repo; informs the v1.0 roadmap.
 - `docs/33-analyst-review-triage-2026-06-01.md` — triage of the external analyst review. Identifies what's already shipped vs real gaps, flags factual errors in the review, sequences forward-looking recommendations. Companion to the staged review at `fixtures/private/findings_reviews_2026-06-01/`.
 
 ## Pre-Unreleased (historical snapshot — 2026-05-30)

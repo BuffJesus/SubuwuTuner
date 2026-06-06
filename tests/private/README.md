@@ -51,7 +51,7 @@ No CMakeLists edits required.
   entirely; that's by design.
 - **Don't hard-code paths to anywhere outside
   `fixtures/private/`** — tests that point at
-  `D:\Documents\SubuwuTuner-defs-private\` or similar
+  `D:\Subuwu\defs-private\` or similar
   user-specific paths break for the next person on the
   same machine.
 

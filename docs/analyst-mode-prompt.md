@@ -4,7 +4,7 @@ Use this when you need a Claude session to perform analyst-side work
 (extracting facts from a protected reference into a spec). Paste the
 fenced block below verbatim into a **fresh** session — one that has not
 previously read, edited, or reviewed any file under
-`D:\Documents\JetBrains\SubaruTuner\` other than the policy documents
+`D:\Subuwu\code\` other than the policy documents
 explicitly listed in the prompt.
 
 The prompt is self-contained: the new session has no memory of why you're
@@ -28,8 +28,8 @@ brief in full before doing anything else.
 
 Before any other action, Read these two files and treat them as binding:
 
-- D:\Documents\JetBrains\SubaruTuner\docs\15-clean-room-engineering.md
-- D:\Documents\JetBrains\SubaruTuner\CLAUDE.md  (sections "Stance on
+- D:\Subuwu\code\docs\15-clean-room-engineering.md
+- D:\Subuwu\code\CLAUDE.md  (sections "Stance on
   third-party IP" and "Rules specific to you, Claude" in particular)
 
 If anything in this prompt conflicts with those documents, the documents
@@ -42,7 +42,7 @@ win. If you find a conflict, stop and surface it before continuing.
   (TOML, Markdown tables, test vectors).
 - You are NOT the implementer. You will not write or edit C++, Python,
   CMake, build configs, or any other source under
-  `D:\Documents\JetBrains\SubaruTuner\` other than the spec output paths
+  `D:\Subuwu\code\` other than the spec output paths
   listed below.
 - You will not paraphrase prose, identifiers, class hierarchies, file
   layouts, comment text, or log strings from any reference. Facts only.
@@ -52,14 +52,14 @@ win. If you find a conflict, stop and surface it before continuing.
 
 References (analyst-only inputs):
 
-- C:\Users\Cornelio\Desktop\jd-gui-master\atlas-decompiled\  — decompiled
+- D:\Subuwu\tools\jd-gui\atlas-decompiled\  — decompiled
   Atlas Java source, ~20k .java files. Treat as the local equivalent of
   the GitHub `motorsportsresearch/atlas-public/` mirror. License is
   All-Rights-Reserved per CLAUDE.md; clean-room rules apply.
-- D:\Documents\atlas-personal\romraider_va_wrx.xml — raw, unsanitized
+- D:\Subuwu\atlas-personal\romraider_va_wrx.xml — raw, unsanitized
   RomRaider XML for VA-platform WRX. GPL-2.0; clean-room rules apply
   because GPL would otherwise contaminate Apache-2.0 SubuwuTuner.
-- D:\Documents\atlas-personal\romraider_vb_wrx.xml — same, VB platform.
+- D:\Subuwu\atlas-personal\romraider_vb_wrx.xml — same, VB platform.
 - Public standards: ISO 14229-1 (UDS), ISO 15765-2 (CAN-TP), ISO 14230
   (KWP2000), SAE J2534 (Pass-Thru), SAE J1979 / J2012 (OBD-II / DTC).
   These are the preferred contamination-free sources per `docs/15` §9.
@@ -71,9 +71,9 @@ Non-source orientation (always permitted):
 - `romraider.com` forums and public protocol documentation.
 
 Out of scope to read in this session: anything under
-`D:\Documents\JetBrains\SubaruTuner\src\`,
-`D:\Documents\JetBrains\SubaruTuner\tools\`, or
-`D:\Documents\JetBrains\SubaruTuner\tests\`. Reading those during an
+`D:\Subuwu\code\src\`,
+`D:\Subuwu\code\tools\`, or
+`D:\Subuwu\code\tests\`. Reading those during an
 analyst session is a contamination channel — implementation patterns
 already in the repo can leak back into your "facts" extraction. The only
 SubuwuTuner files you may Read are the policy documents named above and
@@ -83,14 +83,14 @@ the existing definitions/ TOMLs (those are themselves clean-room outputs).
 
 ALL output of this session goes to ONE of:
 
-1. A separate specs repository at `D:\Documents\SubuwuTuner-specs\`
+1. A separate specs repository at `D:\Subuwu\specs\`
    (create if it does not yet exist; commit history is the audit trail
    per `docs/15` §11).
-2. A scratch directory at `D:\Documents\atlas-personal\analyst-notes\`
+2. A scratch directory at `D:\Subuwu\atlas-personal\analyst-notes\`
    for working drafts.
 3. The chat itself, for clarifying questions back to the user.
 
-Output may NOT land anywhere under `D:\Documents\JetBrains\SubaruTuner\`.
+Output may NOT land anywhere under `D:\Subuwu\code\`.
 If a deliverable feels like it belongs in the public repo, it is the
 WRONG deliverable for this session — escalate to the user instead of
 writing it.
@@ -101,7 +101,7 @@ writing it.
 
 Compare Atlas (`atlas-decompiled\`) and RomRaider (raw XML at
 `atlas-personal\romraider_*_wrx.xml`) along the following axes, and
-produce a spec at `D:\Documents\SubuwuTuner-specs\references\
+produce a spec at `D:\Subuwu\specs\references\
 atlas-vs-romraider.md`:
 
 - **Definition file format.** What does each tool consider a "definition"?
@@ -152,7 +152,7 @@ While working:
 
 When you finish:
 
-- Write or append an entry in `D:\Documents\SubuwuTuner-specs\AUDIT.md`
+- Write or append an entry in `D:\Subuwu\specs\AUDIT.md`
   per the template in `docs/15` §11.
 - Do NOT mirror the spec into the public SubuwuTuner repo. The
   implementer pulls from the specs repo in a separate, later session.
@@ -170,19 +170,19 @@ constraint is mostly about what's NOT in context:
 
 ```
 You are operating in IMPLEMENTER MODE. Read
-D:\Documents\JetBrains\SubaruTuner\docs\15-clean-room-engineering.md and
+D:\Subuwu\code\docs\15-clean-room-engineering.md and
 CLAUDE.md ("Rules specific to you, Claude") before any other action.
 
 You may Read only:
-- Files under D:\Documents\JetBrains\SubaruTuner\
-- Files under D:\Documents\SubuwuTuner-specs\ (the spec section relevant
+- Files under D:\Subuwu\code\
+- Files under D:\Subuwu\specs\ (the spec section relevant
   to this module — not the entire specs repo, not AUDIT.md, not the
   references/ subdir)
 - ISO / SAE standards documents the user has explicitly cited
 
 You may NOT Read:
-- Anything under C:\Users\Cornelio\Desktop\jd-gui-master\atlas-decompiled\
-- D:\Documents\atlas-personal\romraider_*.xml (the raw XMLs)
+- Anything under D:\Subuwu\tools\jd-gui\atlas-decompiled\
+- D:\Subuwu\atlas-personal\romraider_*.xml (the raw XMLs)
 - The atlas-personal\analyst-notes\ scratch directory
 - GitHub atlas-public source files via WebFetch
 

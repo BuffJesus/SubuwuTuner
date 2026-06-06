@@ -2,7 +2,7 @@
 // Copyright 2026 The SubuwuTuner Authors
 //
 // Phase A read-pipeline validation per
-// `C:\Users\Cornelio\Desktop\Findings\PROMPT-subuwutuner-agent-test-dumping.md`.
+// `D:\Subuwu\findings\PROMPT-subuwutuner-agent-test-dumping.md`.
 //
 // What this test does: ports the analyst-side reference SA key algorithm
 // from `Findings/decompile/lf79103p/sa_feistel_v4.py` into a self-contained

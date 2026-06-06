@@ -30,7 +30,7 @@ Two source pipelines, both clean-room per `docs/01-reverse-engineering.md`
 and `docs/15-clean-room-engineering.md`:
 
 **Current WRX (`va/`, `vb/`)** — generated from `*.facts.xml` inputs in the
-developer's analyst-side workspace (`D:\Documents\atlas-personal\`, kept
+developer's analyst-side workspace (`D:\Subuwu\atlas-personal\`, kept
 off-repo). Those inputs are fact-stripped derivatives of public RomRaider
 XML: names replaced with `va_tNNNN`/`vb_tNNNN` slugs, descriptive prose
 dropped, only addresses, axis sizes, storagetype, endian, and scaling

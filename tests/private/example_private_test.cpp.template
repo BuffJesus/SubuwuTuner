@@ -66,7 +66,7 @@ TEST_CASE("private: AS80U ROM CID matches what the pack identifies",
 //    against this ROM produces sensible numbers:
 //
 //        auto const def = st::Definition::from_directory(
-//            "D:/Documents/SubuwuTuner-defs-private/va/AS80U/");
+//            "D:/Subuwu/defs-private/va/AS80U/");
 //        REQUIRE(def.has_value());
 //        auto const td = def->read_table(*rom, "primary_open_loop_fuel");
 //        REQUIRE(td.has_value());

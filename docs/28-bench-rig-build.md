@@ -17,7 +17,7 @@ already deployed and validated in the field.
 Every voltage, pin number, and connector identifier in this doc comes
 from the 2017 WRX FA20DIT FSM extract at:
 
-`C:\Users\Cornelio\Desktop\Findings\2017_WRX_FA_ECU_Bench_Reference.pdf`
+`D:\Subuwu\findings\2017_WRX_FA_ECU_Bench_Reference.pdf`
 
 Key sections (page numbers are within the extract, not the source FSM):
 
@@ -240,7 +240,7 @@ Goal: full 2 MB plaintext ROM image off the bench ECU.
 subuwutuner-cli.exe rom-pull `
     --transport obdx --device COM5 `
     --sa-variant factory `
-    --output "C:\Users\Cornelio\Desktop\Subaru-data\reference-dumps\bench-junkyard-stock.bin"
+    --output "D:\Subuwu\subaru-data\reference-dumps\bench-junkyard-stock.bin"
 ```
 
 Expected: 2,097,152 bytes (0x200000) in ~7–10 minutes. The exact
@@ -308,5 +308,5 @@ runbook are what gets us moving on that.
   / Fehr-active)
 - `docs/26-bulk-reflash-cipher.md` — optional gated 0xB6 write path
   (off by default; not needed for Tier 4)
-- `C:\Users\Cornelio\Desktop\Findings\2017_WRX_FA_ECU_Bench_Reference.pdf`
+- `D:\Subuwu\findings\2017_WRX_FA_ECU_Bench_Reference.pdf`
   — the authoritative wiring + voltage reference cited throughout

@@ -91,12 +91,12 @@ definitions/vb/
 atlas-public-main/
 
 # Decompiled Atlas Java source (jd-gui dump). Canonical off-repo path
-# is C:\Users\Cornelio\Desktop\jd-gui-master\atlas-decompiled\.
+# is D:\Subuwu\tools\jd-gui\atlas-decompiled\.
 atlas-decompiled/
 *-decompiled/
 
 # Raw RomRaider XML and the analyst-side scrubber workspace. Canonical
-# off-repo path is D:\Documents\atlas-personal\. The scrubbed
+# off-repo path is D:\Subuwu\atlas-personal\. The scrubbed
 # `*.facts.xml` and `*.name-mapping.tsv` derivatives are wall-clean
 # inputs to defgen, but they live analyst-side too — never in this repo.
 atlas-personal/
@@ -106,8 +106,8 @@ romraider_*.xml
 
 # Analyst working notes and the analyst-side specs repo. The kickoff
 # brief at docs/analyst-mode-prompt.md steers output to
-# D:\Documents\atlas-personal\analyst-notes\ and
-# D:\Documents\SubuwuTuner-specs\; ignore both shapes here too in case
+# D:\Subuwu\atlas-personal\analyst-notes\ and
+# D:\Subuwu\specs\; ignore both shapes here too in case
 # someone nests them inside the workspace.
 analyst-notes/
 SubuwuTuner-specs/

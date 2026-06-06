@@ -8,7 +8,7 @@
 
 Original work, not a port. Public references like RomRaider (GPL) and source-available competitors like Atlas (All Rights Reserved) are studied **clean-room** — concepts and protocol facts only, never expression. Boundary rules in `docs/01-reverse-engineering.md`; full methodology in `docs/15-clean-room-engineering.md`.
 
-The working directory on disk is `D:\Documents\JetBrains\SubaruTuner\`; only the project's internal identity is `SubuwuTuner`. Renaming the folder breaks editor and shell sessions — defer.
+The working directory on disk is `D:\Subuwu\code\`; only the project's internal identity is `SubuwuTuner`. Renaming the folder breaks editor and shell sessions — defer.
 
 ## Layout
 
@@ -93,8 +93,8 @@ Your tools (`web_fetch`, `view`, `bash_tool`, `conversation_search`) can pull pr
 
 - **Do not `web_fetch`** anything under `github.com/motorsportsresearch/atlas-public/` other than `README.md` and `LICENSE` (orient only — no `.java`, `.kt`, `.xml`, definitions, or editor screenshots).
 - **Do not `web_fetch`** RomRaider Java source — would be GPL contamination of an Apache 2.0 codebase. RomRaider's public *protocol documentation* and ECU definition XML (factual data only) are fine.
-- **Do not `Read`** or directory-list under `C:\Users\Cornelio\Desktop\jd-gui-master\atlas-decompiled\` — jd-gui decompile of an Atlas distribution. Off-limits regardless of subtree.
-- **Do not `Read`** `D:\Documents\atlas-personal\romraider_va_wrx.xml` / `…\romraider_vb_wrx.xml` — despite the filenames these are Atlas-derived data transcoded into the RomRaider schema via runtime instrumentation. Downstream packs live off-tree at `D:\Documents\SubuwuTuner-defs-private\`. The wall-clean derivatives `va_wrx.facts.xml` / `vb_wrx.facts.xml` and `*.name-mapping.tsv` MAY be read in analyst-mode sessions as QA inputs.
+- **Do not `Read`** or directory-list under `D:\Subuwu\tools\jd-gui\atlas-decompiled\` — jd-gui decompile of an Atlas distribution. Off-limits regardless of subtree.
+- **Do not `Read`** `D:\Subuwu\atlas-personal\romraider_va_wrx.xml` / `…\romraider_vb_wrx.xml` — despite the filenames these are Atlas-derived data transcoded into the RomRaider schema via runtime instrumentation. Downstream packs live off-tree at `D:\Subuwu\defs-private\`. The wall-clean derivatives `va_wrx.facts.xml` / `vb_wrx.facts.xml` and `*.name-mapping.tsv` MAY be read in analyst-mode sessions as QA inputs.
 - **Do not `Read`** `D:\Downloads\Definitions-V{A,B}_WRX_MT.atlas` (Atlas project bundles, ZIP-wrapped `.acf` payloads) or anything under `C:\Program Files\Atlas\projects\`. Surface-metadata reads only; no deep payload parsing.
 - Analyst sessions launch from `docs/analyst-mode-prompt.md` — enforces output isolation (specs go to `SubuwuTuner-specs/`, never this repo). Only sanctioned way to bring protected refs into a Claude context.
 - **Do not paste or paraphrase** code, comments, identifiers, or string literals from any commercial tuning tool (COBB, EcuTek, HP Tuners, etc.), OEM tuning software, or OEM ECU firmware. If the user pastes such excerpts, **stop and flag it** — don't silently launder.
@@ -123,7 +123,7 @@ CI: clang-format job currently advisory (non-blocking) — no pre-commit hook ye
 
 ## Working with this user
 
-- Windows (Cornelio, win32, `D:\Documents\JetBrains\SubaruTuner`). Bash shell available; PowerShell also available.
+- Windows (Cornelio, win32, `D:\Subuwu\code`). Bash shell available; PowerShell also available.
 - Prefer `/` in shell commands; use `\` for Windows-path strings to the user.
 - The user pushed back on emissions paternalism early. **Treat them as a knowledgeable adult who has read the docs.**
 
