@@ -6817,10 +6817,17 @@ int cmd_checksum_repair(int argc, char *argv[]) {
     }
 
     auto const field = def->pack().checksum_type;
-    auto const *kind_name =
-        st::flash::checksum_kind_name(st::flash::checksum_kind_from_pack(field));
+    auto const kind = st::flash::checksum_kind_from_pack(field);
+    auto const *kind_name = st::flash::checksum_kind_name(kind);
     std::printf("checksum-repair: wrote %zu bytes to %s (kind: %s)\n", bytes.size(),
                 output_path->string().c_str(), kind_name);
+    if (kind == st::flash::ChecksumKind::CobbPerBlockCrc32) {
+        std::puts(
+            "note: slot 24 (block 0x1E0000-0x200000) is self-referential and was\n"
+            "      left untouched. Edits in the 0x1E0000-0x200000 range need\n"
+            "      manual analysis - the repair only fixes slots 0-23.\n"
+            "      Most cal tables land in slots 5-16 and are unaffected.");
+    }
     return 0;
 }
 
@@ -6894,8 +6901,17 @@ int cmd_checksum_verify(int argc, char *argv[]) {
     // Compare bytes. Equal → existing checksum was already correct
     // (or the pack declared "none" so no work was needed); unequal
     // → repair would have rewritten some bytes.
+    auto const slot24_caveat = [&] {
+        if (kind == st::flash::ChecksumKind::CobbPerBlockCrc32) {
+            std::puts(
+                "note: slot 24 (block 0x1E0000-0x200000) is not verified by\n"
+                "      this algorithm. A mismatch in that block would not show\n"
+                "      up in this report.");
+        }
+    };
     if (copy == std::vector<std::uint8_t>{rom->data().begin(), rom->data().end()}) {
         std::printf("\nResult: VALID (no bytes would change)\n");
+        slot24_caveat();
         return 0;
     }
 
@@ -6915,6 +6931,7 @@ int cmd_checksum_verify(int argc, char *argv[]) {
         std::printf(", first at 0x%08zX", first_diff);
     }
     std::printf(")\n");
+    slot24_caveat();
     return 1;
 }
 
