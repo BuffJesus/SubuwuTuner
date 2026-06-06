@@ -16,6 +16,7 @@
 
 #include "st/defs.hpp"
 #include "st/policy.hpp"
+#include "st/profile.hpp"
 
 #include <imgui.h>
 
@@ -183,6 +184,117 @@ void render_status_bar(AppState &state) {
                                       "settings.txt as the default for future projects.\n"
                                       "The CLI's `project-new` still defaults to\n"
                                       "motorsport-only — this setting is GUI-only for now.");
+                }
+                ImGui::EndPopup();
+            }
+        }
+
+        // VehicleProfile chip — surfaces the active profile so the
+        // user doesn't have to dive into Settings to remember which
+        // one is current. Click → popup combo lists every profile
+        // under default_profile_dir() and switches active_vehicle_
+        // profile_id on selection (persisted via save_settings).
+        // No profile set → "Profile: none" with a Settings hint.
+        ImGui::SameLine();
+        {
+            std::string const &active_id = state.settings.active_vehicle_profile_id;
+            std::string chip_label;
+            chip_label.reserve(40);
+            // E77B Contact — small person glyph reads as "vehicle/owner"
+            // in this vocabulary. Trailing ▾ keeps the menu affordance.
+            chip_label.append("\xEE\x9D\xBB  Profile: ");
+            chip_label.append(active_id.empty() ? "none" : active_id);
+            chip_label.append("  \xE2\x96\xBE");
+            if (active_id.empty()) {
+                chip(chip_label.c_str(), chip_fg_muted(), chip_bg_muted());
+            } else {
+                chip(chip_label.c_str(), chip_fg_accent(), chip_bg_accent());
+            }
+            if (ImGui::IsItemHovered()) {
+                if (active_id.empty()) {
+                    ImGui::SetTooltip("No active vehicle profile.\n"
+                                      "Profiles capture vehicle identity (VIN,\n"
+                                      "year/make/model, ECU cal id) for\n"
+                                      "context-aware Flash + Read ROM dialogs.\n"
+                                      "Click to pick one, or create via the\n"
+                                      "CLI `profile import`.");
+                } else {
+                    ImGui::SetTooltip("Active vehicle profile: %s\n"
+                                      "Stored at default_profile_dir().\n"
+                                      "Click to switch.",
+                                      active_id.c_str());
+                }
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            }
+            if (ImGui::IsItemClicked()) {
+                ImGui::OpenPopup("##vehicle_profile_chooser");
+            }
+            if (ImGui::BeginPopup("##vehicle_profile_chooser")) {
+                text_subtle("Vehicle profile");
+                ImGui::Separator();
+                // List profiles on each popup open. The directory is
+                // tiny in practice (a user typically has 1-5 cars), so
+                // re-reading on each popup is cheaper than a cache +
+                // invalidation dance. Errors fall through to a quiet
+                // empty list so the popup still renders.
+                auto const profile_dir = st::profile::default_profile_dir();
+                auto profiles_result = st::profile::list(profile_dir);
+                if (profiles_result.has_value() && !profiles_result->empty()) {
+                    // "(none)" — explicit unset, mirrors the policy
+                    // profile chooser's same-shape interaction.
+                    if (ImGui::Selectable("(none)", active_id.empty())) {
+                        state.settings.active_vehicle_profile_id.clear();
+                        save_settings(state.settings);
+                        state.status_msg = "Profile: none";
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::Separator();
+                    for (auto const &p : *profiles_result) {
+                        bool const is_current = (p.id == active_id);
+                        char row[128];
+                        if (p.display_name.empty()) {
+                            std::snprintf(row, sizeof row, "%s", p.id.c_str());
+                        } else {
+                            std::snprintf(row, sizeof row, "%s (%s)",
+                                          p.display_name.c_str(), p.id.c_str());
+                        }
+                        if (ImGui::Selectable(row, is_current)) {
+                            state.settings.active_vehicle_profile_id = p.id;
+                            save_settings(state.settings);
+                            state.status_msg = std::string{"Profile: "} + p.id;
+                            ImGui::CloseCurrentPopup();
+                        }
+                        if (ImGui::IsItemHovered()) {
+                            std::string tip;
+                            tip.reserve(128);
+                            if (!p.year.empty() || !p.make.empty() || !p.model.empty()) {
+                                if (!p.year.empty()) {
+                                    tip.append(p.year);
+                                    tip.append(" ");
+                                }
+                                if (!p.make.empty()) {
+                                    tip.append(p.make);
+                                    tip.append(" ");
+                                }
+                                if (!p.model.empty()) {
+                                    tip.append(p.model);
+                                }
+                                tip.append("\n");
+                            }
+                            if (!p.vin.empty()) {
+                                tip.append("VIN: ");
+                                tip.append(p.vin);
+                            }
+                            if (!tip.empty()) {
+                                ImGui::SetTooltip("%s", tip.c_str());
+                            }
+                        }
+                    }
+                } else {
+                    text_subtle("No profiles found.");
+                    text_subtle("Create one via the CLI:");
+                    text_subtle("  subuwutuner-cli profile import <FILE>");
+                    text_subtle("Dir: %s", profile_dir.string().c_str());
                 }
                 ImGui::EndPopup();
             }
