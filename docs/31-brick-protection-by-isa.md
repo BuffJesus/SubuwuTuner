@@ -65,41 +65,79 @@ Concrete facts staged at `fixtures/private/brick-protection.md` (analyst-side,
 ### What is **not** the boot-time integrity check
 
 Two regions live in the bootloader area that look like integrity
-checks but aren't (or aren't yet decoded). Treat both as decoupled
-from the application-image checksum above.
+checks but aren't. Treat both as decoupled from the
+application-image checksum above.
 
-**COBB per-block CRC-32 table at `0x1FFF3C..0x1FFFA0`.** 25 BE u32
-slots, one per COBB install block. Algorithm + impl shipped at
+**Aftermarket per-install-block CRC-32 table at `0x1FFF3C..0x1FFFA0`.**
+25 BE u32 slots, one per install block, populated during
+aftermarket-installer reflash. Algorithm + impl shipped at
 `src/flash/src/checksum.cpp` as `cobb_per_block_crc32`. **Not
 consulted by the running ECU.** The analyst's 2026-06-06 Ghidra
-trace (full SH-2A auto-analysis of both stock and COBB-installed
-`lf79103p`) found zero literal-pool references to any address in
-that region and zero CRC-32 polynomial constants anywhere in
-either ROM. The table is AccessPort-side metadata only — written
-by the AP during install, never read at boot.
-`st::flash::CobbPerBlockCrc32Repair` exists to preserve AP-side
-coherence (in case the user later flashes via AP); it has no role
-in boot-time safety. Evidence:
+trace (full SH-2A auto-analysis of both stock and aftermarket-
+installed `lf79103p`) found zero literal-pool references to any
+address in that region and zero CRC-32 polynomial constants
+anywhere in either ROM. The table is installer-side metadata only
+— written during install, never read at boot.
+`st::flash::CobbPerBlockCrc32Repair` exists to preserve
+installer-side coherence (in case the user later flashes via the
+installer's own tool); it has no role in boot-time safety.
+Evidence:
 `findings/corpus-wide-re-2026-06-06/out/cobb_datalog/CHECKSUM_RUNTIME_VERIFICATION.md`
 and `findings/decompile/lf79103p/slot24_refs_{stock,cobb}.txt`.
 
-**SecureBoot stub at `0x4000`.** A 16-byte signature
-`05 7B 00 0B  E0 00 00 0B  E0 01 E1 00  02 00 FF FF` lives at
-offset `0x4000` in every 2 MB SH-2A ROM the analyst has scanned
-(186 bins — see `findings/.../ARCH_REPORT.md` §3). Confirmed
-byte-identical across `2017-wrx-stock.bin` (factory virgin),
-`fehr-live-dump-2026-06-06.bin` (user's COBB-installed live ROM),
-and `fehr-full-dump.bin` (older W585 snapshot), so it is **Subaru
-factory firmware, not a COBB addition**. The instruction
-semantics are not yet decoded; sequence-shape suggests a series
-of tiny "always return success" stubs (`mov #0,R0; rts` /
-`mov #1,R0; mov #0,R1; ...`), consistent with the COBB-installed
-ECU booting normally despite COBB modifying calibration bytes
-freely. Working hypothesis: either a no-op placeholder or a check
-that doesn't gate on the cal region. Decoding it is an open
-Tier-4 task; until then, the empirical safety floor is that
-"edits in sectors COBB already modifies are accepted by whatever
-runs at `0x4000`."
+**Stub at `0x4000` (formerly called the "SecureBoot stub" — it
+isn't).** A 16-byte block
+`05 7B 00 0B  E0 00 00 0B  E0 01 E1 00  02 00 FF FF` at flash
+offset `0x4000` in every 2 MB SH-2A ROM in the analyst's corpus
+(186 bins — see `findings/.../ARCH_REPORT.md` §3). The analyst's
+2026-06-06 Ghidra decompile of this block (project
+`ghidra_proj_lf79103p`, script `HuntSecureBoot.java`) confirmed:
+
+- `0x4000` is a 2-byte SH-2A `RTV/N R5` (Return-with-no-delay-slot,
+  copy R5 to R0). Ghidra decompiles `FUN_00004000` as
+  `return param_2;` — a leaf that returns its second argument.
+- The remaining 14 bytes are a cluster of similar tiny leaf
+  helpers (`mov #0,R0; rts` / `mov #1,R0; rts` / `movi20 #0xFFFF,R2`)
+  — most likely Renesas standard-library boilerplate at a fixed
+  link-script slot, which explains why it's byte-identical across
+  186 SH-2A 2 MB ROMs but absent on SH7058 (1 MB SH-2) and the
+  RH850 4 MB (different toolchain, different runtime layout).
+- **Confirmed dead code on both stock and aftermarket-installed
+  LF79103P.** Zero CALL / JUMP / COMPUTED_CALL refs in either
+  ROM. The 18 DATA refs Ghidra reports are analyzer false
+  positives — the immediate-constant value `0x4000` used as a
+  CAN-timing bitmask alongside `0x8f02` / `0x9000` / `0x1fff`, not
+  as an address. 49 byte-pattern hits of `00 00 40 00` across the
+  ROM, none loaded via `mov.l @(disp,PC),Rn` for use as a code
+  target.
+
+So the stub poses no brick risk and is not part of any
+integrity-check flow. Full evidence:
+`findings/SECUREBOOT_STUB_4000_VERIFICATION.md` and raw output at
+`findings/decompile/lf79103p/secureboot_refs_*.bin.txt`.
+
+### Note on the application sum-of-words checksum claim above
+
+Point 3 in "What protects the ECU at rest" (the bootloader's
+sum-of-words check over `0x00010000..0x001FFFFF`) is sourced from
+`fixtures/private/brick-protection.md` §3, which states it was
+derived against LF79100P (2 MB Generation-A.2) and confirmed
+against EZ1G (1 MB) — **not LF79103P / LF79101P specifically**.
+The analyst's 2026-06-06 follow-up could not locate the loop on
+LF79103P by literal-bounds heuristic: zero functions in either
+the stock or aftermarket-installed ROM reference both APP_START
+(`0x00010000`) and an end-constant (`0x001FFFFF` / `0x00200000`)
+as immediates. The three plausible explanations are (a) bounds
+come from a descriptor table rather than literals (same shape as
+the FCU sector-allow-list), (b) the check is per-sector and uses
+sector-local addresses, or (c) the aftermarket bootloader patches
+have rewritten this check. **Open Tier-4 item: decompile
+`FUN_000000E8` (reset entry) and walk successors to verify or
+falsify the §3 claim on LF79103P.** Until that lands, the
+"empirical safety floor" framing (aftermarket-installed ECU
+boots and runs daily, so the boot path accepts the cal patterns
+in our flash scope) is the load-bearing argument for the
+LF79103P case — not the §3 literal claim.
 
 ### What can actually brick
 
@@ -387,11 +425,20 @@ The flasher honors these regardless of ISA:
   empirical confirmation that bootloader `0x000000..0x006000` is
   byte-identical across stock + four observed install states.
 - `findings/corpus-wide-re-2026-06-06/out/cobb_datalog/CHECKSUM_RUNTIME_VERIFICATION.md`
-  (analyst off-tree) — Ghidra evidence that the COBB per-block
-  CRC-32 slot table is **not** consulted by the running ECU.
-  Source for the "What is not the boot-time integrity check"
+  (analyst off-tree) — Ghidra evidence that the aftermarket
+  per-block CRC-32 slot table is **not** consulted by the running
+  ECU. Source for the "What is not the boot-time integrity check"
   subsection above.
+- `findings/SECUREBOOT_STUB_4000_VERIFICATION.md` (analyst
+  off-tree) — Ghidra decompile and reference enumeration that
+  resolved the `0x4000` block as Renesas runtime-library leaf
+  helpers (dead code on both stock and aftermarket-installed
+  LF79103P). Source for the resolved-state claim in the same
+  subsection. Also documents the negative result of the
+  literal-bounds search for the application sum-of-words
+  checksum cited in §3 of `brick-protection.md`.
 - `findings/corpus-wide-re-2026-06-06/out/ARCH_REPORT.md` §3
   (analyst off-tree) — cross-CID census of the `0x4000`
-  SecureBoot stub signature; present in 186 bins, absent on 1 MB
-  SH7058 and the 4 MB RH850.
+  signature; present in 186 bins, absent on 1 MB SH7058 and the
+  4 MB RH850, consistent with the "Renesas runtime boilerplate"
+  resolved-state explanation.
