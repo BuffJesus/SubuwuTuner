@@ -1,0 +1,48 @@
+# Minimal LF79102P identifier pack — recognizes the user's actual ROM CID.
+#
+# Why: SubuwuTuner has lf79100p.toml and lf79103p.toml in its definitions
+# tree, but no lf79102p.toml. The user's actual car's ROM contains the
+# LF79102P descriptor at offset 0x37C51 (verified — see
+# `USER_CAR_CID_TRIANGULATION.md`). With no pack matching that string,
+# `rom-identify` returns 0 matches against the user's ROMs.
+#
+# This stub pack contains ONLY the [pack] + [[identification]] blocks. It
+# doesn't claim any calibration tables; just lets `rom-identify` find a
+# match. Pairs with `lf79102p_cobb_f3xx.toml` (the overlay that extends
+# this pack and adds the 12 R²-verified Cobb F3xx PIDs).
+#
+# If a full LF79102P RomRaider XML is sourced later, run defgen against
+# it to produce a richer lf79102p.toml that replaces this stub.
+
+[pack]
+schema_version = 1
+id             = "lf79102p"
+display_name   = "LF79102P (stub identifier — no cal tables)"
+platform       = "subaru"
+transmission   = "mt"
+years          = [2017]
+endianness     = "big"
+rom_size_bytes = 2097152
+license        = "Apache-2.0"
+# COBB-installed ROMs (including post-uninstall states that retain the
+# table — uninstall is partial) carry a 25-slot per-block CRC-32
+# integrity table at 0x1FFF3C..0x1FFFA0 (analyst handoff 2026-06-06).
+# Pristine factory-virgin ROMs have FF-fill in the slot region; the
+# repair will rewrite those 96 bytes to real CRCs (96/96 differ → 0/24
+# slots match per the analyst's cross-ROM matrix) but the factory
+# bootloader's integrity check doesn't gate on this table, so the
+# rewrite is functionally inert. The field belongs here because the
+# user's actual car sits in a COBB-touched LF79102P state where the
+# table IS active.
+checksum_type  = "cobb_per_block_crc32"
+
+
+[[identification]]
+name      = "LF79102P"
+# FA-DIT WRX firmware embeds the CID in a descriptor at a variable
+# per-firmware offset (~0x31C51 in bootloader-stripped dumps, ~0x37C51
+# in full 2MB ROMs — 0x6000 difference is the bootloader). cid_scan
+# lets the loader find it wherever it lives.
+cid_scan  = true
+cid_match = "LF79102P"
+ecu_part  = ""

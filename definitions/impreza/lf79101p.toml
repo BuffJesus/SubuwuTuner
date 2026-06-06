@@ -1,0 +1,36 @@
+# Minimal LF79101P identifier pack — recognizes the user's car in
+# COBB-installed state.
+#
+# Why: When COBB installs a tune, it overwrites the ROM CID descriptor
+# at offset 0x37C51 from LF79102P (factory) to LF79101P (COBB's "tuned
+# car" marker). This pack lets `rom-identify` recognize that state.
+#
+# Pairs with `lf79101p_cobb_f3xx.toml` — that's the overlay carrying
+# the 12 R²-verified Cobb datalog PIDs. The byte positions in that
+# overlay were R²-verified against the user's actual car sniff while
+# in this very state.
+#
+# When the user uninstalls COBB, the descriptor reverts to LF79102P
+# and `lf79102p.toml` matches instead.
+
+[pack]
+schema_version = 1
+id             = "lf79101p"
+display_name   = "LF79101P (COBB-installed state — stub identifier)"
+platform       = "subaru"
+transmission   = "mt"
+years          = [2017]
+endianness     = "big"
+rom_size_bytes = 2097152
+license        = "Apache-2.0"
+# COBB-installed ROMs carry a 25-slot per-block CRC-32 integrity table
+# at 0x1FFF3C..0x1FFFA0 (analyst handoff 2026-06-06). Repair must fire
+# after every cal edit or the bootloader integrity check trips.
+checksum_type  = "cobb_per_block_crc32"
+
+
+[[identification]]
+name      = "LF79101P"
+cid_scan  = true
+cid_match = "LF79101P"
+ecu_part  = ""
