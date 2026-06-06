@@ -292,6 +292,7 @@ void render_settings_modal(AppState &state) {
         if (ImGui::Selectable("(none)", none_sel)) {
             state.settings.active_vehicle_profile_id.clear();
             save_settings(state.settings);
+            state.refresh_audit_identity();
         }
         for (auto const &p : profs) {
             std::string const label = p.display_name.empty() ? p.id
@@ -300,6 +301,7 @@ void render_settings_modal(AppState &state) {
             if (ImGui::Selectable(label.c_str(), sel)) {
                 state.settings.active_vehicle_profile_id = p.id;
                 save_settings(state.settings);
+                state.refresh_audit_identity();
             }
         }
         ImGui::EndCombo();

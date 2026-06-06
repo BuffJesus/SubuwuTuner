@@ -384,7 +384,31 @@ void render_menubar(AppState &state) {
                                   "per-entry CRC32 verification — bad checksums\n"
                                   "render as red 'BAD' chips so tampering is\n"
                                   "visible instead of silently dropped.\n"
+                                  "Toggle scope to 'Per-vehicle history' inside\n"
+                                  "the panel to pull the cross-project history\n"
+                                  "for the active VehicleProfile's CID.\n"
                                   "See analyst Issue #8.");
+            }
+            // Quick-launch into the per-vehicle scope, mirrored under
+            // both View (Audit log) and the help discoverability path.
+            // Single sink ultimately the same panel — but a dedicated
+            // entry surfaces the new scope without forcing the user to
+            // open the panel and discover the dropdown.
+            if (ImGui::MenuItem("Audit (per-vehicle history)", nullptr, nullptr,
+                                state.settings.active_vehicle_profile_id.empty()
+                                    ? false : true)) {
+                state.audit_scope = AppState::AuditScope::Vehicle;
+                state.audit_pinned_keys.clear();
+                state.audit_show_pinned_only = false;
+                state.audit_loaded = false;
+                state.audit_error_msg.clear();
+                state.show_audit_panel = true;
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip(
+                    "Open the Audit panel pre-scoped to per-vehicle\n"
+                    "history — aggregates every project's appends for\n"
+                    "this car's CID. Needs an active VehicleProfile.");
             }
             ImGui::Separator();
             if (ImGui::BeginMenu("Theme")) {

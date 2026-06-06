@@ -473,6 +473,15 @@ struct AppState {
     // Off by default so the audit panel still serves its "what just
     // happened?" chronological role.
     bool audit_show_pinned_only{false};
+    // Scope toggle (analyst Issue #8, per-vehicle slice). Project mode
+    // reads <project>/audit.log; Vehicle mode reads
+    // <config>/audit-by-cid/<CID>.log to surface this car's history
+    // across every project that touched it. CID is resolved from the
+    // active VehicleProfile; empty CID + Vehicle scope = empty-state.
+    // Pin/star features hide in Vehicle scope (pins are a per-project
+    // sidecar and cross-project pinning isn't shipped yet).
+    enum class AuditScope : std::uint8_t { Project, Vehicle };
+    AuditScope audit_scope{AuditScope::Project};
     // Project-scoped audit log handle. Lifecycle:
     //   try_open_project  → AuditLog::open on <project>/audit.log;
     //                        ProjectOpened entry appended
@@ -730,6 +739,12 @@ struct AppState {
     void try_open_project(std::filesystem::path const &path);
     void select_table(std::string const &id);
     void close_project();
+    // Re-resolve the active VehicleProfile's CID + VIN and apply them
+    // to the open audit_log handle. Called when the user switches
+    // profiles via the status-bar chip or Settings → Profile tab so
+    // every subsequent audit append picks up the new identity (and
+    // tees into the new per-CID file) without restarting the project.
+    void refresh_audit_identity();
 
     // Return the ROM the GUI's read-side surfaces (table grid, copy,
     // reset preview) should be displaying. Resolves active_rom_id

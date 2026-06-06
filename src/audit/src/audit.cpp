@@ -101,6 +101,18 @@ std::string serialize_for_checksum(Entry const &e) {
     json_escape(out, e.source);
     out.append(",\"desc\":");
     json_escape(out, e.description);
+    // Empty cid/vin are skipped on the wire so legacy logs (written
+    // before these fields existed) still round-trip with a matching
+    // CRC32 after a re-read. New entries with empty cid produce the
+    // same byte sequence the old serializer did.
+    if (!e.cid.empty()) {
+        out.append(",\"cid\":");
+        json_escape(out, e.cid);
+    }
+    if (!e.vin.empty()) {
+        out.append(",\"vin\":");
+        json_escape(out, e.vin);
+    }
     out.append(",\"fields\":[");
     for (std::size_t i = 0; i < e.fields.size(); ++i) {
         if (i != 0)
@@ -262,6 +274,12 @@ bool parse_entry_line(std::string_view line, Entry &out) {
         } else if (key == "desc") {
             if (!parse_quoted_string(line, out.description))
                 return false;
+        } else if (key == "cid") {
+            if (!parse_quoted_string(line, out.cid))
+                return false;
+        } else if (key == "vin") {
+            if (!parse_quoted_string(line, out.vin))
+                return false;
         } else if (key == "fields") {
             if (!consume(line, '['))
                 return false;
@@ -369,11 +387,42 @@ Result<AuditLog> AuditLog::open(std::filesystem::path const &path) {
 Status AuditLog::append(Entry entry) {
     if (entry.timestamp_ns == 0)
         entry.timestamp_ns = now_ns();
+    if (entry.cid.empty())
+        entry.cid = default_cid_;
+    if (entry.vin.empty())
+        entry.vin = default_vin_;
+    // Serialize once — both the project log and the per-CID sink
+    // write the exact same canonical bytes, so the cross-session
+    // reader can verify CRCs without re-canonicalizing.
     auto const line = serialize_entry(entry);
     out_ << line << '\n';
     out_.flush();
     if (!out_) {
         return failure(ErrorCode::IoFailure, "AuditLog::append: write failed");
+    }
+    // Per-CID tee. Project-log write is already durable; a sink
+    // failure surfaces but doesn't unwind the local write.
+    if (!per_cid_dir_.empty() && !entry.cid.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(per_cid_dir_, ec);
+        if (ec) {
+            std::string msg{"AuditLog::append: cannot create per-CID dir "};
+            msg.append(per_cid_dir_.string());
+            return failure(ErrorCode::IoFailure, std::move(msg));
+        }
+        auto const sink_path = per_cid_log_path(per_cid_dir_, entry.cid);
+        std::ofstream sink{sink_path, std::ios::app | std::ios::binary};
+        if (!sink) {
+            std::string msg{"AuditLog::append: cannot open per-CID sink "};
+            msg.append(sink_path.string());
+            return failure(ErrorCode::IoFailure, std::move(msg));
+        }
+        sink << line << '\n';
+        sink.flush();
+        if (!sink) {
+            return failure(ErrorCode::IoFailure,
+                           "AuditLog::append: per-CID sink write failed");
+        }
     }
     return ok();
 }
@@ -390,6 +439,59 @@ Status AuditLog::log(EntryKind kind, std::string source, std::string description
 
 Result<std::vector<Entry>> AuditLog::read_all(std::filesystem::path const &path) {
     return st::audit::read_all(path);
+}
+
+namespace {
+
+// Char-set for per-CID slug. Preserves case (CIDs like "LF79103P" are
+// uppercase alphanumeric); chars outside [A-Za-z0-9._-] become '_'.
+// Distinct from BackupStore's slugify, which lowercases — we want the
+// on-disk filename to visually match the CID the user sees in the
+// VehicleProfile panel.
+[[nodiscard]] std::string sanitize_cid(std::string_view cid) {
+    std::string out;
+    out.reserve(cid.size());
+    for (char raw_c : cid) {
+        auto const c = static_cast<unsigned char>(raw_c);
+        bool const ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                        (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+        out.push_back(ok ? static_cast<char>(c) : '_');
+    }
+    return out;
+}
+
+} // namespace
+
+std::filesystem::path
+per_cid_log_path(std::filesystem::path const &per_cid_dir, std::string_view cid) {
+    if (cid.empty())
+        return {};
+    return per_cid_dir / (sanitize_cid(cid) + ".log");
+}
+
+Status append_with_per_cid(AuditLog &project_log,
+                           std::filesystem::path const &per_cid_dir,
+                           Entry entry) {
+    // One-off convenience for callers that don't want a long-lived
+    // configured AuditLog handle. Temporarily borrows the per-CID
+    // sink, restores the previous one. Steady-state code paths
+    // (UI/protocol) prefer set_per_cid_sink() at session open.
+    auto const saved = project_log.per_cid_sink();
+    project_log.set_per_cid_sink(per_cid_dir);
+    auto status = project_log.append(std::move(entry));
+    project_log.set_per_cid_sink(saved);
+    return status;
+}
+
+Result<std::vector<Entry>>
+read_per_cid(std::filesystem::path const &per_cid_dir, std::string_view cid) {
+    if (cid.empty())
+        return std::vector<Entry>{};
+    auto const path = per_cid_log_path(per_cid_dir, cid);
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec))
+        return std::vector<Entry>{};
+    return read_all(path);
 }
 
 Result<std::vector<Entry>> read_all(std::filesystem::path const &path) {

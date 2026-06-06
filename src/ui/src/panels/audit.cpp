@@ -22,6 +22,7 @@
 #include "panels/panels.hpp"
 
 #include "app_state.hpp"
+#include "persistence.hpp"
 #include "widgets/widgets.hpp"
 
 #include "actions.hpp" // jump_to_table
@@ -144,19 +145,47 @@ void save_audit_pinned(AppState const &state) {
     }
 }
 
+// Resolve the on-disk path the audit panel reads. Project scope →
+// <project>/audit.log; Vehicle scope → <config>/audit-by-cid/<CID>.log
+// based on the active VehicleProfile. Empty path = "no source"
+// (renders a scope-specific empty-state message).
+std::filesystem::path audit_source_path(AppState const &state) {
+    if (state.audit_scope == AppState::AuditScope::Project) {
+        if (!state.project.has_value())
+            return {};
+        return state.project->dir() / "audit.log";
+    }
+    auto const identity = resolve_active_vehicle_identity(state.settings);
+    if (identity.cid.empty())
+        return {};
+    return st::audit::per_cid_log_path(audit_by_cid_dir(), identity.cid);
+}
+
 void load_audit_log(AppState &state) {
     state.audit_entries.clear();
     state.audit_error_msg.clear();
     state.audit_loaded = false;
     state.audit_log_mtime = std::filesystem::file_time_type{};
-    if (!state.project.has_value()) {
-        state.audit_error_msg = "No project loaded — open a .stune project to view its audit log.";
+    auto const log_path = audit_source_path(state);
+    if (log_path.empty()) {
+        if (state.audit_scope == AppState::AuditScope::Project) {
+            state.audit_error_msg =
+                "No project loaded — open a .stune project to view its audit log.";
+        } else {
+            state.audit_error_msg =
+                "Vehicle scope needs an active profile with a CID. Set a "
+                "VehicleProfile via the status-bar chip (or CLI "
+                "`profile create`) so this view can pull its cross-project "
+                "history.";
+        }
         return;
     }
-    auto const log_path = state.project->dir() / "audit.log";
     if (!std::filesystem::exists(log_path)) {
         state.audit_loaded = true; // genuinely empty, not an error
-        load_audit_pinned(state);
+        if (state.audit_scope == AppState::AuditScope::Project)
+            load_audit_pinned(state);
+        else
+            state.audit_pinned_keys.clear();
         return;
     }
     auto r = st::audit::read_all(log_path);
@@ -166,7 +195,13 @@ void load_audit_log(AppState &state) {
     }
     state.audit_entries = std::move(*r);
     state.audit_loaded = true;
-    load_audit_pinned(state);
+    // Pin sidecar is project-scoped only — per-CID pinning isn't shipped
+    // (would need a separate sidecar keyed by CID + composite-entry-key).
+    if (state.audit_scope == AppState::AuditScope::Project) {
+        load_audit_pinned(state);
+    } else {
+        state.audit_pinned_keys.clear();
+    }
     std::error_code ec;
     state.audit_log_mtime = std::filesystem::last_write_time(log_path, ec);
     if (ec) {
@@ -179,10 +214,12 @@ void load_audit_log(AppState &state) {
 // panel is visible so events appended elsewhere in the GUI surface
 // without the user having to click Refresh.
 void maybe_auto_refresh_audit(AppState &state) {
-    if (!state.audit_loaded || !state.project.has_value()) {
+    if (!state.audit_loaded) {
         return;
     }
-    auto const log_path = state.project->dir() / "audit.log";
+    auto const log_path = audit_source_path(state);
+    if (log_path.empty())
+        return;
     std::error_code ec;
     if (!std::filesystem::exists(log_path, ec) || ec) {
         return;
@@ -222,11 +259,45 @@ void render_audit_panel(AppState &state) {
     }
 
     // ---- Header / toolbar -------------------------------------------
-    if (state.project.has_value()) {
-        auto const path = state.project->dir() / "audit.log";
-        text_subtle("Log: %s", path.string().c_str());
-    } else {
-        text_subtle("Log: (no project loaded)");
+    {
+        char const *const scope_labels[] = {"Project log", "Per-vehicle history"};
+        int scope_idx = static_cast<int>(state.audit_scope);
+        ImGui::SetNextItemWidth(180.0f);
+        if (ImGui::Combo("##audit_scope", &scope_idx, scope_labels, 2)) {
+            auto const new_scope = static_cast<AppState::AuditScope>(scope_idx);
+            if (new_scope != state.audit_scope) {
+                state.audit_scope = new_scope;
+                // Scope flip invalidates pin sidecar context — clear
+                // first so the in-flight render doesn't briefly show
+                // project pins against a vehicle log. Also drop the
+                // pinned-only filter so the vehicle view doesn't
+                // start out filtering against an empty pin set.
+                state.audit_pinned_keys.clear();
+                state.audit_show_pinned_only = false;
+                state.audit_loaded = false;
+                state.audit_error_msg.clear();
+                load_audit_log(state);
+            }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Project log: this .stune's audit.log only.\n"
+                "Per-vehicle history: every project's appends for the\n"
+                "active VehicleProfile's CID, merged across sessions.");
+        }
+        ImGui::SameLine();
+        auto const path = audit_source_path(state);
+        if (!path.empty()) {
+            text_subtle("Log: %s", path.string().c_str());
+        } else if (state.audit_scope == AppState::AuditScope::Project) {
+            text_subtle("Log: (no project loaded)");
+        } else {
+            auto const identity = resolve_active_vehicle_identity(state.settings);
+            if (identity.cid.empty())
+                text_subtle("Log: (no active VehicleProfile)");
+            else
+                text_subtle("CID: %s", identity.cid.c_str());
+        }
     }
 
     if (ImGui::Button("\xEE\x9D\xB3  Refresh")) { // E773 Refresh
@@ -236,32 +307,27 @@ void render_audit_panel(AppState &state) {
         ImGui::SetTooltip("Re-read the project's audit.log from disk.");
     }
     ImGui::SameLine();
-    ImGui::BeginDisabled(!state.project.has_value());
-    if (ImGui::Button("Open log location##audit_reveal")) {
-        // Open the project dir in the OS file explorer, selecting the
-        // audit.log file when possible. Windows: explorer /select,
-        // <path>. macOS: open -R. Linux: xdg-open the parent.
-        if (state.project.has_value()) {
-            auto const log_path = state.project->dir() / "audit.log";
+    {
+        auto const reveal_path = audit_source_path(state);
+        ImGui::BeginDisabled(reveal_path.empty());
+        if (ImGui::Button("Open log location##audit_reveal")) {
             std::string cmd;
 #if defined(_WIN32)
-            cmd = "explorer /select,\"" + log_path.string() + "\"";
+            cmd = "explorer /select,\"" + reveal_path.string() + "\"";
 #elif defined(__APPLE__)
-            cmd = "open -R \"" + log_path.string() + "\"";
+            cmd = "open -R \"" + reveal_path.string() + "\"";
 #else
-            cmd = "xdg-open \"" + state.project->dir().string() + "\"";
+            cmd = "xdg-open \"" + reveal_path.parent_path().string() + "\"";
 #endif
-            // std::system inherits the parent's stdio + blocks until
-            // the shell returns. Explorer/Finder/xdg-open spawn and
-            // detach quickly, so this is fine for a one-shot reveal.
             (void)std::system(cmd.c_str());
         }
+        ImGui::EndDisabled();
     }
-    ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Reveal <project>/audit.log in the OS file\n"
-                          "browser. Useful for archiving / mailing /\n"
-                          "tail-following from a terminal.");
+        ImGui::SetTooltip(
+            "Reveal the loaded audit log in the OS file browser.\n"
+            "Project scope reveals <project>/audit.log; vehicle scope\n"
+            "reveals the per-CID file under <config>/audit-by-cid/.");
     }
     ImGui::SameLine();
     // Export NDJSON. Popup with two scopes — full timeline ("All
@@ -369,8 +435,9 @@ void render_audit_panel(AppState &state) {
     ImGui::SameLine();
     // Pinned-only toggle. Surfaces just the entries the user starred
     // for review — composes with the text + chip + range filters
-    // (pinned-only applies AFTER them).
-    {
+    // (pinned-only applies AFTER them). Hidden in vehicle scope —
+    // pin sidecar is per-project, no cross-project equivalent yet.
+    if (state.audit_scope == AppState::AuditScope::Project) {
         bool const active = state.audit_show_pinned_only;
         if (active) {
             push_primary_button_colors();
@@ -394,12 +461,8 @@ void render_audit_panel(AppState &state) {
         }
     }
     ImGui::SameLine();
-    // Bulk pin operations. The current text + chip filter defines the
-    // "visible" scope here — the time-range slider lives below the
-    // toolbar so it isn't applied at this layer (the user-visible
-    // toolbar context controls what the toolbar acts on). Disabled
-    // when the log is empty; Clear-all is further gated on whether
-    // any pins exist.
+    // Bulk pin operations. Project-scope only — see Pinned toggle.
+    if (state.audit_scope == AppState::AuditScope::Project) {
     ImGui::BeginDisabled(state.audit_entries.empty());
     if (ImGui::Button("Bulk pins  \xE2\x96\xBE")) { // ▾
         ImGui::OpenPopup("##audit_bulk_pins");
@@ -476,6 +539,7 @@ void render_audit_panel(AppState &state) {
                     state.audit_entries.size());
         ImGui::EndPopup();
     }
+    } // end project-scope pin/bulk-pin gate
 
     // Kind-filter chips. One per kind actually present in the loaded
     // entries — keeps the toolbar from showing 18 unused buttons on a
@@ -729,25 +793,29 @@ void render_audit_panel(AppState &state) {
         // Pin column. Star toggle on the leftmost cell so it's the
         // first thing the eye lands on. Always-enabled — even tampered
         // entries are pinnable (the user might want to flag a
-        // bad-CRC row for later forensic review).
+        // bad-CRC row for later forensic review). Hidden in vehicle
+        // scope — pin sidecar is per-project.
         ImGui::TableNextColumn();
-        ImGui::PushID(static_cast<int>(idx) ^ 0x70696E00);
-        char const *glyph = is_pinned ? "\xE2\x98\x85" : "\xE2\x98\x86";
-        if (ImGui::SmallButton(glyph)) {
-            if (is_pinned) {
-                state.audit_pinned_keys.erase(pin_key);
-            } else {
-                state.audit_pinned_keys.insert(pin_key);
+        if (state.audit_scope == AppState::AuditScope::Project) {
+            ImGui::PushID(static_cast<int>(idx) ^ 0x70696E00);
+            char const *glyph = is_pinned ? "\xE2\x98\x85" : "\xE2\x98\x86";
+            if (ImGui::SmallButton(glyph)) {
+                if (is_pinned) {
+                    state.audit_pinned_keys.erase(pin_key);
+                } else {
+                    state.audit_pinned_keys.insert(pin_key);
+                }
+                save_audit_pinned(state);
             }
-            save_audit_pinned(state);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    is_pinned
+                        ? "Unpin: this entry won't be highlighted next session."
+                        : "Pin: keep this entry flagged for review across sessions.\n"
+                          "Pinned IDs persist to <project>/audit.pinned.");
+            }
+            ImGui::PopID();
         }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(is_pinned
-                                  ? "Unpin: this entry won't be highlighted next session."
-                                  : "Pin: keep this entry flagged for review across sessions.\n"
-                                    "Pinned IDs persist to <project>/audit.pinned.");
-        }
-        ImGui::PopID();
 
         ImGui::TableNextColumn();
         format_iso_utc(e.timestamp_ns, ts_buf, sizeof ts_buf);

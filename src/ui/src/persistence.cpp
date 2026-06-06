@@ -9,6 +9,7 @@
 #include "persistence.hpp"
 
 #include "st/policy.hpp"
+#include "st/profile.hpp"
 
 #include <algorithm>
 #include <array>
@@ -60,6 +61,25 @@ std::filesystem::path recents_config_path() {
 
 std::filesystem::path settings_config_path() {
     return config_dir_root() / "settings.txt";
+}
+
+std::filesystem::path audit_by_cid_dir() {
+    return config_dir_root() / "audit-by-cid";
+}
+
+ActiveVehicleIdentity resolve_active_vehicle_identity(Settings const &settings) {
+    ActiveVehicleIdentity out;
+    if (settings.active_vehicle_profile_id.empty())
+        return out;
+    auto const profile_path = st::profile::default_profile_dir() /
+                              (settings.active_vehicle_profile_id + ".stprofile");
+    auto const r = st::profile::load(profile_path);
+    if (!r.has_value())
+        return out;
+    out.vin = r->vin;
+    if (!r->ecus.empty())
+        out.cid = r->ecus.front().cal_id;
+    return out;
 }
 
 // Locate the bundled fixtures/demo.stune project relative to argv[0].

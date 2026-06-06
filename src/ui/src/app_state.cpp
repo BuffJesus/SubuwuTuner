@@ -53,6 +53,15 @@ void AppState::try_open_project(std::filesystem::path const &path) {
     if (auto al = st::audit::AuditLog::open(project->dir() / "audit.log");
         al.has_value()) {
         audit_log.emplace(std::move(*al));
+        // Cross-session AuditLog wiring (analyst Issue #8): tee every
+        // append into <config>/audit-by-cid/<CID>.log so a tech can
+        // pull this car's history across every project that touched
+        // it. Identity comes from the active VehicleProfile; empty CID
+        // → tee is a no-op (project log only).
+        auto const identity = resolve_active_vehicle_identity(settings);
+        audit_log->set_default_cid(identity.cid);
+        audit_log->set_default_vin(identity.vin);
+        audit_log->set_per_cid_sink(audit_by_cid_dir());
         (void)audit_log->log(st::audit::EntryKind::ProjectOpened, "ui",
                              "Project opened",
                              {{"dir", project->dir().string()},
@@ -139,6 +148,14 @@ void AppState::select_table(std::string const &id) {
     if (td.has_value()) {
         current_table_data = std::move(*td);
     }
+}
+
+void AppState::refresh_audit_identity() {
+    if (!audit_log.has_value())
+        return;
+    auto const identity = resolve_active_vehicle_identity(settings);
+    audit_log->set_default_cid(identity.cid);
+    audit_log->set_default_vin(identity.vin);
 }
 
 void AppState::close_project() {

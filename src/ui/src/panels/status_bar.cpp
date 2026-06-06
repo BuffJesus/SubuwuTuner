@@ -245,6 +245,7 @@ void render_status_bar(AppState &state) {
                     if (ImGui::Selectable("(none)", active_id.empty())) {
                         state.settings.active_vehicle_profile_id.clear();
                         save_settings(state.settings);
+                        state.refresh_audit_identity();
                         state.status_msg = "Profile: none";
                         ImGui::CloseCurrentPopup();
                     }
@@ -261,6 +262,7 @@ void render_status_bar(AppState &state) {
                         if (ImGui::Selectable(row, is_current)) {
                             state.settings.active_vehicle_profile_id = p.id;
                             save_settings(state.settings);
+                            state.refresh_audit_identity();
                             state.status_msg = std::string{"Profile: "} + p.id;
                             ImGui::CloseCurrentPopup();
                         }

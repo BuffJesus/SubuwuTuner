@@ -86,6 +86,25 @@ std::filesystem::path config_dir_root();
 std::filesystem::path recents_config_path();
 std::filesystem::path settings_config_path();
 
+// Cross-session per-CID audit sink directory (analyst Issue #8). Lives
+// at `<config>/audit-by-cid/`; each file inside is
+// `<sanitized_cid>.log`. AuditLog::set_per_cid_sink(this) tees every
+// project's appended entry into the matching CID file so a tech can
+// pull the full cross-project history for one car.
+std::filesystem::path audit_by_cid_dir();
+
+// Resolve the CID + VIN for the active VehicleProfile from
+// `Settings.active_vehicle_profile_id`. Returns empty strings when no
+// profile is active, the .stprofile file can't be loaded, or the
+// profile has no engine ECU recorded. Reads the .stprofile each call
+// — typically called once at project-open / profile-switch, so the
+// disk-read cost is negligible.
+struct ActiveVehicleIdentity {
+    std::string cid;
+    std::string vin;
+};
+ActiveVehicleIdentity resolve_active_vehicle_identity(Settings const &settings);
+
 std::optional<std::filesystem::path> resolve_demo_project_path(char const *argv0);
 
 // Locate the project's docs/ directory relative to argv[0]. Same

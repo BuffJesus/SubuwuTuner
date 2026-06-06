@@ -96,6 +96,17 @@ struct Entry {
     std::int64_t timestamp_ns{0};
     std::string source;
     std::string description;
+    // ECU calibration ID (e.g. "LF79103P") this entry is about. Empty
+    // when not applicable (transport-level events with no active ECU
+    // identity yet). Drives the per-CID cross-session sink at
+    // `<config>/audit-by-cid/<CID>.log` so a tech can pull the full
+    // cross-project history for one car. Empty cid is NOT written to
+    // the wire so legacy (pre-cid) logs still verify their checksums.
+    std::string cid;
+    // Vehicle identification number, when known. Many tunes are
+    // ECU-only (no VIN exchange) so this is frequently empty. Same
+    // empty-skip rule as cid for backward-compat.
+    std::string vin;
     std::vector<std::pair<std::string, std::string>> fields;
 
     // Populated only on read — true when the on-disk CRC32 doesn't
@@ -138,13 +149,46 @@ public:
 
     // Append a single entry. Computes the CRC32, serializes, writes
     // one line + trailing '\n', flushes. Sets entry.timestamp_ns
-    // automatically if the caller left it at 0 (= "now").
+    // automatically if the caller left it at 0 (= "now"). Stamps
+    // default_cid / default_vin onto the entry when its own cid/vin
+    // are empty (configure via set_default_cid / set_default_vin).
+    // When a per-CID sink dir is configured (set_per_cid_sink), the
+    // entry is also teed into per_cid_log_path(dir, entry.cid).
     [[nodiscard]] Status append(Entry entry);
 
     // Convenience: append with just a kind + description + optional
     // source + fields. Timestamps to "now".
     [[nodiscard]] Status log(EntryKind kind, std::string source, std::string description,
                              std::vector<std::pair<std::string, std::string>> fields = {});
+
+    // Default CID stamped onto every appended entry whose own
+    // entry.cid is empty. Set once at project-open / profile-switch
+    // time so every downstream subsystem (UDS / Flasher / GUI panels)
+    // benefits without threading the CID through their call sites.
+    // Empty string clears the default.
+    void set_default_cid(std::string cid) noexcept {
+        default_cid_ = std::move(cid);
+    }
+    void set_default_vin(std::string vin) noexcept {
+        default_vin_ = std::move(vin);
+    }
+    [[nodiscard]] std::string const &default_cid() const noexcept {
+        return default_cid_;
+    }
+    [[nodiscard]] std::string const &default_vin() const noexcept {
+        return default_vin_;
+    }
+
+    // Configure a per-CID cross-session sink. When set, append() also
+    // writes each entry to per_cid_log_path(dir, entry.cid) — the
+    // tee that powers the "Audit (per-vehicle history)" GUI panel.
+    // Empty path clears the sink (project-log-only mode).
+    void set_per_cid_sink(std::filesystem::path dir) {
+        per_cid_dir_ = std::move(dir);
+    }
+    [[nodiscard]] std::filesystem::path const &per_cid_sink() const noexcept {
+        return per_cid_dir_;
+    }
 
     // Read every entry from disk. Per-entry checksum is verified;
     // entries with bad checksums come back with checksum_valid=false
@@ -157,12 +201,46 @@ private:
     AuditLog() = default;
     std::filesystem::path path_;
     std::ofstream out_;
+    std::string default_cid_;
+    std::string default_vin_;
+    std::filesystem::path per_cid_dir_;
 };
 
 // Free-function reader for tools that don't want to open the log
 // for append. Same semantics as AuditLog::read_all.
 [[nodiscard]] Result<std::vector<Entry>>
 read_all(std::filesystem::path const &path);
+
+// ---- Per-CID cross-session sink ----------------------------------------
+//
+// Closes analyst Issue #8 (cross-session AuditLog). Each project still
+// has its own `audit.log`, but entries also tee into a centralized
+// per-CID file under a caller-provided directory (typically
+// `<config>/audit-by-cid/`) so a tech can pull the full history for one
+// car across every project it appeared in.
+
+// Compute the per-CID sink path under `per_cid_dir`. Sanitizes the CID
+// to a filesystem-safe slug: chars outside [A-Za-z0-9._-] become '_'.
+// Empty cid returns an empty path. The per_cid_dir is NOT created here.
+[[nodiscard]] std::filesystem::path
+per_cid_log_path(std::filesystem::path const &per_cid_dir, std::string_view cid);
+
+// Tee-append. Always writes `entry` to `project_log`; additionally
+// appends to per_cid_log_path(per_cid_dir, entry.cid) when entry.cid is
+// non-empty. Creates per_cid_dir if missing. The project-log write is
+// attempted first so a per-CID hiccup never loses the local entry.
+// Returns the first failure encountered, or ok() on success.
+[[nodiscard]] Status
+append_with_per_cid(AuditLog &project_log,
+                    std::filesystem::path const &per_cid_dir,
+                    Entry entry);
+
+// Read every entry for `cid` from the per-CID sink. Returns an empty
+// vector (not an error) when the per-CID file does not yet exist —
+// callers iterating fresh-install state need that distinction.
+// Empty cid returns an empty vector.
+[[nodiscard]] Result<std::vector<Entry>>
+read_per_cid(std::filesystem::path const &per_cid_dir, std::string_view cid);
 
 } // namespace st::audit
 
