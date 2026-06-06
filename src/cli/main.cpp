@@ -12593,7 +12593,9 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
             out.append(std::to_string(cb::kDidPayloads[i].bytes));
             out.append("}");
         }
-        out.append("],\"signals\":[");
+        out.append("],\"total_payload_bytes\":");
+        out.append(std::to_string(cb::total_payload_bytes(firmware)));
+        out.append(",\"signals\":[");
         auto const storage_name = [](cb::CobbSignalStorage s) -> char const * {
             switch (s) {
             case cb::CobbSignalStorage::Uint8:    return "uint8";
@@ -12656,10 +12658,10 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
                 cb::kMedianPollIntervalMs);
     std::printf("  Request shape:     22 F3 00 F3 01 F3 02 F3 03 F3 04 (13 bytes)\n");
     std::printf("  Response payload:  %zu bytes total (ISO-TP multi-frame)\n",
-                cb::kTotalPayloadBytes);
+                cb::total_payload_bytes(firmware));
     std::puts("");
     std::puts("  DID payload widths:");
-    for (auto const &p : cb::kDidPayloads) {
+    for (auto const &p : cb::did_payloads(firmware)) {
         std::printf("    0x%04X — %2u bytes\n", p.did, p.bytes);
     }
     std::puts("");

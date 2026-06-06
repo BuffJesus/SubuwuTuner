@@ -153,6 +153,26 @@ std::span<CobbSignalLayout const> ap_layout(CobbApFirmware fw) noexcept {
     return {};
 }
 
+std::span<DidPayload const> did_payloads(CobbApFirmware fw) noexcept {
+    switch (fw) {
+    case CobbApFirmware::V1_7_4_2_CCF_Gen2:
+        return {kDidPayloadsV1_7_4_2.data(), kDidPayloadsV1_7_4_2.size()};
+    case CobbApFirmware::V1_7_6_0_CCF_Gen3:
+        return {kDidPayloadsV1_7_6_0.data(), kDidPayloadsV1_7_6_0.size()};
+    }
+    return {};
+}
+
+std::size_t total_payload_bytes(CobbApFirmware fw) noexcept {
+    switch (fw) {
+    case CobbApFirmware::V1_7_4_2_CCF_Gen2:
+        return kTotalPayloadBytesV1_7_4_2;
+    case CobbApFirmware::V1_7_6_0_CCF_Gen3:
+        return kTotalPayloadBytesV1_7_6_0;
+    }
+    return 0;
+}
+
 CobbSignalLayout const *
 find_signal(CobbApFirmware fw, std::uint16_t did,
             std::uint8_t byte_offset) noexcept {

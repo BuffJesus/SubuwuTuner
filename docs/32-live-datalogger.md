@@ -324,14 +324,33 @@ driving-data ground-truth.
 **Wire shape (confirmed)**
 - Tester → ECU: CAN id `0x7E0`, 13-byte UDS request
   `22 F3 00 F3 01 F3 02 F3 03 F3 04`
-- ECU → tester: CAN id `0x7E8`, 78-byte ISO-TP multi-frame response
-  (67 payload bytes + per-DID id bytes + service-positive code)
-- 5 DIDs, always in order: `0xF300` (22 B), `0xF301` (19 B),
-  `0xF302` (10 B), `0xF303` (10 B), `0xF304` (6 B)
+- ECU → tester: CAN id `0x7E8`, ISO-TP multi-frame response —
+  **78 bytes for v1.7.4.2** (67 payload + DID echoes + service code),
+  **86 bytes for v1.7.6.0** (75 payload + DID echoes + service code)
+- 5 DIDs, always in order. Per-firmware DID widths:
+  - v1.7.4.2 (CCF Gen2): F300=22, F301=19, F302=10, F303=10, F304=6
+  - v1.7.6.0 (CCF Gen3): F300=26, F301=20, F302=10, F303=10, F304=9
 - No SecurityAccess unlock during the datalog phase — L3 latch
   persists from a prior install/uninstall session
 - Median cadence 39 ms / p95 91 ms / min 8 ms across the
   reference capture (832 polls)
+
+**Monitor naming reference**
+
+The AP-internal monitor IDs split into two prefixes:
+- `SSM_*` — OEM Subaru SSM-protocol RAM reads. RAM addresses are
+  authoritative from the firmware live-signals catalog. Six of the
+  12 R²-verified v1.7.6.0 entries are SSM_* (RPM, Battery Volts,
+  AF Sens 1, AF Learning, Vehicle Speed, Wastegate Duty).
+- `RAM_*` — COBB-defined RAM reads, often pointing at a Cobb
+  tune-patch region. RAM addresses for these are candidate-only —
+  Cobb may read OEM RAM or a different patch RAM. The other six
+  Verified entries are RAM_* (Comm Fuel Final, Gear Position,
+  Oil Temp, SD VE Est MAF, TD Boost Error Ext, TGV Map Ratio); use
+  their `ram_address` as a best-guess pointer, not as ground truth.
+
+Full 49-monitor list at
+`findings/corpus-wide-re-2026-06-06/out/cobb_datalog/COBB_MONITOR_IDS.md`.
 
 **Per-byte signal layout (two AP firmware versions)**
 

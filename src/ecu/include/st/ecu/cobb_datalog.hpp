@@ -60,13 +60,19 @@ inline constexpr std::array<std::uint16_t, 5> kDidSet{
     0xF300, 0xF301, 0xF302, 0xF303, 0xF304,
 };
 
-// Per-DID response payload width in bytes (sum = 67). Total ECU
-// response is 78 bytes (67 payload + per-DID id bytes + service code).
+// Per-DID response payload width in bytes. Different AP firmware
+// versions use different widths — v1.7.6.0 (CCF Gen3) widened the
+// payload to fit more signals. ECU response size = sum(payloads) +
+// 2 bytes per DID id echo + 1 byte service-positive code (0x62) +
+// 1 byte for the trailing SID echo.
 struct DidPayload {
     std::uint16_t did;
     std::uint8_t  bytes;
 };
-inline constexpr std::array<DidPayload, 5> kDidPayloads{{
+
+// v1.7.4.2 (CCF Gen2): 67 payload bytes / 78-byte ECU response.
+// Confirmed from `bus-check.log`.
+inline constexpr std::array<DidPayload, 5> kDidPayloadsV1_7_4_2{{
     {0xF300, 22},
     {0xF301, 19},
     {0xF302, 10},
@@ -74,7 +80,23 @@ inline constexpr std::array<DidPayload, 5> kDidPayloads{{
     {0xF304,  6},
 }};
 
+// v1.7.6.0 (CCF Gen3): 75 payload bytes / 86-byte ECU response.
+// Confirmed from the dmann-sniff-20260528-181747 driving capture.
+inline constexpr std::array<DidPayload, 5> kDidPayloadsV1_7_6_0{{
+    {0xF300, 26},
+    {0xF301, 20},
+    {0xF302, 10},
+    {0xF303, 10},
+    {0xF304,  9},
+}};
+
+// Backward-compat alias — v1.7.4.2 widths. Old call sites that
+// referenced kDidPayloads / kTotalPayloadBytes (anchored to bus-check
+// .log) keep working. New code should use did_payloads(firmware).
+inline constexpr auto kDidPayloads = kDidPayloadsV1_7_4_2;
 inline constexpr std::size_t kTotalPayloadBytes = 67;
+inline constexpr std::size_t kTotalPayloadBytesV1_7_4_2 = 67;
+inline constexpr std::size_t kTotalPayloadBytesV1_7_6_0 = 75;
 
 // ---- Per-byte signal layout (AP v1.7.6.0 "CCF Gen3" hypothesis) ---------
 //
@@ -167,18 +189,35 @@ enum class CobbApFirmware : std::uint8_t {
 
 // Per-firmware signal layouts.
 //
-// v1.7.4.2 (CCF Gen2): 31 signals, 100% catalog-mapped to LF79103P
-//   RAM addresses (analyst's high-confidence join).
+// v1.7.4.2 (CCF Gen2): 31 signals across F300..F302; 67-byte response.
+//   100% catalog-mapped to LF79103P RAM addresses (high-confidence
+//   join). All entries Hypothesized — R²-fit was run against a
+//   v1.7.6.0 sniff only.
 //
-// v1.7.6.0 (CCF Gen3): 43 signals across F300..F304 (88% of the AP's
-//   49-signal gauge set). Six signals overflowed the 67-byte budget
-//   in the analyst's inference (SD VE Est MAF, TD Boost Error Ext,
-//   TGV Map Ratio, Throttle Pos, Vehicle Speed, Wastegate Duty) —
-//   pending an on-car sniff to confirm whether they live in an
-//   unseen F305 DID.
+// v1.7.6.0 (CCF Gen3): 44 signals across F300..F304; 75-byte response.
+//   12 entries R²-verified ≥ 0.95 against the dmann driving sniff
+//   (Verified); the remaining 32 are CSV-column-order inferences
+//   (Hypothesized) and many disagree with the Verified positions at
+//   the same DID byte offset.
+//
+// Naming reference (see findings/.../COBB_MONITOR_IDS.md):
+//   SSM_*  — OEM Subaru SSM-protocol RAM reads. RAM address is
+//            authoritative from the firmware live-signals catalog.
+//   RAM_*  — COBB-defined RAM reads, often from a Cobb tune-patch
+//            region. RAM addresses for these are candidate-only —
+//            Cobb may read OEM RAM or a Cobb-patch RAM at a different
+//            address. Verified Cobb-monitor entries here may carry a
+//            ram_address that's a best guess.
 std::span<CobbSignalLayout const> ap_v1_7_4_2_layout() noexcept;
 std::span<CobbSignalLayout const> ap_v1_7_6_0_layout() noexcept;
 std::span<CobbSignalLayout const> ap_layout(CobbApFirmware fw) noexcept;
+
+// Per-firmware DID payload widths (5 entries for the 5 polled DIDs).
+[[nodiscard]] std::span<DidPayload const>
+did_payloads(CobbApFirmware fw) noexcept;
+
+// Per-firmware total payload byte count (sum of the 5 DID widths).
+[[nodiscard]] std::size_t total_payload_bytes(CobbApFirmware fw) noexcept;
 
 // Look up the signal at (did, byte_offset) within a specific firmware
 // layout. Returns nullptr if the position is not in that layout.

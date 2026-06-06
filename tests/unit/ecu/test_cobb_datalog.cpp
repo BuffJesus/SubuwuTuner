@@ -25,13 +25,55 @@ TEST_CASE("Cobb datalog protocol constants match bus-check.log",
     REQUIRE(cb::kDidSet[4] == 0xF304);
 }
 
-TEST_CASE("Cobb DID payload widths sum to 67 bytes",
+TEST_CASE("v1.7.4.2 DID payload widths sum to 67 bytes",
           "[ecu][cobb][datalog]") {
     std::size_t total = 0;
-    for (auto const &p : cb::kDidPayloads)
+    for (auto const &p : cb::kDidPayloadsV1_7_4_2)
         total += p.bytes;
-    REQUIRE(total == cb::kTotalPayloadBytes);
+    REQUIRE(total == cb::kTotalPayloadBytesV1_7_4_2);
     REQUIRE(total == 67);
+    // Backward-compat alias matches v1.7.4.2.
+    REQUIRE(cb::kTotalPayloadBytes == 67);
+}
+
+TEST_CASE("v1.7.6.0 DID payload widths sum to 75 bytes",
+          "[ecu][cobb][datalog]") {
+    std::size_t total = 0;
+    for (auto const &p : cb::kDidPayloadsV1_7_6_0)
+        total += p.bytes;
+    REQUIRE(total == cb::kTotalPayloadBytesV1_7_6_0);
+    REQUIRE(total == 75);
+}
+
+TEST_CASE("did_payloads() + total_payload_bytes() dispatch by firmware",
+          "[ecu][cobb][datalog]") {
+    REQUIRE(cb::did_payloads(cb::CobbApFirmware::V1_7_4_2_CCF_Gen2).size() == 5);
+    REQUIRE(cb::did_payloads(cb::CobbApFirmware::V1_7_6_0_CCF_Gen3).size() == 5);
+    REQUIRE(cb::total_payload_bytes(cb::CobbApFirmware::V1_7_4_2_CCF_Gen2) == 67);
+    REQUIRE(cb::total_payload_bytes(cb::CobbApFirmware::V1_7_6_0_CCF_Gen3) == 75);
+}
+
+TEST_CASE("v1.7.6.0 Verified positions all fit within v1.7.6.0 payload widths",
+          "[ecu][cobb][datalog][verified][widths]") {
+    // Now that v1.7.6.0 F300 is 26 bytes (not 22), the F300:21 u16_le
+    // TD Boost Error Ext fits cleanly within the DID.
+    auto const widths = cb::did_payloads(cb::CobbApFirmware::V1_7_6_0_CCF_Gen3);
+    for (auto const &s : cb::ap_v1_7_6_0_layout()) {
+        if (s.verification != cb::CobbVerification::Verified)
+            continue;
+        auto const it = std::find_if(
+            widths.begin(), widths.end(),
+            [&](cb::DidPayload const &p) { return p.did == s.did; });
+        REQUIRE(it != widths.end());
+        std::uint8_t const width =
+            (s.storage == cb::CobbSignalStorage::Uint16 ||
+             s.storage == cb::CobbSignalStorage::Int16 ||
+             s.storage == cb::CobbSignalStorage::Uint16Le ||
+             s.storage == cb::CobbSignalStorage::Int16Le)
+                ? 2u
+                : 1u;
+        REQUIRE(s.byte_offset + width <= it->bytes);
+    }
 }
 
 TEST_CASE("AP v1.7.6.0 layout exposes 44 signals across the 5 DIDs",
