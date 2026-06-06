@@ -95,6 +95,40 @@ public:
 // pack declare a kind?"
 [[nodiscard]] std::unique_ptr<IChecksumRepair> make_checksum_repair(ChecksumKind kind);
 
+// ---- SubaruStd configuration -----------------------------------------
+//
+// SubaruStd needs to know which bytes participate in the sum and where
+// the two checksum slots live. Per the public algorithm shape
+// (RomRaider's ChecksumSTD + Subaru tuning literature):
+//
+//   - The cal region is summed as 16-bit big-endian words mod 2^32.
+//   - The two slot bytes are SKIPPED while summing (otherwise the
+//     algorithm is self-referential).
+//   - The lower-address slot stores the sum.
+//   - The upper-address slot stores `~sum` (one's complement). Boot-
+//     time integrity check then verifies sum + complement == 0xFFFFFFFF.
+//
+// Defaults below target the common SH-2A 2 MB family (SH72546R) — the
+// 2017 WRX FA20DIT ECU lives here. For other ROM sizes / families
+// supply an explicit config.
+struct SubaruStdConfig {
+    std::uint32_t cal_start{0x10000};     // first byte included in the sum
+    std::uint32_t cal_end{0x200000};      // one-past-last (exclusive upper bound)
+    std::uint32_t sum_slot{0x100};        // offset of the 4-byte sum word
+    std::uint32_t complement_slot{0x104}; // offset of the 4-byte ~sum word
+
+    // Validation invariants used by make_checksum_repair before
+    // constructing the impl. cal_end > cal_start; both slots
+    // 4-byte-aligned; slots distinct; slots within cal_start..cal_end.
+    // Returns the first invariant violated (empty when valid).
+    [[nodiscard]] std::string_view validate() const noexcept;
+};
+
+// Construct a SubaruStd repair with explicit slot config. Useful when
+// the platform isn't the default SH-2A 2 MB layout.
+[[nodiscard]] std::unique_ptr<IChecksumRepair>
+make_subaru_std_repair(SubaruStdConfig const &cfg);
+
 } // namespace st::flash
 
 // Forward-declared in st:: so apply_checksum_repair can take a
