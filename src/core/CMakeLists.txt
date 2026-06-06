@@ -17,6 +17,7 @@ FetchContent_MakeAvailable(tl_expected)
 
 add_library(st_core STATIC
     src/error.cpp
+    src/json_util.cpp
     src/version.cpp
 )
 add_library(st::core ALIAS st_core)

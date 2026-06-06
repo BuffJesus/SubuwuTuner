@@ -4,6 +4,7 @@
 #include "st/autotune.hpp"
 #include "st/can.hpp"
 #include "st/config.hpp"
+#include "st/core/json_util.hpp"
 #include "st/core/version.hpp"
 #include "st/dbc.hpp"
 #include "st/audit.hpp"
@@ -22,6 +23,7 @@
 #include "st/flash.hpp"
 #include "st/flash/checksum.hpp"
 #include "st/log.hpp"
+#include "st/ai/backend.hpp"
 #include "st/ai/drift.hpp"
 #include "st/log/adaptive_history.hpp"
 #include "st/log/coldstart.hpp"
@@ -75,43 +77,7 @@ std::optional<double> parse_fraction_or_percent(std::string_view raw);
 
 namespace {
 
-// Minimal JSON-string escape — used by every --json subcommand. Hand-
-// rolled to avoid pulling in a JSON library for output-only use. Per
-// RFC 8259 §7 the bare-minimum escapes are `\"`, `\\`, and `\u00XX`
-// for control chars < 0x20.
-void json_escape(std::string &out, std::string_view s) {
-    out.reserve(out.size() + s.size() + 2);
-    out.push_back('"');
-    for (char ch : s) {
-        auto const u = static_cast<unsigned char>(ch);
-        switch (ch) {
-        case '"':
-            out.append("\\\"");
-            break;
-        case '\\':
-            out.append("\\\\");
-            break;
-        case '\n':
-            out.append("\\n");
-            break;
-        case '\r':
-            out.append("\\r");
-            break;
-        case '\t':
-            out.append("\\t");
-            break;
-        default:
-            if (u < 0x20) {
-                char buf[8];
-                std::snprintf(buf, sizeof buf, "\\u%04X", u);
-                out.append(buf);
-            } else {
-                out.push_back(ch);
-            }
-        }
-    }
-    out.push_back('"');
-}
+using st::json_escape;
 
 constexpr std::string_view kUsage =
     "subuwutuner-cli — headless ECU calibration tool\n"
@@ -390,6 +356,15 @@ constexpr std::string_view kUsage =
     "                            an adaptive-history CSV, runs classify(), prints a\n"
     "                            diagnosis (cause + confidence + evidence + alternatives\n"
     "                            + recommended checks). Pure-domain, no LLM.\n"
+    "    ai-narrate --provider anthropic|openai (--key <K> | --key-env <NAME>)\n"
+    "               (--prompt <text> | --prompt-file <P> | --prompt-stdin)\n"
+    "               [--model <M>] [--system <text>] [--system-file <P>] [--json]\n"
+    "                            Tier-2 LLM narration via st::ai::Backend (docs/20).\n"
+    "                            Shells out to curl; needs network + a valid API key.\n"
+    "                            Pipe-friendly: `ai-drift … | ai-narrate --prompt-stdin`.\n"
+    "                            Prefer --key-env on shared boxes — cmdline args are\n"
+    "                            visible to other local users via tasklist/ps.\n"
+    "                            --json emits subuwutuner.ai-narrate.v1 envelope.\n"
     "    adaptive-history --log <CSV> --timestamp-col <name>\n"
     "                     [--ltft-col <name>] [--dam-col <name>] [--idle-adapt-col <name>]\n"
     "                     [--bucket-seconds N] [--timestamp-unit seconds|millis|micros|rows]\n"
@@ -3870,7 +3845,7 @@ int cmd_completion(int argc, char *argv[]) {
         "pack-info", "pack-lint", "primitive-list", "hook-list", "pack-dtcs",
         "stats", "diff", "diff-load", "audit", "profile", "config",
         "changelog", "log", "ssm-a8-poll", "doctor", "transport-list",
-        "uds-test", "feature-graph", "ai-drift",
+        "uds-test", "feature-graph", "ai-drift", "ai-narrate",
         nullptr,
     };
     // Flag completion vocabulary. Reused across bash + zsh handlers.
@@ -8019,6 +7994,196 @@ int cmd_ai_drift(int argc, char *argv[]) {
         for (auto const &c : diag.recommended_checks) {
             std::printf("  - %s\n", c.c_str());
         }
+    }
+    return 0;
+}
+
+// ai-narrate — Tier 2 LLM narration CLI surface (docs/20). Wraps
+// st::ai::Backend so the user can smoke-test the live HTTPS path
+// without going through the GUI confirm modal, and so the engine
+// is scriptable for batch log processing. Auth is via either
+// --key <K> (visible on cmdline — convenient for one-shot use)
+// or --key-env <NAME> (read from env var — preferred for shared
+// boxes / CI / shell history hygiene). Prompt comes from --prompt,
+// --prompt-file, or stdin (--prompt - / piped input).
+int cmd_ai_narrate(int argc, char *argv[]) {
+    std::string provider_arg;
+    std::string api_key;
+    std::string key_env;
+    std::string model;
+    std::string system_prompt;
+    std::string system_file;
+    std::string prompt;
+    std::string prompt_file;
+    bool prompt_stdin = false;
+    bool json_mode = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const need = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "ai-narrate: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--provider") {
+            auto *v = need("--provider");
+            if (!v) return 2;
+            provider_arg = v;
+        } else if (a == "--key") {
+            auto *v = need("--key");
+            if (!v) return 2;
+            api_key = v;
+        } else if (a == "--key-env") {
+            auto *v = need("--key-env");
+            if (!v) return 2;
+            key_env = v;
+        } else if (a == "--model") {
+            auto *v = need("--model");
+            if (!v) return 2;
+            model = v;
+        } else if (a == "--system") {
+            auto *v = need("--system");
+            if (!v) return 2;
+            system_prompt = v;
+        } else if (a == "--system-file") {
+            auto *v = need("--system-file");
+            if (!v) return 2;
+            system_file = v;
+        } else if (a == "--prompt") {
+            auto *v = need("--prompt");
+            if (!v) return 2;
+            if (std::string_view{v} == "-") {
+                prompt_stdin = true;
+            } else {
+                prompt = v;
+            }
+        } else if (a == "--prompt-file") {
+            auto *v = need("--prompt-file");
+            if (!v) return 2;
+            prompt_file = v;
+        } else if (a == "--prompt-stdin") {
+            prompt_stdin = true;
+        } else if (a == "--json") {
+            json_mode = true;
+        } else {
+            std::fprintf(stderr, "ai-narrate: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (provider_arg.empty()) {
+        std::fputs("ai-narrate: --provider is required (anthropic|openai)\n",
+                   stderr);
+        return 2;
+    }
+    if (api_key.empty() && !key_env.empty()) {
+        if (auto const *v = std::getenv(key_env.c_str()); v != nullptr) {
+            api_key = v;
+        } else {
+            std::fprintf(stderr, "ai-narrate: env var %s is not set\n",
+                         key_env.c_str());
+            return 2;
+        }
+    }
+    if (api_key.empty()) {
+        std::fputs("ai-narrate: --key <K> or --key-env <NAME> is required\n",
+                   stderr);
+        return 2;
+    }
+
+    // Resolve the prompt. Priority: --prompt-file > --prompt-stdin >
+    // --prompt > empty (error). Stdin path slurps until EOF so a pipe
+    // from another CLI verb (`subuwutuner-cli ai-drift ... | ai-narrate ...`)
+    // is the natural composition.
+    if (!prompt_file.empty()) {
+        std::ifstream in{prompt_file, std::ios::binary};
+        if (!in) {
+            std::fprintf(stderr, "ai-narrate: cannot open %s\n",
+                         prompt_file.c_str());
+            return 2;
+        }
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        prompt = ss.str();
+    } else if (prompt_stdin) {
+        std::ostringstream ss;
+        ss << std::cin.rdbuf();
+        prompt = ss.str();
+    }
+    if (prompt.empty()) {
+        std::fputs("ai-narrate: empty prompt — supply --prompt, "
+                   "--prompt-file, or --prompt-stdin\n",
+                   stderr);
+        return 2;
+    }
+    if (!system_file.empty()) {
+        std::ifstream in{system_file, std::ios::binary};
+        if (!in) {
+            std::fprintf(stderr, "ai-narrate: cannot open %s\n",
+                         system_file.c_str());
+            return 2;
+        }
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        system_prompt = ss.str();
+    }
+
+    std::unique_ptr<st::ai::Backend> backend;
+    if (provider_arg == "anthropic") {
+        backend = st::ai::make_anthropic_backend(std::move(api_key),
+                                                  std::move(model));
+    } else if (provider_arg == "openai") {
+        backend = st::ai::make_openai_backend(std::move(api_key),
+                                               std::move(model));
+    } else {
+        std::fprintf(stderr,
+                     "ai-narrate: --provider must be 'anthropic' or "
+                     "'openai' (got '%s')\n",
+                     provider_arg.c_str());
+        return 2;
+    }
+
+    auto const info = backend->info();
+    auto const r = backend->complete(system_prompt, prompt);
+    if (!r.has_value()) {
+        if (json_mode) {
+            std::string out;
+            out.append("{\"schema\":\"subuwutuner.ai-narrate.v1\",\"ok\":false,"
+                       "\"error\":");
+            st::json_escape(out, r.error().message());
+            out.append(",\"provider\":");
+            st::json_escape(out, info.name);
+            out.append(",\"model\":");
+            st::json_escape(out, info.model);
+            out.append("}\n");
+            std::fputs(out.c_str(), stdout);
+        } else {
+            std::fprintf(stderr, "ai-narrate: %.*s\n",
+                         static_cast<int>(r.error().message().size()),
+                         r.error().message().data());
+        }
+        return 1;
+    }
+    if (json_mode) {
+        std::string out;
+        out.append("{\"schema\":\"subuwutuner.ai-narrate.v1\",\"ok\":true,"
+                   "\"response\":");
+        st::json_escape(out, *r);
+        out.append(",\"provider\":");
+        st::json_escape(out, info.name);
+        out.append(",\"model\":");
+        st::json_escape(out, info.model);
+        out.append(",\"locality\":\"");
+        out.append(info.locality == st::ai::BackendLocality::Cloud ? "cloud"
+                                                                    : "local");
+        out.append("\"}\n");
+        std::fputs(out.c_str(), stdout);
+    } else {
+        std::fputs(r->c_str(), stdout);
+        if (r->empty() || r->back() != '\n')
+            std::fputc('\n', stdout);
     }
     return 0;
 }
@@ -14394,6 +14559,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "ai-drift") {
         return cmd_ai_drift(argc - 2, argv + 2);
+    }
+    if (cmd == "ai-narrate") {
+        return cmd_ai_narrate(argc - 2, argv + 2);
     }
     if (cmd == "coldstart-analyze") {
         return cmd_coldstart_analyze(argc - 2, argv + 2);

@@ -17,6 +17,7 @@ add_executable(st_unit_tests
     unit/core/test_error.cpp
     unit/core/test_version.cpp
     unit/core/test_crc32.cpp
+    unit/core/test_json_util.cpp
     unit/core/test_ext_interfaces.cpp
     unit/config/test_config.cpp
     unit/rom/test_rom.cpp

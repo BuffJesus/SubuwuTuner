@@ -3,6 +3,8 @@
 
 #include "st/ai/backend.hpp"
 
+#include "st/core/json_util.hpp"
+
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -24,42 +26,6 @@ constexpr char const *kDefaultOpenAiModel = "gpt-4o";
 constexpr char const *kAnthropicEndpoint = "https://api.anthropic.com/v1/messages";
 constexpr char const *kOpenAiEndpoint = "https://api.openai.com/v1/chat/completions";
 constexpr char const *kAnthropicVersion = "2023-06-01";
-
-// Append `s` to `out` with JSON string escapes. Mirrors the audit-
-// module's json_escape — same shape so both modules round-trip the
-// same payload. Wraps in surrounding quotes.
-void json_quote(std::string &out, std::string_view s) {
-    out.push_back('"');
-    for (char ch : s) {
-        auto const u = static_cast<unsigned char>(ch);
-        switch (ch) {
-        case '"':
-            out.append("\\\"");
-            break;
-        case '\\':
-            out.append("\\\\");
-            break;
-        case '\n':
-            out.append("\\n");
-            break;
-        case '\r':
-            out.append("\\r");
-            break;
-        case '\t':
-            out.append("\\t");
-            break;
-        default:
-            if (u < 0x20) {
-                char buf[8];
-                std::snprintf(buf, sizeof buf, "\\u%04X", u);
-                out.append(buf);
-            } else {
-                out.push_back(ch);
-            }
-        }
-    }
-    out.push_back('"');
-}
 
 // Parse a JSON string at `pos` in `body`. On success returns the
 // unescaped value and advances `pos` past the closing quote. On
@@ -208,15 +174,15 @@ std::string build_anthropic_request_body(std::string_view model,
     std::string out;
     out.reserve(256 + system_prompt.size() + user_prompt.size());
     out.append("{\"model\":");
-    json_quote(out, model.empty() ? std::string_view{kDefaultAnthropicModel} : model);
+    st::json_escape(out, model.empty() ? std::string_view{kDefaultAnthropicModel} : model);
     out.append(",\"max_tokens\":");
     out.append(std::to_string(max_tokens));
     if (!system_prompt.empty()) {
         out.append(",\"system\":");
-        json_quote(out, system_prompt);
+        st::json_escape(out, system_prompt);
     }
     out.append(",\"messages\":[{\"role\":\"user\",\"content\":");
-    json_quote(out, user_prompt);
+    st::json_escape(out, user_prompt);
     out.append("}]}");
     return out;
 }
@@ -227,21 +193,21 @@ std::string build_openai_request_body(std::string_view model,
     std::string out;
     out.reserve(256 + system_prompt.size() + user_prompt.size());
     out.append("{\"model\":");
-    json_quote(out, model.empty() ? std::string_view{kDefaultOpenAiModel} : model);
+    st::json_escape(out, model.empty() ? std::string_view{kDefaultOpenAiModel} : model);
     out.append(",\"max_tokens\":");
     out.append(std::to_string(max_tokens));
     out.append(",\"messages\":[");
     bool first = true;
     if (!system_prompt.empty()) {
         out.append("{\"role\":\"system\",\"content\":");
-        json_quote(out, system_prompt);
+        st::json_escape(out, system_prompt);
         out.append("}");
         first = false;
     }
     if (!first)
         out.append(",");
     out.append("{\"role\":\"user\",\"content\":");
-    json_quote(out, user_prompt);
+    st::json_escape(out, user_prompt);
     out.append("}");
     out.append("]}");
     return out;
