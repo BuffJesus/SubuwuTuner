@@ -278,6 +278,7 @@ void render_read_rom_modal(AppState &state) {
             "Factory L1",
             "COBB-AP L1",
             "COBB-AP L3",
+            "Fehr-active L3",
         };
         ImGui::SetNextItemWidth(220.0f);
         ImGui::Combo("SA variant##read_rom_sa_variant", &state.read_rom_sa_variant_idx,
@@ -294,20 +295,32 @@ void render_read_rom_modal(AppState &state) {
                     "  Use on factory ECUs. NRC 0x35 invalidKey on any\n"
                     "  ECU that's had a COBB AccessPort install (the AP\n"
                     "  patches the round-key constants in flash).\n"
+                    "  CLI: --sa-variant factory (default).\n"
                     "\n"
                     "COBB-AP L1 — the COBB-AccessPort-substituted L1\n"
                     "  round-key table (recovered 2026-05-26 from\n"
-                    "  captured install logs). Use on COBB-tuned ECUs.\n"
-                    "  Equivalent to CLI: --sa-variant fehr-active.\n"
+                    "  captured install logs). Use on COBB-tuned ECUs in\n"
+                    "  install/uninstall-flow state. The L1 path is\n"
+                    "  shared between COBB-AP and Fehr-active e-tune\n"
+                    "  (ssmcan1_l1_fehr_active is an alias).\n"
+                    "  CLI: --sa-variant cobb-ap.\n"
                     "\n"
-                    "COBB-AP L3 — same algorithm, deeper diagnostic\n"
-                    "  level (0x03 instead of 0x01). Pick this when the\n"
-                    "  ECU rejects L1 (NRC 0x35) on a COBB-AP install\n"
-                    "  — some firmwares route RMBA past L3 specifically.\n"
-                    "  Equivalent to CLI: --sa-variant fehr-active-l3.\n"
+                    "COBB-AP L3 — same COBB-AP algorithm at diagnostic\n"
+                    "  level 0x03. Pick this for a COBB-tuned ECU when\n"
+                    "  some firmwares route RMBA past L3 specifically.\n"
+                    "  Different from Fehr-active L3 (separate function).\n"
+                    "  CLI: --sa-variant cobb-ap-l3.\n"
+                    "\n"
+                    "Fehr-active L3 — for an ECU running an active Fehr\n"
+                    "  e-tune (NOT a COBB OTS install). Fehr patches\n"
+                    "  the dispatcher iteration at flash 0xBE911 +\n"
+                    "  0xBE9C7..0xBE9CE; round keys live at 0x074358.\n"
+                    "  Required when L1/L3 above both return NRC 0x35.\n"
+                    "  CLI: --sa-variant fehr-active-l3.\n"
                     "\n"
                     "If you don't know: try Factory L1 first. NRC 0x35\n"
-                    "→ switch to COBB-AP L1. Still 0x35 → COBB-AP L3.");
+                    "→ COBB-AP L1. Still 0x35 → COBB-AP L3. Still 0x35\n"
+                    "→ Fehr-active L3 (the car is on an e-tune layer).");
             }
         }
 
@@ -400,6 +413,10 @@ void render_read_rom_modal(AppState &state) {
                     break;
                 case 2:
                     sa_fn = &st::ecu::subaru::ssmcan1_l3_cobb_ap;
+                    security_level = 0x03;
+                    break;
+                case 3:
+                    sa_fn = &st::ecu::subaru::ssmcan1_l3_fehr_active;
                     security_level = 0x03;
                     break;
                 case 0:
