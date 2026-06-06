@@ -805,4 +805,30 @@ TEST_CASE("CLI cobb-datalog-preset --json emits subuwutuner.cobb-datalog-preset.
     REQUIRE(stdout_contains(r, "\"schema\":\"subuwutuner.cobb-datalog-preset.v1\""));
     REQUIRE(stdout_contains(r, "\"firmware\":\"AP v1.7.6.0"));
     REQUIRE(stdout_contains(r, "\"did\":\"0xF303\""));
+    REQUIRE(stdout_contains(r, "\"ram_address\":\"0xFFF8D424\""));
+    REQUIRE(stdout_contains(r, "\"scaling\":\"(x/5.12)\""));
+}
+
+TEST_CASE("CLI cobb-datalog-preset --firmware v1_7_4_2 prints the Gen2 layout",
+          "[cli][integration][cobb-datalog-preset][firmware]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run("cobb-datalog-preset --firmware v1_7_4_2");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "v1.7.4.2"));
+    REQUIRE(stdout_contains(r, "RPM"));
+    // CCF Gen2 doesn't pack the AVCS signals Gen3 does.
+    REQUIRE_FALSE(stdout_contains(r, "AVCS Exh Left"));
+}
+
+TEST_CASE("CLI cobb-datalog-preset exits 2 on unknown firmware",
+          "[cli][integration][cobb-datalog-preset][error]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run("cobb-datalog-preset --firmware v9_9_9_9");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
 }

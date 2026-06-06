@@ -45,7 +45,23 @@ TEST_CASE("AP v1.7.6.0 layout exposes 43 signals across the 5 DIDs",
     }
 }
 
-TEST_CASE("AP layout offsets fit within each DID's payload width",
+TEST_CASE("AP v1.7.4.2 layout exposes 31 signals across 3 DIDs",
+          "[ecu][cobb][datalog][layout]") {
+    auto const layout = cb::ap_v1_7_4_2_layout();
+    REQUIRE(layout.size() == 31);
+    // v1.7.4.2 only covers F300/F301/F302 (CCF Gen2 pre-expansion).
+    for (auto const &s : layout) {
+        REQUIRE((s.did == 0xF300 || s.did == 0xF301 || s.did == 0xF302));
+    }
+}
+
+TEST_CASE("ap_layout dispatches to the right firmware",
+          "[ecu][cobb][datalog][layout]") {
+    REQUIRE(cb::ap_layout(cb::CobbApFirmware::V1_7_4_2_CCF_Gen2).size() == 31);
+    REQUIRE(cb::ap_layout(cb::CobbApFirmware::V1_7_6_0_CCF_Gen3).size() == 43);
+}
+
+TEST_CASE("AP v1.7.6.0 layout offsets fit within each DID's payload width",
           "[ecu][cobb][datalog][layout]") {
     auto const layout = cb::ap_v1_7_6_0_layout();
     for (auto const &s : layout) {
@@ -62,17 +78,49 @@ TEST_CASE("AP layout offsets fit within each DID's payload width",
     }
 }
 
-TEST_CASE("find_signal hits a known F303 RPM mapping",
+TEST_CASE("AP layouts carry RAM addresses + scaling expressions",
+          "[ecu][cobb][datalog][layout][ram]") {
+    // Each entry must name a non-empty scaling expression and a RAM
+    // address in the LF79103P RAM band (0xFFF8xxxx — analyst's join
+    // sourced every address from the firmware's live-signals catalog).
+    for (auto const &s : cb::ap_v1_7_4_2_layout()) {
+        REQUIRE_FALSE(s.scaling.empty());
+        REQUIRE(s.ram_address >= 0xFFF80000u);
+        REQUIRE(s.ram_address < 0xFFF90000u);
+    }
+    for (auto const &s : cb::ap_v1_7_6_0_layout()) {
+        REQUIRE_FALSE(s.scaling.empty());
+        REQUIRE(s.ram_address >= 0xFFF80000u);
+        REQUIRE(s.ram_address < 0xFFF90000u);
+    }
+}
+
+TEST_CASE("find_signal hits a known F303 RPM mapping (v1.7.6.0)",
           "[ecu][cobb][datalog][layout]") {
     auto const *rpm = cb::find_signal(0xF303, 4);
     REQUIRE(rpm != nullptr);
     REQUIRE(rpm->name == "RPM");
-    REQUIRE(rpm->scale == 1);
+    REQUIRE(rpm->scaling == "(x/5.12)");
+    REQUIRE(rpm->ram_address == 0xFFF8D424u);
     REQUIRE(rpm->storage == cb::CobbSignalStorage::Uint16);
+}
+
+TEST_CASE("find_signal hits a known F301 RPM mapping (v1.7.4.2)",
+          "[ecu][cobb][datalog][layout]") {
+    auto const *rpm = cb::find_signal(
+        cb::CobbApFirmware::V1_7_4_2_CCF_Gen2, 0xF301, 17);
+    REQUIRE(rpm != nullptr);
+    REQUIRE(rpm->name == "RPM");
+    // v1.7.4.2 packs RPM at F301:17 (Gen2 layout); v1.7.6.0 moved it
+    // to F303:4 (Gen3 layout). The RAM address is unchanged across
+    // firmwares because the underlying calibration is the same.
+    REQUIRE(rpm->ram_address == 0xFFF8D424u);
 }
 
 TEST_CASE("find_signal returns nullptr for off-table position",
           "[ecu][cobb][datalog][layout]") {
     REQUIRE(cb::find_signal(0xF300, 99) == nullptr);
     REQUIRE(cb::find_signal(0xF399, 0) == nullptr);
+    REQUIRE(cb::find_signal(cb::CobbApFirmware::V1_7_4_2_CCF_Gen2,
+                            0xF399, 0) == nullptr);
 }

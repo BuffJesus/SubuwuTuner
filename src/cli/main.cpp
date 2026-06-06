@@ -627,14 +627,17 @@ constexpr std::string_view kUsage =
     "                            — what each checks, when it no-ops, and its\n"
     "                            default thresholds. --json emits the\n"
     "                            subuwutuner.list-validators.v1 envelope.\n"
-    "    cobb-datalog-preset [--json]\n"
+    "    cobb-datalog-preset [--json] [--firmware v1_7_4_2|v1_7_6_0]\n"
     "                            Print the Cobb AccessPort live datalog\n"
     "                            protocol shape (DID set 0xF300-0xF304,\n"
-    "                            ~25 Hz polling, 78-byte multi-frame\n"
-    "                            response) and the AP v1.7.6.0 per-byte\n"
-    "                            signal layout. Sourced clean-room from\n"
-    "                            sniff + AP CSV captures (see analyst\n"
-    "                            handoff 2026-06-06).\n"
+    "                            ~25 Hz polling) and per-byte signal layout\n"
+    "                            including RAM address + scaling expression.\n"
+    "                            --firmware picks the AP firmware version\n"
+    "                            (defaults to v1_7_6_0 / CCF Gen3, 43 signals;\n"
+    "                            v1_7_4_2 / CCF Gen2 covers 31 signals).\n"
+    "                            Sourced clean-room from sniff + AP CSV\n"
+    "                            captures + LF79103P live-signals catalog\n"
+    "                            join (see analyst handoff 2026-06-06).\n"
     "    transport-list [--json] [--explain]\n"
     "                            List J2534 v04.04 vendor DLLs registered on\n"
     "                            this host (HKLM\\Software\\PassThruSupport.04.04\n"
@@ -12531,10 +12534,18 @@ int cmd_transport_list(int argc, char *argv[]) {
 // is what" for a captured trace.
 int cmd_cobb_datalog_preset(int argc, char *argv[]) {
     bool json_mode = false;
+    std::string firmware_arg = "v1_7_6_0";
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         if (a == "--json") {
             json_mode = true;
+        } else if (a == "--firmware") {
+            if (i + 1 >= argc) {
+                std::fputs("cobb-datalog-preset: --firmware requires a value\n",
+                           stderr);
+                return 2;
+            }
+            firmware_arg = argv[++i];
         } else {
             std::fprintf(stderr,
                          "cobb-datalog-preset: unknown argument: %s\n", argv[i]);
@@ -12542,12 +12553,26 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
         }
     }
     namespace cb = st::ecu::cobb_datalog;
-    auto const layout = cb::ap_v1_7_6_0_layout();
+    cb::CobbApFirmware firmware = cb::CobbApFirmware::V1_7_6_0_CCF_Gen3;
+    char const *firmware_label = "AP v1.7.6.0 (CCF Gen3)";
+    if (firmware_arg == "v1_7_4_2" || firmware_arg == "v1.7.4.2") {
+        firmware = cb::CobbApFirmware::V1_7_4_2_CCF_Gen2;
+        firmware_label = "AP v1.7.4.2 (CCF Gen2)";
+    } else if (firmware_arg != "v1_7_6_0" && firmware_arg != "v1.7.6.0") {
+        std::fprintf(stderr,
+                     "cobb-datalog-preset: --firmware must be 'v1_7_4_2' or "
+                     "'v1_7_6_0' (got '%s')\n",
+                     firmware_arg.c_str());
+        return 2;
+    }
+    auto const layout = cb::ap_layout(firmware);
     if (json_mode) {
         std::string out;
         out.reserve(8192);
         out.append("{\"schema\":\"subuwutuner.cobb-datalog-preset.v1\",");
-        out.append("\"firmware\":\"AP v1.7.6.0 (CCF Gen3)\",");
+        out.append("\"firmware\":");
+        json_escape(out, firmware_label);
+        out.append(",");
         out.append("\"request_can_id\":\"0x");
         char hexbuf[16];
         std::snprintf(hexbuf, sizeof hexbuf, "%03X", cb::kRequestCanId);
@@ -12579,6 +12604,7 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
             return "unknown";
         };
         bool first = true;
+        char addrbuf[16];
         for (auto const &s : layout) {
             if (!first) out.append(",");
             first = false;
@@ -12589,19 +12615,23 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
             out.append(std::to_string(s.byte_offset));
             out.append(",\"storage\":\"");
             out.append(storage_name(s.storage));
-            out.append("\",\"scale\":");
-            out.append(std::to_string(s.scale));
-            out.append(",\"name\":");
+            out.append("\",\"ram_address\":\"");
+            std::snprintf(addrbuf, sizeof addrbuf, "0x%08X", s.ram_address);
+            out.append(addrbuf);
+            out.append("\",\"name\":");
             json_escape(out, s.name);
             out.append(",\"unit\":");
             json_escape(out, s.unit);
+            out.append(",\"scaling\":");
+            json_escape(out, s.scaling);
             out.append("}");
         }
         out.append("]}\n");
         std::fputs(out.c_str(), stdout);
         return 0;
     }
-    std::puts("Cobb AccessPort live datalog protocol (AP v1.7.6.0 / CCF Gen3)");
+    std::printf("Cobb AccessPort live datalog protocol — %s\n",
+                firmware_label);
     std::puts("");
     std::printf("  Request CAN id:    0x%03X (tester → ECU)\n",
                 cb::kRequestCanId);
@@ -12620,7 +12650,7 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
         std::printf("    0x%04X — %2u bytes\n", p.did, p.bytes);
     }
     std::puts("");
-    std::printf("Signal layout (%zu signals across 5 DIDs):\n", layout.size());
+    std::printf("Signal layout (%zu signals):\n", layout.size());
     std::uint16_t last_did = 0;
     for (auto const &s : layout) {
         if (s.did != last_did) {
@@ -12634,16 +12664,22 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
         case cb::CobbSignalStorage::Uint16: storage = "u16"; break;
         case cb::CobbSignalStorage::Int16:  storage = "i16"; break;
         }
-        std::printf("    [%2u] %-3s /%-4u  %.*s (%.*s)\n",
-                    s.byte_offset, storage, s.scale,
+        std::printf("    [%2u] %-3s 0x%08X  %.*s (%.*s)\n"
+                    "         scaling: %.*s\n",
+                    s.byte_offset, storage, s.ram_address,
                     static_cast<int>(s.name.size()), s.name.data(),
-                    static_cast<int>(s.unit.size()), s.unit.data());
+                    static_cast<int>(s.unit.size()), s.unit.data(),
+                    static_cast<int>(s.scaling.size()), s.scaling.data());
     }
     std::puts("");
+    std::puts("RAM addresses are LF79103P-specific (same Cobb signal on a");
+    std::puts("different CID may live at a different address). Scaling is");
+    std::puts("the catalog raw→engineering expression; variable 'x' is the");
+    std::puts("raw value (sign-extended for signed storage).");
     std::puts("Source: analyst handoff 2026-06-06 (bus-check.log + 18 AP CSV");
-    std::puts("exports). Protocol shape confirmed; per-byte signal mapping is");
-    std::puts("high-confidence but pending an on-car driving capture to ground-");
-    std::puts("truth the engine-running values.");
+    std::puts("exports + LF79103P live-signals catalog join). Protocol shape");
+    std::puts("confirmed; per-byte mapping high-confidence pending on-car");
+    std::puts("driving-data ground-truth.");
     return 0;
 }
 

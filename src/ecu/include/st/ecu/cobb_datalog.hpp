@@ -102,22 +102,56 @@ struct CobbSignalLayout {
     std::uint16_t       did;
     std::uint8_t        byte_offset;
     CobbSignalStorage   storage;
-    std::uint16_t       scale;
+    // LF79103P RAM address the AP reads to populate this byte. Sourced
+    // from the analyst's join of (CSV column order × firmware live-
+    // signals catalog name match). Unique per-firmware-version; the
+    // same signal name across firmwares may resolve to different RAM
+    // addresses if the underlying RAM moved between calibrations.
+    std::uint32_t       ram_address;
     std::string_view    name;
     std::string_view    unit;
+    // Raw → engineering-units expression. Variable `x` is the raw
+    // value already widened to a 32-bit container (sign-extended for
+    // Int8/Int16). Operators per the catalog: `+ - * / >> << & | (...)`.
+    // No exponentiation, no function calls. Some firmware-pack
+    // calibrations use floating-point literals — evaluate accordingly.
+    // Expressions are pass-through analyst-side; an evaluator that
+    // accepts this grammar will land alongside the live datalogger
+    // (docs/32).
+    std::string_view    scaling;
 };
 
-// The full AP v1.7.6.0 preset. 49 signals total — 14 in F300, 12 in
-// F301, 5 in F302, 6 in F303, 5 in F304. Six signals overflowed the
-// 67-byte budget in the analyst's inference (SD VE Est MAF, TD Boost
-// Error Ext, TGV Map Ratio, Throttle Pos, Vehicle Speed, Wastegate
-// Duty) — those are not exposed here and need a v1.7.6.0 sniff to
-// confirm whether they live in an unseen F305 DID or a different
-// width packing.
-std::span<CobbSignalLayout const> ap_v1_7_6_0_layout() noexcept;
+// AP firmware version tags. Pre-/post-CCF-Gen2-to-Gen3 transition.
+// Different DID byte order, different signal sets, sometimes different
+// RAM addresses for the same logical signal.
+enum class CobbApFirmware : std::uint8_t {
+    V1_7_4_2_CCF_Gen2,  // 31 signals across F300..F302
+    V1_7_6_0_CCF_Gen3,  // 43 signals across F300..F304
+};
 
-// Look up the signal at (did, byte_offset). Returns nullptr if the
-// position is not in the layout.
+// Per-firmware signal layouts.
+//
+// v1.7.4.2 (CCF Gen2): 31 signals, 100% catalog-mapped to LF79103P
+//   RAM addresses (analyst's high-confidence join).
+//
+// v1.7.6.0 (CCF Gen3): 43 signals across F300..F304 (88% of the AP's
+//   49-signal gauge set). Six signals overflowed the 67-byte budget
+//   in the analyst's inference (SD VE Est MAF, TD Boost Error Ext,
+//   TGV Map Ratio, Throttle Pos, Vehicle Speed, Wastegate Duty) —
+//   pending an on-car sniff to confirm whether they live in an
+//   unseen F305 DID.
+std::span<CobbSignalLayout const> ap_v1_7_4_2_layout() noexcept;
+std::span<CobbSignalLayout const> ap_v1_7_6_0_layout() noexcept;
+std::span<CobbSignalLayout const> ap_layout(CobbApFirmware fw) noexcept;
+
+// Look up the signal at (did, byte_offset) within a specific firmware
+// layout. Returns nullptr if the position is not in that layout.
+[[nodiscard]] CobbSignalLayout const *
+find_signal(CobbApFirmware fw, std::uint16_t did,
+            std::uint8_t byte_offset) noexcept;
+
+// Backwards-compat overload — defaults to v1.7.6.0 (CCF Gen3), the
+// firmware version most users of recent APs will be running.
 [[nodiscard]] CobbSignalLayout const *
 find_signal(std::uint16_t did, std::uint8_t byte_offset) noexcept;
 

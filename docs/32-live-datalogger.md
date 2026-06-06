@@ -333,20 +333,35 @@ driving-data ground-truth.
 - Median cadence 39 ms / p95 91 ms / min 8 ms across the
   reference capture (832 polls)
 
-**Per-byte signal layout (AP v1.7.6.0 / CCF Gen3)**
+**Per-byte signal layout (two AP firmware versions)**
 
-Lives in code at `st::ecu::cobb_datalog::ap_v1_7_6_0_layout()`
-(`src/ecu/include/st/ecu/cobb_datalog.hpp`). 43 signals across the
-5 DIDs; print with `subuwutuner-cli cobb-datalog-preset` or pull
-machine-readable via `--json` (envelope:
-`subuwutuner.cobb-datalog-preset.v1`).
+Both supported AP firmware versions ship as const-data layouts in
+`st::ecu::cobb_datalog`:
 
-Six signals overflowed the 67-byte budget in the analyst's
-inference (SD VE Est MAF, TD Boost Error Ext, TGV Map Ratio,
-Throttle Pos, Vehicle Speed, Wastegate Duty) — those imply either
-an unseen `0xF305` DID, a wider F300, or a width-inference miss.
-A single fresh bus-check sniff from a v1.7.6.0-installed AP
-resolves this in one minute on-car.
+- `ap_v1_7_4_2_layout()` — CCF Gen2, 31 signals across F300..F302.
+  100% catalog-mapped to LF79103P RAM addresses.
+- `ap_v1_7_6_0_layout()` — CCF Gen3, 43 signals across F300..F304.
+  88% of the AP's 49-signal gauge set; six signals (SD VE Est MAF,
+  TD Boost Error Ext, TGV Map Ratio, Throttle Pos, Vehicle Speed,
+  Wastegate Duty) overflowed the 67-byte budget in the analyst's
+  inference and may live in an unseen F305 DID — one fresh on-car
+  bus-check sniff from a v1.7.6.0-installed AP resolves this in
+  about a minute.
+
+Each `CobbSignalLayout` entry carries the byte offset, storage
+shape, RAM address (LF79103P-specific — same Cobb signal on a
+different CID may live at a different address), raw→engineering
+scaling expression in the catalog grammar (operators
+`+ - * / >> << & | (...)` over variable `x`, no function calls),
+and the signal's name + unit.
+
+Print or pull machine-readable via
+`subuwutuner-cli cobb-datalog-preset [--firmware v1_7_4_2|v1_7_6_0]
+[--json]` — JSON envelope `subuwutuner.cobb-datalog-preset.v1`
+includes `ram_address` + `scaling` per signal so downstream
+tooling (a CSV ↔ DID replay verifier, a "is my datalog Cobb-
+equivalent?" checker, a future scaling expression evaluator) can
+consume the layout without re-doing the analyst-side join.
 
 **What this unlocks pre-hardware**
 - A `LogChannel` preset that mirrors the Cobb shape so the live
