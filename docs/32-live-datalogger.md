@@ -352,6 +352,19 @@ The AP-internal monitor IDs split into two prefixes:
 Full 49-monitor list at
 `findings/corpus-wide-re-2026-06-06/out/cobb_datalog/COBB_MONITOR_IDS.md`.
 
+**Deployment recipe**
+
+The analyst's `INTEGRATION_RECIPE.md` at
+`findings/corpus-wide-re-2026-06-06/out/cobb_datalog/` walks the
+end-to-end drop-in: copy the 8 per-CID TOMLs into the user's
+`definitions/impreza/` tree, run `subuwutuner-cli pack-list` to
+register them, run `subuwutuner-cli rom-identify` to verify the
+`extends = "<base_pack>"` chain merges the 12 Cobb PIDs on top of
+the existing 235-table base pack. All 9 packs (`cobb_pids.toml`
+for LF79103P + 8 per-CID variants) load without ID collisions. The
+recipe is for the user's own definitions tree — Path B distribution
+means SubuwuTuner doesn't ship the packs itself.
+
 **Cross-CID portability**
 
 The byte positions + wire scales for the 12 Verified rows are assumed
