@@ -62,6 +62,45 @@ Concrete facts staged at `fixtures/private/brick-protection.md` (analyst-side,
   observed install states (verified in
   `fixtures/private/findings_calibration_deltas/SUMMARY.md`)
 
+### What is **not** the boot-time integrity check
+
+Two regions live in the bootloader area that look like integrity
+checks but aren't (or aren't yet decoded). Treat both as decoupled
+from the application-image checksum above.
+
+**COBB per-block CRC-32 table at `0x1FFF3C..0x1FFFA0`.** 25 BE u32
+slots, one per COBB install block. Algorithm + impl shipped at
+`src/flash/src/checksum.cpp` as `cobb_per_block_crc32`. **Not
+consulted by the running ECU.** The analyst's 2026-06-06 Ghidra
+trace (full SH-2A auto-analysis of both stock and COBB-installed
+`lf79103p`) found zero literal-pool references to any address in
+that region and zero CRC-32 polynomial constants anywhere in
+either ROM. The table is AccessPort-side metadata only — written
+by the AP during install, never read at boot.
+`st::flash::CobbPerBlockCrc32Repair` exists to preserve AP-side
+coherence (in case the user later flashes via AP); it has no role
+in boot-time safety. Evidence:
+`findings/corpus-wide-re-2026-06-06/out/cobb_datalog/CHECKSUM_RUNTIME_VERIFICATION.md`
+and `findings/decompile/lf79103p/slot24_refs_{stock,cobb}.txt`.
+
+**SecureBoot stub at `0x4000`.** A 16-byte signature
+`05 7B 00 0B  E0 00 00 0B  E0 01 E1 00  02 00 FF FF` lives at
+offset `0x4000` in every 2 MB SH-2A ROM the analyst has scanned
+(186 bins — see `findings/.../ARCH_REPORT.md` §3). Confirmed
+byte-identical across `2017-wrx-stock.bin` (factory virgin),
+`fehr-live-dump-2026-06-06.bin` (user's COBB-installed live ROM),
+and `fehr-full-dump.bin` (older W585 snapshot), so it is **Subaru
+factory firmware, not a COBB addition**. The instruction
+semantics are not yet decoded; sequence-shape suggests a series
+of tiny "always return success" stubs (`mov #0,R0; rts` /
+`mov #1,R0; mov #0,R1; ...`), consistent with the COBB-installed
+ECU booting normally despite COBB modifying calibration bytes
+freely. Working hypothesis: either a no-op placeholder or a check
+that doesn't gate on the cal region. Decoding it is an open
+Tier-4 task; until then, the empirical safety floor is that
+"edits in sectors COBB already modifies are accepted by whatever
+runs at `0x4000`."
+
 ### What can actually brick
 
 From the on-ECU code, only these conditions write to bootloader
@@ -347,3 +386,12 @@ The flasher honors these regardless of ISA:
 - `fixtures/private/findings_calibration_deltas/SUMMARY.md` —
   empirical confirmation that bootloader `0x000000..0x006000` is
   byte-identical across stock + four observed install states.
+- `findings/corpus-wide-re-2026-06-06/out/cobb_datalog/CHECKSUM_RUNTIME_VERIFICATION.md`
+  (analyst off-tree) — Ghidra evidence that the COBB per-block
+  CRC-32 slot table is **not** consulted by the running ECU.
+  Source for the "What is not the boot-time integrity check"
+  subsection above.
+- `findings/corpus-wide-re-2026-06-06/out/ARCH_REPORT.md` §3
+  (analyst off-tree) — cross-CID census of the `0x4000`
+  SecureBoot stub signature; present in 186 bins, absent on 1 MB
+  SH7058 and the 4 MB RH850.
