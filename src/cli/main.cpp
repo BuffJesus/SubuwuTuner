@@ -30,6 +30,7 @@
 #include "st/log/ebcs.hpp"
 #include "st/log/knock_dashboard.hpp"
 #include "st/policy.hpp"
+#include "st/policy/flash_preflight.hpp"
 #include "st/project.hpp"
 #include "st/rom.hpp"
 #include "st/transport/factory.hpp"
@@ -619,7 +620,13 @@ constexpr std::string_view kUsage =
     "                            [TAMPERED] prefix. --json emits the full\n"
     "                            subuwutuner.audit.v1 array for CI scoring.\n"
     "                            See docs/05 §4 / analyst Issue #8.\n"
-    "    transport-list [--json]\n"
+    "    list-validators [--json]\n"
+    "                            List the static inventory of flash pre-flight\n"
+    "                            validators (`st::policy::available_validators`)\n"
+    "                            — what each checks, when it no-ops, and its\n"
+    "                            default thresholds. --json emits the\n"
+    "                            subuwutuner.list-validators.v1 envelope.\n"
+    "    transport-list [--json] [--explain]\n"
     "                            List J2534 v04.04 vendor DLLs registered on\n"
     "                            this host (HKLM\\Software\\PassThruSupport.04.04\n"
     "                            + the Wow6432Node mirror). Read-only — never\n"
@@ -627,6 +634,9 @@ constexpr std::string_view kUsage =
     "                            The DLL path printed for each entry is what\n"
     "                            you'd pass to `--transport j2534 --dll <path>`\n"
     "                            once the platform dynload layer lands.\n"
+    "                            --explain prints per-transport decision text\n"
+    "                            (obdx / j2534 / native / mock — when to pick\n"
+    "                            each, plus the CLI flag shape).\n"
     "    doctor [--pack-dir <dir>] [--rom <FILE.bin>] [--json]\n"
     "                            Triage the install: tool/build identity, J2534\n"
     "                            adapter registry, definition-pack health, and\n"
@@ -3846,6 +3856,7 @@ int cmd_completion(int argc, char *argv[]) {
         "stats", "diff", "diff-load", "audit", "profile", "config",
         "changelog", "log", "ssm-a8-poll", "doctor", "transport-list",
         "uds-test", "feature-graph", "ai-drift", "ai-narrate",
+        "list-validators",
         nullptr,
     };
     // Flag completion vocabulary. Reused across bash + zsh handlers.
@@ -12374,16 +12385,88 @@ int cmd_transport_list_json() {
     return 0;
 }
 
+// Per-transport decision text — surfaces "when to pick this" prose so
+// a user staring at OBDX / J2534 / native doesn't have to read the
+// design doc. Returned by --explain; also referenced in the JSON
+// envelope so downstream tooling can render the same guidance.
+struct TransportExplain {
+    char const *id;
+    char const *headline;
+    char const *when_to_pick;
+    char const *notes;
+};
+
+constexpr TransportExplain kTransportExplains[] = {
+    {
+        "obdx",
+        "OBDX Pro VX — USB CDC + DVI codec",
+        "Daily-driver SSM-A8 polling, UDS-side flashing, datalog "
+        "capture. Default choice for the in-hand 2017 WRX rig.",
+        "Needs --device COM5 (per the field-commands doc). DVI codec "
+        "handles ISO-15765 framing in adapter firmware so the host "
+        "speaks one-PDU-at-a-time."
+    },
+    {
+        "j2534",
+        "Generic J2534 v04.04 — vendor DLL",
+        "Cross-vendor compatibility: Tactrix OpenPort 2.0, Kvaser, "
+        "DrewTech, Mongoose. Pick when the user has an existing "
+        "OEM-grade tool from RomRaider / OEM diag-software lineage.",
+        "Windows-only registration channel. CLI surface is currently "
+        "a stub for v1 — discovery works (see --transport j2534 "
+        "rom-info, list), reads/writes wire next."
+    },
+    {
+        "native",
+        "Doc-18 handheld — USB CDC + native framing",
+        "The portable Teensy/ESP32 handheld from docs/18. Same "
+        "byte-channel as OBDX but expects the host-side firmware to "
+        "produce ISO-15765-framed PDUs.",
+        "Same --device <port> shape as OBDX. Detection logic in "
+        "transport::discover handles the firmware-id handshake."
+    },
+    {
+        "mock",
+        "MockTransport — trace replay (no hardware)",
+        "Replay a captured datalog / SSM-A8 / UDS exchange against "
+        "the framers. Drives every Catch2 integration test that "
+        "doesn't have a real adapter on hand.",
+        "Needs --trace <file>. Hex format defined in "
+        "fixtures/demo-trace.hex; see docs/24-sniff-workflows.md."
+    },
+};
+
 int cmd_transport_list(int argc, char *argv[]) {
     bool json_mode = false;
+    bool explain_mode = false;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         if (a == "--json") {
             json_mode = true;
+        } else if (a == "--explain") {
+            explain_mode = true;
         } else {
             std::fprintf(stderr, "transport-list: unknown argument: %s\n", argv[i]);
             return 2;
         }
+    }
+    if (explain_mode) {
+        // Always text — pairs with the human-readable transport list,
+        // not the JSON envelope. JSON consumers get the same prose
+        // through "when_to_pick" + "notes" in the v1.1 envelope below.
+        std::puts("Transport selection guide:");
+        std::puts("");
+        for (auto const &e : kTransportExplains) {
+            std::printf("  %s — %s\n", e.id, e.headline);
+            std::printf("    Pick when: %s\n", e.when_to_pick);
+            std::printf("    Notes:     %s\n", e.notes);
+            std::puts("");
+        }
+        std::puts("CLI flag shape: --transport <id> [--device <port> | "
+                  "--dll <path> | --trace <file>]");
+        std::puts("Run `subuwutuner-cli transport-list` (no flag) for "
+                  "host-discovered adapters.");
+        return 0;
     }
     if (json_mode) {
         return cmd_transport_list_json();
@@ -12428,6 +12511,77 @@ int cmd_transport_list(int argc, char *argv[]) {
     std::puts("  - Doc-18 handheld (USB CDC + native): "
               "--transport native --device <port> [shipped — same byte chan]");
     std::puts("  See docs/13-transport.md for the byte-channel design.");
+    return 0;
+}
+
+// list-validators — surfaces the static inventory of st::policy
+// flash-preflight validators. Answers "what does the policy gate
+// actually check?" without having to read the source. JSON envelope:
+// subuwutuner.list-validators.v1.
+int cmd_list_validators(int argc, char *argv[]) {
+    bool json_mode = false;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--json") {
+            json_mode = true;
+        } else {
+            std::fprintf(stderr, "list-validators: unknown argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    auto const validators = st::policy::available_validators();
+    if (json_mode) {
+        std::string out;
+        out.reserve(2048);
+        out.append("{\"schema\":\"subuwutuner.list-validators.v1\",\"count\":");
+        out.append(std::to_string(validators.size()));
+        out.append(",\"validators\":[");
+        for (std::size_t i = 0; i < validators.size(); ++i) {
+            if (i != 0)
+                out.append(",");
+            auto const &v = validators[i];
+            out.append("{\"category\":");
+            json_escape(out, v.category);
+            out.append(",\"name\":");
+            json_escape(out, v.name);
+            out.append(",\"description\":");
+            json_escape(out, v.description);
+            out.append(",\"default_thresholds\":");
+            json_escape(out, v.default_thresholds);
+            out.append(",\"skip_when\":");
+            json_escape(out, v.skip_when);
+            out.append("}");
+        }
+        out.append("]}\n");
+        std::fputs(out.c_str(), stdout);
+        return 0;
+    }
+    std::printf("Flash pre-flight validators (default_pipeline order — "
+                "%zu validators):\n",
+                validators.size());
+    std::puts("");
+    for (auto const &v : validators) {
+        std::printf("  %.*s — %.*s\n",
+                    static_cast<int>(v.name.size()), v.name.data(),
+                    static_cast<int>(v.category.size()), v.category.data());
+        std::printf("    %.*s\n",
+                    static_cast<int>(v.description.size()), v.description.data());
+        if (!v.default_thresholds.empty()) {
+            std::printf("    Thresholds: %.*s\n",
+                        static_cast<int>(v.default_thresholds.size()),
+                        v.default_thresholds.data());
+        }
+        if (!v.skip_when.empty()) {
+            std::printf("    No-op when: %.*s\n",
+                        static_cast<int>(v.skip_when.size()),
+                        v.skip_when.data());
+        }
+        std::puts("");
+    }
+    std::puts("Every validator runs (no fail-fast). Blocker-tier "
+              "diagnostics refuse the flash regardless of profile.");
+    std::puts("See docs/05-improvements.md §4 + docs/06-legal-ethics.md "
+              "for the policy posture.");
     return 0;
 }
 
@@ -14598,6 +14752,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "flash-apply") {
         return cmd_flash_apply(argc - 2, argv + 2);
+    }
+    if (cmd == "list-validators") {
+        return cmd_list_validators(argc - 2, argv + 2);
     }
     if (cmd == "transport-list") {
         return cmd_transport_list(argc - 2, argv + 2);

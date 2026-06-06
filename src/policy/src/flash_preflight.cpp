@@ -177,4 +177,38 @@ Pipeline default_pipeline() {
     return p;
 }
 
+std::vector<ValidatorDescription> available_validators() {
+    return {
+        {kCatEcuIdMatch, "EcuIdMatch",
+         "Refuses if the ECU reports a calibration id different from the "
+         "source ROM's pack metadata.",
+         "", "expected_ecu_id or observed_ecu_id unset"},
+        {kCatVinMatch, "VinMatch",
+         "Warns if the host has an expected VIN but the ECU did not report "
+         "one; blocks on a hard mismatch.",
+         "", "expected_vin or observed_vin unset"},
+        {kCatBatteryVoltage, "BatteryVoltageOk",
+         "Refuses below the engine-cranking-safe floor; warns below the "
+         "resting-target floor.",
+         "block_below=11.5 V, warn_below=12.0 V",
+         "battery_voltage_v not reported by transport"},
+        {kCatIgnitionOn, "IgnitionOn",
+         "Refuses when the transport reports ignition off (no engine "
+         "control while writing = unsafe).",
+         "", "ignition_on not reported by transport"},
+        {kCatChecksumKnown, "ChecksumKnown",
+         "Refuses if the host doesn't know how to recompute the ECU's "
+         "checksum (post-write verify would fail).",
+         "", "checksum_strategy_known unset"},
+        {kCatBackupPresent, "BackupPresent",
+         "Refuses without a fresh verified backup of the connected ECU.",
+         "", "backup_present unset"},
+        {kCatWriteExtent, "WriteExtentSane",
+         "Warns if the plan would write more than 80% of the ROM; blocks "
+         "if it exceeds 100% (impossible without an addressing bug).",
+         "warn_fraction=0.80, block_fraction=1.00",
+         "bytes_to_write or source_rom_size unset"},
+    };
+}
+
 } // namespace st::policy

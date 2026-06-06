@@ -722,3 +722,59 @@ TEST_CASE("CLI ai-narrate exits 2 on unknown option",
     REQUIRE(r.spawned);
     REQUIRE(r.exit_code == 2);
 }
+
+TEST_CASE("CLI transport-list --explain prints the decision guide",
+          "[cli][integration][transport-list]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run("transport-list --explain");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "Transport selection guide"));
+    REQUIRE(stdout_contains(r, "obdx"));
+    REQUIRE(stdout_contains(r, "j2534"));
+    REQUIRE(stdout_contains(r, "native"));
+    REQUIRE(stdout_contains(r, "mock"));
+    REQUIRE(stdout_contains(r, "Pick when"));
+}
+
+TEST_CASE("CLI list-validators prints the 7 default-pipeline validators",
+          "[cli][integration][list-validators]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run("list-validators");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "EcuIdMatch"));
+    REQUIRE(stdout_contains(r, "VinMatch"));
+    REQUIRE(stdout_contains(r, "BatteryVoltageOk"));
+    REQUIRE(stdout_contains(r, "IgnitionOn"));
+    REQUIRE(stdout_contains(r, "ChecksumKnown"));
+    REQUIRE(stdout_contains(r, "BackupPresent"));
+    REQUIRE(stdout_contains(r, "WriteExtentSane"));
+}
+
+TEST_CASE("CLI list-validators --json emits subuwutuner.list-validators.v1 schema",
+          "[cli][integration][list-validators][json]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run("list-validators --json");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "\"schema\":\"subuwutuner.list-validators.v1\""));
+    REQUIRE(stdout_contains(r, "\"count\":7"));
+    REQUIRE(stdout_contains(r, "\"battery_voltage\""));
+}
+
+TEST_CASE("CLI list-validators exits 2 on unknown option",
+          "[cli][integration][list-validators][error]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run("list-validators --bogus");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}

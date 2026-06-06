@@ -176,6 +176,23 @@ inline constexpr char kCatChecksumKnown[] = "checksum_known";
 inline constexpr char kCatBackupPresent[] = "backup_present";
 inline constexpr char kCatWriteExtent[] = "write_extent";
 
+// Static-description record for each built-in validator. Used by the
+// `subuwutuner-cli list-validators` verb and the GUI's "what does the
+// flash gate actually check?" affordance — so a user staring at a
+// Blocker can see the full validator inventory + when each fires.
+struct ValidatorDescription {
+    std::string_view category;            // matches kCat* constants
+    std::string_view name;                // human-readable label
+    std::string_view description;         // 1-line summary
+    std::string_view default_thresholds;  // empty when not numerically gated
+    std::string_view skip_when;           // condition under which the validator no-ops
+};
+
+// Returns the static inventory of validators that `default_pipeline()`
+// assembles. Order matches the pipeline order so callers can render
+// "run sequence" verbatim.
+[[nodiscard]] std::vector<ValidatorDescription> available_validators();
+
 } // namespace st::policy
 
 #endif // ST_POLICY_FLASH_PREFLIGHT_HPP
