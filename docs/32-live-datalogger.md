@@ -365,22 +365,36 @@ for LF79103P + 8 per-CID variants) load without ID collisions. The
 recipe is for the user's own definitions tree — Path B distribution
 means SubuwuTuner doesn't ship the packs itself.
 
+**Provenance — two confidence axes**
+
+Two independently-sourced axes underpin the const-data:
+
+- **Byte positions + wire scales** were R²-verified ≥ 0.95 against
+  the user's actual car sniff (the dmann-sniff-20260528 capture).
+  The user's 2017 WRX runs **LF79101P**-content firmware — not
+  LF79103P. Cobb's AP firmware uses one response template across
+  the A-series, so these positions + scales are assumed portable
+  family-wide. `decode_signal()` depends only on this axis and
+  works on any CID running the same AP firmware preset.
+- **RAM addresses** were sourced from the **LF79103P** live-signals
+  catalog (the only LF79 variant in the catalog). LF79103P is the
+  "stock equivalent" of the user's LF79101P-content tune. RAM
+  addresses matter only for an SSM-A8 fallback path (not currently
+  implemented) and may need correction for non-LF79103P deployments.
+
 **Cross-CID portability**
 
-The byte positions + wire scales for the 12 Verified rows are assumed
-portable across A-series CIDs — Cobb's AP firmware uses one response
-template regardless of which A-series CID answers. RAM addresses, by
-contrast, are per-CID: every `ram_address` value in
-`st::ecu::cobb_datalog` is from the LF79103P catalog. The analyst has
-generated 8 per-CID TOML packs at
+The analyst has generated 8 per-CID TOML packs at
 `findings/.../per_cid_packs/cobb_pids_<CID>.toml` (`LF75404H`,
 `LF75404S`, `LF75600H`, `LF79103P`, `LF9C102P`, `LF9D012H`,
-`LF9G003T`, `LF9L000E`) — drop-in for definitions trees. `LF79103P`
-is R²-verified end-to-end; the other 7 are byte-position hypotheses
-that should be confirmed via a one-time sniff before shipping them as
-a default for a different car. `LF75600H` has 3 monitors with no
-high-confidence catalog match (per the analyst's `per_cid_packs/
-README.md`); the other 7 map cleanly.
+`LF9G003T`, `LF9L000E`) — same 12 PIDs, RAM addresses re-resolved
+per CID. Drop-in for definitions trees. The byte-position axis ports
+directly across the family (one AP response template). `LF75600H`
+has 3 monitors with no high-confidence catalog match (per the
+analyst's `per_cid_packs/README.md`); the other 7 map cleanly. The
+user's car would benefit most from an `lf79101p` base pack + a
+parallel `lf79101p_cobb_f3xx.toml` overlay (not in the current
+707-pack collection).
 
 **Per-byte signal layout (two AP firmware versions)**
 

@@ -225,20 +225,30 @@ enum class CobbApFirmware : std::uint8_t {
 //            address. Verified Cobb-monitor entries here may carry a
 //            ram_address that's a best guess.
 //
-// Cross-CID portability story (analyst 2026-06-06 per_cid_packs/):
-//   - Byte positions + wire scales (factor/offset) are assumed
-//     portable across A-series CIDs — Cobb's AP firmware writes
-//     one response template regardless of which A-series CID
-//     answers. This assumption holds for the 7 LF75404H / LF75404S
-//     / LF79103P / LF9C102P / LF9D012H / LF9G003T / LF9L000E packs
-//     the analyst generated.
-//   - RAM addresses are LF79103P-specific. Every `ram_address`
-//     in this file refers to the LF79103P live-signals catalog.
-//     For other CIDs, look up the same `monitor_id` in that CID's
-//     pack at `findings/.../per_cid_packs/cobb_pids_<CID>.toml`.
-//   - LF75600H is the one A-series CID where 3 of the 12 signals
-//     have no high-confidence catalog match (per-CID README) —
-//     don't assume the LF79103P pack ports cleanly there.
+// Provenance — two confidence axes, distinct sources:
+//
+//   1. BYTE POSITIONS + WIRE SCALES were R²-verified against the
+//      USER'S ACTUAL CAR sniff (dmann-sniff-20260528-181747.log).
+//      The user's 2017 WRX runs LF79101P-content firmware (per the
+//      analyst's grep of fehr-full-dump.bin + atlas-personal LF79101P
+//      .bin) — NOT LF79103P. Cobb's AP firmware uses one response
+//      template regardless of CID, so these positions + scales are
+//      assumed portable across the A-series family. `decode_signal()`
+//      relies only on these and works on any CID running the same
+//      Cobb AP firmware preset.
+//
+//   2. RAM ADDRESSES were sourced from the LF79103P live-signals
+//      CATALOG (the only LF79 variant present in the catalog
+//      `findings/live-signals/live-signals-A-series.csv`). LF79103P
+//      is the "stock equivalent" of the user's LF79101P-content
+//      tune. The per-CID packs the analyst generated at
+//      `findings/.../per_cid_packs/cobb_pids_<CID>.toml` re-resolve
+//      the same `monitor_id` against other A-series CIDs' catalog
+//      rows. These RAM addresses matter only for the SSM-A8 fallback
+//      path (read RAM directly via OEM SSM instead of decoding the
+//      Cobb wire response) — not implemented as of this commit.
+//      LF75600H is the one A-series CID where 3 of the 12 signals
+//      have no high-confidence catalog match.
 std::span<CobbSignalLayout const> ap_v1_7_4_2_layout() noexcept;
 std::span<CobbSignalLayout const> ap_v1_7_6_0_layout() noexcept;
 std::span<CobbSignalLayout const> ap_layout(CobbApFirmware fw) noexcept;
@@ -273,6 +283,14 @@ find_signal(std::uint16_t did, std::uint8_t byte_offset) noexcept;
 // range, or when `cobb_scale == 0.0` (Hypothesized entry — no wire-side
 // transform is available, callers should evaluate the catalog `scaling`
 // expression instead).
+//
+// CID portability: decode_signal depends only on the byte position +
+// storage + wire scale axes. Those were R²-verified against the
+// user's actual LF79101P-content car, but Cobb's AP firmware writes
+// one response template per AP-firmware-version across the A-series,
+// so the same decode works on any A-series CID running the same AP
+// firmware preset. The ram_address axis (LF79103P catalog) is not
+// consulted.
 //
 // Designed to mirror the analyst's demo_decode_sniff.py end-to-end
 // closing-loop demo. Producing a Verified-row value from sniffed bytes

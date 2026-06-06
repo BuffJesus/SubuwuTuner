@@ -69,10 +69,11 @@ TEST_CASE("Every v1.7.6.0 Verified entry carries an AP monitor_id",
     }
 }
 
-TEST_CASE("Every Verified RAM address sits in the LF79103P band",
+TEST_CASE("Every Verified RAM address sits in the LF79103P catalog band",
           "[ecu][cobb][datalog][verified][lf79103p]") {
-    // Guard against accidental cross-CID contamination: the const-
-    // data ram_address values are LF79103P-specific by design. Any
+    // The ram_address axis is sourced from the LF79103P live-signals
+    // catalog. (The byte-position axis was R²-verified against the
+    // user's LF79101P-content car — separate confidence axes.) Any
     // future commit that adds a RAM address from a different CID's
     // catalog should land in a separate per-CID pack, not the
     // primary layout. LF79103P RAM lives in 0xFFF80000-0xFFFFFFFF.
