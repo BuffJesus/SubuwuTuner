@@ -328,6 +328,24 @@ std::optional<Theme> parse_theme(std::string_view s) noexcept {
     return std::nullopt;
 }
 
+char const *ai_provider_name(AiProvider p) noexcept {
+    switch (p) {
+    case AiProvider::Anthropic:
+        return "anthropic";
+    case AiProvider::OpenAI:
+        return "openai";
+    }
+    return "anthropic";
+}
+
+std::optional<AiProvider> parse_ai_provider(std::string_view s) noexcept {
+    if (s == "anthropic" || s == "claude")
+        return AiProvider::Anthropic;
+    if (s == "openai" || s == "gpt")
+        return AiProvider::OpenAI;
+    return std::nullopt;
+}
+
 // User-preferences persistence. Stored next to recents.txt as a
 // `key=value\n` plain-text file (one setting per line). New settings
 // land without breaking older builds — unknown keys are silently
@@ -362,6 +380,16 @@ Settings load_settings() {
             s.active_vehicle_profile_id = std::string{val};
         } else if (key == "help_active_topic_id") {
             s.help_active_topic_id = std::string{val};
+        } else if (key == "ai_narration_enabled") {
+            s.ai_narration_enabled = (val == "true" || val == "1");
+        } else if (key == "ai_provider") {
+            if (auto p = parse_ai_provider(val); p.has_value()) {
+                s.ai_provider = *p;
+            }
+        } else if (key == "ai_api_key") {
+            s.ai_api_key = std::string{val};
+        } else if (key == "ai_model") {
+            s.ai_model = std::string{val};
         }
     }
     return s;
@@ -379,6 +407,10 @@ void save_settings(Settings const &s) {
     out << "first_run_complete=" << (s.first_run_complete ? "true" : "false") << '\n';
     out << "active_vehicle_profile_id=" << s.active_vehicle_profile_id << '\n';
     out << "help_active_topic_id=" << s.help_active_topic_id << '\n';
+    out << "ai_narration_enabled=" << (s.ai_narration_enabled ? "true" : "false") << '\n';
+    out << "ai_provider=" << ai_provider_name(s.ai_provider) << '\n';
+    out << "ai_api_key=" << s.ai_api_key << '\n';
+    out << "ai_model=" << s.ai_model << '\n';
 }
 
 // Move `path` to the front of `recents`, deduplicating by canonical

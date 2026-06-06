@@ -36,6 +36,16 @@ enum class Theme { Dark, Light };
 char const *theme_name(Theme t) noexcept;
 std::optional<Theme> parse_theme(std::string_view s) noexcept;
 
+// AI narration backend (docs/20 Tier 2). Two cloud providers in v1 —
+// Ollama-local stays a v2.1+ item per the doc. User supplies the API
+// key; storage is plaintext settings.txt (local-user trust model,
+// same threat surface as recents.txt). Off by default; the GUI shows
+// a Settings → AI tab toggle with provider radio + key field +
+// model name.
+enum class AiProvider { Anthropic, OpenAI };
+char const *ai_provider_name(AiProvider p) noexcept;
+std::optional<AiProvider> parse_ai_provider(std::string_view s) noexcept;
+
 struct Settings {
     st::policy::Profile default_policy_profile{st::policy::Profile::MotorsportOnly};
     Theme theme{Theme::Dark};
@@ -58,6 +68,18 @@ struct Settings {
     // per-panel routing still overrides this — context wins over
     // memory. Empty = no prior session, fall through to topic 0.
     std::string help_active_topic_id;
+    // AI Tier 2 narration (docs/20). Opt-in; off by default. When
+    // enabled, the engine call site (next sprint) routes through
+    // ai_provider with ai_api_key. ai_model is the per-provider
+    // model identifier — empty means use the provider's default
+    // (claude-opus-4-7 for Anthropic, gpt-4o for OpenAI). Plaintext
+    // settings.txt storage per user direction; local-user trust
+    // model — same threat surface as other user-supplied secrets
+    // already in this file.
+    bool        ai_narration_enabled{false};
+    AiProvider  ai_provider{AiProvider::Anthropic};
+    std::string ai_api_key;
+    std::string ai_model;
 };
 
 std::filesystem::path config_dir_root();

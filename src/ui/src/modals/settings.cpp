@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace st::ui {
 
@@ -389,6 +390,45 @@ void render_settings_modal(AppState &state) {
             text_subtle("%s", joined.c_str());
         }
     }
+
+    // Compare panel pinned tables — discoverable surface for the
+    // star markers shipped in c324628. Without this line a user who
+    // starred tables weeks ago has to open Compare to see the count;
+    // surfacing it here mirrors the hidden-cats line above.
+    if (state.project.has_value()) {
+        ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+        std::size_t const n_pinned = state.compare_pinned_table_ids.size();
+        ImGui::Text("Pinned compare tables: %zu", n_pinned);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(n_pinned == 0);
+        if (ImGui::SmallButton("Reset##settings_unpin_all")) {
+            state.compare_pinned_table_ids.clear();
+            // Empty set removes the sidecar file — matches the
+            // "clean state = no file" shape compare.cpp:925-928
+            // uses on per-toggle saves.
+            save_compare_pinned(state.project->dir(), {});
+        }
+        ImGui::EndDisabled();
+        if (n_pinned > 0) {
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Unpin every compare table. The Compare\n"
+                                  "panel's pinned-only filter will no\n"
+                                  "longer find any matches.");
+            }
+            // Sorted preview so the order is stable across sessions
+            // (compare_pinned_table_ids is an unordered_set).
+            std::vector<std::string> sorted(state.compare_pinned_table_ids.begin(),
+                                            state.compare_pinned_table_ids.end());
+            std::sort(sorted.begin(), sorted.end());
+            std::string joined;
+            joined.reserve(64);
+            for (std::size_t i = 0; i < sorted.size(); ++i) {
+                if (i > 0) joined.append(", ");
+                joined.append(sorted[i]);
+            }
+            text_subtle("%s", joined.c_str());
+        }
+    }
             ImGui::EndTabItem();
         }
 
@@ -487,6 +527,114 @@ void render_settings_modal(AppState &state) {
             ImGui::EndChild();
         }
     }
+            ImGui::EndTabItem();
+        }
+        // AI tab — Tier 2 narration backend config (docs/20).
+        // Plumbing only in this commit: settings persistence + GUI
+        // toggle + provider radio + API key + model field. The
+        // actual engine call site lands in a later commit; until
+        // then the toggle parks as a no-op so the user can pre-
+        // configure their key + provider before the feature lights up.
+        if (ImGui::BeginTabItem("AI")) {
+            ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+            ImGui::TextWrapped(
+                "Tier 2 LLM narration is opt-in. When enabled, the\n"
+                "ai-drift adaptive-history panel routes its rule-based\n"
+                "diagnosis through your chosen provider for a plain-\n"
+                "English explanation. Output is advisory only — never\n"
+                "auto-applied. Engine-safety gates still block\n"
+                "regardless. See docs/20 for the full posture.");
+            ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+            if (ImGui::Checkbox("Enable AI narration",
+                                &state.settings.ai_narration_enabled)) {
+                save_settings(state.settings);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Off by default. The Tier 1 rules-based diagnosis\n"
+                    "(local, deterministic) keeps working with or\n"
+                    "without this toggle. The narration layer is\n"
+                    "additive.");
+            }
+            ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+            ImGui::BeginDisabled(!state.settings.ai_narration_enabled);
+            ImGui::TextUnformatted("Provider");
+            bool const claude_active =
+                (state.settings.ai_provider == AiProvider::Anthropic);
+            bool const openai_active =
+                (state.settings.ai_provider == AiProvider::OpenAI);
+            if (ImGui::RadioButton("Anthropic (Claude)", claude_active)) {
+                state.settings.ai_provider = AiProvider::Anthropic;
+                save_settings(state.settings);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Uses the Anthropic API. Default model:\n"
+                    "claude-opus-4-7. Override below.");
+            }
+            ImGui::SameLine();
+            if (ImGui::RadioButton("OpenAI (GPT)", openai_active)) {
+                state.settings.ai_provider = AiProvider::OpenAI;
+                save_settings(state.settings);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Uses the OpenAI API. Default model:\n"
+                    "gpt-4o. Override below.");
+            }
+            ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+            ImGui::TextUnformatted("API key");
+            // Password-masked input — eyeball reveal isn't worth the
+            // extra UI; key is stored plaintext on disk anyway (per
+            // user direction). Width pinned so the box doesn't pull
+            // the whole modal.
+            char key_buf[1024]{};
+            std::snprintf(key_buf, sizeof key_buf, "%s",
+                          state.settings.ai_api_key.c_str());
+            ImGui::SetNextItemWidth(420.0f);
+            if (ImGui::InputText("##ai_api_key", key_buf, sizeof key_buf,
+                                 ImGuiInputTextFlags_Password)) {
+                state.settings.ai_api_key = key_buf;
+            }
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                save_settings(state.settings);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Stored plaintext in settings.txt under your config\n"
+                    "directory. Local-user trust model — anyone with\n"
+                    "access to your home dir already has access to your\n"
+                    "shell config, SSH keys, etc. The key is sent only\n"
+                    "to the selected provider, only when narration\n"
+                    "fires, and only after the data-preview confirm.");
+            }
+            ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+            ImGui::TextUnformatted("Model (optional)");
+            char model_buf[256]{};
+            std::snprintf(model_buf, sizeof model_buf, "%s",
+                          state.settings.ai_model.c_str());
+            ImGui::SetNextItemWidth(280.0f);
+            char const *hint = (state.settings.ai_provider == AiProvider::Anthropic)
+                                   ? "claude-opus-4-7"
+                                   : "gpt-4o";
+            if (ImGui::InputTextWithHint("##ai_model", hint, model_buf,
+                                         sizeof model_buf)) {
+                state.settings.ai_model = model_buf;
+            }
+            if (ImGui::IsItemDeactivatedAfterEdit()) {
+                save_settings(state.settings);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Provider-specific model id. Leave empty to use\n"
+                    "the provider default. Override when you need a\n"
+                    "cheaper / smaller / newer model.");
+            }
+            ImGui::EndDisabled();
+            if (!state.settings.ai_narration_enabled) {
+                ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+                text_subtle("Enable the toggle above to edit provider config.");
+            }
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();
