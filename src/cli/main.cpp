@@ -6823,10 +6823,11 @@ int cmd_checksum_repair(int argc, char *argv[]) {
                 output_path->string().c_str(), kind_name);
     if (kind == st::flash::ChecksumKind::CobbPerBlockCrc32) {
         std::puts(
-            "note: slot 24 (block 0x1E0000-0x200000) is self-referential and was\n"
-            "      left untouched. Edits in the 0x1E0000-0x200000 range need\n"
-            "      manual analysis - the repair only fixes slots 0-23.\n"
-            "      Most cal tables land in slots 5-16 and are unaffected.");
+            "note: slot 24 (block 0x1E0000-0x200000) left untouched - the algorithm\n"
+            "      is self-referential and unrecovered. Ghidra confirms the ECU does\n"
+            "      not consult the slot table at runtime (findings 2026-06-06), so\n"
+            "      the value's only consumer is the AccessPort during a subsequent\n"
+            "      AP-driven flash. Direct-CAN flash via SubuwuTuner ignores it.");
     }
     return 0;
 }
@@ -6905,8 +6906,10 @@ int cmd_checksum_verify(int argc, char *argv[]) {
         if (kind == st::flash::ChecksumKind::CobbPerBlockCrc32) {
             std::puts(
                 "note: slot 24 (block 0x1E0000-0x200000) is not verified by\n"
-                "      this algorithm. A mismatch in that block would not show\n"
-                "      up in this report.");
+                "      this algorithm; a mismatch there will not show up.\n"
+                "      Per Ghidra (findings 2026-06-06) the ECU does not\n"
+                "      consult the slot table at runtime - the table is\n"
+                "      AccessPort-side metadata only.");
         }
     };
     if (copy == std::vector<std::uint8_t>{rom->data().begin(), rom->data().end()}) {

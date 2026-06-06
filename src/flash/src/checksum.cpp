@@ -184,10 +184,17 @@ private:
 // CobbPerBlockCrc32 — per-COBB-install-block CRC-32 table. The COBB
 // AccessPort install flow populates a 25-slot CRC table at
 // 0x1FFF3C..0x1FFFA0 (BE u32 each), one slot per install block per
-// `findings/communication-protocols/cobb-install-flow.md` §4. After
-// any edit to a covered block, the corresponding slot needs
-// recomputation; otherwise the COBB-installed integrity check
-// trips.
+// `findings/communication-protocols/cobb-install-flow.md` §4.
+//
+// **What this repair is and isn't for** (analyst's Ghidra finding
+// 2026-06-06, `findings/.../CHECKSUM_RUNTIME_VERIFICATION.md`): the
+// ECU firmware does NOT consult the slot table at runtime — zero
+// literal-pool references to any address in 0x1FFF3C..0x1FFFA0 in
+// either the stock or COBB-installed ROM, zero CRC-32 polynomial
+// constants anywhere. The slots exist purely as AccessPort-side
+// metadata. So this repair is about preserving AP-side coherence
+// (in case the user later routes through the AP), not about
+// satisfying any boot-time integrity check.
 //
 // Algorithm: zlib-style CRC-32 (poly 0xEDB88320 reflected, init +
 // final XOR 0xFFFFFFFF). The existing st::crc32 in
@@ -195,14 +202,17 @@ private:
 //
 // **Slot 24 caveat**: the last 128 KB block (0x1E0000-0x200000)
 // contains the checksum table itself. The relationship between the
-// stored slot 24 value and the block contents isn't yet decoded
-// (analyst handoff 2026-06-06 §"What's not yet decoded"). Repair
-// leaves slot 24 untouched. For EGR/TGV/AFR/boost/timing edits —
-// all in slots 5..16 (0x010000-0x180000) — this is non-blocking.
+// stored slot 24 value and the block contents isn't yet decoded —
+// analyst's exhaustive analytical search (all standard CRC-16 +
+// CRC-32 variants over all subregions) found no match. Repair
+// leaves slot 24 untouched. Per the runtime-verification finding
+// above this is non-blocking for ECU correctness regardless of
+// where the edit lands.
 //
 // **Use only on COBB-installed FA-DIT 2 MB ROMs.** Factory-virgin
-// ROMs don't have the table populated and this repair would write
-// garbage into the cal-region tail.
+// ROMs have all-FF in the slot region; running this would rewrite
+// 96 bytes to real CRCs the firmware doesn't check — inert but
+// noisy in a diff.
 class CobbPerBlockCrc32Repair final : public IChecksumRepair {
 public:
     // The 25 install-block ranges, in install order. First 5 are
