@@ -339,21 +339,32 @@ Both supported AP firmware versions ship as const-data layouts in
 `st::ecu::cobb_datalog`:
 
 - `ap_v1_7_4_2_layout()` — CCF Gen2, 31 signals across F300..F302.
-  100% catalog-mapped to LF79103P RAM addresses.
-- `ap_v1_7_6_0_layout()` — CCF Gen3, 43 signals across F300..F304.
-  88% of the AP's 49-signal gauge set; six signals (SD VE Est MAF,
-  TD Boost Error Ext, TGV Map Ratio, Throttle Pos, Vehicle Speed,
-  Wastegate Duty) overflowed the 67-byte budget in the analyst's
-  inference and may live in an unseen F305 DID — one fresh on-car
-  bus-check sniff from a v1.7.6.0-installed AP resolves this in
-  about a minute.
+  100% catalog-mapped to LF79103P RAM addresses; all entries
+  Hypothesized (no R²-fit was run for this firmware version).
+- `ap_v1_7_6_0_layout()` — CCF Gen3, 44 signals across F300..F304.
+  12 entries R²-verified ≥ 0.95 against a real driving sniff
+  (`CobbVerification::Verified`); the remaining 32 are
+  CSV-column-order inferences (`CobbVerification::Hypothesized`).
+  The Verified set folds in 5 previously-overflowed signals
+  (SD VE Est MAF, TD Boost Error Ext, TGV Map Ratio, Vehicle Speed,
+  Wastegate Duty); Throttle Pos is the one overflow signal still
+  unplaced — pending another correlation pass or an SSM-0xA8
+  RAM-read ground-truth.
 
-Each `CobbSignalLayout` entry carries the byte offset, storage
-shape, RAM address (LF79103P-specific — same Cobb signal on a
-different CID may live at a different address), raw→engineering
-scaling expression in the catalog grammar (operators
-`+ - * / >> << & | (...)` over variable `x`, no function calls),
-and the signal's name + unit.
+Each `CobbSignalLayout` entry carries:
+- byte offset + storage shape (`Uint8`/`Int8`/`Uint16` (big-endian)/
+  `Int16`/`Uint16Le`/`Int16Le` — the AP packs a handful of values
+  little-endian on the wire)
+- RAM address (LF79103P-specific; same Cobb signal on a different
+  CID may live at a different address)
+- catalog `scaling` expression in the catalog grammar (operators
+  `+ - * / >> << & | (...)` over variable `x`, no function calls)
+- `verification` tier (`Verified` / `Hypothesized`)
+- wire-side `cobb_scale` + `cobb_offset` — populated only for
+  Verified entries; gives `value_eng = raw * cobb_scale +
+  cobb_offset` straight from the wire. For Hypothesized entries the
+  wire-side transform is unknown; use the catalog `scaling`
+  expression as the best-available approximation.
 
 Print or pull machine-readable via
 `subuwutuner-cli cobb-datalog-preset [--firmware v1_7_4_2|v1_7_6_0]

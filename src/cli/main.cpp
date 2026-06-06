@@ -12596,15 +12596,18 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
         out.append("],\"signals\":[");
         auto const storage_name = [](cb::CobbSignalStorage s) -> char const * {
             switch (s) {
-            case cb::CobbSignalStorage::Uint8:  return "uint8";
-            case cb::CobbSignalStorage::Int8:   return "int8";
-            case cb::CobbSignalStorage::Uint16: return "uint16";
-            case cb::CobbSignalStorage::Int16:  return "int16";
+            case cb::CobbSignalStorage::Uint8:    return "uint8";
+            case cb::CobbSignalStorage::Int8:     return "int8";
+            case cb::CobbSignalStorage::Uint16:   return "uint16_be";
+            case cb::CobbSignalStorage::Int16:    return "int16_be";
+            case cb::CobbSignalStorage::Uint16Le: return "uint16_le";
+            case cb::CobbSignalStorage::Int16Le:  return "int16_le";
             }
             return "unknown";
         };
         bool first = true;
         char addrbuf[16];
+        char numbuf[32];
         for (auto const &s : layout) {
             if (!first) out.append(",");
             first = false;
@@ -12624,6 +12627,16 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
             json_escape(out, s.unit);
             out.append(",\"scaling\":");
             json_escape(out, s.scaling);
+            out.append(",\"verification\":\"");
+            out.append(s.verification == cb::CobbVerification::Verified
+                           ? "verified"
+                           : "hypothesized");
+            out.append("\",\"cobb_scale\":");
+            std::snprintf(numbuf, sizeof numbuf, "%.10g", s.cobb_scale);
+            out.append(numbuf);
+            out.append(",\"cobb_offset\":");
+            std::snprintf(numbuf, sizeof numbuf, "%.10g", s.cobb_offset);
+            out.append(numbuf);
             out.append("}");
         }
         out.append("]}\n");
@@ -12659,17 +12672,25 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
         }
         char const *storage = "?";
         switch (s.storage) {
-        case cb::CobbSignalStorage::Uint8:  storage = "u8";  break;
-        case cb::CobbSignalStorage::Int8:   storage = "i8";  break;
-        case cb::CobbSignalStorage::Uint16: storage = "u16"; break;
-        case cb::CobbSignalStorage::Int16:  storage = "i16"; break;
+        case cb::CobbSignalStorage::Uint8:    storage = "u8";    break;
+        case cb::CobbSignalStorage::Int8:     storage = "i8";    break;
+        case cb::CobbSignalStorage::Uint16:   storage = "u16be"; break;
+        case cb::CobbSignalStorage::Int16:    storage = "i16be"; break;
+        case cb::CobbSignalStorage::Uint16Le: storage = "u16le"; break;
+        case cb::CobbSignalStorage::Int16Le:  storage = "i16le"; break;
         }
-        std::printf("    [%2u] %-3s 0x%08X  %.*s (%.*s)\n"
-                    "         scaling: %.*s\n",
-                    s.byte_offset, storage, s.ram_address,
+        char const *verification =
+            (s.verification == cb::CobbVerification::Verified) ? "✓" : "?";
+        std::printf("    [%2u] %s %-5s 0x%08X  %.*s (%.*s)\n"
+                    "         catalog: %.*s\n",
+                    s.byte_offset, verification, storage, s.ram_address,
                     static_cast<int>(s.name.size()), s.name.data(),
                     static_cast<int>(s.unit.size()), s.unit.data(),
                     static_cast<int>(s.scaling.size()), s.scaling.data());
+        if (s.verification == cb::CobbVerification::Verified) {
+            std::printf("         wire:    raw * %.6g + %.3f\n",
+                        s.cobb_scale, s.cobb_offset);
+        }
     }
     std::puts("");
     std::puts("RAM addresses are LF79103P-specific (same Cobb signal on a");

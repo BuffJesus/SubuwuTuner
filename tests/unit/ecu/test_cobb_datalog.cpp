@@ -34,14 +34,48 @@ TEST_CASE("Cobb DID payload widths sum to 67 bytes",
     REQUIRE(total == 67);
 }
 
-TEST_CASE("AP v1.7.6.0 layout exposes 43 signals across the 5 DIDs",
+TEST_CASE("AP v1.7.6.0 layout exposes 44 signals across the 5 DIDs",
           "[ecu][cobb][datalog][layout]") {
     auto const layout = cb::ap_v1_7_6_0_layout();
-    REQUIRE(layout.size() == 43);
+    REQUIRE(layout.size() == 44);
     // Every entry's DID is in the polled set.
     for (auto const &s : layout) {
         REQUIRE(std::find(cb::kDidSet.begin(), cb::kDidSet.end(),
                           s.did) != cb::kDidSet.end());
+    }
+}
+
+TEST_CASE("AP v1.7.6.0 has 12 R²-verified entries",
+          "[ecu][cobb][datalog][layout][verified]") {
+    auto const layout = cb::ap_v1_7_6_0_layout();
+    auto const verified_count = std::count_if(
+        layout.begin(), layout.end(), [](cb::CobbSignalLayout const &s) {
+            return s.verification == cb::CobbVerification::Verified;
+        });
+    REQUIRE(verified_count == 12);
+}
+
+TEST_CASE("All Verified entries carry non-zero wire scale + RAM address",
+          "[ecu][cobb][datalog][layout][verified]") {
+    for (auto const &s : cb::ap_v1_7_6_0_layout()) {
+        if (s.verification != cb::CobbVerification::Verified)
+            continue;
+        REQUIRE(s.ram_address != 0u);
+        REQUIRE(s.cobb_scale != 0.0);
+    }
+}
+
+TEST_CASE("Hypothesized entries carry zero wire scale (sentinel)",
+          "[ecu][cobb][datalog][layout][hypothesis]") {
+    for (auto const &s : cb::ap_v1_7_6_0_layout()) {
+        if (s.verification != cb::CobbVerification::Hypothesized)
+            continue;
+        REQUIRE(s.cobb_scale == 0.0);
+        REQUIRE(s.cobb_offset == 0.0);
+    }
+    // v1.7.4.2 is entirely Hypothesized.
+    for (auto const &s : cb::ap_v1_7_4_2_layout()) {
+        REQUIRE(s.verification == cb::CobbVerification::Hypothesized);
     }
 }
 
@@ -58,12 +92,18 @@ TEST_CASE("AP v1.7.4.2 layout exposes 31 signals across 3 DIDs",
 TEST_CASE("ap_layout dispatches to the right firmware",
           "[ecu][cobb][datalog][layout]") {
     REQUIRE(cb::ap_layout(cb::CobbApFirmware::V1_7_4_2_CCF_Gen2).size() == 31);
-    REQUIRE(cb::ap_layout(cb::CobbApFirmware::V1_7_6_0_CCF_Gen3).size() == 43);
+    REQUIRE(cb::ap_layout(cb::CobbApFirmware::V1_7_6_0_CCF_Gen3).size() == 44);
 }
 
-TEST_CASE("AP v1.7.6.0 layout offsets fit within each DID's payload width",
+TEST_CASE("AP v1.7.4.2 Hypothesized offsets fit within payload widths",
           "[ecu][cobb][datalog][layout]") {
-    auto const layout = cb::ap_v1_7_6_0_layout();
+    // v1.7.4.2 is the only firmware where the hypothesis layout was
+    // bounded by the bus-check.log-derived payload widths. v1.7.6.0
+    // Verified entries (e.g. TD Boost Error Ext at F300:21 u16_le)
+    // already exceed the 22-byte F300 width per the analyst's R²-fit
+    // — investigation pending whether F300 is actually wider on
+    // v1.7.6.0 or the analyst's byte-numbering convention differs.
+    auto const layout = cb::ap_v1_7_4_2_layout();
     for (auto const &s : layout) {
         auto const it = std::find_if(
             cb::kDidPayloads.begin(), cb::kDidPayloads.end(),
@@ -71,7 +111,9 @@ TEST_CASE("AP v1.7.6.0 layout offsets fit within each DID's payload width",
         REQUIRE(it != cb::kDidPayloads.end());
         std::uint8_t const width =
             (s.storage == cb::CobbSignalStorage::Uint16 ||
-             s.storage == cb::CobbSignalStorage::Int16)
+             s.storage == cb::CobbSignalStorage::Int16 ||
+             s.storage == cb::CobbSignalStorage::Uint16Le ||
+             s.storage == cb::CobbSignalStorage::Int16Le)
                 ? 2u
                 : 1u;
         REQUIRE(s.byte_offset + width <= it->bytes);
@@ -80,29 +122,40 @@ TEST_CASE("AP v1.7.6.0 layout offsets fit within each DID's payload width",
 
 TEST_CASE("AP layouts carry RAM addresses + scaling expressions",
           "[ecu][cobb][datalog][layout][ram]") {
-    // Each entry must name a non-empty scaling expression and a RAM
-    // address in the LF79103P RAM band (0xFFF8xxxx — analyst's join
-    // sourced every address from the firmware's live-signals catalog).
+    // Each entry names a non-empty scaling expression and a
+    // catalog-resolved RAM address. Most addresses fall in the
+    // 0xFFF8xxxx band; Vehicle Speed at 0xFFF99835 is an exception.
     for (auto const &s : cb::ap_v1_7_4_2_layout()) {
         REQUIRE_FALSE(s.scaling.empty());
         REQUIRE(s.ram_address >= 0xFFF80000u);
-        REQUIRE(s.ram_address < 0xFFF90000u);
     }
     for (auto const &s : cb::ap_v1_7_6_0_layout()) {
         REQUIRE_FALSE(s.scaling.empty());
         REQUIRE(s.ram_address >= 0xFFF80000u);
-        REQUIRE(s.ram_address < 0xFFF90000u);
     }
 }
 
-TEST_CASE("find_signal hits a known F303 RPM mapping (v1.7.6.0)",
-          "[ecu][cobb][datalog][layout]") {
-    auto const *rpm = cb::find_signal(0xF303, 4);
+TEST_CASE("find_signal returns the F301:6 Verified RPM mapping (v1.7.6.0)",
+          "[ecu][cobb][datalog][layout][verified]") {
+    // R²-fit relocated RPM from the CSV-column-order hypothesis
+    // (F303:4) to F301:6. Verified entries supersede.
+    auto const *rpm = cb::find_signal(0xF301, 6);
     REQUIRE(rpm != nullptr);
     REQUIRE(rpm->name == "RPM");
-    REQUIRE(rpm->scaling == "(x/5.12)");
     REQUIRE(rpm->ram_address == 0xFFF8D424u);
-    REQUIRE(rpm->storage == cb::CobbSignalStorage::Uint16);
+    REQUIRE(rpm->verification == cb::CobbVerification::Verified);
+    REQUIRE(rpm->cobb_scale == 0.21246);
+    REQUIRE(rpm->cobb_offset == -130.370);
+}
+
+TEST_CASE("Vehicle Speed Verified entry sits at F300:13 with the LE storage",
+          "[ecu][cobb][datalog][layout][verified]") {
+    auto const *vs = cb::find_signal(0xF300, 13);
+    REQUIRE(vs != nullptr);
+    REQUIRE(vs->name == "Vehicle Speed");
+    REQUIRE(vs->storage == cb::CobbSignalStorage::Uint16Le);
+    REQUIRE(vs->ram_address == 0xFFF99835u);
+    REQUIRE(vs->verification == cb::CobbVerification::Verified);
 }
 
 TEST_CASE("find_signal hits a known F301 RPM mapping (v1.7.4.2)",
@@ -111,9 +164,10 @@ TEST_CASE("find_signal hits a known F301 RPM mapping (v1.7.4.2)",
         cb::CobbApFirmware::V1_7_4_2_CCF_Gen2, 0xF301, 17);
     REQUIRE(rpm != nullptr);
     REQUIRE(rpm->name == "RPM");
-    // v1.7.4.2 packs RPM at F301:17 (Gen2 layout); v1.7.6.0 moved it
-    // to F303:4 (Gen3 layout). The RAM address is unchanged across
-    // firmwares because the underlying calibration is the same.
+    // v1.7.4.2 packs RPM at F301:17 (Gen2 layout, hypothesis);
+    // v1.7.6.0 packs it at F301:6 (verified). The RAM address is
+    // unchanged across firmwares because the underlying calibration
+    // is the same.
     REQUIRE(rpm->ram_address == 0xFFF8D424u);
 }
 

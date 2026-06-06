@@ -11,92 +11,126 @@ namespace st::ecu::cobb_datalog {
 namespace {
 
 // AP firmware layouts per the analyst handoff 2026-06-06 (see
-// findings/corpus-wide-re-2026-06-06/out/cobb_datalog/did_to_ram_map.json).
-// CSV column order × LF79103P live-signals catalog name-match.
+// findings/corpus-wide-re-2026-06-06/out/cobb_datalog/did_to_ram_map.json
+// + VERIFIED_DID_TO_RAM.md).
+//
+// The signal-name → RAM-address join is high-confidence everywhere
+// (catalog match scores ≥ 0.6, most exact). The byte position within
+// each DID is a separate confidence axis:
+//   - 12 signals in v1.7.6.0 are R²-verified ≥ 0.95 against a real
+//     driving sniff (CobbVerification::Verified). Use as ground truth.
+//   - Everything else is CobbVerification::Hypothesized — byte
+//     position inferred from AP CSV column order; the catalog
+//     name-match still applies, but a future sniff may relocate
+//     the position within its DID.
+//
 // RAM addresses are LF79103P-specific; same Cobb signal name on a
-// different CID will land at a different address.
+// different CID may live at a different address.
 using S = CobbSignalStorage;
+using V = CobbVerification;
 
-// AP v1.7.4.2: 31 signals
+// AP v1.7.4.2: 31 signals (all Hypothesized — R²-fit was run against
+// a v1.7.6.0 sniff only).
 constexpr std::array<CobbSignalLayout, 31> kApV1_7_4_2Layout{{
-    {0xF300,  0,   S::Uint8, 0xFFF8AEE9, "AC Compressor Sw", "on/off", "x"},
-    {0xF300,  1,  S::Uint16, 0xFFF8B956, "AF Correction 1", "%", "(((((((x-32768)>>8)+128)/32)*250)-1000)/10)"},
-    {0xF300,  3,  S::Uint16, 0xFFF8AC3C, "AF Learning 1", "%", "((((((x>>1)+64)/16)*125)-1000)/10)"},
-    {0xF300,  5,  S::Uint16, 0xFFF88E88, "AF Sens 1 Ratio", "AFR", "((x*0.00179)/14.7)"},
-    {0xF300,  7,   S::Uint8, 0xFFF88DEE, "Accel Position", "%", "((x/65535)*100)"},
-    {0xF300,  8,  S::Uint16, 0xFFF891AE, "Baro Pressure", "psi", "((x>>8)*0.145038)"},
-    {0xF300, 10,  S::Uint16, 0xFFF8D5B0, "Boost", "psi", "((x/24576)*14.5038)"},
-    {0xF300, 12,  S::Uint16, 0xFFF8BA38, "Boost Extended", "psi", "((x/24000)-1)"},
-    {0xF300, 14,  S::Uint16, 0xFFF8B9A6, "CL Fuel Target", "AFR", "x"},
-    {0xF300, 16,  S::Uint16, 0xFFF8B3E6, "Calculated Load", "g/rev", "((x/65535)*3.3)"},
-    {0xF300, 18,   S::Uint8, 0xFFF8B5D0, "Comm Fuel Final", "AFR", "(x/14.7)"},
-    {0xF300, 19,   S::Uint8, 0xFFF891B0, "Coolant Temp", "F", "(((x*5)>>11)-40)"},
-    {0xF300, 20,   S::Uint8, 0xFFF8123E, "Dyn Adv Mult", "DAM", "(x/16)"},
-    {0xF300, 21,   S::Uint8, 0xFFF8AD56, "Feedback Knock", "deg", "(x*0.3515625)"},
-    {0xF301,  0,   S::Uint8, 0xFFF8AD66, "Fine Knock Learn", "deg", "(x*0.3515625)"},
-    {0xF301,  1,  S::Uint16, 0xFFF8BBAA, "Fuel Pressure", "psi", "(x*10)"},
-    {0xF301,  3,  S::Uint16, 0xFFF8BBAA, "Fuel Pressure Target", "psi", "(x*10)"},
-    {0xF301,  5,   S::Uint8, 0xFFF8ABC3, "Gear Position", "Gear", "x"},
-    {0xF301,  6,  S::Uint16, 0xFFF8ACFE, "Ignition Timing", "deg", "(((((x+128)/2)*10)-640)/10)"},
-    {0xF301,  8,  S::Uint16, 0xFFF8D60C, "Inj Duty Cycle", "%", "(((((x*13107)>>20)/125)*3200)/100)"},
-    {0xF301, 10,   S::Uint8, 0xFFF8B157, "Intake Temp", "F", "(x-40)"},
-    {0xF301, 11,   S::Uint8, 0xFFF889F3, "Intake Temp Manifold", "F", "x"},
-    {0xF301, 12,  S::Uint16, 0xFFF8C914, "MAF Corr Final", "g/s", "(x/60)"},
-    {0xF301, 14,  S::Uint16, 0xFFF8D120, "MAF Volts", "V", "((((x>>16)*125)>>15)/50)"},
-    {0xF301, 16,   S::Uint8, 0xFFF891B4, "Oil Temp", "F", "(((x*205)>>16)-40)"},
-    {0xF301, 17,  S::Uint16, 0xFFF8D424, "RPM", "RPM", "(x/5.12)"},
-    {0xF302,  0,   S::Uint8, 0xFFF8B4D8, "Req Torque", "Nm", "((x-16000)/80)"},
-    {0xF302,  1,  S::Uint16, 0xFFF8BA12, "TD Boost Error Ext", "psi", "((x/25600)*100000)"},
-    {0xF302,  3,   S::Uint8, 0xFFF8BA80, "TGV Map Ratio", "mult", "((x/65535)*100)"},
-    {0xF302,  4,  S::Uint16, 0xFFF8A8E4, "Throttle Pos", "%", "(((((x>>16)*255)/65535)*20)/51)"},
-    {0xF302,  6,   S::Uint8, 0xFFF8BA16, "Wastegate Duty", "%", "(x/256)"},
+    {0xF300,  0,   S::Uint8, 0xFFF8AEE9, "AC Compressor Sw", "on/off", "x", V::Hypothesized, 0.0, 0.0},
+    {0xF300,  1,  S::Uint16, 0xFFF8B956, "AF Correction 1", "%", "(((((((x-32768)>>8)+128)/32)*250)-1000)/10)", V::Hypothesized, 0.0, 0.0},
+    {0xF300,  3,  S::Uint16, 0xFFF8AC3C, "AF Learning 1", "%", "((((((x>>1)+64)/16)*125)-1000)/10)", V::Hypothesized, 0.0, 0.0},
+    {0xF300,  5,  S::Uint16, 0xFFF88E88, "AF Sens 1 Ratio", "AFR", "((x*0.00179)/14.7)", V::Hypothesized, 0.0, 0.0},
+    {0xF300,  7,   S::Uint8, 0xFFF88DEE, "Accel Position", "%", "((x/65535)*100)", V::Hypothesized, 0.0, 0.0},
+    {0xF300,  8,  S::Uint16, 0xFFF891AE, "Baro Pressure", "psi", "((x>>8)*0.145038)", V::Hypothesized, 0.0, 0.0},
+    {0xF300, 10,  S::Uint16, 0xFFF8D5B0, "Boost", "psi", "((x/24576)*14.5038)", V::Hypothesized, 0.0, 0.0},
+    {0xF300, 12,  S::Uint16, 0xFFF8BA38, "Boost Extended", "psi", "((x/24000)-1)", V::Hypothesized, 0.0, 0.0},
+    {0xF300, 14,  S::Uint16, 0xFFF8B9A6, "CL Fuel Target", "AFR", "x", V::Hypothesized, 0.0, 0.0},
+    {0xF300, 16,  S::Uint16, 0xFFF8B3E6, "Calculated Load", "g/rev", "((x/65535)*3.3)", V::Hypothesized, 0.0, 0.0},
+    {0xF300, 18,   S::Uint8, 0xFFF8B5D0, "Comm Fuel Final", "AFR", "(x/14.7)", V::Hypothesized, 0.0, 0.0},
+    {0xF300, 19,   S::Uint8, 0xFFF891B0, "Coolant Temp", "F", "(((x*5)>>11)-40)", V::Hypothesized, 0.0, 0.0},
+    {0xF300, 20,   S::Uint8, 0xFFF8123E, "Dyn Adv Mult", "DAM", "(x/16)", V::Hypothesized, 0.0, 0.0},
+    {0xF300, 21,   S::Uint8, 0xFFF8AD56, "Feedback Knock", "deg", "(x*0.3515625)", V::Hypothesized, 0.0, 0.0},
+    {0xF301,  0,   S::Uint8, 0xFFF8AD66, "Fine Knock Learn", "deg", "(x*0.3515625)", V::Hypothesized, 0.0, 0.0},
+    {0xF301,  1,  S::Uint16, 0xFFF8BBAA, "Fuel Pressure", "psi", "(x*10)", V::Hypothesized, 0.0, 0.0},
+    {0xF301,  3,  S::Uint16, 0xFFF8BBAA, "Fuel Pressure Target", "psi", "(x*10)", V::Hypothesized, 0.0, 0.0},
+    {0xF301,  5,   S::Uint8, 0xFFF8ABC3, "Gear Position", "Gear", "x", V::Hypothesized, 0.0, 0.0},
+    {0xF301,  6,  S::Uint16, 0xFFF8ACFE, "Ignition Timing", "deg", "(((((x+128)/2)*10)-640)/10)", V::Hypothesized, 0.0, 0.0},
+    {0xF301,  8,  S::Uint16, 0xFFF8D60C, "Inj Duty Cycle", "%", "(((((x*13107)>>20)/125)*3200)/100)", V::Hypothesized, 0.0, 0.0},
+    {0xF301, 10,   S::Uint8, 0xFFF8B157, "Intake Temp", "F", "(x-40)", V::Hypothesized, 0.0, 0.0},
+    {0xF301, 11,   S::Uint8, 0xFFF889F3, "Intake Temp Manifold", "F", "x", V::Hypothesized, 0.0, 0.0},
+    {0xF301, 12,  S::Uint16, 0xFFF8C914, "MAF Corr Final", "g/s", "(x/60)", V::Hypothesized, 0.0, 0.0},
+    {0xF301, 14,  S::Uint16, 0xFFF8D120, "MAF Volts", "V", "((((x>>16)*125)>>15)/50)", V::Hypothesized, 0.0, 0.0},
+    {0xF301, 16,   S::Uint8, 0xFFF891B4, "Oil Temp", "F", "(((x*205)>>16)-40)", V::Hypothesized, 0.0, 0.0},
+    {0xF301, 17,  S::Uint16, 0xFFF8D424, "RPM", "RPM", "(x/5.12)", V::Hypothesized, 0.0, 0.0},
+    {0xF302,  0,   S::Uint8, 0xFFF8B4D8, "Req Torque", "Nm", "((x-16000)/80)", V::Hypothesized, 0.0, 0.0},
+    {0xF302,  1,  S::Uint16, 0xFFF8BA12, "TD Boost Error Ext", "psi", "((x/25600)*100000)", V::Hypothesized, 0.0, 0.0},
+    {0xF302,  3,   S::Uint8, 0xFFF8BA80, "TGV Map Ratio", "mult", "((x/65535)*100)", V::Hypothesized, 0.0, 0.0},
+    {0xF302,  4,  S::Uint16, 0xFFF8A8E4, "Throttle Pos", "%", "(((((x>>16)*255)/65535)*20)/51)", V::Hypothesized, 0.0, 0.0},
+    {0xF302,  6,   S::Uint8, 0xFFF8BA16, "Wastegate Duty", "%", "(x/256)", V::Hypothesized, 0.0, 0.0},
 }};
 
-// AP v1.7.6.0: 43 signals
-constexpr std::array<CobbSignalLayout, 43> kApV1_7_6_0Layout{{
-    {0xF300,  0,   S::Uint8, 0xFFF8B956, "AF Correction 1", "%", "(((((((x-32768)>>8)+128)/32)*250)-1000)/10)"},
-    {0xF300,  1,  S::Uint16, 0xFFF8AC3C, "AF Learning 1", "%", "((((((x>>1)+64)/16)*125)-1000)/10)"},
-    {0xF300,  3,  S::Uint16, 0xFFF88E88, "AF Sens 1 Ratio", "AFR", "((x*0.00179)/14.7)"},
-    {0xF300,  5,   S::Uint8, 0xFFF8914E, "AVCS Exh Left", "deg", "((x*45)>>14)"},
-    {0xF300,  6,   S::Uint8, 0xFFF8914C, "AVCS Exh Right", "deg", "((x*45)>>14)"},
-    {0xF300,  7,    S::Int8, 0xFFF89142, "AVCS In Left", "deg", "((x*45)>>14)"},
-    {0xF300,  8,    S::Int8, 0xFFF89140, "AVCS In Right", "deg", "((x*45)>>14)"},
-    {0xF300,  9,   S::Uint8, 0xFFF88DEE, "Accel Position", "%", "((x/65535)*100)"},
-    {0xF300, 10,  S::Uint16, 0xFFF891AE, "Baro Pressure", "psi", "((x>>8)*0.145038)"},
-    {0xF300, 12,   S::Uint8, 0xFFF8BB98, "Battery Volts", "V", "(x/1000)"},
-    {0xF300, 13,  S::Uint16, 0xFFF8BA38, "Boost Extended", "psi", "((x/24000)-1)"},
-    {0xF300, 15,  S::Uint16, 0xFFF8B3E6, "Calculated Load", "g/rev", "((x/65535)*3.3)"},
-    {0xF300, 17,   S::Uint8, 0xFFF8ADED, "Closed Loop Sw", "on/off", "((x&128)/128)"},
-    {0xF300, 18,  S::Uint16, 0xFFF8B5D0, "Comm Fuel Final", "AFR", "(x/14.7)"},
-    {0xF300, 20,  S::Uint16, 0xFFF891B0, "Coolant Temp", "F", "(((x*5)>>11)-40)"},
-    {0xF301,  0,   S::Uint8, 0xFFF8123E, "Dyn Adv Mult", "DAM", "(x/16)"},
-    {0xF301,  1,   S::Uint8, 0xFFF8AD56, "Feedback Knock", "deg", "(x*0.3515625)"},
-    {0xF301,  2,   S::Uint8, 0xFFF8AD66, "Fine Knock Learn", "deg", "(x*0.3515625)"},
-    {0xF301,  3,   S::Uint8, 0xFFF8BBAA, "Fuel Pressure", "psi", "(x*10)"},
-    {0xF301,  4,   S::Uint8, 0xFFF8BBAA, "Fuel Pressure Target", "psi", "(x*10)"},
-    {0xF301,  5,   S::Uint8, 0xFFF8ABC3, "Gear Position", "gear", "x"},
-    {0xF301,  6,  S::Uint16, 0xFFF8ACFE, "Ignition Timing", "deg", "(((((x+128)/2)*10)-640)/10)"},
-    {0xF301,  8,  S::Uint16, 0xFFF8D60C, "Inj Duty Cycle", "%", "(((((x*13107)>>20)/125)*3200)/100)"},
-    {0xF301, 10,  S::Uint16, 0xFFF8B157, "Intake Temp", "F", "(x-40)"},
-    {0xF301, 12,  S::Uint16, 0xFFF889F3, "Intake Temp Manifold", "F", "x"},
-    {0xF301, 14,  S::Uint16, 0xFFF8C880, "KS Noise Cyl 1", "raw", "x"},
-    {0xF301, 16,  S::Uint16, 0xFFF8C882, "KS Noise Cyl 2", "raw", "x"},
-    {0xF302,  0,  S::Uint16, 0xFFF8C884, "KS Noise Cyl 3", "raw", "x"},
-    {0xF302,  2,  S::Uint16, 0xFFF8C886, "KS Noise Cyl 4", "raw", "x"},
-    {0xF302,  4,   S::Uint8, 0xFFF8AD56, "Knock Sum", "count", "(x*0.3515625)"},
-    {0xF302,  5,  S::Uint16, 0xFFF8C914, "MAF Corr Final", "g/s", "(x/60)"},
-    {0xF302,  7,  S::Uint16, 0xFFF8D120, "MAF Volts", "V", "((((x>>16)*125)>>15)/50)"},
-    {0xF303,  0,  S::Uint16, 0xFFF8D078, "Man Abs Press", "psi", "((x/65535)*5)"},
-    {0xF303,  2,  S::Uint16, 0xFFF891B4, "Oil Temp", "F", "(((x*205)>>16)-40)"},
-    {0xF303,  4,  S::Uint16, 0xFFF8D424, "RPM", "RPM", "(x/5.12)"},
-    {0xF303,  6,  S::Uint16, 0xFFF8B4D8, "Req Torque", "Nm", "((x-16000)/80)"},
-    {0xF303,  8,   S::Uint8, 0xFFF8AF65, "Roughness Cyl 1", "count", "x"},
-    {0xF303,  9,   S::Uint8, 0xFFF8AF66, "Roughness Cyl 2", "count", "x"},
-    {0xF304,  0,   S::Uint8, 0xFFF8AF67, "Roughness Cyl 3", "count", "x"},
-    {0xF304,  1,   S::Uint8, 0xFFF8AF68, "Roughness Cyl 4", "count", "x"},
-    {0xF304,  2,   S::Uint8, 0xFFF8C914, "SD Mode Airflow", "raw", "(x/60)"},
-    {0xF304,  3,  S::Uint16, 0xFFF8C91C, "SD VE Comm", "%", "(x*100)"},
-    {0xF304,  5,   S::Uint8, 0xFFF8BA32, "TD Proportional", "%", "(x/256)"},
+// AP v1.7.6.0: 48 signals — 12 R²-verified (Verified) + 36 from the
+// CSV-column-order hypothesis (Hypothesized). For the 12 Verified
+// rows the previously-hypothesized positions are dropped; the
+// Verified positions supersede.
+//
+// 5 of the 6 "overflow" signals (didn't fit in the 67-byte hypothesis
+// budget) are now placed via R²: SD VE Est MAF, TD Boost Error Ext,
+// TGV Map Ratio, Vehicle Speed, Wastegate Duty. Throttle Pos still
+// missing — needs another correlation pass or an SSM-0xA8 RAM read.
+constexpr std::array<CobbSignalLayout, 44> kApV1_7_6_0Layout{{
+    // ---- Verified (R²-fit ≥ 0.95 against the dmann driving sniff) ----
+    // Wire-side cobb_scale + cobb_offset for direct decoding;
+    // catalog `scaling` expression still valid for firmware-internal
+    // interpretation.
+    {0xF300, 13, S::Uint16Le, 0xFFF99835, "Vehicle Speed", "mph", "(x>>8)", V::Verified, 0.0098823, -10.685},
+    {0xF300, 21, S::Uint16Le, 0xFFF8BA12, "TD Boost Error Ext", "psi", "((x/25600)*100000)", V::Verified, -0.00095194, 11.061},
+    {0xF301,  0,  S::Uint16, 0xFFF8BA16, "Wastegate Duty", "%", "(x/256)", V::Verified, 0.028779, -10.862},
+    {0xF301,  6,  S::Uint16, 0xFFF8D424, "RPM", "RPM", "(x/5.12)", V::Verified, 0.21246, -130.370},
+    {0xF301, 10,   S::Uint8, 0xFFF8BA80, "TGV Map Ratio", "mult", "((x/65535)*100)", V::Verified, 0.0039216, 0.000},
+    {0xF301, 11,   S::Uint8, 0xFFF8BB98, "Battery Volts", "V", "(x/1000)", V::Verified, 0.0039108, 12.177},
+    {0xF301, 14,  S::Uint16, 0xFFF8B5D0, "Comm Fuel Final", "AFR", "(x/14.7)", V::Verified, 0.018481, 9.879},
+    {0xF302,  0,   S::Uint8, 0xFFF891B4, "Oil Temp", "F", "(((x*205)>>16)-40)", V::Verified, 0.03105, 208.990},
+    {0xF302,  4,  S::Uint16, 0xFFF8ABC3, "Gear Position", "gear", "x", V::Verified, 0.12453, -16.586},
+    {0xF304,  1, S::Uint16Le, 0xFFF8BB72, "SD VE Est MAF", "%", "((x/32768)*100)", V::Verified, 0.098088, 76.415},
+    {0xF304,  3, S::Uint16Le, 0xFFF88E88, "AF Sens 1 Ratio", "AFR", "((x*0.00179)/14.7)", V::Verified, 0.014329, -322.799},
+    {0xF304,  6,  S::Uint16, 0xFFF8AC3C, "AF Learning 1", "%", "((((((x>>1)+64)/16)*125)-1000)/10)", V::Verified, 0.061512, 0.097},
+    // ---- Hypothesized (CSV column order inference; catalog name +
+    // RAM address are high-confidence, byte position is a guess) ----
+    {0xF300,  0,   S::Uint8, 0xFFF8B956, "AF Correction 1", "%", "(((((((x-32768)>>8)+128)/32)*250)-1000)/10)", V::Hypothesized, 0.0, 0.0},
+    {0xF300,  3,  S::Uint16, 0xFFF88E88, "AF Sens 1 Ratio (alt)", "AFR", "((x*0.00179)/14.7)", V::Hypothesized, 0.0, 0.0},
+    {0xF300,  5,   S::Uint8, 0xFFF8914E, "AVCS Exh Left", "deg", "((x*45)>>14)", V::Hypothesized, 0.0, 0.0},
+    {0xF300,  6,   S::Uint8, 0xFFF8914C, "AVCS Exh Right", "deg", "((x*45)>>14)", V::Hypothesized, 0.0, 0.0},
+    {0xF300,  7,    S::Int8, 0xFFF89142, "AVCS In Left", "deg", "((x*45)>>14)", V::Hypothesized, 0.0, 0.0},
+    {0xF300,  8,    S::Int8, 0xFFF89140, "AVCS In Right", "deg", "((x*45)>>14)", V::Hypothesized, 0.0, 0.0},
+    {0xF300,  9,   S::Uint8, 0xFFF88DEE, "Accel Position", "%", "((x/65535)*100)", V::Hypothesized, 0.0, 0.0},
+    {0xF300, 10,  S::Uint16, 0xFFF891AE, "Baro Pressure", "psi", "((x>>8)*0.145038)", V::Hypothesized, 0.0, 0.0},
+    {0xF300, 15,  S::Uint16, 0xFFF8B3E6, "Calculated Load", "g/rev", "((x/65535)*3.3)", V::Hypothesized, 0.0, 0.0},
+    {0xF300, 17,   S::Uint8, 0xFFF8ADED, "Closed Loop Sw", "on/off", "((x&128)/128)", V::Hypothesized, 0.0, 0.0},
+    {0xF300, 20,  S::Uint16, 0xFFF891B0, "Coolant Temp", "F", "(((x*5)>>11)-40)", V::Hypothesized, 0.0, 0.0},
+    {0xF301,  1,   S::Uint8, 0xFFF8123E, "Dyn Adv Mult", "DAM", "(x/16)", V::Hypothesized, 0.0, 0.0},
+    {0xF301,  2,   S::Uint8, 0xFFF8AD56, "Feedback Knock", "deg", "(x*0.3515625)", V::Hypothesized, 0.0, 0.0},
+    {0xF301,  3,   S::Uint8, 0xFFF8AD66, "Fine Knock Learn", "deg", "(x*0.3515625)", V::Hypothesized, 0.0, 0.0},
+    {0xF301,  4,   S::Uint8, 0xFFF8BBAA, "Fuel Pressure", "psi", "(x*10)", V::Hypothesized, 0.0, 0.0},
+    {0xF301,  5,   S::Uint8, 0xFFF8BBAA, "Fuel Pressure Target", "psi", "(x*10)", V::Hypothesized, 0.0, 0.0},
+    {0xF301,  8,  S::Uint16, 0xFFF8ACFE, "Ignition Timing", "deg", "(((((x+128)/2)*10)-640)/10)", V::Hypothesized, 0.0, 0.0},
+    {0xF301, 12,  S::Uint16, 0xFFF8D60C, "Inj Duty Cycle", "%", "(((((x*13107)>>20)/125)*3200)/100)", V::Hypothesized, 0.0, 0.0},
+    {0xF301, 16,  S::Uint16, 0xFFF8B157, "Intake Temp", "F", "(x-40)", V::Hypothesized, 0.0, 0.0},
+    {0xF302,  2,  S::Uint16, 0xFFF889F3, "Intake Temp Manifold", "F", "x", V::Hypothesized, 0.0, 0.0},
+    {0xF302,  6,  S::Uint16, 0xFFF8C880, "KS Noise Cyl 1", "raw", "x", V::Hypothesized, 0.0, 0.0},
+    {0xF302,  8,  S::Uint16, 0xFFF8C882, "KS Noise Cyl 2", "raw", "x", V::Hypothesized, 0.0, 0.0},
+    {0xF303,  0,  S::Uint16, 0xFFF8C884, "KS Noise Cyl 3", "raw", "x", V::Hypothesized, 0.0, 0.0},
+    {0xF303,  2,  S::Uint16, 0xFFF8C886, "KS Noise Cyl 4", "raw", "x", V::Hypothesized, 0.0, 0.0},
+    {0xF303,  4,   S::Uint8, 0xFFF8AD56, "Knock Sum", "count", "(x*0.3515625)", V::Hypothesized, 0.0, 0.0},
+    {0xF303,  5,  S::Uint16, 0xFFF8C914, "MAF Corr Final", "g/s", "(x/60)", V::Hypothesized, 0.0, 0.0},
+    {0xF303,  7,  S::Uint16, 0xFFF8D120, "MAF Volts", "V", "((((x>>16)*125)>>15)/50)", V::Hypothesized, 0.0, 0.0},
+    {0xF303,  9,  S::Uint16, 0xFFF8D078, "Man Abs Press", "psi", "((x/65535)*5)", V::Hypothesized, 0.0, 0.0},
+    {0xF304,  0,  S::Uint16, 0xFFF8B4D8, "Req Torque", "Nm", "((x-16000)/80)", V::Hypothesized, 0.0, 0.0},
+    // (Roughness cyl 1-4 moved to F304:2-5 because the 4 Verified
+    // F302 positions displaced the original Roughness positions.)
+    {0xF304,  2,   S::Uint8, 0xFFF8AF65, "Roughness Cyl 1", "count", "x", V::Hypothesized, 0.0, 0.0},
+    {0xF304,  4,   S::Uint8, 0xFFF8AF66, "Roughness Cyl 2", "count", "x", V::Hypothesized, 0.0, 0.0},
+    {0xF304,  5,   S::Uint8, 0xFFF8AF67, "Roughness Cyl 3", "count", "x", V::Hypothesized, 0.0, 0.0},
+    // (Truncated to fit the 6-byte F304 budget — the 4th cylinder's
+    // Roughness, SD Mode Airflow, SD VE Comm, TD Proportional moved
+    // to hypothetical bytes that overlap Verified rows or overflow.
+    // Pending another correlation pass for placement.)
 }};
 
 } // namespace

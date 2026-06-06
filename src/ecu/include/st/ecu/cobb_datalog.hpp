@@ -94,8 +94,28 @@ inline constexpr std::size_t kTotalPayloadBytes = 67;
 enum class CobbSignalStorage : std::uint8_t {
     Uint8,
     Int8,
-    Uint16,
-    Int16,
+    Uint16,    // big-endian (standard SH-2A wire byte order)
+    Int16,     // big-endian
+    Uint16Le,  // little-endian — AP packs some values LE on the wire
+    Int16Le,   // little-endian
+};
+
+// Confidence tier for a signal's byte position. The RAM-address +
+// signal-name join is high-confidence everywhere (analyst's catalog
+// match scores ≥ 0.6, most are exact). The byte position within
+// each DID is a separate axis: a handful of signals have been
+// R²-verified against a real driving capture; the rest are
+// hypothesized from CSV column order and may be wrong.
+enum class CobbVerification : std::uint8_t {
+    // Position inferred from AP CSV column order — catalog name match
+    // is exact, but the byte position is a best guess until R²-fit
+    // against a real sniff confirms it. Use these as "this is where
+    // the byte probably is" not "this is where the byte is."
+    Hypothesized,
+    // Byte position + storage shape + COBB wire scale all confirmed
+    // via R²-fit (≥0.95) against the analyst's dmann driving sniff.
+    // Use these as ground truth.
+    Verified,
 };
 
 struct CobbSignalLayout {
@@ -118,7 +138,23 @@ struct CobbSignalLayout {
     // Expressions are pass-through analyst-side; an evaluator that
     // accepts this grammar will land alongside the live datalogger
     // (docs/32).
+    //
+    // For Verified entries this is the catalog (firmware-internal)
+    // expression. The AP applies a different `cobb_scale` /
+    // `cobb_offset` on the wire — see those fields. For Hypothesized
+    // entries the wire-side transform is unknown; the catalog
+    // expression is what the firmware would compute internally.
     std::string_view    scaling;
+    // Confidence tier — see CobbVerification.
+    CobbVerification    verification{CobbVerification::Hypothesized};
+    // Wire-side scale + offset. Populated only for Verified entries;
+    // zero/NaN for Hypothesized. value_engineering = raw * cobb_scale
+    // + cobb_offset (decode straight from the wire). The catalog
+    // `scaling` expression evaluates the same value from the
+    // ram_address. The two often differ — the AP pre-transforms the
+    // RAM value before packing into the F3xx payload.
+    double              cobb_scale{0.0};
+    double              cobb_offset{0.0};
 };
 
 // AP firmware version tags. Pre-/post-CCF-Gen2-to-Gen3 transition.
