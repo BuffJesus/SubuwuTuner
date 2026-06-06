@@ -14,8 +14,17 @@ were protected.
 
 | ISA family | Parts | Bank layout | What stays alive in a bad write |
 |---|---|---|---|
-| SH-2A | SH7055 / SH7058 / SH7059 | **Single bank** | Hardware-locked bootloader sectors (`0x00..0x0F`) + the FCU sector-allow-list. The bootloader cannot be overwritten by application-level code; the reset vector at `0x000000E8` always re-enters it. |
+| SH-2A | SH7055 / SH7058 / SH7059 / **SH72543** (1.5 MB) / **SH72546R** (2 MB and 2.5 MB) | **Single bank** | Hardware-locked bootloader sectors (`0x00..0x0F`) + the FCU sector-allow-list. The bootloader cannot be overwritten by application-level code; the reset vector at `0x000000E8` always re-enters it. |
 | RH850 | RH850 / F1x (G3MH for VB WRX) | **Dual bank** | The currently-inactive bank. The flash-controller refuses writes to the bank holding executing code; cold-boot fails over to the most-recently-verified bank. |
+
+The SH-2A row covers four flash sizes (1 / 1.5 / 2 / 2.5 MB). The
+recipe below was authored against the 2 MB SH72546R (the VA WRX
+target); the **2.5 MB SH72546R variant** (LF9D / LF9G / LF9L / LT8D
+CID families per `findings/corpus-wide-re-2026-06-06/`) shares the
+same FCU + bootloader layout — the only delta is the calibration
+region extending to `0x280000` instead of `0x200000`. Bench-rig
+validation for the 2.5 MB variant remains an open Tier-4 item
+alongside the 2 MB validation.
 
 Single-bank protection is a hardware-locked sector boundary plus a
 reset-time integrity check. Dual-bank protection is a separate
