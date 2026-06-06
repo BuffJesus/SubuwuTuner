@@ -466,6 +466,65 @@ TEST_CASE("CobbPerBlockCrc32 round-trip against fehr-live-dump-2026-06-06.bin",
     REQUIRE(rom == before);
 }
 
+// Opt-in end-to-end integration fixture from the analyst's 2026-06-06
+// handoff appendix. Replicates the EGR + TGV delete recipe, runs repair,
+// and asserts byte-for-byte equality with the analyst's candidate ROM.
+//
+// Three edits + slot-7 recompute:
+//   - 0x034DEA..0x034EAA  EGR Airflow                       192 bytes
+//   - 0x034F9A..0x03501A  EGR Absolute Pressure Main        128 bytes
+//   - 0x03A922..0x03ABE2  ignition_comp_coolant_tgv_closed  704 bytes
+//   - slot 7 (@ 0x1FFF58) recomputes 0x9E47A152 -> 0x30E98431
+//
+// All three regions land in block 7 (the 0x030000-0x040000 cal sector),
+// so only one CRC slot moves. Confirms the algorithm AND the
+// single-block edit-tracking math against a real-ROM cross-check.
+TEST_CASE("CobbPerBlockCrc32 EGR+TGV delete fixture matches analyst candidate",
+          "[flash][checksum][cobb_per_block_crc32][rom][fixture]") {
+    auto const input_path =
+        std::filesystem::path{"D:/Subuwu/subaru-data/reference-dumps/"
+                              "fehr-live-dump-2026-06-06.bin"};
+    auto const candidate_path =
+        std::filesystem::path{"D:/Subuwu/subaru-data/derived-dumps/"
+                              "fehr-live-dump-2026-06-06_no-egr-tgv_candidate.bin"};
+    if (!std::filesystem::exists(input_path) ||
+        !std::filesystem::exists(candidate_path)) {
+        WARN("Reference or candidate ROM not present — skipping fixture test.");
+        return;
+    }
+    auto load_rom = [](std::filesystem::path const &p) {
+        std::ifstream in{p, std::ios::binary};
+        REQUIRE(in.is_open());
+        std::vector<std::uint8_t> bytes{(std::istreambuf_iterator<char>(in)),
+                                         std::istreambuf_iterator<char>()};
+        REQUIRE(bytes.size() == 0x200000u);
+        return bytes;
+    };
+    auto rom = load_rom(input_path);
+    auto const expected = load_rom(candidate_path);
+
+    // Snapshot stored slot-7 before the edit. Per the analyst the
+    // pre-edit value is 0x9E47A152.
+    constexpr std::uint32_t kSlot7Off = 0x1FFF3Cu + 7u * 4u;
+    REQUIRE(read_u32_be(rom, kSlot7Off) == 0x9E47A152u);
+
+    // Apply the three table-zero edits exactly as the handoff specifies.
+    std::fill(rom.begin() + 0x034DEA, rom.begin() + 0x034EAA, std::uint8_t{0});
+    std::fill(rom.begin() + 0x034F9A, rom.begin() + 0x03501A, std::uint8_t{0});
+    std::fill(rom.begin() + 0x03A922, rom.begin() + 0x03ABE2, std::uint8_t{0});
+
+    auto r = fl::make_checksum_repair(fl::ChecksumKind::CobbPerBlockCrc32);
+    REQUIRE(r->repair(rom).has_value());
+
+    // Slot 7 must land on the analyst's predicted new value.
+    REQUIRE(read_u32_be(rom, kSlot7Off) == 0x30E98431u);
+
+    // Byte-for-byte equality with the candidate proves the full
+    // pipeline (edits + algorithm + slot table base + endianness)
+    // matches the analyst's reference.
+    REQUIRE(rom == expected);
+}
+
 TEST_CASE("SubaruStd repair: hand-computed sum matches the impl",
           "[flash][checksum][subaru_std][algorithm]") {
     // ROM is 0x200 bytes; cal region [0x10..0x100). Slots at 0x10,
