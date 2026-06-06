@@ -583,6 +583,103 @@ void render_compare_panel(AppState &state) {
         return std::move(ss).str();
     };
 
+    // NDJSON renderer — one JSON object per changed table per line,
+    // each self-contained (carries pack_id + ROM CRCs so a single line
+    // is meaningful out of context). Matches the per-table shape in
+    // st::diff::render_json's `tables` array so a downstream parser
+    // built against the CLI envelope handles both. nullptr filter =
+    // all changed tables; non-null = pinned subset only (stale ids
+    // referencing tables not in this diff are silently dropped).
+    auto const json_escape_inline = [](std::string &out, std::string_view s) {
+        out.push_back('"');
+        for (char c : s) {
+            auto const u = static_cast<unsigned char>(c);
+            switch (c) {
+            case '"': out.append("\\\""); break;
+            case '\\': out.append("\\\\"); break;
+            case '\n': out.append("\\n"); break;
+            case '\r': out.append("\\r"); break;
+            case '\t': out.append("\\t"); break;
+            default:
+                if (u < 0x20) {
+                    char b[8];
+                    std::snprintf(b, sizeof b, "\\u%04X", u);
+                    out.append(b);
+                } else {
+                    out.push_back(c);
+                }
+            }
+        }
+        out.push_back('"');
+    };
+    auto const render_diff_ndjson =
+        [&](st::diff::DiffSet const &d,
+            std::unordered_set<std::string> const *pinned_filter) -> std::string {
+        std::string out;
+        out.reserve(4096);
+        char buf[64];
+        for (auto const &t : d.tables) {
+            if (!t.changed()) {
+                continue;
+            }
+            if (pinned_filter != nullptr &&
+                pinned_filter->find(t.table_id) == pinned_filter->end()) {
+                continue;
+            }
+            out.append("{\"schema\":\"subuwutuner.diff.table.v1\",\"pack_id\":");
+            json_escape_inline(out, d.pack_id);
+            out.append(",\"rom_a_crc32\":");
+            out.append(std::to_string(d.rom_a_crc32));
+            out.append(",\"rom_b_crc32\":");
+            out.append(std::to_string(d.rom_b_crc32));
+            out.append(",\"table_id\":");
+            json_escape_inline(out, t.table_id);
+            out.append(",\"table_name\":");
+            json_escape_inline(out, t.table_name);
+            out.append(",\"rows\":");
+            out.append(std::to_string(t.rows));
+            out.append(",\"cols\":");
+            out.append(std::to_string(t.cols));
+            out.append(",\"total_cells\":");
+            out.append(std::to_string(t.total_cells));
+            out.append(",\"cells_changed\":");
+            out.append(std::to_string(t.cells_changed));
+            std::snprintf(buf, sizeof buf, "%g", t.max_abs_delta);
+            out.append(",\"max_abs_delta\":");
+            out.append(buf);
+            std::snprintf(buf, sizeof buf, "%g", t.mean_abs_delta);
+            out.append(",\"mean_abs_delta\":");
+            out.append(buf);
+            out.append(",\"engine_safety_critical\":");
+            out.append(t.engine_safety_critical ? "true" : "false");
+            out.append(",\"emissions_relevant\":");
+            out.append(t.emissions_relevant ? "true" : "false");
+            out.append(",\"changes\":[");
+            for (std::size_t j = 0; j < t.changes.size(); ++j) {
+                if (j != 0) {
+                    out.append(",");
+                }
+                auto const &c = t.changes[j];
+                out.append("{\"row\":");
+                out.append(std::to_string(c.row));
+                out.append(",\"col\":");
+                out.append(std::to_string(c.col));
+                std::snprintf(buf, sizeof buf, "%g", c.value_a);
+                out.append(",\"value_a\":");
+                out.append(buf);
+                std::snprintf(buf, sizeof buf, "%g", c.value_b);
+                out.append(",\"value_b\":");
+                out.append(buf);
+                std::snprintf(buf, sizeof buf, "%g", c.delta());
+                out.append(",\"delta\":");
+                out.append(buf);
+                out.push_back('}');
+            }
+            out.append("]}\n");
+        }
+        return out;
+    };
+
     ImGui::BeginDisabled(!state.compare_result.has_value());
     if (ImGui::Button("Export Markdown  \xE2\x96\xBE", ImVec2(170.0f, 0.0f))) { // ▾
         ImGui::OpenPopup("##compare_export_md_scope");
@@ -691,6 +788,97 @@ void render_compare_panel(AppState &state) {
         } else {
             ImGui::SetTooltip("Run Compare first to enable.");
         }
+    }
+    ImGui::SameLine();
+    // Export NDJSON — same All / Pinned scope shape as Markdown, but
+    // emits one JSON object per changed table per line. Suited for
+    // tooling that wants to stream-parse a tune diff (CI hooks,
+    // analyst notebooks). Pinned scope is the natural share-with-tuner
+    // wire: star the relevant tables, export, attach to the question.
+    ImGui::BeginDisabled(!state.compare_result.has_value());
+    if (ImGui::Button("Export NDJSON  \xE2\x96\xBE", ImVec2(150.0f, 0.0f))) { // ▾
+        ImGui::OpenPopup("##compare_export_ndjson_scope");
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        if (state.compare_result.has_value()) {
+            ImGui::SetTooltip(
+                "Write one JSON object per changed table per line.\n"
+                "Pick All (every changed table) or Pinned only\n"
+                "(your star-marked subset). Per-line shape matches\n"
+                "subuwutuner.diff.v1's `tables[]` entries so a parser\n"
+                "built against the CLI envelope handles both.");
+        } else {
+            ImGui::SetTooltip("Run Compare first to enable export.");
+        }
+    }
+    if (state.compare_result.has_value() &&
+        ImGui::BeginPopup("##compare_export_ndjson_scope")) {
+        auto const &d_for_count = *state.compare_result;
+        std::size_t pinned_in_diff = 0;
+        for (auto const &t : d_for_count.tables) {
+            if (!t.changed()) {
+                continue;
+            }
+            if (state.compare_pinned_table_ids.find(t.table_id) !=
+                state.compare_pinned_table_ids.end()) {
+                ++pinned_in_diff;
+            }
+        }
+        auto const run_ndjson_export = [&](bool pinned_only,
+                                           std::string const &default_name) {
+            NFD::UniquePath out;
+            nfdfilteritem_t const filters[] = {{"NDJSON", "ndjson"},
+                                                {"JSON Lines", "jsonl"}};
+            nfdresult_t const r = NFD::SaveDialog(out, filters, 2, nullptr,
+                                                  default_name.c_str());
+            if (r == NFD_OKAY) {
+                std::filesystem::path const target{out.get()};
+                std::ofstream fh{target, std::ios::binary};
+                if (!fh) {
+                    state.compare_error_msg =
+                        "Export NDJSON: cannot open " + target.string();
+                    return;
+                }
+                auto const ndjson = render_diff_ndjson(
+                    *state.compare_result,
+                    pinned_only ? &state.compare_pinned_table_ids : nullptr);
+                fh << ndjson;
+                if (!fh) {
+                    state.compare_error_msg = "Export NDJSON: write failed";
+                    return;
+                }
+                if (pinned_only) {
+                    enqueue_toast(state, ToastKind::Success,
+                                  "Wrote " + std::to_string(pinned_in_diff) +
+                                      " pinned tables to " + target.string());
+                } else {
+                    enqueue_toast(state, ToastKind::Success,
+                                  "Wrote " + target.string());
+                }
+            } else if (r == NFD_ERROR) {
+                state.compare_error_msg =
+                    std::string{"Export NDJSON dialog error: "} + NFD::GetError();
+            }
+        };
+        char buf[80];
+        std::snprintf(buf, sizeof buf, "All changed tables (%zu)",
+                      d_for_count.tables_changed);
+        if (ImGui::MenuItem(buf)) {
+            run_ndjson_export(false, "rom-diff.ndjson");
+        }
+        std::snprintf(buf, sizeof buf, "Pinned only (%zu)", pinned_in_diff);
+        ImGui::BeginDisabled(pinned_in_diff == 0);
+        if (ImGui::MenuItem(buf)) {
+            run_ndjson_export(true, "rom-diff-pinned.ndjson");
+        }
+        ImGui::EndDisabled();
+        std::size_t const total_pinned = state.compare_pinned_table_ids.size();
+        if (total_pinned > pinned_in_diff) {
+            text_subtle("(%zu pinned ids reference tables not in this diff)",
+                        total_pinned - pinned_in_diff);
+        }
+        ImGui::EndPopup();
     }
     ImGui::SameLine();
     // Export CSV — write the cached compare_result to a file. Useful
