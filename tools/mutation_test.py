@@ -120,28 +120,107 @@ class MutantResult:
 
 def _is_in_string_literal(text: str, col: int) -> bool:
     """Single-line state machine. Walks `text` left-to-right tracking
-    whether we're currently inside a double-quoted C++ string (handling
-    backslash escapes). Returns True iff `col` falls inside a quote.
-    Catches the common case where the harness regex matches `!=` or `>`
-    glyphs inside an error-message literal; mutating those is a wasted
-    cycle because the test suite never asserts on the prose. Doesn't
-    handle raw-string literals (R"(...)" / R"foo(...)foo"), char
-    literals, or multi-line strings — good enough for the 90% case in
-    src/flash."""
-    in_str = False
-    escape = False
-    for i, ch in enumerate(text):
+    whether `col` falls inside any of: a regular `"..."` string with
+    backslash escapes, a raw string `R"(...)"` / `R"foo(...)foo"`
+    (with backslashes treated as literal), or a character literal
+    `'...'` with backslash escapes. Catches the common case where the
+    harness regex matches `!=` or `>` glyphs inside an error-message
+    literal, an embedded TOML/JSON blob in a raw string, or a `'<'`
+    char literal — mutating those is a wasted cycle because the test
+    suite never asserts on the literal byte sequence.
+
+    Limitations:
+    - Multi-line raw strings are NOT threaded across lines. A raw
+      string whose opening `R"(` is on line N and closing `)"` is on
+      line N+3 looks like NORMAL state to this function on lines N+1
+      and N+2. Documented gap; needs find_candidates-level threading
+      to fix.
+    - Inline `//` and `/* */` comments aren't tracked. An unbalanced
+      `"` inside a comment on the same line as code could mis-toggle
+      string state. Rare in practice; line-level `//` prefix skip in
+      find_candidates handles whole-line-comment lines.
+    - Wide / utf raw-string prefixes (LR"…", uR"…", u8R"…", UR"…",
+      U8R"…") aren't recognized — those literals would not be skipped.
+      SubuwuTuner's src/ uses narrow strings only.
+    """
+    in_str  = False
+    in_char = False
+    raw_close: str | None = None  # closing delim for raw-string state
+    escape  = False
+    i = 0
+    n = len(text)
+    while i < n:
         if i == col:
-            return in_str
-        if escape:
-            escape = False
+            return in_str or in_char or (raw_close is not None)
+        ch = text[i]
+        if raw_close is not None:
+            # Backslashes are literal inside a raw string. Look for
+            # the close-delim verbatim.
+            close_len = len(raw_close)
+            if text.startswith(raw_close, i):
+                # If col falls anywhere inside the closer (`)`, the
+                # delim chars, the final `"`) we're still "in raw" —
+                # mirrors the existing behavior where col-at-closing-
+                # `"` of a regular string returns True.
+                if i <= col < i + close_len:
+                    return True
+                i += close_len
+                raw_close = None
+                continue
+            i += 1
             continue
-        if ch == "\\":
-            escape = True
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            i += 1
             continue
+        if in_char:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == "'":
+                in_char = False
+            i += 1
+            continue
+        # NORMAL state. Check for raw-string opener (R"<delim>() first
+        # so a `"` immediately after R isn't mistaken for a regular
+        # string start. Only treat R as a prefix when it's at a word
+        # boundary — `someRfunc("…")` has R inside an identifier and
+        # the `"` is a regular string opener.
+        word_boundary = (i == 0 or
+                         not (text[i - 1].isalnum() or text[i - 1] == "_"))
+        if (word_boundary and ch == "R" and i + 1 < n
+                and text[i + 1] == '"'):
+            j = text.find("(", i + 2)
+            if j != -1:
+                delim = text[i + 2:j]
+                raw_close = ")" + delim + '"'
+                # Positions in the opener (R, ", delim chars, `(`)
+                # are OUTSIDE the string body. If col falls there,
+                # report not-in-literal.
+                if i <= col <= j:
+                    return False
+                i = j + 1
+                continue
+            # No `(` after `R"` — malformed; treat the `"` as a
+            # regular string opener and fall through.
         if ch == '"':
-            in_str = not in_str
-    return in_str
+            in_str = True
+            i += 1
+            continue
+        if ch == "'":
+            in_char = True
+            i += 1
+            continue
+        i += 1
+    # Past end of line without hitting col — col is out of range or
+    # at the very end. Return the trailing state for completeness.
+    return in_str or in_char or (raw_close is not None)
 
 
 def find_candidates(lines: list[str], line_start: int, line_end: int,
