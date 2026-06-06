@@ -263,6 +263,60 @@ jobs:
           fi
           clang-format --dry-run --Werror "${files[@]}"
 
+  layering:
+    name: domain headers free of UI/USB types
+    runs-on: ubuntu-24.04
+    # Required gate. Enforces docs/02 §A-1's layering rule with a
+    # 30-second grep: no domain module's public header may #include
+    # imgui / GLFW / libusb / nfd / implot. Catches a whole class of
+    # drift before review — without it, a one-line "convenience"
+    # include in a domain header pulls the GUI stack into every CLI
+    # consumer and the layer boundary erodes commit by commit.
+    #
+    # Domains the rule covers: every module under src/<name>/include/
+    # that ISN'T itself the UI/CLI/transport-shim layer. Update the
+    # list when a new domain module lands.
+    #
+    # Analyst review §D-1 (findings_reviews_2026-06-01/
+    # 08_architecture_recommendations.md).
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Grep domain headers for UI/USB includes
+        run: |
+          set +e
+          DOMAINS=(
+            src/core/include
+            src/rom/include
+            src/defs/include
+            src/edit/include
+            src/project/include
+            src/policy/include
+            src/transport/include
+            src/ecu/include
+            src/log/include
+            src/can/include
+            src/dbc/include
+            src/discover/include
+            src/flash/include
+            src/autotune/include
+            src/feature/include
+            src/feature_codegen/include
+            src/feature_patch/include
+            src/audit/include
+            src/ai/include
+            src/profile/include
+            src/diff/include
+          )
+          PATTERN='#include[[:space:]]+[<"](imgui|GLFW|libusb|nfd|implot)'
+          violations=$(grep -rEn "$PATTERN" "${DOMAINS[@]}" 2>/dev/null)
+          if [ -n "$violations" ]; then
+            echo "::error::Domain header includes a UI/USB symbol — see docs/02 §A-1."
+            echo "$violations"
+            exit 1
+          fi
+          echo "Layering check passed across ${#DOMAINS[@]} domain trees."
+
   mutation-flash:
     name: "mutation testing (advisory) — ${{ matrix.pass_name }}"
     # Advisory lane: a surviving mutant on a safety-critical line is a
