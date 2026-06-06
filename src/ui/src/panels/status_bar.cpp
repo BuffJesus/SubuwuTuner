@@ -198,15 +198,32 @@ void render_status_bar(AppState &state) {
         ImGui::SameLine();
         {
             std::string const &active_id = state.settings.active_vehicle_profile_id;
+            // Orphan detection — the active_id references a .stprofile
+            // file that's no longer on disk (user deleted it via the
+            // shell, moved the profile dir, etc.). Falls back to a
+            // caution-colored chip with a "click to clear" affordance
+            // in the popup. One stat call per frame; cheap enough.
+            bool orphan = false;
+            if (!active_id.empty()) {
+                auto const expected_path = st::profile::default_profile_dir() /
+                                           (active_id + ".stprofile");
+                std::error_code ec;
+                orphan = !std::filesystem::exists(expected_path, ec);
+            }
             std::string chip_label;
-            chip_label.reserve(40);
+            chip_label.reserve(56);
             // E77B Contact — small person glyph reads as "vehicle/owner"
             // in this vocabulary. Trailing ▾ keeps the menu affordance.
             chip_label.append("\xEE\x9D\xBB  Profile: ");
             chip_label.append(active_id.empty() ? "none" : active_id);
+            if (orphan) {
+                chip_label.append("  ⚠");
+            }
             chip_label.append("  \xE2\x96\xBE");
             if (active_id.empty()) {
                 chip(chip_label.c_str(), chip_fg_muted(), chip_bg_muted());
+            } else if (orphan) {
+                chip(chip_label.c_str(), chip_fg_caution(), chip_bg_caution());
             } else {
                 chip(chip_label.c_str(), chip_fg_accent(), chip_bg_accent());
             }
@@ -218,6 +235,12 @@ void render_status_bar(AppState &state) {
                                       "context-aware Flash + Read ROM dialogs.\n"
                                       "Click to pick one, or create via the\n"
                                       "CLI `profile import`.");
+                } else if (orphan) {
+                    ImGui::SetTooltip(
+                        "Active profile '%s' is missing on disk.\n"
+                        "The .stprofile file was deleted or moved.\n"
+                        "Click to clear or pick a different profile.",
+                        active_id.c_str());
                 } else {
                     ImGui::SetTooltip("Active vehicle profile: %s\n"
                                       "Stored at default_profile_dir().\n"
@@ -232,6 +255,25 @@ void render_status_bar(AppState &state) {
             if (ImGui::BeginPopup("##vehicle_profile_chooser")) {
                 text_subtle("Vehicle profile");
                 ImGui::Separator();
+                // Orphan row — when the active id no longer resolves
+                // on disk, render a top-of-popup hint with a one-click
+                // clear so the user doesn't have to find (none) below.
+                if (orphan) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_caution());
+                    char orphan_label[160];
+                    std::snprintf(orphan_label, sizeof orphan_label,
+                                  "%s — missing on disk · click to clear",
+                                  active_id.c_str());
+                    if (ImGui::Selectable(orphan_label)) {
+                        state.settings.active_vehicle_profile_id.clear();
+                        save_settings(state.settings);
+                        state.refresh_audit_identity();
+                        state.status_msg = "Profile: cleared (was orphan)";
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::PopStyleColor();
+                    ImGui::Separator();
+                }
                 // List profiles on each popup open. The directory is
                 // tiny in practice (a user typically has 1-5 cars), so
                 // re-reading on each popup is cheaper than a cache +

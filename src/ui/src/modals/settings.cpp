@@ -317,6 +317,28 @@ void render_settings_modal(AppState &state) {
         ImGui::SetTooltip("Re-scan %s for .stprofile files.",
                           st::profile::default_profile_dir().string().c_str());
     }
+    // Orphan affordance — current_idx<0 + non-empty active id means
+    // the .stprofile file on disk doesn't match the persisted id.
+    // Surface a one-click clear so the user isn't trapped picking the
+    // (none) entry buried in the combo.
+    if (current_idx < 0 && !state.settings.active_vehicle_profile_id.empty()) {
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_caution());
+        if (ImGui::Button("Clear (missing)##profiles_clear_orphan",
+                          ImVec2(btn_w * 1.4f, 0.0f))) {
+            state.settings.active_vehicle_profile_id.clear();
+            save_settings(state.settings);
+            state.refresh_audit_identity();
+        }
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Active profile id no longer resolves to a .stprofile\n"
+                "file under %s.\n"
+                "Click to clear the dangling id.",
+                st::profile::default_profile_dir().string().c_str());
+        }
+    }
     if (current_idx >= 0) {
         auto const &p = profs[static_cast<std::size_t>(current_idx)];
         text_subtle("%s %s %s%s%s%s%s",
