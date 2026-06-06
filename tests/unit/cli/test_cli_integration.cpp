@@ -640,3 +640,85 @@ TEST_CASE("CLI project-info --audit-summary surfaces audit bucket counts",
     REQUIRE(r.exit_code == 0);
     REQUIRE(stdout_contains(r, "Audit"));
 }
+
+// ai-narrate verb (Tier 2 LLM CLI surface). Live HTTPS path requires
+// a real API key + network; the suite only exercises the fail-fast
+// arg-parsing paths so CI runs offline.
+
+TEST_CASE("CLI ai-narrate exits 2 with no args",
+          "[cli][integration][ai-narrate]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run("ai-narrate");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("CLI ai-narrate exits 2 when --provider is missing",
+          "[cli][integration][ai-narrate]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r =
+        st::test::cli_run("ai-narrate --key xyz --prompt \"hi\"");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("CLI ai-narrate exits 2 when no API key is supplied",
+          "[cli][integration][ai-narrate]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r =
+        st::test::cli_run("ai-narrate --provider anthropic --prompt \"hi\"");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("CLI ai-narrate exits 2 when --key-env points at an unset variable",
+          "[cli][integration][ai-narrate]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run(
+        "ai-narrate --provider anthropic --key-env "
+        "ST_AI_NARRATE_TEST_DOES_NOT_EXIST_XYZ --prompt \"hi\"");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("CLI ai-narrate exits 2 when the prompt is empty",
+          "[cli][integration][ai-narrate]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run(
+        "ai-narrate --provider anthropic --key xyz");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("CLI ai-narrate exits 2 on an unknown provider",
+          "[cli][integration][ai-narrate]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run(
+        "ai-narrate --provider gemini --key xyz --prompt \"hi\"");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("CLI ai-narrate exits 2 on unknown option",
+          "[cli][integration][ai-narrate]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run(
+        "ai-narrate --provider anthropic --key xyz --prompt \"hi\" "
+        "--bogus-flag");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
