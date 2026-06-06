@@ -95,6 +95,7 @@ add_executable(st_unit_tests
     unit/cli/test_cli_integration.cpp
     unit/profile/test_profile.cpp
     unit/ai/test_drift.cpp
+    unit/ai/test_backend.cpp
 )
 
 target_link_libraries(st_unit_tests

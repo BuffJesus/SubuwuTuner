@@ -491,6 +491,23 @@ struct AppState {
     // the project still loads; we just don't audit until next session.
     std::optional<st::audit::AuditLog> audit_log;
 
+    // AI Tier 2 narration (docs/20). Engine plumbing — backend
+    // factories live in st::ai; this state holds the in-flight prompt
+    // + response so the adaptive-history panel can render
+    // request/confirm/result without owning a Backend itself. The
+    // confirm dialog shows ai_explain_prompt verbatim (editable) so
+    // the user sees exactly what'd be transmitted; on Accept the
+    // panel issues the synchronous backend call and parks the result
+    // in ai_explain_response (or ai_explain_error). One in-flight
+    // request at a time — `in_flight` blocks the button so repeat
+    // clicks don't double-spend the API.
+    bool ai_explain_pending_confirm{false}; // confirm dialog opens this frame
+    bool ai_explain_in_flight{false};       // request issued, response pending
+    std::string ai_explain_prompt;          // shown + editable in confirm
+    std::string ai_explain_response;        // assistant text
+    std::string ai_explain_error;           // human-readable on failure
+    std::string ai_explain_provenance;      // "Cloud · Anthropic claude-opus-4-7"
+
     // In-app help modal (analyst Issues #12 + #22). Two-pane: topic
     // list on the left, rendered markdown on the right. Topics are
     // markdown files under <docs_dir>/; help_loaded_topics caches

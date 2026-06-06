@@ -1,5 +1,6 @@
 add_library(st_ai STATIC
     src/drift.cpp
+    src/backend.cpp
 )
 add_library(st::ai ALIAS st_ai)
 

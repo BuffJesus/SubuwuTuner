@@ -12,18 +12,24 @@
 #include "app_state.hpp"
 #include "widgets/widgets.hpp"
 
+#include "st/ai/backend.hpp"
 #include "st/ai/drift.hpp"
 #include "st/log/adaptive_history.hpp"
+
+#include "persistence.hpp" // AiProvider, ai_provider_name
 
 #include <imgui.h>
 #include <implot.h>
 #include <nfd.hpp>
 
 #include <cctype>
+#include <cfloat>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -335,6 +341,167 @@ void render_adaptive_history_panel(AppState &state) {
                 }
             }
             ImGui::Spacing();
+
+            // ---- AI Tier 2 narration (docs/20) ------------------------
+            //
+            // Opt-in. Toggled off → nothing renders. Toggled on but no
+            // API key → an inline hint pointing at Settings → AI. Both
+            // states keep the panel usable without forcing the user
+            // through a network call.
+            if (state.settings.ai_narration_enabled) {
+                if (state.settings.ai_api_key.empty()) {
+                    text_subtle(
+                        "AI narration: enabled but no API key. Configure "
+                        "Settings → AI to use this feature.");
+                } else {
+                    // Render the confirm-dialog trigger + the previous
+                    // response (if any) inline. Diagnosis snapshot is
+                    // re-derived from the current chart each click;
+                    // re-running against the same chart issues the same
+                    // prompt (deterministic; helps audit).
+                    if (ImGui::Button("Explain (AI)##ah_explain")) {
+                        std::string prompt;
+                        prompt.reserve(512);
+                        prompt.append("Diagnosis: ");
+                        prompt.append(diag.cause.empty() ? "no_signal"
+                                                          : diag.cause);
+                        prompt.append("\nConfidence: ");
+                        auto const confidence_str =
+                            st::ai::drift::confidence_name(diag.confidence);
+                        prompt.append(confidence_str);
+                        prompt.append("\n\nDescription: ");
+                        prompt.append(diag.description);
+                        if (!diag.evidence.empty()) {
+                            prompt.append("\n\nEvidence:");
+                            for (auto const &e : diag.evidence) {
+                                prompt.append("\n- ");
+                                prompt.append(e);
+                            }
+                        }
+                        if (!diag.alternatives.empty()) {
+                            prompt.append("\n\nAlternatives:");
+                            for (auto const &alt : diag.alternatives) {
+                                prompt.append("\n- ");
+                                prompt.append(alt);
+                            }
+                        }
+                        prompt.append(
+                            "\n\nWrite a 3-5 sentence narration explaining the "
+                            "diagnosis for a Subaru tuner. Stay factual; "
+                            "decline to give cal-value recommendations. End "
+                            "with one suggested next check the user should "
+                            "perform.");
+                        state.ai_explain_prompt = std::move(prompt);
+                        state.ai_explain_response.clear();
+                        state.ai_explain_error.clear();
+                        state.ai_explain_pending_confirm = true;
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        char const *provider_name =
+                            st::ui::ai_provider_name(state.settings.ai_provider);
+                        ImGui::SetTooltip(
+                            "Send the diagnosis above to %s for a narration.\n"
+                            "Shows the exact prompt before transmission so\n"
+                            "you can review or edit it. Output is advisory\n"
+                            "and tagged with its provenance — no cal value\n"
+                            "ever lands automatically.",
+                            provider_name);
+                    }
+                    if (!state.ai_explain_response.empty()) {
+                        ImGui::Spacing();
+                        ImGui::Separator();
+                        text_subtle("AI explanation · %s",
+                                    state.ai_explain_provenance.c_str());
+                        ImGui::TextWrapped("%s",
+                                           state.ai_explain_response.c_str());
+                    } else if (!state.ai_explain_error.empty()) {
+                        ImGui::Spacing();
+                        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
+                        ImGui::TextWrapped("AI error: %s",
+                                           state.ai_explain_error.c_str());
+                        ImGui::PopStyleColor();
+                    } else if (state.ai_explain_in_flight) {
+                        ImGui::SameLine();
+                        text_subtle(" — asking model…");
+                    }
+                }
+            }
+
+            // Confirm-prompt modal. Render at panel scope so the modal
+            // sits over the panel, not under it. OpenPopup must happen
+            // in the SAME ImGui scope where BeginPopupModal lives —
+            // matching ID, same frame.
+            if (state.ai_explain_pending_confirm) {
+                ImGui::OpenPopup("Confirm AI request##ah_ai_confirm");
+                state.ai_explain_pending_confirm = false;
+            }
+            ImGui::SetNextWindowSize(ImVec2(640.0f, 360.0f),
+                                     ImGuiCond_FirstUseEver);
+            if (ImGui::BeginPopupModal("Confirm AI request##ah_ai_confirm",
+                                       nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+                char const *provider_name =
+                    st::ui::ai_provider_name(state.settings.ai_provider);
+                ImGui::TextWrapped(
+                    "The prompt below will be transmitted to %s. Review or "
+                    "edit before sending. The diagnosis text is included "
+                    "verbatim; nothing else from your project is attached.",
+                    provider_name);
+                ImGui::Separator();
+                // Editable prompt box. Resize dynamically; 64 KiB cap
+                // matches the curl shell-out's 1 MiB body cap with a
+                // huge safety margin.
+                if (state.ai_explain_prompt.size() + 1 > 65536)
+                    state.ai_explain_prompt.resize(65535);
+                state.ai_explain_prompt.resize(65536, '\0');
+                ImGui::InputTextMultiline(
+                    "##ah_ai_prompt_edit", state.ai_explain_prompt.data(),
+                    state.ai_explain_prompt.size(), ImVec2(-FLT_MIN, 220.0f));
+                state.ai_explain_prompt.resize(
+                    std::strlen(state.ai_explain_prompt.c_str()));
+                ImGui::Separator();
+                if (ImGui::Button("Send")) {
+                    std::string const system_prompt =
+                        "You are a careful Subaru ECU tuning assistant. "
+                        "Output is advisory only; never recommend specific "
+                        "calibration cell values.";
+                    std::unique_ptr<st::ai::Backend> backend;
+                    switch (state.settings.ai_provider) {
+                    case AiProvider::Anthropic:
+                        backend = st::ai::make_anthropic_backend(
+                            state.settings.ai_api_key, state.settings.ai_model);
+                        break;
+                    case AiProvider::OpenAI:
+                        backend = st::ai::make_openai_backend(
+                            state.settings.ai_api_key, state.settings.ai_model);
+                        break;
+                    }
+                    state.ai_explain_provenance = backend->info().name;
+                    state.ai_explain_in_flight = true;
+                    auto const r = backend->complete(system_prompt,
+                                                     state.ai_explain_prompt);
+                    state.ai_explain_in_flight = false;
+                    if (r.has_value()) {
+                        state.ai_explain_response = *r;
+                        state.ai_explain_error.clear();
+                    } else {
+                        state.ai_explain_response.clear();
+                        state.ai_explain_error = std::string{r.error().message()};
+                    }
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel")) {
+                    ImGui::CloseCurrentPopup();
+                }
+                if (!state.ai_explain_error.empty()) {
+                    ImGui::Spacing();
+                    ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
+                    ImGui::TextWrapped("Last error: %s",
+                                       state.ai_explain_error.c_str());
+                    ImGui::PopStyleColor();
+                }
+                ImGui::EndPopup();
+            }
         }
 
         // One time-series plot per signal that has data.
