@@ -112,6 +112,25 @@ std::vector<std::string> load_compare_pinned(std::filesystem::path const &projec
 void save_compare_pinned(std::filesystem::path const &project_dir,
                          std::vector<std::string> const &pinned);
 
+// Compare panel last-comparison setup. Persisted at
+// <project_dir>/compare.config as `key=value` lines (same shape
+// settings.txt uses). Restored on project open so the user picks
+// up where they left off — Compare's ROM A/B + epsilon +
+// include_identical + filter chip survive across sessions. Empty
+// optional = no saved state yet (fresh project / never compared).
+struct CompareConfig {
+    std::string rom_a_path;        // path string OR sentinel "<project working>"
+    std::string rom_b_path;
+    float       epsilon{0.0f};
+    bool        include_identical{false};
+    std::string filter_chip;       // "@safety" / "@emissions" / "@flagged" /
+                                   // a category name / empty for "All"
+};
+std::optional<CompareConfig>
+load_compare_config(std::filesystem::path const &project_dir);
+void save_compare_config(std::filesystem::path const &project_dir,
+                         CompareConfig const &cfg);
+
 // Per-project pack-validation snapshot. Settings → "Validate pack"
 // writes this so the next session can render the chip without re-
 // running the validator, and so the welcome panel can surface a

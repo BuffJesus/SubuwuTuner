@@ -12,6 +12,7 @@
 
 #include "st/project.hpp"
 
+#include <cstdio>
 #include <filesystem>
 #include <string>
 #include <utility>
@@ -72,6 +73,26 @@ void AppState::try_open_project(std::filesystem::path const &path) {
         for (auto const &id : pinned) {
             compare_pinned_table_ids.insert(id);
         }
+    }
+    // Restore the last-comparison setup (ROM A/B paths, epsilon,
+    // include_identical, filter chip) so the user picks up where
+    // they left off. Reset to defaults FIRST so a project-switch
+    // into a project with no compare.config doesn't leak the
+    // previous project's Compare picker values.
+    compare_rom_a_path[0] = '\0';
+    compare_rom_b_path[0] = '\0';
+    compare_epsilon = 0.0f;
+    compare_include_identical = false;
+    compare_filter_chip[0] = '\0';
+    if (auto cfg = load_compare_config(project->dir()); cfg.has_value()) {
+        std::snprintf(compare_rom_a_path, sizeof compare_rom_a_path, "%s",
+                      cfg->rom_a_path.c_str());
+        std::snprintf(compare_rom_b_path, sizeof compare_rom_b_path, "%s",
+                      cfg->rom_b_path.c_str());
+        compare_epsilon = cfg->epsilon;
+        compare_include_identical = cfg->include_identical;
+        std::snprintf(compare_filter_chip, sizeof compare_filter_chip, "%s",
+                      cfg->filter_chip.c_str());
     }
     // Restore the prior pack-lint result so the Settings chip + welcome
     // panel surface the last verdict without forcing the user to

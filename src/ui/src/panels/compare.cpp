@@ -497,9 +497,27 @@ void render_compare_panel(AppState &state) {
     ImGui::SameLine();
     ImGui::Checkbox("Show identical tables", &state.compare_include_identical);
     ImGui::SameLine();
+    // Last-comparison setup persistence. Mirrors the per-toggle
+    // save shape compare.pinned uses — write whenever the user
+    // commits a change (Run Compare button, chip toggle below).
+    // Restored on project open in app_state.cpp so the picker
+    // returns to its previous state.
+    auto const persist_compare_setup = [&]() {
+        if (!state.project.has_value()) {
+            return;
+        }
+        st::ui::CompareConfig cfg;
+        cfg.rom_a_path = state.compare_rom_a_path;
+        cfg.rom_b_path = state.compare_rom_b_path;
+        cfg.epsilon = state.compare_epsilon;
+        cfg.include_identical = state.compare_include_identical;
+        cfg.filter_chip = state.compare_filter_chip;
+        save_compare_config(state.project->dir(), cfg);
+    };
     // Compare button — pinned to the right for thumb reach.
     if (ImGui::Button("\xEE\x9C\xA0  Compare", ImVec2(120.0f, 0.0f))) { // E700 GlobalNav
         recompute_compare(state);
+        persist_compare_setup();
     }
     ImGui::SameLine();
     // Export Markdown — companion to the CSV exporter. Markdown is the
@@ -1019,6 +1037,7 @@ void render_compare_panel(AppState &state) {
                     std::snprintf(state.compare_filter_chip,
                                   sizeof state.compare_filter_chip, "%s", val);
                 }
+                persist_compare_setup();
             }
             ImGui::PopID();
             if (active) {

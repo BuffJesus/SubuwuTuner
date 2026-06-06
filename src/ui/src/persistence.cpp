@@ -533,6 +533,56 @@ void save_compare_pinned(std::filesystem::path const &project_dir,
     }
 }
 
+std::optional<CompareConfig>
+load_compare_config(std::filesystem::path const &project_dir) {
+    auto const path = project_dir / "compare.config";
+    std::ifstream in{path};
+    if (!in)
+        return std::nullopt;
+    CompareConfig cfg;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        auto const eq = line.find('=');
+        if (eq == std::string::npos)
+            continue;
+        std::string_view const key{line.data(), eq};
+        std::string_view const val{line.data() + eq + 1, line.size() - eq - 1};
+        if (key == "rom_a_path") {
+            cfg.rom_a_path = std::string{val};
+        } else if (key == "rom_b_path") {
+            cfg.rom_b_path = std::string{val};
+        } else if (key == "epsilon") {
+            try {
+                cfg.epsilon = std::stof(std::string{val});
+            } catch (...) {
+                // malformed float — keep default, don't fail the load
+            }
+        } else if (key == "include_identical") {
+            cfg.include_identical = (val == "true" || val == "1");
+        } else if (key == "filter_chip") {
+            cfg.filter_chip = std::string{val};
+        }
+        // Unknown keys silently ignored so newer builds can read older
+        // files without forcing a migration.
+    }
+    return cfg;
+}
+
+void save_compare_config(std::filesystem::path const &project_dir,
+                         CompareConfig const &cfg) {
+    auto const path = project_dir / "compare.config";
+    std::ofstream out{path, std::ios::trunc};
+    if (!out)
+        return;
+    out << "rom_a_path=" << cfg.rom_a_path << '\n';
+    out << "rom_b_path=" << cfg.rom_b_path << '\n';
+    out << "epsilon=" << cfg.epsilon << '\n';
+    out << "include_identical=" << (cfg.include_identical ? "true" : "false") << '\n';
+    out << "filter_chip=" << cfg.filter_chip << '\n';
+}
+
 // pack-lint.toml format. Hand-rolled rather than going through
 // tomlplusplus — three string fields + one int + an optional
 // multi-line body. Toml-quoting a multi-line message would mean
