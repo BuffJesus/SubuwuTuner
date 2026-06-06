@@ -6,7 +6,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <span>
 #include <string>
 #include <string_view>
@@ -336,6 +339,131 @@ TEST_CASE("SubaruStd repair: pre-existing slot bytes don't contaminate the sum",
     REQUIRE(r->repair(rom_b).has_value());
     REQUIRE(read_u32_be(rom_a, cfg.sum_slot) ==
             read_u32_be(rom_b, cfg.sum_slot));
+}
+
+// ============================================================================
+// CobbPerBlockCrc32 — analyst-recovered FA-DIT algorithm (2026-06-06)
+// ============================================================================
+//
+// zlib-style CRC-32 over 25 install blocks; slots BE u32 at
+// 0x1FFF3C..0x1FFFA0. Slot 24 (self-referential) left untouched on
+// repair — non-blocking for EGR/TGV-class edits in slots 5..16.
+
+TEST_CASE("name + parse round-trip cobb_per_block_crc32",
+          "[flash][checksum][cobb_per_block_crc32]") {
+    REQUIRE(std::string_view{fl::checksum_kind_name(
+                fl::ChecksumKind::CobbPerBlockCrc32)} ==
+            "cobb_per_block_crc32");
+    auto parsed = fl::parse_checksum_kind("cobb_per_block_crc32");
+    REQUIRE(parsed.has_value());
+    REQUIRE(*parsed == fl::ChecksumKind::CobbPerBlockCrc32);
+}
+
+TEST_CASE("CobbPerBlockCrc32 rejects ROMs smaller than 2 MB",
+          "[flash][checksum][cobb_per_block_crc32]") {
+    auto r = fl::make_checksum_repair(fl::ChecksumKind::CobbPerBlockCrc32);
+    REQUIRE(r->name() == "cobb_per_block_crc32");
+    std::vector<std::uint8_t> rom(0x100000, 0); // 1 MB
+    auto const s = r->repair(rom);
+    REQUIRE_FALSE(s.has_value());
+    REQUIRE(s.error().code() == st::ErrorCode::InvalidArgument);
+}
+
+TEST_CASE("CobbPerBlockCrc32 repair is idempotent on a re-pass",
+          "[flash][checksum][cobb_per_block_crc32]") {
+    auto r = fl::make_checksum_repair(fl::ChecksumKind::CobbPerBlockCrc32);
+    std::vector<std::uint8_t> rom(0x200000, 0);
+    REQUIRE(r->repair(rom).has_value());
+    auto const after_first = rom;
+    REQUIRE(r->repair(rom).has_value());
+    REQUIRE(rom == after_first);
+}
+
+TEST_CASE("CobbPerBlockCrc32 single-block edit changes only that slot",
+          "[flash][checksum][cobb_per_block_crc32]") {
+    // The analyst's smoke-test pattern: mutate a byte in block 7
+    // (the EGR/TGV sector at 0x030000-0x040000), repair, verify only
+    // slot 7's CRC moved.
+    auto r = fl::make_checksum_repair(fl::ChecksumKind::CobbPerBlockCrc32);
+    std::vector<std::uint8_t> rom(0x200000, 0);
+    REQUIRE(r->repair(rom).has_value());
+    // Snapshot all 25 slot values.
+    constexpr std::uint32_t kTableBase = 0x1FFF3Cu;
+    std::array<std::array<std::uint8_t, 4>, 25> baseline_slots{};
+    for (std::size_t i = 0; i < 25; ++i) {
+        for (std::size_t b = 0; b < 4; ++b)
+            baseline_slots[i][b] = rom[kTableBase + i * 4 + b];
+    }
+    // Flip a byte in block 7 (EGR Airflow location per analyst).
+    rom[0x034DEA] = 0x42;
+    REQUIRE(r->repair(rom).has_value());
+    // Slot 7 must have changed.
+    bool slot7_changed = false;
+    for (std::size_t b = 0; b < 4; ++b) {
+        if (rom[kTableBase + 7 * 4 + b] != baseline_slots[7][b]) {
+            slot7_changed = true;
+            break;
+        }
+    }
+    REQUIRE(slot7_changed);
+    // Slots 0..6, 8..23 must be unchanged. Slot 24 untouched by
+    // design (self-referential).
+    for (std::size_t i = 0; i < 25; ++i) {
+        if (i == 7)
+            continue;
+        for (std::size_t b = 0; b < 4; ++b) {
+            INFO("slot " << i << " byte " << b);
+            REQUIRE(rom[kTableBase + i * 4 + b] == baseline_slots[i][b]);
+        }
+    }
+}
+
+TEST_CASE("CobbPerBlockCrc32: slot 24 is never written by repair",
+          "[flash][checksum][cobb_per_block_crc32]") {
+    // Slot 24's decode is pending (analyst handoff). repair() must
+    // leave whatever was there untouched, even if it's garbage.
+    auto r = fl::make_checksum_repair(fl::ChecksumKind::CobbPerBlockCrc32);
+    std::vector<std::uint8_t> rom(0x200000, 0);
+    // Stamp a recognizable pattern at slot 24.
+    constexpr std::uint32_t kSlot24Off = 0x1FFF3Cu + 24 * 4;
+    rom[kSlot24Off + 0] = 0xDE;
+    rom[kSlot24Off + 1] = 0xAD;
+    rom[kSlot24Off + 2] = 0xBE;
+    rom[kSlot24Off + 3] = 0xEF;
+    REQUIRE(r->repair(rom).has_value());
+    REQUIRE(rom[kSlot24Off + 0] == 0xDE);
+    REQUIRE(rom[kSlot24Off + 1] == 0xAD);
+    REQUIRE(rom[kSlot24Off + 2] == 0xBE);
+    REQUIRE(rom[kSlot24Off + 3] == 0xEF);
+}
+
+// Opt-in end-to-end validation against the user's actual COBB-installed
+// LF79101P ROM. Skipped when the file isn't present (CI / fresh checkout).
+// Confirms my repair is byte-identical to the existing checksum bytes —
+// i.e. the algorithm + block table I implemented matches what COBB
+// actually writes.
+TEST_CASE("CobbPerBlockCrc32 round-trip against fehr-live-dump-2026-06-06.bin",
+          "[flash][checksum][cobb_per_block_crc32][rom]") {
+    auto const path =
+        std::filesystem::path{"D:/Subuwu/subaru-data/reference-dumps/"
+                              "fehr-live-dump-2026-06-06.bin"};
+    if (!std::filesystem::exists(path)) {
+        WARN("Reference ROM not present at " << path.string()
+             << " — skipping end-to-end validation.");
+        return;
+    }
+    std::ifstream in{path, std::ios::binary};
+    REQUIRE(in.is_open());
+    std::vector<std::uint8_t> rom{(std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>()};
+    REQUIRE(rom.size() == 0x200000u);
+    auto const before = rom;
+    auto r = fl::make_checksum_repair(fl::ChecksumKind::CobbPerBlockCrc32);
+    REQUIRE(r->repair(rom).has_value());
+    // ROM was unmodified before repair — the stored slot CRCs were
+    // already correct. Post-repair must be byte-identical, proving
+    // my algorithm matches the COBB-installed values.
+    REQUIRE(rom == before);
 }
 
 TEST_CASE("SubaruStd repair: hand-computed sum matches the impl",

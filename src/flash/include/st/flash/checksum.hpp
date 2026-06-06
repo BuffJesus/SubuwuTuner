@@ -40,9 +40,16 @@ namespace st::flash {
 // default-constructed packs).
 enum class ChecksumKind : std::uint8_t {
     None = 0,       // no-op repair (pack didn't declare a kind)
-    SubaruStd = 1,  // RR ChecksumSTD — most VA + early VB ECUs
+    SubaruStd = 1,  // sum-of-16-bit-BE-words + complement at paired slots
     SubaruAlt = 2,  // RR ChecksumALT — older 16-bit families
     SubaruAlt2 = 3, // RR ChecksumALT2 — some 32-bit ROMs (per RR release notes)
+    // COBB-AccessPort installed FA-DIT 2 MB ROMs use a per-install-
+    // block CRC-32 table at 0x1FFF3C..0x1FFFA0 — see SubuwuTuner
+    // findings 2026-06-06 (`out/cobb_datalog/CHECKSUM_FA_DIT.md`).
+    // 25 blocks total; slot 24 is self-referential (block contains
+    // the table) and left untouched on repair — non-blocking for
+    // EGR/TGV-class edits which all land in slots 5..16.
+    CobbPerBlockCrc32 = 4,
 };
 
 // CLI-canonical string form (lowercase, snake_case). Matches the

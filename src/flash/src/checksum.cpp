@@ -3,9 +3,11 @@
 
 #include "st/flash/checksum.hpp"
 
+#include "st/core/crc32.hpp"
 #include "st/core/error.hpp"
 #include "st/defs.hpp"
 
+#include <array>
 #include <memory>
 #include <span>
 #include <string>
@@ -24,6 +26,8 @@ char const *checksum_kind_name(ChecksumKind k) noexcept {
         return "subaru_alt";
     case ChecksumKind::SubaruAlt2:
         return "subaru_alt2";
+    case ChecksumKind::CobbPerBlockCrc32:
+        return "cobb_per_block_crc32";
     }
     return "unknown";
 }
@@ -37,6 +41,8 @@ std::optional<ChecksumKind> parse_checksum_kind(std::string_view s) noexcept {
         return ChecksumKind::SubaruAlt;
     if (s == "subaru_alt2")
         return ChecksumKind::SubaruAlt2;
+    if (s == "cobb_per_block_crc32")
+        return ChecksumKind::CobbPerBlockCrc32;
     return std::nullopt;
 }
 
@@ -175,6 +181,87 @@ private:
     SubaruStdConfig cfg_;
 };
 
+// CobbPerBlockCrc32 — per-COBB-install-block CRC-32 table. The COBB
+// AccessPort install flow populates a 25-slot CRC table at
+// 0x1FFF3C..0x1FFFA0 (BE u32 each), one slot per install block per
+// `findings/communication-protocols/cobb-install-flow.md` §4. After
+// any edit to a covered block, the corresponding slot needs
+// recomputation; otherwise the COBB-installed integrity check
+// trips.
+//
+// Algorithm: zlib-style CRC-32 (poly 0xEDB88320 reflected, init +
+// final XOR 0xFFFFFFFF). The existing st::crc32 in
+// `src/core/include/st/core/crc32.hpp` matches byte-for-byte.
+//
+// **Slot 24 caveat**: the last 128 KB block (0x1E0000-0x200000)
+// contains the checksum table itself. The relationship between the
+// stored slot 24 value and the block contents isn't yet decoded
+// (analyst handoff 2026-06-06 §"What's not yet decoded"). Repair
+// leaves slot 24 untouched. For EGR/TGV/AFR/boost/timing edits —
+// all in slots 5..16 (0x010000-0x180000) — this is non-blocking.
+//
+// **Use only on COBB-installed FA-DIT 2 MB ROMs.** Factory-virgin
+// ROMs don't have the table populated and this repair would write
+// garbage into the cal-region tail.
+class CobbPerBlockCrc32Repair final : public IChecksumRepair {
+public:
+    // The 25 install-block ranges, in install order. First 5 are
+    // the 8 KB bootloader patches; next 9 are 64 KB cal sectors;
+    // last 11 are 128 KB cal blocks.
+    struct Block {
+        std::uint32_t start;
+        std::uint32_t end_exclusive;
+    };
+
+    static constexpr std::uint32_t kTableBase = 0x1FFF3Cu;
+    static constexpr std::size_t kBlockCount = 25;
+    static constexpr std::size_t kRepairedBlockCount = 24; // slot 24 untouched
+    static constexpr std::uint32_t kRomSizeRequired = 0x200000u;
+
+    static constexpr std::array<Block, kBlockCount> kBlocks{{
+        // 5 × 8 KB bootloader patches
+        {0x006000, 0x008000}, {0x008000, 0x00A000}, {0x00A000, 0x00C000},
+        {0x00C000, 0x00E000}, {0x00E000, 0x010000},
+        // 9 × 64 KB cal sectors
+        {0x010000, 0x020000}, {0x020000, 0x030000}, {0x030000, 0x040000},
+        {0x040000, 0x050000}, {0x050000, 0x060000}, {0x060000, 0x070000},
+        {0x070000, 0x080000}, {0x080000, 0x090000}, {0x090000, 0x0A0000},
+        // 11 × 128 KB cal blocks
+        {0x0A0000, 0x0C0000}, {0x0C0000, 0x0E0000}, {0x0E0000, 0x100000},
+        {0x100000, 0x120000}, {0x120000, 0x140000}, {0x140000, 0x160000},
+        {0x160000, 0x180000}, {0x180000, 0x1A0000}, {0x1A0000, 0x1C0000},
+        {0x1C0000, 0x1E0000}, {0x1E0000, 0x200000},
+    }};
+
+    [[nodiscard]] st::Status
+    repair(std::span<std::uint8_t> rom) noexcept override {
+        if (rom.size() < kRomSizeRequired) {
+            return failure(ErrorCode::InvalidArgument,
+                           "flash::cobb_per_block_crc32::repair: ROM is too "
+                           "small (need 2 MB FA-DIT layout)");
+        }
+        // Compute and write CRCs for the first 24 blocks. Slot 24
+        // stays as-is — its decode is pending per the analyst
+        // handoff.
+        for (std::size_t i = 0; i < kRepairedBlockCount; ++i) {
+            auto const &b = kBlocks[i];
+            std::span<std::uint8_t const> block_view{rom.data() + b.start,
+                                                      b.end_exclusive - b.start};
+            std::uint32_t const crc = st::crc32(block_view);
+            std::uint32_t const slot_off = kTableBase + static_cast<std::uint32_t>(i) * 4u;
+            rom[slot_off + 0] = static_cast<std::uint8_t>((crc >> 24) & 0xFFu);
+            rom[slot_off + 1] = static_cast<std::uint8_t>((crc >> 16) & 0xFFu);
+            rom[slot_off + 2] = static_cast<std::uint8_t>((crc >> 8) & 0xFFu);
+            rom[slot_off + 3] = static_cast<std::uint8_t>(crc & 0xFFu);
+        }
+        return ok();
+    }
+
+    [[nodiscard]] std::string_view name() const noexcept override {
+        return "cobb_per_block_crc32";
+    }
+};
+
 // Stub family for the not-yet-implemented Subaru variants. Each
 // surfaces a NotImplemented with a citation pointer to where the
 // algorithm lives in public references so the next implementer
@@ -222,6 +309,8 @@ std::unique_ptr<IChecksumRepair> make_checksum_repair(ChecksumKind kind) {
         return std::make_unique<SubaruRepairStub<ChecksumKind::SubaruAlt, kAltCitation>>();
     case ChecksumKind::SubaruAlt2:
         return std::make_unique<SubaruRepairStub<ChecksumKind::SubaruAlt2, kAlt2Citation>>();
+    case ChecksumKind::CobbPerBlockCrc32:
+        return std::make_unique<CobbPerBlockCrc32Repair>();
     }
     // Unreachable per the exhaustive switch; defensive None fallback.
     return std::make_unique<NoneRepair>();
