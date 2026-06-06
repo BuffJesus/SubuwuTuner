@@ -778,3 +778,31 @@ TEST_CASE("CLI list-validators exits 2 on unknown option",
     REQUIRE(r.spawned);
     REQUIRE(r.exit_code == 2);
 }
+
+TEST_CASE("CLI cobb-datalog-preset prints the AP v1.7.6.0 layout",
+          "[cli][integration][cobb-datalog-preset]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run("cobb-datalog-preset");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "0x7E0"));
+    REQUIRE(stdout_contains(r, "0x7E8"));
+    REQUIRE(stdout_contains(r, "0xF300"));
+    REQUIRE(stdout_contains(r, "RPM"));
+    REQUIRE(stdout_contains(r, "ReadDataByIdentifier"));
+}
+
+TEST_CASE("CLI cobb-datalog-preset --json emits subuwutuner.cobb-datalog-preset.v1",
+          "[cli][integration][cobb-datalog-preset][json]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run("cobb-datalog-preset --json");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "\"schema\":\"subuwutuner.cobb-datalog-preset.v1\""));
+    REQUIRE(stdout_contains(r, "\"firmware\":\"AP v1.7.6.0"));
+    REQUIRE(stdout_contains(r, "\"did\":\"0xF303\""));
+}

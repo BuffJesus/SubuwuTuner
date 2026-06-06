@@ -37,6 +37,7 @@ add_executable(st_unit_tests
     unit/transport/test_factory.cpp
     unit/transport/test_uds_trace.cpp
     unit/transport/test_j2534_discovery.cpp
+    unit/ecu/test_cobb_datalog.cpp
     unit/ecu/test_ssm.cpp
     unit/ecu/test_ssm_properties.cpp
     unit/ecu/test_uds_properties.cpp

@@ -14,6 +14,7 @@
 #include "st/profile.hpp"
 #include "st/discover.hpp"
 #include "st/ecu/bulk_reflash_cipher.hpp"
+#include "st/ecu/cobb_datalog.hpp"
 #include "st/ecu/ssm.hpp"
 #include "st/ecu/subaru_security.hpp"
 #include "st/edit.hpp"
@@ -626,6 +627,14 @@ constexpr std::string_view kUsage =
     "                            — what each checks, when it no-ops, and its\n"
     "                            default thresholds. --json emits the\n"
     "                            subuwutuner.list-validators.v1 envelope.\n"
+    "    cobb-datalog-preset [--json]\n"
+    "                            Print the Cobb AccessPort live datalog\n"
+    "                            protocol shape (DID set 0xF300-0xF304,\n"
+    "                            ~25 Hz polling, 78-byte multi-frame\n"
+    "                            response) and the AP v1.7.6.0 per-byte\n"
+    "                            signal layout. Sourced clean-room from\n"
+    "                            sniff + AP CSV captures (see analyst\n"
+    "                            handoff 2026-06-06).\n"
     "    transport-list [--json] [--explain]\n"
     "                            List J2534 v04.04 vendor DLLs registered on\n"
     "                            this host (HKLM\\Software\\PassThruSupport.04.04\n"
@@ -3856,7 +3865,7 @@ int cmd_completion(int argc, char *argv[]) {
         "stats", "diff", "diff-load", "audit", "profile", "config",
         "changelog", "log", "ssm-a8-poll", "doctor", "transport-list",
         "uds-test", "feature-graph", "ai-drift", "ai-narrate",
-        "list-validators",
+        "list-validators", "cobb-datalog-preset",
         nullptr,
     };
     // Flag completion vocabulary. Reused across bash + zsh handlers.
@@ -12514,6 +12523,130 @@ int cmd_transport_list(int argc, char *argv[]) {
     return 0;
 }
 
+// cobb-datalog-preset — prints the Cobb AccessPort live datalog
+// protocol shape + AP v1.7.6.0 signal layout. Sourced clean-room
+// from analyst captures (bus-check.log + 18 AP CSV exports). Useful
+// when a tuner wants to replay a Cobb AP datalog in SubuwuTuner's
+// future live-gauge cluster or wants a paper trail of "what byte
+// is what" for a captured trace.
+int cmd_cobb_datalog_preset(int argc, char *argv[]) {
+    bool json_mode = false;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--json") {
+            json_mode = true;
+        } else {
+            std::fprintf(stderr,
+                         "cobb-datalog-preset: unknown argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    namespace cb = st::ecu::cobb_datalog;
+    auto const layout = cb::ap_v1_7_6_0_layout();
+    if (json_mode) {
+        std::string out;
+        out.reserve(8192);
+        out.append("{\"schema\":\"subuwutuner.cobb-datalog-preset.v1\",");
+        out.append("\"firmware\":\"AP v1.7.6.0 (CCF Gen3)\",");
+        out.append("\"request_can_id\":\"0x");
+        char hexbuf[16];
+        std::snprintf(hexbuf, sizeof hexbuf, "%03X", cb::kRequestCanId);
+        out.append(hexbuf);
+        out.append("\",\"response_can_id\":\"0x");
+        std::snprintf(hexbuf, sizeof hexbuf, "%03X", cb::kResponseCanId);
+        out.append(hexbuf);
+        out.append("\",\"median_poll_interval_ms\":");
+        out.append(std::to_string(cb::kMedianPollIntervalMs));
+        out.append(",\"did_payloads\":[");
+        for (std::size_t i = 0; i < cb::kDidPayloads.size(); ++i) {
+            if (i != 0) out.append(",");
+            std::snprintf(hexbuf, sizeof hexbuf, "0x%04X",
+                          cb::kDidPayloads[i].did);
+            out.append("{\"did\":\"");
+            out.append(hexbuf);
+            out.append("\",\"bytes\":");
+            out.append(std::to_string(cb::kDidPayloads[i].bytes));
+            out.append("}");
+        }
+        out.append("],\"signals\":[");
+        auto const storage_name = [](cb::CobbSignalStorage s) -> char const * {
+            switch (s) {
+            case cb::CobbSignalStorage::Uint8:  return "uint8";
+            case cb::CobbSignalStorage::Int8:   return "int8";
+            case cb::CobbSignalStorage::Uint16: return "uint16";
+            case cb::CobbSignalStorage::Int16:  return "int16";
+            }
+            return "unknown";
+        };
+        bool first = true;
+        for (auto const &s : layout) {
+            if (!first) out.append(",");
+            first = false;
+            std::snprintf(hexbuf, sizeof hexbuf, "0x%04X", s.did);
+            out.append("{\"did\":\"");
+            out.append(hexbuf);
+            out.append("\",\"byte_offset\":");
+            out.append(std::to_string(s.byte_offset));
+            out.append(",\"storage\":\"");
+            out.append(storage_name(s.storage));
+            out.append("\",\"scale\":");
+            out.append(std::to_string(s.scale));
+            out.append(",\"name\":");
+            json_escape(out, s.name);
+            out.append(",\"unit\":");
+            json_escape(out, s.unit);
+            out.append("}");
+        }
+        out.append("]}\n");
+        std::fputs(out.c_str(), stdout);
+        return 0;
+    }
+    std::puts("Cobb AccessPort live datalog protocol (AP v1.7.6.0 / CCF Gen3)");
+    std::puts("");
+    std::printf("  Request CAN id:    0x%03X (tester → ECU)\n",
+                cb::kRequestCanId);
+    std::printf("  Response CAN id:   0x%03X (ECU → tester)\n",
+                cb::kResponseCanId);
+    std::printf("  UDS service:       0x%02X ReadDataByIdentifier\n",
+                cb::kReadDataByIdentifier);
+    std::printf("  Poll cadence:      ~%u ms median (~25 Hz)\n",
+                cb::kMedianPollIntervalMs);
+    std::printf("  Request shape:     22 F3 00 F3 01 F3 02 F3 03 F3 04 (13 bytes)\n");
+    std::printf("  Response payload:  %zu bytes total (ISO-TP multi-frame)\n",
+                cb::kTotalPayloadBytes);
+    std::puts("");
+    std::puts("  DID payload widths:");
+    for (auto const &p : cb::kDidPayloads) {
+        std::printf("    0x%04X — %2u bytes\n", p.did, p.bytes);
+    }
+    std::puts("");
+    std::printf("Signal layout (%zu signals across 5 DIDs):\n", layout.size());
+    std::uint16_t last_did = 0;
+    for (auto const &s : layout) {
+        if (s.did != last_did) {
+            std::printf("\n  0x%04X:\n", s.did);
+            last_did = s.did;
+        }
+        char const *storage = "?";
+        switch (s.storage) {
+        case cb::CobbSignalStorage::Uint8:  storage = "u8";  break;
+        case cb::CobbSignalStorage::Int8:   storage = "i8";  break;
+        case cb::CobbSignalStorage::Uint16: storage = "u16"; break;
+        case cb::CobbSignalStorage::Int16:  storage = "i16"; break;
+        }
+        std::printf("    [%2u] %-3s /%-4u  %.*s (%.*s)\n",
+                    s.byte_offset, storage, s.scale,
+                    static_cast<int>(s.name.size()), s.name.data(),
+                    static_cast<int>(s.unit.size()), s.unit.data());
+    }
+    std::puts("");
+    std::puts("Source: analyst handoff 2026-06-06 (bus-check.log + 18 AP CSV");
+    std::puts("exports). Protocol shape confirmed; per-byte signal mapping is");
+    std::puts("high-confidence but pending an on-car driving capture to ground-");
+    std::puts("truth the engine-running values.");
+    return 0;
+}
+
 // list-validators — surfaces the static inventory of st::policy
 // flash-preflight validators. Answers "what does the policy gate
 // actually check?" without having to read the source. JSON envelope:
@@ -14755,6 +14888,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "list-validators") {
         return cmd_list_validators(argc - 2, argv + 2);
+    }
+    if (cmd == "cobb-datalog-preset") {
+        return cmd_cobb_datalog_preset(argc - 2, argv + 2);
     }
     if (cmd == "transport-list") {
         return cmd_transport_list(argc - 2, argv + 2);

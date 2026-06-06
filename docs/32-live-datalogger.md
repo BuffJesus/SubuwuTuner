@@ -310,6 +310,57 @@ Hardware-gated (OBDX VX in hand):
   display-rate decimation in the gauge panel (capture rate stays
   full; visual rate caps at 100 Hz for the mini-line).
 
+## Compatibility — Cobb AccessPort datalog protocol
+
+The Cobb AP polls a fixed UDS RDBI shape every ~39 ms (~25 Hz).
+Documented here so the GUI live-datalogger can offer a "match Cobb
+AP" preset out of the box — and so a captured AP sniff can be
+replayed against `MockTransport` for parity testing without
+hardware. Source: clean-room analysis of the user's own AP captures
+(bus-check.log + 18 AP CSV exports) — protocol shape confirmed,
+per-byte signal mapping high-confidence pending an on-car
+driving-data ground-truth.
+
+**Wire shape (confirmed)**
+- Tester → ECU: CAN id `0x7E0`, 13-byte UDS request
+  `22 F3 00 F3 01 F3 02 F3 03 F3 04`
+- ECU → tester: CAN id `0x7E8`, 78-byte ISO-TP multi-frame response
+  (67 payload bytes + per-DID id bytes + service-positive code)
+- 5 DIDs, always in order: `0xF300` (22 B), `0xF301` (19 B),
+  `0xF302` (10 B), `0xF303` (10 B), `0xF304` (6 B)
+- No SecurityAccess unlock during the datalog phase — L3 latch
+  persists from a prior install/uninstall session
+- Median cadence 39 ms / p95 91 ms / min 8 ms across the
+  reference capture (832 polls)
+
+**Per-byte signal layout (AP v1.7.6.0 / CCF Gen3)**
+
+Lives in code at `st::ecu::cobb_datalog::ap_v1_7_6_0_layout()`
+(`src/ecu/include/st/ecu/cobb_datalog.hpp`). 43 signals across the
+5 DIDs; print with `subuwutuner-cli cobb-datalog-preset` or pull
+machine-readable via `--json` (envelope:
+`subuwutuner.cobb-datalog-preset.v1`).
+
+Six signals overflowed the 67-byte budget in the analyst's
+inference (SD VE Est MAF, TD Boost Error Ext, TGV Map Ratio,
+Throttle Pos, Vehicle Speed, Wastegate Duty) — those imply either
+an unseen `0xF305` DID, a wider F300, or a width-inference miss.
+A single fresh bus-check sniff from a v1.7.6.0-installed AP
+resolves this in one minute on-car.
+
+**What this unlocks pre-hardware**
+- A `LogChannel` preset that mirrors the Cobb shape so the live
+  gauge cluster can reach Cobb-parity behavior without the user
+  enumerating 43 channels by hand
+- Replay-side: parse a captured `bus-check.log`-style trace and
+  decode it byte-by-byte using the layout above
+- A bench rig can simulate Cobb-equivalent responses for the
+  future live datalogger's integration tests — no AP needed
+
+The analyst's full reconstruction is at
+`D:\Subuwu\findings\HANDOFF-from-analyst-2026-06-06-cobb-datalog.md`
++ `findings/corpus-wide-re-2026-06-06/out/cobb_datalog/`.
+
 ## References
 
 - `docs/04-roadmap.md` Phase 3 — live datalog gauge cluster + CSV
