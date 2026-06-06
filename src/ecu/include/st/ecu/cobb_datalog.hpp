@@ -228,14 +228,22 @@ enum class CobbApFirmware : std::uint8_t {
 // Provenance — two confidence axes, distinct sources:
 //
 //   1. BYTE POSITIONS + WIRE SCALES were R²-verified against the
-//      USER'S ACTUAL CAR sniff (dmann-sniff-20260528-181747.log).
-//      The user's 2017 WRX runs LF79101P-content firmware (per the
-//      analyst's grep of fehr-full-dump.bin + atlas-personal LF79101P
-//      .bin) — NOT LF79103P. Cobb's AP firmware uses one response
-//      template regardless of CID, so these positions + scales are
-//      assumed portable across the A-series family. `decode_signal()`
-//      relies only on these and works on any CID running the same
-//      Cobb AP firmware preset.
+//      user's actual car sniff. **2026-06-06 ALIGNED**: the layout
+//      below is the corrected re-fit after the user's daytime drive
+//      sniff (`bus-cobb-datalog-2026-06-06`) revealed the prior
+//      dmann-session (2026-05-28) layout had a -1.6 s time-alignment
+//      error between sniff and AP CSV. The OLS fits compensated for
+//      the misalignment instead of finding real positions; only RPM
+//      and TGV Map Ratio byte positions survived the correction.
+//      With proper alignment (RPM anchor R²=0.9999) the AP packs raw
+//      SSM values directly with canonical scales (RPM is x/5.12, not
+//      the v5 OLS-fit 0.21246). The user's 2017 WRX runs LF79101P-
+//      content firmware (per `project_user_car_cid_states.md`) —
+//      NOT LF79103P. Cobb's AP firmware uses one response template
+//      regardless of CID, so these positions + scales are assumed
+//      portable across the A-series family. `decode_signal()` relies
+//      only on these and works on any CID running the same Cobb AP
+//      firmware preset.
 //
 //   2. RAM ADDRESSES were sourced from the LF79103P live-signals
 //      CATALOG (the only LF79 variant present in the catalog

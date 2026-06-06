@@ -62,10 +62,6 @@ TEST_CASE("Every v1.7.6.0 Verified entry carries an AP monitor_id",
         if (s.verification != cb::CobbVerification::Verified)
             continue;
         REQUIRE_FALSE(s.monitor_id.empty());
-        // monitor_id prefix matches ram_authoritative: SSM_* means
-        // OEM-RAM authoritative, RAM_* means COBB-defined candidate.
-        bool const is_ssm = s.monitor_id.starts_with("SSM_");
-        REQUIRE(s.ram_authoritative == is_ssm);
     }
 }
 
@@ -85,20 +81,24 @@ TEST_CASE("Every Verified RAM address sits in the LF79103P catalog band",
     }
 }
 
-TEST_CASE("v1.7.6.0 has 6 SSM_* + 6 RAM_* Verified rows",
+TEST_CASE("v1.7.6.0 Verified split: 15 authoritative + 21 candidate RAM",
           "[ecu][cobb][datalog][verified][monitor_id]") {
-    int ssm = 0;
-    int ram = 0;
+    // Per-monitor classification has more nuance than the SSM_*/RAM_*
+    // prefix would imply — e.g. SSM_BST_REL_EXT_SHDIT (Boost Extended)
+    // is marked candidate in the analyst's cobb_pids_aligned.toml.
+    // Counts sourced directly from that TOML.
+    int auth = 0;
+    int cand = 0;
     for (auto const &s : cb::ap_v1_7_6_0_layout()) {
         if (s.verification != cb::CobbVerification::Verified)
             continue;
         if (s.ram_authoritative)
-            ++ssm;
+            ++auth;
         else
-            ++ram;
+            ++cand;
     }
-    REQUIRE(ssm == 6);
-    REQUIRE(ram == 6);
+    REQUIRE(auth == 15);
+    REQUIRE(cand == 21);
 }
 
 TEST_CASE("v1.7.6.0 Verified positions all fit within v1.7.6.0 payload widths",
@@ -124,10 +124,10 @@ TEST_CASE("v1.7.6.0 Verified positions all fit within v1.7.6.0 payload widths",
     }
 }
 
-TEST_CASE("AP v1.7.6.0 layout exposes 44 signals across the 5 DIDs",
+TEST_CASE("AP v1.7.6.0 layout exposes 36 signals across the 5 DIDs",
           "[ecu][cobb][datalog][layout]") {
     auto const layout = cb::ap_v1_7_6_0_layout();
-    REQUIRE(layout.size() == 44);
+    REQUIRE(layout.size() == 36);
     // Every entry's DID is in the polled set.
     for (auto const &s : layout) {
         REQUIRE(std::find(cb::kDidSet.begin(), cb::kDidSet.end(),
@@ -135,14 +135,14 @@ TEST_CASE("AP v1.7.6.0 layout exposes 44 signals across the 5 DIDs",
     }
 }
 
-TEST_CASE("AP v1.7.6.0 has 12 R²-verified entries",
+TEST_CASE("AP v1.7.6.0 has 36 R²-verified entries (2026-06-06 aligned)",
           "[ecu][cobb][datalog][layout][verified]") {
     auto const layout = cb::ap_v1_7_6_0_layout();
     auto const verified_count = std::count_if(
         layout.begin(), layout.end(), [](cb::CobbSignalLayout const &s) {
             return s.verification == cb::CobbVerification::Verified;
         });
-    REQUIRE(verified_count == 12);
+    REQUIRE(verified_count == 36);
 }
 
 TEST_CASE("All Verified entries carry non-zero wire scale + RAM address",
@@ -182,7 +182,7 @@ TEST_CASE("AP v1.7.4.2 layout exposes 31 signals across 3 DIDs",
 TEST_CASE("ap_layout dispatches to the right firmware",
           "[ecu][cobb][datalog][layout]") {
     REQUIRE(cb::ap_layout(cb::CobbApFirmware::V1_7_4_2_CCF_Gen2).size() == 31);
-    REQUIRE(cb::ap_layout(cb::CobbApFirmware::V1_7_6_0_CCF_Gen3).size() == 44);
+    REQUIRE(cb::ap_layout(cb::CobbApFirmware::V1_7_6_0_CCF_Gen3).size() == 36);
 }
 
 TEST_CASE("AP v1.7.4.2 Hypothesized offsets fit within payload widths",
@@ -220,30 +220,36 @@ TEST_CASE("AP layouts carry RAM addresses + scaling expressions",
         REQUIRE(s.ram_address >= 0xFFF80000u);
     }
     for (auto const &s : cb::ap_v1_7_6_0_layout()) {
-        REQUIRE_FALSE(s.scaling.empty());
+        // Aligned layout dropped the catalog scaling expression
+        // strings — every Verified row carries cobb_scale + cobb_offset
+        // for direct decode and that's all the layer needs.
         REQUIRE(s.ram_address >= 0xFFF80000u);
     }
 }
 
 TEST_CASE("find_signal returns the F301:6 Verified RPM mapping (v1.7.6.0)",
           "[ecu][cobb][datalog][layout][verified]") {
-    // R²-fit relocated RPM from the CSV-column-order hypothesis
-    // (F303:4) to F301:6. Verified entries supersede.
+    // 2026-06-06 aligned: RPM at F301:6 u16_be with the canonical SSM
+    // scale x/5.12 = 0.19531 and zero offset. v5 carried a misfit
+    // 0.21246 scale that was compensating for time-alignment error.
     auto const *rpm = cb::find_signal(0xF301, 6);
     REQUIRE(rpm != nullptr);
     REQUIRE(rpm->name == "RPM");
     REQUIRE(rpm->ram_address == 0xFFF8D424u);
     REQUIRE(rpm->verification == cb::CobbVerification::Verified);
-    REQUIRE(rpm->cobb_scale == 0.21246);
-    REQUIRE(rpm->cobb_offset == -130.370);
+    REQUIRE(rpm->cobb_scale == 0.19531);
+    REQUIRE(rpm->cobb_offset == 0.0);
 }
 
-TEST_CASE("Vehicle Speed Verified entry sits at F300:13 with the LE storage",
+TEST_CASE("Vehicle Speed Verified entry sits at F302:0 (aligned position)",
           "[ecu][cobb][datalog][layout][verified]") {
-    auto const *vs = cb::find_signal(0xF300, 13);
+    // 2026-06-06 aligned: VSS moved from v5's F300:13 u16_le to
+    // F302:0 u8 with canonical scale 0.62389 (mph per raw count) and
+    // a tiny -0.1256 offset.
+    auto const *vs = cb::find_signal(0xF302, 0);
     REQUIRE(vs != nullptr);
     REQUIRE(vs->name == "Vehicle Speed");
-    REQUIRE(vs->storage == cb::CobbSignalStorage::Uint16Le);
+    REQUIRE(vs->storage == cb::CobbSignalStorage::Uint8);
     REQUIRE(vs->ram_address == 0xFFF99835u);
     REQUIRE(vs->verification == cb::CobbVerification::Verified);
 }
@@ -282,65 +288,65 @@ std::array<std::uint8_t, 32> make_u16_be_payload(std::size_t did_bytes,
     return buf;
 }
 
-std::array<std::uint8_t, 32> make_u16_le_payload(std::size_t did_bytes,
-                                                  std::size_t off,
-                                                  std::uint16_t value) {
-    std::array<std::uint8_t, 32> buf{};
-    (void)did_bytes;
-    buf[off] = static_cast<std::uint8_t>(value & 0xFF);
-    buf[off + 1] = static_cast<std::uint8_t>(value >> 8);
-    return buf;
-}
-
 } // namespace
 
-TEST_CASE("decode_signal: RPM at F301:6 → idle range",
+TEST_CASE("decode_signal: RPM at F301:6 → idle (aligned canonical scale)",
           "[ecu][cobb][datalog][decode]") {
+    // 2026-06-06 aligned correction: RPM uses the canonical SSM scale
+    // x/5.12 = 0.19531, no offset. Analyst's smoking-gun: first sniff
+    // response F301[6-7] = 4158 (u16_be) → AP CSV RPM at t=0 was 808.
+    // 4158 * 0.19531 = 812.1 (matches within ~4 RPM interpolation noise).
     auto const *rpm = cb::find_signal(0xF301, 6);
     REQUIRE(rpm != nullptr);
     REQUIRE(rpm->verification == cb::CobbVerification::Verified);
-    // Reproduce ~746 RPM from a synthetic raw value. cobb_scale=0.21246,
-    // cobb_offset=-130.370; 746 = raw*0.21246 - 130.370 → raw ≈ 4124.
-    auto const payload = make_u16_be_payload(20, 6, 4124);
+    REQUIRE(rpm->cobb_offset == 0.0);
+    auto const payload = make_u16_be_payload(20, 6, 4158);
     auto const eng = cb::decode_signal(*rpm,
                                        {payload.data(), payload.size()});
-    REQUIRE_THAT(eng, Catch::Matchers::WithinAbs(746.0, 1.0));
+    REQUIRE_THAT(eng, Catch::Matchers::WithinAbs(812.1, 1.0));
 }
 
-TEST_CASE("decode_signal: Vehicle Speed u16_le respects little-endian",
+TEST_CASE("decode_signal: Vehicle Speed u8 at F302:0 (post-aligned position)",
           "[ecu][cobb][datalog][decode]") {
-    auto const *vss = cb::find_signal(0xF300, 13);
+    auto const *vss = cb::find_signal(0xF302, 0);
     REQUIRE(vss != nullptr);
-    REQUIRE(vss->storage == cb::CobbSignalStorage::Uint16Le);
-    // raw=1100 → 1100*0.0098823 - 10.685 ≈ 0.185 mph (idle).
-    auto const payload = make_u16_le_payload(26, 13, 1100);
+    REQUIRE(vss->name == "Vehicle Speed");
+    REQUIRE(vss->storage == cb::CobbSignalStorage::Uint8);
+    // raw=80 → 80*0.62389 - 0.1256 ≈ 49.79 mph (cruise).
+    std::array<std::uint8_t, 10> payload{};
+    payload[0] = 80;
     auto const eng = cb::decode_signal(*vss,
                                        {payload.data(), payload.size()});
-    REQUIRE_THAT(eng, Catch::Matchers::WithinAbs(0.185, 0.05));
+    REQUIRE_THAT(eng, Catch::Matchers::WithinAbs(49.8, 0.2));
 }
 
-TEST_CASE("decode_signal: Oil Temp u8 produces warm-idle value",
+TEST_CASE("decode_signal: Coolant Temp at F303:3 → warm-idle ~190 F",
           "[ecu][cobb][datalog][decode]") {
-    auto const *oil = cb::find_signal(0xF302, 0);
-    REQUIRE(oil != nullptr);
-    // raw=130 → 130*0.03105 + 208.990 ≈ 213.0 F (warm idle).
+    // Coolant Temp at F303:3 with canonical 1.8 scale (C↔F conversion)
+    // and offset -40. raw=128 → 128*1.8001 - 40.008 ≈ 190.4 F.
+    auto const *ct = cb::find_signal(0xF303, 3);
+    REQUIRE(ct != nullptr);
+    REQUIRE(ct->name == "Coolant Temp");
     std::array<std::uint8_t, 10> payload{};
-    payload[0] = 130;
-    auto const eng = cb::decode_signal(*oil,
+    payload[3] = 128;
+    auto const eng = cb::decode_signal(*ct,
                                        {payload.data(), payload.size()});
-    REQUIRE_THAT(eng, Catch::Matchers::WithinAbs(213.0, 0.1));
+    REQUIRE_THAT(eng, Catch::Matchers::WithinAbs(190.4, 0.1));
 }
 
-TEST_CASE("decode_signal: Battery Volts u8 produces 12-13V range",
+TEST_CASE("decode_signal: AVCS Exh Left u16_le exercises LE endianness",
           "[ecu][cobb][datalog][decode]") {
-    auto const *batt = cb::find_signal(0xF301, 11);
-    REQUIRE(batt != nullptr);
-    // raw=70 → 70*0.0039108 + 12.177 ≈ 12.451 V.
-    std::array<std::uint8_t, 20> payload{};
-    payload[11] = 70;
-    auto const eng = cb::decode_signal(*batt,
+    auto const *av = cb::find_signal(0xF302, 8);
+    REQUIRE(av != nullptr);
+    REQUIRE(av->storage == cb::CobbSignalStorage::Uint16Le);
+    // raw=12880 (LE bytes 0x50 0x32) → 12880*0.0039086 - 50.356 ≈ 0 deg
+    // (at-rest cam position).
+    std::array<std::uint8_t, 10> payload{};
+    payload[8] = 0x50; // low byte
+    payload[9] = 0x32; // high byte (12880 LE)
+    auto const eng = cb::decode_signal(*av,
                                        {payload.data(), payload.size()});
-    REQUIRE_THAT(eng, Catch::Matchers::WithinAbs(12.45, 0.05));
+    REQUIRE_THAT(eng, Catch::Matchers::WithinAbs(0.0, 0.1));
 }
 
 TEST_CASE("decode_signal returns NaN for Hypothesized rows",

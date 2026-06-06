@@ -806,7 +806,8 @@ TEST_CASE("CLI cobb-datalog-preset --json emits subuwutuner.cobb-datalog-preset.
     REQUIRE(stdout_contains(r, "\"firmware\":\"AP v1.7.6.0"));
     REQUIRE(stdout_contains(r, "\"did\":\"0xF303\""));
     REQUIRE(stdout_contains(r, "\"ram_address\":\"0xFFF8D424\""));
-    REQUIRE(stdout_contains(r, "\"scaling\":\"(x/5.12)\""));
+    // RPM is now at F301:6 (post 2026-06-06 aligned correction), not F303:4.
+    REQUIRE(stdout_contains(r, "\"did\":\"0xF301\""));
 }
 
 TEST_CASE("CLI cobb-datalog-preset --firmware v1_7_4_2 prints the Gen2 layout",
@@ -846,5 +847,5 @@ TEST_CASE("CLI cobb-datalog-preset --toml emits Verified-only TOML",
     REQUIRE(stdout_contains(r, "monitor_id        = \"RAM_GEAR_POS_EST\""));
     REQUIRE(stdout_contains(r, "ram_address_status = \"authoritative\""));
     REQUIRE(stdout_contains(r, "ram_address_status = \"candidate\""));
-    REQUIRE(stdout_contains(r, "# 12 Verified PIDs emitted."));
+    REQUIRE(stdout_contains(r, "# 36 Verified PIDs emitted."));
 }
