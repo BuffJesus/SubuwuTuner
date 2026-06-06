@@ -194,4 +194,56 @@ find_signal(std::uint16_t did, std::uint8_t byte_offset) noexcept {
     return find_signal(CobbApFirmware::V1_7_6_0_CCF_Gen3, did, byte_offset);
 }
 
+double decode_signal(CobbSignalLayout const &layout,
+                     std::span<std::uint8_t const> did_payload) noexcept {
+    auto const nan = std::numeric_limits<double>::quiet_NaN();
+    if (layout.cobb_scale == 0.0)
+        return nan;
+    std::size_t const off = layout.byte_offset;
+    auto const sz = did_payload.size();
+    auto const u8 = [&](std::size_t i) { return did_payload[i]; };
+    std::int64_t raw = 0;
+    switch (layout.storage) {
+    case CobbSignalStorage::Uint8:
+        if (off >= sz)
+            return nan;
+        raw = static_cast<std::int64_t>(u8(off));
+        break;
+    case CobbSignalStorage::Int8:
+        if (off >= sz)
+            return nan;
+        raw = static_cast<std::int64_t>(static_cast<std::int8_t>(u8(off)));
+        break;
+    case CobbSignalStorage::Uint16:
+        if (off + 1 >= sz)
+            return nan;
+        raw = static_cast<std::int64_t>(
+            (static_cast<std::uint16_t>(u8(off)) << 8) |
+            static_cast<std::uint16_t>(u8(off + 1)));
+        break;
+    case CobbSignalStorage::Int16:
+        if (off + 1 >= sz)
+            return nan;
+        raw = static_cast<std::int64_t>(static_cast<std::int16_t>(
+            (static_cast<std::uint16_t>(u8(off)) << 8) |
+            static_cast<std::uint16_t>(u8(off + 1))));
+        break;
+    case CobbSignalStorage::Uint16Le:
+        if (off + 1 >= sz)
+            return nan;
+        raw = static_cast<std::int64_t>(
+            (static_cast<std::uint16_t>(u8(off + 1)) << 8) |
+            static_cast<std::uint16_t>(u8(off)));
+        break;
+    case CobbSignalStorage::Int16Le:
+        if (off + 1 >= sz)
+            return nan;
+        raw = static_cast<std::int64_t>(static_cast<std::int16_t>(
+            (static_cast<std::uint16_t>(u8(off + 1)) << 8) |
+            static_cast<std::uint16_t>(u8(off))));
+        break;
+    }
+    return static_cast<double>(raw) * layout.cobb_scale + layout.cobb_offset;
+}
+
 } // namespace st::ecu::cobb_datalog

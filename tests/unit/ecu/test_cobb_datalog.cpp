@@ -8,8 +8,11 @@
 #include "st/ecu/cobb_datalog.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <numeric>
 
 namespace cb = st::ecu::cobb_datalog;
@@ -255,6 +258,112 @@ TEST_CASE("find_signal hits a known F301 RPM mapping (v1.7.4.2)",
     // unchanged across firmwares because the underlying calibration
     // is the same.
     REQUIRE(rpm->ram_address == 0xFFF8D424u);
+}
+
+// ---- decode_signal ------------------------------------------------------
+//
+// Mirrors the analyst's demo_decode_sniff.py end-to-end demo. Each test
+// case picks a Verified entry, constructs a synthetic DID payload, and
+// checks the decode produces a physically plausible value. Sources for
+// the canonical idle/cruise values: the analyst's dmann sniff (746 RPM
+// at sniff start, idle range 700-950).
+
+namespace {
+
+// Build a Uint16 big-endian sample at `off` in a buf of `did_bytes`.
+std::array<std::uint8_t, 32> make_u16_be_payload(std::size_t did_bytes,
+                                                  std::size_t off,
+                                                  std::uint16_t value) {
+    std::array<std::uint8_t, 32> buf{};
+    (void)did_bytes;
+    buf[off] = static_cast<std::uint8_t>(value >> 8);
+    buf[off + 1] = static_cast<std::uint8_t>(value & 0xFF);
+    return buf;
+}
+
+std::array<std::uint8_t, 32> make_u16_le_payload(std::size_t did_bytes,
+                                                  std::size_t off,
+                                                  std::uint16_t value) {
+    std::array<std::uint8_t, 32> buf{};
+    (void)did_bytes;
+    buf[off] = static_cast<std::uint8_t>(value & 0xFF);
+    buf[off + 1] = static_cast<std::uint8_t>(value >> 8);
+    return buf;
+}
+
+} // namespace
+
+TEST_CASE("decode_signal: RPM at F301:6 → idle range",
+          "[ecu][cobb][datalog][decode]") {
+    auto const *rpm = cb::find_signal(0xF301, 6);
+    REQUIRE(rpm != nullptr);
+    REQUIRE(rpm->verification == cb::CobbVerification::Verified);
+    // Reproduce ~746 RPM from a synthetic raw value. cobb_scale=0.21246,
+    // cobb_offset=-130.370; 746 = raw*0.21246 - 130.370 → raw ≈ 4124.
+    auto const payload = make_u16_be_payload(20, 6, 4124);
+    auto const eng = cb::decode_signal(*rpm,
+                                       {payload.data(), payload.size()});
+    REQUIRE_THAT(eng, Catch::Matchers::WithinAbs(746.0, 1.0));
+}
+
+TEST_CASE("decode_signal: Vehicle Speed u16_le respects little-endian",
+          "[ecu][cobb][datalog][decode]") {
+    auto const *vss = cb::find_signal(0xF300, 13);
+    REQUIRE(vss != nullptr);
+    REQUIRE(vss->storage == cb::CobbSignalStorage::Uint16Le);
+    // raw=1100 → 1100*0.0098823 - 10.685 ≈ 0.185 mph (idle).
+    auto const payload = make_u16_le_payload(26, 13, 1100);
+    auto const eng = cb::decode_signal(*vss,
+                                       {payload.data(), payload.size()});
+    REQUIRE_THAT(eng, Catch::Matchers::WithinAbs(0.185, 0.05));
+}
+
+TEST_CASE("decode_signal: Oil Temp u8 produces warm-idle value",
+          "[ecu][cobb][datalog][decode]") {
+    auto const *oil = cb::find_signal(0xF302, 0);
+    REQUIRE(oil != nullptr);
+    // raw=130 → 130*0.03105 + 208.990 ≈ 213.0 F (warm idle).
+    std::array<std::uint8_t, 10> payload{};
+    payload[0] = 130;
+    auto const eng = cb::decode_signal(*oil,
+                                       {payload.data(), payload.size()});
+    REQUIRE_THAT(eng, Catch::Matchers::WithinAbs(213.0, 0.1));
+}
+
+TEST_CASE("decode_signal: Battery Volts u8 produces 12-13V range",
+          "[ecu][cobb][datalog][decode]") {
+    auto const *batt = cb::find_signal(0xF301, 11);
+    REQUIRE(batt != nullptr);
+    // raw=70 → 70*0.0039108 + 12.177 ≈ 12.451 V.
+    std::array<std::uint8_t, 20> payload{};
+    payload[11] = 70;
+    auto const eng = cb::decode_signal(*batt,
+                                       {payload.data(), payload.size()});
+    REQUIRE_THAT(eng, Catch::Matchers::WithinAbs(12.45, 0.05));
+}
+
+TEST_CASE("decode_signal returns NaN for Hypothesized rows",
+          "[ecu][cobb][datalog][decode][hypothesis]") {
+    // Hypothesized entries have cobb_scale=0; decode_signal must refuse.
+    for (auto const &s : cb::ap_v1_7_6_0_layout()) {
+        if (s.verification != cb::CobbVerification::Hypothesized)
+            continue;
+        std::array<std::uint8_t, 32> payload{};
+        auto const eng = cb::decode_signal(s, {payload.data(), payload.size()});
+        REQUIRE(std::isnan(eng));
+        break; // one is enough — invariant is a single conditional
+    }
+}
+
+TEST_CASE("decode_signal returns NaN on short payload",
+          "[ecu][cobb][datalog][decode][bounds]") {
+    auto const *rpm = cb::find_signal(0xF301, 6);
+    REQUIRE(rpm != nullptr);
+    // Payload too short for byte_offset=6 + u16.
+    std::array<std::uint8_t, 5> payload{};
+    auto const eng = cb::decode_signal(*rpm,
+                                       {payload.data(), payload.size()});
+    REQUIRE(std::isnan(eng));
 }
 
 TEST_CASE("find_signal returns nullptr for off-table position",

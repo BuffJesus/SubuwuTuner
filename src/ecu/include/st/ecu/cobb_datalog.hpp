@@ -30,6 +30,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string_view>
 
@@ -259,6 +260,27 @@ find_signal(CobbApFirmware fw, std::uint16_t did,
 // firmware version most users of recent APs will be running.
 [[nodiscard]] CobbSignalLayout const *
 find_signal(std::uint16_t did, std::uint8_t byte_offset) noexcept;
+
+// Decode the raw bytes of a single DID payload into the engineering
+// value for one signal, applying the wire-side cobb_scale + cobb_offset.
+//
+// `did_payload` is the DID's payload region of the ECU response — for
+// example, F301's 20 bytes in a v1.7.6.0 response. Caller is responsible
+// for slicing the right DID out of the multi-frame response per the
+// per-firmware widths (see did_payloads()).
+//
+// Returns NaN when `layout.byte_offset` (+ storage width) is out of
+// range, or when `cobb_scale == 0.0` (Hypothesized entry — no wire-side
+// transform is available, callers should evaluate the catalog `scaling`
+// expression instead).
+//
+// Designed to mirror the analyst's demo_decode_sniff.py end-to-end
+// closing-loop demo. Producing a Verified-row value from sniffed bytes
+// is the smallest concrete "this data is useful" capability for the
+// const-data layouts.
+[[nodiscard]] double
+decode_signal(CobbSignalLayout const &layout,
+              std::span<std::uint8_t const> did_payload) noexcept;
 
 } // namespace st::ecu::cobb_datalog
 
