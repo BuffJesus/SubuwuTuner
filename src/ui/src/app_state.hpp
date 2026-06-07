@@ -802,6 +802,15 @@ struct AppState {
     enum class UnitSystem : std::uint8_t { Metric, Imperial };
     UnitSystem first_run_units{UnitSystem::Metric};
 
+    // FA24-swap workflow modal (Welcome → Common workflows). Opened
+    // from the welcome card or future Tools menu; gated at open-time
+    // on pack_supports_fa24_swap(). Persistent badge in the status
+    // bar reflects whether the project's active history carries the
+    // "fa24_swap" tag at its head (i.e. the workflow ran and hasn't
+    // been undone). See docs/16-custom-features.md for the broader
+    // workflow concept.
+    bool show_fa24_swap_modal{false};
+
     // Settings modal (Tools -> Settings...).
     bool show_settings_modal{false};
     char settings_def_root_input[1024]{};

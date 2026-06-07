@@ -26,6 +26,28 @@ void render_def_registry_modal(AppState &state);
 void render_read_rom_modal(AppState &state);
 void render_first_run_modal(AppState &state);
 void render_help_modal(AppState &state);
+void render_fa24_swap_modal(AppState &state);
+
+// Public guard used by Welcome card + Tools menu entry to decide
+// whether the FA24-swap workflow card should be enabled. Returns
+// true when the loaded project's pack declares all required tables
+// for the workflow. See modals/fa24_swap.cpp for the table list.
+[[nodiscard]] bool pack_supports_fa24_swap(AppState const &state);
+
+// Returns true when the project's active-ROM history has at least
+// one edit tagged "fa24_swap" at the head of the applied range —
+// i.e. the FA24-swap workflow ran and hasn't been undone past its
+// first edit. Drives the status-bar badge and the welcome-card's
+// "already applied" indicator.
+[[nodiscard]] bool fa24_swap_active(AppState const &state);
+
+// Atomically undo every contiguous "fa24_swap"-tagged edit at the
+// head of the active history, restoring the project state to before
+// the workflow ran. Used by the status-bar badge's Revert All. Noop
+// when there's no project, no tagged edits, or the head edit is
+// untagged (user added a manual edit on top — they need to undo
+// that one first to expose the workflow batch).
+void revert_fa24_swap(AppState &state);
 
 } // namespace st::ui
 
