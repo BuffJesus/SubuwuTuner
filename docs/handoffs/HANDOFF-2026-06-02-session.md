@@ -15,7 +15,7 @@ landed in `48d16e5` and the workaround pattern (plain `ImGui::Begin` +
 manual dim overlay instead of `BeginPopupModal`) is captured in memory
 at `project_imgui_popupmodal_invisible.md`. From there the user
 directed continuous shipping — 11 sprints, each ~4 tasks — punctuated
-by spot-tests on the FehrTune project and the demo project.
+by spot-tests on the user's working project and the demo project.
 
 The session's center of gravity was UX completion across already-shipped
 modules: every panel that needed a chip filter got one, every shareable
