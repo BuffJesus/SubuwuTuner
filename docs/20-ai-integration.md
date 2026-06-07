@@ -114,7 +114,7 @@ target_peak_hp = 340                    # wheel hp
 fuel = "93"                             # "91" | "93" | "e30" | "e40" | "e85"
 hardware = [
     "3-port boost solenoid",
-    "Cobb Stage 2 intake",
+    "aftermarket Stage 2 intake",
     "TMIC",
 ]
 use = "daily-summer-only"               # | "track-only" | "drag-only" | "year-round-daily"

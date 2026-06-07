@@ -19,7 +19,7 @@ Ordered by expected impact × probability.
 - **Probability:** low if we follow `06-legal-ethics.md`
 - **Mitigations:**
   - Clean-room workflow documented per file; no decompilation of any third-party tool
-  - All code original; data drawn only from public sources (RomRaider, SAE standards, vendor-documented APIs, owner-supplied test fixtures)
+  - All code original; data drawn only from public sources (community XML schemas, SAE standards, vendor-documented APIs, owner-supplied test fixtures)
   - Apache 2.0 license keeps our own output unencumbered
   - When in doubt about whether a public artifact is safe to reference, document the question and get written legal advice before proceeding
 
@@ -39,7 +39,7 @@ Ordered by expected impact × probability.
 - **Impact:** schedule slip in Phase 3–4
 - **Probability:** high — VB UDS particulars are not fully documented in public
 - **Mitigations:**
-  - Use RomRaider as a reference; many of the unknowns are already solved for VA
+  - Use the community XML definition corpus as a reference; many of the unknowns are already solved for VA
   - Ship Phase 1–3 features (read-only viewer, editor, ELM datalogging) without VB write support if needed
   - Recruit a community contributor with a VB and a J2534 device early
 

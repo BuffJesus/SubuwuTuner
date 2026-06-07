@@ -113,8 +113,8 @@ The Y-cable capture flow described below remains correct as a parallel / verific
 
 ## Deriving SSMCAN1 from a Y-cable capture (the parallel / verification path)
 
-Best path for a vehicle owner with a working authenticated tool (COBB
-AP, EcuTek, ECUFlash, etc.) already paired to their car:
+Best path for a vehicle owner with an aftermarket flasher already
+paired to their car:
 
 ### Hardware
 

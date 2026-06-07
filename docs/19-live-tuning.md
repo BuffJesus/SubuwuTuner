@@ -1,6 +1,6 @@
 # 19 — Live tuning
 
-Live tuning means editing a calibration value while the engine is running, with the change taking effect on the very next ECU loop iteration — no flash cycle, no key-off. It is the canonical dyno-tuner workflow: pull on the dyno, AFR is two points lean in cell X, tuner clicks the cell, types a value, the next pull is correct. Atlas supports this; nothing in the public Subaru-tuning open-source ecosystem does (RomRaider has the *protocol* support but ships no UI for it).
+Live tuning means editing a calibration value while the engine is running, with the change taking effect on the very next ECU loop iteration — no flash cycle, no key-off. It is the canonical dyno-tuner workflow: pull on the dyno, AFR is two points lean in cell X, tuner clicks the cell, types a value, the next pull is correct. Some commercial tools support this; nothing in the public Subaru-tuning open-source ecosystem ships an end-to-end UI for it.
 
 This document is the design + roadmap for adding it to SubuwuTuner. **It is forward-looking; live tuning is not implemented yet.** Building it now would land before Phase 4 hardware validation, which is the wrong order — see §"Roadmap placement" below.
 
@@ -101,7 +101,7 @@ RAM-shadow addresses are per-firmware data. Same provenance rules as the calibra
 
 1. **Owner-side ROM analysis** — the user dumps their ROM via `rom-pull`, RAM-shadow tables are decoded by following the bootloader's RAM-redirect setup code. Documented as a workflow under `tools/defgen/`.
 2. **Hardware capture** — observe which RAM addresses an existing live-tuning tool writes to, when in side-by-side mode against a logger.
-3. **Forum-sourced RR XMLs** — RomRaider's logger XML carries live-tune metadata for some CIDs. Fact extraction via `tools/defgen/loggergen.py` (extend to consume the relevant tags).
+3. **Forum-sourced community XMLs** — public logger-XML files in the community schema (see `docs/15`) carry live-tune metadata for some CIDs. Fact extraction via `tools/defgen/loggergen.py` (extend to consume the relevant tags).
 
 Same red-line rules from `CLAUDE.md`: do not decompile commercial tools to obtain these. RomRaider's GPL source is the canonical fact source.
 
@@ -109,7 +109,7 @@ Same red-line rules from `CLAUDE.md`: do not decompile commercial tools to obtai
 
 The same write primitives work for two adjacent surfaces:
 
-- **Custom-feature enable flags** (`docs/16` §"Live-toggleable features"). A feature declares an `enable_ram_address`; toggling Launch Control on or off is a 1-byte UDS write to that address. The patch's main loop reads the flag every iteration; flag false = feature inert. This is the underlying mechanism for the COBB-AccessPort-style "toggle from the hardware screen" UX described in `docs/18` §12.
+- **Custom-feature enable flags** (`docs/16` §"Live-toggleable features"). A feature declares an `enable_ram_address`; toggling Launch Control on or off is a 1-byte UDS write to that address. The patch's main loop reads the flag every iteration; flag false = feature inert. This is the underlying mechanism for the handheld-tuner "toggle from the device screen" UX described in `docs/18` §12.
 - **Scalar feature parameters.** A feature can also declare `scalar_param_ram_address` entries for runtime-tunable knobs (Launch Control target RPM, anti-lag overrun threshold). These are 2-byte or 4-byte writes to the same kind of RAM address.
 
 The `st::live_tune::Session` API is the same: `write_cell(table_id, row, col, value)` for calibration cells; an additional `write_feature_param(feature_id, param_name, value)` (or equivalent) for feature-side writes. The plan-time linter runs on both — engine-safety verdicts apply to a "launch control RPM = 8500" write the same way they apply to a calibration-cell write.

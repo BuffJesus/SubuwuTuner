@@ -77,10 +77,9 @@ license         = "Apache-2.0"
 
 Post-write checksum repair is a Phase 4 concern, but the pack should already
 carry the selector so `defgen` can populate it from upstream data and we don't
-have to revisit every pack later. Mirrors the `<checksum module="…">` strings
-used in RomRaider's public definition XML (`ChecksumSTD`, `ChecksumALT`,
-`ChecksumALT2`, `ChecksumCOPY`, `ChecksumBYTEXOR`, …) and ECUFlash's
-`<checksummodule>` strings (`subarudbw`, …):
+have to revisit every pack later. The string set covers the checksum variants
+documented in the community XML definition schema (standard sum-of-words
+variant plus the alternate-shape variants, copy / xor variants, etc.):
 
 | `checksum_type` | Meaning |
 |---|---|

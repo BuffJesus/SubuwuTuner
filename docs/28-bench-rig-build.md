@@ -304,8 +304,8 @@ runbook are what gets us moving on that.
   shim
 - `docs/08-testing-strategy.md` Tier 4 — HIL test plan
 - `docs/13-transport.md` — OBDX adapter wiring on the host side
-- `docs/23-security-access.md` — SA variant catalog (factory / COBB-AP
-  / Fehr-active)
+- `docs/23-security-access.md` — SA variant catalog (factory +
+  aftermarket-installer variants)
 - `docs/26-bulk-reflash-cipher.md` — optional gated 0xB6 write path
   (off by default; not needed for Tier 4)
 - `D:\Subuwu\findings\2017_WRX_FA_ECU_Bench_Reference.pdf`

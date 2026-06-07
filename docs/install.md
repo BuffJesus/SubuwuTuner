@@ -42,9 +42,9 @@ subuwutuner-cli project-new --source path/to/rom.bin \
 
 The pack format is documented in [`11-definition-format.md`](11-definition-format.md).
 
-## Generating your own pack from a public RomRaider XML
+## Generating your own pack from a public community XML
 
-`tools/defgen/` converts a RomRaider-format XML definition to SubuwuTuner's TOML schema:
+`tools/defgen/` converts a community-schema XML definition to SubuwuTuner's TOML schema:
 
 ```bash
 # Single-ROM XML → single TOML
@@ -56,10 +56,10 @@ python tools/defgen/defgen.py path/to/multi-rom.xml -o path/to/out-dir/
 
 Public sources:
 
-- **Genuine RomRaider community XML:** [`github.com/RomRaider/RomRaider`](https://github.com/RomRaider/RomRaider) — the canonical upstream
-- **Merp's curated pack:** [`github.com/Merp/SubaruDefs`](https://github.com/Merp/SubaruDefs) — `RomRaider/ecu/metric/ecu_defs.xml` covers most older Subarus
+- The community-maintained upstream XML repository (open-source GPL project; URLs in `docs/15`)
+- Curated-pack mirrors (e.g., `Merp/SubaruDefs` on GitHub — `ecu/metric/ecu_defs.xml` covers most older Subarus)
 
-Anything traceable to commercial-tool circumvention (Atlas, COBB, EcuTek, dealer software) is **out of scope** for this repo as first-party content; see [`17-data-distribution-policy.md`](17-data-distribution-policy.md) §4 for the acceptance criteria.
+Anything traceable to commercial-tool circumvention is **out of scope** for this repo as first-party content; see [`17-data-distribution-policy.md`](17-data-distribution-policy.md) §4 for the acceptance criteria.
 
 ## Generating from your own ROM dump
 
@@ -67,7 +67,7 @@ Planned: a hardware-capture workflow that builds a starter pack from a ROM you h
 
 ## SSM datalogger fragments
 
-The `definitions/pids.toml` (91 SSM PIDs + 68 switches) and `definitions/ecuparams/` (per-CID extended PIDs) are community-sourced from RomRaider's `logger.xml` and ship with the public repo. Your VA/VB pack will need to declare them as fragments via `[pack].includes`:
+The `definitions/pids.toml` (91 SSM PIDs + 68 switches) and `definitions/ecuparams/` (per-CID extended PIDs) are community-sourced from the public `logger.xml` shape and ship with the public repo. Your VA/VB pack will need to declare them as fragments via `[pack].includes`:
 
 ```toml
 # in your pack.toml
