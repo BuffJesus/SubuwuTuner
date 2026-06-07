@@ -46,3 +46,153 @@ name      = "LF79102P"
 cid_scan  = true
 cid_match = "LF79102P"
 ecu_part  = ""
+
+# === DTC bitmap (resolved 2026-06-06 PM) ===
+#
+# Cross-verified across the LF79100P/101P/102P/103P family: all share the
+# same bitmap base, structure, and per-code (byte, bit) positions. See
+# D:/Subuwu/findings/decompile/lf79103p/DTC_BITMAP_RESOLVED.md for the
+# derivation against the Stage-1 LF79100P decat tune (8/8 catalyst codes
+# match perfectly).
+
+[[dtc_bitmap]]
+id           = "primary_dtc_enable"
+name         = "Primary DTC enable bitmap"
+# 1 bit per DTC, indexed by position in the DTC code table at 0x074400
+# (stride 2 bytes per slot). 320 bytes covers 2560 possible DTC slots.
+address      = 0x04CA68
+length_bytes = 320
+endianness   = "big"
+
+# Catalyst efficiency — primary cat removal target for tuners.
+[[dtc]]
+code               = "P0420"
+name               = "Catalyst System Efficiency Below Threshold Bank 1"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 26
+bit                = 0
+emissions_relevant = true
+
+# Direct-injection HPFP fault — common after FA20DIT mods.
+# Note: P008B not present in the standard DTC code table at 0x074400.
+# Either stored under a different code form or in a separate (extended) table.
+# Pack entry kept for documentation; flipping these bytes will NOT affect the
+# real ECU behavior until P008B's actual location is found.
+[[dtc]]
+code               = "P008B"
+name               = "Low Pressure Fuel System Pressure Too High (NOT IN STANDARD TABLE — needs further hunt)"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 0
+bit                = 1
+emissions_relevant = false
+
+# Wastegate solenoid — surfaces during boost-by-gear tuning.
+[[dtc]]
+code               = "P0244"
+name               = "Turbocharger Wastegate Solenoid A Range/Performance"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 36
+bit                = 3
+emissions_relevant = false
+
+# Tumble Generator Valve — frequently disabled on intake mods.
+[[dtc]]
+code               = "P2610"
+name               = "Tumble Generator Valve Performance"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 83
+bit                = 2
+emissions_relevant = true
+
+# OBD-II readiness sentinel — disabling this hides incomplete monitors.
+[[dtc]]
+code               = "P0606"
+name               = "ECM Processor Performance"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 95
+bit                = 6
+emissions_relevant = false
+
+# === Catalyst/O2 DTCs commonly disabled by decat tunes ===
+# All validated against the LF79100P Stage 1 decat diff.
+
+[[dtc]]
+code               = "P0141"
+name               = "O2 Sensor Heater Performance Bank 1 Sensor 2 (rear O2)"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 24
+bit                = 5
+emissions_relevant = true
+
+[[dtc]]
+code               = "P0137"
+name               = "O2 Sensor Voltage Low Bank 1 Sensor 2 (rear O2)"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 29
+bit                = 0
+emissions_relevant = true
+
+[[dtc]]
+code               = "P0138"
+name               = "O2 Sensor Voltage High Bank 1 Sensor 2 (rear O2)"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 29
+bit                = 6
+emissions_relevant = true
+
+[[dtc]]
+code               = "P0037"
+name               = "HO2 Sensor Heater Control Bank 1 Sensor 2 Low"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 30
+bit                = 6
+emissions_relevant = true
+
+[[dtc]]
+code               = "P0038"
+name               = "HO2 Sensor Heater Control Bank 1 Sensor 2 High"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 30
+bit                = 4
+emissions_relevant = true
+
+[[dtc]]
+code               = "P2096"
+name               = "Post-Cat Fuel Trim System Too Lean Bank 1"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 52
+bit                = 6
+emissions_relevant = true
+
+[[dtc]]
+code               = "P2097"
+name               = "Post-Cat Fuel Trim System Too Rich Bank 1"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 53
+bit                = 7
+emissions_relevant = true
+
+# === EGR DTCs ===
+# FA20DIT (2017 WRX) has a physical cooled external EGR valve. These two
+# are the only EGR codes present in the LF79103P standard DTC code table at
+# 0x074400 — P0401/P0402/P040D/P0488 are not monitored by this ECU. Useful
+# as a fallback if the cal-table EGR delete (zeroing EGR Airflow @ 0x034DEA
+# + EGR Absolute Pressure Main @ 0x034F9A) doesn't fully suppress runtime
+# monitor errors in field testing. Validated against the LF79102P stock ROM;
+# cousin equivalence inferred from the existing cross-CID diff for adjacent codes.
+
+[[dtc]]
+code               = "P0400"
+name               = "Exhaust Gas Recirculation Flow Malfunction"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 26
+bit                = 4
+emissions_relevant = true
+
+[[dtc]]
+code               = "P0403"
+name               = "Exhaust Gas Recirculation Control Circuit"
+bitmap_id          = "primary_dtc_enable"
+byte_offset        = 96
+bit                = 2
+emissions_relevant = true
