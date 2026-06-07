@@ -1,22 +1,31 @@
-# Minimal LF79101P identifier pack — recognizes the user's car in
-# COBB-installed state.
+# LF79101P pack — recognizes a third-party-installed-tune state and
+# inherits the LF79103P table catalog (same firmware family, identical
+# table addresses; the CID byte at offset 0x37C51 is the only diff).
 #
-# Why: When COBB installs a tune, it overwrites the ROM CID descriptor
-# at offset 0x37C51 from LF79102P (factory) to LF79101P (COBB's "tuned
-# car" marker). This pack lets `rom-identify` recognize that state.
+# History: when a popular handheld flasher installs a tune, it
+# overwrites the ROM CID descriptor at offset 0x37C51 from LF79102P
+# (factory) to LF79101P (the flasher's "tuned car" marker). This pack
+# lets `rom-identify` recognize that state and gives the editor the
+# full table catalog via `extends`.
 #
-# Pairs with `lf79101p_cobb_f3xx.toml` — that's the overlay carrying
-# the 12 R²-verified Cobb datalog PIDs. The byte positions in that
-# overlay were R²-verified against the user's actual car sniff while
-# in this very state.
+# Pairs with `lf79101p_cobb_f3xx_v2.toml` — that's the overlay carrying
+# the COBB AP F3xx datalog PIDs. The chain at load time:
+#     lf79101p_cobb_f3xx_v2  →  lf79101p  →  lf79103p
+# Cobb-overlay PIDs land on top of LF79103P's tables.
 #
-# When the user uninstalls COBB, the descriptor reverts to LF79102P
-# and `lf79102p.toml` matches instead.
+# When the user uninstalls the third-party tune, the descriptor reverts
+# to LF79102P and `lf79102p.toml` matches instead.
 
 [pack]
 schema_version = 1
 id             = "lf79101p"
-display_name   = "LF79101P (COBB-installed state — stub identifier)"
+# Inherit table catalog from lf79103p (same firmware family; only the
+# CID descriptor byte differs). Required for workflows like the FA24-
+# swap recipe to pack_supports_*-gate correctly against this CID —
+# the user's tuned ECU reports LF79101P at runtime even though the
+# tables are at the LF79103P addresses.
+extends        = "lf79103p"
+display_name   = "LF79101P (third-party-installed-tune state)"
 platform       = "subaru"
 transmission   = "mt"
 years          = [2017]
@@ -26,6 +35,9 @@ license        = "Apache-2.0"
 # COBB-installed ROMs carry a 25-slot per-block CRC-32 integrity table
 # at 0x1FFF3C..0x1FFFA0 (analyst handoff 2026-06-06). Repair must fire
 # after every cal edit or the bootloader integrity check trips.
+# Restate explicitly so merge_over() doesn't lose the parent's
+# subaru_std checksum when the LF79101P state needs the COBB-specific
+# per-install scheme.
 checksum_type  = "per_install_block_crc32"
 
 
