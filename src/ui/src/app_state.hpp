@@ -603,6 +603,14 @@ struct AppState {
     // frame. Not persisted — the user's manual open/close choices
     // from imgui.ini take over again on the next frame.
     bool sidebar_collapse_all_request{false};
+    // One-shot request to force-open the top + leaf group containing
+    // the currently-selected table, and scroll the row into view.
+    // Set by select_table() whenever the selection changes, so jumps
+    // from elsewhere (command palette, compare panel, history panel,
+    // jump_to_table) land the user inside the relevant section of
+    // the sidebar without leaving them lost in a collapsed tree.
+    // Cleared at end of frame so the user can collapse freely.
+    bool sidebar_open_selected_group_request{false};
     // Parsed glossary terms (from docs/10-glossary.md). Populated
     // lazily on first help-modal open OR first glossary_tooltip_for
     // hover. glossary_loaded gates the load; using a flag instead of

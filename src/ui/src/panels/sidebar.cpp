@@ -423,6 +423,13 @@ void render_sidebar(AppState &state) {
         // than affordance.
         char const *label = t.name.empty() ? t.id.c_str() : t.name.c_str();
         ImGui::PushID(t.id.c_str());
+        // Auto-scroll the selected row into view when a jump from
+        // elsewhere just landed here. SetScrollHereY centers the row
+        // vertically; only do it on the actual selected row to avoid
+        // every row fighting for the scroll position.
+        if (selected && state.sidebar_open_selected_group_request) {
+            ImGui::SetScrollHereY(0.5f);
+        }
         if (ImGui::Selectable(label, selected, ImGuiSelectableFlags_AllowOverlap)) {
             state.select_table(t.id);
         }
@@ -542,6 +549,34 @@ void render_sidebar(AppState &state) {
 
     std::size_t hidden_visible_in_pack = 0; // how many hidden cats actually exist in this pack
 
+    // Does this leaf group's `indices` include a table whose id equals
+    // state.selected_table_id? Used by the auto-open-on-jump path —
+    // when a cross-reference jump lands a new selection, we want to
+    // force-open the containing top + leaf so the user lands inside
+    // it rather than facing a collapsed tree.
+    auto const leaf_contains_selected = [&](std::size_t gi) -> bool {
+        if (state.selected_table_id.empty()) {
+            return false;
+        }
+        for (auto idx : groups[gi].indices) {
+            if (def.tables()[idx].id == state.selected_table_id) {
+                return true;
+            }
+        }
+        return false;
+    };
+    auto const top_contains_selected = [&](TopGroup const &tg) -> bool {
+        if (state.selected_table_id.empty()) {
+            return false;
+        }
+        for (auto gi : tg.sub_idx) {
+            if (leaf_contains_selected(gi)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
     // Renders one leaf-level group (the existing `Group`) as a TreeNode
     // with all its context-menu / drag-drop / glossary affordances. Used
     // both inline-at-top-level (when a top group has no sub-divisions)
@@ -566,6 +601,12 @@ void render_sidebar(AppState &state) {
         } else if (state.sidebar_collapse_all_request) {
             // One-shot "Collapse all" overrides imgui.ini.
             ImGui::SetNextItemOpen(false, ImGuiCond_Always);
+        } else if (state.sidebar_open_selected_group_request &&
+                   leaf_contains_selected(gi)) {
+            // Auto-open the leaf that contains the just-selected table
+            // so a cross-reference jump from elsewhere lands the user
+            // inside the relevant section.
+            ImGui::SetNextItemOpen(true, ImGuiCond_Always);
         }
         // Leaf-level default-CLOSED to match the top-level default.
         // Opening a top group should reveal what's INSIDE it (the
@@ -678,6 +719,12 @@ void render_sidebar(AppState &state) {
             // takes precedence so an active filter is never broken by
             // a stale collapse request.
             ImGui::SetNextItemOpen(false, ImGuiCond_Always);
+        } else if (state.sidebar_open_selected_group_request &&
+                   top_contains_selected(tg)) {
+            // Auto-open the top group that contains the just-selected
+            // table — paired with the leaf auto-open below so the
+            // jump path reveals two nested groups in one frame.
+            ImGui::SetNextItemOpen(true, ImGuiCond_Always);
         }
         bool const top_open = ImGui::TreeNodeEx(top_label,
                                                 ImGuiTreeNodeFlags_SpanAvailWidth);
@@ -713,6 +760,9 @@ void render_sidebar(AppState &state) {
     // in this frame has had its chance to consume the SetNextItemOpen
     // override. Leaving it set would force-close the tree every frame.
     state.sidebar_collapse_all_request = false;
+    // Same for the auto-open-on-selection flag — single-frame trigger
+    // so the user can collapse again if they want.
+    state.sidebar_open_selected_group_request = false;
     // Apply the drag-drop reorder once the loop finishes. Mutating
     // `groups` mid-frame is fine (it's a local), but the persistence
     // side mutates AppState + writes disk — defer to post-loop so the

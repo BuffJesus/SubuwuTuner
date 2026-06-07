@@ -129,6 +129,12 @@ void AppState::try_open_project(std::filesystem::path const &path) {
 }
 
 void AppState::select_table(std::string const &id) {
+    // Mark the sidebar's auto-open-and-scroll behavior for this frame.
+    // Callers might be the sidebar itself (where the user is already
+    // looking at the row) or a cross-reference jump from a different
+    // panel — the request is harmless in the first case (already-open
+    // groups stay open) and meaningful in the second.
+    sidebar_open_selected_group_request = true;
     selected_table_id = id;
     current_table_data.reset();
     selection.reset();
