@@ -154,6 +154,12 @@ if (TARGET subuwutuner-cli)
 endif()
 target_compile_definitions(st_unit_tests PRIVATE
     ST_FIXTURE_DEMO_STUNE="${CMAKE_SOURCE_DIR}/fixtures/demo.stune")
+# Exposes the source-tree definitions/ directory as a compile-time
+# constant so tests can exercise real in-tree packs (e.g. asserting
+# lf79103p.toml's [[workflow]] declarations still resolve every
+# required_table). Same pattern as ST_FIXTURE_DEMO_STUNE.
+target_compile_definitions(st_unit_tests PRIVATE
+    ST_DEFINITIONS_DIR="${CMAKE_SOURCE_DIR}/definitions")
 
 # Tests that pin specific encoder bit patterns (e.g. test_rh850.cpp)
 # need direct access to the backend's private impl headers. Exposing

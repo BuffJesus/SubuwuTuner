@@ -2514,6 +2514,63 @@ required_tables = ["t1", "t2"]
     REQUIRE(d->find_workflow("e85_conversion") != nullptr);
 }
 
+// Belt-and-suspenders against in-tree pack drift: load the real
+// definitions/impreza/lf79103p.toml and assert fa24_swap is declared
+// AND every required_tables id still resolves. Trips if anyone runs
+// a regen that drops one of the 5 required tables or renames them.
+// Complements the CI workflow-list smoke gate by running inside the
+// unit-test binary so failure shows up at `ctest` time, not just on
+// the bigger CI matrix.
+TEST_CASE("definitions/impreza/lf79103p.toml declares an eligible fa24_swap workflow",
+          "[defs][workflow][in_tree]") {
+    auto const path =
+        std::filesystem::path{ST_DEFINITIONS_DIR} / "impreza" / "lf79103p.toml";
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec)) {
+        // Tolerate missing file in unusual checkouts (sparse clone /
+        // path-B-only test sandbox). Skip with a warning rather than
+        // failing — the CI workflow-list gate covers the canonical
+        // case from the same source tree.
+        WARN("definitions/impreza/lf79103p.toml not present — skipping in-tree workflow check");
+        return;
+    }
+    auto const d = st::Definition::from_file(path);
+    REQUIRE(d.has_value());
+    auto const *fa24 = d->find_workflow("fa24_swap");
+    REQUIRE(fa24 != nullptr);
+    REQUIRE(fa24->display_name == "FA24 swap (VA WRX)");
+    REQUIRE(fa24->modal == "fa24_swap");
+    REQUIRE(fa24->required_tables.size() == 5);
+    // Per-table presence — surfaces which id is missing if eligibility
+    // breaks, instead of a single boolean failure.
+    for (auto const &table_id : fa24->required_tables) {
+        INFO("required table: " << table_id);
+        REQUIRE(d->find_table(table_id) != nullptr);
+    }
+    REQUIRE(d->supports_workflow("fa24_swap"));
+}
+
+// Same test against lf79101p — verifies the extends chain actually
+// flows the [[workflow]] entry from lf79103p down to the e-tuned
+// pack the user's project loads in practice. Without this, a future
+// edit that breaks extends inheritance for workflows specifically
+// would slip past the lf79103p test above.
+TEST_CASE("definitions/impreza/lf79101p.toml inherits fa24_swap via extends",
+          "[defs][workflow][extends][in_tree]") {
+    auto const path =
+        std::filesystem::path{ST_DEFINITIONS_DIR} / "impreza" / "lf79101p.toml";
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec)) {
+        WARN("definitions/impreza/lf79101p.toml not present — skipping in-tree extends check");
+        return;
+    }
+    auto const d = st::Definition::from_file(path);
+    REQUIRE(d.has_value());
+    REQUIRE(d->pack().id == "lf79101p");
+    // Workflow comes from the parent pack (lf79103p).
+    REQUIRE(d->supports_workflow("fa24_swap"));
+}
+
 TEST_CASE("from_directory follows multi-level extends chains", "[defs][extends]") {
     TempDir td;
 
