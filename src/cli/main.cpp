@@ -1785,7 +1785,36 @@ int cmd_pack_info_json(std::filesystem::path const &path) {
     out.append(std::to_string(def->hooks().size()));
     out.append(",\"primitives\":");
     out.append(std::to_string(def->primitives().size()));
+    out.append(",\"workflows\":");
+    out.append(std::to_string(def->workflows().size()));
     out.append("}");
+
+    // Workflows — pack-declared [[workflow]] entries with their
+    // required_tables list + eligibility (supports_workflow). CI
+    // scripts that gate on workflow availability consume this without
+    // needing to re-parse the TOML.
+    out.append(",\"workflows\":[");
+    for (std::size_t i = 0; i < def->workflows().size(); ++i) {
+        auto const &w = def->workflows()[i];
+        if (i != 0)
+            out.append(",");
+        out.append("{\"id\":");
+        json_escape(out, w.id);
+        out.append(",\"display_name\":");
+        json_escape(out, w.display_name);
+        out.append(",\"modal\":");
+        json_escape(out, w.modal);
+        out.append(",\"required_tables\":[");
+        for (std::size_t j = 0; j < w.required_tables.size(); ++j) {
+            if (j != 0)
+                out.append(",");
+            json_escape(out, w.required_tables[j]);
+        }
+        out.append("],\"eligible\":");
+        out.append(def->supports_workflow(w.id) ? "true" : "false");
+        out.append("}");
+    }
+    out.append("]");
 
     // Validation.
     auto const validity = def->validate();
