@@ -489,19 +489,62 @@ void copy_table_from_basemap(AppState &state, std::string const &label,
                    });
 }
 
+// Workflow table descriptor — what to edit + how, parameterised so
+// the apply loop is a single pass over kWorkflowTables instead of an
+// open-coded sequence. Adding a 5th workflow table (or a 6th when the
+// AVCS TGV-open variants land) is a one-line addition here, no apply-
+// path changes. The default op signature is (TableData&, Rect, double)
+// — all of set_cells / add_cells / multiply_cells fit.
+using EditOp = st::Status (*)(st::Definition::TableData &, st::edit::Rect, double);
+
+struct WorkflowTable {
+    char const *table_id;
+    char const *label_basemap; // edit-description string when copying from basemap
+    char const *label_default; // edit-description string for the defaults branch
+    EditOp default_op;         // op the defaults branch invokes
+    double default_arg;        // single double argument for set_cells / add_cells / multiply_cells
+    bool needs_keep_fa24_cams; // false = always apply; true = skipped on hardware-only cam paths
+};
+
+// Order matters — apply_fa24_swap iterates this verbatim and the
+// status bar's "Revert All" undoes in reverse. The 4 keep-FA24-cams
+// edits should land contiguously so undo_while_tag peels them as one
+// batch even when the user adds an unrelated edit on top later.
+constexpr std::array<WorkflowTable, 5> kWorkflowTables = {{
+    {"engine_displacement",
+     "FA24 swap: Engine Displacement (basemap)",
+     "FA24 swap: Engine Displacement \xE2\x86\x92 2.4 L",
+     &st::edit::set_cells, 2.4, /*needs_keep_fa24_cams=*/false},
+    {"fuel_timing_hpfp_base_offset",
+     "FA24 swap: HPFP Base Offset (basemap)",
+     "FA24 swap: HPFP Base Offset \xE2\x86\x92 260\xC2\xB0",
+     &st::edit::set_cells, 260.0, true},
+    {"avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
+     "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) (basemap)",
+     "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) +2\xC2\xB0",
+     &st::edit::add_cells, 2.0, true},
+    {"avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
+     "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) (basemap)",
+     "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) +2\xC2\xB0",
+     &st::edit::add_cells, 2.0, true},
+    {"fuel_injectors_pulse_injector_mult_table",
+     "FA24 swap: Injector Mult Table (basemap)",
+     "FA24 swap: Injector Mult Table \xC3\x97""1.18",
+     &st::edit::multiply_cells, 1.18, true},
+}};
+
 void apply_fa24_swap(AppState &state) {
     // All edits route through apply_op_table() so each is recorded as
     // its own undoable history entry, surfaces in the audit log, and
-    // flips the dirty flag. The shared transaction_tag ("fa24_swap")
+    // flips the dirty flag. The shared transaction_tag (kWorkflowId)
     // is what powers the status-bar badge's Revert All affordance —
     // History::undo_while_tag walks back contiguous tag-matching edits.
 
-    constexpr char const *kTag = "fa24_swap";
     bool const from_basemap = g_state.basemap_source == BasemapSource::LoadBasemap &&
                               !g_state.basemap_path.empty();
 
     // Load the basemap up-front (one shared Rom) so we don't re-read
-    // 2 MB four times. Fall back to defaults if the load fails so the
+    // 2 MB N times. Fall back to defaults if the load fails so the
     // user gets something rather than nothing — surfaces the failure
     // via a warn toast.
     std::optional<st::Rom> basemap_rom;
@@ -518,62 +561,21 @@ void apply_fa24_swap(AppState &state) {
 
     auto const cursor_before = state.project->active_history().cursor();
 
-    // 1. Displacement — applies for every cam strategy. Single-cell
-    //    table; "set whole table to 2.4" is correct regardless of its
-    //    actual row/col layout, and the basemap variant is "copy
-    //    whatever the basemap stored" (also 2.4 in practice).
-    if (basemap_rom.has_value()) {
-        copy_table_from_basemap(state, "FA24 swap: Engine Displacement (basemap)",
-                                "engine_displacement", *basemap_rom);
-    } else {
-        apply_op_table(state, "FA24 swap: Engine Displacement → 2.4 L", kTag,
-                       "engine_displacement",
-                       [](st::Definition::TableData &td, st::edit::Rect r) {
-                           return st::edit::set_cells(td, r, 2.4);
-                       });
-    }
-
-    if (g_state.cam_strategy == CamStrategy::KeepFA24Cams) {
+    // Single pass over the descriptor table. needs_keep_fa24_cams skips
+    // HPFP/AVCS/Injector when the user picked a hardware-only cam path
+    // (Displacement is the only descriptor with needs_keep_fa24_cams=false
+    // so it lands for every strategy).
+    for (auto const &wt : kWorkflowTables) {
+        if (wt.needs_keep_fa24_cams && g_state.cam_strategy != CamStrategy::KeepFA24Cams) {
+            continue;
+        }
         if (basemap_rom.has_value()) {
-            copy_table_from_basemap(state, "FA24 swap: HPFP Base Offset (basemap)",
-                                    "fuel_timing_hpfp_base_offset", *basemap_rom);
-            copy_table_from_basemap(state,
-                                    "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) (basemap)",
-                                    "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
-                                    *basemap_rom);
-            copy_table_from_basemap(state,
-                                    "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) (basemap)",
-                                    "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
-                                    *basemap_rom);
-            copy_table_from_basemap(state, "FA24 swap: Injector Mult Table (basemap)",
-                                    "fuel_injectors_pulse_injector_mult_table", *basemap_rom);
+            copy_table_from_basemap(state, wt.label_basemap, wt.table_id, *basemap_rom);
         } else {
-            // 2. HPFP base offset — flipped triangle lobe shift. 260°
-            //    is the geometric default.
-            apply_op_table(state, "FA24 swap: HPFP Base Offset → 260°", kTag,
-                           "fuel_timing_hpfp_base_offset",
-                           [](st::Definition::TableData &td, st::edit::Rect r) {
-                               return st::edit::set_cells(td, r, 260.0);
-                           });
-            // 3a/b. AVCS Intake Cam Target — +2° absorbs the FA24 cam
-            //       sensor plate tooth-angle delta. Baro Low + High.
-            apply_op_table(state, "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) +2°",
-                           kTag,
-                           "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
-                           [](st::Definition::TableData &td, st::edit::Rect r) {
-                               return st::edit::add_cells(td, r, 2.0);
-                           });
-            apply_op_table(state, "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) +2°",
-                           kTag,
-                           "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
-                           [](st::Definition::TableData &td, st::edit::Rect r) {
-                               return st::edit::add_cells(td, r, 2.0);
-                           });
-            // 4. Injector multiplier — scale per-cell by FA24/FA20 flow ratio.
-            apply_op_table(state, "FA24 swap: Injector Mult Table ×1.18", kTag,
-                           "fuel_injectors_pulse_injector_mult_table",
-                           [](st::Definition::TableData &td, st::edit::Rect r) {
-                               return st::edit::multiply_cells(td, r, 1.18);
+            apply_op_table(state, wt.label_default, kWorkflowId, wt.table_id,
+                           [op = wt.default_op, arg = wt.default_arg](
+                               st::Definition::TableData &td, st::edit::Rect r) {
+                               return op(td, r, arg);
                            });
         }
     }
