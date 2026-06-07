@@ -596,6 +596,13 @@ struct AppState {
     // Order doesn't matter (treated as a set) but the underlying
     // type is vector for cheap cross-frame iteration.
     std::vector<std::string> sidebar_hidden_categories;
+    // One-shot request to force-close every TreeNode in the sidebar
+    // for one frame. Set by the "Collapse all" affordance under the
+    // filter input; sidebar.cpp consumes it (SetNextItemOpen(false,
+    // Always) before each TreeNodeEx) and clears the flag at end of
+    // frame. Not persisted — the user's manual open/close choices
+    // from imgui.ini take over again on the next frame.
+    bool sidebar_collapse_all_request{false};
     // Parsed glossary terms (from docs/10-glossary.md). Populated
     // lazily on first help-modal open OR first glossary_tooltip_for
     // hover. glossary_loaded gates the load; using a flag instead of

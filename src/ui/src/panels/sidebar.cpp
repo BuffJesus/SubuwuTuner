@@ -223,6 +223,39 @@ void render_sidebar(AppState &state) {
     ImGui::InputTextWithHint("##table_filter", "Filter tables…  (Ctrl+F)", state.table_filter,
                              sizeof state.table_filter, ImGuiInputTextFlags_EscapeClearsAll);
 
+    // Right-aligned "Collapse all" affordance. One-shot — flips a flag
+    // the render loop consumes for one frame to force every TreeNode
+    // closed; persisted imgui.ini state takes over again next frame as
+    // soon as the user opens anything. Link-styled so it reads as a
+    // utility action, not a primary CTA — same vocabulary as the
+    // welcome footer's "Keyboard shortcuts" / "Command palette" links.
+    {
+        char const *const label = "Collapse all";
+        float const label_w = ImGui::CalcTextSize(label).x;
+        float const right_x =
+            ImGui::GetWindowContentRegionMax().x - label_w -
+            ImGui::GetStyle().FramePadding.x * 2.0f;
+        if (right_x > ImGui::GetCursorPosX()) {
+            ImGui::SetCursorPosX(right_x);
+        }
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 1.0f, 1.0f, 0.08f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.0f, 1.0f, 1.0f, 0.15f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2.0f, 0.0f));
+        if (ImGui::SmallButton(label)) {
+            state.sidebar_collapse_all_request = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            ImGui::SetTooltip("Close every group in the tree.\n"
+                              "Your previously-opened groups stay in imgui.ini\n"
+                              "and reopen on click — this is a one-shot reset.");
+        }
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(4);
+    }
+
     // Quick-jump shortcuts: E → first emissions-relevant table,
     // S → first engine-safety-critical table. Only fires when the
     // sidebar window is focused AND no text-input is active. Useful
@@ -530,6 +563,9 @@ void render_sidebar(AppState &state) {
         }
         if (!filter.empty()) {
             ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+        } else if (state.sidebar_collapse_all_request) {
+            // One-shot "Collapse all" overrides DefaultOpen + imgui.ini.
+            ImGui::SetNextItemOpen(false, ImGuiCond_Always);
         }
         // Leaf-level KEEPS DefaultOpen — once the user has opened the
         // parent top-level group, they want to see the actual rows
@@ -635,6 +671,11 @@ void render_sidebar(AppState &state) {
         }
         if (!filter.empty()) {
             ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+        } else if (state.sidebar_collapse_all_request) {
+            // One-shot "Collapse all" — closes top-level too. Filter
+            // takes precedence so an active filter is never broken by
+            // a stale collapse request.
+            ImGui::SetNextItemOpen(false, ImGuiCond_Always);
         }
         bool const top_open = ImGui::TreeNodeEx(top_label,
                                                 ImGuiTreeNodeFlags_SpanAvailWidth);
@@ -666,6 +707,10 @@ void render_sidebar(AppState &state) {
         }
         ImGui::TreePop();
     }
+    // Clear the one-shot "Collapse all" flag now that every TreeNode
+    // in this frame has had its chance to consume the SetNextItemOpen
+    // override. Leaving it set would force-close the tree every frame.
+    state.sidebar_collapse_all_request = false;
     // Apply the drag-drop reorder once the loop finishes. Mutating
     // `groups` mid-frame is fine (it's a local), but the persistence
     // side mutates AppState + writes disk — defer to post-loop so the
