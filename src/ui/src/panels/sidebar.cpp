@@ -564,16 +564,18 @@ void render_sidebar(AppState &state) {
         if (!filter.empty()) {
             ImGui::SetNextItemOpen(true, ImGuiCond_Always);
         } else if (state.sidebar_collapse_all_request) {
-            // One-shot "Collapse all" overrides DefaultOpen + imgui.ini.
+            // One-shot "Collapse all" overrides imgui.ini.
             ImGui::SetNextItemOpen(false, ImGuiCond_Always);
         }
-        // Leaf-level KEEPS DefaultOpen — once the user has opened the
-        // parent top-level group, they want to see the actual rows
-        // without a second click per sub-category. Per-session collapse
-        // state still persists via imgui.ini.
-        ImGuiTreeNodeFlags const tn_flags =
-            ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
-        bool const opened = ImGui::TreeNodeEx(tn_label, tn_flags);
+        // Leaf-level default-CLOSED to match the top-level default.
+        // Opening a top group should reveal what's INSIDE it (the
+        // sub-category labels) — not auto-expand every leaf and pour
+        // out every row, which puts the user back where they started.
+        // Per-session open/close still persists via imgui.ini's stable
+        // ###cat_<full-name> ID; once the user opens a leaf it stays
+        // open across sessions.
+        bool const opened =
+            ImGui::TreeNodeEx(tn_label, ImGuiTreeNodeFlags_SpanAvailWidth);
         if (ImGui::BeginPopupContextItem()) {
             char buf[160];
             std::snprintf(buf, sizeof buf, "Hide \"%.*s\"",
