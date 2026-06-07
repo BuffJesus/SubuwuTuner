@@ -44,7 +44,7 @@ SubuwuTuner/
 │   ├── README.md
 │   └── IDE-RUN-CONFIGS.md
 ├── tools/
-│   └── defgen/                        RomRaider XML → SubuwuTuner TOML (Python 3.12+; 88 unit tests)
+│   └── defgen/                        Community XML → SubuwuTuner TOML (Python 3.12+; 88 unit tests)
 └── .github/workflows/
     └── ci.yml                         single CI workflow (build matrix + defgen tools + advisory clang-format)
 ```

@@ -27,7 +27,7 @@ This folder contains the design and planning documents for **SubuwuTuner**, a co
 21. [20-ai-integration.md](20-ai-integration.md) — AI / LLM as advisory surface, not modification surface (v2.0+)
 22. [21-stune-format.md](21-stune-format.md) — `.stune` project directory layout and TOML schema
 23. [22-auto-update.md](22-auto-update.md) — `st::updater` design sketch (Phase 6): channels, manifest, signature verification, swap mechanics
-24. [23-security-access.md](23-security-access.md) — SecurityAccess (UDS 0x27): factory SSMCAN1 Feistel + COBB-AP / Fehr-active variants in tree, CLI-selectable
+24. [23-security-access.md](23-security-access.md) — SecurityAccess (UDS 0x27): factory SSMCAN1 Feistel + aftermarket-installer variants in tree, CLI-selectable
 25. [24-sniff-workflows.md](24-sniff-workflows.md) — Y-cable sniffing playbooks (during-flash capture, RAM-poll discovery, protocol learning, feature RE)
 26. [25-config-system.md](25-config-system.md) — `st::config` user-config layout, `[security_access].handheld_serial`, persistence rules
 27. [26-bulk-reflash-cipher.md](26-bulk-reflash-cipher.md) — Optional gated 0xB6 bulk-transfer write path: two-step arming, failure modes, brick-risk rationale

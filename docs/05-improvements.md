@@ -103,9 +103,9 @@ Adapter support (Tactrix, OBDLink, ELM327, OBDX Pro) is built on a coroutine-bas
 
 ## 11. Surfacing under-served definition coverage
 
-The RomRaider XMLs and the packs we ship from them already expose a long tail of maps and parameters that the existing tools *technically support* but for which **no community workflow exists**. Tuners ignore them because the UI doesn't make them legible, the methodology isn't written down, or both. SubuwuTuner uses this as a deliberate differentiator: ship the visualization and the workflow, not just the editor cell.
+The community XML definitions and the packs we ship from them already expose a long tail of maps and parameters that the existing tools *technically support* but for which **no community workflow exists**. Tuners ignore them because the UI doesn't make them legible, the methodology isn't written down, or both. SubuwuTuner uses this as a deliberate differentiator: ship the visualization and the workflow, not just the editor cell.
 
-The under-served categories below are present in nearly every per-CID RR pack we generate but rarely touched in published tunes:
+The under-served categories below are present in nearly every per-CID community-XML pack we generate but rarely touched in published tunes:
 
 | Category | What's in the def | Why it's neglected |
 |---|---|---|
@@ -146,7 +146,7 @@ Four concrete features fall out directly. None require new hardware; all run aga
    ```
 
    The shipped fixture (`fixtures/demo-knock-log.csv`) is a synthetic 3rd-gear pull where cyl 1 picks up persistent knock retard and cyls 3-4 stay clean — the output should clearly flag cyl 1 as the outlier.
-3. **Cold-start tuning workflow** — define a methodology (target lambda by ECT, recommended timing pull by ambient) and a GUI mode that gates the cold-start tables behind a checklist. Atlas exposes the maps; nobody ships a workflow around them. Implementation: `src/log/{include/st/log/coldstart.hpp,src/coldstart.cpp}` (phase classifier PreCrank / Cranking / InitialFiring / HighIdle / Warmup / ClosedLoop + ECT-binned aggregation + compliance vs a user-defined `TargetLambdaCurve`), `tests/unit/log/test_coldstart.cpp` (15 cases), `subuwutuner-cli coldstart-analyze` (phase table + ECT-bin table + deviation report), and a GUI panel under **View → Cold-start analysis (preview)** (phase summary + observed-vs-target ImPlot + sortable ECT-bin table). Try it without bringing your own log:
+3. **Cold-start tuning workflow** — define a methodology (target lambda by ECT, recommended timing pull by ambient) and a GUI mode that gates the cold-start tables behind a checklist. The maps are exposed by existing competing tools but no one ships a workflow around them. Implementation: `src/log/{include/st/log/coldstart.hpp,src/coldstart.cpp}` (phase classifier PreCrank / Cranking / InitialFiring / HighIdle / Warmup / ClosedLoop + ECT-binned aggregation + compliance vs a user-defined `TargetLambdaCurve`), `tests/unit/log/test_coldstart.cpp` (15 cases), `subuwutuner-cli coldstart-analyze` (phase table + ECT-bin table + deviation report), and a GUI panel under **View → Cold-start analysis (preview)** (phase summary + observed-vs-target ImPlot + sortable ECT-bin table). Try it without bringing your own log:
 
    ```
    subuwutuner-cli coldstart-analyze --log fixtures/demo-coldstart-log.csv \
@@ -202,7 +202,7 @@ Roadmap placement: **schema bump pulled into v1.0**, panel wires land incrementa
 
 ### FA-DIT logger XML supplement
 
-All four plays depend on extended SSM PIDs whose RAM addresses are firmware-specific. RomRaider's v370 logger XML (Nov 2021) is the latest public release and predates FA-DIT VA/VB WRX coverage entirely (see `fixtures/private/PAK_DECODE_RESULTS.md`). The SubuwuTuner-native fix is `tools/defgen/data/logger_supplement_fadit.xml` — a small additive logger XML in the RomRaider DTD shape that `loggergen.py` already consumes. Initially empty (except for a stub entry that proves the round-trip), it grows by contribution as community members capture real RAM addresses from hardware. Provenance rules and clean-room boundaries are baked into the file's header comment per `docs/15-clean-room-engineering.md`.
+All four plays depend on extended SSM PIDs whose RAM addresses are firmware-specific. The latest public community-XML logger release (v370, Nov 2021) predates FA-DIT VA/VB WRX coverage entirely (see `fixtures/private/PAK_DECODE_RESULTS.md`). The SubuwuTuner-native fix is `tools/defgen/data/logger_supplement_fadit.xml` — a small additive logger XML in the community-XML DTD shape that `loggergen.py` already consumes. Initially empty (except for a stub entry that proves the round-trip), it grows by contribution as community members capture real RAM addresses from hardware. Provenance rules and clean-room boundaries are baked into the file's header comment per `docs/15-clean-room-engineering.md`.
 
 ---
 

@@ -21,10 +21,11 @@ Project's existential risk: `docs/09` R1, `docs/05` §4, `docs/08` Tier 4.
 
 ## 1. Product vision
 
-A standalone handheld in the spirit of a COBB / Bully Dog / SCT: flash
-tune files **without a PC**, gauges, datalog, DTC read/clear, restore
-stock — *and* act as a PC↔car interface, now also **wirelessly** (phone
-dash, wireless log offload, wireless package delivery) like the OBDX.
+A standalone handheld in the spirit of the existing aftermarket
+flasher platforms: flash tune files **without a PC**, gauges,
+datalog, DTC read/clear, restore stock — *and* act as a PC↔car
+interface, now also **wirelessly** (phone dash, wireless log
+offload, wireless package delivery) like the OBDX.
 
 Clean-room: handheld-tuner and wireless-OBD-adapter are *concepts*, free
 to implement per `docs/15`. No competitor firmware/protocol is read. The
@@ -224,13 +225,14 @@ no competitor firmware, capture, or scheme is read or mirrored.
 
 ---
 
-## 12. Hardware feature-toggle UX (COBB-equivalent)
+## 12. Hardware feature-toggle UX
 
-The COBB AccessPort's defining UX feature is a hardware screen that
-toggles individual tuning behaviors live — Launch Control on/off,
-Flat-Foot Shift on/off, idle RPM up or down — without a reflash and
-without a PC. Replicating that experience is *not* a new subsystem;
-it is the **convergence** of three existing designs:
+A defining UX feature of the mainstream aftermarket handheld
+flashers is a hardware screen that toggles individual tuning
+behaviors live — Launch Control on/off, Flat-Foot Shift on/off,
+idle RPM up or down — without a reflash and without a PC.
+Replicating that experience is *not* a new subsystem; it is the
+**convergence** of three existing designs:
 
 1. **`docs/16` (custom features)** declares each feature with a
    RAM-mapped enable flag (a `[[feature]]` block in the pack carries
@@ -264,10 +266,10 @@ typical FA-DIT WRX pack:
 Map switching is the one exception. Switching the "active tune" is a
 full flash cycle, not a RAM write, because the entire calibration
 needs to change atomically. That matches what we observe on the wire
-when an AccessPort performs a map change — ~2 MB written to flash,
-not a RAM toggle. The handheld surfaces map-switching as a flash
-button, with the same brick-protection + brownout interlock as any
-other flash from `docs/05` §4.
+when a handheld flasher performs a map change — ~2 MB written to
+flash, not a RAM toggle. The handheld surfaces map-switching as a
+flash button, with the same brick-protection + brownout interlock
+as any other flash from `docs/05` §4.
 
 ### Safety constraints specific to feature toggles
 
@@ -291,19 +293,20 @@ other flash from `docs/05` §4.
 
 Concept-side, this is the canonical "concept is fair game, expression
 is not" division from `CLAUDE.md`. *Hardware screen that toggles
-features live* is an idea — COBB pioneered it on Subaru, but it's
-descended from rally-rallying TC1 toggles in physical switches.
-**Implementing it from our spec stack is fine.** What is not fine:
-copying COBB's specific feature catalog (their named features, their
-preset RAM addresses, their UI strings, their .ptm format). All of
-those are expression. Per `CLAUDE.md`'s explicit red flags, we do
-not pull any of that from a COBB tool decompile.
+features live* is an idea — a mainstream commercial handheld
+popularised it on Subaru, but it's descended from rally TC1 toggles
+in physical switches. **Implementing it from our spec stack is
+fine.** What is not fine: copying a competitor's specific feature
+catalog (their named features, their preset RAM addresses, their UI
+strings, their proprietary tune-file format). All of those are
+expression. Per `CLAUDE.md`'s explicit red flags, we do not pull
+any of that from a competitor's tool decompile.
 
 The features in the table above are derived from public engine-
 management literature + the existing `docs/16` sample packs
 (`clutch-kill.stmod`, `flat-foot-shift.stmod`, `launch-control.stmod`).
 Adding a sixth or seventh feature means designing it from first
-principles, not from COBB's list.
+principles, not from any competitor's list.
 
 ### Roadmap
 
@@ -323,7 +326,7 @@ just less convenient for dyno work.
 - Any flash path that bypasses the shared orchestrator, the stored-stock
   interlock, or the §4 rule.
 - Wireless in the live flash transport path (the §4 rule).
-- COBB `.ptm` / proprietary encrypted tunes; locked-ECU decryption.
+- Competitor-proprietary tune-file formats (encrypted `.ptm`-style containers) / locked-ECU decryption.
 - ELM327-style write paths (`docs/13` non-goal).
 - Cloud / always-online dependency (`docs/00` non-goal). Wireless is
   local-link only — no telemetry servers.

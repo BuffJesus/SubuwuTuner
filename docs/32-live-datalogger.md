@@ -310,16 +310,17 @@ Hardware-gated (OBDX VX in hand):
   display-rate decimation in the gauge panel (capture rate stays
   full; visual rate caps at 100 Hz for the mini-line).
 
-## Compatibility — Cobb AccessPort datalog protocol
+## Compatibility — extended-DID datalog protocol (`0xF3xx` family)
 
-The Cobb AP polls a fixed UDS RDBI shape every ~39 ms (~25 Hz).
-Documented here so the GUI live-datalogger can offer a "match Cobb
-AP" preset out of the box — and so a captured AP sniff can be
-replayed against `MockTransport` for parity testing without
-hardware. Source: clean-room analysis of the user's own AP captures
-(bus-check.log + 18 AP CSV exports) — protocol shape confirmed,
-per-byte signal mapping high-confidence pending an on-car
-driving-data ground-truth.
+A mainstream aftermarket handheld flasher polls a fixed UDS RDBI
+shape every ~39 ms (~25 Hz). Documented here so the GUI
+live-datalogger can offer a "match the handheld's preset" out of
+the box — and so a captured sniff can be replayed against
+`MockTransport` for parity testing without hardware. Source:
+clean-room analysis of the user's own captures (bus-check.log + 18
+handheld-app CSV exports) — protocol shape confirmed, per-byte
+signal mapping high-confidence pending an on-car driving-data
+ground-truth.
 
 **Wire shape (confirmed)**
 - Tester → ECU: CAN id `0x7E0`, 13-byte UDS request
@@ -337,17 +338,18 @@ driving-data ground-truth.
 
 **Monitor naming reference**
 
-The AP-internal monitor IDs split into two prefixes:
+The handheld-flasher-internal monitor IDs split into two prefixes:
 - `SSM_*` — OEM Subaru SSM-protocol RAM reads. RAM addresses are
   authoritative from the firmware live-signals catalog. Six of the
   12 R²-verified v1.7.6.0 entries are SSM_* (RPM, Battery Volts,
   AF Sens 1, AF Learning, Vehicle Speed, Wastegate Duty).
-- `RAM_*` — COBB-defined RAM reads, often pointing at a Cobb
+- `RAM_*` — installer-defined RAM reads, often pointing at a
   tune-patch region. RAM addresses for these are candidate-only —
-  Cobb may read OEM RAM or a different patch RAM. The other six
-  Verified entries are RAM_* (Comm Fuel Final, Gear Position,
-  Oil Temp, SD VE Est MAF, TD Boost Error Ext, TGV Map Ratio); use
-  their `ram_address` as a best-guess pointer, not as ground truth.
+  the installer may read OEM RAM or a different patch RAM. The
+  other six Verified entries are RAM_* (Comm Fuel Final, Gear
+  Position, Oil Temp, SD VE Est MAF, TD Boost Error Ext, TGV Map
+  Ratio); use their `ram_address` as a best-guess pointer, not as
+  ground truth.
 
 Full 49-monitor list at
 the independent monitor-ID catalog.
@@ -359,23 +361,24 @@ the corpus-wide datalog reverse-engineering output walks the
 end-to-end drop-in: copy the 8 per-CID TOMLs into the user's
 `definitions/impreza/` tree, run `subuwutuner-cli pack-list` to
 register them, run `subuwutuner-cli rom-identify` to verify the
-`extends = "<base_pack>"` chain merges the 12 Cobb PIDs on top of
-the existing 235-table base pack. All 9 packs (`cobb_pids.toml`
-for LF79103P + 8 per-CID variants) load without ID collisions. The
-recipe is for the user's own definitions tree — Path B distribution
-means SubuwuTuner doesn't ship the packs itself.
+`extends = "<base_pack>"` chain merges the 12 extended-DID PIDs on
+top of the existing 235-table base pack. All 9 packs (the
+F3xx-PIDs pack for LF79103P + 8 per-CID variants) load without ID
+collisions. The recipe is for the user's own definitions tree —
+Path B distribution means SubuwuTuner doesn't ship the packs
+itself.
 
 **Provenance — two confidence axes**
 
 Two independently-sourced axes underpin the const-data:
 
 - **Byte positions + wire scales** were R²-verified ≥ 0.95 against
-  the user's actual car sniff (the dmann-sniff-20260528 capture).
-  The user's 2017 WRX runs **LF79101P**-content firmware — not
-  LF79103P. Cobb's AP firmware uses one response template across
-  the A-series, so these positions + scales are assumed portable
+  the user's actual car sniff. The user's 2017 WRX runs
+  **LF79101P**-content firmware — not LF79103P. The handheld
+  flasher's firmware uses one response template across the
+  A-series, so these positions + scales are assumed portable
   family-wide. `decode_signal()` depends only on this axis and
-  works on any CID running the same AP firmware preset.
+  works on any CID running the same handheld-firmware preset.
 - **RAM addresses** were sourced from the **LF79103P** live-signals
   catalog (the only LF79 variant in the catalog). LF79103P is the
   "stock equivalent" of the user's LF79101P-content tune. RAM
@@ -385,42 +388,40 @@ Two independently-sourced axes underpin the const-data:
 **Cross-CID portability — use the v2 packs**
 
 After the 2026-06-06 aligned re-fit, the analyst regenerated the
-per-CID packs at `findings/.../per_cid_packs/cobb_pids_v2_<CID>.toml`
-covering 10 A-series CIDs: `LF75404H`, `LF75404S`, `LF75600H`,
-`LF79101P`, `LF79102P`, `LF79103P`, `LF9C102P`, `LF9D012H`,
-`LF9G003T`, `LF9L000E`. Each carries the 36 aligned PIDs with
-RAM addresses re-resolved against that CID's catalog.
+per-CID packs (the v2 series, off-tree per Path B) covering 10
+A-series CIDs: `LF75404H`, `LF75404S`, `LF75600H`, `LF79101P`,
+`LF79102P`, `LF79103P`, `LF9C102P`, `LF9D012H`, `LF9G003T`,
+`LF9L000E`. Each carries the 36 aligned PIDs with RAM addresses
+re-resolved against that CID's catalog.
 
 Two new identifier base packs are alongside the overlays:
 `lf79101p_identifier.toml` and `lf79102p_identifier.toml` cover the
-user's currently-installed tune state (LF79101P, Fehr-active e-tune)
-and factory state (LF79102P, virgin) respectively — neither was in
-the 707-pack collection before.
+user's currently-installed tune state (LF79101P, aftermarket
+e-tune) and factory state (LF79102P, virgin) respectively — neither
+was in the 707-pack collection before.
 
-**Do NOT deploy the v1 per-CID packs** (`cobb_pids_<CID>.toml`
-without the `v2_` prefix). They were generated from the
-since-superseded v5 layout — byte positions are wrong for 10 of 12
-PIDs. Stale-pack deployment will produce plausible-looking but
-incorrect engineering values.
+**Do NOT deploy the v1 per-CID packs.** They were generated from
+the since-superseded v5 layout — byte positions are wrong for 10
+of 12 PIDs. Stale-pack deployment will produce plausible-looking
+but incorrect engineering values.
 
 End-to-end validation: 28 of 36 PIDs in the v2 pack decode within
-5% of the AP CSV's t=0 row (others within ±1 unit absolute; small
-values amplify percent error). See
-`findings/.../scripts/demo_decode_aligned.py`. The full INTEGRATION
-recipe with cp commands lives at
-`findings/.../INTEGRATION_RECIPE.md`.
+5% of the reference CSV's t=0 row (others within ±1 unit absolute;
+small values amplify percent error). The full integration recipe
+lives in the analyst's off-tree findings.
 
-**Per-byte signal layout (two AP firmware versions)**
+**Per-byte signal layout (two handheld-firmware versions)**
 
-Both supported AP firmware versions ship as const-data layouts in
+Both supported firmware versions ship as const-data layouts in
 `st::ecu::extended_did_datalog`:
 
-- `ap_v1_7_4_2_layout()` — CCF Gen2, 31 signals across F300..F302.
-  100% catalog-mapped to LF79103P RAM addresses; all entries
-  Hypothesized (no R²-fit was run for this firmware version).
-- `ap_v1_7_6_0_layout()` — CCF Gen3, 44 signals across F300..F304.
-  12 entries R²-verified ≥ 0.95 against a real driving sniff
-  (`Verification::Verified`); the remaining 32 are
+- `firmware_layout_narrow()` — older firmware, 31 signals across
+  F300..F302. 100% catalog-mapped to LF79103P RAM addresses; all
+  entries Hypothesized (no R²-fit was run for this firmware
+  version).
+- `firmware_layout_wide()` — newer firmware, 44 signals across
+  F300..F304. 12 entries R²-verified ≥ 0.95 against a real
+  driving sniff (`Verification::Verified`); the remaining 32 are
   CSV-column-order inferences (`Verification::Hypothesized`).
   The Verified set folds in 5 previously-overflowed signals
   (SD VE Est MAF, TD Boost Error Ext, TGV Map Ratio, Vehicle Speed,
@@ -430,9 +431,9 @@ Both supported AP firmware versions ship as const-data layouts in
 
 Each `SignalLayout` entry carries:
 - byte offset + storage shape (`Uint8`/`Int8`/`Uint16` (big-endian)/
-  `Int16`/`Uint16Le`/`Int16Le` — the AP packs a handful of values
-  little-endian on the wire)
-- RAM address (LF79103P-specific; same Cobb signal on a different
+  `Int16`/`Uint16Le`/`Int16Le` — the handheld packs a handful of
+  values little-endian on the wire)
+- RAM address (LF79103P-specific; the same signal on a different
   CID may live at a different address)
 - catalog `scaling` expression in the catalog grammar (operators
   `+ - * / >> << & | (...)` over variable `x`, no function calls)
@@ -444,16 +445,16 @@ Each `SignalLayout` entry carries:
   expression as the best-available approximation.
 
 Print or pull machine-readable via
-`subuwutuner-cli cobb-datalog-preset [--firmware v1_7_4_2|v1_7_6_0]
-[--json]` — JSON envelope `subuwutuner.cobb-datalog-preset.v1`
+`subuwutuner-cli extended-did-datalog-preset [--firmware narrow|wide]
+[--json]` — JSON envelope `subuwutuner.extended-did-datalog-preset.v1`
 includes `ram_address` + `scaling` per signal so downstream
-tooling (a CSV ↔ DID replay verifier, a "is my datalog Cobb-
-equivalent?" checker, a future scaling expression evaluator) can
-consume the layout without re-doing the analyst-side join.
+tooling (a CSV ↔ DID replay verifier, an equivalence checker, a
+future scaling expression evaluator) can consume the layout without
+re-doing the analyst-side join.
 
 **What this unlocks pre-hardware**
-- A `LogChannel` preset that mirrors the Cobb shape so the live
-  gauge cluster can reach Cobb-parity behavior without the user
+- A `LogChannel` preset that mirrors the handheld's shape so the live
+  gauge cluster can reach parity behavior without the user
   enumerating 43 channels by hand
 - Replay-side: parse a captured `bus-check.log`-style trace and
   decode it byte-by-byte using the layout above

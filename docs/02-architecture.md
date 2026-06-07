@@ -98,7 +98,7 @@ Communication is via message passing (a typed `concurrent_queue<Cmd>` per worker
 
 We expose two extension points for community contributions and power-user customization:
 
-1. **Definition packs** — TOML files / directories. The public repo carries the demo pack + older Subaru packs (Impreza, Forester, Legacy, etc.) + SSM PID + ecuparams fragments; VA/VB WRX packs are user-supplied per Path B (`docs/17`) and can be generated from public RomRaider XML via `tools/defgen/`. Users point the CLI/GUI at any pack path.
+1. **Definition packs** — TOML files / directories. The public repo carries the demo pack + older Subaru packs (Impreza, Forester, Legacy, etc.) + SSM PID + ecuparams fragments; VA/VB WRX packs are user-supplied per Path B (`docs/17`) and can be generated from public community-XML definitions via `tools/defgen/`. Users point the CLI/GUI at any pack path.
 2. **`.stmod` feature graphs** — TOML documents holding `[graph]` + `[[node]]` + `[[edge]]` (the source graph) and optionally `[patch]` (the codegen output bundled in the same file). Lowered through `st::feature::ir` and compiled by `st::feature::codegen` per `docs/16`. The IR is a typed dataflow SSA representation, not Lua — the earlier Lua-as-IR direction was dropped before any of it shipped.
 
 Native (DLL/SO) plugins are explicitly **out of scope for v1** — they are a vector for malicious tunes and a portability hazard.

@@ -6,7 +6,7 @@
 
 The Y-cable + OBDX-Pro-VX-in-LISTEN-ONLY rig described in `docs/23` is general-purpose. SecurityAccess capture is the most license-load-bearing use (because it unblocks ROM dumps without GPL contamination), but the same rig can pull a tune off the wire during a flash, locate live RAM addresses for cal tables by watching what an active tuner-tool polls, and characterise unknown ECU behaviour by observing how the OEM-blessed tools session-shape their requests.
 
-Status: **all workflows in this doc are hardware-gated.** Capture path (`sniff` subcommand, listen-only mode, ISO-TP-aware extractor) is shipped and tested against MockTransport. OBDX Pro VX is in hand (2026-05-24) and the install-flow captures + B6 cipher recovery have run end-to-end against real CAN logs (see `Findings/communication-protocols/cobb-install-flow.md`); live-car verification of the documented workflows is in progress.
+Status: **all workflows in this doc are hardware-gated.** Capture path (`sniff` subcommand, listen-only mode, ISO-TP-aware extractor) is shipped and tested against MockTransport. OBDX Pro VX is in hand (2026-05-24) and the install-flow captures + B6 cipher recovery have run end-to-end against real CAN logs (analyst-side findings); live-car verification of the documented workflows is in progress.
 
 ## Shared hardware setup
 
@@ -14,7 +14,7 @@ Identical for every recipe in this doc:
 
 - **OBDX Pro VX** in LISTEN-ONLY (no TX, no ACK).
 - **OBD-II Y-splitter cable** (passive, ~$15). Both adapters share CAN-H/CAN-L on the multi-drop bus.
-- **The active tuning tool** (COBB AP, EcuTek ProECU, ECUFlash via Tactrix, etc.) on the other branch of the Y, doing whatever the workflow needs to capture.
+- **The active tuning tool** (any aftermarket flasher or commercial ECU-tuning application) on the other branch of the Y, doing whatever the workflow needs to capture.
 
 `subuwutuner-cli sniff` opens the VX with `LinkConfig::listen_only=true`, which both skips adapter-level CAN filtering (every frame on the bus reaches the host) and configures EnableNetwork STATE=0x02 so the VX physically cannot transmit. Two transmitters fighting over CAN-H/CAN-L would corrupt the active tool's session; LISTEN-ONLY makes the OBDX invisible to the bus.
 
@@ -26,8 +26,8 @@ Output format is one frame per line: `<elapsed_ms> 0xCANID <hex bytes>`. Plain-t
 
 **Goal.** Recover the calibration bytes for the tune currently on the car without ever issuing an RMBA or RoutineControl ourselves. Captures whatever the active tuning tool sends down the wire during a flash. Particularly valuable when:
 
-- ROM-read path is blocked (no SecurityAccess algorithm yet, RMBA gated at a higher SA level than 0x01, COBB Pro-locked ECU rejects external reads).
-- The on-disk copy of the tune is encrypted-at-rest (COBB AccessPort Manager keeps customer ROMs encrypted; the tuner has the plaintext only transiently during a flash).
+- ROM-read path is blocked (no SecurityAccess algorithm yet, RMBA gated at a higher SA level than 0x01, an aftermarket-tool-locked ECU rejects external reads).
+- The on-disk copy of the tune is encrypted-at-rest (the aftermarket flasher's PC management app keeps customer ROMs encrypted; the tuner has the plaintext only transiently during a flash).
 - We want ground truth for what a known-working flash sequence looks like before our own Flasher tries to replicate it.
 
 ### Capture
@@ -77,7 +77,7 @@ The extractor `tools/extract_uds_transfer.py` walks the capture, ISO-TP-reassemb
 }
 ```
 
-Each `payload_path` is the reassembled bytes for that transfer. **Whether those bytes are the tune as-it-hits-flash depends on the active tool's payload envelope.** RequestDownload's dataFormatIdentifier (the `00` in `34 00 44 …`) is the OEM-side declaration of compression / encryption applied to the *transferred* bytes; a value of 0x00 means the ECU writes the wire bytes verbatim. Tuner tools often layer their own outer envelope on top (COBB-format ROMs, EcuTek's container) that the ECU's bootloader strips before flashing — or pre-process the calibration into a delta against a known base. Treat the extracted payload as "what the wire saw" and validate against a known-pre-flash baseline (or a same-CID stock ROM, if available) before trusting it as the calibration in flash. Non-zero `dataFormatIdentifier` makes this unambiguous: the wire bytes are not the flash bytes.
+Each `payload_path` is the reassembled bytes for that transfer. **Whether those bytes are the tune as-it-hits-flash depends on the active tool's payload envelope.** RequestDownload's dataFormatIdentifier (the `00` in `34 00 44 …`) is the OEM-side declaration of compression / encryption applied to the *transferred* bytes; a value of 0x00 means the ECU writes the wire bytes verbatim. Tuner tools often layer their own outer envelope on top (proprietary container formats) that the ECU's bootloader strips before flashing — or pre-process the calibration into a delta against a known base. Treat the extracted payload as "what the wire saw" and validate against a known-pre-flash baseline (or a same-CID stock ROM, if available) before trusting it as the calibration in flash. Non-zero `dataFormatIdentifier` makes this unambiguous: the wire bytes are not the flash bytes.
 
 ### Caveats
 
@@ -94,11 +94,11 @@ Each `payload_path` is the reassembled bytes for that transfer. **Whether those 
 
 ### How the discovery works
 
-When COBB AP / EcuTek / ECUFlash show a live "Boost Target" gauge, they poll a fixed RAM address every 50–200 ms via ReadDataByIdentifier or ReadMemoryByAddress. The address is the live (current) value of that quantity — which is fed by, e.g., the boost target lookup table in calibration. Knowing the RAM address gives you:
+When an aftermarket flasher's PC app shows a live "Boost Target" gauge, it polls a fixed RAM address every 50–200 ms via ReadDataByIdentifier or ReadMemoryByAddress. The address is the live (current) value of that quantity — which is fed by, e.g., the boost target lookup table in calibration. Knowing the RAM address gives you:
 
 1. **A grep target for the disassembly** — RAM address Y is referenced by code that reads from cal table Z, exposing Z's flash location even when the definition file doesn't list it.
 2. **A correlation handle** — start a feature (launch control, flat-foot, rev limit), watch which polled values change in lockstep, infer which RAM address tracks the feature's state.
-3. **A confirmation channel** — the in-tree definition packs claim cal table Z is at address W; sniffing confirms COBB reads W's shadow value during normal operation.
+3. **A confirmation channel** — the in-tree definition packs claim cal table Z is at address W; sniffing confirms the active tool reads W's shadow value during normal operation.
 
 ### Capture
 
@@ -148,15 +148,16 @@ Addresses whose value distribution **changes** between phases are the candidates
 
 The "what tuner-tool was polling" question above tells you *which* RAM
 addresses get touched but not *which monitor name* sits at each address.
-If the active tuner-tool exports a labeled datalog CSV (COBB AP CSV,
-EcuTek log, etc.), you can recover the address-to-monitor mapping by
-joining the CSV against the sniff capture in time.
+If the active tuner-tool exports a labeled datalog CSV (any of the
+aftermarket flashers' PC apps emits one), you can recover the
+address-to-monitor mapping by joining the CSV against the sniff
+capture in time.
 
 The CSV gives you: per-row timestamp + labelled monitor values. The
 sniff gives you: per-frame timestamp + raw poll-response bytes. The
 join requires a per-log **time anchor** between sniff time and the
-CSV's internal time (the AP CSV starts at t=0 when the user pressed
-"log", no wall-clock).
+CSV's internal time (typical aftermarket-flasher CSVs start at t=0
+when the user pressed "log", no wall-clock).
 
 Practical anchor: find a strongly-varying CSV column (engine RPM is
 ideal — fast dynamic range during a WOT pull) and search for a sniff
@@ -199,13 +200,14 @@ per-log anchor offsets.
 
 ### Caveats
 
-- COBB / EcuTek poll over UDS (`22 <DID>`) for everything. The DIDs
-  in the OEM-reserved space (~0x0000–0x00FF) carry the standardised
-  quantities; the DIDs in proprietary ranges (e.g. 0xF3xx for COBB
-  AP) carry batches of multiple monitors packed into one ~80-byte
-  response. RMBA (`23 <addr>`) shows up for one-off RAM reads (e.g.
-  during a flash dump) but is rare in normal datalogging on modern
-  AP firmware.
+- Aftermarket flashers typically poll over UDS (`22 <DID>`) for
+  everything. The DIDs in the OEM-reserved space (~0x0000–0x00FF)
+  carry the standardised quantities; the DIDs in proprietary
+  ranges (e.g. the 0xF3xx range observed on one mainstream
+  handheld) carry batches of multiple monitors packed into one
+  ~80-byte response. RMBA (`23 <addr>`) shows up for one-off RAM
+  reads (e.g. during a flash dump) but is rare in normal
+  datalogging on modern handheld-flasher firmware.
 - **Multi-byte ISO-TP reassembly is adapter-firmware dependent.** The
   OBDX VX with its default `AutoProcess` flag reassembles
   multi-frame responses automatically — each line in the sniff log
