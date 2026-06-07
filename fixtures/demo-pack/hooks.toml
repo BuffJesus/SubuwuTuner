@@ -89,6 +89,61 @@ outputs = [
 ]
 
 [[hook]]
+id           = "override_hpfp_command_angle"
+display_name = "Override HPFP command crank angle (illustrative)"
+description  = """
+Illustrative runtime hook. The actual FA24-into-VA swap HPFP fix is
+a static table edit on `Fuel - Timing - HPFP - Base Offset` (a u16
+scalar in the calibration). See `docs/16-custom-features.md`
+§"Static-edit fix" for the full walkthrough. This hook is the runtime
+equivalent — keep it in the demo pack for users who want
+RPM/load-dependent phase tuning that a single scalar can't express,
+or for CIDs whose def doesn't yet have Base Offset mapped.
+
+Splice point: after the ECU computes its commanded HPFP solenoid
+energize crank angle (the point in the cam cycle at which the
+pump-control solenoid is driven), before the value is written to the
+timer / output-compare register that fires the solenoid.
+
+Background — the FA24 swap problem: the HPFP-driving lobe on the
+intake cam is a triangle that got flipped between FA20 and FA24
+generations. At the same commanded crank angle, the FA20 ECU thinks
+the pump is on its upstroke but on the FA24 cam it's on its
+downstroke. The pump runs at max effort against the commanded target,
+climbs to ~4000 psi, and the ECU's safety cutoff (~4200 psi) kills
+the engine. Shifting the commanded angle by a constant offset (~180°
+crank, or ~90° cam — unit not yet pinned, see fixture caveats)
+aligns the command back to the actual lobe peak.
+
+Source: a publicly-circulated VA FA24-swap recipe. SubuwuTuner and
+an open-source competing tuner are the platforms currently capable
+of exposing this surface; tunes done on the mainstream commercial
+platforms must run FA20 cams to dodge the issue.
+
+The earlier `override_hpfp_target` (pressure clamp) and
+`override_injector_pw` (Bernoulli PW correction) hooks were both
+designed under the wrong premise that the FA24 pump can't reach
+FA20-commanded pressures.
+
+Pack-specific notes: addresses below are PLACEHOLDERS. A real VA pack
+that wants to ship this hook as a flashable patch must resolve the
+firmware splice address (the instruction that writes the commanded
+HPFP energize angle to the output-compare register) plus the source
+RAM address for the commanded angle, via firmware disasm. None of
+this is required for the static-edit path — see docs/16.
+"""
+ecu_address  = 0x000ABF40
+free_ram     = { base = 0x40000380, length = 128 }
+inputs = [
+  { name = "commanded_angle_deg", label = "Commanded HPFP energize angle", type = "float", unit = "deg", address = 0x000F2210 },
+  { name = "rpm",                 label = "Engine RPM",                    type = "float", unit = "rpm", address = 0x000F2000 },
+  { name = "load",                label = "Engine load",                   type = "float", unit = "%",   address = 0x000F2208 },
+]
+outputs = [
+  { name = "angle_override_deg", label = "Override HPFP energize angle", type = "float", unit = "deg" },
+]
+
+[[hook]]
 id           = "override_hpfp_target"
 display_name = "Override HPFP target pressure"
 description  = """

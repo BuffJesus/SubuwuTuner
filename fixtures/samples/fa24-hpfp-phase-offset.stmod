@@ -1,0 +1,157 @@
+# FA20→FA24 HPFP command-angle phase offset (illustrative).
+#
+# NOT the actual FA24 swap fix. The actual fix is a static table edit
+# on `Fuel - Timing - HPFP - Base Offset` (LF79103P: flash address
+# 0x49BA8, u16 BE, deg/10 scaling, stock 80.0°). That scalar behaves
+# as a constant additive phase bias on the commanded HPFP energize
+# angle — change one byte-pair, repair the cal checksum, flash. Done.
+# See `docs/16-custom-features.md` §"Static-edit fix" for the full
+# walkthrough.
+#
+# This fixture exists as a demonstration of how the same correction
+# would be expressed as a runtime hook IF the static-edit path were
+# unreachable (e.g. for a CID whose def doesn't yet have Base Offset
+# mapped) OR if a user genuinely needs RPM/load-dependent phase
+# tuning that a single scalar can't express.
+#
+# The earlier fa24-hpfp-clamp.stmod and fa24-bernoulli-comp.stmod were
+# built on a misdiagnosis (pump can't reach commanded pressure); both
+# are wrong for this swap. See bottom-of-file note.
+#
+# THE ACTUAL PROBLEM (per a publicly-circulated VA FA24 swap recipe):
+#
+#   The HPFP-driving lobe on the intake cam is a triangle. Between FA20
+#   and FA24 the triangle got FLIPPED. The FA20 ECU thinks the pump
+#   begins its upstroke at X° of crank angle, but on the FA24 cam at
+#   that same X° the pump is on its downstroke. The pump gets driven on
+#   the wrong half of its cycle, runs at maximum effort against
+#   commanded pressure, climbs to ~4000 psi, and the ECU's safety
+#   cutoff (~4200 psi) kills the engine.
+#
+#   This is not a pump-capacity problem. The FA24 stock pump can
+#   exceed the FA20 ECU's commanded pressures; it just does so on the
+#   wrong stroke. Clamping the commanded pressure doesn't fix this.
+#   Compensating injector PW for an "actual < commanded" gap doesn't
+#   either — actual will be wrong (oscillating, undershoot/overshoot)
+#   because the pump itself is being driven out of phase.
+#
+# THE FIX:
+#
+#   Shift the HPFP command crank angle by a constant offset:
+#
+#     corrected_angle = commanded_angle + PHASE_OFFSET_DEG
+#
+#   For a "triangle got flipped" lobe, the offset is geometrically
+#   180° of cam angle = 360° of crank angle. But the actual value is
+#   whatever the ground-truth basemap says — degree-counts on the
+#   commanded vs. actual lobe peaks may differ from a pure flip due to
+#   how the FA20 ECU's angle reference is established. The placeholder
+#   below uses 180.0° as a first guess; the real value comes from a
+#   published ground-truth basemap (when available) or from logging
+#   commanded HPFP angle vs. actual rail-pressure rise on a bench.
+#
+# WHY THIS IS THE RIGHT SURFACE (vs. table edits):
+#
+#   docs/16 §"Worked example" / "HPFP control" row suggests rescaling
+#   `hpfp_duty_*` and `hpfp_target_pressure_*` tables. Those table
+#   edits change *magnitudes*, not *phase*. They cannot fix a wrong-
+#   stroke command — the pump would still be driven against itself, just
+#   to a different magnitude target. The phase offset is the only fix
+#   that addresses the actual lobe-geometry mismatch.
+#
+#   That said, a static table-edit on a single calibration scalar (the
+#   HPFP commanded-angle offset, if it exists as a flat parameter in
+#   the FA20 def) is operationally simpler than a runtime hook. Use
+#   this fixture when:
+#     - The calibration scalar isn't reachable from `st::edit` for the
+#       current CID (no def entry → no table to edit), OR
+#     - You want RPM-dependent or load-dependent phase tuning that a
+#       single scalar can't express (extend by routing the hook's
+#       `rpm` / `load` outputs through an `interpolate_*` primitive).
+#
+# CAVEATS:
+#
+#   - PHASE_OFFSET_DEG = 180.0 is a placeholder. The angle unit is not
+#     yet pinned down — could be deg crank (then 180° is right) or
+#     deg cam (then 90° is right). Weak analyst inference favors cam
+#     (the cluster span 80°-345° on adjacent scalars fits a 360° cam
+#     cycle better than a 720° crank cycle), but it's not confirmed.
+#     A published ground-truth basemap will resolve this when one is
+#     byte-diffed against a stock LF79103P at 0x49BA8.
+#   - The `override_hpfp_command_angle` hook in
+#     `fixtures/demo-pack/hooks.toml` ships with placeholder splice
+#     and RAM addresses. A real VA-WRX pack that actually compiles
+#     this fixture into a flashable patch must resolve the splice
+#     address (the instruction that writes the commanded HPFP energize
+#     angle to the timer / output-compare register) and the source
+#     RAM address for the commanded angle. For the static-edit fix
+#     none of this matters — only the runtime hook needs it.
+#
+# Pairs with fixtures/demo-pack. Compile with:
+#
+#   subuwutuner-cli feature-compile fixtures/samples/fa24-hpfp-phase-offset.stmod \
+#     --def fixtures/demo-pack --arch sh2a
+#
+# Related (DEPRECATED for FA24 swap use case):
+#   - fa24-hpfp-clamp.stmod         (wrong premise: pressure-clamp on
+#                                    "unreachable target" — pump can
+#                                    reach the target, it's just out of
+#                                    phase)
+#   - fa24-aux-pressure-clamp.stmod (same wrong premise + a dependence
+#                                    on a 3rd-party CAN pressure sensor
+#                                    that doesn't help when the
+#                                    underlying issue is phase)
+#   - fa24-bernoulli-comp.stmod     (correct math for a real pressure
+#                                    undershoot; wrong framing for the
+#                                    FA24 swap, which doesn't have a
+#                                    pressure undershoot once phase is
+#                                    corrected)
+
+[graph]
+schema_version = 1
+
+# ---- Splice: read commanded HPFP energize crank angle -------------
+
+[[node]]
+id    = 1
+kind  = "hook.override_hpfp_command_angle"
+label = "Override HPFP command angle"
+x     = 48.0
+y     = 48.0
+phase_break = true
+pins  = [
+  { id = 0, name = "commanded_angle_deg", label = "Commanded HPFP energize angle", type = "float", direction = "output", unit = "deg" },
+  { id = 1, name = "rpm",                 label = "Engine RPM",                    type = "float", direction = "output", unit = "rpm" },
+  { id = 2, name = "load",                label = "Engine load",                   type = "float", direction = "output", unit = "%"   },
+  { id = 3, name = "angle_override_deg",  label = "Override HPFP energize angle",  type = "float", direction = "input",  unit = "deg" },
+]
+
+# ---- Add: corrected_angle = commanded_angle + PHASE_OFFSET_DEG ----
+
+[[node]]
+id    = 2
+kind  = "primitive.add_float"
+label = "+ 180 deg crank (FA24 lobe flip)"
+x     = 336.0
+y     = 48.0
+pins  = [
+  { id = 0, name = "a",   type = "float", direction = "input",  unit = "deg" },
+  { id = 1, name = "b",   type = "float", direction = "input",  unit = "deg", default = 180.0 },
+  { id = 2, name = "out", type = "float", direction = "output", unit = "deg" },
+]
+
+# ---- Edges --------------------------------------------------------
+
+# commanded_angle_deg → add.a
+[[edge]]
+from_node = 1
+from_pin  = 0
+to_node   = 2
+to_pin    = 0
+
+# add.out → override_hpfp_command_angle.angle_override_deg
+[[edge]]
+from_node = 2
+from_pin  = 2
+to_node   = 1
+to_pin    = 3
