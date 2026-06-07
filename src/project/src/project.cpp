@@ -146,6 +146,14 @@ std::string render_history_toml(edit::History const &h) {
     for (auto const &e : h.records()) {
         ss << "\n[[edit]]\n";
         ss << "  description = \"" << e.description << "\"\n";
+        // Optional transaction tag — only emitted when non-empty so the
+        // common case (untagged single-step edit) stays bit-identical
+        // to schema_version=2 output. Older readers silently ignore
+        // unknown keys (tomlplusplus value_or fallback), so the field
+        // is forward-compatible without bumping schema_version.
+        if (!e.tag.empty()) {
+            ss << "  tag         = \"" << e.tag << "\"\n";
+        }
         if (auto const *t = e.as_table(); t != nullptr) {
             ss << "  table_id    = \"" << t->table_id << "\"\n";
             render_snapshot(ss, "before", t->before);
@@ -229,6 +237,10 @@ Result<edit::History> parse_history_toml(std::string_view text) {
             }
             edit::Edit e;
             e.description = (*et)["description"].value_or<std::string>("");
+            // Optional transaction tag (forward-compat; missing in v1/v2
+            // files and in untagged v2+ edits). Empty string is the
+            // sentinel "untagged" value used by History::undo_while_tag.
+            e.tag = (*et)["tag"].value_or<std::string>("");
 
             // Discriminate kind by which fields are present. ByteEdit's
             // `byte_changes` array is the v2 addition; absence of it plus

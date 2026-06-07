@@ -327,3 +327,74 @@ TEST_CASE("History records ByteEdits alongside TableEdits", "[edit][byte][histor
     REQUIRE(e0->description == "byte op 1");
     REQUIRE_FALSE(h.can_undo());
 }
+
+TEST_CASE("Edit::with_tag attaches a transaction tag", "[edit][tag]") {
+    auto e = st::edit::Edit::bytes({{0x1000, 0xFF, 0xFE}}, "displacement")
+                 .with_tag("fa24_swap");
+    REQUIRE(e.tag == "fa24_swap");
+    REQUIRE(e.description == "displacement");
+    REQUIRE(e.is_byte());
+}
+
+TEST_CASE("undo_while_tag walks back contiguous tag-matching edits",
+          "[edit][tag][history]") {
+    st::edit::History h;
+    h.record(st::edit::Edit::bytes({{0x1, 0x0, 0x1}}, "unrelated A"));
+    h.record(st::edit::Edit::bytes({{0x2, 0x0, 0x1}}, "swap edit 1").with_tag("fa24_swap"));
+    h.record(st::edit::Edit::bytes({{0x3, 0x0, 0x1}}, "swap edit 2").with_tag("fa24_swap"));
+    h.record(st::edit::Edit::bytes({{0x4, 0x0, 0x1}}, "swap edit 3").with_tag("fa24_swap"));
+    REQUIRE(h.cursor() == 4);
+
+    auto const reverted = h.undo_while_tag("fa24_swap");
+    REQUIRE(reverted.size() == 3);
+    // Returned in undo order — newest first.
+    REQUIRE(reverted[0]->description == "swap edit 3");
+    REQUIRE(reverted[1]->description == "swap edit 2");
+    REQUIRE(reverted[2]->description == "swap edit 1");
+    REQUIRE(h.cursor() == 1);
+    REQUIRE(h.can_undo()); // unrelated A is still applied
+    REQUIRE(h.can_redo()); // the 3 swap edits are now in the redo range
+}
+
+TEST_CASE("undo_while_tag stops at the first non-matching edit",
+          "[edit][tag][history]") {
+    // Real-world flow: user runs FA24 swap (3 edits), then makes a
+    // manual edit on top. Revert All should peel off ONLY the manual
+    // edit's worth of contiguous matches at the head — which is zero,
+    // because the manual edit is untagged. Otherwise we'd silently
+    // discard the user's work between the workflow and now.
+    st::edit::History h;
+    h.record(st::edit::Edit::bytes({{0x2, 0x0, 0x1}}, "swap").with_tag("fa24_swap"));
+    h.record(st::edit::Edit::bytes({{0x3, 0x0, 0x1}}, "manual"));
+    REQUIRE(h.cursor() == 2);
+
+    auto const reverted = h.undo_while_tag("fa24_swap");
+    REQUIRE(reverted.empty());
+    REQUIRE(h.cursor() == 2); // nothing moved
+}
+
+TEST_CASE("undo_while_tag with empty tag is a no-op", "[edit][tag][history]") {
+    // Empty tag must not match untagged edits — otherwise calling
+    // undo_while_tag("") would peel every untagged edit off the stack.
+    st::edit::History h;
+    h.record(st::edit::Edit::bytes({{0x1, 0x0, 0x1}}, "untagged"));
+    REQUIRE(h.cursor() == 1);
+
+    auto const reverted = h.undo_while_tag("");
+    REQUIRE(reverted.empty());
+    REQUIRE(h.cursor() == 1);
+}
+
+TEST_CASE("undo_while_tag stops at a different tag", "[edit][tag][history]") {
+    // Two adjacent transactions of different tags — Revert All for the
+    // newer one must not bleed into the older one.
+    st::edit::History h;
+    h.record(st::edit::Edit::bytes({{0x1, 0x0, 0x1}}, "stage1").with_tag("stage1_2_step"));
+    h.record(st::edit::Edit::bytes({{0x2, 0x0, 0x1}}, "swap A").with_tag("fa24_swap"));
+    h.record(st::edit::Edit::bytes({{0x3, 0x0, 0x1}}, "swap B").with_tag("fa24_swap"));
+    REQUIRE(h.cursor() == 3);
+
+    auto const reverted = h.undo_while_tag("fa24_swap");
+    REQUIRE(reverted.size() == 2);
+    REQUIRE(h.cursor() == 1);
+}

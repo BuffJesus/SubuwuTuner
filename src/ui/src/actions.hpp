@@ -115,6 +115,99 @@ void apply_op(AppState &state, std::string label, Op &&op) {
     }
 }
 
+// Sibling of apply_op for "I have a table-id but no user-selection."
+// Reads the named table fresh from the active ROM, runs the op over
+// the whole rect, writes back, and records the edit with an optional
+// transaction tag so workflow modals (FA24 swap, future Stage1→2
+// step) can group their writes for an atomic Revert All.
+//
+// Why a separate helper instead of teaching apply_op to operate on an
+// explicit table: apply_op's contract is "act on the user's current
+// selection," and that's what every call site in the toolbar +
+// command palette + cell-editor expects. Splicing in an alternate
+// "but if you pass a table_id, ignore the selection" path would make
+// the existing call sites hard to reason about. A sibling helper
+// reads cleanly at the call site (every workflow modal uses this
+// variant exclusively) and keeps apply_op's invariants intact.
+//
+// The op receives the whole-table Rect — callers that want a sub-rect
+// can apply the op manually before calling and pass a no-op. Most
+// workflow edits are whole-table (set Engine Displacement to 2.4 L,
+// scale every cell by 1.18, add 2 deg to every cell), so the whole-
+// table default fits the use case.
+template<typename Op>
+void apply_op_table(AppState &state, std::string label, std::string tag,
+                    std::string const &table_id, Op &&op) {
+    if (!state.project.has_value()) {
+        return;
+    }
+    st::Rom *target_rom = state.project->active_rom_mut();
+    if (target_rom == nullptr) {
+        state.status_msg = label + ": this ROM is read-only "
+                                   "(switch View → Active ROM to an editable slot).";
+        return;
+    }
+    auto const &def = state.project->definition();
+    auto const *tbl = def.find_table(table_id);
+    if (tbl == nullptr) {
+        state.status_msg = label + ": table '" + table_id + "' not in pack";
+        return;
+    }
+    auto td_r = def.read_table_values(*target_rom, *tbl);
+    if (!td_r.has_value()) {
+        state.status_msg = label + ": read: " + td_r.error().to_string();
+        return;
+    }
+    auto td = std::move(*td_r);
+    auto const rect = st::edit::whole_table(td);
+
+    auto before = st::edit::snapshot(td, rect);
+    if (!before.has_value()) {
+        state.status_msg = label + ": snapshot: " + before.error().to_string();
+        return;
+    }
+
+    if (auto s = op(td, rect); !s.has_value()) {
+        state.status_msg = label + ": " + s.error().to_string();
+        return;
+    }
+
+    auto after = st::edit::snapshot(td, rect);
+    if (!after.has_value()) {
+        state.status_msg = label + ": snapshot: " + after.error().to_string();
+        return;
+    }
+
+    auto wb = def.write_table_values(*target_rom, *tbl, td);
+    if (!wb.has_value()) {
+        state.status_msg = label + ": writeback: " + wb.error().to_string();
+        return;
+    }
+
+    std::string const audited_label = label;
+    std::size_t const audited_cells = rect.rows() * rect.cols();
+    auto edit = st::edit::Edit::table(table_id, std::move(*before), std::move(*after),
+                                      std::move(label));
+    if (!tag.empty()) {
+        edit = std::move(edit).with_tag(std::move(tag));
+    }
+    state.project->active_history().record(std::move(edit));
+    state.status_msg.clear();
+    state.dirty = true;
+
+    if (state.audit_log.has_value()) {
+        std::vector<std::pair<std::string, std::string>> fields{
+            {"table", table_id},
+            {"cells", std::to_string(audited_cells)}};
+        if (!state.active_rom_id.empty() && state.active_rom_id != "working") {
+            fields.emplace_back("rom", state.active_rom_id);
+        }
+        (void)state.audit_log->log(
+            st::audit::EntryKind::EditCommitted, "ui.editor", audited_label,
+            std::move(fields));
+    }
+}
+
 void apply_history_step(AppState &state, st::edit::Edit const &edit, bool forward);
 void paste_clipboard_at_cursor(AppState &state);
 void reset_selection_to_source(AppState &state);

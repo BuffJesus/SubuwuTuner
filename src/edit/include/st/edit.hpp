@@ -113,6 +113,14 @@ struct ByteEdit {
 
 struct Edit {
     std::string description;
+    // Optional transaction tag — empty for a normal single-step edit.
+    // Set when a higher-level workflow (e.g. the FA24 swap modal) records
+    // a batch of edits that should be undone as one unit. The tag is an
+    // opaque string the caller chooses (typically the workflow id like
+    // "fa24_swap"); History::undo_while_tag walks back across every
+    // adjacent edit carrying the same tag. Persisted to edits.toml as
+    // an optional `tag` field; absent / empty reads as a normal edit.
+    std::string tag;
     std::variant<TableEdit, ByteEdit> payload{TableEdit{}};
 
     [[nodiscard]] bool is_table() const noexcept {
@@ -131,13 +139,17 @@ struct Edit {
     [[nodiscard]] static Edit table(std::string table_id, Snapshot before, Snapshot after,
                                     std::string description) {
         return Edit{
-            std::move(description),
+            std::move(description), std::string{},
             TableEdit{std::move(table_id), std::move(before), std::move(after)},
         };
     }
     [[nodiscard]] static Edit bytes(std::vector<ByteEdit::Change> changes,
                                     std::string description) {
-        return Edit{std::move(description), ByteEdit{std::move(changes)}};
+        return Edit{std::move(description), std::string{}, ByteEdit{std::move(changes)}};
+    }
+    [[nodiscard]] Edit with_tag(std::string t) && {
+        tag = std::move(t);
+        return std::move(*this);
     }
 };
 
@@ -158,6 +170,20 @@ public:
     // caller should restore from .before, or nullptr if there's nothing to
     // undo. The pointer is valid until the next record()/clear() call.
     [[nodiscard]] Edit const *undo() noexcept;
+
+    // Walk the cursor back across every adjacent edit at the head of the
+    // applied range that carries the given non-empty tag. Returns the
+    // edits in undo order (newest first) so the caller can restore each
+    // from its .before snapshot in sequence. The pointers are valid
+    // until the next record()/clear() call.
+    //
+    // Used by workflow modals (FA24 swap, future Stage1→2 step) where
+    // a single user-visible "Revert all" reverses the whole batch.
+    // Only contiguous tag-matching edits at the head of the applied
+    // range are walked back — if the user has added unrelated edits
+    // after the workflow batch, undo_while_tag stops at the first
+    // non-match rather than peeling through them. Empty tag is a no-op.
+    [[nodiscard]] std::vector<Edit const *> undo_while_tag(std::string_view tag) noexcept;
 
     // Step the cursor forward by one. Returns a pointer to the Edit to
     // restore from .after, or nullptr.

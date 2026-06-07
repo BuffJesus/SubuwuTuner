@@ -218,6 +218,18 @@ Edit const *History::undo() noexcept {
     return &edits_[cursor_];
 }
 
+std::vector<Edit const *> History::undo_while_tag(std::string_view tag) noexcept {
+    std::vector<Edit const *> out;
+    if (tag.empty()) {
+        return out;
+    }
+    while (cursor_ > 0 && edits_[cursor_ - 1].tag == tag) {
+        --cursor_;
+        out.push_back(&edits_[cursor_]);
+    }
+    return out;
+}
+
 Edit const *History::redo() noexcept {
     if (!can_redo())
         return nullptr;
