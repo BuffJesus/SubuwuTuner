@@ -37,7 +37,7 @@ add_executable(st_unit_tests
     unit/transport/test_factory.cpp
     unit/transport/test_uds_trace.cpp
     unit/transport/test_j2534_discovery.cpp
-    unit/ecu/test_cobb_datalog.cpp
+    unit/ecu/test_extended_did_datalog.cpp
     unit/ecu/test_ssm.cpp
     unit/ecu/test_ssm_properties.cpp
     unit/ecu/test_uds_properties.cpp
@@ -57,6 +57,7 @@ add_executable(st_unit_tests
     unit/discover/test_discover.cpp
     unit/flash/test_flash.cpp
     unit/flash/test_checksum.cpp
+    unit/flash/test_boot_signatures.cpp
     unit/flash/test_backup_store.cpp
     unit/flash/test_cancellation_invariants.cpp
     unit/flash/test_read_full_rom_sa_v4_port.cpp

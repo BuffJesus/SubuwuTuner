@@ -45,11 +45,31 @@ recovery paths, not "we wrote a shim" hopium.
    region — application code cannot bypass it.
 2. **Reset PC is `0x000000E8`** — inside the bootloader. Every
    power-on enters the bootloader regardless of application state.
-3. **Application-image checksum.** The bootloader computes a
-   sum-of-words over the application region (`0x00010000..0x001FFFFF`)
-   and compares against an expected value at a fixed offset in the
-   image header. Failure holds the bootloader in "waiting for
-   reprogram" mode and prevents the jump to application entry.
+3. **Application integrity check** (verified on LF79103P;
+   `findings/APP_CHECKSUM_VERIFICATION.md`). The bootloader's
+   startup at `0x000000E8` (`_reset_entry`) runs C-runtime init,
+   six peripheral / RAM-self-test indirections, then enters
+   `_stage2_entry @ 0x00000CA0` which calls `FUN_00000D6E`. That
+   function performs two checks, both of which must pass before
+   the JMP to `*(uint32_t *)0x00000D00 = 0x001F094C = _main`:
+    - **Flash signature check** (`FUN_00000C54`): three fixed-pattern
+      comparisons resident in the flash image —
+      `*(uint16_t *)0x00006000 == 0x5555`,
+      `*(uint16_t *)0x001FFFF2 == 0xAAAA`, and
+      `*(uint16_t *)0x0000006C == *(uint16_t *)0x00006010`.
+      Fixed-pattern verification, not a sum or CRC over the cal
+      region — content is irrelevant as long as these three
+      signatures hold. `st::flash::verify_boot_signatures_sh2a_2mb`
+      is the host-side pre-flight mirror; pre-flash buffers should
+      run through it before being sent to the ECU.
+    - **RAM consistency check** (`FUN_00000B88`): sum of 28 BE u16
+      words from system RAM `0xFFF82008..0xFFF82040` compared
+      against the value at `0xFFF82000`. Verifies the C-runtime
+      init didn't corrupt the configuration table; does not
+      constrain flash content.
+   If either check fails, bit 1 of MMIO `0xFFF99819` is set, the
+   bootloader enters waiting-for-reprogram mode, and the
+   application entry at `0x001F094C` is not reached.
 
 Concrete facts staged at `fixtures/private/brick-protection.md` (analyst-side,
 2 MB plaintext Generation-A.2 ROM):
@@ -71,19 +91,16 @@ application-image checksum above.
 **Aftermarket per-install-block CRC-32 table at `0x1FFF3C..0x1FFFA0`.**
 25 BE u32 slots, one per install block, populated during
 aftermarket-installer reflash. Algorithm + impl shipped at
-`src/flash/src/checksum.cpp` as `cobb_per_block_crc32`. **Not
-consulted by the running ECU.** The analyst's 2026-06-06 Ghidra
-trace (full SH-2A auto-analysis of both stock and aftermarket-
-installed `lf79103p`) found zero literal-pool references to any
-address in that region and zero CRC-32 polynomial constants
-anywhere in either ROM. The table is installer-side metadata only
-— written during install, never read at boot.
-`st::flash::CobbPerBlockCrc32Repair` exists to preserve
+`src/flash/src/checksum.cpp` as `per_install_block_crc32`. **Not
+consulted by the running ECU.** Independent disassembly (full
+SH-2A auto-analysis of both stock and aftermarket-installed
+`lf79103p` ROMs) found zero literal-pool references to any address
+in that region and zero CRC-32 polynomial constants anywhere in
+either ROM. The table is installer-side metadata only — written
+during install, never read at boot.
+`st::flash::PerInstallBlockCrc32Repair` exists to preserve
 installer-side coherence (in case the user later flashes via the
 installer's own tool); it has no role in boot-time safety.
-Evidence:
-`findings/corpus-wide-re-2026-06-06/out/cobb_datalog/CHECKSUM_RUNTIME_VERIFICATION.md`
-and `findings/decompile/lf79103p/slot24_refs_{stock,cobb}.txt`.
 
 **Stub at `0x4000` (formerly called the "SecureBoot stub" — it
 isn't).** A 16-byte block
@@ -116,28 +133,22 @@ integrity-check flow. Full evidence:
 `findings/SECUREBOOT_STUB_4000_VERIFICATION.md` and raw output at
 `findings/decompile/lf79103p/secureboot_refs_*.bin.txt`.
 
-### Note on the application sum-of-words checksum claim above
+### Note on the prior sum-of-words checksum claim
 
-Point 3 in "What protects the ECU at rest" (the bootloader's
-sum-of-words check over `0x00010000..0x001FFFFF`) is sourced from
-`fixtures/private/brick-protection.md` §3, which states it was
-derived against LF79100P (2 MB Generation-A.2) and confirmed
-against EZ1G (1 MB) — **not LF79103P / LF79101P specifically**.
-The analyst's 2026-06-06 follow-up could not locate the loop on
-LF79103P by literal-bounds heuristic: zero functions in either
-the stock or aftermarket-installed ROM reference both APP_START
-(`0x00010000`) and an end-constant (`0x001FFFFF` / `0x00200000`)
-as immediates. The three plausible explanations are (a) bounds
-come from a descriptor table rather than literals (same shape as
-the FCU sector-allow-list), (b) the check is per-sector and uses
-sector-local addresses, or (c) the aftermarket bootloader patches
-have rewritten this check. **Open Tier-4 item: decompile
-`FUN_000000E8` (reset entry) and walk successors to verify or
-falsify the §3 claim on LF79103P.** Until that lands, the
-"empirical safety floor" framing (aftermarket-installed ECU
-boots and runs daily, so the boot path accepts the cal patterns
-in our flash scope) is the load-bearing argument for the
-LF79103P case — not the §3 literal claim.
+Earlier drafts of this doc cited a bootloader sum-of-words check
+over `0x00010000..0x001FFFFF`, sourced from
+`fixtures/private/brick-protection.md` §3 (verified there against
+LF79100P / EZ1G silicon). The analyst's 2026-06-06 follow-up walk
+of `FUN_000000E8` and its successors on LF79103P found instead the
+three-signature mechanism documented in point 3 above — a fixed-
+pattern check, not a sum. The sum-of-words function (`FUN_00000884`)
+does exist on LF79103P but is called with system-RAM bounds
+(`0xFFF82008..0xFFF82040`), not flash bounds, and serves the RAM
+consistency role (also documented in point 3) rather than gating
+the app jump. `brick-protection.md` §3 either drifted from
+LF79100P → LF79103P silicon or was always speculative for the
+LF79xxxP generation; the SubuwuTuner-side authoritative source is
+`findings/APP_CHECKSUM_VERIFICATION.md`.
 
 ### What can actually brick
 
@@ -173,6 +184,14 @@ unconditionally:
   refuses any flash plan whose erase set contains a sector index in
   `0x00..0x0F`. The on-ECU FCU would refuse anyway; we refuse before
   we hit the wire so a malicious / buggy pack can't even attempt it.
+- **Boot-signature host-side preflight** (`st::flash::verify_boot_signatures_sh2a_2mb`).
+  Mirrors the bootloader's `FUN_00000C54` three-signature check
+  against the working buffer before any bytes go to the ECU. Any
+  image that would fail the bootloader's gate fails the host-side
+  check first, returning a `BootSignatureReport` naming which
+  signature mismatched so a user / CI script can fix it before
+  ever touching flash. Verified against both factory-virgin and
+  aftermarket-installed reference ROMs.
 - **Cancellation invariants.** `Flasher::execute(plan, cancel)`
   polls cancel at PDU boundaries only; an in-flight TransferData or
   RequestDownload completes before cancel is honored. Tests at
@@ -186,8 +205,14 @@ The expected case. No special tooling.
 
 1. ECU power restored.
 2. Bootloader re-enters at `0x000000E8`.
-3. Application checksum fails (region is partly rewritten).
-4. Bootloader holds in waiting-for-reprogram mode.
+3. `FUN_00000C54` flash signature check fails — a partial app
+   rewrite clobbers either `0xAAAA @ 0x1FFFF2` (since that's in
+   the last app sector) or the `0x5555 @ 0x6000` / pair signatures
+   (boot region edge), so at least one fixed-pattern compare in
+   `FUN_00000D6E` mismatches.
+4. Bit 1 of MMIO `0xFFF99819` is set, bootloader holds in
+   waiting-for-reprogram mode (jump to `0x001F094C = _main` is
+   suppressed).
 5. SubuwuTuner reconnects, re-establishes UDS session `0x02`,
    re-authenticates (SecurityAccess), re-runs the same flash plan.
    Verify routine catches identity match this time, ECU resets,
@@ -434,9 +459,12 @@ The flasher honors these regardless of ISA:
   resolved the `0x4000` block as Renesas runtime-library leaf
   helpers (dead code on both stock and aftermarket-installed
   LF79103P). Source for the resolved-state claim in the same
-  subsection. Also documents the negative result of the
-  literal-bounds search for the application sum-of-words
-  checksum cited in §3 of `brick-protection.md`.
+  subsection.
+- `findings/APP_CHECKSUM_VERIFICATION.md` (analyst off-tree) —
+  reset-tree walk through `FUN_000000E8 → _stage2_entry → FUN_00000D6E`
+  that resolved the LF79103P boot-time integrity check as the
+  three-signature mechanism documented in point 3 above. Source
+  for `st::flash::verify_boot_signatures_sh2a_2mb`.
 - `findings/corpus-wide-re-2026-06-06/out/ARCH_REPORT.md` §3
   (analyst off-tree) — cross-CID census of the `0x4000`
   signature; present in 186 bins, absent on 1 MB SH7058 and the
