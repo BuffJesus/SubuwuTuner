@@ -563,6 +563,42 @@ Result<Primitive> parse_primitive(toml::table const &t) {
     return p;
 }
 
+Result<Workflow> parse_workflow(toml::table const &t) {
+    Workflow w;
+    if (auto const v = t["id"].value<std::string>(); v.has_value() && !v->empty()) {
+        w.id = *v;
+    } else {
+        return failure(ErrorCode::ParseError,
+                       "[[workflow]] missing id" + source_suffix(t));
+    }
+    w.display_name = optional_value<std::string>(t, "display_name", {});
+    w.modal = optional_value<std::string>(t, "modal", {});
+    auto const *arr = t["required_tables"].as_array();
+    if (arr == nullptr) {
+        // Empty required_tables is legal — a workflow can declare
+        // itself without table prerequisites (e.g. a recipe that
+        // only writes ByteEdits or only touches DTC bitmaps). The
+        // modal that owns the workflow gates harder if needed.
+        return w;
+    }
+    w.required_tables.reserve(arr->size());
+    std::size_t i = 0;
+    for (auto const &el : *arr) {
+        auto const s = el.value<std::string>();
+        if (!s.has_value() || s->empty()) {
+            std::string msg{"[[workflow]] '"};
+            msg.append(w.id);
+            msg.append("' required_tables[");
+            msg.append(std::to_string(i));
+            msg.append("] is not a non-empty string");
+            return failure(ErrorCode::ParseError, std::move(msg));
+        }
+        w.required_tables.push_back(*s);
+        ++i;
+    }
+    return w;
+}
+
 } // namespace
 
 // ---- DataType helpers ----------------------------------------------------
@@ -993,6 +1029,9 @@ public:
             !r.has_value()) {
             return failure(r.error());
         }
+        if (auto r = visit_array("workflow", parse_workflow, def.workflows_); !r.has_value()) {
+            return failure(r.error());
+        }
         return ok();
     }
 
@@ -1028,6 +1067,11 @@ public:
         upsert(parent.dtc_bitmaps_, child.dtc_bitmaps_);
         upsert(parent.hooks_, child.hooks_);
         upsert(parent.primitives_, child.primitives_);
+        // Workflows merge by id — child override / append same as the
+        // other id-keyed kinds. A child pack adding a workflow its
+        // parent doesn't declare is the common case (FA24 swap on
+        // lf79103p, inherited via extends by lf79101p).
+        upsert(parent.workflows_, child.workflows_);
         // WritableRegion is keyed by `name` rather than `id`. Same upsert
         // semantics — child's same-named region overrides parent's, new
         // names append.
@@ -1587,6 +1631,25 @@ Primitive const *Definition::find_primitive(std::string_view id) const noexcept 
     auto it = std::find_if(primitives_.begin(), primitives_.end(),
                            [&](Primitive const &p) { return p.id == id; });
     return it == primitives_.end() ? nullptr : &*it;
+}
+
+Workflow const *Definition::find_workflow(std::string_view id) const noexcept {
+    auto it = std::find_if(workflows_.begin(), workflows_.end(),
+                           [&](Workflow const &w) { return w.id == id; });
+    return it == workflows_.end() ? nullptr : &*it;
+}
+
+bool Definition::supports_workflow(std::string_view id) const noexcept {
+    auto const *w = find_workflow(id);
+    if (w == nullptr) {
+        return false;
+    }
+    for (auto const &table_id : w->required_tables) {
+        if (find_table(table_id) == nullptr) {
+            return false;
+        }
+    }
+    return true;
 }
 
 namespace {

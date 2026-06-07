@@ -1923,6 +1923,19 @@ int cmd_pack_info(int argc, char *argv[]) {
     }
     std::printf("Hooks:           %zu\n", def->hooks().size());
     std::printf("Primitives:      %zu\n", def->primitives().size());
+    if (!def->workflows().empty()) {
+        std::printf("Workflows:       %zu\n", def->workflows().size());
+        for (auto const &w : def->workflows()) {
+            bool const supported = def->supports_workflow(w.id);
+            std::printf("  - %s%s%s\n",
+                        w.id.c_str(),
+                        w.display_name.empty() ? "" : " ",
+                        w.display_name.empty() ? "" : w.display_name.c_str());
+            if (!supported) {
+                std::printf("      (missing one or more required_tables — not eligible)\n");
+            }
+        }
+    }
 
     // Quick validate so users see issues without running rom-info.
     auto const validity = def->validate();

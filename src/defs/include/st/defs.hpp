@@ -354,6 +354,19 @@ struct Primitive {
     std::vector<HookSignal> outputs;
 };
 
+// A pack-declared opinionated multi-table recipe — drives the welcome
+// "Common workflows" card + Tools menu entry + the workflow modal's
+// open-time pack-readiness check. Each entry names a workflow id (e.g.
+// "fa24_swap"), the modal that owns its UI, and the table ids that
+// must be present in the resolved pack for the workflow to be eligible.
+// See docs/16-custom-features.md for the broader pattern.
+struct Workflow {
+    std::string id;
+    std::string display_name;
+    std::string modal;
+    std::vector<std::string> required_tables;
+};
+
 // A complete definition pack: one Pack header, plus 0..N of each child kind.
 class Definition {
 public:
@@ -409,6 +422,14 @@ public:
     [[nodiscard]] std::vector<WritableRegion> const &writable_regions() const noexcept {
         return writable_regions_;
     }
+    [[nodiscard]] std::vector<Workflow> const &workflows() const noexcept {
+        return workflows_;
+    }
+    [[nodiscard]] Workflow const *find_workflow(std::string_view id) const noexcept;
+    // True when the pack declares `id` AND every table in its
+    // required_tables list resolves via find_table (so workflow
+    // callers don't have to redo the per-table presence check).
+    [[nodiscard]] bool supports_workflow(std::string_view id) const noexcept;
 
     [[nodiscard]] Axis const *find_axis(std::string_view id) const noexcept;
     [[nodiscard]] Scaling const *find_scaling(std::string_view id) const noexcept;
@@ -518,6 +539,7 @@ private:
     std::vector<Hook> hooks_;
     std::vector<Primitive> primitives_;
     std::vector<WritableRegion> writable_regions_;
+    std::vector<Workflow> workflows_;
 
     friend class DefinitionBuilder;
 };

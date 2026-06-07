@@ -2367,6 +2367,153 @@ extends    = "nonexistent-parent"
     REQUIRE(msg.find("nonexistent-parent") != std::string::npos);
 }
 
+// ----- workflow registry ------------------------------------------------
+
+TEST_CASE("[[workflow]] parses id, display_name, modal, required_tables",
+          "[defs][workflow]") {
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "wf-test"
+endianness     = "big"
+rom_size_bytes = 65536
+
+[[workflow]]
+id              = "fa24_swap"
+display_name    = "FA24 swap (VA WRX)"
+modal           = "fa24_swap"
+required_tables = ["a_table", "b_table"]
+)toml");
+    REQUIRE(d.has_value());
+    REQUIRE(d->workflows().size() == 1);
+    auto const *w = d->find_workflow("fa24_swap");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->id == "fa24_swap");
+    REQUIRE(w->display_name == "FA24 swap (VA WRX)");
+    REQUIRE(w->modal == "fa24_swap");
+    REQUIRE(w->required_tables == std::vector<std::string>{"a_table", "b_table"});
+}
+
+TEST_CASE("supports_workflow returns true only when every required_table is present",
+          "[defs][workflow]") {
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "wf-presence"
+endianness     = "big"
+rom_size_bytes = 65536
+
+[[scaling]]
+id        = "raw"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint8"
+
+[[axis]]
+id        = "x"
+data_type = "uint8"
+address   = 0
+length    = 4
+scaling   = "raw"
+
+[[table]]
+id         = "engine_displacement"
+dimensions = 1
+data_type  = "uint8"
+address    = 16
+scaling    = "raw"
+axis_x     = "x"
+
+[[workflow]]
+id              = "all_present"
+required_tables = ["engine_displacement"]
+
+[[workflow]]
+id              = "missing_some"
+required_tables = ["engine_displacement", "ghost_table"]
+)toml");
+    REQUIRE(d.has_value());
+    REQUIRE(d->supports_workflow("all_present"));
+    REQUIRE_FALSE(d->supports_workflow("missing_some"));
+    // Unknown workflow id never qualifies.
+    REQUIRE_FALSE(d->supports_workflow("unknown_wf"));
+}
+
+TEST_CASE("[[workflow]] required_tables defaults to empty when absent",
+          "[defs][workflow]") {
+    // Empty required_tables is legal — a workflow can declare itself
+    // without table prerequisites. supports_workflow should treat
+    // that as trivially satisfied.
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "wf-no-reqs"
+endianness     = "big"
+rom_size_bytes = 65536
+
+[[workflow]]
+id   = "no_table_reqs"
+)toml");
+    REQUIRE(d.has_value());
+    auto const *w = d->find_workflow("no_table_reqs");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->required_tables.empty());
+    REQUIRE(d->supports_workflow("no_table_reqs"));
+}
+
+TEST_CASE("[[workflow]] missing id fails parse", "[defs][workflow]") {
+    auto const d = st::Definition::from_toml_string(R"toml(
+[pack]
+id             = "wf-bad"
+endianness     = "big"
+rom_size_bytes = 65536
+
+[[workflow]]
+display_name = "FA24 swap"
+)toml");
+    REQUIRE_FALSE(d.has_value());
+    REQUIRE(d.error().to_string().find("[[workflow]] missing id") != std::string::npos);
+}
+
+TEST_CASE("workflows inherit across extends, child overrides by id",
+          "[defs][workflow][extends]") {
+    TempDir td;
+    write_text(td.path / "parent.toml", R"toml(
+[pack]
+id             = "wf-parent"
+endianness     = "big"
+rom_size_bytes = 65536
+
+[[workflow]]
+id              = "fa24_swap"
+display_name    = "Parent FA24 swap"
+required_tables = ["t1"]
+
+[[workflow]]
+id              = "e85_conversion"
+required_tables = ["t1"]
+)toml");
+    write_text(td.path / "child.toml", R"toml(
+[pack]
+id             = "wf-child"
+endianness     = "big"
+rom_size_bytes = 65536
+extends        = "wf-parent"
+
+# Override fa24_swap with a different display_name + extended table list.
+[[workflow]]
+id              = "fa24_swap"
+display_name    = "Child FA24 swap"
+required_tables = ["t1", "t2"]
+)toml");
+    auto const d = st::Definition::from_file(td.path / "child.toml");
+    REQUIRE(d.has_value());
+    REQUIRE(d->workflows().size() == 2); // 1 inherited + 1 override (replaces parent)
+    auto const *fa24 = d->find_workflow("fa24_swap");
+    REQUIRE(fa24 != nullptr);
+    REQUIRE(fa24->display_name == "Child FA24 swap");
+    REQUIRE(fa24->required_tables.size() == 2);
+    // Inherited workflow is still visible on the child.
+    REQUIRE(d->find_workflow("e85_conversion") != nullptr);
+}
+
 TEST_CASE("from_directory follows multi-level extends chains", "[defs][extends]") {
     TempDir td;
 
