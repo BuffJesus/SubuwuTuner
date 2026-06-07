@@ -42,9 +42,13 @@
 #include "theme.hpp"
 #include "widgets/widgets.hpp"
 
+#include "st/rom.hpp"
+
 #include <imgui.h>
+#include <nfd.hpp>
 
 #include <array>
+#include <filesystem>
 #include <string>
 #include <string_view>
 
@@ -71,12 +75,12 @@ enum class CamStrategy : std::uint8_t {
 };
 
 // Basemap source. "UseDefaults" applies SubuwuTuner's best-guess
-// starting values (placeholder until the basemap byte-diff is wired);
-// "LoadBasemap" prompts for a .bin / .stune file and writes only the
-// diff cells.
+// starting values. "LoadBasemap" reads the user-picked .bin and
+// copies the workflow tables' values cell-by-cell into the working
+// ROM, recording each table as its own tagged Edit.
 enum class BasemapSource : std::uint8_t {
     UseDefaults,
-    LoadBasemap, // not yet implemented — stubbed in Step 2 branch
+    LoadBasemap,
 };
 
 // Per-modal state — survives across frames while the modal is open.
@@ -89,6 +93,8 @@ struct ModalState {
     int step{0};
     CamStrategy cam_strategy{CamStrategy::KeepFA24Cams};
     BasemapSource basemap_source{BasemapSource::UseDefaults};
+    std::filesystem::path basemap_path;
+    std::string basemap_status; // shown under the "Yes" radio when set
 };
 static ModalState g_state;
 
@@ -96,6 +102,8 @@ void reset_state() {
     g_state.step = 0;
     g_state.cam_strategy = CamStrategy::KeepFA24Cams;
     g_state.basemap_source = BasemapSource::UseDefaults;
+    g_state.basemap_path.clear();
+    g_state.basemap_status.clear();
 }
 
 } // namespace
@@ -304,14 +312,51 @@ void draw_basemap(AppState &state) {
 
     bool yes = g_state.basemap_source == BasemapSource::LoadBasemap;
     bool no_ = g_state.basemap_source == BasemapSource::UseDefaults;
-    if (ImGui::RadioButton("Yes — load it from a .bin or .stune file", yes)) {
+    if (ImGui::RadioButton("Yes — load it from a .bin file", yes)) {
         g_state.basemap_source = BasemapSource::LoadBasemap;
     }
     ImGui::Indent();
-    text_subtle("Recommended path. The basemap captures the exact values for HPFP "
-                "timing, AVCS reference, and injector scaling that match your FA24 "
-                "hardware. SubuwuTuner will diff it against stock and apply only "
-                "the cells that differ.");
+    text_subtle("Reads the workflow tables (HPFP timing, AVCS targets, injector mult, "
+                "displacement) from your basemap and copies them into the working ROM. "
+                "Basemap must be the same firmware family as the loaded project pack.");
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+    // Browse button always available — clicking it auto-selects the
+    // Yes radio so the user doesn't have to make two clicks for the
+    // common "find the file then proceed" flow.
+    if (ImGui::Button("Browse\xE2\x80\xA6##fa24_basemap")) {
+        nfdu8filteritem_t const filters[] = {{"ROM image", "bin"}};
+        NFD::UniquePathU8 out;
+        nfdresult_t const r = NFD::OpenDialog(out, filters, 1);
+        if (r == NFD_OKAY) {
+            g_state.basemap_path = std::filesystem::path{out.get()};
+            g_state.basemap_source = BasemapSource::LoadBasemap;
+            // Sanity-check size against the loaded project's source
+            // ROM size while we have the path in hand — surfaces an
+            // obvious mismatch (wrong firmware family / partial dump)
+            // before the user gets to Step 3 Apply.
+            std::error_code ec;
+            auto const sz = std::filesystem::file_size(g_state.basemap_path, ec);
+            auto const expected = state.project->source_rom().data().size();
+            if (ec) {
+                g_state.basemap_status = "Couldn't stat the picked file: " + ec.message();
+            } else if (sz != expected) {
+                g_state.basemap_status =
+                    "Size mismatch: basemap is " + std::to_string(sz) +
+                    " bytes, project expects " + std::to_string(expected) +
+                    " bytes. Likely wrong firmware family.";
+            } else {
+                g_state.basemap_status = "Selected: " + g_state.basemap_path.filename().string();
+            }
+        } else if (r == NFD_ERROR) {
+            g_state.basemap_status = std::string{"File dialog error: "} + NFD::GetError();
+        }
+    }
+    ImGui::SameLine();
+    if (g_state.basemap_path.empty()) {
+        text_subtle("No file picked yet.");
+    } else {
+        text_subtle("%s", g_state.basemap_status.c_str());
+    }
     ImGui::Unindent();
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
 
@@ -340,11 +385,14 @@ void draw_review(AppState &state) {
         return;
     }
 
+    bool const from_basemap = g_state.basemap_source == BasemapSource::LoadBasemap &&
+                              !g_state.basemap_path.empty();
+
     // Software-fix path (KeepFA24Cams) — 4 edits
     ImGui::TextWrapped("This will change 4 calibration tables in your pack:");
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
 
-    // Each row uses the same shape: name, before/after, why-line.
+    // Each row uses the same shape: name, transition, why-line.
     auto change_row = [](char const *name, char const *transition, char const *why) {
         ImGui::BulletText("%s", name);
         ImGui::Indent();
@@ -354,24 +402,91 @@ void draw_review(AppState &state) {
         ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
     };
 
-    change_row("Engine - Displacement", "2.0 L → 2.4 L",
-               "Required for the MAF / load-calc math to track the larger engine.");
-    change_row("Fuel - Timing - HPFP - Base Offset", "80.0° → 260.0°",
-               "Shifts the pump command past the flipped triangle lobe on the FA24 "
-               "cam. Default of +180° is a geometric estimate; the basemap byte-diff "
-               "(when received) will refine this.");
-    change_row("AVCS - Intake - Cam Target (TGV Open / Closed, Baro Low / High)",
-               "+2° offset applied to every cell of all 4 tables",
-               "Absorbs the FA24 cam sensor plate's ~2° tooth-angle difference "
-               "from the FA20 plate (per the documented swap recipes).");
-    change_row("Fuel - Injectors - Pulse - Injector Mult Table",
-               "per-cell stock × 1.18",
-               "Scales injector pulse-width for the FA24's higher injector flow rate.");
+    if (from_basemap) {
+        // Basemap path: every workflow table gets the basemap's values
+        // copied wholesale into the working ROM. We don't enumerate
+        // per-cell deltas here — the basemap may differ from stock on
+        // dozens of cells per table, which would make the Review screen
+        // unreadable. Instead surface the source file as the source of
+        // truth, with a one-line per-table description.
+        change_row("Engine - Displacement", "copied from basemap",
+                   "FA24 cars run 2.4 L; the basemap captures the exact stored value.");
+        change_row("Fuel - Timing - HPFP - Base Offset", "copied from basemap",
+                   "Tuned HPFP timing for the FA24's flipped triangle lobe.");
+        change_row("AVCS - Intake - Cam Target (Baro Low / High, TGV Closed)",
+                   "copied from basemap",
+                   "Tuned AVCS reference for the FA24 cam sensor plate.");
+        change_row("Fuel - Injectors - Pulse - Injector Mult Table",
+                   "copied from basemap",
+                   "Tuned injector scaling for the FA24's injector flow rate.");
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+        text_subtle("Source: %s", g_state.basemap_path.filename().string().c_str());
+    } else {
+        change_row("Engine - Displacement", "2.0 L → 2.4 L",
+                   "Required for the MAF / load-calc math to track the larger engine.");
+        change_row("Fuel - Timing - HPFP - Base Offset", "80.0° → 260.0°",
+                   "Shifts the pump command past the flipped triangle lobe on the FA24 "
+                   "cam. Geometric estimate; refine via basemap or bench data.");
+        change_row("AVCS - Intake - Cam Target (Baro Low / High, TGV Closed)",
+                   "+2° offset applied to every cell",
+                   "Absorbs the FA24 cam sensor plate's ~2° tooth-angle difference "
+                   "from the FA20 plate.");
+        change_row("Fuel - Injectors - Pulse - Injector Mult Table",
+                   "per-cell stock × 1.18",
+                   "Scales injector pulse-width for the FA24's higher injector flow rate.");
+    }
 
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
     text_subtle("This is a calibration change only. No firmware patch. Revert "
                 "any edit individually under Tools → History after applying, or "
                 "use the FA24-swap-mode status badge → Revert All.");
+}
+
+// Read the named table from `basemap_rom` via the project's
+// definition (so axis sizing + scaling line up), then write each
+// cell into the working ROM's same table. Recorded as a single
+// tagged Edit (revert_fa24_swap peels them off as a batch). 1D and
+// 2D tables are handled via TableData.values; 3D tables (which the
+// FA24 workflow doesn't touch today) would need an extra branch on
+// TableData.slices.
+void copy_table_from_basemap(AppState &state, std::string const &label,
+                             std::string const &table_id, st::Rom const &basemap_rom) {
+    auto const &def = state.project->definition();
+    auto const *tbl = def.find_table(table_id);
+    if (tbl == nullptr) {
+        state.status_msg = label + ": table '" + table_id + "' not in pack";
+        return;
+    }
+    auto basemap_td_r = def.read_table_values(basemap_rom, *tbl);
+    if (!basemap_td_r.has_value()) {
+        state.status_msg = label + ": basemap read: " + basemap_td_r.error().to_string();
+        return;
+    }
+    auto const basemap_td = std::move(*basemap_td_r);
+
+    apply_op_table(state, label, "fa24_swap", table_id,
+                   [&basemap_td](st::Definition::TableData &td,
+                                 st::edit::Rect r) -> st::Status {
+                       // Refuse to write back if the basemap's grid
+                       // shape doesn't line up with the working ROM's —
+                       // that's a sign the pack changed shape between
+                       // the basemap's vintage and now (or the basemap
+                       // is the wrong firmware).
+                       if (basemap_td.values.size() != td.values.size()) {
+                           return st::failure(st::ErrorCode::InvalidArgument,
+                                              "basemap row count mismatch");
+                       }
+                       for (std::size_t row = r.r_start; row <= r.r_end; ++row) {
+                           if (basemap_td.values[row].size() != td.values[row].size()) {
+                               return st::failure(st::ErrorCode::InvalidArgument,
+                                                  "basemap col count mismatch");
+                           }
+                           for (std::size_t col = r.c_start; col <= r.c_end; ++col) {
+                               td.values[row][col] = basemap_td.values[row][col];
+                           }
+                       }
+                       return st::ok();
+                   });
 }
 
 void apply_fa24_swap(AppState &state) {
@@ -380,67 +495,91 @@ void apply_fa24_swap(AppState &state) {
     // flips the dirty flag. The shared transaction_tag ("fa24_swap")
     // is what powers the status-bar badge's Revert All affordance —
     // History::undo_while_tag walks back contiguous tag-matching edits.
-    //
-    // Basemap import path is still stubbed pending NTM basemap arrival
-    // (~week of 2026-06-09); for now any "Yes" pick falls through to
-    // the defaults branch with a warn toast so the user knows.
-    if (g_state.basemap_source == BasemapSource::LoadBasemap) {
-        // TODO(2026-06-09+): file-picker + byte-diff against stock.
-        enqueue_toast(state, ToastKind::Warn,
-                      "Basemap import isn't wired yet — applying SubuwuTuner defaults. "
-                      "Refine via direct table edits once your basemap arrives.");
-    }
 
     constexpr char const *kTag = "fa24_swap";
-    std::size_t edits_recorded = 0;
+    bool const from_basemap = g_state.basemap_source == BasemapSource::LoadBasemap &&
+                              !g_state.basemap_path.empty();
+
+    // Load the basemap up-front (one shared Rom) so we don't re-read
+    // 2 MB four times. Fall back to defaults if the load fails so the
+    // user gets something rather than nothing — surfaces the failure
+    // via a warn toast.
+    std::optional<st::Rom> basemap_rom;
+    if (from_basemap) {
+        auto r = st::Rom::from_file(g_state.basemap_path);
+        if (!r.has_value()) {
+            enqueue_toast(state, ToastKind::Warn,
+                          std::string{"Couldn't load basemap ("} + r.error().to_string() +
+                              "). Falling back to SubuwuTuner defaults.");
+        } else {
+            basemap_rom = std::move(*r);
+        }
+    }
+
     auto const cursor_before = state.project->active_history().cursor();
 
     // 1. Displacement — applies for every cam strategy. Single-cell
     //    table; "set whole table to 2.4" is correct regardless of its
-    //    actual row/col layout.
-    apply_op_table(state, "FA24 swap: Engine Displacement → 2.4 L", kTag,
-                   "engine_displacement",
-                   [](st::Definition::TableData &td, st::edit::Rect r) {
-                       return st::edit::set_cells(td, r, 2.4);
-                   });
-
-    if (g_state.cam_strategy == CamStrategy::KeepFA24Cams) {
-        // 2. HPFP base offset — flipped triangle lobe shift. 260° is
-        //    the geometric default; the basemap byte-diff will refine
-        //    once it arrives.
-        apply_op_table(state, "FA24 swap: HPFP Base Offset → 260°", kTag,
-                       "fuel_timing_hpfp_base_offset",
+    //    actual row/col layout, and the basemap variant is "copy
+    //    whatever the basemap stored" (also 2.4 in practice).
+    if (basemap_rom.has_value()) {
+        copy_table_from_basemap(state, "FA24 swap: Engine Displacement (basemap)",
+                                "engine_displacement", *basemap_rom);
+    } else {
+        apply_op_table(state, "FA24 swap: Engine Displacement → 2.4 L", kTag,
+                       "engine_displacement",
                        [](st::Definition::TableData &td, st::edit::Rect r) {
-                           return st::edit::set_cells(td, r, 260.0);
-                       });
-
-        // 3a. AVCS Intake Cam Target — Baro Low × TGV Closed. +2°
-        //     absorbs the FA24 cam sensor plate tooth-angle delta.
-        apply_op_table(state, "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) +2°",
-                       kTag,
-                       "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
-                       [](st::Definition::TableData &td, st::edit::Rect r) {
-                           return st::edit::add_cells(td, r, 2.0);
-                       });
-
-        // 3b. Same offset on the Baro High variant.
-        apply_op_table(state, "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) +2°",
-                       kTag,
-                       "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
-                       [](st::Definition::TableData &td, st::edit::Rect r) {
-                           return st::edit::add_cells(td, r, 2.0);
-                       });
-
-        // 4. Injector multiplier — scale per-cell by FA24/FA20 flow
-        //    ratio (1.18). Whole-table multiply.
-        apply_op_table(state, "FA24 swap: Injector Mult Table ×1.18", kTag,
-                       "fuel_injectors_pulse_injector_mult_table",
-                       [](st::Definition::TableData &td, st::edit::Rect r) {
-                           return st::edit::multiply_cells(td, r, 1.18);
+                           return st::edit::set_cells(td, r, 2.4);
                        });
     }
 
-    edits_recorded = state.project->active_history().cursor() - cursor_before;
+    if (g_state.cam_strategy == CamStrategy::KeepFA24Cams) {
+        if (basemap_rom.has_value()) {
+            copy_table_from_basemap(state, "FA24 swap: HPFP Base Offset (basemap)",
+                                    "fuel_timing_hpfp_base_offset", *basemap_rom);
+            copy_table_from_basemap(state,
+                                    "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) (basemap)",
+                                    "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
+                                    *basemap_rom);
+            copy_table_from_basemap(state,
+                                    "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) (basemap)",
+                                    "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
+                                    *basemap_rom);
+            copy_table_from_basemap(state, "FA24 swap: Injector Mult Table (basemap)",
+                                    "fuel_injectors_pulse_injector_mult_table", *basemap_rom);
+        } else {
+            // 2. HPFP base offset — flipped triangle lobe shift. 260°
+            //    is the geometric default.
+            apply_op_table(state, "FA24 swap: HPFP Base Offset → 260°", kTag,
+                           "fuel_timing_hpfp_base_offset",
+                           [](st::Definition::TableData &td, st::edit::Rect r) {
+                               return st::edit::set_cells(td, r, 260.0);
+                           });
+            // 3a/b. AVCS Intake Cam Target — +2° absorbs the FA24 cam
+            //       sensor plate tooth-angle delta. Baro Low + High.
+            apply_op_table(state, "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) +2°",
+                           kTag,
+                           "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
+                           [](st::Definition::TableData &td, st::edit::Rect r) {
+                               return st::edit::add_cells(td, r, 2.0);
+                           });
+            apply_op_table(state, "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) +2°",
+                           kTag,
+                           "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
+                           [](st::Definition::TableData &td, st::edit::Rect r) {
+                               return st::edit::add_cells(td, r, 2.0);
+                           });
+            // 4. Injector multiplier — scale per-cell by FA24/FA20 flow ratio.
+            apply_op_table(state, "FA24 swap: Injector Mult Table ×1.18", kTag,
+                           "fuel_injectors_pulse_injector_mult_table",
+                           [](st::Definition::TableData &td, st::edit::Rect r) {
+                               return st::edit::multiply_cells(td, r, 1.18);
+                           });
+        }
+    }
+
+    auto const edits_recorded =
+        state.project->active_history().cursor() - cursor_before;
     if (edits_recorded == 0) {
         // Every apply_op_table call wrote a status_msg on its way out
         // (typically "table 'X' not in pack" — the workflow declared
@@ -453,9 +592,13 @@ void apply_fa24_swap(AppState &state) {
                       "this workflow expects. See bottom-bar status for the first failure.");
         return;
     }
+    std::string const source_note = basemap_rom.has_value()
+                                        ? std::string{" (from "} +
+                                              g_state.basemap_path.filename().string() + ")"
+                                        : std::string{" (defaults)"};
     enqueue_toast(state, ToastKind::Success,
-                  "FA24 swap applied (" + std::to_string(edits_recorded) +
-                      " edits). Status-bar badge → Revert All to undo as a unit.");
+                  "FA24 swap applied (" + std::to_string(edits_recorded) + " edits)" +
+                      source_note + ". Status-bar badge → Revert All to undo as a unit.");
 }
 
 } // namespace
