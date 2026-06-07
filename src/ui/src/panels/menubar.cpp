@@ -11,6 +11,7 @@
 
 #include "actions.hpp"
 #include "app_state.hpp"
+#include "modals/modals.hpp" // pack_supports_fa24_swap
 #include "persistence.hpp"
 #include "project_io.hpp"
 #include "theme.hpp"
@@ -101,8 +102,8 @@ void render_menubar(AppState &state) {
             }
             if (!can_csv) {
                 disabled_tip("Select a table first.\n"
-                             "Emits only cells changed from the source — "
-                             "share-able tune diff.");
+                             "Exports only the cells you've changed from "
+                             "the source ROM — a compact, share-able tune diff.");
             }
             ImGui::Separator();
             if (ImGui::MenuItem("\xEE\x9F\xA8  Quit", "Ctrl+Q")) {
@@ -267,6 +268,41 @@ void render_menubar(AppState &state) {
                     "to running `subuwutuner-cli config set` from a\n"
                     "shell. See docs/25 for precedence rules.");
             }
+            // Common-workflows submenu — discovery-and-action surface
+            // for opinionated multi-table recipes. Each entry routes to
+            // a dedicated modal; the enabled-state gates on the loaded
+            // pack declaring the workflow's required_tables. Today only
+            // FA24 swap is wired; future entries (Stage1→2 step, E85
+            // conversion, BRZ stroker) follow the same shape.
+            ImGui::Separator();
+            if (ImGui::BeginMenu("\xEE\xA2\xA8  Common Workflows")) {
+                bool const fa24_ok = pack_supports_fa24_swap(state);
+                if (ImGui::MenuItem("FA24 swap (VA WRX)\xE2\x80\xA6", nullptr, false,
+                                    fa24_ok)) {
+                    state.show_fa24_swap_modal = true;
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    if (fa24_ok) {
+                        ImGui::SetTooltip(
+                            "Guided 3-step recipe for the FA20→FA24 engine swap.\n"
+                            "Applies Engine Displacement + HPFP-Timing + AVCS-\n"
+                            "Reference + Injector-Mult edits atomically. Reversible\n"
+                            "via the status-bar badge after Apply.");
+                    } else if (!state.project.has_value()) {
+                        ImGui::SetTooltip(
+                            "Open a project first. The workflow needs a loaded\n"
+                            "calibration pack to know which tables to edit.");
+                    } else {
+                        ImGui::SetTooltip(
+                            "This pack doesn't declare FA24-swap support — it's\n"
+                            "missing one or more of: HPFP Base Offset, AVCS\n"
+                            "Intake Cam Target (Closed, Baro Low/High), Injector\n"
+                            "Mult Table, Engine Displacement. Pick a project\n"
+                            "based on LF79101P / LF79103P / LF9L000E to enable.");
+                    }
+                }
+                ImGui::EndMenu();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View")) {
@@ -305,9 +341,9 @@ void render_menubar(AppState &state) {
                                       "project creation. Edit affordances\n"
                                       "disable while this slot is active.");
                 }
+                ImGui::Separator();
                 if (state.project.has_value() &&
                     !state.project->additional_roms().empty()) {
-                    ImGui::Separator();
                     for (auto const &r : state.project->additional_roms()) {
                         bool const is_active = state.active_rom_id == r.id;
                         std::string const label =
@@ -316,6 +352,19 @@ void render_menubar(AppState &state) {
                             !is_active) {
                             set_active_view_rom(state, r.id);
                         }
+                    }
+                } else {
+                    // Empty-state row so the user sees the submenu's
+                    // structure (Working / Source / + extras) even
+                    // when no extra ROMs have been imported yet.
+                    // Without this the separator above looks like the
+                    // menu got cut off mid-list.
+                    ImGui::MenuItem("(no additional ROMs imported)", nullptr,
+                                    false, false);
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                        ImGui::SetTooltip(
+                            "Add ROMs via Tools \xE2\x86\x92 Read ROM from Car\xE2\x80\xA6\n"
+                            "(or copy a .bin into the project dir and reopen).");
                     }
                 }
                 ImGui::EndMenu();

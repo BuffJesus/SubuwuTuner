@@ -97,6 +97,12 @@ bool icontains(std::string_view hay, std::string_view needle) noexcept;
 struct AppState;
 void glossary_tooltip_for(AppState &state, std::string_view term);
 
+// Eagerly parse the glossary so the first hover doesn't pay a TOML
+// read latency. Idempotent and cheap (a few hundred bytes of disk
+// I/O); call once at app startup after state.docs_dir is resolved.
+// No-op when docs_dir wasn't located.
+void preload_glossary(AppState &state);
+
 // Map an autotune lint-kind enum to a fix-oriented phrase for end-user
 // display. Library-side `lint_kind_name` returns kebab-cased technical
 // terms; this wrapper produces something the tuner can act on.

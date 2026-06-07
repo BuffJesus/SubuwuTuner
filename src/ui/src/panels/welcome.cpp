@@ -10,6 +10,7 @@
 
 #include "actions.hpp"
 #include "app_state.hpp"
+#include "modals/modals.hpp" // pack_supports_fa24_swap
 #include "persistence.hpp"
 #include "theme.hpp"
 #include "widgets/widgets.hpp"
@@ -229,6 +230,61 @@ void render_welcome_panel(AppState &state) {
         }
     }
 
+    // Common workflows discovery card. Surfaces opinionated multi-
+    // table recipes (FA24 swap today; future Stage1→2 step, E85
+    // conversion) without burying them in Tools → Common Workflows
+    // for users who haven't found the menu yet. The card itself is
+    // pre-project-only here (welcome panel doesn't render once a
+    // project is loaded) — clicking pre-project shows a guidance
+    // toast, and the actionable surface for users WITH a project
+    // loaded is the Tools menubar entry.
+    //
+    // Justification per analyst handoff 2026-06-07-fa24-swap-uiux-plan:
+    // a user who just bolted in an FA24 lands on Welcome first and
+    // shouldn't have to know the menubar exists to find the workflow.
+    {
+        ImGui::Dummy(ImVec2(0.0f, kSpaceL));
+        constexpr float kCardW = 480.0f;
+        center_cursor_x(kCardW);
+        ImGui::BeginGroup();
+        ImGui::TextUnformatted("Common workflows");
+        {
+            ImVec2 const p = ImGui::GetCursorScreenPos();
+            auto *const dl = ImGui::GetWindowDrawList();
+            ImU32 const col = ImGui::GetColorU32(ImGuiCol_Separator);
+            dl->AddLine(ImVec2(p.x, p.y + 2.0f), ImVec2(p.x + kCardW, p.y + 2.0f), col);
+            ImGui::Dummy(ImVec2(kCardW, 4.0f));
+        }
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+
+        bool const fa24_ok = pack_supports_fa24_swap(state);
+        ImGui::BeginDisabled(!fa24_ok);
+        if (ImGui::Button("\xEE\xA2\xA8  FA24 swap (VA WRX)\xE2\x80\xA6",
+                          ImVec2(kCardW, 32.0f))) {
+            state.show_fa24_swap_modal = true;
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            if (fa24_ok) {
+                ImGui::SetTooltip(
+                    "Guided 3-step recipe for the FA20→FA24 engine swap.\n"
+                    "Applies Engine Displacement + HPFP-Timing + AVCS-Reference +\n"
+                    "Injector-Mult edits atomically. Reversible via the status-bar\n"
+                    "badge after Apply.");
+            } else if (!state.project.has_value()) {
+                ImGui::SetTooltip(
+                    "Open a project first (Open Project or Recents above).\n"
+                    "The workflow needs a loaded calibration pack to know\n"
+                    "which tables to edit.");
+            } else {
+                ImGui::SetTooltip(
+                    "This pack doesn't declare FA24-swap support.\n"
+                    "Requires LF79101P / LF79103P / LF9L000E coverage.");
+            }
+        }
+        ImGui::EndGroup();
+    }
+
     // First-run-only pack hint. Answers "what do I need to start?"
     // without forcing the user to open the New Project modal first
     // to find out. Hidden once the user has any recents — they've
@@ -391,13 +447,23 @@ void render_welcome_panel(AppState &state) {
             // Decorate the visible label with a ★ glyph for pinned
             // entries so the user spots them at a glance. The button
             // id stays the path-derived ImGui::PushID so click handlers
-            // don't conflict.
+            // don't conflict. Pinned star is colored with the brand
+            // accent so it pops against the row's normal text — a
+            // bare glyph reads as ornamental noise; tinted reads as
+            // status.
             std::string display_label = e.pinned ? (std::string{"\xE2\x98\x85  "} + basename)
                                                  : basename;
+            if (e.pinned) {
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                                      accent_for(current_theme()).base);
+            }
             if (ImGui::Button(display_label.c_str(), ImVec2(body_w, 0.0f))) {
                 clicked_idx = i;
             }
             ImGui::EndDisabled();
+            if (e.pinned) {
+                ImGui::PopStyleColor();
+            }
             if (kb_selected) {
                 pop_primary_button_colors();
             }
@@ -554,12 +620,27 @@ void render_welcome_panel(AppState &state) {
                 // Refresh the parallel cache slot so the chip updates
                 // this frame without waiting for a recents-size churn.
                 state.recents_pack_lint[*revalidate_idx] = snap;
+                // Explicit confirmation — without this, a silent
+                // re-validate looks like the click did nothing,
+                // especially when the pack was already OK and the
+                // chip text doesn't visibly change.
+                if (snap.status == 0) {
+                    enqueue_toast(state, ToastKind::Success,
+                                  "Pack '" + snap.pack_id + "' is valid.");
+                } else {
+                    enqueue_toast(state, ToastKind::Warn,
+                                  "Pack '" + snap.pack_id + "' has " +
+                                      std::to_string(snap.status) +
+                                      (snap.status == 1 ? " issue."
+                                                        : " issues."));
+                }
+            } else {
+                // Project couldn't be opened (deleted, perm denied)
+                // — surface a visible failure rather than no-op.
+                enqueue_toast(state, ToastKind::Warn,
+                              "Couldn't open the project to revalidate. "
+                              "The directory may have moved.");
             }
-            // No status_msg on failure — the chip stays as-is, and
-            // attempting to open the project would have failed
-            // visibly anyway. Welcome panel's job here is "give the
-            // user a one-click revalidate", not "diagnose project
-            // load failures".
         }
     }
 
@@ -581,7 +662,12 @@ void render_welcome_panel(AppState &state) {
         constexpr float kRowW = 480.0f;
         center_cursor_x(kRowW);
         ImGui::BeginGroup();
-        ImGui::TextUnformatted("What's new");
+        // Renamed from "What's new" — the parsed source is CHANGELOG's
+        // [Unreleased] section, so this is literally what's new in the
+        // build currently running, not a forward-looking roadmap.
+        // Spelling that out keeps the user from confusing it with
+        // marketing copy.
+        ImGui::TextUnformatted("New in this build");
         {
             ImVec2 const p = ImGui::GetCursorScreenPos();
             auto *const dl = ImGui::GetWindowDrawList();
@@ -682,28 +768,43 @@ void render_welcome_panel(AppState &state) {
         ImGui::EndGroup();
     }
 
-    // Footer: version + a small Help shortcut. Subtle enough to not
+    // Footer: version + small Help shortcuts. Subtle enough to not
     // compete with the CTAs above, present enough to be discoverable.
+    // Command-palette link is the highest-leverage navigation in the
+    // app, so it gets a persistent footer slot — relying on the
+    // rotating tip alone meant users had to get lucky to discover
+    // Ctrl+K on their first visit.
     ImGui::Dummy(ImVec2(0.0f, kSpaceXL));
     {
         char buf[64];
         std::snprintf(buf, sizeof buf, "SubuwuTuner %.*s",
                       static_cast<int>(st::Version::string().size()), st::Version::string().data());
-        float const text_w = ImGui::CalcTextSize(buf).x + ImGui::CalcTextSize(" \xC2\xB7 ").x +
-                             ImGui::CalcTextSize("Keyboard shortcuts").x;
+        float const sep_w = ImGui::CalcTextSize(" \xC2\xB7 ").x;
+        float const text_w = ImGui::CalcTextSize(buf).x + sep_w +
+                             ImGui::CalcTextSize("Command palette (Ctrl+K)").x +
+                             sep_w + ImGui::CalcTextSize("Keyboard shortcuts").x;
         center_cursor_x(text_w);
         text_subtle("%s", buf);
         ImGui::SameLine();
         text_subtle(" \xC2\xB7 ");
         ImGui::SameLine();
-        // Render as a button styled to look like a link — TextDisabled
-        // color, no frame. Reduces visual weight while keeping it
-        // clickable and tab-reachable.
+        // Link-styled buttons — TextDisabled color, no frame. Reduces
+        // visual weight while keeping them clickable and tab-reachable.
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0, 0, 0, 0));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0, 0, 0, 0));
         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+        if (ImGui::Button("Command palette (Ctrl+K)")) {
+            open_command_palette(state);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            ImGui::SetTooltip("Search every action, panel, and table in one input.");
+        }
+        ImGui::SameLine();
+        text_subtle(" \xC2\xB7 ");
+        ImGui::SameLine();
         if (ImGui::Button("Keyboard shortcuts")) {
             state.show_shortcuts_modal = true;
         }

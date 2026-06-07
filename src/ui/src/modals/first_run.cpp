@@ -78,25 +78,41 @@ void draw_welcome(AppState &state) {
     text_centered("SubuwuTuner", 2.0f);
     text_centered_subtle("A free, open-source Subaru ECU tuning suite");
     ImGui::Dummy(ImVec2(0.0f, kSpaceL));
-    ImGui::TextWrapped("This is your first launch. In the next few steps you'll pick a few "
-                       "defaults so the editor matches how you tune:");
+    // Match the jurisdiction-step philosophy: lead with what the user
+    // is actually deciding (small, fast), not procedural "this is
+    // your first launch" framing. The bullets describe the *choice*
+    // not the *setting name* — "jurisdiction policy" reads as jargon
+    // until you know what it controls; "when the editor warns about
+    // emissions edits" answers the question without requiring you to
+    // already know the answer.
+    ImGui::TextWrapped("Three quick prefs and you're in. None of them lock you into "
+                       "anything — everything is changeable under Tools → Settings.");
     ImGui::Bullet();
-    ImGui::TextUnformatted("Jurisdiction policy — controls emissions-edit warnings.");
+    ImGui::TextUnformatted("When the editor warns about emissions-related edits");
     ImGui::Bullet();
-    ImGui::TextUnformatted("Unit system — metric or imperial for display.");
+    ImGui::TextUnformatted("Whether displays show °C / kPa / km/h or °F / psi / mph");
     ImGui::Bullet();
-    ImGui::TextUnformatted("Theme — Dark or Light.");
+    ImGui::TextUnformatted("Dark or light interface");
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
-    text_subtle("Defaults are tuner-friendly. You can change everything later under "
-                "Tools → Settings.");
+    text_subtle("All defaults are picked for a typical project build. Press Esc or click "
+                "Skip wizard to accept them and jump straight to the app.");
     (void)state; // step advance handled by footer
 }
 
 void draw_jurisdiction(AppState &state) {
     ImGui::Dummy(ImVec2(0.0f, kSpaceS));
-    ImGui::TextWrapped("Choose a jurisdiction profile. This controls when the editor warns or "
-                       "blocks edits to emissions-related tables. SubuwuTuner is "
-                       "jurisdiction-neutral by design — pick what matches your situation.");
+    // Lead with what the choice DOES, in plain language. Without
+    // this, "Jurisdiction profile" is the first piece of unexplained
+    // jargon a new user sees. The reassurance ("you can change it
+    // any time") lowers the stakes so the user doesn't agonize over
+    // a default they'll never revisit.
+    ImGui::TextWrapped("This only controls when the editor warns you about "
+                       "emissions-related edits. Engine-safety violations always "
+                       "block, regardless of which profile you pick.");
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+    text_subtle("Not sure? The default ('Motorsport-only') is the right pick "
+                "for a track car or any non-street build. You can change it "
+                "any time under Tools \xE2\x86\x92 Settings.");
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
 
     using P = st::policy::Profile;
@@ -107,15 +123,13 @@ void draw_jurisdiction(AppState &state) {
     };
     constexpr std::array<Choice, 4> choices = {{
         {P::MotorsportOnly, "Motorsport-only",
-         "No emissions equipment in scope. Track car, race-only build. Default."},
+         "Track car or race-only build. No emissions warnings. Default."},
         {P::AlbertaCa, "Alberta, Canada",
-         "No provincial emissions inspection; minimal federal enforcement against "
-         "individual modifiers."},
+         "Light-touch street use. Yellow badge on emissions edits, no flash-time gate."},
         {P::EuRoadworthy, "EU road-worthy",
-         "Stricter — warns on any emissions table edit. For street cars subject to "
-         "EU annual inspection."},
+         "Street car subject to EU annual inspection. Confirm on flash for emissions edits."},
         {P::CaliforniaUs, "California (USA)",
-         "Strictest — blocks emissions edits by default. CARB jurisdiction."},
+         "California / CARB jurisdiction. Confirm + reason required for emissions edits."},
     }};
     bool first = true;
     for (auto const &c : choices) {
@@ -134,9 +148,16 @@ void draw_jurisdiction(AppState &state) {
 
 void draw_units(AppState &state) {
     ImGui::Dummy(ImVec2(0.0f, kSpaceS));
-    ImGui::TextWrapped("Pick a unit system for display. Engineering values stored in the ROM "
-                       "stay in their native scaling regardless — this only affects how the "
-                       "editor labels them.");
+    // Lead with what this is for — the old copy buried the user's
+    // actual question ("does it change what gets flashed?") under
+    // implementation detail. The bytes-flashed-are-identical note
+    // is reassurance, not a header.
+    ImGui::TextWrapped("This controls how numbers display in the editor. Bytes flashed to "
+                       "the ECU are identical either way — the ROM's native scaling never "
+                       "changes.");
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+    text_subtle("Not sure? Metric matches the ROM's internal scaling and is what most "
+                "existing tuning docs use. Imperial is fine if you think in psi.");
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
 
     using U = AppState::UnitSystem;
@@ -147,18 +168,33 @@ void draw_units(AppState &state) {
                           state.first_run_units == U::Metric)) {
         state.first_run_units = U::Metric;
     }
-    if (ImGui::RadioButton("Imperial (°F, psi, mph)",
-                          state.first_run_units == U::Imperial)) {
-        state.first_run_units = U::Imperial;
+    // Imperial conversion layer is not yet implemented (UnitSystem::Imperial
+    // exists in app_state.hpp but no conversion logic reads it as of
+    // 2026-06-07). Disable the choice with a tooltip so the wizard
+    // doesn't offer a no-op pick — onboarding sets the user's
+    // expectation that whatever they click takes effect.
+    ImGui::BeginDisabled();
+    bool imperial_selected_dummy = (state.first_run_units == U::Imperial);
+    ImGui::RadioButton("Imperial (°F, psi, mph) — coming in a follow-up release",
+                       imperial_selected_dummy);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Imperial display layer ships in a follow-up release. Pick "
+                          "Metric for now; the toggle will be in Tools → Settings when "
+                          "the conversion layer lands.");
     }
-    ImGui::Dummy(ImVec2(0.0f, kSpaceM));
-    text_subtle("v1 ships with metric throughout; the imperial conversion layer lands in a "
-                "follow-up. Pick what you'd want it to be when it does.");
 }
 
 void draw_theme(AppState &state) {
     ImGui::Dummy(ImVec2(0.0f, kSpaceS));
-    ImGui::TextWrapped("Light or dark? Toggleable later under View → Theme.");
+    // Two-sided lead lets the user self-identify ("which one am I?")
+    // rather than forcing a binary they haven't been given context
+    // for. Light got no description before while Dark did — fixed.
+    ImGui::TextWrapped("Dark for indoor / nighttime work, light for sunny garages and "
+                       "outdoor dyno days.");
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+    text_subtle("Not sure? Dark is the default and matches most tuning environments. "
+                "View → Theme switches any time.");
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
 
     if (state.first_run_focused_step != state.first_run_step) {
@@ -169,7 +205,8 @@ void draw_theme(AppState &state) {
         state.settings.theme = Theme::Dark;
         apply_theme(state.settings.theme);
     }
-    if (ImGui::RadioButton("Light", state.settings.theme == Theme::Light)) {
+    if (ImGui::RadioButton("Light (better for sunlight or printed screenshots)",
+                          state.settings.theme == Theme::Light)) {
         state.settings.theme = Theme::Light;
         apply_theme(state.settings.theme);
     }
@@ -177,16 +214,22 @@ void draw_theme(AppState &state) {
 
 void draw_demo(AppState &state) {
     ImGui::Dummy(ImVec2(0.0f, kSpaceS));
-    ImGui::TextWrapped("All set. Want to open the bundled demo project? It loads a small "
-                       "synthetic ROM + pack so you can poke around the table editor without "
-                       "needing a real ECU dump.");
+    // "Sample project to poke around in" reads as more inviting than
+    // "bundled demo project." Surface the actual use-case ("haven't
+    // pulled a ROM yet") so the user knows when this is for them.
+    ImGui::TextWrapped("All set. Want a sample project to poke around in? The demo loads "
+                       "a synthetic ROM + pack — every table editable, no real ECU needed. "
+                       "Useful if you haven't pulled a ROM yet.");
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+    text_subtle("Not sure? Yes is a good pick. The demo is a 30-second poke around the "
+                "editor; close it any time without saving.");
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
     if (state.first_run_focused_step != state.first_run_step) {
         ImGui::SetKeyboardFocusHere();
     }
     ImGui::Checkbox("Open the demo project on Finish", &state.first_run_offer_demo);
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
-    text_subtle("You can always open it later via File → Open Recent → demo.stune.");
+    text_subtle("Always available later: File → Open Recent → demo.stune.");
 }
 
 } // namespace
@@ -260,15 +303,35 @@ void render_first_run_modal(AppState &state) {
         ImGui::End();
         return;
     }
-    if (!open) {
-        // Window-X = Skip wizard.
+    // Skip-wizard helper — called from window-X, the Skip button, and
+    // an Esc keypress. Always: mark first_run_complete, persist, close
+    // the wizard, toast the user with how to reopen it. Centralized so
+    // the three escape hatches stay in lockstep; the previous shape
+    // duplicated the body across window-X and the Skip button, which
+    // drifted (the Esc affordance the welcome step promises in copy
+    // had no wiring at all).
+    auto skip_wizard = [&]() {
         state.settings.first_run_complete = true;
         save_settings(state.settings);
         g_wizard_open = false;
         state.first_run_focused_step = -1;
-        ImGui::End();
         enqueue_toast(state, ToastKind::Info,
                       "Wizard skipped — defaults kept. Reopen via Help → Welcome wizard.");
+    };
+    if (!open) {
+        // Window-X = Skip wizard.
+        skip_wizard();
+        ImGui::End();
+        return;
+    }
+    // Esc = Skip wizard. The welcome step's copy promises this; the
+    // wiring used to be missing. IsKeyPressed reads global keypresses
+    // and the wizard owns focus while it's rendered (SetNextWindowFocus
+    // every frame + dim overlay absorbing clicks), so it's safe to
+    // trigger here without scoping to the wizard window specifically.
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        skip_wizard();
+        ImGui::End();
         return;
     }
 
@@ -313,12 +376,7 @@ void render_first_run_modal(AppState &state) {
         ImGui::SameLine();
     }
     if (ImGui::Button("Skip wizard")) {
-        state.settings.first_run_complete = true;
-        save_settings(state.settings);
-        g_wizard_open = false;
-        state.first_run_focused_step = -1;
-        enqueue_toast(state, ToastKind::Info,
-                      "Wizard skipped — defaults kept. Reopen via Help → Welcome wizard.");
+        skip_wizard();
     }
     ImGui::SameLine();
 

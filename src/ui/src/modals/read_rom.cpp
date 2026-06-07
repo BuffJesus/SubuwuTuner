@@ -192,27 +192,60 @@ void render_read_rom_modal(AppState &state) {
             ImGui::SetKeyboardFocusHere();
             state.focus_pending_read_rom = false;
         }
-        ImGui::TextUnformatted("Pulls a ROM dump from the connected ECU via the");
+        ImGui::TextUnformatted("Copies the ECU's current calibration to a file on disk.");
         glossary_tooltip_for(state, "ROM");
-        ImGui::TextUnformatted("OBDX/J2534/native adapter. Read-only — no ECU writes.");
-        glossary_tooltip_for(state, "J2534");
+        text_subtle("Read-only \xE2\x80\x94 the ECU itself is never written.");
         ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+        // Pre-read checklist — same content, friendlier shape (numbered
+        // steps, action-first phrasing) so a first-timer can run down
+        // the list without re-reading.
         ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_caution());
-        ImGui::TextWrapped("Before clicking Read: ignition must be in ACC or RUN "
-                           "(engine off is fine), nothing else (e.g. COBB AccessPort) "
-                           "plugged into the OBD-II port, OBDX in the port. ECU is "
-                           "asleep with key out — it won't answer.");
+        ImGui::TextWrapped("Before you click Read:");
         ImGui::PopStyleColor();
+        ImGui::BulletText("Turn the key to ACC or RUN. Engine off is fine.");
+        ImGui::BulletText("Unplug any other OBD-II device (COBB AP, etc.).");
+        ImGui::BulletText("Plug the adapter into the OBD-II port.");
         ImGui::Dummy(ImVec2(0.0f, kSpaceS));
 
         bool const adapter_ready = render_adapter_picker(state.read_rom_adapter);
+        ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+
+        // ROM size presets — saves a fresh user from having to know
+        // "0x200000" off the top of their head. Pre-fills the size
+        // input on click. Common Subaru ECU sizes; users with an
+        // exotic size can still type a custom value below.
+        ImGui::TextUnformatted("ROM size:");
+        ImGui::SameLine();
+        auto const set_size = [&](char const *hex) {
+            std::snprintf(state.read_rom_size_hex,
+                          sizeof state.read_rom_size_hex, "%s", hex);
+        };
+        if (ImGui::SmallButton("512 KB##sz_512")) set_size("0x80000");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("1 MB##sz_1m")) set_size("0x100000");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("1.5 MB##sz_1_5m")) set_size("0x180000");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("2 MB##sz_2m")) set_size("0x200000");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Sets the size field below. Picks the right value\n"
+                              "for most Subaru ECUs:\n"
+                              "  EJ K-Line / early FA: 512 KB\n"
+                              "  FA20DIT (VA WRX): 1.5 MB\n"
+                              "  FA24 (VB WRX): 2 MB");
+        }
         ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
-        ImGui::InputText("Base address (hex)", state.read_rom_base_addr_hex,
-                         sizeof state.read_rom_base_addr_hex);
-        ImGui::InputText("Size (hex)", state.read_rom_size_hex, sizeof state.read_rom_size_hex);
-        ImGui::Combo("Protocol", &state.read_rom_protocol,
-                     "SSM2 (pre-2016 K-Line + early CAN)\0"
-                     "UDS / SSM4 (2016+ WRX, FA20DIT, FA24)\0\0");
+
+        // Advanced controls — collapsed by default so the form doesn't
+        // intimidate a first-time user with raw hex fields. The defaults
+        // work for any standard read; users who need to override expand.
+        if (ImGui::CollapsingHeader("Advanced \xC2\xB7 address, protocol, security")) {
+            ImGui::InputText("Base address (hex)", state.read_rom_base_addr_hex,
+                             sizeof state.read_rom_base_addr_hex);
+            ImGui::InputText("Size (hex)", state.read_rom_size_hex, sizeof state.read_rom_size_hex);
+            ImGui::Combo("Protocol", &state.read_rom_protocol,
+                         "Older Subarus (pre-2016)\0"
+                         "Newer Subarus (2016+, VA/VB WRX, BRZ)\0\0");
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
                 "Wire-level protocol used to talk to the ECU.\n"
@@ -317,6 +350,7 @@ void render_read_rom_modal(AppState &state) {
                     "→ Aftermarket L1. Still 0x35 → Aftermarket L3.");
             }
         }
+        } // end Advanced CollapsingHeader
 
         // Pre-run errors (typically a parse failure from a previous click).
         if (!state.read_rom_error_msg.empty()) {

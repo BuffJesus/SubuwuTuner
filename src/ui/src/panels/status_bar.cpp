@@ -11,7 +11,9 @@
 
 #include "actions.hpp" // set_active_view_rom
 #include "app_state.hpp"
+#include "modals/modals.hpp" // fa24_swap_active, revert_fa24_swap
 #include "persistence.hpp"
+#include "project_io.hpp" // save_project
 #include "widgets/widgets.hpp"
 
 #include "st/defs.hpp"
@@ -50,16 +52,20 @@ void render_status_bar(AppState &state) {
     if (state.project.has_value()) {
         bool const dirty = state.dirty;
 
-        // Left cluster: project name → status chip → history position.
+        // Left cluster: project name → pack id → status chip → history.
+        // Pack id is surfaced inline (subtle) so the user can read at
+        // a glance which calibration pack the project is bound to,
+        // rather than having to hover the project name to find it.
         ImGui::TextUnformatted(state.project->display_name().c_str());
-        // Hover the name to see the on-disk path and which definition
-        // pack the project is bound to. Two projects with the same id
-        // (different copies, different forks) read the same in the
-        // name line; the path is the unambiguous handle, and the pack
-        // disambiguates ECU variant.
+        // Hover the name to see the on-disk path — pack id is now
+        // shown inline so the hover is just for the directory path.
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s\nPack: %s", state.project->dir().string().c_str(),
-                              state.project->definition().pack().id.c_str());
+            ImGui::SetTooltip("%s", state.project->dir().string().c_str());
+        }
+        ImGui::SameLine();
+        text_subtle("\xC2\xB7 %s", state.project->definition().pack().id.c_str());
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Calibration pack bound to this project.");
         }
 
         ImGui::SameLine();
@@ -67,10 +73,17 @@ void render_status_bar(AppState &state) {
         //   E70F Edit (pencil)   — unsaved edits
         //   E930 Completed       — saved / clean (filled circle + check)
         if (dirty) {
-            chip("\xEE\x9C\x8F  Unsaved edits", chip_fg_warn(), chip_bg_warn());
+            // Clickable chip — most-frequent action in the app shouldn't
+            // hide behind a keyboard shortcut. Tooltip still mentions
+            // Ctrl+S for users who'd rather not reach for the mouse.
+            chip("\xEE\x9C\x8F  Save  \xC2\xB7  Ctrl+S", chip_fg_warn(), chip_bg_warn());
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("In-memory edits have not been written to disk.\n"
-                                  "Ctrl+S to save the .stune project.");
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                ImGui::SetTooltip("Unsaved edits in memory.\n"
+                                  "Click to save, or press Ctrl+S.");
+            }
+            if (ImGui::IsItemClicked()) {
+                save_project(state);
             }
         } else {
             // After a successful save this session, swap the generic
@@ -413,6 +426,60 @@ void render_status_bar(AppState &state) {
                         }
                     }
                 }
+            }
+        }
+
+        // FA24-swap badge — lit when the active history carries at
+        // least one "fa24_swap"-tagged edit in its applied range.
+        // Persistent confirmation that the workflow ran; click for the
+        // Revert All entry point + a list of the recorded edits.
+        if (fa24_swap_active(state)) {
+            ImGui::SameLine();
+            chip("\xEE\xA2\xA8  FA24-swap mode  \xE2\x96\xBE", chip_fg_accent(),
+                 chip_bg_accent());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "FA24-swap workflow active.\n"
+                    "Click to see the recorded edits + Revert All.");
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            }
+            if (ImGui::IsItemClicked()) {
+                ImGui::OpenPopup("##fa24_swap_badge");
+            }
+            if (ImGui::BeginPopup("##fa24_swap_badge")) {
+                text_subtle("FA24 swap — recorded edits");
+                ImGui::Separator();
+                // List the workflow's edits inline so the user can
+                // see what's in the batch without opening Tools →
+                // History. Pulls directly from the active history's
+                // record list and filters on the tag.
+                auto const &records = state.project->active_history().records();
+                std::size_t shown = 0;
+                for (auto const &e : records) {
+                    if (e.tag != "fa24_swap") {
+                        continue;
+                    }
+                    ImGui::BulletText("%s", e.description.c_str());
+                    ++shown;
+                }
+                if (shown == 0) {
+                    // Defensive — fa24_swap_active returned true so
+                    // there should be matches; render a stub for the
+                    // theoretical empty case.
+                    text_subtle("(no edits recorded)");
+                }
+                ImGui::Separator();
+                push_primary_button_colors();
+                if (ImGui::Button("Revert All")) {
+                    revert_fa24_swap(state);
+                    ImGui::CloseCurrentPopup();
+                }
+                pop_primary_button_colors();
+                ImGui::SameLine();
+                if (ImGui::Button("Close")) {
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
             }
         }
 

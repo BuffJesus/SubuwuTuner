@@ -120,10 +120,55 @@ void render_flash_modal(AppState &state) {
     auto const pname = std::string{st::policy::profile_name(profile)};
     using A = st::policy::Action;
 
-    // Header: plan stats.
-    ImGui::Text("Sectors: %zu   Bytes: %zu   Profile: %s", pending->plan.writes.size(),
-                pending->total_bytes, pname.c_str());
+    // Header: plan stats — human-readable summary instead of a
+    // raw-byte breakdown. The tuner cares about "this will write to
+    // the ECU" first, with the byte / sector count as backup.
+    ImGui::Text("This flash will write %zu sector%s (%zu bytes) to the ECU.",
+                pending->plan.writes.size(),
+                pending->plan.writes.size() == 1 ? "" : "s",
+                pending->total_bytes);
+    text_subtle("Policy profile: %s", pname.c_str());
     glossary_tooltip_for(state, "Flash");
+
+    // Expandable summary of the flagged tables in the plan. Without
+    // this the user knows the byte count but not WHICH calibration
+    // tables are flagged for safety or emissions. The policy
+    // decision already tracks both sets; surfacing them here in a
+    // collapsed tree gives the user a sanity check before they
+    // commit. (The full "every changed table" list would require
+    // re-walking the plan against the definition — out of scope for
+    // this UX polish; flagged tables are the ones that matter for
+    // the decision.)
+    {
+        std::size_t const n_flagged =
+            d.engine_safety_tables.size() + d.emissions_tables.size();
+        if (n_flagged > 0) {
+            ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+            char header[64];
+            std::snprintf(header, sizeof header,
+                          "Flagged tables in this plan (%zu)", n_flagged);
+            if (ImGui::CollapsingHeader(header)) {
+                ImGui::Indent();
+                if (!d.engine_safety_tables.empty()) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_warn());
+                    ImGui::TextUnformatted("Engine-safety:");
+                    ImGui::PopStyleColor();
+                    for (auto const &id : d.engine_safety_tables) {
+                        ImGui::BulletText("%s", id.c_str());
+                    }
+                }
+                if (!d.emissions_tables.empty()) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_caution());
+                    ImGui::TextUnformatted("Emissions:");
+                    ImGui::PopStyleColor();
+                    for (auto const &id : d.emissions_tables) {
+                        ImGui::BulletText("%s", id.c_str());
+                    }
+                }
+                ImGui::Unindent();
+            }
+        }
+    }
 
     // Issue #10 sweep: when the user is viewing a non-working ROM
     // (additional or source), the Flash modal still operates on the
@@ -178,17 +223,31 @@ void render_flash_modal(AppState &state) {
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0.0f, kSpaceS));
 
-    // Engine-safety is a hard refusal across every profile.
+    // Engine-safety is a hard refusal across every profile. Phrased
+    // calmly: "this can't be flashed, here's why, and here's what to
+    // do" rather than a red REFUSED slab. The amber/caution band
+    // reads as "needs your attention" — danger-red is reserved for
+    // the actual destructive-action confirmation gate.
     if (!d.engine_safety_tables.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_danger());
-        ImGui::TextUnformatted("REFUSED: engine-safety-critical tables in plan");
+        ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_warn());
+        ImGui::TextUnformatted("\xE2\x9A\xA0  Can't flash: engine-safety tables modified");
         ImGui::PopStyleColor();
         ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+        ImGui::TextWrapped(
+            "These tables control engine safety and are blocked from "
+            "flashing in every jurisdiction profile. Revert your edits "
+            "in the table editor (Right-click \xE2\x86\x92 Reset to "
+            "Source) or open them under View \xE2\x86\x92 Active ROM to "
+            "review:");
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+        ImGui::Indent();
         for (auto const &id : d.engine_safety_tables) {
             ImGui::BulletText("%s", id.c_str());
         }
+        ImGui::Unindent();
         ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
-        text_subtle("Engine-safety violations block in every profile (docs/06).");
+        text_subtle("Why: these tables can damage the engine if mis-set. "
+                    "The block is hardcoded \xE2\x80\x94 see docs/06.");
         ImGui::Dummy(ImVec2(0.0f, 12.0f));
         if (ImGui::Button("Close", ImVec2(120.0f, 0.0f)) ||
             ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
@@ -268,6 +327,11 @@ void render_flash_modal(AppState &state) {
     // a no-op. Suppressed when the profile already refuses (Block).
     if (d.overall_action != A::Block) {
         ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+        // Explain WHY the typed-phrase gate exists. Without context
+        // it reads as gatekeeping ritual; with context, the user
+        // understands it's a guard against accidental ECU writes.
+        text_subtle("Final guard against an accidental flash. "
+                    "Mistypes are harmless \xE2\x80\x94 just retype.");
         bool const phrase_ok = typed_phrase_gate(state.flash_typed_phrase,
                                                  sizeof state.flash_typed_phrase,
                                                  "YES FLASH", "##flash_phrase");

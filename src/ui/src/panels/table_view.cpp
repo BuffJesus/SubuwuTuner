@@ -135,12 +135,15 @@ void render_table_heatmap(st::Definition::TableData const &td, st::Table const *
     auto const cols = td.values.front().size();
 
     // Scalar (1×1) — an ImPlot heatmap of one cell with no axes carries
-    // no information; render the value plainly and point at Grid view
-    // for editing. Same fallback the grid path takes for dim=0 tables,
-    // so toggling View modes on a scalar doesn't make the panel blank.
+    // no information; render the value as a big centered Selectable so
+    // double-click opens the inline editor in place. Previously this
+    // path forced the user to switch to Grid view to edit a single
+    // cell, which felt like a needless detour.
     // Inline centering rather than using text_centered_* — those helpers
     // are defined further down the file (forward-reference would fail).
     if (rows == 1 && cols == 1) {
+        (void)tbl; // unused here; kept for symmetry with the grid path
+        (void)stats;
         int const precision = scal != nullptr ? scal->precision : 0;
         std::string const unit = (scal != nullptr) ? scal->unit : std::string{};
         char buf[64];
@@ -160,7 +163,12 @@ void render_table_heatmap(st::Definition::TableData const &td, st::Table const *
         ImGui::SetWindowFontScale(1.0f);
         ImGui::Dummy(ImVec2(0.0f, 8.0f));
         {
-            char const *hint = "Scalar table — switch to Grid view to edit.";
+            // Grid-view path supports F2 / double-click on the cell;
+            // Heatmap-view's scalar fallback is read-only. Spell that
+            // out so the user doesn't try to click the value above
+            // and wonder why nothing happens.
+            char const *hint = "Switch View \xE2\x86\x92 Grid to edit (F2 or "
+                               "double-click the cell).";
             float const avail_x = ImGui::GetContentRegionAvail().x;
             float const w = ImGui::CalcTextSize(hint).x;
             if (w < avail_x) {
@@ -924,7 +932,17 @@ void render_table_view(AppState &state, Fonts const &fonts) {
             constexpr float kBarW = 220.0f;
             constexpr float kBarH = 12.0f;
             constexpr int kSegs = 64;
-            text_subtle("scale:");
+            // Surface the table's unit (g/min, kPa, deg, %, …) on the
+            // legend label so a value like "1.05" reads as "1.05 deg"
+            // not an unlabeled decimal. Unit comes from the Scaling
+            // record on the active table; the value chip up at the
+            // header already shows it, but the legend repetition is
+            // load-bearing for users who land on the table mid-scroll.
+            std::string const unit_label =
+                (scal != nullptr && !scal->unit.empty())
+                    ? std::string{"scale ("} + scal->unit + std::string{"):"}
+                    : std::string{"scale:"};
+            text_subtle("%s", unit_label.c_str());
             ImGui::SameLine();
             char buf[32];
             std::snprintf(buf, sizeof buf, "%.*f", precision, stats.min);

@@ -230,7 +230,29 @@ void render_toasts(AppState &state) {
                          ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                          ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
                          ImGuiWindowFlags_NoDocking);
+        // Body text wraps to leave room for the × close glyph in the
+        // top-right corner. Close glyph is drawn manually so it lives
+        // on the same y baseline as the first line of the message
+        // regardless of how many lines the message wraps to.
+        constexpr float kCloseW = 14.0f;
+        ImGui::PushTextWrapPos(ImGui::GetContentRegionAvail().x - kCloseW);
         ImGui::TextWrapped("%s", t.text.c_str());
+        ImGui::PopTextWrapPos();
+
+        // Visible × in the top-right — affordance for click-to-dismiss.
+        // Anchored to the toast's window edge so it stays in the same
+        // place across single-line and multi-line toasts.
+        {
+            ImVec2 const win_pos = ImGui::GetWindowPos();
+            ImVec2 const win_size = ImGui::GetWindowSize();
+            ImVec2 const close_pos(win_pos.x + win_size.x - kCloseW - 4.0f,
+                                   win_pos.y + 4.0f);
+            // U+2715 ✕ — multiplication X. Lighter weight than 'x'
+            // and aligns visually with the row baseline.
+            ImU32 const col = ImGui::ColorConvertFloat4ToU32(
+                ImVec4(fg.x, fg.y, fg.z, fg.w * alpha));
+            ImGui::GetWindowDrawList()->AddText(close_pos, col, "\xE2\x9C\x95");
+        }
 
         // Click-to-dismiss: any click anywhere on the toast window
         // queues it for removal. The user might want to dismiss a

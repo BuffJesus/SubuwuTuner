@@ -674,6 +674,14 @@ void render_settings_modal(AppState &state) {
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
 
+    // Save-semantics banner — Theme / Profile / AI tabs persist on
+    // toggle; Paths and Project metadata wait for an explicit Save
+    // click. Without this hint the user can't tell which fields are
+    // "pending" and may close the dialog assuming everything saved.
+    text_subtle("Theme, Profile, and AI settings save automatically. "
+                "Paths and Project edits save when you click Save below.");
+    ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+
     // Button-row convention (matches unsaved_modal, csv_import_modal,
     // autotune modals, new_project_modal):
     //   primary: 160 wide, accent-filled, Enter shortcut, tooltip

@@ -193,6 +193,10 @@ int main(int argc, char *argv[]) {
     state.demo_project_path = resolve_demo_project_path(argc >= 1 ? argv[0] : nullptr);
     state.docs_dir = resolve_docs_dir(argc >= 1 ? argv[0] : nullptr);
     state.changelog_path = resolve_changelog_path(argc >= 1 ? argv[0] : nullptr);
+    // Eager glossary parse — cheap TOML/markdown read, lifted out of
+    // the first F1 / hover path so the first tooltip doesn't pay disk
+    // latency. No-op when docs_dir wasn't located.
+    preload_glossary(state);
     // Apply the persisted theme before any user-visible frame renders.
     apply_theme(state.settings.theme);
     // First-run wizard auto-trigger ONLY when --reset-config was just
@@ -386,6 +390,7 @@ int main(int argc, char *argv[]) {
         render_def_registry_modal(state);
         render_settings_modal(state);
         render_first_run_modal(state);
+        render_fa24_swap_modal(state);
         render_shortcuts_modal(state);
         render_about_modal(state);
         render_help_modal(state);

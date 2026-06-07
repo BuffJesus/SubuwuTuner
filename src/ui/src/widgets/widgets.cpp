@@ -409,6 +409,10 @@ bool ieq(std::string_view a, std::string_view b) {
 
 } // namespace
 
+void preload_glossary(AppState &state) {
+    ensure_glossary_loaded(state);
+}
+
 void glossary_tooltip_for(AppState &state, std::string_view term) {
     if (!ImGui::IsItemHovered()) {
         return;

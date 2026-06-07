@@ -262,6 +262,56 @@ void render_sidebar(AppState &state) {
         ImGui::Separator();
     }
 
+    // Persistent "N hidden — show all" hint near the filter. Without
+    // this, a user who hid a category right-click → Hide weeks ago
+    // wouldn't have a top-of-panel hint that some categories are
+    // missing on purpose — they'd have to scroll to the footer
+    // restore chips or right-click the panel again.
+    // Counted against pack categories, not the hidden_categories
+    // vector itself, so stale entries (categories that no longer
+    // exist in this pack) don't inflate the count.
+    {
+        std::size_t hidden_present = 0;
+        for (auto const &h : state.sidebar_hidden_categories) {
+            for (auto const &t : def.tables()) {
+                std::string_view const tcat =
+                    t.category.empty() ? std::string_view{"Other"}
+                                       : std::string_view{t.category};
+                if (tcat == std::string_view{h}) {
+                    ++hidden_present;
+                    break;
+                }
+            }
+        }
+        if (hidden_present > 0) {
+            ImGui::PushStyleColor(ImGuiCol_Text, chip_fg_caution());
+            char hint[64];
+            std::snprintf(hint, sizeof hint,
+                          "\xE2\x9A\xA0 %zu hidden \xC2\xB7 show all",
+                          hidden_present);
+            // Render as a small link-style button so a click clears
+            // every hidden category in one gesture, mirroring the
+            // panel-level "Show all categories" menu item.
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                                  ImVec4(1.0f, 1.0f, 1.0f, 0.08f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                                  ImVec4(1.0f, 1.0f, 1.0f, 0.15f));
+            if (ImGui::SmallButton(hint)) {
+                state.sidebar_hidden_categories.clear();
+                save_sidebar_hidden_categories(state.project->dir(),
+                                               state.sidebar_hidden_categories);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                ImGui::SetTooltip("Restore every hidden category.\n"
+                                  "Right-click a category header to hide it again.");
+            }
+            ImGui::PopStyleColor(4);
+            ImGui::Separator();
+        }
+    }
+
     if (!filter.empty() && matched == 0) {
         char title[80];
         std::snprintf(title, sizeof title, "No tables match \"%s\"", state.table_filter);
