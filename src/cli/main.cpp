@@ -291,10 +291,12 @@ constexpr std::string_view kUsage =
     "                            List custom-feature primitives in a pack with\n"
     "                            their type signature + description. Useful for\n"
     "                            .stmod authors browsing what's available.\n"
-    "    workflow-list <DEF> [--id <id>] [--eligible]\n"
+    "    workflow-list <DEF> [--id <id>] [--eligible] [--json]\n"
     "                            List pack-declared [[workflow]] entries with\n"
     "                            their required_tables presence check. Exit 1\n"
     "                            when any workflow is ineligible (CI gate).\n"
+    "                            --json emits a subuwutuner.workflow-list.v1\n"
+    "                            one-liner for scripted consumption.\n"
     "    hook-list <DEF> [--sensor] [--action]\n"
     "                            List custom-feature hooks in a pack with their\n"
     "                            ECU splice address + signal signature. --sensor\n"
@@ -2341,6 +2343,7 @@ int cmd_workflow_list(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
     std::optional<std::string> id_filter;
     bool only_eligible = false;
+    bool emit_json = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -2352,6 +2355,8 @@ int cmd_workflow_list(int argc, char *argv[]) {
             id_filter = std::string{argv[++i]};
         } else if (a == "--eligible") {
             only_eligible = true;
+        } else if (a == "--json") {
+            emit_json = true;
         } else if (a.starts_with("--")) {
             std::fprintf(stderr, "workflow-list: unknown option: %s\n", argv[i]);
             return 2;
@@ -2366,14 +2371,83 @@ int cmd_workflow_list(int argc, char *argv[]) {
     if (!def_path.has_value()) {
         std::fputs("workflow-list: missing path\n", stderr);
         std::fputs("Usage: subuwutuner-cli workflow-list <DEF> "
-                   "[--id <id>] [--eligible]\n",
+                   "[--id <id>] [--eligible] [--json]\n",
                    stderr);
         return 2;
     }
 
     auto const def = st::Definition::from_file(resolve_def_path(*def_path));
     if (!def.has_value()) {
+        if (emit_json) {
+            std::string out{"{\"schema\":\"subuwutuner.workflow-list.v1\",\"path\":"};
+            json_escape(out, def_path->string());
+            out.append(",\"error\":");
+            json_escape(out, def.error().to_string());
+            out.append("}\n");
+            std::fputs(out.c_str(), stdout);
+            return 1;
+        }
         return print_def_load_error("workflow-list", *def_path, def.error());
+    }
+
+    // JSON emitter — mirrors the pack-info --json shape so CI scripts
+    // can consume both with the same JSON tooling. Schema name
+    // subuwutuner.workflow-list.v1.
+    if (emit_json) {
+        std::string out{"{\"schema\":\"subuwutuner.workflow-list.v1\",\"path\":"};
+        json_escape(out, def_path->string());
+        out.append(",\"pack_id\":");
+        json_escape(out, def->pack().id);
+        out.append(",\"workflows\":[");
+        std::size_t shown = 0;
+        bool any_ineligible_unfiltered = false;
+        for (auto const &w : def->workflows()) {
+            if (id_filter.has_value() && w.id != *id_filter) {
+                continue;
+            }
+            bool const eligible = def->supports_workflow(w.id);
+            if (!id_filter.has_value() && !eligible) {
+                any_ineligible_unfiltered = true;
+            }
+            if (only_eligible && !eligible) {
+                continue;
+            }
+            if (shown != 0) {
+                out.append(",");
+            }
+            out.append("{\"id\":");
+            json_escape(out, w.id);
+            out.append(",\"display_name\":");
+            json_escape(out, w.display_name);
+            out.append(",\"modal\":");
+            json_escape(out, w.modal);
+            out.append(",\"required_tables\":[");
+            for (std::size_t j = 0; j < w.required_tables.size(); ++j) {
+                if (j != 0) {
+                    out.append(",");
+                }
+                json_escape(out, w.required_tables[j]);
+            }
+            out.append("],\"required_tables_present\":[");
+            for (std::size_t j = 0; j < w.required_tables.size(); ++j) {
+                if (j != 0) {
+                    out.append(",");
+                }
+                out.append(def->find_table(w.required_tables[j]) != nullptr ? "true"
+                                                                            : "false");
+            }
+            out.append("],\"eligible\":");
+            out.append(eligible ? "true" : "false");
+            out.append("}");
+            ++shown;
+        }
+        out.append("],\"shown\":");
+        out.append(std::to_string(shown));
+        out.append(",\"declared\":");
+        out.append(std::to_string(def->workflows().size()));
+        out.append("}\n");
+        std::fputs(out.c_str(), stdout);
+        return any_ineligible_unfiltered ? 1 : 0;
     }
 
     if (def->workflows().empty()) {
