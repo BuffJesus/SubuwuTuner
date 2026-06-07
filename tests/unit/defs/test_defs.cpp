@@ -43,7 +43,7 @@ years          = [2019, 2020]
 endianness     = "big"
 rom_size_bytes = 1572864
 authors        = ["The SubuwuTuner Authors"]
-data_sources   = ["RomRaider XML (facts only)"]
+data_sources   = ["Community XML (facts only)"]
 license        = "Apache-2.0"
 
 [[identification]]

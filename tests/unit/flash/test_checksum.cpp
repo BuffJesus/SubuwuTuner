@@ -342,36 +342,40 @@ TEST_CASE("SubaruStd repair: pre-existing slot bytes don't contaminate the sum",
 }
 
 // ============================================================================
-// CobbPerBlockCrc32 — analyst-recovered FA-DIT algorithm (2026-06-06)
+// PerInstallBlockCrc32 — aftermarket-installer FA-DIT algorithm
 // ============================================================================
 //
 // zlib-style CRC-32 over 25 install blocks; slots BE u32 at
 // 0x1FFF3C..0x1FFFA0. Slot 24 (self-referential) left untouched on
 // repair — non-blocking for EGR/TGV-class edits in slots 5..16.
 
-TEST_CASE("name + parse round-trip cobb_per_block_crc32",
-          "[flash][checksum][cobb_per_block_crc32]") {
+TEST_CASE("name + parse round-trip per_install_block_crc32",
+          "[flash][checksum][per_install_block_crc32]") {
     REQUIRE(std::string_view{fl::checksum_kind_name(
-                fl::ChecksumKind::CobbPerBlockCrc32)} ==
-            "cobb_per_block_crc32");
-    auto parsed = fl::parse_checksum_kind("cobb_per_block_crc32");
+                fl::ChecksumKind::PerInstallBlockCrc32)} ==
+            "per_install_block_crc32");
+    auto parsed = fl::parse_checksum_kind("per_install_block_crc32");
     REQUIRE(parsed.has_value());
-    REQUIRE(*parsed == fl::ChecksumKind::CobbPerBlockCrc32);
+    REQUIRE(*parsed == fl::ChecksumKind::PerInstallBlockCrc32);
+    // Legacy alias still parses but emitter writes the new name.
+    auto legacy = fl::parse_checksum_kind("cobb_per_block_crc32");
+    REQUIRE(legacy.has_value());
+    REQUIRE(*legacy == fl::ChecksumKind::PerInstallBlockCrc32);
 }
 
-TEST_CASE("CobbPerBlockCrc32 rejects ROMs smaller than 2 MB",
-          "[flash][checksum][cobb_per_block_crc32]") {
-    auto r = fl::make_checksum_repair(fl::ChecksumKind::CobbPerBlockCrc32);
-    REQUIRE(r->name() == "cobb_per_block_crc32");
+TEST_CASE("PerInstallBlockCrc32 rejects ROMs smaller than 2 MB",
+          "[flash][checksum][per_install_block_crc32]") {
+    auto r = fl::make_checksum_repair(fl::ChecksumKind::PerInstallBlockCrc32);
+    REQUIRE(r->name() == "per_install_block_crc32");
     std::vector<std::uint8_t> rom(0x100000, 0); // 1 MB
     auto const s = r->repair(rom);
     REQUIRE_FALSE(s.has_value());
     REQUIRE(s.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("CobbPerBlockCrc32 repair is idempotent on a re-pass",
-          "[flash][checksum][cobb_per_block_crc32]") {
-    auto r = fl::make_checksum_repair(fl::ChecksumKind::CobbPerBlockCrc32);
+TEST_CASE("PerInstallBlockCrc32 repair is idempotent on a re-pass",
+          "[flash][checksum][per_install_block_crc32]") {
+    auto r = fl::make_checksum_repair(fl::ChecksumKind::PerInstallBlockCrc32);
     std::vector<std::uint8_t> rom(0x200000, 0);
     REQUIRE(r->repair(rom).has_value());
     auto const after_first = rom;
@@ -379,12 +383,12 @@ TEST_CASE("CobbPerBlockCrc32 repair is idempotent on a re-pass",
     REQUIRE(rom == after_first);
 }
 
-TEST_CASE("CobbPerBlockCrc32 single-block edit changes only that slot",
-          "[flash][checksum][cobb_per_block_crc32]") {
-    // The analyst's smoke-test pattern: mutate a byte in block 7
-    // (the EGR/TGV sector at 0x030000-0x040000), repair, verify only
-    // slot 7's CRC moved.
-    auto r = fl::make_checksum_repair(fl::ChecksumKind::CobbPerBlockCrc32);
+TEST_CASE("PerInstallBlockCrc32 single-block edit changes only that slot",
+          "[flash][checksum][per_install_block_crc32]") {
+    // Smoke-test pattern: mutate a byte in block 7 (the EGR/TGV
+    // sector at 0x030000-0x040000), repair, verify only slot 7's CRC
+    // moved.
+    auto r = fl::make_checksum_repair(fl::ChecksumKind::PerInstallBlockCrc32);
     std::vector<std::uint8_t> rom(0x200000, 0);
     REQUIRE(r->repair(rom).has_value());
     // Snapshot all 25 slot values.
@@ -394,7 +398,7 @@ TEST_CASE("CobbPerBlockCrc32 single-block edit changes only that slot",
         for (std::size_t b = 0; b < 4; ++b)
             baseline_slots[i][b] = rom[kTableBase + i * 4 + b];
     }
-    // Flip a byte in block 7 (EGR Airflow location per analyst).
+    // Flip a byte in block 7 (the EGR Airflow region).
     rom[0x034DEA] = 0x42;
     REQUIRE(r->repair(rom).has_value());
     // Slot 7 must have changed.
@@ -418,11 +422,11 @@ TEST_CASE("CobbPerBlockCrc32 single-block edit changes only that slot",
     }
 }
 
-TEST_CASE("CobbPerBlockCrc32: slot 24 is never written by repair",
-          "[flash][checksum][cobb_per_block_crc32]") {
-    // Slot 24's decode is pending (analyst handoff). repair() must
-    // leave whatever was there untouched, even if it's garbage.
-    auto r = fl::make_checksum_repair(fl::ChecksumKind::CobbPerBlockCrc32);
+TEST_CASE("PerInstallBlockCrc32: slot 24 is never written by repair",
+          "[flash][checksum][per_install_block_crc32]") {
+    // Slot 24's decode is still pending. repair() must leave whatever
+    // was there untouched, even if it's garbage.
+    auto r = fl::make_checksum_repair(fl::ChecksumKind::PerInstallBlockCrc32);
     std::vector<std::uint8_t> rom(0x200000, 0);
     // Stamp a recognizable pattern at slot 24.
     constexpr std::uint32_t kSlot24Off = 0x1FFF3Cu + 24 * 4;
@@ -437,13 +441,13 @@ TEST_CASE("CobbPerBlockCrc32: slot 24 is never written by repair",
     REQUIRE(rom[kSlot24Off + 3] == 0xEF);
 }
 
-// Opt-in end-to-end validation against the user's actual COBB-installed
-// LF79101P ROM. Skipped when the file isn't present (CI / fresh checkout).
-// Confirms my repair is byte-identical to the existing checksum bytes —
-// i.e. the algorithm + block table I implemented matches what COBB
-// actually writes.
-TEST_CASE("CobbPerBlockCrc32 round-trip against fehr-live-dump-2026-06-06.bin",
-          "[flash][checksum][cobb_per_block_crc32][rom]") {
+// Opt-in end-to-end validation against a real aftermarket-installed
+// LF79101P ROM. Skipped when the file isn't present (CI / fresh
+// checkout). Confirms the repair is byte-identical to the stored
+// checksum bytes — i.e. the algorithm + block table matches what the
+// installer actually writes.
+TEST_CASE("PerInstallBlockCrc32 round-trip against live-dump reference",
+          "[flash][checksum][per_install_block_crc32][rom]") {
     auto const path =
         std::filesystem::path{"D:/Subuwu/subaru-data/reference-dumps/"
                               "fehr-live-dump-2026-06-06.bin"};
@@ -458,17 +462,17 @@ TEST_CASE("CobbPerBlockCrc32 round-trip against fehr-live-dump-2026-06-06.bin",
                                    std::istreambuf_iterator<char>()};
     REQUIRE(rom.size() == 0x200000u);
     auto const before = rom;
-    auto r = fl::make_checksum_repair(fl::ChecksumKind::CobbPerBlockCrc32);
+    auto r = fl::make_checksum_repair(fl::ChecksumKind::PerInstallBlockCrc32);
     REQUIRE(r->repair(rom).has_value());
     // ROM was unmodified before repair — the stored slot CRCs were
     // already correct. Post-repair must be byte-identical, proving
-    // my algorithm matches the COBB-installed values.
+    // the algorithm matches what the installer writes.
     REQUIRE(rom == before);
 }
 
-// Opt-in end-to-end integration fixture from the analyst's 2026-06-06
-// handoff appendix. Replicates the EGR + TGV delete recipe, runs repair,
-// and asserts byte-for-byte equality with the analyst's candidate ROM.
+// Opt-in end-to-end integration fixture. Replicates the EGR + TGV
+// delete recipe, runs repair, and asserts byte-for-byte equality with
+// an independently-produced candidate ROM.
 //
 // Three edits + slot-7 recompute:
 //   - 0x034DEA..0x034EAA  EGR Airflow                       192 bytes
@@ -479,8 +483,8 @@ TEST_CASE("CobbPerBlockCrc32 round-trip against fehr-live-dump-2026-06-06.bin",
 // All three regions land in block 7 (the 0x030000-0x040000 cal sector),
 // so only one CRC slot moves. Confirms the algorithm AND the
 // single-block edit-tracking math against a real-ROM cross-check.
-TEST_CASE("CobbPerBlockCrc32 EGR+TGV delete fixture matches analyst candidate",
-          "[flash][checksum][cobb_per_block_crc32][rom][fixture]") {
+TEST_CASE("PerInstallBlockCrc32 EGR+TGV delete fixture matches reference candidate",
+          "[flash][checksum][per_install_block_crc32][rom][fixture]") {
     auto const input_path =
         std::filesystem::path{"D:/Subuwu/subaru-data/reference-dumps/"
                               "fehr-live-dump-2026-06-06.bin"};
@@ -503,25 +507,25 @@ TEST_CASE("CobbPerBlockCrc32 EGR+TGV delete fixture matches analyst candidate",
     auto rom = load_rom(input_path);
     auto const expected = load_rom(candidate_path);
 
-    // Snapshot stored slot-7 before the edit. Per the analyst the
-    // pre-edit value is 0x9E47A152.
+    // Snapshot stored slot-7 before the edit. Pre-edit value is
+    // 0x9E47A152.
     constexpr std::uint32_t kSlot7Off = 0x1FFF3Cu + 7u * 4u;
     REQUIRE(read_u32_be(rom, kSlot7Off) == 0x9E47A152u);
 
-    // Apply the three table-zero edits exactly as the handoff specifies.
+    // Apply the three table-zero edits.
     std::fill(rom.begin() + 0x034DEA, rom.begin() + 0x034EAA, std::uint8_t{0});
     std::fill(rom.begin() + 0x034F9A, rom.begin() + 0x03501A, std::uint8_t{0});
     std::fill(rom.begin() + 0x03A922, rom.begin() + 0x03ABE2, std::uint8_t{0});
 
-    auto r = fl::make_checksum_repair(fl::ChecksumKind::CobbPerBlockCrc32);
+    auto r = fl::make_checksum_repair(fl::ChecksumKind::PerInstallBlockCrc32);
     REQUIRE(r->repair(rom).has_value());
 
-    // Slot 7 must land on the analyst's predicted new value.
+    // Slot 7 must land on the predicted new value.
     REQUIRE(read_u32_be(rom, kSlot7Off) == 0x30E98431u);
 
     // Byte-for-byte equality with the candidate proves the full
     // pipeline (edits + algorithm + slot table base + endianness)
-    // matches the analyst's reference.
+    // matches the reference.
     REQUIRE(rom == expected);
 }
 

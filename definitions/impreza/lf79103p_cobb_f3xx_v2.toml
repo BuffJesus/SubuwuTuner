@@ -21,7 +21,7 @@ extends        = "lf79103p"
 # (analyst handoff 2026-06-06 "for symmetry"). merge_over() in
 # src/defs replaces the parent pack header wholesale, so this lives
 # on the overlay even though the base lf79103p.toml leaves it absent.
-checksum_type  = "cobb_per_block_crc32"
+checksum_type  = "per_install_block_crc32"
 
 # ---- Scaling blocks ----
 

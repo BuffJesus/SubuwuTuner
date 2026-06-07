@@ -20,7 +20,7 @@ extends        = "lf79101p"
 # Restate explicitly: merge_over() in src/defs replaces the parent
 # pack header wholesale with the child's, so the parent's checksum
 # kind would be lost if it weren't repeated here.
-checksum_type  = "cobb_per_block_crc32"
+checksum_type  = "per_install_block_crc32"
 
 # ---- Scaling blocks ----
 

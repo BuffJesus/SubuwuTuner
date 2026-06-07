@@ -50,9 +50,8 @@ inline constexpr std::uint8_t kSidRequestTransferExit = 0x37;
 // (= 0xB6 + kPositiveResponseOffset); negative is the usual `7F B6
 // NRC`. Sniff/extract tooling that filters for 0x36 will see zero
 // matching frames during an actual write session — filter for 0xB6
-// instead, or for both. Cross-reference:
-// Findings/communication-protocols/cobb-install-flow.md §5 (full
-// wire-format derivation from cobb-reinstall-3.log).
+// instead, or for both. See docs/26-bulk-reflash-cipher.md §5 for the
+// full wire-format derivation.
 inline constexpr std::uint8_t kSidSubaruBulkTransfer = 0xB6;
 inline constexpr std::uint8_t kSidTesterPresent = 0x3E;
 inline constexpr std::uint8_t kSidWriteMemoryByAddress = 0x3D;
@@ -155,8 +154,8 @@ parse_request_download_response(std::span<std::uint8_t const> resp);
 // Negative response: standard [0x7F] [0xB6] [NRC]. The transport layer
 // is responsible for swallowing NRC 0x78 (responsePending) intermediate
 // frames and surfacing only the final response — every observed B6 in
-// cobb-reinstall-3.log produced one `7F B6 78` followed by an `F6` and
-// real adapters / J2534 drivers handle this transparently.
+// our capture set produced one `7F B6 78` followed by an `F6` and real
+// adapters / J2534 drivers handle this transparently.
 //
 // PRECONDITION: `memory_address <= 0xFFFFFF`. The wire format only
 // carries 3 address bytes; values above the 24-bit ceiling are silently

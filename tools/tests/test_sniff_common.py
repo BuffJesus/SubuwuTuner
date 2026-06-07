@@ -156,9 +156,10 @@ class TestIsoTpReassembler(unittest.TestCase):
         # than buffering the first 6 bytes and waiting for CFs that never
         # arrive.
         #
-        # Concrete case from cobb-reinstall-3.log: a 0x34 RequestDownload
-        # arrives as `10 09 34 04 33 1E 00 00 02 00 00` (11 bytes total —
-        # PCI says length 9, payload is 9 bytes after the 2-byte PCI).
+        # Concrete case from an aftermarket reflash capture: a 0x34
+        # RequestDownload arrives as `10 09 34 04 33 1E 00 00 02 00 00`
+        # (11 bytes total — PCI says length 9, payload is 9 bytes after
+        # the 2-byte PCI).
         # The old behaviour buffered the first 6 bytes (`34 04 33 1E 00 00`)
         # and waited for 3 more via CFs — they never arrived, the 0x34
         # was silently dropped, and every subsequent 0xB6 that referenced

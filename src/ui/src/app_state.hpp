@@ -734,7 +734,7 @@ struct AppState {
     AdapterPickerState read_rom_adapter{};
     char read_rom_base_addr_hex[32]{"0x0"};
     char read_rom_size_hex[32]{"0x200000"};
-    int read_rom_max_chunk{0x100};
+    int read_rom_max_chunk{0x1000};
     int read_rom_protocol{0};
     bool read_rom_verbose{true};
     bool read_rom_authenticate{true};

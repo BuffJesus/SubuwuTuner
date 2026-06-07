@@ -4,10 +4,10 @@
 // Property-based tests for the SSM framing layer — ship blocker #11.
 //
 // Example-based coverage (test_ssm.cpp) exercises specific hand-written
-// frames lifted from RomRaider source / NASIOC threads. Property tests
-// cover the encode/parse pair across the input space: any address set,
-// any data size within spec → request frame is well-formed, response
-// parse round-trips.
+// frames derived from the SSM wire-format spec and live bus capture.
+// Property tests cover the encode/parse pair across the input space:
+// any address set, any data size within spec → request frame is
+// well-formed, response parse round-trips.
 //
 // Properties pinned here:
 //

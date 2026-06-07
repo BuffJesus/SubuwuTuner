@@ -57,7 +57,6 @@ Phase 0/1/2 done. Phase 3 protocol framing complete (SSM + full UDS catalog incl
 | Reason about SecurityAccess (UDS 0x27) / seed-key plug-in | `docs/23-security-access.md` |
 | Reason about Y-cable sniffing (during-flash capture, datalog RAM-poll discovery, protocol learning, feature RE for LC / FFS / rev limit) | `docs/24-sniff-workflows.md` |
 | Reason about the optional 0xB6 bulk-transfer write path (off by default) | `docs/26-bulk-reflash-cipher.md` |
-| Reason about the user's specific Fehr e-tune (cal delta vs factory, SA L1/L35 status, patch manifests) | `docs/27-fehr-analysis-2026-05-26.md` |
 | Reason about / execute the junkyard-ECU bench-rig assembly (FSM pin references, power-on sequence, first read, brick-recovery loop) | `docs/28-bench-rig-build.md` |
 | Reason about SSM-A8 RAM polling + correlator (recovering tuner-pack DID byte layouts without ROM disasm; `ssm-a8-poll` CLI + `tools/cross_ref_ssm_a8.py`) | `docs/29-ssm-a8-poll-workflow.md` |
 | Reason about / implement the patch insertion layer (`src/feature_patch/`) — manifest format, ROM-allocator, SH-2A + RH850 splice mechanics, end-to-end `PatchObject → PatchedRom` | `docs/30-patch-insertion.md` |

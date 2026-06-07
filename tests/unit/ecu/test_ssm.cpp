@@ -573,7 +573,7 @@ TEST_CASE("ssm-a8-poll SA preamble: DSC + L3 unlock then poll on same transport"
     REQUIRE(seed.has_value());
     REQUIRE(*seed == seed_be);
 
-    auto const key = st::ecu::subaru::ssmcan1_l3_fehr_active(*seed);
+    auto const key = st::ecu::subaru::ssmcan1_l3_aftermarket(*seed);
     REQUIRE(key.has_value());
     REQUIRE(*key == key_be);
 

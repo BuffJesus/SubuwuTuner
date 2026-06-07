@@ -20,6 +20,7 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
@@ -32,7 +33,10 @@ void render_status_bar(AppState &state) {
     auto const *vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(
         ImVec2(vp->WorkPos.x, vp->WorkPos.y + vp->WorkSize.y - kStatusBarHeight));
-    ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x, kStatusBarHeight));
+    // Defensive clamp at >= 1px against the GLFW size-limit floor —
+    // negative width to SetNextWindowSize is UB.
+    float const status_w = std::max(1.0f, vp->WorkSize.x);
+    ImGui::SetNextWindowSize(ImVec2(status_w, kStatusBarHeight));
     ImGui::SetNextWindowViewport(vp->ID);
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);

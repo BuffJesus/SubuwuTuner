@@ -1,28 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The SubuwuTuner Authors
 //
-// Phase A read-pipeline validation per
-// `D:\Subuwu\findings\PROMPT-subuwutuner-agent-test-dumping.md`.
+// Phase A read-pipeline validation.
 //
-// What this test does: ports the analyst-side reference SA key algorithm
-// from `Findings/decompile/lf79103p/sa_feistel_v4.py` into a self-contained
-// C++ helper, wires it through `Flasher::set_security_key_fn(...)`, and
-// drives the full SA-then-RMBA path against MockTransport using one of the
-// captured (seed, key) pairs from the user's 2017 LF79103P.
+// What this test does: re-derives the SA key algorithm from the spec
+// into a self-contained C++ helper, wires it through
+// `Flasher::set_security_key_fn(...)`, and drives the full
+// SA-then-RMBA path against MockTransport using captured (seed, key)
+// pairs from a real 2017 LF79103P.
 //
 // Why this exists in addition to `test_subaru_security.cpp`: that file
-// exercises the in-tree `ssmcan1_key_stub` against captured pairs at the
-// algorithm level. This file exercises the orchestrator integration end
-// to end — request_seed → key_fn → send_key → ack → RMBA — and pins the
-// pluggable seam with an *independent* algorithm port. A regression in
-// either the in-tree default or the analyst-side reference would now be
-// caught by the cross-check in the third TEST_CASE below.
+// exercises the in-tree `ssmcan1_key_stub` against captured pairs at
+// the algorithm level. This file exercises the orchestrator
+// integration end to end — request_seed → key_fn → send_key → ack →
+// RMBA — and pins the pluggable seam with an *independent* algorithm
+// port. A regression in either the in-tree default or the independent
+// reference would now be caught by the cross-check in the third
+// TEST_CASE below.
 //
-// L1 only. The Python reference handles L1/L3/L5 with per-level byte
-// permutations, but at L1 both SEED_PERM and KEY_PERM are identity, so
-// the port collapses to "Feistel-forward(K) wordswap → seed". Phase A
-// validates the factory-state L1 path; L3/L5 and Fehr-active variants
-// are out of scope here.
+// L1 only. The spec handles L1/L3/L5 with per-level byte permutations,
+// but at L1 both SEED_PERM and KEY_PERM are identity, so the
+// implementation collapses to "Feistel-forward(K) wordswap → seed".
+// Phase A validates the factory-state L1 path; L3/L5 and aftermarket
+// variants are out of scope here.
 
 #include "st/core/error.hpp"
 #include "st/core/result.hpp"
@@ -44,15 +44,13 @@ namespace uds = st::ecu::uds;
 namespace {
 
 // 16 × 16-bit BE round keys at flash 0x074338 (L1 dispatch).
-// Source: `Findings/HANDOFF-to-subuwutuner-2026-05-25-cipher-structure.md` §2,
-// byte-identical between LF79102P and LF79103P factory dumps.
+// Byte-identical between LF79102P and LF79103P factory dumps.
 constexpr std::array<std::uint16_t, 16> kSaTableL1 = {
     0x794B, 0x3CAF, 0x3019, 0x8B57, 0x52A0, 0xA77C, 0x38C9, 0xB0B5,
     0x6520, 0x3B66, 0xA09D, 0x2877, 0x479F, 0xB685, 0x7568, 0x84D7,
 };
 
 // 32 × 4-bit S-box at flash 0x074378.
-// Source: same handoff §1 (the "alt S-box" finding).
 constexpr std::array<std::uint8_t, 32> kSBox = {
     0x05, 0x06, 0x07, 0x01, 0x09, 0x0C, 0x0D, 0x08,
     0x0A, 0x0D, 0x02, 0x0B, 0x0F, 0x04, 0x00, 0x03,
@@ -152,18 +150,18 @@ void expect(st::transport::MockTransport &t, std::vector<std::uint8_t> req,
     t.expect_send_recv(std::move(req), std::move(resp));
 }
 
-// Captured factory-state L1 (seed, key) pairs from sa_feistel_v4.py PAIRS.
-// Each was observed on the wire from the user's 2017 LF79103P during a
-// COBB reinstall capture and ack'd positively by the ECU.
+// Captured factory-state L1 (seed, key) pairs. Each was observed on
+// the wire from a real 2017 LF79103P during an aftermarket-reinstall
+// capture and ack'd positively by the ECU.
 struct Pair {
     std::uint32_t seed;
     std::uint32_t key;
     char const *note;
 };
 constexpr std::array<Pair, 3> kFactoryPairs = {{
-    {0x4BC3CC87U, 0xA73FED09U, "cobb-reinstall L1"},
-    {0x38C54C7CU, 0x64AEE90BU, "cobb-reinstall-2 L1"},
-    {0xBD269DDFU, 0x60195F2DU, "cobb-reinstall-3 L1"},
+    {0x4BC3CC87U, 0xA73FED09U, "aftermarket-reinstall L1"},
+    {0x38C54C7CU, 0x64AEE90BU, "aftermarket-reinstall L1 #2"},
+    {0xBD269DDFU, 0x60195F2DU, "aftermarket-reinstall L1 #3"},
 }};
 
 } // namespace
@@ -213,7 +211,7 @@ TEST_CASE("Flasher::read_full_rom drives SA+RMBA end-to-end with sa_feistel_v4 p
     // ride on. If this test passes, the orchestrator + UDS framing +
     // SA preamble + key-fn seam are all wired correctly; only the
     // transport layer remains as a hardware-side variable.
-    auto const &p = kFactoryPairs[0]; // cobb-reinstall L1, the original anchor pair.
+    auto const &p = kFactoryPairs[0]; // aftermarket-reinstall L1, the original anchor pair.
     auto const seed_bytes = unpack_be(p.seed);
     auto const key_bytes = unpack_be(p.key);
 

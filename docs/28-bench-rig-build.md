@@ -247,12 +247,12 @@ Expected: 2,097,152 bytes (0x200000) in ~7–10 minutes. The exact
 duration depends on per-block timeout and the ECU's RequestDownload
 buffer size; the orchestrator handles negotiation.
 
-If the bench ECU was COBB-tuned or otherwise non-factory, the factory
-SA variant will be refused with "incorrect key." Try in order:
+If the bench ECU has been touched by an aftermarket flasher or is
+otherwise non-factory, the factory SA variant will be refused with
+"incorrect key." Try in order:
 
-1. `--sa-variant cobb-ap` (= `fehr-active-l1`)
-2. `--sa-variant fehr-active-l3`
-3. `--cobb-tuned` flag (forces alternate L1 derivation path)
+1. `--sa-variant aftermarket` (= `aftermarket-l1`)
+2. `--sa-variant aftermarket-l3`
 
 See `docs/23-security-access.md` for the variant catalog and how to
 diagnose which one to use.

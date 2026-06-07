@@ -449,7 +449,7 @@ The flasher honors these regardless of ISA:
 - `fixtures/private/findings_calibration_deltas/SUMMARY.md` —
   empirical confirmation that bootloader `0x000000..0x006000` is
   byte-identical across stock + four observed install states.
-- `findings/corpus-wide-re-2026-06-06/out/cobb_datalog/CHECKSUM_RUNTIME_VERIFICATION.md`
+- the independent checksum-runtime verification report
   (analyst off-tree) — Ghidra evidence that the aftermarket
   per-block CRC-32 slot table is **not** consulted by the running
   ECU. Source for the "What is not the boot-time integrity check"

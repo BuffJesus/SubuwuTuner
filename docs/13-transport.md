@@ -18,7 +18,7 @@ Status today (2026-05-26) — the **shapes** are real and locked under unit test
 | `st::ecu::ssm::SsmClient` (K-Line + CAN paths) | ✅ CAN path validated against real ECU (SSM/UDS sniff captures); K-Line still MockTransport-only |
 | `st::ecu::uds::UdsClient` | ✅ validated against the user's 2017 WRX over OBDX (SecurityAccess, RDBI, RMBA, ReadFullRom via UDS RequestDownload/TransferData) |
 | `st::ecu::uds` OBD-II Mode 0x09 (CAL ID / CVN / VIN) | ✅ shipped + CLI surfaced |
-| `st::ecu::subaru_security` (SecurityAccess Feistel: factory + COBB-AP + Fehr-active L1/L3 variants, CLI `--sa-variant`) | ✅ shipped |
+| `st::ecu::subaru_security` (SecurityAccess Feistel: factory + aftermarket L1/L3 variants, CLI `--sa-variant`) | ✅ shipped |
 | `st::ecu::bulk_reflash` (gated 0xB6 cipher, `ST_ENABLE_BULK_REFLASH_CIPHER`) | ✅ shipped, off in default builds |
 | `st::log::LogStream` (SPSC ring) + `LogSession` (I/O thread) + `CsvSink` | ✅ shipped; consumed by MockTransport-backed tests |
 | `subuwutuner-cli log --def <pack> --pid <ids> [--csv …]` | ✅ shipped; gates on transport platform wiring for live ECU |

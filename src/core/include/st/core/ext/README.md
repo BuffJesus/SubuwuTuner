@@ -4,7 +4,7 @@
 
 This directory exists so the seams between major subsystems are visible, reviewed, and stable *before* a third-party plugin host is built. The idea-level inspiration comes from the plugin / service-registry pattern common in long-lived desktop applications; the C++ here is original.
 
-Cross-reference: `Findings/08_recommended_improvements.md#I-12` and `Findings/03_reference_architecture_patterns.md` for the rationale.
+See `docs/02-architecture.md` (the extension-seam discussion) for the rationale.
 
 ## Interfaces in this directory
 

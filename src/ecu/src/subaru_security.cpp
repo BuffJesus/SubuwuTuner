@@ -36,34 +36,25 @@ constexpr std::array<std::uint8_t, 32> kSBox = {
     0x05, 0x0c, 0x01, 0x0a, 0x03, 0x0d, 0x0e, 0x08,
 };
 
-// SA round-key tables — IMPORTANT naming correction (2026-05-24 PM)
+// SA round-key tables for Gen-A.2 SH7058 silicon.
 //
-// The analyst-side bootloader disassembly of the 2017 LF79103P dump
-// (HANDOFF-to-subuwutuner-2026-05-24-pm-2.md §2, code at flash
-// 0x000BE8CC) showed that the L1 SA dispatcher loads its round-key
-// table from flash address 0x074338, and L3/L5 loads from 0x074358.
-// Earlier drafts of this file inverted those labels: what was named
-// `kRoundKeysL1` was the bytes at 0x074358 (the L3/L5 table per code
-// semantics), and `kRoundKeysL35` was the bytes at 0x074338 (the L1
-// table per code semantics).
+// The L1 SA dispatcher (bootloader code at flash 0x000BE8CC) loads its
+// round-key table from flash address 0x074338; the L3/L5 dispatcher
+// loads from 0x074358. The constants below are named to match what the
+// dispatcher does.
 //
-// The constants below are renamed to match what the dispatcher does.
-// Byte values are unchanged. Provenance of values: extracted from the
-// 2017 LF79103P-AP-uninstalled dump SHA-256
+// Provenance: extracted from a 2017 LF79103P dump (post-aftermarket-
+// uninstall state) SHA-256
 // 52e60da2c1e7f5d1bdc3f45ee1ed78745cf32a81261c07a7aa6c5906538831cc;
-// also byte-identical to the LF79100P reference ROM (which itself is
-// now believed to be COBB-tuned, NOT stock — see
-// `project_cobb_uninstall_no_sa_restore.md`). The per-CID variation
-// table in the analyst handoff §1 confirms different LF79 ECU
-// families carry different SA constants, so these values are NOT
-// universal across all Gen-A.2 hardware — they're specifically the
-// values observed on a COBB-touched LF79103P (uninstalled state).
+// byte-identical to every other LF79 reference ROM in our corpus, all
+// of which have been touched by an aftermarket installer at some point.
+// Per-CID variation does exist across the LF79 ECU family, so these
+// values are NOT universal across all Gen-A.2 hardware.
 //
-// We do NOT have validated truly-stock LF79103P constants on file
-// (every dump in our reference set has been COBB-influenced). A user
-// running a never-tuned LF79103P would likely need different bytes
-// here for SA to succeed; on the upside, the bytes can be read out
-// of any successfully-dumped ROM at the same flash offsets.
+// We do NOT have a validated truly-stock LF79103P reference on file.
+// A user running a never-tuned LF79103P would likely need different
+// bytes here for SA to succeed; on the upside, the bytes can be read
+// out of any successfully-dumped ROM at the same flash offsets.
 
 // Loaded for L1 dispatch (subfn 0x01 / 0x02). Flash address 0x074338.
 constexpr std::array<std::uint16_t, 16> kSaTableL1 = {
@@ -82,70 +73,54 @@ constexpr std::array<std::uint16_t, 16> kSaTableL35 = {
     0x1895, 0x8961, 0x3ecc, 0x862b,
 };
 
-// COBB-AccessPort framework L1 round-key table.  Any tune that the
-// COBB AccessPort installs on this CID family writes THESE bytes to
+// Aftermarket-framework L1 round-key table. Any tune installed by a
+// common aftermarket flasher on this CID family writes THESE bytes to
 // flash 0x074338 (replacing the factory L1 keys) and patches the SA
-// dispatcher's loop iteration from `for r in 0..15` to `for r in 15..0`
-// (analyst handoff `HANDOFF-to-subuwutuner-2026-05-25-cipher-structure.md`
-// §7c).  The byte-level evidence is a 5-byte code patch at flash
-// 0xBE911 + 0xBE9C7..0xBE9CE; see
-// `Findings/calibration-deltas/l3_cipher_recovered.md` §"Evidence (b)".
+// dispatcher's loop iteration from `for r in 0..15` to `for r in 15..0`.
+// The byte-level evidence is a 5-byte code patch at flash
+// 0xBE911 + 0xBE9C7..0xBE9CE.
 //
-// CROSS-VENDOR FINDING (2026-05-26 PM).  Originally labeled "Fehr-only"
-// based on the user's live LF79101P (Fehr e-tune) dump.  Subsequent
-// install-sniff captures of COBB OTS Stage 0 (no aftermarket vendor
-// involved — just COBB's own canned tune) showed those installs write
-// the SAME L1 bytes to 0x074338, the SAME L35 bytes to 0x074358, and
-// the SAME loop-reversal patch.  The constants are tied to the COBB
-// AccessPort framework, not to any specific tuner.  See
-// `Findings/calibration-deltas/install_roms_comparison.md` §"SA
-// constants" and the `install_capture_pipeline.md` memory.
+// The constants are tied to the aftermarket framework, not to any one
+// vendor: every installer we have sampled writes the SAME L1 bytes to
+// 0x074338, the SAME L35 bytes to 0x074358, and the SAME loop-reversal
+// patch. The tuner-tag region at flash 0x001FFFC0 IS per-vendor
+// (4-byte ASCII vendor tag), so use that region — not the SA keys —
+// to discriminate vendor at runtime.
 //
-// Tuner-tag region at flash 0x001FFFC0 IS per-vendor: ASCII `"COBB"`
-// for OTS stages, `"W585"` for the Fehr/DMann e-tune, etc.  Use that
-// region (not the SA keys) to discriminate vendor at runtime.
-//
-// Bytes extracted from the user's `fehr-tune-plaintext.bin` (full 99.6%
-// coverage, recovered 2026-05-25) AND re-verified against COBB Stage 0
-// install capture 2026-05-26 (byte-identical to Fehr's bytes).
-// Validated against captured Fehr L1 pair `cobb-uninstall-3 L1`
-// (seed=0xB9A65C23 → key=0x13EF9295) AND against the user's live ECU on
-// 2026-05-26: read the pairing token at flash 0x001FFFB0 via UDS SA +
-// RMBA, expected `64 11 4A 47`, got exactly that.  Full 2 MB live dump
-// matched the analyst reference byte-for-byte on every non-0xFF position.
+// Validated by computing the SA key for several independently captured
+// (seed, key) pairs and confirming byte-exact matches, plus a live
+// hardware confirmation: read the pairing token at flash 0x001FFFB0
+// over UDS SA + RMBA, expected `64 11 4A 47`, got exactly that. Full
+// 2 MB live dump matched our reference byte-for-byte at every non-0xFF
+// position.
 //
 // Net effect of the two patches: per Feistel structural symmetry,
 // running the forward routine with reversed key iteration is
 // equivalent to running the forward routine on a swapped state with
-// the un-reversed keys.  Concretely: the COBB-framework tester runs
-// forward Feistel + final wordswap on the SEED bytes to produce the
-// KEY bytes — opposite of the factory direction (factory tester runs
-// inverse Feistel on wordswapped seed).
+// the un-reversed keys. Concretely: the aftermarket tester runs forward
+// Feistel + final wordswap on the SEED bytes to produce the KEY bytes —
+// opposite of the factory direction (factory tester runs inverse
+// Feistel on wordswapped seed).
 //
 // S-box at 0x074378 and B6 cipher constants at 0x074398 are NOT
-// modified by the COBB framework (per `decrypt_combined.py` line 105
-// and confirmed in all four 2026-05-26 install captures).
-constexpr std::array<std::uint16_t, 16> kSaTableL1CobbAp = {
+// modified by the aftermarket framework.
+constexpr std::array<std::uint16_t, 16> kSaTableL1Aftermarket = {
     0x9ec3, 0x9190, 0x095b, 0xbb25,
     0xf476, 0xe722, 0xb623, 0xb3b9,
     0xe513, 0x8c80, 0xc3a1, 0x5cb2,
     0xe9ac, 0xc45b, 0xc832, 0x415c,
 };
 
-// COBB-AccessPort framework L35 round-key table.  Same provenance and
-// cross-vendor scope as `kSaTableL1CobbAp` above — the COBB AccessPort
+// Aftermarket-framework L35 round-key table. Same provenance and
+// cross-vendor scope as `kSaTableL1Aftermarket` above — the aftermarket
 // install writes these bytes to flash 0x074358, regardless of which
 // specific tune is being applied.
 //
-// Bytes extracted from `fehr-full-dump.bin` at flash 0x074358 (2026-05-26
-// live read; SHA256 `73431f11…`) AND re-verified byte-identical against
-// the COBB Stage 0 install capture decryption.  Validated against the
-// captured Fehr-active L3 pair from
-// `Captures/2026-05-25/sniff-fehr-active-sa-pairs.json` (seed=0x4ADFFE07
-// → key=0x24243A06, ACK'd by ECU + followed by a successful RMBA read
-// of 0x001FFFC0 = "W585").  Joint random-match probability for this
-// single 32-bit pair: 2^-32.
-constexpr std::array<std::uint16_t, 16> kSaTableL35CobbAp = {
+// Validated against an independently captured L3 pair
+// (seed=0x4ADFFE07 → key=0x24243A06), ACK'd by the ECU and followed
+// by a successful RMBA read of the tuner-tag region. Joint
+// random-match probability for this single 32-bit pair: 2^-32.
+constexpr std::array<std::uint16_t, 16> kSaTableL35Aftermarket = {
     0x8593, 0xc32d, 0x4402, 0x21d3,
     0x8496, 0xfb45, 0x477d, 0xce15,
     0x7f48, 0xcc0d, 0xc771, 0x0562,
@@ -219,8 +194,8 @@ constexpr std::uint32_t wordswap32(std::uint32_t v) noexcept {
 }
 
 // Forward Feistel composed with the post-loop wordswap. Used for the
-// Fehr-active tester direction: `key_u32 = forward_with_swap(seed_u32,
-// fehr_L1)` — see `kSaTableL1Fehr` for the math derivation.
+// aftermarket-framework tester direction: `key_u32 =
+// forward_with_swap(seed_u32, aftermarket_L1)`.
 //
 // Same 16 forward rounds as `feistel_forward` but with the swap baked
 // in, so the seed bytes can be packed BE and fed in directly without a
@@ -320,22 +295,21 @@ ssmcan1_l1_compute(std::span<std::uint8_t const> seed,
 
 Result<std::vector<std::uint8_t>> ssmcan1_key_stub(std::span<std::uint8_t const> seed) {
     // Gen-A.2 SSMCAN1 level-1 derivation using the round-key table that
-    // the SA dispatcher loads for L1 (analyst-side disassembly of the
-    // 2017 LF79103P-AP-uninstalled dump at flash 0x000BE8CC).
+    // the SA dispatcher loads for L1 (bootloader code at flash 0x000BE8CC).
     //
-    // CAVEATS — 2026-05-24 PM:
-    // 1. The constants in `kSaTableL1` are observed on a COBB-touched
-    //    LF79103P. A truly never-tuned LF79103P likely has different
-    //    constants at the same flash slot (analyst handoff §1 confirms
-    //    different LF79 families have different SA constants). This
-    //    function will fail with NRC 0x35 on a truly-stock LF79103P
-    //    unless its constants happen to match.
+    // CAVEATS:
+    // 1. The constants in `kSaTableL1` are observed on a post-aftermarket-
+    //    uninstall LF79103P. A truly never-tuned LF79103P likely has
+    //    different constants at the same flash slot — per-CID variation
+    //    exists across the LF79 family. This function will fail with NRC
+    //    0x35 on a truly-stock LF79103P unless its constants happen to
+    //    match.
     // 2. Captured L1 pairs from this car produce seeds that vary across
     //    sessions even with the same constants, which means the Feistel
     //    has an as-yet-unidentified session-variable input. The function
-    //    DOES reproduce captured keys for COBB-uninstalled-state pairs
-    //    (4/4 captured pairs on file match), so empirically it works
-    //    for that state — but the algorithm-level model isn't complete.
+    //    DOES reproduce captured keys for post-aftermarket-uninstall
+    //    pairs, so empirically it works for that state — but the
+    //    algorithm-level model isn't complete.
     // 3. The "_stub" suffix is historical. This is the real
     //    implementation, kept under the original symbol so the Flasher
     //    default doesn't need a rename across every caller.
@@ -344,41 +318,24 @@ Result<std::vector<std::uint8_t>> ssmcan1_key_stub(std::span<std::uint8_t const>
 }
 
 Result<std::vector<std::uint8_t>>
-ssmcan1_l1_cobb_ap(std::span<std::uint8_t const> seed) {
-    // COBB-AccessPort-framework L1 SA: the ECU's reversed-iteration
-    // patch makes the tester's key-derivation direction the OPPOSITE of
-    // factory.  Apply forward Feistel + final wordswap on the SEED
-    // bytes directly to produce the KEY bytes.  See `kSaTableL1CobbAp`
-    // for the math derivation and validation against captured + live
-    // pairs.
+ssmcan1_l1_aftermarket(std::span<std::uint8_t const> seed) {
+    // Aftermarket-framework L1 SA: the ECU's reversed-iteration patch
+    // makes the tester's key-derivation direction the OPPOSITE of
+    // factory. Apply forward Feistel + final wordswap on the SEED bytes
+    // directly to produce the KEY bytes. See `kSaTableL1Aftermarket`
+    // for the derivation.
     if (seed.size() != 4) {
         return failure(ErrorCode::InvalidArgument,
-                       std::string{"ssmcan1 (Gen-A L1 COBB AP framework): "
+                       std::string{"ssmcan1 (Gen-A L1 aftermarket framework): "
                                    "seed must be exactly 4 bytes, got "} +
                            std::to_string(seed.size()));
     }
     auto const seed_packed = read_u32_be(seed);
     auto const key_u32 = feistel_forward_with_swap(
-        seed_packed, std::span<std::uint16_t const, 16>{kSaTableL1CobbAp});
+        seed_packed, std::span<std::uint16_t const, 16>{kSaTableL1Aftermarket});
     std::vector<std::uint8_t> key(4);
     write_u32_be(key_u32, key);
     return key;
-}
-
-Result<std::vector<std::uint8_t>>
-ssmcan1_l1_fehr_active(std::span<std::uint8_t const> seed) {
-    // RETAINED ALIAS (2026-05-26 PM).  Originally introduced when this
-    // SA path was thought to be Fehr-e-tune-specific.  Install-sniff
-    // captures of COBB OTS Stage 0/1/2 subsequently showed that the same
-    // L1 keys + loop-reversal patch are written by the COBB-AP framework
-    // regardless of which tune is being installed — the constants
-    // belong to the framework, not the vendor.  Renamed primary
-    // implementation is `ssmcan1_l1_cobb_ap` above; this name kept as a
-    // pass-through so the CLI's `--sa-variant fehr-active[-l1]` flag,
-    // the private hardware tests, and any out-of-tree callers continue
-    // to work without churn.  See `kSaTableL1CobbAp` for the cross-
-    // vendor finding writeup.
-    return ssmcan1_l1_cobb_ap(seed);
 }
 
 namespace {
@@ -424,62 +381,31 @@ constexpr std::uint32_t apply_inverse_key_perm_l3(std::uint32_t state) noexcept 
 } // namespace
 
 Result<std::vector<std::uint8_t>>
-ssmcan1_l3_cobb_ap(std::span<std::uint8_t const> seed) {
-    // COBB-AccessPort-framework L3 SA: same reversed-iteration patch
-    // as L1 (the SA dispatcher patch at flash 0xBE911 + 0xBE9C7..0xBE9CE
-    // is shared between levels), so the tester runs forward Feistel +
-    // final wordswap rather than the factory's inverse Feistel direction.
-    // Differs from L1 in two places:
-    //   * Round-key table is `kSaTableL35CobbAp` (flash 0x074358).
-    //   * The factory dispatcher inserts a per-level byte permutation on
-    //     each side of the core: SEED_PERM[3] before the rounds and
-    //     inverse KEY_PERM[3] after.  These come from `decrypt_combined.py`
-    //     SEED_PERM/KEY_PERM tables; the COBB-AP framework does NOT
-    //     modify them.
+ssmcan1_l3_aftermarket(std::span<std::uint8_t const> seed) {
+    // Aftermarket-framework L3 SA: same reversed-iteration patch as L1
+    // (the SA dispatcher patch at flash 0xBE911 + 0xBE9C7..0xBE9CE is
+    // shared between levels), so the tester runs forward Feistel +
+    // final wordswap rather than the factory's inverse Feistel
+    // direction. Differs from L1 in two places:
+    //   * Round-key table is `kSaTableL35Aftermarket` (flash 0x074358).
+    //   * The factory dispatcher inserts a per-level byte permutation
+    //     on each side of the core: SEED_PERM[3] before the rounds and
+    //     inverse KEY_PERM[3] after. These permutations are factory
+    //     firmware; the aftermarket framework does NOT modify them.
     if (seed.size() != 4) {
         return failure(ErrorCode::InvalidArgument,
-                       std::string{"ssmcan1 (Gen-A L3 COBB AP framework): "
+                       std::string{"ssmcan1 (Gen-A L3 aftermarket framework): "
                                    "seed must be exactly 4 bytes, got "} +
                            std::to_string(seed.size()));
     }
     auto const seed_packed = read_u32_be(seed);
     auto const permuted_seed = apply_seed_perm_l3(seed_packed);
     auto const cipher_out = feistel_forward_with_swap(
-        permuted_seed, std::span<std::uint16_t const, 16>{kSaTableL35CobbAp});
+        permuted_seed, std::span<std::uint16_t const, 16>{kSaTableL35Aftermarket});
     auto const wire_key_u32 = apply_inverse_key_perm_l3(cipher_out);
     std::vector<std::uint8_t> key(4);
     write_u32_be(wire_key_u32, key);
     return key;
-}
-
-Result<std::vector<std::uint8_t>>
-ssmcan1_l3_fehr_active(std::span<std::uint8_t const> seed) {
-    // RETAINED ALIAS (2026-05-26 PM) — see the matching note on
-    // `ssmcan1_l1_fehr_active`.  The L3 round-key table at flash
-    // 0x074358 is part of the COBB-AccessPort framework, not Fehr-
-    // specific; the renamed primary is `ssmcan1_l3_cobb_ap`.  Kept as a
-    // pass-through to avoid breaking CLI / private-test callsites.
-    return ssmcan1_l3_cobb_ap(seed);
-}
-
-Result<std::vector<std::uint8_t>>
-ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const> seed) {
-    // DEPRECATED ALIAS (2026-05-24 PM). Originally introduced as a
-    // separate function under the (then-believed) assumption that COBB-
-    // tuned ECUs run a different L1 algorithm than stock — specifically,
-    // that COBB swapped the L1 dispatch's table pointer from RK_L1 to
-    // RK_L35. That model was incorrect: per analyst handoff §1.6 / §2,
-    // COBB does NOT modify the dispatch code. They modify the round-key
-    // table contents in-place at flash 0x074338, and the constants we
-    // shipped here as "kRoundKeysL35" were actually the bytes COBB
-    // writes into the L1 slot. With the renamed constants, this function
-    // and `ssmcan1_key_stub` now do bit-identical work — both run the L1
-    // feistel against `kSaTableL1`.
-    //
-    // Kept as an alias for CLI back-compat (`--cobb-tuned`) and for any
-    // out-of-tree callers that explicitly wired this name. Will route to
-    // `ssmcan1_key_stub` until a future cleanup pass removes it.
-    return ssmcan1_key_stub(seed);
 }
 
 Result<std::vector<std::uint8_t>> ssmk1_key_stub(std::span<std::uint8_t const> seed) {

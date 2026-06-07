@@ -1,5 +1,5 @@
 set(ST_ECU_SOURCES
-    src/cobb_datalog.cpp
+    src/extended_did_datalog.cpp
     src/ssm.cpp
     src/uds.cpp
     src/subaru_security.cpp

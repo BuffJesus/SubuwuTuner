@@ -78,9 +78,8 @@ struct Pack {
     std::vector<int> years;
     std::string endianness{"big"};
     std::size_t rom_size_bytes{};
-    // Per-ECU-family checksum selector. Names mirror RomRaider's
-    // ChecksumXxx class family (`subaru_std` ↔ ChecksumSTD,
-    // `subaru_alt` ↔ ChecksumALT, `subaru_alt2` ↔ ChecksumALT2).
+    // Per-ECU-family checksum selector. Values follow the community
+    // XML schema naming (`subaru_std`, `subaru_alt`, `subaru_alt2`).
     // Empty string is permitted at parse time + treated as
     // "unspecified" — st::flash::checksum_kind_from() defaults
     // that to None (no-op repair). The actual repair algorithm
@@ -220,8 +219,9 @@ struct Pid {
     std::string produces_table;
 };
 
-// A single-bit status flag in an SSM RAM byte. RomRaider numbers bits with
-// `bit=0` as the LSB. `default_log` mirrors the Pid convention.
+// A single-bit status flag in an SSM RAM byte. Bit numbering follows
+// the community XML convention: `bit=0` is the LSB. `default_log`
+// mirrors the Pid convention.
 struct Switch {
     std::string id;
     std::string name;

@@ -31,6 +31,15 @@ void render_sidebar(AppState &state) {
     if (!state.show_tables_panel) {
         return;
     }
+    // First-show fallback: if the user toggles Tables on from a
+    // workspace whose layout didn't dock it (Datalog, Features), give
+    // it a central-area tab instead of letting it land floating at the
+    // default top-left, which overlaps every other docked panel.
+    // FirstUseEver respects subsequent user docking choices and the
+    // layout-rebuild path (build_workspace_layout's DockBuilderDockWindow).
+    if (ImGuiID const central = central_dock_node_id(); central != 0) {
+        ImGui::SetNextWindowDockID(central, ImGuiCond_FirstUseEver);
+    }
     ImGui::Begin("Tables");
 
     track_help_context(state, AppState::HelpContext::Sidebar);

@@ -30,6 +30,12 @@ void render_history_panel(AppState &state) {
     if (!state.show_history_panel) {
         return;
     }
+    // First-show fallback so toggling History on outside the Tune
+    // workspace (whose layout docks it) doesn't drop a floating window
+    // at the default top-left.
+    if (ImGuiID const central = central_dock_node_id(); central != 0) {
+        ImGui::SetNextWindowDockID(central, ImGuiCond_FirstUseEver);
+    }
     if (!ImGui::Begin("History", &state.show_history_panel)) {
         ImGui::End();
         return;

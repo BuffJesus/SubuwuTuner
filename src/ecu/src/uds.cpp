@@ -421,10 +421,11 @@ Status parse_transfer_data_response(std::span<std::uint8_t const> resp,
 
 std::vector<std::uint8_t>
 build_subaru_bulk_transfer(std::uint32_t memory_address, std::span<std::uint8_t const> data) {
-    // Wire format from cobb-reinstall-3.log: `B6 <addr_be3> <data...>`.
-    // No addressAndLengthFormat byte and no block-sequence counter —
-    // address width is implicit (always 3 bytes) and the address is the
-    // sequence anchor that the orchestrator advances between calls.
+    // Wire format observed on aftermarket reflash captures:
+    // `B6 <addr_be3> <data...>`. No addressAndLengthFormat byte and no
+    // block-sequence counter — address width is implicit (always 3
+    // bytes) and the address is the sequence anchor that the
+    // orchestrator advances between calls.
     //
     // See build_wdbi_request — same GCC 15 false-positive workaround
     // (brace-init the fixed prefix, then reserve, then insert).
@@ -449,8 +450,8 @@ Status parse_subaru_bulk_transfer_response(std::span<std::uint8_t const> resp) {
     if (resp[0] != kSidSubaruBulkTransfer + kPositiveResponseOffset) {
         return failure(ErrorCode::EcuRejected, "UDS SubaruBulkTransfer unexpected SID");
     }
-    // Positive response may carry trailing status bytes (observed `F6 00`
-    // in cobb-reinstall-3.log) — accept and ignore.
+    // Positive response may carry trailing status bytes (observed
+    // `F6 00` on aftermarket reflash captures) — accept and ignore.
     return ok();
 }
 

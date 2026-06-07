@@ -660,6 +660,12 @@ void render_table_view(AppState &state, Fonts const &fonts) {
     if (!state.show_table_view_panel) {
         return;
     }
+    // First-show fallback so toggling Table on outside the Tune
+    // workspace (whose layout docks it as the central window)
+    // doesn't drop a floating window at the default top-left.
+    if (ImGuiID const central = central_dock_node_id(); central != 0) {
+        ImGui::SetNextWindowDockID(central, ImGuiCond_FirstUseEver);
+    }
     ImGui::Begin("Table");
     track_help_context(state,
                        state.project.has_value() ? AppState::HelpContext::TableEditor

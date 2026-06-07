@@ -18,6 +18,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 
@@ -103,8 +104,11 @@ void apply_workspace_mode(AppState &state, WorkspaceMode mode) {
 void render_workspace_rail(AppState &state) {
     auto const *vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->WorkPos);
-    ImGui::SetNextWindowSize(
-        ImVec2(kWorkspaceRailWidth, vp->WorkSize.y - kStatusBarHeight));
+    // Defensive clamp at >= 1px even though main.cpp's
+    // glfwSetWindowSizeLimits keeps the OS window comfortably above the
+    // chrome budget. A negative height to SetNextWindowSize is UB.
+    float const rail_h = std::max(1.0f, vp->WorkSize.y - kStatusBarHeight);
+    ImGui::SetNextWindowSize(ImVec2(kWorkspaceRailWidth, rail_h));
     ImGui::SetNextWindowViewport(vp->ID);
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
@@ -227,19 +231,29 @@ void build_workspace_layout(WorkspaceMode const mode, ImGuiID const dockspace_id
 
     switch (mode) {
     case WorkspaceMode::Tune: {
-        // Tables left (22%) | Table central | Stats+History+DTCs right (25%).
-        // Default tuning surface — what every other mode is compared to.
+        // Tables left (18%) | Table central | right rail (22%) split
+        // vertically: Stats on top (60%), History+DTCs as tabs on the
+        // bottom (40%). Stats is the panel you actually read while
+        // editing a map (histogram + min/mean/max) — gets the larger
+        // share. History is glanceable when you want to retrace edits;
+        // DTCs is "set once, ignore" — fine as a tucked tab next to
+        // History. Old layout stuffed all three into one tab strip,
+        // which hid Stats behind a click and wasted the vertical space
+        // in the right rail.
         ImGuiID left = 0;
         ImGuiID middle = 0;
-        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.22f, &left, &middle);
+        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, 0.18f, &left, &middle);
         ImGuiID right = 0;
         ImGuiID center = 0;
-        ImGui::DockBuilderSplitNode(middle, ImGuiDir_Right, 0.25f, &right, &center);
+        ImGui::DockBuilderSplitNode(middle, ImGuiDir_Right, 0.22f, &right, &center);
+        ImGuiID right_bottom = 0;
+        ImGuiID right_top = 0;
+        ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.40f, &right_bottom, &right_top);
         ImGui::DockBuilderDockWindow("Tables", left);
         ImGui::DockBuilderDockWindow("Table", center);
-        ImGui::DockBuilderDockWindow("Stats", right);
-        ImGui::DockBuilderDockWindow("History", right);
-        ImGui::DockBuilderDockWindow("DTCs", right);
+        ImGui::DockBuilderDockWindow("Stats", right_top);
+        ImGui::DockBuilderDockWindow("History", right_bottom);
+        ImGui::DockBuilderDockWindow("DTCs", right_bottom);
         break;
     }
     case WorkspaceMode::Datalog: {
@@ -248,10 +262,12 @@ void build_workspace_layout(WorkspaceMode const mode, ImGuiID const dockspace_id
         // strip for active-code cross-reference against observed
         // signals. Tables + Table editor are suppressed at the panel
         // level for this mode (show_tables_panel /
-        // show_table_view_panel both false).
+        // show_table_view_panel both false). DTCs gets 25% (bumped from
+        // 22%) so a 4-5 code list doesn't need scrolling on a default
+        // window.
         ImGuiID bottom = 0;
         ImGuiID top = 0;
-        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Down, 0.22f, &bottom, &top);
+        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Down, 0.25f, &bottom, &top);
         ImGui::DockBuilderDockWindow("Knock Dashboard###Knock Dashboard (Preview)", top);
         ImGui::DockBuilderDockWindow("Adaptive History###Adaptive History (Preview)", top);
         ImGui::DockBuilderDockWindow(
@@ -305,8 +321,12 @@ ImGuiID central_dock_node_id() {
 void render_dockspace_host(AppState &state) {
     auto const *vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + kWorkspaceRailWidth, vp->WorkPos.y));
-    ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x - kWorkspaceRailWidth,
-                                    vp->WorkSize.y - kStatusBarHeight));
+    // Defensive clamp at >= 1px. main.cpp's glfwSetWindowSizeLimits keeps
+    // the OS window above the chrome budget, but a host window with
+    // negative dimensions is UB so guard regardless.
+    float const dock_w = std::max(1.0f, vp->WorkSize.x - kWorkspaceRailWidth);
+    float const dock_h = std::max(1.0f, vp->WorkSize.y - kStatusBarHeight);
+    ImGui::SetNextWindowSize(ImVec2(dock_w, dock_h));
     ImGui::SetNextWindowViewport(vp->ID);
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);

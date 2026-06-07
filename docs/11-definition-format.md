@@ -62,7 +62,7 @@ rom_size_bytes  = 1572864         # 1.5 MB typical
 checksum_type   = "subaru_std"    # see below; Phase 4 uses this for post-write repair
 authors         = ["The SubuwuTuner Authors"]
 data_sources    = [
-    "Derived from RomRaider XML via tools/defgen (facts only, no code copied — see docs/01-reverse-engineering.md)",
+    "Derived from community XML via tools/defgen (facts only, no code copied — see docs/01-reverse-engineering.md)",
     "Manual research on owner-supplied stock dumps",
 ]
 license         = "Apache-2.0"

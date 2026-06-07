@@ -263,8 +263,9 @@ void trace_dump(char const *prefix, std::span<std::uint8_t const> bytes) {
 // OFF — without this step the adapter accepts SetProtocol but won't
 // actually pass bytes to the bus, so opening the link looks fine
 // but every send_recv() times out. `state_on=false` selects LISTEN-
-// ONLY mode for sniff sessions where another tool (e.g. COBB AP via
-// a Y-cable) is bus-mastering and any TX from us would collide.
+// ONLY mode for sniff sessions where another tester (e.g. an
+// aftermarket flasher via a Y-cable) is bus-mastering and any TX
+// from us would collide.
 [[nodiscard]] std::vector<std::uint8_t> enable_network_payload(bool state_on = true) {
     constexpr std::uint8_t kSubEnableNetwork = 0x02;
     constexpr std::uint8_t kStateOn = 0x01;
@@ -329,6 +330,46 @@ can_filter_payload(std::uint32_t filter_id, std::uint32_t mask, std::uint32_t fl
         static_cast<std::uint8_t>(flow_id & 0xFFU),
     };
     return std::vector<std::uint8_t>(std::begin(bytes), std::end(bytes));
+}
+
+// Build an OBDX "FC Delay" payload (Developers Reference Manual v3.00
+// §3.14.11, sub-op 0x0A). Wire frame:
+//   CMD=0x34  LEN=0x05  SUB=0x0A  US3  US2  US1  US0  CHK
+// where US3..US0 is the per-FC microsecond delay as a 4-byte big-endian
+// unsigned int — the time the adapter waits between receiving a First
+// Frame and sending its Flow Control frame back to the ECU.
+//
+// Per the manual the default is 1000 µs and the explicit guidance is:
+// "For maximum speed, setting this value to 0 will increase overall
+// flash read/write speeds." At 4 KB RMBA chunks (post-L1 bump in
+// `src/flash/src/flash.cpp`) that's one FC per chunk → ~0.5 s saved
+// over a 2 MB dump — modest, but free.
+//
+// IMPORTANT — the related sub-op 0x09 (FC Frame Data) is NOT this
+// helper. FC Frame Data controls the BS / STmin bytes the adapter
+// sends on the wire in its FC; its default is already `30 00 00`
+// (BS=0, STmin=0), which matches both the ECU's own advertised FC and
+// what aftermarket flashers we've sniffed use on the wire (twelve CFs
+// streamed in 1 ms after the FC). Setting FC Frame Data explicitly
+// achieves zero additional speedup, so we don't do it here.
+//
+// Wire-shape note: the 4-byte BE microsecond payload is a best
+// interpretation of "microsecond delay" without bench-rig confirmation
+// of the manual's exact LEN/payload layout. The 4-byte width covers
+// any plausible delay range; if a future bench session reveals the
+// firmware expects 2 bytes or some other width, the failure mode is
+// best-effort (open() emits a trace warning and continues with the
+// adapter's power-on default 1000 µs).
+[[nodiscard]] std::vector<std::uint8_t>
+fc_delay_payload(std::uint32_t microseconds) noexcept {
+    constexpr std::uint8_t kSubFcDelay = 0x0A;
+    return {
+        kSubFcDelay,
+        static_cast<std::uint8_t>((microseconds >> 24U) & 0xFFU),
+        static_cast<std::uint8_t>((microseconds >> 16U) & 0xFFU),
+        static_cast<std::uint8_t>((microseconds >> 8U) & 0xFFU),
+        static_cast<std::uint8_t>(microseconds & 0xFFU),
+    };
 }
 
 // Strip the leading 4-byte big-endian CAN ID prefix that the OBDX
@@ -571,6 +612,51 @@ st::Status Transport::open(LinkConfig const &cfg) {
         }
         if (trace) {
             trace_dump("[trace][obdx-open] step 4 RX CAN Filter ACK", *filt_rsp);
+        }
+
+        // 4.5. Force the adapter's ISO-TP Flow-Control delay to 0 µs
+        // (manual default = 1000 µs). Per OBDX Developers Reference
+        // Manual v3.00 §3.14.11, opcode 0x34 sub-op 0x0A "FC Delay" —
+        // the explicit guidance is *"For maximum speed, setting this
+        // value to 0 will increase overall flash read/write speeds."*
+        // The sibling sub-op 0x09 ("FC Frame Data") would control the
+        // BS / STmin bytes on the wire, but its default `30 00 00`
+        // already matches both the ECU's advertised FC and what
+        // aftermarket flashers we've sniffed use on the wire — so we
+        // don't touch it.
+        //
+        // Real speedup: ~1 ms per chunk → ~0.5 s over a 2 MB dump at
+        // 4 KB RMBA chunks. Modest in absolute terms, but the bigger
+        // value is defensive — pinning the adapter's behavior means we
+        // don't get bitten by a future firmware update that ships a
+        // different default. See sibling test
+        // `obdx::Transport::open emits FC Delay (sub-op 0x0A) = 0 µs`
+        // for the pinned wire shape.
+        //
+        // Best-effort: the wire-shape (4-byte BE microseconds after
+        // SUB) is a best interpretation of the manual's "microsecond
+        // delay" — not bench-validated. If the adapter rejects the
+        // frame (Error_SubCommandIncorrectSize 0x05, or unknown sub-op
+        // from a stripped firmware), the power-on 1000 µs default stays
+        // in effect and reads still work. We surface a trace warning
+        // for visibility during `--verbose` but don't fail open().
+        constexpr std::uint32_t kMaxSpeedFcDelayMicroseconds = 0;
+        auto const fc = fc_delay_payload(kMaxSpeedFcDelayMicroseconds);
+        if (trace) {
+            trace_dump("[trace][obdx-open] step 4.5 TX FC Delay = 0 us", fc);
+        }
+        auto fc_rsp =
+            dvi_exchange(*channel_, dvi::Opcode::CanProtocolSettings, fc, kCanFilterTimeout);
+        if (!fc_rsp.has_value()) {
+            if (trace) {
+                std::fprintf(stderr,
+                             "[trace][obdx-open] step 4.5 WARNING (best-effort, "
+                             "continuing with adapter default 1000 us FC delay): %s\n",
+                             std::string{fc_rsp.error().message()}.c_str());
+                std::fflush(stderr);
+            }
+        } else if (trace) {
+            trace_dump("[trace][obdx-open] step 4.5 RX FC Delay ACK", *fc_rsp);
         }
     }
 
@@ -931,9 +1017,9 @@ st::Status Transport::start_streaming(FrameCallback callback) {
     streaming_thread_ = std::thread([this]() {
         bool const trace_local = g_trace_enabled.load(std::memory_order_acquire);
         // Short per-read timeout so the thread re-checks the stop flag
-        // promptly. A bus that's busy with COBB+ECU traffic produces
-        // many frames per second; sleeping on a long timeout would
-        // make stop_streaming sluggish.
+        // promptly. A bus that's busy with another tester + ECU traffic
+        // produces many frames per second; sleeping on a long timeout
+        // would make stop_streaming sluggish.
         constexpr milliseconds kStreamReadTimeout{50};
         while (!streaming_stop_.load(std::memory_order_acquire)) {
             auto frame = read_dvi_frame(*channel_, kStreamReadTimeout);

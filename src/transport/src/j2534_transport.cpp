@@ -222,9 +222,7 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
 
     // Read loop. The DLL may return BufferEmpty when polled before
     // the ECU's reply has landed; treat that as "still waiting" and
-    // re-poll until our host-side deadline runs out. This mirrors
-    // the wait pattern RR's serial driver uses (per the
-    // RomRaider+SubaruDefs findings doc this session committed).
+    // re-poll until our host-side deadline runs out.
     auto const deadline = std::chrono::steady_clock::now() + timeout;
     while (true) {
         PassThruMsg rx{};

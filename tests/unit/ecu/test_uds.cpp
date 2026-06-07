@@ -354,7 +354,7 @@ TEST_CASE("UdsClient::transfer_data through MockTransport", "[uds][client][trans
 
 TEST_CASE("build_subaru_bulk_transfer encodes address as 3 big-endian bytes",
           "[uds][framing][b6]") {
-    // Wire format from cobb-reinstall-3.log: B6 + addr(3) + data.
+    // Wire format observed on aftermarket reflash captures: B6 + addr(3) + data.
     std::vector<std::uint8_t> const data{0xF1, 0x35, 0xFA, 0x11};
     auto const r = uds::build_subaru_bulk_transfer(0x006000, data);
     REQUIRE(r == std::vector<std::uint8_t>{0xB6, 0x00, 0x60, 0x00, 0xF1, 0x35, 0xFA, 0x11});
@@ -371,8 +371,8 @@ TEST_CASE("parse_subaru_bulk_transfer_response accepts F6 positive",
     std::vector<std::uint8_t> const resp{0xF6};
     REQUIRE(uds::parse_subaru_bulk_transfer_response(resp).has_value());
 
-    // Some ECUs include a trailing status byte (observed `F6 00` in
-    // cobb-reinstall-3.log). Accept and ignore.
+    // Some ECUs include a trailing status byte (observed `F6 00` on
+    // aftermarket reflash captures). Accept and ignore.
     std::vector<std::uint8_t> const resp_with_status{0xF6, 0x00};
     REQUIRE(uds::parse_subaru_bulk_transfer_response(resp_with_status).has_value());
 }
@@ -397,7 +397,7 @@ TEST_CASE("UdsClient::subaru_bulk_transfer round-trip through MockTransport",
           "[uds][client][b6]") {
     st::transport::MockTransport t;
     REQUIRE(t.open({}).has_value());
-    // Mirror the first B6 transfer captured at cobb-reinstall-3.log:163442.
+    // Mirror the first B6 transfer from a real aftermarket reflash capture.
     std::vector<std::uint8_t> const data(256, 0xFF);
     auto expected_req = std::vector<std::uint8_t>{0xB6, 0x00, 0x60, 0x00};
     expected_req.insert(expected_req.end(), data.begin(), data.end());
@@ -441,9 +441,9 @@ TEST_CASE("build_obd2_vehicle_info_request emits [09 pid]", "[uds][framing][obd2
 
 TEST_CASE("parse_obd2_vehicle_info_response decodes one CAL ID (LF79102P)",
           "[uds][framing][obd2]") {
-    // Real response from cobb-reinstall-3.log:14565 — engine ECU reports
-    // its calibration ID as "LF79102P" (8 printable bytes) padded to 16
-    // with NULs. Total UDS payload: 3-byte header + 16-byte message = 19.
+    // Real response from a live engine ECU — calibration ID
+    // "LF79102P" (8 printable bytes) padded to 16 with NULs. Total
+    // UDS payload: 3-byte header + 16-byte message = 19.
     std::vector<std::uint8_t> const resp{0x49, 0x04, 0x01, 0x4C, 0x46, 0x37, 0x39, 0x31,
                                          0x30, 0x32, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00,
                                          0x00, 0x00, 0x00};

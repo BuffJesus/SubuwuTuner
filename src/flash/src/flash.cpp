@@ -35,7 +35,139 @@ std::string hex_addr(std::uint32_t v) {
     std::snprintf(buf, sizeof buf, "0x%08X", v);
     return std::string{buf};
 }
+
+// Floor the chunk-size probe ladder walks down to. 0x100 (256 B) is the
+// previous default; if even 256 B RMBA fails the issue is unrelated to
+// chunk size (SA, DSC, bad base address) and the probe should bail.
+constexpr std::uint32_t kProbeFloor = 0x100U;
+
+// Walk down a power-of-two ladder until we hit kProbeFloor or below.
+[[nodiscard]] constexpr std::uint32_t halve_chunk(std::uint32_t c) noexcept {
+    std::uint32_t const h = c / 2U;
+    return h < kProbeFloor ? kProbeFloor : h;
+}
+
+// Lower-case hex search for an NRC byte in an EcuRejected message — the
+// UDS layer surfaces NRCs as "UDS NRC=0xXX [optional name]"; we look at
+// the byte after "NRC=0x". Returns 0 when not found (no NRC = some
+// other rejection).
+[[nodiscard]] std::uint8_t extract_nrc(std::string_view msg) noexcept {
+    constexpr std::string_view kPrefix{"NRC=0x"};
+    auto const pos = msg.find(kPrefix);
+    if (pos == std::string_view::npos || pos + kPrefix.size() + 1 >= msg.size()) {
+        return 0;
+    }
+    auto const hex_digit = [](char c) -> int {
+        if (c >= '0' && c <= '9')
+            return c - '0';
+        if (c >= 'A' && c <= 'F')
+            return 10 + c - 'A';
+        if (c >= 'a' && c <= 'f')
+            return 10 + c - 'a';
+        return -1;
+    };
+    int const hi = hex_digit(msg[pos + kPrefix.size()]);
+    int const lo = hex_digit(msg[pos + kPrefix.size() + 1]);
+    if (hi < 0 || lo < 0) {
+        return 0;
+    }
+    return static_cast<std::uint8_t>((hi << 4) | lo);
+}
+
+// Classify an RMBA failure for the probe ladder + dump-loop robustness.
+enum class ChunkFailureKind : std::uint8_t {
+    // Transport-level silent drop. On Subaru Hitachi this is the
+    // dominant "request too big" signal (the handler drops without
+    // emitting an NRC). On a transient cable wiggle this can also fire
+    // mid-dump — the dump loop retries once before halving.
+    SilentDrop,
+    // NRC 0x13 incorrectMessageLength or NRC 0x14 responseTooLong —
+    // standard ISO 14229 "request too big" signals. Halve.
+    SizeTooBig,
+    // NRC 0x31 RequestOutOfRange — at probe time means wrong base addr;
+    // at dump-loop time means graceful end of readable flash.
+    OutOfRange,
+    // Any other failure (NRC 0x33 SA denied, NRC 0x22 wrong session,
+    // generic IO, parse error). Halving won't help; bail.
+    Unrecoverable,
+};
+
+[[nodiscard]] ChunkFailureKind classify_chunk_failure(Error const &e) noexcept {
+    if (e.code() == ErrorCode::TransportTimeout) {
+        return ChunkFailureKind::SilentDrop;
+    }
+    if (e.code() != ErrorCode::EcuRejected) {
+        return ChunkFailureKind::Unrecoverable;
+    }
+    auto const nrc = extract_nrc(e.message());
+    switch (nrc) {
+        case 0x13: // incorrectMessageLength
+        case 0x14: // responseTooLong
+            return ChunkFailureKind::SizeTooBig;
+        case 0x31: // requestOutOfRange
+            return ChunkFailureKind::OutOfRange;
+        default:
+            return ChunkFailureKind::Unrecoverable;
+    }
+}
 } // namespace
+
+// ---------------------------------------------------------------------
+// probe_max_chunk — one-shot RMBA-size ladder
+// ---------------------------------------------------------------------
+
+Result<std::uint32_t>
+Flasher::probe_max_chunk(std::uint32_t probe_address, std::uint32_t hint_max,
+                         std::chrono::milliseconds per_chunk_timeout) {
+    if (hint_max == 0) {
+        return failure(ErrorCode::InvalidArgument,
+                       "flash: probe_max_chunk hint_max must be > 0");
+    }
+    std::uint32_t candidate = hint_max < kProbeFloor ? kProbeFloor : hint_max;
+    Error last_error{ErrorCode::Unknown, "flash: probe_max_chunk: no candidates tried"};
+    while (true) {
+        auto chunk = client_.read_memory_by_address(probe_address, candidate, per_chunk_timeout);
+        if (chunk.has_value()) {
+            return candidate;
+        }
+        auto const kind = classify_chunk_failure(chunk.error());
+        // At probe time NRC 0x31 (RequestOutOfRange) is ambiguous. The
+        // analyst handoff classified it as "wrong base addr — bail",
+        // but on the user's 2017 WRX (LF79101P, FA20DIT, Fehr e-tune)
+        // a 4 KB read at addr 0x0 returns NRC 0x31 while a 256 B read
+        // at the same address succeeds. The handler is enforcing a
+        // chunk-size-dependent region boundary (4 KB straddles a non-
+        // mapped span; 256 B fits inside the readable head). Halve and
+        // try again — if the floor (0x100) also gets NRC 0x31, the
+        // floor-failure path bubbles up the unrecoverable "wrong base
+        // addr" case as before.
+        if (kind == ChunkFailureKind::SilentDrop || kind == ChunkFailureKind::SizeTooBig ||
+            kind == ChunkFailureKind::OutOfRange) {
+            std::fprintf(stderr,
+                         "flash: probe: chunk 0x%X rejected at %s (%s); halving\n",
+                         static_cast<unsigned>(candidate), hex_addr(probe_address).c_str(),
+                         std::string{chunk.error().message()}.c_str());
+            std::fflush(stderr);
+            if (candidate <= kProbeFloor) {
+                last_error = chunk.error();
+                break;
+            }
+            candidate = halve_chunk(candidate);
+            continue;
+        }
+        // True unrecoverable: NRC 0x33 (SA denied), NRC 0x22 (wrong
+        // session), generic IO. Halving won't help; surface as-is.
+        return failure(chunk.error().code(),
+                       std::string{"flash: probe_max_chunk at "} +
+                           hex_addr(probe_address) + ": " +
+                           std::string{chunk.error().message()});
+    }
+    return failure(last_error.code(),
+                   std::string{"flash: probe_max_chunk: even "} +
+                       std::to_string(kProbeFloor) + " B failed at " +
+                       hex_addr(probe_address) + ": " +
+                       std::string{last_error.message()});
+}
 
 // ---------------------------------------------------------------------
 // Public-API helpers
@@ -69,7 +201,7 @@ Flasher::read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
                        std::uint32_t max_chunk_size, std::chrono::milliseconds per_chunk_timeout,
                        Flasher::ReadProgressFn progress, std::atomic<bool> const *cancel,
                        bool enter_diagnostic_session, bool authenticate,
-                       std::uint8_t security_level) {
+                       std::uint8_t security_level, bool auto_probe) {
     if (total_length == 0) {
         if (progress)
             progress({0, 0});
@@ -82,11 +214,9 @@ Flasher::read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
 
     // Optional extendedDiagnostic-session entry before the chunk loop.
     // Subaru Hitachi ECUs (FA20DIT and similar) silently drop RMBA
-    // (SID 0x23) in the default session — no NRC, just silence.
-    // Diagnosed 2026-05-23: stock VA WRX with COBB tune uninstalled
-    // still produced silent RX timeouts on UDS RMBA until DSC entry
-    // was added. Mirrors what EcuTek's ProECU calls "Enter Utility
-    // Mode" in its ROM-dump workflow.
+    // (SID 0x23) in the default session — no NRC, just silence. A live
+    // VA WRX produced silent RX timeouts on UDS RMBA until DSC entry
+    // was added.
     //
     // Opt-in (default off) because Flasher::execute's verify-after-write
     // path already enters programmingSession at the top of the sequence;
@@ -159,10 +289,54 @@ Flasher::read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
         }
     }
 
+    // Upfront one-shot probe to discover the largest chunk size the ECU
+    // will honor — see `probe_max_chunk` for the ladder + classification
+    // rules. The probe lives BEFORE the dump loop so we lock in a working
+    // chunk size up front and avoid retry overhead per chunk.
+    //
+    // Generation-A.2 Subarus document a "typically 4 KB" ceiling in
+    // `findings/uds-read-workflow.md` §6, but the actual ECU-specific
+    // ceiling varies; the ladder walks down to 0x100 (the previous
+    // default), at which point any further failure is a non-size issue
+    // (SA, DSC, bad base address) and we bail.
+    //
+    // `auto_probe = false` skips the probe — for benchmarking,
+    // reproducibility, or known-good hardware where the caller has
+    // already established a working size.
+    std::uint32_t effective_chunk = max_chunk_size;
+    // Probe only when there's a ladder to walk. If the caller passed a
+    // chunk size at or below the floor (0x100), they're explicitly
+    // opting into a small / known-good size; respect that without doing
+    // any extra RMBA. The dump loop's first chunk surfaces the same
+    // error a probe would have, just one round-trip later.
+    if (auto_probe && total_length > 0 && max_chunk_size > kProbeFloor) {
+        auto probed = probe_max_chunk(base_address, max_chunk_size, per_chunk_timeout);
+        if (!probed.has_value()) {
+            return failure(probed.error().code(),
+                           std::string{"flash: read_full_rom upfront probe failed: "} +
+                               std::string{probed.error().message()});
+        }
+        effective_chunk = *probed;
+        if (effective_chunk != max_chunk_size) {
+            std::fprintf(stderr,
+                         "flash: read_full_rom probe settled on chunk 0x%X "
+                         "(requested 0x%X)\n",
+                         static_cast<unsigned>(effective_chunk),
+                         static_cast<unsigned>(max_chunk_size));
+            std::fflush(stderr);
+        }
+    }
+
     std::vector<std::uint8_t> out;
     out.reserve(total_length);
     std::uint32_t cursor = base_address;
     std::uint32_t remaining = total_length;
+    // Dump-loop robustness: per the analyst handoff 2026-06-06, mid-dump
+    // TransportTimeouts get ONE retry at the same address+size before we
+    // halve `effective_chunk` ONCE for the rest of the dump. A single
+    // transient cable wiggle shouldn't permanently shrink chunks. After
+    // the halve-once budget is spent, further timeouts bail.
+    bool halved_in_dump_loop = false;
     // Emit a t=0 progress event so the UI can show "starting…" immediately.
     if (progress)
         progress({0, total_length});
@@ -175,9 +349,102 @@ Flasher::read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
             return failure(ErrorCode::Cancelled,
                            "flash: read_full_rom cancelled at " + hex_addr(cursor));
         }
-        std::uint32_t const this_chunk = remaining < max_chunk_size ? remaining : max_chunk_size;
+        std::uint32_t const this_chunk = remaining < effective_chunk ? remaining : effective_chunk;
         auto chunk = client_.read_memory_by_address(cursor, this_chunk, per_chunk_timeout);
         if (!chunk.has_value()) {
+            auto const kind = classify_chunk_failure(chunk.error());
+            if (kind == ChunkFailureKind::OutOfRange) {
+                // Graceful end-of-range: per `findings/uds-read-workflow.md`
+                // §6, "reading up to 0x00200000 and stopping when the ECU
+                // returns NRC 0x31 works in practice." The caller may have
+                // passed an oversized `--size` (e.g. probing for the actual
+                // readable ceiling) — return the partial buffer as success
+                // only if we're past 50% of the requested length, otherwise
+                // surface the error (a too-early 0x31 looks like a probe-
+                // address mistake, not a graceful boundary).
+                std::uint32_t const bytes_done = total_length - remaining;
+                if (bytes_done > total_length / 2U) {
+                    std::fprintf(stderr,
+                                 "flash: read_full_rom: ECU returned NRC 0x31 at %s "
+                                 "(%u of %u bytes read; treating as end-of-range)\n",
+                                 hex_addr(cursor).c_str(),
+                                 static_cast<unsigned>(bytes_done),
+                                 static_cast<unsigned>(total_length));
+                    std::fflush(stderr);
+                    if (progress) {
+                        progress({bytes_done, bytes_done});
+                    }
+                    return out;
+                }
+                return failure(chunk.error().code(),
+                               "flash: read_full_rom: NRC 0x31 too early at " +
+                                   hex_addr(cursor) + " (only " +
+                                   std::to_string(bytes_done) + " of " +
+                                   std::to_string(total_length) +
+                                   " bytes read — check base address): " +
+                                   std::string{chunk.error().message()});
+            }
+            if (kind == ChunkFailureKind::SilentDrop) {
+                // One-shot retry at the same address + chunk size. A
+                // transient timeout (USB scheduling hiccup, ECU brief
+                // unresponsiveness during background tasks) shouldn't
+                // permanently shrink chunks.
+                auto retry = client_.read_memory_by_address(cursor, this_chunk, per_chunk_timeout);
+                if (retry.has_value()) {
+                    if (retry->size() != this_chunk) {
+                        return failure(ErrorCode::UnexpectedEof,
+                                       "flash: short read at " + hex_addr(cursor) +
+                                           " on retry (expected " +
+                                           std::to_string(this_chunk) + ", got " +
+                                           std::to_string(retry->size()) + ")");
+                    }
+                    out.insert(out.end(), retry->begin(), retry->end());
+                    cursor += this_chunk;
+                    remaining -= this_chunk;
+                    if (progress)
+                        progress({total_length - remaining, total_length});
+                    continue;
+                }
+                // Retry also failed. Halve once if budget remains; else
+                // bail. The halve-once budget covers the edge case where
+                // the chunk size we settled on at boot is borderline and
+                // a hot ECU starts NACKing partway through.
+                if (!halved_in_dump_loop && effective_chunk > kProbeFloor) {
+                    std::uint32_t const halved = halve_chunk(effective_chunk);
+                    std::fprintf(stderr,
+                                 "flash: read_full_rom: persistent timeout at %s; "
+                                 "halving chunk 0x%X -> 0x%X for the remainder of "
+                                 "the dump\n",
+                                 hex_addr(cursor).c_str(),
+                                 static_cast<unsigned>(effective_chunk),
+                                 static_cast<unsigned>(halved));
+                    std::fflush(stderr);
+                    effective_chunk = halved;
+                    halved_in_dump_loop = true;
+                    continue;
+                }
+                return failure(retry.error().code(),
+                               "flash: read_full_rom persistent timeout at " +
+                                   hex_addr(cursor) + ": " +
+                                   std::string{retry.error().message()});
+            }
+            if (kind == ChunkFailureKind::SizeTooBig && !halved_in_dump_loop &&
+                effective_chunk > kProbeFloor) {
+                // ECU started reporting NRC 0x13/0x14 mid-dump — same
+                // halve-once treatment as silent drops.
+                std::uint32_t const halved = halve_chunk(effective_chunk);
+                std::fprintf(stderr,
+                             "flash: read_full_rom: NRC 0x%02X at %s; halving "
+                             "chunk 0x%X -> 0x%X for the remainder of the dump\n",
+                             static_cast<unsigned>(extract_nrc(chunk.error().message())),
+                             hex_addr(cursor).c_str(),
+                             static_cast<unsigned>(effective_chunk),
+                             static_cast<unsigned>(halved));
+                std::fflush(stderr);
+                effective_chunk = halved;
+                halved_in_dump_loop = true;
+                continue;
+            }
             return failure(chunk.error().code(), "flash: read_full_rom failed at " +
                                                      hex_addr(cursor) + ": " +
                                                      std::string{chunk.error().message()});

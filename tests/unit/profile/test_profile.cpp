@@ -32,14 +32,14 @@ pf::VehicleProfile make_test_profile() {
     p.transport_hint = "obdx COM5";
     p.created_iso = "2026-06-01T20:00:00Z";
     p.updated_iso = "2026-06-01T20:30:00Z";
-    p.notes = "Daily driver; Fehr e-tune; LF79103P after COBB uninstall";
+    p.notes = "Daily driver; aftermarket cal; LF79103P after aftermarket-uninstall";
 
     pf::EcuProfile engine;
     engine.role = "engine";
     engine.cal_id = "LF79103P";
     engine.ecu_part = "22765-AS80U";
     engine.pack_id = "subaru-va-wrx-mt";
-    engine.notes = "Post-COBB-uninstall state per project_user_car_cid_states";
+    engine.notes = "Post-aftermarket-uninstall state";
     p.ecus.push_back(std::move(engine));
 
     pf::LastFlash lf;

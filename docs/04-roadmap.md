@@ -65,9 +65,9 @@ Orchestrator + Manifest + journal + policy gate + checksum-type field all exist 
 - ✅ FlashPlan + sector model (`st::flash`)
 - ✅ Manifest + journal + `plan_resume` for crash-safe writes
 - ✅ Policy + mutation gate (`docs/06` + `st::policy`)
-- ✅ `checksum_type` field in pack `[pack]` table (added `58a821f`); enum mirrors the `<checksum module="…">` strings in RomRaider's public definition XML (`ChecksumSTD` / `ALT` / `ALT2` …)
+- ✅ `checksum_type` field in pack `[pack]` table; enum mirrors the `<checksum module="…">` strings in the community definition XML schema (`subaru_std` / `subaru_alt` / `subaru_alt2` …)
 - ✅ `IChecksumRepair` seam + `make_checksum_repair` factory + `apply_checksum_repair(span, Definition)` wrapper + CLI `checksum-verify` / `checksum-repair` exit-3-on-NotImplemented (every concrete kind still returns NotImplemented; algorithm impls wait on a known-good stock dump for byte validation)
-- ✅ **Seed/key authentication (SecurityAccess)** — A-series SSMCAN1 fully recovered: factory 16-round Feistel (`ssmcan1_key_stub`), COBB-AP L1 + L3 variants (`ssmcan1_l{1,3}_cobb_ap`), Fehr-active aliases. CLI-selectable via `--sa-variant`. See `docs/23-security-access.md` for the full catalog.
+- ✅ **Seed/key authentication (SecurityAccess)** — A-series SSMCAN1 fully recovered: factory 16-round Feistel (`ssmcan1_key_stub`) and aftermarket L1 + L3 variants (`ssmcan1_l{1,3}_aftermarket`). CLI-selectable via `--sa-variant`. See `docs/23-security-access.md` for the full catalog.
 - ✅ **Optional gated 0xB6 bulk-transfer write path** — compile-flagged + runtime-flagged. See `docs/26-bulk-reflash-cipher.md`.
 - ⬜ Checksum-repair implementations (subaru_std, subaru_alt, subaru_alt2) — seam ready; algorithms still need byte-validation against a known stock dump
 - 🔒 Brick protection bootstrap + recovery shim — bench rig prerequisite
@@ -156,9 +156,9 @@ The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0
 - ⬜ VB Linux/M-series J2534 parity
 - ⬜ ELM327 write path (only if we can prove it's safe — likely never)
 - ⬜ Bench-tools mode for ECU benches (Tactrix Pro J)
-- ✅ `defgen` tool to convert RomRaider XML → our TOML schema (Python 3.12+ in `tools/defgen/`; 88 tests)
+- ✅ `defgen` tool to convert community XML → our TOML schema (Python 3.12+ in `tools/defgen/`; 88 tests)
 - ✅ **OBD-II Mode 0x09 vehicle-info** (CAL ID / CVN / VIN) — `st::ecu::uds` extension + CLI; lets a tool read the calibration identifier without an authenticated session, which underpins per-CID definition-pack auto-selection.
-- ✅ **SecurityAccess for A-series SSMCAN1** — factory Feistel + COBB-AP / Fehr-active L1+L3 variants in tree, CLI `--sa-variant {factory,cobb-ap,fehr-active-l1,fehr-active-l3}`; see `docs/23-security-access.md`.
+- ✅ **SecurityAccess for A-series SSMCAN1** — factory Feistel + aftermarket L1 + L3 variants in tree, CLI `--sa-variant {factory,aftermarket,aftermarket-l1,aftermarket-l3}`; see `docs/23-security-access.md`.
 - ✅ **Optional gated 0xB6 bulk-reflash cipher** (build flag `ST_ENABLE_BULK_REFLASH_CIPHER` + runtime `--enable-bulk-reflash-cipher`); see `docs/26-bulk-reflash-cipher.md`.
 - ✅ **DTC enable/disable** via `[[dtc_bitmap]]` schema in definition packs (see `11-definition-format.md`). CLI:
   ```

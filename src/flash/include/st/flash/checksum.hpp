@@ -35,21 +35,20 @@
 
 namespace st::flash {
 
-// Mirrors RomRaider's class family + the docs/11 enum values. New
-// kinds get added at the end (None stays 0 for "no checksum" /
-// default-constructed packs).
+// Mirrors the community XML checksum-kind family + the docs/11 enum
+// values. New kinds get added at the end (None stays 0 for "no
+// checksum" / default-constructed packs).
 enum class ChecksumKind : std::uint8_t {
     None = 0,       // no-op repair (pack didn't declare a kind)
     SubaruStd = 1,  // sum-of-16-bit-BE-words + complement at paired slots
-    SubaruAlt = 2,  // RR ChecksumALT — older 16-bit families
-    SubaruAlt2 = 3, // RR ChecksumALT2 — some 32-bit ROMs (per RR release notes)
-    // COBB-AccessPort installed FA-DIT 2 MB ROMs use a per-install-
-    // block CRC-32 table at 0x1FFF3C..0x1FFFA0 — see SubuwuTuner
-    // findings 2026-06-06 (`out/cobb_datalog/CHECKSUM_FA_DIT.md`).
-    // 25 blocks total; slot 24 is self-referential (block contains
-    // the table) and left untouched on repair — non-blocking for
-    // EGR/TGV-class edits which all land in slots 5..16.
-    CobbPerBlockCrc32 = 4,
+    SubaruAlt = 2,  // community `subaru_alt` — older 16-bit families
+    SubaruAlt2 = 3, // community `subaru_alt2` — some 32-bit ROMs (incl. SH-2A)
+    // Aftermarket-installed FA-DIT 2 MB ROMs carry a per-install-
+    // block CRC-32 table at 0x1FFF3C..0x1FFFA0. 25 blocks total;
+    // slot 24 is self-referential (block contains the table) and
+    // left untouched on repair — non-blocking for EGR/TGV-class
+    // edits which all land in slots 5..16.
+    PerInstallBlockCrc32 = 4,
 };
 
 // CLI-canonical string form (lowercase, snake_case). Matches the
@@ -105,8 +104,8 @@ public:
 // ---- SubaruStd configuration -----------------------------------------
 //
 // SubaruStd needs to know which bytes participate in the sum and where
-// the two checksum slots live. Per the public algorithm shape
-// (RomRaider's ChecksumSTD + Subaru tuning literature):
+// the two checksum slots live. Per the public algorithm shape (the
+// community `subaru_std` variant + Subaru tuning literature):
 //
 //   - The cal region is summed as 16-bit big-endian words mod 2^32.
 //   - The two slot bytes are SKIPPED while summing (otherwise the

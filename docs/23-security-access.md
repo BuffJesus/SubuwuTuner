@@ -66,10 +66,12 @@ auto rom = flasher.read_full_rom(
 `st::ecu::subaru::ssmcan1_key_stub`. The name is retained for source
 compatibility, but the function is no longer a stub — it computes the
 real 16-round Feistel against the in-tree round-key tables. CLI
-`--sa-variant {factory,cobb-ap,fehr-active-l1,fehr-active-l3}` selects
-between the variants below; aftermarket variants share the same Feistel
-structure with different round-key tables (and, for L3, a 5-byte loop-
-reversal patch at flash 0xBE911 + 0xBE9C7..0xBE9CE).
+`--sa-variant {factory,aftermarket,aftermarket-l1,aftermarket-l3}`
+selects between the variants below; aftermarket variants share the same
+Feistel structure with different round-key tables (and, for L3, a 5-byte
+loop-reversal patch at flash 0xBE911 + 0xBE9C7..0xBE9CE). The legacy
+spellings `fehr-active{,-l1,-l3}` and `cobb-ap{,-l3}` are accepted as
+deprecated aliases for one release cycle.
 
 Era / variant catalog:
 
@@ -77,8 +79,8 @@ Era / variant catalog:
 |-----------|---------|---------------|----------------|-----------------------------------------------------------------------|----------------|
 | pre-2008  | SH7055  | SSMK1         | 4              | `ssmk1_key_stub`                                                      | ⬜ not yet     |
 | 2008–2017 | SH7058  | SSMCAN1 (L1)  | 4              | `ssmcan1_key_stub` (factory)                                          | ✅ shipped     |
-| 2008–2017 | SH7058  | SSMCAN1 (L1)  | 4              | `ssmcan1_l1_cobb_ap` (= alias `ssmcan1_l1_fehr_active`)               | ✅ shipped     |
-| 2008–2017 | SH7058  | SSMCAN1 (L3)  | 4              | `ssmcan1_l3_cobb_ap` (= alias `ssmcan1_l3_fehr_active`)               | ✅ shipped     |
+| 2008–2017 | SH7058  | SSMCAN1 (L1)  | 4              | `ssmcan1_l1_aftermarket`                                              | ✅ shipped     |
+| 2008–2017 | SH7058  | SSMCAN1 (L3)  | 4              | `ssmcan1_l3_aftermarket`                                              | ✅ shipped     |
 | 2018+     | RH850   | CY1 (AES-128 ECB) | 16             | `cy1_aes_key_stub`                                                    | ⬜ not yet     |
 
 The CY1 algorithm is publicly known (jglim/UnlockECU/SubaruSecurityAccess2018CY1.cs,

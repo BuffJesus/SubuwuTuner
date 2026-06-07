@@ -208,69 +208,14 @@ TEST_CASE("ssmcan1_key_stub: degenerate-seed cases produce deterministic keys",
     REQUIRE(*r1 != std::vector<std::uint8_t>{0x00, 0x00, 0x00, 0x00});
 }
 
-TEST_CASE("ssmcan1_l1_cobb_tuned: captured pair from 2017 LF79103P",
-          "[ecu][sa][gen_a][cobb]") {
-    // EMPIRICAL VECTOR (2026-05-24). Captured during a COBB AccessPort
-    // reinstall flash on a 2017 USDM WRX 6MT (LF79103P, AP serial
-    // SUB0484551). The AP sent `27 02 A7 3F ED 09` in response to the
-    // ECU's `67 01 4B C3 CC 87` seed challenge, and got positive ack.
-    //
-    // Random-match probability with a single pair: 2^-32 (≈ 1 in 4
-    // billion) — sufficient to anchor unit-level confidence, but
-    // L1 session-state behavior is unverified beyond this point. Add
-    // more captured vectors here as additional COBB-tuned ECUs come
-    // through.
-    using ecu::subaru::ssmcan1_l1_cobb_tuned;
-    std::array<std::uint8_t, 4> const seed{0x4B, 0xC3, 0xCC, 0x87};
-    auto const r = ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const>{seed});
-    REQUIRE(r.has_value());
-    std::vector<std::uint8_t> const expected{0xA7, 0x3F, 0xED, 0x09};
-    REQUIRE(*r == expected);
-}
-
-TEST_CASE("ssmcan1_l1_cobb_tuned: rejects wrong seed length",
-          "[ecu][sa][gen_a][cobb]") {
-    using ecu::subaru::ssmcan1_l1_cobb_tuned;
-    std::array<std::uint8_t, 3> const three{0x00, 0x00, 0x00};
-    auto const r = ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const>{three});
-    REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().code() == ErrorCode::InvalidArgument);
-}
-
-TEST_CASE("ssmcan1_l1_cobb_tuned: is now an alias for ssmcan1_key_stub",
-          "[ecu][sa][gen_a][cobb]") {
-    // 2026-05-24 PM correction: an earlier draft of this test asserted
-    // the two functions MUST differ (the "table-swap" hypothesis,
-    // refuted by the bootloader disassembly handoff). Per the renamed
-    // constants in subaru_security.cpp, `kSaTableL1` is what the
-    // dispatcher loads for L1, and BOTH functions now use it. They
-    // therefore produce bit-identical output for every seed. Sample
-    // a few to lock that in.
-    using ecu::subaru::ssmcan1_key_stub;
-    using ecu::subaru::ssmcan1_l1_cobb_tuned;
-    constexpr std::array<std::array<std::uint8_t, 4>, 4> seeds{{
-        {0xDE, 0xAD, 0xBE, 0xEF},
-        {0x4B, 0xC3, 0xCC, 0x87},
-        {0x00, 0x00, 0x00, 0x00},
-        {0xFF, 0xFF, 0xFF, 0xFF},
-    }};
-    for (auto const &s : seeds) {
-        auto const a = ssmcan1_key_stub(std::span<std::uint8_t const>{s});
-        auto const b = ssmcan1_l1_cobb_tuned(std::span<std::uint8_t const>{s});
-        REQUIRE(a.has_value());
-        REQUIRE(b.has_value());
-        REQUIRE(*a == *b);
-    }
-}
-
 TEST_CASE("ssmcan1_key_stub: captured pairs from 2017 LF79103P",
           "[ecu][sa][gen_a]") {
-    // EMPIRICAL VECTORS — 4 captured L1 pairs from the user's
-    // COBB-uninstalled-state 2017 LF79103P, 2026-05-24. Each pair was
-    // sniffed during a real AP session and produced a positive 67-ack
-    // from the ECU, so each (seed, key) is wire-valid by definition.
-    // The default `ssmcan1_key_stub` should reproduce every key
-    // exactly. Joint random-match probability with 4 pairs: 2^-128.
+    // EMPIRICAL VECTORS — 4 captured L1 pairs from a 2017 LF79103P in
+    // post-aftermarket-uninstall state. Each pair was sniffed during a
+    // real flasher session and produced a positive 67-ack from the
+    // ECU, so each (seed, key) is wire-valid by definition. The
+    // default `ssmcan1_key_stub` should reproduce every key exactly.
+    // Joint random-match probability with 4 pairs: 2^-128.
     using ecu::subaru::ssmcan1_key_stub;
     struct V { std::array<std::uint8_t, 4> seed; std::array<std::uint8_t, 4> key; };
     constexpr std::array<V, 4> vectors{{
@@ -301,44 +246,42 @@ TEST_CASE("ssmcan1_key_stub: captured pairs from 2017 LF79103P",
     }
 }
 
-TEST_CASE("ssmcan1_l1_fehr_active: captured Fehr L1 pair (cobb-uninstall-3)",
-          "[ecu][sa][gen_a][fehr]") {
-    // EMPIRICAL VECTOR. The only on-file captured Fehr-active L1 (seed,
-    // key) pair: extracted from cobb-uninstall-3 sniff log, ECU in
-    // Fehr-active state at the time of capture (per cipher-structure
-    // handoff §"Pair classification"). Random-match probability for a
-    // single 32-bit pair: 2^-32.
+TEST_CASE("ssmcan1_l1_aftermarket: captured aftermarket-framework L1 pair",
+          "[ecu][sa][gen_a][aftermarket]") {
+    // EMPIRICAL VECTOR. An on-file captured aftermarket-framework L1
+    // (seed, key) pair recovered from a sniff log; the ECU was in an
+    // aftermarket-touched state at the time of capture. Random-match
+    // probability for a single 32-bit pair: 2^-32.
     //
-    // Additionally, on 2026-05-26 this same function authenticated
-    // against the user's live ECU through `Flasher::set_security_key_fn`,
-    // producing the expected pairing token at flash 0x001FFFB0 via UDS
-    // RMBA. Live validation is logged in the gitignored
-    // `tests/private/test_fehr_active_live_read.cpp` plus the
-    // `project_fehr_sa_l1_direction.md` memory entry.
-    using ecu::subaru::ssmcan1_l1_fehr_active;
+    // Additionally, this same function authenticated against a live
+    // ECU through `Flasher::set_security_key_fn`, producing the
+    // expected pairing token at flash 0x001FFFB0 via UDS RMBA. Live
+    // validation is logged in a gitignored hardware-gated private test
+    // tree.
+    using ecu::subaru::ssmcan1_l1_aftermarket;
     std::array<std::uint8_t, 4> const seed{0xB9, 0xA6, 0x5C, 0x23};
-    auto const r = ssmcan1_l1_fehr_active(std::span<std::uint8_t const>{seed});
+    auto const r = ssmcan1_l1_aftermarket(std::span<std::uint8_t const>{seed});
     REQUIRE(r.has_value());
     std::vector<std::uint8_t> const expected{0x13, 0xEF, 0x92, 0x95};
     REQUIRE(*r == expected);
 }
 
-TEST_CASE("ssmcan1_l1_fehr_active: rejects wrong seed length",
-          "[ecu][sa][gen_a][fehr]") {
-    using ecu::subaru::ssmcan1_l1_fehr_active;
+TEST_CASE("ssmcan1_l1_aftermarket: rejects wrong seed length",
+          "[ecu][sa][gen_a][aftermarket]") {
+    using ecu::subaru::ssmcan1_l1_aftermarket;
     std::array<std::uint8_t, 3> const three{0x00, 0x00, 0x00};
-    auto const r = ssmcan1_l1_fehr_active(std::span<std::uint8_t const>{three});
+    auto const r = ssmcan1_l1_aftermarket(std::span<std::uint8_t const>{three});
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("ssmcan1_l1_fehr_active differs from ssmcan1_key_stub on the same seed",
-          "[ecu][sa][gen_a][fehr]") {
-    // The factory and Fehr variants must NOT collide — if they did,
-    // either of them is computing the wrong thing. Spot-check several
-    // seeds and confirm the byte outputs diverge.
+TEST_CASE("ssmcan1_l1_aftermarket differs from ssmcan1_key_stub on the same seed",
+          "[ecu][sa][gen_a][aftermarket]") {
+    // The factory and aftermarket variants must NOT collide — if they
+    // did, either of them is computing the wrong thing. Spot-check
+    // several seeds and confirm the byte outputs diverge.
     using ecu::subaru::ssmcan1_key_stub;
-    using ecu::subaru::ssmcan1_l1_fehr_active;
+    using ecu::subaru::ssmcan1_l1_aftermarket;
     constexpr std::array<std::array<std::uint8_t, 4>, 4> seeds{{
         {0xDE, 0xAD, 0xBE, 0xEF},
         {0xB9, 0xA6, 0x5C, 0x23},
@@ -347,92 +290,50 @@ TEST_CASE("ssmcan1_l1_fehr_active differs from ssmcan1_key_stub on the same seed
     }};
     for (auto const &s : seeds) {
         auto const factory = ssmcan1_key_stub(std::span<std::uint8_t const>{s});
-        auto const fehr = ssmcan1_l1_fehr_active(std::span<std::uint8_t const>{s});
+        auto const after = ssmcan1_l1_aftermarket(std::span<std::uint8_t const>{s});
         REQUIRE(factory.has_value());
-        REQUIRE(fehr.has_value());
-        REQUIRE(*factory != *fehr);
+        REQUIRE(after.has_value());
+        REQUIRE(*factory != *after);
     }
 }
 
-TEST_CASE("ssmcan1_l3_fehr_active: captured Fehr L3 pair (fehr-active-sa)",
-          "[ecu][sa][gen_a][fehr]") {
-    // EMPIRICAL VECTOR. The only on-file captured Fehr-active L3 (seed,
-    // key) pair: extracted from sniff-fehr-active-sa.log,
-    // `Captures/2026-05-25/sniff-fehr-active-sa-pairs.json`. The ECU
-    // ACK'd this key with 0x67 0x04 and immediately served an RMBA read
-    // of 0x001FFFC0 returning ASCII "W585" (Fehr's tuner tag), so the
-    // L3 session was definitely elevated by this exchange.
+TEST_CASE("ssmcan1_l3_aftermarket: captured aftermarket-framework L3 pair",
+          "[ecu][sa][gen_a][aftermarket]") {
+    // EMPIRICAL VECTOR. An on-file captured aftermarket-framework L3
+    // (seed, key) pair recovered from a sniff log. The ECU ACK'd this
+    // key with 0x67 0x04 and immediately served an RMBA read of
+    // 0x001FFFC0 returning a 4-byte ASCII tuner tag, so the L3 session
+    // was definitely elevated by this exchange.
     //
     // Random-match probability for a single 32-bit pair: 2^-32. The
-    // shared loop-reversal patch with L1 (validated 4/4 against captured
-    // pairs cross-level — see calibration-deltas/l3_cipher_recovered.md
-    // for the full cross-check) brings effective confidence higher.
-    using ecu::subaru::ssmcan1_l3_fehr_active;
+    // shared loop-reversal patch with L1 (validated cross-level
+    // against multiple captured pairs) brings effective confidence
+    // higher.
+    using ecu::subaru::ssmcan1_l3_aftermarket;
     std::array<std::uint8_t, 4> const seed{0x4A, 0xDF, 0xFE, 0x07};
-    auto const r = ssmcan1_l3_fehr_active(std::span<std::uint8_t const>{seed});
+    auto const r = ssmcan1_l3_aftermarket(std::span<std::uint8_t const>{seed});
     REQUIRE(r.has_value());
     std::vector<std::uint8_t> const expected{0x24, 0x24, 0x3A, 0x06};
     REQUIRE(*r == expected);
 }
 
-TEST_CASE("ssmcan1_l3_fehr_active: rejects wrong seed length",
-          "[ecu][sa][gen_a][fehr]") {
-    using ecu::subaru::ssmcan1_l3_fehr_active;
+TEST_CASE("ssmcan1_l3_aftermarket: rejects wrong seed length",
+          "[ecu][sa][gen_a][aftermarket]") {
+    using ecu::subaru::ssmcan1_l3_aftermarket;
     std::array<std::uint8_t, 3> const three{0x00, 0x00, 0x00};
-    auto const r = ssmcan1_l3_fehr_active(std::span<std::uint8_t const>{three});
+    auto const r = ssmcan1_l3_aftermarket(std::span<std::uint8_t const>{three});
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("ssmcan1_l1_cobb_ap is byte-equivalent to ssmcan1_l1_fehr_active alias",
-          "[ecu][sa][gen_a][fehr]") {
-    // The 2026-05-26 PM rename made `_cobb_ap` the canonical name and
-    // `_fehr_active` a pass-through alias.  This test pins the
-    // equivalence — any divergence here is a regression in the alias.
-    using ecu::subaru::ssmcan1_l1_cobb_ap;
-    using ecu::subaru::ssmcan1_l1_fehr_active;
-    constexpr std::array<std::array<std::uint8_t, 4>, 4> seeds{{
-        {0xDE, 0xAD, 0xBE, 0xEF},
-        {0xB9, 0xA6, 0x5C, 0x23},
-        {0x00, 0x00, 0x00, 0x00},
-        {0xFF, 0xFF, 0xFF, 0xFF},
-    }};
-    for (auto const &s : seeds) {
-        auto const cobb = ssmcan1_l1_cobb_ap(std::span<std::uint8_t const>{s});
-        auto const fehr = ssmcan1_l1_fehr_active(std::span<std::uint8_t const>{s});
-        REQUIRE(cobb.has_value());
-        REQUIRE(fehr.has_value());
-        REQUIRE(*cobb == *fehr);
-    }
-}
-
-TEST_CASE("ssmcan1_l3_cobb_ap is byte-equivalent to ssmcan1_l3_fehr_active alias",
-          "[ecu][sa][gen_a][fehr]") {
-    using ecu::subaru::ssmcan1_l3_cobb_ap;
-    using ecu::subaru::ssmcan1_l3_fehr_active;
-    constexpr std::array<std::array<std::uint8_t, 4>, 4> seeds{{
-        {0x4A, 0xDF, 0xFE, 0x07},
-        {0xDE, 0xAD, 0xBE, 0xEF},
-        {0x00, 0x00, 0x00, 0x00},
-        {0xFF, 0xFF, 0xFF, 0xFF},
-    }};
-    for (auto const &s : seeds) {
-        auto const cobb = ssmcan1_l3_cobb_ap(std::span<std::uint8_t const>{s});
-        auto const fehr = ssmcan1_l3_fehr_active(std::span<std::uint8_t const>{s});
-        REQUIRE(cobb.has_value());
-        REQUIRE(fehr.has_value());
-        REQUIRE(*cobb == *fehr);
-    }
-}
-
-TEST_CASE("ssmcan1_l3_fehr_active differs from L1 variants on the same seed",
-          "[ecu][sa][gen_a][fehr]") {
+TEST_CASE("ssmcan1_l3_aftermarket differs from L1 variants on the same seed",
+          "[ecu][sa][gen_a][aftermarket]") {
     // L3 has a different round-key table AND per-level byte
     // permutations; it must produce a different key from both the
-    // factory L1 path and the Fehr-active L1 path for the same seed.
+    // factory L1 path and the aftermarket L1 path for the same seed.
     using ecu::subaru::ssmcan1_key_stub;
-    using ecu::subaru::ssmcan1_l1_fehr_active;
-    using ecu::subaru::ssmcan1_l3_fehr_active;
+    using ecu::subaru::ssmcan1_l1_aftermarket;
+    using ecu::subaru::ssmcan1_l3_aftermarket;
     constexpr std::array<std::array<std::uint8_t, 4>, 4> seeds{{
         {0xDE, 0xAD, 0xBE, 0xEF},
         {0x4A, 0xDF, 0xFE, 0x07},
@@ -441,13 +342,13 @@ TEST_CASE("ssmcan1_l3_fehr_active differs from L1 variants on the same seed",
     }};
     for (auto const &s : seeds) {
         auto const factory_l1 = ssmcan1_key_stub(std::span<std::uint8_t const>{s});
-        auto const fehr_l1 = ssmcan1_l1_fehr_active(std::span<std::uint8_t const>{s});
-        auto const fehr_l3 = ssmcan1_l3_fehr_active(std::span<std::uint8_t const>{s});
+        auto const after_l1 = ssmcan1_l1_aftermarket(std::span<std::uint8_t const>{s});
+        auto const after_l3 = ssmcan1_l3_aftermarket(std::span<std::uint8_t const>{s});
         REQUIRE(factory_l1.has_value());
-        REQUIRE(fehr_l1.has_value());
-        REQUIRE(fehr_l3.has_value());
-        REQUIRE(*fehr_l3 != *factory_l1);
-        REQUIRE(*fehr_l3 != *fehr_l1);
+        REQUIRE(after_l1.has_value());
+        REQUIRE(after_l3.has_value());
+        REQUIRE(*after_l3 != *factory_l1);
+        REQUIRE(*after_l3 != *after_l1);
     }
 }
 

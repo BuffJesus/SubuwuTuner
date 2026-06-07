@@ -26,8 +26,8 @@ char const *checksum_kind_name(ChecksumKind k) noexcept {
         return "subaru_alt";
     case ChecksumKind::SubaruAlt2:
         return "subaru_alt2";
-    case ChecksumKind::CobbPerBlockCrc32:
-        return "cobb_per_block_crc32";
+    case ChecksumKind::PerInstallBlockCrc32:
+        return "per_install_block_crc32";
     }
     return "unknown";
 }
@@ -41,8 +41,12 @@ std::optional<ChecksumKind> parse_checksum_kind(std::string_view s) noexcept {
         return ChecksumKind::SubaruAlt;
     if (s == "subaru_alt2")
         return ChecksumKind::SubaruAlt2;
+    if (s == "per_install_block_crc32")
+        return ChecksumKind::PerInstallBlockCrc32;
+    // Accept the previous serialized name for one release cycle so
+    // existing TOML packs keep loading. Emitter writes the new name.
     if (s == "cobb_per_block_crc32")
-        return ChecksumKind::CobbPerBlockCrc32;
+        return ChecksumKind::PerInstallBlockCrc32;
     return std::nullopt;
 }
 
@@ -102,9 +106,9 @@ public:
 // integrity check that verifies sum+complement == 0xFFFFFFFF holds.
 //
 // Implementation is fresh from the documented algorithm shape per
-// the clean-room rules in docs/15 — no source lifted from RomRaider
-// or any other reference. Algorithm shape (public knowledge from
-// Subaru tuning literature):
+// the clean-room rules in docs/15 — no source lifted from any
+// reference. Algorithm shape (public knowledge from Subaru tuning
+// literature):
 //   1. Sum word[i] = (rom[2i]<<8) | rom[2i+1], for i covering
 //      cal_start..cal_end in word steps, SKIPPING the 4-byte sum
 //      slot and the 4-byte complement slot.
@@ -181,20 +185,19 @@ private:
     SubaruStdConfig cfg_;
 };
 
-// CobbPerBlockCrc32 — per-COBB-install-block CRC-32 table. The COBB
-// AccessPort install flow populates a 25-slot CRC table at
-// 0x1FFF3C..0x1FFFA0 (BE u32 each), one slot per install block per
-// `findings/communication-protocols/cobb-install-flow.md` §4.
+// PerInstallBlockCrc32 — per-aftermarket-install-block CRC-32 table.
+// Aftermarket installers populate a 25-slot CRC table at
+// 0x1FFF3C..0x1FFFA0 (BE u32 each), one slot per install block.
 //
-// **What this repair is and isn't for** (analyst's Ghidra finding
-// 2026-06-06, `findings/.../CHECKSUM_RUNTIME_VERIFICATION.md`): the
-// ECU firmware does NOT consult the slot table at runtime — zero
-// literal-pool references to any address in 0x1FFF3C..0x1FFFA0 in
-// either the stock or COBB-installed ROM, zero CRC-32 polynomial
-// constants anywhere. The slots exist purely as AccessPort-side
-// metadata. So this repair is about preserving AP-side coherence
-// (in case the user later routes through the AP), not about
-// satisfying any boot-time integrity check.
+// **What this repair is and isn't for**: the ECU firmware does NOT
+// consult the slot table at runtime — independent disassembly turned
+// up zero literal-pool references to any address in
+// 0x1FFF3C..0x1FFFA0 in either the stock or aftermarket-installed
+// ROM, zero CRC-32 polynomial constants anywhere. The slots exist
+// purely as installer-side metadata. So this repair is about
+// preserving installer-side coherence (in case the user later routes
+// back through the same toolchain), not about satisfying any
+// boot-time integrity check.
 //
 // Algorithm: zlib-style CRC-32 (poly 0xEDB88320 reflected, init +
 // final XOR 0xFFFFFFFF). The existing st::crc32 in
@@ -202,18 +205,17 @@ private:
 //
 // **Slot 24 caveat**: the last 128 KB block (0x1E0000-0x200000)
 // contains the checksum table itself. The relationship between the
-// stored slot 24 value and the block contents isn't yet decoded —
-// analyst's exhaustive analytical search (all standard CRC-16 +
-// CRC-32 variants over all subregions) found no match. Repair
-// leaves slot 24 untouched. Per the runtime-verification finding
-// above this is non-blocking for ECU correctness regardless of
-// where the edit lands.
+// stored slot 24 value and the block contents isn't yet decoded — an
+// exhaustive analytical search (all standard CRC-16 + CRC-32 variants
+// over all subregions) found no match. Repair leaves slot 24
+// untouched. Per the runtime-verification finding above this is
+// non-blocking for ECU correctness regardless of where the edit lands.
 //
-// **Use only on COBB-installed FA-DIT 2 MB ROMs.** Factory-virgin
-// ROMs have all-FF in the slot region; running this would rewrite
-// 96 bytes to real CRCs the firmware doesn't check — inert but
-// noisy in a diff.
-class CobbPerBlockCrc32Repair final : public IChecksumRepair {
+// **Use only on aftermarket-installed FA-DIT 2 MB ROMs.** Factory-
+// virgin ROMs have all-FF in the slot region; running this would
+// rewrite 96 bytes to real CRCs the firmware doesn't check — inert
+// but noisy in a diff.
+class PerInstallBlockCrc32Repair final : public IChecksumRepair {
 public:
     // The 25 install-block ranges, in install order. First 5 are
     // the 8 KB bootloader patches; next 9 are 64 KB cal sectors;
@@ -247,12 +249,11 @@ public:
     repair(std::span<std::uint8_t> rom) noexcept override {
         if (rom.size() < kRomSizeRequired) {
             return failure(ErrorCode::InvalidArgument,
-                           "flash::cobb_per_block_crc32::repair: ROM is too "
+                           "flash::per_install_block_crc32::repair: ROM is too "
                            "small (need 2 MB FA-DIT layout)");
         }
         // Compute and write CRCs for the first 24 blocks. Slot 24
-        // stays as-is — its decode is pending per the analyst
-        // handoff.
+        // stays as-is — its decode is still pending.
         for (std::size_t i = 0; i < kRepairedBlockCount; ++i) {
             auto const &b = kBlocks[i];
             std::span<std::uint8_t const> block_view{rom.data() + b.start,
@@ -268,7 +269,7 @@ public:
     }
 
     [[nodiscard]] std::string_view name() const noexcept override {
-        return "cobb_per_block_crc32";
+        return "per_install_block_crc32";
     }
 };
 
@@ -297,10 +298,11 @@ public:
 // namespace scope so a non-type template parameter can take their
 // addresses without ODR / static-init-order surprises.
 inline constexpr char kAltCitation[] =
-    "RomRaider's `ChecksumALT.java` (older 16-bit Subaru family)";
+    "the older 16-bit Subaru `subaru_alt` checksum variant documented "
+    "in the community XML schema";
 inline constexpr char kAlt2Citation[] =
-    "RomRaider's `ChecksumALT2.java` (some 32-bit Subaru ROMs — "
-    "release notes mention SH-2A platforms)";
+    "the `subaru_alt2` checksum variant documented in the community "
+    "XML schema (some 32-bit Subaru ROMs, including SH-2A platforms)";
 
 } // namespace
 
@@ -319,8 +321,8 @@ std::unique_ptr<IChecksumRepair> make_checksum_repair(ChecksumKind kind) {
         return std::make_unique<SubaruRepairStub<ChecksumKind::SubaruAlt, kAltCitation>>();
     case ChecksumKind::SubaruAlt2:
         return std::make_unique<SubaruRepairStub<ChecksumKind::SubaruAlt2, kAlt2Citation>>();
-    case ChecksumKind::CobbPerBlockCrc32:
-        return std::make_unique<CobbPerBlockCrc32Repair>();
+    case ChecksumKind::PerInstallBlockCrc32:
+        return std::make_unique<PerInstallBlockCrc32Repair>();
     }
     // Unreachable per the exhaustive switch; defensive None fallback.
     return std::make_unique<NoneRepair>();

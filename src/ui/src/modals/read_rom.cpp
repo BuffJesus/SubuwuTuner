@@ -69,9 +69,9 @@ void render_read_rom_modal(AppState &state) {
         // Pre-fill SA variant from the active vehicle profile's
         // transport_hint. Looks for substrings the user is likely to
         // have typed when documenting which adapter / variant they use
-        // ("cobb-ap-l1", "cobb l3", "fehr-active-l3", etc). Best-effort
-        // match; falls through to keeping the current dropdown value
-        // when nothing recognizable shows up.
+        // ("aftermarket-l1", "aftermarket l3", etc). Best-effort match;
+        // falls through to keeping the current dropdown value when
+        // nothing recognizable shows up.
         if (!state.settings.active_vehicle_profile_id.empty()) {
             auto const profile_path = st::profile::default_profile_dir() /
                                       (state.settings.active_vehicle_profile_id + ".stprofile");
@@ -81,16 +81,20 @@ void render_read_rom_modal(AppState &state) {
                 std::transform(hint.begin(), hint.end(), hint.begin(),
                                [](unsigned char c) { return std::tolower(c); });
                 // Order matters — match more specific strings first
-                // (l3 before plain "cobb") so the index lands on the
-                // right variant.
-                if (hint.find("cobb") != std::string::npos &&
-                    (hint.find("l3") != std::string::npos ||
-                     hint.find("level-3") != std::string::npos)) {
+                // (l3 before plain "aftermarket") so the index lands
+                // on the right variant. Deprecated "cobb"/"fehr-active"
+                // hints are still recognized as aftermarket.
+                auto const has = [&hint](char const *needle) {
+                    return hint.find(needle) != std::string::npos;
+                };
+                bool const is_aftermarket =
+                    has("aftermarket") || has("cobb") || has("fehr");
+                bool const is_l3 = has("l3") || has("level-3");
+                if (is_aftermarket && is_l3) {
                     state.read_rom_sa_variant_idx = 2;
-                } else if (hint.find("cobb") != std::string::npos) {
+                } else if (is_aftermarket) {
                     state.read_rom_sa_variant_idx = 1;
-                } else if (hint.find("factory") != std::string::npos ||
-                           hint.find("stock") != std::string::npos) {
+                } else if (has("factory") || has("stock")) {
                     state.read_rom_sa_variant_idx = 0;
                 }
             }
@@ -238,8 +242,10 @@ void render_read_rom_modal(AppState &state) {
             ImGui::SetTooltip("Bytes per request.\n"
                               "SSM: caps at 80 internally (single-frame limit);\n"
                               "     larger values are silently clamped.\n"
-                              "UDS: 256 is the safe Subaru SH-2A default;\n"
-                              "     some adapters tolerate up to 4096.");
+                              "UDS: 0x1000 (4096) is the documented Gen-A.2 ECU\n"
+                              "     response-buffer ceiling. The Flasher runs an\n"
+                              "     upfront probe at boot and halves the size if\n"
+                              "     the ECU rejects 4 KB; 0x100 is the floor.");
         }
         ImGui::Checkbox("Verbose console output", &state.read_rom_verbose);
         if (ImGui::IsItemHovered()) {
@@ -267,18 +273,17 @@ void render_read_rom_modal(AppState &state) {
         }
 
         // SA-variant picker — surfaces the CLI's --sa-variant flag in
-        // the GUI. Factory ECUs work with the default; COBB-tuned ECUs
-        // need the COBB-AP key tables (the AP-install patches the SA
-        // round-key constants in flash, so the factory algorithm
-        // returns NRC 0x35 invalidKey on those cars). Pick L3 if the
-        // ECU also gates RMBA at SA level 3 — the dropdown bumps the
-        // security_level alongside the key fn.
+        // the GUI. Factory ECUs work with the default; aftermarket-
+        // tuned ECUs need the aftermarket key tables (an aftermarket
+        // install patches the SA round-key constants in flash, so the
+        // factory algorithm returns NRC 0x35 invalidKey on those
+        // cars). Pick L3 if the ECU also gates RMBA at SA level 3 —
+        // the dropdown bumps the security_level alongside the key fn.
         ImGui::BeginDisabled(!state.read_rom_authenticate);
         constexpr char const *kSaVariantNames[] = {
             "Factory L1",
-            "COBB-AP L1",
-            "COBB-AP L3",
-            "Fehr-active L3",
+            "Aftermarket L1",
+            "Aftermarket L3",
         };
         ImGui::SetNextItemWidth(220.0f);
         ImGui::Combo("SA variant##read_rom_sa_variant", &state.read_rom_sa_variant_idx,
@@ -293,34 +298,23 @@ void render_read_rom_modal(AppState &state) {
                     "\n"
                     "Factory L1 — stock SH7058 / SSMCAN1 round-key table.\n"
                     "  Use on factory ECUs. NRC 0x35 invalidKey on any\n"
-                    "  ECU that's had a COBB AccessPort install (the AP\n"
-                    "  patches the round-key constants in flash).\n"
+                    "  ECU that's had an aftermarket flasher install\n"
+                    "  (those patch the round-key constants in flash).\n"
                     "  CLI: --sa-variant factory (default).\n"
                     "\n"
-                    "COBB-AP L1 — the COBB-AccessPort-substituted L1\n"
-                    "  round-key table (recovered 2026-05-26 from\n"
-                    "  captured install logs). Use on COBB-tuned ECUs in\n"
-                    "  install/uninstall-flow state. The L1 path is\n"
-                    "  shared between COBB-AP and Fehr-active e-tune\n"
-                    "  (ssmcan1_l1_fehr_active is an alias).\n"
-                    "  CLI: --sa-variant cobb-ap.\n"
+                    "Aftermarket L1 — the substituted L1 round-key table\n"
+                    "  written by aftermarket installers. Use on\n"
+                    "  aftermarket-tuned ECUs in install/uninstall-flow\n"
+                    "  state.\n"
+                    "  CLI: --sa-variant aftermarket.\n"
                     "\n"
-                    "COBB-AP L3 — same COBB-AP algorithm at diagnostic\n"
-                    "  level 0x03. Pick this for a COBB-tuned ECU when\n"
-                    "  some firmwares route RMBA past L3 specifically.\n"
-                    "  Different from Fehr-active L3 (separate function).\n"
-                    "  CLI: --sa-variant cobb-ap-l3.\n"
-                    "\n"
-                    "Fehr-active L3 — for an ECU running an active Fehr\n"
-                    "  e-tune (NOT a COBB OTS install). Fehr patches\n"
-                    "  the dispatcher iteration at flash 0xBE911 +\n"
-                    "  0xBE9C7..0xBE9CE; round keys live at 0x074358.\n"
-                    "  Required when L1/L3 above both return NRC 0x35.\n"
-                    "  CLI: --sa-variant fehr-active-l3.\n"
+                    "Aftermarket L3 — same aftermarket algorithm at\n"
+                    "  diagnostic level 0x03. Required when some\n"
+                    "  firmwares route RMBA past L3 specifically.\n"
+                    "  CLI: --sa-variant aftermarket-l3.\n"
                     "\n"
                     "If you don't know: try Factory L1 first. NRC 0x35\n"
-                    "→ COBB-AP L1. Still 0x35 → COBB-AP L3. Still 0x35\n"
-                    "→ Fehr-active L3 (the car is on an e-tune layer).");
+                    "→ Aftermarket L1. Still 0x35 → Aftermarket L3.");
             }
         }
 
@@ -408,15 +402,11 @@ void render_read_rom_modal(AppState &state) {
                 std::uint8_t security_level = 0x01;
                 switch (state.read_rom_sa_variant_idx) {
                 case 1:
-                    sa_fn = &st::ecu::subaru::ssmcan1_l1_cobb_ap;
+                    sa_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket;
                     security_level = 0x01;
                     break;
                 case 2:
-                    sa_fn = &st::ecu::subaru::ssmcan1_l3_cobb_ap;
-                    security_level = 0x03;
-                    break;
-                case 3:
-                    sa_fn = &st::ecu::subaru::ssmcan1_l3_fehr_active;
+                    sa_fn = &st::ecu::subaru::ssmcan1_l3_aftermarket;
                     security_level = 0x03;
                     break;
                 case 0:
@@ -594,7 +584,21 @@ void render_read_rom_modal(AppState &state) {
         char overlay[64];
         std::snprintf(overlay, sizeof overlay, "0x%X / 0x%X  (%.1f%%)", done, total,
                       static_cast<double>(100.0f * frac));
-        ImGui::ProgressBar(frac, ImVec2(-1.0f, 0.0f), overlay);
+        // ImGui::ProgressBar centers the overlay text over the FILLED
+        // portion of the bar, which makes the readout slide rightward as
+        // progress accumulates. Draw the bar with no overlay, then place
+        // the text manually centered over the FULL bar width so the
+        // readout stays anchored regardless of fill fraction.
+        ImVec2 const bar_origin = ImGui::GetCursorScreenPos();
+        float const bar_width = ImGui::GetContentRegionAvail().x;
+        float const bar_height = ImGui::GetFrameHeight();
+        ImGui::ProgressBar(frac, ImVec2(-1.0f, 0.0f), "");
+        ImVec2 const text_size = ImGui::CalcTextSize(overlay);
+        ImVec2 const text_pos{
+            bar_origin.x + (bar_width - text_size.x) * 0.5f,
+            bar_origin.y + (bar_height - text_size.y) * 0.5f,
+        };
+        ImGui::GetWindowDrawList()->AddText(text_pos, ImGui::GetColorU32(ImGuiCol_Text), overlay);
         ImGui::Dummy(ImVec2(0.0f, kSpaceS));
         ImGui::Text("Elapsed: %s", elapsed_str().c_str());
         ImGui::Dummy(ImVec2(0.0f, kSpaceM));

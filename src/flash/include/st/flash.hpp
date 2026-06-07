@@ -79,8 +79,8 @@ struct FlashPlan {
     // encryption). Setting `data_format = kDataFormatSubaruCiphertext`
     // (0x04) switches `execute()` from standard TransferData (0x36) to
     // the Subaru-manufacturer bulk-transfer service (0xB6) — the wire
-    // format COBB AccessPort uses on aftermarket reflash, per
-    // Findings/communication-protocols/cobb-install-flow.md §5.
+    // format observed on aftermarket reflash captures (see
+    // docs/26-bulk-reflash-cipher.md §5).
     std::uint8_t data_format{0x00};
 
     // When true, the plan probes the ECU's session-level acceptance
@@ -137,11 +137,10 @@ struct FlashPlan {
     // flashed tune — the safe failure mode.
     //
     // This is the brick-protection-by-construction pattern observed in
-    // the COBB AccessPort install (decoded from cobb-reinstall-3.log,
-    // see Findings/communication-protocols/cobb-install-flow.md §4):
-    // erase the checksum sector first, write the body, write the
-    // checksum sector last. Independent of any specific cipher or
-    // checksum algorithm — just an ordering constraint.
+    // aftermarket install sequences: erase the checksum sector first,
+    // write the body, write the checksum sector last. Independent of
+    // any specific cipher or checksum algorithm — just an ordering
+    // constraint.
     //
     // When unset, sectors execute in plan.writes order without
     // reordering. When set but no sector contains the offset, the order
@@ -251,6 +250,15 @@ public:
         client_.set_audit_log(log);
     }
 
+    // Borrow the underlying UDS client. Diagnostic CLI commands and
+    // tests sometimes need to drive a DSC / SA / RDBI exchange directly
+    // (e.g. `subuwutuner-cli rom-pull --probe-only` runs DSC + SA itself,
+    // then calls `probe_max_chunk`). Production callers should prefer
+    // `read_full_rom` / `execute`, which orchestrate the full sequence.
+    [[nodiscard]] ecu::uds::UdsClient &client() noexcept {
+        return client_;
+    }
+
     // Read a contiguous span of ECU memory via ReadMemoryByAddress,
     // chunked into `max_chunk_size`-byte requests. Returns the
     // concatenated bytes in the requested order. Errors at any chunk
@@ -284,13 +292,55 @@ public:
     // with NRC 0x78 "response pending" while writing — legitimate
     // writes can run 2-5 s per block. Write callers should pass at
     // least 5000-10000 ms, possibly more depending on block size.
+    //
+    // `max_chunk_size` default 0x1000 (4 KB) — per `findings/uds-read-
+    // workflow.md` §6 this is the typical Gen-A.2 ECU response-buffer
+    // ceiling and what the workflow doc estimates at "30-60 s for a 2 MB
+    // dump". The empirical 256 B / 13 minute baseline is overhead-bound
+    // (~95 ms per request × 8192 requests) — amortizing over 4 KB
+    // chunks drops per-byte cost ~13×.
+    //
+    // `auto_probe = true` (default) runs a one-shot upfront probe at
+    // `base_address` with successively smaller candidate sizes (0x1000 →
+    // 0x800 → 0x400 → 0x200 → 0x100) until one succeeds, then settles
+    // into the dump loop with the discovered size. Halves on the
+    // "too big" signals: TransportTimeout (Subaru Hitachi silent-drop),
+    // NRC 0x13 (incorrectMessageLength), NRC 0x14 (responseTooLong).
+    // Bails on the "halving won't help" signals: NRC 0x33 (SA denied),
+    // NRC 0x31 (RequestOutOfRange — wrong base addr at probe time),
+    // wrong-session. Probe overhead is ≤ 5 round-trips at boot.
+    // Pass `false` to skip the probe and use `max_chunk_size` as-is
+    // (benchmarking, reproducibility, known-good hardware).
+    //
+    // Dump-loop robustness (independent of `auto_probe`): on a mid-dump
+    // TransportTimeout the loop retries the same address + chunk size
+    // ONCE before halving once (with a log line); a persistent timeout
+    // after that bails. On NRC 0x31 (RequestOutOfRange) mid-dump the
+    // loop treats the failure as a graceful end-of-range and returns
+    // the partial buffer as success IF we're past 50% of the requested
+    // length. This matches `uds-read-workflow.md` §6: "reading up to
+    // 0x00200000 and stopping when the ECU returns NRC 0x31 works in
+    // practice."
     [[nodiscard]] Result<std::vector<std::uint8_t>>
     read_full_rom(std::uint32_t base_address, std::uint32_t total_length,
-                  std::uint32_t max_chunk_size = 0x100,
+                  std::uint32_t max_chunk_size = 0x1000,
                   std::chrono::milliseconds per_chunk_timeout = std::chrono::milliseconds{1000},
                   ReadProgressFn progress = nullptr, std::atomic<bool> const *cancel = nullptr,
                   bool enter_diagnostic_session = false, bool authenticate = false,
-                  std::uint8_t security_level = 0x01);
+                  std::uint8_t security_level = 0x01, bool auto_probe = true);
+
+    // Run the chunk-size probe ladder alone — the one-shot upfront
+    // probe that `read_full_rom(auto_probe=true)` runs internally,
+    // surfaced for `subuwutuner-cli rom-pull --probe-only` and similar
+    // characterization callers. Walks `hint_max → hint_max/2 → ... → 0x100`
+    // performing a single RMBA at `probe_address` until one succeeds;
+    // returns the working chunk size, or an error if even 0x100 fails
+    // (which means the failure is unrelated to chunk size — SA, DSC,
+    // bad base address, etc.). Does NOT perform SA / DSC setup itself;
+    // the caller must have done that already.
+    [[nodiscard]] Result<std::uint32_t>
+    probe_max_chunk(std::uint32_t probe_address, std::uint32_t hint_max,
+                    std::chrono::milliseconds per_chunk_timeout = std::chrono::milliseconds{1000});
 
     // SSM (Subaru Select Monitor) variant of read_full_rom — uses
     // SSM 0xA8 (ReadByAddress) instead of UDS 0x23. This is the path

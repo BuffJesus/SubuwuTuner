@@ -77,8 +77,12 @@ enum class Opcode : std::uint8_t {
     ProtocolSettings = 0x33,
     // OBDX Pro Developers Reference Manual v3.00 §3.14 "CAN Protocol
     // Settings". Family covers filter setup (sub-op 0x00 Entire Filter),
-    // flow-control configuration (0x0A FC frame data, 0x0B FC delay,
-    // 0x0E/0x0F padding byte/state), and per-baud-rate selection.
+    // flow-control configuration (§3.14.10 sub-op 0x09 FC Frame Data —
+    // the BS/STmin bytes the adapter sends on the wire, default
+    // `30 00 00` already matches what we want; §3.14.11 sub-op 0x0A FC
+    // Delay — microsecond delay between receiving FF and sending FC,
+    // default 1000 µs, manual recommends 0 for max read/write speed),
+    // auto frame processing (sub-op 0x0B), and per-baud-rate selection.
     // Critical for ISO15765 — without an explicit Flow filter, the
     // adapter has no idea which CAN IDs are the ECU's responses and
     // drops every incoming frame.

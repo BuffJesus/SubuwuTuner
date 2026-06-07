@@ -26,7 +26,7 @@ license        = "Apache-2.0"
 # COBB-installed ROMs carry a 25-slot per-block CRC-32 integrity table
 # at 0x1FFF3C..0x1FFFA0 (analyst handoff 2026-06-06). Repair must fire
 # after every cal edit or the bootloader integrity check trips.
-checksum_type  = "cobb_per_block_crc32"
+checksum_type  = "per_install_block_crc32"
 
 
 [[identification]]

@@ -70,7 +70,7 @@ TEST_CASE("private: AS80U ROM CID matches what the pack identifies",
 //        REQUIRE(def.has_value());
 //        auto const td = def->read_table(*rom, "primary_open_loop_fuel");
 //        REQUIRE(td.has_value());
-//        // ... spot-check a few cells against the RomRaider XML
+//        // ... spot-check a few cells against the community XML
 //
 //  - Round-trip a project create + edit + save:
 //

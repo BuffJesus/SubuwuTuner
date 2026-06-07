@@ -133,6 +133,11 @@ TEST_CASE("obdx::Transport::open drives ELM probe -> DX DP 1 -> SetProtocol -> "
     // Response shape echoes the sub-op byte (0x00 = Entire Filter); the
     // exact payload isn't asserted here beyond "successful response".
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x0A})); // FC Delay ack (step 4.5)
+    // FC frame data ack — Developers Reference Manual v3.00 §3.14, sub-op
+    // 0x0A. Step 4.5 of open() forces STmin=0, BS=0 on the adapter so
+    // multi-frame ECU responses arrive back-to-back. Wire-shape pinned by
+    // a sibling test below.
     cp.raw->queue_read(
         dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x01})); // EnableNetwork ack (sub=02, state=ON)
 
@@ -192,6 +197,104 @@ TEST_CASE("obdx::Transport::open drives ELM probe -> DX DP 1 -> SetProtocol -> "
     REQUIRE(filter_pos < enable_pos);
 
     REQUIRE(t.firmware() == "OBDX Pro VX v1.0\r");
+}
+
+TEST_CASE("obdx::Transport::open emits FC Delay (sub-op 0x0A) = 0 us after CAN filter",
+          "[transport][obdx_transport]") {
+    // Step 4.5 of open() sets the OBDX adapter's microsecond FC delay to
+    // 0 — the time the adapter waits between receiving an ISO-TP First
+    // Frame and sending its Flow Control frame back to the ECU. Per OBDX
+    // Developers Reference Manual v3.00 §3.14.11 sub-op 0x0A, manual
+    // default is 1000 us and the explicit guidance is "for maximum speed
+    // set this value to 0". Wire frame:
+    //   CMD=0x34  LEN=0x05  SUB=0x0A  US3=0x00  US2=0x00  US1=0x00  US0=0x00  CHK
+    // This test pins the wire shape AND ordering (after Filter, before
+    // EnableNetwork). Without this step we'd rely on the adapter's
+    // power-on 1000 us default, costing ~0.5 s on a 2 MB RMBA dump at
+    // 4 KB chunks. The sibling sub-op 0x09 (FC Frame Data) default
+    // `30 00 00` already matches the ECU's advertised FC, so we don't
+    // touch it.
+    auto cp = make_channel();
+    cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
+    cp.raw->queue_read_ascii("OK\r>");
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x0A}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x01}));
+
+    obdx::Transport t{std::move(cp.owner)};
+    auto const r = t.open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
+    REQUIRE(r.has_value());
+
+    // Locate the exact 7-byte FC Delay payload in the raw write stream:
+    //   34 05 0A 00 00 00 00  (CMD LEN SUB US3 US2 US1 US0)
+    // Then verify ordering: it must appear AFTER the filter frame (0x34
+    // with LEN=0x11) and BEFORE EnableNetwork (0x31 02 02 01).
+    auto const &raw_writes = cp.raw->writes();
+    std::size_t fc_pos = std::string::npos;
+    for (std::size_t i = 0; i + 6 < raw_writes.size(); ++i) {
+        if (raw_writes[i] == 0x34U && raw_writes[i + 1] == 0x05U &&
+            raw_writes[i + 2] == 0x0AU && raw_writes[i + 3] == 0x00U &&
+            raw_writes[i + 4] == 0x00U && raw_writes[i + 5] == 0x00U &&
+            raw_writes[i + 6] == 0x00U) {
+            fc_pos = i;
+            break;
+        }
+    }
+    REQUIRE(fc_pos != std::string::npos);
+
+    std::size_t filter_pos = std::string::npos;
+    for (std::size_t i = 0; i + 1 < raw_writes.size(); ++i) {
+        if (raw_writes[i] == 0x34U && raw_writes[i + 1] == 0x11U) {
+            filter_pos = i;
+            break;
+        }
+    }
+    REQUIRE(filter_pos != std::string::npos);
+    REQUIRE(fc_pos > filter_pos);
+
+    std::size_t enable_pos = std::string::npos;
+    for (std::size_t i = 0; i + 3 < raw_writes.size(); ++i) {
+        if (raw_writes[i] == 0x31U && raw_writes[i + 1] == 0x02U &&
+            raw_writes[i + 2] == 0x02U && raw_writes[i + 3] == 0x01U) {
+            enable_pos = i;
+            break;
+        }
+    }
+    REQUIRE(enable_pos != std::string::npos);
+    REQUIRE(fc_pos < enable_pos);
+}
+
+TEST_CASE("obdx::Transport::open survives FC Delay NACK (best-effort, "
+          "adapter default stays in effect)",
+          "[transport][obdx_transport]") {
+    // Step 4.5 is best-effort: a future firmware revision could reject
+    // our wire-shape guess (4-byte BE microseconds after SUB) with
+    // Error_SubCommandIncorrectSize (0x05), and the adapter's power-on
+    // FC Delay default (1000 us) keeps the link working. open() must
+    // continue past the FC failure with a trace warning rather than
+    // fail the link.
+    auto cp = make_channel();
+    cp.raw->queue_read_ascii("OBDX Pro VX v1.0\r>");
+    cp.raw->queue_read_ascii("OK\r>");
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
+    // FC Delay — adapter rejects with error frame 0x7F LEN CMD ERR CHK.
+    {
+        std::vector<std::uint8_t> err{0x7FU, 0x02U,
+                                       static_cast<std::uint8_t>(
+                                           obdx::dvi::Opcode::CanProtocolSettings),
+                                       0x05U};
+        err.push_back(
+            obdx::dvi::checksum(std::span<std::uint8_t const>{err.data(), err.size()}));
+        cp.raw->queue_read(std::move(err));
+    }
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x01}));
+
+    obdx::Transport t{std::move(cp.owner)};
+    auto const r = t.open({st::transport::LinkKind::CanIso15765, 500000, 0x7E0, 0x7E8});
+    REQUIRE(r.has_value());
+    REQUIRE(t.is_open());
 }
 
 TEST_CASE("obdx::Transport::open rejects device whose probe doesn't say OBDX",
@@ -264,6 +367,7 @@ TEST_CASE("obdx::Transport::open rejects EnableNetwork ACK with state != ON",
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x0A})); // FC Delay ack (step 4.5)
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x00}));
     // SoftReboot ACK — best-effort cleanup the validation-failure path emits.
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SoftReboot, {}));
@@ -298,6 +402,7 @@ TEST_CASE("obdx::Transport::open rejects EnableNetwork ACK with wrong sub-op ech
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x0A})); // FC Delay ack (step 4.5)
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0xEE, 0x01}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SoftReboot, {}));
 
@@ -319,6 +424,7 @@ TEST_CASE("obdx::Transport::open accepts EnableNetwork ACK with state=LISTEN-ONL
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x0A})); // FC Delay ack (step 4.5)
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
 
     obdx::Transport t{std::move(cp.owner)};
@@ -349,6 +455,7 @@ struct ReadyTransport {
     // CAN filter ack — Developers Reference Manual v3.00 §3.14.1.
     // Response echoes the sub-op (0x00 = Entire Filter).
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x0A})); // FC Delay ack (step 4.5)
     // EnableNetwork(ON) ack — VT v1.06 §3.10.2; sent right after the
     // CAN filter so the bus comes up with a configured filter already.
     // Response echoes the sub-op (0x02) and the final state byte (0x01).
@@ -536,6 +643,7 @@ TEST_CASE("obdx::Transport::open in listen_only mode installs a PERMISSIVE "
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x0A})); // FC Delay ack (step 4.5)
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
 
     obdx::Transport t{std::move(cp.owner)};
@@ -597,6 +705,7 @@ TEST_CASE("obdx::Transport::send_recv refused in listen_only mode",
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x0A})); // FC Delay ack (step 4.5)
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
 
     obdx::Transport t{std::move(cp.owner)};
@@ -619,6 +728,7 @@ TEST_CASE("obdx::Transport::send refused in listen_only mode",
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x0A})); // FC Delay ack (step 4.5)
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
 
     obdx::Transport t{std::move(cp.owner)};
@@ -641,6 +751,7 @@ TEST_CASE("obdx::Transport::start_streaming pushes unsolicited frames to callbac
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x0A})); // FC Delay ack (step 4.5)
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
 
     // Two unsolicited adapter→PC pushes the streaming thread will see.
@@ -700,6 +811,7 @@ TEST_CASE("obdx::Transport::start_streaming rejects empty callback",
     cp.raw->queue_read_ascii("OK\r>");
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x01, 0x02}));
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x00}));
+    cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::CanProtocolSettings, {0x0A})); // FC Delay ack (step 4.5)
     cp.raw->queue_read(dvi_response_frame(obdx::dvi::Opcode::SetProtocol, {0x02, 0x02}));
     obdx::Transport t{std::move(cp.owner)};
     st::transport::LinkConfig cfg{};

@@ -30,6 +30,12 @@ void render_dtcs_panel(AppState &state) {
     if (!state.show_dtcs_panel) {
         return;
     }
+    // First-show fallback so toggling DTCs on outside the Tune/Datalog
+    // layouts (which dock it explicitly) doesn't drop a floating window
+    // at the default top-left.
+    if (ImGuiID const central = central_dock_node_id(); central != 0) {
+        ImGui::SetNextWindowDockID(central, ImGuiCond_FirstUseEver);
+    }
     if (!ImGui::Begin("DTCs", &state.show_dtcs_panel)) {
         ImGui::End();
         return;

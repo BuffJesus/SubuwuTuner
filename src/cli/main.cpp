@@ -14,7 +14,7 @@
 #include "st/profile.hpp"
 #include "st/discover.hpp"
 #include "st/ecu/bulk_reflash_cipher.hpp"
-#include "st/ecu/cobb_datalog.hpp"
+#include "st/ecu/extended_did_datalog.hpp"
 #include "st/ecu/ssm.hpp"
 #include "st/ecu/subaru_security.hpp"
 #include "st/edit.hpp"
@@ -461,7 +461,8 @@ constexpr std::string_view kUsage =
     "                            number, vin (0x02) the 17-byte VIN. Lives in the\n"
     "                            default session, no SecurityAccess needed.\n"
     "                            Useful as a quick tune-state identity check\n"
-    "                            before/after applying a tune via COBB AP.\n"
+    "                            before/after applying a tune via any\n"
+    "                            aftermarket flasher.\n"
     "    rdbi --transport <kind> --did <hex>\n"
     "         [--device <path>] [--dll <path>] [--output FILE.bin]\n"
     "         [--no-dsc] [--verbose]\n"
@@ -478,16 +479,16 @@ constexpr std::string_view kUsage =
     "          [--dll <path>] [--filter <id>[,<id>...]] [--duration <sec>]\n"
     "                            Passive CAN bus monitor. Opens the adapter in\n"
     "                            LISTEN-ONLY mode (adapter never transmits — safe to\n"
-    "                            share the OBD-II port with COBB AP or another active\n"
-    "                            tool via a Y-cable) and records every CAN frame to\n"
+    "                            share the OBD-II port with another active tester\n"
+    "                            via a Y-cable) and records every CAN frame to\n"
     "                            --output. Stops on Ctrl+C or after --duration\n"
     "                            seconds. --filter narrows the recorded IDs (the\n"
     "                            adapter still hears everything; the filter only\n"
     "                            controls what gets written to the file). Output is\n"
     "                            one frame per line: '<ms> 0xCANID <hex bytes>'.\n"
     "                            Use case: SecurityAccess seed/key capture (run\n"
-    "                            during a COBB connect cycle) for downstream feeding\n"
-    "                            into tools/extract_subaru_sa.py.\n"
+    "                            during an aftermarket-flasher connect cycle) for\n"
+    "                            downstream feeding into tools/extract_subaru_sa.py.\n"
     "    ssm-a8-poll --transport <kind> --output <FILE.log>\n"
     "                --addr <hex>[,<hex>...] [--addr <hex> ...]\n"
     "                [--device <path>] [--dll <path>] [--duration <sec>]\n"
@@ -502,13 +503,12 @@ constexpr std::string_view kUsage =
     "                            --duration seconds. Output is a header-commented\n"
     "                            log: per-poll lines '<elapsed_ms>\\t<HH HH ...>'\n"
     "                            with one hex byte per address in request order.\n"
-    "                            Use case: cross-correlate captured COBB F3xx\n"
-    "                            response bytes against direct OEM RAM reads to\n"
-    "                            recover the byte-to-RAM-address map without ROM\n"
-    "                            disassembly (see fixtures/private/findings_dmann_\n"
-    "                            sniff_20260528/NEXT-SESSION-RECIPE.md). May be\n"
-    "                            SA-gated on COBB-tuned ECUs; if denied, retry on\n"
-    "                            a factory / uninstalled ECU or unlock SSM first.\n"
+    "                            Use case: cross-correlate captured aftermarket-\n"
+    "                            datalogger F3xx response bytes against direct OEM\n"
+    "                            RAM reads to recover the byte-to-RAM-address map\n"
+    "                            without ROM disassembly. May be SA-gated on\n"
+    "                            aftermarket-tuned ECUs; if denied, retry on a\n"
+    "                            factory / uninstalled ECU or unlock SSM first.\n"
     "    rom-pull --addr <hex> --size <hex> --output <FILE.bin>\n"
     "             (--trace <FILE.uds> | --transport <kind> [--dll <path>]\n"
     "                                   [--device <path>])\n"
@@ -627,22 +627,21 @@ constexpr std::string_view kUsage =
     "                            — what each checks, when it no-ops, and its\n"
     "                            default thresholds. --json emits the\n"
     "                            subuwutuner.list-validators.v1 envelope.\n"
-    "    cobb-datalog-preset [--json|--toml] [--firmware v1_7_4_2|v1_7_6_0]\n"
-    "                            Print the Cobb AccessPort live datalog\n"
-    "                            protocol shape (DID set 0xF300-0xF304,\n"
+    "    did-datalog-preset [--json|--toml] [--firmware narrow|wide]\n"
+    "                            Print the aftermarket-datalogger SSM-extended\n"
+    "                            DID polling protocol shape (DID set 0xF300-0xF304,\n"
     "                            ~25 Hz polling) and per-byte signal layout\n"
     "                            including RAM address + scaling expression\n"
-    "                            + AP-internal monitor_id.\n"
-    "                            --firmware picks the AP firmware version\n"
-    "                            (defaults to v1_7_6_0 / CCF Gen3, 44 signals;\n"
-    "                            v1_7_4_2 / CCF Gen2 covers 31 signals).\n"
-    "                            --json emits subuwutuner.cobb-datalog-preset.v1.\n"
+    "                            + tester-internal monitor_id.\n"
+    "                            --firmware picks the DID layout version\n"
+    "                            (defaults to 'wide', 44 signals; 'narrow'\n"
+    "                            covers 31 signals).\n"
+    "                            --json emits subuwutuner.did-datalog-preset.v1.\n"
     "                            --toml emits a SubuwuTuner-ready pack fragment\n"
     "                            for the Verified-only subset (drop-in for a\n"
     "                            definitions tree).\n"
-    "                            Sourced clean-room from sniff + AP CSV\n"
-    "                            captures + LF79103P live-signals catalog\n"
-    "                            join (see analyst handoff 2026-06-06).\n"
+    "                            Sourced clean-room from sniff + CSV captures\n"
+    "                            + the LF79103P live-signals catalog.\n"
     "    transport-list [--json] [--explain]\n"
     "                            List J2534 v04.04 vendor DLLs registered on\n"
     "                            this host (HKLM\\Software\\PassThruSupport.04.04\n"
@@ -840,7 +839,7 @@ int print_def_load_error(char const *subcmd, std::filesystem::path const &path,
         std::fputs("\n  No definition pack found at the path above.\n"
                    "  SubuwuTuner does not ship with bundled calibration packs;\n"
                    "  generate one with tools/defgen/defgen.py from a public\n"
-                   "  RomRaider XML, or use fixtures/demo-pack/ as an example.\n",
+                   "  community XML, or use fixtures/demo-pack/ as an example.\n",
                    stderr);
     }
     return 1;
@@ -906,7 +905,7 @@ void print_id_suggestions(char const *entry_kind, std::string_view needle,
 // Forward-declared so commands defined ahead of parse_range's body can use it.
 bool parse_range(std::string_view s, std::size_t &lo, std::size_t &hi);
 
-// Subaru-convention CID location. Per ECUFlash + RomRaider XML
+// Subaru-convention CID location. Per the community per-ECU XML
 // definitions for every VA / VB / older-EJ family ECU we've
 // catalogued, the 8-byte ASCII "internal ID" (CID) sits at byte
 // offset 0x00002000. Per-pack `internalidaddress` fields exist
@@ -3873,7 +3872,7 @@ int cmd_completion(int argc, char *argv[]) {
         "stats", "diff", "diff-load", "audit", "profile", "config",
         "changelog", "log", "ssm-a8-poll", "doctor", "transport-list",
         "uds-test", "feature-graph", "ai-drift", "ai-narrate",
-        "list-validators", "cobb-datalog-preset",
+        "list-validators", "did-datalog-preset",
         nullptr,
     };
     // Flag completion vocabulary. Reused across bash + zsh handlers.
@@ -6821,13 +6820,14 @@ int cmd_checksum_repair(int argc, char *argv[]) {
     auto const *kind_name = st::flash::checksum_kind_name(kind);
     std::printf("checksum-repair: wrote %zu bytes to %s (kind: %s)\n", bytes.size(),
                 output_path->string().c_str(), kind_name);
-    if (kind == st::flash::ChecksumKind::CobbPerBlockCrc32) {
+    if (kind == st::flash::ChecksumKind::PerInstallBlockCrc32) {
         std::puts(
             "note: slot 24 (block 0x1E0000-0x200000) left untouched - the algorithm\n"
-            "      is self-referential and unrecovered. Ghidra confirms the ECU does\n"
-            "      not consult the slot table at runtime (findings 2026-06-06), so\n"
-            "      the value's only consumer is the AccessPort during a subsequent\n"
-            "      AP-driven flash. Direct-CAN flash via SubuwuTuner ignores it.");
+            "      is self-referential and unrecovered. Independent disassembly\n"
+            "      confirms the ECU does not consult the slot table at runtime, so\n"
+            "      the value's only consumer is the original aftermarket installer\n"
+            "      during a subsequent reflash. Direct-CAN flash via SubuwuTuner\n"
+            "      ignores it.");
     }
     return 0;
 }
@@ -6903,13 +6903,13 @@ int cmd_checksum_verify(int argc, char *argv[]) {
     // (or the pack declared "none" so no work was needed); unequal
     // → repair would have rewritten some bytes.
     auto const slot24_caveat = [&] {
-        if (kind == st::flash::ChecksumKind::CobbPerBlockCrc32) {
+        if (kind == st::flash::ChecksumKind::PerInstallBlockCrc32) {
             std::puts(
                 "note: slot 24 (block 0x1E0000-0x200000) is not verified by\n"
                 "      this algorithm; a mismatch there will not show up.\n"
-                "      Per Ghidra (findings 2026-06-06) the ECU does not\n"
-                "      consult the slot table at runtime - the table is\n"
-                "      AccessPort-side metadata only.");
+                "      Per independent disassembly the ECU does not consult\n"
+                "      the slot table at runtime - the table is installer-side\n"
+                "      metadata only.");
         }
     };
     if (copy == std::vector<std::uint8_t>{rom->data().begin(), rom->data().end()}) {
@@ -7187,7 +7187,7 @@ std::optional<double> parse_decimal(std::string_view raw);
 
 // Look up a column name in a CSV header; returns the index, or
 // std::string_view::npos if not found. Comparison is case-insensitive
-// because RomRaider log column names are inconsistently cased.
+// because community log column names are inconsistently cased.
 std::size_t find_csv_column(std::vector<std::string> const &header, std::string_view name) {
     auto const to_lower = [](char c) -> char {
         return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -8984,9 +8984,9 @@ int cmd_log(int argc, char *argv[]) {
         }
     }
 
-    // SSM PID id → autotune-canonical column name. Stable RomRaider/SSM
-    // mapping per Merp's logger.xml. Anything not in this table keeps its
-    // original PID id as the column header.
+    // SSM PID id → autotune-canonical column name. Stable mapping
+    // sourced from community PID inventories. Anything not in this
+    // table keeps its original PID id as the column header.
     auto const canonical_for = [](std::string_view pid_id) -> std::string_view {
         if (pid_id == "p2")
             return "coolant_c";
@@ -12010,7 +12010,7 @@ void doctor_section_packs(DoctorReport &r,
         std::printf("%s Definition packs\n", doctor_glyph(DoctorStatus::Fail));
         std::printf("       No .toml pack files found under %s.\n", pack_dir->string().c_str());
         r.note(DoctorStatus::Fail,
-               "Generate packs from RomRaider XML via tools/defgen, "
+               "Generate packs from community XML via tools/defgen, "
                "or drop a community pack bundle in there.");
         return;
     }
@@ -12210,7 +12210,7 @@ int cmd_doctor_json(std::optional<std::filesystem::path> const &pack_dir,
                 json_escape(out, pack_dir->string());
                 out.append(",\"found\":0,\"loaded\":0,\"failed\":0,\"failure_paths\":[]}");
                 report.note(DoctorStatus::Fail,
-                            "Generate packs from RomRaider XML via tools/defgen, or drop a "
+                            "Generate packs from community XML via tools/defgen, or drop a "
                             "community pack bundle in there.");
             } else {
                 std::size_t failed = 0;
@@ -12446,9 +12446,9 @@ constexpr TransportExplain kTransportExplains[] = {
     {
         "j2534",
         "Generic J2534 v04.04 — vendor DLL",
-        "Cross-vendor compatibility: Tactrix OpenPort 2.0, Kvaser, "
-        "DrewTech, Mongoose. Pick when the user has an existing "
-        "OEM-grade tool from RomRaider / OEM diag-software lineage.",
+        "Cross-vendor compatibility across J2534 adapter brands. "
+        "Pick when the user has an existing OEM-grade adapter that "
+        "speaks the v04.04 PassThru API.",
         "Windows-only registration channel. CLI surface is currently "
         "a stub for v1 — discovery works (see --transport j2534 "
         "rom-info, list), reads/writes wire next."
@@ -12551,16 +12551,16 @@ int cmd_transport_list(int argc, char *argv[]) {
     return 0;
 }
 
-// cobb-datalog-preset — prints the Cobb AccessPort live datalog
-// protocol shape + AP v1.7.6.0 signal layout. Sourced clean-room
-// from analyst captures (bus-check.log + 18 AP CSV exports). Useful
-// when a tuner wants to replay a Cobb AP datalog in SubuwuTuner's
-// future live-gauge cluster or wants a paper trail of "what byte
-// is what" for a captured trace.
-int cmd_cobb_datalog_preset(int argc, char *argv[]) {
+// did-datalog-preset — prints the SSM-extended DID polling protocol
+// shape + wide-layout signal map. Sourced clean-room from bus
+// captures + 18 datalog CSV exports. Useful when a tuner wants to
+// replay an aftermarket-datalogger trace in SubuwuTuner's future
+// live-gauge cluster or wants a paper trail of "what byte is what"
+// for a captured trace.
+int cmd_did_datalog_preset(int argc, char *argv[]) {
     bool json_mode = false;
     bool toml_mode = false;
-    std::string firmware_arg = "v1_7_6_0";
+    std::string firmware_arg = "wide";
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         if (a == "--json") {
@@ -12569,64 +12569,67 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
             toml_mode = true;
         } else if (a == "--firmware") {
             if (i + 1 >= argc) {
-                std::fputs("cobb-datalog-preset: --firmware requires a value\n",
+                std::fputs("did-datalog-preset: --firmware requires a value\n",
                            stderr);
                 return 2;
             }
             firmware_arg = argv[++i];
         } else {
             std::fprintf(stderr,
-                         "cobb-datalog-preset: unknown argument: %s\n", argv[i]);
+                         "did-datalog-preset: unknown argument: %s\n", argv[i]);
             return 2;
         }
     }
-    namespace cb = st::ecu::cobb_datalog;
-    cb::CobbApFirmware firmware = cb::CobbApFirmware::V1_7_6_0_CCF_Gen3;
-    char const *firmware_label = "AP v1.7.6.0 (CCF Gen3)";
-    if (firmware_arg == "v1_7_4_2" || firmware_arg == "v1.7.4.2") {
-        firmware = cb::CobbApFirmware::V1_7_4_2_CCF_Gen2;
-        firmware_label = "AP v1.7.4.2 (CCF Gen2)";
-    } else if (firmware_arg != "v1_7_6_0" && firmware_arg != "v1.7.6.0") {
+    namespace cb = st::ecu::extended_did_datalog;
+    cb::DidLayoutVersion firmware = cb::DidLayoutVersion::Wide;
+    char const *firmware_label = "wide layout";
+    // Accept the new "narrow"/"wide" tags plus legacy firmware-version
+    // aliases for one release cycle.
+    if (firmware_arg == "narrow" || firmware_arg == "v1_7_4_2" ||
+        firmware_arg == "v1.7.4.2") {
+        firmware = cb::DidLayoutVersion::Narrow;
+        firmware_label = "narrow layout";
+    } else if (firmware_arg != "wide" && firmware_arg != "v1_7_6_0" &&
+               firmware_arg != "v1.7.6.0") {
         std::fprintf(stderr,
-                     "cobb-datalog-preset: --firmware must be 'v1_7_4_2' or "
-                     "'v1_7_6_0' (got '%s')\n",
+                     "did-datalog-preset: --firmware must be 'narrow' or "
+                     "'wide' (got '%s')\n",
                      firmware_arg.c_str());
         return 2;
     }
     auto const layout = cb::ap_layout(firmware);
     if (toml_mode) {
-        // SubuwuTuner-ready pack fragment for the 12 Verified rows in
-        // v1.7.6.0 — mirrors the analyst's cobb_pids.toml shape so a
-        // user can drop it into a definitions tree. Verified-only:
-        // Hypothesized rows are excluded because their byte positions
-        // aren't ground-truth.
-        std::printf("# COBB AP F3xx polled-DID PIDs — generated by\n"
-                    "# `subuwutuner-cli cobb-datalog-preset --toml "
+        // SubuwuTuner-ready pack fragment for the wide-layout Verified
+        // rows so a user can drop it into a definitions tree.
+        // Verified-only: Hypothesized rows are excluded because their
+        // byte positions aren't ground-truth.
+        std::printf("# Aftermarket-datalogger F3xx polled-DID PIDs — generated by\n"
+                    "# `subuwutuner-cli did-datalog-preset --toml "
                     "--firmware %s`.\n"
-                    "# Source: st::ecu::cobb_datalog — see "
-                    "src/ecu/include/st/ecu/cobb_datalog.hpp.\n"
-                    "# Each [[scaling]] block is the COBB wire scale; "
+                    "# Source: st::ecu::extended_did_datalog — see\n"
+                    "# src/ecu/include/st/ecu/extended_did_datalog.hpp.\n"
+                    "# Each [[scaling]] block is the wire-side scale; "
                     "decode raw bytes via\n"
                     "#   value_eng = raw * factor + offset.\n"
                     "# ram_address_status: authoritative (SSM_* — OEM "
                     "RAM) or candidate\n"
-                    "#   (RAM_* — COBB-defined; on-car SSM-0xA8 needed "
-                    "to confirm).\n\n",
+                    "#   (RAM_* — tester-defined; on-car SSM-0xA8 "
+                    "needed to confirm).\n\n",
                     firmware_arg.c_str());
-        auto const storage_str = [](cb::CobbSignalStorage s) -> char const * {
+        auto const storage_str = [](cb::SignalStorage s) -> char const * {
             switch (s) {
-            case cb::CobbSignalStorage::Uint8:    return "u8";
-            case cb::CobbSignalStorage::Int8:     return "i8";
-            case cb::CobbSignalStorage::Uint16:   return "u16_be";
-            case cb::CobbSignalStorage::Int16:    return "i16_be";
-            case cb::CobbSignalStorage::Uint16Le: return "u16_le";
-            case cb::CobbSignalStorage::Int16Le:  return "i16_le";
+            case cb::SignalStorage::Uint8:    return "u8";
+            case cb::SignalStorage::Int8:     return "i8";
+            case cb::SignalStorage::Uint16:   return "u16_be";
+            case cb::SignalStorage::Int16:    return "i16_be";
+            case cb::SignalStorage::Uint16Le: return "u16_le";
+            case cb::SignalStorage::Int16Le:  return "i16_le";
             }
             return "u8";
         };
         std::size_t emitted = 0;
         for (auto const &s : layout) {
-            if (s.verification != cb::CobbVerification::Verified)
+            if (s.verification != cb::Verification::Verified)
                 continue;
             ++emitted;
             std::printf("[[pid]]\n");
@@ -12642,8 +12645,8 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
             std::printf("unit              = \"%.*s\"\n",
                         static_cast<int>(s.unit.size()), s.unit.data());
             std::printf("scaling.formula   = \"linear\"\n");
-            std::printf("scaling.factor    = %.10g\n", s.cobb_scale);
-            std::printf("scaling.offset    = %.4f\n", s.cobb_offset);
+            std::printf("scaling.factor    = %.10g\n", s.scale);
+            std::printf("scaling.offset    = %.4f\n", s.offset);
             std::printf("scaling_ssm       = \"%.*s\"\n",
                         static_cast<int>(s.scaling.size()), s.scaling.data());
             std::printf("ssm_address       = 0x%08X\n", s.ram_address);
@@ -12654,18 +12657,16 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
         std::printf("# %zu Verified PIDs emitted.\n", emitted);
         std::puts("# RAM addresses (`ssm_address`) above are LF79103P-specific.");
         std::puts("# For other A-series CIDs, the byte positions + wire scales");
-        std::puts("# port directly; the RAM addresses do not. Use the analyst's");
-        std::puts("# per-CID packs at findings/.../per_cid_packs/cobb_pids_<CID>");
-        std::puts("# .toml — supported CIDs: LF75404H, LF75404S, LF75600H,");
-        std::puts("# LF79103P, LF9C102P, LF9D012H, LF9G003T, LF9L000E.");
-        std::puts("# LF75600H has 3 monitors with no high-confidence catalog");
-        std::puts("# match; the other 7 CIDs map cleanly.");
+        std::puts("# port directly; the RAM addresses do not. Per-CID packs");
+        std::puts("# exist for LF75404H, LF75404S, LF75600H, LF79103P, LF9C102P,");
+        std::puts("# LF9D012H, LF9G003T, LF9L000E; LF75600H has 3 monitors with");
+        std::puts("# no high-confidence catalog match.");
         return 0;
     }
     if (json_mode) {
         std::string out;
         out.reserve(8192);
-        out.append("{\"schema\":\"subuwutuner.cobb-datalog-preset.v1\",");
+        out.append("{\"schema\":\"subuwutuner.did-datalog-preset.v1\",");
         out.append("\"firmware\":");
         json_escape(out, firmware_label);
         out.append(",");
@@ -12692,14 +12693,14 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
         out.append("],\"total_payload_bytes\":");
         out.append(std::to_string(cb::total_payload_bytes(firmware)));
         out.append(",\"signals\":[");
-        auto const storage_name = [](cb::CobbSignalStorage s) -> char const * {
+        auto const storage_name = [](cb::SignalStorage s) -> char const * {
             switch (s) {
-            case cb::CobbSignalStorage::Uint8:    return "uint8";
-            case cb::CobbSignalStorage::Int8:     return "int8";
-            case cb::CobbSignalStorage::Uint16:   return "uint16_be";
-            case cb::CobbSignalStorage::Int16:    return "int16_be";
-            case cb::CobbSignalStorage::Uint16Le: return "uint16_le";
-            case cb::CobbSignalStorage::Int16Le:  return "int16_le";
+            case cb::SignalStorage::Uint8:    return "uint8";
+            case cb::SignalStorage::Int8:     return "int8";
+            case cb::SignalStorage::Uint16:   return "uint16_be";
+            case cb::SignalStorage::Int16:    return "int16_be";
+            case cb::SignalStorage::Uint16Le: return "uint16_le";
+            case cb::SignalStorage::Int16Le:  return "int16_le";
             }
             return "unknown";
         };
@@ -12726,14 +12727,14 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
             out.append(",\"scaling\":");
             json_escape(out, s.scaling);
             out.append(",\"verification\":\"");
-            out.append(s.verification == cb::CobbVerification::Verified
+            out.append(s.verification == cb::Verification::Verified
                            ? "verified"
                            : "hypothesized");
-            out.append("\",\"cobb_scale\":");
-            std::snprintf(numbuf, sizeof numbuf, "%.10g", s.cobb_scale);
+            out.append("\",\"scale\":");
+            std::snprintf(numbuf, sizeof numbuf, "%.10g", s.scale);
             out.append(numbuf);
-            out.append(",\"cobb_offset\":");
-            std::snprintf(numbuf, sizeof numbuf, "%.10g", s.cobb_offset);
+            out.append(",\"offset\":");
+            std::snprintf(numbuf, sizeof numbuf, "%.10g", s.offset);
             out.append(numbuf);
             out.append(",\"monitor_id\":");
             json_escape(out, s.monitor_id);
@@ -12745,7 +12746,7 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
         std::fputs(out.c_str(), stdout);
         return 0;
     }
-    std::printf("Cobb AccessPort live datalog protocol — %s\n",
+    std::printf("Aftermarket-datalogger SSM-extended DID protocol — %s\n",
                 firmware_label);
     std::puts("");
     std::printf("  Request CAN id:    0x%03X (tester → ECU)\n",
@@ -12774,24 +12775,24 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
         }
         char const *storage = "?";
         switch (s.storage) {
-        case cb::CobbSignalStorage::Uint8:    storage = "u8";    break;
-        case cb::CobbSignalStorage::Int8:     storage = "i8";    break;
-        case cb::CobbSignalStorage::Uint16:   storage = "u16be"; break;
-        case cb::CobbSignalStorage::Int16:    storage = "i16be"; break;
-        case cb::CobbSignalStorage::Uint16Le: storage = "u16le"; break;
-        case cb::CobbSignalStorage::Int16Le:  storage = "i16le"; break;
+        case cb::SignalStorage::Uint8:    storage = "u8";    break;
+        case cb::SignalStorage::Int8:     storage = "i8";    break;
+        case cb::SignalStorage::Uint16:   storage = "u16be"; break;
+        case cb::SignalStorage::Int16:    storage = "i16be"; break;
+        case cb::SignalStorage::Uint16Le: storage = "u16le"; break;
+        case cb::SignalStorage::Int16Le:  storage = "i16le"; break;
         }
         char const *verification =
-            (s.verification == cb::CobbVerification::Verified) ? "✓" : "?";
+            (s.verification == cb::Verification::Verified) ? "✓" : "?";
         std::printf("    [%2u] %s %-5s 0x%08X  %.*s (%.*s)\n"
                     "         catalog: %.*s\n",
                     s.byte_offset, verification, storage, s.ram_address,
                     static_cast<int>(s.name.size()), s.name.data(),
                     static_cast<int>(s.unit.size()), s.unit.data(),
                     static_cast<int>(s.scaling.size()), s.scaling.data());
-        if (s.verification == cb::CobbVerification::Verified) {
+        if (s.verification == cb::Verification::Verified) {
             std::printf("         wire:    raw * %.6g + %.3f\n",
-                        s.cobb_scale, s.cobb_offset);
+                        s.scale, s.offset);
             std::printf("         monitor: %.*s (%s RAM)\n",
                         static_cast<int>(s.monitor_id.size()),
                         s.monitor_id.data(),
@@ -12799,14 +12800,12 @@ int cmd_cobb_datalog_preset(int argc, char *argv[]) {
         }
     }
     std::puts("");
-    std::puts("RAM addresses are LF79103P-specific (same Cobb signal on a");
-    std::puts("different CID may live at a different address). Scaling is");
-    std::puts("the catalog raw→engineering expression; variable 'x' is the");
+    std::puts("RAM addresses are LF79103P-specific (the same logical signal");
+    std::puts("on a different CID may live at a different address). Scaling");
+    std::puts("is the catalog raw→engineering expression; variable 'x' is the");
     std::puts("raw value (sign-extended for signed storage).");
-    std::puts("Source: analyst handoff 2026-06-06 (bus-check.log + 18 AP CSV");
-    std::puts("exports + LF79103P live-signals catalog join). Protocol shape");
-    std::puts("confirmed; per-byte mapping high-confidence pending on-car");
-    std::puts("driving-data ground-truth.");
+    std::puts("Protocol shape confirmed; per-byte mapping high-confidence");
+    std::puts("pending on-car driving-data ground-truth.");
     return 0;
 }
 
@@ -12884,7 +12883,14 @@ int cmd_list_validators(int argc, char *argv[]) {
 int cmd_rom_pull(int argc, char *argv[]) {
     std::optional<std::uint32_t> addr;
     std::optional<std::uint32_t> size;
-    std::uint32_t max_chunk = 0x100;
+    // Default --max-chunk = 0x1000 (4 KB) — the documented Gen-A.2
+    // ECU response-buffer ceiling per `findings/uds-read-workflow.md`
+    // §6. With the upfront chunk-size probe in `Flasher::read_full_rom`,
+    // this is the START of the ladder; the probe walks 0x1000 → 0x800
+    // → 0x400 → 0x200 → 0x100 until the ECU accepts a size.
+    std::uint32_t max_chunk = 0x1000;
+    bool auto_probe = true;   // --no-probe disables the upfront ladder
+    bool probe_only = false;  // --probe-only runs probe, prints size, exits
     std::optional<std::filesystem::path> trace_path;
     std::optional<std::filesystem::path> output_path;
     std::optional<std::string> transport_kind;
@@ -12898,8 +12904,6 @@ int cmd_rom_pull(int argc, char *argv[]) {
     std::optional<bool> authenticate_flag;
     std::optional<bool> enter_dsc_flag;
     std::uint8_t security_level = 0x01;
-    bool cobb_tuned = false;  // DEPRECATED — see comment at the
-                              // call site below. Now a no-op alias.
     std::optional<std::string> sa_variant;  // --sa-variant <name>.
 
     for (int i = 0; i < argc; ++i) {
@@ -12988,8 +12992,13 @@ int cmd_rom_pull(int argc, char *argv[]) {
                 return 2;
             }
             security_level = static_cast<std::uint8_t>(val);
-        } else if (a == "--cobb-tuned") {
-            cobb_tuned = true;
+        } else if (a == "--no-probe") {
+            auto_probe = false;
+        } else if (a == "--probe") {
+            auto_probe = true;
+        } else if (a == "--probe-only") {
+            probe_only = true;
+            auto_probe = true; // implied — there's nothing else to do
         } else if (a == "--sa-variant") {
             if (auto const *v = require_arg("--sa-variant"); v) {
                 sa_variant = std::string{v};
@@ -13011,7 +13020,12 @@ int cmd_rom_pull(int argc, char *argv[]) {
                    "(default: <rom_dump_root>/subuwutuner-rom-<UTC-timestamp>.bin)\n"
                    "         (--trace <FILE.uds> | --transport <kind>\n"
                    "                               [--dll <path>] [--device <path>])\n"
-                   "         [--max-chunk <hex>]\n"
+                   "         [--max-chunk <hex>]                  "
+                   "(default 0x1000 — upper bound for the probe ladder)\n"
+                   "         [--no-probe|--probe]                 "
+                   "(default ON — auto-shrink chunk size at boot)\n"
+                   "         [--probe-only]                       "
+                   "(run probe, print discovered size, exit)\n"
                    "         [--authenticate|--no-authenticate]   "
                    "(default ON for --transport, OFF for --trace)\n"
                    "         [--enter-dsc|--no-enter-dsc]         "
@@ -13019,29 +13033,44 @@ int cmd_rom_pull(int argc, char *argv[]) {
                    "         [--security-level <hex>]             "
                    "(default 0x01 — bootloader unlock)\n"
                    "         [--sa-variant <name>]                "
-                   "(default | fehr-active[-l1] | fehr-active-l3; see docs/23)\n"
-                   "         [--cobb-tuned]                       "
-                   "(DEPRECATED no-op alias; use --sa-variant)\n",
+                   "(default | aftermarket[-l1] | aftermarket-l3; see docs/23)\n",
                    stderr);
         return 2;
     }
     // Resolve --sa-variant to a key function. Allow `default` as an
     // explicit synonym for the factory L1 path so scripts can be
     // explicit about which variant they're using.
+    //
+    // Deprecated aliases (`fehr-active{,-l1,-l3}`) are accepted for one
+    // release cycle but emit a stderr warning. New tooling should pass
+    // the `aftermarket{,-l1,-l3}` names directly.
     st::ecu::SecurityKeyFn sa_variant_fn;
     if (sa_variant.has_value()) {
         if (*sa_variant == "default" || *sa_variant == "factory") {
             sa_variant_fn = &st::ecu::subaru::ssmcan1_key_stub;
+        } else if (*sa_variant == "aftermarket" ||
+                   *sa_variant == "aftermarket-l1") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket;
+        } else if (*sa_variant == "aftermarket-l3") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l3_aftermarket;
         } else if (*sa_variant == "fehr-active" ||
                    *sa_variant == "fehr-active-l1") {
-            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_fehr_active;
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket;
+            std::fputs("rom-pull: warning: --sa-variant 'fehr-active[-l1]' "
+                       "is a deprecated alias for 'aftermarket[-l1]'; will "
+                       "be removed next release.\n",
+                       stderr);
         } else if (*sa_variant == "fehr-active-l3") {
-            sa_variant_fn = &st::ecu::subaru::ssmcan1_l3_fehr_active;
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l3_aftermarket;
+            std::fputs("rom-pull: warning: --sa-variant 'fehr-active-l3' "
+                       "is a deprecated alias for 'aftermarket-l3'; will "
+                       "be removed next release.\n",
+                       stderr);
         } else {
             std::fprintf(stderr,
                          "rom-pull: --sa-variant '%s' not recognized "
-                         "(expected one of: default, fehr-active, "
-                         "fehr-active-l1, fehr-active-l3).\n",
+                         "(expected one of: default, aftermarket, "
+                         "aftermarket-l1, aftermarket-l3).\n",
                          sa_variant->c_str());
             return 2;
         }
@@ -13168,20 +13197,66 @@ int cmd_rom_pull(int argc, char *argv[]) {
     if (sa_variant_fn) {
         flasher.set_security_key_fn(sa_variant_fn);
         std::fprintf(stderr, "rom-pull: SA variant: %s\n", sa_variant->c_str());
-    } else if (cobb_tuned) {
-        flasher.set_security_key_fn(&st::ecu::subaru::ssmcan1_l1_cobb_tuned);
-        std::fputs("rom-pull: --cobb-tuned is now a no-op alias. "
-                   "Default L1 SA uses the COBB-uninstalled constants "
-                   "by design (the original two-variant model was "
-                   "wrong; see src/ecu/src/subaru_security.cpp). For "
-                   "Fehr e-tunes, pass --sa-variant fehr-active.\n",
-                   stderr);
     }
+    // --probe-only short-circuit: drive DSC + SA so the ECU is in the
+    // right state to honor RMBA, then walk the chunk-size ladder once,
+    // print the discovered size, and exit. This is a characterization
+    // tool; intentionally separate from --no-probe (which dumps with a
+    // fixed user-supplied size).
+    if (probe_only) {
+        if (enter_dsc) {
+            if (auto s = flasher.client().diagnostic_session_control(
+                    st::ecu::uds::kDscExtendedDiagnostic, std::chrono::milliseconds{1000});
+                !s.has_value()) {
+                std::fprintf(stderr, "rom-pull --probe-only: DSC entry failed: %s\n",
+                             s.error().to_string().c_str());
+                return 1;
+            }
+        }
+        if (authenticate) {
+            auto seed = flasher.client().security_access_request_seed(
+                security_level, std::chrono::milliseconds{1000});
+            if (!seed.has_value()) {
+                std::fprintf(stderr, "rom-pull --probe-only: SA requestSeed failed: %s\n",
+                             seed.error().to_string().c_str());
+                return 1;
+            }
+            // Reuse whatever SA fn the Flasher was configured with above.
+            auto key = sa_variant_fn ? sa_variant_fn(*seed)
+                                     : st::ecu::subaru::ssmcan1_key_stub(*seed);
+            if (!key.has_value()) {
+                std::fprintf(stderr, "rom-pull --probe-only: SA key derivation failed: %s\n",
+                             key.error().to_string().c_str());
+                return 1;
+            }
+            auto const send_sub = static_cast<std::uint8_t>(security_level + 1U);
+            if (auto s = flasher.client().security_access_send_key(
+                    send_sub, *key, std::chrono::milliseconds{1000});
+                !s.has_value()) {
+                std::fprintf(stderr, "rom-pull --probe-only: SA sendKey failed: %s\n",
+                             s.error().to_string().c_str());
+                return 1;
+            }
+        }
+        auto probed = flasher.probe_max_chunk(*addr, max_chunk, std::chrono::milliseconds{1000});
+        if (!probed.has_value()) {
+            std::fprintf(stderr, "rom-pull --probe-only: %s\n",
+                         probed.error().to_string().c_str());
+            return 1;
+        }
+        std::fprintf(stdout,
+                     "rom-pull: probe at 0x%08X (hint 0x%X) settled on chunk 0x%X\n",
+                     *addr, static_cast<unsigned>(max_chunk),
+                     static_cast<unsigned>(*probed));
+        return 0;
+    }
+
     auto const r = flasher.read_full_rom(*addr, *size, max_chunk,
                                           std::chrono::milliseconds{1000},
                                           /*progress=*/nullptr,
                                           /*cancel=*/nullptr,
-                                          enter_dsc, authenticate, security_level);
+                                          enter_dsc, authenticate, security_level,
+                                          auto_probe);
     if (!r.has_value()) {
         std::fprintf(stderr, "rom-pull: %s\n", r.error().to_string().c_str());
         return 1;
@@ -13402,8 +13477,7 @@ int cmd_rdbi(int argc, char *argv[]) {
 // which tune is currently active on the ECU without dumping the full
 // ROM. Mode 09 is in the default session and SA-free, so the command
 // is intentionally short: open transport, send `09 PID`, print
-// response. Pairs with the tuned-dump workflow in
-// Findings/HANDOFF-to-analyst-2026-05-25-tuned-dump-plan.md §4 step 6.
+// response.
 int cmd_obd_info(int argc, char *argv[]) {
     std::optional<std::string> transport_kind;
     std::string dll_path;
@@ -13653,8 +13727,8 @@ int cmd_sniff(int argc, char *argv[]) {
                    "(or --duration seconds elapsed). Output format is one frame\n"
                    "per line: '<elapsed_ms> 0xCANID <hex bytes>'.\n"
                    "\n"
-                   "Intended for SecurityAccess seed/key capture (run while COBB AP\n"
-                   "or any other active tool is connected via a Y-cable), DBC reverse\n"
+                   "Intended for SecurityAccess seed/key capture (run while any\n"
+                   "other active tester is connected via a Y-cable), DBC reverse\n"
                    "engineering, or general bus exploration. Safe to run on a live\n"
                    "vehicle — listen-only mode means the adapter never transmits.\n"
                    "\n"
@@ -13686,7 +13760,7 @@ int cmd_sniff(int argc, char *argv[]) {
     }
     // listen_only=true: skip CAN filter setup (capture everything) +
     // EnableNetwork LISTEN-ONLY (adapter never TXes, safe to share the
-    // bus with COBB AP via Y-cable).
+    // bus with another active tester via a Y-cable).
     st::transport::LinkConfig link{};
     link.kind = st::transport::LinkKind::CanIso15765;
     link.baud = 500000;
@@ -13824,14 +13898,14 @@ int cmd_ssm_a8_poll(int argc, char *argv[]) {
     std::string device_path;
     std::optional<std::filesystem::path> output_path;
     std::optional<std::uint32_t> duration_seconds;
-    std::uint32_t interval_ms = 333;  // ~3 Hz, matches COBB AP F3xx cadence
+    std::uint32_t interval_ms = 333;  // ~3 Hz, matches typical aftermarket-flasher F3xx cadence
     std::uint32_t timeout_ms = 500;
     std::vector<std::uint32_t> addresses;
     bool verbose = false;
 
     // SA-prelude flags (default OFF — preserves the original "just send A8"
     // behavior on factory ECUs where SSM-A8 isn't gated). Opt in when the
-    // ECU returns NRC 0x33 on every poll, indicating COBB-style lockdown.
+    // ECU returns NRC 0x33 on every poll, indicating aftermarket-style lockdown.
     std::optional<bool> authenticate_flag;
     std::optional<bool> enter_dsc_flag;
     std::optional<std::uint8_t> security_level_flag;
@@ -13972,15 +14046,16 @@ int cmd_ssm_a8_poll(int argc, char *argv[]) {
             "Reads one byte per --addr via OEM SSM-0xA8 over ISO-15765 every\n"
             "--interval-ms (default 333). Writes a comment-headered log with\n"
             "per-poll lines '<elapsed_ms>\\t<HH HH ...>' for downstream\n"
-            "correlation against captured COBB F3xx response bytes.\n"
+            "correlation against captured aftermarket-datalogger F3xx response\n"
+            "bytes.\n"
             "\n"
             "If the ECU returns NRC 0x33 on every poll, SSM-A8 is SA-gated\n"
-            "(observed on COBB-tuned ECUs that null-redirect OEM service\n"
+            "(observed on aftermarket-tuned ECUs that null-redirect OEM service\n"
             "handlers). Pass --authenticate to do the UDS DSC + SA dance\n"
             "before polling starts. --sa-variant names the key function\n"
-            "(default | fehr-active[-l1] | fehr-active-l3; see docs/23).\n"
+            "(default | aftermarket[-l1] | aftermarket-l3; see docs/23).\n"
             "--security-level overrides the SA level (default tracks the\n"
-            "variant: 0x03 for fehr-active-l3, 0x01 otherwise).\n",
+            "variant: 0x03 for aftermarket-l3, 0x01 otherwise).\n",
             stderr);
         return 2;
     }
@@ -14003,24 +14078,43 @@ int cmd_ssm_a8_poll(int argc, char *argv[]) {
     // whether to run the preamble lives at the open-transport call site.
     bool const authenticate = authenticate_flag.value_or(false);
     bool const enter_dsc = enter_dsc_flag.value_or(authenticate);
+    auto const variant_uses_l3 =
+        sa_variant.has_value() &&
+        (*sa_variant == "aftermarket-l3" || *sa_variant == "fehr-active-l3");
     std::uint8_t const security_level = security_level_flag.value_or(
-        (sa_variant.has_value() && *sa_variant == "fehr-active-l3") ? 0x03 : 0x01);
+        variant_uses_l3 ? 0x03 : 0x01);
 
     st::ecu::SecurityKeyFn sa_fn = &st::ecu::subaru::ssmcan1_key_stub;
     char const *sa_label = "factory L1";
     if (sa_variant.has_value()) {
         if (*sa_variant == "default" || *sa_variant == "factory") {
             // already set above
-        } else if (*sa_variant == "fehr-active" || *sa_variant == "fehr-active-l1") {
-            sa_fn = &st::ecu::subaru::ssmcan1_l1_fehr_active;
-            sa_label = "fehr-active L1";
+        } else if (*sa_variant == "aftermarket" ||
+                   *sa_variant == "aftermarket-l1") {
+            sa_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket;
+            sa_label = "aftermarket L1";
+        } else if (*sa_variant == "aftermarket-l3") {
+            sa_fn = &st::ecu::subaru::ssmcan1_l3_aftermarket;
+            sa_label = "aftermarket L3";
+        } else if (*sa_variant == "fehr-active" ||
+                   *sa_variant == "fehr-active-l1") {
+            sa_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket;
+            sa_label = "aftermarket L1";
+            std::fputs("ssm-a8-poll: warning: --sa-variant "
+                       "'fehr-active[-l1]' is a deprecated alias for "
+                       "'aftermarket[-l1]'.\n",
+                       stderr);
         } else if (*sa_variant == "fehr-active-l3") {
-            sa_fn = &st::ecu::subaru::ssmcan1_l3_fehr_active;
-            sa_label = "fehr-active L3";
+            sa_fn = &st::ecu::subaru::ssmcan1_l3_aftermarket;
+            sa_label = "aftermarket L3";
+            std::fputs("ssm-a8-poll: warning: --sa-variant "
+                       "'fehr-active-l3' is a deprecated alias for "
+                       "'aftermarket-l3'.\n",
+                       stderr);
         } else {
             std::fprintf(stderr,
                          "ssm-a8-poll: --sa-variant '%s' not recognized "
-                         "(expected: default | fehr-active[-l1] | fehr-active-l3).\n",
+                         "(expected: default | aftermarket[-l1] | aftermarket-l3).\n",
                          sa_variant->c_str());
             return 2;
         }
@@ -15052,8 +15146,16 @@ int main(int argc, char *argv[]) {
     if (cmd == "list-validators") {
         return cmd_list_validators(argc - 2, argv + 2);
     }
+    if (cmd == "did-datalog-preset") {
+        return cmd_did_datalog_preset(argc - 2, argv + 2);
+    }
     if (cmd == "cobb-datalog-preset") {
-        return cmd_cobb_datalog_preset(argc - 2, argv + 2);
+        // Deprecated alias kept for one release cycle. Emits a stderr
+        // warning so scripts can be updated; semantics are identical.
+        std::fputs("cobb-datalog-preset: deprecated alias for "
+                   "did-datalog-preset; please update your scripts.\n",
+                   stderr);
+        return cmd_did_datalog_preset(argc - 2, argv + 2);
     }
     if (cmd == "transport-list") {
         return cmd_transport_list(argc - 2, argv + 2);

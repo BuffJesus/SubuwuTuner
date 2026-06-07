@@ -34,7 +34,7 @@ license        = "Apache-2.0"
 # rewrite is functionally inert. The field belongs here because the
 # user's actual car sits in a COBB-touched LF79102P state where the
 # table IS active.
-checksum_type  = "cobb_per_block_crc32"
+checksum_type  = "per_install_block_crc32"
 
 
 [[identification]]

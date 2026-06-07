@@ -35,7 +35,7 @@ enum class WireProtocol : std::uint8_t {
 // This is metadata only — actual kernel code is not exposed across the
 // extension boundary. A future `KernelLoader` interface may follow.
 struct KernelDescriptor {
-    // Stable identifier (e.g. "subaru.va.sh2a.cobb-ap.v3").
+    // Stable identifier (e.g. "subaru.va.sh2a.aftermarket.v3").
     std::string_view id{};
 
     // Display name (UI: "Subaru VA WRX MT — SH-2A — Stage Kernel v3").

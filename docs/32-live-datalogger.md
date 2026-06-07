@@ -350,12 +350,12 @@ The AP-internal monitor IDs split into two prefixes:
   their `ram_address` as a best-guess pointer, not as ground truth.
 
 Full 49-monitor list at
-`findings/corpus-wide-re-2026-06-06/out/cobb_datalog/COBB_MONITOR_IDS.md`.
+the independent monitor-ID catalog.
 
 **Deployment recipe**
 
 The analyst's `INTEGRATION_RECIPE.md` at
-`findings/corpus-wide-re-2026-06-06/out/cobb_datalog/` walks the
+the corpus-wide datalog reverse-engineering output walks the
 end-to-end drop-in: copy the 8 per-CID TOMLs into the user's
 `definitions/impreza/` tree, run `subuwutuner-cli pack-list` to
 register them, run `subuwutuner-cli rom-identify` to verify the
@@ -413,22 +413,22 @@ recipe with cp commands lives at
 **Per-byte signal layout (two AP firmware versions)**
 
 Both supported AP firmware versions ship as const-data layouts in
-`st::ecu::cobb_datalog`:
+`st::ecu::extended_did_datalog`:
 
 - `ap_v1_7_4_2_layout()` — CCF Gen2, 31 signals across F300..F302.
   100% catalog-mapped to LF79103P RAM addresses; all entries
   Hypothesized (no R²-fit was run for this firmware version).
 - `ap_v1_7_6_0_layout()` — CCF Gen3, 44 signals across F300..F304.
   12 entries R²-verified ≥ 0.95 against a real driving sniff
-  (`CobbVerification::Verified`); the remaining 32 are
-  CSV-column-order inferences (`CobbVerification::Hypothesized`).
+  (`Verification::Verified`); the remaining 32 are
+  CSV-column-order inferences (`Verification::Hypothesized`).
   The Verified set folds in 5 previously-overflowed signals
   (SD VE Est MAF, TD Boost Error Ext, TGV Map Ratio, Vehicle Speed,
   Wastegate Duty); Throttle Pos is the one overflow signal still
   unplaced — pending another correlation pass or an SSM-0xA8
   RAM-read ground-truth.
 
-Each `CobbSignalLayout` entry carries:
+Each `SignalLayout` entry carries:
 - byte offset + storage shape (`Uint8`/`Int8`/`Uint16` (big-endian)/
   `Int16`/`Uint16Le`/`Int16Le` — the AP packs a handful of values
   little-endian on the wire)
@@ -437,9 +437,9 @@ Each `CobbSignalLayout` entry carries:
 - catalog `scaling` expression in the catalog grammar (operators
   `+ - * / >> << & | (...)` over variable `x`, no function calls)
 - `verification` tier (`Verified` / `Hypothesized`)
-- wire-side `cobb_scale` + `cobb_offset` — populated only for
-  Verified entries; gives `value_eng = raw * cobb_scale +
-  cobb_offset` straight from the wire. For Hypothesized entries the
+- wire-side `scale` + `offset` — populated only for
+  Verified entries; gives `value_eng = raw * scale +
+  offset` straight from the wire. For Hypothesized entries the
   wire-side transform is unknown; use the catalog `scaling`
   expression as the best-available approximation.
 
@@ -457,12 +457,11 @@ consume the layout without re-doing the analyst-side join.
   enumerating 43 channels by hand
 - Replay-side: parse a captured `bus-check.log`-style trace and
   decode it byte-by-byte using the layout above
-- A bench rig can simulate Cobb-equivalent responses for the
-  future live datalogger's integration tests — no AP needed
+- A bench rig can simulate aftermarket-equivalent responses for the
+  future live datalogger's integration tests — no upstream tool needed
 
-The analyst's full reconstruction is at
-`D:\Subuwu\findings\HANDOFF-from-analyst-2026-06-06-cobb-datalog.md`
-+ `findings/corpus-wide-re-2026-06-06/out/cobb_datalog/`.
+Full reverse-engineering output lives in the corpus-wide datalog
+reverse-engineering tree on the analyst side.
 
 ## References
 

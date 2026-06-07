@@ -779,12 +779,12 @@ TEST_CASE("CLI list-validators exits 2 on unknown option",
     REQUIRE(r.exit_code == 2);
 }
 
-TEST_CASE("CLI cobb-datalog-preset prints the AP v1.7.6.0 layout",
-          "[cli][integration][cobb-datalog-preset]") {
+TEST_CASE("CLI did-datalog-preset prints the wide-layout signal map",
+          "[cli][integration][did-datalog-preset]") {
     if (!can_run_cli_tests()) {
         return;
     }
-    auto const r = st::test::cli_run("cobb-datalog-preset");
+    auto const r = st::test::cli_run("did-datalog-preset");
     REQUIRE(r.spawned);
     REQUIRE(r.exit_code == 0);
     REQUIRE(stdout_contains(r, "0x7E0"));
@@ -794,52 +794,52 @@ TEST_CASE("CLI cobb-datalog-preset prints the AP v1.7.6.0 layout",
     REQUIRE(stdout_contains(r, "ReadDataByIdentifier"));
 }
 
-TEST_CASE("CLI cobb-datalog-preset --json emits subuwutuner.cobb-datalog-preset.v1",
-          "[cli][integration][cobb-datalog-preset][json]") {
+TEST_CASE("CLI did-datalog-preset --json emits subuwutuner.did-datalog-preset.v1",
+          "[cli][integration][did-datalog-preset][json]") {
     if (!can_run_cli_tests()) {
         return;
     }
-    auto const r = st::test::cli_run("cobb-datalog-preset --json");
+    auto const r = st::test::cli_run("did-datalog-preset --json");
     REQUIRE(r.spawned);
     REQUIRE(r.exit_code == 0);
-    REQUIRE(stdout_contains(r, "\"schema\":\"subuwutuner.cobb-datalog-preset.v1\""));
-    REQUIRE(stdout_contains(r, "\"firmware\":\"AP v1.7.6.0"));
+    REQUIRE(stdout_contains(r, "\"schema\":\"subuwutuner.did-datalog-preset.v1\""));
+    REQUIRE(stdout_contains(r, "\"firmware\":\"wide layout"));
     REQUIRE(stdout_contains(r, "\"did\":\"0xF303\""));
     REQUIRE(stdout_contains(r, "\"ram_address\":\"0xFFF8D424\""));
-    // RPM is now at F301:6 (post 2026-06-06 aligned correction), not F303:4.
+    // RPM lives at F301:6 in the aligned wide layout, not F303:4.
     REQUIRE(stdout_contains(r, "\"did\":\"0xF301\""));
 }
 
-TEST_CASE("CLI cobb-datalog-preset --firmware v1_7_4_2 prints the Gen2 layout",
-          "[cli][integration][cobb-datalog-preset][firmware]") {
+TEST_CASE("CLI did-datalog-preset --firmware narrow prints the narrow layout",
+          "[cli][integration][did-datalog-preset][firmware]") {
     if (!can_run_cli_tests()) {
         return;
     }
-    auto const r = st::test::cli_run("cobb-datalog-preset --firmware v1_7_4_2");
+    auto const r = st::test::cli_run("did-datalog-preset --firmware narrow");
     REQUIRE(r.spawned);
     REQUIRE(r.exit_code == 0);
-    REQUIRE(stdout_contains(r, "v1.7.4.2"));
+    REQUIRE(stdout_contains(r, "narrow layout"));
     REQUIRE(stdout_contains(r, "RPM"));
-    // CCF Gen2 doesn't pack the AVCS signals Gen3 does.
+    // Narrow layout doesn't pack the AVCS signals the wide layout does.
     REQUIRE_FALSE(stdout_contains(r, "AVCS Exh Left"));
 }
 
-TEST_CASE("CLI cobb-datalog-preset exits 2 on unknown firmware",
-          "[cli][integration][cobb-datalog-preset][error]") {
+TEST_CASE("CLI did-datalog-preset exits 2 on unknown firmware",
+          "[cli][integration][did-datalog-preset][error]") {
     if (!can_run_cli_tests()) {
         return;
     }
-    auto const r = st::test::cli_run("cobb-datalog-preset --firmware v9_9_9_9");
+    auto const r = st::test::cli_run("did-datalog-preset --firmware v9_9_9_9");
     REQUIRE(r.spawned);
     REQUIRE(r.exit_code == 2);
 }
 
-TEST_CASE("CLI cobb-datalog-preset --toml emits Verified-only TOML",
-          "[cli][integration][cobb-datalog-preset][toml]") {
+TEST_CASE("CLI did-datalog-preset --toml emits Verified-only TOML",
+          "[cli][integration][did-datalog-preset][toml]") {
     if (!can_run_cli_tests()) {
         return;
     }
-    auto const r = st::test::cli_run("cobb-datalog-preset --toml");
+    auto const r = st::test::cli_run("did-datalog-preset --toml");
     REQUIRE(r.spawned);
     REQUIRE(r.exit_code == 0);
     REQUIRE(stdout_contains(r, "[[pid]]"));
@@ -848,4 +848,15 @@ TEST_CASE("CLI cobb-datalog-preset --toml emits Verified-only TOML",
     REQUIRE(stdout_contains(r, "ram_address_status = \"authoritative\""));
     REQUIRE(stdout_contains(r, "ram_address_status = \"candidate\""));
     REQUIRE(stdout_contains(r, "# 36 Verified PIDs emitted."));
+}
+
+TEST_CASE("CLI cobb-datalog-preset still works as a deprecated alias",
+          "[cli][integration][did-datalog-preset][alias]") {
+    if (!can_run_cli_tests()) {
+        return;
+    }
+    auto const r = st::test::cli_run("cobb-datalog-preset");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_contains(r, "RPM"));
 }

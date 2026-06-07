@@ -26,6 +26,12 @@ void render_stats_panel(AppState &state) {
     if (!state.show_stats_panel) {
         return;
     }
+    // First-show fallback so toggling Stats on outside the Tune
+    // workspace (whose build_workspace_layout docks it) doesn't drop
+    // a floating window at the default top-left.
+    if (ImGuiID const central = central_dock_node_id(); central != 0) {
+        ImGui::SetNextWindowDockID(central, ImGuiCond_FirstUseEver);
+    }
     if (!ImGui::Begin("Stats", &state.show_stats_panel)) {
         ImGui::End();
         return;
