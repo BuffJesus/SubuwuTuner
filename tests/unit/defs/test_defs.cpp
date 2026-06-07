@@ -2268,6 +2268,105 @@ cid_match   = "CHILD   "
     REQUIRE(d->identifications()[1].cid_match == "CHILD   ");
 }
 
+// Regression: from_file (single-file load) used to skip extends
+// resolution entirely. Project::open loads its def via from_file, so
+// any pack relying on inheritance (lf79101p extends lf79103p in the
+// shipping defs tree) saw zero inherited tables at runtime — the
+// workflow modal's pack_supports_* check returned false and the
+// feature stayed disabled even though the inheritance was declared.
+TEST_CASE("Definition::from_file resolves 'extends' across sibling files",
+          "[defs][from_file][extends]") {
+    TempDir td;
+
+    // Flat-file layout: both packs are *.toml files in the same dir,
+    // mirroring the definitions/impreza/ tree.
+    write_text(td.path / "parent.toml", R"toml(
+[pack]
+id             = "parent-pack-ff"
+endianness     = "big"
+rom_size_bytes = 65536
+
+[[scaling]]
+id        = "rpm_x1"
+formula   = "linear"
+factor    = 1.0
+data_type = "uint16_be"
+unit      = "rpm"
+
+[[axis]]
+id        = "rpm_axis"
+data_type = "uint16_be"
+address   = 0
+length    = 16
+scaling   = "rpm_x1"
+
+[[table]]
+id         = "fuel_table"
+dimensions = 1
+data_type  = "uint8"
+address    = 256
+scaling    = "rpm_x1"
+axis_x     = "rpm_axis"
+)toml");
+
+    write_text(td.path / "child.toml", R"toml(
+[pack]
+id             = "child-pack-ff"
+endianness     = "big"
+rom_size_bytes = 65536
+extends        = "parent-pack-ff"
+)toml");
+
+    auto const d = st::Definition::from_file(td.path / "child.toml");
+    REQUIRE(d.has_value());
+    REQUIRE(d->pack().id == "child-pack-ff");
+    REQUIRE_FALSE(d->pack().extends.has_value()); // consumed by resolution
+    // Inherited from parent: 1 scaling, 1 axis, 1 table — present despite
+    // the child file having no records of its own.
+    REQUIRE(d->scalings().size() == 1);
+    REQUIRE(d->axes().size() == 1);
+    REQUIRE(d->tables().size() == 1);
+    REQUIRE(d->find_table("fuel_table") != nullptr);
+}
+
+TEST_CASE("Definition::from_file extends cycles are detected",
+          "[defs][from_file][extends]") {
+    TempDir td;
+
+    write_text(td.path / "a.toml", R"toml(
+[pack]
+id      = "pack-a"
+endianness = "big"
+extends = "pack-b"
+)toml");
+    write_text(td.path / "b.toml", R"toml(
+[pack]
+id      = "pack-b"
+endianness = "big"
+extends = "pack-a"
+)toml");
+
+    auto const d = st::Definition::from_file(td.path / "a.toml");
+    REQUIRE_FALSE(d.has_value());
+    REQUIRE(d.error().to_string().find("cycle") != std::string::npos);
+}
+
+TEST_CASE("Definition::from_file missing extends parent fails clearly",
+          "[defs][from_file][extends]") {
+    TempDir td;
+    write_text(td.path / "orphan.toml", R"toml(
+[pack]
+id         = "orphan-pack"
+endianness = "big"
+extends    = "nonexistent-parent"
+)toml");
+
+    auto const d = st::Definition::from_file(td.path / "orphan.toml");
+    REQUIRE_FALSE(d.has_value());
+    auto const msg = d.error().to_string();
+    REQUIRE(msg.find("nonexistent-parent") != std::string::npos);
+}
+
 TEST_CASE("from_directory follows multi-level extends chains", "[defs][extends]") {
     TempDir td;
 

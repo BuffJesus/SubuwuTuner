@@ -1252,29 +1252,116 @@ Status resolve_includes(Definition &def, std::vector<std::string> const &include
 }
 } // namespace
 
-Result<Definition> Definition::from_file(std::filesystem::path const &path) {
+namespace {
+// Scan sibling `*.toml` files in `file_path.parent_path()` for one whose
+// `[pack].id` matches `target_id`. Used by from_file's extends-resolution
+// step — counterpart to DefinitionBuilder::find_sibling_pack_dir for the
+// flat-file layout (one .toml per pack, all in the same directory) that
+// the impreza/ tree uses today. Subdirectory layouts continue to flow
+// through from_directory's load_chain path.
+Result<std::filesystem::path>
+find_sibling_pack_file(std::filesystem::path const &file_path, std::string_view target_id) {
+    auto const parent = file_path.parent_path();
+    if (parent.empty()) {
+        return failure(ErrorCode::FileNotFound,
+                       "cannot resolve 'extends = " + std::string{target_id} +
+                           "': no parent directory of " + file_path.string());
+    }
+    std::error_code ec;
+    if (!std::filesystem::is_directory(parent, ec) || ec) {
+        return failure(ErrorCode::FileNotFound,
+                       "cannot resolve 'extends = " + std::string{target_id} +
+                           "': search root is not a directory: " + parent.string());
+    }
+    for (auto const &entry : std::filesystem::directory_iterator{parent, ec}) {
+        if (ec)
+            break;
+        if (!entry.is_regular_file(ec) || ec)
+            continue;
+        auto const ep = entry.path();
+        if (ep.extension() != ".toml")
+            continue;
+        // Skip self so we don't recurse into our own file.
+        if (std::filesystem::equivalent(ep, file_path, ec))
+            continue;
+        std::error_code read_ec;
+        std::string const contents = read_file(ep, read_ec);
+        if (read_ec)
+            continue;
+        auto tbl = parse_toml(contents);
+        if (!tbl.has_value())
+            continue;
+        auto const id_node = (*tbl)["pack"]["id"].value<std::string>();
+        if (id_node.has_value() && *id_node == target_id) {
+            return ep;
+        }
+    }
+    return failure(ErrorCode::FileNotFound,
+                   "cannot resolve 'extends = " + std::string{target_id} +
+                       "': no sibling .toml file with [pack].id matching in " +
+                       parent.string());
+}
+
+// from_file implementation parameterised by a `visited` chain for cycle
+// protection across recursive extends resolution. Public from_file
+// wraps this with a fresh visited list.
+Result<Definition> from_file_impl(std::filesystem::path const &path,
+                                  std::vector<std::string> &visited) {
     std::error_code ec;
     if (std::filesystem::is_directory(path, ec) && !ec) {
-        return from_directory(path);
+        return Definition::from_directory(path);
     }
     std::string const contents = read_file(path, ec);
     if (ec) {
         return failure(ErrorCode::FileNotFound, path.string());
     }
-    auto def_r = from_toml_string(contents);
+    auto def_r = Definition::from_toml_string(contents);
     if (!def_r.has_value())
         return def_r;
     auto def = std::move(*def_r);
-    if (!def.pack_.includes.empty()) {
+    if (!def.pack().includes.empty()) {
         auto const canon = std::filesystem::weakly_canonical(path, ec);
         auto const self = ec ? path : canon;
-        std::vector<std::filesystem::path> visited{self};
-        if (auto status = resolve_includes(def, def.pack_.includes, self.parent_path(), visited);
+        std::vector<std::filesystem::path> includes_visited{self};
+        if (auto status =
+                resolve_includes(def, def.pack().includes, self.parent_path(), includes_visited);
             !status.has_value()) {
             return failure(status.error());
         }
     }
-    return def;
+    // Single-file extends resolution. Mirrors the directory loader's
+    // chain semantics: parent is found by scanning siblings for a
+    // matching [pack].id, then we recurse into it (so a multi-level
+    // chain like A → B → C resolves cleanly), then merge over. Without
+    // this, packs that lean on inheritance (e.g. lf79101p extends
+    // lf79103p) silently lose every inherited table when loaded by
+    // Project::open which uses from_file with a single-file path.
+    if (!def.pack().extends.has_value()) {
+        return def;
+    }
+    auto const parent_id = *def.pack().extends;
+    if (std::find(visited.begin(), visited.end(), parent_id) != visited.end()) {
+        return failure(ErrorCode::ParseError, "'extends' cycle detected: pack '" +
+                                                  def.pack().id + "' extends already-visited '" +
+                                                  parent_id + "'");
+    }
+    auto parent_path = find_sibling_pack_file(path, parent_id);
+    if (!parent_path.has_value())
+        return failure(parent_path.error());
+
+    visited.push_back(def.pack().id);
+    auto parent_def = from_file_impl(*parent_path, visited);
+    visited.pop_back();
+    if (!parent_def.has_value())
+        return failure(parent_def.error());
+
+    return DefinitionBuilder::merge_over(std::move(*parent_def), std::move(def));
+}
+} // namespace
+
+Result<Definition> Definition::from_file(std::filesystem::path const &path) {
+    std::vector<std::string> visited;
+    return from_file_impl(path, visited);
 }
 
 Result<Definition> Definition::from_directory(std::filesystem::path const &path) {
