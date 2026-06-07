@@ -21,6 +21,7 @@
 
 #include "actions.hpp"
 #include "app_state.hpp"
+#include "modals/modals.hpp" // pack_supports_fa24_swap
 #include "project_io.hpp"
 #include "theme.hpp"
 #include "widgets/widgets.hpp"
@@ -84,6 +85,7 @@ enum class PaletteCommandKind : std::uint8_t {
     OpenRecent,      // payload = absolute path
     OpenTable,       // payload = table id
     SwitchActiveRom, // payload = "working" / "source" / additional id
+    FA24Swap,        // open the FA24 swap workflow modal
 };
 
 struct PaletteCommand {
@@ -158,6 +160,14 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
     push(PaletteCommandKind::ReadRom, "Read ROM from car…", "Dump current cal", "Tools");
     push(PaletteCommandKind::BrowseDefs, "Browse definitions…", "Pack registry", "Tools");
     push(PaletteCommandKind::Settings, "Settings…", "", "Tools");
+    // Pack-declared workflows — only surface when the loaded pack
+    // qualifies, so the palette doesn't list a half-dozen disabled
+    // workflows on every demo project. Future workflows (Stage1→2
+    // step, E85 conversion) follow the same shape.
+    if (has_project && pack_supports_fa24_swap(state)) {
+        push(PaletteCommandKind::FA24Swap, "FA24 swap (VA WRX)\xE2\x80\xA6",
+             "Guided 3-step recipe", "Workflows");
+    }
 
     // View — table view modes only meaningful with a project loaded.
     if (has_project) {
@@ -368,6 +378,9 @@ void dispatch_palette_command(AppState &state, PaletteCommand const &cmd) {
         break;
     case PaletteCommandKind::Settings:
         state.show_settings_modal = true;
+        break;
+    case PaletteCommandKind::FA24Swap:
+        state.show_fa24_swap_modal = true;
         break;
     case PaletteCommandKind::ViewGrid:
         state.view_mode = TableViewMode::Grid;
