@@ -384,14 +384,13 @@ void render_sidebar(AppState &state) {
         bool const selected = state.selected_table_id == t.id;
         // Prefer the human-readable name as the primary label.
         // Snake-case IDs are developer-facing — surface them in the
-        // tooltip instead.
+        // tooltip instead. No leading icon — the tree's left margin
+        // already conveys "this is a child row," and stamping a grid
+        // glyph on every one of 293 rows reads as visual noise rather
+        // than affordance.
         char const *label = t.name.empty() ? t.id.c_str() : t.name.c_str();
-        // MDL2 E80A GridView — small leading icon so every table row
-        // reads as a data-grid affordance even when scanning quickly.
-        char row_label[256];
-        std::snprintf(row_label, sizeof row_label, "\xEE\xA0\x8A  %s", label);
         ImGui::PushID(t.id.c_str());
-        if (ImGui::Selectable(row_label, selected, ImGuiSelectableFlags_AllowOverlap)) {
+        if (ImGui::Selectable(label, selected, ImGuiSelectableFlags_AllowOverlap)) {
             state.select_table(t.id);
         }
         // Capture Selectable hover state BEFORE drawing the badge — the
@@ -463,74 +462,82 @@ void render_sidebar(AppState &state) {
         }
         return false;
     };
-    std::size_t hidden_visible_in_pack = 0; // how many hidden cats actually exist in this pack
-    for (std::size_t gi = 0; gi < groups.size(); ++gi) {
-        auto const &g = groups[gi];
-        // Hidden categories never render. Active filter doesn't override
-        // hiding — if the user opted out of seeing the category, a
-        // substring match for some other table shouldn't drag the
-        // suppressed category back into view.
-        if (is_hidden(g.name)) {
-            ++hidden_visible_in_pack;
-            continue;
+    // Two-level hierarchy: pack categories like "fuel - injectors - pulse"
+    // split on the first " - " into a top-level group name ("fuel") and
+    // a sub-group label ("injectors - pulse"). Without this the user
+    // saw 91 flat folder headers at once — busy and intimidating against
+    // the project's design philosophy. With it: ~8-10 top-level groups,
+    // collapsed-by-default; opening one reveals its sub-categories as
+    // the existing leaf groups (which keep their persisted open/close
+    // state via imgui.ini's stable ###cat_<full-name> IDs). Tables that
+    // have no " - " separator land directly at top-level with no nested
+    // sub-tree. Empty categories fall into "Other".
+    auto const split_top = [](std::string_view full)
+        -> std::pair<std::string_view, std::string_view> {
+        auto const pos = full.find(" - ");
+        if (pos == std::string_view::npos) {
+            return {full, {}};
         }
-        // Count matches in this group up-front so the header line can
-        // report it AND so we can skip an entirely-filtered-out group
-        // (don't render an empty TreeNode that just clutters the panel).
-        std::size_t group_matched = 0;
-        for (auto idx : g.indices) {
-            if (table_matches(def.tables()[idx])) {
-                ++group_matched;
-            }
-        }
-        if (group_matched == 0)
-            continue;
+        return {full.substr(0, pos), full.substr(pos + 3)};
+    };
 
-        // The visible label embeds the table count. The ID hash uses
-        // the category name only (via ImGui's `###` separator: text
-        // before is shown, text after is the stable ID hash). Without
-        // this split the ID would change every time the count
-        // changes — applying a filter, loading a different pack —
-        // and ImGui::TreeNode would lose the user's collapse state
-        // because the new ID has no stored entry. With `###cat_<name>`
-        // the ID stays stable across filter / pack / count changes,
-        // so the collapse state persists for as long as imgui.ini is
-        // writable (across sessions).
-        // MDL2 E8B7 Folder — leads the category header so the group
-        // hierarchy reads at a glance. The ### suffix keeps the ImGui
-        // ID stable on the category name only, so the leading icon
-        // doesn't churn the collapse state when the count changes.
+    struct TopGroup {
+        std::string_view name;            // "fuel", "engine", etc.
+        std::vector<std::size_t> sub_idx; // indices into `groups`
+        std::size_t total_tables{0};
+    };
+    std::vector<TopGroup> tops;
+    tops.reserve(8);
+    for (std::size_t gi = 0; gi < groups.size(); ++gi) {
+        auto const top = split_top(groups[gi].name).first;
+        auto it = std::find_if(tops.begin(), tops.end(),
+                               [top](TopGroup const &t) { return t.name == top; });
+        if (it == tops.end()) {
+            tops.push_back({top, {gi}, groups[gi].indices.size()});
+        } else {
+            it->sub_idx.push_back(gi);
+            it->total_tables += groups[gi].indices.size();
+        }
+    }
+    // Top-level sort: alphabetical. Pack-author order at the leaf level
+    // still matters (and the persisted reorder pass above already
+    // honored it), but at the top level alphabetical is the predictable
+    // expectation — "Fuel" always comes after "Engine" regardless of
+    // which categories appear first in the pack file.
+    std::sort(tops.begin(), tops.end(),
+              [](TopGroup const &a, TopGroup const &b) { return a.name < b.name; });
+
+    std::size_t hidden_visible_in_pack = 0; // how many hidden cats actually exist in this pack
+
+    // Renders one leaf-level group (the existing `Group`) as a TreeNode
+    // with all its context-menu / drag-drop / glossary affordances. Used
+    // both inline-at-top-level (when a top group has no sub-divisions)
+    // and nested inside a top-level TreeNode.
+    auto const render_leaf_group = [&](std::size_t gi, std::string_view header_label,
+                                       std::size_t group_matched) -> void {
+        auto const &g = groups[gi];
         char tn_label[200];
         if (filter.empty()) {
-            std::snprintf(tn_label, sizeof tn_label, "\xEE\xA2\xB7  %.*s (%zu)###cat_%.*s",
-                          static_cast<int>(g.name.size()), g.name.data(),
+            std::snprintf(tn_label, sizeof tn_label, "%.*s (%zu)###cat_%.*s",
+                          static_cast<int>(header_label.size()), header_label.data(),
                           g.indices.size(),
                           static_cast<int>(g.name.size()), g.name.data());
         } else {
-            std::snprintf(tn_label, sizeof tn_label,
-                          "\xEE\xA2\xB7  %.*s (%zu of %zu)###cat_%.*s",
-                          static_cast<int>(g.name.size()), g.name.data(),
+            std::snprintf(tn_label, sizeof tn_label, "%.*s (%zu of %zu)###cat_%.*s",
+                          static_cast<int>(header_label.size()), header_label.data(),
                           group_matched, g.indices.size(),
                           static_cast<int>(g.name.size()), g.name.data());
         }
-
-        // When filtering, force the group open so matches are always
-        // visible. Otherwise default-open on first run; the user can
-        // collapse manually and the state persists via imgui.ini
-        // (across sessions, thanks to the stable `###cat_<name>` ID
-        // suffix above).
         if (!filter.empty()) {
             ImGui::SetNextItemOpen(true, ImGuiCond_Always);
         }
+        // Leaf-level KEEPS DefaultOpen — once the user has opened the
+        // parent top-level group, they want to see the actual rows
+        // without a second click per sub-category. Per-session collapse
+        // state still persists via imgui.ini.
         ImGuiTreeNodeFlags const tn_flags =
             ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
         bool const opened = ImGui::TreeNodeEx(tn_label, tn_flags);
-        // Per-header context menu — right-click a category header for
-        // the "Hide" action. Uses BeginPopupContextItem on the TreeNode
-        // so the panel-level menu (which has NoOpenOverItems) doesn't
-        // collide. Sole entry; one-action menus are still worth the
-        // popup over a custom modifier because right-click is the
-        // conventional Hide gesture.
         if (ImGui::BeginPopupContextItem()) {
             char buf[160];
             std::snprintf(buf, sizeof buf, "Hide \"%.*s\"",
@@ -541,10 +548,6 @@ void render_sidebar(AppState &state) {
             text_subtle("Reopen from the panel right-click menu");
             ImGui::EndPopup();
         }
-        // Drag the header to reorder; drop another header on it to
-        // place the dragged group before this one. Payload is the
-        // source's index into `groups` so the post-loop apply can
-        // rotate the vector + persist the new ordering.
         if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceNoDisableHover)) {
             int const src_idx = static_cast<int>(gi);
             ImGui::SetDragDropPayload("SUBUWU_SIDEBAR_CATEGORY", &src_idx, sizeof src_idx);
@@ -560,9 +563,8 @@ void render_sidebar(AppState &state) {
             }
             ImGui::EndDragDropTarget();
         }
-        // Glossary hover on the category header — many category strings
-        // (Table, Datalog, DTC, Flash, Scaling) match glossary entries
-        // and the user has the header right there to hover.
+        // Glossary hover on the leaf header — many category strings
+        // match glossary entries (Table, Datalog, DTC, Scaling).
         glossary_tooltip_for(state, g.name);
         if (opened) {
             for (auto idx : g.indices) {
@@ -573,6 +575,96 @@ void render_sidebar(AppState &state) {
             }
             ImGui::TreePop();
         }
+    };
+
+    for (auto const &tg : tops) {
+        // Compute match counts + visible sub-group count for this top.
+        // Drops the top-level entirely when nothing inside it matches
+        // the active filter, OR when every sub-group is hidden.
+        std::size_t top_matched = 0;
+        std::size_t visible_subs = 0;
+        for (auto gi : tg.sub_idx) {
+            auto const &g = groups[gi];
+            if (is_hidden(g.name)) {
+                ++hidden_visible_in_pack;
+                continue;
+            }
+            std::size_t sub_matched = 0;
+            for (auto idx : g.indices) {
+                if (table_matches(def.tables()[idx])) {
+                    ++sub_matched;
+                }
+            }
+            if (sub_matched > 0) {
+                top_matched += sub_matched;
+                ++visible_subs;
+            }
+        }
+        if (visible_subs == 0) {
+            continue;
+        }
+
+        // Single-leaf top-level groups whose sole leaf has no sub-name
+        // (e.g. "engine", which is both a top-level and the only category
+        // for its rows) get rendered as their own TreeNode at top level —
+        // no redundant nesting. The leaf's full category IS the top name
+        // in this case.
+        bool const inline_single_leaf =
+            tg.sub_idx.size() == 1 &&
+            split_top(groups[tg.sub_idx[0]].name).second.empty();
+        if (inline_single_leaf) {
+            render_leaf_group(tg.sub_idx[0], tg.name, top_matched);
+            continue;
+        }
+
+        // Top-level TreeNode. Default-CLOSED — this is the change that
+        // collapses a 91-folder wall down to ~9 visible group headers
+        // on first open. Stable ID via ###top_<name> so future sessions
+        // remember which groups the user has opened.
+        char top_label[160];
+        if (filter.empty()) {
+            std::snprintf(top_label, sizeof top_label, "%.*s (%zu)###top_%.*s",
+                          static_cast<int>(tg.name.size()), tg.name.data(),
+                          tg.total_tables,
+                          static_cast<int>(tg.name.size()), tg.name.data());
+        } else {
+            std::snprintf(top_label, sizeof top_label, "%.*s (%zu of %zu)###top_%.*s",
+                          static_cast<int>(tg.name.size()), tg.name.data(),
+                          top_matched, tg.total_tables,
+                          static_cast<int>(tg.name.size()), tg.name.data());
+        }
+        if (!filter.empty()) {
+            ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+        }
+        bool const top_open = ImGui::TreeNodeEx(top_label,
+                                                ImGuiTreeNodeFlags_SpanAvailWidth);
+        // Glossary hover on the top-level too — "fuel" / "ignition" /
+        // "avcs" are all glossary entries the user might want to peek
+        // before drilling in.
+        glossary_tooltip_for(state, tg.name);
+        if (!top_open) {
+            continue;
+        }
+        // Render visible sub-groups nested inside, dropping the redundant
+        // "<top> - " prefix from each leaf's header label.
+        for (auto gi : tg.sub_idx) {
+            auto const &g = groups[gi];
+            if (is_hidden(g.name)) {
+                continue;
+            }
+            std::size_t sub_matched = 0;
+            for (auto idx : g.indices) {
+                if (table_matches(def.tables()[idx])) {
+                    ++sub_matched;
+                }
+            }
+            if (sub_matched == 0) {
+                continue;
+            }
+            auto const sub_name = split_top(g.name).second;
+            render_leaf_group(gi, sub_name.empty() ? g.name : sub_name, sub_matched);
+        }
+        ImGui::TreePop();
     }
     // Apply the drag-drop reorder once the loop finishes. Mutating
     // `groups` mid-frame is fine (it's a local), but the persistence
