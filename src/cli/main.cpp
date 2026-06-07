@@ -291,6 +291,10 @@ constexpr std::string_view kUsage =
     "                            List custom-feature primitives in a pack with\n"
     "                            their type signature + description. Useful for\n"
     "                            .stmod authors browsing what's available.\n"
+    "    workflow-list <DEF> [--id <id>] [--eligible]\n"
+    "                            List pack-declared [[workflow]] entries with\n"
+    "                            their required_tables presence check. Exit 1\n"
+    "                            when any workflow is ineligible (CI gate).\n"
     "    hook-list <DEF> [--sensor] [--action]\n"
     "                            List custom-feature hooks in a pack with their\n"
     "                            ECU splice address + signal signature. --sensor\n"
@@ -2297,6 +2301,98 @@ int cmd_primitive_list(int argc, char *argv[]) {
     return 0;
 }
 
+int cmd_workflow_list(int argc, char *argv[]) {
+    // Enumerate [[workflow]] entries declared by the pack. Useful for:
+    //   - pack catalog browsing ("which packs support FA24 swap?")
+    //   - end-to-end tests that assert a pack's declared workflows still
+    //     resolve all required_tables after a regen
+    //   - debugging the welcome card / Tools menu gating: if a workflow
+    //     shows as "not eligible" here, the GUI's pack_supports_*()
+    //     will also return false.
+    std::optional<std::filesystem::path> def_path;
+    std::optional<std::string> id_filter;
+    bool only_eligible = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--id") {
+            if (i + 1 >= argc) {
+                std::fputs("workflow-list: --id requires a value\n", stderr);
+                return 2;
+            }
+            id_filter = std::string{argv[++i]};
+        } else if (a == "--eligible") {
+            only_eligible = true;
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "workflow-list: unknown option: %s\n", argv[i]);
+            return 2;
+        } else if (!def_path.has_value()) {
+            def_path = std::filesystem::path{a};
+        } else {
+            std::fprintf(stderr, "workflow-list: extra argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!def_path.has_value()) {
+        std::fputs("workflow-list: missing path\n", stderr);
+        std::fputs("Usage: subuwutuner-cli workflow-list <DEF> "
+                   "[--id <id>] [--eligible]\n",
+                   stderr);
+        return 2;
+    }
+
+    auto const def = st::Definition::from_file(resolve_def_path(*def_path));
+    if (!def.has_value()) {
+        return print_def_load_error("workflow-list", *def_path, def.error());
+    }
+
+    if (def->workflows().empty()) {
+        std::printf("Pack declares no workflows.\n");
+        return 0;
+    }
+
+    std::size_t shown = 0;
+    for (auto const &w : def->workflows()) {
+        if (id_filter.has_value() && w.id != *id_filter) {
+            continue;
+        }
+        bool const eligible = def->supports_workflow(w.id);
+        if (only_eligible && !eligible) {
+            continue;
+        }
+        std::printf("%-18s %s%s\n",
+                    w.id.c_str(),
+                    w.display_name.empty() ? "" : w.display_name.c_str(),
+                    eligible ? "" : "  (not eligible)");
+        if (!w.modal.empty()) {
+            std::printf("    modal:           %s\n", w.modal.c_str());
+        }
+        std::printf("    required_tables: %zu\n", w.required_tables.size());
+        // Per-table presence: surface which IDs are missing so a regen
+        // failure is obvious without grepping the pack TOML manually.
+        for (auto const &table_id : w.required_tables) {
+            bool const present = def->find_table(table_id) != nullptr;
+            std::printf("      %s  %s\n", present ? "OK  " : "MISS",
+                        table_id.c_str());
+        }
+        ++shown;
+    }
+    std::printf("\n%zu workflow%s shown (of %zu declared).\n",
+                shown, shown == 1 ? "" : "s", def->workflows().size());
+    // Exit code: 0 on clean, 1 if any shown workflow is "not eligible"
+    // when no --id filter was set — useful as a CI gate that a pack's
+    // declared workflows actually resolve.
+    if (!id_filter.has_value()) {
+        for (auto const &w : def->workflows()) {
+            if (!def->supports_workflow(w.id)) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 int cmd_hook_list(int argc, char *argv[]) {
     std::optional<std::filesystem::path> def_path;
     bool only_sensor = false;
@@ -3882,7 +3978,8 @@ int cmd_completion(int argc, char *argv[]) {
         "project-set-active-rom",
         "project-history", "project-flash", "project-diff",
         "project-autotune-maf", "project-autotune-knock-pull",
-        "pack-info", "pack-lint", "primitive-list", "hook-list", "pack-dtcs",
+        "pack-info", "pack-lint", "primitive-list", "workflow-list",
+        "hook-list", "pack-dtcs",
         "stats", "diff", "diff-load", "audit", "profile", "config",
         "changelog", "log", "ssm-a8-poll", "doctor", "transport-list",
         "uds-test", "feature-graph", "ai-drift", "ai-narrate",
@@ -15084,6 +15181,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "primitive-list") {
         return cmd_primitive_list(argc - 2, argv + 2);
+    }
+    if (cmd == "workflow-list") {
+        return cmd_workflow_list(argc - 2, argv + 2);
     }
     if (cmd == "hook-list") {
         return cmd_hook_list(argc - 2, argv + 2);
