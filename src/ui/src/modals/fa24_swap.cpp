@@ -105,12 +105,18 @@ bool pack_supports_fa24_swap(AppState const &state) {
         return false;
     }
     auto const &def = state.project->definition();
-    // Required-table IDs are present in the in-tree packs as of
-    // 2026-06-07 (lf79103p, lf9l000e, lf9d012h native; lf79101p
-    // inherits via `extends = "lf79103p"`). The TOML-driven workflow
-    // registry that would move this list into pack metadata is task
-    // #2 — deferred until there's a second workflow shape worth
-    // generalising for.
+    // Preferred path: pack declares the workflow via a [[workflow]]
+    // block. Definition::supports_workflow handles the per-table
+    // presence check from the declared required_tables list, so this
+    // lights up automatically when packs add the declaration.
+    if (def.supports_workflow("fa24_swap")) {
+        return true;
+    }
+    // Fallback: packs predating the [[workflow]] declaration (or packs
+    // a user authored before this feature shipped) get the legacy
+    // hardcoded table check. Lets the workflow remain usable without
+    // forcing every existing pack to be republished. Drop this branch
+    // once all shipping packs declare their workflows in TOML.
     constexpr std::array<char const *, 5> required = {
         "engine_displacement",
         "fuel_timing_hpfp_base_offset",

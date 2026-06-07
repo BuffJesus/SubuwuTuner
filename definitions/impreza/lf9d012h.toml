@@ -18,6 +18,20 @@ license        = "Apache-2.0"
 includes       = ["../pids.toml"]
 
 
+# Pack-declared opinionated multi-table recipes — see docs/16-custom-features.md.
+[[workflow]]
+id              = "fa24_swap"
+display_name    = "FA24 swap (VA WRX)"
+modal           = "fa24_swap"
+required_tables = [
+    "engine_displacement",
+    "fuel_timing_hpfp_base_offset",
+    "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
+    "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
+    "fuel_injectors_pulse_injector_mult_table",
+]
+
+
 [[identification]]
 name      = "LF9D012H"
 cid_scan  = true
