@@ -104,32 +104,15 @@ bool pack_supports_fa24_swap(AppState const &state) {
     if (!state.project.has_value()) {
         return false;
     }
-    auto const &def = state.project->definition();
-    // Preferred path: pack declares the workflow via a [[workflow]]
-    // block. Definition::supports_workflow handles the per-table
-    // presence check from the declared required_tables list, so this
-    // lights up automatically when packs add the declaration.
-    if (def.supports_workflow("fa24_swap")) {
-        return true;
-    }
-    // Fallback: packs predating the [[workflow]] declaration (or packs
-    // a user authored before this feature shipped) get the legacy
-    // hardcoded table check. Lets the workflow remain usable without
-    // forcing every existing pack to be republished. Drop this branch
-    // once all shipping packs declare their workflows in TOML.
-    constexpr std::array<char const *, 5> required = {
-        "engine_displacement",
-        "fuel_timing_hpfp_base_offset",
-        "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
-        "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
-        "fuel_injectors_pulse_injector_mult_table",
-    };
-    for (auto const *id : required) {
-        if (def.find_table(id) == nullptr) {
-            return false;
-        }
-    }
-    return true;
+    // Pack must declare the workflow via a [[workflow]] block.
+    // Definition::supports_workflow validates each required_tables id
+    // resolves to a present table. This is the only gate — there was
+    // a transitional hardcoded table-presence fallback until 2026-06-07
+    // that masked packs with the required IDs but unverified data
+    // (lf75404h's HPFP cluster failed analyst validation while still
+    // matching by name, for example). Dropping the fallback aligns
+    // eligibility with explicit pack-author opt-in.
+    return state.project->definition().supports_workflow("fa24_swap");
 }
 
 bool fa24_swap_active(AppState const &state) {
