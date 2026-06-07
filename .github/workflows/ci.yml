@@ -109,6 +109,9 @@ jobs:
           # Pack-validation smoke — see Unix variant above for details.
           ./build/${{ matrix.preset }}/bin/subuwutuner-cli.exe pack-info `
             --json fixtures/demo-pack/pack.toml | Out-Null
+          # Workflow-eligibility gate — see Unix variant above for details.
+          ./build/${{ matrix.preset }}/bin/subuwutuner-cli.exe workflow-list `
+            definitions/impreza/lf79103p.toml | Out-Null
 
       - name: Smoke-test CLI (Unix)
         if: matrix.os != 'windows-2022'
@@ -124,6 +127,15 @@ jobs:
           # the QW-J "pack lint" smoke gate.)
           ./build/${{ matrix.preset }}/bin/subuwutuner-cli pack-info \
             --json fixtures/demo-pack/pack.toml > /dev/null
+          # Workflow-eligibility gate: workflow-list exits 1 when any
+          # declared [[workflow]] has a missing required_tables id, so
+          # a pack regen that drops one of fa24_swap's required tables
+          # trips CI immediately rather than silently disabling the
+          # welcome card / Tools menu entry. Guards the canonical
+          # lf79103p (which lf79101p inherits via `extends` and which
+          # the FA24 swap modal depends on at runtime).
+          ./build/${{ matrix.preset }}/bin/subuwutuner-cli workflow-list \
+            definitions/impreza/lf79103p.toml > /dev/null
 
       - name: Performance gate — binary sizes (Unix)
         if: matrix.os != 'windows-2022'

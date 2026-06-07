@@ -110,6 +110,60 @@ This is a calibration-table change — same shape as any other Subaru calibratio
 
 For sister VA CIDs (LF9L000E, LF75404H, etc.), the same scalar exists but at different flash addresses; the firmware-RE work to locate them is queued analyst-side.
 
+### FA24 swap workflow modal (shipped 2026-06-07)
+
+The static-edit recipe above is wired as a guided 3-step modal: **Welcome → Common Workflows → FA24 swap (VA WRX)** (or **Tools → Common Workflows → FA24 swap**). Pack-eligibility gates the entry — only packs that declare a `[[workflow]] id = "fa24_swap"` block (currently `lf79103p`, `lf9l000e`, `lf9d012h`, plus `lf79101p` via `extends = "lf79103p"`) light up the affordance.
+
+Flow:
+
+1. **Cam strategy** — pick "Keep the FA24 cams (recommended)" / "Swap FA20 cams into the FA24 block" / "Use the RS Motors swap kit." Hardware-only choices skip Step 2 and limit Step 3 to the Engine Displacement edit. Software-fix choice runs the full set.
+2. **Basemap** — "Yes, load a `.bin`" opens an NFD file picker, size-checks against the project's source ROM, and reads the 5 workflow tables from the basemap. "No, use defaults" applies the documented constants (`2.4 L` / `260°` / `+2°` × 2 / `×1.18`).
+3. **Review** — names each table that will change with the from/to values (defaults branch) or "copied from basemap" with the source filename (basemap branch). Apply commits 4 edits (1 on hardware paths) tagged `fa24_swap`.
+
+A persistent purple "FA24-swap mode" chip lands in the status bar after Apply. Click it for the edit list + a **Revert All** button that calls `History::undo_while_tag("fa24_swap")` to peel the workflow batch off the head of history atomically — restores `working.bin` to its pre-workflow state in one click.
+
+The 5 tables the workflow knows about (defined at `src/ui/src/modals/fa24_swap.cpp` as `kWorkflowTables`, single-source for both the apply path and the basemap-copy path):
+
+| Table id | Default op | Default arg | Needs Keep-FA24-cams |
+|---|---|---|---|
+| `engine_displacement` | `set_cells` | `2.4` | no — applies for every strategy |
+| `fuel_timing_hpfp_base_offset` | `set_cells` | `260.0` | yes |
+| `avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed` | `add_cells` | `2.0` | yes |
+| `avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed` | `add_cells` | `2.0` | yes |
+| `fuel_injectors_pulse_injector_mult_table` | `multiply_cells` | `1.18` | yes |
+
+Adding a 5th edit (when the AVCS TGV-open variants land) is a one-line append to the descriptor array — no apply-path changes.
+
+### Workflow registry pattern
+
+The FA24 swap is the first pack-declared workflow; the same pattern fits future recipes (Stage1→2 step, E85 conversion, BRZ stroker swap). Each is one `[[workflow]]` block in a pack TOML + one modal file in `src/ui/src/modals/`.
+
+Pack TOML schema:
+
+```toml
+[[workflow]]
+id              = "fa24_swap"
+display_name    = "FA24 swap (VA WRX)"
+modal           = "fa24_swap"
+required_tables = [
+    "engine_displacement",
+    "fuel_timing_hpfp_base_offset",
+    "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
+    "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
+    "fuel_injectors_pulse_injector_mult_table",
+]
+```
+
+The defs runtime exposes:
+
+- `Definition::workflows()` — list every declared workflow (resolved across `extends`)
+- `Definition::find_workflow(id)` — pointer to one
+- `Definition::supports_workflow(id)` — true when the workflow is declared AND every `required_tables` id resolves to a present table
+
+The GUI side reads these for welcome-card / Tools-menu enable gating + the modal's defensive re-check at open time. CLI side exposes them via `subuwutuner-cli workflow-list <DEF>` with a per-table presence column and an exit-1 CI gate when any declared workflow is ineligible.
+
+Edit-history side: every workflow's writes flow through `apply_op_table(state, label, tag, table_id, op)` with the workflow's `id` as the tag. Same-tag adjacent edits at the head of history form a transactional batch that `History::undo_while_tag(tag)` peels off in one shot, powering the "Revert All" affordance in the workflow's status-bar badge.
+
 ### Public references for the swap
 
 Hardware kits + harnesses:
