@@ -9,6 +9,15 @@ Pre-1.0 entries describe substantial state changes rather than strict semver rel
 ## [Unreleased]
 
 ### Added
+- **FA24 swap workflow modal** (`src/ui/src/modals/fa24_swap.cpp`) — guided 3-step recipe for the FA20→FA24 engine swap into a VA WRX. Steps: cam strategy (Keep FA24 / Swap FA20 cams / RS Motors kit), basemap import (.bin file picker via NFD + size sanity-check), review changes. Applies Engine Displacement / HPFP Base Offset / AVCS Intake Cam Target (Baro Low + High, TGV Closed) / Injector Mult Table as four `apply_op_table` writes tagged `fa24_swap`. Reachable from the welcome panel's "Common workflows" card and from Tools → Common Workflows → FA24 swap.
+- **`st::edit::Edit::tag` + `History::undo_while_tag`** — optional transaction tag on edits so workflow modals (FA24 swap today; future Stage1→2 step, E85 conversion) can record their writes as a tagged batch and undo them as a single unit via the status-bar badge's "Revert All". Forward-compatible serialization to edits.toml — old readers ignore unknown keys, no schema bump.
+- **`apply_op_table(state, label, tag, table_id, op)` helper** (in `src/ui/src/actions.hpp`) — sibling of `apply_op` for "I have a table id but no user selection." Reads the named table from the active ROM, runs the op over the whole rect, writes back, records with an optional transaction tag. Lets workflow modals write multiple tables without forcing the user to manually select each one first.
+- **`[[workflow]]` pack-TOML registry** — first-class support for pack-declared multi-table workflows. Each entry has `id` / `display_name` / `modal` / `required_tables`. `Definition::workflows()` / `find_workflow(id)` / `supports_workflow(id)` drive UI eligibility gating without code changes. Extends-aware: child packs inherit + override by id. `pack-info` CLI surfaces the declared workflows with a "(missing required_tables — not eligible)" note when applicable. (See `docs/16-custom-features.md`.)
+- **AP install capture rig** (`tools/ap_install_capture/`) — three-stream Frida + USBPcap capture for recording a Cobb AccessPort Manager install session. Frida hooks on CryptoAPI / BCrypt / file I/O, USBPcap on the AP's USB bus, joint JSONL event log for wall-clock correlation. Goal: recover the AES key + IV + cipher mode AP Manager uses to encrypt customer ROMs at rest.
+- **Sidebar "Common workflows" card** on the welcome panel — discovery surface listing pack-declared workflows; disabled-with-tooltip when the loaded pack lacks coverage.
+- **Tools menu → Common Workflows submenu** — enumerates available workflows for the loaded pack; enabled-state gated on `pack_supports_*`.
+- **Status-bar FA24-swap badge** — persistent purple-accent chip when the active history carries at least one `fa24_swap`-tagged edit. Click → popup lists the recorded edits + a "Revert All" button calling `revert_fa24_swap` (which walks `History::undo_while_tag` for the batch).
+- **Sidebar "Collapse all" affordance** — right-aligned link-styled button under the filter input. One-shot flag closes every TreeNode for one frame; imgui.ini-persisted user choices take over again on the next click.
 - `st::flash::BackupStore` — mandatory pre-write full-ROM backup with CRC32 verify gate. Flash refuses to proceed without a verified backup. Retention policy: keep last 10 + all pinned. (See `docs/05-improvements.md` §4.)
 - `st::policy::FlashPreflight` — composable pre-flight validator pipeline. Built-in validators: `EcuIdMatch`, `VinMatch`, `BatteryVoltageOk`, `IgnitionState`, `ChecksumKnown`, `BackupStorePresent`. Pipeline returns a `PreflightReport` with explicit `blockers`/`warnings`. Surface in flash modal + CLI.
 - Plugin / extension interface seams under `st/core/ext/` (header-only). Stable abstract interfaces for `ChecksumStrategy`, `TransportDriver`, `KernelDescriptor`, `Validator`, `LogChannelSource`, `RomFormat`, `DefinitionSource`, `UnitConverter`, `ActionHandler`, `HelpTopic`. No dynamic loading yet — interfaces only. (See `docs/02-architecture.md` and the recommendation in `Findings/08_recommended_improvements.md#I-12`.)
@@ -16,9 +25,24 @@ Pre-1.0 entries describe substantial state changes rather than strict semver rel
 - `SECURITY.md` — responsible-disclosure policy and scope.
 - `THIRD-PARTY-INSPIRATIONS.md` — clean-room inspiration trail.
 
+### Changed
+- **First-run wizard rewrite** — Welcome / Units / Theme / Demo steps rewritten in the design philosophy set by yesterday's jurisdiction rewrite. Lead with what the choice does in plain language, "Not sure?" reassurance line, concrete use-case blurbs over implementation-detail blurbs. Imperial radio disabled-with-tooltip ("coming in a follow-up release") since no conversion layer is wired yet. Esc wired to the skip flow with a `skip_wizard` lambda deduplicating the body across window-X / Skip button / Esc.
+- **Sidebar table list now hierarchical** — pack categories like `fuel - injectors - pulse` split on the first ` - ` into a top-level group (`fuel`) and a sub-group label (`injectors - pulse`). Top-level and leaf-level both default-CLOSED so a fresh project shows ~9 group headers instead of 91 flat folders. Per-row MDL2 grid icon + per-header folder icon dropped (the indent + arrow already convey hierarchy). S/E policy badges still right-aligned. Glossary hover works at both levels.
+- **FA24-swap pack-support check** is now purely pack-declared — the transitional hardcoded table-presence fallback that was falsely qualifying packs by table-name presence alone (lf75404h, lf75404s, lf79100p, lf9c102p, lf9g003t) is dropped. Future packs opt in by adding `[[workflow]]` to their TOML.
+- **`definitions/impreza/lf79101p.toml`** now declares `extends = "lf79103p"` so the third-party-installed-tune pack inherits the LF79103P table catalog (same firmware family; CID descriptor at 0x37C51 is the only difference). `checksum_type` restated explicitly so `merge_over` doesn't drop the COBB-specific `per_install_block_crc32`.
+
+### Fixed
+- **`Definition::from_file` now resolves `extends`** — the single-file loader (used by `Project::open` for the project's `def_path`) silently skipped extends resolution, so packs relying on inheritance loaded zero inherited tables at runtime and workflow guards returned false against valid project state. Adds `find_sibling_pack_file` (flat-file counterpart to `find_sibling_pack_dir`) with cycle-protected recursion. `pack-info lf79101p.toml` now reports 293 tables (inherited) instead of 0.
+
 ### Tooling
 - `.pre-commit-config.yaml` — local mirror of the CI `clang-format (required)` lane, plus trailing-whitespace, end-of-file-fixer, yaml/toml/merge-conflict checks. Install: `pip install --user pre-commit && pre-commit install`. Stops format drift at commit time before CI.
 - CI smoke now exercises `pack-info --json fixtures/demo-pack/pack.toml` on every matrix lane — guards the demo pack against drift + exercises the `subuwutuner.pack-info.v1` JSON emitter.
+
+### Definitions
+- New base pack `lf9d012h.toml` (296 tables, full FA24-swap cluster coverage matching its LF9-family siblings).
+- New scaffolding stubs: `va_2015_2018_base.toml`, `va_2019_2021_base.toml`, `vb_all_base.toml` — pattern follows the existing ecuparams/ shared base files.
+- COBB AP F3xx v2 datalog overlays for LF75 + LF9 families (per-CID monitor PIDs validated R²≥0.99 against the user's car sniff).
+- `[[workflow]] fa24_swap` block added to lf79103p / lf9l000e / lf9d012h (lf79101p inherits via `extends`).
 
 ### Documentation
 - External multi-file design + gap analysis under `D:\Subuwu\findings\` (`00_reference_scan.md` through `12_final_summary.md`). Not part of the public repo; informs the v1.0 roadmap.
