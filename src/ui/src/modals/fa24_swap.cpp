@@ -89,12 +89,19 @@ enum class BasemapSource : std::uint8_t {
 // callers can toggle it from their own translation units; this state
 // holds only the step + decision selections, which are private to
 // the modal's UI flow.
+// Severity of the basemap status line — colors the text under the
+// "Yes" radio after a file is picked. Warn highlights things like
+// CID mismatch or unrecognized firmware so the user notices before
+// committing to Apply.
+enum class BasemapStatusSeverity : std::uint8_t { Ok, Warn, Error };
+
 struct ModalState {
     int step{0};
     CamStrategy cam_strategy{CamStrategy::KeepFA24Cams};
     BasemapSource basemap_source{BasemapSource::UseDefaults};
     std::filesystem::path basemap_path;
     std::string basemap_status; // shown under the "Yes" radio when set
+    BasemapStatusSeverity basemap_status_severity{BasemapStatusSeverity::Ok};
 };
 static ModalState g_state;
 
@@ -104,6 +111,7 @@ void reset_state() {
     g_state.basemap_source = BasemapSource::UseDefaults;
     g_state.basemap_path.clear();
     g_state.basemap_status.clear();
+    g_state.basemap_status_severity = BasemapStatusSeverity::Ok;
 }
 
 } // namespace
@@ -339,23 +347,81 @@ void draw_basemap(AppState &state) {
             auto const expected = state.project->source_rom().data().size();
             if (ec) {
                 g_state.basemap_status = "Couldn't stat the picked file: " + ec.message();
+                g_state.basemap_status_severity = BasemapStatusSeverity::Error;
             } else if (sz != expected) {
                 g_state.basemap_status =
                     "Size mismatch: basemap is " + std::to_string(sz) +
                     " bytes, project expects " + std::to_string(expected) +
                     " bytes. Likely wrong firmware family.";
+                g_state.basemap_status_severity = BasemapStatusSeverity::Error;
             } else {
-                g_state.basemap_status = "Selected: " + g_state.basemap_path.filename().string();
+                // Size matches — go one step further and run the pack's
+                // identification check against the basemap's bytes. If the
+                // basemap is the wrong CID (e.g. an LF79103P stock cal
+                // dropped into an LF79101P project, or a CID this pack
+                // doesn't recognize at all), the workflow would copy
+                // values whose row/col layout matches but whose meaning
+                // is for a different firmware. Warning here is cheap
+                // (~one 2 MB read on file pick) and prevents a confusing
+                // mid-apply discovery.
+                auto basemap_rom = st::Rom::from_file(g_state.basemap_path);
+                if (!basemap_rom.has_value()) {
+                    g_state.basemap_status =
+                        "Couldn't load file as a ROM: " + basemap_rom.error().to_string();
+                    g_state.basemap_status_severity = BasemapStatusSeverity::Error;
+                } else {
+                    auto const &def = state.project->definition();
+                    auto const basemap_cid = def.matches(*basemap_rom);
+                    auto const project_cid = def.matches(state.project->source_rom());
+                    std::string const fname = g_state.basemap_path.filename().string();
+                    if (basemap_cid.has_value() && project_cid.has_value() &&
+                        *basemap_cid == *project_cid) {
+                        g_state.basemap_status =
+                            "Selected: " + fname + "  \xC2\xB7  CID " + *basemap_cid + " (match)";
+                        g_state.basemap_status_severity = BasemapStatusSeverity::Ok;
+                    } else if (basemap_cid.has_value() && project_cid.has_value()) {
+                        g_state.basemap_status =
+                            "Selected: " + fname + "  \xC2\xB7  WARNING basemap CID is " +
+                            *basemap_cid + ", project CID is " + *project_cid +
+                            ". Workflow may apply values for a different firmware.";
+                        g_state.basemap_status_severity = BasemapStatusSeverity::Warn;
+                    } else if (basemap_cid.has_value()) {
+                        // Project's source didn't identify against this
+                        // pack — shouldn't happen in normal flow but
+                        // surface what we found in the basemap so the
+                        // user has something to compare to manually.
+                        g_state.basemap_status =
+                            "Selected: " + fname + "  \xC2\xB7  CID " + *basemap_cid +
+                            " (project CID unrecognized — verify manually)";
+                        g_state.basemap_status_severity = BasemapStatusSeverity::Warn;
+                    } else {
+                        // Basemap doesn't match any CID this pack
+                        // declares. Could still apply if the table
+                        // layout happens to line up, but the user
+                        // should know.
+                        g_state.basemap_status =
+                            "Selected: " + fname +
+                            "  \xC2\xB7  WARNING basemap CID unrecognized by this pack. "
+                            "Verify it's the same firmware family before applying.";
+                        g_state.basemap_status_severity = BasemapStatusSeverity::Warn;
+                    }
+                }
             }
         } else if (r == NFD_ERROR) {
             g_state.basemap_status = std::string{"File dialog error: "} + NFD::GetError();
+            g_state.basemap_status_severity = BasemapStatusSeverity::Error;
         }
     }
     ImGui::SameLine();
     if (g_state.basemap_path.empty()) {
         text_subtle("No file picked yet.");
     } else {
-        text_subtle("%s", g_state.basemap_status.c_str());
+        ImVec4 const color = g_state.basemap_status_severity == BasemapStatusSeverity::Error
+                                 ? chip_fg_danger()
+                                 : (g_state.basemap_status_severity == BasemapStatusSeverity::Warn
+                                        ? chip_fg_caution()
+                                        : chip_fg_ok());
+        ImGui::TextColored(color, "%s", g_state.basemap_status.c_str());
     }
     ImGui::Unindent();
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
