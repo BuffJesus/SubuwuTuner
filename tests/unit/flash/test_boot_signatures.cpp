@@ -7,8 +7,10 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -122,48 +124,63 @@ TEST_CASE("boot_signature_failure_name covers every enumerator",
             "pair_mismatch");
 }
 
-// Opt-in end-to-end checks against the analyst's reference ROMs.
-// Skipped when the file isn't present (CI / fresh checkout) so the
-// suite stays green without analyst-side data.
+// Opt-in end-to-end checks against locally-staged reference ROMs.
+// Both paths are configurable via environment variables so the
+// public source tree carries no hardcoded user-specific filenames;
+// the tests skip cleanly when the env var is unset or the file
+// is absent.
+//
+//   SUBUWU_TEST_LIVE_ROM    — full path to an aftermarket-installed
+//                             2 MB SH-2A reference ROM
+//   SUBUWU_TEST_STOCK_ROM   — full path to a factory-virgin 2 MB
+//                             SH-2A reference ROM
 
-TEST_CASE("verify_boot_signatures_sh2a_2mb passes against the user's live ROM",
+namespace {
+
+std::vector<std::uint8_t> load_2mb_rom(std::filesystem::path const &p) {
+    std::ifstream in{p, std::ios::binary};
+    REQUIRE(in.is_open());
+    std::vector<std::uint8_t> bytes{(std::istreambuf_iterator<char>(in)),
+                                     std::istreambuf_iterator<char>()};
+    REQUIRE(bytes.size() == 0x200000u);
+    return bytes;
+}
+
+std::optional<std::filesystem::path> env_rom_path(char const *var) {
+    char const *raw = std::getenv(var);
+    if (raw == nullptr || raw[0] == '\0') return std::nullopt;
+    std::filesystem::path p{raw};
+    if (!std::filesystem::exists(p)) return std::nullopt;
+    return p;
+}
+
+} // namespace
+
+TEST_CASE("verify_boot_signatures_sh2a_2mb passes against an aftermarket-installed reference ROM",
           "[flash][boot_signatures][rom]") {
-    auto const path =
-        std::filesystem::path{"D:/Subuwu/subaru-data/reference-dumps/"
-                              "fehr-live-dump-2026-06-06.bin"};
-    if (!std::filesystem::exists(path)) {
-        WARN("Reference ROM not present at " << path.string()
-             << " — skipping end-to-end validation.");
+    auto const path = env_rom_path("SUBUWU_TEST_LIVE_ROM");
+    if (!path) {
+        WARN("SUBUWU_TEST_LIVE_ROM unset or file absent — skipping.");
         return;
     }
-    std::ifstream in{path, std::ios::binary};
-    REQUIRE(in.is_open());
-    std::vector<std::uint8_t> rom{(std::istreambuf_iterator<char>(in)),
-                                   std::istreambuf_iterator<char>()};
-    REQUIRE(rom.size() == 0x200000u);
+    auto const rom = load_2mb_rom(*path);
     auto const r = fl::verify_boot_signatures_sh2a_2mb(rom);
     REQUIRE(r.ok());
-    // Spot-check the analyst's measured values for this image:
-    // 0x0504 at both pair offsets per APP_CHECKSUM_VERIFICATION.md.
+    // Spot-check the paired-vector value documented for the
+    // reference image in APP_CHECKSUM_VERIFICATION.md (0x0504 at
+    // both 0x6C and 0x6010).
     REQUIRE(r.pair_at_6c == 0x0504u);
     REQUIRE(r.pair_at_6010 == 0x0504u);
 }
 
-TEST_CASE("verify_boot_signatures_sh2a_2mb passes against the factory-stock ROM",
+TEST_CASE("verify_boot_signatures_sh2a_2mb passes against a factory-virgin reference ROM",
           "[flash][boot_signatures][rom]") {
-    auto const path =
-        std::filesystem::path{"D:/Subuwu/subaru-data/reference-dumps/"
-                              "2017-wrx-stock.bin"};
-    if (!std::filesystem::exists(path)) {
-        WARN("Reference ROM not present at " << path.string()
-             << " — skipping end-to-end validation.");
+    auto const path = env_rom_path("SUBUWU_TEST_STOCK_ROM");
+    if (!path) {
+        WARN("SUBUWU_TEST_STOCK_ROM unset or file absent — skipping.");
         return;
     }
-    std::ifstream in{path, std::ios::binary};
-    REQUIRE(in.is_open());
-    std::vector<std::uint8_t> rom{(std::istreambuf_iterator<char>(in)),
-                                   std::istreambuf_iterator<char>()};
-    REQUIRE(rom.size() == 0x200000u);
+    auto const rom = load_2mb_rom(*path);
     auto const r = fl::verify_boot_signatures_sh2a_2mb(rom);
     REQUIRE(r.ok());
 }

@@ -22,10 +22,11 @@
 //
 // This module is the host-side pre-flight: run on the working
 // buffer before sending bytes to the ECU, fail any image that
-// wouldn't boot. Verified against `2017-wrx-stock.bin` (factory
-// virgin) and `fehr-live-dump-2026-06-06.bin` (user's COBB-installed
-// live ROM); cross-CID confirmation across other LF79xxxP variants
-// is a Tier-4 follow-up.
+// wouldn't boot. Verified against a factory-virgin 2 MB SH-2A
+// reference ROM and an independently-produced aftermarket-installed
+// reference ROM (both pass the three-signature check). Cross-CID
+// confirmation across other LF79xxxP variants is a Tier-4
+// follow-up.
 
 #ifndef ST_FLASH_BOOT_SIGNATURES_HPP
 #define ST_FLASH_BOOT_SIGNATURES_HPP
