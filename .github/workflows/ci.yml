@@ -137,6 +137,14 @@ jobs:
           ./build/${{ matrix.preset }}/bin/subuwutuner-cli workflow-list \
             definitions/impreza/lf79103p.toml > /dev/null
 
+      - name: Docs gate — every subuwutuner-cli reference in docs/ exists
+        # Catches doc drift where a subcommand renames behind a doc that
+        # still references the old name (read-rom → rom-pull, flash →
+        # flash-resume, extended-did-datalog-preset → did-datalog-preset
+        # all happened pre-commit a264b54). Pure text lint; no build deps.
+        shell: bash
+        run: bash scripts/check-docs-cli-refs.sh
+
       - name: Performance gate — binary sizes (Unix)
         if: matrix.os != 'windows-2022'
         run: bash scripts/check-binary-sizes.sh build/${{ matrix.preset }}/bin
