@@ -187,11 +187,13 @@ Goal: SubuwuTuner reads the CAL ID off the bench ECU via OBD-II Mode 0x09.
 
 ### Pins to wire
 
-| Function | Pin | Wire to |
-|---|---|---|
-| CAN-Hi | **B134-10** | OBDX CAN-H |
-| CAN-Lo | **B134-9** | OBDX CAN-L |
-| (Optional) 120 Ω termination | between CAN-H and CAN-L at the OBDX end | matches the ECU's internal expectation of a 60 Ω diff line (two terminations in parallel) |
+Subaru uses non-ISO-standard CAN colors here — don't assume Yellow/Green from generic CAN guides.
+
+| Function | Pin | Wire color | Wire to |
+|---|---|---|---|
+| CAN-Hi | **B134-10** | R (Red) | OBDX CAN-H → OBD-II pin 6 |
+| CAN-Lo | **B134-9** | L (Light blue) | OBDX CAN-L → OBD-II pin 14 |
+| (Optional) 120 Ω termination | between CAN-H and CAN-L at the OBDX end | — | matches the ECU's internal expectation of a 60 Ω diff line (two terminations in parallel) |
 
 Per FSM p.198–200 (CAN Communication System diagram), the in-vehicle
 network has the ECU + TCM + gateway all on one bus with two 120 Ω
