@@ -127,24 +127,28 @@ attempts to talk to it.
 
 ### Pins to wire
 
-| Function | Pin | Wire to | Expected at key-on |
-|---|---|---|---|
-| Control module power supply 1 | **B134-12** | +12 V (switched via main relay; for the bench, switched directly via the main relay simulator switch) | Battery voltage |
-| Control module power supply 2 | **B134-24** | +12 V (same as above) | Battery voltage |
-| Back-up power supply | **B134-23** | +12 V **always-on** (NOT switched) | Battery voltage |
-| Ignition switch | **B134-32** | +12 V switched by your ignition toggle | Battery voltage |
-| Self-shutoff relay control | **B134-38** | Multimeter probe (output from ECU) | 1 V (ECU's "I'm alive" signal) |
-| Engine ground 1 | **B134-35** | Battery negative | 0 V |
-| Engine ground 2 | **B134-47** | Battery negative | 0 V |
-| Engine ground 3 | **E159-10** | Battery negative | 0 V |
-| Engine ground 4 | **E159-18** | Battery negative | 0 V |
-| Engine ground 5 | **E159-26** | Battery negative | 0 V |
-| Engine ground 6 | **E159-17** | Battery negative | 0 V |
-| Engine ground 7 | **E159-25** | Battery negative | 0 V |
-| Sensor ground 1 | **B134-19** | Battery negative | 0 V |
-| Sensor ground 2 | **E159-27** | Battery negative | 0 V |
-| Sensor power supply (5 V out) | **B134-18** | Multimeter probe (output from ECU) | **5 V — this is the boot success indicator** |
-| Sensor power supply (5 V out, duplicate) | **E159-19** | Multimeter probe (output from ECU) | **5 V** |
+Wire colors are from the FSM Engine Electrical System wiring diagrams (WI-160 / WI-161 et al). Subaru color code: `Y` = yellow, `L` = light blue (NOT light green), `R` = red, `G` = green, `W` = white, `B` = black, `Br` = brown, `Lg` = light green, `Sb` = sky blue. A slash (`Y/L`) means main color / stripe color — so `Y/L` is **yellow with a light-blue stripe** and `L/Y` is **light-blue with a yellow stripe** (different wires).
+
+| Function | Pin | Wire color | Wire to | Expected at key-on |
+|---|---|---|---|---|
+| Control module power supply 1 | **B134-12** | Y/L | +12 V (switched via main relay; for the bench, switched directly via the main relay simulator switch) | Battery voltage |
+| Control module power supply 2 | **B134-24** | Y/L | +12 V (same as above) | Battery voltage |
+| Back-up power supply | **B134-23** | Lg | +12 V **always-on** (NOT switched) | Battery voltage |
+| Ignition switch | **B134-32** | Y/R | +12 V switched by your ignition toggle | Battery voltage |
+| Self-shutoff relay control | **B134-38** | Lg | Multimeter probe (output from ECU; this wire runs to the main relay coil) | **~0 V** with ECU running normally (active-low — see step 4) |
+| Engine ground 1 | **B134-35** | B/L | Battery negative | 0 V |
+| Engine ground 2 | **B134-47** | B/R | Battery negative | 0 V |
+| Engine ground 3 | **E159-10** | (see FSM) | Battery negative | 0 V |
+| Engine ground 4 | **E159-18** | (see FSM) | Battery negative | 0 V |
+| Engine ground 5 | **E159-26** | (see FSM) | Battery negative | 0 V |
+| Engine ground 6 | **E159-17** | (see FSM) | Battery negative | 0 V |
+| Engine ground 7 | **E159-25** | (see FSM) | Battery negative | 0 V |
+| Sensor ground 1 | **B134-19** | G/R | Battery negative | 0 V |
+| Sensor ground 2 | **E159-27** | (see FSM) | Battery negative | 0 V |
+| Sensor power supply (5 V out) | **B134-18** | L/Y | Multimeter probe (output from ECU) | **5 V — this is the boot success indicator** |
+| Sensor power supply (5 V out, duplicate) | **E159-19** | (see FSM) | Multimeter probe (output from ECU) | **5 V** |
+
+**Disambiguating the two Lg wires on B134.** Pin 23 (back-up power, +12 V always-on) and pin 38 (main relay control, ~0 V active) are *both* solid Lg. They live in different rows of the 48-pin grid — B134-23 is in row 2 (positions 13–24, sixth from the right), B134-38 is in row 4 (positions 37–48, second from the left). If you find a Lg wire reading **~0 V** while the ECU is running, that's pin 38 doing its job. If you find a Lg wire reading **battery voltage**, that's pin 23 (back-up). Anything else on an Lg wire = check your harness.
 
 **All seven engine grounds must be tied** — the ECU's internal current
 return paths assume them. Skimping on grounds is a leading cause of
@@ -163,9 +167,19 @@ bench-rig boot failures that look like dead silicon but aren't.
      B134-12 and B134-19, dead ECU.
    - **Anything else**: power off, do not retry. Check for short to
      +12 V or to ground on a 5 V rail before re-applying power.
-4. Verify B134-38 reads ~1 V. This is the self-shutoff relay output,
-   which the ECU asserts as long as it's running normally. If it stays
-   at 0 V the ECU is in a degraded state.
+4. Verify **B134-38 reads ~0 V** (anything under ~0.5 V is healthy).
+   This is the ECU's main-relay-control output: the ECU pulls the
+   wire low (sinks current through the relay coil to ground via its
+   internal switching FET) to keep the main relay engaged. So while
+   the ECU is running normally, you should see ~0 V at this pin.
+   - **~0 V**: ECU is asserting; main relay engaged; healthy.
+   - **~12 V (battery voltage)**: ECU is NOT asserting; main relay
+     dropped — which means the bench wouldn't have powered up. If you
+     see 12 V here AND have your 5 V telltale, you're probing the
+     wrong Lg wire (likely B134-23 back-up instead of B134-38 main-
+     relay-control — see the wire-disambiguation note above).
+   - **Anywhere in between** (e.g. 2–3 V): the wire is floating /
+     poorly connected — check your B134 connector seating.
 
 ## Phase 3 — Comms bring-up (CAN to OBDX)
 
