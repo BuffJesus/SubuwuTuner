@@ -300,8 +300,10 @@ flash. The drill:
    a sector erase, but power-loss during a TransferData block is the
    most common real-world failure.
 3. Re-power the ECU.
-4. Run `subuwutuner-cli.exe flash --resume <manifest>` and verify the
-   journal-based resume completes the write.
+4. Run `subuwutuner-cli.exe flash-resume <plan.toml> <journal.manifest.toml>`
+   (the original flash plan + the journal manifest produced by the
+   interrupted write) and verify the journal-based resume completes
+   the write.
 5. Read back the ROM and compare to the intended post-write image.
 
 This loop must succeed 100 times in a row across both VA and VB junkyard

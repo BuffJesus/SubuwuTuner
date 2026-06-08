@@ -445,8 +445,8 @@ Each `SignalLayout` entry carries:
   expression as the best-available approximation.
 
 Print or pull machine-readable via
-`subuwutuner-cli extended-did-datalog-preset [--firmware narrow|wide]
-[--json]` — JSON envelope `subuwutuner.extended-did-datalog-preset.v1`
+`subuwutuner-cli did-datalog-preset [--firmware narrow|wide]
+[--json]` — JSON envelope `subuwutuner.did-datalog-preset.v1`
 includes `ram_address` + `scaling` per signal so downstream
 tooling (a CSV ↔ DID replay verifier, an equivalence checker, a
 future scaling expression evaluator) can consume the layout without

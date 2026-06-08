@@ -397,7 +397,7 @@ Done (shipped against MockTransport + tests):
 
 Pending (gated on hardware on the bench):
 
-12. 🟡 Real-car smoke test: `subuwutuner-cli read-rom <output.bin>` against the developer's car using OBDX. This is the moment platform wiring (libusb open / `CreateFileW` on `COM*`) inside `obdx::Transport::open` flips from `NotImplemented` to live.
+12. 🟡 Real-car smoke test: `subuwutuner-cli rom-pull --transport obdx --device COM5 --sa-variant <variant> --output <output.bin>` against the developer's car. This is the moment platform wiring (libusb open / `CreateFileW` on `COM*`) inside `obdx::Transport::open` flips from `NotImplemented` to live.
 13. 🟡 Same smoke test through Tactrix OP2.0 — flips J2534 from `NotImplemented` to live via `LoadLibraryA` on the registered DLL.
 14. 🟡 `subuwutuner-cli log` against a real car — exercises the LogSession pipeline end-to-end through whichever transport's platform layer comes online first.
 15. ⬜ Phase 4 (flashing) gates on all of the above plus the safety story in `docs/08-testing-strategy.md` Tier 4.
