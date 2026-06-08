@@ -70,8 +70,9 @@ real 16-round Feistel against the in-tree round-key tables. CLI
 selects between the variants below; aftermarket variants share the same
 Feistel structure with different round-key tables (and, for L3, a 5-byte
 loop-reversal patch at flash 0xBE911 + 0xBE9C7..0xBE9CE). The legacy
-spellings `fehr-active{,-l1,-l3}` and `cobb-ap{,-l3}` are accepted as
-deprecated aliases for one release cycle.
+spelling `fehr-active{,-l1,-l3}` is accepted as a deprecated alias
+for one release cycle (`cobb-ap` was never wired in the CLI parser
+and is rejected — historical doc reference only).
 
 Era / variant catalog:
 
