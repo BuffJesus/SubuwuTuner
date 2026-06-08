@@ -265,8 +265,11 @@ Goal: full 2 MB plaintext ROM image off the bench ECU.
 subuwutuner-cli.exe rom-pull `
     --transport obdx --device COM5 `
     --sa-variant factory `
+    --addr 0x0 --size 0x200000 `
     --output "D:\Subuwu\subaru-data\reference-dumps\bench-junkyard-stock.bin"
 ```
+
+`--addr 0x0 --size 0x200000` covers the full 2 MB SH-2A address space (0x000000–0x1FFFFF). They're required arguments — without them `rom-pull` exits with "missing --addr / --size" before any bus traffic.
 
 Expected: 2,097,152 bytes (0x200000) in ~7–10 minutes. The exact
 duration depends on per-block timeout and the ECU's RequestDownload
