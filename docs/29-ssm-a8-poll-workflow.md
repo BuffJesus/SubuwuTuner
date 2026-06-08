@@ -45,7 +45,7 @@ E8 <byte1> <byte2> ...
 
 Multi-byte values (e.g. an OEM u16 RPM at `0x00000E`) are read as two consecutive `--addr` slots and reassembled offline. Negative responses use the standard `7F <NRC>` pattern.
 
-The protocol is implemented in `src/ecu/ssm.hpp` / `ssm.cpp` (`build_a8_request`, `parse_a8_response`, `SsmClient`) with `Framing::IsoTp` for the CAN-bus path. The K-Line variant in the same module is the original SSM2 wrapper for pre-CAN ECUs.
+The protocol is implemented in `src/ecu/include/st/ecu/ssm.hpp` and `src/ecu/src/ssm.cpp` (`build_a8_request`, `parse_a8_response`, `SsmClient`) with `Framing::IsoTp` for the CAN-bus path. The K-Line variant in the same module is the original SSM2 wrapper for pre-CAN ECUs.
 
 ## Capture
 
@@ -154,7 +154,7 @@ Prints `min / mean / max` per column the hypothesis maps. Switch to `--mode tail
 ## Companion files
 
 - `src/cli/main.cpp` — `cmd_ssm_a8_poll` (CLI surface) and `cmd_sniff` (the passive-capture counterpart).
-- `src/ecu/ssm.hpp` / `ssm.cpp` — protocol layer; `SsmClient` with `Framing::IsoTp` is the production path for this workflow.
+- `src/ecu/include/st/ecu/ssm.hpp` and `src/ecu/src/ssm.cpp` — protocol layer; `SsmClient` with `Framing::IsoTp` is the production path for this workflow.
 - `tools/cross_ref_ssm_a8.py` — offline rank-quantile correlator (brute discovery; no hypothesis required) + `--self-test`.
 - `tools/decode_ssm_log.py` — single-log decoder via a hypothesis TSV (sanity check / summary stats) + `--self-test`.
 - `docs/24-sniff-workflows.md` — sniff capture rig + log format the correlator consumes.
