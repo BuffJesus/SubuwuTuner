@@ -204,28 +204,37 @@ OBDX end — the ECU itself has 120 Ω built in.
 ### First exchange
 
 With the OBDX adapter plugged in on Windows (COM5 per current setup),
-power-cycle the bench ECU (ignition off → on) and run:
+power-cycle the bench ECU (ignition off → on) and ask the ECU for its
+calibration ID via OBD-II Mode 0x09:
 
 ```powershell
-subuwutuner-cli.exe rom-info --transport obdx --device COM5 --probe
+subuwutuner-cli.exe obd-info --transport obdx --device COM5 --pid cal-id
 ```
 
-Expected output: CAL ID + CVN + VIN read via Mode 0x09. The VIN field
-will be whatever was last programmed into the junkyard ECU before it
-was pulled — it doesn't have to match a car you own; it just has to
-respond.
+Expected output: a 16-byte ASCII CAL ID string (e.g. `LF79102P` for a
+2017 WRX MT or whatever the junkyard ECU had last). `cal-id` lives in
+the default session and requires no SecurityAccess, so it's the
+cleanest "is the bus alive" check. Once that returns, try `--pid cvn`
+and `--pid vin` for the verification number and the last-programmed
+VIN.
 
-If this fails:
+If `obd-info` fails:
 - **No `>` prompt from ELM probe**: OBDX adapter isn't seeing the bus.
   Check CAN-H/L wiring, check 120 Ω termination, check that the OBDX
   is actually on COM5 (`Get-PnpDevice -Class Ports`).
 - **ELM probe OK, SetProtocol fails**: ECU is on the bus but not
   responding. Verify the bench ECU is fully booted (Phase 2 success
-  criteria) and CAN-H/L aren't swapped.
+  criteria) and CAN-H/L aren't swapped (B134-10 Red → CAN-H, B134-9
+  Light blue → CAN-L).
 - **SetProtocol OK, no Mode 0x09 response**: bus is alive but the ECU
   isn't seeing addressed frames. Most likely the OBDX CAN filter is
   misconfigured; pass `--verbose` to dump the DVI exchange and check
   the filter setup against the trace.
+
+(Historical note: earlier revisions of this doc referenced
+`rom-info --transport obdx ... --probe` — that command doesn't exist;
+`rom-info` is the *offline* pack-and-ROM inspector, no transport
+support. The live-on-bus probe is `obd-info`.)
 
 ## Phase 4 — Immobilizer (skip for read/write bench work)
 
