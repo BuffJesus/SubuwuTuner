@@ -301,6 +301,32 @@ void render_menubar(AppState &state) {
                             "based on LF79101P / LF79103P / LF9L000E to enable.");
                     }
                 }
+                bool const tgv_egr_ok = pack_supports_tgv_egr_delete(state);
+                if (ImGui::MenuItem("TGV + EGR Delete (off-road only)\xE2\x80\xA6",
+                                    nullptr, false, tgv_egr_ok)) {
+                    state.show_tgv_egr_delete_modal = true;
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    if (tgv_egr_ok) {
+                        ImGui::SetTooltip(
+                            "Guided 3-step delete: zeros 5 EGR + TGV cal tables\n"
+                            "and disables the P0400 DTC. Per analyst Tasks A-F\n"
+                            "(2026-06-09). Jurisdiction-gated; not for daily-\n"
+                            "drivers on public roads. Reversible via the\n"
+                            "status-bar badge after Apply.");
+                    } else if (!state.project.has_value()) {
+                        ImGui::SetTooltip(
+                            "Open a project first. The workflow needs a loaded\n"
+                            "calibration pack to know which tables to edit.");
+                    } else {
+                        ImGui::SetTooltip(
+                            "This pack doesn't declare TGV+EGR-delete support —\n"
+                            "missing one or more of: EGR Airflow, EGR Absolute\n"
+                            "Pressure Main, TGV Closed Activation, Ignition\n"
+                            "Timing EGR Adders A/C. Currently supported on\n"
+                            "LF79103P (+ inherited via LF79101P).");
+                    }
+                }
                 ImGui::EndMenu();
             }
             ImGui::EndMenu();

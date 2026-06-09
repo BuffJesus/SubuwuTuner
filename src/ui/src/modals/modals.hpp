@@ -49,6 +49,15 @@ void render_fa24_swap_modal(AppState &state);
 // that one first to expose the workflow batch).
 void revert_fa24_swap(AppState &state);
 
+// TGV + EGR delete workflow. Same shape as the FA24 trio above
+// (render + pack support + active + revert). Per analyst's Task A-F
+// delivery 2026-06-09; encodes the L1 + DTC bit-clear delete strategy
+// jurisdiction-gated at modal entry.
+void render_tgv_egr_delete_modal(AppState &state);
+[[nodiscard]] bool pack_supports_tgv_egr_delete(AppState const &state);
+[[nodiscard]] bool tgv_egr_delete_active(AppState const &state);
+void revert_tgv_egr_delete(AppState &state);
+
 } // namespace st::ui
 
 #endif

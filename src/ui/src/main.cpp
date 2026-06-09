@@ -391,6 +391,7 @@ int main(int argc, char *argv[]) {
         render_settings_modal(state);
         render_first_run_modal(state);
         render_fa24_swap_modal(state);
+        render_tgv_egr_delete_modal(state);
         render_shortcuts_modal(state);
         render_about_modal(state);
         render_help_modal(state);

@@ -134,6 +134,7 @@ add_executable(subuwutuner-gui
     src/modals/csv_import.cpp
     src/modals/def_registry.cpp
     src/modals/fa24_swap.cpp
+    src/modals/tgv_egr_delete.cpp
     src/modals/first_run.cpp
     src/modals/flash.cpp
     src/modals/help.cpp

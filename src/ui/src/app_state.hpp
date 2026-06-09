@@ -826,6 +826,13 @@ struct AppState {
     // workflow concept.
     bool show_fa24_swap_modal{false};
 
+    // TGV + EGR delete workflow modal. Same shape as fa24_swap.
+    // Opened from the Tools menu; gated at open-time on
+    // pack_supports_tgv_egr_delete(). Jurisdiction-confirm and
+    // hardware-confirm checkboxes inside the modal must be ticked
+    // before Apply is reachable.
+    bool show_tgv_egr_delete_modal{false};
+
     // Settings modal (Tools -> Settings...).
     bool show_settings_modal{false};
     char settings_def_root_input[1024]{};

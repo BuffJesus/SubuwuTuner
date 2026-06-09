@@ -39,6 +39,35 @@ required_tables = [
 ]
 
 
+# TGV + EGR delete workflow. Per analyst's Task A-F delivery
+# 2026-06-09 (findings/tgv-egr-delete/TASK_E_WORKFLOW_SPEC.md +
+# TASK_F_ADDER_GATING_RESOLVED.md): zero five L1 cal tables so the
+# ECU commands "no EGR" and "TGV always open" at every operating
+# point, plus disable the P0400 (EGR Flow Malfunction) DTC.
+# Sufficient for the user's hardware-delete plan (physical TGV
+# motor + EGR valve removal, electrical connectors disconnected).
+# Off-road / track-only; jurisdiction-gated at modal entry.
+#
+# Three L1 zeros come from Tasks A-E (EGR Airflow, EGR Pressure
+# Main, TGV Closed Activation). Two more come from Task F: the
+# Ignition Timing EGR Adders A + C are non-zero in stock and have
+# been edited in DMann's WRK3; the analyst couldn't fully prove
+# they're dormant post-L1 without a caller trace, so the
+# conservative path zeros them too. Adders B + D stay untouched —
+# byte-verified stock-neutral (0x80 = 0° everywhere).
+[[workflow]]
+id              = "tgv_egr_delete"
+display_name    = "TGV + EGR Delete (off-road only)"
+modal           = "tgv_egr_delete"
+required_tables = [
+    "airflow_manifold_flow_model_egr_flow_model_egr_airflow",
+    "airflow_manifold_flow_model_egr_flow_model_egr_absolute_pressure_main",
+    "ignition_compensation_coolant_tgv_closed_activation",
+    "ignition_compensation_egr_tgv_closed_ignition_timing_egr_adder_a",
+    "ignition_compensation_egr_tgv_closed_ignition_timing_egr_adder_c",
+]
+
+
 [[identification]]
 name      = "LF79103P"
 # FA-DIT WRX firmware embeds the CID in a descriptor at a variable
