@@ -443,6 +443,18 @@ void draw_basemap(AppState &state) {
                                         : chip_fg_ok());
         ImGui::TextColored(color, "%s", g_state.basemap_status.c_str());
     }
+    // Mirror the review-screen warning here: when the user is on the
+    // LoadBasemap default but hasn't picked a file yet, Apply will
+    // silently fall through to SubuwuTuner defaults. Surfacing it on
+    // Step 2 (where the choice happens) is more honest than waiting
+    // for Step 3 to point out the gap.
+    if (g_state.basemap_source == BasemapSource::LoadBasemap &&
+        g_state.basemap_path.empty()) {
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+        ImGui::TextColored(chip_fg_caution(),
+                           "\xE2\x9A\xA0  Apply will fall back to defaults until you "
+                           "pick a basemap file.");
+    }
     ImGui::Unindent();
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
 

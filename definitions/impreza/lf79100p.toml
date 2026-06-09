@@ -637,6 +637,20 @@ precision = 2
 data_type = "uint32_be"
 
 
+# Raw 32-bit big-endian, no transform. Used for tables whose four bytes
+# are tuned as a unit but whose per-byte semantics aren't RE'd yet.
+# Hand-added 2026-06-09 for the HPFP lobe-phase descriptor — same
+# firmware family as lf79103p, so the same surface exists here.
+[[scaling]]
+id        = "raw_uint32_be"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = ""
+precision = 0
+data_type = "uint32_be"
+
+
 [[scaling]]
 id        = "c_rshift_11_0_x_5_0_40_0"
 formula   = "linear"
@@ -4304,6 +4318,25 @@ data_type              = "uint16_be"
 scaling                = "deg_x_10_0"
 emissions_relevant     = false
 engine_safety_critical = false
+
+
+# Hand-added 2026-06-09. Same firmware family as lf79103p — the 4-byte
+# cluster at canon 0x49BA0 sits 8 B before the named Base Offset and is
+# the surface NTM's FA24-swap basemap rewrites. Per-byte semantics
+# aren't RE'd yet; treated as a single uint32 until bench RE confirms.
+# This pack doesn't declare the fa24_swap workflow (LF79100P is a
+# COBB Stage 1 tune state, not a typical FA24-swap target), but the
+# table exists so the editor surfaces the descriptor.
+[[table]]
+id                     = "fuel_timing_hpfp_lobe_phase_descriptor"
+name                   = "HPFP Lobe Phase Descriptor (4-byte cluster, pre-RE)"
+category               = "fuel - timing - hpfp"
+dimensions             = 0
+address                = 0x00049BA0
+data_type              = "uint32_be"
+scaling                = "raw_uint32_be"
+emissions_relevant     = false
+engine_safety_critical = true
 
 
 [[table]]
