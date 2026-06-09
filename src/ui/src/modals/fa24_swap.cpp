@@ -23,12 +23,12 @@
 //      semantics aren't RE'd yet — defaults branch writes the exact
 //      NTM pattern; basemap branch copies whatever the user's basemap
 //      contains.
-//   3. avcs_intake_*_intake_cam_target_tgv_closed  → load from basemap (default)
-//      NTM does a structured 2D retune, not a uniform delta — the
-//      +1.45° cell-mean-delta defaults exist as a low-magnitude
-//      fallback. Step 2 defaults to "Yes, load basemap" so users
-//      get NTM's exact per-cell curves. Baro Low == Baro High in
-//      both stock and NTM, so they share the same default.
+//   3. avcs_intake_*_intake_cam_target_tgv_closed  → NTM per-cell preset
+//      The defaults branch writes NTM's actual 10×16 cam-target
+//      table (extracted from their FA24-swap basemap; see
+//      kNtmAvcsCamTargetTgvClosed). Baro Low == Baro High in both
+//      stock and NTM, so they share the same preset. Defaults and
+//      basemap branches produce identical bytes for these tables.
 //   4. fuel_injectors_pulse_injector_mult_table    → ×1.43 per cell
 //      NTM scales uniformly by ~1.43, not 1.18 (the pre-NTM-data guess).
 //
@@ -62,6 +62,7 @@
 
 #include <array>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -550,14 +551,14 @@ void draw_review(AppState &state) {
                    "default writes NTM's exact byte pattern atomically. Safety-critical: "
                    "wrong values risk HPFP pressure faults.");
         change_row("AVCS - Intake - Cam Target (Baro Low, TGV Closed)",
-                   "+1.45° offset applied to every cell (NTM cell-mean delta)",
-                   "NTM does a structured 2D retune (some cells +30°, some -70°); "
-                   "the +1.45° default is the cell-mean delta — a small nudge, not "
-                   "a substitute. Load NTM basemap for the per-cell curve.");
+                   "stock → NTM per-cell preset (10×16 cells, 5°..30° range)",
+                   "The defaults branch now writes NTM's exact 10×16 cam-target "
+                   "table (extracted from their FA24-swap basemap). Identical to "
+                   "the basemap-load path for this table.");
         change_row("AVCS - Intake - Cam Target (Baro High, TGV Closed)",
-                   "+1.45° offset applied to every cell (NTM cell-mean delta)",
-                   "Same shape and mean delta as Baro Low — NTM keeps the two "
-                   "tables identical. Load NTM basemap for the exact curve.");
+                   "stock → NTM per-cell preset (identical to Baro Low)",
+                   "NTM keeps Baro Low and Baro High at the same values in both "
+                   "stock and their basemap, so they share the same preset.");
         change_row("Fuel - Injectors - Pulse - Injector Mult Table",
                    "per-cell stock × 1.43",
                    "Scales injector pulse-width for the FA24's higher flow rate. "
@@ -621,17 +622,61 @@ void copy_table_from_basemap(AppState &state, std::string const &label,
 // the apply loop is a single pass over kWorkflowTables instead of an
 // open-coded sequence. Adding a 5th workflow table (or a 6th when the
 // AVCS TGV-open variants land) is a one-line addition here, no apply-
-// path changes. The default op signature is (TableData&, Rect, double)
-// — all of set_cells / add_cells / multiply_cells fit.
+// path changes. Two default-write shapes are supported:
+//   * **Scalar op** — (default_op, default_arg). The op is one of
+//     set_cells / add_cells / multiply_cells; arg is the single
+//     double. Covers Displacement (set 2.4 L), HPFP (set 0x3D37322C),
+//     Injector mult (×1.43).
+//   * **Per-cell preset** — default_preset is a row-major flat span
+//     of NTM's actual cells. Used for the AVCS Cam Target tables
+//     where NTM's edit is a structured 2D retune that no scalar op
+//     approximates well. When the preset is non-empty, the apply
+//     path uses it and ignores default_op/default_arg.
+// Exactly one of the two should be set. The descriptor is constexpr
+// so an all-unset entry is a compile-time configuration bug; the
+// apply path silently skips it rather than warning at runtime.
 using EditOp = st::Status (*)(st::Definition::TableData &, st::edit::Rect, double);
+
+// 10x16 row-major NTM AVCS Cam Target (TGV Closed). Extracted from
+// the NTM FA24-swap basemap (cipher_agent decode 2026-06-09). NTM
+// keeps Baro Low == Baro High at every cell in both stock and NTM,
+// so this single preset serves both tables. Values are in degrees
+// (the scaled cell value); the ROM writeback converts back to int16
+// via the deg_x_728_1_0_5 scaling and the cells match NTM's bytes
+// byte-for-byte at the table's canon addresses (0x442F0 / 0x465F8).
+// Each row is RPM (axis_y = rpm_len10); each column is calculated
+// load (axis_x = avcs_intake_target_calculated_load_len16_v2).
+inline constexpr std::array<double, 160> kNtmAvcsCamTargetTgvClosed = {
+    4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 10.8337, 17.5003,
+    29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 30.0041,
+    9.9986, 9.9986, 9.9986, 9.9986, 9.9986, 9.9986, 10.8337, 17.5003,
+    29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 30.0041,
+    9.9986, 9.9986, 9.9986, 9.9986, 9.9986, 9.9986, 10.8337, 17.5003,
+    29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 30.0041,
+    9.9986, 9.9986, 9.9986, 9.9986, 9.9986, 9.9986, 10.8337, 17.5003,
+    29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 30.0041,
+    9.9986, 9.9986, 9.9986, 9.9986, 9.9986, 9.9986, 10.8337, 17.5003,
+    29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 30.0041,
+    9.9986, 9.9986, 9.9986, 9.9986, 9.9986, 9.9986, 10.8337, 17.5003,
+    29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 27.7517,
+    9.9986, 9.9986, 9.9986, 9.9986, 9.9986, 9.9986, 10.8337, 17.5003,
+    29.9986, 29.9986, 29.9986, 29.9986, 24.9993, 24.9993, 24.9993, 24.9993,
+    4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 10.8337, 17.5003,
+    29.9986, 29.9986, 29.9986, 29.9986, 24.9993, 24.9993, 24.9993, 24.9993,
+    4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 10.8337, 17.5003,
+    29.9986, 29.9986, 29.9986, 24.9993, 24.9993, 24.9993, 24.9993, 24.9993,
+    4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 9.6663, 15.0007,
+    29.9986, 29.9986, 29.9986, 22.4997, 22.4997, 22.4997, 22.4997, 21.4421,
+};
 
 struct WorkflowTable {
     char const *table_id;
     char const *label_basemap; // edit-description string when copying from basemap
     char const *label_default; // edit-description string for the defaults branch
-    EditOp default_op;         // op the defaults branch invokes
-    double default_arg;        // single double argument for set_cells / add_cells / multiply_cells
+    EditOp default_op;         // scalar op (nullptr if using preset)
+    double default_arg;        // scalar op argument (ignored if default_op == nullptr)
     bool needs_keep_fa24_cams; // false = always apply; true = skipped on hardware-only cam paths
+    std::span<double const> default_preset{}; // row-major per-cell preset; takes precedence
 };
 
 // Order matters — apply_fa24_swap iterates this verbatim and the
@@ -657,22 +702,23 @@ constexpr std::array<WorkflowTable, 5> kWorkflowTables = {{
      "FA24 swap: HPFP Lobe Phase Descriptor (basemap)",
      "FA24 swap: HPFP Lobe Phase Descriptor \xE2\x86\x92 NTM 0x3D37322C",
      &st::edit::set_cells, static_cast<double>(0x3D37322Cu), true},
-    // NTM does a structured 2D retune (not uniform delta, not constant).
-    // Stock and NTM both keep Baro Low == Baro High at every cell, and
-    // the cell-mean delta is +1.45 deg for both tables (verified
-    // 2026-06-09 against the correct 10x16 shape — earlier +10.5/+8
-    // figures were computed against an inflated 22x24 table size and
-    // were wrong). For an exact NTM match, load the basemap; the
-    // defaults below are a low-magnitude fallback that nudges the
-    // table in the right direction without lying about precision.
+    // AVCS Cam Target (TGV Closed) — Baro Low / Baro High. NTM
+    // writes a structured 2D retune that no scalar op approximates
+    // well; both tables get the per-cell preset above. The defaults
+    // branch and the basemap branch now produce identical bytes for
+    // these two tables (the preset was extracted from the same
+    // basemap), making the defaults branch a viable standalone path
+    // for users who don't have NTM's .acf in hand.
     {"avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
      "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) (basemap)",
-     "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) +1.45\xC2\xB0 mean",
-     &st::edit::add_cells, 1.45, true},
+     "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) NTM preset",
+     nullptr, 0.0, true,
+     std::span<double const>{kNtmAvcsCamTargetTgvClosed}},
     {"avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
      "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) (basemap)",
-     "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) +1.45\xC2\xB0 mean",
-     &st::edit::add_cells, 1.45, true},
+     "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) NTM preset",
+     nullptr, 0.0, true,
+     std::span<double const>{kNtmAvcsCamTargetTgvClosed}},
     {"fuel_injectors_pulse_injector_mult_table",
      "FA24 swap: Injector Mult Table (basemap)",
      "FA24 swap: Injector Mult Table \xC3\x97""1.43",
@@ -717,13 +763,45 @@ void apply_fa24_swap(AppState &state) {
         }
         if (basemap_rom.has_value()) {
             copy_table_from_basemap(state, wt.label_basemap, wt.table_id, *basemap_rom);
-        } else {
+        } else if (!wt.default_preset.empty()) {
+            // Per-cell preset path. apply_op_table hands us the whole-
+            // table Rect; we walk it row-major and write the preset's
+            // flat array into the cells. Cell-count mismatch (preset
+            // size doesn't match the resolved table shape) bails
+            // cleanly with InvalidArgument so the workflow doesn't
+            // half-write a misaligned grid.
+            apply_op_table(state, wt.label_default, kWorkflowId, wt.table_id,
+                           [preset = wt.default_preset](
+                               st::Definition::TableData &td,
+                               st::edit::Rect r) -> st::Status {
+                               std::size_t const rows = r.rows();
+                               std::size_t const cols = r.cols();
+                               if (preset.size() != rows * cols) {
+                                   return st::failure(
+                                       st::ErrorCode::InvalidArgument,
+                                       "preset cell count " +
+                                           std::to_string(preset.size()) +
+                                           " doesn't match table shape " +
+                                           std::to_string(rows) + "x" +
+                                           std::to_string(cols));
+                               }
+                               for (std::size_t row = 0; row < rows; ++row) {
+                                   for (std::size_t col = 0; col < cols; ++col) {
+                                       td.values[r.r_start + row][r.c_start + col] =
+                                           preset[row * cols + col];
+                                   }
+                               }
+                               return st::ok();
+                           });
+        } else if (wt.default_op != nullptr) {
             apply_op_table(state, wt.label_default, kWorkflowId, wt.table_id,
                            [op = wt.default_op, arg = wt.default_arg](
                                st::Definition::TableData &td, st::edit::Rect r) {
                                return op(td, r, arg);
                            });
         }
+        // (no else — a descriptor with no op AND no preset is a
+        // configuration bug; the test fixture catches it before ship)
     }
 
     auto const edits_recorded =
