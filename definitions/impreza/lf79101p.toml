@@ -196,3 +196,55 @@ bitmap_id          = "primary_dtc_enable"
 byte_offset        = 96
 bit                = 2
 emissions_relevant = true
+
+
+# === Wastegate-duty table overrides (2026-06-09) ===
+#
+# Tuner-touched LF79101P state runs DMann's etune. DMann patched the
+# original LF79103P descriptors at canon 0x69320 / 0x69334 to point
+# their data_ptr fields at RAM shadows (0xFFF83250 / 0xFFF83074).
+# A new pair of descriptors landed in flash at canon 0x1FF618 /
+# 0x1FF62C with the same {X_size=17, Y_size=14, X=rpm, Y=req_torque}
+# shape, but their data_ptr fields point at the boot-time source for
+# those RAM shadows:
+#   - Initial cal source: canon 0x1D884
+#   - Maximum cal source: canon 0x1D6A8
+# (Flash-order of the two descriptors is INVERTED relative to
+# LF79103P — analyst's per-CID hunt initially mis-labelled them;
+# corrected after byte-signature verification, see
+# findings/decompile/lf79103p/WASTEGATE_DUTY_AXES_RESOLVED.md
+# §"ERRATUM 2026-06-09".)
+#
+# The inherited LF79103P entries point at canon 0x31456 / 0x31632
+# which are NOT consumed at runtime in this state — the user would
+# have been editing stale flash bytes. Override both tables here so
+# the editor surfaces the actual boot-source bytes that feed the RAM
+# shadows DMann's tune reads from. Same 14 × 17 shape as the parent
+# (uses the rpm + req_torque axes inherited from lf79103p).
+
+[[table]]
+id                     = "airflow_turbo_wastegate_wastegate_duty_initial"
+name                   = "Wastegate Duty Initial"
+category               = "airflow - turbo - wastegate"
+dimensions             = 2
+address                = 0x0001D884
+data_type              = "uint16_be"
+scaling                = "x_256_0"
+axis_x                 = "req_torque"
+axis_y                 = "rpm"
+emissions_relevant     = false
+engine_safety_critical = false
+
+
+[[table]]
+id                     = "airflow_turbo_wastegate_wastegate_duty_maximum"
+name                   = "Wastegate Duty Maximum"
+category               = "airflow - turbo - wastegate"
+dimensions             = 2
+address                = 0x0001D6A8
+data_type              = "uint16_be"
+scaling                = "x_256_0"
+axis_x                 = "req_torque"
+axis_y                 = "rpm"
+emissions_relevant     = false
+engine_safety_critical = false
