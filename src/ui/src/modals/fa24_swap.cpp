@@ -24,10 +24,11 @@
 //      NTM pattern; basemap branch copies whatever the user's basemap
 //      contains.
 //   3. avcs_intake_*_intake_cam_target_tgv_closed  → load from basemap (default)
-//      NTM does a non-uniform whole-table replacement, not a uniform
-//      delta — the +10.5°/+8° cell-mean defaults exist as a fallback
-//      but Step 2 defaults to "Yes, load basemap" so the user gets
-//      NTM's exact per-cell curves.
+//      NTM does a structured 2D retune, not a uniform delta — the
+//      +1.45° cell-mean-delta defaults exist as a low-magnitude
+//      fallback. Step 2 defaults to "Yes, load basemap" so users
+//      get NTM's exact per-cell curves. Baro Low == Baro High in
+//      both stock and NTM, so they share the same default.
 //   4. fuel_injectors_pulse_injector_mult_table    → ×1.43 per cell
 //      NTM scales uniformly by ~1.43, not 1.18 (the pre-NTM-data guess).
 //
@@ -549,13 +550,14 @@ void draw_review(AppState &state) {
                    "default writes NTM's exact byte pattern atomically. Safety-critical: "
                    "wrong values risk HPFP pressure faults.");
         change_row("AVCS - Intake - Cam Target (Baro Low, TGV Closed)",
-                   "+10.5° offset applied to every cell (cell-mean of NTM)",
-                   "NTM does a non-uniform whole-table replacement; the +10.5° "
-                   "default is the cell-mean. Load NTM basemap for exact match.");
+                   "+1.45° offset applied to every cell (NTM cell-mean delta)",
+                   "NTM does a structured 2D retune (some cells +30°, some -70°); "
+                   "the +1.45° default is the cell-mean delta — a small nudge, not "
+                   "a substitute. Load NTM basemap for the per-cell curve.");
         change_row("AVCS - Intake - Cam Target (Baro High, TGV Closed)",
-                   "+8° offset applied to every cell (cell-mean of NTM)",
-                   "NTM does a non-uniform whole-table replacement; the +8° "
-                   "default is the cell-mean. Load NTM basemap for exact match.");
+                   "+1.45° offset applied to every cell (NTM cell-mean delta)",
+                   "Same shape and mean delta as Baro Low — NTM keeps the two "
+                   "tables identical. Load NTM basemap for the exact curve.");
         change_row("Fuel - Injectors - Pulse - Injector Mult Table",
                    "per-cell stock × 1.43",
                    "Scales injector pulse-width for the FA24's higher flow rate. "
@@ -655,17 +657,22 @@ constexpr std::array<WorkflowTable, 5> kWorkflowTables = {{
      "FA24 swap: HPFP Lobe Phase Descriptor (basemap)",
      "FA24 swap: HPFP Lobe Phase Descriptor \xE2\x86\x92 NTM 0x3D37322C",
      &st::edit::set_cells, static_cast<double>(0x3D37322Cu), true},
-    // NTM does a non-uniform whole-table replacement, NOT a uniform delta.
-    // Default uses NTM's cell-mean (+10.5 deg for Baro Low, +8 deg for High);
-    // for an exact match, load the NTM basemap (Step 2 → "Yes").
+    // NTM does a structured 2D retune (not uniform delta, not constant).
+    // Stock and NTM both keep Baro Low == Baro High at every cell, and
+    // the cell-mean delta is +1.45 deg for both tables (verified
+    // 2026-06-09 against the correct 10x16 shape — earlier +10.5/+8
+    // figures were computed against an inflated 22x24 table size and
+    // were wrong). For an exact NTM match, load the basemap; the
+    // defaults below are a low-magnitude fallback that nudges the
+    // table in the right direction without lying about precision.
     {"avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
      "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) (basemap)",
-     "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) +10.5\xC2\xB0 mean",
-     &st::edit::add_cells, 10.5, true},
+     "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) +1.45\xC2\xB0 mean",
+     &st::edit::add_cells, 1.45, true},
     {"avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
      "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) (basemap)",
-     "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) +8\xC2\xB0 mean",
-     &st::edit::add_cells, 8.0, true},
+     "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) +1.45\xC2\xB0 mean",
+     &st::edit::add_cells, 1.45, true},
     {"fuel_injectors_pulse_injector_mult_table",
      "FA24 swap: Injector Mult Table (basemap)",
      "FA24 swap: Injector Mult Table \xC3\x97""1.43",

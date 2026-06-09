@@ -5629,7 +5629,11 @@ address                = 0x00049BA8
 data_type              = "uint16_be"
 scaling                = "deg_x_10_0"
 emissions_relevant     = false
-engine_safety_critical = false
+# Hand-flipped 2026-06-09 to match the sibling lobe_phase_descriptor's
+# safety_critical=true. HPFP pump-command timing edits risk pump
+# damage if mis-set; defgen-generated false was a pre-existing
+# inconsistency.
+engine_safety_critical = true
 
 
 # Hand-added 2026-06-09. The 4-byte cluster at canon 0x49BA0 sits 8 B

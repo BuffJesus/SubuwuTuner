@@ -4317,7 +4317,9 @@ address                = 0x00049BA8
 data_type              = "uint16_be"
 scaling                = "deg_x_10_0"
 emissions_relevant     = false
-engine_safety_critical = false
+# Hand-flipped 2026-06-09 to match the sibling lobe_phase_descriptor.
+# See lf79103p.toml for the rationale.
+engine_safety_critical = true
 
 
 # Hand-added 2026-06-09. Same firmware family as lf79103p — the 4-byte
