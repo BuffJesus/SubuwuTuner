@@ -117,7 +117,7 @@ The static-edit recipe above is wired as a guided 3-step modal: **Welcome → Co
 Flow:
 
 1. **Cam strategy** — pick "Keep the FA24 cams (recommended)" / "Swap FA20 cams into the FA24 block" / "Use the RS Motors swap kit." Hardware-only choices skip Step 2 and limit Step 3 to the Engine Displacement edit. Software-fix choice runs the full set.
-2. **Basemap** — "Yes, load a `.bin`" opens an NFD file picker, size-checks against the project's source ROM, and reads the 5 workflow tables from the basemap. Step 2 defaults to **Yes** for safety, but the defaults branch is now a complete standalone path: it writes NTM's actual values for every workflow table, including the AVCS Cam Target's 10×16 per-cell preset (extracted from NTM's basemap). Defaults and basemap branches produce identical bytes for the AVCS tables and for HPFP / Injector Mult; the only place they can diverge is the Engine Displacement scalar (basemap captures whatever the .bin holds; defaults force 2.4 L).
+2. **Basemap** — "Yes, load a `.bin`" opens an NFD file picker, size-checks against the project's source ROM, and reads the 5 workflow tables from the basemap. Step 2 defaults to **Yes** for safety, but the defaults branch is now a complete standalone path: it writes NTM's actual values for every workflow table, including per-cell presets for the AVCS Cam Target (10×16) and the HPFP Phase Transfer Curve (16-element 1-D) — both extracted from NTM's basemap. Defaults and basemap branches produce identical bytes for the AVCS, HPFP, and Injector Mult tables; the only place they can diverge is the Engine Displacement scalar (basemap captures whatever the .bin holds; defaults force 2.4 L).
 3. **Review** — names each table that will change with the from/to values (defaults branch) or "copied from basemap" with the source filename (basemap branch). Apply commits up to 5 edits (1 on hardware paths) tagged `fa24_swap`.
 
 A persistent purple "FA24-swap mode" chip lands in the status bar after Apply. Click it for the edit list + a **Revert All** button that calls `History::undo_while_tag("fa24_swap")` to peel the workflow batch off the head of history atomically — restores `working.bin` to its pre-workflow state in one click.
@@ -127,7 +127,7 @@ The 5 tables the workflow knows about (defined at `src/ui/src/modals/fa24_swap.c
 | Table id | Default op | Default arg | Needs Keep-FA24-cams | NTM rationale |
 |---|---|---|---|---|
 | `engine_displacement` | `set_cells` | `2.4` | no — applies for every strategy | NTM writes 2.4 L exactly. |
-| `fuel_timing_hpfp_lobe_phase_descriptor` | `set_cells` | `0x3D37322C` | yes | 4-byte cluster at canon 0x49BA0 — the surface NTM actually rewrites for the FA24 lobe-phase fix (the named Base Offset at 0x49BA8 stays stock). Per-byte semantics pre-RE; defaults branch writes NTM's exact byte pattern atomically. |
+| `fuel_timing_hpfp_phase_transfer_curve` | per-cell preset | `kNtmHpfpPhaseTransferCurve` (16) | yes | 16-element 1-D uint8 table at canon 0x49B98 (X-axis at 0x40E04). Ghidra-resolved 2026-06-09 (see `findings/decompile/lf79103p/HPFP_0x49BA0_RESOLVED.md`); supersedes the earlier 4-byte uint32 placeholder. NTM tunes indices 6..10 to smooth the descent through the transition zone; the preset writes the full 16-byte pattern (unchanged plateaus at both ends, tuned middle). |
 | `avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed` | per-cell preset | `kNtmAvcsCamTargetTgvClosed` (10×16) | yes | NTM does a structured 2D retune (cells span 5°..30°). The defaults branch now writes NTM's exact 10×16 array (extracted from their basemap 2026-06-09). Identical to the basemap-load path for this table. |
 | `avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed` | per-cell preset | `kNtmAvcsCamTargetTgvClosed` (10×16) | yes | NTM keeps Baro Low == Baro High at every cell — shares the same preset. |
 | `fuel_injectors_pulse_injector_mult_table` | `multiply_cells` | `1.43` | yes | NTM multiplies every cell uniformly by ~1.43 (not 1.18 — that was the pre-NTM-data guess). |
@@ -147,7 +147,7 @@ display_name    = "FA24 swap (VA WRX)"
 modal           = "fa24_swap"
 required_tables = [
     "engine_displacement",
-    "fuel_timing_hpfp_lobe_phase_descriptor",
+    "fuel_timing_hpfp_phase_transfer_curve",
     "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
     "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
     "fuel_injectors_pulse_injector_mult_table",

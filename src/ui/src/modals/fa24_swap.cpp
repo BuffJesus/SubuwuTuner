@@ -17,12 +17,13 @@
 // calibrated against the NTMotorsports FA24-swap basemap (cipher-decrypted
 // 2026-06-09; see findings/ntm-fa24-basemap-2026-06-08/WORKFLOW_VALIDATION.md):
 //   1. engine_displacement                         → 2.4 L
-//   2. fuel_timing_hpfp_lobe_phase_descriptor      → 0x3D37322C (NTM bytes)
-//      The 4-byte cluster at canon 0x49BA0; the named Base Offset at
-//      0x49BA8 stays stock (NTM doesn't tune that uint16). Per-byte
-//      semantics aren't RE'd yet — defaults branch writes the exact
-//      NTM pattern; basemap branch copies whatever the user's basemap
-//      contains.
+//   2. fuel_timing_hpfp_phase_transfer_curve       → NTM 16-byte preset
+//      16-element 1-D uint8 table at canon 0x49B98, indexed by the
+//      halfword phase axis at 0x40E04. NTM tunes indices 6..10 to
+//      smooth the descent through the transition zone; the preset
+//      writes NTM's full 16-byte pattern verbatim. The named Base
+//      Offset uint16 at 0x49BA8 stays stock (NTM doesn't touch it).
+//      Resolved 2026-06-09 via Ghidra (see HPFP_0x49BA0_RESOLVED.md).
 //   3. avcs_intake_*_intake_cam_target_tgv_closed  → NTM per-cell preset
 //      The defaults branch writes NTM's actual 10×16 cam-target
 //      table (extracted from their FA24-swap basemap; see
@@ -544,12 +545,12 @@ void draw_review(AppState &state) {
     } else {
         change_row("Engine - Displacement", "2.0 L → 2.4 L",
                    "Required for the MAF / load-calc math to track the larger engine.");
-        change_row("Fuel - Timing - HPFP - Lobe Phase Descriptor",
-                   "0x372C2C2C → 0x3D37322C (NTM bytes)",
-                   "4-byte cluster at canon 0x49BA0 that NTM's basemap rewrites for the "
-                   "FA24 cam lobe-phase fix. Per-byte semantics aren't RE'd yet; the "
-                   "default writes NTM's exact byte pattern atomically. Safety-critical: "
-                   "wrong values risk HPFP pressure faults.");
+        change_row("Fuel - Timing - HPFP - Phase Transfer Curve",
+                   "stock 16-byte curve → NTM smoothed transition (indices 6..10)",
+                   "16-element 1-D lookup table at canon 0x49B98 (Ghidra-resolved "
+                   "2026-06-09). NTM keeps the plateaus at both ends and smooths the "
+                   "transition zone — full 16-byte preset written. Safety-critical: "
+                   "wrong values affect HPFP pressure-or-timing transfer behavior.");
         change_row("AVCS - Intake - Cam Target (Baro Low, TGV Closed)",
                    "stock → NTM per-cell preset (10×16 cells, 5°..30° range)",
                    "The defaults branch now writes NTM's exact 10×16 cam-target "
@@ -637,6 +638,25 @@ void copy_table_from_basemap(AppState &state, std::string const &label,
 // apply path silently skips it rather than warning at runtime.
 using EditOp = st::Status (*)(st::Definition::TableData &, st::edit::Rect, double);
 
+// 16-element NTM HPFP Phase Transfer Curve. Extracted from the NTM
+// FA24-swap basemap (cipher_agent decode 2026-06-09) at canon
+// 0x49B98. Raw uint8 values 1:1 (raw_uint8 scaling factor 1.0).
+// Indexed by the halfword phase axis at canon 0x40E04 (uniform ramp
+// 0x0000..0xF000 step 0x1000). NTM tunes indices 6..10 to smooth
+// the descent through the curve's transition zone; indices 0..5
+// and 11..15 stay at stock values. Resolved 2026-06-09 via Ghidra
+// disasm of FUN_001AF6D8 + FUN_0016CD74. See
+// findings/decompile/lf79103p/HPFP_0x49BA0_RESOLVED.md.
+inline constexpr std::array<double, 16> kNtmHpfpPhaseTransferCurve = {
+    // idx 0..5: unchanged from stock (0x4D = 77)
+    77.0, 77.0, 77.0, 77.0, 77.0, 77.0,
+    // idx 6..10: NTM-tuned (smoothed descent)
+    //   stock: 60 60 55 44 44   ->   NTM: 72 66 61 55 50
+    72.0, 66.0, 61.0, 55.0, 50.0,
+    // idx 11..15: unchanged from stock (idx 11 = 0x2C = 44; idx 12..15 = 0x21 = 33)
+    44.0, 33.0, 33.0, 33.0, 33.0,
+};
+
 // 10x16 row-major NTM AVCS Cam Target (TGV Closed). Extracted from
 // the NTM FA24-swap basemap (cipher_agent decode 2026-06-09). NTM
 // keeps Baro Low == Baro High at every cell in both stock and NTM,
@@ -691,17 +711,19 @@ constexpr std::array<WorkflowTable, 5> kWorkflowTables = {{
      "FA24 swap: Engine Displacement (basemap)",
      "FA24 swap: Engine Displacement \xE2\x86\x92 2.4 L",
      &st::edit::set_cells, 2.4, /*needs_keep_fa24_cams=*/false},
-    // HPFP lobe-phase descriptor at canon 0x49BA0 — the 4-byte cluster
-    // NTM's FA24-swap basemap actually rewrites (stock 0x372C2C2C →
-    // NTM 0x3D37322C). Treated here as a single uint32 because per-byte
-    // semantics aren't RE'd; the default writes the exact NTM byte
-    // pattern atomically via set_cells. Once the bytes' per-cylinder /
-    // phase-pair role is confirmed, the table will split into per-byte
-    // cells and this entry will switch to a structured op.
-    {"fuel_timing_hpfp_lobe_phase_descriptor",
-     "FA24 swap: HPFP Lobe Phase Descriptor (basemap)",
-     "FA24 swap: HPFP Lobe Phase Descriptor \xE2\x86\x92 NTM 0x3D37322C",
-     &st::edit::set_cells, static_cast<double>(0x3D37322Cu), true},
+    // HPFP Phase Transfer Curve at canon 0x49B98 — 16-element 1-D
+    // uint8 table indexed by the halfword phase axis at 0x40E04.
+    // NTM's basemap tunes indices 6..10 to smooth the stepwise
+    // descent through the transition zone; the preset writes NTM's
+    // full 16-byte pattern verbatim (indices 0..5 and 11..15 stay
+    // at stock values, matching what NTM ships). Resolved 2026-06-09
+    // via Ghidra; supersedes the pre-RE `fuel_timing_hpfp_lobe_phase_descriptor`
+    // uint32 placeholder.
+    {"fuel_timing_hpfp_phase_transfer_curve",
+     "FA24 swap: HPFP Phase Transfer Curve (basemap)",
+     "FA24 swap: HPFP Phase Transfer Curve NTM preset (idx 6..10 smoothed)",
+     nullptr, 0.0, true,
+     std::span<double const>{kNtmHpfpPhaseTransferCurve}},
     // AVCS Cam Target (TGV Closed) — Baro Low / Baro High. NTM
     // writes a structured 2D retune that no scalar op approximates
     // well; both tables get the per-cell preset above. The defaults
