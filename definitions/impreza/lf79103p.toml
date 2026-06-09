@@ -841,7 +841,15 @@ name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00031B24
-length    = 8
+# Bumped 2026-06-09 from 8 → 17. defgen-generated `length = 8` was
+# wrong — it only covered cells 0..7 of a 17-cell monotonic ramp
+# (2000..8000 RPM). The wastegate Initial/Maximum dispatcher
+# FUN_001B3758 reads X_size = 17 from the descriptor at canon
+# 0x69320 (Ghidra-confirmed). lf79103p.toml's only consumers of
+# `axis_y = "rpm"` were the two wastegate tables (both 17-row),
+# so the bump is consumer-safe. See
+# findings/decompile/lf79103p/WASTEGATE_DUTY_AXES_RESOLVED.md.
+length    = 17
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -852,7 +860,13 @@ name      = "REQ TORQUE"
 unit      = ""
 type      = "static"
 address   = 0x00031314
-length    = 7
+# Bumped 2026-06-09 from 7 → 14. Same story as the `rpm` axis above:
+# defgen-generated `length = 7` truncated a 14-cell monotonic
+# req-torque ramp. Wastegate dispatcher reads Y_size = 14 (Ghidra-
+# confirmed). Only consumer was wastegate_duty_initial, so the bump
+# is safe; wastegate_duty_maximum is also being migrated to this
+# axis (was incorrectly using `boost_control_requested_torque`).
+length    = 14
 data_type = "uint16_be"
 scaling   = "nm_x_16000_0_80_0"
 
@@ -2759,7 +2773,15 @@ dimensions             = 2
 address                = 0x00031632
 data_type              = "uint16_be"
 scaling                = "x_256_0"
-axis_x                 = "boost_control_requested_torque"
+# Hand-fixed 2026-06-09. defgen-generated axis_x =
+# `boost_control_requested_torque` was wrong — the
+# wastegate-duty descriptor at canon 0x69334 points at the SAME
+# req_torque axis (0x31314) that wastegate_duty_initial uses
+# (Ghidra-confirmed via FUN_001B3758). After the axis-length bumps
+# above, this table now resolves to its true 14 × 17 shape (was
+# silently rendering 7 × 8). See findings/decompile/lf79103p/
+# WASTEGATE_DUTY_AXES_RESOLVED.md.
+axis_x                 = "req_torque"
 axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
