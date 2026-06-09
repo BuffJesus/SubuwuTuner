@@ -784,7 +784,7 @@ name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0002979C
-length    = 8
+length    = 17
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -795,7 +795,7 @@ name      = "REQ TORQUE"
 unit      = ""
 type      = "static"
 address   = 0x00028F8C
-length    = 7
+length    = 14
 data_type = "uint16_be"
 scaling   = "nm_x_16000_0_80_0"
 
@@ -2645,7 +2645,7 @@ dimensions             = 2
 address                = 0x000292AA
 data_type              = "uint16_be"
 scaling                = "x_256_0"
-axis_x                 = "boost_control_requested_torque"
+axis_x                 = "req_torque"
 axis_y                 = "rpm"
 emissions_relevant     = false
 engine_safety_critical = false
