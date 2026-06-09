@@ -6643,3 +6643,68 @@ data_type              = "float32_be"
 scaling                = "x_200000_0_100_0"
 emissions_relevant     = false
 engine_safety_critical = false
+
+
+# Raw scalings for tables whose physical units aren't decoded yet —
+# the editor shows the value 1:1 with the underlying integer.
+# Hand-added 2026-06-09 for the HPFP phase transfer curve and its
+# X-axis. See findings/decompile/lf79103p/HPFP_0x49BA0_RESOLVED.md.
+[[scaling]]
+id        = "raw_uint8"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = ""
+precision = 0
+data_type = "uint8"
+
+
+[[scaling]]
+id        = "raw_uint16_be"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = ""
+precision = 0
+data_type = "uint16_be"
+
+
+# Generic 16-halfword uniform ramp 0x0000..0xF000 step 0x1000. Per
+# analyst byte-pattern hunt (2026-06-09): this canonical address is
+# referenced as a BE-word ~200 times per ROM — it's the firmware's
+# generic "normalized 16-step index" axis. First consumer in this
+# pack is fuel_timing_hpfp_phase_transfer_curve (below); future
+# tables that need this axis can reference it by id without
+# re-declaring. See findings/decompile/lf79103p/
+# HPFP_TRANSFER_CURVE_SIBLING_PROMOTION.md §"X-axis pattern reuse".
+[[axis]]
+id        = "normalized_index_0_to_0xF000_step_0x1000"
+name      = "Normalized 16-step Index (0..0xF000)"
+unit      = ""
+type      = "static"
+address   = 0x0004124C
+length    = 16
+data_type = "uint16_be"
+scaling   = "raw_uint16_be"
+
+
+# 16-element 1-D HPFP phase transfer curve. Stock data pattern
+# 4d4d4d4d4d4d3c3c372c2c2c21212121 (identical across the SH-2A
+# A-series family). X-axis is the generic normalized 16-step index
+# above. Per Ghidra disasm of FUN_001AF6D8 in LF79103P (the 1-D
+# linear-interp dispatcher); cousin packs use the same descriptor
+# format at per-CID addresses. Resolved 2026-06-09; see
+# findings/decompile/lf79103p/HPFP_0x49BA0_RESOLVED.md
+# (+ HPFP_TRANSFER_CURVE_SIBLING_PROMOTION.md for the per-CID
+# address table). Hand-added 2026-06-09.
+[[table]]
+id                     = "fuel_timing_hpfp_phase_transfer_curve"
+name                   = "HPFP Phase Transfer Curve"
+category               = "fuel - timing - hpfp"
+dimensions             = 1
+address                = 0x0004BD28
+data_type              = "uint8"
+scaling                = "raw_uint8"
+axis_x                 = "normalized_index_0_to_0xF000_step_0x1000"
+emissions_relevant     = false
+engine_safety_critical = true

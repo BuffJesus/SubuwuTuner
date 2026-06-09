@@ -923,16 +923,22 @@ data_type = "uint16_be"
 scaling   = "c_x_4096_0_10_0_40_0"
 
 
-# 16-halfword uniform ramp 0x0000..0xF000 step 0x1000. Same physical
-# bytes as the IAT axis above (boost tables read the first 8 halfwords
-# with an IAT scaling), but the HPFP phase transfer curve at
-# fuel_timing_hpfp_phase_transfer_curve reads all 16 with raw scaling
-# — per Ghidra disasm of FUN_001AF6D8 (the 1-D linear-interp
-# dispatcher) called from FUN_0016CD74. Resolved 2026-06-09; see
-# findings/decompile/lf79103p/HPFP_0x49BA0_RESOLVED.md.
+# Generic 16-halfword uniform ramp 0x0000..0xF000 step 0x1000.
+# Per analyst byte-pattern hunt (2026-06-09): this canonical address
+# is referenced as a BE-word 200± times per ROM across every SH-2A
+# A-series Subaru pack — it's the firmware's generic "normalized 16-
+# step index" axis, consumed by many 1-D and 2-D tables (boost
+# control, fuel timing, AVCS, the HPFP transfer curve below, and
+# others not yet promoted). Declared once here under a generic id
+# so future tables that need this axis can reference it by id
+# without re-declaring. See findings/decompile/lf79103p/
+# HPFP_TRANSFER_CURVE_SIBLING_PROMOTION.md §"X-axis pattern reuse".
+# Same physical bytes as boost_control_wastegate_iat above (which
+# reads the first 8 halfwords with an IAT scaling); toml's
+# axis-by-id system keeps the two distinct.
 [[axis]]
-id        = "hpfp_phase_axis_x_0_to_0xF000_step_0x1000"
-name      = "HPFP Phase Axis (0..0xF000 step 0x1000)"
+id        = "normalized_index_0_to_0xF000_step_0x1000"
+name      = "Normalized 16-step Index (0..0xF000)"
 unit      = ""
 type      = "static"
 address   = 0x00040E04
@@ -5683,7 +5689,7 @@ dimensions             = 1
 address                = 0x00049B98
 data_type              = "uint8"
 scaling                = "raw_uint8"
-axis_x                 = "hpfp_phase_axis_x_0_to_0xF000_step_0x1000"
+axis_x                 = "normalized_index_0_to_0xF000_step_0x1000"
 emissions_relevant     = false
 engine_safety_critical = true
 
