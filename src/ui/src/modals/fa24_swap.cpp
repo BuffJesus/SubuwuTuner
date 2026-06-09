@@ -13,11 +13,23 @@
 // with an in-app preview. See HANDOFF-from-analyst-2026-06-07-fa24-swap-uiux-plan.md
 // for the full design rationale.
 //
-// The 4 tables this writes (when "use defaults" branch is taken):
+// The tables this writes (when "use defaults" branch is taken),
+// calibrated against the NTMotorsports FA24-swap basemap (cipher-decrypted
+// 2026-06-09; see findings/ntm-fa24-basemap-2026-06-08/WORKFLOW_VALIDATION.md):
 //   1. engine_displacement                         → 2.4 L
-//   2. fuel_timing_hpfp_base_offset                → +180 deg from stock
-//   3. avcs_intake_*_intake_cam_target_*           → +2 deg per cell
-//   4. fuel_injectors_pulse_injector_mult_table    → ×1.18 per cell
+//   2. fuel_timing_hpfp_lobe_phase_descriptor      → 0x3D37322C (NTM bytes)
+//      The 4-byte cluster at canon 0x49BA0; the named Base Offset at
+//      0x49BA8 stays stock (NTM doesn't tune that uint16). Per-byte
+//      semantics aren't RE'd yet — defaults branch writes the exact
+//      NTM pattern; basemap branch copies whatever the user's basemap
+//      contains.
+//   3. avcs_intake_*_intake_cam_target_tgv_closed  → load from basemap (default)
+//      NTM does a non-uniform whole-table replacement, not a uniform
+//      delta — the +10.5°/+8° cell-mean defaults exist as a fallback
+//      but Step 2 defaults to "Yes, load basemap" so the user gets
+//      NTM's exact per-cell curves.
+//   4. fuel_injectors_pulse_injector_mult_table    → ×1.43 per cell
+//      NTM scales uniformly by ~1.43, not 1.18 (the pre-NTM-data guess).
 //
 // Each edit routes through the standard apply_op() pipeline so the
 // existing undo/redo and audit log surface them — "Revert all" is
@@ -98,7 +110,13 @@ enum class BasemapStatusSeverity : std::uint8_t { Ok, Warn, Error };
 struct ModalState {
     int step{0};
     CamStrategy cam_strategy{CamStrategy::KeepFA24Cams};
-    BasemapSource basemap_source{BasemapSource::UseDefaults};
+    // Default to LoadBasemap. NTM's per-cell AVCS retune can't be
+    // honestly expressed as a uniform delta, and the HPFP lobe-phase
+    // descriptor's per-byte semantics aren't RE'd — both are best
+    // served by copying the user's NTM basemap. UseDefaults remains
+    // a fallback for users who don't have a basemap in hand. Step 2's
+    // "No" radio still works; it's just not the default any more.
+    BasemapSource basemap_source{BasemapSource::LoadBasemap};
     std::filesystem::path basemap_path;
     std::string basemap_status; // shown under the "Yes" radio when set
     BasemapStatusSeverity basemap_status_severity{BasemapStatusSeverity::Ok};
@@ -108,7 +126,7 @@ static ModalState g_state;
 void reset_state() {
     g_state.step = 0;
     g_state.cam_strategy = CamStrategy::KeepFA24Cams;
-    g_state.basemap_source = BasemapSource::UseDefaults;
+    g_state.basemap_source = BasemapSource::LoadBasemap;
     g_state.basemap_path.clear();
     g_state.basemap_status.clear();
     g_state.basemap_status_severity = BasemapStatusSeverity::Ok;
@@ -314,8 +332,10 @@ void draw_basemap(AppState &state) {
 
     ImGui::TextWrapped("Do you have a basemap to import?");
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
-    text_subtle("Not sure? Pick 'No' — SubuwuTuner's defaults are a safe starting "
-                "point. You'll likely need bench or dyno time to refine either way.");
+    text_subtle("Recommended: pick 'Yes' and load your tuner's FA24 basemap (e.g. NTM's). "
+                "The AVCS cam targets are per-cell, not uniform — defaults approximate them "
+                "with a mean delta, basemap gives you the exact curve. Either way, bench / "
+                "dyno time is still required to refine.");
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
 
     bool yes = g_state.basemap_source == BasemapSource::LoadBasemap;
@@ -426,12 +446,13 @@ void draw_basemap(AppState &state) {
     ImGui::Unindent();
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
 
-    if (ImGui::RadioButton("No — use SubuwuTuner's default starting values", no_)) {
+    if (ImGui::RadioButton("No \xE2\x80\x94 fall back to SubuwuTuner's default values", no_)) {
         g_state.basemap_source = BasemapSource::UseDefaults;
     }
     ImGui::Indent();
-    text_subtle("Best-guess starting point. Safe to start from but you'll want to "
-                "log + verify HPFP rail pressure before sustained driving.");
+    text_subtle("Fallback only. AVCS targets get cell-mean approximations of NTM's per-cell "
+                "retune; HPFP lobe-phase descriptor gets NTM's exact byte pattern. Safe to "
+                "start from but log + verify HPFP rail pressure before sustained driving.");
     ImGui::Unindent();
 }
 
@@ -454,8 +475,22 @@ void draw_review(AppState &state) {
     bool const from_basemap = g_state.basemap_source == BasemapSource::LoadBasemap &&
                               !g_state.basemap_path.empty();
 
-    // Software-fix path (KeepFA24Cams) — 4 edits
-    ImGui::TextWrapped("This will change 4 calibration tables in your pack:");
+    // Surface the case where the user left Step 2 on "Yes" (the
+    // default) but never picked a file. Apply still falls through to
+    // defaults, but staying silent would let the user think they're
+    // getting NTM-exact curves when they're not.
+    if (g_state.basemap_source == BasemapSource::LoadBasemap &&
+        g_state.basemap_path.empty()) {
+        ImVec4 const color = chip_fg_caution();
+        ImGui::TextColored(color,
+                           "No basemap picked yet \xE2\x80\x94 these edits will use "
+                           "SubuwuTuner's fallback defaults. Click Back to pick a basemap "
+                           "for NTM-exact values.");
+        ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+    }
+
+    // Software-fix path (KeepFA24Cams) — 5 edits
+    ImGui::TextWrapped("This will change 5 calibration tables in your pack:");
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
 
     // Each row uses the same shape: name, transition, why-line.
@@ -477,11 +512,16 @@ void draw_review(AppState &state) {
         // truth, with a one-line per-table description.
         change_row("Engine - Displacement", "copied from basemap",
                    "FA24 cars run 2.4 L; the basemap captures the exact stored value.");
-        change_row("Fuel - Timing - HPFP - Base Offset", "copied from basemap",
-                   "Tuned HPFP timing for the FA24's flipped triangle lobe.");
-        change_row("AVCS - Intake - Cam Target (Baro Low / High, TGV Closed)",
+        change_row("Fuel - Timing - HPFP - Lobe Phase Descriptor",
                    "copied from basemap",
-                   "Tuned AVCS reference for the FA24 cam sensor plate.");
+                   "4-byte cluster at canon 0x49BA0 that NTM-style basemaps rewrite "
+                   "for the FA24 cam lobe-phase fix.");
+        change_row("AVCS - Intake - Cam Target (Baro Low, TGV Closed)",
+                   "copied from basemap",
+                   "Tuned AVCS reference for the FA24 cam sensor plate (Baro Low).");
+        change_row("AVCS - Intake - Cam Target (Baro High, TGV Closed)",
+                   "copied from basemap",
+                   "Tuned AVCS reference for the FA24 cam sensor plate (Baro High).");
         change_row("Fuel - Injectors - Pulse - Injector Mult Table",
                    "copied from basemap",
                    "Tuned injector scaling for the FA24's injector flow rate.");
@@ -490,16 +530,24 @@ void draw_review(AppState &state) {
     } else {
         change_row("Engine - Displacement", "2.0 L → 2.4 L",
                    "Required for the MAF / load-calc math to track the larger engine.");
-        change_row("Fuel - Timing - HPFP - Base Offset", "80.0° → 260.0°",
-                   "Shifts the pump command past the flipped triangle lobe on the FA24 "
-                   "cam. Geometric estimate; refine via basemap or bench data.");
-        change_row("AVCS - Intake - Cam Target (Baro Low / High, TGV Closed)",
-                   "+2° offset applied to every cell",
-                   "Absorbs the FA24 cam sensor plate's ~2° tooth-angle difference "
-                   "from the FA20 plate.");
+        change_row("Fuel - Timing - HPFP - Lobe Phase Descriptor",
+                   "0x372C2C2C → 0x3D37322C (NTM bytes)",
+                   "4-byte cluster at canon 0x49BA0 that NTM's basemap rewrites for the "
+                   "FA24 cam lobe-phase fix. Per-byte semantics aren't RE'd yet; the "
+                   "default writes NTM's exact byte pattern atomically. Safety-critical: "
+                   "wrong values risk HPFP pressure faults.");
+        change_row("AVCS - Intake - Cam Target (Baro Low, TGV Closed)",
+                   "+10.5° offset applied to every cell (cell-mean of NTM)",
+                   "NTM does a non-uniform whole-table replacement; the +10.5° "
+                   "default is the cell-mean. Load NTM basemap for exact match.");
+        change_row("AVCS - Intake - Cam Target (Baro High, TGV Closed)",
+                   "+8° offset applied to every cell (cell-mean of NTM)",
+                   "NTM does a non-uniform whole-table replacement; the +8° "
+                   "default is the cell-mean. Load NTM basemap for exact match.");
         change_row("Fuel - Injectors - Pulse - Injector Mult Table",
-                   "per-cell stock × 1.18",
-                   "Scales injector pulse-width for the FA24's higher injector flow rate.");
+                   "per-cell stock × 1.43",
+                   "Scales injector pulse-width for the FA24's higher flow rate. "
+                   "NTM's uniform ×1.43 multiplier; calibrated against their basemap.");
     }
 
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
@@ -576,27 +624,40 @@ struct WorkflowTable {
 // status bar's "Revert All" undoes in reverse. The 4 keep-FA24-cams
 // edits should land contiguously so undo_while_tag peels them as one
 // batch even when the user adds an unrelated edit on top later.
+// Defaults calibrated against NTMotorsports' FA24-swap basemap
+// (cipher-decrypted 2026-06-09; see findings/ntm-fa24-basemap-2026-06-08/
+// WORKFLOW_VALIDATION.md for the per-table numerical comparison).
 constexpr std::array<WorkflowTable, 5> kWorkflowTables = {{
     {"engine_displacement",
      "FA24 swap: Engine Displacement (basemap)",
      "FA24 swap: Engine Displacement \xE2\x86\x92 2.4 L",
      &st::edit::set_cells, 2.4, /*needs_keep_fa24_cams=*/false},
-    {"fuel_timing_hpfp_base_offset",
-     "FA24 swap: HPFP Base Offset (basemap)",
-     "FA24 swap: HPFP Base Offset \xE2\x86\x92 260\xC2\xB0",
-     &st::edit::set_cells, 260.0, true},
+    // HPFP lobe-phase descriptor at canon 0x49BA0 — the 4-byte cluster
+    // NTM's FA24-swap basemap actually rewrites (stock 0x372C2C2C →
+    // NTM 0x3D37322C). Treated here as a single uint32 because per-byte
+    // semantics aren't RE'd; the default writes the exact NTM byte
+    // pattern atomically via set_cells. Once the bytes' per-cylinder /
+    // phase-pair role is confirmed, the table will split into per-byte
+    // cells and this entry will switch to a structured op.
+    {"fuel_timing_hpfp_lobe_phase_descriptor",
+     "FA24 swap: HPFP Lobe Phase Descriptor (basemap)",
+     "FA24 swap: HPFP Lobe Phase Descriptor \xE2\x86\x92 NTM 0x3D37322C",
+     &st::edit::set_cells, static_cast<double>(0x3D37322Cu), true},
+    // NTM does a non-uniform whole-table replacement, NOT a uniform delta.
+    // Default uses NTM's cell-mean (+10.5 deg for Baro Low, +8 deg for High);
+    // for an exact match, load the NTM basemap (Step 2 → "Yes").
     {"avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
      "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) (basemap)",
-     "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) +2\xC2\xB0",
-     &st::edit::add_cells, 2.0, true},
+     "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) +10.5\xC2\xB0 mean",
+     &st::edit::add_cells, 10.5, true},
     {"avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
      "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) (basemap)",
-     "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) +2\xC2\xB0",
-     &st::edit::add_cells, 2.0, true},
+     "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) +8\xC2\xB0 mean",
+     &st::edit::add_cells, 8.0, true},
     {"fuel_injectors_pulse_injector_mult_table",
      "FA24 swap: Injector Mult Table (basemap)",
-     "FA24 swap: Injector Mult Table \xC3\x97""1.18",
-     &st::edit::multiply_cells, 1.18, true},
+     "FA24 swap: Injector Mult Table \xC3\x97""1.43",
+     &st::edit::multiply_cells, 1.43, true},
 }};
 
 void apply_fa24_swap(AppState &state) {

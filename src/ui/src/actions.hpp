@@ -133,7 +133,7 @@ void apply_op(AppState &state, std::string label, Op &&op) {
 // The op receives the whole-table Rect — callers that want a sub-rect
 // can apply the op manually before calling and pass a no-op. Most
 // workflow edits are whole-table (set Engine Displacement to 2.4 L,
-// scale every cell by 1.18, add 2 deg to every cell), so the whole-
+// scale every cell by 1.43, add ~10 deg to every cell), so the whole-
 // table default fits the use case.
 template<typename Op>
 void apply_op_table(AppState &state, std::string label, std::string tag,

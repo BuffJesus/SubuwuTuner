@@ -27,7 +27,11 @@ display_name    = "FA24 swap (VA WRX)"
 modal           = "fa24_swap"
 required_tables = [
     "engine_displacement",
-    "fuel_timing_hpfp_base_offset",
+    # 4-byte HPFP lobe-phase cluster at 0x49BA0 — the actual surface
+    # NTM's FA24-swap basemap tunes (the named Base Offset at 0x49BA8
+    # stays stock). See the table definition further down for the
+    # pre-RE caveat.
+    "fuel_timing_hpfp_lobe_phase_descriptor",
     "avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
     "avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
     "fuel_injectors_pulse_injector_mult_table",
@@ -642,6 +646,22 @@ factor    = 1.3020833333333334e-05
 offset    = 0.0
 unit      = "G Per Sec"
 precision = 2
+data_type = "uint32_be"
+
+
+# Raw 32-bit big-endian, no transform. Used for tables whose four bytes
+# are tuned as a unit but whose per-byte semantics aren't RE'd yet —
+# the editor shows the unsigned 32-bit value (or hex via the existing
+# widget); the workflow path writes the exact byte pattern via
+# set_cells(value). Hand-added 2026-06-09 for the HPFP lobe-phase
+# descriptor (see fuel_timing_hpfp_lobe_phase_descriptor below).
+[[scaling]]
+id        = "raw_uint32_be"
+formula   = "linear"
+factor    = 1.0
+offset    = 0.0
+unit      = ""
+precision = 0
 data_type = "uint32_be"
 
 
@@ -5610,6 +5630,28 @@ data_type              = "uint16_be"
 scaling                = "deg_x_10_0"
 emissions_relevant     = false
 engine_safety_critical = false
+
+
+# Hand-added 2026-06-09. The 4-byte cluster at canon 0x49BA0 sits 8 B
+# before the named Base Offset above and is the surface NTM's FA24-swap
+# basemap actually modifies (stock 37 2c 2c 2c → NTM 3d 37 32 2c).
+# Per-byte semantics aren't RE'd yet — the working hypothesis is a
+# 4-byte HPFP/cam lobe-phase descriptor (per-cylinder or 2x phase
+# pair), tracked in findings/ntm-fa24-basemap-2026-06-08/
+# WORKFLOW_VALIDATION.md. Treated as a single uint32 here so the
+# workflow's set_cells path can write the exact NTM byte pattern
+# atomically; the table will split into proper per-byte cells once
+# its semantics are confirmed via ROM disasm.
+[[table]]
+id                     = "fuel_timing_hpfp_lobe_phase_descriptor"
+name                   = "HPFP Lobe Phase Descriptor (4-byte cluster, pre-RE)"
+category               = "fuel - timing - hpfp"
+dimensions             = 0
+address                = 0x00049BA0
+data_type              = "uint32_be"
+scaling                = "raw_uint32_be"
+emissions_relevant     = false
+engine_safety_critical = true
 
 
 [[table]]
