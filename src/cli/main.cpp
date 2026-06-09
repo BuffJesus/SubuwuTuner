@@ -63,6 +63,7 @@
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <set>
 #include <span>
 #include <sstream>
 #include <string>
@@ -171,6 +172,19 @@ constexpr std::string_view kUsage =
     "                            the diff with the session's saved options, and\n"
     "                            render. Text-mode also prints any saved\n"
     "                            annotations. Exit codes match `diff`.\n"
+    "    analyze-tune-iterations --roms <A.bin> <B.bin> [...] --out-dir <DIR>\n"
+    "                            [--labels L1 L2 ...] [--pack <pack.toml>]\n"
+    "                            [--gap-bytes 8] [--undeclared-threshold 256]\n"
+    "                            [--sample-bytes 32] [--out json|md|both]\n"
+    "                            N-ROM byte-coalesced diff with per-pair pack-xref.\n"
+    "                            Adjacent pairs + cumulative first/last when >=3.\n"
+    "                            Classifies each diff run against the nearest\n"
+    "                            declared table; flags runs >threshold past any\n"
+    "                            declared table as RE candidates (catches the\n"
+    "                            kind of 4x-wrong declaration that surfaced the\n"
+    "                            wastegate_duty bug 2026-06-09). Writes\n"
+    "                            summary.json + report.md into --out-dir.\n"
+    "                            JSON schema: subuwutuner.analyze-tune-iterations.v1.\n"
     "    table-edit --def <pack.toml> --table <id> [--rows A:B] [--cols A:B]\n"
     "               OP [VALUE] <FILE> --output <OUT>\n"
     "                            Edit a table in <FILE> and write the result to\n"
@@ -4083,7 +4097,8 @@ int cmd_completion(int argc, char *argv[]) {
         "project-autotune-maf", "project-autotune-knock-pull",
         "pack-info", "pack-lint", "primitive-list", "workflow-list",
         "hook-list", "pack-dtcs",
-        "stats", "diff", "diff-load", "audit", "profile", "config",
+        "stats", "diff", "diff-load", "analyze-tune-iterations",
+        "audit", "profile", "config",
         "changelog", "log", "ssm-a8-poll", "doctor", "transport-list",
         "uds-test", "feature-graph", "ai-drift", "ai-narrate",
         "list-validators", "did-datalog-preset",
@@ -6074,6 +6089,574 @@ int cmd_rom_diff(int argc, char *argv[]) {
         }
         std::printf("\n");
     }
+    return 0;
+}
+
+// ---------------------------------------------------------------------
+// analyze-tune-iterations — N-ROM byte-coalesced diff with pack xref
+// ---------------------------------------------------------------------
+//
+// Given N ROM dumps (chronological) and an optional toml pack,
+// produces a per-pair coalesced byte-diff report (report.md +
+// summary.json) classifying each run against the nearest declared
+// table. Flags `UNDECLARED` regions (runs >threshold past any
+// declared table) as RE candidates — this is what surfaced the
+// 4x-wrong wastegate_duty_initial declaration in lf79103p.toml
+// 2026-06-09.
+//
+// PoC absorbed from findings/scripts/analyze_tune_iterations.py
+// (analyst handoff 2026-06-09). The Python PoC validated end-to-end
+// on Fehr's WRK1/WRK2/WRK3 corpus. Sample output at
+// findings/tune-evolution/2026-06-09-wrk1-to-wrk3-analysis/.
+
+namespace {
+
+struct AtiRun {
+    std::size_t start;          // inclusive
+    std::size_t end;            // exclusive
+    // Cached / classified against the nearest declared table; -1 sentinel
+    // when no table sits at-or-before the run start.
+    long long nearest_addr{-1};
+    std::string nearest_name;
+    std::string nearest_category;
+    long long nearest_distance{-1};
+    bool is_undeclared{false};
+    std::string sample_a_hex;
+    std::string sample_b_hex;
+};
+
+// Coalesce contiguous-differing byte ranges, joining runs separated by
+// <= gap_bytes of matching bytes. Mirrors the Python PoC's
+// coalesce_diff_runs exactly so the C++ output matches the analyst's
+// sample report for the same inputs.
+std::vector<AtiRun> ati_coalesce(std::span<std::uint8_t const> a,
+                                 std::span<std::uint8_t const> b,
+                                 std::size_t gap_bytes) {
+    std::vector<AtiRun> out;
+    bool in_run = false;
+    std::size_t run_start = 0;
+    std::size_t last_diff = 0;
+    auto const n = a.size();
+    for (std::size_t i = 0; i < n; ++i) {
+        if (a[i] != b[i]) {
+            if (!in_run) {
+                in_run = true;
+                run_start = i;
+            } else if (i - last_diff > gap_bytes) {
+                AtiRun ar;
+        ar.start = run_start;
+        ar.end = last_diff + 1;
+        out.push_back(std::move(ar));
+                run_start = i;
+            }
+            last_diff = i;
+        }
+    }
+    if (in_run) {
+        AtiRun ar;
+        ar.start = run_start;
+        ar.end = last_diff + 1;
+        out.push_back(std::move(ar));
+    }
+    return out;
+}
+
+// Lower-case hex encode of a byte span. Used for the sample bytes
+// embedded in JSON output so consumers can spot-check what each pair
+// actually changed without re-reading the ROMs.
+std::string ati_hex_encode(std::span<std::uint8_t const> bytes) {
+    static constexpr char kDigits[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(bytes.size() * 2);
+    for (auto b : bytes) {
+        out.push_back(kDigits[(b >> 4) & 0xF]);
+        out.push_back(kDigits[b & 0xF]);
+    }
+    return out;
+}
+
+// Classify each run against the nearest declared table. Tables are
+// pre-sorted by address; binary search would scale but the inner loop
+// is at most ~3,500 runs * ~300 tables == 1M ops, sub-ms even linear.
+void ati_classify_runs(std::vector<AtiRun> &runs,
+                       std::vector<st::Table> const &tables_sorted,
+                       std::size_t undeclared_threshold) {
+    for (auto &r : runs) {
+        st::Table const *nearest = nullptr;
+        st::Table const *next_table = nullptr;
+        for (auto const &t : tables_sorted) {
+            if (t.address <= r.start) {
+                nearest = &t;
+            } else {
+                next_table = &t;
+                break;
+            }
+        }
+        if (nearest == nullptr) {
+            continue;
+        }
+        r.nearest_addr = static_cast<long long>(nearest->address);
+        r.nearest_name = nearest->name;
+        r.nearest_category = nearest->category;
+        r.nearest_distance = static_cast<long long>(r.start) -
+                             static_cast<long long>(nearest->address);
+        bool const spans_into_next = next_table != nullptr && next_table->address < r.end;
+        r.is_undeclared = static_cast<std::size_t>(r.nearest_distance) > undeclared_threshold &&
+                          !spans_into_next;
+    }
+}
+
+// Render the summary JSON. Schema: subuwutuner.analyze-tune-iterations.v1.
+// Mirrors the PoC's summary.json shape so any downstream tooling the
+// analyst wrote against the PoC also works against the CLI.
+struct AtiPair {
+    std::string label_a;
+    std::string label_b;
+    std::vector<AtiRun> runs;
+};
+
+void ati_emit_json(std::string &out, std::vector<std::string> const &labels,
+                   std::vector<std::filesystem::path> const &rom_paths,
+                   std::size_t rom_size, std::optional<std::filesystem::path> const &pack_path,
+                   std::size_t gap_bytes, std::size_t undeclared_threshold,
+                   std::vector<AtiPair> const &pairs) {
+    out.append("{\"schema\":\"subuwutuner.analyze-tune-iterations.v1\"");
+    out.append(",\"rom_labels\":[");
+    for (std::size_t i = 0; i < labels.size(); ++i) {
+        if (i != 0) out.append(",");
+        json_escape(out, labels[i]);
+    }
+    out.append("],\"rom_paths\":[");
+    for (std::size_t i = 0; i < rom_paths.size(); ++i) {
+        if (i != 0) out.append(",");
+        json_escape(out, rom_paths[i].string());
+    }
+    out.append("],\"rom_size\":");
+    out.append(std::to_string(rom_size));
+    out.append(",\"pack_path\":");
+    if (pack_path.has_value()) {
+        json_escape(out, pack_path->string());
+    } else {
+        out.append("null");
+    }
+    out.append(",\"gap_bytes\":");
+    out.append(std::to_string(gap_bytes));
+    out.append(",\"undeclared_threshold\":");
+    out.append(std::to_string(undeclared_threshold));
+    out.append(",\"pairs\":{");
+    bool first_pair = true;
+    for (auto const &p : pairs) {
+        if (!first_pair) out.append(",");
+        first_pair = false;
+        std::string const pair_label = p.label_a + " -> " + p.label_b;
+        json_escape(out, pair_label);
+        out.append(":{\"runs\":[");
+        std::size_t total_bytes = 0;
+        std::size_t undeclared_runs = 0;
+        for (std::size_t i = 0; i < p.runs.size(); ++i) {
+            auto const &r = p.runs[i];
+            if (i != 0) out.append(",");
+            out.append("{\"start\":");
+            out.append(std::to_string(r.start));
+            out.append(",\"end\":");
+            out.append(std::to_string(r.end));
+            out.append(",\"span\":");
+            out.append(std::to_string(r.end - r.start));
+            out.append(",\"iter_a\":");
+            json_escape(out, p.label_a);
+            out.append(",\"iter_b\":");
+            json_escape(out, p.label_b);
+            out.append(",\"bytes_a_hex\":");
+            json_escape(out, r.sample_a_hex);
+            out.append(",\"bytes_b_hex\":");
+            json_escape(out, r.sample_b_hex);
+            out.append(",\"nearest_table_addr\":");
+            if (r.nearest_addr < 0) {
+                out.append("null");
+            } else {
+                out.append(std::to_string(r.nearest_addr));
+            }
+            out.append(",\"nearest_table_name\":");
+            if (r.nearest_addr < 0) {
+                out.append("null");
+            } else {
+                json_escape(out, r.nearest_name);
+            }
+            out.append(",\"nearest_table_category\":");
+            if (r.nearest_addr < 0) {
+                out.append("null");
+            } else {
+                json_escape(out, r.nearest_category);
+            }
+            out.append(",\"nearest_table_distance\":");
+            if (r.nearest_distance < 0) {
+                out.append("null");
+            } else {
+                out.append(std::to_string(r.nearest_distance));
+            }
+            out.append(",\"is_undeclared\":");
+            out.append(r.is_undeclared ? "true" : "false");
+            out.append("}");
+            total_bytes += (r.end - r.start);
+            if (r.is_undeclared) ++undeclared_runs;
+        }
+        out.append("],\"summary\":{\"total_runs\":");
+        out.append(std::to_string(p.runs.size()));
+        out.append(",\"total_bytes\":");
+        out.append(std::to_string(total_bytes));
+        out.append(",\"undeclared_runs\":");
+        out.append(std::to_string(undeclared_runs));
+        out.append("}}");
+    }
+    out.append("}}\n");
+}
+
+// Render the human-readable markdown. Same layout as the PoC's
+// report.md so analyst handoffs that reference specific section
+// headings (e.g. "Per-category rollup", "RE candidates") still match.
+void ati_emit_markdown(std::string &out, std::vector<std::string> const &labels,
+                       std::optional<std::filesystem::path> const &pack_path,
+                       std::size_t gap_bytes, std::size_t undeclared_threshold,
+                       std::vector<AtiPair> const &pairs) {
+    out.append("# Tune-iteration diff analysis\n\n");
+    out.append("- ROMs analysed: ");
+    for (std::size_t i = 0; i < labels.size(); ++i) {
+        if (i != 0) out.append(", ");
+        out.append(labels[i]);
+    }
+    out.append("\n- Pack (for table xref): ");
+    if (pack_path.has_value()) {
+        out.append("`");
+        out.append(pack_path->string());
+        out.append("`");
+    } else {
+        out.append("(none)");
+    }
+    out.append("\n- Coalesce gap: ");
+    out.append(std::to_string(gap_bytes));
+    out.append(" B\n- Undeclared threshold: ");
+    out.append(std::to_string(undeclared_threshold));
+    out.append(" B\n\n");
+
+    for (auto const &p : pairs) {
+        out.append("## ");
+        out.append(p.label_a);
+        out.append(" \xE2\x86\x92 ");
+        out.append(p.label_b);
+        out.append("\n\n");
+        std::size_t total = 0;
+        for (auto const &r : p.runs) total += (r.end - r.start);
+        out.append("- ");
+        out.append(std::to_string(p.runs.size()));
+        out.append(" coalesced diff runs, ");
+        out.append(std::to_string(total));
+        out.append(" bytes total\n\n");
+
+        // Per-category rollup
+        struct Roll {
+            std::size_t runs{0};
+            std::size_t bytes{0};
+            std::set<std::string> tables;
+        };
+        std::map<std::string, Roll> cat_roll;
+        for (auto const &r : p.runs) {
+            std::string const cat = r.nearest_addr < 0
+                                        ? std::string{"(unclassified)"}
+                                        : r.nearest_category;
+            auto &s = cat_roll[cat];
+            ++s.runs;
+            s.bytes += (r.end - r.start);
+            if (!r.nearest_name.empty()) {
+                s.tables.insert(r.nearest_name);
+            }
+        }
+        out.append("### Per-category rollup\n\n");
+        out.append("| Category | Runs | Bytes | Tables touched |\n");
+        out.append("|---|---|---|---|\n");
+        // Sort by descending bytes
+        std::vector<std::pair<std::string, Roll>> sorted_roll(cat_roll.begin(), cat_roll.end());
+        std::sort(sorted_roll.begin(), sorted_roll.end(),
+                  [](auto const &a, auto const &b) { return a.second.bytes > b.second.bytes; });
+        for (auto const &[cat, s] : sorted_roll) {
+            out.append("| ");
+            out.append(cat);
+            out.append(" | ");
+            out.append(std::to_string(s.runs));
+            out.append(" | ");
+            out.append(std::to_string(s.bytes));
+            out.append(" | ");
+            out.append(std::to_string(s.tables.size()));
+            out.append(" |\n");
+        }
+        out.append("\n### Run-by-run classification\n\n");
+        out.append("| canon range | span | nearest declared table | category | undecl |\n");
+        out.append("|---|---|---|---|---|\n");
+        for (auto const &r : p.runs) {
+            char buf[64];
+            std::snprintf(buf, sizeof buf, "0x%05zx..0x%05zx",
+                          r.start, r.end == 0 ? r.end : r.end - 1);
+            out.append("| ");
+            out.append(buf);
+            out.append(" | ");
+            out.append(std::to_string(r.end - r.start));
+            out.append(" | ");
+            if (r.nearest_addr < 0) {
+                out.append("(none)");
+            } else {
+                out.append(r.nearest_name);
+                char addr_buf[64];
+                std::snprintf(addr_buf, sizeof addr_buf, " @ 0x%05llx(+%lldB)",
+                              r.nearest_addr, r.nearest_distance);
+                out.append(addr_buf);
+            }
+            out.append(" | ");
+            out.append(r.nearest_addr < 0 ? std::string{"?"} : r.nearest_category);
+            out.append(" | ");
+            out.append(r.is_undeclared ? "yes" : "");
+            out.append(" |\n");
+        }
+        out.append("\n");
+
+        // RE-candidate summary: group undeclared runs by anchor.
+        std::vector<AtiRun const *> undecl;
+        for (auto const &r : p.runs) {
+            if (r.is_undeclared) undecl.push_back(&r);
+        }
+        if (!undecl.empty()) {
+            out.append("### RE candidates \xE2\x80\x94 undeclared edited regions (");
+            out.append(std::to_string(undecl.size()));
+            out.append(")\n\n");
+            std::map<std::pair<long long, std::string>, std::vector<AtiRun const *>> by_anchor;
+            for (auto const *r : undecl) {
+                by_anchor[{r->nearest_addr, r->nearest_name}].push_back(r);
+            }
+            for (auto const &[anchor, rl] : by_anchor) {
+                if (rl.empty()) continue;
+                auto const min_off = rl.front()->nearest_distance;
+                auto const max_off = rl.back()->nearest_distance +
+                                     static_cast<long long>(rl.back()->end - rl.back()->start);
+                char buf[256];
+                std::snprintf(buf, sizeof buf,
+                              "- `%s` @ 0x%05llx: %zu run(s), spanning "
+                              "+%lld..+%lld B past the declared table address \xE2\x80\x94 "
+                              "declared boundary likely too small.\n",
+                              anchor.second.c_str(), anchor.first, rl.size(), min_off, max_off);
+                out.append(buf);
+            }
+            out.append("\n");
+        }
+    }
+}
+
+} // namespace
+
+int cmd_analyze_tune_iterations(int argc, char *argv[]) {
+    std::vector<std::filesystem::path> rom_paths;
+    std::vector<std::string> labels;
+    std::optional<std::filesystem::path> pack_path;
+    std::optional<std::filesystem::path> out_dir;
+    std::size_t gap_bytes = 8;
+    std::size_t undeclared_threshold = 256;
+    std::size_t sample_bytes = 32;
+    std::string out_mode{"both"};  // json | md | both
+
+    // Simple two-state parser: --roms / --labels each consume the
+    // following non-flag tokens until the next --flag.
+    enum class State { None, Roms, Labels } collecting = State::None;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a.starts_with("--")) {
+            collecting = State::None;
+        }
+        if (collecting == State::Roms) {
+            rom_paths.emplace_back(a);
+            continue;
+        }
+        if (collecting == State::Labels) {
+            labels.emplace_back(a);
+            continue;
+        }
+        if (a == "--roms") {
+            collecting = State::Roms;
+        } else if (a == "--labels") {
+            collecting = State::Labels;
+        } else if (a == "--pack") {
+            if (i + 1 >= argc) {
+                std::fputs("analyze-tune-iterations: --pack requires a path\n", stderr);
+                return 2;
+            }
+            pack_path = std::filesystem::path{argv[++i]};
+        } else if (a == "--out-dir") {
+            if (i + 1 >= argc) {
+                std::fputs("analyze-tune-iterations: --out-dir requires a path\n", stderr);
+                return 2;
+            }
+            out_dir = std::filesystem::path{argv[++i]};
+        } else if (a == "--gap-bytes") {
+            if (i + 1 >= argc) {
+                std::fputs("analyze-tune-iterations: --gap-bytes requires a value\n", stderr);
+                return 2;
+            }
+            gap_bytes = static_cast<std::size_t>(std::stoul(argv[++i]));
+        } else if (a == "--undeclared-threshold") {
+            if (i + 1 >= argc) {
+                std::fputs("analyze-tune-iterations: --undeclared-threshold requires a value\n",
+                           stderr);
+                return 2;
+            }
+            undeclared_threshold = static_cast<std::size_t>(std::stoul(argv[++i]));
+        } else if (a == "--sample-bytes") {
+            if (i + 1 >= argc) {
+                std::fputs("analyze-tune-iterations: --sample-bytes requires a value\n", stderr);
+                return 2;
+            }
+            sample_bytes = static_cast<std::size_t>(std::stoul(argv[++i]));
+        } else if (a == "--out") {
+            if (i + 1 >= argc) {
+                std::fputs("analyze-tune-iterations: --out requires json|md|both\n", stderr);
+                return 2;
+            }
+            out_mode = argv[++i];
+            if (out_mode != "json" && out_mode != "md" && out_mode != "both") {
+                std::fprintf(stderr,
+                             "analyze-tune-iterations: --out must be json, md, or both (got %s)\n",
+                             out_mode.c_str());
+                return 2;
+            }
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "analyze-tune-iterations: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (rom_paths.size() < 2) {
+        std::fputs("analyze-tune-iterations: at least 2 --roms required\n", stderr);
+        std::fputs("Usage: subuwutuner-cli analyze-tune-iterations --roms <A.bin> <B.bin> [...]\n"
+                   "       [--labels L1 L2 ...] [--pack <pack.toml>] --out-dir <dir>\n"
+                   "       [--gap-bytes 8] [--undeclared-threshold 256] [--sample-bytes 32]\n"
+                   "       [--out json|md|both]\n",
+                   stderr);
+        return 2;
+    }
+    if (!out_dir.has_value()) {
+        std::fputs("analyze-tune-iterations: --out-dir is required\n", stderr);
+        return 2;
+    }
+    if (!labels.empty() && labels.size() != rom_paths.size()) {
+        std::fprintf(stderr,
+                     "analyze-tune-iterations: --labels count (%zu) must match --roms count (%zu)\n",
+                     labels.size(), rom_paths.size());
+        return 2;
+    }
+    if (labels.empty()) {
+        for (auto const &p : rom_paths) labels.push_back(p.stem().string());
+    }
+
+    // Load ROMs, verify size match.
+    std::vector<std::vector<std::uint8_t>> roms;
+    roms.reserve(rom_paths.size());
+    for (auto const &p : rom_paths) {
+        auto r = st::Rom::from_file(p);
+        if (!r.has_value()) {
+            std::fprintf(stderr, "analyze-tune-iterations: %s: %s\n",
+                         p.string().c_str(), r.error().to_string().c_str());
+            return 1;
+        }
+        auto const span = r->data();
+        roms.emplace_back(span.begin(), span.end());
+    }
+    std::size_t const rom_size = roms[0].size();
+    for (std::size_t i = 1; i < roms.size(); ++i) {
+        if (roms[i].size() != rom_size) {
+            std::fprintf(stderr,
+                         "analyze-tune-iterations: ROM size mismatch: %s is %zu B, %s is %zu B. "
+                         "Align ROMs to identical size before analysing.\n",
+                         rom_paths[0].string().c_str(), rom_size,
+                         rom_paths[i].string().c_str(), roms[i].size());
+            return 1;
+        }
+    }
+
+    // Load pack tables if provided. Sort by address for the classify loop.
+    std::vector<st::Table> tables_sorted;
+    if (pack_path.has_value()) {
+        auto const def = st::Definition::from_file(resolve_def_path(*pack_path));
+        if (!def.has_value()) {
+            return print_def_load_error("analyze-tune-iterations", *pack_path, def.error());
+        }
+        tables_sorted = def->tables();
+        std::sort(tables_sorted.begin(), tables_sorted.end(),
+                  [](st::Table const &a, st::Table const &b) { return a.address < b.address; });
+    }
+
+    std::fprintf(stderr,
+                 "analyze-tune-iterations: loaded %zu ROMs (0x%zx B each); %zu declared tables\n",
+                 roms.size(), rom_size, tables_sorted.size());
+
+    // Adjacent pairs + cumulative first/last if >2 ROMs.
+    std::vector<std::pair<std::size_t, std::size_t>> pair_idx;
+    for (std::size_t i = 0; i + 1 < roms.size(); ++i) pair_idx.emplace_back(i, i + 1);
+    if (roms.size() > 2) pair_idx.emplace_back(0, roms.size() - 1);
+
+    std::vector<AtiPair> pairs;
+    pairs.reserve(pair_idx.size());
+    for (auto const &[i, j] : pair_idx) {
+        AtiPair p;
+        p.label_a = labels[i];
+        p.label_b = labels[j];
+        p.runs = ati_coalesce(roms[i], roms[j], gap_bytes);
+        // Embed sample bytes (capped) for spot-checking.
+        for (auto &r : p.runs) {
+            std::size_t const sample_len =
+                std::min(sample_bytes, r.end - r.start);
+            r.sample_a_hex = ati_hex_encode(std::span{roms[i].data() + r.start, sample_len});
+            r.sample_b_hex = ati_hex_encode(std::span{roms[j].data() + r.start, sample_len});
+        }
+        ati_classify_runs(p.runs, tables_sorted, undeclared_threshold);
+        std::size_t total = 0;
+        for (auto const &r : p.runs) total += (r.end - r.start);
+        std::fprintf(stderr, "  %s -> %s: %zu runs, %zu B total\n",
+                     p.label_a.c_str(), p.label_b.c_str(), p.runs.size(), total);
+        pairs.push_back(std::move(p));
+    }
+
+    // Create output dir + write files.
+    std::error_code ec;
+    std::filesystem::create_directories(*out_dir, ec);
+    if (ec) {
+        std::fprintf(stderr, "analyze-tune-iterations: couldn't create %s: %s\n",
+                     out_dir->string().c_str(), ec.message().c_str());
+        return 1;
+    }
+
+    if (out_mode == "json" || out_mode == "both") {
+        std::string json_buf;
+        ati_emit_json(json_buf, labels, rom_paths, rom_size, pack_path,
+                      gap_bytes, undeclared_threshold, pairs);
+        auto const json_path = *out_dir / "summary.json";
+        std::ofstream js{json_path, std::ios::binary};
+        if (!js) {
+            std::fprintf(stderr, "analyze-tune-iterations: open %s failed\n",
+                         json_path.string().c_str());
+            return 1;
+        }
+        js.write(json_buf.data(), static_cast<std::streamsize>(json_buf.size()));
+        std::fprintf(stderr, "wrote %s\n", json_path.string().c_str());
+    }
+    if (out_mode == "md" || out_mode == "both") {
+        std::string md_buf;
+        ati_emit_markdown(md_buf, labels, pack_path, gap_bytes, undeclared_threshold, pairs);
+        auto const md_path = *out_dir / "report.md";
+        std::ofstream ms{md_path, std::ios::binary};
+        if (!ms) {
+            std::fprintf(stderr, "analyze-tune-iterations: open %s failed\n",
+                         md_path.string().c_str());
+            return 1;
+        }
+        ms.write(md_buf.data(), static_cast<std::streamsize>(md_buf.size()));
+        std::fprintf(stderr, "wrote %s\n", md_path.string().c_str());
+    }
+
     return 0;
 }
 
@@ -15201,6 +15784,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "diff") {
         return cmd_diff(argc - 2, argv + 2);
+    }
+    if (cmd == "analyze-tune-iterations") {
+        return cmd_analyze_tune_iterations(argc - 2, argv + 2);
     }
     if (cmd == "diff-load") {
         return cmd_diff_load(argc - 2, argv + 2);
