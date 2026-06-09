@@ -2375,7 +2375,13 @@ name      = "EGR Steps"
 unit      = ""
 type      = "static"
 address   = 0x00034DBE
-length    = 8
+# Bumped 2026-06-09 from 8 → 16. Analyst's Task B descriptor decode
+# at canon 0x68DCC shows the EGR Airflow dispatcher reads Y_size=16
+# (this axis is the dispatcher's Y / toml's axis_x). Single-consumer
+# check: only airflow_manifold_flow_model_egr_flow_model_egr_airflow
+# references egr_steps, so bump is consumer-safe. 16 monotonic
+# halfwords confirmed at 0x00034DBE..0x00034DDE.
+length    = 16
 data_type = "uint16_be"
 scaling   = "rshift_7_0_x"
 
@@ -2408,7 +2414,11 @@ name      = "Airflow - EGR - Manifold Flow Model - RPM"
 unit      = ""
 type      = "static"
 address   = 0x00035CBC
-length    = 8
+# Bumped 2026-06-09 from 8 → 16. Per analyst Task B descriptor at
+# canon 0x68F28 (EGR Pressure Baro Compensation 2-D map): X_size=16.
+# Single consumer: airflow_manifold_flow_model_egr_flow_model_egr_
+# absolute_pressure_main_barometric_compensation.
+length    = 16
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -2419,7 +2429,11 @@ name      = "Sensors - Barometric Pressure"
 unit      = ""
 type      = "static"
 address   = 0x00035B7C
-length    = 8
+# Bumped 2026-06-09 from 8 → 16. Per analyst Task B descriptor at
+# canon 0x68F3C (1-D Baro Comp Activation scaling): X_size=16.
+# Single consumer: airflow_manifold_flow_model_egr_flow_model_
+# barometric_compensation_activation.
+length    = 16
 data_type = "uint16_be"
 scaling   = "psi_rshift_8_0_x_0_145038"
 
@@ -2628,7 +2642,15 @@ name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00034F6A
-length    = 8
+# Bumped 2026-06-09 from 8 → 16. Analyst's Task B descriptor decode
+# at canon 0x68F14 shows the EGR Pressure Main dispatcher reads
+# X_size=16 (this axis is the dispatcher's X / toml's axis_y).
+# Single-consumer check: only airflow_manifold_flow_model_egr_flow_
+# model_egr_absolute_pressure_main references rpm_len8_v6, so bump
+# is consumer-safe. 16 monotonic RPM halfwords (600..6375 RPM)
+# confirmed at 0x00034F6A. Id-name "len8" is now stale but kept to
+# avoid axis-reference churn.
+length    = 16
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -3129,6 +3151,32 @@ name                   = "TGV Closed Activation"
 category               = "ignition - compensation - coolant"
 dimensions             = 2
 address                = 0x0003A922
+data_type              = "uint16_be"
+scaling                = "x_100_0"
+axis_x                 = "timing_compensation_calculated_load"
+axis_y                 = "timing_compensation_rpm"
+emissions_relevant     = false
+engine_safety_critical = false
+
+
+# Companion to TGV Closed Activation above. Per analyst's Task B
+# decompile of FUN_000F1C14 + Task C audit, both Activation tables
+# are read in parallel by the TGV-mode dispatcher to compute the
+# weighted blend of Open / Closed control targets. Descriptor at
+# canon 0x67FFC (parallel with the TGV Closed descriptor at 0x67FE8):
+#   X_size=22, X_ptr=0x3A2F2 (timing_compensation_rpm),
+#   Y_size=16, Y_ptr=0x3A308 (timing_compensation_calculated_load),
+#   data_ptr=0x3ABE2
+# Shares both axes with TGV Closed Activation. Was missing from the
+# toml; added 2026-06-09 from analyst's Task C catalogue. See
+# findings/toml-audit-2026-06-09.md §4 and findings/tgv-egr-delete/
+# TASK_C_PAIRED_TABLES.md.
+[[table]]
+id                     = "ignition_compensation_coolant_tgv_open_activation"
+name                   = "TGV Open Activation"
+category               = "ignition - compensation - coolant"
+dimensions             = 2
+address                = 0x0003ABE2
 data_type              = "uint16_be"
 scaling                = "x_100_0"
 axis_x                 = "timing_compensation_calculated_load"
