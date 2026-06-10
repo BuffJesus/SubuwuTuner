@@ -666,6 +666,18 @@ inline constexpr std::array<double, 16> kNtmHpfpPhaseTransferCurve = {
 // byte-for-byte at the table's canon addresses (0x442F0 / 0x465F8).
 // Each row is RPM (axis_y = rpm_len10); each column is calculated
 // load (axis_x = avcs_intake_target_calculated_load_len16_v2).
+//
+// TODO 2026-06-09: per audit_toml_axis_truncation finding +
+// descriptor decode (HANDOFF-to-analyst-2026-06-09-avcs-truncation-
+// audit.md), the AVCS table's rpm_len10 axis is probably truncated —
+// the descriptor at canon 0x6AA00 reports X_size=20, not 10. If the
+// analyst confirms, this preset is HALF-SIZED: the bottom 10 rows
+// of the actual 20-row table stay at stock values. The apply path's
+// preset-size guard (apply_op_table cell-count mismatch check) will
+// reject the write rather than half-fill — so on a corrected toml,
+// the workflow will bail loudly and we'll need to expand the preset
+// to 20x16 = 320 cells (or switch the AVCS step back to a uniform
+// scalar op). Tracked in the analyst handoff above.
 inline constexpr std::array<double, 160> kNtmAvcsCamTargetTgvClosed = {
     4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 10.8337, 17.5003,
     29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 30.0041,
