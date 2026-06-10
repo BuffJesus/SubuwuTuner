@@ -1277,7 +1277,7 @@ name      = "EGR Steps"
 unit      = ""
 type      = "static"
 address   = 0x00034DBE
-length    = 8
+length    = 16
 data_type = "uint16_be"
 scaling   = "rshift_7_0_x"
 
@@ -1299,7 +1299,7 @@ name      = "Airflow - EGR - Manifold Flow Model - RPM"
 unit      = ""
 type      = "static"
 address   = 0x00035CBC
-length    = 8
+length    = 16
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1310,7 +1310,7 @@ name      = "Sensors - Barometric Pressure"
 unit      = ""
 type      = "static"
 address   = 0x00035B7C
-length    = 8
+length    = 16
 data_type = "uint16_be"
 scaling   = "psi_rshift_8_0_x_0_145038"
 
@@ -5487,3 +5487,20 @@ scaling                = "raw_uint8"
 axis_x                 = "normalized_index_0_to_0xF000_step_0x1000"
 emissions_relevant     = false
 engine_safety_critical = true
+
+
+# TGV + EGR delete workflow promoted from lf79103p.toml per analyst
+# Tasks A-F (findings/tgv-egr-delete/). Off-road / track-only;
+# jurisdiction-gated at modal entry. See lf79103p.toml header comment
+# for the full delete-strategy rationale.
+[[workflow]]
+id              = "tgv_egr_delete"
+display_name    = "TGV + EGR Delete (off-road only)"
+modal           = "tgv_egr_delete"
+required_tables = [
+    "airflow_manifold_flow_model_egr_flow_model_egr_airflow",
+    "airflow_manifold_flow_model_egr_flow_model_egr_absolute_pressure_main",
+    "ignition_compensation_coolant_tgv_closed_activation",
+    "ignition_compensation_egr_tgv_closed_ignition_timing_egr_adder_a",
+    "ignition_compensation_egr_tgv_closed_ignition_timing_egr_adder_c",
+]
