@@ -164,6 +164,49 @@ The GUI side reads these for welcome-card / Tools-menu enable gating + the modal
 
 Edit-history side: every workflow's writes flow through `apply_op_table(state, label, tag, table_id, op)` with the workflow's `id` as the tag. Same-tag adjacent edits at the head of history form a transactional batch that `History::undo_while_tag(tag)` peels off in one shot, powering the "Revert All" affordance in the workflow's status-bar badge.
 
+### TGV + EGR delete workflow (shipped 2026-06-09)
+
+Second pack-declared workflow. Off-road / track-only emissions delete; jurisdiction-gated at modal entry. Per analyst's Task A–F delivery (`findings/tgv-egr-delete/TASK_E_WORKFLOW_SPEC.md` + `TASK_F_ADDER_GATING_RESOLVED.md`).
+
+Modal at `src/ui/src/modals/tgv_egr_delete.cpp`. Three-step guided flow:
+
+1. **Jurisdiction confirm** — user attests at least one of: vehicle not operated on public roads (off-road / track-only), OR jurisdiction explicitly permits EGR/TGV deletion. Next button disabled until one box ticked.
+2. **Hardware confirm** — single checkbox affirming physical TGV motor + EGR valve removal is done (or will be before flashing).
+3. **Review** — lists all 6 edits + rationale. Apply commits all edits tagged `tgv_egr_delete`.
+
+The 6 edits are:
+
+| # | Op | Target | Effect |
+|---|---|---|---|
+| 1 | `set_cells(0.0)` whole-table | `airflow_manifold_flow_model_egr_flow_model_egr_airflow` (16×12 u16, canon 0x34DEA) | EGR Airflow target → 0 across every cell |
+| 2 | `set_cells(0.0)` whole-table | `airflow_manifold_flow_model_egr_flow_model_egr_absolute_pressure_main` (16×16 u8, canon 0x34F9A) | EGR Pressure target → 0 |
+| 3 | `set_cells(0.0)` whole-table | `ignition_compensation_coolant_tgv_closed_activation` (16×22 u16, canon 0x3A922) | TGV Closed blend weight → 0 (dispatcher returns Open value only) |
+| 4 | `set_cells(0.0)` whole-table | `ignition_compensation_egr_tgv_closed_ignition_timing_egr_adder_a` (16×22 u8, canon 0x38DD0) | EGR Ignition Adder A → 0 (Task F conservative zero) |
+| 5 | `set_cells(0.0)` whole-table | `ignition_compensation_egr_tgv_closed_ignition_timing_egr_adder_c` (16×22 u8, canon 0x38F30) | EGR Ignition Adder C → 0 (Task F conservative zero) |
+| 6 | `set_dtc_enabled(false)` | P0400 (EGR Flow Malfunction) in `primary_dtc_enable` bitmap | Disable P0400 enable bit |
+
+Checksum recompute fires automatically post-edit when the user flashes — `Flasher::execute` runs `apply_checksum_repair` via the pack's `checksum_type`, so no separate workflow step is needed for slot-7 fixing.
+
+Pack TOML schema:
+
+```toml
+[[workflow]]
+id              = "tgv_egr_delete"
+display_name    = "TGV + EGR Delete (off-road only)"
+modal           = "tgv_egr_delete"
+required_tables = [
+    "airflow_manifold_flow_model_egr_flow_model_egr_airflow",
+    "airflow_manifold_flow_model_egr_flow_model_egr_absolute_pressure_main",
+    "ignition_compensation_coolant_tgv_closed_activation",
+    "ignition_compensation_egr_tgv_closed_ignition_timing_egr_adder_a",
+    "ignition_compensation_egr_tgv_closed_ignition_timing_egr_adder_c",
+]
+```
+
+Declared in 7 SH-2A packs as of 2026-06-09: `lf79103p`, `lf79100p` (COBB Stage 1), `lf75404s`, `lf75404h`, `lf9c102p`, `lf9d012h`, `lf9g003t`, `lf9l000e` — plus `lf79101p` inheriting via `extends`. `lf75600h` declined because its defgen output is missing the EGR Adder declarations; can be added in a follow-up.
+
+Post-install expectations (analyst's Task D doc): AF Correction drifts +3 to +8% in cruise cells for the first ~10 minutes; AF Learning absorbs by the 30-min mark; WOT unaffected (EGR wasn't active there anyway). If actuator-circuit DTCs fire (P0488, P2122, etc.), escalate to Task B v2 PWM-driver trace.
+
 ### Public references for the swap
 
 Hardware kits + harnesses:
