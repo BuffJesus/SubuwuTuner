@@ -4007,11 +4007,156 @@ bit                = 0
 emissions_relevant = true
 
 
-# NOTE 2026-06-09: tgv_egr_delete workflow NOT declared here because
-# the EGR Adder A + C tables aren't in this pack's defgen output.
-# Promotion script auto-added the workflow but pack-info verification
-# returned MISS on both Adder ids. Once an analyst pass adds the
-# Adder declarations (analyst's TASK_E sibling table HAS the per-CID
-# addresses: A=0x3095C, C=0x30ABC — identical to LF75404), the
-# workflow declaration can land in a follow-up. The L1 + DTC bitmap
-# infrastructure for this pack is already in place from this commit.
+# EGR Ignition Adder cluster — descriptor at canon 0x5BA04 confirmed
+# 2026-06-09 by direct ROM byte-read of the stock LF75600H fixture.
+# Descriptor decode: X_size=22, X_ptr=0x1B83E, Y_size=16,
+# Y_ptr=0x1B86A — identical to LF75404S/H. defgen output missed
+# these declarations; hand-added below to support the tgv_egr_delete
+# workflow's required_tables resolution. Same per-CID data addresses
+# the analyst confirmed in HANDOFF-from-analyst-2026-06-09-tgv-egr-
+# sibling-addresses.md (A=0x3095C, B=0x239D2, C=0x30ABC, D=0x23B32).
+
+# Scaling needed for the EGR Ignition Adders + TGV Closed Activation
+# below. Same coefficients as the LF75404S pack (deg_x_128_0_0_5 is
+# family-stable across SH-2A A-series).
+[[scaling]]
+id        = "deg_x_128_0_0_5"
+formula   = "linear"
+factor    = 0.5
+offset    = -64.0
+unit      = "deg"
+precision = 2
+data_type = "uint8"
+
+
+[[axis]]
+id        = "timing_compensation_rpm"
+name      = "Timing - Compensation - RPM"
+unit      = ""
+type      = "static"
+address   = 0x00031E7E
+length    = 22
+data_type = "uint8"
+scaling   = "rpm_x_25_0"
+
+
+[[axis]]
+id        = "timing_compensation_calculated_load"
+name      = "Timing - Compensation - Calculated Load"
+unit      = ""
+type      = "static"
+address   = 0x00031E94
+length    = 16
+data_type = "uint8"
+scaling   = "g_per_rev_x_0_0129"
+
+
+[[axis]]
+id        = "rpm_len11_v2"
+name      = "RPM"
+unit      = ""
+type      = "static"
+address   = 0x0001B83E
+length    = 22
+data_type = "uint16_be"
+scaling   = "rpm_x_5_12"
+
+
+[[axis]]
+id        = "calculated_load_len8_v2"
+name      = "Calculated Load"
+unit      = ""
+type      = "static"
+address   = 0x0001B86A
+length    = 16
+data_type = "uint16_be"
+scaling   = "g_per_rev_x_65535_0_3_3"
+
+
+# TGV Closed Activation descriptor at canon 0x5BD84 verified by
+# direct ROM byte-read; data_ptr=0x324AE, X_size=22, X_ptr=0x31E7E
+# (timing_compensation_rpm), Y_size=16, Y_ptr=0x31E94
+# (timing_compensation_calculated_load). Same shape as LF75404S/H.
+[[table]]
+id                     = "ignition_compensation_coolant_tgv_closed_activation"
+name                   = "TGV Closed Activation"
+category               = "ignition - compensation - coolant"
+dimensions             = 2
+address                = 0x000324AE
+data_type              = "uint16_be"
+scaling                = "x_100_0"
+axis_x                 = "timing_compensation_calculated_load"
+axis_y                 = "timing_compensation_rpm"
+emissions_relevant     = false
+engine_safety_critical = false
+
+
+[[table]]
+id                     = "ignition_compensation_egr_tgv_closed_ignition_timing_egr_adder_a"
+name                   = "Ignition Timing EGR Adder A"
+category               = "ignition - compensation - egr - tgv closed"
+dimensions             = 2
+address                = 0x0003095C
+data_type              = "uint8"
+scaling                = "deg_x_128_0_0_5"
+axis_x                 = "calculated_load_len8_v2"
+axis_y                 = "rpm_len11_v2"
+emissions_relevant     = true
+engine_safety_critical = false
+
+
+[[table]]
+id                     = "ignition_compensation_egr_tgv_open_ignition_timing_egr_adder_b"
+name                   = "Ignition Timing EGR Adder B"
+category               = "ignition - compensation - egr - tgv open"
+dimensions             = 2
+address                = 0x000239D2
+data_type              = "uint8"
+scaling                = "deg_x_128_0_0_5"
+axis_x                 = "calculated_load_len8_v2"
+axis_y                 = "rpm_len11_v2"
+emissions_relevant     = true
+engine_safety_critical = false
+
+
+[[table]]
+id                     = "ignition_compensation_egr_tgv_closed_ignition_timing_egr_adder_c"
+name                   = "Ignition Timing EGR Adder C"
+category               = "ignition - compensation - egr - tgv closed"
+dimensions             = 2
+address                = 0x00030ABC
+data_type              = "uint8"
+scaling                = "deg_x_128_0_0_5"
+axis_x                 = "calculated_load_len8_v2"
+axis_y                 = "rpm_len11_v2"
+emissions_relevant     = true
+engine_safety_critical = false
+
+
+[[table]]
+id                     = "ignition_compensation_egr_tgv_open_ignition_timing_egr_adder_d"
+name                   = "Ignition Timing EGR Adder D"
+category               = "ignition - compensation - egr - tgv open"
+dimensions             = 2
+address                = 0x00023B32
+data_type              = "uint8"
+scaling                = "deg_x_128_0_0_5"
+axis_x                 = "calculated_load_len8_v2"
+axis_y                 = "rpm_len11_v2"
+emissions_relevant     = true
+engine_safety_critical = false
+
+
+# TGV + EGR delete workflow. See lf79103p.toml header comment for the
+# full delete-strategy rationale.
+[[workflow]]
+id              = "tgv_egr_delete"
+display_name    = "TGV + EGR Delete (off-road only)"
+modal           = "tgv_egr_delete"
+required_tables = [
+    "airflow_manifold_flow_model_egr_flow_model_egr_airflow",
+    "airflow_manifold_flow_model_egr_flow_model_egr_absolute_pressure_main",
+    "ignition_compensation_coolant_tgv_closed_activation",
+    "ignition_compensation_egr_tgv_closed_ignition_timing_egr_adder_a",
+    "ignition_compensation_egr_tgv_closed_ignition_timing_egr_adder_c",
+]
