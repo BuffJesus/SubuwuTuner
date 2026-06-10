@@ -2598,6 +2598,42 @@ TEST_CASE("definitions/impreza/lf79103p.toml declares an eligible tgv_egr_delete
     REQUIRE(d->supports_workflow("tgv_egr_delete"));
 }
 
+// Sibling-pack tgv_egr_delete eligibility — same shape as the
+// lf79103p test above, replicated across the 7 SH-2A siblings that
+// declare the workflow (per commits 431e551 + 0315bc5). Trips if a
+// regen drops any per-CID Adder declaration or breaks the per-CID
+// DTC bitmap base. Skips cleanly when a pack file is missing (sparse
+// clone).
+TEST_CASE("sibling SH-2A packs declare eligible tgv_egr_delete workflow",
+          "[defs][workflow][in_tree]") {
+    static constexpr char const *const kPackIds[] = {
+        "lf79100p", "lf75404s", "lf75404h", "lf75600h",
+        "lf9c102p", "lf9d012h", "lf9g003t", "lf9l000e",
+    };
+    for (char const *pack_id : kPackIds) {
+        SECTION(pack_id) {
+            auto const path = std::filesystem::path{ST_DEFINITIONS_DIR} /
+                              "impreza" / (std::string{pack_id} + ".toml");
+            std::error_code ec;
+            if (!std::filesystem::exists(path, ec)) {
+                WARN("definitions/impreza/" << pack_id
+                                            << ".toml not present — skipping");
+                return;
+            }
+            auto const d = st::Definition::from_file(path);
+            REQUIRE(d.has_value());
+            auto const *del = d->find_workflow("tgv_egr_delete");
+            REQUIRE(del != nullptr);
+            REQUIRE(del->required_tables.size() == 5);
+            for (auto const &table_id : del->required_tables) {
+                INFO("required table: " << table_id);
+                REQUIRE(d->find_table(table_id) != nullptr);
+            }
+            REQUIRE(d->supports_workflow("tgv_egr_delete"));
+        }
+    }
+}
+
 // The DTC the workflow's bit-clear step targets must be declared in
 // the pack. Without this, the workflow apply path skips step 4 and
 // the user has to disable P0400 manually post-flash.
