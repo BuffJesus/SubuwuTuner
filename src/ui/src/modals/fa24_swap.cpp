@@ -657,28 +657,25 @@ inline constexpr std::array<double, 16> kNtmHpfpPhaseTransferCurve = {
     44.0, 33.0, 33.0, 33.0, 33.0,
 };
 
-// 10x16 row-major NTM AVCS Cam Target (TGV Closed). Extracted from
+// 20x16 row-major NTM AVCS Cam Target (TGV Closed). Extracted from
 // the NTM FA24-swap basemap (cipher_agent decode 2026-06-09). NTM
 // keeps Baro Low == Baro High at every cell in both stock and NTM,
 // so this single preset serves both tables. Values are in degrees
 // (the scaled cell value); the ROM writeback converts back to int16
 // via the deg_x_728_1_0_5 scaling and the cells match NTM's bytes
 // byte-for-byte at the table's canon addresses (0x442F0 / 0x465F8).
-// Each row is RPM (axis_y = rpm_len10); each column is calculated
-// load (axis_x = avcs_intake_target_calculated_load_len16_v2).
+// Each row is RPM (axis_y = rpm_len10, length 20); each column is
+// calculated load (axis_x = avcs_intake_target_calculated_load_len16_v2).
 //
-// TODO 2026-06-09: per audit_toml_axis_truncation finding +
-// descriptor decode (HANDOFF-to-analyst-2026-06-09-avcs-truncation-
-// audit.md), the AVCS table's rpm_len10 axis is probably truncated —
-// the descriptor at canon 0x6AA00 reports X_size=20, not 10. If the
-// analyst confirms, this preset is HALF-SIZED: the bottom 10 rows
-// of the actual 20-row table stay at stock values. The apply path's
-// preset-size guard (apply_op_table cell-count mismatch check) will
-// reject the write rather than half-fill — so on a corrected toml,
-// the workflow will bail loudly and we'll need to expand the preset
-// to 20x16 = 320 cells (or switch the AVCS step back to a uniform
-// scalar op). Tracked in the analyst handoff above.
-inline constexpr std::array<double, 160> kNtmAvcsCamTargetTgvClosed = {
+// Originally shipped as 10x16 = 160 cells in commit 219d212.
+// Audit + 12-descriptor verification 2026-06-09 confirmed every
+// rpm_len10 consumer's descriptor reports X_size=20, not 10 — same
+// wastegate-pattern truncation. rpm_len10 bumped to length=20 in
+// the toml; preset expanded here from 10x16 → 20x16 to match.
+// Rows 0-9 are byte-identical to the shipped 10x16 preset. Rows
+// 10-19 include the high-load / high-RPM region NTM uses for cam
+// retard (negative degrees at the bottom-right corner).
+inline constexpr std::array<double, 320> kNtmAvcsCamTargetTgvClosed = {
     4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 10.8337, 17.5003,
     29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 29.9986, 30.0041,
     9.9986, 9.9986, 9.9986, 9.9986, 9.9986, 9.9986, 10.8337, 17.5003,
@@ -699,6 +696,29 @@ inline constexpr std::array<double, 160> kNtmAvcsCamTargetTgvClosed = {
     29.9986, 29.9986, 29.9986, 24.9993, 24.9993, 24.9993, 24.9993, 24.9993,
     4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 9.6663, 15.0007,
     29.9986, 29.9986, 29.9986, 22.4997, 22.4997, 22.4997, 22.4997, 21.4421,
+    // Rows 10-19: high-load / high-RPM region. NTM transitions from
+    // cam-advance targets (rows 0-9) into cam-retard at the bottom
+    // right corner (-2.4997° at 14:11..15).
+    4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 8.4988, 12.5010,
+    24.9993, 24.9993, 24.2494, 20.0000, 20.0000, 20.0000, 20.0000, 17.8877,
+    4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 7.3342, 10.0014,
+    20.0000, 20.0000, 18.5002, 13.5009, 13.5009, 13.5009, 13.5009, 12.4433,
+    4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 6.1667, 7.4990,
+    14.9979, 14.9979, 12.7482, 6.9990, 6.9990, 6.9990, 6.9990, 6.9990,
+    4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 6.1667, 7.4990,
+    9.9986, 9.9986, 6.9990, 2.9996, 2.9996, 2.9996, 2.9996, 2.9996,
+    4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 6.1667, 7.4990,
+    9.9986, 9.9986, 3.7495, -2.4997, -2.4997, -2.4997, -2.4997, -2.4997,
+    4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 6.1667, 7.4990,
+    9.9986, 9.9986, 3.7495, -2.4997, -2.4997, -2.4997, -2.4997, -2.4997,
+    4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 6.1667, 7.4990,
+    9.9986, 9.9986, 3.7495, -2.4997, -2.4997, -2.4997, -2.4997, -2.4997,
+    4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 6.1667, 7.4990,
+    9.9986, 9.9986, 3.7495, -2.4997, -2.4997, -2.4997, -2.4997, -2.4997,
+    4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 6.1667, 7.4990,
+    9.9986, 9.9986, 3.7495, -2.4997, -2.4997, -2.4997, -2.4997, -2.4997,
+    4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 6.1667, 7.4990,
+    9.9986, 9.9986, 3.7495, -2.4997, -2.4997, -2.4997, -2.4997, -2.4997,
 };
 
 struct WorkflowTable {

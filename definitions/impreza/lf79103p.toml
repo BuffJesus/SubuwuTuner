@@ -1486,7 +1486,17 @@ name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x000452A0
-length    = 9
+# Bumped 2026-06-09 from 9 → 18. Same wastegate-pattern truncation
+# the audit_toml_axis_truncation script flagged. Code-side verified
+# ALL 12 consumers by direct descriptor decode at the addresses
+# 0x45994, 0x485B8, 0x48378, 0x476B8, 0x487F8, 0x48A38, 0x45514,
+# 0x452D4, 0x46FF8, 0x47238, 0x45754, 0x47478 — every one reports
+# X_size=18 (this axis_y) at X_ptr=0x452A0. Family-stable; bump is
+# consumer-safe across all 12. Id-name "len9" is now stale but kept
+# to avoid the 24+ axis_y reference churn. See
+# findings/handoffs/HANDOFF-to-analyst-2026-06-09-avcs-truncation-
+# audit.md for the methodology.
+length    = 18
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1530,7 +1540,13 @@ name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00044298
-length    = 10
+# Bumped 2026-06-09 from 10 → 20. Same wastegate-pattern truncation
+# as rpm_len9 above. Code-side verified ALL 12 consumers by direct
+# descriptor decode at the addresses 0x442F0, 0x465F8, 0x44570,
+# 0x46878, 0x447F0, 0x46AF8, 0x47E78, 0x480F8, 0x44A70, 0x46D78,
+# 0x47978, 0x47BF8 — every one reports X_size=20 at X_ptr=0x44298.
+# Family-stable; bump is consumer-safe.
+length    = 20
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
