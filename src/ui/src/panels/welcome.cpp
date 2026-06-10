@@ -282,6 +282,41 @@ void render_welcome_panel(AppState &state) {
                     "Requires LF79101P / LF79103P / LF9L000E coverage.");
             }
         }
+
+        ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+
+        // TGV+EGR delete card. Off-road / track-only by analyst Task E
+        // spec — gated at modal entry with explicit jurisdiction
+        // confirmation. Surfaced here so users who own track cars find
+        // it without menu-spelunking; the disabled state on packs that
+        // don't declare the workflow tells daily-driver users why it's
+        // not for them.
+        bool const tgv_egr_ok = pack_supports_tgv_egr_delete(state);
+        ImGui::BeginDisabled(!tgv_egr_ok);
+        if (ImGui::Button("\xEE\xAB\x80  TGV + EGR delete (off-road only)\xE2\x80\xA6",
+                          ImVec2(kCardW, 32.0f))) {
+            state.show_tgv_egr_delete_modal = true;
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            if (tgv_egr_ok) {
+                ImGui::SetTooltip(
+                    "Guided 3-step delete: zeros 5 EGR + TGV cal tables and\n"
+                    "disables the P0400 DTC. Per analyst Tasks A-F (2026-06-09).\n"
+                    "Jurisdiction-confirmation chip inside the modal; not for\n"
+                    "daily-drivers on public roads. Reversible via the\n"
+                    "status-bar badge after Apply.");
+            } else if (!state.project.has_value()) {
+                ImGui::SetTooltip(
+                    "Open a project first. The workflow needs a loaded\n"
+                    "calibration pack to know which tables to edit.");
+            } else {
+                ImGui::SetTooltip(
+                    "This pack doesn't declare TGV+EGR-delete support.\n"
+                    "Supported on 8 SH-2A packs (LF79103P + LF79101P inherited\n"
+                    "+ 6 promoted siblings).");
+            }
+        }
         ImGui::EndGroup();
     }
 
