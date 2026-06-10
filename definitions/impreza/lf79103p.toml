@@ -1436,7 +1436,15 @@ name      = "Calculated Load"
 unit      = ""
 type      = "static"
 address   = 0x00021D5A
-length    = 8
+# Bumped 2026-06-09 from 8 → 16. Same wastegate-pattern truncation:
+# defgen produced `length = 8` but the EGR Adder cluster's
+# descriptor at canon 0x67C34 reports Y_size=16. Verified by
+# reading 16 monotonic load values at 0x21D5A (2560 → 61440 raw).
+# All 4 consumers (EGR Adders A/B/C/D) share this axis; bump is
+# consumer-safe. Id-name "len8" is now stale but kept to avoid
+# axis-reference churn. See findings/handoffs/
+# HANDOFF-from-analyst-2026-06-09-tgv-egr-sibling-addresses.md.
+length    = 16
 data_type = "uint16_be"
 scaling   = "g_per_rev_x_65535_0_3_3"
 
@@ -1447,7 +1455,16 @@ name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x00021D2E
-length    = 11
+# Bumped 2026-06-09 from 11 → 22. Same story as calculated_load_
+# len8_v3 above: EGR Adder descriptor at canon 0x67C34 reports
+# X_size=22, but defgen produced length=11. Cells 16-21 of this
+# axis hold sentinel padding values (0x8001..0x8006 — non-physical
+# RPM, but the dispatcher reads them via the interpolation
+# scan-loop's clamp logic for above-redline inputs). Workflow
+# zero-table ops need the full 22-row extent to zero the actual
+# 352-byte cell region per Adder. All 4 consumers (EGR Adders
+# A/B/C/D) share this axis; bump is consumer-safe.
+length    = 22
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
