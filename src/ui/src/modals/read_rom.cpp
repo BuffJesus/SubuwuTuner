@@ -66,6 +66,26 @@ void render_read_rom_modal(AppState &state) {
                               "0x%zX", sz);
             }
         }
+        // Pre-fill Protocol from the active project's pack.years on
+        // open. Same "only if at default" gate as Size — leaves a
+        // user-overridden choice alone. Pre-2016 cars use SSM2
+        // (index 0); 2016+ cars use UDS / ReadMemoryByAddress
+        // (index 1). The SSM↔UDS transition lined up with MY2016 per
+        // Subaru's own technician reference (SSMIII → SSM4 dealer
+        // software). If a user picks an older protocol manually and
+        // saves it, the modal won't flip it back on next open.
+        // Reported as a bug 2026-06-09: protocol stayed at the pre-
+        // 2016 default for a 2017 VA WRX user, requiring manual flip
+        // every time.
+        if (state.project.has_value() && state.read_rom_protocol == 0) {
+            auto const &years = state.project->definition().pack().years;
+            if (!years.empty()) {
+                int const max_year = *std::max_element(years.begin(), years.end());
+                if (max_year >= 2016) {
+                    state.read_rom_protocol = 1;
+                }
+            }
+        }
         // Pre-fill SA variant from the active vehicle profile's
         // transport_hint. Looks for substrings the user is likely to
         // have typed when documenting which adapter / variant they use
@@ -210,30 +230,73 @@ void render_read_rom_modal(AppState &state) {
         bool const adapter_ready = render_adapter_picker(state.read_rom_adapter);
         ImGui::Dummy(ImVec2(0.0f, kSpaceS));
 
-        // ROM size presets — saves a fresh user from having to know
-        // "0x200000" off the top of their head. Pre-fills the size
-        // input on click. Common Subaru ECU sizes; users with an
-        // exotic size can still type a custom value below.
-        ImGui::TextUnformatted("ROM size:");
+        // Vehicle-platform presets — users know their car, not "0x200000".
+        // Each preset sets BOTH the ROM size AND the protocol so the
+        // happy path is one click, no Advanced needed. User-suggested
+        // UX 2026-06-09 (replaced earlier raw-size buttons because new
+        // users don't translate "my 2017 WRX" → "1.5 MB or 2 MB").
+        //
+        // Selection visibility: the preset whose (size, protocol) pair
+        // currently matches the modal state gets the accent button
+        // color so the user sees their choice persisted across frames.
+        ImGui::TextUnformatted("Vehicle:");
         ImGui::SameLine();
-        auto const set_size = [&](char const *hex) {
+        auto const set_preset = [&](char const *size_hex, int protocol) {
             std::snprintf(state.read_rom_size_hex,
-                          sizeof state.read_rom_size_hex, "%s", hex);
+                          sizeof state.read_rom_size_hex, "%s", size_hex);
+            state.read_rom_protocol = protocol;
         };
-        if (ImGui::SmallButton("512 KB##sz_512")) set_size("0x80000");
+        auto const vehicle_preset = [&](char const *label,
+                                        char const *size_hex,
+                                        int protocol,
+                                        char const *tooltip) {
+            bool const selected =
+                std::string_view{state.read_rom_size_hex} == size_hex &&
+                state.read_rom_protocol == protocol;
+            if (selected) {
+                push_primary_button_colors();
+            }
+            bool const clicked = ImGui::SmallButton(label);
+            if (selected) {
+                pop_primary_button_colors();
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", tooltip);
+            }
+            if (clicked) {
+                set_preset(size_hex, protocol);
+            }
+        };
+        // VA WRX (FA20DIT) 2015–2021: 2 MB canonical, UDS (SID 0x23).
+        // The user's daily-driver and most common case for SubuwuTuner
+        // today.
+        vehicle_preset("WRX 2015\xE2\x80\x93" "2021##veh_va", "0x200000", 1,
+                       "VA WRX (FA20DIT, 2015\xE2\x80\x93" "2021):\n"
+                       "  Size:     0x200000 (2 MB)\n"
+                       "  Protocol: UDS (ReadMemoryByAddress)\n"
+                       "  Covers MY 2015\xE2\x80\x93" "2021 manual + auto.");
         ImGui::SameLine();
-        if (ImGui::SmallButton("1 MB##sz_1m")) set_size("0x100000");
+        // VB WRX (FA24) 2022+: same 2 MB / UDS as VA in this respect.
+        vehicle_preset("WRX 2022+##veh_vb", "0x200000", 1,
+                       "VB WRX (FA24, 2022+):\n"
+                       "  Size:     0x200000 (2 MB)\n"
+                       "  Protocol: UDS (ReadMemoryByAddress)\n"
+                       "  Including FA24-swap retrofitted VA chassis.");
         ImGui::SameLine();
-        if (ImGui::SmallButton("1.5 MB##sz_1_5m")) set_size("0x180000");
+        // EJ-era K-Line / early CAN Subarus. Size varies by ECU (SH7058
+        // is 1 MB, older EJ is 512 KB); we pick 1 MB as the more common
+        // case for the WRX/STI lineage. User can override in Advanced
+        // if their specific ECU is 512 KB.
+        vehicle_preset("EJ Subaru (pre-2015)##veh_ej", "0x100000", 0,
+                       "EJ-era WRX / STI / Legacy / Forester (pre-2015):\n"
+                       "  Size:     0x100000 (1 MB) — default for SH7058 ECUs\n"
+                       "  Protocol: SSM2 (A8 ReadByAddress)\n"
+                       "  Some early EJ ECUs are 512 KB; override via\n"
+                       "  Advanced if your hex dump is 0x80000.");
         ImGui::SameLine();
-        if (ImGui::SmallButton("2 MB##sz_2m")) set_size("0x200000");
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Sets the size field below. Picks the right value\n"
-                              "for most Subaru ECUs:\n"
-                              "  EJ K-Line / early FA: 512 KB\n"
-                              "  FA20DIT (VA WRX): 1.5 MB\n"
-                              "  FA24 (VB WRX): 2 MB");
-        }
+        // Custom is a no-op (visual cue only). Users with exotic
+        // platforms expand Advanced and type the hex values directly.
+        ImGui::TextDisabled("\xC2\xB7 or use Advanced below");
         ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
 
         // Advanced controls — collapsed by default so the form doesn't
