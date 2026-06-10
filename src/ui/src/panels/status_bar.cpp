@@ -483,6 +483,55 @@ void render_status_bar(AppState &state) {
             }
         }
 
+        // TGV + EGR delete badge — same shape as FA24 above. Lit when
+        // the active history carries a "tgv_egr_delete"-tagged edit
+        // at head; click for the recorded-edits list + Revert All.
+        if (tgv_egr_delete_active(state)) {
+            ImGui::SameLine();
+            // Use the caution color (purple-tinted) since this is a
+            // delete workflow with jurisdiction implications, not a
+            // routine swap recipe like FA24.
+            chip("\xEE\xAB\x80  TGV+EGR delete  \xE2\x96\xBE",
+                 chip_fg_caution(), chip_bg_accent());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "TGV + EGR delete workflow active.\n"
+                    "Click to see the recorded edits + Revert All.");
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            }
+            if (ImGui::IsItemClicked()) {
+                ImGui::OpenPopup("##tgv_egr_delete_badge");
+            }
+            if (ImGui::BeginPopup("##tgv_egr_delete_badge")) {
+                text_subtle("TGV + EGR delete \xE2\x80\x94 recorded edits");
+                ImGui::Separator();
+                auto const &records = state.project->active_history().records();
+                std::size_t shown = 0;
+                for (auto const &e : records) {
+                    if (e.tag != "tgv_egr_delete") {
+                        continue;
+                    }
+                    ImGui::BulletText("%s", e.description.c_str());
+                    ++shown;
+                }
+                if (shown == 0) {
+                    text_subtle("(no edits recorded)");
+                }
+                ImGui::Separator();
+                push_primary_button_colors();
+                if (ImGui::Button("Revert All##tgv_egr_revert")) {
+                    revert_tgv_egr_delete(state);
+                    ImGui::CloseCurrentPopup();
+                }
+                pop_primary_button_colors();
+                ImGui::SameLine();
+                if (ImGui::Button("Close##tgv_egr_close")) {
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+        }
+
         ImGui::SameLine();
         // Edits counter reflects the active slot (Issue #10 phase 3).
         // Source: always 0/0 (no history). Additional ROMs and
