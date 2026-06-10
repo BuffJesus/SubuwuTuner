@@ -267,32 +267,53 @@ void render_read_rom_modal(AppState &state) {
                 set_preset(size_hex, protocol);
             }
         };
-        // VA WRX (FA20DIT) 2015–2021: 2 MB canonical, UDS (SID 0x23).
-        // The user's daily-driver and most common case for SubuwuTuner
-        // today.
-        vehicle_preset("WRX 2015\xE2\x80\x93" "2021##veh_va", "0x200000", 1,
-                       "VA WRX (FA20DIT, 2015\xE2\x80\x93" "2021):\n"
-                       "  Size:     0x200000 (2 MB)\n"
+        // Sizes verified 2026-06-09 against the actual rom_size_bytes
+        // values in the in-tree packs (definitions/impreza/*.toml):
+        //   VA early (LF79103P MY2017 etc.):  2,097,152 B = 0x200000
+        //   VA late  (LF9D012H MY2019-2021):  2,596,864 B = 0x27A000
+        //   VB       (LHBxxx  MY2022+):       4,128,768 B = 0x3F0000
+        //   EJ era   (SH7058):                1,048,576 B = 0x100000
+        //   EJ K-Line (a4rg/a4rm/a4rn era):     196,608 B = 0x30000
+        // Vehicle presets here pick the most common case per category.
+        // When a project is loaded, the modal's on-open pre-fill (above)
+        // overrides with the loaded pack's exact rom_size_bytes — so
+        // the imprecise "VA 2015-2021" coverage is just a starting
+        // point for fresh users without a project open yet.
+
+        // VA WRX (FA20DIT) 2015-2018: 2 MB canonical, UDS. The most
+        // common SubuwuTuner case + user's daily-driver target.
+        vehicle_preset("WRX 2015\xE2\x80\x93" "2018##veh_va_early", "0x200000", 1,
+                       "VA WRX (FA20DIT, MY2015\xE2\x80\x93" "2018):\n"
+                       "  Size:     0x200000 (2 MB exactly)\n"
                        "  Protocol: UDS (ReadMemoryByAddress)\n"
-                       "  Covers MY 2015\xE2\x80\x93" "2021 manual + auto.");
+                       "  LF79xxx / LF754xxx / LF756xxx ECUs.");
         ImGui::SameLine();
-        // VB WRX (FA24) 2022+: same 2 MB / UDS as VA in this respect.
-        vehicle_preset("WRX 2022+##veh_vb", "0x200000", 1,
-                       "VB WRX (FA24, 2022+):\n"
-                       "  Size:     0x200000 (2 MB)\n"
+        // VA late-model — different rom_size_bytes per the toml's
+        // declared 2,596,864 B for LF9D012H et al.
+        vehicle_preset("WRX 2019\xE2\x80\x93" "2021##veh_va_late", "0x27A000", 1,
+                       "VA WRX (FA20DIT, MY2019\xE2\x80\x93" "2021):\n"
+                       "  Size:     0x27A000 (2,596,864 B)\n"
                        "  Protocol: UDS (ReadMemoryByAddress)\n"
+                       "  LF9Cxxx / LF9Dxxx / LF9Gxxx / LF9Lxxx ECUs.\n"
+                       "  Larger calibration section than early VA.");
+        ImGui::SameLine();
+        // VB WRX (FA24): per toml's LHBxxx rom_size_bytes = 4,128,768 B.
+        // NOT 2 MB — original preset shipped wrong.
+        vehicle_preset("WRX 2022+##veh_vb", "0x3F0000", 1,
+                       "VB WRX (FA24, MY2022+):\n"
+                       "  Size:     0x3F0000 (4,128,768 B \xE2\x89\x88 3.94 MB)\n"
+                       "  Protocol: UDS (ReadMemoryByAddress)\n"
+                       "  LHBxxx ECUs (RH850, not SH-2A).\n"
                        "  Including FA24-swap retrofitted VA chassis.");
         ImGui::SameLine();
-        // EJ-era K-Line / early CAN Subarus. Size varies by ECU (SH7058
-        // is 1 MB, older EJ is 512 KB); we pick 1 MB as the more common
-        // case for the WRX/STI lineage. User can override in Advanced
-        // if their specific ECU is 512 KB.
+        // EJ-era SH7058 (most common for tuners): 1 MB. K-Line A4-series
+        // is smaller (0x30000); user can override in Advanced.
         vehicle_preset("EJ Subaru (pre-2015)##veh_ej", "0x100000", 0,
                        "EJ-era WRX / STI / Legacy / Forester (pre-2015):\n"
-                       "  Size:     0x100000 (1 MB) — default for SH7058 ECUs\n"
+                       "  Size:     0x100000 (1 MB) \xE2\x80\x94 SH7058 default\n"
                        "  Protocol: SSM2 (A8 ReadByAddress)\n"
-                       "  Some early EJ ECUs are 512 KB; override via\n"
-                       "  Advanced if your hex dump is 0x80000.");
+                       "  Some K-Line A4-series ECUs are 0x30000 (192 KB);\n"
+                       "  override via Advanced if your dump is smaller.");
         ImGui::SameLine();
         // Custom is a no-op (visual cue only). Users with exotic
         // platforms expand Advanced and type the hex values directly.
