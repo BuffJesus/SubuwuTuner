@@ -1301,7 +1301,7 @@ name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0003BDD0
-length    = 9
+length    = 18
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
@@ -1345,7 +1345,7 @@ name      = "RPM"
 unit      = ""
 type      = "static"
 address   = 0x0003ADB8
-length    = 10
+length    = 20
 data_type = "uint16_be"
 scaling   = "rpm_x_5_12"
 
