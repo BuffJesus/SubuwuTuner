@@ -2571,6 +2571,54 @@ TEST_CASE("definitions/impreza/lf79101p.toml inherits fa24_swap via extends",
     REQUIRE(d->supports_workflow("fa24_swap"));
 }
 
+// Same shape as the fa24_swap eligibility check above, for the
+// tgv_egr_delete workflow added 2026-06-09. Trips if a regen drops
+// one of the 5 required tables (EGR Airflow, EGR Pressure Main, TGV
+// Closed Activation, EGR Ignition Adders A + C) or renames them.
+TEST_CASE("definitions/impreza/lf79103p.toml declares an eligible tgv_egr_delete workflow",
+          "[defs][workflow][in_tree]") {
+    auto const path =
+        std::filesystem::path{ST_DEFINITIONS_DIR} / "impreza" / "lf79103p.toml";
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec)) {
+        WARN("definitions/impreza/lf79103p.toml not present — skipping in-tree workflow check");
+        return;
+    }
+    auto const d = st::Definition::from_file(path);
+    REQUIRE(d.has_value());
+    auto const *del = d->find_workflow("tgv_egr_delete");
+    REQUIRE(del != nullptr);
+    REQUIRE(del->display_name == "TGV + EGR Delete (off-road only)");
+    REQUIRE(del->modal == "tgv_egr_delete");
+    REQUIRE(del->required_tables.size() == 5);
+    for (auto const &table_id : del->required_tables) {
+        INFO("required table: " << table_id);
+        REQUIRE(d->find_table(table_id) != nullptr);
+    }
+    REQUIRE(d->supports_workflow("tgv_egr_delete"));
+}
+
+// The DTC the workflow's bit-clear step targets must be declared in
+// the pack. Without this, the workflow apply path skips step 4 and
+// the user has to disable P0400 manually post-flash.
+TEST_CASE("lf79103p declares P0400 DTC for tgv_egr_delete workflow",
+          "[defs][workflow][in_tree]") {
+    auto const path =
+        std::filesystem::path{ST_DEFINITIONS_DIR} / "impreza" / "lf79103p.toml";
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec)) {
+        WARN("definitions/impreza/lf79103p.toml not present — skipping P0400 check");
+        return;
+    }
+    auto const d = st::Definition::from_file(path);
+    REQUIRE(d.has_value());
+    auto const *p0400 = d->find_dtc("P0400");
+    REQUIRE(p0400 != nullptr);
+    auto const *bm = d->find_dtc_bitmap(p0400->bitmap_id);
+    REQUIRE(bm != nullptr);
+    REQUIRE(p0400->emissions_relevant);
+}
+
 TEST_CASE("from_directory follows multi-level extends chains", "[defs][extends]") {
     TempDir td;
 
