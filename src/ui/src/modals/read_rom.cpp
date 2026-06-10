@@ -241,18 +241,33 @@ void render_read_rom_modal(AppState &state) {
         // color so the user sees their choice persisted across frames.
         ImGui::TextUnformatted("Vehicle:");
         ImGui::SameLine();
-        auto const set_preset = [&](char const *size_hex, int protocol) {
+        // Per-preset max_chunk: FA20DIT caps at 0x800 (per memory note;
+        // 2017 WRX returns NRC 0x31 on any RMBA larger than 2 KB). VB
+        // chunk ceiling is unknown empirically; assume same 0x800 floor
+        // — the Flasher's upfront probe will halve further if rejected.
+        // SSM2 internally clamps to 80 regardless of UI value, so the
+        // displayed 80 just matches what the protocol path actually
+        // sends. Without this, the default 0x1000 forces a probe step
+        // that adds 1-2 seconds at read start.
+        auto const set_preset = [&](char const *size_hex, int protocol,
+                                    int max_chunk) {
             std::snprintf(state.read_rom_size_hex,
                           sizeof state.read_rom_size_hex, "%s", size_hex);
             state.read_rom_protocol = protocol;
+            state.read_rom_max_chunk = max_chunk;
         };
         auto const vehicle_preset = [&](char const *label,
                                         char const *size_hex,
                                         int protocol,
+                                        int max_chunk,
                                         char const *tooltip) {
+            // Highlight matches the full triple (size + protocol +
+            // chunk) so re-clicking after a manual chunk override
+            // re-applies the optimal value.
             bool const selected =
                 std::string_view{state.read_rom_size_hex} == size_hex &&
-                state.read_rom_protocol == protocol;
+                state.read_rom_protocol == protocol &&
+                state.read_rom_max_chunk == max_chunk;
             if (selected) {
                 push_primary_button_colors();
             }
@@ -264,7 +279,7 @@ void render_read_rom_modal(AppState &state) {
                 ImGui::SetTooltip("%s", tooltip);
             }
             if (clicked) {
-                set_preset(size_hex, protocol);
+                set_preset(size_hex, protocol, max_chunk);
             }
         };
         // Sizes verified 2026-06-09 against the actual rom_size_bytes
@@ -280,38 +295,45 @@ void render_read_rom_modal(AppState &state) {
         // the imprecise "VA 2015-2021" coverage is just a starting
         // point for fresh users without a project open yet.
 
-        // VA WRX (FA20DIT) 2015-2018: 2 MB canonical, UDS. The most
-        // common SubuwuTuner case + user's daily-driver target.
-        vehicle_preset("WRX 2015\xE2\x80\x93" "2018##veh_va_early", "0x200000", 1,
+        // VA WRX (FA20DIT) 2015-2018: 2 MB canonical, UDS, 0x800 chunk.
+        // The most common SubuwuTuner case + user's daily-driver target.
+        vehicle_preset("WRX 2015\xE2\x80\x93" "2018##veh_va_early", "0x200000", 1, 0x800,
                        "VA WRX (FA20DIT, MY2015\xE2\x80\x93" "2018):\n"
-                       "  Size:     0x200000 (2 MB exactly)\n"
-                       "  Protocol: UDS (ReadMemoryByAddress)\n"
+                       "  Size:      0x200000 (2 MB exactly)\n"
+                       "  Protocol:  UDS (ReadMemoryByAddress)\n"
+                       "  Max chunk: 0x800 (FA20DIT RMBA cap; avoids probe)\n"
                        "  LF79xxx / LF754xxx / LF756xxx ECUs.");
         ImGui::SameLine();
         // VA late-model — different rom_size_bytes per the toml's
         // declared 2,596,864 B for LF9D012H et al.
-        vehicle_preset("WRX 2019\xE2\x80\x93" "2021##veh_va_late", "0x27A000", 1,
+        vehicle_preset("WRX 2019\xE2\x80\x93" "2021##veh_va_late", "0x27A000", 1, 0x800,
                        "VA WRX (FA20DIT, MY2019\xE2\x80\x93" "2021):\n"
-                       "  Size:     0x27A000 (2,596,864 B)\n"
-                       "  Protocol: UDS (ReadMemoryByAddress)\n"
+                       "  Size:      0x27A000 (2,596,864 B)\n"
+                       "  Protocol:  UDS (ReadMemoryByAddress)\n"
+                       "  Max chunk: 0x800 (FA20DIT RMBA cap; avoids probe)\n"
                        "  LF9Cxxx / LF9Dxxx / LF9Gxxx / LF9Lxxx ECUs.\n"
                        "  Larger calibration section than early VA.");
         ImGui::SameLine();
         // VB WRX (FA24): per toml's LHBxxx rom_size_bytes = 4,128,768 B.
-        // NOT 2 MB — original preset shipped wrong.
-        vehicle_preset("WRX 2022+##veh_vb", "0x3F0000", 1,
+        // NOT 2 MB — original preset shipped wrong. Assume same 0x800
+        // chunk cap as FA20DIT until empirical evidence says otherwise.
+        vehicle_preset("WRX 2022+##veh_vb", "0x3F0000", 1, 0x800,
                        "VB WRX (FA24, MY2022+):\n"
-                       "  Size:     0x3F0000 (4,128,768 B \xE2\x89\x88 3.94 MB)\n"
-                       "  Protocol: UDS (ReadMemoryByAddress)\n"
+                       "  Size:      0x3F0000 (4,128,768 B \xE2\x89\x88 3.94 MB)\n"
+                       "  Protocol:  UDS (ReadMemoryByAddress)\n"
+                       "  Max chunk: 0x800 (FA20DIT-derived; probe will\n"
+                       "             scale down if VB ECU rejects 2 KB)\n"
                        "  LHBxxx ECUs (RH850, not SH-2A).\n"
                        "  Including FA24-swap retrofitted VA chassis.");
         ImGui::SameLine();
-        // EJ-era SH7058 (most common for tuners): 1 MB. K-Line A4-series
-        // is smaller (0x30000); user can override in Advanced.
-        vehicle_preset("EJ Subaru (pre-2015)##veh_ej", "0x100000", 0,
+        // EJ-era SH7058: 1 MB, SSM2, chunk clamped to 80 by the SSM
+        // protocol path regardless of UI value. Set displayed chunk to
+        // match what the protocol actually sends.
+        vehicle_preset("EJ Subaru (pre-2015)##veh_ej", "0x100000", 0, 80,
                        "EJ-era WRX / STI / Legacy / Forester (pre-2015):\n"
-                       "  Size:     0x100000 (1 MB) \xE2\x80\x94 SH7058 default\n"
-                       "  Protocol: SSM2 (A8 ReadByAddress)\n"
+                       "  Size:      0x100000 (1 MB) \xE2\x80\x94 SH7058 default\n"
+                       "  Protocol:  SSM2 (A8 ReadByAddress)\n"
+                       "  Max chunk: 80 (SSM2 single-frame limit)\n"
                        "  Some K-Line A4-series ECUs are 0x30000 (192 KB);\n"
                        "  override via Advanced if your dump is smaller.");
         ImGui::SameLine();
