@@ -12,8 +12,11 @@
 
 #include "st/project.hpp"
 
+#include <toml++/toml.hpp>
+
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <utility>
 
@@ -41,6 +44,27 @@ void AppState::try_open_project(std::filesystem::path const &path) {
     selection.reset();
     dirty = false;
     last_save_iso.reset();
+    // Surface a status-bar badge if this project was produced by
+    // `ptm import` (or the GUI equivalent). [ptm_metadata] is the
+    // round-trip-preservation block we wrote at import time; its
+    // presence flags an imported tune even after Project::open's main
+    // pass since Project doesn't model that section.
+    ptm_imported_vendor.reset();
+    ptm_imported_vehicle.reset();
+    try {
+        auto const tbl = toml::parse_file((path / "project.toml").string());
+        if (auto const *meta = tbl["ptm_metadata"].as_table(); meta != nullptr) {
+            if (auto v = (*meta)["vendor_id"].value<std::string>(); v.has_value() && !v->empty()) {
+                ptm_imported_vendor = *v;
+            }
+            if (auto v = (*meta)["vehicle_id"].value<std::string>(); v.has_value() && !v->empty()) {
+                ptm_imported_vehicle = *v;
+            }
+        }
+    } catch (toml::parse_error const &) {
+        // Project::open already validated the file — if we re-parse and
+        // it fails here, swallow silently (the badge just doesn't show).
+    }
     // Sync the GUI's view selection from whatever the project
     // persisted. New / older projects come back with "" = working,
     // which keeps the v1 behavior.

@@ -173,6 +173,7 @@ target_link_libraries(subuwutuner-gui
         st::transport
         st::devices_ap3
         st::library
+        tomlplusplus::tomlplusplus
         imgui_lib
         implot_lib
         nfd

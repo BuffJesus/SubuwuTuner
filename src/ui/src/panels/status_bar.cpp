@@ -122,6 +122,27 @@ void render_status_bar(AppState &state) {
             }
         }
 
+        // PTM-imported tune badge. Surfaces when the loaded project's
+        // project.toml carries a [ptm_metadata] block — i.e. it was
+        // produced by `ptm import` (CLI or GUI wizard). Purple accent
+        // for the imported-tune affordance; tooltip shows vendor +
+        // vehicle so the user can confirm at a glance.
+        if (state.ptm_imported_vendor.has_value()) {
+            ImGui::SameLine();
+            auto const chip_label = "\xEE\x86\x97  " + *state.ptm_imported_vendor;
+            chip(chip_label.c_str(), chip_fg_accent(), chip_bg_accent());
+            if (ImGui::IsItemHovered()) {
+                std::string tip = "Imported tune (round-trip-preserving)\n";
+                tip += "Vendor:  " + *state.ptm_imported_vendor + "\n";
+                if (state.ptm_imported_vehicle.has_value()) {
+                    tip += "Vehicle: " + *state.ptm_imported_vehicle + "\n";
+                }
+                tip += "Source:  project.toml [ptm_metadata] block\n";
+                tip += "Round-trip back to .ptm via `ptm export`.";
+                ImGui::SetTooltip("%s", tip.c_str());
+            }
+        }
+
         // Jurisdiction profile chip — disabled-muted in motorsport-only
         // (the default, silent gate), accent for any other profile so the
         // user notices when they're under a real regulatory posture. Click

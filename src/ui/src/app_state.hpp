@@ -666,6 +666,14 @@ struct AppState {
     // confirmation can't carry forward.
     char flash_typed_phrase[64]{};
 
+    // PTM-imported tune badge — populated when the loaded project's
+    // project.toml has a [ptm_metadata] block (i.e. it was produced by
+    // `ptm import`). The status bar surfaces it as a purple chip
+    // showing the vendor + vehicle so the user can tell at a glance
+    // they're editing an imported tune vs a fresh project.
+    std::optional<std::string> ptm_imported_vendor;
+    std::optional<std::string> ptm_imported_vehicle;
+
     // ptm import wizard modal — Pull-from-AP-then-Import workflow.
     // Picks a .ptm file (and base ROM, optional def-pack), runs the
     // cipher chain inline, shows the decoded metadata preview, and on

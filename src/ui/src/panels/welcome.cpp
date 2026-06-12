@@ -340,6 +340,29 @@ void render_welcome_panel(AppState &state) {
         }
     }
 
+    // Import .ptm hint. Always available — the cipher gate is checked
+    // inside the modal; users without ST_ENABLE_COBB_AP_CIPHER=ON see
+    // a clear PolicyDenied error there rather than failing silently.
+    // Always-on (rather than first-run-only) because the import flow
+    // is the headline path for tuners coming from COBB.
+    {
+        ImGui::Dummy(ImVec2(0.0f, kSpaceM));
+        constexpr float kHintW = 480.0f;
+        center_cursor_x(kHintW);
+        if (ImGui::Button("\xEE\x86\x97  Import .ptm tune file as project\xE2\x80\xA6",
+                          ImVec2(kHintW, 32.0f))) {
+            state.show_ptm_import_modal = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Decode a COBB AccessPort .ptm file into a SubuwuTuner project.\n"
+                "Picks the .ptm, base ROM, and definition pack via NFD; runs the\n"
+                "4-layer cipher chain (XTEA + base64 + AES + bzip2) and writes a\n"
+                "Project::open-compatible skeleton. Loads the new project\n"
+                "automatically. Requires ST_ENABLE_COBB_AP_CIPHER=ON at build.");
+        }
+    }
+
     // First-run-only pack hint. Answers "what do I need to start?"
     // without forcing the user to open the New Project modal first
     // to find out. Hidden once the user has any recents — they've
