@@ -463,14 +463,18 @@ Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
     //     slash ("/maps/"); EXCEPT for root-level pseudo-files like
     //     /backupcksum, where path = name = bare token.
     // Empirical layout pinned against `cmd20_*_request_known_good.bin`.
+    // cmd 0x20 ReadFile setup expects:
+    //   FileInfo2.name = basename (e.g. "Stage1.ptm")
+    //   FileInfo2.path = full relative path with NO leading slash
+    //                    (e.g. "maps/Stage1.ptm" or "backupcksum")
+    // Live-confirmed 2026-06-12 against the reference Python tool's
+    // successful pull of 59 tunes from /maps/. The earlier convention
+    // (name=basename, path="/maps/") produced a degenerate setup ACK
+    // (name=".", size=0) and cmd 0x21 returned zero body bytes.
     auto split = split_ap_path(path);
     FileInfo info{};
     info.name = std::move(split.name);
-    if (split.path == "/") {
-        info.path = info.name; // /backupcksum: name=path=bare token
-    } else {
-        info.path = std::move(split.path);
-    }
+    info.path = strip_leading_slash(path); // full relative path
 
     // Step 1: cmd 0x20 setup. Response carries the actual size in a
     // FileInfo2 echo; we discard the host-echoed name/path and trust
@@ -499,42 +503,37 @@ Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
     // findings/handoffs/HANDOFF-to-analyst-2026-06-12-cmd21-large-file-truncation.md).
     // Fail fast in that case rather than burning a 30-second cmd 0x21
     // timeout for nothing.
+    // Decode the setup ACK to extract reported_size (response shape is
+    // different from the request — see decode_setup_ack_response_shape).
+    // A degenerate ACK (name=".", size=0) historically meant the AP's
+    // path-lookup failed because we were sending path="/maps/" (directory)
+    // instead of path="maps/X.ptm" (full relative); the cmd 0x20 setup
+    // path field convention is now fixed and ACKs decode cleanly. The
+    // fast-fail check is kept as a defensive guard in case other
+    // degenerate request shapes surface in the future.
     std::uint64_t reported_size = 0;
     if (auto ack_info = decode_setup_ack_response_shape(*setup_resp);
         ack_info.has_value()) {
-        // Degenerate-ACK fast-fail: by default refuse to issue cmd 0x21
-        // when the AP's setup ACK echo'd name="." and size=0, since the
-        // body never arrives (firmware path-resolution bug, see handoff
-        // 2026-06-12). ST_AP3_READFILE_DRAIN_MODE=1 callers explicitly
-        // want to attempt the cmd 0x21 read regardless (idle-driven
-        // accumulator strategy doesn't trust wire_len anyway), so let
-        // the experiment proceed in that mode.
-        if (ack_info->name == "." && ack_info->size == 0 &&
-            !readfile_drain_mode_enabled()) {
+        if (ack_info->name == "." && ack_info->size == 0) {
             return st::failure(
                 st::ErrorCode::TransportNack,
-                "ap3::read_file: AP setup ACK returned a degenerate path "
+                "ap3::read_file: AP setup ACK reported a degenerate path "
                 "lookup (name=\".\", size=0) for '" +
                     std::string{path} +
-                    "'. The AP firmware's cmd 0x20 handler appears to fail "
-                    "path resolution for files in subdirectories; root-level "
-                    "files like /backupcksum work. Workaround: try "
-                    "ST_AP3_READFILE_DRAIN_MODE=1 (idle-driven receive). "
-                    "See docs/install.md troubleshooting.");
+                    "'. Verify the path encoding — cmd 0x20 wants "
+                    "FileInfo2.path = full relative path with no leading "
+                    "slash (e.g. \"maps/X.ptm\"), not the directory.");
         }
         reported_size = ack_info->size;
     } else if (auto echoed_info = decode_file_info(*setup_resp);
                echoed_info.has_value()) {
-        // Fallback to the request-shape decoder for the case where the
-        // response actually mirrors the request (root-level files).
         reported_size = echoed_info->size;
     }
 
-    // Step 2: cmd 0x21 data. Body is a Boost-archived session-ID
-    // string per the analyst handoff (any non-empty string works; the
-    // AP uses it as an opaque session identifier and does not write
-    // to it). Use the AP path so logs / sniffer captures still
-    // identify which file each cmd 0x21 corresponds to.
+    // Step 2: cmd 0x21 data. Body is a Boost-archived UTF-8 string —
+    // the AP uses it as an opaque session identifier and does not
+    // write to it. Pass the AP path; the analyst tool's choice of a
+    // synthetic Windows-local path is cosmetic.
     auto data_req = encode_string_body(path);
     if (!data_req.has_value()) {
         return st::failure(std::move(data_req).error());
