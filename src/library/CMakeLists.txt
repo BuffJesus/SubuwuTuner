@@ -2,6 +2,7 @@ add_library(st_library STATIC
     src/patch_decoder.cpp
     src/table_mapping.cpp
     src/tune_diff.cpp
+    src/ptm_xml_builder.cpp
 )
 
 target_include_directories(st_library

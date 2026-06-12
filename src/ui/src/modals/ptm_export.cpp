@@ -17,6 +17,7 @@
 #include "widgets/widgets.hpp"
 
 #include "st/devices/ap3/ptm_cipher.hpp"
+#include "st/library/ptm_xml_builder.hpp"
 
 #include <toml++/toml.hpp>
 
@@ -44,22 +45,6 @@ void pick_save(char *buf, std::size_t buf_size) {
         std::strncpy(buf, out_path.get(), buf_size - 1);
         buf[buf_size - 1] = '\0';
     }
-}
-
-std::string xml_escape(std::string_view s) {
-    std::string out;
-    out.reserve(s.size());
-    for (char c : s) {
-        switch (c) {
-        case '&': out.append("&amp;"); break;
-        case '<': out.append("&lt;"); break;
-        case '>': out.append("&gt;"); break;
-        case '"': out.append("&quot;"); break;
-        case '\'': out.append("&apos;"); break;
-        default: out.push_back(c);
-        }
-    }
-    return out;
 }
 
 bool parse_seed(std::string_view s, std::uint32_t &out) {
@@ -146,7 +131,7 @@ void run_export(AppState &s) {
         s.ptm_export_error = "ptm_patches.toml has no [[patch]] entries.";
         return;
     }
-    std::vector<std::tuple<std::uint32_t, std::int32_t, std::uint32_t, std::string>> patches;
+    std::vector<st::library::PtmExportPatch> patches;
     patches.reserve(arr->size());
     for (auto const &node : *arr) {
         auto const *p = node.as_table();
@@ -160,35 +145,16 @@ void run_export(AppState &s) {
         if (rom_off < 0 || length < 0 || b64.empty()) {
             continue;
         }
-        patches.emplace_back(static_cast<std::uint32_t>(rom_off),
-                             static_cast<std::int32_t>(ram_off),
-                             static_cast<std::uint32_t>(length),
-                             b64);
+        patches.push_back({static_cast<std::uint32_t>(rom_off),
+                           static_cast<std::int32_t>(ram_off),
+                           static_cast<std::uint32_t>(length),
+                           b64});
     }
 
-    // Build inner PrivateData XML.
-    std::string inner = "<PrivateData>";
-    inner += "<vendorID>" + xml_escape(vendor_id) + "</vendorID>";
-    inner += "<vehicleID>" + xml_escape(vehicle_id) + "</vehicleID>";
-    inner += "<lock mask=\"" + std::to_string(lock_mask) + "\" />";
-    inner += "<romSum value=\"" + xml_escape(rom_sum) + "\" />";
-    inner += "<saveDateTime value=\"" + xml_escape(save_date) + "\" />";
-    inner += "<patches>";
-    for (auto const &[ro, ra, len, b64] : patches) {
-        inner += "<patch romOffset=\"" + std::to_string(ro) +
-                 "\" ramOffset=\"" + std::to_string(ra) +
-                 "\" length=\"" + std::to_string(len) + "\">" + b64 + "</patch>";
-    }
-    inner += "</patches></PrivateData>";
-
-    // Build outer envelope.
-    std::string outer = "<PtmOuter>";
-    outer += "<vendorID>" + xml_escape(vendor_id) + "</vendorID>";
-    outer += "<vehicleID>" + xml_escape(vehicle_id) + "</vehicleID>";
-    outer += "<lock mask=\"" + std::to_string(lock_mask) + "\" />";
-    outer += "<romSum value=\"" + xml_escape(rom_sum) + "\" />";
-    outer += "<saveDateTime value=\"" + xml_escape(save_date) + "\" />";
-    outer += "</PtmOuter>";
+    auto const inner = st::library::build_ptm_inner_xml(
+        vendor_id, vehicle_id, lock_mask, rom_sum, save_date, patches);
+    auto const outer = st::library::build_ptm_outer_xml(
+        vendor_id, vehicle_id, lock_mask, rom_sum, save_date);
 
     auto encrypted = st::devices::ap3::cipher::encrypt_ptm(inner, outer, seed);
     if (!encrypted.has_value()) {

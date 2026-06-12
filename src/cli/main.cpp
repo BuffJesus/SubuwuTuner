@@ -40,6 +40,7 @@
 #include "st/devices/ap3/file_info.hpp"
 #include "st/devices/ap3/ptm_cipher.hpp"
 #include "st/library/patch_decoder.hpp"
+#include "st/library/ptm_xml_builder.hpp"
 #include "st/library/table_mapping.hpp"
 #include "st/library/tune_diff.hpp"
 
@@ -17808,79 +17809,8 @@ bool parse_export_opts(int argc, char **argv, ExportOpts &out) {
     return true;
 }
 
-// Build the inner <PrivateData> XML from the project's [ptm_metadata]
-// + decoded patches. Patches' bytes_b64 fields are already base64; we
-// pass them through verbatim into the <patch> element body.
-std::string build_private_data_xml(
-    std::string const &vendor_id, std::string const &vehicle_id,
-    std::uint32_t lock_mask, std::string const &rom_sum,
-    std::string const &save_date,
-    std::vector<std::tuple<std::uint32_t, std::int32_t, std::uint32_t, std::string>> const &patches) {
-    auto xml_escape = [](std::string_view s) {
-        std::string out;
-        out.reserve(s.size());
-        for (char c : s) {
-            switch (c) {
-            case '&': out.append("&amp;"); break;
-            case '<': out.append("&lt;"); break;
-            case '>': out.append("&gt;"); break;
-            case '"': out.append("&quot;"); break;
-            case '\'': out.append("&apos;"); break;
-            default: out.push_back(c);
-            }
-        }
-        return out;
-    };
-    std::string xml = "<PrivateData>";
-    xml += "<vendorID>" + xml_escape(vendor_id) + "</vendorID>";
-    xml += "<vehicleID>" + xml_escape(vehicle_id) + "</vehicleID>";
-    xml += "<lock mask=\"" + std::to_string(lock_mask) + "\" />";
-    xml += "<romSum value=\"" + xml_escape(rom_sum) + "\" />";
-    xml += "<saveDateTime value=\"" + xml_escape(save_date) + "\" />";
-    xml += "<patches>";
-    for (auto const &[rom_off, ram_off, length, bytes_b64] : patches) {
-        xml += "<patch romOffset=\"" + std::to_string(rom_off) +
-               "\" ramOffset=\"" + std::to_string(ram_off) +
-               "\" length=\"" + std::to_string(length) + "\">" +
-               bytes_b64 + "</patch>";
-    }
-    xml += "</patches></PrivateData>";
-    return xml;
-}
-
-// Build the outer envelope XML that wraps the inner cipher payload.
-// encrypt_ptm injects `<encData>…</encData>` before this XML's last
-// closing tag, so the structure here just needs valid XML with a root
-// element that closes at the end.
-std::string build_outer_metadata_xml(std::string const &vendor_id,
-                                      std::string const &vehicle_id,
-                                      std::uint32_t lock_mask,
-                                      std::string const &rom_sum,
-                                      std::string const &save_date) {
-    auto xml_escape = [](std::string_view s) {
-        std::string out;
-        out.reserve(s.size());
-        for (char c : s) {
-            switch (c) {
-            case '&': out.append("&amp;"); break;
-            case '<': out.append("&lt;"); break;
-            case '>': out.append("&gt;"); break;
-            case '"': out.append("&quot;"); break;
-            case '\'': out.append("&apos;"); break;
-            default: out.push_back(c);
-            }
-        }
-        return out;
-    };
-    std::string xml = "<PtmOuter>";
-    xml += "<vendorID>" + xml_escape(vendor_id) + "</vendorID>";
-    xml += "<vehicleID>" + xml_escape(vehicle_id) + "</vehicleID>";
-    xml += "<lock mask=\"" + std::to_string(lock_mask) + "\" />";
-    xml += "<romSum value=\"" + xml_escape(rom_sum) + "\" />";
-    xml += "<saveDateTime value=\"" + xml_escape(save_date) + "\" />";
-    xml += "</PtmOuter>";
-    return xml;
-}
+// The inner/outer PTM XML builders moved to st::library::ptm_xml_builder
+// (2026-06-12 PM consolidation). Both surfaces share the same helper now.
 
 int run_export(int argc, char **argv) {
     ExportOpts opts;
@@ -17936,7 +17866,7 @@ int run_export(int argc, char **argv) {
         std::fputs("ptm export: ptm_patches.toml has no [[patch]] entries\n", stderr);
         return 1;
     }
-    std::vector<std::tuple<std::uint32_t, std::int32_t, std::uint32_t, std::string>> patches;
+    std::vector<st::library::PtmExportPatch> patches;
     patches.reserve(arr->size());
     for (auto const &node : *arr) {
         auto const *p = node.as_table();
@@ -17956,16 +17886,16 @@ int run_export(int argc, char **argv) {
                          b64.empty() ? 1 : 0);
             continue;
         }
-        patches.emplace_back(static_cast<std::uint32_t>(rom_off),
-                             static_cast<std::int32_t>(ram_off),
-                             static_cast<std::uint32_t>(length),
-                             b64);
+        patches.push_back({static_cast<std::uint32_t>(rom_off),
+                           static_cast<std::int32_t>(ram_off),
+                           static_cast<std::uint32_t>(length),
+                           b64});
     }
 
-    auto const inner = build_private_data_xml(vendor_id, vehicle_id, lock_mask, rom_sum,
-                                              save_date, patches);
-    auto const outer = build_outer_metadata_xml(vendor_id, vehicle_id, lock_mask, rom_sum,
-                                                save_date);
+    auto const inner = st::library::build_ptm_inner_xml(
+        vendor_id, vehicle_id, lock_mask, rom_sum, save_date, patches);
+    auto const outer = st::library::build_ptm_outer_xml(
+        vendor_id, vehicle_id, lock_mask, rom_sum, save_date);
 
     auto encrypted = st::devices::ap3::cipher::encrypt_ptm(inner, outer, opts.seed);
     if (!encrypted.has_value()) {
