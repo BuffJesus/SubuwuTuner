@@ -320,6 +320,26 @@ void render_welcome_panel(AppState &state) {
         ImGui::EndGroup();
     }
 
+    // Hardware-detection hint. Surfaces the AccessPort panel when an
+    // AP3 is enumerated on USB so a first-time user discovers the
+    // file-vault capability without menu-spelunking. Cheap polling
+    // (~1 Hz) — render every frame, the detector caches internally.
+    if (ap3_browser_should_hint(state)) {
+        ImGui::Dummy(ImVec2(0.0f, kSpaceM));
+        constexpr float kHintW = 480.0f;
+        center_cursor_x(kHintW);
+        if (ImGui::Button("\xEE\xA2\x8C  AccessPort detected — open the AccessPort panel\xE2\x80\xA6",
+                          ImVec2(kHintW, 32.0f))) {
+            state.show_ap3_browser_panel = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Browse the AP's file vault (tunes / datalogs / presets /\n"
+                "boot logo), pull historic logs, push staged tunes, and\n"
+                "back up the whole device. See docs/34.");
+        }
+    }
+
     // First-run-only pack hint. Answers "what do I need to start?"
     // without forcing the user to open the New Project modal first
     // to find out. Hidden once the user has any recents — they've

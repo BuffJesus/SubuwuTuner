@@ -34,6 +34,9 @@
 #include "st/policy/flash_preflight.hpp"
 #include "st/project.hpp"
 #include "st/rom.hpp"
+#include "st/devices/ap3/client.hpp"
+#include "st/devices/ap3/file_info.hpp"
+#include "st/transport/cobb_ap_channel.hpp"
 #include "st/transport/factory.hpp"
 #include "st/transport/j2534_discovery.hpp"
 #include "st/transport/mock.hpp"
@@ -15709,6 +15712,443 @@ int cmd_config(int argc, char *argv[]) {
     return 2;
 }
 
+// ---------------------------------------------------------------------------
+// `ap3` subcommand: COBB AccessPort V3 file vault over USB.
+//
+// Capability A only — opaque blob-level ls/pull/push/rm + a state
+// summary read. Cipher-gated `.ptm` introspection (`ap3 inspect`,
+// `ap3 patch-list`) lands behind ST_ENABLE_COBB_AP_CIPHER in a
+// follow-up tier (T3 of specs/cobb-ap3-implementation-checklist.md;
+// not implemented in this session).
+//
+// Marriage-state gate: spec §15 leaves the exact byte offset of the
+// "Installed / Not Installed" marker inside the cmd 0x03
+// DeviceSettings blob undocumented. Until a follow-up analyst session
+// pins that down, query_state() returns `married = std::nullopt`
+// (meaning "unknown") and this CLI emits a one-line warning rather
+// than refusing outright. `--allow-unmarried-ap` is wired through for
+// forward-compat; today it changes nothing behavioral. When the spec
+// is extended, the gate flips on automatically.
+// ---------------------------------------------------------------------------
+
+namespace ap3_cli {
+
+struct CommonOpts {
+    bool allow_unmarried{false};
+    std::uint16_t vid{st::transport::ap3::kVendorId};
+    std::uint16_t pid{st::transport::ap3::kProductId};
+};
+
+// Parse common flags that may appear in any ap3 subcommand. Consumes
+// them out of `argv` in-place by compaction; the surviving args are
+// the subcommand-specific positionals.
+bool consume_common(int &argc, char **argv, CommonOpts &opts) {
+    int write = 0;
+    for (int read = 0; read < argc; ++read) {
+        std::string_view const a{argv[read]};
+        if (a == "--allow-unmarried-ap") {
+            opts.allow_unmarried = true;
+            continue;
+        }
+        if (a == "--vid" && read + 1 < argc) {
+            std::uint32_t v = 0;
+            if (!parse_uint32_arg(argv[read + 1], v) || v > 0xFFFFU) {
+                std::fputs("ap3: --vid must be a 16-bit hex/decimal value\n", stderr);
+                return false;
+            }
+            opts.vid = static_cast<std::uint16_t>(v);
+            ++read;
+            continue;
+        }
+        if (a == "--pid" && read + 1 < argc) {
+            std::uint32_t v = 0;
+            if (!parse_uint32_arg(argv[read + 1], v) || v > 0xFFFFU) {
+                std::fputs("ap3: --pid must be a 16-bit hex/decimal value\n", stderr);
+                return false;
+            }
+            opts.pid = static_cast<std::uint16_t>(v);
+            ++read;
+            continue;
+        }
+        argv[write++] = argv[read];
+    }
+    argc = write;
+    return true;
+}
+
+st::Result<std::unique_ptr<st::transport::IByteChannel>>
+open_channel(CommonOpts const &opts) {
+    st::transport::ap3::ChannelConfig cfg{};
+    cfg.vendor_id = opts.vid;
+    cfg.product_id = opts.pid;
+    return st::transport::ap3::open_channel(cfg);
+}
+
+// Walk through query_state, print the summary, and check the marriage
+// gate. Returns true when the caller should proceed (with any
+// destructive op), false when refused.
+bool gate_marriage(st::devices::ap3::DeviceState const &state, CommonOpts const &opts) {
+    if (state.married.has_value() && !*state.married && !opts.allow_unmarried) {
+        std::fputs(
+            "ap3: the connected AccessPort reports Not Installed. SubuwuTuner has not\n"
+            "     been bench-tested against unmarried devices. Pass --allow-unmarried-ap\n"
+            "     to bypass this check (at your own risk).\n",
+            stderr);
+        return false;
+    }
+    if (!state.married.has_value()) {
+        std::fputs(
+            "ap3: warning — marriage state could not be parsed from this device's\n"
+            "     settings blob (the byte offset of the Installed/Not Installed\n"
+            "     marker is not yet pinned down in the protocol spec). Proceeding\n"
+            "     anyway. Pass --allow-unmarried-ap to silence this warning.\n",
+            stderr);
+    }
+    return true;
+}
+
+int run_state(CommonOpts const &opts) {
+    auto channel = open_channel(opts);
+    if (!channel.has_value()) {
+        std::fprintf(stderr, "ap3 state: %s\n", channel.error().to_string().c_str());
+        return 1;
+    }
+    st::devices::ap3::Client client{**channel};
+    auto state = client.query_state();
+    if (!state.has_value()) {
+        std::fprintf(stderr, "ap3 state: %s\n", state.error().to_string().c_str());
+        return 1;
+    }
+    std::printf("AccessPort                 : VID 0x%04X PID 0x%04X\n", opts.vid, opts.pid);
+    std::printf("Serial                     : %s\n",
+                state->ap_serial.value_or(std::string{"(unparsed)"}).c_str());
+    std::printf("Firmware                   : %s\n",
+                state->firmware_version.value_or(std::string{"(unparsed)"}).c_str());
+    std::printf("Vehicle                    : %s\n",
+                state->vehicle_descriptor.value_or(std::string{"(unparsed)"}).c_str());
+    std::printf("Marriage                   : %s\n",
+                state->married.has_value() ? (*state->married ? "Installed" : "Not Installed")
+                                           : "(unparsed — see docs/34)");
+    std::printf("UserInfo body bytes        : %zu\n", state->user_info_body.size());
+    std::printf("Firmware response bytes    : %zu\n", state->firmware_body.size());
+    std::printf("DeviceSettings body bytes  : %zu\n", state->device_settings_body.size());
+    (void)gate_marriage(*state, opts); // state subcommand never refuses; warning only.
+    return 0;
+}
+
+int run_ls(int argc, char **argv, CommonOpts const &opts) {
+    std::string subdir = "/maps/";
+    if (argc > 0) {
+        subdir = argv[0];
+        if (subdir.empty() || subdir.front() != '/') {
+            subdir.insert(subdir.begin(), '/');
+        }
+        if (subdir.back() != '/') {
+            subdir.push_back('/');
+        }
+    }
+    auto channel = open_channel(opts);
+    if (!channel.has_value()) {
+        std::fprintf(stderr, "ap3 ls: %s\n", channel.error().to_string().c_str());
+        return 1;
+    }
+    st::devices::ap3::Client client{**channel};
+    auto state = client.query_state();
+    if (!state.has_value()) {
+        std::fprintf(stderr, "ap3 ls: query_state: %s\n", state.error().to_string().c_str());
+        return 1;
+    }
+    if (!gate_marriage(*state, opts)) {
+        return 1;
+    }
+    auto records = client.ls(subdir);
+    if (!records.has_value()) {
+        std::fprintf(stderr, "ap3 ls: %s\n", records.error().to_string().c_str());
+        return 1;
+    }
+    std::printf("%zu file%s in %s\n", records->size(), records->size() == 1 ? "" : "s",
+                subdir.c_str());
+    for (auto const &r : *records) {
+        std::printf("  %12llu  %s%s\n", static_cast<unsigned long long>(r.size), r.path.c_str(),
+                    r.name.c_str());
+    }
+    return 0;
+}
+
+int run_pull(int argc, char **argv, CommonOpts const &opts) {
+    if (argc < 1) {
+        std::fputs("ap3 pull: missing <ap-path>\n"
+                   "Usage: subuwutuner-cli ap3 pull <ap-path> [--into <local-path>]\n",
+                   stderr);
+        return 2;
+    }
+    std::string ap_path = argv[0];
+    if (!ap_path.empty() && ap_path.front() != '/') {
+        ap_path.insert(ap_path.begin(), '/');
+    }
+    std::filesystem::path out_path;
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string_view{argv[i]} == "--into") {
+            out_path = argv[i + 1];
+            ++i;
+        }
+    }
+    if (out_path.empty()) {
+        // Default: write into CWD using the filename component of the
+        // AP-side path.
+        auto slash = ap_path.rfind('/');
+        out_path = (slash == std::string::npos) ? ap_path : ap_path.substr(slash + 1);
+    }
+    auto channel = open_channel(opts);
+    if (!channel.has_value()) {
+        std::fprintf(stderr, "ap3 pull: %s\n", channel.error().to_string().c_str());
+        return 1;
+    }
+    st::devices::ap3::Client client{**channel};
+    auto state = client.query_state();
+    if (state.has_value() && !gate_marriage(*state, opts)) {
+        return 1;
+    }
+    auto bytes = client.read_file(ap_path);
+    if (!bytes.has_value()) {
+        std::fprintf(stderr, "ap3 pull: %s\n", bytes.error().to_string().c_str());
+        return 1;
+    }
+    std::error_code ec;
+    if (auto parent = out_path.parent_path(); !parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+    }
+    std::ofstream out{out_path, std::ios::binary};
+    if (!out) {
+        std::fprintf(stderr, "ap3 pull: open %s for writing failed\n",
+                     out_path.string().c_str());
+        return 1;
+    }
+    out.write(reinterpret_cast<char const *>(bytes->data()),
+              static_cast<std::streamsize>(bytes->size()));
+    out.close();
+    std::printf("ap3 pull: wrote %zu bytes to %s\n", bytes->size(), out_path.string().c_str());
+    return 0;
+}
+
+int run_push(int argc, char **argv, CommonOpts const &opts) {
+    if (argc < 1) {
+        std::fputs("ap3 push: missing <local-path>\n"
+                   "Usage: subuwutuner-cli ap3 push <local-path> [--as <ap-path>]\n",
+                   stderr);
+        return 2;
+    }
+    std::filesystem::path local{argv[0]};
+    std::string ap_path;
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string_view{argv[i]} == "--as") {
+            ap_path = argv[i + 1];
+            ++i;
+        }
+    }
+    if (ap_path.empty()) {
+        // Default: drop into /maps/ with the local file's basename.
+        // /maps/ is the only sane default for SubuwuTuner-managed
+        // pushes; bytes destined for /presets/ or /datalog/ require
+        // an explicit --as.
+        ap_path = "/maps/" + local.filename().string();
+    }
+    if (!ap_path.empty() && ap_path.front() != '/') {
+        ap_path.insert(ap_path.begin(), '/');
+    }
+    std::ifstream in{local, std::ios::binary | std::ios::ate};
+    if (!in) {
+        std::fprintf(stderr, "ap3 push: open %s failed\n", local.string().c_str());
+        return 1;
+    }
+    auto const size = in.tellg();
+    in.seekg(0);
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+    in.read(reinterpret_cast<char *>(bytes.data()), size);
+    in.close();
+    auto channel = open_channel(opts);
+    if (!channel.has_value()) {
+        std::fprintf(stderr, "ap3 push: %s\n", channel.error().to_string().c_str());
+        return 1;
+    }
+    st::devices::ap3::Client client{**channel};
+    auto state = client.query_state();
+    if (state.has_value() && !gate_marriage(*state, opts)) {
+        return 1;
+    }
+    auto now_secs = static_cast<std::uint64_t>(std::time(nullptr));
+    auto status = client.write_file(ap_path, bytes, now_secs);
+    if (!status.has_value()) {
+        std::fprintf(stderr, "ap3 push: %s\n", status.error().to_string().c_str());
+        return 1;
+    }
+    std::printf("ap3 push: wrote %zu bytes to AP:%s\n", bytes.size(), ap_path.c_str());
+    return 0;
+}
+
+int run_rm(int argc, char **argv, CommonOpts const &opts) {
+    if (argc < 1) {
+        std::fputs("ap3 rm: missing <ap-path>\n", stderr);
+        return 2;
+    }
+    std::string ap_path = argv[0];
+    if (!ap_path.empty() && ap_path.front() != '/') {
+        ap_path.insert(ap_path.begin(), '/');
+    }
+    auto channel = open_channel(opts);
+    if (!channel.has_value()) {
+        std::fprintf(stderr, "ap3 rm: %s\n", channel.error().to_string().c_str());
+        return 1;
+    }
+    st::devices::ap3::Client client{**channel};
+    auto state = client.query_state();
+    if (state.has_value() && !gate_marriage(*state, opts)) {
+        return 1;
+    }
+    auto status = client.remove_file(ap_path);
+    if (!status.has_value()) {
+        std::fprintf(stderr, "ap3 rm: %s\n", status.error().to_string().c_str());
+        return 1;
+    }
+    std::printf("ap3 rm: removed AP:%s\n", ap_path.c_str());
+    return 0;
+}
+
+int run_backup(int argc, char **argv, CommonOpts const &opts) {
+    std::filesystem::path out_dir = std::filesystem::current_path() / "ap3-backup";
+    for (int i = 0; i + 1 < argc; ++i) {
+        if (std::string_view{argv[i]} == "--into") {
+            out_dir = argv[i + 1];
+            ++i;
+        }
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(out_dir, ec);
+
+    auto channel = open_channel(opts);
+    if (!channel.has_value()) {
+        std::fprintf(stderr, "ap3 backup: %s\n", channel.error().to_string().c_str());
+        return 1;
+    }
+    st::devices::ap3::Client client{**channel};
+    auto state = client.query_state();
+    if (state.has_value() && !gate_marriage(*state, opts)) {
+        return 1;
+    }
+    // Walk the well-known subdirectories per spec §6.8.
+    static constexpr std::array<std::string_view, 4> kSubdirs{
+        "/maps/", "/datalog/", "/presets/", "/images/",
+    };
+    std::size_t total_files = 0;
+    std::uint64_t total_bytes = 0;
+    for (auto sub : kSubdirs) {
+        auto records = client.ls(sub);
+        if (!records.has_value()) {
+            std::fprintf(stderr, "ap3 backup: ls %.*s: %s\n", static_cast<int>(sub.size()),
+                         sub.data(), records.error().to_string().c_str());
+            continue;
+        }
+        auto sub_dir = out_dir / std::string{sub.substr(1, sub.size() - 2)};
+        std::filesystem::create_directories(sub_dir, ec);
+        for (auto const &rec : *records) {
+            auto bytes = client.read_file(rec.path + rec.name);
+            if (!bytes.has_value()) {
+                std::fprintf(stderr, "ap3 backup: read %s%s: %s\n", rec.path.c_str(),
+                             rec.name.c_str(), bytes.error().to_string().c_str());
+                continue;
+            }
+            std::ofstream out{sub_dir / rec.name, std::ios::binary};
+            if (!out) {
+                std::fprintf(stderr, "ap3 backup: open %s failed\n", rec.name.c_str());
+                continue;
+            }
+            out.write(reinterpret_cast<char const *>(bytes->data()),
+                      static_cast<std::streamsize>(bytes->size()));
+            ++total_files;
+            total_bytes += bytes->size();
+        }
+    }
+    // Top-level singletons.
+    for (auto const *name : {"settings", "backupcksum"}) {
+        std::string const path = std::string{"/"} + name;
+        auto bytes = client.read_file(path);
+        if (!bytes.has_value()) {
+            std::fprintf(stderr, "ap3 backup: read %s: %s\n", path.c_str(),
+                         bytes.error().to_string().c_str());
+            continue;
+        }
+        std::ofstream out{out_dir / name, std::ios::binary};
+        out.write(reinterpret_cast<char const *>(bytes->data()),
+                  static_cast<std::streamsize>(bytes->size()));
+        ++total_files;
+        total_bytes += bytes->size();
+    }
+    std::printf("ap3 backup: pulled %zu files (%llu bytes) into %s\n", total_files,
+                static_cast<unsigned long long>(total_bytes), out_dir.string().c_str());
+    return 0;
+}
+
+} // namespace ap3_cli
+
+int cmd_ap3(int argc, char *argv[]) {
+    if (argc < 1) {
+        std::fputs("Usage: subuwutuner-cli ap3 <subcommand> [args]\n"
+                   "\n"
+                   "Subcommands:\n"
+                   "  state              Print AP serial / firmware / marriage state\n"
+                   "  ls [subdir]        List files in /user/ap-user/<subdir> (default /maps/)\n"
+                   "  pull <ap-path> [--into <local>]\n"
+                   "                     Pull a file off the AP\n"
+                   "  push <local> [--as <ap-path>]\n"
+                   "                     Push a local file to the AP\n"
+                   "  rm <ap-path>       Remove a file from the AP\n"
+                   "  backup [--into <dir>]\n"
+                   "                     Pull /maps + /datalog + /presets + /images +\n"
+                   "                     /settings + /backupcksum into <dir>\n"
+                   "\n"
+                   "Common flags:\n"
+                   "  --allow-unmarried-ap   Don't refuse if marriage state reports Not\n"
+                   "                         Installed (default policy refuses; see docs/34)\n"
+                   "  --vid <hex16> --pid <hex16>\n"
+                   "                         Override the VID/PID match (default: 0x1A84/0x0121)\n"
+                   "\n"
+                   "See docs/34-cobb-ap-as-tune-vault.md for the gating model and the\n"
+                   ".ptm cipher tier (off by default).\n",
+                   stderr);
+        return 2;
+    }
+    ap3_cli::CommonOpts opts;
+    int sub_argc = argc - 1;
+    char **sub_argv = argv + 1;
+    if (!ap3_cli::consume_common(sub_argc, sub_argv, opts)) {
+        return 2;
+    }
+    std::string_view const sub{argv[0]};
+    if (sub == "state") {
+        return ap3_cli::run_state(opts);
+    }
+    if (sub == "ls") {
+        return ap3_cli::run_ls(sub_argc, sub_argv, opts);
+    }
+    if (sub == "pull") {
+        return ap3_cli::run_pull(sub_argc, sub_argv, opts);
+    }
+    if (sub == "push") {
+        return ap3_cli::run_push(sub_argc, sub_argv, opts);
+    }
+    if (sub == "rm") {
+        return ap3_cli::run_rm(sub_argc, sub_argv, opts);
+    }
+    if (sub == "backup") {
+        return ap3_cli::run_backup(sub_argc, sub_argv, opts);
+    }
+    std::fprintf(stderr,
+                 "ap3: unknown subcommand: %s\n"
+                 "Run `subuwutuner-cli ap3` for the list.\n",
+                 argv[0]);
+    return 2;
+}
+
 int main(int argc, char *argv[]) {
     // Pre-pass: pluck out global options that can appear anywhere in argv
     // and that the subcommand dispatchers shouldn't see. Currently:
@@ -16652,6 +17092,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "feature-compile") {
         return cmd_feature_compile(argc - 2, argv + 2);
+    }
+    if (cmd == "ap3") {
+        return cmd_ap3(argc - 2, argv + 2);
     }
     if (cmd == "autotune") {
         // Match the `config` subcommand-help shape: list all known

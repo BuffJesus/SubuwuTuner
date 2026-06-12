@@ -9,6 +9,12 @@ set(_st_transport_sources
     src/native_transport.cpp
     src/factory.cpp
     src/uds_trace.cpp
+    # COBB AccessPort V3 USB byte-channel: wire codec is always
+    # built (no external deps); the libusb-backed channel impl is
+    # the same TU regardless of ST_ENABLE_AP3 but compiles into a
+    # NotImplemented stub when libusb isn't wired (see below).
+    src/cobb_ap_packet.cpp
+    src/cobb_ap_channel.cpp
 )
 
 # Platform-specific IByteChannel implementations. USB-CDC ACM
@@ -46,3 +52,50 @@ target_link_libraries(st_transport
         st::warnings
         st::sanitizers
 )
+
+# ---------------------------------------------------------------------------
+# COBB AccessPort V3 (USB byte-channel for the AP3 file-vault).
+# ---------------------------------------------------------------------------
+#
+# When ST_ENABLE_AP3=ON (default), FetchContent pulls the libusb-cmake
+# wrapper around libusb-1.0 and the AP3 channel uses bulk OUT/IN on
+# endpoints 0x03 / 0x82. When OFF, the channel TU compiles its
+# NotImplemented fallback so the CLI's `ap3` subcommand still links
+# and fails cleanly at runtime.
+#
+# Linux CI runners typically need `libudev-dev` (or distro equivalent)
+# on PATH for libusb-cmake to build. Windows requires Zadig to rebind
+# the AP3 device to WinUSB at runtime — see docs/install.md.
+#
+# Spec: D:\Subuwu\specs\references\cobb-ap3-usb-protocol.md §3
+# Gating doc: docs/34-cobb-ap-as-tune-vault.md
+option(ST_ENABLE_AP3
+    "Build the libusb-backed AP3 file-vault channel. When ON (default), \
+FetchContent pulls libusb-1.0 via the libusb-cmake wrapper. When OFF, \
+the AP3 transport links a NotImplemented stub and the file-vault CLI \
+subcommand fails at runtime."
+    ON)
+
+if(ST_ENABLE_AP3)
+    include(FetchContent)
+    # libusb-cmake is the upstream CMake wrapper around libusb-1.0.
+    # Pinned to a recent stable; the upstream version of libusb wrapped
+    # in this tag is 1.0.27, which has all the bulk_transfer + kernel-
+    # driver-detach APIs the channel impl uses.
+    set(LIBUSB_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(LIBUSB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(LIBUSB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(LIBUSB_INSTALL_TARGETS OFF CACHE BOOL "" FORCE)
+    set(LIBUSB_ENABLE_UDEV ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        libusb_cmake
+        GIT_REPOSITORY https://github.com/libusb/libusb-cmake.git
+        GIT_TAG        v1.0.27-0
+        GIT_SHALLOW    TRUE
+        SYSTEM
+    )
+    FetchContent_MakeAvailable(libusb_cmake)
+
+    target_compile_definitions(st_transport PRIVATE ST_AP3_HAVE_LIBUSB=1)
+    target_link_libraries(st_transport PRIVATE usb-1.0)
+endif()

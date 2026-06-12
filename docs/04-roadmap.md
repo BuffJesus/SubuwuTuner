@@ -54,8 +54,9 @@ Architecture, protocol catalog, and datalogger pipeline are complete end-to-end 
 - 🟡 Streaming on concrete Transports — OBDX shipped (sniff-mode + live-streaming wired 2026-05-23). j2534 still `NotImplemented` (platform DLL dynload pending); native still `NotImplemented` (doc-18 handheld lower priority).
 - 🟡 Live gauge cluster (4–8 gauges) + CSV log export — design landed at `docs/32-live-datalogger.md` (LiveBuffer SPSC ring + LogSession multi-sink fan-out + ImPlot mini-lines + record-while-gauging); implementation queued in 5 hardware-free steps. CsvSink + LogSession + OBDX streaming all ship today.
 - 🟡 Sustained 50 Hz logging across 20 PIDs — pipeline supports it (per `docs/32` §Sustained 100 Hz target); hardware validation gated on `docs/32` impl + bench/car run
+- ✅ COBB AccessPort V3 file-vault integration (libusb-backed `st::transport::ap3` + `st::devices::ap3::Client`; CLI `ap3 {state,ls,pull,push,rm,backup}` + GUI `AccessPort Browser` panel — Connect/Disconnect, subdir tabs, per-row Pull/Remove with inline confirm popup, Push / Backup-all / Refresh toolbar, marriage chip, welcome-panel hint when an AP is detected on USB). Capability A on by default; `.ptm` cipher introspection (Capability A.1) gated behind `ST_ENABLE_COBB_AP_CIPHER` + `--enable-cobb-ap-cipher`, deferred to a follow-up tier. See `docs/34-cobb-ap-as-tune-vault.md`.
 
-**Gate:** 🔒 hardware-blocked. Code paths are real + unit-tested (108 transport tests across the trio + factory + discovery). When OBDX Pro VX adapter arrives, the path to first ROM dump is: implement one platform `IByteChannel` (libusb on Windows ~1 file), wire it into `obdx::Transport`, run `subuwutuner-cli rom-pull --transport obdx --device <COM>`.
+**Gate:** 🟡 hardware-actionable. Code paths are real + unit-tested. **Hardware now in hand:** OBDX Pro VX (2026-05-24, the OBD path), COBB AccessPort V3 (2026-06-10, the file-vault path). First ROM dump via OBDX is the open task on the OBD path; the AP3 file vault is shipped end-to-end against the spec's live-verified protocol. The bench rig (Phase 2 boot validated 2026-06-07) covers the hardware-in-the-loop side.
 
 ## Phase 4 — Flashing (6–10 weeks, the dangerous one) ✅ done hardware-free / 🔒 live validation hardware-gated
 
@@ -142,12 +143,20 @@ The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0
 |---|---|---|
 | **v1.1** | VA + VB WRX **AT** | Small. Same ECU, additional transmission map set + AT-specific definitions |
 | **v1.1** | **MAF auto-tune + knock-based ignition pull** (see `docs/12-auto-tuning.md`) ✅ shipped (kernels + lint + CLI + GUI modals) | Medium. Pure-domain function, no hardware deps |
+| **v1.1** | **`.ptm` import / export** as first-class tune format (per `docs/36-tune-as-patch-set.md` + `specs/private-data-xml-to-stune-mapping.md`) — gated behind `ST_ENABLE_COBB_AP_CIPHER` per `docs/34` | Medium. Builds on T3 cipher work landing in v1.0; uses architectural classifier already shipped. |
+| **v1.1** | **Architectural-layer-aware patch display** (Layer 1 OEM-tables, Layer 2 tuner-additions, Layer 3 code-patches per `docs/35`) | Small. Wire shipped classifier into GUI patch list. |
+| **v1.1** | **Tune-vs-tune structured diff** (CLI + GUI) — replace hex-byte diff with table-cell-level semantic diff | Medium. Composition of patch decoder + definition pack table mapping. |
+| **v1.1** | **Pre-flash safety preview** — show structured delta against currently-flashed, not just abstract "this tune is 87 KB" | Small. Adds backupcksum identity matching + delta visualization to the existing flash modal. |
+| **v1.1** | **AP-side ROM attestation** at AccessPort connect — identify the currently-installed tune from the AP's `/backupcksum` against local library | Small. Read + hash existing local tunes; match against backupcksum string. |
 | **v1.2** | **VA STI (EJ257)** + older STI 2008+ | Medium. Different engine family but shares much of the protocol surface |
 | **v1.2** | **Closed-loop trim integration, boost auto-trim, idle target trim** | Medium |
 | **v1.2** | **Under-served-coverage feature pack** — adaptive-learning history visualizer, per-cylinder knock dashboard, cold-start tuning workflow, EBCS PID assistant (see `05-improvements.md` §11) | Medium. Pure-domain features over existing pack data; shares infra with auto-tune |
 | **v1.3** | **Older EJ-powered cars** (early WRX/STI, Forester XT, Legacy GT, Outback XT, EJ20/EJ25) | Medium. Oldest ECU tech but very well covered by the community-XML catalog — mostly definitions work |
 | **v1.4** | **BRZ / Toyota 86 (FA20D NA)** | Large. Toyota-partnership ECU, different vendor, biggest single-platform engineering ask |
 | **v1.5** | **Live tuning** — RAM-shadow override + UDS WriteDataByIdentifier for on-dyno cell editing (see `docs/19-live-tuning.md`) | Large. New `st::live_tune` module + per-CID RAM-shadow address tables + per-write safety linting; gated on Phase 4 hardware validation |
+| **v1.5** | **Differential flash** — flash only the bytes that differ from currently-flashed (per `docs/36` + `findings/SUBUWUTUNER_STRATEGIC_APPLICATIONS_2026_06_11.md` #5). Minutes → seconds for typical tune-to-tune transitions. | Medium. Requires `docs/31` brick-protection extension for partial-overlay corner cases. |
+| **v1.5** | **Composable patch sets** — `compose` CLI command per `specs/patch-composition-algebra.md`. Stack COBB + Felix + NTM + user tweaks; layer-aware conflict detection. | Large. New `st::compose` module + conflict resolution UX + multi-layer journal. CLI ships first, GUI follows. |
+| **v1.5** | **Tune library 3-way sync** — AP ↔ local cache ↔ project, with content-hash identity tracking. | Medium. Builds on Capability A file vault + import/export. |
 | **v2.0** | **AI advisory surface (Tier 2+)** — rules-based drift classifier (`st::ai::drift`) already shipped 2026-05-31 with CLI + inline panel surfacing; v2.0 adds the optional local-LLM explanation layer on top + "explain this log" assistant (see `docs/20-ai-integration.md`). Advisory only; no path into the write surface. | Medium. `st::ai` module already in tree; v2.0 adds the Backend abstraction (Ollama / OpenAI / Anthropic) over the existing classifier output. Compile-time-optional. |
 | **v2.0** | **Crosstrek / Forester (current FB-powered)**, regional variants | Definitions work plus light protocol additions |
 

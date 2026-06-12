@@ -371,6 +371,7 @@ int main(int argc, char *argv[]) {
         render_coldstart_panel(state);
         render_ebcs_panel(state);
         render_gauge_cluster_panel(state);
+        render_ap3_browser_panel(state);
         render_compare_panel(state);
         render_audit_panel(state);
         render_features_designer(state);

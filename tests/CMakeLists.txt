@@ -37,6 +37,12 @@ add_executable(st_unit_tests
     unit/transport/test_factory.cpp
     unit/transport/test_uds_trace.cpp
     unit/transport/test_j2534_discovery.cpp
+    unit/transport/test_cobb_ap_packet.cpp
+    unit/devices/ap3/test_file_info.cpp
+    unit/devices/ap3/test_live_smoke.cpp
+    unit/devices/ap3/test_architectural_classifier.cpp
+    unit/devices/ap3/test_user_info_parse.cpp
+    unit/devices/ap3/test_user_info_parse_private.cpp
     unit/ecu/test_extended_did_datalog.cpp
     unit/ecu/test_ssm.cpp
     unit/ecu/test_ssm_properties.cpp
@@ -125,6 +131,7 @@ target_link_libraries(st_unit_tests
         st::audit
         st::profile
         st::ai
+        st::devices_ap3
         st::warnings
         st::sanitizers
         st::platform
@@ -154,6 +161,11 @@ if (TARGET subuwutuner-cli)
 endif()
 target_compile_definitions(st_unit_tests PRIVATE
     ST_FIXTURE_DEMO_STUNE="${CMAKE_SOURCE_DIR}/fixtures/demo.stune")
+# AP3 binary fixtures (six per spec §12 + a malformed-body negative
+# vector per §4.2). Copied from D:\Subuwu\specs\fixtures\ap3\ — see
+# fixtures/ap3/README.md for the per-fixture role.
+target_compile_definitions(st_unit_tests PRIVATE
+    ST_FIXTURE_AP3_DIR="${CMAKE_SOURCE_DIR}/fixtures/ap3")
 # Exposes the source-tree definitions/ directory as a compile-time
 # constant so tests can exercise real in-tree packs (e.g. asserting
 # lf79103p.toml's [[workflow]] declarations still resolve every

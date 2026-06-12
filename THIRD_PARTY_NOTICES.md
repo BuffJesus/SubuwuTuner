@@ -15,6 +15,7 @@ All of the following are pulled in via CMake `FetchContent` and statically linke
 | Dear ImGui | v1.91 | MIT | immediate-mode GUI | https://github.com/ocornut/imgui |
 | ImPlot | latest | MIT | plotting widgets (heatmap, histogram) | https://github.com/epezent/implot |
 | nativefiledialog-extended | latest | Zlib | native Open/Save dialogs | https://github.com/btzy/nativefiledialog-extended |
+| libusb-1.0 (via libusb-cmake) | v1.0.27-0 | LGPL-2.1 + linking exception | USB byte channel for the AP3 file vault (default-on; build with `-DST_ENABLE_AP3=OFF` to omit) | https://github.com/libusb/libusb-cmake |
 
 Full license texts are bundled with the source of each dependency under `_deps/<name>-src/` after a CMake configure.
 
@@ -48,6 +49,10 @@ The cleanest possible provenance — preferred over any competitor's interpretat
 
 - **RomRaider** (GPL-2.0, https://github.com/RomRaider/RomRaider) — public protocol documentation and community ECU definition XML. `tools/defgen/` consumes the XML for fact extraction; the Java source was not used.
 - **Merp's SubaruDefs** (https://github.com/Merp/SubaruDefs) — community-curated RomRaider XML, source of the older-Subaru packs in `definitions/{impreza,forester,legacy,liberty,outback,baja,tribeca,exiga}/`.
+
+### Third-party hardware interoperability
+
+- **COBB AccessPort V3 USB protocol** — reverse-engineered (Capability A: file vault, wire format + dispatcher + FileInfo2 layout, no cipher source incorporated by default) for the `st::devices::ap3` integration. Provenance and the analyst-side audit trail are documented in `D:\Subuwu\specs\references\cobb-ap3-usb-protocol.md` (private analyst spec) and the public-side gating model in `docs/34-cobb-ap-as-tune-vault.md`. The COBB binaries (APManager.exe and the AP firmware OTA `.img` archives) were studied as facts-only references under the clean-room methodology in `docs/15` §6 and the §1201 posture in §12. No binary source, decompile output, function-symbol names, or authored prose was incorporated into SubuwuTuner. The optional gated `.ptm` cipher (`ST_ENABLE_COBB_AP_CIPHER`) does not ship in the default public build.
 
 ### Community discussion
 

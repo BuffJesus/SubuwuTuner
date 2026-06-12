@@ -404,6 +404,13 @@ void render_menubar(AppState &state) {
             // may want hidden when working in the table grid full-screen.
             ImGui::MenuItem("Stats Panel", nullptr, &state.show_stats_panel);
             ImGui::MenuItem("DTCs Panel", nullptr, &state.show_dtcs_panel);
+            ImGui::MenuItem("AccessPort Browser", nullptr, &state.show_ap3_browser_panel);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Manage tunes / datalogs / presets on a COBB AccessPort V3\n"
+                    "over USB. Capability A (file vault) only — the .ptm patch\n"
+                    "introspection tier ships off by default. See docs/34.");
+            }
             ImGui::MenuItem("History Panel", nullptr, &state.show_history_panel);
             ImGui::MenuItem("Knock Dashboard", nullptr,
                             &state.show_knock_dashboard_panel);

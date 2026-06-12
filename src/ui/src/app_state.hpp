@@ -387,6 +387,11 @@ struct AppState {
     // that injects synthetic samples for development + visual
     // smoke-tests until the real-transport hookup lands.
     bool show_gauge_cluster_panel{false};
+    // AccessPort V3 file-vault browser panel. State (libusb channel,
+    // device info, cached file listings) is owned file-statically in
+    // src/ui/src/panels/ap3_browser.cpp so AppState carries only the
+    // visibility toggle. See docs/34-cobb-ap-as-tune-vault.md.
+    bool show_ap3_browser_panel{false};
     std::unique_ptr<st::log::LiveBuffer> gauge_buffer;
     std::atomic<bool> gauge_demo_running{false};
     std::atomic<bool> gauge_demo_stop{false};

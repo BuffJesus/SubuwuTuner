@@ -12,6 +12,7 @@ Status today (2026-05-26) — the **shapes** are real and locked under unit test
 | `st::transport::open_transport` factory + CLI `--transport <kind>` flag | ✅ shipped |
 | `st::transport::j2534::Transport` (skeleton + DLL discovery) | 🟡 shipped, gated on `LoadLibraryA` of a real vendor DLL |
 | `st::transport::obdx::Transport` + DVI codec | ✅ shipped end-to-end on Windows — operational against the user's 2017 WRX (ROM dumps, install-flow sniff captures, live SA L3 read). POSIX byte-channel impl is the only remaining gap. |
+| `st::transport::ap3` USB byte-channel + wire codec (COBB AccessPort V3 file vault) | ✅ shipped — libusb-backed `IByteChannel` (VID 0x1A84 / PID 0x0121, bulk OUT 0x03 / IN 0x82), wire codec (sync + u24-BE wire_len + CRC-32) and `st::devices::ap3::Client` for the Capability A surface (`ls`/`pull`/`push`/`rm`/`state`/`backup`). Default-on; `.ptm` cipher introspection gated behind `ST_ENABLE_COBB_AP_CIPHER`. See `docs/34-cobb-ap-as-tune-vault.md`. |
 | `st::transport::native::Transport` + SOF/seq/CRC16 codec | 🟡 shipped, gated on doc-18 handheld firmware (not on the byte-channel layer, which works) |
 | Win32 serial `IByteChannel` (`CreateFile` + DCB + COMMTIMEOUTS) | ✅ shipped (`src/transport/src/serial_byte_channel_win.cpp`) |
 | POSIX serial `IByteChannel` (termios) | ⬜ stub returns `NotImplemented`; lands when first Linux/macOS user needs it |

@@ -423,6 +423,23 @@ The flasher honors these regardless of ISA:
    after bench validation per `docs/03` §Hashing). The manifest
    travels with the project so a third party can verify exactly
    what was written.
+7. **Aggressive-overlay sanity check (2026-06-11).** Tuner-overlay
+   patterns per `docs/35-tuner-overlay-architecture.md` can touch
+   large code regions in addition to OEM tables — a single `.ptm`
+   may include ~50 KB of code-region modifications even when the
+   visible `<patch>` list looks small (the `.ptm` format splits
+   contiguous code-region edits across many small `<patch>` entries
+   that share edges). Validation must compute the **byte-level
+   diff against the OEM image**, not just the sum of declared
+   `<patch>` lengths, when sanity-checking that no protected
+   regions are written. The flasher's `gate_patch` operates on
+   resolved final-image bytes against the FCU sector-allow-list,
+   which catches this correctly today; this note exists to ensure
+   it stays correct against future patch-list-size-based shortcuts.
+   See `findings/ptm-decrypt-2026-06-09/V3_CODE_DISASM_ATTEMPT_2026_06_11.md`
+   for the v3 example: 234 declared patches summing to 1,474 bytes
+   in 0x60000–0x80000 mask 1,050 contiguous diff runs totaling ~50 KB
+   of actual byte-level changes.
 
 ---
 

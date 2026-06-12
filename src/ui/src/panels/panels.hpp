@@ -64,6 +64,8 @@ void render_audit_panel(AppState &state);
 void render_dtcs_panel(AppState &state);
 void render_history_panel(AppState &state);
 void render_features_designer(AppState &state);
+void render_ap3_browser_panel(AppState &state);
+[[nodiscard]] bool ap3_browser_should_hint(AppState const &state);
 void render_table_view(AppState &state, Fonts const &fonts);
 
 // Status bar + toasts. enqueue_toast is declared here because the toast
