@@ -49,7 +49,7 @@ TEST_CASE("json_escape on empty input emits the empty string",
     REQUIRE(out == "\"\"");
 }
 
-TEST_CASE("json_escape appends — does not overwrite prefix",
+TEST_CASE("json_escape appends -- does not overwrite prefix",
           "[core][json][append-semantics]") {
     std::string out{"prefix:"};
     st::json_escape(out, "x");

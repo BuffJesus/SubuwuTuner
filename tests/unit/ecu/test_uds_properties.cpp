@@ -81,7 +81,7 @@ make_negative_response(std::uint8_t sid, std::uint8_t nrc) {
 // RDBI (0x22)
 // ---------------------------------------------------------------------
 
-TEST_CASE("property: UDS RDBI roundtrip — build then parse a positive response",
+TEST_CASE("property: UDS RDBI roundtrip -- build then parse a positive response",
           "[ecu][uds][property][roundtrip]") {
     st::test::check_property(0x2222'2222'1111'1111ULL, 400, [&](st::test::PropertyRng &rng) {
         auto const did = rng.uint16();
@@ -142,7 +142,7 @@ TEST_CASE("property: UDS RDBI rejects positive responses with mismatched DID",
 // WDBI (0x2E)
 // ---------------------------------------------------------------------
 
-TEST_CASE("property: UDS WDBI roundtrip — build then parse a positive ACK",
+TEST_CASE("property: UDS WDBI roundtrip -- build then parse a positive ACK",
           "[ecu][uds][property][roundtrip]") {
     st::test::check_property(0x2E2E'2E2E'1111'1111ULL, 300, [&](st::test::PropertyRng &rng) {
         auto const did = rng.uint16();
@@ -269,7 +269,7 @@ TEST_CASE("property: UDS SecurityAccess parsers reject NRC responses",
 // RequestDownload (0x34) + TransferData (0x36)
 // ---------------------------------------------------------------------
 
-TEST_CASE("property: UDS RequestDownload roundtrip — build + parse maxBlockLength",
+TEST_CASE("property: UDS RequestDownload roundtrip -- build + parse maxBlockLength",
           "[ecu][uds][property][roundtrip]") {
     st::test::check_property(0x3434'3434'D000'D000ULL, 300, [&](st::test::PropertyRng &rng) {
         auto const data_format = rng.byte();

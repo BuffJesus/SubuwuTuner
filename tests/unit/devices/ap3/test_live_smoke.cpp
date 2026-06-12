@@ -92,7 +92,7 @@ TEST_CASE("ap3 live: ls /maps/ decodes to a non-empty file list", "[.live][ap3]"
     }
 }
 
-TEST_CASE("ap3 live: push 50 KB → read-back byte-identical → remove",
+TEST_CASE("ap3 live: push 50 KB -> read-back byte-identical -> remove",
           "[.live][ap3]") {
     if (!live_test_enabled()) {
         SKIP("STT_AP3_LIVE_TEST not set — skipping live-hardware smoke");

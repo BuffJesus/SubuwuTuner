@@ -134,7 +134,7 @@ TEST_CASE("Wide layout exposes 36 signals across the 5 DIDs",
     }
 }
 
-TEST_CASE("Wide layout has 36 R²-verified entries",
+TEST_CASE("Wide layout has 36 R^2-verified entries",
           "[ecu][did-datalog][layout][verified]") {
     auto const layout = cb::v_wide_layout();
     auto const verified_count = std::count_if(
@@ -289,7 +289,7 @@ std::array<std::uint8_t, 32> make_u16_be_payload(std::size_t did_bytes,
 
 } // namespace
 
-TEST_CASE("decode_signal: RPM at F301:6 → idle (aligned canonical scale)",
+TEST_CASE("decode_signal: RPM at F301:6 -> idle (aligned canonical scale)",
           "[ecu][did-datalog][decode]") {
     // 2026-06-06 aligned correction: RPM uses the canonical SSM scale
     // x/5.12 = 0.19531, no offset. Analyst's smoking-gun: first sniff
@@ -319,7 +319,7 @@ TEST_CASE("decode_signal: Vehicle Speed u8 at F302:0 (post-aligned position)",
     REQUIRE_THAT(eng, Catch::Matchers::WithinAbs(49.8, 0.2));
 }
 
-TEST_CASE("decode_signal: Coolant Temp at F303:3 → warm-idle ~190 F",
+TEST_CASE("decode_signal: Coolant Temp at F303:3 -> warm-idle ~190 F",
           "[ecu][did-datalog][decode]") {
     // Coolant Temp at F303:3 with canonical 1.8 scale (C↔F conversion)
     // and offset -40. raw=128 → 128*1.8001 - 40.008 ≈ 190.4 F.

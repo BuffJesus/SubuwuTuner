@@ -150,7 +150,7 @@ TEST_CASE("ssmcan1_key_stub accepts any 4-byte seed",
     }
 }
 
-TEST_CASE("ssmcan1_key_stub end-to-end: forward(K) → seed → key == K",
+TEST_CASE("ssmcan1_key_stub end-to-end: forward(K) -> seed -> key == K",
           "[ecu][sa][gen_a]") {
     // The ECU side runs feistel_forward(internal_key, L1_rk) → wordswap →
     // seed_bytes. The tester runs ssmcan1_key_stub(seed_bytes) and the

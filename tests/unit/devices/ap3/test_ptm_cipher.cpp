@@ -50,7 +50,7 @@ namespace {
 
 #ifdef ST_AP3_HAVE_CIPHER
 
-TEST_CASE("ap3 cipher: XTEA-CBC encrypt → decrypt round-trip preserves bytes",
+TEST_CASE("ap3 cipher: XTEA-CBC encrypt -> decrypt round-trip preserves bytes",
           "[devices][ap3][cipher]") {
     // File-level: encrypt produces output with 5-byte trailer; decrypt
     // parses the trailer and strips zero-padding. Arbitrary length OK.
@@ -314,7 +314,7 @@ TEST_CASE("ap3 cipher: bzip2_compress round-trips against decompress",
 #endif
 }
 
-TEST_CASE("ap3 cipher: encrypt_ptm → decrypt_ptm logical round-trip",
+TEST_CASE("ap3 cipher: encrypt_ptm -> decrypt_ptm logical round-trip",
           "[devices][ap3][cipher]") {
 #ifndef ST_AP3_HAVE_PTM_REWRITE
     // Rewrite gate off — encrypt_ptm cascades into bzip2_compress's

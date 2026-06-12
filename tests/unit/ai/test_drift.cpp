@@ -100,7 +100,7 @@ TEST_CASE("drift::classify rejects sub-minimum span as NoSignal",
     REQUIRE(has_evidence(d, "shorter than minimum"));
 }
 
-TEST_CASE("drift::classify Rule 1 — DAM well below baseline → knock_correction",
+TEST_CASE("drift::classify Rule 1 -- DAM well below baseline -> knock_correction",
           "[ai][drift][knock]") {
     auto const h = make_snapshot(
         7.0, 25000,
@@ -114,7 +114,7 @@ TEST_CASE("drift::classify Rule 1 — DAM well below baseline → knock_correcti
     REQUIRE_FALSE(d.recommended_checks.empty());
 }
 
-TEST_CASE("drift::classify Rule 1 borderline → Possible",
+TEST_CASE("drift::classify Rule 1 borderline -> Possible",
           "[ai][drift][knock]") {
     // DAM at 0.93 — within knock-trigger band but not deeply below.
     auto const h = make_snapshot(
@@ -139,7 +139,7 @@ TEST_CASE("drift::classify Rule 1 + positive LTFT lists fuel_quality_drift alt",
     REQUIRE(has_alt(d, "fuel_quality_drift"));
 }
 
-TEST_CASE("drift::classify Rule 2 — positive LTFT trending positive → fuel_quality",
+TEST_CASE("drift::classify Rule 2 -- positive LTFT trending positive -> fuel_quality",
           "[ai][drift][fuel-quality]") {
     // LTFT +8% mean, +0.6%/day drift over 14 days.
     auto const h = make_snapshot(
@@ -153,7 +153,7 @@ TEST_CASE("drift::classify Rule 2 — positive LTFT trending positive → fuel_q
     REQUIRE(has_alt(d, "injector_overflow_or_leak"));
 }
 
-TEST_CASE("drift::classify Rule 3 — negative LTFT trending negative + idle drift → vacuum_leak alt",
+TEST_CASE("drift::classify Rule 3 -- negative LTFT trending negative + idle drift -> vacuum_leak alt",
           "[ai][drift][fuel-system][vacuum]") {
     auto const h = make_snapshot(
         14.0, 100000,
@@ -167,7 +167,7 @@ TEST_CASE("drift::classify Rule 3 — negative LTFT trending negative + idle dri
     REQUIRE(has_alt(d, "evap_leak"));
 }
 
-TEST_CASE("drift::classify Rule 3 — negative LTFT drift without idle corroboration → Ambiguous",
+TEST_CASE("drift::classify Rule 3 -- negative LTFT drift without idle corroboration -> Ambiguous",
           "[ai][drift][fuel-system][ambiguous]") {
     auto const h = make_snapshot(
         14.0, 100000,
@@ -182,7 +182,7 @@ TEST_CASE("drift::classify Rule 3 — negative LTFT drift without idle corrobora
     REQUIRE(has_alt(d, "maf_aging"));
 }
 
-TEST_CASE("drift::classify Rule 4 — single-signal LTFT off-baseline → Possible",
+TEST_CASE("drift::classify Rule 4 -- single-signal LTFT off-baseline -> Possible",
           "[ai][drift][partial]") {
     // LTFT slightly negative, no drift, no other signals.
     auto const h = make_snapshot(
@@ -199,7 +199,7 @@ TEST_CASE("drift::classify Rule 4 — single-signal LTFT off-baseline → Possib
     REQUIRE(has_evidence(d, "Idle-adapt signal absent"));
 }
 
-TEST_CASE("drift::classify Rule 5 — idle-adapt only → idle_air_drift",
+TEST_CASE("drift::classify Rule 5 -- idle-adapt only -> idle_air_drift",
           "[ai][drift][idle]") {
     auto const h = make_snapshot(
         14.0, 100000,
@@ -213,7 +213,7 @@ TEST_CASE("drift::classify Rule 5 — idle-adapt only → idle_air_drift",
     REQUIRE(has_alt(d, "throttle_body_carbon"));
 }
 
-TEST_CASE("drift::classify no-rule-fires when all signals near baseline → NoSignal",
+TEST_CASE("drift::classify no-rule-fires when all signals near baseline -> NoSignal",
           "[ai][drift][no-signal]") {
     auto const h = make_snapshot(
         14.0, 100000,

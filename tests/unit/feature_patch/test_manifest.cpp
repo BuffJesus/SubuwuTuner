@@ -55,7 +55,7 @@ TEST_CASE("encode emits big-endian u32 address + type/op + big-endian u16 length
     }
 }
 
-TEST_CASE("encode/decode round-trip — multiple records",
+TEST_CASE("encode/decode round-trip -- multiple records",
           "[feature_patch][manifest][round-trip]") {
     // Four records from the staged analyst manifest (different type/op/length
     // combinations to exercise the field-width handling).

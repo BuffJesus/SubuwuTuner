@@ -111,7 +111,7 @@ TEST_CASE("ap3 FileInfo: encode uses u32 LE string lengths, NOT uleb128",
     REQUIRE((*encoded)[kNameLenOffset + 6] == 'c');
 }
 
-TEST_CASE("ap3 FileInfo: field order is name → metadata → path",
+TEST_CASE("ap3 FileInfo: field order is name -> metadata -> path",
           "[devices][ap3]") {
     // Verify the 27-byte metadata block sits BETWEEN the name and the
     // path, not after both. This was the other spec §7 misread —

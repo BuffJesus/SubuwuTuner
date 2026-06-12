@@ -22,7 +22,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE("HIL: bench smoke — placeholder until real hardware arrives",
+TEST_CASE("HIL: bench smoke -- placeholder until real hardware arrives",
           "[hil][smoke]") {
     // When the junkyard ECU + relay are connected:
     //   1. open OBDX on COM5

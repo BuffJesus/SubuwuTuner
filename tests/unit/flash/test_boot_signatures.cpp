@@ -98,7 +98,7 @@ TEST_CASE("verify_boot_signatures_sh2a_2mb flags PairMismatch",
     REQUIRE(r.pair_at_6010 == 0xDEADu);
 }
 
-TEST_CASE("verify_boot_signatures_sh2a_2mb fails in offset order — SigA before SigB",
+TEST_CASE("verify_boot_signatures_sh2a_2mb fails in offset order -- SigA before SigB",
           "[flash][boot_signatures]") {
     // Break both SigA and SigB; the report should flag SigA (lower
     // offset wins) so the user sees the first thing to fix.

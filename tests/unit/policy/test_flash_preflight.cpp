@@ -127,7 +127,7 @@ TEST_CASE("BatteryVoltageOk tiers warn/block correctly",
     }
 }
 
-TEST_CASE("BatteryVoltageOk threshold boundaries — exact-threshold voltage is OK",
+TEST_CASE("BatteryVoltageOk threshold boundaries -- exact-threshold voltage is OK",
           "[policy][preflight][battery][boundary]") {
     // The 2026-06-04 mutation lane found that swapping `<` to `<=` on
     // either threshold survived because no test exercised a voltage

@@ -58,7 +58,7 @@ constexpr std::array<std::uint8_t, 7> kPutFileHeader{
 
 } // namespace
 
-TEST_CASE("ap3 packet: CRC matches §12.2 UserInfo vector", "[transport][ap3]") {
+TEST_CASE("ap3 packet: CRC matches sec12.2 UserInfo vector", "[transport][ap3]") {
     // Computing the CRC over the 46 bytes that precede the CRC slot
     // must reproduce 0x4F1FF045.
     auto without_crc = std::span<std::uint8_t const>{kUserInfoPacket.data(),
@@ -67,12 +67,12 @@ TEST_CASE("ap3 packet: CRC matches §12.2 UserInfo vector", "[transport][ap3]") 
     REQUIRE(crc == 0x4F1FF045U);
 }
 
-TEST_CASE("ap3 packet: verify_crc accepts the §12.2 UserInfo packet", "[transport][ap3]") {
+TEST_CASE("ap3 packet: verify_crc accepts the sec12.2 UserInfo packet", "[transport][ap3]") {
     auto status = st::transport::ap3::verify_crc(kUserInfoPacket);
     REQUIRE(status.has_value());
 }
 
-TEST_CASE("ap3 packet: decode_header reads §12.2 UserInfo header", "[transport][ap3]") {
+TEST_CASE("ap3 packet: decode_header reads sec12.2 UserInfo header", "[transport][ap3]") {
     auto header = st::transport::ap3::decode_header(kUserInfoPacket);
     REQUIRE(header.has_value());
     REQUIRE(header->type == 0x28);
@@ -80,7 +80,7 @@ TEST_CASE("ap3 packet: decode_header reads §12.2 UserInfo header", "[transport]
     REQUIRE(header->body_size == 0x2BU - 4U);
 }
 
-TEST_CASE("ap3 packet: decode_header reads §12.4 PutFile header — u24-BE not u16-LE",
+TEST_CASE("ap3 packet: decode_header reads sec12.4 PutFile header -- u24-BE not u16-LE",
           "[transport][ap3]") {
     // The whole point of this vector: a buggy decoder reading u16 LE
     // at [4..5] would compute wire_len = 0x00F1 = 241. Anything wrong
@@ -92,7 +92,7 @@ TEST_CASE("ap3 packet: decode_header reads §12.4 PutFile header — u24-BE not 
     REQUIRE(header->body_size == 0x0119F1U - 4U);
 }
 
-TEST_CASE("ap3 packet: §12.5 setup ACK round-trips through verify_crc and decode_header",
+TEST_CASE("ap3 packet: sec12.5 setup ACK round-trips through verify_crc and decode_header",
           "[transport][ap3]") {
     auto header = st::transport::ap3::decode_header(kSetupAckPacket);
     REQUIRE(header.has_value());
@@ -103,7 +103,7 @@ TEST_CASE("ap3 packet: §12.5 setup ACK round-trips through verify_crc and decod
     REQUIRE(status.has_value());
 }
 
-TEST_CASE("ap3 packet: encode_packet round-trips against §12.2 UserInfo vector",
+TEST_CASE("ap3 packet: encode_packet round-trips against sec12.2 UserInfo vector",
           "[transport][ap3]") {
     // body = 39 bytes of Boost archive header from §12.2.
     constexpr std::array<std::uint8_t, 39> kBody{
@@ -140,7 +140,7 @@ TEST_CASE("ap3 packet: decode_header rejects a bad sync magic", "[transport][ap3
 // Skip gracefully if absent.
 // ---------------------------------------------------------------------------
 
-TEST_CASE("ap3 fixtures: packet_cmd28_userinfo.bin matches the inline §12.2 vector",
+TEST_CASE("ap3 fixtures: packet_cmd28_userinfo.bin matches the inline sec12.2 vector",
           "[transport][ap3][fixtures]") {
     auto fixture = load_ap3_fixture("packet_cmd28_userinfo.bin");
     if (fixture.empty()) {
@@ -189,7 +189,7 @@ TEST_CASE("ap3 fixtures: packet_cmd23_putfile_prefix.bin pins u24 BE (NOT u16 LE
 // Spec §6.0 codec-level command-block list.
 // ---------------------------------------------------------------------------
 
-TEST_CASE("ap3 §6.0: is_blocked_command flags every spec-listed cmd byte",
+TEST_CASE("ap3 sec6.0: is_blocked_command flags every spec-listed cmd byte",
           "[transport][ap3][safety]") {
     constexpr std::array<std::uint8_t, 6> kBlocked{0x05, 0x06, 0x07, 0x08, 0x18, 0x29};
     for (auto b : kBlocked) {
@@ -202,7 +202,7 @@ TEST_CASE("ap3 §6.0: is_blocked_command flags every spec-listed cmd byte",
     REQUIRE(st::transport::ap3::is_blocked_command(0xFF));
 }
 
-TEST_CASE("ap3 §6.0: is_blocked_command does NOT flag the safe file-vault set",
+TEST_CASE("ap3 sec6.0: is_blocked_command does NOT flag the safe file-vault set",
           "[transport][ap3][safety]") {
     // The Capability-A surface SubuwuTuner uses today must remain
     // through the gate — these are the spec §6.5–6.13 commands plus
@@ -220,7 +220,7 @@ TEST_CASE("ap3 §6.0: is_blocked_command does NOT flag the safe file-vault set",
     REQUIRE_FALSE(st::transport::ap3::is_blocked_command(0x31)); // ApManufacturer
 }
 
-TEST_CASE("ap3 §6.0: encode_packet returns PolicyDenied for blocked cmd bytes",
+TEST_CASE("ap3 sec6.0: encode_packet returns PolicyDenied for blocked cmd bytes",
           "[transport][ap3][safety]") {
     constexpr std::array<std::uint8_t, 6> kBlocked{0x05, 0x06, 0x07, 0x08, 0x18, 0x29};
     for (auto b : kBlocked) {

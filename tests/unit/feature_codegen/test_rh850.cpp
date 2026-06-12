@@ -398,7 +398,7 @@ TEST_CASE("rh850::split_imm32 handles the boundary 0x00008000",
 
 // ---- Backend compile ---------------------------------------------------
 
-TEST_CASE("Rh850Backend::compile emits 24 bytes for one LoadConstant→Store",
+TEST_CASE("Rh850Backend::compile emits 24 bytes for one LoadConstant->Store",
           "[rh850][compile]") {
     auto const def = load_pack(kPackOneHookToml);
     auto const m = make_const_store_module(0x12345678, "after_fuel_calc",
@@ -598,7 +598,7 @@ TEST_CASE("Rh850Backend::compile rejects LoadHookInput with no declared input pi
     REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
 }
 
-TEST_CASE("Rh850Backend::compile emits LoadHookInput→StoreHookOutput slice",
+TEST_CASE("Rh850Backend::compile emits LoadHookInput->StoreHookOutput slice",
           "[rh850][compile][load_hook_input]") {
     // A hook with one input (rpm at firmware address 0xFFFF8400) and one
     // output. Wire LoadHookInput → StoreHookOutput and verify the patch
@@ -1630,7 +1630,7 @@ TEST_CASE("Rh850Backend::compile rejects type-mismatched primitive operand",
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
 
-TEST_CASE("Rh850Backend::compile emits nested CallPrimitive — (a + b) + c",
+TEST_CASE("Rh850Backend::compile emits nested CallPrimitive -- (a + b) + c",
           "[rh850][compile][call_primitive][nested]") {
     // (a + b) + c. The inner add_int's result feeds the outer add_int's
     // first operand. The nested driver allocates one RAM slot for the
