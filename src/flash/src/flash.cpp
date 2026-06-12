@@ -552,6 +552,29 @@ Status Flasher::ecu_enable_flash_mode(std::uint16_t routine_id,
 }
 
 // ---------------------------------------------------------------------
+// ecu_erase_block — RoutineControl 0x31 0x01 with u32 LE block index
+// ---------------------------------------------------------------------
+
+Status Flasher::ecu_erase_block(std::uint16_t routine_id, std::uint32_t block_idx,
+                                 std::chrono::milliseconds timeout) {
+    // 4-byte LE option record carrying the block index. Per
+    // docs/37 §RE5 (Subaru SH-2A): the firmware ROM-side erase
+    // routine consumes the index in little-endian byte order.
+    std::array<std::uint8_t, 4> option{
+        static_cast<std::uint8_t>(block_idx & 0xFFU),
+        static_cast<std::uint8_t>((block_idx >> 8) & 0xFFU),
+        static_cast<std::uint8_t>((block_idx >> 16) & 0xFFU),
+        static_cast<std::uint8_t>((block_idx >> 24) & 0xFFU),
+    };
+    auto r = client_.routine_control(ecu::uds::kRcStart, routine_id,
+                                     std::span<std::uint8_t const>{option}, timeout);
+    if (!r.has_value()) {
+        return st::failure(std::move(r).error());
+    }
+    return st::ok();
+}
+
+// ---------------------------------------------------------------------
 // ecu_compute_checksum — ECU-side post-flash verification (RoutineControl)
 // ---------------------------------------------------------------------
 

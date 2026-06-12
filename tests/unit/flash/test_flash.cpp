@@ -1990,6 +1990,46 @@ TEST_CASE("Flasher::ecu_enable_flash_mode surfaces NRC on bad session",
 }
 
 // ---------------------------------------------------------------------
+// ecu_erase_block — RoutineControl 0x31 0x01 with u32 LE block index
+// ---------------------------------------------------------------------
+
+TEST_CASE("Flasher::ecu_erase_block sends RoutineControl with 4-byte LE block index",
+          "[flash][ecu_uds]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // Subaru's erase-block routine ID is 0xff01 per docs/37 + RE5.
+    // Block index 0x12345678 encodes LE as 78 56 34 12.
+    constexpr std::uint16_t kRoutineId = 0xFF01;
+    constexpr std::uint32_t kBlockIdx = 0x12345678U;
+    expect(t,
+           {0x31, 0x01, 0xFF, 0x01, 0x78, 0x56, 0x34, 0x12},
+           {0x71, 0x01, 0xFF, 0x01});
+
+    flash::Flasher f{t};
+    auto const r = f.ecu_erase_block(kRoutineId, kBlockIdx);
+    REQUIRE(r.has_value());
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("Flasher::ecu_erase_block surfaces NRC when block index is out of range",
+          "[flash][ecu_uds][error]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // NRC 0x31 (RequestOutOfRange) — common when the host passes a
+    // block index past the flash bank's last block.
+    expect(t,
+           {0x31, 0x01, 0xFF, 0x01, 0xFF, 0xFF, 0xFF, 0xFF},
+           {0x7F, 0x31, 0x31});
+
+    flash::Flasher f{t};
+    auto const r = f.ecu_erase_block(0xFF01, 0xFFFFFFFFU);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(t.exhausted());
+}
+
+// ---------------------------------------------------------------------
 // ecu_compute_checksum — RE5 reference architecture's ChecksumECUData
 // ---------------------------------------------------------------------
 

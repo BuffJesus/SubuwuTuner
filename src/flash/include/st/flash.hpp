@@ -383,6 +383,15 @@ public:
     ecu_enable_flash_mode(std::uint16_t routine_id,
                           std::chrono::milliseconds timeout = std::chrono::milliseconds{5000});
 
+    // Erase a single flash block by index. RoutineControl 0x31 0x01
+    // with the routine ID per docs/37 §RE5 (0xff01 on Subaru) and a
+    // 4-byte LE option record carrying the block index. Block size +
+    // count are family-specific (1 KB blocks on SH-2A LF79103P) and
+    // come from the def pack.
+    [[nodiscard]] Status
+    ecu_erase_block(std::uint16_t routine_id, std::uint32_t block_idx,
+                    std::chrono::milliseconds timeout = std::chrono::milliseconds{10000});
+
     // Ask the ECU to compute its own checksum over `[start_addr,
     // end_addr]` (inclusive) and return the routine result. Per
     // `docs/37-subaru-flash-protocol.md` (RE5), the Subaru reference
