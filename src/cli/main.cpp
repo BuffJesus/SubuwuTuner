@@ -15845,8 +15845,37 @@ int run_state(CommonOpts const &opts) {
 
 int run_ls(int argc, char **argv, CommonOpts const &opts) {
     std::string subdir = "/maps/";
-    if (argc > 0) {
-        subdir = argv[0];
+    std::string format = "text";
+    // Parse --format + walk positionals. Only one positional (subdir)
+    // is meaningful; later ones are an error.
+    bool subdir_set = false;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--format" && i + 1 < argc) {
+            format = argv[++i];
+            if (format != "text" && format != "json" && format != "toml") {
+                std::fprintf(stderr,
+                             "ap3 ls: --format must be text|json|toml (got '%s')\n",
+                             format.c_str());
+                return 2;
+            }
+            continue;
+        }
+        if (a.starts_with("--")) {
+            std::fprintf(stderr, "ap3 ls: unknown flag: %.*s\n",
+                         static_cast<int>(a.size()), a.data());
+            return 2;
+        }
+        if (subdir_set) {
+            std::fprintf(stderr,
+                         "ap3 ls: only one subdir positional allowed (got %.*s)\n",
+                         static_cast<int>(a.size()), a.data());
+            return 2;
+        }
+        subdir.assign(a);
+        subdir_set = true;
+    }
+    if (subdir_set) {
         if (subdir.empty() || subdir.front() != '/') {
             subdir.insert(subdir.begin(), '/');
         }
@@ -15873,15 +15902,38 @@ int run_ls(int argc, char **argv, CommonOpts const &opts) {
         std::fprintf(stderr, "ap3 ls: %s\n", records.error().to_string().c_str());
         return 1;
     }
-    std::printf("%zu file%s in %s\n", records->size(), records->size() == 1 ? "" : "s",
-                subdir.c_str());
-    for (auto const &r : *records) {
-        // FileInfo2 records in a ListFiles response use `path` for the
-        // full relative path (e.g. "maps/Stage1.ptm") and `name` for
-        // just the basename ("Stage1.ptm") — different from the request-
-        // side convention. Print path-only; prepending `name` would
-        // duplicate the basename as observed live 2026-06-12.
-        std::printf("  %12llu  %s\n", static_cast<unsigned long long>(r.size), r.path.c_str());
+    if (format == "json") {
+        std::printf("{\n  \"subdir\": \"%s\",\n  \"files\": [\n", subdir.c_str());
+        for (std::size_t i = 0; i < records->size(); ++i) {
+            auto const &r = (*records)[i];
+            std::printf("    {\"path\":\"%s\",\"name\":\"%s\",\"size\":%llu,\"mtime\":%llu}%s\n",
+                        r.path.c_str(), r.name.c_str(),
+                        static_cast<unsigned long long>(r.size),
+                        static_cast<unsigned long long>(r.mtime),
+                        i + 1 < records->size() ? "," : "");
+        }
+        std::printf("  ]\n}\n");
+    } else if (format == "toml") {
+        std::printf("subdir = \"%s\"\n\n", subdir.c_str());
+        for (auto const &r : *records) {
+            std::printf("[[file]]\n");
+            std::printf("path  = \"%s\"\n", r.path.c_str());
+            std::printf("name  = \"%s\"\n", r.name.c_str());
+            std::printf("size  = %llu\n", static_cast<unsigned long long>(r.size));
+            std::printf("mtime = %llu\n\n", static_cast<unsigned long long>(r.mtime));
+        }
+    } else {
+        std::printf("%zu file%s in %s\n", records->size(), records->size() == 1 ? "" : "s",
+                    subdir.c_str());
+        for (auto const &r : *records) {
+            // FileInfo2 records in a ListFiles response use `path` for the
+            // full relative path (e.g. "maps/Stage1.ptm") and `name` for
+            // just the basename ("Stage1.ptm") — different from the request-
+            // side convention. Print path-only; prepending `name` would
+            // duplicate the basename as observed live 2026-06-12.
+            std::printf("  %12llu  %s\n", static_cast<unsigned long long>(r.size),
+                        r.path.c_str());
+        }
     }
     return 0;
 }
@@ -16110,7 +16162,8 @@ int cmd_ap3(int argc, char *argv[]) {
                    "\n"
                    "Subcommands:\n"
                    "  state              Print AP serial / firmware / marriage state\n"
-                   "  ls [subdir]        List files in /user/ap-user/<subdir> (default /maps/)\n"
+                   "  ls [subdir] [--format text|json|toml]\n"
+                   "                     List files in /user/ap-user/<subdir> (default /maps/)\n"
                    "  pull <ap-path> [--into <local>]\n"
                    "                     Pull a file off the AP\n"
                    "  push <local> [--as <ap-path>]\n"
