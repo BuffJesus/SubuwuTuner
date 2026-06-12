@@ -17099,12 +17099,37 @@ bool parse_import_opts(int argc, char **argv, ImportOpts &out) {
         return false;
     }
     if (out.base_rom.empty()) {
-        std::fputs("ptm import: --base-rom <path> is required (auto-discovery from "
-                   "vehicle_id is not yet wired)\n",
-                   stderr);
-        return false;
+        // --base-rom is optional ONLY when ST_PTM_BASE_ROM_DIR is set
+        // (auto-discovery via vehicle_id → <env>/<vehicle_id>.bin in
+        // run_import after decode). If neither is set, refuse early
+        // rather than burning a full decode just to error at the
+        // base-rom step.
+        char const *env = std::getenv("ST_PTM_BASE_ROM_DIR");
+        if (env == nullptr || *env == '\0') {
+            std::fputs("ptm import: --base-rom <path> is required (or set\n"
+                       "  ST_PTM_BASE_ROM_DIR for auto-discovery via vehicle_id;\n"
+                       "  see docs/install.md).\n",
+                       stderr);
+            return false;
+        }
     }
     return true;
+}
+
+// When --base-rom wasn't given, try ST_PTM_BASE_ROM_DIR/<vehicle_id>.bin
+// as the conventional auto-discovery path. Returns empty string if the
+// env var isn't set or the file doesn't exist.
+std::string discover_base_rom(std::string const &vehicle_id) {
+    char const *root = std::getenv("ST_PTM_BASE_ROM_DIR");
+    if (root == nullptr || *root == '\0' || vehicle_id.empty()) {
+        return {};
+    }
+    auto const candidate = std::filesystem::path{root} / (vehicle_id + ".bin");
+    std::error_code ec;
+    if (!std::filesystem::exists(candidate, ec) || ec) {
+        return {};
+    }
+    return candidate.string();
 }
 
 // Escape a string for TOML's basic-string literal form. Handles `"`,
@@ -17156,6 +17181,23 @@ int run_import(int argc, char **argv) {
         return loaded.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
     }
     auto &decoded = loaded->decoded;
+
+    // Auto-discover base ROM if --base-rom wasn't passed. Uses
+    // ST_PTM_BASE_ROM_DIR/<vehicle_id>.bin per the convention in
+    // docs/install.md.
+    if (opts.base_rom.empty()) {
+        opts.base_rom = discover_base_rom(decoded.metadata.vehicle_id);
+        if (opts.base_rom.empty()) {
+            std::fprintf(stderr,
+                         "ptm import: --base-rom <path> is required.\n"
+                         "  Auto-discovery: set ST_PTM_BASE_ROM_DIR to a directory\n"
+                         "  containing '%s.bin', or pass --base-rom explicitly.\n",
+                         decoded.metadata.vehicle_id.c_str());
+            return 2;
+        }
+        std::fprintf(stderr, "ptm import: auto-discovered base ROM at %s\n",
+                     opts.base_rom.c_str());
+    }
 
     // Read base ROM.
     auto rom_bytes = read_file_bytes(opts.base_rom);
