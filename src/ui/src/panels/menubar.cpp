@@ -93,6 +93,9 @@ void render_menubar(AppState &state) {
                 disabled_tip("Open a project first. The export modal needs a project\n"
                              "with [ptm_metadata] + ptm_patches.toml (from `ptm import`).");
             }
+            if (ImGui::MenuItem("\xEE\xA0\x84  Diff Two .ptm Files\xE2\x80\xA6")) {
+                state.show_ptm_diff_modal = true;
+            }
             ImGui::Separator();
             // CSV import/export — same `# pack_id` / `# table` /
             // `row,col,value` format as project-export-csv / -edit-csv,

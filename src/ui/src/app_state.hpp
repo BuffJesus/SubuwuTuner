@@ -693,6 +693,35 @@ struct AppState {
     std::string ptm_import_error;
     std::string ptm_import_success;
 
+    // ptm diff modal — two .ptm files compared via compute_tune_diff,
+    // results shown grouped by architectural layer (or by table when
+    // a def-pack is picked). Read-only.
+    bool show_ptm_diff_modal{false};
+    char ptm_diff_a_path[1024]{};
+    char ptm_diff_b_path[1024]{};
+    char ptm_diff_def_path[1024]{};
+    bool ptm_diff_have_result{false};
+    std::string ptm_diff_error;
+    std::uint32_t ptm_diff_a_total{0};
+    std::uint32_t ptm_diff_b_total{0};
+    std::uint32_t ptm_diff_shared{0};
+    std::uint32_t ptm_diff_a_only{0};
+    std::uint32_t ptm_diff_b_only{0};
+    std::uint32_t ptm_diff_changed_at_shared{0};
+    std::uint64_t ptm_diff_changed_bytes{0};
+    // Per-layer / per-table summary rows:
+    //   (label, (a_only, b_only, shared, changed_at_shared, changed_bytes))
+    struct PtmDiffRow {
+        std::string label;
+        std::uint32_t a_only{0};
+        std::uint32_t b_only{0};
+        std::uint32_t shared{0};
+        std::uint32_t changed{0};
+        std::uint64_t changed_bytes{0};
+    };
+    std::vector<PtmDiffRow> ptm_diff_by_layer;
+    std::vector<PtmDiffRow> ptm_diff_by_table;
+
     // ptm export modal — reverse of import. Reads the loaded project's
     // [ptm_metadata] + ptm_patches.toml, rebuilds the inner PrivateData
     // XML, runs through encrypt_ptm, writes to disk. Gated on

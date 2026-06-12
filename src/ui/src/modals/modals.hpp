@@ -18,6 +18,7 @@ void render_csv_import_modal(AppState &state);
 void render_ptm_import_modal(AppState &state);
 void render_ptm_inspect_modal(AppState &state);
 void render_ptm_export_modal(AppState &state);
+void render_ptm_diff_modal(AppState &state);
 void render_maf_autotune_modal(AppState &state);
 void render_kp_autotune_modal(AppState &state);
 void render_shortcuts_modal(AppState &state);

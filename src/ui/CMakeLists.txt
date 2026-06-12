@@ -140,6 +140,7 @@ add_executable(subuwutuner-gui
     src/modals/flash.cpp
     src/modals/help.cpp
     src/modals/new_project.cpp
+    src/modals/ptm_diff.cpp
     src/modals/ptm_export.cpp
     src/modals/ptm_import.cpp
     src/modals/ptm_inspect.cpp
