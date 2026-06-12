@@ -392,6 +392,22 @@ public:
     ecu_erase_block(std::uint16_t routine_id, std::uint32_t block_idx,
                     std::chrono::milliseconds timeout = std::chrono::milliseconds{10000});
 
+    // UDS RequestDownload (0x34) — open a download lifecycle. The
+    // host names the target address + size and the address/size
+    // format nibbles (lengthFormatIdentifier high+low nibbles). The
+    // ECU responds with maxNumberOfBlockLength — the largest payload
+    // it accepts per subsequent TransferData (0x36) call.
+    //
+    // `addr_size_bytes` and `size_size_bytes` MUST be in [1..4]; the
+    // ALFI byte encodes them as (size_size << 4) | addr_size. Common
+    // Subaru convention is 4+4 (ALFI=0x44) but some legacy variants
+    // use 3+3 (ALFI=0x33) — the explicit nibble args let callers pick
+    // per platform.
+    [[nodiscard]] Result<std::uint32_t>
+    ecu_request_download(std::uint32_t addr, std::uint32_t size,
+                         std::uint8_t addr_size_bytes, std::uint8_t size_size_bytes,
+                         std::chrono::milliseconds timeout = std::chrono::milliseconds{2000});
+
     // Ask the ECU to compute its own checksum over `[start_addr,
     // end_addr]` (inclusive) and return the routine result. Per
     // `docs/37-subaru-flash-protocol.md` (RE5), the Subaru reference

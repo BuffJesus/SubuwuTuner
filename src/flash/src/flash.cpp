@@ -575,6 +575,31 @@ Status Flasher::ecu_erase_block(std::uint16_t routine_id, std::uint32_t block_id
 }
 
 // ---------------------------------------------------------------------
+// ecu_request_download — UDS 0x34, open a download lifecycle
+// ---------------------------------------------------------------------
+
+Result<std::uint32_t>
+Flasher::ecu_request_download(std::uint32_t addr, std::uint32_t size,
+                              std::uint8_t addr_size_bytes, std::uint8_t size_size_bytes,
+                              std::chrono::milliseconds timeout) {
+    // UdsClient::request_download today encodes the AddressAndLength-
+    // Format Identifier as 0x44 (4-byte addr + 4-byte size) — the
+    // Subaru convention per docs/37 §RE5. Non-4+4 platforms (legacy
+    // SH7055 variants reportedly use 3+3) will need a UdsClient
+    // extension; refuse here rather than silently truncating.
+    if (addr_size_bytes != 4 || size_size_bytes != 4) {
+        return st::failure(st::ErrorCode::InvalidArgument,
+                           "ecu_request_download: only ALFI=0x44 (4+4) is "
+                           "wired today; non-Subaru-standard nibbles need a "
+                           "UdsClient extension. See docs/37 §RE5.");
+    }
+    // data_format=0x00 — no compression, no encryption (standard
+    // path). Subaru's bulk-cipher 0xB6 path uses 0x04 and goes via
+    // subaru_bulk_transfer; that route is separate.
+    return client_.request_download(0x00U, addr, size, timeout);
+}
+
+// ---------------------------------------------------------------------
 // ecu_compute_checksum — ECU-side post-flash verification (RoutineControl)
 // ---------------------------------------------------------------------
 

@@ -2030,6 +2030,51 @@ TEST_CASE("Flasher::ecu_erase_block surfaces NRC when block index is out of rang
 }
 
 // ---------------------------------------------------------------------
+// ecu_request_download — UDS 0x34 download-lifecycle opener
+// ---------------------------------------------------------------------
+
+TEST_CASE("Flasher::ecu_request_download sends 0x34 with ALFI 0x44 + parses maxBlockLength",
+          "[flash][ecu_uds]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // Standard Subaru shape: data_format=00, ALFI=44, then 4-byte BE
+    // address followed by 4-byte BE size. Use values that naturally
+    // require 4 bytes each (high byte non-zero) so UdsClient's
+    // bytes_to_encode helper picks 4+4 instead of optimal-shrinking
+    // to 3+3. Positive response 74 LFI<maxLen> — Subaru convention
+    // uses LFI=20 (high nibble 2 = 2-byte maxLen) followed by maxLen
+    // = 0x0102 (258 bytes — the typical TransferData ceiling).
+    expect(t,
+           {0x34, 0x00, 0x44,
+            0x80, 0x01, 0x00, 0x00,
+            0x80, 0x04, 0x00, 0x00},
+           {0x74, 0x20, 0x01, 0x02});
+
+    flash::Flasher f{t};
+    auto const r = f.ecu_request_download(0x80010000U, 0x80040000U, 4, 4);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == 0x0102U);
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("Flasher::ecu_request_download refuses non-4+4 ALFI",
+          "[flash][ecu_uds][error]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // Non-Subaru-standard ALFI (3+3) — Tier-A surface refuses with
+    // InvalidArgument rather than silently truncating + bricking. A
+    // future UdsClient extension would handle 3+3 / 2+2 / etc.
+    flash::Flasher f{t};
+    auto const r = f.ecu_request_download(0x00010000U, 0x00040000U, 3, 3);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::InvalidArgument);
+    // No wire I/O should have happened — the refuse fires before send.
+    REQUIRE(t.exhausted());
+}
+
+// ---------------------------------------------------------------------
 // ecu_compute_checksum — RE5 reference architecture's ChecksumECUData
 // ---------------------------------------------------------------------
 
