@@ -51,6 +51,7 @@
 #include "st/transport/uds_trace.hpp"
 
 #include <algorithm>
+#include <regex>
 #include <array>
 #include <atomic>
 #include <cerrno>
@@ -15874,8 +15875,8 @@ int run_state(CommonOpts const &opts) {
 int run_ls(int argc, char **argv, CommonOpts const &opts) {
     std::string subdir = "/maps/";
     std::string format = "text";
-    // Parse --format + walk positionals. Only one positional (subdir)
-    // is meaningful; later ones are an error.
+    std::string filter_regex;
+    std::string sort_key; // empty = no sort
     bool subdir_set = false;
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -15885,6 +15886,20 @@ int run_ls(int argc, char **argv, CommonOpts const &opts) {
                 std::fprintf(stderr,
                              "ap3 ls: --format must be text|json|toml (got '%s')\n",
                              format.c_str());
+                return 2;
+            }
+            continue;
+        }
+        if (a == "--filter" && i + 1 < argc) {
+            filter_regex.assign(argv[++i]);
+            continue;
+        }
+        if (a == "--sort" && i + 1 < argc) {
+            sort_key.assign(argv[++i]);
+            if (sort_key != "name" && sort_key != "size" && sort_key != "mtime") {
+                std::fprintf(stderr,
+                             "ap3 ls: --sort must be name|size|mtime (got '%s')\n",
+                             sort_key.c_str());
                 return 2;
             }
             continue;
@@ -15929,6 +15944,36 @@ int run_ls(int argc, char **argv, CommonOpts const &opts) {
     if (!records.has_value()) {
         std::fprintf(stderr, "ap3 ls: %s\n", records.error().to_string().c_str());
         return 1;
+    }
+    // Apply --filter and --sort if requested. Filter on `name` (the
+    // basename) since the full `path` always includes the subdir which
+    // would over-match a regex like `^Stage1`.
+    if (!filter_regex.empty()) {
+        try {
+            std::regex const re(filter_regex);
+            records->erase(
+                std::remove_if(records->begin(), records->end(),
+                               [&](st::devices::ap3::FileInfo const &r) {
+                                   return !std::regex_search(r.name, re);
+                               }),
+                records->end());
+        } catch (std::regex_error const &e) {
+            std::fprintf(stderr, "ap3 ls: --filter regex error: %s\n", e.what());
+            return 2;
+        }
+    }
+    if (!sort_key.empty()) {
+        std::sort(records->begin(), records->end(),
+                  [&](st::devices::ap3::FileInfo const &x,
+                      st::devices::ap3::FileInfo const &y) {
+                      if (sort_key == "size") {
+                          return x.size < y.size;
+                      }
+                      if (sort_key == "mtime") {
+                          return x.mtime < y.mtime;
+                      }
+                      return x.name < y.name; // name default
+                  });
     }
     if (format == "json") {
         std::printf("{\n  \"subdir\": \"%s\",\n  \"files\": [\n", subdir.c_str());
@@ -16246,7 +16291,7 @@ int cmd_ap3(int argc, char *argv[]) {
                    "\n"
                    "Subcommands:\n"
                    "  state              Print AP serial / firmware / marriage state\n"
-                   "  ls [subdir] [--format text|json|toml]\n"
+                   "  ls [subdir] [--format text|json|toml] [--filter <regex>] [--sort name|size|mtime]\n"
                    "                     List files in /user/ap-user/<subdir> (default /maps/)\n"
                    "  pull <ap-path> [--into <local>] [--format text|json|toml]\n"
                    "                     Pull a file off the AP\n"
