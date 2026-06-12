@@ -25,6 +25,13 @@ st::library::PatchEntry mk(std::uint32_t offset, std::vector<std::uint8_t> bytes
     return p;
 }
 
+st::library::PatchEntry mk_ram(std::uint32_t rom, std::int32_t ram,
+                                std::vector<std::uint8_t> bytes) {
+    auto p = mk(rom, std::move(bytes));
+    p.ram_offset = ram;
+    return p;
+}
+
 } // namespace
 
 TEST_CASE("compute_tune_diff: identical tunes diff to all-zero",
@@ -102,6 +109,60 @@ TEST_CASE("compute_tune_diff: per-layer breakdown populated + sorted by impact",
     // The b_only patch at 0x9000 contributes 12 bytes; that layer
     // should appear first (sorted by impact descending).
     REQUIRE(r.by_layer.front().b_only_bytes >= 12U);
+}
+
+TEST_CASE("compute_tune_diff: identical tunes with duplicate rom_offset diff to zero",
+          "[library][tune_diff]") {
+    // Real COBB tunes emit clear-then-set byte pairs at hot offsets — 2
+    // patches with the same `rom_offset` but different `ram_offset` and
+    // bytes. Stage1 91 v401.ptm has 78 such pairs. Pre-fix
+    // compute_tune_diff used `std::map<rom_offset, idx>` which silently
+    // dropped the second half of each pair, then misclassified the
+    // first half as `changed_at_shared` by comparing it against the
+    // mapped-over second half. Same bug pattern as a251f47 fixed in
+    // `ptm verify`; same fix shape (key on (rom, ram) tuple).
+    st::library::DecodedPtm a, b;
+    // Clear-then-set pair at rom=0x10000 (MainCalibration). Both tunes
+    // emit the exact same 2 patches — the diff must report zero
+    // changes.
+    a.patches.push_back(mk_ram(0x10000, 0, {0, 0, 0, 0}));
+    a.patches.push_back(mk_ram(0x10000, 16, {0xAB, 0xCD, 0xEF, 0x12}));
+    b.patches = a.patches;
+
+    auto const r = st::library::compute_tune_diff(a, b);
+    REQUIRE(r.a_total_patches == 2);
+    REQUIRE(r.b_total_patches == 2);
+    REQUIRE(r.shared_patches == 2);
+    REQUIRE(r.a_only_patches == 0);
+    REQUIRE(r.b_only_patches == 0);
+    REQUIRE(r.changed_at_shared == 0);
+    REQUIRE(r.changed_bytes == 0);
+}
+
+TEST_CASE("compute_tune_diff: duplicate rom_offset — one side missing the set half",
+          "[library][tune_diff]") {
+    // A has the full clear-then-set pair; B only has the clear half.
+    // Correct: 1 shared (the clear half byte-identical), 1 a_only (the
+    // set half), 0 b_only, 0 changed_at_shared. Pre-fix:
+    // a_by_offset[0x10000] = 1 (the set half); b_by_offset[0x10000] = 0.
+    // Iterating A's two patches, both look up b[0] (clear half). The
+    // clear half matches its mirror; the set half is compared against
+    // b's clear half and bytes differ → phantom `changed_at_shared`.
+    st::library::DecodedPtm a, b;
+    a.patches.push_back(mk_ram(0x10000, 0, {0, 0, 0, 0}));
+    a.patches.push_back(mk_ram(0x10000, 16, {0xAB, 0xCD, 0xEF, 0x12}));
+    b.patches.push_back(mk_ram(0x10000, 0, {0, 0, 0, 0}));
+
+    auto const r = st::library::compute_tune_diff(a, b);
+    REQUIRE(r.a_total_patches == 2);
+    REQUIRE(r.b_total_patches == 1);
+    REQUIRE(r.shared_patches == 1);
+    REQUIRE(r.a_only_patches == 1);
+    REQUIRE(r.b_only_patches == 0);
+    REQUIRE(r.changed_at_shared == 0);
+    REQUIRE(r.changed_bytes == 0);
+    // The orphaned set half contributes its full byte count to a_only.
+    REQUIRE(r.a_only_bytes == 4);
 }
 
 TEST_CASE("compute_tune_diff: per-table breakdown only when ranges provided",

@@ -15,14 +15,19 @@ compute_tune_diff(DecodedPtm const &a, DecodedPtm const &b,
     r.a_total_patches = static_cast<std::uint32_t>(a.patches.size());
     r.b_total_patches = static_cast<std::uint32_t>(b.patches.size());
 
-    std::map<std::uint32_t, std::size_t> a_by_offset;
-    std::map<std::uint32_t, std::size_t> b_by_offset;
-    for (std::size_t i = 0; i < a.patches.size(); ++i) {
-        a_by_offset[a.patches[i].rom_offset] = i;
-    }
+    // Index by `rom_offset` (multimap — see patch_decoder.hpp for the
+    // duplicate-rom_offset invariant: COBB tunes emit clear-then-set
+    // byte pairs at hot offsets, 78 of them in Stage1 91 v401.ptm).
+    // Pair within an offset bucket by `(rom_offset, ram_offset)`, the
+    // natural patch-slot key. A flat `std::map<rom_offset, idx>` would
+    // silently overwrite duplicates and produce phantom
+    // `changed_at_shared` counts — same bug pattern a251f47 fixed in
+    // `ptm verify`.
+    std::multimap<std::uint32_t, std::size_t> b_by_offset;
     for (std::size_t i = 0; i < b.patches.size(); ++i) {
-        b_by_offset[b.patches[i].rom_offset] = i;
+        b_by_offset.emplace(b.patches[i].rom_offset, i);
     }
+    std::vector<char> b_matched(b.patches.size(), 0);
 
     auto const &map = st::devices::ap3::default_lf79103p_layer_map();
     std::map<st::devices::ap3::Layer, LayerDiff> per_layer;
@@ -54,8 +59,19 @@ compute_tune_diff(DecodedPtm const &a, DecodedPtm const &b,
         auto const L = st::devices::ap3::classify(map, p.rom_offset);
         auto &bucket = layer_bucket(L);
         auto *tb = table_bucket(p.rom_offset);
-        auto it = b_by_offset.find(p.rom_offset);
-        if (it == b_by_offset.end()) {
+        // Find an unmatched B patch at the same (rom_offset,
+        // ram_offset) slot. If the slot has no match (or all matches
+        // already consumed), the A patch is a_only.
+        auto const range = b_by_offset.equal_range(p.rom_offset);
+        std::size_t b_idx = static_cast<std::size_t>(-1);
+        for (auto it = range.first; it != range.second; ++it) {
+            if (!b_matched[it->second] &&
+                b.patches[it->second].ram_offset == p.ram_offset) {
+                b_idx = it->second;
+                break;
+            }
+        }
+        if (b_idx == static_cast<std::size_t>(-1)) {
             ++r.a_only_patches;
             r.a_only_bytes += p.length;
             ++bucket.a_only_patches;
@@ -65,12 +81,13 @@ compute_tune_diff(DecodedPtm const &a, DecodedPtm const &b,
                 tb->a_only_bytes += p.length;
             }
         } else {
+            b_matched[b_idx] = 1;
             ++r.shared_patches;
             ++bucket.shared_patches;
             if (tb != nullptr) {
                 ++tb->shared_patches;
             }
-            auto const &pb = b.patches[it->second];
+            auto const &pb = b.patches[b_idx];
             if (p.bytes != pb.bytes) {
                 ++r.changed_at_shared;
                 ++bucket.changed_at_shared;
@@ -92,10 +109,11 @@ compute_tune_diff(DecodedPtm const &a, DecodedPtm const &b,
             }
         }
     }
-    for (auto const &p : b.patches) {
-        if (a_by_offset.find(p.rom_offset) != a_by_offset.end()) {
+    for (std::size_t i = 0; i < b.patches.size(); ++i) {
+        if (b_matched[i]) {
             continue;
         }
+        auto const &p = b.patches[i];
         auto const L = st::devices::ap3::classify(map, p.rom_offset);
         auto &bucket = layer_bucket(L);
         auto *tb = table_bucket(p.rom_offset);
