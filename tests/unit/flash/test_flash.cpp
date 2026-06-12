@@ -2075,6 +2075,52 @@ TEST_CASE("Flasher::ecu_request_download refuses non-4+4 ALFI",
 }
 
 // ---------------------------------------------------------------------
+// ecu_transfer_data — UDS 0x36 chunk shipment
+// ---------------------------------------------------------------------
+
+TEST_CASE("Flasher::ecu_transfer_data pins one full + one partial chunk",
+          "[flash][ecu_uds]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // First chunk: sequence_no=1, full 8-byte payload. Wire: 36 01
+    // + 8 bytes. Response: 76 01 (ack with same sequence_no).
+    expect(t,
+           {0x36, 0x01,
+            0xDE, 0xAD, 0xBE, 0xEF,
+            0xCA, 0xFE, 0xBA, 0xBE},
+           {0x76, 0x01});
+    // Second chunk: sequence_no=2, partial 3-byte payload. Wire: 36
+    // 02 + 3 bytes. Response: 76 02.
+    expect(t, {0x36, 0x02, 0x11, 0x22, 0x33}, {0x76, 0x02});
+
+    flash::Flasher f{t};
+    std::array<std::uint8_t, 8> const chunk1{
+        0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE};
+    std::array<std::uint8_t, 3> const chunk2{0x11, 0x22, 0x33};
+    REQUIRE(f.ecu_transfer_data(1, std::span<std::uint8_t const>{chunk1}).has_value());
+    REQUIRE(f.ecu_transfer_data(2, std::span<std::uint8_t const>{chunk2}).has_value());
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("Flasher::ecu_transfer_data surfaces NRC on sequence-counter mismatch",
+          "[flash][ecu_uds][error]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // NRC 0x73 (wrongBlockSequenceCounter) — fires when the host
+    // skips a sequence number or repeats one. Realistic recovery
+    // path: caller re-syncs sequence_no and re-sends the chunk.
+    expect(t, {0x36, 0x05, 0xAA}, {0x7F, 0x36, 0x73});
+
+    flash::Flasher f{t};
+    std::array<std::uint8_t, 1> tiny{0xAA};
+    auto const r = f.ecu_transfer_data(5, std::span<std::uint8_t const>{tiny});
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(t.exhausted());
+}
+
+// ---------------------------------------------------------------------
 // ecu_compute_checksum — RE5 reference architecture's ChecksumECUData
 // ---------------------------------------------------------------------
 

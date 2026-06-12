@@ -408,6 +408,17 @@ public:
                          std::uint8_t addr_size_bytes, std::uint8_t size_size_bytes,
                          std::chrono::milliseconds timeout = std::chrono::milliseconds{2000});
 
+    // UDS TransferData (0x36) — ship one chunk of the download
+    // payload after `ecu_request_download` has opened the lifecycle.
+    // `sequence_no` starts at 1 and increments per call (wraps 0xFF
+    // → 0x00); the ECU echoes it back in the positive response.
+    // `bytes.size()` MUST not exceed the maxBlockLength the ECU
+    // returned from RequestDownload (minus 2 for the SID + sequence
+    // header).
+    [[nodiscard]] Status
+    ecu_transfer_data(std::uint8_t sequence_no, std::span<std::uint8_t const> bytes,
+                      std::chrono::milliseconds timeout = std::chrono::milliseconds{2000});
+
     // Ask the ECU to compute its own checksum over `[start_addr,
     // end_addr]` (inclusive) and return the routine result. Per
     // `docs/37-subaru-flash-protocol.md` (RE5), the Subaru reference

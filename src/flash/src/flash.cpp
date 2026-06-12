@@ -600,6 +600,16 @@ Flasher::ecu_request_download(std::uint32_t addr, std::uint32_t size,
 }
 
 // ---------------------------------------------------------------------
+// ecu_transfer_data — UDS 0x36, ship one chunk of the download payload
+// ---------------------------------------------------------------------
+
+Status Flasher::ecu_transfer_data(std::uint8_t sequence_no,
+                                   std::span<std::uint8_t const> bytes,
+                                   std::chrono::milliseconds timeout) {
+    return client_.transfer_data(sequence_no, bytes, timeout);
+}
+
+// ---------------------------------------------------------------------
 // ecu_compute_checksum — ECU-side post-flash verification (RoutineControl)
 // ---------------------------------------------------------------------
 
