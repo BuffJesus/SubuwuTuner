@@ -54,6 +54,8 @@ The file-vault Capability A is **not** gated for any of these reasons: it manipu
 ## What the CLI surface looks like
 
 ```
+# AP file vault — always available when the AP3 is built (default ON).
+# All subcommands also accept --format text|json|toml for structured output.
 subuwutuner-cli ap3 state                       # AP serial, firmware, marriage state, current ROM MD5
 subuwutuner-cli ap3 ls [subdir]                 # list files under /user/ap-user/<subdir>
 subuwutuner-cli ap3 pull <name> [--into <path>] # read a file off the AP
@@ -61,12 +63,34 @@ subuwutuner-cli ap3 push <local> [--as <name>]  # write a file to the AP
 subuwutuner-cli ap3 rm <name>                   # remove a file from the AP
 subuwutuner-cli ap3 backup [--into <dir>]       # full snapshot of /user/ap-user/
 
-# Requires both build flag and runtime flag:
-subuwutuner-cli --enable-cobb-ap-cipher ap3 inspect <local.ptm>
-subuwutuner-cli --enable-cobb-ap-cipher ap3 patch-list <local.ptm>
+# `.ptm` tune-file family. Requires ST_ENABLE_COBB_AP_CIPHER=ON at build +
+# --enable-cobb-ap-cipher at runtime. Export additionally requires
+# ST_ENABLE_COBB_AP_PTM_REWRITE=ON.
+subuwutuner-cli --enable-cobb-ap-cipher ptm list-patches <file.ptm> [--def <pack>]
+subuwutuner-cli --enable-cobb-ap-cipher ptm inspect <file.ptm> [--def <pack>]
+subuwutuner-cli --enable-cobb-ap-cipher ptm diff <a.ptm> <b.ptm> [--def <pack>] [--by-table]
+subuwutuner-cli --enable-cobb-ap-cipher ptm import <file.ptm> --base-rom <path>
+                                                                    [--into <dir>] [--def <pack>]
+subuwutuner-cli --enable-cobb-ap-cipher ptm export <project.stune> --as <out.ptm>
+
+# Env-var auto-discovery for `ptm import` — sets the base ROM to
+# <ST_PTM_BASE_ROM_DIR>/<vehicle_id>.bin if it exists, so --base-rom
+# becomes optional after one-time setup.
+export ST_PTM_BASE_ROM_DIR=~/subuwutuner/base-roms
 ```
 
-The GUI exposes the same operations through an `AP3 Browser` panel (Phase-3 deliverable per `docs/04-roadmap.md`); the cipher-gated commands appear in the panel only when both flags are set.
+`ptm import` writes a `Project::open`-compatible 5-file skeleton (`project.toml` with `[ptm_metadata]` + `source.bin` + `working.bin` (patches applied) + `edits.toml` + `ptm_patches.toml`). The output project loads in the GUI immediately.
+
+`ptm export` is the reverse — reads `[ptm_metadata]` + `ptm_patches.toml` from a project and rebuilds the .ptm via `encrypt_ptm`. Round-trip is byte-identical at the PrivateData XML level.
+
+The GUI exposes the same operations through:
+
+- **AP3 Browser panel** (`View → AccessPort Browser`) — file vault (ls / pull / push / rm / backup).
+- **File → Import .ptm File…** — wizard modal mirroring `ptm import`. NFD pickers for the .ptm + base ROM + def-pack + output dir; Decode preview before commit; loads the resulting project on success.
+- **File → Inspect .ptm File…** — read-only viewer mirroring `ptm inspect`. Renders identity + architectural breakdown + top-tables tables.
+- **File → Export as .ptm…** — mirroring `ptm export`. Visible only when a project is loaded; gated on the same build flags as the CLI.
+- **Status bar PTM-imported badge** — purple-accent chip showing the loaded project's vendor (from `[ptm_metadata].vendor_id`) when the project was created via `ptm import`.
+- **Welcome panel cards** — surface the Import / Inspect entry points for first-run discoverability.
 
 ## Marriage-state caveat
 
