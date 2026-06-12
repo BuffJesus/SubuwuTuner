@@ -27,6 +27,7 @@ target_link_libraries(subuwutuner-cli
         st::policy
         st::devices_ap3
         st::library
+        tomlplusplus::tomlplusplus
         st::warnings
         st::sanitizers
         st::platform

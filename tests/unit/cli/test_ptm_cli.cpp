@@ -295,3 +295,40 @@ TEST_CASE("ptm import exercises decrypt + decode on synthetic fixture",
 #endif
 #endif
 }
+
+TEST_CASE("ptm export refuses without --enable-cobb-ap-cipher",
+          "[cli][ptm][integration]") {
+    if (!can_run()) {
+        return;
+    }
+    auto const r = st::test::cli_run(
+        "ptm export /nonexistent/project.stune --as /tmp/out.ptm");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("ptm export requires --as",
+          "[cli][ptm][integration]") {
+    if (!can_run()) {
+        return;
+    }
+    auto const r = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm export /tmp/proj.stune");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("ptm export reports missing project dir",
+          "[cli][ptm][integration][cipher]") {
+#ifndef ST_AP3_HAVE_CIPHER
+    SKIP("Cipher gating off");
+#else
+    if (!can_run()) {
+        return;
+    }
+    auto const r = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm export /nonexistent/x.stune --as /tmp/out.ptm");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 1);
+#endif
+}

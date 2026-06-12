@@ -41,6 +41,8 @@
 #include "st/devices/ap3/ptm_cipher.hpp"
 #include "st/library/patch_decoder.hpp"
 #include "st/library/table_mapping.hpp"
+
+#include <toml++/toml.hpp>
 #include "st/transport/cobb_ap_channel.hpp"
 #include "st/transport/factory.hpp"
 #include "st/transport/j2534_discovery.hpp"
@@ -17258,6 +17260,241 @@ int run_import(int argc, char **argv) {
     return 0;
 }
 
+struct ExportOpts {
+    std::string project_dir;
+    std::string out_path;
+    std::uint32_t seed{0x12345678U};
+};
+
+bool parse_export_opts(int argc, char **argv, ExportOpts &out) {
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--as" && i + 1 < argc) {
+            out.out_path.assign(argv[++i]);
+            continue;
+        }
+        if (a == "--seed" && i + 1 < argc) {
+            std::string_view const v{argv[++i]};
+            std::uint32_t parsed = 0;
+            if (!parse_uint32_arg(v.data(), parsed)) {
+                std::fprintf(stderr, "ptm export: --seed must be a hex/decimal u32 (got '%.*s')\n",
+                             static_cast<int>(v.size()), v.data());
+                return false;
+            }
+            out.seed = parsed;
+            continue;
+        }
+        if (a.starts_with("--")) {
+            std::fprintf(stderr, "ptm export: unknown flag: %.*s\n",
+                         static_cast<int>(a.size()), a.data());
+            return false;
+        }
+        if (!out.project_dir.empty()) {
+            std::fprintf(stderr,
+                         "ptm export: only one project dir may be given (got '%s' and '%.*s')\n",
+                         out.project_dir.c_str(),
+                         static_cast<int>(a.size()), a.data());
+            return false;
+        }
+        out.project_dir.assign(a);
+    }
+    if (out.project_dir.empty()) {
+        std::fputs("ptm export: missing required <project.stune> argument\n", stderr);
+        return false;
+    }
+    if (out.out_path.empty()) {
+        std::fputs("ptm export: --as <out.ptm> is required\n", stderr);
+        return false;
+    }
+    return true;
+}
+
+// Build the inner <PrivateData> XML from the project's [ptm_metadata]
+// + decoded patches. Patches' bytes_b64 fields are already base64; we
+// pass them through verbatim into the <patch> element body.
+std::string build_private_data_xml(
+    std::string const &vendor_id, std::string const &vehicle_id,
+    std::uint32_t lock_mask, std::string const &rom_sum,
+    std::string const &save_date,
+    std::vector<std::tuple<std::uint32_t, std::int32_t, std::uint32_t, std::string>> const &patches) {
+    auto xml_escape = [](std::string_view s) {
+        std::string out;
+        out.reserve(s.size());
+        for (char c : s) {
+            switch (c) {
+            case '&': out.append("&amp;"); break;
+            case '<': out.append("&lt;"); break;
+            case '>': out.append("&gt;"); break;
+            case '"': out.append("&quot;"); break;
+            case '\'': out.append("&apos;"); break;
+            default: out.push_back(c);
+            }
+        }
+        return out;
+    };
+    std::string xml = "<PrivateData>";
+    xml += "<vendorID>" + xml_escape(vendor_id) + "</vendorID>";
+    xml += "<vehicleID>" + xml_escape(vehicle_id) + "</vehicleID>";
+    xml += "<lock mask=\"" + std::to_string(lock_mask) + "\" />";
+    xml += "<romSum value=\"" + xml_escape(rom_sum) + "\" />";
+    xml += "<saveDateTime value=\"" + xml_escape(save_date) + "\" />";
+    xml += "<patches>";
+    for (auto const &[rom_off, ram_off, length, bytes_b64] : patches) {
+        xml += "<patch romOffset=\"" + std::to_string(rom_off) +
+               "\" ramOffset=\"" + std::to_string(ram_off) +
+               "\" length=\"" + std::to_string(length) + "\">" +
+               bytes_b64 + "</patch>";
+    }
+    xml += "</patches></PrivateData>";
+    return xml;
+}
+
+// Build the outer envelope XML that wraps the inner cipher payload.
+// encrypt_ptm injects `<encData>…</encData>` before this XML's last
+// closing tag, so the structure here just needs valid XML with a root
+// element that closes at the end.
+std::string build_outer_metadata_xml(std::string const &vendor_id,
+                                      std::string const &vehicle_id,
+                                      std::uint32_t lock_mask,
+                                      std::string const &rom_sum,
+                                      std::string const &save_date) {
+    auto xml_escape = [](std::string_view s) {
+        std::string out;
+        out.reserve(s.size());
+        for (char c : s) {
+            switch (c) {
+            case '&': out.append("&amp;"); break;
+            case '<': out.append("&lt;"); break;
+            case '>': out.append("&gt;"); break;
+            case '"': out.append("&quot;"); break;
+            case '\'': out.append("&apos;"); break;
+            default: out.push_back(c);
+            }
+        }
+        return out;
+    };
+    std::string xml = "<PtmOuter>";
+    xml += "<vendorID>" + xml_escape(vendor_id) + "</vendorID>";
+    xml += "<vehicleID>" + xml_escape(vehicle_id) + "</vehicleID>";
+    xml += "<lock mask=\"" + std::to_string(lock_mask) + "\" />";
+    xml += "<romSum value=\"" + xml_escape(rom_sum) + "\" />";
+    xml += "<saveDateTime value=\"" + xml_escape(save_date) + "\" />";
+    xml += "</PtmOuter>";
+    return xml;
+}
+
+int run_export(int argc, char **argv) {
+    ExportOpts opts;
+    if (!parse_export_opts(argc, argv, opts)) {
+        return 2;
+    }
+
+    std::filesystem::path const dir{opts.project_dir};
+    auto const proj_toml = dir / "project.toml";
+    auto const patches_toml = dir / "ptm_patches.toml";
+
+    if (!std::filesystem::exists(proj_toml)) {
+        std::fprintf(stderr, "ptm export: %s missing\n", proj_toml.string().c_str());
+        return 1;
+    }
+    if (!std::filesystem::exists(patches_toml)) {
+        std::fprintf(stderr, "ptm export: %s missing (only projects from `ptm import` "
+                             "carry this file)\n", patches_toml.string().c_str());
+        return 1;
+    }
+
+    // Parse project.toml [ptm_metadata].
+    toml::table proj;
+    try {
+        proj = toml::parse_file(proj_toml.string());
+    } catch (toml::parse_error const &e) {
+        std::fprintf(stderr, "ptm export: project.toml parse error: %s\n", e.description().data());
+        return 1;
+    }
+    auto const *meta = proj["ptm_metadata"].as_table();
+    if (meta == nullptr) {
+        std::fputs("ptm export: project.toml is missing the [ptm_metadata] block — "
+                   "only projects from `ptm import` can be exported back to a .ptm.\n",
+                   stderr);
+        return 1;
+    }
+    std::string const vendor_id    = (*meta)["vendor_id"].value_or<std::string>("");
+    std::string const vehicle_id   = (*meta)["vehicle_id"].value_or<std::string>("");
+    std::uint32_t const lock_mask  = (*meta)["lock_mask"].value_or<std::uint32_t>(0);
+    std::string const rom_sum      = (*meta)["rom_sum"].value_or<std::string>("");
+    std::string const save_date    = (*meta)["save_date_time"].value_or<std::string>("");
+
+    // Parse ptm_patches.toml [[patch]] entries.
+    toml::table pat;
+    try {
+        pat = toml::parse_file(patches_toml.string());
+    } catch (toml::parse_error const &e) {
+        std::fprintf(stderr, "ptm export: ptm_patches.toml parse error: %s\n", e.description().data());
+        return 1;
+    }
+    auto const *arr = pat["patch"].as_array();
+    if (arr == nullptr) {
+        std::fputs("ptm export: ptm_patches.toml has no [[patch]] entries\n", stderr);
+        return 1;
+    }
+    std::vector<std::tuple<std::uint32_t, std::int32_t, std::uint32_t, std::string>> patches;
+    patches.reserve(arr->size());
+    for (auto const &node : *arr) {
+        auto const *p = node.as_table();
+        if (p == nullptr) {
+            continue;
+        }
+        auto const rom_off = (*p)["rom_offset"].value_or<std::int64_t>(-1);
+        auto const ram_off = (*p)["ram_offset"].value_or<std::int64_t>(0);
+        auto const length  = (*p)["length"].value_or<std::int64_t>(-1);
+        auto const b64     = (*p)["bytes_b64"].value_or<std::string>("");
+        if (rom_off < 0 || length < 0 || b64.empty()) {
+            std::fprintf(stderr,
+                         "ptm export: malformed [[patch]] entry "
+                         "(rom_offset=%lld length=%lld b64-empty=%d) — skipping\n",
+                         static_cast<long long>(rom_off),
+                         static_cast<long long>(length),
+                         b64.empty() ? 1 : 0);
+            continue;
+        }
+        patches.emplace_back(static_cast<std::uint32_t>(rom_off),
+                             static_cast<std::int32_t>(ram_off),
+                             static_cast<std::uint32_t>(length),
+                             b64);
+    }
+
+    auto const inner = build_private_data_xml(vendor_id, vehicle_id, lock_mask, rom_sum,
+                                              save_date, patches);
+    auto const outer = build_outer_metadata_xml(vendor_id, vehicle_id, lock_mask, rom_sum,
+                                                save_date);
+
+    auto encrypted = st::devices::ap3::cipher::encrypt_ptm(inner, outer, opts.seed);
+    if (!encrypted.has_value()) {
+        std::fprintf(stderr, "ptm export: encrypt_ptm: %s\n",
+                     encrypted.error().to_string().c_str());
+        return encrypted.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
+    }
+
+    // Write output.
+    std::ofstream out{opts.out_path, std::ios::binary};
+    if (!out) {
+        std::fprintf(stderr, "ptm export: cannot open output %s\n", opts.out_path.c_str());
+        return 1;
+    }
+    out.write(reinterpret_cast<char const *>(encrypted->data()),
+              static_cast<std::streamsize>(encrypted->size()));
+
+    // Summary.
+    std::printf("ptm export: %s\n", opts.project_dir.c_str());
+    std::printf("  Patches:   %s\n", with_commas(patches.size()).c_str());
+    std::printf("  Vendor:    %s\n", vendor_id.c_str());
+    std::printf("  Vehicle:   %s\n", vehicle_id.c_str());
+    std::printf("  Seed:      0x%08X\n", opts.seed);
+    std::printf("  Output:    %s (%s bytes)\n",
+                opts.out_path.c_str(), with_commas(encrypted->size()).c_str());
+    return 0;
+}
+
 int run_inspect(int argc, char **argv) {
     InspectOpts opts;
     if (!parse_inspect_opts(argc, argv, opts)) {
@@ -17404,6 +17641,9 @@ int cmd_ptm(int argc, char *argv[]) {
                    "                     Layer or table-grouped diff between two tunes.\n"
                    "  import <file.ptm> --base-rom <path> [--into <dir>] [--name <s>] [--def <p>]\n"
                    "                     Write a .stune project from a .ptm + base ROM.\n"
+                   "  export <project.stune> --as <out.ptm> [--seed <hex>]\n"
+                   "                     Reverse of import: round-trip the project back to .ptm.\n"
+                   "                     Requires ST_ENABLE_COBB_AP_PTM_REWRITE=ON at build time.\n"
                    "  list-patches <file.ptm> [--format text|json|toml] [--def <pack-path>]\n"
                    "                     Decode a .ptm and emit one row per patch.\n"
                    "\n"
@@ -17434,6 +17674,9 @@ int cmd_ptm(int argc, char *argv[]) {
     }
     if (sub == "import") {
         return ptm_cli::run_import(argc - 1, argv + 1);
+    }
+    if (sub == "export") {
+        return ptm_cli::run_export(argc - 1, argv + 1);
     }
     if (sub == "list-patches") {
         return ptm_cli::run_list_patches(argc - 1, argv + 1);
