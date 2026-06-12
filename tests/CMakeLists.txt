@@ -42,6 +42,7 @@ add_executable(st_unit_tests
     unit/devices/ap3/test_live_smoke.cpp
     unit/devices/ap3/test_ptm_cipher.cpp
     unit/devices/ap3/test_ptm_cipher_private.cpp
+    unit/devices/ap3/test_aes_ctr_chunk_boundary.cpp
     unit/devices/ap3/test_architectural_classifier.cpp
     unit/devices/ap3/test_user_info_parse.cpp
     unit/devices/ap3/test_user_info_parse_private.cpp
