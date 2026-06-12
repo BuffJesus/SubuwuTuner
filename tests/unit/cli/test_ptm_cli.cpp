@@ -16,7 +16,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <system_error>
 
 namespace {
 
@@ -332,3 +335,75 @@ TEST_CASE("ptm export reports missing project dir",
     REQUIRE(r.exit_code == 1);
 #endif
 }
+
+#if defined(ST_AP3_HAVE_CIPHER) && defined(ST_AP3_HAVE_PTM_REWRITE)
+TEST_CASE("ptm export → ptm inspect end-to-end round-trip",
+          "[cli][ptm][integration][cipher][rewrite]") {
+    if (!can_run()) {
+        return;
+    }
+    namespace fs = std::filesystem;
+    auto const tmp = fs::temp_directory_path() / "subuwutuner_ptm_roundtrip";
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    auto const proj_dir = tmp / "synth.stune";
+    fs::create_directories(proj_dir, ec);
+
+    // Write a minimal project.toml + ptm_patches.toml that exercises
+    // the export pipeline's metadata + patch-array handling.
+    {
+        std::ofstream f{proj_dir / "project.toml"};
+        f << "[project]\n"
+             "schema_version = 1\n"
+             "display_name   = \"roundtrip-smoke\"\n"
+             "\n"
+             "[ptm_metadata]\n"
+             "vendor_id      = \"SUBUWU_ROUNDTRIP\"\n"
+             "vehicle_id     = \"SYNTHETIC_E2E\"\n"
+             "lock_mask      = 0\n"
+             "rom_sum        = \"12345\"\n"
+             "save_date_time = \"0\"\n";
+    }
+    {
+        std::ofstream f{proj_dir / "ptm_patches.toml"};
+        f << "[[patch]]\n"
+             "rom_offset = 32768\n"
+             "ram_offset = -657408\n"
+             "length     = 5\n"
+             "bytes_b64  = \"SGVsbG8=\"\n"
+             "layer      = \"tuner_addition\"\n"
+             "\n"
+             "[[patch]]\n"
+             "rom_offset = 65536\n"
+             "ram_offset = -624640\n"
+             "length     = 5\n"
+             "bytes_b64  = \"V29ybGQ=\"\n"
+             "layer      = \"tuner_addition\"\n";
+    }
+
+    auto const out_ptm = tmp / "out.ptm";
+
+    // Export.
+    {
+        auto const r = st::test::cli_run(
+            "--enable-cobb-ap-cipher ptm export " +
+            st::test::quote(proj_dir.string()) + " --as " +
+            st::test::quote(out_ptm.string()));
+        REQUIRE(r.spawned);
+        REQUIRE(r.exit_code == 0);
+    }
+
+    // Output file exists and is non-empty.
+    REQUIRE(fs::exists(out_ptm));
+    REQUIRE(fs::file_size(out_ptm) > 0);
+
+    // Inspect → identity + patch count round-trip.
+    auto const r = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm inspect " + st::test::quote(out_ptm.string()));
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_text.find("SUBUWU_ROUNDTRIP") != std::string::npos);
+    REQUIRE(r.stdout_text.find("SYNTHETIC_E2E") != std::string::npos);
+    REQUIRE(r.stdout_text.find("Patches:          2 ") != std::string::npos);
+}
+#endif
