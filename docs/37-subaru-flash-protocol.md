@@ -86,7 +86,17 @@ extract the actual key material per variant (analyst RE6 / future pass).
 
 ## Implementer roadmap
 
-Ordered by what unblocks the bench-rig flash gate:
+Ordered by what unblocks the bench-rig flash gate.
+
+**Tier A skeleton shipped** (commit hash recorded in CLAUDE.md). The
+class `st::flash::SubaruShCanFlash` lives at
+`src/flash/include/st/flash/subaru_sh_can_flash.hpp` + `.cpp`. Every
+method returns `PolicyDenied` by default (build flag
+`ST_ENABLE_SUBARU_ECU_FLASH=OFF`); with the flag ON the methods
+return `NotImplemented`. Tier B fills in the UDS sequence body.
+Three test cases pin the gate behavior at
+`tests/unit/flash/test_subaru_sh_can_flash.cpp`.
+
 
 1. **Map our existing SA names to the RE5 variants** (live or via disasm).
    Without this, calling `SH_CAN_Flash::OpenComms(... init_type ...)`

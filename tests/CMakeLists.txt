@@ -81,6 +81,7 @@ add_executable(st_unit_tests
     unit/flash/test_read_full_rom_sa_v4_port.cpp
     unit/flash/test_brick_recovery_fixture.cpp
     unit/flash/test_ascii_relay_bench_power.cpp
+    unit/flash/test_subaru_sh_can_flash.cpp
     # Bench-rig fixture sources (header + impl). The header lives
     # under tests/_helpers/; .cpp's compile into st_unit_tests so the
     # MockBenchPower + BrickRecoveryFixture unit tests can link.
@@ -168,6 +169,11 @@ if(ST_ENABLE_COBB_AP_CIPHER)
 endif()
 if(ST_ENABLE_COBB_AP_PTM_REWRITE)
     target_compile_definitions(st_unit_tests PRIVATE ST_AP3_HAVE_PTM_REWRITE=1)
+endif()
+# Mirror the Subaru-direct-flash gate to the test binary so
+# test_subaru_sh_can_flash.cpp's #if branches select the right path.
+if(ST_ENABLE_SUBARU_ECU_FLASH)
+    target_compile_definitions(st_unit_tests PRIVATE ST_SUBARU_ECU_FLASH_ENABLED=1)
 endif()
 
 # Wire the CLI binary path + demo-fixture path into the test target so
