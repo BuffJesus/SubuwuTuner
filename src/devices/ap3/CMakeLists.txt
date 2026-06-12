@@ -43,6 +43,9 @@ add_library(st_devices_ap3 STATIC
     src/client.cpp
     src/ptm_cipher.cpp
     src/architectural_classifier.cpp
+    # COBB AP datalogger preset format (`/presets/*.cfg`) — RE4
+    # output, plain ASCII INI with no cipher dependency.
+    src/datalogger_cfg.cpp
     # Session 2 cipher wrappers (always compile — they pick OFF-path
     # stubs when ST_AP3_HAVE_CIPHER is undefined).
     src/aes256_ctr.cpp

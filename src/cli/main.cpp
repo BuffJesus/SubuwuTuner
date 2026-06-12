@@ -15836,11 +15836,16 @@ bool gate_marriage(st::devices::ap3::DeviceState const &state, CommonOpts const 
         return false;
     }
     if (!state.married.has_value()) {
+        // cmd 0x28 is the sole marriage source per RE2; this branch
+        // means its ASCII payload didn't parse (truncation, shape
+        // drift in a future firmware, etc.). Warn but proceed —
+        // refusing on a parse failure would lock the user out for a
+        // CLI-side bug, not an unmarried device.
         std::fputs(
-            "ap3: warning — marriage state could not be parsed from this device's\n"
-            "     settings blob (the byte offset of the Installed/Not Installed\n"
-            "     marker is not yet pinned down in the protocol spec). Proceeding\n"
-            "     anyway. Pass --allow-unmarried-ap to silence this warning.\n",
+            "ap3: warning — marriage state could not be parsed from the cmd 0x28\n"
+            "     UserInfo response. The ASCII payload may be truncated or have\n"
+            "     drifted shape. Proceeding anyway. Pass --allow-unmarried-ap to\n"
+            "     silence this warning.\n",
             stderr);
     }
     return true;

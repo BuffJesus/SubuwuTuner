@@ -168,18 +168,19 @@ struct UserInfoFields {
 [[nodiscard]] UserInfoFields parse_user_info_body(std::span<std::uint8_t const> body);
 
 // Extract the marriage flag from the cmd 0x03 DeviceSettings response
-// body. Spec §15 leaves the exact byte offset of the Installed / Not
-// Installed marker undocumented; the analyst RE task is to fill it in.
-// Until then this returns `std::nullopt` (unknown) — callers fall back
-// to the cmd 0x28 ASCII payload's `install state` field, which is the
-// authoritative source on current firmware (v1.7.6.0-28785).
+// body. Per RE2 (findings/re-2026-06-12-pm/), the AP's persistent
+// settings store is `/root/settings`, a plain ASCII INI with no
+// marriage field — marriage state lives ONLY in the cmd 0x28
+// UserInfo response (already parsed by `parse_user_info_body`). The
+// cmd 0x03 binary layout could not be decoded without fresh live
+// captures, and analysts confirmed no marriage byte is hiding there.
 //
-// The hook is intentionally a free function so the analyst's offset
-// finding can drop in as a single-symbol edit. When the offset lands,
-// add a fixture-pinned unit test that loads
-// `fixtures/private/ap3_live_captures/cmd03_*.bin` and asserts the
-// parsed bool agrees with the cmd 0x28 derived `married` for that
-// same session (cross-validation).
+// This hook is retained as a forward-compat seam: a future firmware
+// revision might add a marriage byte to cmd 0x03 (carrier-flagged or
+// otherwise), in which case the body becomes a one-line edit and the
+// `query_state` fallback already wired here picks up the new signal.
+// For now it returns `std::nullopt` unconditionally — callers MUST
+// keep treating `parse_user_info_body` as authoritative.
 [[nodiscard]] std::optional<bool>
 parse_marriage_from_device_settings(std::span<std::uint8_t const> body);
 

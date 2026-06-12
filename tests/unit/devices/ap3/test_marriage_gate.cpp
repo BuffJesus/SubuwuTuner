@@ -89,19 +89,15 @@ void queue_query_state(st::test::transport::LoopbackByteChannel &channel,
 
 } // namespace
 
-TEST_CASE("parse_marriage_from_device_settings is a placeholder returning nullopt",
+TEST_CASE("parse_marriage_from_device_settings returns nullopt by design",
           "[devices][ap3][marriage]") {
-    // Until the analyst pins the byte offset of the Installed marker
-    // in the cmd 0x03 DeviceSettings blob (spec §15 open question),
-    // this hook returns nullopt for every input. The CLI marriage gate
-    // (`gate_marriage` in main.cpp) falls back to a "warn + proceed"
-    // path in that case, which matches the current user-visible
-    // behavior.
-    //
-    // When the offset lands, replace this test with a fixture-pinned
-    // one loading fixtures/private/ap3_live_captures/cmd03_*.bin and
-    // asserting the parsed bool agrees with the cmd 0x28 marriage for
-    // that same session.
+    // Per RE2 (findings/re-2026-06-12-pm/): the AP's persistent
+    // settings file `/root/settings` is plain ASCII INI with no
+    // marriage field, and the cmd 0x03 binary layout has no marriage
+    // byte either. cmd 0x28 (parsed by parse_user_info_body) is the
+    // sole authoritative source. This hook stays as a forward-compat
+    // seam — if a future firmware revision adds the byte, the body
+    // becomes a one-line edit.
     std::array<std::uint8_t, 0> empty{};
     REQUIRE_FALSE(
         st::devices::ap3::parse_marriage_from_device_settings(empty).has_value());

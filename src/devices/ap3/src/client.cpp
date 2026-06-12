@@ -133,26 +133,12 @@ UserInfoFields parse_user_info_body(std::span<std::uint8_t const> body) {
 
 std::optional<bool>
 parse_marriage_from_device_settings(std::span<std::uint8_t const> body) {
-    // PLACEHOLDER — analyst RE task per spec §15. The cmd 0x03
-    // DeviceSettings response is a Boost-archived blob with an
-    // Installed / Not Installed marker somewhere in the payload;
-    // exact byte offset is the open question.
-    //
-    // Drop-in shape, when the offset lands:
-    //
-    //   constexpr std::size_t kMarriageByteOffset = 0xXX;
-    //   constexpr std::uint8_t kInstalled = 0xYY;
-    //   constexpr std::uint8_t kNotInstalled = 0xZZ;
-    //   if (body.size() <= kMarriageByteOffset) return std::nullopt;
-    //   auto const b = body[kMarriageByteOffset];
-    //   if (b == kInstalled)    return true;
-    //   if (b == kNotInstalled) return false;
-    //   return std::nullopt;
-    //
-    // Until then, every caller falls back to the cmd 0x28 ASCII
-    // payload (parse_user_info_body) — which is reliable on current
-    // firmware. Returning nullopt here keeps the cmd 0x28 result
-    // load-bearing without poisoning it.
+    // Per RE2 (findings/re-2026-06-12-pm/): the AP stores persistent
+    // settings in `/root/settings` as plain ASCII INI with no
+    // marriage field. cmd 0x28 is the only source. This hook stays
+    // as a forward-compat seam — if a future firmware revision adds
+    // a marriage byte to cmd 0x03, the body becomes a one-liner and
+    // query_state's fallback ordering picks it up automatically.
     (void)body;
     return std::nullopt;
 }
