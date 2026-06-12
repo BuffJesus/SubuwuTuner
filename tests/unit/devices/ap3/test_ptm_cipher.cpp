@@ -233,25 +233,32 @@ TEST_CASE("ap3 cipher fixtures: base64 layer 2 envelope + decode against canonic
     }
 }
 
-TEST_CASE("ap3 cipher fixtures: AES-256-CTR layer 3 byte-identical against canonical vectors",
-          "[devices][ap3][cipher][fixtures]") {
-    auto plaintext = load_cipher_fixture("aes_layer3_input.bin");
-    auto expected = load_cipher_fixture("aes_layer3_output.bin");
-    if (plaintext.empty() || expected.empty()) {
-        SKIP("AES layer 3 fixtures not staged");
+TEST_CASE("ap3 cipher: AES-256-CTR symmetric round-trip with the custom construction",
+          "[devices][ap3][cipher]") {
+    // The canonical aes_layer3_input/output fixture was generated for
+    // STANDARD AES-CTR (linear 16-byte counter), but the real `.ptm`
+    // format uses a custom CTR with 16 KB chunks + counter-repeated-4
+    // input blocks — see pkg::ExrRil::en_de + the reference Python
+    // tool. Live-verified 2026-06-12 against real tunes from the AP.
+    //
+    // Self-consistency round-trip is sufficient here; byte-identity
+    // against an external fixture is gated on the analyst staging a
+    // generator for the custom construction.
+    std::vector<std::uint8_t> plaintext;
+    for (std::size_t i = 0; i < 8192; ++i) {
+        plaintext.push_back(static_cast<std::uint8_t>(i & 0xFF));
     }
-    auto encrypted = st::devices::ap3::cipher::aes256_ctr_encrypt(plaintext);
+    constexpr std::uint32_t kNonce = 0x00000020U;
+    auto encrypted = st::devices::ap3::cipher::aes256_ctr_encrypt(plaintext, kNonce);
     REQUIRE(encrypted.has_value());
-    REQUIRE(encrypted->size() == expected.size());
-    for (std::size_t i = 0; i < expected.size(); ++i) {
-        INFO("byte " << i << " encrypted=" << std::hex << static_cast<int>((*encrypted)[i])
-                     << " expected=" << static_cast<int>(expected[i]));
-        REQUIRE((*encrypted)[i] == expected[i]);
-    }
-    // CTR is symmetric; decrypt of expected ciphertext must recover plaintext.
-    auto decrypted = st::devices::ap3::cipher::aes256_ctr_decrypt(expected);
+    REQUIRE(encrypted->size() == plaintext.size());
+    auto decrypted = st::devices::ap3::cipher::aes256_ctr_decrypt(*encrypted, kNonce);
     REQUIRE(decrypted.has_value());
     REQUIRE(*decrypted == plaintext);
+    // Different nonce → different keystream → wrong plaintext.
+    auto wrong = st::devices::ap3::cipher::aes256_ctr_decrypt(*encrypted, 0x21U);
+    REQUIRE(wrong.has_value());
+    REQUIRE_FALSE(*wrong == plaintext);
 }
 
 TEST_CASE("ap3 cipher fixtures: bzip2 decompress layer 4 against canonical vectors",
@@ -368,7 +375,7 @@ TEST_CASE("ap3 cipher: PolicyDenied when build flag is off",
     REQUIRE_FALSE(d.has_value());
     REQUIRE(d.error().code() == st::ErrorCode::PolicyDenied);
 
-    auto a = st::devices::ap3::cipher::aes256_ctr_decrypt(dummy);
+    auto a = st::devices::ap3::cipher::aes256_ctr_decrypt(dummy, 0x20U);
     REQUIRE_FALSE(a.has_value());
     REQUIRE(a.error().code() == st::ErrorCode::PolicyDenied);
 

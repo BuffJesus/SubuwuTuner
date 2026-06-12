@@ -332,7 +332,21 @@ decrypt_ptm(std::span<std::uint8_t const> ptm_bytes) {
     if (!inner_ct.has_value()) {
         return st::failure(std::move(inner_ct).error());
     }
-    auto bz_blob = aes256_ctr_decrypt(*inner_ct);
+    // The base64-decoded encData blob carries the per-file AES nonce
+    // in its last 4 bytes (BE u32). Strip those before feeding the
+    // body to the custom CTR construction. Per `pkg::ExrRil::en_de`
+    // and the reference Python tool — verified live 2026-06-12.
+    if (inner_ct->size() < 4) {
+        return st::failure(st::ErrorCode::ParseError,
+                           "ap3: encData blob too short to carry a 4-byte nonce");
+    }
+    std::uint32_t const aes_nonce =
+        (static_cast<std::uint32_t>((*inner_ct)[inner_ct->size() - 4]) << 24) |
+        (static_cast<std::uint32_t>((*inner_ct)[inner_ct->size() - 3]) << 16) |
+        (static_cast<std::uint32_t>((*inner_ct)[inner_ct->size() - 2]) << 8) |
+        static_cast<std::uint32_t>((*inner_ct)[inner_ct->size() - 1]);
+    inner_ct->resize(inner_ct->size() - 4);
+    auto bz_blob = aes256_ctr_decrypt(*inner_ct, aes_nonce);
     if (!bz_blob.has_value()) {
         return st::failure(std::move(bz_blob).error());
     }
@@ -366,7 +380,7 @@ Result<std::vector<std::uint8_t>>
 encrypt_ptm(std::string_view private_data_xml,
             std::string_view outer_metadata_xml,
             std::uint32_t seed,
-            std::uint32_t /*nonce*/) {
+            std::uint32_t nonce) {
     // Reverse of decrypt_ptm. Pipeline: bzip2 compress → AES-256-CTR
     // encrypt → base64 encode → inject into outer XML → XTEA-CBC
     // encrypt + 5-byte trailer.
@@ -384,10 +398,19 @@ encrypt_ptm(std::string_view private_data_xml,
     if (!compressed.has_value()) {
         return st::failure(std::move(compressed).error());
     }
-    auto encrypted_inner = aes256_ctr_encrypt(*compressed);
+    // AES-256-CTR with the per-file nonce. The `nonce` parameter is
+    // the same value that gets appended (BE u32) at the end of the
+    // encData blob so decrypt_ptm can recover it. Every observed real
+    // .ptm uses the spec §13 constant 0x00000020 here.
+    auto encrypted_inner = aes256_ctr_encrypt(*compressed, nonce);
     if (!encrypted_inner.has_value()) {
         return st::failure(std::move(encrypted_inner).error());
     }
+    // Append 4-byte BE nonce trailer to match the per-file format.
+    encrypted_inner->push_back(static_cast<std::uint8_t>((nonce >> 24) & 0xFFU));
+    encrypted_inner->push_back(static_cast<std::uint8_t>((nonce >> 16) & 0xFFU));
+    encrypted_inner->push_back(static_cast<std::uint8_t>((nonce >> 8) & 0xFFU));
+    encrypted_inner->push_back(static_cast<std::uint8_t>(nonce & 0xFFU));
     std::string const encdata_b64 = base64_encode(*encrypted_inner);
 
     // Inject `<encData>BASE64</encData>` into the outer XML. Heuristic:

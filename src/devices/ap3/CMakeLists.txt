@@ -92,16 +92,20 @@ if(ST_ENABLE_COBB_AP_CIPHER)
         third_party/tiny_aes
         third_party/bzip2_dec
     )
-    # Configure tiny-AES-c at compile time for AES-256-CTR only.
-    # AES128/192/256 select key length; CBC/ECB/CTR select modes.
-    # The upstream defaults to AES128 + CBC + ECB + CTR; we want
-    # only AES256 + CTR.
+    # Configure tiny-AES-c at compile time for AES-256.
+    # The .ptm cipher uses AES-ECB-encrypt as the keystream primitive
+    # inside a custom CTR construction (see aes256_ctr.cpp xcrypt); the
+    # built-in CTR mode in tiny-AES-c is the standard linear-counter
+    # variant which doesn't match the AP firmware's 16 KB-chunked
+    # construction. Enable ECB; the CTR macro is left ON to keep the
+    # AES_CTR_xcrypt_buffer entry point declared for backwards-compat
+    # with any existing fixture tests but unused by the production path.
     target_compile_definitions(st_devices_ap3 PRIVATE
         AES128=0
         AES192=0
         AES256=1
         CBC=0
-        ECB=0
+        ECB=1
         CTR=1
     )
     # bzip2 + tiny-AES-c are C with their own conventions — suppress

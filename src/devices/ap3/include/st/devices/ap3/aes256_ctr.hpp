@@ -28,16 +28,23 @@
 
 namespace st::devices::ap3::cipher {
 
-// Decrypt under the spec §13 key + IV. Input length is arbitrary
-// (CTR doesn't require block alignment); output has the same length.
+// Decrypt under the spec §13 key + custom CTR construction.
+// `nonce` is the 32-bit value extracted from the last 4 bytes (BE) of
+// the base64-decoded `encData` blob. Input length is arbitrary;
+// output has the same length.
+//
+// The construction is NOT standard AES-CTR — it processes the body in
+// 16 KB outer chunks, each with `outer_nonce = nonce + chunk_offset`,
+// and within each chunk uses 16-byte AES inputs built as
+// `counter (4B BE) × 4` where counter = outer_nonce + block_idx.
+// Mirrors pkg::ExrRil::en_de in libMapFile.so. Live-verified against
+// real `.ptm` samples by the reference Python tool.
 [[nodiscard]] Result<std::vector<std::uint8_t>>
-aes256_ctr_decrypt(std::span<std::uint8_t const> ciphertext);
+aes256_ctr_decrypt(std::span<std::uint8_t const> ciphertext, std::uint32_t nonce);
 
-// Encrypt under the spec §13 key + IV. Same operation as decrypt
-// because CTR is XOR-with-keystream; both directions are exposed
-// for intent.
+// Encrypt — symmetric XOR-with-keystream, same construction as decrypt.
 [[nodiscard]] Result<std::vector<std::uint8_t>>
-aes256_ctr_encrypt(std::span<std::uint8_t const> plaintext);
+aes256_ctr_encrypt(std::span<std::uint8_t const> plaintext, std::uint32_t nonce);
 
 } // namespace st::devices::ap3::cipher
 
