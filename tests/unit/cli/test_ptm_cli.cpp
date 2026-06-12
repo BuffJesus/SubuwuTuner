@@ -143,3 +143,65 @@ TEST_CASE("ptm inspect exercises decrypt + decode on synthetic fixture",
 #endif
 #endif
 }
+
+TEST_CASE("ptm diff refuses without --enable-cobb-ap-cipher",
+          "[cli][ptm][integration]") {
+    if (!can_run()) {
+        return;
+    }
+    auto const r = st::test::cli_run("ptm diff /nonexistent/a.ptm /nonexistent/b.ptm");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("ptm diff requires two positional args",
+          "[cli][ptm][integration]") {
+    if (!can_run()) {
+        return;
+    }
+    auto const r = st::test::cli_run("--enable-cobb-ap-cipher ptm diff /tmp/only-one.ptm");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("ptm diff reports missing files on cipher path",
+          "[cli][ptm][integration][cipher]") {
+#ifndef ST_AP3_HAVE_CIPHER
+    SKIP("Cipher gating off");
+#else
+    if (!can_run()) {
+        return;
+    }
+    auto const r = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm diff /nonexistent/a.ptm /nonexistent/b.ptm");
+    REQUIRE(r.spawned);
+    // First file (a) fails the read; exit 1.
+    REQUIRE(r.exit_code == 1);
+#endif
+}
+
+TEST_CASE("ptm diff: a == b on synthetic fixture",
+          "[cli][ptm][integration][cipher]") {
+#ifndef ST_AP3_HAVE_CIPHER
+    SKIP("Cipher gating off");
+#else
+#ifndef ST_FIXTURE_AP3_CIPHER_DIR
+    SKIP("ST_FIXTURE_AP3_CIPHER_DIR not defined");
+#else
+    if (!can_run()) {
+        return;
+    }
+    std::string const fixture =
+        std::string{ST_FIXTURE_AP3_CIPHER_DIR} + "/synthetic_e2e_ptm_envelope.ptm";
+    // Diff a file against itself. The synthetic fixture intentionally
+    // fails decoding (trivial null inner payload), so the first decode
+    // call returns ParseError → exit 1. The CLI plumbing of two
+    // positional args + format dispatch still gets exercised.
+    auto const r = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm diff " + st::test::quote(fixture) +
+        " " + st::test::quote(fixture));
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 1);
+#endif
+#endif
+}

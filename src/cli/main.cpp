@@ -16459,6 +16459,328 @@ void render_inspect_toml(std::string const &path,
     }
 }
 
+struct DiffOpts {
+    std::string a_path;
+    std::string b_path;
+    Format format{Format::Text};
+};
+
+bool parse_diff_opts(int argc, char **argv, DiffOpts &out) {
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--format" && i + 1 < argc) {
+            std::string_view const v{argv[++i]};
+            if (v == "text") {
+                out.format = Format::Text;
+            } else if (v == "json") {
+                out.format = Format::Json;
+            } else if (v == "toml") {
+                out.format = Format::Toml;
+            } else {
+                std::fprintf(stderr,
+                             "ptm diff: --format must be text|json|toml (got '%.*s')\n",
+                             static_cast<int>(v.size()), v.data());
+                return false;
+            }
+            continue;
+        }
+        if (a.starts_with("--")) {
+            std::fprintf(stderr, "ptm diff: unknown flag: %.*s\n",
+                         static_cast<int>(a.size()), a.data());
+            return false;
+        }
+        if (out.a_path.empty()) {
+            out.a_path.assign(a);
+        } else if (out.b_path.empty()) {
+            out.b_path.assign(a);
+        } else {
+            std::fprintf(stderr,
+                         "ptm diff: too many positional args (got '%s', '%s', '%.*s')\n",
+                         out.a_path.c_str(), out.b_path.c_str(),
+                         static_cast<int>(a.size()), a.data());
+            return false;
+        }
+    }
+    if (out.a_path.empty() || out.b_path.empty()) {
+        std::fputs("ptm diff: missing <a.ptm> <b.ptm> arguments\n", stderr);
+        return false;
+    }
+    return true;
+}
+
+// Per-architectural-layer diff tally. The shared / a_only / b_only
+// breakdown is at the rom_offset level — patches with the same
+// rom_offset are considered "shared"; bytes-different among shared is
+// the changed_at_common bucket.
+struct LayerDiff {
+    st::devices::ap3::Layer layer{st::devices::ap3::Layer::Uncharacterized};
+    std::uint32_t a_only_patches{0};
+    std::uint32_t b_only_patches{0};
+    std::uint32_t shared_patches{0};
+    std::uint32_t changed_at_shared{0};
+    std::uint64_t a_only_bytes{0};
+    std::uint64_t b_only_bytes{0};
+    std::uint64_t changed_bytes{0};
+};
+
+struct DiffResult {
+    std::uint32_t a_total_patches{0};
+    std::uint32_t b_total_patches{0};
+    std::uint32_t shared_patches{0};
+    std::uint32_t a_only_patches{0};
+    std::uint32_t b_only_patches{0};
+    std::uint32_t changed_at_shared{0};
+    std::uint64_t a_only_bytes{0};
+    std::uint64_t b_only_bytes{0};
+    std::uint64_t changed_bytes{0};
+    std::vector<LayerDiff> by_layer;
+};
+
+DiffResult compute_diff(st::library::DecodedPtm const &a, st::library::DecodedPtm const &b) {
+    DiffResult r{};
+    r.a_total_patches = static_cast<std::uint32_t>(a.patches.size());
+    r.b_total_patches = static_cast<std::uint32_t>(b.patches.size());
+
+    // rom_offset → patch index. Two patches at the same offset are
+    // considered the same record for diff purposes.
+    std::map<std::uint32_t, std::size_t> a_by_offset;
+    std::map<std::uint32_t, std::size_t> b_by_offset;
+    for (std::size_t i = 0; i < a.patches.size(); ++i) {
+        a_by_offset[a.patches[i].rom_offset] = i;
+    }
+    for (std::size_t i = 0; i < b.patches.size(); ++i) {
+        b_by_offset[b.patches[i].rom_offset] = i;
+    }
+
+    auto const &map = st::devices::ap3::default_lf79103p_layer_map();
+    std::map<st::devices::ap3::Layer, LayerDiff> per_layer;
+    auto layer_bucket = [&](st::devices::ap3::Layer L) -> LayerDiff & {
+        auto it = per_layer.find(L);
+        if (it == per_layer.end()) {
+            it = per_layer.emplace(L, LayerDiff{L, 0, 0, 0, 0, 0, 0, 0}).first;
+        }
+        return it->second;
+    };
+
+    // Shared + a_only iteration: for each A patch, check whether B has
+    // the same rom_offset. If yes → shared (possibly bytes-different).
+    // If no → a_only.
+    for (auto const &p : a.patches) {
+        auto const L = st::devices::ap3::classify(map, p.rom_offset);
+        auto &bucket = layer_bucket(L);
+        auto it = b_by_offset.find(p.rom_offset);
+        if (it == b_by_offset.end()) {
+            ++r.a_only_patches;
+            r.a_only_bytes += p.length;
+            ++bucket.a_only_patches;
+            bucket.a_only_bytes += p.length;
+        } else {
+            ++r.shared_patches;
+            ++bucket.shared_patches;
+            auto const &pb = b.patches[it->second];
+            // bytes-different at shared offset?
+            if (p.bytes != pb.bytes) {
+                ++r.changed_at_shared;
+                ++bucket.changed_at_shared;
+                // Charge the changed-bytes count to the byte-wise diff
+                // size — the spec rolls it up as a single number.
+                std::size_t const min_n = std::min(p.bytes.size(), pb.bytes.size());
+                std::uint64_t diff_bytes = 0;
+                for (std::size_t i = 0; i < min_n; ++i) {
+                    if (p.bytes[i] != pb.bytes[i]) {
+                        ++diff_bytes;
+                    }
+                }
+                // Length mismatch contributes the trailing bytes too.
+                diff_bytes += p.bytes.size() > min_n ? p.bytes.size() - min_n : 0;
+                diff_bytes += pb.bytes.size() > min_n ? pb.bytes.size() - min_n : 0;
+                r.changed_bytes += diff_bytes;
+                bucket.changed_bytes += diff_bytes;
+            }
+        }
+    }
+    // b_only iteration: only the B patches whose rom_offset isn't in A.
+    for (auto const &p : b.patches) {
+        if (a_by_offset.find(p.rom_offset) != a_by_offset.end()) {
+            continue;
+        }
+        auto const L = st::devices::ap3::classify(map, p.rom_offset);
+        auto &bucket = layer_bucket(L);
+        ++r.b_only_patches;
+        r.b_only_bytes += p.length;
+        ++bucket.b_only_patches;
+        bucket.b_only_bytes += p.length;
+    }
+    // Flatten the map into a vector sorted by total-impact (a_only +
+    // b_only + changed bytes), descending. Bigger-impact layers first.
+    for (auto const &[layer, ld] : per_layer) {
+        r.by_layer.push_back(ld);
+    }
+    std::sort(r.by_layer.begin(), r.by_layer.end(),
+              [](LayerDiff const &x, LayerDiff const &y) {
+                  return (x.a_only_bytes + x.b_only_bytes + x.changed_bytes) >
+                         (y.a_only_bytes + y.b_only_bytes + y.changed_bytes);
+              });
+    return r;
+}
+
+void render_diff_text(std::string const &a_path, std::string const &b_path,
+                      DiffResult const &r) {
+    auto basename = [](std::string const &p) {
+        auto s = p.find_last_of("/\\");
+        return s == std::string::npos ? p : p.substr(s + 1);
+    };
+    std::printf("ptm diff: %s → %s\n\n", basename(a_path).c_str(), basename(b_path).c_str());
+    std::printf("Patch envelope: a=%u  b=%u  shared=%u  a_only=%u  b_only=%u  "
+                "changed_at_shared=%u\n",
+                r.a_total_patches, r.b_total_patches, r.shared_patches,
+                r.a_only_patches, r.b_only_patches, r.changed_at_shared);
+    std::printf("Bytes:          a_only=%s  b_only=%s  changed=%s\n\n",
+                with_commas(r.a_only_bytes).c_str(),
+                with_commas(r.b_only_bytes).c_str(),
+                with_commas(r.changed_bytes).c_str());
+
+    if (!r.by_layer.empty()) {
+        std::printf("By layer\n");
+        for (auto const &ld : r.by_layer) {
+            auto const label = st::devices::ap3::layer_label(ld.layer);
+            std::printf("  %-30.*s a_only=%u/%s  b_only=%u/%s  "
+                        "shared=%u (changed=%u/%s)\n",
+                        static_cast<int>(label.size()), label.data(),
+                        ld.a_only_patches, with_commas(ld.a_only_bytes).c_str(),
+                        ld.b_only_patches, with_commas(ld.b_only_bytes).c_str(),
+                        ld.shared_patches, ld.changed_at_shared,
+                        with_commas(ld.changed_bytes).c_str());
+        }
+        std::printf("\n");
+    }
+
+    std::printf("Cross-references\n");
+    std::printf("  Per-row patch listing:           ptm list-patches <file>\n");
+    std::printf("  Identity + summary per file:     ptm inspect <file>\n");
+}
+
+void render_diff_json(std::string const &a_path, std::string const &b_path,
+                      DiffResult const &r) {
+    (void)a_path;
+    (void)b_path;
+    std::printf("{\n");
+    std::printf("  \"envelope\": {\n");
+    std::printf("    \"a_total\": %u,\n", r.a_total_patches);
+    std::printf("    \"b_total\": %u,\n", r.b_total_patches);
+    std::printf("    \"shared\": %u,\n", r.shared_patches);
+    std::printf("    \"a_only\": %u,\n", r.a_only_patches);
+    std::printf("    \"b_only\": %u,\n", r.b_only_patches);
+    std::printf("    \"changed_at_shared\": %u\n", r.changed_at_shared);
+    std::printf("  },\n");
+    std::printf("  \"bytes\": {\n");
+    std::printf("    \"a_only\": %llu,\n", static_cast<unsigned long long>(r.a_only_bytes));
+    std::printf("    \"b_only\": %llu,\n", static_cast<unsigned long long>(r.b_only_bytes));
+    std::printf("    \"changed\": %llu\n", static_cast<unsigned long long>(r.changed_bytes));
+    std::printf("  },\n");
+    std::printf("  \"by_layer\": [\n");
+    for (std::size_t i = 0; i < r.by_layer.size(); ++i) {
+        auto const &ld = r.by_layer[i];
+        auto const label = st::devices::ap3::layer_label(ld.layer);
+        std::printf("    {\"layer\":\"%.*s\","
+                    "\"a_only_patches\":%u,\"b_only_patches\":%u,"
+                    "\"shared_patches\":%u,\"changed_at_shared\":%u,"
+                    "\"a_only_bytes\":%llu,\"b_only_bytes\":%llu,"
+                    "\"changed_bytes\":%llu}%s\n",
+                    static_cast<int>(label.size()), label.data(),
+                    ld.a_only_patches, ld.b_only_patches, ld.shared_patches,
+                    ld.changed_at_shared,
+                    static_cast<unsigned long long>(ld.a_only_bytes),
+                    static_cast<unsigned long long>(ld.b_only_bytes),
+                    static_cast<unsigned long long>(ld.changed_bytes),
+                    i + 1 < r.by_layer.size() ? "," : "");
+    }
+    std::printf("  ]\n");
+    std::printf("}\n");
+}
+
+void render_diff_toml(std::string const &a_path, std::string const &b_path,
+                      DiffResult const &r) {
+    (void)a_path;
+    (void)b_path;
+    std::printf("[envelope]\n");
+    std::printf("a_total = %u\n", r.a_total_patches);
+    std::printf("b_total = %u\n", r.b_total_patches);
+    std::printf("shared = %u\n", r.shared_patches);
+    std::printf("a_only = %u\n", r.a_only_patches);
+    std::printf("b_only = %u\n", r.b_only_patches);
+    std::printf("changed_at_shared = %u\n", r.changed_at_shared);
+    std::printf("\n[bytes]\n");
+    std::printf("a_only = %llu\n", static_cast<unsigned long long>(r.a_only_bytes));
+    std::printf("b_only = %llu\n", static_cast<unsigned long long>(r.b_only_bytes));
+    std::printf("changed = %llu\n", static_cast<unsigned long long>(r.changed_bytes));
+    for (auto const &ld : r.by_layer) {
+        auto const label = st::devices::ap3::layer_label(ld.layer);
+        std::printf("\n[[by_layer]]\n");
+        std::printf("layer = \"%.*s\"\n", static_cast<int>(label.size()), label.data());
+        std::printf("a_only_patches = %u\n", ld.a_only_patches);
+        std::printf("b_only_patches = %u\n", ld.b_only_patches);
+        std::printf("shared_patches = %u\n", ld.shared_patches);
+        std::printf("changed_at_shared = %u\n", ld.changed_at_shared);
+        std::printf("a_only_bytes = %llu\n", static_cast<unsigned long long>(ld.a_only_bytes));
+        std::printf("b_only_bytes = %llu\n", static_cast<unsigned long long>(ld.b_only_bytes));
+        std::printf("changed_bytes = %llu\n", static_cast<unsigned long long>(ld.changed_bytes));
+    }
+}
+
+// Decrypt + decode one .ptm. Helper shared by run_diff (and could be
+// shared by run_inspect / run_list_patches but those have one-shot
+// callers and grew their inline paths first).
+struct LoadResult {
+    st::library::DecodedPtm decoded;
+};
+st::Result<LoadResult> load_ptm(std::string const &path) {
+    auto bytes = read_file_bytes(path);
+    if (!bytes.has_value()) {
+        return st::failure(std::move(bytes).error());
+    }
+    auto contents = st::devices::ap3::cipher::decrypt_ptm(*bytes);
+    if (!contents.has_value()) {
+        return st::failure(std::move(contents).error());
+    }
+    auto decoded = st::library::decode_ptm_xml(contents->private_data_xml);
+    if (!decoded.has_value()) {
+        return st::failure(std::move(decoded).error());
+    }
+    return LoadResult{std::move(*decoded)};
+}
+
+int run_diff(int argc, char **argv) {
+    DiffOpts opts;
+    if (!parse_diff_opts(argc, argv, opts)) {
+        return 2;
+    }
+    auto a = load_ptm(opts.a_path);
+    if (!a.has_value()) {
+        std::fprintf(stderr, "ptm diff: a: %s\n", a.error().to_string().c_str());
+        return a.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
+    }
+    auto b = load_ptm(opts.b_path);
+    if (!b.has_value()) {
+        std::fprintf(stderr, "ptm diff: b: %s\n", b.error().to_string().c_str());
+        return b.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
+    }
+    auto const result = compute_diff(a->decoded, b->decoded);
+
+    switch (opts.format) {
+    case Format::Text:
+        render_diff_text(opts.a_path, opts.b_path, result);
+        break;
+    case Format::Json:
+        render_diff_json(opts.a_path, opts.b_path, result);
+        break;
+    case Format::Toml:
+        render_diff_toml(opts.a_path, opts.b_path, result);
+        break;
+    }
+    return 0;
+}
+
 int run_inspect(int argc, char **argv) {
     InspectOpts opts;
     if (!parse_inspect_opts(argc, argv, opts)) {
@@ -16571,6 +16893,8 @@ int cmd_ptm(int argc, char *argv[]) {
                    "Subcommands:\n"
                    "  inspect <file.ptm> [--format text|json|toml]\n"
                    "                     Identity block + architectural breakdown.\n"
+                   "  diff <a.ptm> <b.ptm> [--format text|json|toml]\n"
+                   "                     By-layer diff between two tunes.\n"
                    "  list-patches <file.ptm> [--format text|json|toml]\n"
                    "                     Decode a .ptm and emit one row per patch.\n"
                    "\n"
@@ -16591,6 +16915,9 @@ int cmd_ptm(int argc, char *argv[]) {
     std::string_view const sub{argv[0]};
     if (sub == "inspect") {
         return ptm_cli::run_inspect(argc - 1, argv + 1);
+    }
+    if (sub == "diff") {
+        return ptm_cli::run_diff(argc - 1, argv + 1);
     }
     if (sub == "list-patches") {
         return ptm_cli::run_list_patches(argc - 1, argv + 1);
