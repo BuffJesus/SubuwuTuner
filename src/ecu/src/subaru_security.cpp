@@ -127,6 +127,45 @@ constexpr std::array<std::uint16_t, 16> kSaTableL35Aftermarket = {
     0x86f0, 0x107e, 0xbf37, 0x60c8,
 };
 
+// COBB-active round-key tables. RE5b extracted these from
+// libFlashSubaru.so 2026-06-12 PM via Capstone disasm of
+// Init_SSM{III,IV}_COBB_{CF,MAF_SD}::GetDecryptKeys (each a
+// 3-instruction trampoline returning a base+offset pointer into a
+// shared key table). See findings/re-2026-06-12-pm/
+// cobb_sa_keys_extracted.md for the full derivation + cross-checks.
+//
+// Cross-validation cred: SSM-IV factory keys at the same trampoline
+// family decode as byte-identical to `kFeistelRoundKeysL35`, which
+// the implementer had recovered independently from the 2017 WRX
+// ROM dump. Two independent extraction paths agreeing → high
+// confidence in the COBB tables too.
+//
+// Key reuse across generations: SSM-III COBB_CF == SSM-IV COBB_CF
+// and SSM-III COBB_MAF_SD == SSM-IV COBB_MAF_SD (analyst confirmed
+// byte-identical). One table per variant covers both SH7058 (Gen-A.1)
+// and SH-2A (Gen-A.2) chassis.
+//
+// Direction: COBB tunes install the same SA-dispatcher reversed-
+// iteration patch the broader aftermarket framework uses (see
+// findings/cobb_install_flow.md), so the tester runs forward Feistel
+// + wordswap with these tables — same shape as `ssmcan1_l1_aftermarket`.
+// The bench-rig SA exchange is the authoritative validation gate
+// (Phase 5.5 of docs/28); until then this is the high-confidence
+// best-guess based on the analyst-confirmed dispatcher behavior.
+constexpr std::array<std::uint16_t, 16> kSaTableCobbFlash = {
+    0x5920, 0x4821, 0x14b5, 0xfdeb,
+    0xce83, 0x5a66, 0x02bc, 0xf90a,
+    0x5a7d, 0xbbf7, 0x14ef, 0x9ffa,
+    0x8f61, 0x19ff, 0x73ee, 0x972d,
+};
+
+constexpr std::array<std::uint16_t, 16> kSaTableCobbMafSd = {
+    0xaa74, 0xf6d9, 0xecab, 0x8b17,
+    0x6155, 0xa6d2, 0x496c, 0x75b8,
+    0x9f2c, 0x7b27, 0xc6d1, 0xb485,
+    0x22b0, 0x90d4, 0xa684, 0x60bb,
+};
+
 constexpr std::uint16_t rol16(std::uint16_t v, unsigned n) noexcept {
     n &= 15U;
     if (n == 0) {
@@ -405,6 +444,47 @@ ssmcan1_l3_aftermarket(std::span<std::uint8_t const> seed) {
     auto const wire_key_u32 = apply_inverse_key_perm_l3(cipher_out);
     std::vector<std::uint8_t> key(4);
     write_u32_be(wire_key_u32, key);
+    return key;
+}
+
+Result<std::vector<std::uint8_t>>
+ssmcan1_l1_cobb_flash(std::span<std::uint8_t const> seed) {
+    // L1 SecurityAccess derivation for ECUs in the COBB-installed-tune
+    // state ("COBB Flash" variant). Same algorithm shape as
+    // `ssmcan1_l1_aftermarket` — forward Feistel + final wordswap —
+    // differing only in the round-key table. See `kSaTableCobbFlash`
+    // comment for analyst attribution + bench-rig validation status.
+    if (seed.size() != 4) {
+        return failure(ErrorCode::InvalidArgument,
+                       std::string{"ssmcan1 (Gen-A L1 COBB-flash): seed must "
+                                   "be exactly 4 bytes, got "} +
+                           std::to_string(seed.size()));
+    }
+    auto const seed_packed = read_u32_be(seed);
+    auto const key_u32 = feistel_forward_with_swap(
+        seed_packed, std::span<std::uint16_t const, 16>{kSaTableCobbFlash});
+    std::vector<std::uint8_t> key(4);
+    write_u32_be(key_u32, key);
+    return key;
+}
+
+Result<std::vector<std::uint8_t>>
+ssmcan1_l1_cobb_maf_sd(std::span<std::uint8_t const> seed) {
+    // L1 SecurityAccess derivation for ECUs running COBB's MAF-based
+    // Speed-Density variant. Same algorithm shape as the COBB-flash
+    // variant above; only the round-key table differs. See
+    // `kSaTableCobbMafSd` comment for analyst attribution.
+    if (seed.size() != 4) {
+        return failure(ErrorCode::InvalidArgument,
+                       std::string{"ssmcan1 (Gen-A L1 COBB-MAF-SD): seed must "
+                                   "be exactly 4 bytes, got "} +
+                           std::to_string(seed.size()));
+    }
+    auto const seed_packed = read_u32_be(seed);
+    auto const key_u32 = feistel_forward_with_swap(
+        seed_packed, std::span<std::uint16_t const, 16>{kSaTableCobbMafSd});
+    std::vector<std::uint8_t> key(4);
+    write_u32_be(key_u32, key);
     return key;
 }
 

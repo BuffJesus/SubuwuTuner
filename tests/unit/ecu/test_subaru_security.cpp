@@ -378,3 +378,109 @@ TEST_CASE("cy1_aes_key_stub remains NotImplemented",
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == ErrorCode::NotImplemented);
 }
+
+// =====================================================================
+// RE5b — COBB SA variants (kSaTableCobbFlash, kSaTableCobbMafSd)
+// =====================================================================
+
+TEST_CASE("ssmcan1_l1_cobb_flash: produces 4-byte key for 4-byte seed",
+          "[ecu][sa][gen_a][cobb]") {
+    // RE5b extraction (findings/re-2026-06-12-pm/) — we don't yet have
+    // a captured (seed, key) pair from a real COBB-installed ECU to
+    // pin specific bytes against, but every code path must:
+    //   * accept exactly 4 bytes
+    //   * return exactly 4 bytes
+    //   * be deterministic (same input -> same output)
+    // Live bench-rig validation against an actual COBB-tuned ECU
+    // closes the loop (docs/28 Phase 5.5).
+    using ecu::subaru::ssmcan1_l1_cobb_flash;
+    std::array<std::uint8_t, 4> const seed{0xDE, 0xAD, 0xBE, 0xEF};
+    auto const r1 = ssmcan1_l1_cobb_flash(std::span<std::uint8_t const>{seed});
+    REQUIRE(r1.has_value());
+    REQUIRE(r1->size() == 4);
+    auto const r2 = ssmcan1_l1_cobb_flash(std::span<std::uint8_t const>{seed});
+    REQUIRE(r2.has_value());
+    REQUIRE(*r1 == *r2);
+}
+
+TEST_CASE("ssmcan1_l1_cobb_maf_sd: produces 4-byte key for 4-byte seed",
+          "[ecu][sa][gen_a][cobb]") {
+    using ecu::subaru::ssmcan1_l1_cobb_maf_sd;
+    std::array<std::uint8_t, 4> const seed{0xDE, 0xAD, 0xBE, 0xEF};
+    auto const r1 = ssmcan1_l1_cobb_maf_sd(std::span<std::uint8_t const>{seed});
+    REQUIRE(r1.has_value());
+    REQUIRE(r1->size() == 4);
+    auto const r2 = ssmcan1_l1_cobb_maf_sd(std::span<std::uint8_t const>{seed});
+    REQUIRE(r2.has_value());
+    REQUIRE(*r1 == *r2);
+}
+
+TEST_CASE("COBB-flash and COBB-MAF-SD use different keys",
+          "[ecu][sa][gen_a][cobb]") {
+    // The two tables are different (analyst writeup pins them as
+    // distinct 32-byte blobs at consecutive addresses); the derived
+    // keys must therefore differ for the same seed. If they collide,
+    // either one table was transcribed wrong or the algorithm isn't
+    // sensitive to the round-key table the way the Feistel design
+    // requires.
+    using ecu::subaru::ssmcan1_l1_cobb_flash;
+    using ecu::subaru::ssmcan1_l1_cobb_maf_sd;
+    constexpr std::array<std::array<std::uint8_t, 4>, 3> seeds{{
+        {0xDE, 0xAD, 0xBE, 0xEF},
+        {0x00, 0x00, 0x00, 0x01},
+        {0xFF, 0xFF, 0xFF, 0xFE},
+    }};
+    for (auto const &s : seeds) {
+        auto const f = ssmcan1_l1_cobb_flash(std::span<std::uint8_t const>{s});
+        auto const m = ssmcan1_l1_cobb_maf_sd(std::span<std::uint8_t const>{s});
+        REQUIRE(f.has_value());
+        REQUIRE(m.has_value());
+        REQUIRE(*f != *m);
+    }
+}
+
+TEST_CASE("COBB variants differ from factory + aftermarket on the same seed",
+          "[ecu][sa][gen_a][cobb]") {
+    // The four Gen-A L1 variants we ship today (factory, aftermarket,
+    // cobb-flash, cobb-maf-sd) MUST produce distinct keys for any
+    // given seed — they target distinct ECU install states. A
+    // collision would mean two states are indistinguishable from the
+    // wire side, which contradicts the analyst's RE5b separation.
+    using ecu::subaru::ssmcan1_key_stub;
+    using ecu::subaru::ssmcan1_l1_aftermarket;
+    using ecu::subaru::ssmcan1_l1_cobb_flash;
+    using ecu::subaru::ssmcan1_l1_cobb_maf_sd;
+    std::array<std::uint8_t, 4> const seed{0xB9, 0xA6, 0x5C, 0x23};
+    auto const factory = ssmcan1_key_stub(std::span<std::uint8_t const>{seed});
+    auto const after = ssmcan1_l1_aftermarket(std::span<std::uint8_t const>{seed});
+    auto const cobbf = ssmcan1_l1_cobb_flash(std::span<std::uint8_t const>{seed});
+    auto const cobbm = ssmcan1_l1_cobb_maf_sd(std::span<std::uint8_t const>{seed});
+    REQUIRE(factory.has_value());
+    REQUIRE(after.has_value());
+    REQUIRE(cobbf.has_value());
+    REQUIRE(cobbm.has_value());
+    REQUIRE(*factory != *after);
+    REQUIRE(*factory != *cobbf);
+    REQUIRE(*factory != *cobbm);
+    REQUIRE(*after != *cobbf);
+    REQUIRE(*after != *cobbm);
+    // cobbf vs cobbm already covered by the previous test case across
+    // multiple seeds; just one assertion here for completeness.
+    REQUIRE(*cobbf != *cobbm);
+}
+
+TEST_CASE("COBB SA variants reject wrong seed length",
+          "[ecu][sa][gen_a][cobb]") {
+    using ecu::subaru::ssmcan1_l1_cobb_flash;
+    using ecu::subaru::ssmcan1_l1_cobb_maf_sd;
+    std::array<std::uint8_t, 3> const three{};
+    std::array<std::uint8_t, 8> const eight{};
+    for (auto fn : {&ssmcan1_l1_cobb_flash, &ssmcan1_l1_cobb_maf_sd}) {
+        auto const r3 = (*fn)(std::span<std::uint8_t const>{three});
+        REQUIRE_FALSE(r3.has_value());
+        REQUIRE(r3.error().code() == ErrorCode::InvalidArgument);
+        auto const r8 = (*fn)(std::span<std::uint8_t const>{eight});
+        REQUIRE_FALSE(r8.has_value());
+        REQUIRE(r8.error().code() == ErrorCode::InvalidArgument);
+    }
+}

@@ -97,6 +97,30 @@ ssmcan1_l1_aftermarket(std::span<std::uint8_t const> seed);
 [[nodiscard]] Result<std::vector<std::uint8_t>>
 ssmcan1_l3_aftermarket(std::span<std::uint8_t const> seed);
 
+// COBB-active L1 — for ECUs in the COBB-installed-tune state. The
+// round-key table differs from `ssmcan1_l1_aftermarket` (which targets
+// the broader Fehr-active framework) but the SA-dispatcher reversed-
+// iteration patch + forward-Feistel direction is shared.
+//
+// Two flavors per RE5b extraction (findings/re-2026-06-12-pm/
+// cobb_sa_keys_extracted.md): `_cobb_flash` is the canonical COBB
+// install variant ("COBB Flash" mode); `_cobb_maf_sd` is the MAF-
+// based Speed-Density variant used when COBB targets an ECU without
+// MAP-sensor data configured. Both algorithms are byte-identical
+// except for the round-key table; the choice is driven by which
+// install state the user's ECU is in (CID + tuner-tag region byte
+// content disambiguate).
+//
+// Cross-validation: SSM-IV factory keys at the same trampoline
+// family decode byte-identical to `kFeistelRoundKeysL35` (the
+// implementer's independently-recovered factory table), so the
+// extraction methodology is verified. Live bench-rig validation
+// against an actual COBB-installed ECU pending (docs/28 Phase 5.5).
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+ssmcan1_l1_cobb_flash(std::span<std::uint8_t const> seed);
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+ssmcan1_l1_cobb_maf_sd(std::span<std::uint8_t const> seed);
+
 // SSMK1 — pre-2008 K-Line SecurityAccess. Algorithm not yet recovered
 // (no K-Line capture rig in hand). Returns failure(NotImplemented) on
 // every input.
