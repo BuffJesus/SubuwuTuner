@@ -15872,8 +15872,12 @@ int run_ls(int argc, char **argv, CommonOpts const &opts) {
     std::printf("%zu file%s in %s\n", records->size(), records->size() == 1 ? "" : "s",
                 subdir.c_str());
     for (auto const &r : *records) {
-        std::printf("  %12llu  %s%s\n", static_cast<unsigned long long>(r.size), r.path.c_str(),
-                    r.name.c_str());
+        // FileInfo2 records in a ListFiles response use `path` for the
+        // full relative path (e.g. "maps/Stage1.ptm") and `name` for
+        // just the basename ("Stage1.ptm") — different from the request-
+        // side convention. Print path-only; prepending `name` would
+        // duplicate the basename as observed live 2026-06-12.
+        std::printf("  %12llu  %s\n", static_cast<unsigned long long>(r.size), r.path.c_str());
     }
     return 0;
 }
@@ -16054,10 +16058,13 @@ int run_backup(int argc, char **argv, CommonOpts const &opts) {
         auto sub_dir = out_dir / std::string{sub.substr(1, sub.size() - 2)};
         std::filesystem::create_directories(sub_dir, ec);
         for (auto const &rec : *records) {
-            auto bytes = client.read_file(rec.path + rec.name);
+            // rec.path is the full relative path (dir + filename);
+            // prepend '/' for the absolute form read_file expects.
+            std::string const abs_path = "/" + rec.path;
+            auto bytes = client.read_file(abs_path);
             if (!bytes.has_value()) {
-                std::fprintf(stderr, "ap3 backup: read %s%s: %s\n", rec.path.c_str(),
-                             rec.name.c_str(), bytes.error().to_string().c_str());
+                std::fprintf(stderr, "ap3 backup: read %s: %s\n", abs_path.c_str(),
+                             bytes.error().to_string().c_str());
                 continue;
             }
             std::ofstream out{sub_dir / rec.name, std::ios::binary};
