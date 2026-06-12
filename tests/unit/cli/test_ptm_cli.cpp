@@ -493,6 +493,68 @@ TEST_CASE("ptm import -> Project::open-compatible (5-file skeleton, project-vali
 }
 #endif
 
+TEST_CASE("ptm import refuses when every patch overflows the base ROM",
+          "[cli][ptm][integration][cipher][rewrite]") {
+    // Real failure mode from the field: user passes the wrong base ROM
+    // (e.g. dumped from a different ECU revision, or the .ptm targets
+    // VB but the base is VA). Pre-fix: import silently exited 0 and
+    // wrote an unmodified working.bin — a script chaining forward into
+    // `ptm verify` or `project-validate` would see "succeeded, 0 of N
+    // matched" and could mis-interpret it as a partial-tune scenario.
+    // Post-fix: refuses with a clear message naming the base ROM size
+    // + suggesting a CID check.
+    if (!can_run()) {
+        return;
+    }
+    namespace fs = std::filesystem;
+    auto const tmp = fs::temp_directory_path() / "subuwutuner_ptm_oob_base";
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    auto const src_dir = tmp / "src.stune";
+    fs::create_directories(src_dir, ec);
+    {
+        std::ofstream f{src_dir / "project.toml"};
+        f << "[project]\nschema_version = 1\ndisplay_name = \"src\"\n"
+             "\n[ptm_metadata]\n"
+             "vendor_id = \"V\"\nvehicle_id = \"X\"\n"
+             "lock_mask = 0\nrom_sum = \"1\"\nsave_date_time = \"0\"\n";
+    }
+    {
+        std::ofstream f{src_dir / "ptm_patches.toml"};
+        // Patch at rom_offset=10000 — far past the 50-byte base we
+        // craft below.
+        f << "[[patch]]\nrom_offset = 10000\nram_offset = 0\nlength = 4\n"
+             "bytes_b64 = \"AAAAAA==\"\n";
+    }
+    auto const ptm = tmp / "test.ptm";
+    {
+        auto const r = st::test::cli_run(
+            "--enable-cobb-ap-cipher ptm export " +
+            st::test::quote(src_dir.string()) + " --as " + st::test::quote(ptm.string()));
+        REQUIRE(r.spawned);
+        REQUIRE(r.exit_code == 0);
+    }
+    // Craft a 50-byte base ROM so the only patch (at offset 10000) is
+    // unambiguously out of bounds.
+    auto const small_base = tmp / "tiny.bin";
+    {
+        std::ofstream f{small_base, std::ios::binary};
+        std::vector<char> zeros(50, '\0');
+        f.write(zeros.data(), static_cast<std::streamsize>(zeros.size()));
+    }
+    auto const imp_dir = tmp / "imported.stune";
+    auto const r = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm import " + st::test::quote(ptm.string()) +
+        " --into " + st::test::quote(imp_dir.string()) +
+        " --base-rom " + st::test::quote(small_base.string()));
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 1);
+    // The refuse path triggers BEFORE working.bin is written. Pre-fix
+    // (silent exit 0 + zero-patches-applied) would have written the
+    // full 5-file skeleton with an unmodified working.bin.
+    REQUIRE_FALSE(fs::exists(imp_dir / "working.bin"));
+}
+
 TEST_CASE("ptm verify refuses without --enable-cobb-ap-cipher",
           "[cli][ptm][integration]") {
     if (!can_run()) {

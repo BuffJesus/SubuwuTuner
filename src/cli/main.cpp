@@ -17624,6 +17624,30 @@ int run_import(int argc, char **argv) {
         std::memcpy(working_bytes.data() + p.rom_offset, p.bytes.data(), p.bytes.size());
         ++patches_applied;
     }
+    // Refuse when every patch overflowed the base ROM — almost always
+    // means the user passed the wrong base. Silently producing an
+    // unmodified working.bin + success exit would let an automation
+    // script chain forward into a broken project. Some-but-not-all
+    // skipped is still a flag (different ROM revision, corrupt tune)
+    // but doesn't preclude the user from continuing if they understand
+    // the trade-off — emit a stderr warning and proceed.
+    if (patches_applied == 0 && patches_skipped > 0) {
+        std::fprintf(stderr,
+                     "ptm import: refusing — all %zu patches fall outside the "
+                     "base ROM (%zu bytes). The .ptm probably targets a different\n"
+                     "  base than `%s`. Check the vehicle_id "
+                     "in `ptm inspect <file>` against your base ROM's CID.\n",
+                     patches_skipped, rom_bytes->size(), opts.base_rom.c_str());
+        return 1;
+    }
+    if (patches_skipped > 0) {
+        std::fprintf(stderr,
+                     "ptm import: warning — %zu of %zu patches fell outside the base "
+                     "ROM (%zu bytes) and were skipped. The working.bin may not "
+                     "match\n  the source tune. Verify with `ptm verify`.\n",
+                     patches_skipped, patches_applied + patches_skipped,
+                     rom_bytes->size());
+    }
     auto const working_crc = st::crc32(working_bytes);
     {
         std::ofstream out{out_dir / "working.bin", std::ios::binary};
