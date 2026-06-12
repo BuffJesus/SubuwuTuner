@@ -372,6 +372,17 @@ public:
                       ReadProgressFn progress = nullptr,
                       std::atomic<bool> const *cancel = nullptr);
 
+    // Enter programming mode via the Subaru-specific "enable flash
+    // mode" routine. RoutineControl 0x31 0x01 with no option record;
+    // the routine ID is per-platform (LF79103P uses 0xff00 per
+    // docs/37 §RE5). Caller is responsible for having issued the
+    // DiagnosticSessionControl → programmingSession (0x10 0x02) and
+    // SecurityAccess preamble first; this routine fails with NRC if
+    // either prerequisite is missing.
+    [[nodiscard]] Status
+    ecu_enable_flash_mode(std::uint16_t routine_id,
+                          std::chrono::milliseconds timeout = std::chrono::milliseconds{5000});
+
     // Ask the ECU to compute its own checksum over `[start_addr,
     // end_addr]` (inclusive) and return the routine result. Per
     // `docs/37-subaru-flash-protocol.md` (RE5), the Subaru reference

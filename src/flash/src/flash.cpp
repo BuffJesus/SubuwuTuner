@@ -539,6 +539,19 @@ Flasher::read_full_rom_ssm(std::uint32_t base_address, std::uint32_t total_lengt
 }
 
 // ---------------------------------------------------------------------
+// ecu_enable_flash_mode — enter programming mode (RoutineControl)
+// ---------------------------------------------------------------------
+
+Status Flasher::ecu_enable_flash_mode(std::uint16_t routine_id,
+                                       std::chrono::milliseconds timeout) {
+    auto r = client_.routine_control(ecu::uds::kRcStart, routine_id, {}, timeout);
+    if (!r.has_value()) {
+        return st::failure(std::move(r).error());
+    }
+    return st::ok();
+}
+
+// ---------------------------------------------------------------------
 // ecu_compute_checksum — ECU-side post-flash verification (RoutineControl)
 // ---------------------------------------------------------------------
 

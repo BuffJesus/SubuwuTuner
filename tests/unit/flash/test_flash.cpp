@@ -1952,6 +1952,44 @@ TEST_CASE("evaluate_plan_policy: sector that overlaps multiple tables flags each
 }
 
 // ---------------------------------------------------------------------
+// ecu_enable_flash_mode — RoutineControl 0x31 0x01 with no option
+// ---------------------------------------------------------------------
+
+TEST_CASE("Flasher::ecu_enable_flash_mode sends RoutineControl 0x31 0x01 "
+          "with no option record",
+          "[flash][ecu_uds]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // Subaru's enable-flash-mode routine ID is 0xff00 per docs/37 + RE5.
+    // Expected request: 31 01 FF 00. Positive response: 71 01 FF 00.
+    constexpr std::uint16_t kRoutineId = 0xFF00;
+    expect(t, {0x31, 0x01, 0xFF, 0x00}, {0x71, 0x01, 0xFF, 0x00});
+
+    flash::Flasher f{t};
+    auto const r = f.ecu_enable_flash_mode(kRoutineId);
+    REQUIRE(r.has_value());
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("Flasher::ecu_enable_flash_mode surfaces NRC on bad session",
+          "[flash][ecu_uds][error]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // NRC 0x7F (serviceNotSupportedInActiveSession) is the realistic
+    // failure when SecurityAccess hasn't been completed before this
+    // call — the routine refuses until programming session + SA L1
+    // are both done.
+    expect(t, {0x31, 0x01, 0xFF, 0x00}, {0x7F, 0x31, 0x7F});
+
+    flash::Flasher f{t};
+    auto const r = f.ecu_enable_flash_mode(0xFF00);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(t.exhausted());
+}
+
+// ---------------------------------------------------------------------
 // ecu_compute_checksum — RE5 reference architecture's ChecksumECUData
 // ---------------------------------------------------------------------
 
