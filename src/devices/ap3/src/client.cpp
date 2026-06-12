@@ -180,15 +180,48 @@ Result<std::vector<std::uint8_t>> Client::receive_packet_body() {
     full.reserve(header_bytes->size() + rest->size());
     full.insert(full.end(), header_bytes->begin(), header_bytes->end());
     full.insert(full.end(), rest->begin(), rest->end());
+
+    // Extract body either from strict CRC verification (the common case)
+    // or from the zero-CRC-sentinel fallback. The AP firmware empirically
+    // emits 0x00000000 in the CRC trailer for cmd 0x21 (ReadFile DATA)
+    // responses — confirmed against a real `/backupcksum` pull on
+    // 2026-06-12, spec §5's strict CRC notwithstanding. The hypothesis is
+    // that the firmware skips CRC computation for file-data responses
+    // because the file content typically carries its own integrity (.ptm
+    // has XTEA-CBC + AES + bzip2 magic; /backupcksum is an MD5 ASCII
+    // string the user reads). Accept zero-CRC as a sentinel rather than
+    // refusing the body — but ONLY on exact `00 00 00 00`, so any other
+    // mismatch still surfaces as BadChecksum.
+    std::span<std::uint8_t const> body_span;
     auto body_view = st::transport::ap3::decode_packet_body(full);
-    if (!body_view.has_value()) {
+    if (body_view.has_value()) {
+        body_span = *body_view;
+    } else if (body_view.error().code() == st::ErrorCode::BadChecksum &&
+               full.size() >= st::transport::ap3::kCrcSize) {
+        std::size_t const crc_off = full.size() - st::transport::ap3::kCrcSize;
+        bool const all_zero =
+            full[crc_off] == 0 && full[crc_off + 1] == 0 &&
+            full[crc_off + 2] == 0 && full[crc_off + 3] == 0;
+        if (!all_zero) {
+            return st::failure(std::move(body_view).error());
+        }
+        std::fprintf(stderr,
+                     "ap3: warning — AP emitted zero CRC trailer for response "
+                     "(type=0x%02X, body=%u bytes); accepting body unchecked "
+                     "(firmware skips CRC for cmd 0x21 file-data responses; "
+                     "see receive_packet_body comment for rationale).\n",
+                     header->type, header->body_size);
+        body_span = std::span<std::uint8_t const>{full.data() + st::transport::ap3::kHeaderSize,
+                                                  header->body_size};
+    } else {
         return st::failure(std::move(body_view).error());
     }
+
     if (header->type == static_cast<std::uint8_t>(st::transport::ap3::ResponseType::Error)) {
         std::string msg{"ap3: device returned error frame"};
-        if (!body_view->empty()) {
+        if (!body_span.empty()) {
             msg += " body=";
-            for (auto b : *body_view) {
+            for (auto b : body_span) {
                 char buf[4];
                 (void)std::snprintf(buf, sizeof(buf), "%02X", b);
                 msg += buf;
@@ -196,7 +229,7 @@ Result<std::vector<std::uint8_t>> Client::receive_packet_body() {
         }
         return st::failure(st::ErrorCode::TransportNack, std::move(msg));
     }
-    return std::vector<std::uint8_t>{body_view->begin(), body_view->end()};
+    return std::vector<std::uint8_t>{body_span.begin(), body_span.end()};
 }
 
 Status Client::ensure_session_warmup() {
