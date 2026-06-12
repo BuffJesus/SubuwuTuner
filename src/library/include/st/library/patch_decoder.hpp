@@ -30,6 +30,17 @@ struct PatchEntry {
     std::vector<std::uint8_t> bytes;
 };
 
+// Duplicate-rom_offset invariant: a single decoded PTM may contain
+// MULTIPLE PatchEntry records sharing the same `rom_offset`. The COBB
+// emitter writes clear-then-set byte pairs at hot offsets (e.g. 78
+// duplicate offsets in `Stage1 91 v401.ptm` — captured 2026-06-12),
+// and the second-write bytes carry the final value. Consumers that
+// fold patches by rom_offset MUST iterate in encounter order — a
+// `std::map<rom_offset, …>` will silently drop the "set" half of each
+// pair. Compare via sorted-tuple set algorithms (set_difference /
+// set_intersection on `(rom_offset, ram_offset, length, bytes)`); see
+// `ptm verify` in `src/cli/main.cpp` for the canonical pattern.
+
 struct PtmMetadata {
     std::string vendor_id;
     std::string vehicle_id;

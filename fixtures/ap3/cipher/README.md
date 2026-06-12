@@ -10,7 +10,7 @@ Each layer of the spec §13 cipher chain has its own fixture pair so the T3 impl
 |---|---|
 | `xtea_layer1_input.bin` + `xtea_layer1_output.bin` + `xtea_layer1_seed.txt` | XTEA-CBC round-trip. Seed is hex literal in the .txt. The output includes the 5-byte trailer (1B padding count + 4B BE seed). |
 | `base64_layer2_input.txt` + `base64_layer2_extracted.b64` + `base64_layer2_inner_bytes.bin` | XML envelope extraction: parser must extract base64 string from `<encData>...</encData>`, then base64-decode to inner_bytes. |
-| `aes_layer3_input.bin` + `aes_layer3_output.bin` | AES-256-CTR round-trip with key `bJTccI%878cPs%2$Tf8EXdzP2!cRUZw&` and IV `20 00 00 00 ... 00 00`. |
+| ~~`aes_layer3_input.bin` + `aes_layer3_output.bin`~~ | **DROPPED 2026-06-12 PM.** Generated for standard AES-256-CTR (linear counter, hardcoded `20 00 00 00 ... 00 00` IV). The real `.ptm` format uses a custom CTR construction (16 KB outer chunks, per-chunk outer_nonce = file_nonce + chunk_offset, counter-repeated-4 input blocks, AES-ECB keystream). The standard-CTR fixture would falsely imply our cipher matches the AP firmware; regenerating against the custom construction is pending. See commit `97bd2dd` for the rewrite + `findings/for-dan/ap3-toolkit/ptm_full_decrypt.py` for the reference algorithm. |
 | `bzip2_layer4_input.bin` + `bzip2_layer4_output.bin` | bzip2-L4 round-trip. Implementer just needs `BZ2_bzBuffToBuffDecompress`/`Compress`. |
 | `blowfish_input.bin` + `blowfish_output_body.bin` + `blowfish_base_ctr.txt` | Blowfish-CTR-double for OTA. base counter in .txt. |
 | `blowfish_output_full.bin` | Full .img-format wrapper around the Blowfish body (4B base_ctr BE + 2B unknown header + body + 32B trailer). Use this for the high-level `decrypt_ota_img` API test. |
