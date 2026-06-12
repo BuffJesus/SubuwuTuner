@@ -110,8 +110,20 @@ private:
     [[nodiscard]] Result<std::vector<std::uint8_t>> receive_packet_body();
     [[nodiscard]] Result<std::vector<std::uint8_t>> read_exact(std::size_t n);
 
+    // Lazy session warmup. The analyst's reference toolkit always
+    // sends cmd 0x28 (UserInfo) before any file-vault command, and
+    // APManager (per Frida) does the same. The hypothesis is that the
+    // AP firmware tracks per-session state and rejects file-vault
+    // commands until UserInfo has been read at least once. This guard
+    // fires query_state() the first time ls/read_file/write_file/
+    // remove_file is called and caches the result; subsequent calls
+    // are no-ops. See findings/handoffs/HANDOFF-from-analyst-2026-06-11-
+    // dispatcher-default-likely-stale-in.md hypothesis #2.
+    [[nodiscard]] Status ensure_session_warmup();
+
     st::transport::IByteChannel *channel_;
     ClientConfig cfg_;
+    bool session_warmed_up_ = false;
 };
 
 // Helper: split an absolute "/dir/.../file" path into the

@@ -199,6 +199,18 @@ Result<std::vector<std::uint8_t>> Client::receive_packet_body() {
     return std::vector<std::uint8_t>{body_view->begin(), body_view->end()};
 }
 
+Status Client::ensure_session_warmup() {
+    if (session_warmed_up_) {
+        return st::ok();
+    }
+    auto state = query_state();
+    if (!state.has_value()) {
+        return st::failure(std::move(state).error());
+    }
+    session_warmed_up_ = true;
+    return st::ok();
+}
+
 Result<DeviceState> Client::query_state() {
     DeviceState state{};
 
@@ -271,10 +283,17 @@ Result<DeviceState> Client::query_state() {
         // here.
     }
 
+    // A successful query_state() satisfies the cmd 0x28 session-warmup
+    // prereq for file-vault commands; mark the flag so subsequent
+    // ls/read/write/remove calls don't re-probe.
+    session_warmed_up_ = true;
     return state;
 }
 
 Result<std::vector<FileInfo>> Client::ls(std::string_view subdir) {
+    if (auto s = ensure_session_warmup(); !s.has_value()) {
+        return st::failure(std::move(s).error());
+    }
     // cmd 0x26 ListFiles carries a single Boost-archived UTF-8 string
     // (directory name like "maps" / "presets" / "datalog" / "images")
     // — NOT a FileInfo2 record. The AP firmware accepts bare names
@@ -302,6 +321,9 @@ Result<std::vector<FileInfo>> Client::ls(std::string_view subdir) {
 }
 
 Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
+    if (auto s = ensure_session_warmup(); !s.has_value()) {
+        return st::failure(std::move(s).error());
+    }
     // ReadFile setup (cmd 0x20) expects:
     //   - FileInfo2.name = basename ("test.ptm", "backupcksum")
     //   - FileInfo2.path = directory with trailing slash and leading
@@ -373,6 +395,9 @@ Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
 
 Status Client::write_file(std::string_view path, std::span<std::uint8_t const> data,
                           std::uint64_t mtime_unix_secs) {
+    if (auto s = ensure_session_warmup(); !s.has_value()) {
+        return s;
+    }
     // PutFile setup (cmd 0x22) expects:
     //   - FileInfo2.name = basename
     //   - FileInfo2.path = full destination WITHOUT leading slash
@@ -410,6 +435,9 @@ Status Client::write_file(std::string_view path, std::span<std::uint8_t const> d
 }
 
 Status Client::remove_file(std::string_view path) {
+    if (auto s = ensure_session_warmup(); !s.has_value()) {
+        return s;
+    }
     // RemoveFile (cmd 0x25) uses the same path-without-leading-slash
     // convention as PutFile. Pinned against
     // `cmd25_removefile_request_known_good.bin`.

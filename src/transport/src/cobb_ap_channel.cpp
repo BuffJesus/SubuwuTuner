@@ -7,9 +7,12 @@
 #include "st/core/result.hpp"
 #include "st/transport/byte_channel.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <span>
 #include <string>
@@ -28,6 +31,34 @@ namespace {
 std::string libusb_error_name_string(int code) {
     char const *n = libusb_error_name(code);
     return n != nullptr ? std::string{n} : std::string{"unknown"};
+}
+
+// Lazily-evaluated env-var trace gate. Caches the env-var lookup so
+// every bulk_transfer doesn't pay the std::getenv cost on the hot
+// path. ST_AP3_TRACE_USB=1 — print a hexdump of every OUT/IN payload
+// to stderr. Off by default. Format intended for direct diff against
+// the captured-known-good fixtures under specs/fixtures/ap3/.
+bool usb_trace_enabled() noexcept {
+    static int cached = -1;
+    if (cached == -1) {
+        char const *v = std::getenv("ST_AP3_TRACE_USB");
+        cached = (v != nullptr && std::string{v} == "1") ? 1 : 0;
+    }
+    return cached == 1;
+}
+
+void hexdump_to_stderr(char const *tag, std::uint8_t const *bytes, std::size_t n) {
+    std::fprintf(stderr, "[ap3-trace] %s (%zu bytes)\n", tag, n);
+    constexpr std::size_t kPerRow = 16;
+    for (std::size_t i = 0; i < n; i += kPerRow) {
+        std::fprintf(stderr, "  %04zx:", i);
+        std::size_t const row = std::min(kPerRow, n - i);
+        for (std::size_t j = 0; j < row; ++j) {
+            std::fprintf(stderr, " %02x", bytes[i + j]);
+        }
+        std::fprintf(stderr, "\n");
+    }
+    std::fflush(stderr);
 }
 
 class LibusbChannel : public IByteChannel {
@@ -50,9 +81,32 @@ public:
     LibusbChannel(LibusbChannel &&) = delete;
     LibusbChannel &operator=(LibusbChannel &&) = delete;
 
+    // Reads the IN endpoint with short timeouts until the bus has been
+    // quiet for `settle`. A prior session that crashed mid-transaction
+    // can leave an unread response in the AP's IN buffer; the next
+    // session's first read would pull those stale bytes and decode
+    // them as a fresh (but wrong) packet. The analyst's `ap_pull_state`
+    // tool always drains before its first send for this reason.
+    void drain(std::chrono::milliseconds settle = std::chrono::milliseconds{500}) {
+        auto last = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - last < settle) {
+            std::uint8_t buf[512];
+            int actual = 0;
+            int const rc = libusb_bulk_transfer(handle_, cfg_.bulk_in_endpoint, buf,
+                                                static_cast<int>(sizeof(buf)), &actual, 100U);
+            if (rc == 0 && actual > 0) {
+                last = std::chrono::steady_clock::now();
+            }
+            // LIBUSB_ERROR_TIMEOUT / no data is the expected idle case.
+        }
+    }
+
     st::Status write_bytes(std::span<std::uint8_t const> bytes) override {
         if (bytes.empty()) {
             return st::ok();
+        }
+        if (usb_trace_enabled()) {
+            hexdump_to_stderr("OUT", bytes.data(), bytes.size());
         }
         // Windows WinUSB caps single DeviceIoControl transfers around
         // ~45 KB. The AP's state machine doesn't require packet
@@ -122,6 +176,9 @@ public:
                                "ap3: bulk_transfer IN failed: " + libusb_error_name_string(rc));
         }
         out.resize(static_cast<std::size_t>(actual));
+        if (usb_trace_enabled() && !out.empty()) {
+            hexdump_to_stderr("IN", out.data(), out.size());
+        }
         return out;
     }
 
@@ -181,7 +238,13 @@ Result<std::unique_ptr<IByteChannel>> open_channel(ChannelConfig const &cfg) {
                                "Linux: install a udev rule for VID 1a84 PID 0121)");
     }
 
-    return std::unique_ptr<IByteChannel>{new LibusbChannel(ctx, handle, cfg)};
+    auto channel = std::unique_ptr<LibusbChannel>{new LibusbChannel(ctx, handle, cfg)};
+    // Drain stale IN bytes left over from any prior session that
+    // crashed mid-transaction. Without this, the first read pulls the
+    // buffered tail of the previous session and decodes it as the
+    // current command's response.
+    channel->drain();
+    return std::unique_ptr<IByteChannel>{std::move(channel)};
 }
 
 bool detect_present(std::uint16_t vendor_id, std::uint16_t product_id) noexcept {

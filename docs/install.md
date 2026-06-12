@@ -159,3 +159,7 @@ Three test cases run: `query_state` returns non-empty response bodies, `ls /maps
 **"no device matched VID 0x1A84 PID 0x0121"** — Zadig hasn't rebound the device to WinUSB, or the AP isn't plugged in. Re-run Zadig: **Options → List All Devices**, select the `1A84 / 0121` entry, pick WinUSB, **Replace Driver**.
 
 **"claim_interface failed: LIBUSB_ERROR_ACCESS"** — on Linux, the udev rule above isn't installed or didn't reload. `sudo udevadm control --reload && sudo udevadm trigger`, then unplug + replug.
+
+**Capturing the USB wire bytes** — set `ST_AP3_TRACE_USB=1` before running any `subuwutuner-cli ap3 …` subcommand and the libusb layer will hexdump every OUT and IN payload to stderr. The format is one row per 16 bytes prefixed with the byte offset, suitable for direct `diff` against the canonical request fixtures under `specs/fixtures/ap3/cmd*_*_request_known_good.bin`. Off by default; redirect stderr to a file if the trace is verbose.
+
+**`/maps/`, `/presets/`, `/datalog/` paths get mangled into `C:/Program Files/Git/maps`** — on Windows under Git Bash / MSYS2, the bash layer auto-converts any argument that looks like an absolute Unix path. The AP firmware sees the mangled string, rejects it, and the CLI surfaces an error like `device returned error frame body=3338` (ASCII "38" = cmd 0x26). Set `MSYS_NO_PATHCONV=1` for the failing invocation, or run from PowerShell where the conversion doesn't apply.
