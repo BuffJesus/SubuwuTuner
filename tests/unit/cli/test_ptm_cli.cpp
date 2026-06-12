@@ -493,6 +493,46 @@ TEST_CASE("ptm import -> Project::open-compatible (5-file skeleton, project-vali
 }
 #endif
 
+TEST_CASE("ptm export refuses when every patch entry is malformed",
+          "[cli][ptm][integration][cipher][rewrite]") {
+    // Symmetric to the import-side OOB refuse. Pre-fix: a corrupt
+    // ptm_patches.toml where every entry is missing a required field
+    // (rom_offset / length / bytes_b64) would parse-skip-with-warning
+    // for each, then proceed to emit a syntactically-valid .ptm with
+    // zero patches. The user would think the export succeeded.
+    if (!can_run()) {
+        return;
+    }
+    namespace fs = std::filesystem;
+    auto const tmp = fs::temp_directory_path() / "subuwutuner_ptm_export_corrupt";
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    auto const src_dir = tmp / "src.stune";
+    fs::create_directories(src_dir, ec);
+    {
+        std::ofstream f{src_dir / "project.toml"};
+        f << "[project]\nschema_version = 1\ndisplay_name = \"src\"\n"
+             "\n[ptm_metadata]\n"
+             "vendor_id = \"V\"\nvehicle_id = \"X\"\n"
+             "lock_mask = 0\nrom_sum = \"1\"\nsave_date_time = \"0\"\n";
+    }
+    {
+        // Two entries, both missing `bytes_b64` — they parse as TOML
+        // but the loop's rom_off/length/b64 sanity check rejects them.
+        std::ofstream f{src_dir / "ptm_patches.toml"};
+        f << "[[patch]]\nrom_offset = 100\nram_offset = 0\nlength = 4\n"
+             "\n"
+             "[[patch]]\nrom_offset = 200\nram_offset = 0\nlength = 8\n";
+    }
+    auto const out = tmp / "out.ptm";
+    auto const r = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm export " +
+        st::test::quote(src_dir.string()) + " --as " + st::test::quote(out.string()));
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE_FALSE(fs::exists(out));
+}
+
 TEST_CASE("ptm import refuses when every patch overflows the base ROM",
           "[cli][ptm][integration][cipher][rewrite]") {
     // Real failure mode from the field: user passes the wrong base ROM

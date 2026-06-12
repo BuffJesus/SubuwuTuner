@@ -17947,6 +17947,19 @@ int run_export(int argc, char **argv) {
                            static_cast<std::uint32_t>(length),
                            b64});
     }
+    // Mirror of the import-side OOB refuse: if every [[patch]] in the
+    // file was malformed and got rejected by the loop above, we'd
+    // emit a syntactically-valid .ptm with zero patches. That's a
+    // corrupt-project signal, not a user choice — refuse instead of
+    // silently producing a do-nothing tune.
+    if (patches.empty()) {
+        std::fputs("ptm export: refusing — every [[patch]] entry in "
+                   "ptm_patches.toml was malformed and dropped.\n"
+                   "  Check the parse warnings above and confirm the file "
+                   "hasn't been hand-edited.\n",
+                   stderr);
+        return 1;
+    }
 
     auto const inner = st::library::build_ptm_inner_xml(
         vendor_id, vehicle_id, lock_mask, rom_sum, save_date, patches);
