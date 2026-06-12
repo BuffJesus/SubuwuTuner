@@ -16276,6 +16276,233 @@ void render_toml(std::vector<st::library::PatchEntry> const &patches,
     }
 }
 
+struct InspectOpts {
+    std::string ptm_path;
+    Format format{Format::Text};
+};
+
+bool parse_inspect_opts(int argc, char **argv, InspectOpts &out) {
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--format" && i + 1 < argc) {
+            std::string_view const v{argv[++i]};
+            if (v == "text") {
+                out.format = Format::Text;
+            } else if (v == "json") {
+                out.format = Format::Json;
+            } else if (v == "toml") {
+                out.format = Format::Toml;
+            } else {
+                std::fprintf(stderr,
+                             "ptm inspect: --format must be text|json|toml (got '%.*s')\n",
+                             static_cast<int>(v.size()), v.data());
+                return false;
+            }
+            continue;
+        }
+        if (a.starts_with("--")) {
+            std::fprintf(stderr, "ptm inspect: unknown flag: %.*s\n",
+                         static_cast<int>(a.size()), a.data());
+            return false;
+        }
+        if (!out.ptm_path.empty()) {
+            std::fprintf(stderr,
+                         "ptm inspect: only one .ptm path may be given (got '%s' and '%.*s')\n",
+                         out.ptm_path.c_str(), static_cast<int>(a.size()), a.data());
+            return false;
+        }
+        out.ptm_path.assign(a);
+    }
+    if (out.ptm_path.empty()) {
+        std::fputs("ptm inspect: missing required <file.ptm> argument\n", stderr);
+        return false;
+    }
+    return true;
+}
+
+// Format an integer with thousand separators for the inspect summary.
+// The spec's example uses `90,060 bytes total`; matching that adds a
+// little human-readable polish without pulling in <locale>.
+std::string with_commas(std::uint64_t n) {
+    auto s = std::to_string(n);
+    std::string out;
+    out.reserve(s.size() + s.size() / 3);
+    int count = 0;
+    for (auto it = s.rbegin(); it != s.rend(); ++it) {
+        if (count > 0 && count % 3 == 0) {
+            out.push_back(',');
+        }
+        out.push_back(*it);
+        ++count;
+    }
+    return {out.rbegin(), out.rend()};
+}
+
+void render_inspect_text(std::string const &path,
+                         std::size_t file_size,
+                         st::library::DecodedPtm const &decoded,
+                         std::vector<st::devices::ap3::LayerSummary> const &summary) {
+    std::uint64_t total_bytes = 0;
+    for (auto const &p : decoded.patches) {
+        total_bytes += p.length;
+    }
+    auto const slash = path.find_last_of("/\\");
+    std::string const basename =
+        slash == std::string::npos ? path : path.substr(slash + 1);
+
+    std::printf("Inspect: %s (%s bytes)\n", basename.c_str(), with_commas(file_size).c_str());
+    std::printf("\n");
+    std::printf("Identity\n");
+    std::printf("  Vendor:           %s\n", decoded.metadata.vendor_id.c_str());
+    std::printf("  Vehicle:          %s\n", decoded.metadata.vehicle_id.c_str());
+    std::printf("  Lock mask:        %u\n", decoded.metadata.lock_mask);
+    std::printf("  ROM sum:          %s\n", decoded.metadata.rom_sum.c_str());
+    std::printf("  Save date:        %s\n", decoded.metadata.save_date_time.c_str());
+    std::printf("  Patches:          %zu (%s bytes total)\n",
+                decoded.patches.size(), with_commas(total_bytes).c_str());
+    std::printf("\n");
+
+    if (!summary.empty()) {
+        std::uint32_t total_patches = 0;
+        for (auto const &row : summary) {
+            total_patches += row.patch_count;
+        }
+        std::printf("Architectural breakdown\n");
+        for (auto const &row : summary) {
+            auto const layer_text = st::devices::ap3::layer_label(row.layer);
+            double const pct =
+                total_bytes == 0 ? 0.0
+                                 : 100.0 * static_cast<double>(row.total_bytes) /
+                                       static_cast<double>(total_bytes);
+            std::printf("  %-30.*s %5u patches  %5.1f%%  (%s bytes)\n",
+                        static_cast<int>(layer_text.size()), layer_text.data(),
+                        row.patch_count, pct, with_commas(row.total_bytes).c_str());
+        }
+        std::printf("\n");
+    }
+
+    std::printf("Cross-references\n");
+    std::printf("  List every patch:                ptm list-patches %s\n", basename.c_str());
+    // Diff / import lines deliberately omitted until those subcommands
+    // ship — keeps cross-refs honest with what's actually wired.
+}
+
+void render_inspect_json(std::string const &path,
+                         std::size_t file_size,
+                         st::library::DecodedPtm const &decoded,
+                         std::vector<st::devices::ap3::LayerSummary> const &summary) {
+    (void)path;
+    std::uint64_t total_bytes = 0;
+    for (auto const &p : decoded.patches) {
+        total_bytes += p.length;
+    }
+    std::printf("{\n");
+    std::printf("  \"identity\": {\n");
+    std::printf("    \"vendor\": \"%s\",\n", decoded.metadata.vendor_id.c_str());
+    std::printf("    \"vehicle_id\": \"%s\",\n", decoded.metadata.vehicle_id.c_str());
+    std::printf("    \"lock_mask\": %u,\n", decoded.metadata.lock_mask);
+    std::printf("    \"rom_sum\": \"%s\",\n", decoded.metadata.rom_sum.c_str());
+    std::printf("    \"save_date\": \"%s\"\n", decoded.metadata.save_date_time.c_str());
+    std::printf("  },\n");
+    std::printf("  \"patches\": { \"total\": %zu, \"total_bytes\": %llu },\n",
+                decoded.patches.size(),
+                static_cast<unsigned long long>(total_bytes));
+    std::printf("  \"file_size_bytes\": %llu,\n",
+                static_cast<unsigned long long>(file_size));
+    std::printf("  \"layers\": [\n");
+    for (std::size_t i = 0; i < summary.size(); ++i) {
+        auto const &row = summary[i];
+        auto const layer_text = st::devices::ap3::layer_label(row.layer);
+        std::printf("    {\"layer\":\"%.*s\",\"patches\":%u,\"bytes\":%llu}%s\n",
+                    static_cast<int>(layer_text.size()), layer_text.data(),
+                    row.patch_count,
+                    static_cast<unsigned long long>(row.total_bytes),
+                    i + 1 < summary.size() ? "," : "");
+    }
+    std::printf("  ]\n");
+    std::printf("}\n");
+}
+
+void render_inspect_toml(std::string const &path,
+                         std::size_t file_size,
+                         st::library::DecodedPtm const &decoded,
+                         std::vector<st::devices::ap3::LayerSummary> const &summary) {
+    (void)path;
+    std::uint64_t total_bytes = 0;
+    for (auto const &p : decoded.patches) {
+        total_bytes += p.length;
+    }
+    std::printf("[identity]\n");
+    std::printf("vendor = \"%s\"\n", decoded.metadata.vendor_id.c_str());
+    std::printf("vehicle_id = \"%s\"\n", decoded.metadata.vehicle_id.c_str());
+    std::printf("lock_mask = %u\n", decoded.metadata.lock_mask);
+    std::printf("rom_sum = \"%s\"\n", decoded.metadata.rom_sum.c_str());
+    std::printf("save_date = \"%s\"\n", decoded.metadata.save_date_time.c_str());
+    std::printf("\n[patches]\n");
+    std::printf("total = %zu\n", decoded.patches.size());
+    std::printf("total_bytes = %llu\n", static_cast<unsigned long long>(total_bytes));
+    std::printf("file_size_bytes = %llu\n", static_cast<unsigned long long>(file_size));
+    for (auto const &row : summary) {
+        auto const layer_text = st::devices::ap3::layer_label(row.layer);
+        std::printf("\n[[layers]]\n");
+        std::printf("layer = \"%.*s\"\n",
+                    static_cast<int>(layer_text.size()), layer_text.data());
+        std::printf("patches = %u\n", row.patch_count);
+        std::printf("bytes = %llu\n", static_cast<unsigned long long>(row.total_bytes));
+    }
+}
+
+int run_inspect(int argc, char **argv) {
+    InspectOpts opts;
+    if (!parse_inspect_opts(argc, argv, opts)) {
+        return 2;
+    }
+
+    auto bytes = read_file_bytes(opts.ptm_path);
+    if (!bytes.has_value()) {
+        std::fprintf(stderr, "ptm inspect: %s\n", bytes.error().to_string().c_str());
+        return 1;
+    }
+    auto const file_size = bytes->size();
+
+    auto contents = st::devices::ap3::cipher::decrypt_ptm(*bytes);
+    if (!contents.has_value()) {
+        std::fprintf(stderr, "ptm inspect: %s\n", contents.error().to_string().c_str());
+        return contents.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
+    }
+
+    auto decoded = st::library::decode_ptm_xml(contents->private_data_xml);
+    if (!decoded.has_value()) {
+        std::fprintf(stderr, "ptm inspect: %s\n", decoded.error().to_string().c_str());
+        return 1;
+    }
+
+    std::vector<std::uint32_t> offsets;
+    std::vector<std::uint32_t> lengths;
+    offsets.reserve(decoded->patches.size());
+    lengths.reserve(decoded->patches.size());
+    for (auto const &p : decoded->patches) {
+        offsets.push_back(p.rom_offset);
+        lengths.push_back(p.length);
+    }
+    auto classifications = st::devices::ap3::classify_patches(
+        st::devices::ap3::default_lf79103p_layer_map(), offsets, lengths);
+    auto summary = st::devices::ap3::summarize(classifications);
+
+    switch (opts.format) {
+    case Format::Text:
+        render_inspect_text(opts.ptm_path, file_size, *decoded, summary);
+        break;
+    case Format::Json:
+        render_inspect_json(opts.ptm_path, file_size, *decoded, summary);
+        break;
+    case Format::Toml:
+        render_inspect_toml(opts.ptm_path, file_size, *decoded, summary);
+        break;
+    }
+    return 0;
+}
+
 int run_list_patches(int argc, char **argv) {
     ListPatchesOpts opts;
     if (!parse_list_patches_opts(argc, argv, opts)) {
@@ -16335,6 +16562,8 @@ int cmd_ptm(int argc, char *argv[]) {
         std::fputs("Usage: subuwutuner-cli --enable-cobb-ap-cipher ptm <subcommand> [args]\n"
                    "\n"
                    "Subcommands:\n"
+                   "  inspect <file.ptm> [--format text|json|toml]\n"
+                   "                     Identity block + architectural breakdown.\n"
                    "  list-patches <file.ptm> [--format text|json|toml]\n"
                    "                     Decode a .ptm and emit one row per patch.\n"
                    "\n"
@@ -16353,6 +16582,9 @@ int cmd_ptm(int argc, char *argv[]) {
         return 2;
     }
     std::string_view const sub{argv[0]};
+    if (sub == "inspect") {
+        return ptm_cli::run_inspect(argc - 1, argv + 1);
+    }
     if (sub == "list-patches") {
         return ptm_cli::run_list_patches(argc - 1, argv + 1);
     }

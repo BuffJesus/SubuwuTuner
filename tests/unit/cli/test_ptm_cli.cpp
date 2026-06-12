@@ -93,3 +93,53 @@ TEST_CASE("ptm with no subcommand prints help and exits 2",
     REQUIRE(r.spawned);
     REQUIRE(r.exit_code == 2);
 }
+
+TEST_CASE("ptm inspect refuses without --enable-cobb-ap-cipher",
+          "[cli][ptm][integration]") {
+    if (!can_run()) {
+        return;
+    }
+    auto const r = st::test::cli_run("ptm inspect /nonexistent/file.ptm");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("ptm inspect reports unreadable file with --enable-cobb-ap-cipher",
+          "[cli][ptm][integration][cipher]") {
+#ifndef ST_AP3_HAVE_CIPHER
+    SKIP("Cipher gating off");
+#else
+    if (!can_run()) {
+        return;
+    }
+    auto const r = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm inspect /nonexistent/xyz.ptm");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 1);
+#endif
+}
+
+TEST_CASE("ptm inspect exercises decrypt + decode on synthetic fixture",
+          "[cli][ptm][integration][cipher]") {
+#ifndef ST_AP3_HAVE_CIPHER
+    SKIP("Cipher gating off");
+#else
+#ifndef ST_FIXTURE_AP3_CIPHER_DIR
+    SKIP("ST_FIXTURE_AP3_CIPHER_DIR not defined");
+#else
+    if (!can_run()) {
+        return;
+    }
+    std::string fixture =
+        std::string{ST_FIXTURE_AP3_CIPHER_DIR} + "/synthetic_e2e_ptm_envelope.ptm";
+    auto const r = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm inspect " + st::test::quote(fixture));
+    REQUIRE(r.spawned);
+    // Same as list-patches: the fixture is intentionally trivial post-
+    // decrypt, so the patch decoder rejects with exit 1. The render
+    // never runs, but the cipher chain does — which is the gate this
+    // test enforces.
+    REQUIRE(r.exit_code == 1);
+#endif
+#endif
+}
