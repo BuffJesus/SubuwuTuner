@@ -52,6 +52,7 @@ Corpus will be checked in alongside; new findings auto-PR'd by the fuzz job once
   - Full read → write → verify cycle
   - **Brick-recovery validation**: pull power mid-flash, verify recovery shim restores
   - Datalogging soak test (1 hour @ 100 Hz, drift < 0.1%)
+- **`.ptm` cycle through APManager (Phase 5.5 of `docs/28`)**: pull a tune from the AP, `ptm import`/`export` through SubuwuTuner, push back, flash to the bench ECU via APManager (not `st::flash` yet — that's the Phase-6 gate), confirm CID + checksum + clean boot. Validates the `.ptm` format end-to-end without putting the SubuwuTuner flash orchestrator in the loop. Live-validated through the AP storage layer 2026-06-12; the ECU-flash leg waits on the bench rig coming up.
 - HIL job is **manual-trigger only** to start; promoted to nightly once it stops finding things
 
 ### Tier 5 — Beta program (post-Phase 4)

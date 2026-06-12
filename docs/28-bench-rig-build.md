@@ -292,6 +292,83 @@ resolved before any write test.
 
 ## Phase 6 — Brick-recovery validation (the gate)
 
+Before Phase 6 (the customer-flash gate), there's a softer milestone worth banking once the harness is up and the bench ECU is comms-alive: the COBB-`.ptm` cycle through the AccessPort and into a bench-flashed ECU. See "Phase 5.5" below.
+
+## Phase 5.5 — `.ptm` cycle live-validation on the bench ECU
+
+**Status as of 2026-06-12 PM:** the full SubuwuTuner `.ptm` cycle has been live-validated against the user's AccessPort SUB0484551, but ONLY through the AP's storage layer (pull → import → edit → export → push → re-pull → byte-identical). The exported `.ptm` has never actually been **flashed onto an ECU** through SubuwuTuner. That last step is what makes the cycle real, and it should be exercised here on the bench rig before being trusted on the car.
+
+Pre-reqs:
+- Bench ECU is comms-alive (Phase 3 success: cmd 0x10 + cmd 0x22 round-trip green).
+- Bench ECU is the SAME CID as your AccessPort is married to, OR you accept that calibration mismatch may produce checksum-fault DTCs that are fine for bench testing but would be a problem on the car.
+- AccessPort is plugged into the bench OBD-II harness (B280 / Y-cable). The AP doesn't need to be married to the bench ECU's VIN — it just needs to be able to talk to the ECU it's connected to.
+
+Recipe:
+
+1. **Pull a known-good stock tune from the AP** (or use any tune we previously confirmed round-trips byte-identical). Stage1 91 v401.ptm was the 2026-06-12 validation file:
+
+   ```bash
+   MSYS_NO_PATHCONV=1 subuwutuner-cli ap3 pull \
+       "/maps/Stage1 91 v401.ptm" \
+       --into /tmp/stage1.ptm
+   ```
+
+2. **Import to a project**, pointing at the bench ECU's matching stock ROM + the def pack for its CID:
+
+   ```bash
+   subuwutuner-cli --enable-cobb-ap-cipher ptm import /tmp/stage1.ptm \
+       --base-rom <bench-ecu-stock.bin> \
+       --def /d/Subuwu/defs-private/va/lf79103p.toml \
+       --into /tmp/stage1-bench.stune
+   ```
+
+3. **Make a single tiny edit** in the GUI (one cell in a non-safety-critical table — see `docs/08` for the canonical "safe poke" list). Save the project.
+
+4. **Export back to `.ptm`**:
+
+   ```bash
+   subuwutuner-cli --enable-cobb-ap-cipher ptm export /tmp/stage1-bench.stune \
+       --as /tmp/stage1-bench.ptm
+   ```
+
+5. **`ptm verify` the round-trip** (should be `4244/4244 matched (full) — YES (byte-identical)` minus your one cell:
+
+   ```bash
+   subuwutuner-cli --enable-cobb-ap-cipher ptm verify /tmp/stage1-bench.ptm /tmp/stage1-bench.stune
+   ```
+
+6. **Push to the AP** under a fresh name (don't overwrite anything):
+
+   ```bash
+   MSYS_NO_PATHCONV=1 subuwutuner-cli ap3 push /tmp/stage1-bench.ptm \
+       --as /maps/SubuwuBenchTest.ptm
+   ```
+
+7. **Use the AP to flash the bench ECU.** *Do NOT use SubuwuTuner's `st::flash` orchestrator for this step yet — that's what Phase 6 is for.* Use APManager itself, or right-click → Flash in the AP's on-device UI. The AP's flash sequence has been wire-traced for years and is what we'll mimic in `st::flash` later; getting the AP to flash our exported `.ptm` proves the file format is valid end-to-end.
+
+8. **After flash completes, read the ECU's calibration ID + checksum back via `ssm-a8-poll` or a fresh `rom-pull`** and confirm:
+   - The new CID/checksum matches what we expect for the edited tune.
+   - The ECU starts and idles cleanly (key-on, engine-off; we're not running the engine on the bench).
+   - No new DTCs beyond the bench-only expected set (P0606 vs no-VSS, etc).
+
+9. **Restore stock**: re-flash the original Stage1 91 v401.ptm so the bench ECU goes back to a known starting state for the next session.
+
+10. **Clean up the AP**:
+
+    ```bash
+    MSYS_NO_PATHCONV=1 subuwutuner-cli ap3 rm /maps/SubuwuBenchTest.ptm
+    ```
+
+Pass criteria:
+- AP accepts the SubuwuTuner-exported `.ptm` without complaint (no marriage-state or signature errors).
+- AP-driven flash completes without errors and the new CID/checksum is what we predicted.
+- ECU re-boots cleanly with the new calibration.
+- Restore back to stock completes with no surprises.
+
+This phase exercises everything **except** the SubuwuTuner-side flash orchestrator. It validates the `.ptm` format end-to-end and the round-trip through the file vault, but the ECU-side flash protocol is delegated to APManager. Phase 6 (brick recovery) is where `st::flash` itself gets the wheel.
+
+## Phase 6 — Brick-recovery validation (the gate)
+
 Per `docs/08-testing-strategy.md` Tier 4 and the Phase-4 ship gate, the
 bench rig has to demonstrate the recovery path before any customer
 flash. The drill:
