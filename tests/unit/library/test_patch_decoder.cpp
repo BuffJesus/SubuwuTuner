@@ -202,3 +202,41 @@ TEST_CASE("patch decoder: rejects missing required field",
     REQUIRE_FALSE(r.has_value());
     REQUIRE(r.error().code() == st::ErrorCode::ParseError);
 }
+
+TEST_CASE("patch decoder: preserves duplicate-rom_offset entries in encounter order",
+          "[library][patch_decoder]") {
+    // Pins the contract documented in patch_decoder.hpp: COBB tunes
+    // emit clear-then-set byte pairs at hot offsets. Both halves MUST
+    // appear in the decoded list in document order — collapsing by
+    // rom_offset would lose the "set" half and let `ptm import`
+    // produce a working.bin that doesn't match the source tune.
+#ifndef ST_AP3_HAVE_CIPHER
+    SKIP("base64_decode lives behind ST_AP3_HAVE_CIPHER");
+#else
+    constexpr std::string_view kXml =
+        "<PrivateData>"
+        "<vendorID>X</vendorID>"
+        "<vehicleID>Y</vehicleID>"
+        "<lock mask=\"0\" />"
+        "<romSum value=\"0\" />"
+        "<patches>"
+        // Same rom_offset (65536), different ram_offset + bytes — the
+        // clear-then-set pattern. AAAAAAA= = 4 zero bytes;
+        // q83vEg== = 0xAB 0xCD 0xEF 0x12 (standard RFC 4648).
+        "<patch romOffset=\"65536\" ramOffset=\"0\" length=\"4\">AAAAAA==</patch>"
+        "<patch romOffset=\"65536\" ramOffset=\"16\" length=\"4\">q83vEg==</patch>"
+        "</patches>"
+        "</PrivateData>";
+    auto r = st::library::decode_ptm_xml(kXml);
+    REQUIRE(r.has_value());
+    REQUIRE(r->patches.size() == 2);
+    // Both entries present, in document order.
+    REQUIRE(r->patches[0].rom_offset == 65536U);
+    REQUIRE(r->patches[0].ram_offset == 0);
+    REQUIRE(r->patches[0].bytes == std::vector<std::uint8_t>{0, 0, 0, 0});
+    REQUIRE(r->patches[1].rom_offset == 65536U);
+    REQUIRE(r->patches[1].ram_offset == 16);
+    REQUIRE(r->patches[1].bytes ==
+            std::vector<std::uint8_t>{0xAB, 0xCD, 0xEF, 0x12});
+#endif
+}
