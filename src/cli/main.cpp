@@ -17321,9 +17321,17 @@ int run_verify(int argc, char **argv) {
         return 1;
     }
 
-    // Build a parallel project_patches vector. Key by rom_offset for
-    // intersection with the .ptm side.
-    struct PP { std::uint32_t rom_offset; std::uint32_t length; std::vector<std::uint8_t> bytes; };
+    // Build a parallel project_patches vector. Includes ram_offset
+    // because some .ptm files have multiple <patch> entries at the
+    // same rom_offset (e.g. before/after byte pairs); collapsing by
+    // rom_offset alone silently drops duplicates and overcounts
+    // false-positive byte mismatches.
+    struct PP {
+        std::uint32_t rom_offset;
+        std::int32_t ram_offset;
+        std::uint32_t length;
+        std::vector<std::uint8_t> bytes;
+    };
     std::vector<PP> project_patches;
     project_patches.reserve(arr->size());
     for (auto const &node : *arr) {
@@ -17332,6 +17340,7 @@ int run_verify(int argc, char **argv) {
             continue;
         }
         auto const rom_off = (*p)["rom_offset"].value_or<std::int64_t>(-1);
+        auto const ram_off = (*p)["ram_offset"].value_or<std::int64_t>(0);
         auto const length  = (*p)["length"].value_or<std::int64_t>(-1);
         auto const b64     = (*p)["bytes_b64"].value_or<std::string>("");
         if (rom_off < 0 || length < 0 || b64.empty()) {
@@ -17342,50 +17351,73 @@ int run_verify(int argc, char **argv) {
             continue;
         }
         project_patches.push_back({static_cast<std::uint32_t>(rom_off),
+                                   static_cast<std::int32_t>(ram_off),
                                    static_cast<std::uint32_t>(length),
                                    std::move(*decoded)});
     }
 
-    // Index both sides by rom_offset.
-    std::map<std::uint32_t, std::size_t> ptm_by;
-    std::map<std::uint32_t, std::size_t> proj_by;
-    for (std::size_t i = 0; i < ptm_patches.size(); ++i) {
-        ptm_by[ptm_patches[i].rom_offset] = i;
-    }
-    for (std::size_t i = 0; i < project_patches.size(); ++i) {
-        proj_by[project_patches[i].rom_offset] = i;
-    }
-
-    // Compare.
-    std::uint32_t shared = 0;
-    std::uint32_t ptm_only = 0;
-    std::uint32_t proj_only = 0;
-    std::uint32_t bytes_different = 0;
+    // Build sortable (rom_offset, ram_offset, length, bytes) tuples
+    // for both sides. Multiset-style comparison: a patch matches iff
+    // ALL four fields equal. Sorting both sides and using
+    // std::set_intersection / std::set_difference handles the
+    // duplicate-rom_offset case correctly — pre-fix, the dict
+    // collapsed duplicates and reported 1 false byte-mismatch per
+    // duplicate-offset pair (the 78-byte phantom diff on Stage1 was
+    // really 78 legitimate duplicate-offset patches).
+    struct PT {
+        std::uint32_t rom_offset;
+        std::int32_t ram_offset;
+        std::uint32_t length;
+        std::vector<std::uint8_t> bytes;
+        auto operator<=>(PT const &o) const = default;
+    };
+    std::vector<PT> ptm_sorted, proj_sorted;
+    ptm_sorted.reserve(ptm_patches.size());
+    proj_sorted.reserve(project_patches.size());
     for (auto const &p : ptm_patches) {
-        auto it = proj_by.find(p.rom_offset);
-        if (it == proj_by.end()) {
-            ++ptm_only;
-            continue;
-        }
-        ++shared;
-        auto const &pp = project_patches[it->second];
-        if (p.bytes != pp.bytes) {
-            ++bytes_different;
-        }
+        ptm_sorted.push_back({p.rom_offset, p.ram_offset, p.length, p.bytes});
     }
     for (auto const &p : project_patches) {
-        if (ptm_by.find(p.rom_offset) == ptm_by.end()) {
-            ++proj_only;
+        proj_sorted.push_back({p.rom_offset, p.ram_offset, p.length, p.bytes});
+    }
+    std::sort(ptm_sorted.begin(), ptm_sorted.end());
+    std::sort(proj_sorted.begin(), proj_sorted.end());
+
+    std::vector<PT> ptm_only_v, proj_only_v;
+    std::set_difference(ptm_sorted.begin(), ptm_sorted.end(),
+                        proj_sorted.begin(), proj_sorted.end(),
+                        std::back_inserter(ptm_only_v));
+    std::set_difference(proj_sorted.begin(), proj_sorted.end(),
+                        ptm_sorted.begin(), ptm_sorted.end(),
+                        std::back_inserter(proj_only_v));
+    // "Bytes-different" is the legacy diagnostic: same (rom_offset,
+    // ram_offset, length) but different bytes. Compute it from the
+    // residuals — patches that didn't match exactly but DO have a
+    // counterpart at the same (rom_offset, ram_offset, length).
+    auto same_key = [](PT const &a, PT const &b) {
+        return a.rom_offset == b.rom_offset && a.ram_offset == b.ram_offset &&
+               a.length == b.length;
+    };
+    std::uint32_t bytes_different = 0;
+    for (auto const &a : ptm_only_v) {
+        for (auto const &b : proj_only_v) {
+            if (same_key(a, b)) {
+                ++bytes_different;
+                break;
+            }
         }
     }
+    auto const ptm_only = static_cast<std::uint32_t>(ptm_only_v.size()) - bytes_different;
+    auto const proj_only = static_cast<std::uint32_t>(proj_only_v.size()) - bytes_different;
+    auto const matched = static_cast<std::uint32_t>(ptm_sorted.size() - ptm_only_v.size());
 
     bool const matches = (ptm_only == 0 && proj_only == 0 && bytes_different == 0 &&
-                          shared == ptm_patches.size() && shared == project_patches.size());
+                          ptm_sorted.size() == proj_sorted.size());
     std::printf("ptm verify: %s vs %s\n", opts.ptm_path.c_str(), opts.project_dir.c_str());
     std::printf("  .ptm patches:        %zu\n", ptm_patches.size());
     std::printf("  project patches:     %zu\n", project_patches.size());
-    std::printf("  shared offsets:      %u\n", shared);
-    std::printf("  .ptm-only offsets:   %u\n", ptm_only);
+    std::printf("  matched (full):      %u\n", matched);
+    std::printf("  .ptm-only:           %u\n", ptm_only);
     std::printf("  project-only:        %u\n", proj_only);
     std::printf("  byte-different:      %u\n", bytes_different);
     std::printf("  match:               %s\n", matches ? "YES (byte-identical)" : "NO");
