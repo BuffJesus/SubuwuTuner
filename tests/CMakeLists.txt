@@ -104,6 +104,7 @@ add_executable(st_unit_tests
     unit/audit/test_audit_subscribers.cpp
     unit/audit/test_apply_op_audit_contract.cpp
     unit/cli/test_cli_integration.cpp
+    unit/cli/test_ptm_cli.cpp
     unit/profile/test_profile.cpp
     unit/ai/test_drift.cpp
     unit/ai/test_backend.cpp

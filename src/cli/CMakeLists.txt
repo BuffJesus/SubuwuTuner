@@ -26,6 +26,7 @@ target_link_libraries(subuwutuner-cli
         st::ai
         st::policy
         st::devices_ap3
+        st::library
         st::warnings
         st::sanitizers
         st::platform

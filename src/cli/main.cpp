@@ -34,8 +34,11 @@
 #include "st/policy/flash_preflight.hpp"
 #include "st/project.hpp"
 #include "st/rom.hpp"
+#include "st/devices/ap3/architectural_classifier.hpp"
 #include "st/devices/ap3/client.hpp"
 #include "st/devices/ap3/file_info.hpp"
+#include "st/devices/ap3/ptm_cipher.hpp"
+#include "st/library/patch_decoder.hpp"
 #include "st/transport/cobb_ap_channel.hpp"
 #include "st/transport/factory.hpp"
 #include "st/transport/j2534_discovery.hpp"
@@ -16149,16 +16152,233 @@ int cmd_ap3(int argc, char *argv[]) {
     return 2;
 }
 
+// Runtime arming flag for the `.ptm` cipher path. The CLI gate is the
+// "second key" of the two-step arming model described in docs/34 — the
+// build flag `ST_ENABLE_COBB_AP_CIPHER=ON` is the first key. Even with
+// the build flag on, every `ptm` subcommand refuses until this flag
+// flips to true. Set from main's pre-pass on `--enable-cobb-ap-cipher`,
+// read in `cmd_ptm`.
+static bool g_cobb_ap_cipher_armed = false;
+
+namespace ptm_cli {
+
+st::Result<std::vector<std::uint8_t>> read_file_bytes(std::string const &path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) {
+        return st::failure(st::ErrorCode::ParseError,
+                           "ptm: file '" + path + "' not found or unreadable");
+    }
+    f.seekg(0, std::ios::end);
+    auto const sz = f.tellg();
+    if (sz < 0) {
+        return st::failure(st::ErrorCode::ParseError,
+                           "ptm: '" + path + "' tellg failed");
+    }
+    f.seekg(0, std::ios::beg);
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(sz));
+    if (sz > 0) {
+        f.read(reinterpret_cast<char *>(bytes.data()), sz);
+        if (!f) {
+            return st::failure(st::ErrorCode::ParseError,
+                               "ptm: '" + path + "' read failed");
+        }
+    }
+    return bytes;
+}
+
+enum class Format { Text, Json, Toml };
+
+struct ListPatchesOpts {
+    std::string ptm_path;
+    Format format{Format::Text};
+};
+
+bool parse_list_patches_opts(int argc, char **argv, ListPatchesOpts &out) {
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--format" && i + 1 < argc) {
+            std::string_view const v{argv[++i]};
+            if (v == "text") {
+                out.format = Format::Text;
+            } else if (v == "json") {
+                out.format = Format::Json;
+            } else if (v == "toml") {
+                out.format = Format::Toml;
+            } else {
+                std::fprintf(stderr,
+                             "ptm list-patches: --format must be text|json|toml (got '%.*s')\n",
+                             static_cast<int>(v.size()), v.data());
+                return false;
+            }
+            continue;
+        }
+        if (a.starts_with("--")) {
+            std::fprintf(stderr, "ptm list-patches: unknown flag: %.*s\n",
+                         static_cast<int>(a.size()), a.data());
+            return false;
+        }
+        if (!out.ptm_path.empty()) {
+            std::fprintf(stderr,
+                         "ptm list-patches: only one .ptm path may be given (got '%s' and '%.*s')\n",
+                         out.ptm_path.c_str(), static_cast<int>(a.size()), a.data());
+            return false;
+        }
+        out.ptm_path.assign(a);
+    }
+    if (out.ptm_path.empty()) {
+        std::fputs("ptm list-patches: missing required <file.ptm> argument\n", stderr);
+        return false;
+    }
+    return true;
+}
+
+void render_text(std::vector<st::library::PatchEntry> const &patches,
+                 std::vector<st::devices::ap3::PatchClassification> const &classifications) {
+    std::printf("%-12s  %8s  %s\n", "rom_offset", "length", "layer");
+    for (std::size_t i = 0; i < patches.size(); ++i) {
+        auto const &p = patches[i];
+        auto const layer_text = classifications.empty()
+                                    ? std::string_view{"?"}
+                                    : st::devices::ap3::layer_label(classifications[i].layer);
+        std::printf("  0x%08X  %8u  %.*s\n", p.rom_offset, p.length,
+                    static_cast<int>(layer_text.size()), layer_text.data());
+    }
+}
+
+void render_json(std::vector<st::library::PatchEntry> const &patches,
+                 std::vector<st::devices::ap3::PatchClassification> const &classifications) {
+    std::printf("[\n");
+    for (std::size_t i = 0; i < patches.size(); ++i) {
+        auto const &p = patches[i];
+        auto const layer_text = classifications.empty()
+                                    ? std::string_view{"?"}
+                                    : st::devices::ap3::layer_label(classifications[i].layer);
+        std::printf(R"(  {"rom_offset":%u,"length":%u,"layer":"%.*s"}%s)" "\n",
+                    p.rom_offset, p.length,
+                    static_cast<int>(layer_text.size()), layer_text.data(),
+                    i + 1 < patches.size() ? "," : "");
+    }
+    std::printf("]\n");
+}
+
+void render_toml(std::vector<st::library::PatchEntry> const &patches,
+                 std::vector<st::devices::ap3::PatchClassification> const &classifications) {
+    for (std::size_t i = 0; i < patches.size(); ++i) {
+        auto const &p = patches[i];
+        auto const layer_text = classifications.empty()
+                                    ? std::string_view{"?"}
+                                    : st::devices::ap3::layer_label(classifications[i].layer);
+        std::printf("[[patches]]\n");
+        std::printf("rom_offset = %u\n", p.rom_offset);
+        std::printf("length = %u\n", p.length);
+        std::printf("layer = \"%.*s\"\n\n",
+                    static_cast<int>(layer_text.size()), layer_text.data());
+    }
+}
+
+int run_list_patches(int argc, char **argv) {
+    ListPatchesOpts opts;
+    if (!parse_list_patches_opts(argc, argv, opts)) {
+        return 2;
+    }
+
+    auto bytes = read_file_bytes(opts.ptm_path);
+    if (!bytes.has_value()) {
+        std::fprintf(stderr, "ptm list-patches: %s\n", bytes.error().to_string().c_str());
+        return 1;
+    }
+
+    auto contents = st::devices::ap3::cipher::decrypt_ptm(*bytes);
+    if (!contents.has_value()) {
+        std::fprintf(stderr, "ptm list-patches: %s\n", contents.error().to_string().c_str());
+        return contents.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
+    }
+
+    auto decoded = st::library::decode_ptm_xml(contents->private_data_xml);
+    if (!decoded.has_value()) {
+        std::fprintf(stderr, "ptm list-patches: %s\n", decoded.error().to_string().c_str());
+        return 1;
+    }
+
+    // Classifier takes parallel offset+length spans rather than the
+    // PatchEntry struct, so the library and classifier headers stay
+    // decoupled. Build them once here.
+    std::vector<std::uint32_t> offsets;
+    std::vector<std::uint32_t> lengths;
+    offsets.reserve(decoded->patches.size());
+    lengths.reserve(decoded->patches.size());
+    for (auto const &p : decoded->patches) {
+        offsets.push_back(p.rom_offset);
+        lengths.push_back(p.length);
+    }
+    auto classifications = st::devices::ap3::classify_patches(
+        st::devices::ap3::default_lf79103p_layer_map(), offsets, lengths);
+
+    switch (opts.format) {
+    case Format::Text:
+        render_text(decoded->patches, classifications);
+        break;
+    case Format::Json:
+        render_json(decoded->patches, classifications);
+        break;
+    case Format::Toml:
+        render_toml(decoded->patches, classifications);
+        break;
+    }
+    return 0;
+}
+
+} // namespace ptm_cli
+
+int cmd_ptm(int argc, char *argv[]) {
+    if (argc < 1) {
+        std::fputs("Usage: subuwutuner-cli --enable-cobb-ap-cipher ptm <subcommand> [args]\n"
+                   "\n"
+                   "Subcommands:\n"
+                   "  list-patches <file.ptm> [--format text|json|toml]\n"
+                   "                     Decode a .ptm and emit one row per patch.\n"
+                   "\n"
+                   "Cipher gating:\n"
+                   "  All ptm subcommands require ST_ENABLE_COBB_AP_CIPHER=ON at build\n"
+                   "  time AND --enable-cobb-ap-cipher at runtime. See docs/34 for the\n"
+                   "  two-step arming model and rationale.\n",
+                   stderr);
+        return 2;
+    }
+    if (!g_cobb_ap_cipher_armed) {
+        std::fputs(
+            "ptm: PolicyDenied — runtime gate not armed. Pass --enable-cobb-ap-cipher\n"
+            "     anywhere in argv to arm the .ptm cipher path. See docs/34.\n",
+            stderr);
+        return 2;
+    }
+    std::string_view const sub{argv[0]};
+    if (sub == "list-patches") {
+        return ptm_cli::run_list_patches(argc - 1, argv + 1);
+    }
+    std::fprintf(stderr,
+                 "ptm: unknown subcommand: %s\n"
+                 "Run `subuwutuner-cli ptm` for the list.\n",
+                 argv[0]);
+    return 2;
+}
+
 int main(int argc, char *argv[]) {
     // Pre-pass: pluck out global options that can appear anywhere in argv
     // and that the subcommand dispatchers shouldn't see. Currently:
-    // --enable-bulk-reflash-cipher. We compact argv in place after stripping.
+    // --enable-bulk-reflash-cipher and --enable-cobb-ap-cipher. We
+    // compact argv in place after stripping.
     {
         bool wants_bulk_reflash_cipher = false;
+        bool wants_cobb_ap_cipher = false;
         int write = 1;  // argv[0] (program name) stays put
         for (int read = 1; read < argc; ++read) {
             if (std::string_view{argv[read]} == "--enable-bulk-reflash-cipher") {
                 wants_bulk_reflash_cipher = true;
+                continue;  // strip from argv
+            }
+            if (std::string_view{argv[read]} == "--enable-cobb-ap-cipher") {
+                wants_cobb_ap_cipher = true;
                 continue;  // strip from argv
             }
             argv[write++] = argv[read];
@@ -16180,6 +16400,9 @@ int main(int argc, char *argv[]) {
             std::fprintf(stderr,
                          "subuwutuner-cli: --enable-bulk-reflash-cipher: not built in\n");
 #endif
+        }
+        if (wants_cobb_ap_cipher) {
+            g_cobb_ap_cipher_armed = true;
         }
     }
 
@@ -17095,6 +17318,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "ap3") {
         return cmd_ap3(argc - 2, argv + 2);
+    }
+    if (cmd == "ptm") {
+        return cmd_ptm(argc - 2, argv + 2);
     }
     if (cmd == "autotune") {
         // Match the `config` subcommand-help shape: list all known
