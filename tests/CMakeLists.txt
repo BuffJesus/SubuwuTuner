@@ -239,7 +239,14 @@ if(ST_BUILD_HIL_TESTS)
 endif()
 
 # Catch2's discovery integrates each TEST_CASE as an individual ctest entry.
+#
+# WORKING_DIRECTORY is set to the project root so tests that reference
+# fixture paths like "fixtures/demo.stune" resolve consistently
+# whether ctest is invoked from the build dir, the project root, or
+# anywhere else. Pre-fix, ~10 diff / verify_compare_inputs cases
+# failed depending on invocation cwd.
 catch_discover_tests(st_unit_tests
     REPORTER console
     OUTPUT_ON_FAILURE
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
