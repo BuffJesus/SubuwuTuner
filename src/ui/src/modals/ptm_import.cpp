@@ -199,6 +199,20 @@ bool commit_import(AppState &s) {
         std::memcpy(working_bytes.data() + p.rom_offset, p.bytes.data(), p.bytes.size());
         ++applied;
     }
+    // Symmetric to the CLI's a4b36d6 refuse: every patch overflowed
+    // the base ROM means the user picked the wrong base. Silently
+    // writing an unmodified working.bin + a "succeeded" toast would be
+    // misleading. Per the AppState's modal-error convention, set
+    // ptm_import_error so render_ptm_import_modal surfaces it inline
+    // (status bar gets hidden behind the modal — see feedback memory).
+    if (applied == 0 && skipped > 0) {
+        s.ptm_import_error =
+            "Every patch (" + std::to_string(skipped) + ") falls outside the "
+            "base ROM (" + std::to_string(base_bytes.size()) + " bytes). The "
+            "selected base probably doesn't match this tune — check the "
+            "vehicle_id against your base ROM's CID.";
+        return false;
+    }
     auto const working_crc = st::crc32(working_bytes);
 
     // Write source.bin + working.bin.

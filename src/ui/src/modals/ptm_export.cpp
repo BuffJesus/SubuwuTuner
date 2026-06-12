@@ -150,6 +150,17 @@ void run_export(AppState &s) {
                            static_cast<std::uint32_t>(length),
                            b64});
     }
+    // Mirror of the CLI's 16a32b7 refuse: every [[patch]] entry was
+    // malformed and dropped. Continuing would emit a syntactically
+    // valid .ptm with zero patches — a do-nothing tune the user could
+    // accidentally push to their AP.
+    if (patches.empty()) {
+        s.ptm_export_error =
+            "Every [[patch]] entry in ptm_patches.toml was malformed and "
+            "dropped. The project file may have been hand-edited or "
+            "corrupted; re-import the source .ptm.";
+        return;
+    }
 
     auto const inner = st::library::build_ptm_inner_xml(
         vendor_id, vehicle_id, lock_mask, rom_sum, save_date, patches);
