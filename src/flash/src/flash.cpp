@@ -539,6 +539,33 @@ Flasher::read_full_rom_ssm(std::uint32_t base_address, std::uint32_t total_lengt
 }
 
 // ---------------------------------------------------------------------
+// ecu_compute_checksum — ECU-side post-flash verification (RoutineControl)
+// ---------------------------------------------------------------------
+
+Result<std::vector<std::uint8_t>>
+Flasher::ecu_compute_checksum(std::uint16_t routine_id,
+                              std::uint32_t start_addr,
+                              std::uint32_t end_addr,
+                              std::chrono::milliseconds timeout) {
+    // 8-byte option record: 4-byte BE start address followed by 4-byte
+    // BE end address. Per docs/37, RE5 finding — Subaru's
+    // SH_CAN_Flash::ChecksumECUData(start, end) passes these as the
+    // RoutineControl 0x31 0x01 sub-function payload.
+    std::array<std::uint8_t, 8> option{
+        static_cast<std::uint8_t>((start_addr >> 24) & 0xFFU),
+        static_cast<std::uint8_t>((start_addr >> 16) & 0xFFU),
+        static_cast<std::uint8_t>((start_addr >> 8) & 0xFFU),
+        static_cast<std::uint8_t>(start_addr & 0xFFU),
+        static_cast<std::uint8_t>((end_addr >> 24) & 0xFFU),
+        static_cast<std::uint8_t>((end_addr >> 16) & 0xFFU),
+        static_cast<std::uint8_t>((end_addr >> 8) & 0xFFU),
+        static_cast<std::uint8_t>(end_addr & 0xFFU),
+    };
+    return client_.routine_control(ecu::uds::kRcStart, routine_id,
+                                   std::span<std::uint8_t const>{option}, timeout);
+}
+
+// ---------------------------------------------------------------------
 // compute_delta — sector-aligned byte-diff
 // ---------------------------------------------------------------------
 

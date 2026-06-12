@@ -1950,3 +1950,61 @@ TEST_CASE("evaluate_plan_policy: sector that overlaps multiple tables flags each
     REQUIRE(d.emissions_tables == std::vector<std::string>{"cl_target"});
     REQUIRE(d.overall_action == st::policy::Action::Block);
 }
+
+// ---------------------------------------------------------------------
+// ecu_compute_checksum — RE5 reference architecture's ChecksumECUData
+// ---------------------------------------------------------------------
+
+TEST_CASE("Flasher::ecu_compute_checksum builds RoutineControl 0x31 0x01 with 8-byte option",
+          "[flash][ecu_compute_checksum]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // Routine ID 0x0202 with range [0x00010000 .. 0x0003FFFF]. Expected
+    // request: 31 01 02 02 00 01 00 00 00 03 FF FF. Positive response:
+    // 71 01 02 02 + 4-byte checksum payload (Subaru CRC-32 convention).
+    constexpr std::uint16_t kRoutineId = 0x0202;
+    constexpr std::uint32_t kStart = 0x00010000;
+    constexpr std::uint32_t kEnd   = 0x0003FFFF;
+    expect(t,
+           {0x31, 0x01, 0x02, 0x02,
+            0x00, 0x01, 0x00, 0x00,   // start BE
+            0x00, 0x03, 0xFF, 0xFF},  // end BE
+           {0x71, 0x01, 0x02, 0x02, 0xDE, 0xAD, 0xBE, 0xEF});
+
+    flash::Flasher f{t};
+    auto const r = f.ecu_compute_checksum(kRoutineId, kStart, kEnd);
+    REQUIRE(r.has_value());
+    // Status record is the payload after [routineInfo(2) + routineId(2)]
+    // per ISO 14229; UdsClient::routine_control strips the header and
+    // returns only the routine output bytes.
+    REQUIRE(r->size() == 4);
+    REQUIRE((*r)[0] == 0xDE);
+    REQUIRE((*r)[1] == 0xAD);
+    REQUIRE((*r)[2] == 0xBE);
+    REQUIRE((*r)[3] == 0xEF);
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("Flasher::ecu_compute_checksum surfaces NRC from the routine",
+          "[flash][ecu_compute_checksum][error]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // NRC 0x31 (RequestOutOfRange) is the realistic failure when the
+    // bench rig + def-pack disagree on the checksum range. UdsClient
+    // surfaces NRC bytes as Result errors with the NRC byte in the
+    // error message; assert the call fails rather than asserting the
+    // exact error code (the routine_control NRC-handling rules are
+    // already pinned in tests/unit/ecu/test_uds.cpp).
+    expect(t,
+           {0x31, 0x01, 0x02, 0x02,
+            0x00, 0x01, 0x00, 0x00,
+            0x00, 0x03, 0xFF, 0xFF},
+           {0x7F, 0x31, 0x31}); // negative response: SID 7F + service 31 + NRC 0x31
+
+    flash::Flasher f{t};
+    auto const r = f.ecu_compute_checksum(0x0202, 0x00010000, 0x0003FFFF);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(t.exhausted());
+}

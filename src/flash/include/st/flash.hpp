@@ -372,6 +372,32 @@ public:
                       ReadProgressFn progress = nullptr,
                       std::atomic<bool> const *cancel = nullptr);
 
+    // Ask the ECU to compute its own checksum over `[start_addr,
+    // end_addr]` (inclusive) and return the routine result. Per
+    // `docs/37-subaru-flash-protocol.md` (RE5), the Subaru reference
+    // architecture's `SH_CAN_Flash::ChecksumECUData(start, end)` is a
+    // `RoutineControl 0x31 0x01` call with an 8-byte option record:
+    // 4-byte BE start address followed by 4-byte BE end address. The
+    // routine_id is per-platform — LF79103P uses one ID, RH850 VB
+    // another — and must be plumbed in by the caller (typically from
+    // a definition pack's `[pack].flash_routine.checksum` field).
+    //
+    // Returns the routine's status record verbatim — typically a
+    // 4-byte big-endian checksum (CRC-32 or sum-of-words; platform-
+    // specific). Caller compares against the host-computed expectation
+    // for the same range. Mismatch = post-flash corruption, abort
+    // before signaling the user "flash successful".
+    //
+    // Used by the Phase 5.5 bench-rig flash gate. UDS-only path —
+    // SSM ECUs (pre-Gen-B Subarus) don't expose this routine; the
+    // caller falls back to a host-side `read_full_rom_ssm` + local
+    // checksum cross-check on those platforms.
+    [[nodiscard]] Result<std::vector<std::uint8_t>>
+    ecu_compute_checksum(std::uint16_t routine_id,
+                         std::uint32_t start_addr,
+                         std::uint32_t end_addr,
+                         std::chrono::milliseconds timeout = std::chrono::milliseconds{5000});
+
     // Walk `current` and `target` in `sector_size`-aligned chunks; emit
     // a Sector for every chunk whose bytes differ. Both spans must be
     // the same length and a multiple of `sector_size` (the last sector
