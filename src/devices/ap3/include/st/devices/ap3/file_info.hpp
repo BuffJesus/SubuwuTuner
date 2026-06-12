@@ -151,10 +151,11 @@ struct FileInfo {
 //
 // Empirically decoded live 2026-06-12 — see
 // findings/handoffs/HANDOFF-to-analyst-2026-06-12-cmd21-large-file-truncation.md
-// for the byte-level decode. The AP returns name="." and size=0 for
-// files in subdirectories (a documented firmware path-resolution bug);
-// callers check `name == "."` to fail fast before a degenerate cmd 0x21
-// hang.
+// for the byte-level decode. A degenerate ACK with name="." and
+// size=0 historically meant our cmd 0x20 request sent the directory
+// rather than the full relative path (fixed in ef70018); callers
+// still check `name == "."` to fail fast against any future request-
+// shape regression that would degenerate the same way.
 [[nodiscard]] Result<FileInfo>
 decode_setup_ack_response_shape(std::span<std::uint8_t const> body);
 [[nodiscard]] Result<FileInfo> decode_file_info(std::span<std::uint8_t const> body);

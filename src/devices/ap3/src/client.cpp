@@ -40,15 +40,16 @@ std::string strip_leading_slash(std::string_view s) {
 
 // Diagnostic fallback for cmd 0x21 ReadFile DATA — off by default.
 // The strict path (receive_packet_body) reads exactly wire_len bytes
-// from the response header. On 2026-06-12 the live AP advertised
-// wire_len = 5500 for a 58 KB .ptm pull and then never sent the body
-// (see findings/handoffs/HANDOFF-to-analyst-2026-06-12-cmd21-large-file-truncation.md).
-// The reference Python tool that DID pull the same file end-to-end on
-// 2026-06-10 (findings/for-dan/ap3-toolkit/ap_pull_state.py) uses an
-// idle-driven accumulator instead: 512-byte reads in a loop, stopping
-// after 800ms of bus silence. ST_AP3_READFILE_DRAIN_MODE=1 swaps in
-// that strategy for the cmd 0x21 step only — the implementer can A/B
-// against the strict path when live hardware is available.
+// from the response header. Kept as defensive code: an early
+// 2026-06-12 PM bug (cmd 0x20 path field set to the directory rather
+// than the full relative path — fixed in ef70018) caused the AP to
+// answer cmd 0x21 with wire_len > 0 + zero body bytes; the resolved
+// failure-mode analysis is in
+// findings/handoffs/HANDOFF-to-analyst-2026-06-12-cmd21-large-file-truncation.md.
+// ST_AP3_READFILE_DRAIN_MODE=1 swaps in an idle-driven accumulator
+// (512-byte reads, stop after 800 ms of silence) for the cmd 0x21
+// step only — a one-knob escape hatch if a future firmware revision
+// regresses the wire_len reporting.
 bool readfile_drain_mode_enabled() noexcept {
     static int cached = -1;
     if (cached == -1) {
@@ -528,21 +529,13 @@ Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
     }
     // The AP's setup ACK uses a DIFFERENT layout than our request —
     // see decode_setup_ack_response_shape for the byte-level decode.
-    // Try the response-shape decoder; if it succeeds AND reports
-    // name="." with size=0, the AP firmware's path lookup degenerated
-    // (live-confirmed for files in /maps/, /presets/, /datalog/ as
-    // of 2026-06-12; analyst investigation pending — see
-    // findings/handoffs/HANDOFF-to-analyst-2026-06-12-cmd21-large-file-truncation.md).
-    // Fail fast in that case rather than burning a 30-second cmd 0x21
-    // timeout for nothing.
-    // Decode the setup ACK to extract reported_size (response shape is
-    // different from the request — see decode_setup_ack_response_shape).
     // A degenerate ACK (name=".", size=0) historically meant the AP's
-    // path-lookup failed because we were sending path="/maps/" (directory)
+    // path-lookup failed because we sent path="/maps/" (directory)
     // instead of path="maps/X.ptm" (full relative); the cmd 0x20 setup
-    // path field convention is now fixed and ACKs decode cleanly. The
-    // fast-fail check is kept as a defensive guard in case other
-    // degenerate request shapes surface in the future.
+    // path convention is now fixed (ef70018) and ACKs decode cleanly
+    // on the user's live AP. The fast-fail check stays as a defensive
+    // guard against future degenerate request shapes — the alternative
+    // is a 30-second cmd 0x21 timeout for nothing.
     std::uint64_t reported_size = 0;
     if (auto ack_info = decode_setup_ack_response_shape(*setup_resp);
         ack_info.has_value()) {
