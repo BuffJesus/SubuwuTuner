@@ -72,10 +72,16 @@ struct DeviceState {
 };
 
 struct ClientConfig {
-    // Per-call timeout for IByteChannel reads/writes. Reads are
-    // looped until wire_len bytes arrive; this is the per-attempt
-    // budget.
+    // Per-call timeout for IByteChannel reads/writes on metadata
+    // commands (state / ls / setup ACKs etc). Small responses; 2s is
+    // generous.
     std::chrono::milliseconds io_timeout{std::chrono::milliseconds{2000}};
+    // Wider timeout for cmd 0x21 ReadFile DATA responses, since the
+    // AP can take noticeably longer to push the body of a large
+    // (50+ KB) tune file than the 2s metadata budget allows. 30s is
+    // ~2x what APManager observably uses, with headroom for slow
+    // flash reads on the AP side.
+    std::chrono::milliseconds file_data_io_timeout{std::chrono::milliseconds{30000}};
 };
 
 class Client {

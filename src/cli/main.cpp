@@ -45,6 +45,7 @@
 
 #include <toml++/toml.hpp>
 #include "st/transport/cobb_ap_channel.hpp"
+#include "st/transport/cobb_ap_packet.hpp"
 #include "st/transport/factory.hpp"
 #include "st/transport/j2534_discovery.hpp"
 #include "st/transport/mock.hpp"
@@ -16312,6 +16313,194 @@ int run_backup(int argc, char **argv, CommonOpts const &opts) {
     return 0;
 }
 
+// Helper for `ap3 raw` — decodes a hex string (whitespace + 0x prefix
+// tolerated) into raw bytes. Returns nullopt on malformed input.
+std::optional<std::vector<std::uint8_t>> decode_hex(std::string_view in) {
+    std::vector<std::uint8_t> out;
+    out.reserve(in.size() / 2);
+    std::uint8_t cur = 0;
+    bool have_nibble = false;
+    for (auto c : in) {
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',' || c == ':') {
+            continue;
+        }
+        if (c == '0' && have_nibble == false) {
+            // Allow leading "0x" prefix on a byte. cur stays 0.
+        }
+        int v = -1;
+        if (c >= '0' && c <= '9') v = c - '0';
+        else if (c >= 'a' && c <= 'f') v = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') v = c - 'A' + 10;
+        else if (c == 'x' || c == 'X') {
+            // Allow "0x" inside the hex string; reset for the next byte.
+            cur = 0;
+            have_nibble = false;
+            continue;
+        }
+        else {
+            return std::nullopt;
+        }
+        if (!have_nibble) {
+            cur = static_cast<std::uint8_t>(v << 4);
+            have_nibble = true;
+        } else {
+            cur = static_cast<std::uint8_t>(cur | static_cast<std::uint8_t>(v));
+            out.push_back(cur);
+            cur = 0;
+            have_nibble = false;
+        }
+    }
+    if (have_nibble) {
+        return std::nullopt;
+    }
+    return out;
+}
+
+// Debug subcommand: send a raw cmd byte + optional body, read the
+// response, dump everything as hex. The encode_packet/decode_packet
+// layer still handles sync/wire_len/CRC framing — this just lets the
+// caller pick the cmd type + body without having to write a one-off
+// Python script. Useful for protocol investigation.
+int run_raw(int argc, char **argv, CommonOpts const &opts) {
+    auto const fmt = consume_format_flag(argc, argv);
+    std::string cmd_hex;
+    std::string body_hex;
+    unsigned int timeout_ms = 5000U;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--body" && i + 1 < argc) {
+            body_hex.assign(argv[++i]);
+            continue;
+        }
+        if (a == "--timeout-ms" && i + 1 < argc) {
+            std::uint32_t v = 0;
+            if (!parse_uint32_arg(argv[++i], v)) {
+                std::fputs("ap3 raw: --timeout-ms must be a u32\n", stderr);
+                return 2;
+            }
+            timeout_ms = v;
+            continue;
+        }
+        if (a.starts_with("--")) {
+            std::fprintf(stderr, "ap3 raw: unknown flag: %.*s\n",
+                         static_cast<int>(a.size()), a.data());
+            return 2;
+        }
+        if (!cmd_hex.empty()) {
+            std::fprintf(stderr, "ap3 raw: multiple cmd args (%s, %.*s)\n",
+                         cmd_hex.c_str(), static_cast<int>(a.size()), a.data());
+            return 2;
+        }
+        cmd_hex.assign(a);
+    }
+    if (cmd_hex.empty()) {
+        std::fputs("ap3 raw: missing <cmd-byte-hex>\n"
+                   "Usage: subuwutuner-cli ap3 raw <cmd-hex> [--body <hex>] "
+                   "[--timeout-ms N] [--format text|json|toml]\n"
+                   "Example: subuwutuner-cli ap3 raw 0x28\n",
+                   stderr);
+        return 2;
+    }
+    auto const cmd_bytes = decode_hex(cmd_hex);
+    if (!cmd_bytes.has_value() || cmd_bytes->size() != 1) {
+        std::fprintf(stderr,
+                     "ap3 raw: cmd must decode to exactly 1 byte (got '%s')\n",
+                     cmd_hex.c_str());
+        return 2;
+    }
+    std::vector<std::uint8_t> body;
+    if (!body_hex.empty()) {
+        auto decoded = decode_hex(body_hex);
+        if (!decoded.has_value()) {
+            std::fprintf(stderr, "ap3 raw: --body hex decode failed: '%s'\n",
+                         body_hex.c_str());
+            return 2;
+        }
+        body = std::move(*decoded);
+    }
+
+    auto channel = open_channel(opts);
+    if (!channel.has_value()) {
+        std::fprintf(stderr, "ap3 raw: %s\n", channel.error().to_string().c_str());
+        return 1;
+    }
+    // Encode the request packet so we can hex-dump exactly what goes
+    // on the wire.
+    auto packet = st::transport::ap3::encode_packet((*cmd_bytes)[0], body);
+    if (!packet.has_value()) {
+        std::fprintf(stderr, "ap3 raw: encode_packet: %s\n",
+                     packet.error().to_string().c_str());
+        return 1;
+    }
+    if (auto s = (*channel)->write_bytes(*packet); !s.has_value()) {
+        std::fprintf(stderr, "ap3 raw: write_bytes: %s\n", s.error().to_string().c_str());
+        return 1;
+    }
+    // Read up to 64 KB of response within the deadline.
+    std::vector<std::uint8_t> resp;
+    auto const deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds{timeout_ms};
+    while (std::chrono::steady_clock::now() < deadline) {
+        auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        if (remaining.count() <= 0) {
+            break;
+        }
+        auto chunk = (*channel)->read_bytes(65536, remaining);
+        if (!chunk.has_value()) {
+            std::fprintf(stderr, "ap3 raw: read_bytes: %s\n",
+                         chunk.error().to_string().c_str());
+            break;
+        }
+        if (chunk->empty()) {
+            // Short timeout on this attempt; if total deadline still
+            // has slack, try one more burst — but only once, so we
+            // don't spin forever waiting for nothing.
+            if (resp.empty()) {
+                continue;
+            }
+            break;
+        }
+        resp.insert(resp.end(), chunk->begin(), chunk->end());
+        // First burst arrived; give the AP a small grace window for
+        // any tail and then return.
+        if (resp.size() >= 16384) {
+            break;
+        }
+    }
+
+    auto dump_hex = [](char const *tag, std::vector<std::uint8_t> const &bytes) {
+        std::printf("%s (%zu bytes)\n", tag, bytes.size());
+        constexpr std::size_t kPerRow = 16;
+        for (std::size_t i = 0; i < bytes.size(); i += kPerRow) {
+            std::printf("  %04zx:", i);
+            std::size_t const row = std::min(kPerRow, bytes.size() - i);
+            for (std::size_t j = 0; j < row; ++j) {
+                std::printf(" %02x", bytes[i + j]);
+            }
+            std::printf("\n");
+        }
+    };
+    if (fmt == "json") {
+        auto print_arr = [](std::vector<std::uint8_t> const &v) {
+            std::printf("[");
+            for (std::size_t i = 0; i < v.size(); ++i) {
+                std::printf("%u%s", v[i], i + 1 < v.size() ? "," : "");
+            }
+            std::printf("]");
+        };
+        std::printf("{\"sent\":");
+        print_arr(*packet);
+        std::printf(",\"received\":");
+        print_arr(resp);
+        std::printf("}\n");
+    } else {
+        dump_hex("OUT", *packet);
+        dump_hex("IN ", resp);
+    }
+    return 0;
+}
+
 } // namespace ap3_cli
 
 int cmd_ap3(int argc, char *argv[]) {
@@ -16329,6 +16518,9 @@ int cmd_ap3(int argc, char *argv[]) {
                    "                     Push a local file to the AP\n"
                    "  rm <ap-path> [--format text|json|toml]\n"
                    "                     Remove a file from the AP\n"
+                   "  raw <cmd-hex> [--body <hex>] [--timeout-ms N] [--format text|json|toml]\n"
+                   "                     Send a raw cmd byte + body; dump request + response as hex.\n"
+                   "                     Debug aid for protocol investigation.\n"
                    "  backup [--into <dir>] [--format text|json|toml]\n"
                    "                     Pull /maps + /datalog + /presets + /images +\n"
                    "                     /settings + /backupcksum into <dir>\n"
@@ -16368,6 +16560,9 @@ int cmd_ap3(int argc, char *argv[]) {
     }
     if (sub == "backup") {
         return ap3_cli::run_backup(sub_argc, sub_argv, opts);
+    }
+    if (sub == "raw") {
+        return ap3_cli::run_raw(sub_argc, sub_argv, opts);
     }
     std::fprintf(stderr,
                  "ap3: unknown subcommand: %s\n"

@@ -411,7 +411,15 @@ Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
     if (auto s = send_packet(0x21U, *data_req); !s.has_value()) {
         return st::failure(std::move(s).error());
     }
+    // cmd 0x21 file data can run to tens of KB on a real tune (~58 KB
+    // for a typical Stage1) and the AP can take several seconds to
+    // push the body through bulk-in. Swap to the wider file-data
+    // timeout for just this receive; restore the metadata default
+    // after so any error-path subsequent reads use the small budget.
+    auto const saved_timeout = cfg_.io_timeout;
+    cfg_.io_timeout = cfg_.file_data_io_timeout;
     auto file_resp = receive_packet_body();
+    cfg_.io_timeout = saved_timeout;
     if (!file_resp.has_value()) {
         return st::failure(std::move(file_resp).error());
     }
