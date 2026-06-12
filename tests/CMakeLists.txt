@@ -47,6 +47,7 @@ add_executable(st_unit_tests
     unit/devices/ap3/test_user_info_parse.cpp
     unit/devices/ap3/test_user_info_parse_private.cpp
     unit/devices/ap3/test_zero_crc_tolerance.cpp
+    unit/devices/ap3/test_read_file_path_encoding.cpp
     unit/library/test_patch_decoder.cpp
     unit/library/test_table_mapping.cpp
     unit/library/test_tune_diff.cpp
