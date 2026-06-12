@@ -44,6 +44,7 @@ add_executable(st_unit_tests
     unit/devices/ap3/test_architectural_classifier.cpp
     unit/devices/ap3/test_user_info_parse.cpp
     unit/devices/ap3/test_user_info_parse_private.cpp
+    unit/library/test_patch_decoder.cpp
     unit/ecu/test_extended_did_datalog.cpp
     unit/ecu/test_ssm.cpp
     unit/ecu/test_ssm_properties.cpp
@@ -133,6 +134,7 @@ target_link_libraries(st_unit_tests
         st::profile
         st::ai
         st::devices_ap3
+        st::library
         st::warnings
         st::sanitizers
         st::platform
