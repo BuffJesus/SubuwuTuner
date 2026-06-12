@@ -17181,7 +17181,7 @@ int run_import(int argc, char **argv) {
         return 1;
     }
 
-    // Write source.bin.
+    // Write source.bin (the stock base ROM, unmodified).
     {
         std::ofstream out{out_dir / "source.bin", std::ios::binary};
         if (!out) {
@@ -17190,6 +17190,37 @@ int run_import(int argc, char **argv) {
         }
         out.write(reinterpret_cast<char const *>(rom_bytes->data()),
                   static_cast<std::streamsize>(rom_bytes->size()));
+    }
+
+    // Apply all decoded patches to a working copy of the ROM. This
+    // gives Project::open a meaningful "working state" — the imported
+    // tune as the user sees it. Patches that fall past the ROM size or
+    // overflow the buffer are skipped with a warning (rare; usually
+    // means the wrong base ROM was passed).
+    auto working_bytes = *rom_bytes;
+    std::size_t patches_applied = 0;
+    std::size_t patches_skipped = 0;
+    for (auto const &p : decoded.patches) {
+        if (p.bytes.empty()) {
+            continue;
+        }
+        if (p.rom_offset >= working_bytes.size() ||
+            p.rom_offset + p.bytes.size() > working_bytes.size()) {
+            ++patches_skipped;
+            continue;
+        }
+        std::memcpy(working_bytes.data() + p.rom_offset, p.bytes.data(), p.bytes.size());
+        ++patches_applied;
+    }
+    auto const working_crc = st::crc32(working_bytes);
+    {
+        std::ofstream out{out_dir / "working.bin", std::ios::binary};
+        if (!out) {
+            std::fprintf(stderr, "ptm import: write working.bin failed\n");
+            return 1;
+        }
+        out.write(reinterpret_cast<char const *>(working_bytes.data()),
+                  static_cast<std::streamsize>(working_bytes.size()));
     }
 
     // Pre-classify patches so the [[patch]] entries can carry the layer
@@ -17240,8 +17271,23 @@ int run_import(int argc, char **argv) {
         out << "crc32 = " << rom_crc << "\n";
         out << "\n";
         out << "[project.working_rom]\n";
-        out << "path  = \"source.bin\"\n";
-        out << "crc32 = " << rom_crc << "\n";
+        out << "path  = \"working.bin\"\n";
+        out << "crc32 = " << working_crc << "\n";
+        out << "\n";
+        // [project.definition] is required by Project::open. When --def
+        // was provided we point at the absolute path (the project may
+        // live anywhere on disk relative to the pack). When --def was
+        // NOT provided we write a placeholder that Project::open will
+        // reject — gives the user a clear error if they try to open
+        // the project without first wiring up the pack.
+        out << "[project.definition]\n";
+        if (!opts.def_path.empty()) {
+            auto const abs = std::filesystem::weakly_canonical(
+                std::filesystem::path{opts.def_path});
+            out << "path = \"" << toml_escape(abs.string()) << "\"\n";
+        } else {
+            out << "path = \"\"  # --def not provided; set this before opening the project\n";
+        }
         out << "\n";
         // Round-trip preservation block — spec §"Project metadata".
         out << "[ptm_metadata]\n";
@@ -17251,6 +17297,20 @@ int run_import(int argc, char **argv) {
         out << "rom_sum        = \"" << toml_escape(decoded.metadata.rom_sum) << "\"\n";
         out << "save_date_time = \"" << toml_escape(decoded.metadata.save_date_time) << "\"\n";
         out << "imported_from  = \"" << toml_escape(opts.ptm_path) << "\"\n";
+    }
+
+    // Write an empty edits.toml so Project::open's history loader has
+    // something to chew on. The patches themselves are recorded in
+    // ptm_patches.toml (round-trip preserving raw form); edits.toml is
+    // the user's local-edit history layered on top.
+    {
+        std::ofstream out{out_dir / "edits.toml"};
+        if (!out) {
+            std::fprintf(stderr, "ptm import: write edits.toml failed\n");
+            return 1;
+        }
+        out << "schema_version = 2\n";
+        out << "cursor = 0\n";
     }
 
     // Write ptm_patches.toml — one [[patch]] per decoded patch. Kept
@@ -17305,7 +17365,14 @@ int run_import(int argc, char **argv) {
                 opts.base_rom.c_str(),
                 with_commas(rom_bytes->size()).c_str(), rom_crc);
     std::printf("  Project:   %s/\n", out_dir.string().c_str());
-    std::printf("    project.toml + source.bin + ptm_patches.toml\n");
+    std::printf("    project.toml + source.bin + working.bin + edits.toml + ptm_patches.toml\n");
+    std::printf("    Patches applied to working.bin: %zu (skipped %zu out-of-bounds)\n",
+                patches_applied, patches_skipped);
+    if (opts.def_path.empty()) {
+        std::printf("    Note: --def was not given; project.toml has a placeholder\n"
+                    "          [project.definition].path. Set it before opening the\n"
+                    "          project in the GUI.\n");
+    }
     if (decoded.metadata.lock_mask != 0) {
         std::printf("  Lock:      mask=%u — preserved for round-trip; do not redistribute\n",
                     decoded.metadata.lock_mask);
