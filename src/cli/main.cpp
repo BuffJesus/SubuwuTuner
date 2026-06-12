@@ -40,6 +40,7 @@
 #include "st/devices/ap3/file_info.hpp"
 #include "st/devices/ap3/ptm_cipher.hpp"
 #include "st/library/patch_decoder.hpp"
+#include "st/library/table_mapping.hpp"
 #include "st/transport/cobb_ap_channel.hpp"
 #include "st/transport/factory.hpp"
 #include "st/transport/j2534_discovery.hpp"
@@ -16170,6 +16171,12 @@ static bool g_cobb_ap_cipher_armed = false;
 
 namespace ptm_cli {
 
+using st::library::TableRange;
+using st::library::TableHit;
+using st::library::compute_table_ranges;
+using st::library::find_table_for;
+using st::library::aggregate_table_hits;
+
 st::Result<std::vector<std::uint8_t>> read_file_bytes(std::string const &path) {
     std::ifstream f(path, std::ios::binary);
     if (!f) {
@@ -16198,12 +16205,17 @@ enum class Format { Text, Json, Toml };
 
 struct ListPatchesOpts {
     std::string ptm_path;
+    std::string def_path;
     Format format{Format::Text};
 };
 
 bool parse_list_patches_opts(int argc, char **argv, ListPatchesOpts &out) {
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
+        if (a == "--def" && i + 1 < argc) {
+            out.def_path.assign(argv[++i]);
+            continue;
+        }
         if (a == "--format" && i + 1 < argc) {
             std::string_view const v{argv[++i]};
             if (v == "text") {
@@ -16241,36 +16253,60 @@ bool parse_list_patches_opts(int argc, char **argv, ListPatchesOpts &out) {
 }
 
 void render_text(std::vector<st::library::PatchEntry> const &patches,
-                 std::vector<st::devices::ap3::PatchClassification> const &classifications) {
-    std::printf("%-12s  %8s  %s\n", "rom_offset", "length", "layer");
+                 std::vector<st::devices::ap3::PatchClassification> const &classifications,
+                 std::vector<TableRange> const &ranges) {
+    bool const has_table_col = !ranges.empty();
+    if (has_table_col) {
+        std::printf("%-12s  %8s  %-20s  %s\n", "rom_offset", "length", "layer", "table");
+    } else {
+        std::printf("%-12s  %8s  %s\n", "rom_offset", "length", "layer");
+    }
     for (std::size_t i = 0; i < patches.size(); ++i) {
         auto const &p = patches[i];
         auto const layer_text = classifications.empty()
                                     ? std::string_view{"?"}
                                     : st::devices::ap3::layer_label(classifications[i].layer);
-        std::printf("  0x%08X  %8u  %.*s\n", p.rom_offset, p.length,
-                    static_cast<int>(layer_text.size()), layer_text.data());
+        if (has_table_col) {
+            auto const *t = find_table_for(ranges, p.rom_offset);
+            std::printf("  0x%08X  %8u  %-20.*s  %s\n", p.rom_offset, p.length,
+                        static_cast<int>(layer_text.size()), layer_text.data(),
+                        t == nullptr ? "" : t->name.c_str());
+        } else {
+            std::printf("  0x%08X  %8u  %.*s\n", p.rom_offset, p.length,
+                        static_cast<int>(layer_text.size()), layer_text.data());
+        }
     }
 }
 
 void render_json(std::vector<st::library::PatchEntry> const &patches,
-                 std::vector<st::devices::ap3::PatchClassification> const &classifications) {
+                 std::vector<st::devices::ap3::PatchClassification> const &classifications,
+                 std::vector<TableRange> const &ranges) {
     std::printf("[\n");
     for (std::size_t i = 0; i < patches.size(); ++i) {
         auto const &p = patches[i];
         auto const layer_text = classifications.empty()
                                     ? std::string_view{"?"}
                                     : st::devices::ap3::layer_label(classifications[i].layer);
-        std::printf(R"(  {"rom_offset":%u,"length":%u,"layer":"%.*s"}%s)" "\n",
-                    p.rom_offset, p.length,
-                    static_cast<int>(layer_text.size()), layer_text.data(),
-                    i + 1 < patches.size() ? "," : "");
+        auto const *t = ranges.empty() ? nullptr : find_table_for(ranges, p.rom_offset);
+        if (t != nullptr) {
+            std::printf(R"(  {"rom_offset":%u,"length":%u,"layer":"%.*s","table_id":"%s","table_name":"%s"}%s)" "\n",
+                        p.rom_offset, p.length,
+                        static_cast<int>(layer_text.size()), layer_text.data(),
+                        t->id.c_str(), t->name.c_str(),
+                        i + 1 < patches.size() ? "," : "");
+        } else {
+            std::printf(R"(  {"rom_offset":%u,"length":%u,"layer":"%.*s"}%s)" "\n",
+                        p.rom_offset, p.length,
+                        static_cast<int>(layer_text.size()), layer_text.data(),
+                        i + 1 < patches.size() ? "," : "");
+        }
     }
     std::printf("]\n");
 }
 
 void render_toml(std::vector<st::library::PatchEntry> const &patches,
-                 std::vector<st::devices::ap3::PatchClassification> const &classifications) {
+                 std::vector<st::devices::ap3::PatchClassification> const &classifications,
+                 std::vector<TableRange> const &ranges) {
     for (std::size_t i = 0; i < patches.size(); ++i) {
         auto const &p = patches[i];
         auto const layer_text = classifications.empty()
@@ -16279,19 +16315,31 @@ void render_toml(std::vector<st::library::PatchEntry> const &patches,
         std::printf("[[patches]]\n");
         std::printf("rom_offset = %u\n", p.rom_offset);
         std::printf("length = %u\n", p.length);
-        std::printf("layer = \"%.*s\"\n\n",
+        std::printf("layer = \"%.*s\"\n",
                     static_cast<int>(layer_text.size()), layer_text.data());
+        if (!ranges.empty()) {
+            if (auto const *t = find_table_for(ranges, p.rom_offset); t != nullptr) {
+                std::printf("table_id = \"%s\"\n", t->id.c_str());
+                std::printf("table_name = \"%s\"\n", t->name.c_str());
+            }
+        }
+        std::printf("\n");
     }
 }
 
 struct InspectOpts {
     std::string ptm_path;
+    std::string def_path;
     Format format{Format::Text};
 };
 
 bool parse_inspect_opts(int argc, char **argv, InspectOpts &out) {
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
+        if (a == "--def" && i + 1 < argc) {
+            out.def_path.assign(argv[++i]);
+            continue;
+        }
         if (a == "--format" && i + 1 < argc) {
             std::string_view const v{argv[++i]};
             if (v == "text") {
@@ -16349,7 +16397,8 @@ std::string with_commas(std::uint64_t n) {
 void render_inspect_text(std::string const &path,
                          std::size_t file_size,
                          st::library::DecodedPtm const &decoded,
-                         std::vector<st::devices::ap3::LayerSummary> const &summary) {
+                         std::vector<st::devices::ap3::LayerSummary> const &summary,
+                         std::vector<TableHit> const &top_tables) {
     std::uint64_t total_bytes = 0;
     for (auto const &p : decoded.patches) {
         total_bytes += p.length;
@@ -16389,6 +16438,21 @@ void render_inspect_text(std::string const &path,
         std::printf("\n");
     }
 
+    if (!top_tables.empty()) {
+        std::printf("Top tables modified\n");
+        std::size_t const show = std::min<std::size_t>(top_tables.size(), 12);
+        for (std::size_t i = 0; i < show; ++i) {
+            auto const &h = top_tables[i];
+            std::printf("  %5u  %5s  %s\n", h.patch_count,
+                        with_commas(h.total_bytes).c_str(), h.table_name.c_str());
+        }
+        if (top_tables.size() > show) {
+            std::printf("  ... (%zu more — pass --format json to see all)\n",
+                        top_tables.size() - show);
+        }
+        std::printf("\n");
+    }
+
     std::printf("Cross-references\n");
     std::printf("  List every patch:                ptm list-patches %s\n", basename.c_str());
     // Diff / import lines deliberately omitted until those subcommands
@@ -16398,7 +16462,8 @@ void render_inspect_text(std::string const &path,
 void render_inspect_json(std::string const &path,
                          std::size_t file_size,
                          st::library::DecodedPtm const &decoded,
-                         std::vector<st::devices::ap3::LayerSummary> const &summary) {
+                         std::vector<st::devices::ap3::LayerSummary> const &summary,
+                         std::vector<TableHit> const &top_tables) {
     (void)path;
     std::uint64_t total_bytes = 0;
     for (auto const &p : decoded.patches) {
@@ -16427,6 +16492,15 @@ void render_inspect_json(std::string const &path,
                     static_cast<unsigned long long>(row.total_bytes),
                     i + 1 < summary.size() ? "," : "");
     }
+    std::printf("  ],\n");
+    std::printf("  \"top_tables\": [\n");
+    for (std::size_t i = 0; i < top_tables.size(); ++i) {
+        auto const &h = top_tables[i];
+        std::printf("    {\"id\":\"%s\",\"name\":\"%s\",\"patches\":%u,\"bytes\":%llu}%s\n",
+                    h.table_id.c_str(), h.table_name.c_str(), h.patch_count,
+                    static_cast<unsigned long long>(h.total_bytes),
+                    i + 1 < top_tables.size() ? "," : "");
+    }
     std::printf("  ]\n");
     std::printf("}\n");
 }
@@ -16434,7 +16508,8 @@ void render_inspect_json(std::string const &path,
 void render_inspect_toml(std::string const &path,
                          std::size_t file_size,
                          st::library::DecodedPtm const &decoded,
-                         std::vector<st::devices::ap3::LayerSummary> const &summary) {
+                         std::vector<st::devices::ap3::LayerSummary> const &summary,
+                         std::vector<TableHit> const &top_tables) {
     (void)path;
     std::uint64_t total_bytes = 0;
     for (auto const &p : decoded.patches) {
@@ -16457,6 +16532,13 @@ void render_inspect_toml(std::string const &path,
                     static_cast<int>(layer_text.size()), layer_text.data());
         std::printf("patches = %u\n", row.patch_count);
         std::printf("bytes = %llu\n", static_cast<unsigned long long>(row.total_bytes));
+    }
+    for (auto const &h : top_tables) {
+        std::printf("\n[[top_tables]]\n");
+        std::printf("id = \"%s\"\n", h.table_id.c_str());
+        std::printf("name = \"%s\"\n", h.table_name.c_str());
+        std::printf("patches = %u\n", h.patch_count);
+        std::printf("bytes = %llu\n", static_cast<unsigned long long>(h.total_bytes));
     }
 }
 
@@ -16787,6 +16869,7 @@ struct ImportOpts {
     std::string into_dir;     // optional; defaults to <basename>.stune in CWD
     std::string base_rom;     // required for v1 (no auto-discovery yet)
     std::string display_name; // optional; defaults to basename of ptm_path
+    std::string def_path;     // optional; populates table_id/table_name in ptm_patches.toml
 };
 
 bool parse_import_opts(int argc, char **argv, ImportOpts &out) {
@@ -16802,6 +16885,10 @@ bool parse_import_opts(int argc, char **argv, ImportOpts &out) {
         }
         if (a == "--name" && i + 1 < argc) {
             out.display_name.assign(argv[++i]);
+            continue;
+        }
+        if (a == "--def" && i + 1 < argc) {
+            out.def_path.assign(argv[++i]);
             continue;
         }
         if (a.starts_with("--")) {
@@ -16928,6 +17015,20 @@ int run_import(int argc, char **argv) {
     auto classifications = st::devices::ap3::classify_patches(
         st::devices::ap3::default_lf79103p_layer_map(), offsets, lengths);
 
+    // Optional --def: load the pack and compute table ranges so each
+    // patch can carry table_id + table_name in ptm_patches.toml.
+    std::vector<TableRange> ranges;
+    if (!opts.def_path.empty()) {
+        auto def = st::Definition::from_file(std::filesystem::path{opts.def_path});
+        if (!def.has_value()) {
+            std::fprintf(stderr,
+                         "ptm import: --def: %s (continuing without table mapping)\n",
+                         def.error().to_string().c_str());
+        } else {
+            ranges = compute_table_ranges(*def);
+        }
+    }
+
     // Write project.toml.
     {
         std::string const display =
@@ -16989,6 +17090,12 @@ int run_import(int argc, char **argv) {
             out << "length     = " << p.length << "\n";
             out << "bytes_b64  = \"" << bytes_b64 << "\"\n";
             out << "layer      = \"" << std::string{layer_text} << "\"\n";
+            if (!ranges.empty()) {
+                if (auto const *t = find_table_for(ranges, p.rom_offset); t != nullptr) {
+                    out << "table_id   = \"" << toml_escape(t->id) << "\"\n";
+                    out << "table_name = \"" << toml_escape(t->name) << "\"\n";
+                }
+            }
             out << "\n";
         }
     }
@@ -17053,15 +17160,33 @@ int run_inspect(int argc, char **argv) {
         st::devices::ap3::default_lf79103p_layer_map(), offsets, lengths);
     auto summary = st::devices::ap3::summarize(classifications);
 
+    // Optional --def integration. When provided, compute per-table
+    // patch counts and pass them through to the renderer for the
+    // "Top tables modified" section. Failure to load the pack is
+    // surfaced but doesn't fail the whole inspect (caller can still
+    // see identity + architectural breakdown without table names).
+    std::vector<TableHit> top_tables;
+    if (!opts.def_path.empty()) {
+        auto def = st::Definition::from_file(std::filesystem::path{opts.def_path});
+        if (!def.has_value()) {
+            std::fprintf(stderr,
+                         "ptm inspect: --def: %s (continuing without table mapping)\n",
+                         def.error().to_string().c_str());
+        } else {
+            auto const ranges = compute_table_ranges(*def);
+            top_tables = aggregate_table_hits(*decoded, ranges);
+        }
+    }
+
     switch (opts.format) {
     case Format::Text:
-        render_inspect_text(opts.ptm_path, file_size, *decoded, summary);
+        render_inspect_text(opts.ptm_path, file_size, *decoded, summary, top_tables);
         break;
     case Format::Json:
-        render_inspect_json(opts.ptm_path, file_size, *decoded, summary);
+        render_inspect_json(opts.ptm_path, file_size, *decoded, summary, top_tables);
         break;
     case Format::Toml:
-        render_inspect_toml(opts.ptm_path, file_size, *decoded, summary);
+        render_inspect_toml(opts.ptm_path, file_size, *decoded, summary, top_tables);
         break;
     }
     return 0;
@@ -17105,15 +17230,27 @@ int run_list_patches(int argc, char **argv) {
     auto classifications = st::devices::ap3::classify_patches(
         st::devices::ap3::default_lf79103p_layer_map(), offsets, lengths);
 
+    std::vector<TableRange> ranges;
+    if (!opts.def_path.empty()) {
+        auto def = st::Definition::from_file(std::filesystem::path{opts.def_path});
+        if (!def.has_value()) {
+            std::fprintf(stderr,
+                         "ptm list-patches: --def: %s (continuing without table names)\n",
+                         def.error().to_string().c_str());
+        } else {
+            ranges = compute_table_ranges(*def);
+        }
+    }
+
     switch (opts.format) {
     case Format::Text:
-        render_text(decoded->patches, classifications);
+        render_text(decoded->patches, classifications, ranges);
         break;
     case Format::Json:
-        render_json(decoded->patches, classifications);
+        render_json(decoded->patches, classifications, ranges);
         break;
     case Format::Toml:
-        render_toml(decoded->patches, classifications);
+        render_toml(decoded->patches, classifications, ranges);
         break;
     }
     return 0;
@@ -17130,10 +17267,14 @@ int cmd_ptm(int argc, char *argv[]) {
                    "                     Identity block + architectural breakdown.\n"
                    "  diff <a.ptm> <b.ptm> [--format text|json|toml]\n"
                    "                     By-layer diff between two tunes.\n"
-                   "  import <file.ptm> --base-rom <path> [--into <dir>] [--name <s>]\n"
+                   "  import <file.ptm> --base-rom <path> [--into <dir>] [--name <s>] [--def <p>]\n"
                    "                     Write a .stune project from a .ptm + base ROM.\n"
-                   "  list-patches <file.ptm> [--format text|json|toml]\n"
+                   "  list-patches <file.ptm> [--format text|json|toml] [--def <pack-path>]\n"
                    "                     Decode a .ptm and emit one row per patch.\n"
+                   "\n"
+                   "Common flags:\n"
+                   "  --def <pack-path>  Definition pack TOML for table-name resolution\n"
+                   "                     (inspect, list-patches, import).\n"
                    "\n"
                    "Cipher gating:\n"
                    "  All ptm subcommands require ST_ENABLE_COBB_AP_CIPHER=ON at build\n"
