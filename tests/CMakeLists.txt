@@ -47,6 +47,7 @@ add_executable(st_unit_tests
     unit/devices/ap3/test_zero_crc_tolerance.cpp
     unit/library/test_patch_decoder.cpp
     unit/library/test_table_mapping.cpp
+    unit/library/test_tune_diff.cpp
     unit/ecu/test_extended_did_datalog.cpp
     unit/ecu/test_ssm.cpp
     unit/ecu/test_ssm_properties.cpp
