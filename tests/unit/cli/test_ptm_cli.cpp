@@ -337,7 +337,7 @@ TEST_CASE("ptm export reports missing project dir",
 }
 
 #if defined(ST_AP3_HAVE_CIPHER) && defined(ST_AP3_HAVE_PTM_REWRITE)
-TEST_CASE("ptm export → ptm inspect end-to-end round-trip",
+TEST_CASE("ptm export -> ptm inspect end-to-end round-trip",
           "[cli][ptm][integration][cipher][rewrite]") {
     if (!can_run()) {
         return;
@@ -409,7 +409,7 @@ TEST_CASE("ptm export → ptm inspect end-to-end round-trip",
 #endif
 
 #if defined(ST_AP3_HAVE_CIPHER) && defined(ST_AP3_HAVE_PTM_REWRITE)
-TEST_CASE("ptm import → Project::open-compatible (5-file skeleton, project-validate passes)",
+TEST_CASE("ptm import -> Project::open-compatible (5-file skeleton, project-validate passes)",
           "[cli][ptm][integration][cipher][rewrite]") {
     if (!can_run()) {
         return;
@@ -548,5 +548,61 @@ TEST_CASE("ptm verify: round-trip exits 0 on byte-identical match",
     REQUIRE(ver.spawned);
     REQUIRE(ver.exit_code == 0);
     REQUIRE(ver.stdout_text.find("byte-identical") != std::string::npos);
+}
+
+TEST_CASE("ptm verify: duplicate rom_offset patches all match",
+          "[cli][ptm][integration][cipher][rewrite]") {
+    // Regression for a251f47. Real COBB tunes write clear-then-set
+    // byte pairs at hot offsets (Stage1 91 v401.ptm has 78 of them).
+    // The pre-fix verify built a `std::map<rom_offset, idx>` that
+    // silently dropped the second entry, then reported phantom
+    // mismatches for the bytes the "set" patch was supposed to write.
+    // This test pins two patches at the SAME rom_offset and asserts
+    // verify reports them both as matched — a regression to map-style
+    // dedup would say "1 byte-different" or similar.
+    if (!can_run()) {
+        return;
+    }
+    namespace fs = std::filesystem;
+    auto const tmp = fs::temp_directory_path() / "subuwutuner_ptm_verify_dup";
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    auto const proj_dir = tmp / "p.stune";
+    fs::create_directories(proj_dir, ec);
+    {
+        std::ofstream f{proj_dir / "project.toml"};
+        f << "[project]\nschema_version = 1\ndisplay_name = \"v\"\n"
+             "\n[ptm_metadata]\n"
+             "vendor_id = \"V\"\nvehicle_id = \"X\"\n"
+             "lock_mask = 0\nrom_sum = \"1\"\nsave_date_time = \"0\"\n";
+    }
+    {
+        std::ofstream f{proj_dir / "ptm_patches.toml"};
+        // Two patches at rom_offset=100 — first clears 4 bytes to
+        // 0x00, second writes the real value (the canonical clear-
+        // then-set pattern). "AAAAAAA=" is 4 zero bytes; "//79/A==" is
+        // 0xFF 0xFE 0xFD 0xFC. ram_offset differs so the entries are
+        // distinguishable; verify still has to compare BOTH sides as
+        // a pair, not collapse them by rom_offset.
+        f << "[[patch]]\nrom_offset = 100\nram_offset = 0\nlength = 4\n"
+             "bytes_b64 = \"AAAAAA==\"\n\n"
+             "[[patch]]\nrom_offset = 100\nram_offset = 16\nlength = 4\n"
+             "bytes_b64 = \"//79/A==\"\n";
+    }
+    auto const out_ptm = tmp / "out.ptm";
+    auto const exp = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm export " + st::test::quote(proj_dir.string()) +
+        " --as " + st::test::quote(out_ptm.string()));
+    REQUIRE(exp.spawned);
+    REQUIRE(exp.exit_code == 0);
+    auto const ver = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm verify " + st::test::quote(out_ptm.string()) +
+        " " + st::test::quote(proj_dir.string()));
+    REQUIRE(ver.spawned);
+    REQUIRE(ver.exit_code == 0);
+    // Both patches accounted for, zero unmatched / byte-different.
+    REQUIRE(ver.stdout_text.find("matched (full):      2") != std::string::npos);
+    REQUIRE(ver.stdout_text.find("byte-different:      0") != std::string::npos);
+    REQUIRE(ver.stdout_text.find("YES (byte-identical)") != std::string::npos);
 }
 #endif
