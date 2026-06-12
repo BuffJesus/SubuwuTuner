@@ -1,0 +1,1 @@
+<PrivateData><vendorID>TEST</vendorID><vehicleID>TEST_VEHICLE_ID</vehicleID><lock mask="0" /><romSum value="123456789" /><saveDateTime value="0" /><patches><patch romOffset="32768" ramOffset="-657408" length="4">SGVsbG8=</patch><patch romOffset="65536" ramOffset="-624640" length="4">V29ybGQ=</patch></patches></PrivateData>

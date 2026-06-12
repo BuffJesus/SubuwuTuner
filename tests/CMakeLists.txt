@@ -40,6 +40,7 @@ add_executable(st_unit_tests
     unit/transport/test_cobb_ap_packet.cpp
     unit/devices/ap3/test_file_info.cpp
     unit/devices/ap3/test_live_smoke.cpp
+    unit/devices/ap3/test_ptm_cipher.cpp
     unit/devices/ap3/test_architectural_classifier.cpp
     unit/devices/ap3/test_user_info_parse.cpp
     unit/devices/ap3/test_user_info_parse_private.cpp
@@ -145,6 +146,17 @@ if (MSVC)
     target_compile_definitions(st_unit_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
+# Mirror the AP3 cipher gating to the test binary so the gated/ungated
+# test cases compile to the right path. st_devices_ap3's PRIVATE
+# definition doesn't reach test_ptm_cipher.cpp, so we set it again
+# here when the option is ON.
+if(ST_ENABLE_COBB_AP_CIPHER)
+    target_compile_definitions(st_unit_tests PRIVATE ST_AP3_HAVE_CIPHER=1)
+endif()
+if(ST_ENABLE_COBB_AP_PTM_REWRITE)
+    target_compile_definitions(st_unit_tests PRIVATE ST_AP3_HAVE_PTM_REWRITE=1)
+endif()
+
 # Wire the CLI binary path + demo-fixture path into the test target so
 # the CLI integration smoke (test_cli_integration.cpp) can locate the
 # real subuwutuner-cli binary regardless of build dir. A build-time
@@ -166,6 +178,8 @@ target_compile_definitions(st_unit_tests PRIVATE
 # fixtures/ap3/README.md for the per-fixture role.
 target_compile_definitions(st_unit_tests PRIVATE
     ST_FIXTURE_AP3_DIR="${CMAKE_SOURCE_DIR}/fixtures/ap3")
+target_compile_definitions(st_unit_tests PRIVATE
+    ST_FIXTURE_AP3_CIPHER_DIR="${CMAKE_SOURCE_DIR}/fixtures/ap3/cipher")
 # Exposes the source-tree definitions/ directory as a compile-time
 # constant so tests can exercise real in-tree packs (e.g. asserting
 # lf79103p.toml's [[workflow]] declarations still resolve every

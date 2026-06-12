@@ -16,6 +16,8 @@ All of the following are pulled in via CMake `FetchContent` and statically linke
 | ImPlot | latest | MIT | plotting widgets (heatmap, histogram) | https://github.com/epezent/implot |
 | nativefiledialog-extended | latest | Zlib | native Open/Save dialogs | https://github.com/btzy/nativefiledialog-extended |
 | libusb-1.0 (via libusb-cmake) | v1.0.27-0 | LGPL-2.1 + linking exception | USB byte channel for the AP3 file vault (default-on; build with `-DST_ENABLE_AP3=OFF` to omit) | https://github.com/libusb/libusb-cmake |
+| tiny-AES-c | master (vendored) | Public domain (Unlicense) | AES-256-CTR primitive for the optional `.ptm` cipher chain (gated; ON only when `-DST_ENABLE_COBB_AP_CIPHER=ON`). Vendored under `src/devices/ap3/third_party/tiny_aes/`. | https://github.com/kokke/tiny-AES-c |
+| bzip2 1.0.8 (decompress-only) | 1.0.8 (vendored, trimmed) | bzip2 license (BSD-style) | bzip2 inflation for the optional `.ptm` cipher chain layer 4. Vendored under `src/devices/ap3/third_party/bzip2_dec/` with compress-side sources (`compress.c`, `blocksort.c`) dropped per `specs/cobb-ap3-tier3-dep-survey.md`; references from `bzlib.c` resolved via `compress_stubs.c` no-op shims. | https://sourceware.org/pub/bzip2/ |
 
 Full license texts are bundled with the source of each dependency under `_deps/<name>-src/` after a CMake configure.
 
