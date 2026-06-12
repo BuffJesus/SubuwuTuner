@@ -15746,6 +15746,34 @@ struct CommonOpts {
     std::uint16_t pid{st::transport::ap3::kProductId};
 };
 
+// Consume `--format <text|json|toml>` from argv (compacting in place)
+// and return the parsed format string. Defaults to "text". Reports the
+// caller through stderr on bad input but returns "text" anyway — the
+// subcommands treat unknown formats as text. This is the per-subcommand
+// helper; consume_common does the same for ap3-wide flags.
+std::string consume_format_flag(int &argc, char **argv) {
+    std::string out{"text"};
+    int write = 0;
+    for (int read = 0; read < argc; ++read) {
+        std::string_view const a{argv[read]};
+        if (a == "--format" && read + 1 < argc) {
+            std::string_view const v{argv[read + 1]};
+            if (v == "text" || v == "json" || v == "toml") {
+                out.assign(v);
+            } else {
+                std::fprintf(stderr,
+                             "ap3: --format must be text|json|toml (got '%.*s'); using text\n",
+                             static_cast<int>(v.size()), v.data());
+            }
+            ++read; // skip the value too
+            continue;
+        }
+        argv[write++] = argv[read];
+    }
+    argc = write;
+    return out;
+}
+
 // Parse common flags that may appear in any ap3 subcommand. Consumes
 // them out of `argv` in-place by compaction; the surviving args are
 // the subcommand-specific positionals.
@@ -15939,9 +15967,11 @@ int run_ls(int argc, char **argv, CommonOpts const &opts) {
 }
 
 int run_pull(int argc, char **argv, CommonOpts const &opts) {
+    auto const fmt = consume_format_flag(argc, argv);
     if (argc < 1) {
         std::fputs("ap3 pull: missing <ap-path>\n"
-                   "Usage: subuwutuner-cli ap3 pull <ap-path> [--into <local-path>]\n",
+                   "Usage: subuwutuner-cli ap3 pull <ap-path> [--into <local-path>] "
+                   "[--format text|json|toml]\n",
                    stderr);
         return 2;
     }
@@ -15990,14 +16020,24 @@ int run_pull(int argc, char **argv, CommonOpts const &opts) {
     out.write(reinterpret_cast<char const *>(bytes->data()),
               static_cast<std::streamsize>(bytes->size()));
     out.close();
-    std::printf("ap3 pull: wrote %zu bytes to %s\n", bytes->size(), out_path.string().c_str());
+    if (fmt == "json") {
+        std::printf("{\"ap_path\":\"%s\",\"into\":\"%s\",\"bytes\":%zu}\n",
+                    ap_path.c_str(), out_path.string().c_str(), bytes->size());
+    } else if (fmt == "toml") {
+        std::printf("ap_path = \"%s\"\ninto    = \"%s\"\nbytes   = %zu\n",
+                    ap_path.c_str(), out_path.string().c_str(), bytes->size());
+    } else {
+        std::printf("ap3 pull: wrote %zu bytes to %s\n", bytes->size(), out_path.string().c_str());
+    }
     return 0;
 }
 
 int run_push(int argc, char **argv, CommonOpts const &opts) {
+    auto const fmt = consume_format_flag(argc, argv);
     if (argc < 1) {
         std::fputs("ap3 push: missing <local-path>\n"
-                   "Usage: subuwutuner-cli ap3 push <local-path> [--as <ap-path>]\n",
+                   "Usage: subuwutuner-cli ap3 push <local-path> [--as <ap-path>] "
+                   "[--format text|json|toml]\n",
                    stderr);
         return 2;
     }
@@ -16045,11 +16085,20 @@ int run_push(int argc, char **argv, CommonOpts const &opts) {
         std::fprintf(stderr, "ap3 push: %s\n", status.error().to_string().c_str());
         return 1;
     }
-    std::printf("ap3 push: wrote %zu bytes to AP:%s\n", bytes.size(), ap_path.c_str());
+    if (fmt == "json") {
+        std::printf("{\"local\":\"%s\",\"ap_path\":\"%s\",\"bytes\":%zu}\n",
+                    local.string().c_str(), ap_path.c_str(), bytes.size());
+    } else if (fmt == "toml") {
+        std::printf("local   = \"%s\"\nap_path = \"%s\"\nbytes   = %zu\n",
+                    local.string().c_str(), ap_path.c_str(), bytes.size());
+    } else {
+        std::printf("ap3 push: wrote %zu bytes to AP:%s\n", bytes.size(), ap_path.c_str());
+    }
     return 0;
 }
 
 int run_rm(int argc, char **argv, CommonOpts const &opts) {
+    auto const fmt = consume_format_flag(argc, argv);
     if (argc < 1) {
         std::fputs("ap3 rm: missing <ap-path>\n", stderr);
         return 2;
@@ -16073,11 +16122,18 @@ int run_rm(int argc, char **argv, CommonOpts const &opts) {
         std::fprintf(stderr, "ap3 rm: %s\n", status.error().to_string().c_str());
         return 1;
     }
-    std::printf("ap3 rm: removed AP:%s\n", ap_path.c_str());
+    if (fmt == "json") {
+        std::printf("{\"ap_path\":\"%s\",\"removed\":true}\n", ap_path.c_str());
+    } else if (fmt == "toml") {
+        std::printf("ap_path = \"%s\"\nremoved = true\n", ap_path.c_str());
+    } else {
+        std::printf("ap3 rm: removed AP:%s\n", ap_path.c_str());
+    }
     return 0;
 }
 
 int run_backup(int argc, char **argv, CommonOpts const &opts) {
+    auto const fmt = consume_format_flag(argc, argv);
     std::filesystem::path out_dir = std::filesystem::current_path() / "ap3-backup";
     for (int i = 0; i + 1 < argc; ++i) {
         if (std::string_view{argv[i]} == "--into") {
@@ -16102,6 +16158,12 @@ int run_backup(int argc, char **argv, CommonOpts const &opts) {
     static constexpr std::array<std::string_view, 4> kSubdirs{
         "/maps/", "/datalog/", "/presets/", "/images/",
     };
+    struct BackupRec {
+        std::string ap_path;
+        std::string local_path;
+        std::size_t bytes;
+    };
+    std::vector<BackupRec> manifest;
     std::size_t total_files = 0;
     std::uint64_t total_bytes = 0;
     for (auto sub : kSubdirs) {
@@ -16114,8 +16176,6 @@ int run_backup(int argc, char **argv, CommonOpts const &opts) {
         auto sub_dir = out_dir / std::string{sub.substr(1, sub.size() - 2)};
         std::filesystem::create_directories(sub_dir, ec);
         for (auto const &rec : *records) {
-            // rec.path is the full relative path (dir + filename);
-            // prepend '/' for the absolute form read_file expects.
             std::string const abs_path = "/" + rec.path;
             auto bytes = client.read_file(abs_path);
             if (!bytes.has_value()) {
@@ -16123,18 +16183,19 @@ int run_backup(int argc, char **argv, CommonOpts const &opts) {
                              bytes.error().to_string().c_str());
                 continue;
             }
-            std::ofstream out{sub_dir / rec.name, std::ios::binary};
+            auto const dst = sub_dir / rec.name;
+            std::ofstream out{dst, std::ios::binary};
             if (!out) {
                 std::fprintf(stderr, "ap3 backup: open %s failed\n", rec.name.c_str());
                 continue;
             }
             out.write(reinterpret_cast<char const *>(bytes->data()),
                       static_cast<std::streamsize>(bytes->size()));
+            manifest.push_back({abs_path, dst.string(), bytes->size()});
             ++total_files;
             total_bytes += bytes->size();
         }
     }
-    // Top-level singletons.
     for (auto const *name : {"settings", "backupcksum"}) {
         std::string const path = std::string{"/"} + name;
         auto bytes = client.read_file(path);
@@ -16143,14 +16204,37 @@ int run_backup(int argc, char **argv, CommonOpts const &opts) {
                          bytes.error().to_string().c_str());
             continue;
         }
-        std::ofstream out{out_dir / name, std::ios::binary};
+        auto const dst = out_dir / name;
+        std::ofstream out{dst, std::ios::binary};
         out.write(reinterpret_cast<char const *>(bytes->data()),
                   static_cast<std::streamsize>(bytes->size()));
+        manifest.push_back({path, dst.string(), bytes->size()});
         ++total_files;
         total_bytes += bytes->size();
     }
-    std::printf("ap3 backup: pulled %zu files (%llu bytes) into %s\n", total_files,
-                static_cast<unsigned long long>(total_bytes), out_dir.string().c_str());
+    if (fmt == "json") {
+        std::printf("{\n  \"into\": \"%s\",\n  \"total_files\": %zu,\n  \"total_bytes\": %llu,\n  \"files\": [\n",
+                    out_dir.string().c_str(), total_files,
+                    static_cast<unsigned long long>(total_bytes));
+        for (std::size_t i = 0; i < manifest.size(); ++i) {
+            auto const &m = manifest[i];
+            std::printf("    {\"ap_path\":\"%s\",\"local\":\"%s\",\"bytes\":%zu}%s\n",
+                        m.ap_path.c_str(), m.local_path.c_str(), m.bytes,
+                        i + 1 < manifest.size() ? "," : "");
+        }
+        std::printf("  ]\n}\n");
+    } else if (fmt == "toml") {
+        std::printf("into        = \"%s\"\ntotal_files = %zu\ntotal_bytes = %llu\n\n",
+                    out_dir.string().c_str(), total_files,
+                    static_cast<unsigned long long>(total_bytes));
+        for (auto const &m : manifest) {
+            std::printf("[[file]]\nap_path = \"%s\"\nlocal   = \"%s\"\nbytes   = %zu\n\n",
+                        m.ap_path.c_str(), m.local_path.c_str(), m.bytes);
+        }
+    } else {
+        std::printf("ap3 backup: pulled %zu files (%llu bytes) into %s\n", total_files,
+                    static_cast<unsigned long long>(total_bytes), out_dir.string().c_str());
+    }
     return 0;
 }
 
@@ -16164,12 +16248,13 @@ int cmd_ap3(int argc, char *argv[]) {
                    "  state              Print AP serial / firmware / marriage state\n"
                    "  ls [subdir] [--format text|json|toml]\n"
                    "                     List files in /user/ap-user/<subdir> (default /maps/)\n"
-                   "  pull <ap-path> [--into <local>]\n"
+                   "  pull <ap-path> [--into <local>] [--format text|json|toml]\n"
                    "                     Pull a file off the AP\n"
-                   "  push <local> [--as <ap-path>]\n"
+                   "  push <local> [--as <ap-path>] [--format text|json|toml]\n"
                    "                     Push a local file to the AP\n"
-                   "  rm <ap-path>       Remove a file from the AP\n"
-                   "  backup [--into <dir>]\n"
+                   "  rm <ap-path> [--format text|json|toml]\n"
+                   "                     Remove a file from the AP\n"
+                   "  backup [--into <dir>] [--format text|json|toml]\n"
                    "                     Pull /maps + /datalog + /presets + /images +\n"
                    "                     /settings + /backupcksum into <dir>\n"
                    "\n"
