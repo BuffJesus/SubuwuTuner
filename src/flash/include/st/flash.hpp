@@ -419,6 +419,12 @@ public:
     ecu_transfer_data(std::uint8_t sequence_no, std::span<std::uint8_t const> bytes,
                       std::chrono::milliseconds timeout = std::chrono::milliseconds{2000});
 
+    // UDS RequestTransferExit (0x37) — close the download lifecycle
+    // started by ecu_request_download / continued by ecu_transfer_data.
+    // No body; the ECU answers with a bare positive ack (0x77).
+    [[nodiscard]] Status
+    ecu_request_transfer_exit(std::chrono::milliseconds timeout = std::chrono::milliseconds{2000});
+
     // Ask the ECU to compute its own checksum over `[start_addr,
     // end_addr]` (inclusive) and return the routine result. Per
     // `docs/37-subaru-flash-protocol.md` (RE5), the Subaru reference

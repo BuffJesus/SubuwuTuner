@@ -2121,6 +2121,40 @@ TEST_CASE("Flasher::ecu_transfer_data surfaces NRC on sequence-counter mismatch"
 }
 
 // ---------------------------------------------------------------------
+// ecu_request_transfer_exit — UDS 0x37 lifecycle close
+// ---------------------------------------------------------------------
+
+TEST_CASE("Flasher::ecu_request_transfer_exit sends 0x37 with no body",
+          "[flash][ecu_uds]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // Bare service: request 37, response 77.
+    expect(t, {0x37}, {0x77});
+
+    flash::Flasher f{t};
+    REQUIRE(f.ecu_request_transfer_exit().has_value());
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("Flasher::ecu_request_transfer_exit surfaces NRC on premature close",
+          "[flash][ecu_uds][error]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // NRC 0x24 (requestSequenceError) — fires when the host closes
+    // before the negotiated `size` from RequestDownload was actually
+    // delivered via TransferData chunks. The orchestrator's recovery
+    // is to abort the FlashPlan and reset session.
+    expect(t, {0x37}, {0x7F, 0x37, 0x24});
+
+    flash::Flasher f{t};
+    auto const r = f.ecu_request_transfer_exit();
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(t.exhausted());
+}
+
+// ---------------------------------------------------------------------
 // ecu_compute_checksum — RE5 reference architecture's ChecksumECUData
 // ---------------------------------------------------------------------
 

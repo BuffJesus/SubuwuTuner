@@ -610,6 +610,14 @@ Status Flasher::ecu_transfer_data(std::uint8_t sequence_no,
 }
 
 // ---------------------------------------------------------------------
+// ecu_request_transfer_exit — UDS 0x37, close the download lifecycle
+// ---------------------------------------------------------------------
+
+Status Flasher::ecu_request_transfer_exit(std::chrono::milliseconds timeout) {
+    return client_.request_transfer_exit(timeout);
+}
+
+// ---------------------------------------------------------------------
 // ecu_compute_checksum — ECU-side post-flash verification (RoutineControl)
 // ---------------------------------------------------------------------
 
