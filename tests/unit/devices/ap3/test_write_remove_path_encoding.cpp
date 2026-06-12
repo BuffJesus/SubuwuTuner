@@ -77,8 +77,9 @@ void prime_warmup(st::test::transport::LoopbackByteChannel &channel,
     auto warmup_pkt = make_packet(
         static_cast<std::uint8_t>(st::transport::ap3::ResponseType::Info),
         tiny_body);
-    // 3 for query_state warmup (cmd 0x28, 0x04, 0x03) + caller's count.
-    for (std::size_t i = 0; i < 3 + extra_response_packets; ++i) {
+    // 6 for query_state warmup (cmd 0x28, 0x04, 0x03, 0x2e, 0x30, 0x31)
+    // + caller's count.
+    for (std::size_t i = 0; i < 6 + extra_response_packets; ++i) {
         channel.queue_read(warmup_pkt);
     }
 }

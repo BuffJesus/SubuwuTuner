@@ -50,6 +50,14 @@ struct DeviceState {
     std::vector<std::uint8_t> user_info_body;       // cmd 0x28 response
     std::vector<std::uint8_t> firmware_body;        // cmd 0x04 response
     std::vector<std::uint8_t> device_settings_body; // cmd 0x03 response
+    // Three additional status-query responses, populated when the AP
+    // firmware supports the cmd byte (v1.7.6.0-28785 confirmed via
+    // RE8b CORRECTED dispatch-table extraction). A non-supporting
+    // firmware emits a default-handler error packet for these; the
+    // parser degrades to nullopt rather than failing query_state.
+    std::vector<std::uint8_t> hardware_type_body;        // cmd 0x2e response
+    std::vector<std::uint8_t> vehicle_manufacturer_body; // cmd 0x30 response
+    std::vector<std::uint8_t> ap_manufacturer_body;      // cmd 0x31 response
 
     // Best-effort parses extracted from the raw bodies above. Empty
     // when the leading Boost-archive prefix is present but the
@@ -61,6 +69,11 @@ struct DeviceState {
     std::optional<std::string> ap_serial;
     std::optional<std::string> firmware_version;
     std::optional<std::string> vehicle_descriptor;
+    // Parsed ASCII payloads from the three RE8b status cmds. Same
+    // treatment as `firmware_version` (printable-ASCII span trim).
+    std::optional<std::string> hardware_type;
+    std::optional<std::string> vehicle_manufacturer;
+    std::optional<std::string> ap_manufacturer;
 
     // Marriage state per spec §15. `std::nullopt` means
     // "unknown / not yet parsed" — distinct from `false`

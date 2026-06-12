@@ -85,6 +85,9 @@ void queue_query_state(st::test::transport::LoopbackByteChannel &channel,
     std::array<std::uint8_t, 1> tiny{0xAAU};
     channel.queue_read(make_packet(info_type, tiny)); // cmd 0x04 firmware echo
     channel.queue_read(make_packet(info_type, tiny)); // cmd 0x03 device settings
+    channel.queue_read(make_packet(info_type, tiny)); // cmd 0x2e OnHardwareType
+    channel.queue_read(make_packet(info_type, tiny)); // cmd 0x30 OnGetVehicleManufacturer
+    channel.queue_read(make_packet(info_type, tiny)); // cmd 0x31 OnGetApManufacturer
 }
 
 } // namespace

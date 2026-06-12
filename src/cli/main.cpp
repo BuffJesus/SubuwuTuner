@@ -15879,6 +15879,9 @@ int run_state(int argc, char **argv, CommonOpts const &opts) {
     auto const serial   = state->ap_serial.value_or(std::string{"(unparsed)"});
     auto const firmware = state->firmware_version.value_or(std::string{"(unparsed)"});
     auto const vehicle  = state->vehicle_descriptor.value_or(std::string{"(unparsed)"});
+    auto const hw_type  = state->hardware_type.value_or(std::string{"(unparsed)"});
+    auto const veh_mfr  = state->vehicle_manufacturer.value_or(std::string{"(unparsed)"});
+    auto const ap_mfr   = state->ap_manufacturer.value_or(std::string{"(unparsed)"});
     char const *marriage_str =
         state->married.has_value() ? (*state->married ? "Installed" : "Not Installed")
                                    : "(unparsed)";
@@ -15888,11 +15891,19 @@ int run_state(int argc, char **argv, CommonOpts const &opts) {
         std::printf("  \"serial\": \"%s\",\n", serial.c_str());
         std::printf("  \"firmware\": \"%s\",\n", firmware.c_str());
         std::printf("  \"vehicle\": \"%s\",\n", vehicle.c_str());
+        std::printf("  \"hardware_type\": \"%s\",\n", hw_type.c_str());
+        std::printf("  \"vehicle_manufacturer\": \"%s\",\n", veh_mfr.c_str());
+        std::printf("  \"ap_manufacturer\": \"%s\",\n", ap_mfr.c_str());
         std::printf("  \"married\": %s,\n",
                     state->married.has_value() ? (*state->married ? "true" : "false") : "null");
         std::printf("  \"user_info_body_bytes\": %zu,\n", state->user_info_body.size());
         std::printf("  \"firmware_body_bytes\": %zu,\n", state->firmware_body.size());
-        std::printf("  \"device_settings_body_bytes\": %zu\n", state->device_settings_body.size());
+        std::printf("  \"device_settings_body_bytes\": %zu,\n", state->device_settings_body.size());
+        std::printf("  \"hardware_type_body_bytes\": %zu,\n", state->hardware_type_body.size());
+        std::printf("  \"vehicle_manufacturer_body_bytes\": %zu,\n",
+                    state->vehicle_manufacturer_body.size());
+        std::printf("  \"ap_manufacturer_body_bytes\": %zu\n",
+                    state->ap_manufacturer_body.size());
         std::printf("}\n");
     } else if (fmt == "toml") {
         std::printf("vid                      = %u\n", opts.vid);
@@ -15900,17 +15911,34 @@ int run_state(int argc, char **argv, CommonOpts const &opts) {
         std::printf("serial                   = \"%s\"\n", serial.c_str());
         std::printf("firmware                 = \"%s\"\n", firmware.c_str());
         std::printf("vehicle                  = \"%s\"\n", vehicle.c_str());
+        if (state->hardware_type.has_value()) {
+            std::printf("hardware_type            = \"%s\"\n", hw_type.c_str());
+        }
+        if (state->vehicle_manufacturer.has_value()) {
+            std::printf("vehicle_manufacturer     = \"%s\"\n", veh_mfr.c_str());
+        }
+        if (state->ap_manufacturer.has_value()) {
+            std::printf("ap_manufacturer          = \"%s\"\n", ap_mfr.c_str());
+        }
         if (state->married.has_value()) {
             std::printf("married                  = %s\n", *state->married ? "true" : "false");
         }
         std::printf("user_info_body_bytes     = %zu\n", state->user_info_body.size());
         std::printf("firmware_body_bytes      = %zu\n", state->firmware_body.size());
         std::printf("device_settings_body_bytes = %zu\n", state->device_settings_body.size());
+        std::printf("hardware_type_body_bytes = %zu\n", state->hardware_type_body.size());
+        std::printf("vehicle_manufacturer_body_bytes = %zu\n",
+                    state->vehicle_manufacturer_body.size());
+        std::printf("ap_manufacturer_body_bytes = %zu\n",
+                    state->ap_manufacturer_body.size());
     } else {
         std::printf("AccessPort                 : VID 0x%04X PID 0x%04X\n", opts.vid, opts.pid);
         std::printf("Serial                     : %s\n", serial.c_str());
         std::printf("Firmware                   : %s\n", firmware.c_str());
         std::printf("Vehicle                    : %s\n", vehicle.c_str());
+        std::printf("Hardware type              : %s\n", hw_type.c_str());
+        std::printf("Vehicle manufacturer       : %s\n", veh_mfr.c_str());
+        std::printf("AP manufacturer            : %s\n", ap_mfr.c_str());
         std::printf("Marriage                   : %s\n", marriage_str);
         std::printf("UserInfo body bytes        : %zu\n", state->user_info_body.size());
         std::printf("Firmware response bytes    : %zu\n", state->firmware_body.size());

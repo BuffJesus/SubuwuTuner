@@ -51,6 +51,7 @@ add_executable(st_unit_tests
     unit/devices/ap3/test_write_remove_path_encoding.cpp
     unit/devices/ap3/test_marriage_gate.cpp
     unit/devices/ap3/test_datalogger_cfg.cpp
+    unit/devices/ap3/test_status_probes.cpp
     unit/library/test_patch_decoder.cpp
     unit/library/test_table_mapping.cpp
     unit/library/test_tune_diff.cpp

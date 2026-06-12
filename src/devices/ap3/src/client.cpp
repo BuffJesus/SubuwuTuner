@@ -435,6 +435,54 @@ Result<DeviceState> Client::query_state() {
         }
     }
 
+    // Three additional status probes per RE8b CORRECTED dispatch
+    // table (firmware v1.7.6.0-28785): cmd 0x2e OnHardwareType, cmd
+    // 0x30 OnGetVehicleManufacturer, cmd 0x31 OnGetApManufacturer.
+    // All three are read-only — empty host body, ASCII-string
+    // response — same shape as cmd 0x04. A firmware that doesn't
+    // implement them emits a default-handler error packet; we treat
+    // any non-printable-ASCII response as nullopt so query_state
+    // still succeeds on older builds. Run AFTER the warmup trio so
+    // session_warmed_up_ already covers the file-vault prereq.
+    auto probe_ascii = [&](std::uint8_t cmd, std::vector<std::uint8_t> &out_body,
+                           std::optional<std::string> &out_parsed) -> Status {
+        if (auto s = send_packet(cmd, std::span<std::uint8_t const>{}); !s.has_value()) {
+            return st::failure(std::move(s).error());
+        }
+        auto body = receive_packet_body();
+        if (!body.has_value()) {
+            return st::failure(std::move(body).error());
+        }
+        out_body = std::move(*body);
+        std::string s(reinterpret_cast<char const *>(out_body.data()),
+                      out_body.size());
+        while (!s.empty() && (static_cast<unsigned char>(s.back()) < 0x20 ||
+                              static_cast<unsigned char>(s.back()) >= 0x7F)) {
+            s.pop_back();
+        }
+        if (!s.empty() &&
+            std::all_of(s.begin(), s.end(),
+                        [](unsigned char c) { return c >= 0x20 && c < 0x7F; })) {
+            out_parsed = std::move(s);
+        }
+        return st::ok();
+    };
+    if (auto s = probe_ascii(0x2eU, state.hardware_type_body,
+                             state.hardware_type);
+        !s.has_value()) {
+        return st::failure(std::move(s).error());
+    }
+    if (auto s = probe_ascii(0x30U, state.vehicle_manufacturer_body,
+                             state.vehicle_manufacturer);
+        !s.has_value()) {
+        return st::failure(std::move(s).error());
+    }
+    if (auto s = probe_ascii(0x31U, state.ap_manufacturer_body,
+                             state.ap_manufacturer);
+        !s.has_value()) {
+        return st::failure(std::move(s).error());
+    }
+
     // A successful query_state() satisfies the cmd 0x28 session-warmup
     // prereq for file-vault commands; mark the flag so subsequent
     // ls/read/write/remove calls don't re-probe.

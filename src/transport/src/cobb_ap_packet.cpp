@@ -65,27 +65,25 @@ bool is_blocked_command(std::uint8_t type) noexcept {
     // a few "characterized enough for callers to decide" (cmd 0x12,
     // 0x1a, 0x2f) and that policy lives one layer up.
     //
-    // Reconciliation note (findings/re-2026-06-12-pm/
-    // dispatch_table_authoritative.md): the analyst's Capstone disasm
-    // of the `libap_comms.so` listen() jump table shows several
-    // handler bindings that disagree with our spec — e.g. 0x05 =
-    // OnVersion (not reboot), 0x18 = default-error (not infinite-
-    // loop), 0x29 = OnUserInfo (not DirectDongleTalk), and 0x28 falls
-    // through to the error responder yet works for us live. The
-    // analyst attributes this to either a firmware-version skew
-    // between the disassembled binary and the user's married AP, or a
-    // pre-listen() interception layer the disasm doesn't see. Until
-    // that's reconciled, this list stays empirically grounded: each
-    // entry below has caused observable harm on a live AP (§4.2 daze
-    // or worse), regardless of which handler name the dispatch table
-    // labels it.
+    // Dispatch table per RE8b CORRECTED (findings/re-2026-06-12-pm/
+    // dispatch_table_CORRECTED.md, firmware v1.7.6.0-28785 — the user's
+    // married AP). The earlier off-by-one finding has been reconciled;
+    // cmd 0x28 IS OnUserInfo via the listen() switch (no higher-level
+    // interception). The corrected mapping mostly agrees with spec
+    // §6.0; the one substantive divergence is cmd 0x05 (spec said
+    // reboot, dispatch table says `ap::Filesystem::remountUser`) —
+    // both dangerous in different ways, both stay blocked. Cmd 0x18
+    // is actually a stringstream-ctor stub per the corrected disasm
+    // (not infinite-loop), but field reports of dazes on this byte
+    // are real, so it stays blocked out of caution until bench-rig
+    // proves otherwise.
     switch (type) {
-    case 0x05: // reboot (per spec §6.0; dispatch table says OnVersion — TBD)
-    case 0x06: // OTA firmware update / Filesystem::remountUser
-    case 0x07: // legacy upload setup / OnUpdateManifest — both dangerous
-    case 0x08: // legacy upload data / modern PutFileSetupOUT — keep blocked
-    case 0x18: // documented infinite loop / default-error — out of caution
-    case 0x29: // OnStartDirectDongleTalk per spec — may exit USB state
+    case 0x05: // ap::Filesystem::remountUser (CORRECTED) — bulk-write flush, OS-level
+    case 0x06: // OnUpdateManifest — OTA path
+    case 0x07: // OnPutFileSetupOUT (legacy) — system-area upload setup
+    case 0x08: // OnPutFileOUT (legacy) — system-area upload data
+    case 0x18: // stringstream ctor stub (CORRECTED) — kept blocked, field daze reports
+    case 0x29: // OnStartDirectDongleTalk — may exit USB state
         return true;
     default:
         break;

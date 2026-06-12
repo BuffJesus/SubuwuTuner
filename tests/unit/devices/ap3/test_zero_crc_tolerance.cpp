@@ -52,17 +52,16 @@ std::vector<std::uint8_t> make_packet(std::uint8_t type,
 TEST_CASE("ap3 client accepts zero-CRC trailer as AP firmware sentinel",
           "[devices][ap3][zero_crc]") {
     st::test::transport::LoopbackByteChannel channel;
-    // query_state issues 3 receives (cmd 0x28, cmd 0x04, cmd 0x03). The
-    // body content doesn't matter for this test — parse_user_info_body
-    // and the firmware/settings parsers all degrade to nullopt fields
-    // when the body shape doesn't match, and query_state itself returns
-    // success regardless.
+    // query_state issues 6 receives (cmd 0x28, 0x04, 0x03, 0x2e, 0x30,
+    // 0x31). Body content doesn't matter for this test — the parsers
+    // all degrade to nullopt fields when the body shape doesn't match,
+    // and query_state itself returns success regardless.
     std::array<std::uint8_t, 1> tiny_body{0xAA};
     auto pkt = make_packet(static_cast<std::uint8_t>(st::transport::ap3::ResponseType::Info),
                            tiny_body, 0x00000000U);
-    channel.queue_read(pkt); // cmd 0x28 response with ZERO CRC
-    channel.queue_read(pkt); // cmd 0x04 response with ZERO CRC
-    channel.queue_read(pkt); // cmd 0x03 response with ZERO CRC
+    for (int i = 0; i < 6; ++i) {
+        channel.queue_read(pkt); // all six replies with ZERO CRC
+    }
 
     st::devices::ap3::Client client{channel};
     auto state = client.query_state();
@@ -73,6 +72,9 @@ TEST_CASE("ap3 client accepts zero-CRC trailer as AP firmware sentinel",
     REQUIRE(state->user_info_body[0] == 0xAA);
     REQUIRE(state->firmware_body.size() == 1U);
     REQUIRE(state->device_settings_body.size() == 1U);
+    REQUIRE(state->hardware_type_body.size() == 1U);
+    REQUIRE(state->vehicle_manufacturer_body.size() == 1U);
+    REQUIRE(state->ap_manufacturer_body.size() == 1U);
 }
 
 TEST_CASE("ap3 client rejects non-zero CRC mismatch",

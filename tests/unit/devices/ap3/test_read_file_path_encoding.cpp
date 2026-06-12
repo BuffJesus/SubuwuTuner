@@ -85,16 +85,17 @@ TEST_CASE("ap3 read_file cmd 0x20 setup encodes path as full relative "
           "(maps/Foo.ptm), NOT directory (/maps/)",
           "[devices][ap3][regression][cmd20-path]") {
     st::test::transport::LoopbackByteChannel channel;
-    // Warmup: query_state issues 3 packets (cmd 0x28, 0x04, 0x03) and
-    // needs 3 IN responses. Body content is irrelevant — the parsers
-    // degrade gracefully to nullopt fields when the shape doesn't match.
+    // Warmup: query_state issues 6 packets (cmd 0x28, 0x04, 0x03,
+    // 0x2e, 0x30, 0x31) and needs 6 IN responses. Body content is
+    // irrelevant — the parsers degrade gracefully to nullopt fields
+    // when the shape doesn't match.
     std::array<std::uint8_t, 1> tiny_body{0xAAU};
     auto warmup_pkt = make_packet(
         static_cast<std::uint8_t>(st::transport::ap3::ResponseType::Info),
         tiny_body);
-    channel.queue_read(warmup_pkt);
-    channel.queue_read(warmup_pkt);
-    channel.queue_read(warmup_pkt);
+    for (int i = 0; i < 6; ++i) {
+        channel.queue_read(warmup_pkt);
+    }
     // cmd 0x20 setup ACK: a 1-byte body that won't decode as
     // FileInfo2 (so decode_setup_ack_response_shape returns nullopt
     // and the degenerate-ACK fast-fail is skipped — letting read_file
@@ -151,10 +152,10 @@ TEST_CASE("ap3 read_file cmd 0x20 setup for root-level pseudo-file "
     auto warmup_pkt = make_packet(
         static_cast<std::uint8_t>(st::transport::ap3::ResponseType::Info),
         tiny_body);
-    channel.queue_read(warmup_pkt);
-    channel.queue_read(warmup_pkt);
-    channel.queue_read(warmup_pkt);
-    channel.queue_read(warmup_pkt);
+    // 6 warmup IN responses + 1 setup-ACK for cmd 0x20.
+    for (int i = 0; i < 7; ++i) {
+        channel.queue_read(warmup_pkt);
+    }
 
     st::devices::ap3::ClientConfig cfg{};
     cfg.io_timeout = std::chrono::milliseconds{50};
