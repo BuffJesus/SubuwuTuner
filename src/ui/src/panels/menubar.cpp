@@ -75,6 +75,14 @@ void render_menubar(AppState &state) {
                 disabled_tip("No project open.");
             }
             ImGui::Separator();
+            // PTM import wizard — decodes a COBB AccessPort .ptm tune
+            // into a new SubuwuTuner project. Cipher-gated; the modal
+            // surfaces a clear PolicyDenied message when the build
+            // doesn't have ST_ENABLE_COBB_AP_CIPHER=ON.
+            if (ImGui::MenuItem("\xEE\x86\x97  Import .ptm File\xE2\x80\xA6")) {
+                state.show_ptm_import_modal = true;
+            }
+            ImGui::Separator();
             // CSV import/export — same `# pack_id` / `# table` /
             // `row,col,value` format as project-export-csv / -edit-csv,
             // and same parser, so the two surfaces round-trip with each

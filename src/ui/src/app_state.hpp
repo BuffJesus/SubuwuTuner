@@ -666,6 +666,25 @@ struct AppState {
     // confirmation can't carry forward.
     char flash_typed_phrase[64]{};
 
+    // ptm import wizard modal — Pull-from-AP-then-Import workflow.
+    // Picks a .ptm file (and base ROM, optional def-pack), runs the
+    // cipher chain inline, shows the decoded metadata preview, and on
+    // commit writes a Project::open-compatible skeleton to disk.
+    bool show_ptm_import_modal{false};
+    char ptm_import_ptm_path[1024]{};
+    char ptm_import_base_rom[1024]{};
+    char ptm_import_def_path[1024]{};
+    char ptm_import_out_dir[1024]{};
+    // Preview state populated on "Decode preview" button press. Empty
+    // strings until a successful decode; preview_error has the message
+    // when decryption / decode failed.
+    std::string ptm_import_preview_vendor;
+    std::string ptm_import_preview_vehicle;
+    std::uint32_t ptm_import_preview_patches{0};
+    std::uint64_t ptm_import_preview_bytes{0};
+    std::string ptm_import_error;
+    std::string ptm_import_success;
+
     // CSV import preview modal.
     bool show_csv_import_modal{false};
     st::EditCsvParseResult csv_import_parsed;

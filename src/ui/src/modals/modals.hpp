@@ -15,6 +15,7 @@ namespace st::ui {
 
 void render_unsaved_modal(AppState &state);
 void render_csv_import_modal(AppState &state);
+void render_ptm_import_modal(AppState &state);
 void render_maf_autotune_modal(AppState &state);
 void render_kp_autotune_modal(AppState &state);
 void render_shortcuts_modal(AppState &state);

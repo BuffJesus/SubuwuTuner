@@ -140,6 +140,7 @@ add_executable(subuwutuner-gui
     src/modals/flash.cpp
     src/modals/help.cpp
     src/modals/new_project.cpp
+    src/modals/ptm_import.cpp
     src/modals/read_rom.cpp
     src/modals/settings.cpp
     src/modals/shortcuts.cpp
@@ -171,6 +172,7 @@ target_link_libraries(subuwutuner-gui
         st::ai
         st::transport
         st::devices_ap3
+        st::library
         imgui_lib
         implot_lib
         nfd
