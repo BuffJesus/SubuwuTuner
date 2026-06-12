@@ -75,7 +75,14 @@ bool is_blocked_command(std::uint8_t type) noexcept {
     default:
         break;
     }
-    return type > 0x31; // beyond the documented dispatcher range
+    // RE8 (findings/re-2026-06-12-pm/) extracted the full listen()
+    // dispatch table at file offset 0x24cec via Capstone disasm: cmd
+    // bytes > 0x31 have no handler entries. Previously a conservative
+    // assumption; now confirmed. Keep refusing them at the codec
+    // boundary — sending an unhandled byte yields undefined firmware
+    // behavior, which the §4.2 daze rule treats as "physical replug
+    // to recover."
+    return type > 0x31;
 }
 
 Result<std::vector<std::uint8_t>>
