@@ -693,6 +693,35 @@ struct AppState {
     std::string ptm_import_error;
     std::string ptm_import_success;
 
+    // ptm export modal — reverse of import. Reads the loaded project's
+    // [ptm_metadata] + ptm_patches.toml, rebuilds the inner PrivateData
+    // XML, runs through encrypt_ptm, writes to disk. Gated on
+    // ST_AP3_HAVE_PTM_REWRITE — surfaces NotImplemented otherwise.
+    bool show_ptm_export_modal{false};
+    char ptm_export_out_path[1024]{};
+    char ptm_export_seed_hex[32] = "0x12345678";
+    std::string ptm_export_error;
+    std::string ptm_export_success;
+
+    // ptm inspect modal — read-only viewer. Pick a .ptm, decode it
+    // inline, render identity + architectural breakdown + top tables.
+    // No project mutation; useful for "what's in this tune?".
+    bool show_ptm_inspect_modal{false};
+    char ptm_inspect_ptm_path[1024]{};
+    char ptm_inspect_def_path[1024]{};
+    bool ptm_inspect_have_preview{false};
+    std::string ptm_inspect_vendor;
+    std::string ptm_inspect_vehicle;
+    std::uint32_t ptm_inspect_lock_mask{0};
+    std::string ptm_inspect_rom_sum;
+    std::uint32_t ptm_inspect_patches{0};
+    std::uint64_t ptm_inspect_total_bytes{0};
+    std::vector<std::pair<std::string, std::pair<std::uint32_t, std::uint64_t>>>
+        ptm_inspect_layers; // (label, (count, bytes))
+    std::vector<std::pair<std::string, std::pair<std::uint32_t, std::uint64_t>>>
+        ptm_inspect_top_tables; // (name, (count, bytes))
+    std::string ptm_inspect_error;
+
     // CSV import preview modal.
     bool show_csv_import_modal{false};
     st::EditCsvParseResult csv_import_parsed;

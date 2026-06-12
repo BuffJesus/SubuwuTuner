@@ -82,6 +82,17 @@ void render_menubar(AppState &state) {
             if (ImGui::MenuItem("\xEE\x86\x97  Import .ptm File\xE2\x80\xA6")) {
                 state.show_ptm_import_modal = true;
             }
+            if (ImGui::MenuItem("\xEE\xA0\x84  Inspect .ptm File\xE2\x80\xA6")) {
+                state.show_ptm_inspect_modal = true;
+            }
+            if (ImGui::MenuItem("\xEE\x9D\x8E  Export as .ptm\xE2\x80\xA6", nullptr,
+                                false, has_project)) {
+                state.show_ptm_export_modal = true;
+            }
+            if (!has_project) {
+                disabled_tip("Open a project first. The export modal needs a project\n"
+                             "with [ptm_metadata] + ptm_patches.toml (from `ptm import`).");
+            }
             ImGui::Separator();
             // CSV import/export — same `# pack_id` / `# table` /
             // `row,col,value` format as project-export-csv / -edit-csv,

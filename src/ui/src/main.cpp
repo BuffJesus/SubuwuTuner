@@ -384,6 +384,8 @@ int main(int argc, char *argv[]) {
         render_unsaved_modal(state);
         render_csv_import_modal(state);
         render_ptm_import_modal(state);
+        render_ptm_inspect_modal(state);
+        render_ptm_export_modal(state);
         render_new_project_modal(state);
         render_maf_autotune_modal(state);
         render_kp_autotune_modal(state);
