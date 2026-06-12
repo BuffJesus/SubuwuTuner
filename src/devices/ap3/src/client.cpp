@@ -130,6 +130,32 @@ UserInfoFields parse_user_info_body(std::span<std::uint8_t const> body) {
     return out;
 }
 
+std::optional<bool>
+parse_marriage_from_device_settings(std::span<std::uint8_t const> body) {
+    // PLACEHOLDER — analyst RE task per spec §15. The cmd 0x03
+    // DeviceSettings response is a Boost-archived blob with an
+    // Installed / Not Installed marker somewhere in the payload;
+    // exact byte offset is the open question.
+    //
+    // Drop-in shape, when the offset lands:
+    //
+    //   constexpr std::size_t kMarriageByteOffset = 0xXX;
+    //   constexpr std::uint8_t kInstalled = 0xYY;
+    //   constexpr std::uint8_t kNotInstalled = 0xZZ;
+    //   if (body.size() <= kMarriageByteOffset) return std::nullopt;
+    //   auto const b = body[kMarriageByteOffset];
+    //   if (b == kInstalled)    return true;
+    //   if (b == kNotInstalled) return false;
+    //   return std::nullopt;
+    //
+    // Until then, every caller falls back to the cmd 0x28 ASCII
+    // payload (parse_user_info_body) — which is reliable on current
+    // firmware. Returning nullopt here keeps the cmd 0x28 result
+    // load-bearing without poisoning it.
+    (void)body;
+    return std::nullopt;
+}
+
 SplitPath split_ap_path(std::string_view absolute_path) {
     SplitPath out;
     auto slash = absolute_path.rfind('/');
@@ -407,13 +433,19 @@ Result<DeviceState> Client::query_state() {
             return st::failure(std::move(body).error());
         }
         state.device_settings_body = std::move(*body);
-        // Marriage state is now sourced from the cmd 0x28 ASCII payload
-        // (spec §6.13 revision), not from this blob. The DeviceSettings
-        // body is still captured for diagnostic use but its byte layout
-        // is undocumented (spec §15 open question — see
-        // findings/handoffs/HANDOFF-to-analyst-2026-06-11-implementer-open-items.md
-        // P1 #5). state.married was populated above; don't clobber it
-        // here.
+        // Marriage state is primarily sourced from the cmd 0x28 ASCII
+        // payload (spec §6.13). The cmd 0x03 DeviceSettings blob is
+        // also examined here as a fallback: if cmd 0x28 yielded a
+        // marriage flag we keep it (authoritative); if it didn't, the
+        // device-settings hook gets a chance. Today the hook always
+        // returns nullopt (analyst RE task — spec §15 open question);
+        // when the offset lands the override-vs-fallback decision is
+        // already wired.
+        auto const dev_marriage =
+            parse_marriage_from_device_settings(state.device_settings_body);
+        if (!state.married.has_value() && dev_marriage.has_value()) {
+            state.married = dev_marriage;
+        }
     }
 
     // A successful query_state() satisfies the cmd 0x28 session-warmup

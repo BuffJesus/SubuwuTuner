@@ -167,6 +167,22 @@ struct UserInfoFields {
 // `fixtures/ap3/cmd28_userinfo_response.bin` for the canonical example.
 [[nodiscard]] UserInfoFields parse_user_info_body(std::span<std::uint8_t const> body);
 
+// Extract the marriage flag from the cmd 0x03 DeviceSettings response
+// body. Spec §15 leaves the exact byte offset of the Installed / Not
+// Installed marker undocumented; the analyst RE task is to fill it in.
+// Until then this returns `std::nullopt` (unknown) — callers fall back
+// to the cmd 0x28 ASCII payload's `install state` field, which is the
+// authoritative source on current firmware (v1.7.6.0-28785).
+//
+// The hook is intentionally a free function so the analyst's offset
+// finding can drop in as a single-symbol edit. When the offset lands,
+// add a fixture-pinned unit test that loads
+// `fixtures/private/ap3_live_captures/cmd03_*.bin` and asserts the
+// parsed bool agrees with the cmd 0x28 derived `married` for that
+// same session (cross-validation).
+[[nodiscard]] std::optional<bool>
+parse_marriage_from_device_settings(std::span<std::uint8_t const> body);
+
 } // namespace st::devices::ap3
 
 #endif // ST_DEVICES_AP3_CLIENT_HPP
