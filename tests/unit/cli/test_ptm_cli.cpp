@@ -205,3 +205,67 @@ TEST_CASE("ptm diff: a == b on synthetic fixture",
 #endif
 #endif
 }
+
+TEST_CASE("ptm import refuses without --enable-cobb-ap-cipher",
+          "[cli][ptm][integration]") {
+    if (!can_run()) {
+        return;
+    }
+    auto const r = st::test::cli_run(
+        "ptm import /nonexistent/file.ptm --base-rom /nonexistent/rom.bin");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("ptm import requires --base-rom",
+          "[cli][ptm][integration]") {
+    if (!can_run()) {
+        return;
+    }
+    auto const r = st::test::cli_run("--enable-cobb-ap-cipher ptm import /tmp/x.ptm");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("ptm import reports missing .ptm with --base-rom",
+          "[cli][ptm][integration][cipher]") {
+#ifndef ST_AP3_HAVE_CIPHER
+    SKIP("Cipher gating off");
+#else
+    if (!can_run()) {
+        return;
+    }
+    auto const r = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm import /nonexistent/x.ptm "
+        "--base-rom /nonexistent/rom.bin");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 1);
+#endif
+}
+
+TEST_CASE("ptm import exercises decrypt + decode on synthetic fixture",
+          "[cli][ptm][integration][cipher]") {
+#ifndef ST_AP3_HAVE_CIPHER
+    SKIP("Cipher gating off");
+#else
+#ifndef ST_FIXTURE_AP3_CIPHER_DIR
+    SKIP("ST_FIXTURE_AP3_CIPHER_DIR not defined");
+#else
+    if (!can_run()) {
+        return;
+    }
+    std::string const fixture =
+        std::string{ST_FIXTURE_AP3_CIPHER_DIR} + "/synthetic_e2e_ptm_envelope.ptm";
+    // Use the fixture itself as a stand-in for a base ROM — we never
+    // get past the decode step on this fixture (intentional malformed
+    // inner per fixtures/ap3/cipher/README.md), so the base ROM path
+    // is never read. Exit 1 from the decode rejection still validates
+    // CLI plumbing.
+    auto const r = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm import " + st::test::quote(fixture) +
+        " --base-rom " + st::test::quote(fixture));
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 1);
+#endif
+#endif
+}

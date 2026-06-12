@@ -4,6 +4,7 @@
 #include "st/autotune.hpp"
 #include "st/can.hpp"
 #include "st/config.hpp"
+#include "st/core/crc32.hpp"
 #include "st/core/json_util.hpp"
 #include "st/core/version.hpp"
 #include "st/dbc.hpp"
@@ -16781,6 +16782,240 @@ int run_diff(int argc, char **argv) {
     return 0;
 }
 
+struct ImportOpts {
+    std::string ptm_path;
+    std::string into_dir;     // optional; defaults to <basename>.stune in CWD
+    std::string base_rom;     // required for v1 (no auto-discovery yet)
+    std::string display_name; // optional; defaults to basename of ptm_path
+};
+
+bool parse_import_opts(int argc, char **argv, ImportOpts &out) {
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--into" && i + 1 < argc) {
+            out.into_dir.assign(argv[++i]);
+            continue;
+        }
+        if (a == "--base-rom" && i + 1 < argc) {
+            out.base_rom.assign(argv[++i]);
+            continue;
+        }
+        if (a == "--name" && i + 1 < argc) {
+            out.display_name.assign(argv[++i]);
+            continue;
+        }
+        if (a.starts_with("--")) {
+            std::fprintf(stderr, "ptm import: unknown flag: %.*s\n",
+                         static_cast<int>(a.size()), a.data());
+            return false;
+        }
+        if (!out.ptm_path.empty()) {
+            std::fprintf(stderr,
+                         "ptm import: only one .ptm path may be given (got '%s' and '%.*s')\n",
+                         out.ptm_path.c_str(), static_cast<int>(a.size()), a.data());
+            return false;
+        }
+        out.ptm_path.assign(a);
+    }
+    if (out.ptm_path.empty()) {
+        std::fputs("ptm import: missing required <file.ptm> argument\n", stderr);
+        return false;
+    }
+    if (out.base_rom.empty()) {
+        std::fputs("ptm import: --base-rom <path> is required (auto-discovery from "
+                   "vehicle_id is not yet wired)\n",
+                   stderr);
+        return false;
+    }
+    return true;
+}
+
+// Escape a string for TOML's basic-string literal form. Handles `"`,
+// `\`, and control chars. Adequate for the well-formed metadata
+// content typical of .ptm vendorID / vehicleID fields.
+std::string toml_escape(std::string_view s) {
+    std::string out;
+    out.reserve(s.size() + 2);
+    for (char c : s) {
+        switch (c) {
+        case '"': out.append("\\\""); break;
+        case '\\': out.append("\\\\"); break;
+        case '\n': out.append("\\n"); break;
+        case '\r': out.append("\\r"); break;
+        case '\t': out.append("\\t"); break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20) {
+                char buf[8];
+                (void)std::snprintf(buf, sizeof(buf), "\\u%04X", static_cast<int>(c));
+                out.append(buf);
+            } else {
+                out.push_back(c);
+            }
+        }
+    }
+    return out;
+}
+
+std::string basename_no_ext(std::string const &path) {
+    auto const slash = path.find_last_of("/\\");
+    std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
+    auto const dot = base.find_last_of('.');
+    if (dot != std::string::npos) {
+        base.erase(dot);
+    }
+    return base;
+}
+
+int run_import(int argc, char **argv) {
+    ImportOpts opts;
+    if (!parse_import_opts(argc, argv, opts)) {
+        return 2;
+    }
+
+    // Decrypt + decode the .ptm.
+    auto loaded = load_ptm(opts.ptm_path);
+    if (!loaded.has_value()) {
+        std::fprintf(stderr, "ptm import: %s\n", loaded.error().to_string().c_str());
+        return loaded.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
+    }
+    auto &decoded = loaded->decoded;
+
+    // Read base ROM.
+    auto rom_bytes = read_file_bytes(opts.base_rom);
+    if (!rom_bytes.has_value()) {
+        std::fprintf(stderr, "ptm import: --base-rom: %s\n",
+                     rom_bytes.error().to_string().c_str());
+        return 1;
+    }
+    auto const rom_crc = st::crc32(*rom_bytes);
+
+    // Resolve output directory. Default to <basename>.stune in CWD.
+    std::filesystem::path out_dir;
+    if (!opts.into_dir.empty()) {
+        out_dir = std::filesystem::path{opts.into_dir};
+    } else {
+        out_dir = std::filesystem::path{basename_no_ext(opts.ptm_path) + ".stune"};
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(out_dir, ec);
+    if (ec) {
+        std::fprintf(stderr, "ptm import: create_directories(%s): %s\n",
+                     out_dir.string().c_str(), ec.message().c_str());
+        return 1;
+    }
+
+    // Write source.bin.
+    {
+        std::ofstream out{out_dir / "source.bin", std::ios::binary};
+        if (!out) {
+            std::fprintf(stderr, "ptm import: write source.bin failed\n");
+            return 1;
+        }
+        out.write(reinterpret_cast<char const *>(rom_bytes->data()),
+                  static_cast<std::streamsize>(rom_bytes->size()));
+    }
+
+    // Pre-classify patches so the [[patch]] entries can carry the layer
+    // tag without a second pass.
+    std::vector<std::uint32_t> offsets;
+    std::vector<std::uint32_t> lengths;
+    offsets.reserve(decoded.patches.size());
+    lengths.reserve(decoded.patches.size());
+    for (auto const &p : decoded.patches) {
+        offsets.push_back(p.rom_offset);
+        lengths.push_back(p.length);
+    }
+    auto classifications = st::devices::ap3::classify_patches(
+        st::devices::ap3::default_lf79103p_layer_map(), offsets, lengths);
+
+    // Write project.toml.
+    {
+        std::string const display =
+            opts.display_name.empty() ? basename_no_ext(opts.ptm_path) : opts.display_name;
+        std::ofstream out{out_dir / "project.toml"};
+        if (!out) {
+            std::fprintf(stderr, "ptm import: write project.toml failed\n");
+            return 1;
+        }
+        out << "[project]\n";
+        out << "schema_version = 1\n";
+        out << "display_name   = \"" << toml_escape(display) << "\"\n";
+        out << "notes          = \"imported from " << toml_escape(opts.ptm_path) << "\"\n";
+        out << "policy_profile = \"motorsport-only\"\n";
+        out << "active_rom_id  = \"\"\n";
+        out << "\n";
+        out << "[project.source_rom]\n";
+        out << "path  = \"source.bin\"\n";
+        out << "crc32 = " << rom_crc << "\n";
+        out << "\n";
+        out << "[project.working_rom]\n";
+        out << "path  = \"source.bin\"\n";
+        out << "crc32 = " << rom_crc << "\n";
+        out << "\n";
+        // Round-trip preservation block — spec §"Project metadata".
+        out << "[ptm_metadata]\n";
+        out << "vendor_id      = \"" << toml_escape(decoded.metadata.vendor_id) << "\"\n";
+        out << "vehicle_id     = \"" << toml_escape(decoded.metadata.vehicle_id) << "\"\n";
+        out << "lock_mask      = " << decoded.metadata.lock_mask << "\n";
+        out << "rom_sum        = \"" << toml_escape(decoded.metadata.rom_sum) << "\"\n";
+        out << "save_date_time = \"" << toml_escape(decoded.metadata.save_date_time) << "\"\n";
+        out << "imported_from  = \"" << toml_escape(opts.ptm_path) << "\"\n";
+    }
+
+    // Write ptm_patches.toml — one [[patch]] per decoded patch. Kept
+    // distinct from canonical edits.toml because Project::open's edit
+    // schema has more constraints; ptm_patches.toml is the v1 round-
+    // trip-preserving raw form the future `ptm export` will read back.
+    {
+        std::ofstream out{out_dir / "ptm_patches.toml"};
+        if (!out) {
+            std::fprintf(stderr, "ptm import: write ptm_patches.toml failed\n");
+            return 1;
+        }
+        out << "# Generated by `subuwutuner-cli ptm import`. One entry per\n";
+        out << "# <patch> element from the source .ptm's PrivateData XML.\n";
+        out << "# Round-trip-preserving raw form (rom_offset + ram_offset + bytes).\n";
+        out << "# Layer is computed at import time via the architectural classifier.\n";
+        out << "\n";
+        for (std::size_t i = 0; i < decoded.patches.size(); ++i) {
+            auto const &p = decoded.patches[i];
+            auto const layer_text = i < classifications.size()
+                                        ? st::devices::ap3::layer_label(classifications[i].layer)
+                                        : std::string_view{"?"};
+            auto const bytes_b64 = st::devices::ap3::cipher::base64_encode(p.bytes);
+            out << "[[patch]]\n";
+            out << "rom_offset = " << p.rom_offset << "\n";
+            out << "ram_offset = " << p.ram_offset << "\n";
+            out << "length     = " << p.length << "\n";
+            out << "bytes_b64  = \"" << bytes_b64 << "\"\n";
+            out << "layer      = \"" << std::string{layer_text} << "\"\n";
+            out << "\n";
+        }
+    }
+
+    // Summary to stdout.
+    std::uint64_t total_bytes = 0;
+    for (auto const &p : decoded.patches) {
+        total_bytes += p.length;
+    }
+    std::printf("ptm import: %s\n", opts.ptm_path.c_str());
+    std::printf("  Decrypted: %s patches, %s bytes total\n",
+                with_commas(decoded.patches.size()).c_str(),
+                with_commas(total_bytes).c_str());
+    std::printf("  Vendor:    %s\n", decoded.metadata.vendor_id.c_str());
+    std::printf("  Vehicle:   %s\n", decoded.metadata.vehicle_id.c_str());
+    std::printf("  Base ROM:  %s (%s bytes, CRC32=0x%08X)\n",
+                opts.base_rom.c_str(),
+                with_commas(rom_bytes->size()).c_str(), rom_crc);
+    std::printf("  Project:   %s/\n", out_dir.string().c_str());
+    std::printf("    project.toml + source.bin + ptm_patches.toml\n");
+    if (decoded.metadata.lock_mask != 0) {
+        std::printf("  Lock:      mask=%u — preserved for round-trip; do not redistribute\n",
+                    decoded.metadata.lock_mask);
+    }
+    return 0;
+}
+
 int run_inspect(int argc, char **argv) {
     InspectOpts opts;
     if (!parse_inspect_opts(argc, argv, opts)) {
@@ -16895,6 +17130,8 @@ int cmd_ptm(int argc, char *argv[]) {
                    "                     Identity block + architectural breakdown.\n"
                    "  diff <a.ptm> <b.ptm> [--format text|json|toml]\n"
                    "                     By-layer diff between two tunes.\n"
+                   "  import <file.ptm> --base-rom <path> [--into <dir>] [--name <s>]\n"
+                   "                     Write a .stune project from a .ptm + base ROM.\n"
                    "  list-patches <file.ptm> [--format text|json|toml]\n"
                    "                     Decode a .ptm and emit one row per patch.\n"
                    "\n"
@@ -16918,6 +17155,9 @@ int cmd_ptm(int argc, char *argv[]) {
     }
     if (sub == "diff") {
         return ptm_cli::run_diff(argc - 1, argv + 1);
+    }
+    if (sub == "import") {
+        return ptm_cli::run_import(argc - 1, argv + 1);
     }
     if (sub == "list-patches") {
         return ptm_cli::run_list_patches(argc - 1, argv + 1);
