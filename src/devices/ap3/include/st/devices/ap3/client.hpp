@@ -115,6 +115,14 @@ private:
     [[nodiscard]] Status send_packet(std::uint8_t type, std::span<std::uint8_t const> body);
     [[nodiscard]] Result<std::vector<std::uint8_t>> receive_packet_body();
     [[nodiscard]] Result<std::vector<std::uint8_t>> read_exact(std::size_t n);
+    // Idle-driven accumulator for cmd 0x21 DATA when the strict
+    // wire_len approach fails (see ST_AP3_READFILE_DRAIN_MODE in
+    // client.cpp). Reads in 512-byte chunks until `idle_threshold`
+    // has elapsed without new data, capped at `file_data_io_timeout`.
+    // Returns the body (header + CRC stripped); accepts a zero CRC
+    // trailer per the §3 sentinel rule. Validates the leading wire
+    // header (sync magic + reserved byte + type).
+    [[nodiscard]] Result<std::vector<std::uint8_t>> receive_packet_body_drain_mode();
 
     // Lazy session warmup. The analyst's reference toolkit always
     // sends cmd 0x28 (UserInfo) before any file-vault command, and

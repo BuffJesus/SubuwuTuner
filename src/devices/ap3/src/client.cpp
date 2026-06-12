@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <span>
 #include <string>
 #include <string_view>
@@ -35,6 +36,26 @@ std::string strip_leading_slash(std::string_view s) {
         return std::string{s.substr(1)};
     }
     return std::string{s};
+}
+
+// Diagnostic fallback for cmd 0x21 ReadFile DATA — off by default.
+// The strict path (receive_packet_body) reads exactly wire_len bytes
+// from the response header. On 2026-06-12 the live AP advertised
+// wire_len = 5500 for a 58 KB .ptm pull and then never sent the body
+// (see findings/handoffs/HANDOFF-to-analyst-2026-06-12-cmd21-large-file-truncation.md).
+// The reference Python tool that DID pull the same file end-to-end on
+// 2026-06-10 (findings/for-dan/ap3-toolkit/ap_pull_state.py) uses an
+// idle-driven accumulator instead: 512-byte reads in a loop, stopping
+// after 800ms of bus silence. ST_AP3_READFILE_DRAIN_MODE=1 swaps in
+// that strategy for the cmd 0x21 step only — the implementer can A/B
+// against the strict path when live hardware is available.
+bool readfile_drain_mode_enabled() noexcept {
+    static int cached = -1;
+    if (cached == -1) {
+        char const *v = std::getenv("ST_AP3_READFILE_DRAIN_MODE");
+        cached = (v != nullptr && std::string{v} == "1") ? 1 : 0;
+    }
+    return cached == 1;
 }
 
 } // namespace
@@ -161,6 +182,85 @@ Result<std::vector<std::uint8_t>> Client::read_exact(std::size_t n) {
         out.insert(out.end(), chunk->begin(), chunk->end());
     }
     return out;
+}
+
+Result<std::vector<std::uint8_t>> Client::receive_packet_body_drain_mode() {
+    // Mirrors ap_pull_state.py do_query(): 512-byte reads in a loop,
+    // tracking the time of the last non-empty chunk. Stops when the
+    // bus has been idle for `kIdleThreshold` AND we have at least one
+    // complete wire frame's worth of bytes (header + CRC = 11 bytes).
+    // Hard-caps at cfg_.file_data_io_timeout. Does NOT trust wire_len
+    // from the response header — that's the whole point of this path.
+    constexpr std::size_t kChunkSize = 512U;
+    constexpr auto kIdleThreshold = std::chrono::milliseconds{800};
+    constexpr auto kPerCallTimeout = std::chrono::milliseconds{500};
+    auto const deadline = std::chrono::steady_clock::now() + cfg_.file_data_io_timeout;
+    auto last_data = std::chrono::steady_clock::now();
+    std::vector<std::uint8_t> raw;
+    while (std::chrono::steady_clock::now() < deadline) {
+        auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        auto chunk_timeout = std::min(remaining, kPerCallTimeout);
+        auto chunk = channel_->read_bytes(kChunkSize, chunk_timeout);
+        if (!chunk.has_value()) {
+            return st::failure(std::move(chunk).error());
+        }
+        if (!chunk->empty()) {
+            raw.insert(raw.end(), chunk->begin(), chunk->end());
+            last_data = std::chrono::steady_clock::now();
+            continue;
+        }
+        // Empty read = no bytes in this 500ms window. If we have any
+        // accumulated data and the idle window has passed, stop.
+        if (!raw.empty()) {
+            auto idle_for = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - last_data);
+            if (idle_for >= kIdleThreshold) {
+                break;
+            }
+        }
+    }
+    if (raw.size() < st::transport::ap3::kFixedOverhead) {
+        return st::failure(st::ErrorCode::UnexpectedEof,
+                           "ap3::receive_packet_body_drain_mode: got " +
+                               std::to_string(raw.size()) +
+                               " bytes; need >= " +
+                               std::to_string(st::transport::ap3::kFixedOverhead));
+    }
+    // Validate the leading wire header. Don't trust its wire_len for
+    // size — the field is empirically wrong for large cmd 0x21
+    // responses — but it MUST be a syntactically valid header so we
+    // know we're not staring at random bus data.
+    if (raw[0] != st::transport::ap3::kSyncByte0 ||
+        raw[1] != st::transport::ap3::kSyncByte1 ||
+        raw[5] != 0x00U) {
+        return st::failure(st::ErrorCode::ParseError,
+                           "ap3::receive_packet_body_drain_mode: invalid sync header");
+    }
+    auto const response_type = raw[6];
+    if (response_type == static_cast<std::uint8_t>(st::transport::ap3::ResponseType::Error)) {
+        // Forward the error frame body just like receive_packet_body does.
+        std::string msg{"ap3: device returned error frame"};
+        std::size_t const body_end =
+            raw.size() >= st::transport::ap3::kCrcSize
+                ? raw.size() - st::transport::ap3::kCrcSize
+                : raw.size();
+        for (std::size_t i = st::transport::ap3::kHeaderSize; i < body_end; ++i) {
+            char buf[4];
+            (void)std::snprintf(buf, sizeof(buf), "%02X", raw[i]);
+            msg += buf;
+        }
+        return st::failure(st::ErrorCode::TransportNack, std::move(msg));
+    }
+    // Strip header + CRC trailer. Accept zero-CRC per §3 sentinel
+    // (we already don't checksum-verify in drain mode — the wire_len
+    // is untrusted, so a CRC over the wrong byte range would be too).
+    std::vector<std::uint8_t> body;
+    body.reserve(raw.size() - st::transport::ap3::kFixedOverhead);
+    body.insert(body.end(),
+                raw.begin() + st::transport::ap3::kHeaderSize,
+                raw.end() - st::transport::ap3::kCrcSize);
+    return body;
 }
 
 Result<std::vector<std::uint8_t>> Client::receive_packet_body() {
@@ -390,12 +490,43 @@ Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
         return st::failure(st::ErrorCode::ProtocolError,
                            "ap3::read_file: empty setup ACK body");
     }
-    // Try to decode the setup ACK body. Response shape is currently
-    // not pinned against a real capture; if decode fails we fall back
-    // to a size of 0 (skip the step-2 size cross-check) rather than
-    // bailing on the read — the AP will tell us how much it sent.
+    // The AP's setup ACK uses a DIFFERENT layout than our request —
+    // see decode_setup_ack_response_shape for the byte-level decode.
+    // Try the response-shape decoder; if it succeeds AND reports
+    // name="." with size=0, the AP firmware's path lookup degenerated
+    // (live-confirmed for files in /maps/, /presets/, /datalog/ as
+    // of 2026-06-12; analyst investigation pending — see
+    // findings/handoffs/HANDOFF-to-analyst-2026-06-12-cmd21-large-file-truncation.md).
+    // Fail fast in that case rather than burning a 30-second cmd 0x21
+    // timeout for nothing.
     std::uint64_t reported_size = 0;
-    if (auto echoed_info = decode_file_info(*setup_resp); echoed_info.has_value()) {
+    if (auto ack_info = decode_setup_ack_response_shape(*setup_resp);
+        ack_info.has_value()) {
+        // Degenerate-ACK fast-fail: by default refuse to issue cmd 0x21
+        // when the AP's setup ACK echo'd name="." and size=0, since the
+        // body never arrives (firmware path-resolution bug, see handoff
+        // 2026-06-12). ST_AP3_READFILE_DRAIN_MODE=1 callers explicitly
+        // want to attempt the cmd 0x21 read regardless (idle-driven
+        // accumulator strategy doesn't trust wire_len anyway), so let
+        // the experiment proceed in that mode.
+        if (ack_info->name == "." && ack_info->size == 0 &&
+            !readfile_drain_mode_enabled()) {
+            return st::failure(
+                st::ErrorCode::TransportNack,
+                "ap3::read_file: AP setup ACK returned a degenerate path "
+                "lookup (name=\".\", size=0) for '" +
+                    std::string{path} +
+                    "'. The AP firmware's cmd 0x20 handler appears to fail "
+                    "path resolution for files in subdirectories; root-level "
+                    "files like /backupcksum work. Workaround: try "
+                    "ST_AP3_READFILE_DRAIN_MODE=1 (idle-driven receive). "
+                    "See docs/install.md troubleshooting.");
+        }
+        reported_size = ack_info->size;
+    } else if (auto echoed_info = decode_file_info(*setup_resp);
+               echoed_info.has_value()) {
+        // Fallback to the request-shape decoder for the case where the
+        // response actually mirrors the request (root-level files).
         reported_size = echoed_info->size;
     }
 
@@ -416,9 +547,21 @@ Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
     // push the body through bulk-in. Swap to the wider file-data
     // timeout for just this receive; restore the metadata default
     // after so any error-path subsequent reads use the small budget.
+    //
+    // Two strategies, selected by env var:
+    //   - default (strict): receive_packet_body trusts wire_len from
+    //     the response header and read_exact's that many body bytes.
+    //   - ST_AP3_READFILE_DRAIN_MODE=1: receive_packet_body_drain_mode
+    //     ignores wire_len and accumulates 512-byte chunks until 800ms
+    //     idle. Mirrors ap_pull_state.py do_query(); use this when the
+    //     strict path advertises wire_len that doesn't match the actual
+    //     body size (per the 2026-06-12 cmd 0x21 large-file truncation
+    //     observation).
     auto const saved_timeout = cfg_.io_timeout;
     cfg_.io_timeout = cfg_.file_data_io_timeout;
-    auto file_resp = receive_packet_body();
+    auto file_resp = readfile_drain_mode_enabled()
+                         ? receive_packet_body_drain_mode()
+                         : receive_packet_body();
     cfg_.io_timeout = saved_timeout;
     if (!file_resp.has_value()) {
         return st::failure(std::move(file_resp).error());

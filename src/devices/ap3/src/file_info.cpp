@@ -6,11 +6,13 @@
 #include "st/core/error.hpp"
 #include "st/core/result.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <span>
+#include <string>
 #include <string>
 #include <vector>
 
@@ -334,6 +336,98 @@ decode_file_info_list(std::span<std::uint8_t const> body) {
         records.push_back(std::move(info));
     }
     return records;
+}
+
+Result<FileInfo>
+decode_setup_ack_response_shape(std::span<std::uint8_t const> body) {
+    // Layout (see HANDOFF-to-analyst-2026-06-12-cmd21-large-file-truncation
+    // for the byte-level derivation):
+    //   [0..29]   30-byte FileInfo2 prefix (same as kFileInfo2Prefix)
+    //   [30..36]  7-byte fixed block 08 01 00 00 00 00 01
+    //   [37..40]  u32 LE name_len
+    //   [41..]    name
+    //   next 4    u32 LE mtime
+    //   next 4    u32 LE size
+    //   next 19   metadata flags (zero)
+    //   next 4    u32 LE path_len
+    //   next N    path
+    constexpr std::size_t kPrefixLen = kFileInfo2Prefix.size(); // 30
+    constexpr std::size_t kFixedBlockLen = 7;
+    constexpr std::size_t kMinHeader = kPrefixLen + kFixedBlockLen + 4U;
+    if (body.size() < kMinHeader) {
+        return failure(ErrorCode::UnexpectedEof,
+                       "ap3 decode_setup_ack_response_shape: body too short");
+    }
+    if (!std::equal(kFileInfo2Prefix.begin(), kFileInfo2Prefix.begin() + 27,
+                    body.begin())) {
+        return failure(ErrorCode::ParseError,
+                       "ap3 decode_setup_ack_response_shape: prefix magic mismatch");
+    }
+    std::size_t off = kPrefixLen + kFixedBlockLen;
+
+    auto read_u32_le = [&](std::size_t at) -> Result<std::uint32_t> {
+        if (at + 4U > body.size()) {
+            return failure(ErrorCode::UnexpectedEof,
+                           "ap3 decode_setup_ack_response_shape: truncated u32");
+        }
+        return static_cast<std::uint32_t>(body[at]) |
+               (static_cast<std::uint32_t>(body[at + 1]) << 8U) |
+               (static_cast<std::uint32_t>(body[at + 2]) << 16U) |
+               (static_cast<std::uint32_t>(body[at + 3]) << 24U);
+    };
+
+    auto name_len = read_u32_le(off);
+    if (!name_len.has_value()) {
+        return failure(name_len.error());
+    }
+    off += 4U;
+    if (*name_len > 4096U || off + *name_len > body.size()) {
+        return failure(ErrorCode::ParseError,
+                       "ap3 decode_setup_ack_response_shape: name_len " +
+                           std::to_string(*name_len) + " implausible");
+    }
+    FileInfo out;
+    out.name.assign(reinterpret_cast<char const *>(body.data() + off), *name_len);
+    off += *name_len;
+
+    auto mtime = read_u32_le(off);
+    if (!mtime.has_value()) {
+        return failure(mtime.error());
+    }
+    out.mtime = *mtime;
+    off += 4U;
+
+    auto size = read_u32_le(off);
+    if (!size.has_value()) {
+        return failure(size.error());
+    }
+    out.size = *size;
+    off += 4U;
+
+    // 19-byte metadata flags block.
+    constexpr std::size_t kFlagsLen = 19U;
+    if (off + kFlagsLen > body.size()) {
+        return failure(ErrorCode::UnexpectedEof,
+                       "ap3 decode_setup_ack_response_shape: flags truncated");
+    }
+    // Copy the first 11 bytes of the 19-byte block into FileInfo.flags
+    // for parity with the request-shape decoder; the trailing 8 bytes
+    // are observed to be zero in every capture so far.
+    std::memcpy(out.flags.data(), body.data() + off, out.flags.size());
+    off += kFlagsLen;
+
+    auto path_len = read_u32_le(off);
+    if (!path_len.has_value()) {
+        return failure(path_len.error());
+    }
+    off += 4U;
+    if (*path_len > 4096U || off + *path_len > body.size()) {
+        return failure(ErrorCode::ParseError,
+                       "ap3 decode_setup_ack_response_shape: path_len " +
+                           std::to_string(*path_len) + " implausible");
+    }
+    out.path.assign(reinterpret_cast<char const *>(body.data() + off), *path_len);
+    return out;
 }
 
 } // namespace st::devices::ap3

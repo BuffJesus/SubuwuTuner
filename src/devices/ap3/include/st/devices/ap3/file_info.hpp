@@ -140,8 +140,23 @@ struct FileInfo {
 // envelope + 2-byte class reg + name + 27-byte metadata + path).
 // Symmetric to encode_file_info; useful for the test round-trip.
 // Response-shape FileInfo2 records (from cmd 0x20 setup ACKs and
-// similar) may use a different prefix — when we observe a real
-// response live, this decoder will grow a second prefix probe.
+// similar) use a different prefix; for those, see
+// decode_setup_ack_response_shape below.
+
+// Decode the cmd 0x20 setup-ACK response body. The AP firmware's
+// echo has a different layout than the request: 30-byte FileInfo2
+// prefix, then a 7-byte fixed block `08 01 00 00 00 00 01`, then
+// FileInfo2 fields (u32 LE name_len + name + u32 LE mtime + u32 LE
+// size + 19-byte flags + u32 LE path_len + path).
+//
+// Empirically decoded live 2026-06-12 — see
+// findings/handoffs/HANDOFF-to-analyst-2026-06-12-cmd21-large-file-truncation.md
+// for the byte-level decode. The AP returns name="." and size=0 for
+// files in subdirectories (a documented firmware path-resolution bug);
+// callers check `name == "."` to fail fast before a degenerate cmd 0x21
+// hang.
+[[nodiscard]] Result<FileInfo>
+decode_setup_ack_response_shape(std::span<std::uint8_t const> body);
 [[nodiscard]] Result<FileInfo> decode_file_info(std::span<std::uint8_t const> body);
 
 // Decode the ListFiles (cmd 0x26) RESPONSE body: 30-byte prefix +
