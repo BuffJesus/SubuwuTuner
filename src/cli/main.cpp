@@ -15844,7 +15844,8 @@ bool gate_marriage(st::devices::ap3::DeviceState const &state, CommonOpts const 
     return true;
 }
 
-int run_state(CommonOpts const &opts) {
+int run_state(int argc, char **argv, CommonOpts const &opts) {
+    auto const fmt = consume_format_flag(argc, argv);
     auto channel = open_channel(opts);
     if (!channel.has_value()) {
         std::fprintf(stderr, "ap3 state: %s\n", channel.error().to_string().c_str());
@@ -15856,19 +15857,46 @@ int run_state(CommonOpts const &opts) {
         std::fprintf(stderr, "ap3 state: %s\n", state.error().to_string().c_str());
         return 1;
     }
-    std::printf("AccessPort                 : VID 0x%04X PID 0x%04X\n", opts.vid, opts.pid);
-    std::printf("Serial                     : %s\n",
-                state->ap_serial.value_or(std::string{"(unparsed)"}).c_str());
-    std::printf("Firmware                   : %s\n",
-                state->firmware_version.value_or(std::string{"(unparsed)"}).c_str());
-    std::printf("Vehicle                    : %s\n",
-                state->vehicle_descriptor.value_or(std::string{"(unparsed)"}).c_str());
-    std::printf("Marriage                   : %s\n",
-                state->married.has_value() ? (*state->married ? "Installed" : "Not Installed")
-                                           : "(unparsed — see docs/34)");
-    std::printf("UserInfo body bytes        : %zu\n", state->user_info_body.size());
-    std::printf("Firmware response bytes    : %zu\n", state->firmware_body.size());
-    std::printf("DeviceSettings body bytes  : %zu\n", state->device_settings_body.size());
+    auto const serial   = state->ap_serial.value_or(std::string{"(unparsed)"});
+    auto const firmware = state->firmware_version.value_or(std::string{"(unparsed)"});
+    auto const vehicle  = state->vehicle_descriptor.value_or(std::string{"(unparsed)"});
+    char const *marriage_str =
+        state->married.has_value() ? (*state->married ? "Installed" : "Not Installed")
+                                   : "(unparsed)";
+    if (fmt == "json") {
+        std::printf("{\n");
+        std::printf("  \"vid\": %u,\n  \"pid\": %u,\n", opts.vid, opts.pid);
+        std::printf("  \"serial\": \"%s\",\n", serial.c_str());
+        std::printf("  \"firmware\": \"%s\",\n", firmware.c_str());
+        std::printf("  \"vehicle\": \"%s\",\n", vehicle.c_str());
+        std::printf("  \"married\": %s,\n",
+                    state->married.has_value() ? (*state->married ? "true" : "false") : "null");
+        std::printf("  \"user_info_body_bytes\": %zu,\n", state->user_info_body.size());
+        std::printf("  \"firmware_body_bytes\": %zu,\n", state->firmware_body.size());
+        std::printf("  \"device_settings_body_bytes\": %zu\n", state->device_settings_body.size());
+        std::printf("}\n");
+    } else if (fmt == "toml") {
+        std::printf("vid                      = %u\n", opts.vid);
+        std::printf("pid                      = %u\n", opts.pid);
+        std::printf("serial                   = \"%s\"\n", serial.c_str());
+        std::printf("firmware                 = \"%s\"\n", firmware.c_str());
+        std::printf("vehicle                  = \"%s\"\n", vehicle.c_str());
+        if (state->married.has_value()) {
+            std::printf("married                  = %s\n", *state->married ? "true" : "false");
+        }
+        std::printf("user_info_body_bytes     = %zu\n", state->user_info_body.size());
+        std::printf("firmware_body_bytes      = %zu\n", state->firmware_body.size());
+        std::printf("device_settings_body_bytes = %zu\n", state->device_settings_body.size());
+    } else {
+        std::printf("AccessPort                 : VID 0x%04X PID 0x%04X\n", opts.vid, opts.pid);
+        std::printf("Serial                     : %s\n", serial.c_str());
+        std::printf("Firmware                   : %s\n", firmware.c_str());
+        std::printf("Vehicle                    : %s\n", vehicle.c_str());
+        std::printf("Marriage                   : %s\n", marriage_str);
+        std::printf("UserInfo body bytes        : %zu\n", state->user_info_body.size());
+        std::printf("Firmware response bytes    : %zu\n", state->firmware_body.size());
+        std::printf("DeviceSettings body bytes  : %zu\n", state->device_settings_body.size());
+    }
     (void)gate_marriage(*state, opts); // state subcommand never refuses; warning only.
     return 0;
 }
@@ -16291,7 +16319,8 @@ int cmd_ap3(int argc, char *argv[]) {
         std::fputs("Usage: subuwutuner-cli ap3 <subcommand> [args]\n"
                    "\n"
                    "Subcommands:\n"
-                   "  state              Print AP serial / firmware / marriage state\n"
+                   "  state [--format text|json|toml]\n"
+                   "                     Print AP serial / firmware / marriage state\n"
                    "  ls [subdir] [--format text|json|toml] [--filter <regex>] [--sort name|size|mtime]\n"
                    "                     List files in /user/ap-user/<subdir> (default /maps/)\n"
                    "  pull <ap-path> [--into <local>] [--format text|json|toml]\n"
@@ -16323,7 +16352,7 @@ int cmd_ap3(int argc, char *argv[]) {
     }
     std::string_view const sub{argv[0]};
     if (sub == "state") {
-        return ap3_cli::run_state(opts);
+        return ap3_cli::run_state(sub_argc, sub_argv, opts);
     }
     if (sub == "ls") {
         return ap3_cli::run_ls(sub_argc, sub_argv, opts);
@@ -17028,6 +17057,143 @@ int run_diff(int argc, char **argv) {
         break;
     }
     return 0;
+}
+
+struct VerifyOpts {
+    std::string ptm_path;
+    std::string project_dir;
+};
+
+bool parse_verify_opts(int argc, char **argv, VerifyOpts &out) {
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a.starts_with("--")) {
+            std::fprintf(stderr, "ptm verify: unknown flag: %.*s\n",
+                         static_cast<int>(a.size()), a.data());
+            return false;
+        }
+        if (out.ptm_path.empty()) {
+            out.ptm_path.assign(a);
+        } else if (out.project_dir.empty()) {
+            out.project_dir.assign(a);
+        } else {
+            std::fprintf(stderr, "ptm verify: too many positional args (got '%s', '%s', '%.*s')\n",
+                         out.ptm_path.c_str(), out.project_dir.c_str(),
+                         static_cast<int>(a.size()), a.data());
+            return false;
+        }
+    }
+    if (out.ptm_path.empty() || out.project_dir.empty()) {
+        std::fputs("ptm verify: usage: ptm verify <file.ptm> <project.stune>\n", stderr);
+        return false;
+    }
+    return true;
+}
+
+int run_verify(int argc, char **argv) {
+    VerifyOpts opts;
+    if (!parse_verify_opts(argc, argv, opts)) {
+        return 2;
+    }
+    // Decode the .ptm.
+    auto loaded = load_ptm(opts.ptm_path);
+    if (!loaded.has_value()) {
+        std::fprintf(stderr, "ptm verify: %s\n", loaded.error().to_string().c_str());
+        return loaded.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
+    }
+    auto const &ptm_patches = loaded->decoded.patches;
+
+    // Read project's ptm_patches.toml.
+    std::filesystem::path const dir{opts.project_dir};
+    auto const patches_toml = dir / "ptm_patches.toml";
+    if (!std::filesystem::exists(patches_toml)) {
+        std::fprintf(stderr, "ptm verify: %s missing (only projects from `ptm import` carry "
+                             "this file)\n", patches_toml.string().c_str());
+        return 1;
+    }
+    toml::table pat;
+    try {
+        pat = toml::parse_file(patches_toml.string());
+    } catch (toml::parse_error const &e) {
+        std::fprintf(stderr, "ptm verify: ptm_patches.toml parse error: %s\n",
+                     e.description().data());
+        return 1;
+    }
+    auto const *arr = pat["patch"].as_array();
+    if (arr == nullptr) {
+        std::fputs("ptm verify: ptm_patches.toml has no [[patch]] entries\n", stderr);
+        return 1;
+    }
+
+    // Build a parallel project_patches vector. Key by rom_offset for
+    // intersection with the .ptm side.
+    struct PP { std::uint32_t rom_offset; std::uint32_t length; std::vector<std::uint8_t> bytes; };
+    std::vector<PP> project_patches;
+    project_patches.reserve(arr->size());
+    for (auto const &node : *arr) {
+        auto const *p = node.as_table();
+        if (p == nullptr) {
+            continue;
+        }
+        auto const rom_off = (*p)["rom_offset"].value_or<std::int64_t>(-1);
+        auto const length  = (*p)["length"].value_or<std::int64_t>(-1);
+        auto const b64     = (*p)["bytes_b64"].value_or<std::string>("");
+        if (rom_off < 0 || length < 0 || b64.empty()) {
+            continue;
+        }
+        auto decoded = st::devices::ap3::cipher::base64_decode(b64);
+        if (!decoded.has_value()) {
+            continue;
+        }
+        project_patches.push_back({static_cast<std::uint32_t>(rom_off),
+                                   static_cast<std::uint32_t>(length),
+                                   std::move(*decoded)});
+    }
+
+    // Index both sides by rom_offset.
+    std::map<std::uint32_t, std::size_t> ptm_by;
+    std::map<std::uint32_t, std::size_t> proj_by;
+    for (std::size_t i = 0; i < ptm_patches.size(); ++i) {
+        ptm_by[ptm_patches[i].rom_offset] = i;
+    }
+    for (std::size_t i = 0; i < project_patches.size(); ++i) {
+        proj_by[project_patches[i].rom_offset] = i;
+    }
+
+    // Compare.
+    std::uint32_t shared = 0;
+    std::uint32_t ptm_only = 0;
+    std::uint32_t proj_only = 0;
+    std::uint32_t bytes_different = 0;
+    for (auto const &p : ptm_patches) {
+        auto it = proj_by.find(p.rom_offset);
+        if (it == proj_by.end()) {
+            ++ptm_only;
+            continue;
+        }
+        ++shared;
+        auto const &pp = project_patches[it->second];
+        if (p.bytes != pp.bytes) {
+            ++bytes_different;
+        }
+    }
+    for (auto const &p : project_patches) {
+        if (ptm_by.find(p.rom_offset) == ptm_by.end()) {
+            ++proj_only;
+        }
+    }
+
+    bool const matches = (ptm_only == 0 && proj_only == 0 && bytes_different == 0 &&
+                          shared == ptm_patches.size() && shared == project_patches.size());
+    std::printf("ptm verify: %s vs %s\n", opts.ptm_path.c_str(), opts.project_dir.c_str());
+    std::printf("  .ptm patches:        %zu\n", ptm_patches.size());
+    std::printf("  project patches:     %zu\n", project_patches.size());
+    std::printf("  shared offsets:      %u\n", shared);
+    std::printf("  .ptm-only offsets:   %u\n", ptm_only);
+    std::printf("  project-only:        %u\n", proj_only);
+    std::printf("  byte-different:      %u\n", bytes_different);
+    std::printf("  match:               %s\n", matches ? "YES (byte-identical)" : "NO");
+    return matches ? 0 : 1;
 }
 
 struct ImportOpts {
@@ -17782,6 +17948,9 @@ int cmd_ptm(int argc, char *argv[]) {
                    "  export <project.stune> --as <out.ptm> [--seed <hex>]\n"
                    "                     Reverse of import: round-trip the project back to .ptm.\n"
                    "                     Requires ST_ENABLE_COBB_AP_PTM_REWRITE=ON at build time.\n"
+                   "  verify <file.ptm> <project.stune>\n"
+                   "                     Check that a project's ptm_patches.toml matches the\n"
+                   "                     .ptm byte-for-byte. Exit 0 on match, 1 on mismatch.\n"
                    "  list-patches <file.ptm> [--format text|json|toml] [--def <pack-path>]\n"
                    "                     Decode a .ptm and emit one row per patch.\n"
                    "\n"
@@ -17815,6 +17984,9 @@ int cmd_ptm(int argc, char *argv[]) {
     }
     if (sub == "export") {
         return ptm_cli::run_export(argc - 1, argv + 1);
+    }
+    if (sub == "verify") {
+        return ptm_cli::run_verify(argc - 1, argv + 1);
     }
     if (sub == "list-patches") {
         return ptm_cli::run_list_patches(argc - 1, argv + 1);

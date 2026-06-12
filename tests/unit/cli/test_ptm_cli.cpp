@@ -492,3 +492,61 @@ TEST_CASE("ptm import → Project::open-compatible (5-file skeleton, project-val
 #endif
 }
 #endif
+
+TEST_CASE("ptm verify refuses without --enable-cobb-ap-cipher",
+          "[cli][ptm][integration]") {
+    if (!can_run()) {
+        return;
+    }
+    auto const r = st::test::cli_run("ptm verify /tmp/x.ptm /tmp/x.stune");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+TEST_CASE("ptm verify requires two positionals",
+          "[cli][ptm][integration]") {
+    if (!can_run()) {
+        return;
+    }
+    auto const r = st::test::cli_run("--enable-cobb-ap-cipher ptm verify /tmp/x.ptm");
+    REQUIRE(r.spawned);
+    REQUIRE(r.exit_code == 2);
+}
+
+#if defined(ST_AP3_HAVE_CIPHER) && defined(ST_AP3_HAVE_PTM_REWRITE)
+TEST_CASE("ptm verify: round-trip exits 0 on byte-identical match",
+          "[cli][ptm][integration][cipher][rewrite]") {
+    if (!can_run()) {
+        return;
+    }
+    namespace fs = std::filesystem;
+    auto const tmp = fs::temp_directory_path() / "subuwutuner_ptm_verify";
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    auto const proj_dir = tmp / "p.stune";
+    fs::create_directories(proj_dir, ec);
+    {
+        std::ofstream f{proj_dir / "project.toml"};
+        f << "[project]\nschema_version = 1\ndisplay_name = \"v\"\n"
+             "\n[ptm_metadata]\n"
+             "vendor_id = \"V\"\nvehicle_id = \"X\"\n"
+             "lock_mask = 0\nrom_sum = \"1\"\nsave_date_time = \"0\"\n";
+    }
+    {
+        std::ofstream f{proj_dir / "ptm_patches.toml"};
+        f << "[[patch]]\nrom_offset = 100\nram_offset = 0\nlength = 5\nbytes_b64 = \"SGVsbG8=\"\n";
+    }
+    auto const out_ptm = tmp / "out.ptm";
+    auto const exp = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm export " + st::test::quote(proj_dir.string()) +
+        " --as " + st::test::quote(out_ptm.string()));
+    REQUIRE(exp.spawned);
+    REQUIRE(exp.exit_code == 0);
+    auto const ver = st::test::cli_run(
+        "--enable-cobb-ap-cipher ptm verify " + st::test::quote(out_ptm.string()) +
+        " " + st::test::quote(proj_dir.string()));
+    REQUIRE(ver.spawned);
+    REQUIRE(ver.exit_code == 0);
+    REQUIRE(ver.stdout_text.find("byte-identical") != std::string::npos);
+}
+#endif
