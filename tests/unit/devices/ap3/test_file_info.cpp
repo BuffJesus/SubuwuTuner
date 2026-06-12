@@ -388,3 +388,78 @@ TEST_CASE("ap3 split_ap_path: basic forms", "[devices][ap3]") {
     REQUIRE(c.name == "bare");
     REQUIRE(c.path == "/");
 }
+
+TEST_CASE("decode_setup_ack_response_shape: backupcksum-style happy path",
+          "[devices][ap3][file_info]") {
+    // Build a synthetic setup ACK body matching the live /backupcksum
+    // capture: 30-byte prefix + 7-byte fixed block + name_len + name +
+    // mtime + size + 19 flags + path_len + path.
+    std::vector<std::uint8_t> body;
+    body.insert(body.end(), st::devices::ap3::kFileInfo2Prefix.begin(),
+                st::devices::ap3::kFileInfo2Prefix.end());
+    // 7-byte fixed block 08 01 00 00 00 00 01
+    body.insert(body.end(), {0x08, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01});
+    // u32 LE name_len = 11
+    body.insert(body.end(), {0x0b, 0x00, 0x00, 0x00});
+    // name = "backupcksum"
+    std::string const name = "backupcksum";
+    body.insert(body.end(), name.begin(), name.end());
+    // mtime = 454 (0x000001c6 LE)
+    body.insert(body.end(), {0xc6, 0x01, 0x00, 0x00});
+    // size = 33 (0x00000021 LE)
+    body.insert(body.end(), {0x21, 0x00, 0x00, 0x00});
+    // 19-byte flags (zero)
+    body.insert(body.end(), 19, std::uint8_t{0});
+    // u32 LE path_len = 11
+    body.insert(body.end(), {0x0b, 0x00, 0x00, 0x00});
+    // path = "backupcksum"
+    body.insert(body.end(), name.begin(), name.end());
+
+    auto result = st::devices::ap3::decode_setup_ack_response_shape(body);
+    REQUIRE(result.has_value());
+    REQUIRE(result->name == "backupcksum");
+    REQUIRE(result->mtime == 454U);
+    REQUIRE(result->size == 33U);
+    REQUIRE(result->path == "backupcksum");
+}
+
+TEST_CASE("decode_setup_ack_response_shape: degenerate ACK (name='.', size=0)",
+          "[devices][ap3][file_info]") {
+    // The AP firmware's path-resolution bug for subdirectory files
+    // (live-confirmed 2026-06-12) returns name="." and size=0 — this
+    // shape must decode successfully so the caller can detect it and
+    // fail fast instead of waiting for a cmd 0x21 timeout.
+    std::vector<std::uint8_t> body;
+    body.insert(body.end(), st::devices::ap3::kFileInfo2Prefix.begin(),
+                st::devices::ap3::kFileInfo2Prefix.end());
+    body.insert(body.end(), {0x08, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01});
+    body.insert(body.end(), {0x01, 0x00, 0x00, 0x00}); // name_len = 1
+    body.push_back(0x2e);                              // name = "."
+    body.insert(body.end(), {0x00, 0x00, 0x00, 0x00}); // mtime = 0
+    body.insert(body.end(), {0x00, 0x00, 0x00, 0x00}); // size = 0
+    body.insert(body.end(), 19, std::uint8_t{0});      // 19 flags
+    body.insert(body.end(), {0x06, 0x00, 0x00, 0x00}); // path_len = 6
+    std::string const path = "/maps/";
+    body.insert(body.end(), path.begin(), path.end());
+
+    auto result = st::devices::ap3::decode_setup_ack_response_shape(body);
+    REQUIRE(result.has_value());
+    REQUIRE(result->name == ".");
+    REQUIRE(result->size == 0U);
+    REQUIRE(result->path == "/maps/");
+}
+
+TEST_CASE("decode_setup_ack_response_shape: truncated body rejects",
+          "[devices][ap3][file_info]") {
+    // Too short for even the prefix + fixed block.
+    std::vector<std::uint8_t> tiny(10, std::uint8_t{0});
+    auto result = st::devices::ap3::decode_setup_ack_response_shape(tiny);
+    REQUIRE_FALSE(result.has_value());
+}
+
+TEST_CASE("decode_setup_ack_response_shape: prefix-magic mismatch rejects",
+          "[devices][ap3][file_info]") {
+    std::vector<std::uint8_t> body(100, std::uint8_t{0xff}); // wrong magic
+    auto result = st::devices::ap3::decode_setup_ack_response_shape(body);
+    REQUIRE_FALSE(result.has_value());
+}
