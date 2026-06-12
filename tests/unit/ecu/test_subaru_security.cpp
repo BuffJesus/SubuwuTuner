@@ -484,3 +484,54 @@ TEST_CASE("COBB SA variants reject wrong seed length",
         REQUIRE(r8.error().code() == ErrorCode::InvalidArgument);
     }
 }
+
+// =====================================================================
+// E — SSM-V factory key flow (RE wave 3 §F3)
+// =====================================================================
+
+TEST_CASE("ssmcan1_l1_ssmv_factory: produces deterministic 4-byte key",
+          "[ecu][sa][gen_a][ssmv]") {
+    using ecu::subaru::ssmcan1_l1_ssmv_factory;
+    std::array<std::uint8_t, 4> const seed{0xDE, 0xAD, 0xBE, 0xEF};
+    auto const r1 = ssmcan1_l1_ssmv_factory(std::span<std::uint8_t const>{seed});
+    REQUIRE(r1.has_value());
+    REQUIRE(r1->size() == 4);
+    auto const r2 = ssmcan1_l1_ssmv_factory(std::span<std::uint8_t const>{seed});
+    REQUIRE(r2.has_value());
+    REQUIRE(*r1 == *r2);
+}
+
+TEST_CASE("ssmcan1_l1_ssmv_factory differs from L35 factory",
+          "[ecu][sa][gen_a][ssmv]") {
+    // SSM-V applies the L35 round-key set REVERSED. The keys produced
+    // by reversed vs forward L35 must differ — if they collide the
+    // round-key application doesn't actually depend on order, which
+    // would mean the Feistel construction is broken.
+    using ecu::subaru::ssmcan1_key_stub;
+    using ecu::subaru::ssmcan1_l1_ssmv_factory;
+    constexpr std::array<std::array<std::uint8_t, 4>, 3> seeds{{
+        {0xDE, 0xAD, 0xBE, 0xEF},
+        {0xB9, 0xA6, 0x5C, 0x23},
+        {0x12, 0x34, 0x56, 0x78},
+    }};
+    for (auto const &s : seeds) {
+        auto const factory = ssmcan1_key_stub(std::span<std::uint8_t const>{s});
+        auto const ssmv = ssmcan1_l1_ssmv_factory(std::span<std::uint8_t const>{s});
+        REQUIRE(factory.has_value());
+        REQUIRE(ssmv.has_value());
+        REQUIRE(*factory != *ssmv);
+    }
+}
+
+TEST_CASE("ssmcan1_l1_ssmv_factory differs from L35 aftermarket",
+          "[ecu][sa][gen_a][ssmv]") {
+    // Distinct round-key tables → distinct keys per seed.
+    using ecu::subaru::ssmcan1_l1_aftermarket;
+    using ecu::subaru::ssmcan1_l1_ssmv_factory;
+    std::array<std::uint8_t, 4> const seed{0xB9, 0xA6, 0x5C, 0x23};
+    auto const after = ssmcan1_l1_aftermarket(std::span<std::uint8_t const>{seed});
+    auto const ssmv = ssmcan1_l1_ssmv_factory(std::span<std::uint8_t const>{seed});
+    REQUIRE(after.has_value());
+    REQUIRE(ssmv.has_value());
+    REQUIRE(*after != *ssmv);
+}

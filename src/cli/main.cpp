@@ -13881,12 +13881,14 @@ int cmd_rom_pull(int argc, char *argv[]) {
             sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_cobb_flash;
         } else if (*sa_variant == "cobb-maf-sd") {
             sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_cobb_maf_sd;
+        } else if (*sa_variant == "ssmv-factory") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_ssmv_factory;
         } else {
             std::fprintf(stderr,
                          "rom-pull: --sa-variant '%s' not recognized "
                          "(expected one of: default, aftermarket, "
                          "aftermarket-l1, aftermarket-l3, cobb-flash, "
-                         "cobb-maf-sd).\n",
+                         "cobb-maf-sd, ssmv-factory).\n",
                          sa_variant->c_str());
             return 2;
         }
@@ -14933,11 +14935,15 @@ int cmd_ssm_a8_poll(int argc, char *argv[]) {
         } else if (*sa_variant == "cobb-maf-sd") {
             sa_fn = &st::ecu::subaru::ssmcan1_l1_cobb_maf_sd;
             sa_label = "COBB-MAF-SD L1";
+        } else if (*sa_variant == "ssmv-factory") {
+            sa_fn = &st::ecu::subaru::ssmcan1_l1_ssmv_factory;
+            sa_label = "SSM-V factory L1";
         } else {
             std::fprintf(stderr,
                          "ssm-a8-poll: --sa-variant '%s' not recognized "
                          "(expected: default | aftermarket[-l1] | "
-                         "aftermarket-l3 | cobb-flash | cobb-maf-sd).\n",
+                         "aftermarket-l3 | cobb-flash | cobb-maf-sd | "
+                         "ssmv-factory).\n",
                          sa_variant->c_str());
             return 2;
         }

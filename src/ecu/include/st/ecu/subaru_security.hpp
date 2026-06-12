@@ -121,6 +121,14 @@ ssmcan1_l1_cobb_flash(std::span<std::uint8_t const> seed);
 [[nodiscard]] Result<std::vector<std::uint8_t>>
 ssmcan1_l1_cobb_maf_sd(std::span<std::uint8_t const> seed);
 
+// SSM-V factory L1 — per RE wave 3 §F3, SSM-V's factory key flow
+// reuses the L35 round-key set in reverse order. Same algorithm
+// shape as the aftermarket / COBB variants (forward Feistel +
+// wordswap); only the round-key table differs (reversed L35
+// factory).
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+ssmcan1_l1_ssmv_factory(std::span<std::uint8_t const> seed);
+
 // SSMK1 — pre-2008 K-Line SecurityAccess. Algorithm not yet recovered
 // (no K-Line capture rig in hand). Returns failure(NotImplemented) on
 // every input.

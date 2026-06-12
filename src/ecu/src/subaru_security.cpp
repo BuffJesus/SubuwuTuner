@@ -116,6 +116,12 @@ constexpr std::array<std::uint16_t, 16> kSaTableL1Aftermarket = {
 // install writes these bytes to flash 0x074358, regardless of which
 // specific tune is being applied.
 //
+// Also used as the SSM-V/VI COBB SA table per RE wave 3 §F3
+// (findings/re-2026-06-12-pm/) — `Init_SSMV_COBB::GetDecryptKeys` +
+// `Init_SSMVI_COBB::GetDecryptKeys` resolve to this exact byte
+// sequence. Same key reuse story as the COBB_CF / COBB_MAF_SD
+// cross-generation reuse documented in `kSaTableCobbFlash` below.
+//
 // Validated against an independently captured L3 pair
 // (seed=0x4ADFFE07 → key=0x24243A06), ACK'd by the ECU and followed
 // by a successful RMBA read of the tuner-tag region. Joint
@@ -125,6 +131,22 @@ constexpr std::array<std::uint16_t, 16> kSaTableL35Aftermarket = {
     0x8496, 0xfb45, 0x477d, 0xce15,
     0x7f48, 0xcc0d, 0xc771, 0x0562,
     0x86f0, 0x107e, 0xbf37, 0x60c8,
+};
+
+// SSM-V factory round-key table. Per RE wave 3 §F3: SSM-V applies
+// the same round-key set as `kFeistelRoundKeysL35` (the L35 factory
+// table) but in inverse order — Feistel forward + inverse swap on
+// the wire seed. The bytes below are the reversed sequence of L35
+// factory.
+//
+// SSM-V is the ISO-CAN / newer RH850 era (VB chassis 2022+). SSM-VI
+// is a later revision sharing this same key reuse pattern with
+// COBB-installed variants (see kSaTableL35Aftermarket note above).
+constexpr std::array<std::uint16_t, 16> kFeistelRoundKeysSSMVFactory = {
+    0x862b, 0x3ecc, 0x8961, 0x1895,
+    0x93f9, 0x4b75, 0x7f4a, 0xb046,
+    0x5e71, 0xfd21, 0x35f4, 0xad6b,
+    0x9ea5, 0x201c, 0x4625, 0x78b1,
 };
 
 // COBB-active round-key tables. RE5b extracted these from
@@ -463,6 +485,28 @@ ssmcan1_l1_cobb_flash(std::span<std::uint8_t const> seed) {
     auto const seed_packed = read_u32_be(seed);
     auto const key_u32 = feistel_forward_with_swap(
         seed_packed, std::span<std::uint16_t const, 16>{kSaTableCobbFlash});
+    std::vector<std::uint8_t> key(4);
+    write_u32_be(key_u32, key);
+    return key;
+}
+
+Result<std::vector<std::uint8_t>>
+ssmcan1_l1_ssmv_factory(std::span<std::uint8_t const> seed) {
+    // SSM-V factory L1 SA derivation. Per RE wave 3 §F3, SSM-V's
+    // factory key flow applies the L35 round-key set in reverse
+    // order (Feistel forward + inverse swap on the wire seed). Same
+    // algorithm shape as `ssmcan1_l1_aftermarket`; only the round-
+    // key table differs. See `kFeistelRoundKeysSSMVFactory`.
+    if (seed.size() != 4) {
+        return failure(ErrorCode::InvalidArgument,
+                       std::string{"ssmcan1 (Gen-A L1 SSM-V factory): seed "
+                                   "must be exactly 4 bytes, got "} +
+                           std::to_string(seed.size()));
+    }
+    auto const seed_packed = read_u32_be(seed);
+    auto const key_u32 = feistel_forward_with_swap(
+        seed_packed,
+        std::span<std::uint16_t const, 16>{kFeistelRoundKeysSSMVFactory});
     std::vector<std::uint8_t> key(4);
     write_u32_be(key_u32, key);
     return key;
