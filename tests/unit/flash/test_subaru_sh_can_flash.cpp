@@ -134,6 +134,65 @@ TEST_CASE("subaru_variant_supported: RH850 has no EcuTek; SSM-VI has no factory"
                                     SubaruInitVariant::Aftermarket));
 }
 
+TEST_CASE("subaru_flash_init_type maps (family, variant) to e_FlashInitTypes",
+          "[flash][subaru_sh_can_flash][variant_matrix]") {
+    // ζ3: the reference architecture's e_FlashInitTypes enum is
+    // 0..5 with values driven by Init class taxonomy. Our finer-
+    // grained (family, variant) split collapses to the 6 wire
+    // values via this helper.
+    using st::flash::SubaruEcuFamily;
+    using st::flash::SubaruInitVariant;
+    using st::flash::SubaruFlashInitType;
+    using st::flash::subaru_flash_init_type;
+
+    CHECK(subaru_flash_init_type(SubaruEcuFamily::SH7055,
+                                  SubaruInitVariant::Factory) ==
+          SubaruFlashInitType::SSMII);
+    CHECK(subaru_flash_init_type(SubaruEcuFamily::SH7058,
+                                  SubaruInitVariant::Factory) ==
+          SubaruFlashInitType::SSMIII_Factory);
+    CHECK(subaru_flash_init_type(SubaruEcuFamily::SH7058,
+                                  SubaruInitVariant::CobbFlash) ==
+          SubaruFlashInitType::SSMIII_COBB);
+    // MAF-SD collapses to the same SSMIII_COBB wire value — the
+    // distinction is per-install-state, not per-flash-init class.
+    CHECK(subaru_flash_init_type(SubaruEcuFamily::SH7058,
+                                  SubaruInitVariant::CobbMafSd) ==
+          SubaruFlashInitType::SSMIII_COBB);
+    CHECK(subaru_flash_init_type(SubaruEcuFamily::SH2A,
+                                  SubaruInitVariant::Factory) ==
+          SubaruFlashInitType::SSMIV_Factory);
+    CHECK(subaru_flash_init_type(SubaruEcuFamily::SH2A,
+                                  SubaruInitVariant::CobbFlash) ==
+          SubaruFlashInitType::SSMIV_COBB);
+    CHECK(subaru_flash_init_type(SubaruEcuFamily::Rh850V,
+                                  SubaruInitVariant::CobbFlash) ==
+          SubaruFlashInitType::SSMVI_COBB);
+    // Combos with no wire mapping fall through to Unknown.
+    CHECK(subaru_flash_init_type(SubaruEcuFamily::SH2A,
+                                  SubaruInitVariant::EcuTek) ==
+          SubaruFlashInitType::Unknown);
+    CHECK(subaru_flash_init_type(SubaruEcuFamily::SH2A,
+                                  SubaruInitVariant::Aftermarket) ==
+          SubaruFlashInitType::Unknown);
+    CHECK(subaru_flash_init_type(SubaruEcuFamily::Rh850V,
+                                  SubaruInitVariant::SsmvFactory) ==
+          SubaruFlashInitType::Unknown);
+}
+
+TEST_CASE("SubaruChallengeMode + SubaruFmatsMode enums are wire-typed",
+          "[flash][subaru_sh_can_flash][variant_matrix]") {
+    // ζ3 pinned ChallengeMode as binary {Construct=0, Direct=1}.
+    // FMATSMode is a 1-byte payload with per-mode values TBD pending
+    // bench-rig observation — pin the placeholder so it doesn't
+    // accidentally drift to a different bit-width.
+    using st::flash::SubaruChallengeMode;
+    using st::flash::SubaruFmatsMode;
+    REQUIRE(static_cast<std::uint8_t>(SubaruChallengeMode::Construct) == 0);
+    REQUIRE(static_cast<std::uint8_t>(SubaruChallengeMode::Direct) == 1);
+    REQUIRE(static_cast<std::uint8_t>(SubaruFmatsMode::Unknown) == 0xFF);
+}
+
 TEST_CASE("SubaruShCanFlash: flash_full_rom is parseable + gated",
           "[flash][subaru_sh_can_flash][gating]") {
     // The composite flash_full_rom orchestrator's signature is the

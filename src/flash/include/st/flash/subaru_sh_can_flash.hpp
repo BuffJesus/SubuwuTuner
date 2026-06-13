@@ -53,6 +53,20 @@ namespace st::flash {
 // width (16-bit vs 32-bit per round-key), the F function's bit
 // shuffling rules, and the wire seed/key byte width. Per
 // docs/38-subaru-sa-variants.md §"The variant matrix".
+//
+// Numeric values aligned to the reference architecture's
+// `e_FlashInitTypes` enum per ζ3 (the constructor arg to
+// `SH_CAN_Flash` takes this as a 0..5 index, validated against the
+// 6-value `cmp #6` upper bound in the disasm). The mapping is:
+//   0 = SSM-II            (factory) → SH7055
+//   1 = SSM-III           (factory) → SH7058
+//   2 = SSM-III COBB                → SH7058 with CobbFlash variant
+//   3 = SSM-IV            (factory) → SH2A
+//   4 = SSM-IV  COBB                → SH2A with CobbFlash variant
+//   5 = SSM-VI COBB                 → Rh850Vi with CobbFlash variant
+// Our (family, variant) split is more granular — the helper
+// `subaru_flash_init_type(family, variant)` below maps to the wire
+// value when a Tier-B implementation needs to send it.
 enum class SubaruEcuFamily : std::uint8_t {
     SH7055 = 0, // SSM-II era — pre-2008 (no aftermarket fleet on file)
     SH7058 = 1, // SSM-III era — older SH platform (2008–2014)
@@ -71,6 +85,52 @@ enum class SubaruInitVariant : std::uint8_t {
     Aftermarket = 3, // Third-party / Fehr-active aftermarket framework
     EcuTek      = 4, // EcuTek-installed tune — factory tables + patched S-box
     SsmvFactory = 5, // SSM-V factory — reversed L35 round-key set
+};
+
+// `e_FlashInitTypes` per ζ3 — 6-value enum the reference
+// architecture's `SH_CAN_Flash` constructor takes to pick the SA
+// Init class internally. The implementer-side (family, variant)
+// split is more granular; this enum is the wire-equivalent value
+// the Tier-B SubaruShCanFlash will pass when constructing the
+// reference-architecture SH_CAN_Flash. Values from the disasm's
+// `cmp #6` upper bound + class taxonomy.
+enum class SubaruFlashInitType : std::uint8_t {
+    SSMII             = 0,
+    SSMIII_Factory    = 1,
+    SSMIII_COBB       = 2,
+    SSMIV_Factory     = 3,
+    SSMIV_COBB        = 4,
+    SSMVI_COBB        = 5,
+    Unknown           = 0xFF, // sentinel for combos with no wire mapping yet
+};
+
+// Map (family, variant) → wire SubaruFlashInitType. Returns
+// SubaruFlashInitType::Unknown for combos the disasm enum doesn't
+// cover (e.g. SSM-V factory, EcuTek, MAF-SD-as-distinct-from-CF).
+[[nodiscard]] constexpr SubaruFlashInitType
+subaru_flash_init_type(SubaruEcuFamily family,
+                        SubaruInitVariant variant) noexcept;
+
+// `e_ChallengeMode` per ζ3 — binary mode select inside
+// `GetDecryptKeys`. Mode 1 takes the Direct path (the SA seed flows
+// straight into the key derivation); Mode 0 takes the Construct
+// path (the seed is composed with internal state before
+// derivation). Subaru picks the mode per init class; the Tier-B
+// SubaruShCanFlash will need to pass the right value when invoking
+// the SA exchange.
+enum class SubaruChallengeMode : std::uint8_t {
+    Construct = 0, // composed-seed path
+    Direct    = 1, // raw-seed path
+};
+
+// `SetFMATSMode` payload per ζ3 — 1-byte mode-select packet. FMATS
+// likely stands for "Field MAintenance and Test Switch" — the
+// programming-mode gate Subaru's field-service tooling uses. The
+// per-mode byte values aren't disclosed in the analyst writeup;
+// when Tier-B observes them on the bench rig, populate this enum
+// (Unknown today).
+enum class SubaruFmatsMode : std::uint8_t {
+    Unknown = 0xFF, // placeholder; bench-rig observation fills in real values
 };
 
 // True when the (family, variant) combination is present in
@@ -113,6 +173,41 @@ subaru_variant_supported(SubaruEcuFamily family,
                variant == SubaruInitVariant::Aftermarket;
     }
     return false;
+}
+
+constexpr SubaruFlashInitType
+subaru_flash_init_type(SubaruEcuFamily family,
+                        SubaruInitVariant variant) noexcept {
+    // Only the 6 cells the disasm enum covers map to a real wire
+    // value. Everything else returns Unknown — Tier B will refuse
+    // these combos at the SH_CAN_Flash construction site.
+    switch (family) {
+    case SubaruEcuFamily::SH7055:
+        if (variant == SubaruInitVariant::Factory)
+            return SubaruFlashInitType::SSMII;
+        break;
+    case SubaruEcuFamily::SH7058:
+        if (variant == SubaruInitVariant::Factory)
+            return SubaruFlashInitType::SSMIII_Factory;
+        if (variant == SubaruInitVariant::CobbFlash ||
+            variant == SubaruInitVariant::CobbMafSd)
+            return SubaruFlashInitType::SSMIII_COBB;
+        break;
+    case SubaruEcuFamily::SH2A:
+        if (variant == SubaruInitVariant::Factory)
+            return SubaruFlashInitType::SSMIV_Factory;
+        if (variant == SubaruInitVariant::CobbFlash ||
+            variant == SubaruInitVariant::CobbMafSd)
+            return SubaruFlashInitType::SSMIV_COBB;
+        break;
+    case SubaruEcuFamily::Rh850V:
+    case SubaruEcuFamily::Rh850Vi:
+        if (variant == SubaruInitVariant::CobbFlash ||
+            variant == SubaruInitVariant::CobbMafSd)
+            return SubaruFlashInitType::SSMVI_COBB;
+        break;
+    }
+    return SubaruFlashInitType::Unknown;
 }
 
 struct SubaruEcuFlashParams {
