@@ -186,21 +186,40 @@ void pull_file(PanelState &p, st::devices::ap3::FileInfo const &rec) {
         set_status(p, StatusSeverity::Error, std::string{"File dialog: "} + NFD::GetError());
         return;
     }
+    set_status(p, StatusSeverity::Ok,
+               "Pulling " + rec.name + " (this may take a few seconds for large tunes)...");
     st::devices::ap3::Client client{*p.channel};
     auto bytes = client.read_file(rec.path + rec.name);
     if (!bytes.has_value()) {
-        set_status(p, StatusSeverity::Error, "pull: " + bytes.error().to_string());
+        // Translate the underlying error into an actionable hint.
+        // TransportTimeout on cmd 0x21 is the most common failure on
+        // the AP — usually a path-encoding bug or a daze recovery
+        // window — so flag that case specifically.
+        std::string msg = "Pull failed: " + bytes.error().to_string();
+        auto const code = bytes.error().code();
+        if (code == st::ErrorCode::TransportTimeout) {
+            msg += "\n  Hint: AP may be in daze recovery — try disconnecting"
+                   " and replugging the AP, then click Refresh.";
+        } else if (code == st::ErrorCode::PolicyDenied) {
+            msg += "\n  Hint: the cmd is on the spec §6.0 block list. This is"
+                   " a SubuwuTuner-side refusal, not the AP.";
+        }
+        set_status(p, StatusSeverity::Error, std::move(msg));
         return;
     }
     std::ofstream o{std::filesystem::path{out.get()}, std::ios::binary};
     if (!o) {
-        set_status(p, StatusSeverity::Error, "pull: failed to open output file");
+        set_status(p, StatusSeverity::Error,
+                   "Pull succeeded but cannot open output file at " +
+                       std::string{out.get()} +
+                       "\n  Hint: check the directory exists and isn't "
+                       "read-only.");
         return;
     }
     o.write(reinterpret_cast<char const *>(bytes->data()),
             static_cast<std::streamsize>(bytes->size()));
     set_status(p, StatusSeverity::Ok,
-               "Pulled " + std::to_string(bytes->size()) + " bytes → " + std::string{out.get()});
+               "Pulled " + std::to_string(bytes->size()) + " bytes -> " + std::string{out.get()});
 }
 
 void push_file(PanelState &p) {
