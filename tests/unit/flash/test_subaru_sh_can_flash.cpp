@@ -79,6 +79,61 @@ TEST_CASE("SubaruShCanFlash: every public method returns the same gated error",
     REQUIRE(g.error().code() == kExpected);
 }
 
+TEST_CASE("subaru_variant_supported: SSM-III/IV cover all five tunable variants",
+          "[flash][subaru_sh_can_flash][variant_matrix]") {
+    using st::flash::SubaruEcuFamily;
+    using st::flash::SubaruInitVariant;
+    using st::flash::subaru_variant_supported;
+    for (auto fam : {SubaruEcuFamily::SH7058, SubaruEcuFamily::SH2A}) {
+        CHECK(subaru_variant_supported(fam, SubaruInitVariant::Factory));
+        CHECK(subaru_variant_supported(fam, SubaruInitVariant::CobbFlash));
+        CHECK(subaru_variant_supported(fam, SubaruInitVariant::CobbMafSd));
+        CHECK(subaru_variant_supported(fam, SubaruInitVariant::Aftermarket));
+        CHECK(subaru_variant_supported(fam, SubaruInitVariant::EcuTek));
+        // SSM-V factory is meaningful only on RH850-era — refuse on SH.
+        CHECK_FALSE(subaru_variant_supported(fam, SubaruInitVariant::SsmvFactory));
+    }
+}
+
+TEST_CASE("subaru_variant_supported: SSM-II is factory-only",
+          "[flash][subaru_sh_can_flash][variant_matrix]") {
+    using st::flash::SubaruEcuFamily;
+    using st::flash::SubaruInitVariant;
+    using st::flash::subaru_variant_supported;
+    CHECK(subaru_variant_supported(SubaruEcuFamily::SH7055,
+                                    SubaruInitVariant::Factory));
+    // No aftermarket fleet on SSM-II per docs/38.
+    CHECK_FALSE(subaru_variant_supported(SubaruEcuFamily::SH7055,
+                                          SubaruInitVariant::CobbFlash));
+    CHECK_FALSE(subaru_variant_supported(SubaruEcuFamily::SH7055,
+                                          SubaruInitVariant::Aftermarket));
+    CHECK_FALSE(subaru_variant_supported(SubaruEcuFamily::SH7055,
+                                          SubaruInitVariant::EcuTek));
+}
+
+TEST_CASE("subaru_variant_supported: RH850 has no EcuTek; SSM-VI has no factory",
+          "[flash][subaru_sh_can_flash][variant_matrix]") {
+    using st::flash::SubaruEcuFamily;
+    using st::flash::SubaruInitVariant;
+    using st::flash::subaru_variant_supported;
+    // SSM-V: factory + SsmvFactory + COBB + aftermarket; no EcuTek yet.
+    CHECK(subaru_variant_supported(SubaruEcuFamily::Rh850V,
+                                    SubaruInitVariant::Factory));
+    CHECK(subaru_variant_supported(SubaruEcuFamily::Rh850V,
+                                    SubaruInitVariant::SsmvFactory));
+    CHECK(subaru_variant_supported(SubaruEcuFamily::Rh850V,
+                                    SubaruInitVariant::CobbFlash));
+    CHECK_FALSE(subaru_variant_supported(SubaruEcuFamily::Rh850V,
+                                          SubaruInitVariant::EcuTek));
+    // SSM-VI: no factory-key recovery on file yet.
+    CHECK_FALSE(subaru_variant_supported(SubaruEcuFamily::Rh850Vi,
+                                          SubaruInitVariant::Factory));
+    CHECK(subaru_variant_supported(SubaruEcuFamily::Rh850Vi,
+                                    SubaruInitVariant::CobbFlash));
+    CHECK(subaru_variant_supported(SubaruEcuFamily::Rh850Vi,
+                                    SubaruInitVariant::Aftermarket));
+}
+
 TEST_CASE("SubaruShCanFlash: flash_full_rom is parseable + gated",
           "[flash][subaru_sh_can_flash][gating]") {
     // The composite flash_full_rom orchestrator's signature is the

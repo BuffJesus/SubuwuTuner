@@ -42,18 +42,71 @@ class ITransport;
 
 namespace st::flash {
 
+// Subaru silicon family / SSM-era axis. Picks the SA round-key
+// width (16-bit vs 32-bit per round-key), the F function's bit
+// shuffling rules, and the wire seed/key byte width. Per
+// docs/38-subaru-sa-variants.md §"The variant matrix".
 enum class SubaruEcuFamily : std::uint8_t {
-    SH7058 = 0, // SSM-III era — older SH platform (2008–2014)
-    SH2A   = 1, // SSM-IV era — LF79103P et al (2015–2021 VA WRX, FA20DIT)
-    Rh850  = 2, // SSM-V / VI era — VB WRX (2022+)
+    SH7055 = 0, // SSM-II era — pre-2008 (no aftermarket fleet on file)
+    SH7058 = 1, // SSM-III era — older SH platform (2008–2014)
+    SH2A   = 2, // SSM-IV era — LF79103P et al (2015–2021 VA WRX, FA20DIT)
+    Rh850V = 3, // SSM-V era — VB WRX (2022+, initial RH850 ECUs)
+    Rh850Vi = 4, // SSM-VI era — newer RH850 ECUs (2024+)
 };
 
+// Install-state axis. Picks the round-key table + S-box + Feistel
+// direction together. Not every (family, variant) combo is real —
+// see docs/38 §"The variant matrix" for the cells on file.
 enum class SubaruInitVariant : std::uint8_t {
     Factory     = 0, // OEM stock SA round keys
     CobbFlash   = 1, // COBB-installed tune ("COBB Flash" mode)
     CobbMafSd   = 2, // COBB MAF-based Speed-Density variant
     Aftermarket = 3, // Third-party / Fehr-active aftermarket framework
+    EcuTek      = 4, // EcuTek-installed tune — factory tables + patched S-box
+    SsmvFactory = 5, // SSM-V factory — reversed L35 round-key set
 };
+
+// True when the (family, variant) combination is present in
+// docs/38's matrix. Callers can use this to refuse impossible
+// combinations early (e.g. EcuTek targeting RH850 isn't on file).
+// Returns false for combos that have no known SA implementation;
+// returns true for combos a Tier-B SubaruShCanFlash would need to
+// support. Tier-A implementations always return PolicyDenied or
+// NotImplemented regardless of this flag.
+[[nodiscard]] constexpr bool
+subaru_variant_supported(SubaruEcuFamily family,
+                          SubaruInitVariant variant) noexcept {
+    switch (family) {
+    case SubaruEcuFamily::SH7055:
+        // SSM-II: factory only on file. No aftermarket fleet
+        // historically targets SSM-II — the install-base is too
+        // small and the engine families are pre-modern-tuning.
+        return variant == SubaruInitVariant::Factory;
+    case SubaruEcuFamily::SH7058:
+    case SubaruEcuFamily::SH2A:
+        // SSM-III + SSM-IV: full variant set on file.
+        return variant == SubaruInitVariant::Factory ||
+               variant == SubaruInitVariant::CobbFlash ||
+               variant == SubaruInitVariant::CobbMafSd ||
+               variant == SubaruInitVariant::Aftermarket ||
+               variant == SubaruInitVariant::EcuTek;
+    case SubaruEcuFamily::Rh850V:
+        // SSM-V: factory + the COBB pair + aftermarket. EcuTek
+        // hasn't shipped Gen-B keys yet (per docs/38).
+        return variant == SubaruInitVariant::Factory ||
+               variant == SubaruInitVariant::SsmvFactory ||
+               variant == SubaruInitVariant::CobbFlash ||
+               variant == SubaruInitVariant::CobbMafSd ||
+               variant == SubaruInitVariant::Aftermarket;
+    case SubaruEcuFamily::Rh850Vi:
+        // SSM-VI: COBB + aftermarket. No factory-key recovery on
+        // file yet (would need a stock 2024+ ROM dump).
+        return variant == SubaruInitVariant::CobbFlash ||
+               variant == SubaruInitVariant::CobbMafSd ||
+               variant == SubaruInitVariant::Aftermarket;
+    }
+    return false;
+}
 
 struct SubaruEcuFlashParams {
     SubaruEcuFamily family{SubaruEcuFamily::SH2A};
