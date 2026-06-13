@@ -97,6 +97,25 @@ struct ClientConfig {
     std::chrono::milliseconds file_data_io_timeout{std::chrono::milliseconds{30000}};
 };
 
+// cmd 0x1f OnCapabilities response, decoded per ζ5: the AP firmware
+// returns a Boost-archived u32 capability-flag word + the raw body
+// bytes (preserved verbatim so the caller can re-decode if the
+// schema changes in a future firmware revision).
+struct ApCapabilities {
+    // The decoded capability bits. On v1.7.6.0-28785 this is the
+    // constant 0x000001BB (443) — 7 bits set: 0, 1, 3, 4, 5, 7, 8.
+    // The per-bit semantics are TBD pending a Frida probe of
+    // APManager-side reads; until then treat the value as an opaque
+    // firmware-version fingerprint.
+    std::uint32_t flags{0};
+    // Raw response body so the caller can sanity-check the parse or
+    // re-decode against a future schema. The decoder treats the
+    // last 4 bytes of `raw_body` as the u32 in little-endian — if a
+    // future Boost archive layout puts the integer elsewhere, the
+    // bytes are still here to re-extract.
+    std::vector<std::uint8_t> raw_body;
+};
+
 class Client {
 public:
     Client(st::transport::IByteChannel &channel, ClientConfig cfg = {}) noexcept
@@ -137,10 +156,14 @@ public:
     // table this maps to ap::Filesystem::remountUser, not reboot.
     //
     // get_capabilities (cmd 0x1f) maps to OnCapabilities per the
-    // corrected dispatch table; response body shape is un-RE'd, so
-    // the raw bytes come back as a vector for the caller to inspect.
+    // corrected dispatch table; ζ5 pinned the response schema as a
+    // Boost-archived u32 capability flag word. On firmware
+    // v1.7.6.0-28785 the value is the constant 0x1BB (443) per the
+    // literal pool at `libap_comms.so:0x24228`, with 7 bits set:
+    // 0 / 1 / 3 / 4 / 5 / 7 / 8. The bit→meaning table is TBD; the
+    // u32 is useful today as a firmware-version fingerprint.
     [[nodiscard]] Status remount_user_filesystem();
-    [[nodiscard]] Result<std::vector<std::uint8_t>> get_capabilities();
+    [[nodiscard]] Result<ApCapabilities> get_capabilities();
 
 private:
     [[nodiscard]] Status send_packet(std::uint8_t type, std::span<std::uint8_t const> body);

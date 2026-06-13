@@ -130,16 +130,17 @@ TEST_CASE("ap3 get_capabilities refuses without env-var",
     REQUIRE(channel.drain_written().empty());
 }
 
-TEST_CASE("ap3 get_capabilities with env-var returns the raw body",
+TEST_CASE("ap3 get_capabilities with env-var returns typed ApCapabilities",
           "[devices][ap3][diagnostic][cmd1f]") {
     DiagnosticEnvGuard guard;
     st::test::transport::LoopbackByteChannel channel;
     prime_warmup(channel);
     auto const info_type =
         static_cast<std::uint8_t>(st::transport::ap3::ResponseType::Info);
-    // Synthetic capability blob — body shape is un-RE'd; the API
-    // contract is "raw bytes returned for caller to inspect."
-    std::array<std::uint8_t, 8> body{0x01, 0x02, 0x03, 0x04, 0xAA, 0xBB, 0xCC, 0xDD};
+    // Synthetic capability blob — last 4 bytes 0xBB 0x01 0x00 0x00
+    // encode 0x000001BB as LE u32, matching ζ5's pinned value for
+    // firmware v1.7.6.0-28785.
+    std::array<std::uint8_t, 8> body{0xAA, 0xBB, 0xCC, 0xDD, 0xBB, 0x01, 0x00, 0x00};
     channel.queue_read(make_packet(info_type, body));
 
     st::devices::ap3::ClientConfig cfg{};
@@ -147,8 +148,31 @@ TEST_CASE("ap3 get_capabilities with env-var returns the raw body",
     st::devices::ap3::Client client{channel, cfg};
     auto const r = client.get_capabilities();
     REQUIRE(r.has_value());
-    REQUIRE(r->size() == body.size());
+    // Raw body preserved verbatim so callers can re-decode against
+    // a future Boost archive layout.
+    REQUIRE(r->raw_body.size() == body.size());
     for (std::size_t i = 0; i < body.size(); ++i) {
-        REQUIRE((*r)[i] == body[i]);
+        REQUIRE(r->raw_body[i] == body[i]);
     }
+    // Decoded flag word — the v1.7.6.0-28785 fingerprint.
+    REQUIRE(r->flags == 0x000001BBU);
+}
+
+TEST_CASE("ap3 get_capabilities: short body degrades flags to zero",
+          "[devices][ap3][diagnostic][cmd1f]") {
+    DiagnosticEnvGuard guard;
+    st::test::transport::LoopbackByteChannel channel;
+    prime_warmup(channel);
+    auto const info_type =
+        static_cast<std::uint8_t>(st::transport::ap3::ResponseType::Info);
+    // 3-byte body — shorter than the u32 the decoder expects. The
+    // caller can still inspect raw_body to decide whether the AP
+    // emitted an error frame or a future, slimmer schema.
+    std::array<std::uint8_t, 3> body{0xAA, 0xBB, 0xCC};
+    channel.queue_read(make_packet(info_type, body));
+    st::devices::ap3::Client client{channel};
+    auto const r = client.get_capabilities();
+    REQUIRE(r.has_value());
+    REQUIRE(r->flags == 0U);
+    REQUIRE(r->raw_body.size() == 3);
 }

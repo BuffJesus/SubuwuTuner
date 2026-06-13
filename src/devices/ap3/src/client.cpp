@@ -802,26 +802,47 @@ Status Client::remount_user_filesystem() {
     return st::ok();
 }
 
-Result<std::vector<std::uint8_t>> Client::get_capabilities() {
+Result<ApCapabilities> Client::get_capabilities() {
     if (!ap3_diagnostic_cmds_enabled()) {
         return st::failure(
             st::ErrorCode::PolicyDenied,
             "ap3::get_capabilities (cmd 0x1f): diagnostic cmds are off by "
-            "default — set ST_AP3_ENABLE_DIAGNOSTIC_CMDS=1 to enable. The "
-            "response body shape is un-RE'd; raw bytes are returned for the "
-            "caller to inspect (see RE wave 5 §ε2 + dispatch_table_CORRECTED.md).");
+            "default — set ST_AP3_ENABLE_DIAGNOSTIC_CMDS=1 to enable. ζ5 "
+            "pinned the response schema as a Boost-archived u32; on "
+            "v1.7.6.0-28785 the value is 0x1BB (firmware-version fingerprint).");
     }
     if (auto s = ensure_session_warmup(); !s.has_value()) {
         return st::failure(std::move(s).error());
     }
     // Cmd 0x1f is in the safe range (not on is_blocked_command), so
-    // the normal send_packet path is fine. The env-var still gates
-    // because the response body shape is un-decoded.
+    // the normal send_packet path is fine. The env-var gates because
+    // the per-bit semantics of the returned flag word are TBD; the
+    // raw u32 is currently useful only as a fingerprint.
     if (auto s = send_packet(0x1fU, std::span<std::uint8_t const>{});
         !s.has_value()) {
         return st::failure(std::move(s).error());
     }
-    return receive_packet_body();
+    auto body = receive_packet_body();
+    if (!body.has_value()) {
+        return st::failure(std::move(body).error());
+    }
+    ApCapabilities out;
+    out.raw_body = std::move(*body);
+    // Decode the u32 capability word as little-endian from the last
+    // 4 bytes of the body. ζ5: the analyst pinned the schema as
+    // Boost-archived but didn't disclose the exact archive layout;
+    // the last 4 bytes is a defensive position that works on the
+    // v1.7.6.0-28785 reference + would still extract a u32 from any
+    // Boost variant that places integers at the payload tail. Short
+    // bodies degrade to flags=0 — caller can inspect raw_body.
+    if (out.raw_body.size() >= 4) {
+        std::size_t const n = out.raw_body.size();
+        out.flags = static_cast<std::uint32_t>(out.raw_body[n - 4]) |
+                    (static_cast<std::uint32_t>(out.raw_body[n - 3]) << 8) |
+                    (static_cast<std::uint32_t>(out.raw_body[n - 2]) << 16) |
+                    (static_cast<std::uint32_t>(out.raw_body[n - 1]) << 24);
+    }
+    return out;
 }
 
 } // namespace st::devices::ap3
