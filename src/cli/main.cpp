@@ -17408,7 +17408,7 @@ st::Result<LoadResult> load_ptm(std::string const &path) {
     if (!contents.has_value()) {
         return st::failure(std::move(contents).error());
     }
-    auto decoded = st::library::decode_ptm_xml(contents->private_data_xml);
+    auto decoded = st::library::decode_ptm_xml(contents->inner_xml);
     if (!decoded.has_value()) {
         return st::failure(std::move(decoded).error());
     }
@@ -18220,7 +18220,7 @@ int run_inspect(int argc, char **argv) {
         return contents.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
     }
 
-    auto decoded = st::library::decode_ptm_xml(contents->private_data_xml);
+    auto decoded = st::library::decode_ptm_xml(contents->inner_xml);
     if (!decoded.has_value()) {
         std::fprintf(stderr, "ptm inspect: %s\n", decoded.error().to_string().c_str());
         return 1;
@@ -18288,7 +18288,7 @@ int run_list_patches(int argc, char **argv) {
         return contents.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
     }
 
-    auto decoded = st::library::decode_ptm_xml(contents->private_data_xml);
+    auto decoded = st::library::decode_ptm_xml(contents->inner_xml);
     if (!decoded.has_value()) {
         std::fprintf(stderr, "ptm list-patches: %s\n", decoded.error().to_string().c_str());
         return 1;

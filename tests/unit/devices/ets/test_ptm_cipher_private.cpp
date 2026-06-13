@@ -72,7 +72,7 @@ TEST_CASE("ap3 cipher private: real COBB Stage1 .ptm decrypts and decodes",
     // AES-256 + bzip2 inflate. Any layer regression breaks this.
     auto contents = st::devices::ets::cipher::decrypt_ptm(ptm_bytes);
     REQUIRE(contents.has_value());
-    auto const &xml = contents->private_data_xml;
+    auto const &xml = contents->inner_xml;
     REQUIRE_FALSE(xml.empty());
     // The COBB Stage1 91 v401 PrivateData root + identity fields. If
     // any of these change, the cipher or the file changed.

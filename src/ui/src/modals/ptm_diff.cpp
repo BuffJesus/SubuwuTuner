@@ -84,7 +84,7 @@ bool decode_one(char const *path, st::library::DecodedPtm &out, std::string &err
         err = std::string{"decrypt_ptm: "} + contents.error().to_string();
         return false;
     }
-    auto decoded = st::library::decode_ptm_xml(contents->private_data_xml);
+    auto decoded = st::library::decode_ptm_xml(contents->inner_xml);
     if (!decoded.has_value()) {
         err = std::string{"decode_ptm_xml: "} + decoded.error().to_string();
         return false;

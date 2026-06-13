@@ -37,18 +37,18 @@
 
 namespace st::devices::ets::cipher {
 
-struct PtmContents {
+struct EtmContents {
     // Layer-4 plaintext: the <PrivateData> XML body containing the
     // tune's <patch> elements. Empty until Session 2 lands AES + bzip2.
-    std::string private_data_xml;
+    std::string inner_xml;
     // Layer-1 plaintext: the outer XML envelope (vendor / vehicle /
     // lock-state / etc.) with the <encData> element scrubbed.
-    std::string outer_metadata_xml;
+    std::string outer_xml;
 };
 
 // Full chain. Returns NotImplemented while only Session 1 has landed;
 // returns PolicyDenied when the cipher tier isn't compiled in.
-[[nodiscard]] Result<PtmContents>
+[[nodiscard]] Result<EtmContents>
 decrypt_ptm(std::span<std::uint8_t const> ptm_bytes);
 
 // Reverse of decrypt_ptm. NotImplemented until Session 2; PolicyDenied
@@ -60,8 +60,8 @@ decrypt_ptm(std::span<std::uint8_t const> ptm_bytes);
 // `nonce` is the inner AES-CTR 32-bit nonce (default 0x00000020 per
 // spec §13 — every reference sample uses this constant).
 [[nodiscard]] Result<std::vector<std::uint8_t>>
-encrypt_ptm(std::string_view private_data_xml,
-            std::string_view outer_metadata_xml,
+encrypt_ptm(std::string_view inner_xml,
+            std::string_view outer_xml,
             std::uint32_t seed,
             std::uint32_t nonce = 0x00000020U);
 

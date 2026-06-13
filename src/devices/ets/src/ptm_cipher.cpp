@@ -312,7 +312,7 @@ Result<std::string> decrypt_ptm_outer(std::span<std::uint8_t const> ptm_bytes) {
     return std::string(plaintext->begin(), plaintext->end());
 }
 
-Result<PtmContents>
+Result<EtmContents>
 decrypt_ptm(std::span<std::uint8_t const> ptm_bytes) {
     // Full 4-layer chain per spec §13 + the Session 2 integration
     // guide:
@@ -356,9 +356,9 @@ decrypt_ptm(std::span<std::uint8_t const> ptm_bytes) {
     }
 
     // Strip the `<encData>...</encData>` element from the outer XML
-    // so the caller's outer_metadata_xml view contains just the
+    // so the caller's outer_xml view contains just the
     // envelope (vendor / vehicle / lock state / etc.) without the
-    // large base64 blob duplicating what's in private_data_xml.
+    // large base64 blob duplicating what's in inner_xml.
     std::string outer_meta = *outer_xml;
     constexpr std::string_view kOpen{"<encData>"};
     constexpr std::string_view kClose{"</encData>"};
@@ -370,15 +370,15 @@ decrypt_ptm(std::span<std::uint8_t const> ptm_bytes) {
         }
     }
 
-    PtmContents out;
-    out.private_data_xml = std::move(*private_xml);
-    out.outer_metadata_xml = std::move(outer_meta);
+    EtmContents out;
+    out.inner_xml = std::move(*private_xml);
+    out.outer_xml = std::move(outer_meta);
     return out;
 }
 
 Result<std::vector<std::uint8_t>>
-encrypt_ptm(std::string_view private_data_xml,
-            std::string_view outer_metadata_xml,
+encrypt_ptm(std::string_view inner_xml,
+            std::string_view outer_xml,
             std::uint32_t seed,
             std::uint32_t nonce) {
     // Reverse of decrypt_ptm. Pipeline: bzip2 compress → AES-256-CTR
@@ -392,8 +392,8 @@ encrypt_ptm(std::string_view private_data_xml,
     // walkthrough §3 "Gotchas" guidance. If a future firmware
     // revision rotates the nonce, plumb it through here.
     std::span<std::uint8_t const> pt_span{
-        reinterpret_cast<std::uint8_t const *>(private_data_xml.data()),
-        private_data_xml.size()};
+        reinterpret_cast<std::uint8_t const *>(inner_xml.data()),
+        inner_xml.size()};
     auto compressed = bzip2_compress(pt_span);
     if (!compressed.has_value()) {
         return st::failure(std::move(compressed).error());
@@ -417,7 +417,7 @@ encrypt_ptm(std::string_view private_data_xml,
     // insert before the last closing element so the encData is a
     // direct child of the document root. If the outer XML is empty,
     // wrap with a minimal envelope.
-    std::string outer = std::string{outer_metadata_xml};
+    std::string outer = std::string{outer_xml};
     std::string const encdata_element = "<encData>" + encdata_b64 + "</encData>";
     if (outer.empty()) {
         outer = "<PtmOuter>" + encdata_element + "</PtmOuter>";
@@ -476,13 +476,13 @@ Result<std::string> decrypt_ptm_outer(std::span<std::uint8_t const> /*ptm_bytes*
     return st::failure(make_policy_denied());
 }
 
-Result<PtmContents> decrypt_ptm(std::span<std::uint8_t const> /*ptm_bytes*/) {
+Result<EtmContents> decrypt_ptm(std::span<std::uint8_t const> /*ptm_bytes*/) {
     return st::failure(make_policy_denied());
 }
 
 Result<std::vector<std::uint8_t>>
-encrypt_ptm(std::string_view /*private_data_xml*/,
-            std::string_view /*outer_metadata_xml*/,
+encrypt_ptm(std::string_view /*inner_xml*/,
+            std::string_view /*outer_xml*/,
             std::uint32_t /*seed*/, std::uint32_t /*nonce*/) {
     return st::failure(make_policy_denied());
 }

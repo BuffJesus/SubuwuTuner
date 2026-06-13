@@ -128,7 +128,7 @@ bool decode_preview(AppState &s) {
                              contents.error().to_string();
         return false;
     }
-    auto decoded = st::library::decode_ptm_xml(contents->private_data_xml);
+    auto decoded = st::library::decode_ptm_xml(contents->inner_xml);
     if (!decoded.has_value()) {
         s.ptm_import_error = std::string{"decode_ptm_xml: "} +
                              decoded.error().to_string();
@@ -171,7 +171,7 @@ bool commit_import(AppState &s) {
                              contents.error().to_string();
         return false;
     }
-    auto decoded = st::library::decode_ptm_xml(contents->private_data_xml);
+    auto decoded = st::library::decode_ptm_xml(contents->inner_xml);
     if (!decoded.has_value()) {
         s.ptm_import_error = std::string{"decode_ptm_xml: "} +
                              decoded.error().to_string();

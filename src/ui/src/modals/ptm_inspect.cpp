@@ -96,7 +96,7 @@ void run_decode(AppState &s) {
         s.ptm_inspect_error = "decrypt_ptm: " + contents.error().to_string();
         return;
     }
-    auto decoded = st::library::decode_ptm_xml(contents->private_data_xml);
+    auto decoded = st::library::decode_ptm_xml(contents->inner_xml);
     if (!decoded.has_value()) {
         s.ptm_inspect_error = "decode_ptm_xml: " + decoded.error().to_string();
         return;

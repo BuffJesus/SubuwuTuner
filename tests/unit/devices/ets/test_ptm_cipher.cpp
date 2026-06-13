@@ -347,14 +347,14 @@ TEST_CASE("ap3 cipher: encrypt_ptm -> decrypt_ptm logical round-trip",
     REQUIRE(contents.has_value());
     // The inner XML must round-trip byte-identical (bzip2 + AES-CTR
     // are deterministic given the spec key/IV).
-    REQUIRE(contents->private_data_xml == private_data);
+    REQUIRE(contents->inner_xml == private_data);
     // The outer metadata should still contain the original "vendor"
     // marker (the `<encData>` injection point sits before `</root>`).
-    REQUIRE(contents->outer_metadata_xml.find("vendor=subuwu_test") !=
+    REQUIRE(contents->outer_xml.find("vendor=subuwu_test") !=
             std::string::npos);
     // And the stripped outer should NOT contain `<encData>` after the
     // decrypt path scrubbed it.
-    REQUIRE(contents->outer_metadata_xml.find("<encData>") == std::string::npos);
+    REQUIRE(contents->outer_xml.find("<encData>") == std::string::npos);
 #endif
 }
 
