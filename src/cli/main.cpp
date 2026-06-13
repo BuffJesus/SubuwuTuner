@@ -35,19 +35,19 @@
 #include "st/policy/flash_preflight.hpp"
 #include "st/project.hpp"
 #include "st/rom.hpp"
-#include "st/devices/ap3/architectural_classifier.hpp"
-#include "st/devices/ap3/client.hpp"
-#include "st/devices/ap3/file_info.hpp"
-#include "st/devices/ap3/ota_cipher.hpp"
-#include "st/devices/ap3/ptm_cipher.hpp"
+#include "st/devices/ets/architectural_classifier.hpp"
+#include "st/devices/ets/client.hpp"
+#include "st/devices/ets/file_info.hpp"
+#include "st/devices/ets/ota_cipher.hpp"
+#include "st/devices/ets/ptm_cipher.hpp"
 #include "st/library/patch_decoder.hpp"
 #include "st/library/ptm_xml_builder.hpp"
 #include "st/library/table_mapping.hpp"
 #include "st/library/tune_diff.hpp"
 
 #include <toml++/toml.hpp>
-#include "st/transport/cobb_ap_channel.hpp"
-#include "st/transport/cobb_ap_packet.hpp"
+#include "st/transport/ets_channel.hpp"
+#include "st/transport/ets_packet.hpp"
 #include "st/transport/factory.hpp"
 #include "st/transport/j2534_discovery.hpp"
 #include "st/transport/mock.hpp"
@@ -15793,16 +15793,16 @@ int cmd_config(int argc, char *argv[]) {
 // ---------------------------------------------------------------------------
 
 // Runtime arming flag for the .ptm + .img cipher path. Defined here
-// (above ap3_cli + ptm_cli, both of which consume it) and flipped
+// (above ets_cli + ptm_cli, both of which consume it) and flipped
 // from main's pre-pass on --enable-cobb-ap-cipher.
 static bool g_cobb_ap_cipher_armed = false;
 
-namespace ap3_cli {
+namespace ets_cli {
 
 struct CommonOpts {
     bool allow_unmarried{false};
-    std::uint16_t vid{st::transport::ap3::kVendorId};
-    std::uint16_t pid{st::transport::ap3::kProductId};
+    std::uint16_t vid{st::transport::ets::kVendorId};
+    std::uint16_t pid{st::transport::ets::kProductId};
 };
 
 // Consume `--format <text|json|toml>` from argv (compacting in place)
@@ -15872,16 +15872,16 @@ bool consume_common(int &argc, char **argv, CommonOpts &opts) {
 
 st::Result<std::unique_ptr<st::transport::IByteChannel>>
 open_channel(CommonOpts const &opts) {
-    st::transport::ap3::ChannelConfig cfg{};
+    st::transport::ets::ChannelConfig cfg{};
     cfg.vendor_id = opts.vid;
     cfg.product_id = opts.pid;
-    return st::transport::ap3::open_channel(cfg);
+    return st::transport::ets::open_channel(cfg);
 }
 
 // Walk through query_state, print the summary, and check the marriage
 // gate. Returns true when the caller should proceed (with any
 // destructive op), false when refused.
-bool gate_marriage(st::devices::ap3::DeviceState const &state, CommonOpts const &opts) {
+bool gate_marriage(st::devices::ets::DeviceState const &state, CommonOpts const &opts) {
     if (state.married.has_value() && !*state.married && !opts.allow_unmarried) {
         std::fputs(
             "ap3: the connected AccessPort reports Not Installed. SubuwuTuner has not\n"
@@ -15913,7 +15913,7 @@ int run_state(int argc, char **argv, CommonOpts const &opts) {
         std::fprintf(stderr, "ap3 state: %s\n", channel.error().to_string().c_str());
         return 1;
     }
-    st::devices::ap3::Client client{**channel};
+    st::devices::ets::Client client{**channel};
     auto state = client.query_state();
     if (!state.has_value()) {
         std::fprintf(stderr, "ap3 state: %s\n", state.error().to_string().c_str());
@@ -16050,7 +16050,7 @@ int run_ls(int argc, char **argv, CommonOpts const &opts) {
         std::fprintf(stderr, "ap3 ls: %s\n", channel.error().to_string().c_str());
         return 1;
     }
-    st::devices::ap3::Client client{**channel};
+    st::devices::ets::Client client{**channel};
     auto state = client.query_state();
     if (!state.has_value()) {
         std::fprintf(stderr, "ap3 ls: query_state: %s\n", state.error().to_string().c_str());
@@ -16072,7 +16072,7 @@ int run_ls(int argc, char **argv, CommonOpts const &opts) {
             std::regex const re(filter_regex);
             records->erase(
                 std::remove_if(records->begin(), records->end(),
-                               [&](st::devices::ap3::FileInfo const &r) {
+                               [&](st::devices::ets::FileInfo const &r) {
                                    return !std::regex_search(r.name, re);
                                }),
                 records->end());
@@ -16083,8 +16083,8 @@ int run_ls(int argc, char **argv, CommonOpts const &opts) {
     }
     if (!sort_key.empty()) {
         std::sort(records->begin(), records->end(),
-                  [&](st::devices::ap3::FileInfo const &x,
-                      st::devices::ap3::FileInfo const &y) {
+                  [&](st::devices::ets::FileInfo const &x,
+                      st::devices::ets::FileInfo const &y) {
                       if (sort_key == "size") {
                           return x.size < y.size;
                       }
@@ -16161,7 +16161,7 @@ int run_pull(int argc, char **argv, CommonOpts const &opts) {
         std::fprintf(stderr, "ap3 pull: %s\n", channel.error().to_string().c_str());
         return 1;
     }
-    st::devices::ap3::Client client{**channel};
+    st::devices::ets::Client client{**channel};
     auto state = client.query_state();
     if (state.has_value() && !gate_marriage(*state, opts)) {
         return 1;
@@ -16238,7 +16238,7 @@ int run_push(int argc, char **argv, CommonOpts const &opts) {
         std::fprintf(stderr, "ap3 push: %s\n", channel.error().to_string().c_str());
         return 1;
     }
-    st::devices::ap3::Client client{**channel};
+    st::devices::ets::Client client{**channel};
     auto state = client.query_state();
     if (state.has_value() && !gate_marriage(*state, opts)) {
         return 1;
@@ -16276,7 +16276,7 @@ int run_rm(int argc, char **argv, CommonOpts const &opts) {
         std::fprintf(stderr, "ap3 rm: %s\n", channel.error().to_string().c_str());
         return 1;
     }
-    st::devices::ap3::Client client{**channel};
+    st::devices::ets::Client client{**channel};
     auto state = client.query_state();
     if (state.has_value() && !gate_marriage(*state, opts)) {
         return 1;
@@ -16313,7 +16313,7 @@ int run_backup(int argc, char **argv, CommonOpts const &opts) {
         std::fprintf(stderr, "ap3 backup: %s\n", channel.error().to_string().c_str());
         return 1;
     }
-    st::devices::ap3::Client client{**channel};
+    st::devices::ets::Client client{**channel};
     auto state = client.query_state();
     if (state.has_value() && !gate_marriage(*state, opts)) {
         return 1;
@@ -16515,7 +16515,7 @@ int run_raw(int argc, char **argv, CommonOpts const &opts) {
     }
     // Encode the request packet so we can hex-dump exactly what goes
     // on the wire.
-    auto packet = st::transport::ap3::encode_packet((*cmd_bytes)[0], body);
+    auto packet = st::transport::ets::encode_packet((*cmd_bytes)[0], body);
     if (!packet.has_value()) {
         std::fprintf(stderr, "ap3 raw: encode_packet: %s\n",
                      packet.error().to_string().c_str());
@@ -16647,7 +16647,7 @@ int run_decrypt_img(int argc, char **argv, CommonOpts const &opts) {
         return 1;
     }
     // Decrypt.
-    auto plaintext = st::devices::ap3::cipher::decrypt_ota_img(img);
+    auto plaintext = st::devices::ets::cipher::decrypt_ota_img(img);
     if (!plaintext.has_value()) {
         std::fprintf(stderr, "ap3 decrypt-img: %s\n",
                      plaintext.error().to_string().c_str());
@@ -16685,7 +16685,7 @@ int run_decrypt_img(int argc, char **argv, CommonOpts const &opts) {
     return 0;
 }
 
-} // namespace ap3_cli
+} // namespace ets_cli
 
 int cmd_ap3(int argc, char *argv[]) {
     if (argc < 1) {
@@ -16723,36 +16723,36 @@ int cmd_ap3(int argc, char *argv[]) {
                    stderr);
         return 2;
     }
-    ap3_cli::CommonOpts opts;
+    ets_cli::CommonOpts opts;
     int sub_argc = argc - 1;
     char **sub_argv = argv + 1;
-    if (!ap3_cli::consume_common(sub_argc, sub_argv, opts)) {
+    if (!ets_cli::consume_common(sub_argc, sub_argv, opts)) {
         return 2;
     }
     std::string_view const sub{argv[0]};
     if (sub == "state") {
-        return ap3_cli::run_state(sub_argc, sub_argv, opts);
+        return ets_cli::run_state(sub_argc, sub_argv, opts);
     }
     if (sub == "ls") {
-        return ap3_cli::run_ls(sub_argc, sub_argv, opts);
+        return ets_cli::run_ls(sub_argc, sub_argv, opts);
     }
     if (sub == "pull") {
-        return ap3_cli::run_pull(sub_argc, sub_argv, opts);
+        return ets_cli::run_pull(sub_argc, sub_argv, opts);
     }
     if (sub == "push") {
-        return ap3_cli::run_push(sub_argc, sub_argv, opts);
+        return ets_cli::run_push(sub_argc, sub_argv, opts);
     }
     if (sub == "rm") {
-        return ap3_cli::run_rm(sub_argc, sub_argv, opts);
+        return ets_cli::run_rm(sub_argc, sub_argv, opts);
     }
     if (sub == "backup") {
-        return ap3_cli::run_backup(sub_argc, sub_argv, opts);
+        return ets_cli::run_backup(sub_argc, sub_argv, opts);
     }
     if (sub == "raw") {
-        return ap3_cli::run_raw(sub_argc, sub_argv, opts);
+        return ets_cli::run_raw(sub_argc, sub_argv, opts);
     }
     if (sub == "decrypt-img") {
-        return ap3_cli::run_decrypt_img(sub_argc, sub_argv, opts);
+        return ets_cli::run_decrypt_img(sub_argc, sub_argv, opts);
     }
     std::fprintf(stderr,
                  "ap3: unknown subcommand: %s\n"
@@ -16767,8 +16767,8 @@ int cmd_ap3(int argc, char *argv[]) {
 // the build flag on, every `ptm` subcommand refuses until this flag
 // flips to true. Set from main's pre-pass on `--enable-cobb-ap-cipher`,
 // read in `cmd_ptm`.
-// (g_cobb_ap_cipher_armed defined above ap3_cli for visibility from
-// both ap3_cli::run_decrypt_img and ptm_cli below.)
+// (g_cobb_ap_cipher_armed defined above ets_cli for visibility from
+// both ets_cli::run_decrypt_img and ptm_cli below.)
 
 namespace ptm_cli {
 
@@ -16854,7 +16854,7 @@ bool parse_list_patches_opts(int argc, char **argv, ListPatchesOpts &out) {
 }
 
 void render_text(std::vector<st::library::PatchEntry> const &patches,
-                 std::vector<st::devices::ap3::PatchClassification> const &classifications,
+                 std::vector<st::devices::ets::PatchClassification> const &classifications,
                  std::vector<TableRange> const &ranges) {
     bool const has_table_col = !ranges.empty();
     if (has_table_col) {
@@ -16866,7 +16866,7 @@ void render_text(std::vector<st::library::PatchEntry> const &patches,
         auto const &p = patches[i];
         auto const layer_text = classifications.empty()
                                     ? std::string_view{"?"}
-                                    : st::devices::ap3::layer_label(classifications[i].layer);
+                                    : st::devices::ets::layer_label(classifications[i].layer);
         if (has_table_col) {
             auto const *t = find_table_for(ranges, p.rom_offset);
             std::printf("  0x%08X  %8u  %-20.*s  %s\n", p.rom_offset, p.length,
@@ -16880,14 +16880,14 @@ void render_text(std::vector<st::library::PatchEntry> const &patches,
 }
 
 void render_json(std::vector<st::library::PatchEntry> const &patches,
-                 std::vector<st::devices::ap3::PatchClassification> const &classifications,
+                 std::vector<st::devices::ets::PatchClassification> const &classifications,
                  std::vector<TableRange> const &ranges) {
     std::printf("[\n");
     for (std::size_t i = 0; i < patches.size(); ++i) {
         auto const &p = patches[i];
         auto const layer_text = classifications.empty()
                                     ? std::string_view{"?"}
-                                    : st::devices::ap3::layer_label(classifications[i].layer);
+                                    : st::devices::ets::layer_label(classifications[i].layer);
         auto const *t = ranges.empty() ? nullptr : find_table_for(ranges, p.rom_offset);
         if (t != nullptr) {
             std::printf(R"(  {"rom_offset":%u,"length":%u,"layer":"%.*s","table_id":"%s","table_name":"%s"}%s)" "\n",
@@ -16906,13 +16906,13 @@ void render_json(std::vector<st::library::PatchEntry> const &patches,
 }
 
 void render_toml(std::vector<st::library::PatchEntry> const &patches,
-                 std::vector<st::devices::ap3::PatchClassification> const &classifications,
+                 std::vector<st::devices::ets::PatchClassification> const &classifications,
                  std::vector<TableRange> const &ranges) {
     for (std::size_t i = 0; i < patches.size(); ++i) {
         auto const &p = patches[i];
         auto const layer_text = classifications.empty()
                                     ? std::string_view{"?"}
-                                    : st::devices::ap3::layer_label(classifications[i].layer);
+                                    : st::devices::ets::layer_label(classifications[i].layer);
         std::printf("[[patches]]\n");
         std::printf("rom_offset = %u\n", p.rom_offset);
         std::printf("length = %u\n", p.length);
@@ -16998,7 +16998,7 @@ std::string with_commas(std::uint64_t n) {
 void render_inspect_text(std::string const &path,
                          std::size_t file_size,
                          st::library::DecodedPtm const &decoded,
-                         std::vector<st::devices::ap3::LayerSummary> const &summary,
+                         std::vector<st::devices::ets::LayerSummary> const &summary,
                          std::vector<TableHit> const &top_tables) {
     std::uint64_t total_bytes = 0;
     for (auto const &p : decoded.patches) {
@@ -17027,7 +17027,7 @@ void render_inspect_text(std::string const &path,
         }
         std::printf("Architectural breakdown\n");
         for (auto const &row : summary) {
-            auto const layer_text = st::devices::ap3::layer_label(row.layer);
+            auto const layer_text = st::devices::ets::layer_label(row.layer);
             double const pct =
                 total_bytes == 0 ? 0.0
                                  : 100.0 * static_cast<double>(row.total_bytes) /
@@ -17063,7 +17063,7 @@ void render_inspect_text(std::string const &path,
 void render_inspect_json(std::string const &path,
                          std::size_t file_size,
                          st::library::DecodedPtm const &decoded,
-                         std::vector<st::devices::ap3::LayerSummary> const &summary,
+                         std::vector<st::devices::ets::LayerSummary> const &summary,
                          std::vector<TableHit> const &top_tables) {
     (void)path;
     std::uint64_t total_bytes = 0;
@@ -17086,7 +17086,7 @@ void render_inspect_json(std::string const &path,
     std::printf("  \"layers\": [\n");
     for (std::size_t i = 0; i < summary.size(); ++i) {
         auto const &row = summary[i];
-        auto const layer_text = st::devices::ap3::layer_label(row.layer);
+        auto const layer_text = st::devices::ets::layer_label(row.layer);
         std::printf("    {\"layer\":\"%.*s\",\"patches\":%u,\"bytes\":%llu}%s\n",
                     static_cast<int>(layer_text.size()), layer_text.data(),
                     row.patch_count,
@@ -17109,7 +17109,7 @@ void render_inspect_json(std::string const &path,
 void render_inspect_toml(std::string const &path,
                          std::size_t file_size,
                          st::library::DecodedPtm const &decoded,
-                         std::vector<st::devices::ap3::LayerSummary> const &summary,
+                         std::vector<st::devices::ets::LayerSummary> const &summary,
                          std::vector<TableHit> const &top_tables) {
     (void)path;
     std::uint64_t total_bytes = 0;
@@ -17127,7 +17127,7 @@ void render_inspect_toml(std::string const &path,
     std::printf("total_bytes = %llu\n", static_cast<unsigned long long>(total_bytes));
     std::printf("file_size_bytes = %llu\n", static_cast<unsigned long long>(file_size));
     for (auto const &row : summary) {
-        auto const layer_text = st::devices::ap3::layer_label(row.layer);
+        auto const layer_text = st::devices::ets::layer_label(row.layer);
         std::printf("\n[[layers]]\n");
         std::printf("layer = \"%.*s\"\n",
                     static_cast<int>(layer_text.size()), layer_text.data());
@@ -17266,7 +17266,7 @@ void render_diff_text(std::string const &a_path, std::string const &b_path,
         // direction (a_only / b_only / changed-at-shared).
         std::printf("By layer (sorted by impact)\n");
         for (auto const &ld : r.by_layer) {
-            auto const label = st::devices::ap3::layer_label(ld.layer);
+            auto const label = st::devices::ets::layer_label(ld.layer);
             std::uint64_t const total_bytes =
                 ld.a_only_bytes + ld.b_only_bytes + ld.changed_bytes;
             std::uint32_t const total_patches =
@@ -17317,7 +17317,7 @@ void render_diff_json(std::string const &a_path, std::string const &b_path,
     std::printf("  \"by_layer\": [\n");
     for (std::size_t i = 0; i < r.by_layer.size(); ++i) {
         auto const &ld = r.by_layer[i];
-        auto const label = st::devices::ap3::layer_label(ld.layer);
+        auto const label = st::devices::ets::layer_label(ld.layer);
         std::printf("    {\"layer\":\"%.*s\","
                     "\"a_only_patches\":%u,\"b_only_patches\":%u,"
                     "\"shared_patches\":%u,\"changed_at_shared\":%u,"
@@ -17368,7 +17368,7 @@ void render_diff_toml(std::string const &a_path, std::string const &b_path,
     std::printf("b_only = %llu\n", static_cast<unsigned long long>(r.b_only_bytes));
     std::printf("changed = %llu\n", static_cast<unsigned long long>(r.changed_bytes));
     for (auto const &ld : r.by_layer) {
-        auto const label = st::devices::ap3::layer_label(ld.layer);
+        auto const label = st::devices::ets::layer_label(ld.layer);
         std::printf("\n[[by_layer]]\n");
         std::printf("layer = \"%.*s\"\n", static_cast<int>(label.size()), label.data());
         std::printf("a_only_patches = %u\n", ld.a_only_patches);
@@ -17404,7 +17404,7 @@ st::Result<LoadResult> load_ptm(std::string const &path) {
     if (!bytes.has_value()) {
         return st::failure(std::move(bytes).error());
     }
-    auto contents = st::devices::ap3::cipher::decrypt_ptm(*bytes);
+    auto contents = st::devices::ets::cipher::decrypt_ptm(*bytes);
     if (!contents.has_value()) {
         return st::failure(std::move(contents).error());
     }
@@ -17554,7 +17554,7 @@ int run_verify(int argc, char **argv) {
         if (rom_off < 0 || length < 0 || b64.empty()) {
             continue;
         }
-        auto decoded = st::devices::ap3::cipher::base64_decode(b64);
+        auto decoded = st::devices::ets::cipher::base64_decode(b64);
         if (!decoded.has_value()) {
             continue;
         }
@@ -17877,8 +17877,8 @@ int run_import(int argc, char **argv) {
         offsets.push_back(p.rom_offset);
         lengths.push_back(p.length);
     }
-    auto classifications = st::devices::ap3::classify_patches(
-        st::devices::ap3::default_lf79103p_layer_map(), offsets, lengths);
+    auto classifications = st::devices::ets::classify_patches(
+        st::devices::ets::default_lf79103p_layer_map(), offsets, lengths);
 
     // Optional --def: load the pack and compute table ranges so each
     // patch can carry table_id + table_name in ptm_patches.toml.
@@ -17975,9 +17975,9 @@ int run_import(int argc, char **argv) {
         for (std::size_t i = 0; i < decoded.patches.size(); ++i) {
             auto const &p = decoded.patches[i];
             auto const layer_text = i < classifications.size()
-                                        ? st::devices::ap3::layer_label(classifications[i].layer)
+                                        ? st::devices::ets::layer_label(classifications[i].layer)
                                         : std::string_view{"?"};
-            auto const bytes_b64 = st::devices::ap3::cipher::base64_encode(p.bytes);
+            auto const bytes_b64 = st::devices::ets::cipher::base64_encode(p.bytes);
             out << "[[patch]]\n";
             out << "rom_offset = " << p.rom_offset << "\n";
             out << "ram_offset = " << p.ram_offset << "\n";
@@ -18174,7 +18174,7 @@ int run_export(int argc, char **argv) {
     auto const outer = st::library::build_ptm_outer_xml(
         vendor_id, vehicle_id, lock_mask, rom_sum, save_date);
 
-    auto encrypted = st::devices::ap3::cipher::encrypt_ptm(inner, outer, opts.seed);
+    auto encrypted = st::devices::ets::cipher::encrypt_ptm(inner, outer, opts.seed);
     if (!encrypted.has_value()) {
         std::fprintf(stderr, "ptm export: encrypt_ptm: %s\n",
                      encrypted.error().to_string().c_str());
@@ -18214,7 +18214,7 @@ int run_inspect(int argc, char **argv) {
     }
     auto const file_size = bytes->size();
 
-    auto contents = st::devices::ap3::cipher::decrypt_ptm(*bytes);
+    auto contents = st::devices::ets::cipher::decrypt_ptm(*bytes);
     if (!contents.has_value()) {
         std::fprintf(stderr, "ptm inspect: %s\n", contents.error().to_string().c_str());
         return contents.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
@@ -18234,9 +18234,9 @@ int run_inspect(int argc, char **argv) {
         offsets.push_back(p.rom_offset);
         lengths.push_back(p.length);
     }
-    auto classifications = st::devices::ap3::classify_patches(
-        st::devices::ap3::default_lf79103p_layer_map(), offsets, lengths);
-    auto summary = st::devices::ap3::summarize(classifications);
+    auto classifications = st::devices::ets::classify_patches(
+        st::devices::ets::default_lf79103p_layer_map(), offsets, lengths);
+    auto summary = st::devices::ets::summarize(classifications);
 
     // Optional --def integration. When provided, compute per-table
     // patch counts and pass them through to the renderer for the
@@ -18282,7 +18282,7 @@ int run_list_patches(int argc, char **argv) {
         return 1;
     }
 
-    auto contents = st::devices::ap3::cipher::decrypt_ptm(*bytes);
+    auto contents = st::devices::ets::cipher::decrypt_ptm(*bytes);
     if (!contents.has_value()) {
         std::fprintf(stderr, "ptm list-patches: %s\n", contents.error().to_string().c_str());
         return contents.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
@@ -18305,8 +18305,8 @@ int run_list_patches(int argc, char **argv) {
         offsets.push_back(p.rom_offset);
         lengths.push_back(p.length);
     }
-    auto classifications = st::devices::ap3::classify_patches(
-        st::devices::ap3::default_lf79103p_layer_map(), offsets, lengths);
+    auto classifications = st::devices::ets::classify_patches(
+        st::devices::ets::default_lf79103p_layer_map(), offsets, lengths);
 
     std::vector<TableRange> ranges;
     if (!opts.def_path.empty()) {

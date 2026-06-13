@@ -16,8 +16,8 @@
 #include "widgets/widgets.hpp"
 
 #include "st/defs.hpp"
-#include "st/devices/ap3/architectural_classifier.hpp"
-#include "st/devices/ap3/ptm_cipher.hpp"
+#include "st/devices/ets/architectural_classifier.hpp"
+#include "st/devices/ets/ptm_cipher.hpp"
 #include "st/library/patch_decoder.hpp"
 #include "st/library/table_mapping.hpp"
 
@@ -91,7 +91,7 @@ void run_decode(AppState &s) {
         s.ptm_inspect_error = std::string{"Cannot read "} + s.ptm_inspect_ptm_path;
         return;
     }
-    auto contents = st::devices::ap3::cipher::decrypt_ptm(bytes);
+    auto contents = st::devices::ets::cipher::decrypt_ptm(bytes);
     if (!contents.has_value()) {
         s.ptm_inspect_error = "decrypt_ptm: " + contents.error().to_string();
         return;
@@ -121,12 +121,12 @@ void run_decode(AppState &s) {
         offsets.push_back(p.rom_offset);
         lengths.push_back(p.length);
     }
-    auto const classifications = st::devices::ap3::classify_patches(
-        st::devices::ap3::default_lf79103p_layer_map(), offsets, lengths);
-    auto const summary = st::devices::ap3::summarize(classifications);
+    auto const classifications = st::devices::ets::classify_patches(
+        st::devices::ets::default_lf79103p_layer_map(), offsets, lengths);
+    auto const summary = st::devices::ets::summarize(classifications);
     for (auto const &row : summary) {
         s.ptm_inspect_layers.push_back(
-            {std::string{st::devices::ap3::layer_label(row.layer)},
+            {std::string{st::devices::ets::layer_label(row.layer)},
              {row.patch_count, row.total_bytes}});
     }
 

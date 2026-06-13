@@ -40,7 +40,7 @@ TEST_CASE("ap3 decrypt-img refuses without --enable-cobb-ap-cipher",
 
 TEST_CASE("ap3 decrypt-img reports missing input with --enable-cobb-ap-cipher",
           "[cli][ap3][decrypt-img][cipher]") {
-#ifndef ST_AP3_HAVE_CIPHER
+#ifndef ST_ETS_HAVE_CIPHER
     SKIP("Cipher gating off — runtime arm has no effect");
 #else
     if (!can_run()) {
@@ -56,20 +56,20 @@ TEST_CASE("ap3 decrypt-img reports missing input with --enable-cobb-ap-cipher",
 
 TEST_CASE("ap3 decrypt-img round-trips the OTA .img fixture",
           "[cli][ap3][decrypt-img][cipher][fixtures]") {
-#ifndef ST_AP3_HAVE_CIPHER
+#ifndef ST_ETS_HAVE_CIPHER
     SKIP("Cipher gating off");
 #else
-#ifndef ST_FIXTURE_AP3_CIPHER_DIR
-    SKIP("ST_FIXTURE_AP3_CIPHER_DIR not defined");
+#ifndef ST_FIXTURE_ETS_CIPHER_DIR
+    SKIP("ST_FIXTURE_ETS_CIPHER_DIR not defined");
 #else
     if (!can_run()) {
         return;
     }
     namespace fs = std::filesystem;
     std::string const input =
-        std::string{ST_FIXTURE_AP3_CIPHER_DIR} + "/blowfish_output_full.bin";
+        std::string{ST_FIXTURE_ETS_CIPHER_DIR} + "/blowfish_output_full.bin";
     std::string const expected =
-        std::string{ST_FIXTURE_AP3_CIPHER_DIR} + "/blowfish_input.bin";
+        std::string{ST_FIXTURE_ETS_CIPHER_DIR} + "/blowfish_input.bin";
     if (!fs::exists(input) || !fs::exists(expected)) {
         SKIP("blowfish fixtures not staged");
     }

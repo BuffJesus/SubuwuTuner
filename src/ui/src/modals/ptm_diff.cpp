@@ -14,8 +14,8 @@
 #include "widgets/widgets.hpp"
 
 #include "st/defs.hpp"
-#include "st/devices/ap3/architectural_classifier.hpp"
-#include "st/devices/ap3/ptm_cipher.hpp"
+#include "st/devices/ets/architectural_classifier.hpp"
+#include "st/devices/ets/ptm_cipher.hpp"
 #include "st/library/patch_decoder.hpp"
 #include "st/library/table_mapping.hpp"
 #include "st/library/tune_diff.hpp"
@@ -79,7 +79,7 @@ bool decode_one(char const *path, st::library::DecodedPtm &out, std::string &err
         err = std::string{"Cannot read "} + path;
         return false;
     }
-    auto contents = st::devices::ap3::cipher::decrypt_ptm(bytes);
+    auto contents = st::devices::ets::cipher::decrypt_ptm(bytes);
     if (!contents.has_value()) {
         err = std::string{"decrypt_ptm: "} + contents.error().to_string();
         return false;
@@ -125,7 +125,7 @@ void run_diff(AppState &s) {
     s.ptm_diff_changed_bytes = result.changed_bytes;
     for (auto const &ld : result.by_layer) {
         AppState::PtmDiffRow row;
-        row.label = std::string{st::devices::ap3::layer_label(ld.layer)};
+        row.label = std::string{st::devices::ets::layer_label(ld.layer)};
         row.a_only = ld.a_only_patches;
         row.b_only = ld.b_only_patches;
         row.shared = ld.shared_patches;

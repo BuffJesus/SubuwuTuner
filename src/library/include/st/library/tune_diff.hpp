@@ -19,7 +19,7 @@
 #ifndef ST_LIBRARY_TUNE_DIFF_HPP
 #define ST_LIBRARY_TUNE_DIFF_HPP
 
-#include "st/devices/ap3/architectural_classifier.hpp"
+#include "st/devices/ets/architectural_classifier.hpp"
 #include "st/library/patch_decoder.hpp"
 #include "st/library/table_mapping.hpp"
 
@@ -30,7 +30,7 @@
 namespace st::library {
 
 struct LayerDiff {
-    st::devices::ap3::Layer layer{st::devices::ap3::Layer::Uncharacterized};
+    st::devices::ets::Layer layer{st::devices::ets::Layer::Uncharacterized};
     std::uint32_t a_only_patches{0};
     std::uint32_t b_only_patches{0};
     std::uint32_t shared_patches{0};

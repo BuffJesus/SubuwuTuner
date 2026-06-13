@@ -15,7 +15,7 @@ target_link_libraries(st_library
         st::core
         st::defs   # table_mapping.hpp consumes st::Definition
     PRIVATE
-        st::devices_ap3   # base64_decode lives here (cipher path)
+        st::devices_ets   # base64_decode lives here (cipher path)
         st::warnings
         st::sanitizers
         st::platform

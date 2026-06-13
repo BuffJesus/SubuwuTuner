@@ -5,7 +5,7 @@
 // representation of a decrypted .ptm PrivateData document.
 //
 // The decoder takes the inner <PrivateData> XML returned by
-// `st::devices::ap3::cipher::decrypt_ptm` and parses it into the
+// `st::devices::ets::cipher::decrypt_ptm` and parses it into the
 // structures below. Consumers (ptm inspect / ptm list-patches /
 // ptm diff / ptm import) build their feature surfaces on top.
 //

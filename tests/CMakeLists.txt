@@ -37,24 +37,24 @@ add_executable(st_unit_tests
     unit/transport/test_factory.cpp
     unit/transport/test_uds_trace.cpp
     unit/transport/test_j2534_discovery.cpp
-    unit/transport/test_cobb_ap_packet.cpp
-    unit/devices/ap3/test_file_info.cpp
-    unit/devices/ap3/test_live_smoke.cpp
-    unit/devices/ap3/test_ptm_cipher.cpp
-    unit/devices/ap3/test_ptm_cipher_private.cpp
-    unit/devices/ap3/test_aes_ctr_chunk_boundary.cpp
-    unit/devices/ap3/test_architectural_classifier.cpp
-    unit/devices/ap3/test_user_info_parse.cpp
-    unit/devices/ap3/test_user_info_parse_private.cpp
-    unit/devices/ap3/test_zero_crc_tolerance.cpp
-    unit/devices/ap3/test_read_file_path_encoding.cpp
-    unit/devices/ap3/test_write_remove_path_encoding.cpp
-    unit/devices/ap3/test_marriage_gate.cpp
-    unit/devices/ap3/test_datalogger_cfg.cpp
-    unit/devices/ap3/test_status_probes.cpp
-    unit/devices/ap3/test_diagnostic_cmds.cpp
-    unit/devices/ap3/test_error_frame_decode.cpp
-    unit/devices/ap3/test_ota_cipher.cpp
+    unit/transport/test_ets_packet.cpp
+    unit/devices/ets/test_file_info.cpp
+    unit/devices/ets/test_live_smoke.cpp
+    unit/devices/ets/test_ptm_cipher.cpp
+    unit/devices/ets/test_ptm_cipher_private.cpp
+    unit/devices/ets/test_aes_ctr_chunk_boundary.cpp
+    unit/devices/ets/test_architectural_classifier.cpp
+    unit/devices/ets/test_user_info_parse.cpp
+    unit/devices/ets/test_user_info_parse_private.cpp
+    unit/devices/ets/test_zero_crc_tolerance.cpp
+    unit/devices/ets/test_read_file_path_encoding.cpp
+    unit/devices/ets/test_write_remove_path_encoding.cpp
+    unit/devices/ets/test_marriage_gate.cpp
+    unit/devices/ets/test_datalogger_cfg.cpp
+    unit/devices/ets/test_status_probes.cpp
+    unit/devices/ets/test_diagnostic_cmds.cpp
+    unit/devices/ets/test_error_frame_decode.cpp
+    unit/devices/ets/test_ota_cipher.cpp
     unit/library/test_patch_decoder.cpp
     unit/library/test_table_mapping.cpp
     unit/library/test_tune_diff.cpp
@@ -150,7 +150,7 @@ target_link_libraries(st_unit_tests
         st::audit
         st::profile
         st::ai
-        st::devices_ap3
+        st::devices_ets
         st::library
         st::warnings
         st::sanitizers
@@ -166,14 +166,14 @@ if (MSVC)
 endif()
 
 # Mirror the AP3 cipher gating to the test binary so the gated/ungated
-# test cases compile to the right path. st_devices_ap3's PRIVATE
+# test cases compile to the right path. st_devices_ets's PRIVATE
 # definition doesn't reach test_ptm_cipher.cpp, so we set it again
 # here when the option is ON.
 if(ST_ENABLE_COBB_AP_CIPHER)
-    target_compile_definitions(st_unit_tests PRIVATE ST_AP3_HAVE_CIPHER=1)
+    target_compile_definitions(st_unit_tests PRIVATE ST_ETS_HAVE_CIPHER=1)
 endif()
 if(ST_ENABLE_COBB_AP_PTM_REWRITE)
-    target_compile_definitions(st_unit_tests PRIVATE ST_AP3_HAVE_PTM_REWRITE=1)
+    target_compile_definitions(st_unit_tests PRIVATE ST_ETS_HAVE_PTM_REWRITE=1)
 endif()
 # Mirror the Subaru-direct-flash gate to the test binary so
 # test_subaru_sh_can_flash.cpp's #if branches select the right path.
@@ -201,9 +201,9 @@ target_compile_definitions(st_unit_tests PRIVATE
 # vector per §4.2). Copied from D:\Subuwu\specs\fixtures\ap3\ — see
 # fixtures/ap3/README.md for the per-fixture role.
 target_compile_definitions(st_unit_tests PRIVATE
-    ST_FIXTURE_AP3_DIR="${CMAKE_SOURCE_DIR}/fixtures/ap3")
+    ST_FIXTURE_ETS_DIR="${CMAKE_SOURCE_DIR}/fixtures/ets")
 target_compile_definitions(st_unit_tests PRIVATE
-    ST_FIXTURE_AP3_CIPHER_DIR="${CMAKE_SOURCE_DIR}/fixtures/ap3/cipher")
+    ST_FIXTURE_ETS_CIPHER_DIR="${CMAKE_SOURCE_DIR}/fixtures/ets/cipher")
 # Exposes the source-tree definitions/ directory as a compile-time
 # constant so tests can exercise real in-tree packs (e.g. asserting
 # lf79103p.toml's [[workflow]] declarations still resolve every

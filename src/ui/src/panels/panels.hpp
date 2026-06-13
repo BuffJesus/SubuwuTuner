@@ -73,7 +73,7 @@ void render_ap3_browser_panel(AppState &state);
 // Returns nullopt when no AP is connected or no query_state has
 // succeeded yet. Populated from the RE8b CORRECTED status probes
 // (cmd 0x2e / 0x30 / 0x31) plus the cmd 0x28 vehicle_descriptor.
-struct Ap3StatusSnapshot {
+struct EtsStatusSnapshot {
     std::string vehicle_descriptor;   // cmd 0x28 — "2017 USDM WRX MT ..."
     std::string hardware_type;        // cmd 0x2e — "AP-V3" / etc.
     std::string vehicle_manufacturer; // cmd 0x30 — "Subaru"
@@ -81,7 +81,7 @@ struct Ap3StatusSnapshot {
     bool married{false};              // Installed vs Not Installed
     bool marriage_known{false};       // distinguishes nullopt from false
 };
-[[nodiscard]] std::optional<Ap3StatusSnapshot> ap3_status_snapshot();
+[[nodiscard]] std::optional<EtsStatusSnapshot> ets_status_snapshot();
 void render_table_view(AppState &state, Fonts const &fonts);
 
 // Status bar + toasts. enqueue_toast is declared here because the toast

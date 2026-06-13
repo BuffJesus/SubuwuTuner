@@ -121,7 +121,7 @@ add_executable(subuwutuner-gui
     src/panels/toasts.cpp
     src/panels/welcome.cpp
     src/panels/workspace.cpp
-    src/panels/ap3_browser.cpp
+    src/panels/ets_browser.cpp
     src/actions.cpp
     src/app_state.cpp
     src/persistence.cpp
@@ -174,7 +174,7 @@ target_link_libraries(subuwutuner-gui
         st::profile
         st::ai
         st::transport
-        st::devices_ap3
+        st::devices_ets
         st::library
         tomlplusplus::tomlplusplus
         imgui_lib

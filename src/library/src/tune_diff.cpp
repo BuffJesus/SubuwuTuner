@@ -29,9 +29,9 @@ compute_tune_diff(DecodedPtm const &a, DecodedPtm const &b,
     }
     std::vector<char> b_matched(b.patches.size(), 0);
 
-    auto const &map = st::devices::ap3::default_lf79103p_layer_map();
-    std::map<st::devices::ap3::Layer, LayerDiff> per_layer;
-    auto layer_bucket = [&](st::devices::ap3::Layer L) -> LayerDiff & {
+    auto const &map = st::devices::ets::default_lf79103p_layer_map();
+    std::map<st::devices::ets::Layer, LayerDiff> per_layer;
+    auto layer_bucket = [&](st::devices::ets::Layer L) -> LayerDiff & {
         auto it = per_layer.find(L);
         if (it == per_layer.end()) {
             it = per_layer.emplace(L, LayerDiff{L, 0, 0, 0, 0, 0, 0, 0}).first;
@@ -56,7 +56,7 @@ compute_tune_diff(DecodedPtm const &a, DecodedPtm const &b,
     };
 
     for (auto const &p : a.patches) {
-        auto const L = st::devices::ap3::classify(map, p.rom_offset);
+        auto const L = st::devices::ets::classify(map, p.rom_offset);
         auto &bucket = layer_bucket(L);
         auto *tb = table_bucket(p.rom_offset);
         // Find an unmatched B patch at the same (rom_offset,
@@ -114,7 +114,7 @@ compute_tune_diff(DecodedPtm const &a, DecodedPtm const &b,
             continue;
         }
         auto const &p = b.patches[i];
-        auto const L = st::devices::ap3::classify(map, p.rom_offset);
+        auto const L = st::devices::ets::classify(map, p.rom_offset);
         auto &bucket = layer_bucket(L);
         auto *tb = table_bucket(p.rom_offset);
         ++r.b_only_patches;

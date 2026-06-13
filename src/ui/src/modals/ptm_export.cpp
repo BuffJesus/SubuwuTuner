@@ -16,7 +16,7 @@
 #include "app_state.hpp"
 #include "widgets/widgets.hpp"
 
-#include "st/devices/ap3/ptm_cipher.hpp"
+#include "st/devices/ets/ptm_cipher.hpp"
 #include "st/library/ptm_xml_builder.hpp"
 
 #include <toml++/toml.hpp>
@@ -167,7 +167,7 @@ void run_export(AppState &s) {
     auto const outer = st::library::build_ptm_outer_xml(
         vendor_id, vehicle_id, lock_mask, rom_sum, save_date);
 
-    auto encrypted = st::devices::ap3::cipher::encrypt_ptm(inner, outer, seed);
+    auto encrypted = st::devices::ets::cipher::encrypt_ptm(inner, outer, seed);
     if (!encrypted.has_value()) {
         s.ptm_export_error = "encrypt_ptm: " + encrypted.error().to_string();
         return;

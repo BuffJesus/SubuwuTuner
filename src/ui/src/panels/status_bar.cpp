@@ -129,7 +129,7 @@ void render_status_bar(AppState &state) {
         // tooltip — hardware type / vehicle mfr / AP mfr / marriage
         // state. Lets users glance at the bar to confirm which AP
         // is connected without re-opening the browser panel.
-        if (auto const ap = ap3_status_snapshot(); ap.has_value()) {
+        if (auto const ap = ets_status_snapshot(); ap.has_value()) {
             ImGui::SameLine();
             std::string label = "\xEE\x83\x97  AP";
             std::string short_veh = ap->vehicle_descriptor;

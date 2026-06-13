@@ -32,8 +32,8 @@ constexpr std::string_view kSyntheticPrivateData =
 
 TEST_CASE("patch decoder: synthetic E2E fixture round-trip",
           "[library][patch_decoder]") {
-#ifndef ST_AP3_HAVE_CIPHER
-    SKIP("base64_decode lives behind ST_AP3_HAVE_CIPHER");
+#ifndef ST_ETS_HAVE_CIPHER
+    SKIP("base64_decode lives behind ST_ETS_HAVE_CIPHER");
 #else
     auto result = st::library::decode_ptm_xml(kSyntheticPrivateData);
     REQUIRE(result.has_value());
@@ -129,8 +129,8 @@ TEST_CASE("patch decoder: rejects empty input",
 
 TEST_CASE("patch decoder: rejects non-numeric romOffset",
           "[library][patch_decoder][negative]") {
-#ifndef ST_AP3_HAVE_CIPHER
-    SKIP("base64_decode lives behind ST_AP3_HAVE_CIPHER");
+#ifndef ST_ETS_HAVE_CIPHER
+    SKIP("base64_decode lives behind ST_ETS_HAVE_CIPHER");
 #else
     constexpr std::string_view kBad =
         "<PrivateData><vendorID>X</vendorID><vehicleID>Y</vehicleID>"
@@ -146,8 +146,8 @@ TEST_CASE("patch decoder: rejects non-numeric romOffset",
 
 TEST_CASE("patch decoder: rejects length / decoded-size mismatch",
           "[library][patch_decoder][negative]") {
-#ifndef ST_AP3_HAVE_CIPHER
-    SKIP("base64_decode lives behind ST_AP3_HAVE_CIPHER");
+#ifndef ST_ETS_HAVE_CIPHER
+    SKIP("base64_decode lives behind ST_ETS_HAVE_CIPHER");
 #else
     // length=5 declared but base64 body decodes to 3 bytes ("ABC")
     constexpr std::string_view kBad =
@@ -210,8 +210,8 @@ TEST_CASE("patch decoder: preserves duplicate-rom_offset entries in encounter or
     // appear in the decoded list in document order — collapsing by
     // rom_offset would lose the "set" half and let `ptm import`
     // produce a working.bin that doesn't match the source tune.
-#ifndef ST_AP3_HAVE_CIPHER
-    SKIP("base64_decode lives behind ST_AP3_HAVE_CIPHER");
+#ifndef ST_ETS_HAVE_CIPHER
+    SKIP("base64_decode lives behind ST_ETS_HAVE_CIPHER");
 #else
     constexpr std::string_view kXml =
         "<PrivateData>"

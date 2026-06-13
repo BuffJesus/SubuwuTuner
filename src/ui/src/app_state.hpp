@@ -389,7 +389,7 @@ struct AppState {
     bool show_gauge_cluster_panel{false};
     // AccessPort V3 file-vault browser panel. State (libusb channel,
     // device info, cached file listings) is owned file-statically in
-    // src/ui/src/panels/ap3_browser.cpp so AppState carries only the
+    // src/ui/src/panels/ets_browser.cpp so AppState carries only the
     // visibility toggle. See docs/34-cobb-ap-as-tune-vault.md.
     bool show_ap3_browser_panel{false};
     std::unique_ptr<st::log::LiveBuffer> gauge_buffer;
@@ -725,7 +725,7 @@ struct AppState {
     // ptm export modal — reverse of import. Reads the loaded project's
     // [ptm_metadata] + ptm_patches.toml, rebuilds the inner PrivateData
     // XML, runs through encrypt_ptm, writes to disk. Gated on
-    // ST_AP3_HAVE_PTM_REWRITE — surfaces NotImplemented otherwise.
+    // ST_ETS_HAVE_PTM_REWRITE — surfaces NotImplemented otherwise.
     bool show_ptm_export_modal{false};
     char ptm_export_out_path[1024]{};
     char ptm_export_seed_hex[32] = "0x12345678";

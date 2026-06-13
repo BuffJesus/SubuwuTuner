@@ -47,7 +47,7 @@ TEST_CASE("ptm list-patches refuses without --enable-cobb-ap-cipher",
 
 TEST_CASE("ptm list-patches reports unreadable file with --enable-cobb-ap-cipher",
           "[cli][ptm][integration][cipher]") {
-#ifndef ST_AP3_HAVE_CIPHER
+#ifndef ST_ETS_HAVE_CIPHER
     SKIP("Cipher gating off — runtime arm has no effect");
 #else
     if (!can_run()) {
@@ -63,17 +63,17 @@ TEST_CASE("ptm list-patches reports unreadable file with --enable-cobb-ap-cipher
 
 TEST_CASE("ptm list-patches exercises decrypt + decode on synthetic fixture",
           "[cli][ptm][integration][cipher]") {
-#ifndef ST_AP3_HAVE_CIPHER
+#ifndef ST_ETS_HAVE_CIPHER
     SKIP("Cipher gating off");
 #else
-#ifndef ST_FIXTURE_AP3_CIPHER_DIR
-    SKIP("ST_FIXTURE_AP3_CIPHER_DIR not defined");
+#ifndef ST_FIXTURE_ETS_CIPHER_DIR
+    SKIP("ST_FIXTURE_ETS_CIPHER_DIR not defined");
 #else
     if (!can_run()) {
         return;
     }
     std::string fixture =
-        std::string{ST_FIXTURE_AP3_CIPHER_DIR} + "/synthetic_e2e_ptm_envelope.ptm";
+        std::string{ST_FIXTURE_ETS_CIPHER_DIR} + "/synthetic_e2e_ptm_envelope.ptm";
     auto const r = st::test::cli_run(
         "--enable-cobb-ap-cipher ptm list-patches " + st::test::quote(fixture));
     REQUIRE(r.spawned);
@@ -109,7 +109,7 @@ TEST_CASE("ptm inspect refuses without --enable-cobb-ap-cipher",
 
 TEST_CASE("ptm inspect reports unreadable file with --enable-cobb-ap-cipher",
           "[cli][ptm][integration][cipher]") {
-#ifndef ST_AP3_HAVE_CIPHER
+#ifndef ST_ETS_HAVE_CIPHER
     SKIP("Cipher gating off");
 #else
     if (!can_run()) {
@@ -124,17 +124,17 @@ TEST_CASE("ptm inspect reports unreadable file with --enable-cobb-ap-cipher",
 
 TEST_CASE("ptm inspect exercises decrypt + decode on synthetic fixture",
           "[cli][ptm][integration][cipher]") {
-#ifndef ST_AP3_HAVE_CIPHER
+#ifndef ST_ETS_HAVE_CIPHER
     SKIP("Cipher gating off");
 #else
-#ifndef ST_FIXTURE_AP3_CIPHER_DIR
-    SKIP("ST_FIXTURE_AP3_CIPHER_DIR not defined");
+#ifndef ST_FIXTURE_ETS_CIPHER_DIR
+    SKIP("ST_FIXTURE_ETS_CIPHER_DIR not defined");
 #else
     if (!can_run()) {
         return;
     }
     std::string fixture =
-        std::string{ST_FIXTURE_AP3_CIPHER_DIR} + "/synthetic_e2e_ptm_envelope.ptm";
+        std::string{ST_FIXTURE_ETS_CIPHER_DIR} + "/synthetic_e2e_ptm_envelope.ptm";
     auto const r = st::test::cli_run(
         "--enable-cobb-ap-cipher ptm inspect " + st::test::quote(fixture));
     REQUIRE(r.spawned);
@@ -169,7 +169,7 @@ TEST_CASE("ptm diff requires two positional args",
 
 TEST_CASE("ptm diff reports missing files on cipher path",
           "[cli][ptm][integration][cipher]") {
-#ifndef ST_AP3_HAVE_CIPHER
+#ifndef ST_ETS_HAVE_CIPHER
     SKIP("Cipher gating off");
 #else
     if (!can_run()) {
@@ -185,17 +185,17 @@ TEST_CASE("ptm diff reports missing files on cipher path",
 
 TEST_CASE("ptm diff: a == b on synthetic fixture",
           "[cli][ptm][integration][cipher]") {
-#ifndef ST_AP3_HAVE_CIPHER
+#ifndef ST_ETS_HAVE_CIPHER
     SKIP("Cipher gating off");
 #else
-#ifndef ST_FIXTURE_AP3_CIPHER_DIR
-    SKIP("ST_FIXTURE_AP3_CIPHER_DIR not defined");
+#ifndef ST_FIXTURE_ETS_CIPHER_DIR
+    SKIP("ST_FIXTURE_ETS_CIPHER_DIR not defined");
 #else
     if (!can_run()) {
         return;
     }
     std::string const fixture =
-        std::string{ST_FIXTURE_AP3_CIPHER_DIR} + "/synthetic_e2e_ptm_envelope.ptm";
+        std::string{ST_FIXTURE_ETS_CIPHER_DIR} + "/synthetic_e2e_ptm_envelope.ptm";
     // Diff a file against itself. The synthetic fixture intentionally
     // fails decoding (trivial null inner payload), so the first decode
     // call returns ParseError → exit 1. The CLI plumbing of two
@@ -211,17 +211,17 @@ TEST_CASE("ptm diff: a == b on synthetic fixture",
 
 TEST_CASE("ptm diff --by-table accepted as flag",
           "[cli][ptm][integration][cipher]") {
-#ifndef ST_AP3_HAVE_CIPHER
+#ifndef ST_ETS_HAVE_CIPHER
     SKIP("Cipher gating off");
 #else
-#ifndef ST_FIXTURE_AP3_CIPHER_DIR
-    SKIP("ST_FIXTURE_AP3_CIPHER_DIR not defined");
+#ifndef ST_FIXTURE_ETS_CIPHER_DIR
+    SKIP("ST_FIXTURE_ETS_CIPHER_DIR not defined");
 #else
     if (!can_run()) {
         return;
     }
     std::string const fixture =
-        std::string{ST_FIXTURE_AP3_CIPHER_DIR} + "/synthetic_e2e_ptm_envelope.ptm";
+        std::string{ST_FIXTURE_ETS_CIPHER_DIR} + "/synthetic_e2e_ptm_envelope.ptm";
     // --by-table without --def should fall back to --by-layer and warn
     // on stderr — but the synthetic fixture still won't decode, so the
     // outcome is exit 1 (parse error). The point of this test is that
@@ -258,7 +258,7 @@ TEST_CASE("ptm import requires --base-rom",
 
 TEST_CASE("ptm import reports missing .ptm with --base-rom",
           "[cli][ptm][integration][cipher]") {
-#ifndef ST_AP3_HAVE_CIPHER
+#ifndef ST_ETS_HAVE_CIPHER
     SKIP("Cipher gating off");
 #else
     if (!can_run()) {
@@ -274,17 +274,17 @@ TEST_CASE("ptm import reports missing .ptm with --base-rom",
 
 TEST_CASE("ptm import exercises decrypt + decode on synthetic fixture",
           "[cli][ptm][integration][cipher]") {
-#ifndef ST_AP3_HAVE_CIPHER
+#ifndef ST_ETS_HAVE_CIPHER
     SKIP("Cipher gating off");
 #else
-#ifndef ST_FIXTURE_AP3_CIPHER_DIR
-    SKIP("ST_FIXTURE_AP3_CIPHER_DIR not defined");
+#ifndef ST_FIXTURE_ETS_CIPHER_DIR
+    SKIP("ST_FIXTURE_ETS_CIPHER_DIR not defined");
 #else
     if (!can_run()) {
         return;
     }
     std::string const fixture =
-        std::string{ST_FIXTURE_AP3_CIPHER_DIR} + "/synthetic_e2e_ptm_envelope.ptm";
+        std::string{ST_FIXTURE_ETS_CIPHER_DIR} + "/synthetic_e2e_ptm_envelope.ptm";
     // Use the fixture itself as a stand-in for a base ROM — we never
     // get past the decode step on this fixture (intentional malformed
     // inner per fixtures/ap3/cipher/README.md), so the base ROM path
@@ -323,7 +323,7 @@ TEST_CASE("ptm export requires --as",
 
 TEST_CASE("ptm export reports missing project dir",
           "[cli][ptm][integration][cipher]") {
-#ifndef ST_AP3_HAVE_CIPHER
+#ifndef ST_ETS_HAVE_CIPHER
     SKIP("Cipher gating off");
 #else
     if (!can_run()) {
@@ -336,7 +336,7 @@ TEST_CASE("ptm export reports missing project dir",
 #endif
 }
 
-#if defined(ST_AP3_HAVE_CIPHER) && defined(ST_AP3_HAVE_PTM_REWRITE)
+#if defined(ST_ETS_HAVE_CIPHER) && defined(ST_ETS_HAVE_PTM_REWRITE)
 TEST_CASE("ptm export -> ptm inspect end-to-end round-trip",
           "[cli][ptm][integration][cipher][rewrite]") {
     if (!can_run()) {
@@ -408,7 +408,7 @@ TEST_CASE("ptm export -> ptm inspect end-to-end round-trip",
 }
 #endif
 
-#if defined(ST_AP3_HAVE_CIPHER) && defined(ST_AP3_HAVE_PTM_REWRITE)
+#if defined(ST_ETS_HAVE_CIPHER) && defined(ST_ETS_HAVE_PTM_REWRITE)
 TEST_CASE("ptm import -> Project::open-compatible (5-file skeleton, project-validate passes)",
           "[cli][ptm][integration][cipher][rewrite]") {
     if (!can_run()) {
@@ -615,7 +615,7 @@ TEST_CASE("ptm verify requires two positionals",
     REQUIRE(r.exit_code == 2);
 }
 
-#if defined(ST_AP3_HAVE_CIPHER) && defined(ST_AP3_HAVE_PTM_REWRITE)
+#if defined(ST_ETS_HAVE_CIPHER) && defined(ST_ETS_HAVE_PTM_REWRITE)
 TEST_CASE("ptm verify: round-trip exits 0 on byte-identical match",
           "[cli][ptm][integration][cipher][rewrite]") {
     if (!can_run()) {

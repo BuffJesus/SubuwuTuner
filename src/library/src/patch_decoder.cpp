@@ -5,7 +5,7 @@
 
 #include "st/core/error.hpp"
 #include "st/core/result.hpp"
-#include "st/devices/ap3/ptm_cipher.hpp"
+#include "st/devices/ets/ptm_cipher.hpp"
 
 #include <cctype>
 #include <charconv>
@@ -362,7 +362,7 @@ Result<DecodedPtm> decode_ptm_xml(std::string_view xml) {
                 }
                 auto text = trim(xml.substr(patch_tag.content_start,
                                             patch_tag.content_end - patch_tag.content_start));
-                auto decoded = st::devices::ap3::cipher::base64_decode(text);
+                auto decoded = st::devices::ets::cipher::base64_decode(text);
                 if (!decoded.has_value()) {
                     return st::failure(st::ErrorCode::ParseError,
                                        "patch_decoder: <patch> body base64-decode failed at "

@@ -13,8 +13,8 @@ set(_st_transport_sources
     # built (no external deps); the libusb-backed channel impl is
     # the same TU regardless of ST_ENABLE_AP3 but compiles into a
     # NotImplemented stub when libusb isn't wired (see below).
-    src/cobb_ap_packet.cpp
-    src/cobb_ap_channel.cpp
+    src/ets_packet.cpp
+    src/ets_channel.cpp
 )
 
 # Platform-specific IByteChannel implementations. USB-CDC ACM

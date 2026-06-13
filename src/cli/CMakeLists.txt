@@ -25,7 +25,7 @@ target_link_libraries(subuwutuner-cli
         st::profile
         st::ai
         st::policy
-        st::devices_ap3
+        st::devices_ets
         st::library
         tomlplusplus::tomlplusplus
         st::warnings
