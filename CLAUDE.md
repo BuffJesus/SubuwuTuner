@@ -119,6 +119,7 @@ My first Session 1 cut had all four wrong (PKCS#7 in body / 4-byte trailer / BE 
 | Reason about the `.stune` project directory layout | `docs/21-stune-format.md` |
 | Reason about auto-update / installer / release channel | `docs/22-auto-update.md` |
 | Reason about SecurityAccess (UDS 0x27) / seed-key plug-in | `docs/23-security-access.md` |
+| Look up which SA variant lines up with which install state | `docs/38-subaru-sa-variants.md` |
 | Reason about Y-cable sniffing (during-flash capture, datalog RAM-poll discovery, protocol learning, feature RE for LC / FFS / rev limit) | `docs/24-sniff-workflows.md` |
 | Reason about the optional 0xB6 bulk-transfer write path (off by default) | `docs/26-bulk-reflash-cipher.md` |
 | Reason about / execute the junkyard-ECU bench-rig assembly (FSM pin references, power-on sequence, first read, brick-recovery loop) | `docs/28-bench-rig-build.md` |
