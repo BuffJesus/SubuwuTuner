@@ -5,7 +5,7 @@
 // AccessPort V3 (USB-only).
 //
 // Built on top of an IByteChannel that owns the USB bulk endpoints,
-// plus the wire codec in st::transport::ets and the FileInfo2
+// plus the wire codec in st::transport::ets and the VaultFileMetadata
 // reader/writer in st::devices::ets. The client knows how to issue
 // each command pair (setup + data for ReadFile / PutFile) and parse
 // the response, but is itself I/O-agnostic — the channel handles
@@ -195,7 +195,7 @@ private:
 };
 
 // Helper: split an absolute "/dir/.../file" path into the
-// (name, path) pair the AP expects in FileInfo2 records. `/maps/Foo.ptm`
+// (name, path) pair the AP expects in VaultFileMetadata records. `/maps/Foo.ptm`
 // → name="Foo.ptm", path="/maps/". `/backupcksum` → name="backupcksum",
 // path="/".
 struct SplitPath {

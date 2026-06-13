@@ -91,7 +91,7 @@ decode_body(std::span<std::uint8_t const> packet) {
     REQUIRE(packet.size() > hs + cs);
     std::span<std::uint8_t const> const body{packet.data() + hs,
                                              packet.size() - hs - cs};
-    auto decoded = st::devices::ets::decode_file_info(body);
+    auto decoded = st::devices::ets::decode_vault_file_metadata(body);
     REQUIRE(decoded.has_value());
     return *decoded;
 }

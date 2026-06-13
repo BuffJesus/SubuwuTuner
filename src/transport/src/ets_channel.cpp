@@ -125,7 +125,7 @@ public:
                 // The most common LIBUSB_ERROR_TIMEOUT-with-zero-progress
                 // failure mode is the §4.2 firmware daze: a prior
                 // malformed-body packet (typically u32-LE string lengths
-                // in a FileInfo2 record where uleb128 was required, but
+                // in a VaultFileMetadata record where uleb128 was required, but
                 // any body-shape error qualifies) wedges the AP's USB
                 // state machine. Subsequent OUT transfers — even
                 // body-less probes like cmd 0x28 — return Pipe error or

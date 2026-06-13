@@ -2,7 +2,7 @@
 // Copyright 2026 The SubuwuTuner Authors
 //
 // Regression test for commit ef70018 — `Client::read_file` cmd 0x20
-// setup body MUST encode the FileInfo2.path field as the full relative
+// setup body MUST encode the VaultFileMetadata.path field as the full relative
 // path with NO leading slash (e.g. "maps/Stage1.ptm"), not the directory
 // (e.g. "/maps/"). The earlier convention triggered a degenerate setup
 // ACK from the AP (name=".", size=0) which caused cmd 0x21 to return
@@ -97,7 +97,7 @@ TEST_CASE("ap3 read_file cmd 0x20 setup encodes path as full relative "
         channel.queue_read(warmup_pkt);
     }
     // cmd 0x20 setup ACK: a 1-byte body that won't decode as
-    // FileInfo2 (so decode_setup_ack_response_shape returns nullopt
+    // VaultFileMetadata (so decode_setup_ack_response_shape returns nullopt
     // and the degenerate-ACK fast-fail is skipped — letting read_file
     // proceed to cmd 0x21). cmd 0x21 then reads an empty queue and
     // times out, which is fine — we're only asserting on the OUT
@@ -124,14 +124,14 @@ TEST_CASE("ap3 read_file cmd 0x20 setup encodes path as full relative "
     auto const cmd20 = find_cmd20_packet(written);
 
     // Extract the body (between 7-byte header and 4-byte CRC) and
-    // decode it as FileInfo2.
+    // decode it as VaultFileMetadata.
     std::size_t const hs = st::transport::ets::kHeaderSize;
     std::size_t const cs = st::transport::ets::kCrcSize;
     REQUIRE(cmd20.size() > hs + cs);
     std::span<std::uint8_t const> const body{cmd20.data() + hs,
                                              cmd20.size() - hs - cs};
 
-    auto decoded = st::devices::ets::decode_file_info(body);
+    auto decoded = st::devices::ets::decode_vault_file_metadata(body);
     REQUIRE(decoded.has_value());
     CHECK(decoded->name == "Stage1.ptm");
     CHECK(decoded->path == "maps/Stage1.ptm");
@@ -173,7 +173,7 @@ TEST_CASE("ap3 read_file cmd 0x20 setup for root-level pseudo-file "
     std::size_t const cs = st::transport::ets::kCrcSize;
     std::span<std::uint8_t const> const body{cmd20.data() + hs,
                                              cmd20.size() - hs - cs};
-    auto decoded = st::devices::ets::decode_file_info(body);
+    auto decoded = st::devices::ets::decode_vault_file_metadata(body);
     REQUIRE(decoded.has_value());
     CHECK(decoded->name == "backupcksum");
     CHECK(decoded->path == "backupcksum");

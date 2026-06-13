@@ -27,7 +27,7 @@ namespace {
 
 // Strip a leading '/' from an AP-vault path. For cmd 0x22 (PutFile)
 // and cmd 0x25 (RemoveFile) the AP firmware expects the request
-// FileInfo2.path to be the full destination relative to the vault
+// VaultFileMetadata.path to be the full destination relative to the vault
 // root WITHOUT a leading slash — e.g. "maps/test.ptm", not
 // "/maps/test.ptm". Verified against `cmd22_putfile_setup_request_known_good.bin`
 // and `cmd25_removefile_request_known_good.bin`.
@@ -83,7 +83,7 @@ bool ap3_diagnostic_cmds_enabled() noexcept {
 // Per spec §6.13 (revised 2026-06-11 PM): cmd 0x28 (UserInfo) response
 // body shape is:
 //
-//   [0..29]    30-byte FileInfo2-style prefix
+//   [0..29]    30-byte VaultFileMetadata-style prefix
 //   [30]       u8 archive flag = 0x08
 //   [31..34]   u32 LE tracking ID = 1
 //   [35..38]   u32 LE string length
@@ -96,11 +96,11 @@ UserInfoFields parse_user_info_body(std::span<std::uint8_t const> body) {
     if (body.size() < kFraming) {
         return out;
     }
-    // The 30-byte FileInfo2 prefix is the leading magic + 3-byte
+    // The 30-byte VaultFileMetadata prefix is the leading magic + 3-byte
     // archive-config; validate the leading 27 bytes of magic, the
     // analyst spec doesn't require strict validation of the trailing
     // 3 bytes.
-    if (!std::equal(kFileInfo2Prefix.begin(), kFileInfo2Prefix.begin() + 27,
+    if (!std::equal(kVaultFileMetadataPrefix.begin(), kVaultFileMetadataPrefix.begin() + 27,
                     body.begin())) {
         return out;
     }
@@ -541,7 +541,7 @@ Result<std::vector<FileInfo>> Client::ls(std::string_view subdir) {
     }
     // cmd 0x26 ListFiles carries a single Boost-archived UTF-8 string
     // (directory name like "maps" / "presets" / "datalog" / "images")
-    // — NOT a FileInfo2 record. The AP firmware accepts bare names
+    // — NOT a VaultFileMetadata record. The AP firmware accepts bare names
     // without leading or trailing slashes; normalise here so callers
     // can still pass `/maps/` or `maps`.
     std::string dir{subdir};
@@ -570,14 +570,14 @@ Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
         return st::failure(std::move(s).error());
     }
     // ReadFile setup (cmd 0x20) expects:
-    //   - FileInfo2.name = basename ("test.ptm", "backupcksum")
-    //   - FileInfo2.path = directory with trailing slash and leading
+    //   - VaultFileMetadata.name = basename ("test.ptm", "backupcksum")
+    //   - VaultFileMetadata.path = directory with trailing slash and leading
     //     slash ("/maps/"); EXCEPT for root-level pseudo-files like
     //     /backupcksum, where path = name = bare token.
     // Empirical layout pinned against `cmd20_*_request_known_good.bin`.
     // cmd 0x20 ReadFile setup expects:
-    //   FileInfo2.name = basename (e.g. "Stage1.ptm")
-    //   FileInfo2.path = full relative path with NO leading slash
+    //   VaultFileMetadata.name = basename (e.g. "Stage1.ptm")
+    //   VaultFileMetadata.path = full relative path with NO leading slash
     //                    (e.g. "maps/Stage1.ptm" or "backupcksum")
     // Live-confirmed 2026-06-12 against the reference Python tool's
     // successful pull of 59 tunes from /maps/. The earlier convention
@@ -589,9 +589,9 @@ Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
     info.path = strip_leading_slash(path); // full relative path
 
     // Step 1: cmd 0x20 setup. Response carries the actual size in a
-    // FileInfo2 echo; we discard the host-echoed name/path and trust
+    // VaultFileMetadata echo; we discard the host-echoed name/path and trust
     // the size field for the step-2 read.
-    auto setup_body = encode_file_info(info);
+    auto setup_body = encode_vault_file_metadata(info);
     if (!setup_body.has_value()) {
         return st::failure(std::move(setup_body).error());
     }
@@ -625,11 +625,11 @@ Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
                 "lookup (name=\".\", size=0) for '" +
                     std::string{path} +
                     "'. Verify the path encoding — cmd 0x20 wants "
-                    "FileInfo2.path = full relative path with no leading "
+                    "VaultFileMetadata.path = full relative path with no leading "
                     "slash (e.g. \"maps/X.ptm\"), not the directory.");
         }
         reported_size = ack_info->size;
-    } else if (auto echoed_info = decode_file_info(*setup_resp);
+    } else if (auto echoed_info = decode_vault_file_metadata(*setup_resp);
                echoed_info.has_value()) {
         reported_size = echoed_info->size;
     }
@@ -686,8 +686,8 @@ Status Client::write_file(std::string_view path, std::span<std::uint8_t const> d
         return s;
     }
     // PutFile setup (cmd 0x22) expects:
-    //   - FileInfo2.name = basename
-    //   - FileInfo2.path = full destination WITHOUT leading slash
+    //   - VaultFileMetadata.name = basename
+    //   - VaultFileMetadata.path = full destination WITHOUT leading slash
     //     ("maps/test.ptm"). Different convention from ReadFile.
     // Empirical layout pinned against `cmd22_putfile_setup_request_known_good.bin`.
     auto split = split_ap_path(path);
@@ -698,7 +698,7 @@ Status Client::write_file(std::string_view path, std::span<std::uint8_t const> d
     info.size = data.size();
 
     // Step 1: cmd 0x22 setup.
-    auto setup_body = encode_file_info(info);
+    auto setup_body = encode_vault_file_metadata(info);
     if (!setup_body.has_value()) {
         return st::failure(std::move(setup_body).error());
     }
@@ -732,7 +732,7 @@ Status Client::remove_file(std::string_view path) {
     FileInfo info{};
     info.name = std::move(split.name);
     info.path = strip_leading_slash(path);
-    auto body = encode_file_info(info);
+    auto body = encode_vault_file_metadata(info);
     if (!body.has_value()) {
         return st::failure(std::move(body).error());
     }

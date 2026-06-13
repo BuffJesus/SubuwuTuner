@@ -52,20 +52,20 @@ std::vector<std::uint8_t> make_packet(std::uint8_t type,
 // Build a synthetic cmd 0x28 UserInfo response with the install state
 // field set to `installed_marker` ("Installed" or "Not Installed").
 // The other 5 fields are placeholders. Spec §6.13 wire shape: 30-byte
-// FileInfo2 prefix + u8 0x08 + u32 LE tracking + u32 LE str_len +
+// VaultFileMetadata prefix + u8 0x08 + u32 LE tracking + u32 LE str_len +
 // ASCII payload.
 std::vector<std::uint8_t> make_userinfo_body(std::string const &installed_marker) {
     std::string const payload =
         std::string{"v1.7.6.0-28785\nAPV3-USDM\nSUBTEST000\n"} +
         installed_marker + "\n2017 USDM WRX MT\n00000";
     std::vector<std::uint8_t> body;
-    // Reuse the canonical kFileInfo2Prefix (27 magic + 3 archive
+    // Reuse the canonical kVaultFileMetadataPrefix (27 magic + 3 archive
     // tail). parse_user_info_body validates the first 27 bytes
     // strictly; the 3 trailing bytes are part of the prefix per
     // spec §6.13.
     body.insert(body.end(),
-                st::devices::ets::kFileInfo2Prefix.begin(),
-                st::devices::ets::kFileInfo2Prefix.end());
+                st::devices::ets::kVaultFileMetadataPrefix.begin(),
+                st::devices::ets::kVaultFileMetadataPrefix.end());
     body.push_back(0x08U); // archive flag at [30]
     body.insert(body.end(), {0x01U, 0x00U, 0x00U, 0x00U}); // tracking id = 1
     auto const len = static_cast<std::uint32_t>(payload.size());

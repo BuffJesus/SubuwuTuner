@@ -16118,7 +16118,7 @@ int run_ls(int argc, char **argv, CommonOpts const &opts) {
         std::printf("%zu file%s in %s\n", records->size(), records->size() == 1 ? "" : "s",
                     subdir.c_str());
         for (auto const &r : *records) {
-            // FileInfo2 records in a ListFiles response use `path` for the
+            // VaultFileMetadata records in a ListFiles response use `path` for the
             // full relative path (e.g. "maps/Stage1.ptm") and `name` for
             // just the basename ("Stage1.ptm") — different from the request-
             // side convention. Print path-only; prepending `name` would

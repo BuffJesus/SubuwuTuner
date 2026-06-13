@@ -82,7 +82,7 @@ TEST_CASE("ap3 UserInfo: parse_user_info_body distinguishes Installed vs Not Ins
     // Build a minimal synthetic body per spec §6.13 with field 4 set
     // to "Not Installed" and verify the parser flips the married flag.
     std::vector<std::uint8_t> body;
-    // 30-byte FileInfo2 prefix (we only need the first 27 to match
+    // 30-byte VaultFileMetadata prefix (we only need the first 27 to match
     // exactly; the remaining 3 are opaque to the parser).
     std::array<std::uint8_t, 30> const kPrefix{
         0x16, 0x00, 0x00, 0x00, 0x73, 0x65, 0x72, 0x69, 0x61, 0x6C, 0x69, 0x7A, 0x61, 0x74, 0x69,

@@ -81,21 +81,21 @@ Result<std::uint32_t> read_le_u32(std::span<std::uint8_t const> bytes, std::size
 
 } // namespace
 
-Result<std::vector<std::uint8_t>> encode_file_info(FileInfo const &info) {
+Result<std::vector<std::uint8_t>> encode_vault_file_metadata(FileInfo const &info) {
     if (info.mtime > 0xFFFFFFFFULL) {
         return st::failure(st::ErrorCode::InvalidArgument,
-                           "ap3::encode_file_info: mtime overflows u32 (post-2106)");
+                           "ap3::encode_vault_file_metadata: mtime overflows u32 (post-2106)");
     }
     if (info.size > 0xFFFFFFFFULL) {
         return st::failure(st::ErrorCode::InvalidArgument,
-                           "ap3::encode_file_info: size overflows u32 (>4 GiB) — "
+                           "ap3::encode_vault_file_metadata: size overflows u32 (>4 GiB) — "
                            "AP firmware reads the metadata size field as u32 LE");
     }
     std::vector<std::uint8_t> out;
     out.reserve(kBoostEnvelope.size() + kFileInfo2ClassReg.size() + 4 + info.name.size() +
                 kMetadataSize + 4 + info.path.size());
     // 35-byte envelope + 2-byte class registration. Field order
-    // inside the FileInfo2 is `name → metadata → path` (NOT
+    // inside the VaultFileMetadata is `name → metadata → path` (NOT
     // name/path/metadata as the older spec §7 prose described).
     out.insert(out.end(), kBoostEnvelope.begin(), kBoostEnvelope.end());
     out.insert(out.end(), kFileInfo2ClassReg.begin(), kFileInfo2ClassReg.end());
@@ -121,20 +121,20 @@ Result<std::vector<std::uint8_t>> encode_string_body(std::string_view s) {
     return out;
 }
 
-Result<FileInfo> decode_file_info(std::span<std::uint8_t const> body) {
+Result<FileInfo> decode_vault_file_metadata(std::span<std::uint8_t const> body) {
     constexpr std::size_t kHeaderSize = kBoostEnvelope.size() + kFileInfo2ClassReg.size();
     if (body.size() < kHeaderSize + 4U + kMetadataSize + 4U) {
         return st::failure(st::ErrorCode::UnexpectedEof,
-                           "ap3::decode_file_info: shorter than minimum FileInfo2 body");
+                           "ap3::decode_vault_file_metadata: shorter than minimum VaultFileMetadata body");
     }
     if (!std::equal(kBoostEnvelope.begin(), kBoostEnvelope.end(), body.begin())) {
         return st::failure(st::ErrorCode::ParseError,
-                           "ap3::decode_file_info: 35-byte request envelope mismatch");
+                           "ap3::decode_vault_file_metadata: 35-byte request envelope mismatch");
     }
     if (body[kBoostEnvelope.size()] != kFileInfo2ClassReg[0] ||
         body[kBoostEnvelope.size() + 1] != kFileInfo2ClassReg[1]) {
         return st::failure(st::ErrorCode::ParseError,
-                           "ap3::decode_file_info: class registration mismatch");
+                           "ap3::decode_vault_file_metadata: class registration mismatch");
     }
     std::size_t off = kHeaderSize;
     // u32 LE name_len + name bytes.
@@ -145,7 +145,7 @@ Result<FileInfo> decode_file_info(std::span<std::uint8_t const> body) {
     off += 4U;
     if (off + *name_len > body.size()) {
         return st::failure(st::ErrorCode::UnexpectedEof,
-                           "ap3::decode_file_info: name truncated");
+                           "ap3::decode_vault_file_metadata: name truncated");
     }
     std::string name(reinterpret_cast<char const *>(body.data() + off),
                      static_cast<std::size_t>(*name_len));
@@ -153,7 +153,7 @@ Result<FileInfo> decode_file_info(std::span<std::uint8_t const> body) {
     // 27-byte metadata.
     if (off + kMetadataSize > body.size()) {
         return st::failure(st::ErrorCode::UnexpectedEof,
-                           "ap3::decode_file_info: metadata truncated");
+                           "ap3::decode_vault_file_metadata: metadata truncated");
     }
     auto mtime = read_le_u32(body, off);
     if (!mtime.has_value()) {
@@ -172,7 +172,7 @@ Result<FileInfo> decode_file_info(std::span<std::uint8_t const> body) {
     off += 4U;
     if (off + *path_len > body.size()) {
         return st::failure(st::ErrorCode::UnexpectedEof,
-                           "ap3::decode_file_info: path truncated");
+                           "ap3::decode_vault_file_metadata: path truncated");
     }
     std::string path(reinterpret_cast<char const *>(body.data() + off),
                      static_cast<std::size_t>(*path_len));
@@ -194,11 +194,11 @@ Result<FileInfo> decode_file_info(std::span<std::uint8_t const> body) {
 
 Result<std::vector<FileInfo>>
 decode_file_info_list(std::span<std::uint8_t const> body) {
-    // Vector<FileInfo2> wire format per spec §7 (revised 2026-06-11 PM).
-    // Critically DIFFERENT from the single-FileInfo2 layout that
-    // decode_file_info handles:
+    // Vector<VaultFileMetadata> wire format per spec §7 (revised 2026-06-11 PM).
+    // Critically DIFFERENT from the single-VaultFileMetadata layout that
+    // decode_vault_file_metadata handles:
     //
-    //   [0..29]    30-byte FileInfo2 prefix (same magic+config)
+    //   [0..29]    30-byte VaultFileMetadata prefix (same magic+config)
     //   [30]       u8 archive flag = 0x08
     //   [31..34]   u32 LE tracking ID = 1
     //   [35..38]   u32 LE = 0 (per-archive sentinel)
@@ -217,7 +217,7 @@ decode_file_info_list(std::span<std::uint8_t const> body) {
     // critical differences" subsection makes this explicit; first
     // observed 2026-06-11 against a captured cmd 0x26 response for
     // /presets/ (3 records).
-    if (body.size() < kFileInfo2Prefix.size()) {
+    if (body.size() < kVaultFileMetadataPrefix.size()) {
         return st::failure(st::ErrorCode::UnexpectedEof,
                            "ap3 decode_file_info_list: shorter than archive prefix");
     }
@@ -225,9 +225,9 @@ decode_file_info_list(std::span<std::uint8_t const> body) {
         return st::failure(st::ErrorCode::ParseError,
                            "ap3 decode_file_info_list: 'serialization::archive' magic mismatch");
     }
-    std::size_t off = kFileInfo2Prefix.size();
+    std::size_t off = kVaultFileMetadataPrefix.size();
     // Carrier framing between prefix and first record per the canonical
-    // 3-record /presets/ capture (`fileinfo2_list_response_known_good.bin`):
+    // 3-record /presets/ capture (`vault_file_metadata_list_response_known_good.bin`):
     //
     //   [30]      u8 archive flag (= 0x08)
     //   [31]      u8 (= 0x01; first-class-tracking marker)
@@ -277,7 +277,7 @@ decode_file_info_list(std::span<std::uint8_t const> body) {
         //   record 0:   27 bytes (= 4 mtime + 4 size + 17 flags + 2 class-tracking)
         //   records 1+: 25 bytes (= 4 mtime + 4 size + 17 flags)
         //
-        // Verified empirically against `fileinfo2_list_response_known_good.bin`
+        // Verified empirically against `vault_file_metadata_list_response_known_good.bin`
         // (3 records totaling 308 body bytes after stripping wire header).
         std::size_t const metadata_size = (i == 0) ? 27U : 25U;
         auto name_len = read_le_u32(body, off);
@@ -342,7 +342,7 @@ Result<FileInfo>
 decode_setup_ack_response_shape(std::span<std::uint8_t const> body) {
     // Layout (see HANDOFF-to-analyst-2026-06-12-cmd21-large-file-truncation
     // for the byte-level derivation):
-    //   [0..29]   30-byte FileInfo2 prefix (same as kFileInfo2Prefix)
+    //   [0..29]   30-byte VaultFileMetadata prefix (same as kVaultFileMetadataPrefix)
     //   [30..36]  7-byte fixed block 08 01 00 00 00 00 01
     //   [37..40]  u32 LE name_len
     //   [41..]    name
@@ -351,14 +351,14 @@ decode_setup_ack_response_shape(std::span<std::uint8_t const> body) {
     //   next 19   metadata flags (zero)
     //   next 4    u32 LE path_len
     //   next N    path
-    constexpr std::size_t kPrefixLen = kFileInfo2Prefix.size(); // 30
+    constexpr std::size_t kPrefixLen = kVaultFileMetadataPrefix.size(); // 30
     constexpr std::size_t kFixedBlockLen = 7;
     constexpr std::size_t kMinHeader = kPrefixLen + kFixedBlockLen + 4U;
     if (body.size() < kMinHeader) {
         return failure(ErrorCode::UnexpectedEof,
                        "ap3 decode_setup_ack_response_shape: body too short");
     }
-    if (!std::equal(kFileInfo2Prefix.begin(), kFileInfo2Prefix.begin() + 27,
+    if (!std::equal(kVaultFileMetadataPrefix.begin(), kVaultFileMetadataPrefix.begin() + 27,
                     body.begin())) {
         return failure(ErrorCode::ParseError,
                        "ap3 decode_setup_ack_response_shape: prefix magic mismatch");
