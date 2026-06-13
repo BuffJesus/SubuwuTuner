@@ -142,10 +142,10 @@ void render_status_bar(AppState &state) {
                 }
                 label += "  \xC2\xB7  " + short_veh;
             }
-            if (ap->marriage_known) {
+            if (ap->paired_known) {
                 chip(label.c_str(),
-                     ap->married ? chip_fg_ok() : chip_fg_danger(),
-                     ap->married ? chip_bg_ok() : chip_bg_danger());
+                     ap->vehicle_paired ? chip_fg_ok() : chip_fg_danger(),
+                     ap->vehicle_paired ? chip_bg_ok() : chip_bg_danger());
             } else {
                 chip(label.c_str(), chip_fg_muted(), chip_bg_muted());
             }
@@ -164,8 +164,8 @@ void render_status_bar(AppState &state) {
                     tip += "AP mfr.:       " + ap->ap_manufacturer + "\n";
                 }
                 tip += "Marriage:      ";
-                tip += ap->marriage_known
-                           ? (ap->married ? "Installed" : "Not Installed")
+                tip += ap->paired_known
+                           ? (ap->vehicle_paired ? "Installed" : "Not Installed")
                            : "(unparsed)";
                 ImGui::SetTooltip("%s", tip.c_str());
             }

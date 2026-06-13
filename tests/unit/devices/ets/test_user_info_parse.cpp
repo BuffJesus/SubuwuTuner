@@ -62,8 +62,8 @@ TEST_CASE("ap3 UserInfo: parse_user_info_body pins the canonical cmd 0x28 fixtur
     REQUIRE(*fields.ap_product_code == "AP3-SUB-004");
     REQUIRE(fields.ap_serial.has_value());
     REQUIRE(*fields.ap_serial == "SUBTEST000");
-    REQUIRE(fields.married.has_value());
-    REQUIRE(*fields.married == true);
+    REQUIRE(fields.vehicle_paired.has_value());
+    REQUIRE(*fields.vehicle_paired == true);
     REQUIRE(fields.vehicle.has_value());
     REQUIRE(*fields.vehicle == "2017 USDM WRX MT CCF Gen3");
 }
@@ -74,7 +74,7 @@ TEST_CASE("ap3 UserInfo: parse_user_info_body returns nullopt fields on truncate
     auto fields = st::devices::ets::parse_user_info_body(short_body);
     REQUIRE_FALSE(fields.firmware_version.has_value());
     REQUIRE_FALSE(fields.ap_serial.has_value());
-    REQUIRE_FALSE(fields.married.has_value());
+    REQUIRE_FALSE(fields.vehicle_paired.has_value());
 }
 
 TEST_CASE("ap3 UserInfo: parse_user_info_body distinguishes Installed vs Not Installed",
@@ -103,8 +103,8 @@ TEST_CASE("ap3 UserInfo: parse_user_info_body distinguishes Installed vs Not Ins
     body.insert(body.end(), payload.begin(), payload.end());
 
     auto fields = st::devices::ets::parse_user_info_body(body);
-    REQUIRE(fields.married.has_value());
-    REQUIRE(*fields.married == false);
+    REQUIRE(fields.vehicle_paired.has_value());
+    REQUIRE(*fields.vehicle_paired == false);
     REQUIRE(fields.firmware_version.has_value());
     REQUIRE(*fields.firmware_version == "v0");
     REQUIRE(fields.vehicle.has_value());

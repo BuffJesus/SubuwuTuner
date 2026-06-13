@@ -78,8 +78,8 @@ struct EtsStatusSnapshot {
     std::string hardware_type;        // cmd 0x2e — "AP-V3" / etc.
     std::string vehicle_manufacturer; // cmd 0x30 — "Subaru"
     std::string ap_manufacturer;      // cmd 0x31 — "COBB Tuning"
-    bool married{false};              // Installed vs Not Installed
-    bool marriage_known{false};       // distinguishes nullopt from false
+    bool vehicle_paired{false};              // Installed vs Not Installed
+    bool paired_known{false};       // distinguishes nullopt from false
 };
 [[nodiscard]] std::optional<EtsStatusSnapshot> ets_status_snapshot();
 void render_table_view(AppState &state, Fonts const &fonts);

@@ -144,7 +144,7 @@ UserInfoFields parse_user_info_body(std::span<std::uint8_t const> body) {
     out.ap_product_code = to_string_opt(fields[1]);
     out.ap_serial = to_string_opt(fields[2]);
     if (!fields[3].empty()) {
-        out.married = (fields[3] == "Installed");
+        out.vehicle_paired = (fields[3] == "Installed");
     }
     out.vehicle = to_string_opt(fields[4]);
     return out;
@@ -425,7 +425,7 @@ Result<DeviceState> Client::query_state() {
         state.firmware_version = fields.firmware_version;
         state.ap_serial = fields.ap_serial;
         state.vehicle_descriptor = fields.vehicle;
-        state.married = fields.married;
+        state.vehicle_paired = fields.vehicle_paired;
     }
 
     // cmd 0x04 firmware version — body-less request. The response is a
@@ -475,8 +475,8 @@ Result<DeviceState> Client::query_state() {
         // already wired.
         auto const dev_marriage =
             parse_marriage_from_device_settings(state.device_settings_body);
-        if (!state.married.has_value() && dev_marriage.has_value()) {
-            state.married = dev_marriage;
+        if (!state.vehicle_paired.has_value() && dev_marriage.has_value()) {
+            state.vehicle_paired = dev_marriage;
         }
     }
 

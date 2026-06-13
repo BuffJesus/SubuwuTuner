@@ -15787,7 +15787,7 @@ int cmd_config(int argc, char *argv[]) {
 // DeviceSettings blob undocumented. Until a follow-up analyst session
 // pins that down, query_state() returns `married = std::nullopt`
 // (meaning "unknown") and this CLI emits a one-line warning rather
-// than refusing outright. `--allow-unmarried-ap` is wired through for
+// than refusing outright. `--allow-unpaired-vehicle` is wired through for
 // forward-compat; today it changes nothing behavioral. When the spec
 // is extended, the gate flips on automatically.
 // ---------------------------------------------------------------------------
@@ -15800,7 +15800,7 @@ static bool g_cobb_ap_cipher_armed = false;
 namespace ets_cli {
 
 struct CommonOpts {
-    bool allow_unmarried{false};
+    bool allow_unpaired{false};
     std::uint16_t vid{st::transport::ets::kVendorId};
     std::uint16_t pid{st::transport::ets::kProductId};
 };
@@ -15840,8 +15840,8 @@ bool consume_common(int &argc, char **argv, CommonOpts &opts) {
     int write = 0;
     for (int read = 0; read < argc; ++read) {
         std::string_view const a{argv[read]};
-        if (a == "--allow-unmarried-ap") {
-            opts.allow_unmarried = true;
+        if (a == "--allow-unpaired-vehicle") {
+            opts.allow_unpaired = true;
             continue;
         }
         if (a == "--vid" && read + 1 < argc) {
@@ -15882,15 +15882,15 @@ open_channel(CommonOpts const &opts) {
 // gate. Returns true when the caller should proceed (with any
 // destructive op), false when refused.
 bool gate_marriage(st::devices::ets::DeviceState const &state, CommonOpts const &opts) {
-    if (state.married.has_value() && !*state.married && !opts.allow_unmarried) {
+    if (state.vehicle_paired.has_value() && !*state.vehicle_paired && !opts.allow_unpaired) {
         std::fputs(
             "ap3: the connected AccessPort reports Not Installed. SubuwuTuner has not\n"
-            "     been bench-tested against unmarried devices. Pass --allow-unmarried-ap\n"
+            "     been bench-tested against unmarried devices. Pass --allow-unpaired-vehicle\n"
             "     to bypass this check (at your own risk).\n",
             stderr);
         return false;
     }
-    if (!state.married.has_value()) {
+    if (!state.vehicle_paired.has_value()) {
         // cmd 0x28 is the sole marriage source per RE2; this branch
         // means its ASCII payload didn't parse (truncation, shape
         // drift in a future firmware, etc.). Warn but proceed —
@@ -15899,7 +15899,7 @@ bool gate_marriage(st::devices::ets::DeviceState const &state, CommonOpts const 
         std::fputs(
             "ap3: warning — marriage state could not be parsed from the cmd 0x28\n"
             "     UserInfo response. The ASCII payload may be truncated or have\n"
-            "     drifted shape. Proceeding anyway. Pass --allow-unmarried-ap to\n"
+            "     drifted shape. Proceeding anyway. Pass --allow-unpaired-vehicle to\n"
             "     silence this warning.\n",
             stderr);
     }
@@ -15926,7 +15926,7 @@ int run_state(int argc, char **argv, CommonOpts const &opts) {
     auto const veh_mfr  = state->vehicle_manufacturer.value_or(std::string{"(unparsed)"});
     auto const ap_mfr   = state->ap_manufacturer.value_or(std::string{"(unparsed)"});
     char const *marriage_str =
-        state->married.has_value() ? (*state->married ? "Installed" : "Not Installed")
+        state->vehicle_paired.has_value() ? (*state->vehicle_paired ? "Installed" : "Not Installed")
                                    : "(unparsed)";
     if (fmt == "json") {
         std::printf("{\n");
@@ -15938,7 +15938,7 @@ int run_state(int argc, char **argv, CommonOpts const &opts) {
         std::printf("  \"vehicle_manufacturer\": \"%s\",\n", veh_mfr.c_str());
         std::printf("  \"ap_manufacturer\": \"%s\",\n", ap_mfr.c_str());
         std::printf("  \"married\": %s,\n",
-                    state->married.has_value() ? (*state->married ? "true" : "false") : "null");
+                    state->vehicle_paired.has_value() ? (*state->vehicle_paired ? "true" : "false") : "null");
         std::printf("  \"user_info_body_bytes\": %zu,\n", state->user_info_body.size());
         std::printf("  \"firmware_body_bytes\": %zu,\n", state->firmware_body.size());
         std::printf("  \"device_settings_body_bytes\": %zu,\n", state->device_settings_body.size());
@@ -15963,8 +15963,8 @@ int run_state(int argc, char **argv, CommonOpts const &opts) {
         if (state->ap_manufacturer.has_value()) {
             std::printf("ap_manufacturer          = \"%s\"\n", ap_mfr.c_str());
         }
-        if (state->married.has_value()) {
-            std::printf("married                  = %s\n", *state->married ? "true" : "false");
+        if (state->vehicle_paired.has_value()) {
+            std::printf("married                  = %s\n", *state->vehicle_paired ? "true" : "false");
         }
         std::printf("user_info_body_bytes     = %zu\n", state->user_info_body.size());
         std::printf("firmware_body_bytes      = %zu\n", state->firmware_body.size());
@@ -16713,7 +16713,7 @@ int cmd_ap3(int argc, char *argv[]) {
                    "                     (no device needed). Requires --enable-cobb-ap-cipher.\n"
                    "\n"
                    "Common flags:\n"
-                   "  --allow-unmarried-ap   Don't refuse if marriage state reports Not\n"
+                   "  --allow-unpaired-vehicle   Don't refuse if marriage state reports Not\n"
                    "                         Installed (default policy refuses; see docs/34)\n"
                    "  --vid <hex16> --pid <hex16>\n"
                    "                         Override the VID/PID match (default: 0x1A84/0x0121)\n"

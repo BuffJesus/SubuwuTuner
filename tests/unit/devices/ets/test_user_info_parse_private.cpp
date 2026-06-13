@@ -69,8 +69,8 @@ TEST_CASE("ap3 UserInfo (private): parse against the un-scrubbed live capture",
     // Confirms the scrubbing process only modified the serial bytes,
     // didn't perturb anything else in the framing.
     REQUIRE(*fields.ap_serial == "SUB0484551");
-    REQUIRE(fields.married.has_value());
-    REQUIRE(*fields.married == true);
+    REQUIRE(fields.vehicle_paired.has_value());
+    REQUIRE(*fields.vehicle_paired == true);
     REQUIRE(fields.vehicle.has_value());
     REQUIRE(*fields.vehicle == "2017 USDM WRX MT CCF Gen3");
 }

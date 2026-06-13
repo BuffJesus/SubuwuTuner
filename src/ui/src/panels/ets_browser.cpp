@@ -68,7 +68,7 @@ struct PanelState {
     std::map<std::string, std::vector<st::devices::ets::FileInfo>> listings;
     std::map<std::string, std::string> listing_errors; // per-subdir last error
 
-    bool allow_unmarried{false};
+    bool allow_unpaired{false};
 
     // Cached "AccessPort detected" probe — refreshed at most once per
     // ~1 second so we don't libusb_get_device_list every frame.
@@ -386,8 +386,8 @@ void render_device_header(PanelState &p) {
 
     ImGui::TextDisabled("Marriage");
     ImGui::SameLine(140.0f);
-    if (s.married.has_value()) {
-        if (*s.married) {
+    if (s.vehicle_paired.has_value()) {
+        if (*s.vehicle_paired) {
             chip("Installed", chip_fg_ok(), chip_bg_ok());
         } else {
             chip("Not Installed", chip_fg_danger(), chip_bg_danger());
@@ -419,7 +419,7 @@ void render_device_header(PanelState &p) {
         }
     }
     ImGui::SameLine();
-    ImGui::Checkbox("Allow unmarried##ap3_allow_unmarried", &p.allow_unmarried);
+    ImGui::Checkbox("Allow unmarried##ap3_allow_unpaired", &p.allow_unpaired);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
             "When ON, suppresses the warning emitted when the marriage\n"
@@ -595,8 +595,8 @@ std::optional<EtsStatusSnapshot> ets_status_snapshot() {
     out.hardware_type = s.hardware_type.value_or("");
     out.vehicle_manufacturer = s.vehicle_manufacturer.value_or("");
     out.ap_manufacturer = s.ap_manufacturer.value_or("");
-    out.marriage_known = s.married.has_value();
-    out.married = s.married.value_or(false);
+    out.paired_known = s.vehicle_paired.has_value();
+    out.vehicle_paired = s.vehicle_paired.value_or(false);
     return out;
 }
 

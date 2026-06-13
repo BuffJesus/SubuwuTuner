@@ -88,7 +88,7 @@ struct DeviceState {
     // to operate when the value is `false`; nullopt warns but
     // proceeds (since blocking on a TBD parse would brick the
     // capability for every user).
-    std::optional<bool> married;
+    std::optional<bool> vehicle_paired;
 };
 
 struct ClientConfig {
@@ -217,7 +217,7 @@ struct UserInfoFields {
     std::optional<std::string> firmware_version;
     std::optional<std::string> ap_product_code;
     std::optional<std::string> ap_serial;
-    std::optional<bool> married;
+    std::optional<bool> vehicle_paired;
     std::optional<std::string> vehicle;
 };
 

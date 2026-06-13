@@ -126,8 +126,8 @@ TEST_CASE("query_state preserves cmd 0x28 marriage flag — Installed",
     st::devices::ets::Client client{channel, cfg};
     auto state = client.query_state();
     REQUIRE(state.has_value());
-    REQUIRE(state->married.has_value());
-    CHECK(*state->married == true);
+    REQUIRE(state->vehicle_paired.has_value());
+    CHECK(*state->vehicle_paired == true);
 }
 
 TEST_CASE("query_state preserves cmd 0x28 marriage flag — Not Installed",
@@ -139,15 +139,15 @@ TEST_CASE("query_state preserves cmd 0x28 marriage flag — Not Installed",
     st::devices::ets::Client client{channel, cfg};
     auto state = client.query_state();
     REQUIRE(state.has_value());
-    REQUIRE(state->married.has_value());
-    CHECK(*state->married == false);
+    REQUIRE(state->vehicle_paired.has_value());
+    CHECK(*state->vehicle_paired == false);
 }
 
 TEST_CASE("query_state leaves marriage nullopt when cmd 0x28 + cmd 0x03 both silent",
           "[devices][ap3][marriage]") {
     // Cmd 0x28 response with a malformed prefix → parse_user_info_body
-    // returns all-nullopt → state.married = nullopt. Cmd 0x03 hook
-    // returns nullopt today. Combined: state.married stays nullopt and
+    // returns all-nullopt → state.vehicle_paired = nullopt. Cmd 0x03 hook
+    // returns nullopt today. Combined: state.vehicle_paired stays nullopt and
     // the CLI gate emits "marriage unparsed — proceeding". This is the
     // current observable behavior; pinning it makes sure a future
     // refactor doesn't accidentally default marriage to false (which
@@ -161,5 +161,5 @@ TEST_CASE("query_state leaves marriage nullopt when cmd 0x28 + cmd 0x03 both sil
     st::devices::ets::Client client{channel, cfg};
     auto state = client.query_state();
     REQUIRE(state.has_value());
-    CHECK_FALSE(state->married.has_value());
+    CHECK_FALSE(state->vehicle_paired.has_value());
 }
