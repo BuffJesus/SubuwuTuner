@@ -59,6 +59,25 @@ bool readfile_drain_mode_enabled() noexcept {
     return cached == 1;
 }
 
+// Diagnostic-cmd gate per workstream G. When the env-var is set,
+// `Client::remount_user_filesystem` (cmd 0x05) + `Client::get_capabilities`
+// (cmd 0x1f) become callable. Cmd 0x05 needs a transport-block-list
+// bypass (it's on `is_blocked_command`'s defense-in-depth list — see
+// dispatch_table_CORRECTED.md: actually OnFilesystem::remountUser, not
+// reboot, but field reports of dazes keep it blocked by default). Cmd
+// 0x1f is already in the safe range; only the env-var gate stops the
+// API from being called.
+bool ap3_diagnostic_cmds_enabled() noexcept {
+    // Re-read on each call so tests can flip the env-var between
+    // cases — unlike `readfile_drain_mode_enabled()` which caches
+    // (its value is meant to be set once at process start). The
+    // hot-path cost of a single getenv per gated call is negligible
+    // (these are not in the inner loop of any throughput-sensitive
+    // path).
+    char const *v = std::getenv("ST_AP3_ENABLE_DIAGNOSTIC_CMDS");
+    return v != nullptr && std::string{v} == "1";
+}
+
 } // namespace
 
 // Per spec §6.13 (revised 2026-06-11 PM): cmd 0x28 (UserInfo) response
@@ -699,6 +718,84 @@ Status Client::remove_file(std::string_view path) {
         return st::failure(std::move(ack).error());
     }
     return st::ok();
+}
+
+namespace {
+
+// Build + ship a packet bypassing the codec-level block list. Only
+// callable from within Client and only after the diagnostic-cmd env-
+// var has been validated. Mirrors `st::transport::ap3::encode_packet`
+// minus the `is_blocked_command` check.
+Status send_packet_bypassing_block_list(
+    st::transport::IByteChannel &channel, std::uint8_t type,
+    std::span<std::uint8_t const> body) {
+    using namespace st::transport::ap3;
+    std::uint32_t const wire_len =
+        static_cast<std::uint32_t>(body.size() + kCrcSize);
+    std::vector<std::uint8_t> out;
+    out.reserve(kHeaderSize + body.size() + kCrcSize);
+    out.push_back(kSyncByte0);
+    out.push_back(kSyncByte1);
+    out.push_back(static_cast<std::uint8_t>((wire_len >> 16) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((wire_len >> 8) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>(wire_len & 0xFFU));
+    out.push_back(0x00U); // reserved
+    out.push_back(type);
+    out.insert(out.end(), body.begin(), body.end());
+    std::uint32_t const crc = packet_crc(out);
+    out.push_back(static_cast<std::uint8_t>((crc >> 24) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((crc >> 16) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((crc >> 8) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>(crc & 0xFFU));
+    return channel.write_bytes(out);
+}
+
+} // namespace
+
+Status Client::remount_user_filesystem() {
+    if (!ap3_diagnostic_cmds_enabled()) {
+        return st::failure(
+            st::ErrorCode::PolicyDenied,
+            "ap3::remount_user_filesystem (cmd 0x05): diagnostic cmds are off "
+            "by default — set ST_AP3_ENABLE_DIAGNOSTIC_CMDS=1 to enable. See "
+            "RE wave 4 + dispatch_table_CORRECTED.md; the firmware-version "
+            "uncertainty applies — live behavior may vary across AP builds.");
+    }
+    if (auto s = ensure_session_warmup(); !s.has_value()) {
+        return s;
+    }
+    if (auto s = send_packet_bypassing_block_list(
+            *channel_, 0x05U, std::span<std::uint8_t const>{});
+        !s.has_value()) {
+        return s;
+    }
+    auto ack = receive_packet_body();
+    if (!ack.has_value()) {
+        return st::failure(std::move(ack).error());
+    }
+    return st::ok();
+}
+
+Result<std::vector<std::uint8_t>> Client::get_capabilities() {
+    if (!ap3_diagnostic_cmds_enabled()) {
+        return st::failure(
+            st::ErrorCode::PolicyDenied,
+            "ap3::get_capabilities (cmd 0x1f): diagnostic cmds are off by "
+            "default — set ST_AP3_ENABLE_DIAGNOSTIC_CMDS=1 to enable. The "
+            "response body shape is un-RE'd; raw bytes are returned for the "
+            "caller to inspect (see RE wave 5 §ε2 + dispatch_table_CORRECTED.md).");
+    }
+    if (auto s = ensure_session_warmup(); !s.has_value()) {
+        return st::failure(std::move(s).error());
+    }
+    // Cmd 0x1f is in the safe range (not on is_blocked_command), so
+    // the normal send_packet path is fine. The env-var still gates
+    // because the response body shape is un-decoded.
+    if (auto s = send_packet(0x1fU, std::span<std::uint8_t const>{});
+        !s.has_value()) {
+        return st::failure(std::move(s).error());
+    }
+    return receive_packet_body();
 }
 
 } // namespace st::devices::ap3

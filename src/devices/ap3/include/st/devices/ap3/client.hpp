@@ -124,6 +124,24 @@ public:
     // cmd 0x25 — remove a file by absolute path.
     [[nodiscard]] Status remove_file(std::string_view path);
 
+    // Diagnostic cmds — env-var gated, off by default.
+    // ST_AP3_ENABLE_DIAGNOSTIC_CMDS=1 unlocks both methods; without it
+    // they return PolicyDenied without touching the wire. The
+    // firmware-version uncertainty (RE wave 3 dispatch table extracted
+    // from binary v1.7.6.0-28785) means these are NOT guaranteed safe
+    // on other AP builds.
+    //
+    // remount_user_filesystem (cmd 0x05) bypasses the codec-level
+    // block list internally — useful as a "flush filesystem caches"
+    // step after a bulk-write batch. Per RE wave 3 corrected dispatch
+    // table this maps to ap::Filesystem::remountUser, not reboot.
+    //
+    // get_capabilities (cmd 0x1f) maps to OnCapabilities per the
+    // corrected dispatch table; response body shape is un-RE'd, so
+    // the raw bytes come back as a vector for the caller to inspect.
+    [[nodiscard]] Status remount_user_filesystem();
+    [[nodiscard]] Result<std::vector<std::uint8_t>> get_capabilities();
+
 private:
     [[nodiscard]] Status send_packet(std::uint8_t type, std::span<std::uint8_t const> body);
     [[nodiscard]] Result<std::vector<std::uint8_t>> receive_packet_body();
