@@ -17151,17 +17151,35 @@ void render_diff_text(std::string const &a_path, std::string const &b_path,
         }
         std::printf("\n");
     } else if (!r.by_layer.empty()) {
-        std::printf("By layer\n");
+        // Per-layer view sorted by total impact (a_only + b_only +
+        // changed) descending — top-of-list is where the tune
+        // diverges most. Each layer gets two lines: a headline naming
+        // the layer + total impact, then a breakdown showing
+        // direction (a_only / b_only / changed-at-shared).
+        std::printf("By layer (sorted by impact)\n");
         for (auto const &ld : r.by_layer) {
             auto const label = st::devices::ap3::layer_label(ld.layer);
-            std::printf("  %-30.*s a_only=%u/%s  b_only=%u/%s  "
-                        "shared=%u (changed=%u/%s)\n",
+            std::uint64_t const total_bytes =
+                ld.a_only_bytes + ld.b_only_bytes + ld.changed_bytes;
+            std::uint32_t const total_patches =
+                ld.a_only_patches + ld.b_only_patches + ld.shared_patches;
+            std::printf("  %-26.*s  %s bytes across %u patches\n",
                         static_cast<int>(label.size()), label.data(),
+                        with_commas(total_bytes).c_str(), total_patches);
+            std::printf("    a_only=%u/%s  b_only=%u/%s  shared=%u  "
+                        "changed=%u/%s\n",
                         ld.a_only_patches, with_commas(ld.a_only_bytes).c_str(),
                         ld.b_only_patches, with_commas(ld.b_only_bytes).c_str(),
                         ld.shared_patches, ld.changed_at_shared,
                         with_commas(ld.changed_bytes).c_str());
         }
+        // Totals footer aggregating across layers — at-a-glance "this
+        // tune changes N bytes across M layers" headline.
+        std::uint64_t const total_all_bytes =
+            r.a_only_bytes + r.b_only_bytes + r.changed_bytes;
+        std::printf("  ----\n");
+        std::printf("  Total                       %s bytes across %zu layers\n",
+                    with_commas(total_all_bytes).c_str(), r.by_layer.size());
         std::printf("\n");
     }
 
