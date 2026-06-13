@@ -17,21 +17,21 @@
 // calibrated against the NTMotorsports FA24-swap basemap (cipher-decrypted
 // 2026-06-09; see findings/ntm-fa24-basemap-2026-06-08/WORKFLOW_VALIDATION.md):
 //   1. engine_displacement                         → 2.4 L
-//   2. fuel_timing_hpfp_phase_transfer_curve       → NTM 16-byte preset
+//   2. fuel_timing_hpfp_phase_transfer_curve       → a community swap-basemap vendor 16-byte preset
 //      16-element 1-D uint8 table at canon 0x49B98, indexed by the
-//      halfword phase axis at 0x40E04. NTM tunes indices 6..10 to
+//      halfword phase axis at 0x40E04. a community swap-basemap vendor tunes indices 6..10 to
 //      smooth the descent through the transition zone; the preset
-//      writes NTM's full 16-byte pattern verbatim. The named Base
-//      Offset uint16 at 0x49BA8 stays stock (NTM doesn't touch it).
+//      writes a community swap-basemap vendor's full 16-byte pattern verbatim. The named Base
+//      Offset uint16 at 0x49BA8 stays stock (a community swap-basemap vendor doesn't touch it).
 //      Resolved 2026-06-09 via Ghidra (see HPFP_0x49BA0_RESOLVED.md).
-//   3. avcs_intake_*_intake_cam_target_tgv_closed  → NTM per-cell preset
-//      The defaults branch writes NTM's actual 10×16 cam-target
+//   3. avcs_intake_*_intake_cam_target_tgv_closed  → a community swap-basemap vendor per-cell preset
+//      The defaults branch writes a community swap-basemap vendor's actual 10×16 cam-target
 //      table (extracted from their FA24-swap basemap; see
 //      kNtmAvcsCamTargetTgvClosed). Baro Low == Baro High in both
-//      stock and NTM, so they share the same preset. Defaults and
+//      stock and a community swap-basemap vendor, so they share the same preset. Defaults and
 //      basemap branches produce identical bytes for these tables.
 //   4. fuel_injectors_pulse_injector_mult_table    → ×1.43 per cell
-//      NTM scales uniformly by ~1.43, not 1.18 (the pre-NTM-data guess).
+//      a community swap-basemap vendor scales uniformly by ~1.43, not 1.18 (the pre-a community swap-basemap vendor-data guess).
 //
 // Each edit routes through the standard apply_op() pipeline so the
 // existing undo/redo and audit log surface them — "Revert all" is
@@ -44,7 +44,7 @@
 //   - Per-cell math for AVCS offset + Injector Mult scaling needs
 //     the apply_op interface extended to N-table batched edits or
 //     simply iterated table-by-table — see TODO at apply_fa24_swap().
-//   - NTM basemap byte-diff handling waits on the basemap arrival
+//   - a community swap-basemap vendor basemap byte-diff handling waits on the basemap arrival
 //     (~week of 2026-06-09 per the user). Step 2's "Yes" branch is
 //     currently a stub that prints a "not yet implemented" toast.
 
@@ -84,7 +84,7 @@ constexpr char const *kWorkflowId = "fa24_swap";
 // because their hardware already aligns the FA24 cam signal with
 // what the FA20 ECU expects).
 enum class CamStrategy : std::uint8_t {
-    KeepFA24Cams,   // NTM path — Atlas applies HPFP phase + AVCS offset
+    KeepFA24Cams,   // a community swap-basemap vendor path — Atlas applies HPFP phase + AVCS offset
     SwapFA20Cams,   // Roberto path — mechanical fix, no software work
     RsMotorsKit,    // RS Motors trigger-wheels — no software work
 };
@@ -113,10 +113,10 @@ enum class BasemapStatusSeverity : std::uint8_t { Ok, Warn, Error };
 struct ModalState {
     int step{0};
     CamStrategy cam_strategy{CamStrategy::KeepFA24Cams};
-    // Default to LoadBasemap. NTM's per-cell AVCS retune can't be
+    // Default to LoadBasemap. a community swap-basemap vendor's per-cell AVCS retune can't be
     // honestly expressed as a uniform delta, and the HPFP lobe-phase
     // descriptor's per-byte semantics aren't RE'd — both are best
-    // served by copying the user's NTM basemap. UseDefaults remains
+    // served by copying the user's a community swap-basemap vendor basemap. UseDefaults remains
     // a fallback for users who don't have a basemap in hand. Step 2's
     // "No" radio still works; it's just not the default any more.
     BasemapSource basemap_source{BasemapSource::LoadBasemap};
@@ -335,7 +335,7 @@ void draw_basemap(AppState &state) {
 
     ImGui::TextWrapped("Do you have a basemap to import?");
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
-    text_subtle("Recommended: pick 'Yes' and load your tuner's FA24 basemap (e.g. NTM's). "
+    text_subtle("Recommended: pick 'Yes' and load your tuner's FA24 basemap (e.g. a community swap-basemap vendor's). "
                 "The AVCS cam targets are per-cell, not uniform — defaults approximate them "
                 "with a mean delta, basemap gives you the exact curve. Either way, bench / "
                 "dyno time is still required to refine.");
@@ -465,8 +465,8 @@ void draw_basemap(AppState &state) {
         g_state.basemap_source = BasemapSource::UseDefaults;
     }
     ImGui::Indent();
-    text_subtle("Fallback only. AVCS targets get cell-mean approximations of NTM's per-cell "
-                "retune; HPFP lobe-phase descriptor gets NTM's exact byte pattern. Safe to "
+    text_subtle("Fallback only. AVCS targets get cell-mean approximations of a community swap-basemap vendor's per-cell "
+                "retune; HPFP lobe-phase descriptor gets a community swap-basemap vendor's exact byte pattern. Safe to "
                 "start from but log + verify HPFP rail pressure before sustained driving.");
     ImGui::Unindent();
 }
@@ -493,14 +493,14 @@ void draw_review(AppState &state) {
     // Surface the case where the user left Step 2 on "Yes" (the
     // default) but never picked a file. Apply still falls through to
     // defaults, but staying silent would let the user think they're
-    // getting NTM-exact curves when they're not.
+    // getting a community swap-basemap vendor-exact curves when they're not.
     if (g_state.basemap_source == BasemapSource::LoadBasemap &&
         g_state.basemap_path.empty()) {
         ImVec4 const color = chip_fg_caution();
         ImGui::TextColored(color,
                            "No basemap picked yet \xE2\x80\x94 these edits will use "
                            "SubuwuTuner's fallback defaults. Click Back to pick a basemap "
-                           "for NTM-exact values.");
+                           "for a community swap-basemap vendor-exact values.");
         ImGui::Dummy(ImVec2(0.0f, kSpaceS));
     }
 
@@ -529,7 +529,7 @@ void draw_review(AppState &state) {
                    "FA24 cars run 2.4 L; the basemap captures the exact stored value.");
         change_row("Fuel - Timing - HPFP - Lobe Phase Descriptor",
                    "copied from basemap",
-                   "4-byte cluster at canon 0x49BA0 that NTM-style basemaps rewrite "
+                   "4-byte cluster at canon 0x49BA0 that a community swap-basemap vendor-style basemaps rewrite "
                    "for the FA24 cam lobe-phase fix.");
         change_row("AVCS - Intake - Cam Target (Baro Low, TGV Closed)",
                    "copied from basemap",
@@ -546,24 +546,24 @@ void draw_review(AppState &state) {
         change_row("Engine - Displacement", "2.0 L → 2.4 L",
                    "Required for the MAF / load-calc math to track the larger engine.");
         change_row("Fuel - Timing - HPFP - Phase Transfer Curve",
-                   "stock 16-byte curve → NTM smoothed transition (indices 6..10)",
+                   "stock 16-byte curve → a community swap-basemap vendor smoothed transition (indices 6..10)",
                    "16-element 1-D lookup table at canon 0x49B98 (Ghidra-resolved "
-                   "2026-06-09). NTM keeps the plateaus at both ends and smooths the "
+                   "2026-06-09). a community swap-basemap vendor keeps the plateaus at both ends and smooths the "
                    "transition zone — full 16-byte preset written. Safety-critical: "
                    "wrong values affect HPFP pressure-or-timing transfer behavior.");
         change_row("AVCS - Intake - Cam Target (Baro Low, TGV Closed)",
-                   "stock → NTM per-cell preset (10×16 cells, 5°..30° range)",
-                   "The defaults branch now writes NTM's exact 10×16 cam-target "
+                   "stock → a community swap-basemap vendor per-cell preset (10×16 cells, 5°..30° range)",
+                   "The defaults branch now writes a community swap-basemap vendor's exact 10×16 cam-target "
                    "table (extracted from their FA24-swap basemap). Identical to "
                    "the basemap-load path for this table.");
         change_row("AVCS - Intake - Cam Target (Baro High, TGV Closed)",
-                   "stock → NTM per-cell preset (identical to Baro Low)",
-                   "NTM keeps Baro Low and Baro High at the same values in both "
+                   "stock → a community swap-basemap vendor per-cell preset (identical to Baro Low)",
+                   "a community swap-basemap vendor keeps Baro Low and Baro High at the same values in both "
                    "stock and their basemap, so they share the same preset.");
         change_row("Fuel - Injectors - Pulse - Injector Mult Table",
                    "per-cell stock × 1.43",
                    "Scales injector pulse-width for the FA24's higher flow rate. "
-                   "NTM's uniform ×1.43 multiplier; calibrated against their basemap.");
+                   "a community swap-basemap vendor's uniform ×1.43 multiplier; calibrated against their basemap.");
     }
 
     ImGui::Dummy(ImVec2(0.0f, kSpaceM));
@@ -629,8 +629,8 @@ void copy_table_from_basemap(AppState &state, std::string const &label,
 //     double. Covers Displacement (set 2.4 L), HPFP (set 0x3D37322C),
 //     Injector mult (×1.43).
 //   * **Per-cell preset** — default_preset is a row-major flat span
-//     of NTM's actual cells. Used for the AVCS Cam Target tables
-//     where NTM's edit is a structured 2D retune that no scalar op
+//     of a community swap-basemap vendor's actual cells. Used for the AVCS Cam Target tables
+//     where a community swap-basemap vendor's edit is a structured 2D retune that no scalar op
 //     approximates well. When the preset is non-empty, the apply
 //     path uses it and ignores default_op/default_arg.
 // Exactly one of the two should be set. The descriptor is constexpr
@@ -638,11 +638,11 @@ void copy_table_from_basemap(AppState &state, std::string const &label,
 // apply path silently skips it rather than warning at runtime.
 using EditOp = st::Status (*)(st::Definition::TableData &, st::edit::Rect, double);
 
-// 16-element NTM HPFP Phase Transfer Curve. Extracted from the NTM
+// 16-element a community swap-basemap vendor HPFP Phase Transfer Curve. Extracted from the a community swap-basemap vendor
 // FA24-swap basemap (cipher_agent decode 2026-06-09) at canon
 // 0x49B98. Raw uint8 values 1:1 (raw_uint8 scaling factor 1.0).
 // Indexed by the halfword phase axis at canon 0x40E04 (uniform ramp
-// 0x0000..0xF000 step 0x1000). NTM tunes indices 6..10 to smooth
+// 0x0000..0xF000 step 0x1000). a community swap-basemap vendor tunes indices 6..10 to smooth
 // the descent through the curve's transition zone; indices 0..5
 // and 11..15 stay at stock values. Resolved 2026-06-09 via Ghidra
 // disasm of FUN_001AF6D8 + FUN_0016CD74. See
@@ -650,19 +650,19 @@ using EditOp = st::Status (*)(st::Definition::TableData &, st::edit::Rect, doubl
 inline constexpr std::array<double, 16> kNtmHpfpPhaseTransferCurve = {
     // idx 0..5: unchanged from stock (0x4D = 77)
     77.0, 77.0, 77.0, 77.0, 77.0, 77.0,
-    // idx 6..10: NTM-tuned (smoothed descent)
-    //   stock: 60 60 55 44 44   ->   NTM: 72 66 61 55 50
+    // idx 6..10: a community swap-basemap vendor-tuned (smoothed descent)
+    //   stock: 60 60 55 44 44   ->   a community swap-basemap vendor: 72 66 61 55 50
     72.0, 66.0, 61.0, 55.0, 50.0,
     // idx 11..15: unchanged from stock (idx 11 = 0x2C = 44; idx 12..15 = 0x21 = 33)
     44.0, 33.0, 33.0, 33.0, 33.0,
 };
 
-// 20x16 row-major NTM AVCS Cam Target (TGV Closed). Extracted from
-// the NTM FA24-swap basemap (cipher_agent decode 2026-06-09). NTM
-// keeps Baro Low == Baro High at every cell in both stock and NTM,
+// 20x16 row-major a community swap-basemap vendor AVCS Cam Target (TGV Closed). Extracted from
+// the an FA24-swap basemap from a community vendor basemap (cipher_agent decode 2026-06-09). a community swap-basemap vendor
+// keeps Baro Low == Baro High at every cell in both stock and a community swap-basemap vendor,
 // so this single preset serves both tables. Values are in degrees
 // (the scaled cell value); the ROM writeback converts back to int16
-// via the deg_x_728_1_0_5 scaling and the cells match NTM's bytes
+// via the deg_x_728_1_0_5 scaling and the cells match a community swap-basemap vendor's bytes
 // byte-for-byte at the table's canon addresses (0x442F0 / 0x465F8).
 // Each row is RPM (axis_y = rpm_len10, length 20); each column is
 // calculated load (axis_x = avcs_intake_target_calculated_load_len16_v2).
@@ -673,7 +673,7 @@ inline constexpr std::array<double, 16> kNtmHpfpPhaseTransferCurve = {
 // wastegate-pattern truncation. rpm_len10 bumped to length=20 in
 // the toml; preset expanded here from 10x16 → 20x16 to match.
 // Rows 0-9 are byte-identical to the shipped 10x16 preset. Rows
-// 10-19 include the high-load / high-RPM region NTM uses for cam
+// 10-19 include the high-load / high-RPM region a community swap-basemap vendor uses for cam
 // retard (negative degrees at the bottom-right corner).
 inline constexpr std::array<double, 320> kNtmAvcsCamTargetTgvClosed = {
     4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 10.8337, 17.5003,
@@ -696,7 +696,7 @@ inline constexpr std::array<double, 320> kNtmAvcsCamTargetTgvClosed = {
     29.9986, 29.9986, 29.9986, 24.9993, 24.9993, 24.9993, 24.9993, 24.9993,
     4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 9.6663, 15.0007,
     29.9986, 29.9986, 29.9986, 22.4997, 22.4997, 22.4997, 22.4997, 21.4421,
-    // Rows 10-19: high-load / high-RPM region. NTM transitions from
+    // Rows 10-19: high-load / high-RPM region. a community swap-basemap vendor transitions from
     // cam-advance targets (rows 0-9) into cam-retard at the bottom
     // right corner (-2.4997° at 14:11..15).
     4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 4.9993, 8.4988, 12.5010,
@@ -745,32 +745,32 @@ constexpr std::array<WorkflowTable, 5> kWorkflowTables = {{
      &st::edit::set_cells, 2.4, /*needs_keep_fa24_cams=*/false},
     // HPFP Phase Transfer Curve at canon 0x49B98 — 16-element 1-D
     // uint8 table indexed by the halfword phase axis at 0x40E04.
-    // NTM's basemap tunes indices 6..10 to smooth the stepwise
-    // descent through the transition zone; the preset writes NTM's
+    // a community swap-basemap vendor's basemap tunes indices 6..10 to smooth the stepwise
+    // descent through the transition zone; the preset writes a community swap-basemap vendor's
     // full 16-byte pattern verbatim (indices 0..5 and 11..15 stay
-    // at stock values, matching what NTM ships). Resolved 2026-06-09
+    // at stock values, matching what a community swap-basemap vendor ships). Resolved 2026-06-09
     // via Ghidra; supersedes the pre-RE `fuel_timing_hpfp_lobe_phase_descriptor`
     // uint32 placeholder.
     {"fuel_timing_hpfp_phase_transfer_curve",
      "FA24 swap: HPFP Phase Transfer Curve (basemap)",
-     "FA24 swap: HPFP Phase Transfer Curve NTM preset (idx 6..10 smoothed)",
+     "FA24 swap: HPFP Phase Transfer Curve a community swap-basemap vendor preset (idx 6..10 smoothed)",
      nullptr, 0.0, true,
      std::span<double const>{kNtmHpfpPhaseTransferCurve}},
-    // AVCS Cam Target (TGV Closed) — Baro Low / Baro High. NTM
+    // AVCS Cam Target (TGV Closed) — Baro Low / Baro High. a community swap-basemap vendor
     // writes a structured 2D retune that no scalar op approximates
     // well; both tables get the per-cell preset above. The defaults
     // branch and the basemap branch now produce identical bytes for
     // these two tables (the preset was extracted from the same
     // basemap), making the defaults branch a viable standalone path
-    // for users who don't have NTM's .acf in hand.
+    // for users who don't have a community swap-basemap vendor's .acf in hand.
     {"avcs_intake_barometric_multiplier_low_intake_cam_target_tgv_closed",
      "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) (basemap)",
-     "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) NTM preset",
+     "FA24 swap: AVCS Intake Cam Target (Baro Low, TGV Closed) a community swap-basemap vendor preset",
      nullptr, 0.0, true,
      std::span<double const>{kNtmAvcsCamTargetTgvClosed}},
     {"avcs_intake_barometric_multiplier_high_intake_cam_target_tgv_closed",
      "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) (basemap)",
-     "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) NTM preset",
+     "FA24 swap: AVCS Intake Cam Target (Baro High, TGV Closed) a community swap-basemap vendor preset",
      nullptr, 0.0, true,
      std::span<double const>{kNtmAvcsCamTargetTgvClosed}},
     {"fuel_injectors_pulse_injector_mult_table",

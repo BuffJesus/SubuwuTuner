@@ -6121,7 +6121,7 @@ int cmd_rom_diff(int argc, char *argv[]) {
 //
 // PoC absorbed from findings/scripts/analyze_tune_iterations.py
 // (analyst handoff 2026-06-09). The Python PoC validated end-to-end
-// on Fehr's WRK1/WRK2/WRK3 corpus. Sample output at
+// on a personal e-tune corpus. Sample output at
 // findings/tune-evolution/2026-06-09-wrk1-to-wrk3-analysis/.
 
 namespace {

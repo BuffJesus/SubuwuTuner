@@ -66,8 +66,8 @@ Our existing SA variants (`docs/23-security-access.md`):
 
 - `ssmcan1_key_stub` — factory Gen-A.2 (SH7058 era, the working baseline)
 - `ssmcan1_l1_cobb_active` — COBB-AP L1 (decoded session 2026-05-25)
-- `ssmcan1_l1_fehr_active` — Fehr-active L1
-- `ssmcan1_l3_fehr_active` — Fehr-active L3 (cd2ef1d)
+- `ssmcan1_l1_fehr_active` — aftermarket-active L1
+- `ssmcan1_l3_fehr_active` — aftermarket-active L3 (cd2ef1d)
 
 **Mapping uncertainty**: the analyst writeup does not assert which of
 the 4 RE5 Init variants corresponds to which of our existing SA names.

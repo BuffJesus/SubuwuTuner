@@ -95,7 +95,7 @@ across the entire SH7058 + SH-2A + RH850 fleet they tune:
 - `SSM-III COBB_MAF_SD == SSM-IV COBB_MAF_SD == kSaTableCobbMafSd`
 - `SSM-V COBB == SSM-VI COBB == kSaTableL35Aftermarket` (the Gen-A.2
   aftermarket L35 table is byte-identical to the Gen-B COBB key —
-  COBB reuses the Fehr-active framework's key on Gen-B too)
+  COBB reuses the aftermarket SA-overwrite framework's key on Gen-B too)
 
 Implementer side: one constant per variant covers both Gen-A.2 and
 Gen-B for COBB. The `SubaruEcuFamily` enum is still load-bearing —

@@ -82,7 +82,7 @@ enum class SubaruInitVariant : std::uint8_t {
     Factory     = 0, // OEM stock SA round keys
     CobbFlash   = 1, // COBB-installed tune ("COBB Flash" mode)
     CobbMafSd   = 2, // COBB MAF-based Speed-Density variant
-    Aftermarket = 3, // Third-party / Fehr-active aftermarket framework
+    Aftermarket = 3, // Third-party / aftermarket-active aftermarket framework
     EcuTek      = 4, // EcuTek-installed tune — factory tables + patched S-box
     SsmvFactory = 5, // SSM-V factory — reversed L35 round-key set
 };

@@ -99,7 +99,7 @@ ssmcan1_l3_aftermarket(std::span<std::uint8_t const> seed);
 
 // COBB-active L1 — for ECUs in the COBB-installed-tune state. The
 // round-key table differs from `ssmcan1_l1_aftermarket` (which targets
-// the broader Fehr-active framework) but the SA-dispatcher reversed-
+// the broader aftermarket SA-overwrite framework) but the SA-dispatcher reversed-
 // iteration patch + forward-Feistel direction is shared.
 //
 // Two flavors per RE5b extraction (findings/re-2026-06-12-pm/

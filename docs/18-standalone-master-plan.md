@@ -408,9 +408,9 @@ signed) metadata:
 
 ```
 Tune Library
-  Felix-on-FA24 v3            72 KB  2026-06-10  [Flash][Inspect][Delete]
-  Felix-on-FA24 v2            64 KB  2026-06-10  [Flash][Inspect][Delete]
-  Fehr WRK3 (currently flashed) 72 KB  2026-06-09  [Restore][Inspect]
+  a personal tuner-on-FA24 v3            72 KB  2026-06-10  [Flash][Inspect][Delete]
+  a personal tuner-on-FA24 v2            64 KB  2026-06-10  [Flash][Inspect][Delete]
+  a personal tuner WRK3 (currently flashed) 72 KB  2026-06-09  [Restore][Inspect]
   Stage 1 + SF v401           51 KB  2026-01-15  [Flash][Inspect][Delete]
   ...
 [Import from SD] [Compose new]
@@ -432,8 +432,8 @@ For users building a tune by stacking patch sets:
 Compose new tune
   Base ROM:   LF79103P stock                       [▾]
   Layer 1:    COBB Stage 1 + SF v401              [✓][▾]
-  Layer 2:    Felix WRX iteration 2                [✓][▾]
-  Layer 3:    NTM FA24 mechanical                  [✓][▾]
+  Layer 2:    a personal tuner WRX iteration 2                [✓][▾]
+  Layer 3:    a community swap-basemap vendor FA24 mechanical                  [✓][▾]
   + Add layer
   Local edits: 3 cells changed                      [Review]
 
@@ -453,7 +453,7 @@ side spec) and surfaces conflicts as the user navigates.
 For a selected tune (whether from library or about-to-flash):
 
 ```
-Felix-on-FA24 v3 — patch breakdown
+a personal tuner-on-FA24 v3 — patch breakdown
 
   Total patches: 1,342 (90,060 bytes vs stock)
 
@@ -464,8 +464,8 @@ Felix-on-FA24 v3 — patch breakdown
     ...
 
   Layer 2: Tuner additions (advanced)
-    NTM HPFP retune @ 0x8000 (1.4 KB)
-    NTM AVCS targets @ 0x89b8 (1.7 KB)
+    a community swap-basemap vendor HPFP retune @ 0x8000 (1.4 KB)
+    a community swap-basemap vendor AVCS targets @ 0x89b8 (1.7 KB)
     ...
 
   Layer 3: Code patches (READ-ONLY)

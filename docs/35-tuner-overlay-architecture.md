@@ -4,7 +4,7 @@
 
 When SubuwuTuner displays a flashed ROM (or inspects a `.ptm` tune file via the optional cipher gating in `docs/34`), patches don't form a flat list of "edits to OEM tables." They form a **layered overlay** with characteristic architectural patterns. This document explains that pattern so contributors building inspection, diff, or analysis features can model it correctly.
 
-The pattern was identified by corpus-wide analysis of 56 `.ptm` files (every COBB OTS tune + Fehr ETune iterations + Anti-Theft Mode + Stage 0) on the LF79103P platform (2017 USDM WRX MT). It is consistent across all tuners studied (COBB, Fehr, NTMotorsports, NexGen). It is **not** an LF79103P quirk — the same pattern is expected on related SH-2A Subaru ECUs (LF75404S/H, LF79101P/102P, LF9C/D/G/L variants).
+The pattern was identified by corpus-wide analysis of 56 `.ptm` files (every COBB OTS tune + a personal tuner ETune iterations + Anti-Theft Mode + Stage 0) on the LF79103P platform (2017 USDM WRX MT). It is consistent across all tuners studied (COBB, a personal tuner, NTMotorsports, a community tune vendor). It is **not** an LF79103P quirk — the same pattern is expected on related SH-2A Subaru ECUs (LF75404S/H, LF79101P/102P, LF9C/D/G/L variants).
 
 ## The three layers
 
@@ -16,7 +16,7 @@ A typical performance tune for these ECUs has three distinct patch categories:
 **What:** byte-level modifications to existing OEM lookup tables (Target Throttle, Boost Targets, Ignition Compensation, Fuel - Closed Loop, etc.).
 **Purpose:** tweak existing behavior without changing the ECU's control logic.
 **Detection:** patches fall within the address range of a known table in the loaded definition (`*.toml` per `docs/11-definition-format.md`).
-**Typical share:** 60–75% of patch bytes in a Stage 1 tune; up to 75% in heavily-OEM-leveraged tunes like Fehr's ETunes.
+**Typical share:** 60–75% of patch bytes in a Stage 1 tune; up to 75% in heavily-OEM-leveraged tunes like a personal tuner's ETunes.
 
 ### Layer 2 — Tuner additions (dead-fill exploitation)
 
@@ -24,7 +24,7 @@ A typical performance tune for these ECUs has three distinct patch categories:
 **What:** entirely new lookup tables that no stock OEM code references.
 **Purpose:** add calibration data that the OEM tune format cannot express — typically supplementary fuel/timing/cam tables driven by tuner-added code (Layer 3).
 **Detection:** patches land in the dead-fill region; the stock ROM bytes there match the filler pattern.
-**Typical share:** 22–35% of patch bytes; varies by tuner (Felix's tunes use 26%, COBB OTS uses ~34%).
+**Typical share:** 22–35% of patch bytes; varies by tuner (a personal tuner's tunes use 26%, COBB OTS uses ~34%).
 
 ### Layer 3 — Code patches (overlay glue)
 
@@ -58,8 +58,8 @@ When the `Ap3Browser` panel (per `docs/34`) inspects a `.ptm`:
 
 When comparing two tunes:
 
-- **Same-tuner iterations (e.g., Fehr WRK1 → WRK2)** typically differ ONLY in Layer 1 byte values; the patch envelope is identical. Diff display should highlight the changed table rows, not the whole patch list.
-- **Different-tuner comparisons (Felix vs NTM)** show large Layer-2 and Layer-3 differences. Group by region first; let the user pick which layer to diff.
+- **Same-tuner iterations (e.g., a personal tuner WRK1 → WRK2)** typically differ ONLY in Layer 1 byte values; the patch envelope is identical. Diff display should highlight the changed table rows, not the whole patch list.
+- **Different-tuner comparisons (a personal tuner vs a community swap-basemap vendor)** show large Layer-2 and Layer-3 differences. Group by region first; let the user pick which layer to diff.
 
 ### Validation (future)
 
@@ -105,8 +105,8 @@ From corpus analysis, each tuner has a characteristic dead-fill % that fingerpri
 
 | Tuner | Dead-fill share | Tuning style |
 |---|---|---|
-| Felix (Fehr ETune) | 26% | Heavy OEM-table tuning; minimal additions |
-| NexGen Stage 2 | 33% | Balanced — uses additions but not aggressively |
+| a personal tuner (a personal tuner ETune) | 26% | Heavy OEM-table tuning; minimal additions |
+| a community tune vendor Stage 2 | 33% | Balanced — uses additions but not aggressively |
 | COBB OTS Stage 1 | 34% | COBB's standard reflash structure |
 | COBB OTS feature modes (Anti-Theft, etc.) | 38–47% | Mostly tuner-side feature implementation |
 | COBB Stage 0 | 47% | Base reflash structure dominates |

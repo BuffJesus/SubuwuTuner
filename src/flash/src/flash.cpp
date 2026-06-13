@@ -133,7 +133,7 @@ Flasher::probe_max_chunk(std::uint32_t probe_address, std::uint32_t hint_max,
         auto const kind = classify_chunk_failure(chunk.error());
         // At probe time NRC 0x31 (RequestOutOfRange) is ambiguous. The
         // analyst handoff classified it as "wrong base addr — bail",
-        // but on the user's 2017 WRX (LF79101P, FA20DIT, Fehr e-tune)
+        // but on the user's 2017 WRX (LF79101P, FA20DIT) running a personal e-tune
         // a 4 KB read at addr 0x0 returns NRC 0x31 while a 256 B read
         // at the same address succeeds. The handler is enforcing a
         // chunk-size-dependent region boundary (4 KB straddles a non-

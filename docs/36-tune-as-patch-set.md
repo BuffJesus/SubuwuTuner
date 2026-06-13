@@ -49,7 +49,7 @@ Users can stack patch sets:
 stock + COBB_stage1 + Felix_WRX_iteration_2 + NTM_FA24_mechanical + user_tweaks
 ```
 
-Each layer is independently sourced, independently versioned, independently audited. When Felix releases an updated iteration, the user re-composes — no need to manually merge.
+Each layer is independently sourced, independently versioned, independently audited. When a personal tuner releases an updated iteration, the user re-composes — no need to manually merge.
 
 See `specs/patch-composition-algebra.md` (private) for the composition model, conflict detection, and layer-aware resolution rules.
 
@@ -70,7 +70,7 @@ The brick-protection model (`docs/31`) needs updating for this — partial-overl
 A SubuwuTuner GUI that shows tunes can group display by layer:
 
 ```
-Felix-on-FA24 v3 changes:
+a personal tuner-on-FA24 v3 changes:
   Layer 1 (OEM tables — editable):     887 patches, 67,851 bytes
     Throttle - Target Throttle:        16 tables, 352 cells
     Boost - Boost Targets:              5 tables, ...
@@ -90,15 +90,15 @@ This is a richer mental model than "this tune is 87 KB of changes."
 Before any flash, SubuwuTuner shows the user the structured delta against currently-flashed:
 
 ```
-You are about to flash: Felix-on-FA24_v3
-Your current tune:       Fehr WRK3
+You are about to flash: a personal tuner-on-FA24_v3
+Your current tune:       a personal tuner WRK3
 
 Layer 1 changes:
-  ✓ 423 cells of Throttle - Target Throttle (Felix's framework)
+  ✓ 423 cells of Throttle - Target Throttle (a personal tuner's framework)
   ⚠ 22 cells of Ignition - Compensation - Coolant (overrides current)
   ...
 Layer 2 changes:
-  ✓ HPFP retune cluster (NTM FA24-mechanical)
+  ✓ HPFP retune cluster (a community swap-basemap vendor FA24-mechanical)
   ...
 Layer 3 changes:
   ⚠ UDS dispatch retarget will be REWRITTEN (Layer 3 = code; review carefully)
