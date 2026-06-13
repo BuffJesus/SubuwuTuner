@@ -13885,8 +13885,22 @@ int cmd_rom_pull(int argc, char *argv[]) {
             sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_ssmv_factory;
         } else if (*sa_variant == "ecutek" || *sa_variant == "ecutek-l1") {
             sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_ecutek;
+            std::fputs(
+                "rom-pull: note: --sa-variant 'ecutek' is EXPERIMENTAL "
+                "per ζ2 (no captured\n"
+                "  (seed, key) pair on file). The S-box differential "
+                "+ determinism are pinned by\n"
+                "  unit tests but no live-ECU validation. Use at your "
+                "own risk; report\n"
+                "  successes / failures so the variant can be promoted "
+                "out of experimental.\n",
+                stderr);
         } else if (*sa_variant == "ecutek-l3" || *sa_variant == "ecutek-l35") {
             sa_variant_fn = &st::ecu::subaru::ssmcan1_l35_ecutek;
+            std::fputs(
+                "rom-pull: note: --sa-variant 'ecutek-l3' is "
+                "EXPERIMENTAL per ζ2.\n",
+                stderr);
         } else {
             std::fprintf(stderr,
                          "rom-pull: --sa-variant '%s' not recognized "
@@ -14945,10 +14959,16 @@ int cmd_ssm_a8_poll(int argc, char *argv[]) {
             sa_label = "SSM-V factory L1";
         } else if (*sa_variant == "ecutek" || *sa_variant == "ecutek-l1") {
             sa_fn = &st::ecu::subaru::ssmcan1_l1_ecutek;
-            sa_label = "EcuTek L1";
+            sa_label = "EcuTek L1 (experimental)";
+            std::fputs("ssm-a8-poll: note: --sa-variant 'ecutek' is "
+                       "EXPERIMENTAL per ζ2 (no captured pair).\n",
+                       stderr);
         } else if (*sa_variant == "ecutek-l3" || *sa_variant == "ecutek-l35") {
             sa_fn = &st::ecu::subaru::ssmcan1_l35_ecutek;
-            sa_label = "EcuTek L3";
+            sa_label = "EcuTek L3 (experimental)";
+            std::fputs("ssm-a8-poll: note: --sa-variant 'ecutek-l3' is "
+                       "EXPERIMENTAL per ζ2 (no captured pair).\n",
+                       stderr);
         } else {
             std::fprintf(stderr,
                          "ssm-a8-poll: --sa-variant '%s' not recognized "

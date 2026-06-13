@@ -66,9 +66,17 @@ via `--sa-variant`.
 | `ssmcan1_l3_aftermarket` | `aftermarket-l3` | `kSaTableL35Aftermarket` (also SSM-V/VI COBB) | `kSBox` | forward + wordswap + L3 perms | SSM-III/IV aftermarket L3 | flash 0x074358 + dispatcher patches |
 | `ssmcan1_l1_cobb_flash` | `cobb-flash` | `kSaTableCobbFlash` | `kSBox` | forward + wordswap | SSM-III/IV COBB-installed | `libFlashSubaru.so` RE5b |
 | `ssmcan1_l1_cobb_maf_sd` | `cobb-maf-sd` | `kSaTableCobbMafSd` | `kSBox` | forward + wordswap | SSM-III/IV COBB MAF-SD mode | `libFlashSubaru.so` RE5b |
-| `ssmcan1_l1_ecutek` | `ecutek` / `ecutek-l1` | `kSaTableL1` (factory!) | `kSBoxEcuTek` | forward + wordswap | SSM-III/IV EcuTek-installed | `libFlashSubaru.so:0x8b73c` |
-| `ssmcan1_l35_ecutek` | `ecutek-l3` / `ecutek-l35` | `kSaTableL35` (factory!) | `kSBoxEcuTek` | forward + wordswap + L3 perms | SSM-III/IV EcuTek L3 | same |
+| `ssmcan1_l1_ecutek` ⚠️ | `ecutek` / `ecutek-l1` | `kSaTableL1` (factory!) | `kSBoxEcuTek` | forward + wordswap | SSM-III/IV EcuTek-installed | `libFlashSubaru.so:0x8b73c` |
+| `ssmcan1_l35_ecutek` ⚠️ | `ecutek-l3` / `ecutek-l35` | `kSaTableL35` (factory!) | `kSBoxEcuTek` | forward + wordswap + L3 perms | SSM-III/IV EcuTek L3 | same |
 | `ssmcan1_l1_ssmv_factory` | `ssmv-factory` | `kFeistelRoundKeysSSMVFactory` (= L35 reversed) | `kSBox` | forward + wordswap | SSM-V/VI factory | `libFlashSubaru.so` RE wave 3 §F3 |
+
+⚠️ **Experimental** — flagged per ζ2: no captured (seed, key) pair on
+file. Determinism + cross-variant distinctness are pinned by unit
+tests, the S-box differential matches `libFlashSubaru.so` byte-for-
+byte, and the Feistel construction round-trips against itself. But
+no live-ECU exchange has confirmed the key these wrappers compute
+matches what a real EcuTek-installed ECU expects. The CLI emits a
+stderr warning when the variant is selected.
 
 Stub functions not yet implemented:
 - `ssmk1_key_stub` — pre-2008 K-Line SSMK1 (no live K-Line capture rig
