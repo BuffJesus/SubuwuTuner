@@ -50,6 +50,10 @@ add_library(st_devices_ap3 STATIC
     # stubs when ST_AP3_HAVE_CIPHER is undefined).
     src/aes256_ctr.cpp
     src/bzip2_decompress.cpp
+    # OTA .img cipher (Session 3) — wrapper parse/build is cipher-
+    # independent; the Blowfish primitive is Tier-A NotImplemented
+    # until the public-domain reference is vendored.
+    src/ota_cipher.cpp
 )
 
 if(ST_ENABLE_COBB_AP_CIPHER)

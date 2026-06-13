@@ -54,6 +54,7 @@ add_executable(st_unit_tests
     unit/devices/ap3/test_status_probes.cpp
     unit/devices/ap3/test_diagnostic_cmds.cpp
     unit/devices/ap3/test_error_frame_decode.cpp
+    unit/devices/ap3/test_ota_cipher.cpp
     unit/library/test_patch_decoder.cpp
     unit/library/test_table_mapping.cpp
     unit/library/test_tune_diff.cpp
