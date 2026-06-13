@@ -350,6 +350,20 @@ void render_device_header(PanelState &p) {
     field("Serial", s.ap_serial.value_or(""));
     field("Firmware", s.firmware_version.value_or(""));
     field("Vehicle", s.vehicle_descriptor.value_or(""));
+    // RE8b CORRECTED status probes (cmd 0x2e / 0x30 / 0x31). Older
+    // firmware may not implement these and the parsers degrade to
+    // nullopt — only show the rows when the AP returned printable
+    // ASCII, so an unsupported firmware doesn't pollute the header
+    // with three "(unparsed)" lines.
+    if (s.hardware_type.has_value()) {
+        field("Hardware", *s.hardware_type);
+    }
+    if (s.vehicle_manufacturer.has_value()) {
+        field("Veh. mfr.", *s.vehicle_manufacturer);
+    }
+    if (s.ap_manufacturer.has_value()) {
+        field("AP mfr.", *s.ap_manufacturer);
+    }
 
     ImGui::TextDisabled("Marriage");
     ImGui::SameLine(140.0f);
@@ -549,6 +563,22 @@ void render_ap3_browser_panel(AppState &state) {
         render_connected_state(p);
     }
     ImGui::End();
+}
+
+std::optional<Ap3StatusSnapshot> ap3_status_snapshot() {
+    auto const &p = panel();
+    if (p.channel == nullptr || !p.device_state.has_value()) {
+        return std::nullopt;
+    }
+    auto const &s = *p.device_state;
+    Ap3StatusSnapshot out;
+    out.vehicle_descriptor = s.vehicle_descriptor.value_or("");
+    out.hardware_type = s.hardware_type.value_or("");
+    out.vehicle_manufacturer = s.vehicle_manufacturer.value_or("");
+    out.ap_manufacturer = s.ap_manufacturer.value_or("");
+    out.marriage_known = s.married.has_value();
+    out.married = s.married.value_or(false);
+    return out;
 }
 
 } // namespace st::ui

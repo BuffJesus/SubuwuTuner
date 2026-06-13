@@ -122,6 +122,55 @@ void render_status_bar(AppState &state) {
             }
         }
 
+        // AP3-connected chip. Surfaces when the AccessPort browser
+        // panel has an open channel + a successful query_state.
+        // Shows the vehicle descriptor (cmd 0x28) as the chip label
+        // and tucks the RE8b CORRECTED status probe payloads into a
+        // tooltip — hardware type / vehicle mfr / AP mfr / marriage
+        // state. Lets users glance at the bar to confirm which AP
+        // is connected without re-opening the browser panel.
+        if (auto const ap = ap3_status_snapshot(); ap.has_value()) {
+            ImGui::SameLine();
+            std::string label = "\xEE\x83\x97  AP";
+            std::string short_veh = ap->vehicle_descriptor;
+            if (!short_veh.empty()) {
+                // Trim to a single ASCII word to keep the chip
+                // narrow; full text stays in the tooltip.
+                auto const sp = short_veh.find_first_of(" \t");
+                if (sp != std::string::npos) {
+                    short_veh.resize(sp);
+                }
+                label += "  \xC2\xB7  " + short_veh;
+            }
+            if (ap->marriage_known) {
+                chip(label.c_str(),
+                     ap->married ? chip_fg_ok() : chip_fg_danger(),
+                     ap->married ? chip_bg_ok() : chip_bg_danger());
+            } else {
+                chip(label.c_str(), chip_fg_muted(), chip_bg_muted());
+            }
+            if (ImGui::IsItemHovered()) {
+                std::string tip = "AccessPort connected\n";
+                if (!ap->vehicle_descriptor.empty()) {
+                    tip += "Vehicle:       " + ap->vehicle_descriptor + "\n";
+                }
+                if (!ap->hardware_type.empty()) {
+                    tip += "Hardware:      " + ap->hardware_type + "\n";
+                }
+                if (!ap->vehicle_manufacturer.empty()) {
+                    tip += "Veh. mfr.:     " + ap->vehicle_manufacturer + "\n";
+                }
+                if (!ap->ap_manufacturer.empty()) {
+                    tip += "AP mfr.:       " + ap->ap_manufacturer + "\n";
+                }
+                tip += "Marriage:      ";
+                tip += ap->marriage_known
+                           ? (ap->married ? "Installed" : "Not Installed")
+                           : "(unparsed)";
+                ImGui::SetTooltip("%s", tip.c_str());
+            }
+        }
+
         // PTM-imported tune badge. Surfaces when the loaded project's
         // project.toml carries a [ptm_metadata] block — i.e. it was
         // produced by `ptm import` (CLI or GUI wizard). Purple accent

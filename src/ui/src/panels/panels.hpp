@@ -19,6 +19,7 @@
 
 #include <imgui.h>
 
+#include <optional>
 #include <string>
 
 namespace st::ui {
@@ -66,6 +67,21 @@ void render_history_panel(AppState &state);
 void render_features_designer(AppState &state);
 void render_ap3_browser_panel(AppState &state);
 [[nodiscard]] bool ap3_browser_should_hint(AppState const &state);
+
+// Snapshot of the AP3 panel's currently-connected device, for the
+// status bar to surface inline when the user has the browser open.
+// Returns nullopt when no AP is connected or no query_state has
+// succeeded yet. Populated from the RE8b CORRECTED status probes
+// (cmd 0x2e / 0x30 / 0x31) plus the cmd 0x28 vehicle_descriptor.
+struct Ap3StatusSnapshot {
+    std::string vehicle_descriptor;   // cmd 0x28 — "2017 USDM WRX MT ..."
+    std::string hardware_type;        // cmd 0x2e — "AP-V3" / etc.
+    std::string vehicle_manufacturer; // cmd 0x30 — "Subaru"
+    std::string ap_manufacturer;      // cmd 0x31 — "COBB Tuning"
+    bool married{false};              // Installed vs Not Installed
+    bool marriage_known{false};       // distinguishes nullopt from false
+};
+[[nodiscard]] std::optional<Ap3StatusSnapshot> ap3_status_snapshot();
 void render_table_view(AppState &state, Fonts const &fonts);
 
 // Status bar + toasts. enqueue_toast is declared here because the toast
