@@ -10,6 +10,13 @@
 // Reference architecture: `docs/37-subaru-flash-protocol.md` (clean-
 // room sequence + signature summary). Spec draft:
 // `findings/re-2026-06-12-pm/RE5_subaru_flash_spec_draft.md`.
+// **ζ1 reframe** (`RE_wave6_findings.md`): Subaru's wire protocol is
+// SSM byte 0xa5 + vtable-dispatched byte vectors, NOT UDS
+// RoutineControl. The `Flasher::ecu_*` primitive set is generic-UDS-
+// only and won't compose here; Tier B needs a parallel
+// `Flasher::subaru_*` (or private SubaruShCanFlash) primitive layer
+// that calls a `PacketExchange_ISO` equivalent. See docs/37 §"Wire
+// protocol — ζ1 reframe" for the implementation roadmap.
 //
 // Two-step arming:
 //   * Build flag `ST_ENABLE_SUBARU_ECU_FLASH` — OFF by default.

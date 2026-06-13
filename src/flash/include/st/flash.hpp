@@ -372,22 +372,26 @@ public:
                       ReadProgressFn progress = nullptr,
                       std::atomic<bool> const *cancel = nullptr);
 
-    // Enter programming mode via the Subaru-specific "enable flash
-    // mode" routine. RoutineControl 0x31 0x01 with no option record;
-    // the routine ID is per-platform (LF79103P uses 0xff00 per
-    // docs/37 §RE5). Caller is responsible for having issued the
-    // DiagnosticSessionControl → programmingSession (0x10 0x02) and
-    // SecurityAccess preamble first; this routine fails with NRC if
-    // either prerequisite is missing.
+    // Standard UDS RoutineControl 0x31 0x01 wrapper — `routine_id`
+    // is per-platform and plumbed in by the caller from a def pack.
+    //
+    // **NOT useful for Subaru** per ζ1 reframe (docs/37 §"Wire
+    // protocol — ζ1 reframe"): Subaru dispatches EnableFlashMode via
+    // SSM byte 0xa5 through a C++ vmethod call, not UDS. Kept in
+    // tree for future non-Subaru targets + as a documented UDS
+    // wrapper for any ECU that actually uses RoutineControl for the
+    // programming-mode transition.
     [[nodiscard]] Status
     ecu_enable_flash_mode(std::uint16_t routine_id,
                           std::chrono::milliseconds timeout = std::chrono::milliseconds{5000});
 
-    // Erase a single flash block by index. RoutineControl 0x31 0x01
-    // with the routine ID per docs/37 §RE5 (0xff01 on Subaru) and a
-    // 4-byte LE option record carrying the block index. Block size +
-    // count are family-specific (1 KB blocks on SH-2A LF79103P) and
-    // come from the def pack.
+    // Standard UDS RoutineControl 0x31 0x01 wrapper with a 4-byte LE
+    // block index in the option record. Block size + count are
+    // family-specific and come from the def pack.
+    //
+    // **NOT useful for Subaru** per ζ1 reframe: Subaru's erase path
+    // wraps an SSM byte sequence in a vector via vtable dispatch,
+    // not UDS RoutineControl. Kept in tree as a generic UDS wrapper.
     [[nodiscard]] Status
     ecu_erase_block(std::uint16_t routine_id, std::uint32_t block_idx,
                     std::chrono::milliseconds timeout = std::chrono::milliseconds{10000});
@@ -425,26 +429,23 @@ public:
     [[nodiscard]] Status
     ecu_request_transfer_exit(std::chrono::milliseconds timeout = std::chrono::milliseconds{2000});
 
-    // Ask the ECU to compute its own checksum over `[start_addr,
-    // end_addr]` (inclusive) and return the routine result. Per
-    // `docs/37-subaru-flash-protocol.md` (RE5), the Subaru reference
-    // architecture's `SH_CAN_Flash::ChecksumECUData(start, end)` is a
-    // `RoutineControl 0x31 0x01` call with an 8-byte option record:
-    // 4-byte BE start address followed by 4-byte BE end address. The
-    // routine_id is per-platform — LF79103P uses one ID, RH850 VB
-    // another — and must be plumbed in by the caller (typically from
-    // a definition pack's `[pack].flash_routine.checksum` field).
+    // Standard UDS RoutineControl 0x31 0x01 wrapper — ECU computes
+    // its own checksum over `[start_addr, end_addr]` (inclusive) and
+    // returns the result. Option record is 4-byte BE start + 4-byte
+    // BE end. The routine_id is per-platform, plumbed in by the
+    // caller from the def pack.
+    //
+    // **NOT useful for Subaru** per ζ1 reframe: Subaru's
+    // `ChecksumECUData` wraps an SSM byte sequence in a vector via
+    // vtable dispatch, not UDS. Kept in tree as a generic UDS
+    // wrapper for any ECU vendor that uses RoutineControl for
+    // post-flash verify.
     //
     // Returns the routine's status record verbatim — typically a
     // 4-byte big-endian checksum (CRC-32 or sum-of-words; platform-
-    // specific). Caller compares against the host-computed expectation
-    // for the same range. Mismatch = post-flash corruption, abort
-    // before signaling the user "flash successful".
-    //
-    // Used by the Phase 5.5 bench-rig flash gate. UDS-only path —
-    // SSM ECUs (pre-Gen-B Subarus) don't expose this routine; the
-    // caller falls back to a host-side `read_full_rom_ssm` + local
-    // checksum cross-check on those platforms.
+    // specific). Caller compares against the host-computed
+    // expectation for the same range; mismatch = abort before
+    // signaling "flash successful".
     [[nodiscard]] Result<std::vector<std::uint8_t>>
     ecu_compute_checksum(std::uint16_t routine_id,
                          std::uint32_t start_addr,

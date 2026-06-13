@@ -84,6 +84,67 @@ the rig is up):
 A follow-up Capstone disasm pass against `libFlashSubaru.so` would
 extract the actual key material per variant (analyst RE6 / future pass).
 
+## Wire protocol — ζ1 reframe (2026-06-12 PM)
+
+**Initial assumption corrected**: the reference architecture above maps
+each call (EnableFlashMode / EraseBlock / ChecksumECUData) to a UDS
+`RoutineControl 0x31 0x01` invocation with a Subaru-specific routine ID
+(0xff00 / 0xff01 / …). This is **wrong for Subaru**.
+
+Per ζ1 (`findings/re-2026-06-12-pm/RE_wave6_findings.md`):
+
+- `EnableFlashMode` is dispatched via SSM byte **`0xa5`** through a
+  C++ vmethod call, **not** UDS RoutineControl. The SSM byte goes
+  straight onto the wire via the reference architecture's
+  `PacketExchange_ISO` primitive (which we don't yet have on the
+  SubuwuTuner side).
+- `EraseBlock` and `ChecksumECUData` similarly wrap their byte
+  sequences in a vector and dispatch through `vtable[N]` calls; the
+  underlying wire shape is SSM byte stream + payload, not UDS.
+- Block boundaries (size + count per family) are populated per-
+  instance via the `FlashParams` constructor arg, **not** hardcoded
+  in code. SubuwuTuner's `st::flash::Flasher::compute_delta` already
+  assumes per-platform sector tables — the boundary list lives in
+  the def pack at runtime.
+
+### What this means for the `Flasher::ecu_*` primitives
+
+The five primitives shipped in commits `1fa521c` / `a00cdb1` /
+`140e166` / `bc54f87` / `9c7a265` / `c20a13d`
+(`ecu_enable_flash_mode` / `ecu_erase_block` / `ecu_request_download` /
+`ecu_transfer_data` / `ecu_request_transfer_exit` /
+`ecu_compute_checksum`) are **standard UDS RoutineControl + UDS 0x34
++ UDS 0x36 + UDS 0x37 + UDS 0x31 0x01 wrappers**. They are correct
+for any ECU that speaks generic UDS flashing — they are NOT useful
+for Subaru's actual flash path.
+
+The primitives stay in tree. They remain useful for:
+
+- Future non-Subaru targets (e.g. when SubuwuTuner expands beyond
+  the Subaru tuning suite scope).
+- Documenting the UDS sequence shape for callers / contributors.
+- Subaru ECUs running in a UDS-compatibility mode (if any actually
+  expose one — open question).
+
+### What `SubaruShCanFlash` Tier-B actually needs
+
+A parallel `Flasher::subaru_*` primitive set (or, equivalently,
+private methods on `SubaruShCanFlash`) that:
+
+1. Sends an SSM byte directly via the transport layer (the analyst's
+   `PacketExchange_ISO` equivalent). This is one level below
+   `SsmClient::read_block` — the read primitive we already have
+   speaks SSM 0xA8 (ReadByAddress); the flash path needs SSM 0xA5
+   (EnableFlashMode) and the matching erase / checksum bytes.
+2. Wraps the byte sequence in the vector layout the reference
+   architecture's vtable dispatch expects.
+
+This is Tier-B work; ship as a separate commit when the SSM-byte
+send path is in. Until then `SubaruShCanFlash::*` methods stay at
+`NotImplemented` (under the `ST_ENABLE_SUBARU_ECU_FLASH=ON` build)
+or `PolicyDenied` (default OFF) — the reframe doesn't change the
+gate behavior.
+
 ## Implementer roadmap
 
 Ordered by what unblocks the bench-rig flash gate.
