@@ -252,6 +252,10 @@ if(ST_BUILD_HIL_TESTS)
     endif()
 endif()
 
+# Fuzz harnesses (tests/fuzz/) — gated separately. See subdir for the
+# default-OFF posture + build recipe.
+add_subdirectory(fuzz)
+
 # Catch2's discovery integrates each TEST_CASE as an individual ctest entry.
 #
 # WORKING_DIRECTORY is set to the project root so tests that reference
