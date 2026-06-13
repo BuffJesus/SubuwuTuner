@@ -10,10 +10,22 @@
 //   [6..N-32]    body bytes — Blowfish-CTR-double encrypted
 //   [N-32..N]    32-byte trailer (signature?  HMAC?  un-RE'd)
 //
-// The body is encrypted with Blowfish-CTR applied **twice**: the
-// keystream from a Blowfish-CTR pass over the base counter is XOR'd
-// with the plaintext, then a second pass over the same counter is
-// XOR'd with the result. (Equivalent to two distinct keys composed.)
+// The body is encrypted with **single-pass Blowfish-ECB in a custom
+// CTR mode** (the "double" in the function name is a holdover —
+// see the function-level comment). Per the analyst's RE of
+// APManager.exe's `StreamEncrypter::Process`:
+//
+//   * 512-byte chunks. 32 Blowfish blocks per chunk.
+//   * Per 16-byte block: counter (4 BE) doubled → 8-byte BF input
+//     → BF-ECB-encrypt with the 32-byte ASCII key → 8-byte output
+//     doubled → 16-byte keystream → XOR with 16 bytes of data.
+//   * Counter advances by 1 per 16-byte block within a chunk.
+//   * **Between chunks** the counter jumps by 512, NOT 32 —
+//     so counter values 32..511 are skipped per chunk transition.
+//     `chunk_base = base_ctr + chunk_idx × 512`.
+//
+// The XOR-stream construction is its own inverse: encrypt and decrypt
+// are the same call.
 //
 // Status:
 //   * Wrapper parse/build  (this header)  — LANDED, no cipher dep
@@ -64,11 +76,12 @@ parse_ota_img(std::span<std::uint8_t const> img_bytes);
 [[nodiscard]] std::vector<std::uint8_t>
 build_ota_img(OtaImgWrapper const &wrapper);
 
-// Decrypt one .img body via Blowfish-CTR-double. Tier-A
-// NotImplemented today; needs a vendored public-domain Blowfish
-// reference primitive (~300 lines C). When implemented, the
-// decryption takes `base_ctr` from the wrapper as the per-file
-// counter and applies the cipher twice.
+// Decrypt one .img body via the Blowfish-ECB-in-custom-CTR
+// construction described in the file header. `base_ctr` comes from
+// the wrapper as the per-file counter seed (the AP's per-firmware-
+// build constant). The function name preserves "double" for binary-
+// compat with the original Session-3 skeleton; the underlying
+// construction is single-pass.
 [[nodiscard]] Result<std::vector<std::uint8_t>>
 blowfish_ctr_double_decrypt(std::span<std::uint8_t const> ciphertext,
                              std::uint32_t base_ctr);

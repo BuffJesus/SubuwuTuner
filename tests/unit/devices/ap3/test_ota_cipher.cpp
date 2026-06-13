@@ -14,6 +14,9 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <string_view>
 #include <vector>
 
 TEST_CASE("parse_ota_img extracts header / body / trailer",
@@ -83,24 +86,23 @@ TEST_CASE("parse_ota_img / build_ota_img round-trip preserves bytes",
     REQUIRE(round->trailer == src.trailer);
 }
 
-TEST_CASE("blowfish_ctr_double_decrypt is gated correctly",
+TEST_CASE("blowfish_ctr_double_decrypt gated OFF returns PolicyDenied",
           "[devices][ap3][ota_cipher][gating]") {
+#if defined(ST_AP3_HAVE_CIPHER)
+    SKIP("Build flag is ON — primitive is live; covered by fixture tests");
+#else
     std::array<std::uint8_t, 8> ct{};
     auto const r = st::devices::ap3::cipher::blowfish_ctr_double_decrypt(ct, 0x42);
     REQUIRE_FALSE(r.has_value());
-#if defined(ST_AP3_HAVE_CIPHER)
-    // Build flag is ON — the Blowfish primitive itself isn't
-    // vendored yet, so we return NotImplemented.
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
-#else
     REQUIRE(r.error().code() == st::ErrorCode::PolicyDenied);
 #endif
 }
 
-TEST_CASE("decrypt_ota_img is gated correctly",
+TEST_CASE("decrypt_ota_img gated OFF returns PolicyDenied",
           "[devices][ap3][ota_cipher][gating]") {
-    // Build a valid synthetic .img (so parse_ota_img wouldn't fail
-    // first) and exercise the high-level decrypt entry point.
+#if defined(ST_AP3_HAVE_CIPHER)
+    SKIP("Build flag is ON — primitive is live; covered by fixture tests");
+#else
     std::vector<std::uint8_t> img(6 + 16 + 32, 0xCD);
     img[0] = 0xDE;
     img[1] = 0xAD;
@@ -108,9 +110,80 @@ TEST_CASE("decrypt_ota_img is gated correctly",
     img[3] = 0xEF;
     auto const r = st::devices::ap3::cipher::decrypt_ota_img(img);
     REQUIRE_FALSE(r.has_value());
-#if defined(ST_AP3_HAVE_CIPHER)
-    REQUIRE(r.error().code() == st::ErrorCode::NotImplemented);
-#else
     REQUIRE(r.error().code() == st::ErrorCode::PolicyDenied);
 #endif
 }
+
+#if defined(ST_AP3_HAVE_CIPHER)
+
+// Fixture loader — borrows the helper pattern from test_ptm_cipher.cpp
+// via a local copy so this file stays self-contained.
+namespace {
+
+std::vector<std::uint8_t> load_blowfish_fixture(std::string_view name) {
+    std::filesystem::path const path =
+        std::filesystem::path{ST_FIXTURE_AP3_CIPHER_DIR} / name;
+    std::ifstream in{path, std::ios::binary | std::ios::ate};
+    if (!in) {
+        return {};
+    }
+    auto const sz = in.tellg();
+    in.seekg(0);
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(sz));
+    in.read(reinterpret_cast<char *>(bytes.data()), sz);
+    return bytes;
+}
+
+} // namespace
+
+TEST_CASE("blowfish_ctr_double_decrypt fixture-pinned byte-identity",
+          "[devices][ap3][ota_cipher][fixtures]") {
+    // base_ctr 0xdeadbeef per fixtures/ap3/cipher/blowfish_base_ctr.txt.
+    // input  → plaintext bytes
+    // output → ciphertext (what the AP firmware emits after Blowfish-CTR)
+    // The cipher is its own inverse (XOR stream), so encrypt(plaintext) ==
+    // ciphertext AND decrypt(ciphertext) == plaintext are the same call.
+    auto plaintext = load_blowfish_fixture("blowfish_input.bin");
+    auto ciphertext = load_blowfish_fixture("blowfish_output_body.bin");
+    if (plaintext.empty() || ciphertext.empty()) {
+        SKIP("blowfish fixtures not staged");
+    }
+    REQUIRE(plaintext.size() == 8192);
+    REQUIRE(ciphertext.size() == 8192);
+
+    constexpr std::uint32_t kBaseCtr = 0xDEADBEEFU;
+    auto encrypted = st::devices::ap3::cipher::blowfish_ctr_double_encrypt(
+        plaintext, kBaseCtr);
+    REQUIRE(encrypted.has_value());
+    REQUIRE(encrypted->size() == ciphertext.size());
+    for (std::size_t i = 0; i < ciphertext.size(); ++i) {
+        REQUIRE((*encrypted)[i] == ciphertext[i]);
+    }
+
+    auto decrypted = st::devices::ap3::cipher::blowfish_ctr_double_decrypt(
+        ciphertext, kBaseCtr);
+    REQUIRE(decrypted.has_value());
+    REQUIRE(decrypted->size() == plaintext.size());
+    for (std::size_t i = 0; i < plaintext.size(); ++i) {
+        REQUIRE((*decrypted)[i] == plaintext[i]);
+    }
+}
+
+TEST_CASE("decrypt_ota_img end-to-end against full .img fixture",
+          "[devices][ap3][ota_cipher][fixtures]") {
+    auto img = load_blowfish_fixture("blowfish_output_full.bin");
+    auto plaintext = load_blowfish_fixture("blowfish_input.bin");
+    if (img.empty() || plaintext.empty()) {
+        SKIP("blowfish fixtures not staged");
+    }
+    REQUIRE(img.size() == 8230); // 6 header + 8192 body + 32 trailer
+
+    auto decrypted = st::devices::ap3::cipher::decrypt_ota_img(img);
+    REQUIRE(decrypted.has_value());
+    REQUIRE(decrypted->size() == plaintext.size());
+    for (std::size_t i = 0; i < plaintext.size(); ++i) {
+        REQUIRE((*decrypted)[i] == plaintext[i]);
+    }
+}
+
+#endif // ST_AP3_HAVE_CIPHER

@@ -51,10 +51,17 @@ add_library(st_devices_ap3 STATIC
     src/aes256_ctr.cpp
     src/bzip2_decompress.cpp
     # OTA .img cipher (Session 3) — wrapper parse/build is cipher-
-    # independent; the Blowfish primitive is Tier-A NotImplemented
-    # until the public-domain reference is vendored.
+    # independent; the Blowfish primitive is gated alongside the
+    # other cipher work via ST_AP3_HAVE_CIPHER.
     src/ota_cipher.cpp
 )
+
+# Blowfish primitive compiles only when the cipher tier is ON. The
+# pi-derived constants + Feistel rounds add ~2 KB of .rodata + a few
+# hundred bytes of .text; not paid for in the default OFF build.
+if(ST_ENABLE_COBB_AP_CIPHER)
+    target_sources(st_devices_ap3 PRIVATE src/blowfish_ecb.cpp)
+endif()
 
 if(ST_ENABLE_COBB_AP_CIPHER)
     # The top-level project() only declares LANGUAGES CXX; enable C
