@@ -13878,10 +13878,10 @@ int cmd_rom_pull(int argc, char *argv[]) {
                        "is a deprecated alias for 'aftermarket-l3'; will "
                        "be removed next release.\n",
                        stderr);
-        } else if (*sa_variant == "cobb-flash") {
-            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_cobb_flash;
-        } else if (*sa_variant == "cobb-maf-sd") {
-            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_cobb_maf_sd;
+        } else if (*sa_variant == "aftermarket-v1-flash") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket_v1_flash;
+        } else if (*sa_variant == "aftermarket-v1-maf-sd") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket_v1_maf_sd;
         } else if (*sa_variant == "ssmv-factory") {
             sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_ssmv_factory;
         } else if (*sa_variant == "ecutek" || *sa_variant == "ecutek-l1") {
@@ -14949,11 +14949,11 @@ int cmd_ssm_a8_poll(int argc, char *argv[]) {
                        "'fehr-active-l3' is a deprecated alias for "
                        "'aftermarket-l3'.\n",
                        stderr);
-        } else if (*sa_variant == "cobb-flash") {
-            sa_fn = &st::ecu::subaru::ssmcan1_l1_cobb_flash;
+        } else if (*sa_variant == "aftermarket-v1-flash") {
+            sa_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket_v1_flash;
             sa_label = "COBB-flash L1";
-        } else if (*sa_variant == "cobb-maf-sd") {
-            sa_fn = &st::ecu::subaru::ssmcan1_l1_cobb_maf_sd;
+        } else if (*sa_variant == "aftermarket-v1-maf-sd") {
+            sa_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket_v1_maf_sd;
             sa_label = "COBB-MAF-SD L1";
         } else if (*sa_variant == "ssmv-factory") {
             sa_fn = &st::ecu::subaru::ssmcan1_l1_ssmv_factory;

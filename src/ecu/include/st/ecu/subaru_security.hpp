@@ -117,9 +117,9 @@ ssmcan1_l3_aftermarket(std::span<std::uint8_t const> seed);
 // extraction methodology is verified. Live bench-rig validation
 // against an actual COBB-installed ECU pending (docs/28 Phase 5.5).
 [[nodiscard]] Result<std::vector<std::uint8_t>>
-ssmcan1_l1_cobb_flash(std::span<std::uint8_t const> seed);
+ssmcan1_l1_aftermarket_v1_flash(std::span<std::uint8_t const> seed);
 [[nodiscard]] Result<std::vector<std::uint8_t>>
-ssmcan1_l1_cobb_maf_sd(std::span<std::uint8_t const> seed);
+ssmcan1_l1_aftermarket_v1_maf_sd(std::span<std::uint8_t const> seed);
 
 // SSM-V factory L1 — per RE wave 3 §F3, SSM-V's factory key flow
 // reuses the L35 round-key set in reverse order. Same algorithm

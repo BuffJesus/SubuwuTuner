@@ -527,7 +527,7 @@ ssmcan1_l3_aftermarket(std::span<std::uint8_t const> seed) {
 }
 
 Result<std::vector<std::uint8_t>>
-ssmcan1_l1_cobb_flash(std::span<std::uint8_t const> seed) {
+ssmcan1_l1_aftermarket_v1_flash(std::span<std::uint8_t const> seed) {
     // L1 SecurityAccess derivation for ECUs in the COBB-installed-tune
     // state ("COBB Flash" variant). Same algorithm shape as
     // `ssmcan1_l1_aftermarket` — forward Feistel + final wordswap —
@@ -613,7 +613,7 @@ ssmcan1_l1_ssmv_factory(std::span<std::uint8_t const> seed) {
 }
 
 Result<std::vector<std::uint8_t>>
-ssmcan1_l1_cobb_maf_sd(std::span<std::uint8_t const> seed) {
+ssmcan1_l1_aftermarket_v1_maf_sd(std::span<std::uint8_t const> seed) {
     // L1 SecurityAccess derivation for ECUs running COBB's MAF-based
     // Speed-Density variant. Same algorithm shape as the COBB-flash
     // variant above; only the round-key table differs. See
