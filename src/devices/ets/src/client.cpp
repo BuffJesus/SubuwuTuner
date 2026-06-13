@@ -576,9 +576,9 @@ Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
     //     /backupcksum, where path = name = bare token.
     // Empirical layout pinned against `cmd20_*_request_known_good.bin`.
     // cmd 0x20 ReadFile setup expects:
-    //   VaultFileMetadata.name = basename (e.g. "Stage1.ptm")
+    //   VaultFileMetadata.name = basename (e.g. "tune.ptm")
     //   VaultFileMetadata.path = full relative path with NO leading slash
-    //                    (e.g. "maps/Stage1.ptm" or "backupcksum")
+    //                    (e.g. "maps/tune.ptm" or "backupcksum")
     // Live-confirmed 2026-06-12 against the reference Python tool's
     // successful pull of 59 tunes from /maps/. The earlier convention
     // (name=basename, path="/maps/") produced a degenerate setup ACK
@@ -646,7 +646,7 @@ Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
         return st::failure(std::move(s).error());
     }
     // cmd 0x21 file data can run to tens of KB on a real tune (~58 KB
-    // for a typical Stage1) and the AP can take several seconds to
+    // for a typical retail) and the AP can take several seconds to
     // push the body through bulk-in. Swap to the wider file-data
     // timeout for just this receive; restore the metadata default
     // after so any error-path subsequent reads use the small budget.

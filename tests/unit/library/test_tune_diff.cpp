@@ -115,7 +115,7 @@ TEST_CASE("compute_tune_diff: identical tunes with duplicate rom_offset diff to 
           "[library][tune_diff]") {
     // Real COBB tunes emit clear-then-set byte pairs at hot offsets — 2
     // patches with the same `rom_offset` but different `ram_offset` and
-    // bytes. Stage1 91 v401.ptm has 78 such pairs. Pre-fix
+    // bytes. a captured retail tune has 78 such pairs. Pre-fix
     // compute_tune_diff used `std::map<rom_offset, idx>` which silently
     // dropped the second half of each pair, then misclassified the
     // first half as `changed_at_shared` by comparing it against the

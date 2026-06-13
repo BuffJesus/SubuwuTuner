@@ -4,7 +4,7 @@
 // Private-fixture regression test for the full real-tune `.ptm` cipher
 // chain. Locked down 2026-06-12 PM after live-validating the AES custom
 // CTR rewrite (commit 97bd2dd) against the user's married AccessPort
-// pulling /maps/Stage1 91 v401.ptm.
+// pulling /maps/a captured retail tune.
 //
 // Why a separate file: the synthetic fixtures in test_ptm_cipher.cpp
 // exercise each layer with hand-crafted vectors. This file exercises
@@ -74,7 +74,7 @@ TEST_CASE("ap3 cipher private: real COBB Stage1 .ptm decrypts and decodes",
     REQUIRE(contents.has_value());
     auto const &xml = contents->inner_xml;
     REQUIRE_FALSE(xml.empty());
-    // The COBB Stage1 91 v401 PrivateData root + identity fields. If
+    // The COBB a captured retail tune PrivateData root + identity fields. If
     // any of these change, the cipher or the file changed.
     REQUIRE(xml.starts_with("<PrivateData>"));
     REQUIRE(xml.find("<vendorID>COBB</vendorID>") != std::string::npos);

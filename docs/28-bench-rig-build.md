@@ -305,11 +305,11 @@ Pre-reqs:
 
 Recipe:
 
-1. **Pull a known-good stock tune from the AP** (or use any tune we previously confirmed round-trips byte-identical). Stage1 91 v401.ptm was the 2026-06-12 validation file:
+1. **Pull a known-good stock tune from the AP** (or use any tune we previously confirmed round-trips byte-identical). a captured retail tune was the 2026-06-12 validation file:
 
    ```bash
    MSYS_NO_PATHCONV=1 subuwutuner-cli ap3 pull \
-       "/maps/Stage1 91 v401.ptm" \
+       "/maps/a captured retail tune" \
        --into /tmp/stage1.ptm
    ```
 
@@ -351,7 +351,7 @@ Recipe:
    - The ECU starts and idles cleanly (key-on, engine-off; we're not running the engine on the bench).
    - No new DTCs beyond the bench-only expected set (P0606 vs no-VSS, etc).
 
-9. **Restore stock**: re-flash the original Stage1 91 v401.ptm so the bench ECU goes back to a known starting state for the next session.
+9. **Restore stock**: re-flash the original a captured retail tune so the bench ECU goes back to a known starting state for the next session.
 
 10. **Clean up the AP**:
 

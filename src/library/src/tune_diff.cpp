@@ -17,7 +17,7 @@ compute_tune_diff(DecodedPtm const &a, DecodedPtm const &b,
 
     // Index by `rom_offset` (multimap — see patch_decoder.hpp for the
     // duplicate-rom_offset invariant: COBB tunes emit clear-then-set
-    // byte pairs at hot offsets, 78 of them in Stage1 91 v401.ptm).
+    // byte pairs at hot offsets, 78 of them in a captured retail tune).
     // Pair within an offset bucket by `(rom_offset, ram_offset)`, the
     // natural patch-slot key. A flat `std::map<rom_offset, idx>` would
     // silently overwrite duplicates and produce phantom

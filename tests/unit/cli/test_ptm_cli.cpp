@@ -655,7 +655,7 @@ TEST_CASE("ptm verify: round-trip exits 0 on byte-identical match",
 TEST_CASE("ptm verify: duplicate rom_offset patches all match",
           "[cli][ptm][integration][cipher][rewrite]") {
     // Regression for a251f47. Real COBB tunes write clear-then-set
-    // byte pairs at hot offsets (Stage1 91 v401.ptm has 78 of them).
+    // byte pairs at hot offsets (a captured retail tune has 78 of them).
     // The pre-fix verify built a `std::map<rom_offset, idx>` that
     // silently dropped the second entry, then reported phantom
     // mismatches for the bytes the "set" patch was supposed to write.

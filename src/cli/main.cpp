@@ -16119,8 +16119,8 @@ int run_ls(int argc, char **argv, CommonOpts const &opts) {
                     subdir.c_str());
         for (auto const &r : *records) {
             // VaultFileMetadata records in a ListFiles response use `path` for the
-            // full relative path (e.g. "maps/Stage1.ptm") and `name` for
-            // just the basename ("Stage1.ptm") — different from the request-
+            // full relative path (e.g. "maps/tune.ptm") and `name` for
+            // just the basename ("tune.ptm") — different from the request-
             // side convention. Print path-only; prepending `name` would
             // duplicate the basename as observed live 2026-06-12.
             std::printf("  %12llu  %s\n", static_cast<unsigned long long>(r.size),

@@ -136,7 +136,7 @@ public:
     [[nodiscard]] Result<std::vector<FileInfo>> ls(std::string_view subdir);
 
     // cmd 0x20 setup + 0x21 data — read a file by its absolute path
-    // under /user/ap-user/. e.g. "/maps/Stage0.ptm". Returns the
+    // under /user/ap-user/. e.g. "/maps/tune.ptm". Returns the
     // file's raw bytes.
     [[nodiscard]] Result<std::vector<std::uint8_t>> read_file(std::string_view path);
 

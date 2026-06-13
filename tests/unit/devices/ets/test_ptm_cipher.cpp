@@ -238,7 +238,7 @@ TEST_CASE("ap3 cipher: AES-256-CTR symmetric round-trip with the custom construc
     // The canonical aes_layer3_input/output fixture was generated for
     // STANDARD AES-CTR (linear 16-byte counter), but the real `.ptm`
     // format uses a custom CTR with 16 KB chunks + counter-repeated-4
-    // input blocks — see pkg::ExrRil::en_de + the reference Python
+    // input blocks — see the OEM cipher dispatcher entry + the reference Python
     // tool. Live-verified 2026-06-12 against real tunes from the AP.
     //
     // Self-consistency round-trip is sufficient here; byte-identity

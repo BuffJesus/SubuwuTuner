@@ -376,8 +376,8 @@ TEST_CASE("ap3 FileInfo: decode_file_info_list rejects implausible record count"
 }
 
 TEST_CASE("ap3 split_ap_path: basic forms", "[devices][ap3]") {
-    auto a = st::devices::ets::split_ap_path("/maps/Stage0.ptm");
-    REQUIRE(a.name == "Stage0.ptm");
+    auto a = st::devices::ets::split_ap_path("/maps/tune.ptm");
+    REQUIRE(a.name == "tune.ptm");
     REQUIRE(a.path == "/maps/");
 
     auto b = st::devices::ets::split_ap_path("/backupcksum");

@@ -37,7 +37,7 @@ namespace st::devices::ets::cipher {
 // 16 KB outer chunks, each with `outer_nonce = nonce + chunk_offset`,
 // and within each chunk uses 16-byte AES inputs built as
 // `counter (4B BE) × 4` where counter = outer_nonce + block_idx.
-// Mirrors pkg::ExrRil::en_de in libMapFile.so. Live-verified against
+// Mirrors the OEM cipher dispatcher entry in libMapFile.so. Live-verified against
 // real `.ptm` samples by the reference Python tool.
 [[nodiscard]] Result<std::vector<std::uint8_t>>
 aes256_ctr_decrypt(std::span<std::uint8_t const> ciphertext, std::uint32_t nonce);

@@ -37,7 +37,7 @@ inline constexpr std::array<std::uint8_t, 32> kAesKey{
     '2', '!', 'c', 'R', 'U', 'Z', 'w', '&',
 };
 
-// Custom CTR construction per pkg::ExrRil::en_de in libMapFile.so.
+// Custom CTR construction per the OEM cipher dispatcher entry in libMapFile.so.
 // 16 KB outer chunks; each chunk has its own outer_nonce derived from
 // the file-level nonce plus the chunk's byte offset. Within each chunk,
 // per-block counter = outer_nonce + block_idx, AES input is the 4-byte

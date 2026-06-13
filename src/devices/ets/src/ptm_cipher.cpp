@@ -334,7 +334,7 @@ decrypt_ptm(std::span<std::uint8_t const> ptm_bytes) {
     }
     // The base64-decoded encData blob carries the per-file AES nonce
     // in its last 4 bytes (BE u32). Strip those before feeding the
-    // body to the custom CTR construction. Per `pkg::ExrRil::en_de`
+    // body to the custom CTR construction. Per `the OEM cipher dispatcher entry`
     // and the reference Python tool — verified live 2026-06-12.
     if (inner_ct->size() < 4) {
         return st::failure(st::ErrorCode::ParseError,

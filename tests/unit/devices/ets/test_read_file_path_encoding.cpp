@@ -3,7 +3,7 @@
 //
 // Regression test for commit ef70018 — `Client::read_file` cmd 0x20
 // setup body MUST encode the VaultFileMetadata.path field as the full relative
-// path with NO leading slash (e.g. "maps/Stage1.ptm"), not the directory
+// path with NO leading slash (e.g. "maps/tune.ptm"), not the directory
 // (e.g. "/maps/"). The earlier convention triggered a degenerate setup
 // ACK from the AP (name=".", size=0) which caused cmd 0x21 to return
 // zero body bytes — diagnosed by running the reference Python tool's
@@ -118,7 +118,7 @@ TEST_CASE("ap3 read_file cmd 0x20 setup encodes path as full relative "
     // Trigger read_file. The cmd 0x21 read will eventually fail or
     // time out — we don't care; the cmd 0x20 setup OUT bytes are
     // already captured by the time the failure surfaces.
-    (void)client.read_file("/maps/Stage1.ptm");
+    (void)client.read_file("/maps/tune.ptm");
 
     auto const written = channel.drain_written();
     auto const cmd20 = find_cmd20_packet(written);
@@ -133,8 +133,8 @@ TEST_CASE("ap3 read_file cmd 0x20 setup encodes path as full relative "
 
     auto decoded = st::devices::ets::decode_vault_file_metadata(body);
     REQUIRE(decoded.has_value());
-    CHECK(decoded->name == "Stage1.ptm");
-    CHECK(decoded->path == "maps/Stage1.ptm");
+    CHECK(decoded->name == "tune.ptm");
+    CHECK(decoded->path == "maps/tune.ptm");
     // The smoking-gun regression check: path MUST NOT be the
     // directory-only form that triggered the original §4 bug.
     CHECK(decoded->path != "/maps/");
