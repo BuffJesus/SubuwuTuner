@@ -41,6 +41,13 @@ namespace st::devices::ets {
 // `/backupcksum`. Spec §6.5.
 inline constexpr std::uint8_t kPathTypeUserFs = 0x02;
 
+// Wire-level virtual filename the device serves for its persisted ROM-
+// backup checksum pseudo-file. The literal stays on the wire (we have
+// to send the bytes the firmware recognizes); call sites reference it
+// through this constant so the OEM string lives in exactly one place
+// in the public source.
+inline constexpr std::string_view kVirtualBackupChecksumPath = "backupcksum";
+
 // Captured state of a connected AP3, populated by query_state().
 struct DeviceState {
     // Raw response bodies — parsing the inner Boost-archived strings

@@ -16360,7 +16360,7 @@ int run_backup(int argc, char **argv, CommonOpts const &opts) {
             total_bytes += bytes->size();
         }
     }
-    for (auto const *name : {"settings", "backupcksum"}) {
+    for (auto const *name : {"settings", st::devices::ets::kVirtualBackupChecksumPath.data()}) {
         std::string const path = std::string{"/"} + name;
         auto bytes = client.read_file(path);
         if (!bytes.has_value()) {
