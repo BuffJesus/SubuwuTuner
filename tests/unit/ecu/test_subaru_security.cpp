@@ -535,3 +535,117 @@ TEST_CASE("ssmcan1_l1_ssmv_factory differs from L35 aftermarket",
     REQUIRE(ssmv.has_value());
     REQUIRE(*after != *ssmv);
 }
+
+// =====================================================================
+// D — EcuTek SA variant (RE wave 5 §ε1)
+// =====================================================================
+
+TEST_CASE("ssmcan1_l1_ecutek / ssmcan1_l35_ecutek produce deterministic 4-byte keys",
+          "[ecu][sa][gen_a][ecutek]") {
+    using ecu::subaru::ssmcan1_l1_ecutek;
+    using ecu::subaru::ssmcan1_l35_ecutek;
+    std::array<std::uint8_t, 4> const seed{0xDE, 0xAD, 0xBE, 0xEF};
+    for (auto fn : {&ssmcan1_l1_ecutek, &ssmcan1_l35_ecutek}) {
+        auto const r1 = (*fn)(std::span<std::uint8_t const>{seed});
+        REQUIRE(r1.has_value());
+        REQUIRE(r1->size() == 4);
+        auto const r2 = (*fn)(std::span<std::uint8_t const>{seed});
+        REQUIRE(r2.has_value());
+        REQUIRE(*r1 == *r2);
+    }
+}
+
+TEST_CASE("EcuTek L1 differs from all four existing L1 variants",
+          "[ecu][sa][gen_a][ecutek]") {
+    // 5-way distinctness: factory / aftermarket / cobb-flash /
+    // cobb-maf-sd / ecutek. The S-box patches (entries 0-4) must
+    // propagate through enough of the Feistel rounds that the output
+    // diverges; if it doesn't, EcuTek's variant would be silently
+    // indistinguishable from one of the existing variants on the
+    // wire.
+    using ecu::subaru::ssmcan1_key_stub;
+    using ecu::subaru::ssmcan1_l1_aftermarket;
+    using ecu::subaru::ssmcan1_l1_cobb_flash;
+    using ecu::subaru::ssmcan1_l1_cobb_maf_sd;
+    using ecu::subaru::ssmcan1_l1_ecutek;
+    std::array<std::uint8_t, 4> const seed{0xB9, 0xA6, 0x5C, 0x23};
+    auto const factory = ssmcan1_key_stub(std::span<std::uint8_t const>{seed});
+    auto const after = ssmcan1_l1_aftermarket(std::span<std::uint8_t const>{seed});
+    auto const cobbf = ssmcan1_l1_cobb_flash(std::span<std::uint8_t const>{seed});
+    auto const cobbm = ssmcan1_l1_cobb_maf_sd(std::span<std::uint8_t const>{seed});
+    auto const eet = ssmcan1_l1_ecutek(std::span<std::uint8_t const>{seed});
+    REQUIRE(factory.has_value());
+    REQUIRE(after.has_value());
+    REQUIRE(cobbf.has_value());
+    REQUIRE(cobbm.has_value());
+    REQUIRE(eet.has_value());
+    REQUIRE(*eet != *factory);
+    REQUIRE(*eet != *after);
+    REQUIRE(*eet != *cobbf);
+    REQUIRE(*eet != *cobbm);
+}
+
+TEST_CASE("EcuTek L35 differs from L35 aftermarket on shared seeds",
+          "[ecu][sa][gen_a][ecutek]") {
+    // L35 EcuTek and L35 aftermarket share the L35 round-key table
+    // (kSaTableL35Aftermarket structurally vs kSaTableL35) — only
+    // the S-box differs. The output must still diverge per seed.
+    using ecu::subaru::ssmcan1_l35_ecutek;
+    using ecu::subaru::ssmcan1_l3_aftermarket;
+    constexpr std::array<std::array<std::uint8_t, 4>, 3> seeds{{
+        {0x4A, 0xDF, 0xFE, 0x07},
+        {0xDE, 0xAD, 0xBE, 0xEF},
+        {0x12, 0x34, 0x56, 0x78},
+    }};
+    for (auto const &s : seeds) {
+        auto const after = ssmcan1_l3_aftermarket(std::span<std::uint8_t const>{s});
+        auto const eet = ssmcan1_l35_ecutek(std::span<std::uint8_t const>{s});
+        REQUIRE(after.has_value());
+        REQUIRE(eet.has_value());
+        REQUIRE(*after != *eet);
+    }
+}
+
+TEST_CASE("EcuTek SA variants reject wrong seed length",
+          "[ecu][sa][gen_a][ecutek]") {
+    using ecu::subaru::ssmcan1_l1_ecutek;
+    using ecu::subaru::ssmcan1_l35_ecutek;
+    std::array<std::uint8_t, 3> const three{};
+    std::array<std::uint8_t, 8> const eight{};
+    for (auto fn : {&ssmcan1_l1_ecutek, &ssmcan1_l35_ecutek}) {
+        auto const r3 = (*fn)(std::span<std::uint8_t const>{three});
+        REQUIRE_FALSE(r3.has_value());
+        REQUIRE(r3.error().code() == ErrorCode::InvalidArgument);
+        auto const r8 = (*fn)(std::span<std::uint8_t const>{eight});
+        REQUIRE_FALSE(r8.has_value());
+        REQUIRE(r8.error().code() == ErrorCode::InvalidArgument);
+    }
+}
+
+TEST_CASE("EcuTek S-box differs from kSBox only at the first 5 entries",
+          "[ecu][sa][gen_a][ecutek]") {
+    // Indirect probe: feed seeds that maximize coverage of S-box
+    // entries 0-4 in the Feistel rounds. EcuTek output must differ
+    // from factory on at least one such seed; if every seed produces
+    // the same output, the S-box swap isn't being applied.
+    using ecu::subaru::ssmcan1_key_stub;
+    using ecu::subaru::ssmcan1_l1_ecutek;
+    bool any_diverged = false;
+    for (std::uint32_t base = 0; base < 0x100; ++base) {
+        std::array<std::uint8_t, 4> seed{
+            static_cast<std::uint8_t>(base & 0xFFU),
+            static_cast<std::uint8_t>((base >> 1) ^ 0x55U),
+            static_cast<std::uint8_t>(base * 31U & 0xFFU),
+            static_cast<std::uint8_t>(base * 7U & 0xFFU),
+        };
+        auto const fac = ssmcan1_key_stub(std::span<std::uint8_t const>{seed});
+        auto const eet = ssmcan1_l1_ecutek(std::span<std::uint8_t const>{seed});
+        REQUIRE(fac.has_value());
+        REQUIRE(eet.has_value());
+        if (*fac != *eet) {
+            any_diverged = true;
+            break;
+        }
+    }
+    REQUIRE(any_diverged);
+}

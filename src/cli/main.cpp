@@ -13883,12 +13883,17 @@ int cmd_rom_pull(int argc, char *argv[]) {
             sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_cobb_maf_sd;
         } else if (*sa_variant == "ssmv-factory") {
             sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_ssmv_factory;
+        } else if (*sa_variant == "ecutek" || *sa_variant == "ecutek-l1") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_ecutek;
+        } else if (*sa_variant == "ecutek-l3" || *sa_variant == "ecutek-l35") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l35_ecutek;
         } else {
             std::fprintf(stderr,
                          "rom-pull: --sa-variant '%s' not recognized "
                          "(expected one of: default, aftermarket, "
                          "aftermarket-l1, aftermarket-l3, cobb-flash, "
-                         "cobb-maf-sd, ssmv-factory).\n",
+                         "cobb-maf-sd, ssmv-factory, ecutek[-l1], "
+                         "ecutek-l3).\n",
                          sa_variant->c_str());
             return 2;
         }
@@ -14938,12 +14943,18 @@ int cmd_ssm_a8_poll(int argc, char *argv[]) {
         } else if (*sa_variant == "ssmv-factory") {
             sa_fn = &st::ecu::subaru::ssmcan1_l1_ssmv_factory;
             sa_label = "SSM-V factory L1";
+        } else if (*sa_variant == "ecutek" || *sa_variant == "ecutek-l1") {
+            sa_fn = &st::ecu::subaru::ssmcan1_l1_ecutek;
+            sa_label = "EcuTek L1";
+        } else if (*sa_variant == "ecutek-l3" || *sa_variant == "ecutek-l35") {
+            sa_fn = &st::ecu::subaru::ssmcan1_l35_ecutek;
+            sa_label = "EcuTek L3";
         } else {
             std::fprintf(stderr,
                          "ssm-a8-poll: --sa-variant '%s' not recognized "
                          "(expected: default | aftermarket[-l1] | "
                          "aftermarket-l3 | cobb-flash | cobb-maf-sd | "
-                         "ssmv-factory).\n",
+                         "ssmv-factory | ecutek[-l1] | ecutek-l3).\n",
                          sa_variant->c_str());
             return 2;
         }

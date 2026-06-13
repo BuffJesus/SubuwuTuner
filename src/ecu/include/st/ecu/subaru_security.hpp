@@ -129,6 +129,17 @@ ssmcan1_l1_cobb_maf_sd(std::span<std::uint8_t const> seed);
 [[nodiscard]] Result<std::vector<std::uint8_t>>
 ssmcan1_l1_ssmv_factory(std::span<std::uint8_t const> seed);
 
+// EcuTek L1 + L3/L5 SA derivations. Per RE wave 5 §ε1: EcuTek
+// inherits the factory round-key tables (kSaTableL1 for L1,
+// kSaTableL35 for L3/L5) but patches the first 5 entries of the
+// Feistel S-box. The wrapper functions use the EcuTek S-box variant
+// for substitutions; otherwise the algorithm shape is identical to
+// the corresponding aftermarket variants.
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+ssmcan1_l1_ecutek(std::span<std::uint8_t const> seed);
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+ssmcan1_l35_ecutek(std::span<std::uint8_t const> seed);
+
 // SSMK1 — pre-2008 K-Line SecurityAccess. Algorithm not yet recovered
 // (no K-Line capture rig in hand). Returns failure(NotImplemented) on
 // every input.

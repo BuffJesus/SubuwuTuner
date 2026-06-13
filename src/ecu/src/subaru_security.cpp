@@ -29,8 +29,31 @@ namespace {
 // -----------------------------------------------------------------------------
 
 // 32-entry × 4-bit S-box, packed one entry per uint8_t.
+//
+// Verified byte-perfect against the live AP firmware's
+// `subaru_feistel` S-box at `libFlashSubaru.so:0x8aa78` (firmware
+// v1.7.6.0-28785, RE'd 2026-06-12 — see findings/re-2026-06-12-pm/
+// RE_wave4_findings.md §δ). Strong cross-check of the clean-room
+// implementation: two independent extractions (the original ROM
+// disasm and the libFlashSubaru disasm) converge byte-for-byte.
 constexpr std::array<std::uint8_t, 32> kSBox = {
     0x05, 0x06, 0x07, 0x01, 0x09, 0x0c, 0x0d, 0x08,
+    0x0a, 0x0d, 0x02, 0x0b, 0x0f, 0x04, 0x00, 0x03,
+    0x0b, 0x04, 0x06, 0x00, 0x0f, 0x02, 0x0d, 0x09,
+    0x05, 0x0c, 0x01, 0x0a, 0x03, 0x0d, 0x0e, 0x08,
+};
+
+// EcuTek-variant S-box. Per RE wave 5 §ε1: EcuTek inherits the
+// factory Feistel + round-key application but patches the first 5
+// S-box entries. Entries [0..4] = {4, 2, 5, 1, 8} replace the
+// factory's {5, 6, 7, 1, 9}; entries [5..31] are byte-identical to
+// kSBox.
+//
+// Pinned against libFlashSubaru.so:0x8b73c (firmware v1.7.6.0-28785).
+// SSM-III and SSM-IV EcuTek share this S-box (no per-generation
+// variation observed in the extraction).
+constexpr std::array<std::uint8_t, 32> kSBoxEcuTek = {
+    0x04, 0x02, 0x05, 0x01, 0x08, 0x0c, 0x0d, 0x08,
     0x0a, 0x0d, 0x02, 0x0b, 0x0f, 0x04, 0x00, 0x03,
     0x0b, 0x04, 0x06, 0x00, 0x0f, 0x02, 0x0d, 0x09,
     0x05, 0x0c, 0x01, 0x0a, 0x03, 0x0d, 0x0e, 0x08,
@@ -276,6 +299,40 @@ constexpr std::uint32_t feistel_forward_with_swap(std::uint32_t state,
     return (static_cast<std::uint32_t>(state_lo) << 16) | state_hi;
 }
 
+// EcuTek-variant F function. Same shape as `feistel_F` but indexes
+// into `kSBoxEcuTek` — the substitution differs at entries 0-4 per
+// RE wave 5 §ε1. The XOR-with-key, 4-overlapping-5-bit-lookup, and
+// 13-bit post-substitution rol16 are unchanged.
+constexpr std::uint16_t feistel_F_ecutek(std::uint16_t x, std::uint16_t k) noexcept {
+    x = static_cast<std::uint16_t>(x ^ k);
+    unsigned const i3 = ((x & 0x0001U) << 4) | (x >> 12);
+    unsigned const i2 = (x >> 8) & 0x1FU;
+    unsigned const i1 = (x >> 4) & 0x1FU;
+    unsigned const i0 = x & 0x1FU;
+    unsigned const y = (unsigned{kSBoxEcuTek[i3]} << 12) |
+                       (unsigned{kSBoxEcuTek[i2]} << 8) |
+                       (unsigned{kSBoxEcuTek[i1]} << 4) |
+                        unsigned{kSBoxEcuTek[i0]};
+    return rol16(static_cast<std::uint16_t>(y), 13);
+}
+
+// EcuTek variant of forward Feistel + post-swap. Same loop shape as
+// `feistel_forward_with_swap`; only the F function differs.
+constexpr std::uint32_t
+feistel_forward_with_swap_ecutek(std::uint32_t state,
+                                  std::span<std::uint16_t const, 16> rk) noexcept {
+    auto state_hi = static_cast<std::uint16_t>(state >> 16);
+    auto state_lo = static_cast<std::uint16_t>(state & 0xFFFFU);
+    for (auto const k : rk) {
+        auto const f_out = feistel_F_ecutek(state_lo, k);
+        auto const new_lo = static_cast<std::uint16_t>(state_hi ^ f_out);
+        auto const new_hi = state_lo;
+        state_hi = new_hi;
+        state_lo = new_lo;
+    }
+    return (static_cast<std::uint32_t>(state_lo) << 16) | state_hi;
+}
+
 constexpr std::uint32_t read_u32_be(std::span<std::uint8_t const> b) noexcept {
     return (static_cast<std::uint32_t>(b[0]) << 24) |
            (static_cast<std::uint32_t>(b[1]) << 16) |
@@ -487,6 +544,49 @@ ssmcan1_l1_cobb_flash(std::span<std::uint8_t const> seed) {
         seed_packed, std::span<std::uint16_t const, 16>{kSaTableCobbFlash});
     std::vector<std::uint8_t> key(4);
     write_u32_be(key_u32, key);
+    return key;
+}
+
+Result<std::vector<std::uint8_t>>
+ssmcan1_l1_ecutek(std::span<std::uint8_t const> seed) {
+    // EcuTek-installed L1 SA derivation. Per RE wave 5 §ε1: EcuTek
+    // inherits the factory L1 round-key table (`kSaTableL1`) but
+    // uses the modified S-box `kSBoxEcuTek` for substitutions. Same
+    // direction as the aftermarket / COBB variants (forward Feistel
+    // + wordswap on the wire seed).
+    if (seed.size() != 4) {
+        return failure(ErrorCode::InvalidArgument,
+                       std::string{"ssmcan1 (Gen-A L1 EcuTek): seed must be "
+                                   "exactly 4 bytes, got "} +
+                           std::to_string(seed.size()));
+    }
+    auto const seed_packed = read_u32_be(seed);
+    auto const key_u32 = feistel_forward_with_swap_ecutek(
+        seed_packed, std::span<std::uint16_t const, 16>{kSaTableL1});
+    std::vector<std::uint8_t> key(4);
+    write_u32_be(key_u32, key);
+    return key;
+}
+
+Result<std::vector<std::uint8_t>>
+ssmcan1_l35_ecutek(std::span<std::uint8_t const> seed) {
+    // EcuTek L3/L5 SA derivation. Mirrors `ssmcan1_l3_aftermarket`
+    // (forward Feistel + per-level byte permutations) but with the
+    // EcuTek S-box. Per RE wave 5 §ε1, the factory L35 round-key
+    // table is inherited; only the substitution differs.
+    if (seed.size() != 4) {
+        return failure(ErrorCode::InvalidArgument,
+                       std::string{"ssmcan1 (Gen-A L35 EcuTek): seed must be "
+                                   "exactly 4 bytes, got "} +
+                           std::to_string(seed.size()));
+    }
+    auto const seed_packed = read_u32_be(seed);
+    auto const permuted_seed = apply_seed_perm_l3(seed_packed);
+    auto const cipher_out = feistel_forward_with_swap_ecutek(
+        permuted_seed, std::span<std::uint16_t const, 16>{kSaTableL35});
+    auto const wire_key_u32 = apply_inverse_key_perm_l3(cipher_out);
+    std::vector<std::uint8_t> key(4);
+    write_u32_be(wire_key_u32, key);
     return key;
 }
 
