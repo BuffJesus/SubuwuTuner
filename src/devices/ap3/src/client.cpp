@@ -358,6 +358,32 @@ Result<std::vector<std::uint8_t>> Client::receive_packet_body() {
                 (void)std::snprintf(buf, sizeof(buf), "%02X", b);
                 msg += buf;
             }
+            // Per RE wave 4 default-handler decode: when the body is
+            // a short ASCII decimal string, it's the dispatched cmd
+            // byte encoded as `itoa(cmd)`. Bodies "32" / "38" / "40"
+            // observed in §4.2 daze reports decode to cmds 50 / 56 /
+            // 64 — all in the out-of-range default-handler band. The
+            // decode helps users understand WHICH cmd the firmware
+            // rejected.
+            bool all_ascii_digits = true;
+            int cmd_decoded = 0;
+            for (auto b : body_span) {
+                if (b < '0' || b > '9') {
+                    all_ascii_digits = false;
+                    break;
+                }
+                cmd_decoded = cmd_decoded * 10 + (b - '0');
+            }
+            if (all_ascii_digits && !body_span.empty() &&
+                body_span.size() <= 3 && cmd_decoded <= 255) {
+                char buf[96];
+                (void)std::snprintf(buf, sizeof(buf),
+                                    " (default-handler error response — cmd "
+                                    "0x%02X is not implemented in this "
+                                    "firmware or was sent with wrong args)",
+                                    cmd_decoded);
+                msg += buf;
+            }
         }
         return st::failure(st::ErrorCode::TransportNack, std::move(msg));
     }

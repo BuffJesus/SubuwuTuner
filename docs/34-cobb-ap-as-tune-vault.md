@@ -166,6 +166,34 @@ If a user reports an AP that won't respond to any SubuwuTuner command, the first
 - **Does not use the AP as an OBD flash bridge.** Capability C is post-1.0. v1.0 routes flash operations through the existing OBDX Pro VX and J2534 transports (per `docs/13-transport.md`).
 - **Does not extract or modify the AP firmware itself.** The Blowfish-CTR-double cipher for OTA `.img` archives is implemented under the same gate as the `.ptm` cipher because the spec covers both, but no SubuwuTuner code path produces or modifies AP firmware images.
 
+## `OnEncFile*` family — reframing (RE wave 5 §ε2)
+
+The AP firmware exposes a parallel file-handler family at cmd bytes
+`0x09 / 0x0a / 0x0c / 0x0d / 0x0e` named `OnEncFile{Setup,}{IN,OUT}`
+in the dispatch table. Earlier project memory described these as
+"encrypted file transfer"; **RE wave 5 §ε2 reframes them as file
+**metadata pre-declaration** handlers, NOT encryption ops.**
+
+What actually happens:
+
+- The OUT side (`OnEncFileSetupOUT` at 0x09, `OnEncFileOUT` at 0x0a)
+  parses an `update::FileInfo` record plus an 8-byte content hash.
+  No data bytes are exchanged here.
+- The IN side (`OnEncFileSetupIN` at 0x0c, alias at 0x0d,
+  `OnEncFileIN` at 0x0e) are no-op stubs — the AP never returns
+  encrypted content via this path.
+- The actual file data upload still uses the standard PutFile path
+  at cmd 0x22 / 0x23 (or the modern `OnGetFile{Setup,}IN` at
+  0x20 / 0x21 for reads).
+
+The "Enc" prefix likely stands for "**Encapsulated**" or "**Endpoint**",
+not "Encrypted". The handler family is a pre-flight metadata seam
+the AP uses internally during APManager's install flow; it is not a
+parallel encryption protocol. SubuwuTuner does not need to call
+these for any current capability — the standard `cmd 0x20-0x26`
+file-vault path covers read / write / list / remove of `.ptm`
+content end-to-end.
+
 ## Related
 
 - `specs/references/cobb-ap3-usb-protocol.md` — analyst-side spec (private) covering the wire format, dispatcher, FileInfo2 layout, cipher chain, and test vectors
