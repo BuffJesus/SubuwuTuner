@@ -205,6 +205,33 @@ public:
     write_block(std::uint32_t address, std::span<std::uint8_t const> data,
                 std::chrono::milliseconds timeout = std::chrono::milliseconds{1000});
 
+    // Send a raw SSM command byte + payload, return the response body
+    // bytes. The wire shape depends on the framing the client was
+    // constructed with:
+    //   * KLine: `80 10 F0 LEN <cmd> <payload...> CSUM`
+    //   * IsoTp: bare `<cmd> <payload...>` over the configured CAN ID
+    //     (the OBDX adapter handles ISO-TP segmentation).
+    //
+    // Per ζ1 (docs/37 §"Wire protocol — ζ1 reframe"): Subaru's flash
+    // path dispatches via SSM byte 0xA5 (EnableFlashMode) + similar
+    // bytes for erase / checksum / etc. This primitive is the wire-
+    // level send the Tier-B SubaruShCanFlash composite needs.
+    //
+    // The response body starts after the SSM ACK byte (response = cmd
+    // | 0x40 per the standard SSM convention); the wrapper strips that
+    // ACK and returns the payload only. NRC-equivalents are surfaced
+    // as Result errors.
+    //
+    // **Tier-A skeleton today** — the wrapper builds the request frame
+    // and calls into `transport_->send_recv`, but the SSM dispatch
+    // table for non-0xA8 / 0xB0 / 0xB8 commands isn't validated; ζ1
+    // Tier-B fills in the per-command response parsers + the
+    // PacketExchange_ISO semantics that the reference architecture
+    // wraps around the bare byte exchange.
+    [[nodiscard]] Result<std::vector<std::uint8_t>>
+    send_byte_command(std::uint8_t cmd, std::span<std::uint8_t const> payload,
+                      std::chrono::milliseconds timeout = std::chrono::milliseconds{2000});
+
 private:
     transport::ITransport *transport_;
     Framing framing_;

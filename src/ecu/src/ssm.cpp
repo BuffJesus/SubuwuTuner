@@ -435,6 +435,101 @@ Result<std::vector<std::uint8_t>> SsmClient::write_block(std::uint32_t address,
     return parse_b8_response(resp->data, data.size(), framing_);
 }
 
+Result<std::vector<std::uint8_t>>
+SsmClient::send_byte_command(std::uint8_t cmd, std::span<std::uint8_t const> payload,
+                              std::chrono::milliseconds timeout) {
+    // Build the request frame per the active framing. KLine wraps the
+    // cmd + payload in a header / src / dest / len / ... / checksum
+    // envelope; IsoTp ships the bare bytes and lets the transport's
+    // ISO-TP layer handle segmentation.
+    std::vector<std::uint8_t> req;
+    if (framing_ == Framing::KLine) {
+        // 80 10 F0 LEN <cmd> <payload...> CSUM
+        // LEN = 1 (cmd byte) + payload.size()
+        if (payload.size() > 0xFEU) {
+            return failure(ErrorCode::InvalidArgument,
+                           "SSM send_byte_command: KLine LEN field is 1 byte; "
+                           "payload too large");
+        }
+        // Indexed assignment instead of reserve+insert — GCC 15 emits a
+        // spurious -Wfree-nonheap-object on the reserve+insert pattern
+        // when the parent function has multi-branch reserve sites.
+        std::size_t const total = 5 + payload.size() + 1;
+        req.resize(total);
+        req[0] = kHeader;
+        req[1] = kDestEcu;
+        req[2] = kSrcTool;
+        req[3] = static_cast<std::uint8_t>(1 + payload.size());
+        req[4] = cmd;
+        for (std::size_t i = 0; i < payload.size(); ++i) {
+            req[5 + i] = payload[i];
+        }
+        std::span<std::uint8_t const> const view(req.data(), req.size() - 1);
+        req[total - 1] = ssm_checksum(view);
+    } else {
+        // IsoTp: raw cmd + payload. The transport layer handles
+        // multi-frame segmentation if the payload is large.
+        req.push_back(cmd);
+        for (auto const b : payload) {
+            req.push_back(b);
+        }
+    }
+    auto resp = transport_->send_recv(req, timeout);
+    if (!resp.has_value())
+        return failure(resp.error());
+
+    auto const &raw = resp->data;
+    // Strip the framing envelope to expose the response body. The SSM
+    // response ACK byte is `cmd | 0x40` per the standard convention.
+    std::span<std::uint8_t const> body{};
+    if (framing_ == Framing::KLine) {
+        // Response shape: 80 F0 10 LEN <ack> <body...> CSUM
+        if (raw.size() < 6 || raw[0] != kHeader || raw[1] != kSrcTool ||
+            raw[2] != kDestEcu) {
+            return failure(ErrorCode::ProtocolError,
+                           "SSM send_byte_command: malformed KLine response "
+                           "envelope");
+        }
+        std::uint8_t const len = raw[3];
+        if (raw.size() != 4U + static_cast<std::size_t>(len) + 1U) {
+            return failure(ErrorCode::ProtocolError,
+                           "SSM send_byte_command: KLine response LEN does "
+                           "not match wire size");
+        }
+        if (len < 1U) {
+            return failure(ErrorCode::ProtocolError,
+                           "SSM send_byte_command: KLine response missing "
+                           "ack byte");
+        }
+        // Checksum byte (last) — defensive verify.
+        std::span<std::uint8_t const> const csum_view(raw.data(), raw.size() - 1);
+        if (raw.back() != ssm_checksum(csum_view)) {
+            return failure(ErrorCode::BadChecksum,
+                           "SSM send_byte_command: KLine response checksum "
+                           "mismatch");
+        }
+        if (raw[4] != static_cast<std::uint8_t>(cmd | 0x40U)) {
+            return failure(ErrorCode::ProtocolError,
+                           "SSM send_byte_command: KLine response ack byte "
+                           "does not match `cmd | 0x40`");
+        }
+        body = std::span<std::uint8_t const>{raw.data() + 5, len - 1U};
+    } else {
+        // IsoTp response: bare <ack> <body...>
+        if (raw.empty()) {
+            return failure(ErrorCode::ProtocolError,
+                           "SSM send_byte_command: empty IsoTp response");
+        }
+        if (raw[0] != static_cast<std::uint8_t>(cmd | 0x40U)) {
+            return failure(ErrorCode::ProtocolError,
+                           "SSM send_byte_command: IsoTp response ack byte "
+                           "does not match `cmd | 0x40`");
+        }
+        body = std::span<std::uint8_t const>{raw.data() + 1, raw.size() - 1};
+    }
+    return std::vector<std::uint8_t>{body.begin(), body.end()};
+}
+
 Result<std::vector<std::uint8_t>> SsmClient::read_block(std::uint32_t base_address,
                                                         std::size_t length,
                                                         std::chrono::milliseconds timeout) {

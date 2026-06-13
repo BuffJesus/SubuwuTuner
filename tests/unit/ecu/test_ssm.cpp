@@ -643,3 +643,89 @@ TEST_CASE("SsmClient IsoTp poll loop tolerates mid-stream NRC and continues",
 
     REQUIRE(t.exhausted());
 }
+
+// =====================================================================
+// send_byte_command — generic SSM byte primitive for ζ1 Tier-B work
+// =====================================================================
+
+TEST_CASE("SsmClient::send_byte_command KLine wraps cmd + payload in envelope",
+          "[ssm][client][send_byte]") {
+    // Sending SSM byte 0xA5 with no payload — the EnableFlashMode
+    // request shape per ζ1 reframe. KLine wraps: 80 10 F0 LEN cmd CSUM.
+    std::vector<std::uint8_t> req_expected{0x80, 0x10, 0xF0, 0x01, 0xA5};
+    req_expected.push_back(ssm::ssm_checksum(req_expected));
+    // Response: 80 F0 10 LEN <ack=0xE5> <body...> CSUM
+    // body = {0x42} for this synthetic test.
+    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x02, 0xE5, 0x42};
+    resp.push_back(ssm::ssm_checksum(resp));
+
+    st::transport::MockTransport t;
+    t.expect_send_recv(req_expected, resp);
+    REQUIRE(t.open({}).has_value());
+
+    ssm::SsmClient client{t};
+    std::array<std::uint8_t, 0> empty_payload{};
+    auto const r =
+        client.send_byte_command(0xA5, std::span<std::uint8_t const>{empty_payload}, 100ms);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == std::vector<std::uint8_t>{0x42});
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("SsmClient::send_byte_command IsoTp emits bare cmd + payload",
+          "[ssm][client][send_byte]") {
+    // No KLine envelope — the OBDX adapter handles ISO-TP segmentation.
+    // 0xA5 with 3-byte payload → wire: A5 11 22 33. Response: E5 (ack)
+    // followed by body bytes.
+    std::vector<std::uint8_t> req_expected{0xA5, 0x11, 0x22, 0x33};
+    std::vector<std::uint8_t> resp{0xE5, 0xDE, 0xAD, 0xBE, 0xEF};
+
+    st::transport::MockTransport t;
+    t.expect_send_recv(req_expected, resp);
+    REQUIRE(t.open({}).has_value());
+
+    ssm::SsmClient client{t, ssm::Framing::IsoTp};
+    std::array<std::uint8_t, 3> payload{0x11, 0x22, 0x33};
+    auto const r =
+        client.send_byte_command(0xA5, std::span<std::uint8_t const>{payload}, 100ms);
+    REQUIRE(r.has_value());
+    REQUIRE(*r == std::vector<std::uint8_t>{0xDE, 0xAD, 0xBE, 0xEF});
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("SsmClient::send_byte_command refuses wrong-ack response",
+          "[ssm][client][send_byte][error]") {
+    // ECU returns ack 0xE6 (which would mean cmd 0xA6, not 0xA5) — the
+    // wrapper refuses with ProtocolError rather than silently passing
+    // wrong data up.
+    std::vector<std::uint8_t> resp{0xE6, 0x42}; // wrong ack
+    st::transport::MockTransport t;
+    t.expect_send_recv({0xA5}, resp);
+    REQUIRE(t.open({}).has_value());
+
+    ssm::SsmClient client{t, ssm::Framing::IsoTp};
+    std::array<std::uint8_t, 0> empty{};
+    auto const r =
+        client.send_byte_command(0xA5, std::span<std::uint8_t const>{empty}, 100ms);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::ProtocolError);
+}
+
+TEST_CASE("SsmClient::send_byte_command KLine refuses bad checksum",
+          "[ssm][client][send_byte][error]") {
+    // Build a valid envelope, then corrupt the trailing checksum.
+    std::vector<std::uint8_t> req_expected{0x80, 0x10, 0xF0, 0x01, 0xA5};
+    req_expected.push_back(ssm::ssm_checksum(req_expected));
+    std::vector<std::uint8_t> resp{0x80, 0xF0, 0x10, 0x02, 0xE5, 0x42, 0xFF};
+
+    st::transport::MockTransport t;
+    t.expect_send_recv(req_expected, resp);
+    REQUIRE(t.open({}).has_value());
+
+    ssm::SsmClient client{t};
+    std::array<std::uint8_t, 0> empty{};
+    auto const r =
+        client.send_byte_command(0xA5, std::span<std::uint8_t const>{empty}, 100ms);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::BadChecksum);
+}
