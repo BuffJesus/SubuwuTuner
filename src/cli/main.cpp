@@ -38,6 +38,7 @@
 #include "st/devices/ap3/architectural_classifier.hpp"
 #include "st/devices/ap3/client.hpp"
 #include "st/devices/ap3/file_info.hpp"
+#include "st/devices/ap3/ota_cipher.hpp"
 #include "st/devices/ap3/ptm_cipher.hpp"
 #include "st/library/patch_decoder.hpp"
 #include "st/library/ptm_xml_builder.hpp"
@@ -15791,6 +15792,11 @@ int cmd_config(int argc, char *argv[]) {
 // is extended, the gate flips on automatically.
 // ---------------------------------------------------------------------------
 
+// Runtime arming flag for the .ptm + .img cipher path. Defined here
+// (above ap3_cli + ptm_cli, both of which consume it) and flipped
+// from main's pre-pass on --enable-cobb-ap-cipher.
+static bool g_cobb_ap_cipher_armed = false;
+
 namespace ap3_cli {
 
 struct CommonOpts {
@@ -16584,6 +16590,101 @@ int run_raw(int argc, char **argv, CommonOpts const &opts) {
     return 0;
 }
 
+int run_decrypt_img(int argc, char **argv, CommonOpts const &opts) {
+    (void)opts; // decrypt-img is hardware-free; the device opts are unused
+    if (!g_cobb_ap_cipher_armed) {
+        std::fputs(
+            "ap3 decrypt-img: PolicyDenied — runtime gate not armed. Pass "
+            "--enable-cobb-ap-cipher\n"
+            "  before the subcommand (the two-step arming model documented in "
+            "docs/34).\n",
+            stderr);
+        return 2;
+    }
+    if (argc < 1) {
+        std::fputs(
+            "Usage: subuwutuner-cli --enable-cobb-ap-cipher ap3 decrypt-img "
+            "<input.img>\n"
+            "                       [-o <output-path>]\n"
+            "\n"
+            "Decrypt a COBB AP firmware .img file (Blowfish-ECB in custom CTR,\n"
+            "T3 Session 3 cipher chain). Default output path is <input>.decrypted\n"
+            "alongside the input file.\n"
+            "\n"
+            "Standalone CLI surface — no device needed; cipher key + algorithm\n"
+            "live in the gated TU. See findings/handoffs/\n"
+            "HANDOFF-from-subuwutuner-2026-06-12-blowfish-cleanroom.md for the\n"
+            "provenance trail.\n",
+            stderr);
+        return 2;
+    }
+    std::filesystem::path const input_path{argv[0]};
+    std::filesystem::path output_path;
+    for (int i = 1; i + 1 < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "-o" || a == "--output") {
+            output_path = std::filesystem::path{argv[i + 1]};
+            ++i;
+        }
+    }
+    if (output_path.empty()) {
+        output_path = input_path;
+        output_path += ".decrypted";
+    }
+    // Read input .img bytes.
+    std::ifstream in{input_path, std::ios::binary | std::ios::ate};
+    if (!in) {
+        std::fprintf(stderr, "ap3 decrypt-img: cannot open input %s\n",
+                     input_path.string().c_str());
+        return 1;
+    }
+    auto const sz = in.tellg();
+    in.seekg(0);
+    std::vector<std::uint8_t> img(static_cast<std::size_t>(sz));
+    if (!in.read(reinterpret_cast<char *>(img.data()), sz)) {
+        std::fprintf(stderr, "ap3 decrypt-img: input read truncated at byte %zu\n",
+                     static_cast<std::size_t>(in.gcount()));
+        return 1;
+    }
+    // Decrypt.
+    auto plaintext = st::devices::ap3::cipher::decrypt_ota_img(img);
+    if (!plaintext.has_value()) {
+        std::fprintf(stderr, "ap3 decrypt-img: %s\n",
+                     plaintext.error().to_string().c_str());
+        return plaintext.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
+    }
+    // Write output.
+    std::ofstream out{output_path, std::ios::binary};
+    if (!out) {
+        std::fprintf(stderr, "ap3 decrypt-img: cannot open output %s\n",
+                     output_path.string().c_str());
+        return 1;
+    }
+    out.write(reinterpret_cast<char const *>(plaintext->data()),
+              static_cast<std::streamsize>(plaintext->size()));
+    // Summary — hint at SquashFS / boot-stream magics so the user can
+    // tell at a glance which kind of image they decrypted.
+    std::printf("ap3 decrypt-img: %s\n", input_path.string().c_str());
+    std::printf("  Input bytes:   %zu\n", img.size());
+    std::printf("  Output bytes:  %zu\n", plaintext->size());
+    std::printf("  Output path:   %s\n", output_path.string().c_str());
+    if (plaintext->size() >= 4) {
+        std::printf("  Magic:         %02X %02X %02X %02X",
+                    (*plaintext)[0], (*plaintext)[1], (*plaintext)[2],
+                    (*plaintext)[3]);
+        if ((*plaintext)[0] == 'h' && (*plaintext)[1] == 's' &&
+            (*plaintext)[2] == 'q' && (*plaintext)[3] == 's') {
+            std::printf("  (SquashFS — mount with unsquashfs)");
+        } else if (plaintext->size() >= 0x18 && (*plaintext)[0x14] == 'S' &&
+                   (*plaintext)[0x15] == 'T' && (*plaintext)[0x16] == 'M' &&
+                   (*plaintext)[0x17] == 'P') {
+            std::printf("  (i.MX28 bootstream SB v1 — magic at offset 0x14)");
+        }
+        std::printf("\n");
+    }
+    return 0;
+}
+
 } // namespace ap3_cli
 
 int cmd_ap3(int argc, char *argv[]) {
@@ -16607,6 +16708,9 @@ int cmd_ap3(int argc, char *argv[]) {
                    "  backup [--into <dir>] [--format text|json|toml]\n"
                    "                     Pull /maps + /datalog + /presets + /images +\n"
                    "                     /settings + /backupcksum into <dir>\n"
+                   "  decrypt-img <input.img> [-o <output>]\n"
+                   "                     Decrypt a COBB AP firmware .img file. Standalone\n"
+                   "                     (no device needed). Requires --enable-cobb-ap-cipher.\n"
                    "\n"
                    "Common flags:\n"
                    "  --allow-unmarried-ap   Don't refuse if marriage state reports Not\n"
@@ -16647,6 +16751,9 @@ int cmd_ap3(int argc, char *argv[]) {
     if (sub == "raw") {
         return ap3_cli::run_raw(sub_argc, sub_argv, opts);
     }
+    if (sub == "decrypt-img") {
+        return ap3_cli::run_decrypt_img(sub_argc, sub_argv, opts);
+    }
     std::fprintf(stderr,
                  "ap3: unknown subcommand: %s\n"
                  "Run `subuwutuner-cli ap3` for the list.\n",
@@ -16660,7 +16767,8 @@ int cmd_ap3(int argc, char *argv[]) {
 // the build flag on, every `ptm` subcommand refuses until this flag
 // flips to true. Set from main's pre-pass on `--enable-cobb-ap-cipher`,
 // read in `cmd_ptm`.
-static bool g_cobb_ap_cipher_armed = false;
+// (g_cobb_ap_cipher_armed defined above ap3_cli for visibility from
+// both ap3_cli::run_decrypt_img and ptm_cli below.)
 
 namespace ptm_cli {
 
