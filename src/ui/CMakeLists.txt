@@ -150,6 +150,7 @@ add_executable(subuwutuner-gui
     src/modals/ptm_pipeline.cpp
     src/modals/ptm_save_and_push.cpp
     src/modals/boot_screen.cpp
+    src/modals/datalog_channels.cpp
     src/modals/read_rom.cpp
     src/modals/settings.cpp
     src/modals/shortcuts.cpp

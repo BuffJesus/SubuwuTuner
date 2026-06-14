@@ -775,6 +775,12 @@ struct AppState {
     // open-modal toggle.
     bool show_boot_screen_modal{false};
 
+    // F6 (lite) — datalog channel catalog modal. State (visibility +
+    // filter buffer) lives on AppState; the actual rendering is
+    // file-static in src/ui/src/modals/datalog_channels.cpp.
+    bool show_datalog_channels_modal{false};
+    char datalog_channels_filter[128]{};
+
     // ptm inspect modal — read-only viewer. Pick a .ptm, decode it
     // inline, render identity + architectural breakdown + top tables.
     // No project mutation; useful for "what's in this tune?".

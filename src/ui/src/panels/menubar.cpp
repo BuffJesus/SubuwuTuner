@@ -293,6 +293,21 @@ void render_menubar(AppState &state) {
                     "for verifying a ship-time install layout where\n"
                     "<platform>.zip archives replace loose .toml files.");
             }
+            if (ImGui::MenuItem(
+                    "\xEE\xA0\x80  Datalog Channel Catalog\xE2\x80\xA6",
+                    nullptr, false, has_project)) {
+                state.show_datalog_channels_modal = true;
+            }
+            if (!has_project) {
+                disabled_tip(
+                    "Open a project first — the catalog lists every SSM\n"
+                    "PID + RAM switch from the project's definition pack.");
+            } else if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Every loggable SSM PID + RAM switch in the loaded\n"
+                    "definition pack. Filterable search; flags the\n"
+                    "default-log channels.");
+            }
             if (ImGui::MenuItem("\xEE\x9C\x93  Settings\xE2\x80\xA6")) {
                 state.show_settings_modal = true;
             }

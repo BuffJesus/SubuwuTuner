@@ -417,6 +417,7 @@ int main(int argc, char *argv[]) {
         render_ptm_export_modal(state);
         render_ptm_save_and_push_modal(state);
         render_boot_screen_modal(state);
+        render_datalog_channels_modal(state);
         render_ptm_diff_modal(state);
         render_new_project_modal(state);
         render_maf_autotune_modal(state);
