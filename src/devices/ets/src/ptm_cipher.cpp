@@ -312,17 +312,84 @@ Result<std::string> decrypt_ptm_outer(std::span<std::uint8_t const> ptm_bytes) {
     return std::string(plaintext->begin(), plaintext->end());
 }
 
+// Parse the integer `version` attribute on the outer XML's root
+// <map> element. Returns 230 (the current shipping default) when the
+// element is absent or unparseable; returns an explicit failure when
+// the attribute IS present but malformed (so the caller can surface
+// the corrupt-input case distinctly from the legitimate-no-attr case).
+[[nodiscard]] Result<std::uint32_t>
+parse_ptm_format_version(std::string_view outer_xml) {
+    constexpr std::string_view kOpen{"<map"};
+    auto const map_pos = outer_xml.find(kOpen);
+    if (map_pos == std::string_view::npos) {
+        return 230U;
+    }
+    // Bound the attribute scan to the opening tag.
+    auto const tag_end = outer_xml.find('>', map_pos);
+    if (tag_end == std::string_view::npos) {
+        return 230U;
+    }
+    auto const tag = outer_xml.substr(map_pos, tag_end - map_pos);
+    constexpr std::string_view kAttr{"version=\""};
+    auto const v_pos = tag.find(kAttr);
+    if (v_pos == std::string_view::npos) {
+        return 230U;
+    }
+    auto const value_start = v_pos + kAttr.size();
+    auto const value_end = tag.find('"', value_start);
+    if (value_end == std::string_view::npos) {
+        return st::failure(st::ErrorCode::ParseError,
+                            "ap3: <map version=\"…\"> closing quote missing");
+    }
+    auto const value = tag.substr(value_start, value_end - value_start);
+    std::uint32_t version = 0;
+    for (char c : value) {
+        if (c < '0' || c > '9') {
+            return st::failure(st::ErrorCode::ParseError,
+                                "ap3: <map version> attribute is not integral");
+        }
+        version = version * 10U +
+                   static_cast<std::uint32_t>(c - '0');
+        if (version > 0xFFFFFU) {
+            return st::failure(st::ErrorCode::ParseError,
+                                "ap3: <map version> attribute overflow");
+        }
+    }
+    return version;
+}
+
 Result<EtmContents>
 decrypt_ptm(std::span<std::uint8_t const> ptm_bytes) {
     // Full 4-layer chain per spec §13 + the Session 2 integration
     // guide:
     //   layer 1 — XTEA-CBC outer  (decrypt_ptm_outer)
     //   layer 2 — XML envelope    (extract_enc_data + base64_decode)
-    //   layer 3 — AES-256-CTR     (aes256_ctr_decrypt)
+    //   layer 3 — AES-256-CTR     (aes256_ctr_decrypt, version-keyed)
     //   layer 4 — bzip2 inflate   (bzip2_decompress)
     auto outer_xml = decrypt_ptm_outer(ptm_bytes);
     if (!outer_xml.has_value()) {
         return st::failure(std::move(outer_xml).error());
+    }
+    // T23 — format-version dispatcher. Parse `<map version="N">` and
+    // look up the per-variant AES key. For supported versions we pass
+    // the key explicitly to aes256_ctr_decrypt; for unsupported ones
+    // (v210 MapInternalKey, v9995 D3IK / D3En7 wrapper) we surface a
+    // clear error naming the analyst doc rather than producing
+    // garbage plaintext. See findings/re-2026-06-14/ptm_format_dispatcher.md.
+    auto version = parse_ptm_format_version(*outer_xml);
+    if (!version.has_value()) {
+        return st::failure(std::move(version).error());
+    }
+    auto const key = ptm_key_for_version(*version);
+    if (key.empty()) {
+        return st::failure(
+            st::ErrorCode::PolicyDenied,
+            "ap3: .ptm version " + std::to_string(*version) +
+                " is not supported by this build. Currently shipped "
+                "format-version table is {220, 230, 240}; see "
+                "findings/re-2026-06-14/ptm_format_dispatcher.md "
+                "for the v210 (MapInternalKey) and v9995 (D3En7) "
+                "variants which need additional implementation work.");
     }
     auto b64 = extract_enc_data(*outer_xml);
     if (!b64.has_value()) {
@@ -346,7 +413,7 @@ decrypt_ptm(std::span<std::uint8_t const> ptm_bytes) {
         (static_cast<std::uint32_t>((*inner_ct)[inner_ct->size() - 2]) << 8) |
         static_cast<std::uint32_t>((*inner_ct)[inner_ct->size() - 1]);
     inner_ct->resize(inner_ct->size() - 4);
-    auto bz_blob = aes256_ctr_decrypt(*inner_ct, aes_nonce);
+    auto bz_blob = aes256_ctr_decrypt(*inner_ct, aes_nonce, key);
     if (!bz_blob.has_value()) {
         return st::failure(std::move(bz_blob).error());
     }

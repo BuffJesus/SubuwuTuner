@@ -68,6 +68,7 @@ add_executable(st_unit_tests
     unit/library/test_tune_annotation.cpp
     unit/library/test_tune_index.cpp
     unit/library/test_filename_classifier.cpp
+    unit/devices/ets/test_ptm_variant_dispatcher.cpp
     unit/ecu/test_extended_did_datalog.cpp
     unit/ecu/test_ssm.cpp
     unit/ecu/test_ssm_properties.cpp

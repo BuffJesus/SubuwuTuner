@@ -26,16 +26,41 @@ namespace st::devices::ets::cipher {
 
 namespace {
 
-// Spec §13 layer 3: AES-256 key is the 32-byte ASCII string
-// `bJTccI%878cPs%2$Tf8EXdzP2!cRUZw&` as it appears in
-// `libMapFile.so` rodata. Stored as a byte array so the compiler
-// can fold it into rodata without runtime initialization.
-inline constexpr std::array<std::uint8_t, 32> kAesKey{
+// .ptm format-version dispatcher per
+// findings/re-2026-06-14/ptm_format_dispatcher.md +
+// libMapFile.so `Maps::MapFile::GetPrivDataEncrypter()` @ 0x8194.
+//
+// v220 / v230 / v240 all share the MapInternalEn7er AES-256 CTR
+// wrapper (same custom CTR construction in xcrypt below) — only the
+// 32-byte key differs. v230 (`MapInternalKey3`) is the current
+// shipping format and was the first one we landed; the v220 / v240
+// keys are recovered from the same RE pass and shipped here for
+// forward compat. v210 (`MapInternalKey`) and v9995 (`D3IK`) are
+// deliberately not loaded — v210's published key bytes don't
+// round-trip cleanly to 32 chars in our reference doc and v9995
+// uses a different wrapper (`D3En7`) altogether.
+inline constexpr std::array<std::uint8_t, 32> kMapInternalKey2{
+    'M', 'I', 'I', 'E', 'o', 'Q', 'I', 'B',
+    'A', 'A', 'K', 'C', 'A', 'Q', 'E', 'A',
+    't', 'z', 'N', '3', 'M', 'u', 'a', 'y',
+    'Z', 'g', 'C', 'D', 'l', 'o', '9', 'Q',
+};
+inline constexpr std::array<std::uint8_t, 32> kMapInternalKey3{
     'b', 'J', 'T', 'c', 'c', 'I', '%', '8',
     '7', '8', 'c', 'P', 's', '%', '2', '$',
     'T', 'f', '8', 'E', 'X', 'd', 'z', 'P',
     '2', '!', 'c', 'R', 'U', 'Z', 'w', '&',
 };
+inline constexpr std::array<std::uint8_t, 32> kMapInternalKey4{
+    'w', 'r', 'q', 'j', '5', 'G', 'W', 'u',
+    'a', 'v', 's', '6', 'Q', '5', 'J', 'g',
+    'j', 'u', 'D', 'J', 'M', 'V', 'n', 'f',
+    'd', 'v', 'P', 'g', 'q', 'e', 'M', 'T',
+};
+// Backwards-compat alias for code that still says "kAesKey" — the
+// v230 key is the default for both encrypt and the legacy 1-arg
+// decrypt overload. Existing call sites stay one-line.
+inline constexpr auto const &kAesKey = kMapInternalKey3;
 
 // Custom CTR construction per the OEM cipher dispatcher entry in libMapFile.so.
 // 16 KB outer chunks; each chunk has its own outer_nonce derived from
@@ -45,12 +70,17 @@ inline constexpr std::array<std::uint8_t, 32> kAesKey{
 // with the chunk plaintext/ciphertext.
 constexpr std::size_t kChunkSize = 0x4000; // 16 KB
 
-std::vector<std::uint8_t> xcrypt(std::span<std::uint8_t const> input, std::uint32_t nonce) {
+std::vector<std::uint8_t>
+xcrypt(std::span<std::uint8_t const> input, std::uint32_t nonce,
+        std::span<std::uint8_t const> key) {
     if (input.empty()) {
         return {};
     }
+    if (key.size() != 32) {
+        return {};
+    }
     struct AES_ctx ctx;
-    AES_init_ctx(&ctx, kAesKey.data());
+    AES_init_ctx(&ctx, key.data());
     std::vector<std::uint8_t> out(input.begin(), input.end());
     std::size_t pos = 0;
     while (pos < out.size()) {
@@ -88,12 +118,46 @@ std::vector<std::uint8_t> xcrypt(std::span<std::uint8_t const> input, std::uint3
 
 Result<std::vector<std::uint8_t>>
 aes256_ctr_decrypt(std::span<std::uint8_t const> ciphertext, std::uint32_t nonce) {
-    return xcrypt(ciphertext, nonce);
+    return xcrypt(ciphertext, nonce, kMapInternalKey3);
+}
+
+Result<std::vector<std::uint8_t>>
+aes256_ctr_decrypt(std::span<std::uint8_t const> ciphertext, std::uint32_t nonce,
+                    std::span<std::uint8_t const> aes_key) {
+    if (aes_key.size() != 32) {
+        return st::failure(st::ErrorCode::InvalidArgument,
+                            "ap3: aes256_ctr_decrypt key must be exactly 32 bytes");
+    }
+    return xcrypt(ciphertext, nonce, aes_key);
 }
 
 Result<std::vector<std::uint8_t>>
 aes256_ctr_encrypt(std::span<std::uint8_t const> plaintext, std::uint32_t nonce) {
-    return xcrypt(plaintext, nonce);
+    return xcrypt(plaintext, nonce, kMapInternalKey3);
+}
+
+Result<std::vector<std::uint8_t>>
+aes256_ctr_encrypt(std::span<std::uint8_t const> plaintext, std::uint32_t nonce,
+                    std::span<std::uint8_t const> aes_key) {
+    if (aes_key.size() != 32) {
+        return st::failure(st::ErrorCode::InvalidArgument,
+                            "ap3: aes256_ctr_encrypt key must be exactly 32 bytes");
+    }
+    return xcrypt(plaintext, nonce, aes_key);
+}
+
+std::span<std::uint8_t const>
+ptm_key_for_version(std::uint32_t version) noexcept {
+    switch (version) {
+    case 220U:
+        return std::span<std::uint8_t const>{kMapInternalKey2};
+    case 230U:
+        return std::span<std::uint8_t const>{kMapInternalKey3};
+    case 240U:
+        return std::span<std::uint8_t const>{kMapInternalKey4};
+    default:
+        return {};
+    }
 }
 
 } // namespace st::devices::ets::cipher
@@ -120,8 +184,25 @@ aes256_ctr_decrypt(std::span<std::uint8_t const> /*ciphertext*/, std::uint32_t /
 }
 
 Result<std::vector<std::uint8_t>>
+aes256_ctr_decrypt(std::span<std::uint8_t const> /*ciphertext*/, std::uint32_t /*nonce*/,
+                    std::span<std::uint8_t const> /*aes_key*/) {
+    return st::failure(policy_denied());
+}
+
+Result<std::vector<std::uint8_t>>
 aes256_ctr_encrypt(std::span<std::uint8_t const> /*plaintext*/, std::uint32_t /*nonce*/) {
     return st::failure(policy_denied());
+}
+
+Result<std::vector<std::uint8_t>>
+aes256_ctr_encrypt(std::span<std::uint8_t const> /*plaintext*/, std::uint32_t /*nonce*/,
+                    std::span<std::uint8_t const> /*aes_key*/) {
+    return st::failure(policy_denied());
+}
+
+std::span<std::uint8_t const>
+ptm_key_for_version(std::uint32_t /*version*/) noexcept {
+    return {};
 }
 
 } // namespace st::devices::ets::cipher
