@@ -1093,6 +1093,183 @@ Status Client::nand_barrier_best_effort() {
 #endif
 }
 
+Result<std::string> Client::query_currently_flashed() {
+#ifndef ST_HAVE_AP_WORKFLOW
+    return st::failure(
+        ErrorCode::PolicyDenied,
+        "ap3::query_currently_flashed (cmd 0x1a show_cur): AP workflow "
+        "surface is off in this build.");
+#else
+    if (auto s = ensure_session_warmup(); !s.has_value()) {
+        return st::failure(s.error());
+    }
+    // Body = Boost-archived vector<string>{"show_cur no_comms"} per
+    // findings/re-2026-06-14/cmd_1a_onruntask_format.md: 35-byte
+    // envelope + u32 LE vector_size (=1) + u32 LE str_len + bytes.
+    auto body = encode_runtask_body("show_cur no_comms");
+    if (!body.has_value()) {
+        return st::failure(body.error());
+    }
+    if (auto s = send_packet(0x1aU, *body); !s.has_value()) {
+        return st::failure(s.error());
+    }
+    // Read chunked response packets until we see the terminator. The
+    // firmware emits one packet per stdout line of the show_cur shell
+    // script; the final packet body is the 17-byte literal
+    // "[RUNTASK_FINISH]" (with optional trailing newline). We accept
+    // both the 16-byte bare form and the 17-byte form for robustness
+    // across firmware revisions.
+    constexpr std::string_view kTerminator16{"[RUNTASK_FINISH]"};
+    std::string accumulated;
+    // Cap the accumulator at 64 KB to avoid an unbounded read if the
+    // AP's firmware regresses and never emits the terminator.
+    constexpr std::size_t kAccumulatorCap = 64 * 1024;
+    while (accumulated.size() < kAccumulatorCap) {
+        auto chunk = receive_packet_body();
+        if (!chunk.has_value()) {
+            return st::failure(chunk.error());
+        }
+        // Convert bytes to string for terminator check.
+        std::string_view chunk_sv{
+            reinterpret_cast<char const *>(chunk->data()), chunk->size()};
+        // Trim trailing newline for the terminator compare so both
+        // "[RUNTASK_FINISH]" and "[RUNTASK_FINISH]\n" match.
+        std::string_view trimmed = chunk_sv;
+        while (!trimmed.empty() &&
+               (trimmed.back() == '\n' || trimmed.back() == '\r')) {
+            trimmed.remove_suffix(1);
+        }
+        if (trimmed == kTerminator16) {
+            break;
+        }
+        accumulated.append(chunk_sv);
+    }
+    // Parse the `reflash=` line.
+    std::string_view view{accumulated};
+    while (!view.empty()) {
+        auto const nl = view.find('\n');
+        std::string_view line = (nl == std::string_view::npos)
+                                     ? view
+                                     : view.substr(0, nl);
+        // Trim CR.
+        if (!line.empty() && line.back() == '\r') {
+            line.remove_suffix(1);
+        }
+        constexpr std::string_view kPrefix{"reflash="};
+        if (line.size() > kPrefix.size() &&
+            line.substr(0, kPrefix.size()) == kPrefix) {
+            std::string value{line.substr(kPrefix.size())};
+            // Trim trailing whitespace.
+            while (!value.empty() &&
+                   (value.back() == ' ' || value.back() == '\t')) {
+                value.pop_back();
+            }
+            return value;
+        }
+        if (nl == std::string_view::npos) {
+            break;
+        }
+        view.remove_prefix(nl + 1);
+    }
+    return st::failure(ErrorCode::ParseError,
+                        "ap3::query_currently_flashed: show_cur response "
+                        "did not contain a `reflash=` line.");
+#endif
+}
+
+Result<std::vector<std::uint8_t>> Client::pull_marriage_backup() {
+#ifndef ST_HAVE_AP_WORKFLOW
+    return st::failure(
+        ErrorCode::PolicyDenied,
+        "ap3::pull_marriage_backup: AP workflow surface is off in this "
+        "build.");
+#else
+    if (auto s = ensure_session_warmup(); !s.has_value()) {
+        return st::failure(s.error());
+    }
+    // Step 1: list /dump/ — file may already be staged from a previous
+    // expose_user invocation.
+    auto find_enc_rom =
+        [this]() -> Result<std::optional<std::string>> {
+        auto entries = ls("/dump/");
+        if (!entries.has_value()) {
+            return st::failure(entries.error());
+        }
+        for (auto const &e : *entries) {
+            // _enc.rom is the canonical suffix; calid prefix varies by
+            // VIN (e.g. SUBA_US_WRXM_CF_17_E_84551_enc.rom).
+            constexpr std::string_view kSuffix{"_enc.rom"};
+            if (e.name.size() >= kSuffix.size() &&
+                e.name.compare(e.name.size() - kSuffix.size(),
+                                kSuffix.size(), kSuffix) == 0) {
+                return std::optional<std::string>{e.name};
+            }
+        }
+        return std::optional<std::string>{};
+    };
+    auto found = find_enc_rom();
+    if (!found.has_value()) {
+        return st::failure(found.error());
+    }
+    // Step 2: if not already there, trigger expose_user.
+    if (!found->has_value()) {
+        auto body = encode_runtask_body("expose_user");
+        if (!body.has_value()) {
+            return st::failure(body.error());
+        }
+        if (auto s = send_packet(0x1aU, *body); !s.has_value()) {
+            return st::failure(s.error());
+        }
+        // Drain chunks until [RUNTASK_FINISH]. Same loop shape as
+        // query_currently_flashed; we discard the stdout body since
+        // expose_user's output is just status messages (the rom file
+        // it produces is fetched separately via cmd 0x21).
+        constexpr std::string_view kTerminator16{"[RUNTASK_FINISH]"};
+        constexpr std::size_t kDrainCap = 256 * 1024;
+        std::size_t total = 0;
+        for (;;) {
+            auto chunk = receive_packet_body();
+            if (!chunk.has_value()) {
+                return st::failure(chunk.error());
+            }
+            total += chunk->size();
+            if (total > kDrainCap) {
+                return st::failure(
+                    ErrorCode::ParseError,
+                    "ap3::pull_marriage_backup: expose_user output cap "
+                    "exceeded; terminator never observed.");
+            }
+            std::string_view chunk_sv{
+                reinterpret_cast<char const *>(chunk->data()),
+                chunk->size()};
+            std::string_view trimmed = chunk_sv;
+            while (!trimmed.empty() && (trimmed.back() == '\n' ||
+                                          trimmed.back() == '\r')) {
+                trimmed.remove_suffix(1);
+            }
+            if (trimmed == kTerminator16) {
+                break;
+            }
+        }
+        // Step 3: re-list /dump/ to pick up the newly-staged filename.
+        found = find_enc_rom();
+        if (!found.has_value()) {
+            return st::failure(found.error());
+        }
+        if (!found->has_value()) {
+            return st::failure(
+                ErrorCode::ParseError,
+                "ap3::pull_marriage_backup: expose_user completed but no "
+                "_enc.rom appeared in /dump/. AP_STATE may not be "
+                "Installed/Recovery.");
+        }
+    }
+    // Step 4: pull the file via the standard ReadFile pipeline.
+    std::string const ap_path = std::string{"/dump/"} + **found;
+    return read_file(ap_path);
+#endif
+}
+
 Status Client::remount_user_filesystem() {
     if (!ap3_diagnostic_cmds_enabled()) {
         return st::failure(

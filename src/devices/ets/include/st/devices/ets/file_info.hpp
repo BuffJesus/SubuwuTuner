@@ -136,6 +136,21 @@ struct FileInfo {
 // Shape: 35-byte envelope + u32 LE str_len + str bytes.
 [[nodiscard]] Result<std::vector<std::uint8_t>> encode_string_body(std::string_view s);
 
+// Encode a cmd 0x1a OnRunTask body: Boost-archive(vector<string>{task}).
+// Per `findings/re-2026-06-14/cmd_1a_onruntask_format.md` the firmware
+// deserializes the body as a `std::vector<std::string>` and matches
+// the first 4 characters of each element against a hardcoded 9-entry
+// catalog ("tunerflash", "live_data", "expose_user", "import_user",
+// "trouble", "about", "show_cur", "upgrade_pn", "diagnostic_file").
+//
+// Wire shape: 35-byte envelope + u32 LE vector size (=1) + u32 LE
+// string length + string bytes. Single-element vector — host-side
+// callers have only been observed sending one task name, and the
+// firmware's loose 4-char-prefix match makes multi-element vectors
+// uninteresting.
+[[nodiscard]] Result<std::vector<std::uint8_t>>
+encode_runtask_body(std::string_view task);
+
 // Decode a single VaultFileMetadata record from a REQUEST-shaped body (35-byte
 // envelope + 2-byte class reg + name + 27-byte metadata + path).
 // Symmetric to encode_vault_file_metadata; useful for the test round-trip.

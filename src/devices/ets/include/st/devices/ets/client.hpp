@@ -233,6 +233,40 @@ public:
     // wire from disconnect.
     [[nodiscard]] Status nand_barrier_best_effort();
 
+    // T22 — query the currently-flashed .ptm path via cmd 0x1a
+    // OnRunTask with task "show_cur no_comms". The AP runs its
+    // show_cur shell script and streams back a series of chunked
+    // packets ending in "[RUNTASK_FINISH]" — we concatenate the
+    // chunks, locate the `reflash=` line, and return its value.
+    //
+    // Returns the .ptm path on success (e.g.
+    // "/user/ap-user/maps/Fehr_WRK3.ptm"); returns NotFound when
+    // the AP responded but didn't include a `reflash=` line.
+    // Workflow-gated: returns PolicyDenied when ST_HAVE_AP_WORKFLOW
+    // is undefined. cmd 0x1a invokes system() on the AP firmware
+    // side; even though show_cur is read-only, gating is consistent
+    // with the broader workflow posture.
+    [[nodiscard]] Result<std::string> query_currently_flashed();
+
+    // T18 — pull the AP's marriage backup ROM from /user/ap-user/dump/
+    // via the three-step dance per
+    // findings/re-2026-06-14/dump_endpoint_protocol.md:
+    //   1. cmd 0x26 ls "/dump/" — file may already be staged
+    //   2. if empty, cmd 0x1a OnRunTask("expose_user") which runs the
+    //      `rom_encrypter ENC` shell script on the AP and stages the
+    //      `<calid>_enc.rom` file at /user/ap-user/dump/. We stream
+    //      bulk-IN until the [RUNTASK_FINISH] terminator.
+    //   3. cmd 0x26 ls "/dump/" again to find the now-populated name
+    //   4. cmd 0x20 + cmd 0x21 ReadFile to pull the bytes
+    //
+    // Returns the raw _enc.rom bytes (bzip2-L4(stock_rom) + 4B IV + XOR
+    // keystream). Decrypt is the caller's responsibility — we keep the
+    // keystream-derivation step in the analyst lane until the cipher
+    // gate covers it.
+    //
+    // Workflow-gated. Returns PolicyDenied when off.
+    [[nodiscard]] Result<std::vector<std::uint8_t>> pull_marriage_backup();
+
 private:
     [[nodiscard]] Status send_packet(std::uint8_t type, std::span<std::uint8_t const> body);
     [[nodiscard]] Result<std::vector<std::uint8_t>> receive_packet_body();

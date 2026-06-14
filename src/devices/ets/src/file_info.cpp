@@ -121,6 +121,18 @@ Result<std::vector<std::uint8_t>> encode_string_body(std::string_view s) {
     return out;
 }
 
+Result<std::vector<std::uint8_t>> encode_runtask_body(std::string_view task) {
+    // Shape per probe_dump_endpoint.py and cmd_1a_onruntask_format.md:
+    //   envelope + u32 LE vector_size + u32 LE strlen + bytes
+    std::vector<std::uint8_t> out;
+    out.reserve(kBoostEnvelope.size() + 8 + task.size());
+    out.insert(out.end(), kBoostEnvelope.begin(), kBoostEnvelope.end());
+    append_le_u32(out, 1U); // vector size
+    append_le_u32(out, static_cast<std::uint32_t>(task.size()));
+    out.insert(out.end(), task.begin(), task.end());
+    return out;
+}
+
 Result<FileInfo> decode_vault_file_metadata(std::span<std::uint8_t const> body) {
     constexpr std::size_t kHeaderSize = kBoostEnvelope.size() + kFileInfo2ClassReg.size();
     if (body.size() < kHeaderSize + 4U + kMetadataSize + 4U) {

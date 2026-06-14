@@ -120,6 +120,13 @@ struct PanelState {
     // small (≤ a few KB) so caching the raw text is cheap.
     std::optional<std::string> device_settings_text;
     std::optional<std::string> device_backupcksum;
+    // T22 / S1 — live "currently flashed" answer from cmd 0x1a
+    // OnRunTask(show_cur). Populated by query_currently_flashed on
+    // first connect; cached for the session. Empty optional means
+    // not-yet-queried or query failed (we render the library-side
+    // lookup instead in that case).
+    std::optional<std::string> live_currently_flashed;
+    bool live_currently_flashed_attempted{false};
     std::string device_fetch_error;
     bool device_tab_fetched{false};
 
@@ -161,6 +168,17 @@ struct PanelState {
         std::chrono::steady_clock::time_point started_at{};
     };
     MirrorState mirror;
+
+    // F4 — async marriage-backup pull state. One pull in flight at a
+    // time per panel. fut.valid()==false means idle. dest_when_done is
+    // populated at start so the polling loop knows where to write the
+    // result. Errors get stamped into status_msg via the usual chip.
+    struct BackupPullState {
+        std::future<st::Result<std::vector<std::uint8_t>>> fut;
+        std::filesystem::path dest;
+        std::chrono::steady_clock::time_point started_at{};
+    };
+    BackupPullState backup_pull;
 };
 
 PanelState &panel() {
@@ -372,6 +390,8 @@ void disconnect(PanelState &p) {
     p.device_backupcksum.reset();
     p.device_fetch_error.clear();
     p.device_tab_fetched = false;
+    p.live_currently_flashed.reset();
+    p.live_currently_flashed_attempted = false;
 }
 
 void connect(PanelState &p) {
@@ -397,6 +417,16 @@ void connect(PanelState &p) {
         return;
     }
     p.device_state = std::move(*state);
+    // T22 — once per connect, ask the AP what tune is currently
+    // flashed (cmd 0x1a OnRunTask show_cur). Best-effort: a failure
+    // doesn't block the rest of the connect — we just fall back to
+    // the library-side md5 cross-ref in the connect pane.
+    p.live_currently_flashed.reset();
+    p.live_currently_flashed_attempted = true;
+    if (auto flashed = client.query_currently_flashed();
+        flashed.has_value()) {
+        p.live_currently_flashed = std::move(*flashed);
+    }
     set_status(p, StatusSeverity::Ok, "Connected.");
     // Eager-fetch the default subdir's listing so the panel doesn't
     // open empty.
@@ -414,6 +444,17 @@ void connect(PanelState &p) {
 // state machine; A3 (immediately below) anchors the per-AP cache at
 // the same root so composite verbs and full mirrors agree on layout.
 [[nodiscard]] std::filesystem::path mirror_root_for(PanelState const &p);
+[[nodiscard]] std::filesystem::path audit_log_path_for(PanelState const &p);
+void audit_log_append(PanelState const &p, std::string_view action,
+                       std::string_view ap_path, std::uint64_t bytes_or_zero);
+struct AuditRow;
+[[nodiscard]] std::vector<AuditRow>
+audit_log_tail(PanelState const &p, std::size_t max_rows);
+
+// F4 — backup-ROM-pull lifecycle helpers.
+[[nodiscard]] std::filesystem::path backup_pull_dest_for(PanelState const &p);
+void start_backup_pull(PanelState &p);
+void tick_backup_pull(PanelState &p);
 
 // A3 — composite verbs (Pull + Inspect / Pull + Import). Pulls the
 // file straight into the per-AP mirror cache under
@@ -602,6 +643,7 @@ void push_file(PanelState &p) {
     }
     set_status(p, StatusSeverity::Ok,
                "Pushed " + std::to_string(bytes.size()) + " bytes → AP:" + ap_path);
+    audit_log_append(p, "push", ap_path, bytes.size());
     refresh_subdir(p, p.current_subdir);
 }
 
@@ -617,6 +659,7 @@ void remove_file(PanelState &p, st::devices::ets::FileInfo const &rec) {
         return;
     }
     set_status(p, StatusSeverity::Ok, "Removed AP:" + rec.path + rec.name);
+    audit_log_append(p, "remove", rec.path + rec.name, 0);
     refresh_subdir(p, p.current_subdir);
 }
 
@@ -641,6 +684,188 @@ void remove_file(PanelState &p, st::devices::ets::FileInfo const &rec) {
         }
     }
     return lib / "ap-mirror" / serial;
+}
+
+// S3 — per-AP audit log. Each row is a tab-separated record of
+// (timestamp, action, ap_path, bytes_or_dash) appended to a file
+// under `<library_root>/ap-logs/<serial>.tsv` so a user with two APs
+// gets independent histories. Cheap to read back: a few hundred
+// rows total per AP in practice, even for an active user.
+[[nodiscard]] std::filesystem::path audit_log_path_for(PanelState const &p) {
+    std::filesystem::path const lib = st::config::library_root();
+    std::string serial = "unknown-ap";
+    if (p.device_state.has_value() && p.device_state->ap_serial.has_value() &&
+        !p.device_state->ap_serial->empty()) {
+        serial = *p.device_state->ap_serial;
+        for (auto &c : serial) {
+            if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' ||
+                c == '"' || c == '<' || c == '>' || c == '|') {
+                c = '_';
+            }
+        }
+    }
+    return lib / "ap-logs" / (serial + ".tsv");
+}
+
+// Append a single TSV row. Best-effort — failures (no disk, no
+// permissions) don't propagate; the user sees nothing in the audit
+// section in that case but the AP operation itself still succeeded.
+void audit_log_append(PanelState const &p, std::string_view action,
+                       std::string_view ap_path,
+                       std::uint64_t bytes_or_zero) {
+    auto const path = audit_log_path_for(p);
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+        return;
+    }
+    std::ofstream out{path, std::ios::app | std::ios::binary};
+    if (!out) {
+        return;
+    }
+    std::time_t const now = std::time(nullptr);
+    char ts[32];
+    std::strftime(ts, sizeof ts, "%Y-%m-%dT%H:%M:%S",
+                   std::localtime(&now));
+    out << ts << '\t' << action << '\t' << ap_path << '\t';
+    if (bytes_or_zero > 0) {
+        out << bytes_or_zero;
+    } else {
+        out << '-';
+    }
+    out << '\n';
+}
+
+// Read the most recent N audit rows. Returns oldest-first within
+// the slice but the slice itself is the tail of the log. Empty
+// vector means no log yet or read failure.
+struct AuditRow {
+    std::string ts;
+    std::string action;
+    std::string ap_path;
+    std::string bytes;
+};
+[[nodiscard]] std::filesystem::path backup_pull_dest_for(PanelState const &p) {
+    // Anchor under <library_root>/ap-backups/<serial>_<YYYYmmdd-HHMMSS>_enc.rom
+    // so a user with two APs gets independent backup files and the
+    // timestamp lets them keep multiple snapshots without overwrites.
+    std::filesystem::path const lib = st::config::library_root();
+    std::string serial = "unknown-ap";
+    if (p.device_state.has_value() && p.device_state->ap_serial.has_value() &&
+        !p.device_state->ap_serial->empty()) {
+        serial = *p.device_state->ap_serial;
+        for (auto &c : serial) {
+            if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' ||
+                c == '"' || c == '<' || c == '>' || c == '|') {
+                c = '_';
+            }
+        }
+    }
+    std::time_t const now = std::time(nullptr);
+    char ts[32];
+    std::strftime(ts, sizeof ts, "%Y%m%d-%H%M%S", std::localtime(&now));
+    return lib / "ap-backups" /
+            (serial + "_" + ts + "_enc.rom");
+}
+
+void start_backup_pull(PanelState &p) {
+    if (p.channel == nullptr || p.backup_pull.fut.valid()) {
+        return;
+    }
+    p.backup_pull.dest = backup_pull_dest_for(p);
+    p.backup_pull.started_at = std::chrono::steady_clock::now();
+    // Run pull_marriage_backup on a dedicated worker thread so the
+    // GUI keeps repainting during the multi-step expose_user dance
+    // (which can take a few seconds while the AP shells out to
+    // rom_encrypter). The Client uses a single channel — we hold the
+    // panel's channel pointer for the duration.
+    auto *channel = p.channel.get();
+    p.backup_pull.fut = std::async(std::launch::async,
+        [channel]() -> st::Result<std::vector<std::uint8_t>> {
+            st::devices::ets::Client client{*channel};
+            return client.pull_marriage_backup();
+        });
+    set_status(p, StatusSeverity::Ok,
+                "Pulling backup ROM (this can take a few seconds)...");
+}
+
+void tick_backup_pull(PanelState &p) {
+    if (!p.backup_pull.fut.valid()) {
+        return;
+    }
+    if (p.backup_pull.fut.wait_for(std::chrono::milliseconds{0}) !=
+        std::future_status::ready) {
+        return;
+    }
+    auto result = p.backup_pull.fut.get();
+    if (!result.has_value()) {
+        note_possible_daze(p, result.error());
+        set_status(p, StatusSeverity::Error,
+                    "Backup pull failed: " + result.error().to_string());
+        return;
+    }
+    auto const &bytes = *result;
+    auto const &dest = p.backup_pull.dest;
+    std::error_code ec;
+    std::filesystem::create_directories(dest.parent_path(), ec);
+    if (ec) {
+        set_status(p, StatusSeverity::Error,
+                    "Couldn't create backup dir " +
+                        dest.parent_path().string() + ": " + ec.message());
+        return;
+    }
+    std::ofstream out{dest, std::ios::binary};
+    if (!out) {
+        set_status(p, StatusSeverity::Error,
+                    "Couldn't open " + dest.string() + " for write");
+        return;
+    }
+    out.write(reinterpret_cast<char const *>(bytes.data()),
+                static_cast<std::streamsize>(bytes.size()));
+    out.close();
+    audit_log_append(p, "backup-pull", dest.string(), bytes.size());
+    set_status_with_path(p, StatusSeverity::Ok,
+                          "Saved backup ROM (" +
+                              std::to_string(bytes.size()) +
+                              " bytes encrypted) → " + dest.string(),
+                          dest);
+}
+
+[[nodiscard]] std::vector<AuditRow>
+audit_log_tail(PanelState const &p, std::size_t max_rows) {
+    std::vector<AuditRow> rows;
+    auto const path = audit_log_path_for(p);
+    std::ifstream in{path};
+    if (!in) {
+        return rows;
+    }
+    std::string line;
+    while (std::getline(in, line)) {
+        AuditRow row;
+        auto const t1 = line.find('\t');
+        if (t1 == std::string::npos) {
+            continue;
+        }
+        auto const t2 = line.find('\t', t1 + 1);
+        if (t2 == std::string::npos) {
+            continue;
+        }
+        auto const t3 = line.find('\t', t2 + 1);
+        if (t3 == std::string::npos) {
+            continue;
+        }
+        row.ts = line.substr(0, t1);
+        row.action = line.substr(t1 + 1, t2 - t1 - 1);
+        row.ap_path = line.substr(t2 + 1, t3 - t2 - 1);
+        row.bytes = line.substr(t3 + 1);
+        rows.push_back(std::move(row));
+    }
+    if (rows.size() > max_rows) {
+        rows.erase(rows.begin(),
+                    rows.begin() +
+                        static_cast<std::ptrdiff_t>(rows.size() - max_rows));
+    }
+    return rows;
 }
 
 // A5 — kick off the mirror. Enumerates files via sync `ls` (4 quick
@@ -959,18 +1184,60 @@ void render_device_header(PanelState &p, AppState const &state) {
         }
     }
 
-    // Currently-flashed cross-reference. A1 from the implementer's UX
-    // handoff: the single most important question this panel can
-    // answer is "what's on the car right now?" — pin that answer in
-    // the header. Source: /backupcksum (cached on Device-tab open)
-    // cross-ref against the loaded TuneIndex via library_status_snapshot.
-    // Three states:
-    //   - No /backupcksum cached yet → row hidden (Device tab not visited)
-    //   - Cached + library match → show "Currently flashed: <name>"
-    //     with vendor / stage / variant chips
-    //   - Cached + no match → show "Currently flashed: unknown tune
-    //     (MD5 abc...)"
-    if (p.device_backupcksum.has_value()) {
+    // T22 — live "currently flashed" answer from cmd 0x1a OnRunTask
+    // show_cur. Authoritative when present (the AP knows what it
+    // last flashed) and takes precedence over the library-side md5
+    // cross-ref below. Renders only when the query produced a
+    // value; a missing optional means the query wasn't run or
+    // failed — we fall through to the library lookup.
+    if (p.live_currently_flashed.has_value() &&
+        !p.live_currently_flashed->empty()) {
+        ImGui::TextDisabled("Currently flashed");
+        ImGui::SameLine(140.0f);
+        // The AP returns the full vault path
+        // ("/user/ap-user/maps/<name>.ptm"); trim to the basename for
+        // the headline display and keep the full path in the tooltip.
+        std::string const &full = *p.live_currently_flashed;
+        auto const slash = full.find_last_of('/');
+        std::string const basename = (slash == std::string::npos)
+                                          ? full
+                                          : full.substr(slash + 1);
+        ImGui::TextUnformatted(basename.c_str());
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Reported by the AP itself via cmd 0x1a show_cur.\n"
+                "Full path on AP: %s", full.c_str());
+        }
+        // Run the F2 classifier on the basename for a quick family /
+        // variant cue right next to the headline.
+        auto const cls = st::library::classify_ptm_filename(basename);
+        std::string detail;
+        auto append = [&detail](std::string const &tok) {
+            if (tok.empty()) {
+                return;
+            }
+            if (!detail.empty()) {
+                detail += " \xC2\xB7 ";
+            }
+            detail += tok;
+        };
+        append(cls.vendor);
+        append(cls.stage);
+        append(cls.fuel_grade);
+        append(cls.variant);
+        if (!detail.empty()) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(%s)", detail.c_str());
+        }
+    }
+    // Library-side cross-reference. Pinned to /backupcksum cached on
+    // Device-tab open, matched against the loaded TuneIndex via
+    // library_status_snapshot. Stays useful even when the show_cur
+    // path above succeeded — they answer subtly different questions
+    // (show_cur = last tunerflash; backupcksum = MD5 of the stock
+    // ROM, which the library cross-refs to identify the unmodified
+    // ROM family).
+    else if (p.device_backupcksum.has_value()) {
         ImGui::TextDisabled("Currently flashed");
         ImGui::SameLine(140.0f);
         std::string md5{*p.device_backupcksum};
@@ -1178,6 +1445,79 @@ void render_device_header(PanelState &p, AppState const &state) {
             "When ON, suppresses the warning emitted when the marriage\n"
             "state can't be confirmed Installed. Forward-compatible with\n"
             "a future spec extension that gates by default.");
+    }
+    ImGui::SameLine();
+    // F4 — pull marriage backup ROM via the T18 USB dance. Disabled
+    // while a pull is in flight (one channel, one operation).
+    bool const pull_in_flight = p.backup_pull.fut.valid();
+    if (pull_in_flight) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::SmallButton("Pull backup ROM\xE2\x80\xA6##ap3_pull_backup")) {
+        start_backup_pull(p);
+    }
+    if (pull_in_flight) {
+        ImGui::EndDisabled();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip(
+            "USB-pull the AP's marriage backup ROM via cmd 0x1a expose_user\n"
+            "+ cmd 0x20/0x21 (T18 dance). Saves the encrypted _enc.rom under\n"
+            "<library>/ap-backups/. Decrypt happens offline.");
+    }
+
+    // S3 — per-AP audit log section. Collapsible: lazy load on
+    // first expand so we don't read the file every frame. Capped at
+    // 100 most-recent rows; users wanting the full history open the
+    // log file in their editor via the "Reveal log" button.
+    if (ImGui::CollapsingHeader("Audit log##ap3_audit_log")) {
+        auto const rows = audit_log_tail(p, 100);
+        if (rows.empty()) {
+            ImGui::TextDisabled("No push / remove actions recorded yet for "
+                                "this AP.");
+        } else {
+            if (ImGui::BeginTable("##ap3_audit_table", 4,
+                                   ImGuiTableFlags_Borders |
+                                       ImGuiTableFlags_RowBg |
+                                       ImGuiTableFlags_ScrollY,
+                                   ImVec2(0.0f, 200.0f))) {
+                ImGui::TableSetupColumn("When",
+                                         ImGuiTableColumnFlags_WidthFixed,
+                                         150.0f);
+                ImGui::TableSetupColumn("Action",
+                                         ImGuiTableColumnFlags_WidthFixed,
+                                         70.0f);
+                ImGui::TableSetupColumn(
+                    "AP path", ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupColumn("Bytes",
+                                         ImGuiTableColumnFlags_WidthFixed,
+                                         80.0f);
+                ImGui::TableHeadersRow();
+                // Render newest at the top so the user sees what they
+                // just did first.
+                for (auto it = rows.rbegin(); it != rows.rend(); ++it) {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::TextUnformatted(it->ts.c_str());
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::TextUnformatted(it->action.c_str());
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::TextUnformatted(it->ap_path.c_str());
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::TextUnformatted(it->bytes.c_str());
+                }
+                ImGui::EndTable();
+            }
+        }
+        ImGui::Spacing();
+        if (ImGui::SmallButton("Reveal log##ap3_audit_reveal")) {
+            reveal_in_explorer(audit_log_path_for(p));
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Open %s in the file manager.",
+                audit_log_path_for(p).string().c_str());
+        }
     }
 }
 
@@ -1780,6 +2120,7 @@ void render_connected_state(PanelState &p, AppState &state) {
     // Drain the async mirror queue first so progress + status reflect
     // the latest frame's worker output before we render anything.
     tick_mirror(p);
+    tick_backup_pull(p);
     render_daze_recovery_card(p);
     render_device_header(p, state);
     ImGui::Separator();
@@ -1948,6 +2289,7 @@ EtsPushResult ets_panel_push_to_maps(std::string filename,
     // Refresh the /maps/ listing so the new entry shows immediately if
     // the user pivots to the AP browser to verify.
     refresh_subdir(p, std::string{"/maps/"});
+    audit_log_append(p, "push", ap_path, bytes.size());
     out.ok = true;
     out.ap_path = ap_path;
     return out;
