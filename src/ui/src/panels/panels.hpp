@@ -123,6 +123,14 @@ struct EtsPushResult {
 [[nodiscard]] EtsPushResult ets_panel_push_to_maps(
     std::string filename, std::vector<std::uint8_t> bytes);
 
+// Synchronous read of an arbitrary AP file via the panel's open
+// channel. Returns the raw bytes on success; on failure returns an
+// empty vector and writes the error string into `err`. Caller must
+// have verified ets_panel_has_channel(). Workflow-gated: returns
+// empty + an error when ST_HAVE_AP_WORKFLOW is undefined.
+[[nodiscard]] std::vector<std::uint8_t>
+ets_panel_read_file_sync(std::string_view ap_path, std::string &err);
+
 // Library-panel snapshot for the status bar. Mirrors the AP status
 // snapshot pattern: file-static inside library.cpp; returns nullopt
 // when no index has been loaded so the status bar can degrade

@@ -769,6 +769,12 @@ struct AppState {
     char ptm_sap_tune_name[128]{};
     char ptm_sap_seed_hex[32] = "0x12345678";
 
+    // F5 — boot-screen viewer modal. State (GL texture handle, pixel
+    // buffer, last pulled raw bytes) is held file-statically in
+    // src/ui/src/modals/boot_screen.cpp; AppState only carries the
+    // open-modal toggle.
+    bool show_boot_screen_modal{false};
+
     // ptm inspect modal — read-only viewer. Pick a .ptm, decode it
     // inline, render identity + architectural breakdown + top tables.
     // No project mutation; useful for "what's in this tune?".

@@ -1110,7 +1110,7 @@ void render_disconnect_state(PanelState &p) {
     text_subtle("Cipher introspection requires the gated build flag (see docs/34).");
 }
 
-void render_device_header(PanelState &p, AppState const &state) {
+void render_device_header(PanelState &p, AppState &state) {
     auto const &s = *p.device_state;
     auto field = [](char const *label, std::string const &v) {
         ImGui::TextDisabled("%s", label);
@@ -1464,6 +1464,20 @@ void render_device_header(PanelState &p, AppState const &state) {
             "USB-pull the AP's marriage backup ROM via cmd 0x1a expose_user\n"
             "+ cmd 0x20/0x21 (T18 dance). Saves the encrypted _enc.rom under\n"
             "<library>/ap-backups/. Decrypt happens offline.");
+    }
+    ImGui::SameLine();
+    // F5 — view AP's boot screen. Decodes the 240x320 RGB565 framebuffer
+    // and renders it at native resolution. Push-back is queued for a
+    // future pass; the view-only path here is the small wedge that
+    // makes the splash visible without dropping to a hex editor.
+    if (ImGui::SmallButton(
+            "Boot screen\xE2\x80\xA6##ap3_boot_screen_view")) {
+        state.show_boot_screen_modal = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Pull /images/startup_screen.fb and render the AP's current\n"
+            "boot logo at native 240x320 resolution.");
     }
 
     // S3 — per-AP audit log section. Collapsible: lazy load on
@@ -2250,6 +2264,34 @@ std::optional<EtsStatusSnapshot> ets_status_snapshot() {
 
 bool ets_panel_has_channel() {
     return panel().channel != nullptr;
+}
+
+std::vector<std::uint8_t>
+ets_panel_read_file_sync(std::string_view ap_path, std::string &err) {
+    err.clear();
+#ifndef ST_HAVE_AP_WORKFLOW
+    (void)ap_path;
+    err =
+        "AP workflow surface is off in this build. Reconfigure with "
+        "-DST_ENABLE_COBB_AP_WORKFLOW=ON to enable reads from the AP.";
+    return {};
+#else
+    auto &p = panel();
+    if (p.channel == nullptr) {
+        err =
+            "No AccessPort channel open. Connect via the AccessPort "
+            "Browser panel first.";
+        return {};
+    }
+    st::devices::ets::Client client{*p.channel};
+    auto result = client.read_file(ap_path);
+    if (!result.has_value()) {
+        note_possible_daze(p, result.error());
+        err = result.error().to_string();
+        return {};
+    }
+    return std::move(*result);
+#endif
 }
 
 EtsPushResult ets_panel_push_to_maps(std::string filename,
