@@ -18,6 +18,7 @@ add_executable(st_unit_tests
     unit/core/test_version.cpp
     unit/core/test_crc32.cpp
     unit/core/test_json_util.cpp
+    unit/core/test_shell_safe.cpp
     unit/core/test_ext_interfaces.cpp
     unit/config/test_config.cpp
     unit/rom/test_rom.cpp
@@ -46,6 +47,7 @@ add_executable(st_unit_tests
     unit/devices/ets/test_architectural_classifier.cpp
     unit/devices/ets/test_user_info_parse.cpp
     unit/devices/ets/test_user_info_parse_private.cpp
+    unit/devices/ets/test_vehicle_id_parse.cpp
     unit/devices/ets/test_zero_crc_tolerance.cpp
     unit/devices/ets/test_read_file_path_encoding.cpp
     unit/devices/ets/test_write_remove_path_encoding.cpp
@@ -55,9 +57,17 @@ add_executable(st_unit_tests
     unit/devices/ets/test_diagnostic_cmds.cpp
     unit/devices/ets/test_error_frame_decode.cpp
     unit/devices/ets/test_ota_cipher.cpp
+    unit/devices/ets/test_rgb565.cpp
+    unit/devices/ets/test_worker_queue.cpp
     unit/library/test_patch_decoder.cpp
     unit/library/test_table_mapping.cpp
     unit/library/test_tune_diff.cpp
+    unit/library/test_interpret.cpp
+    unit/library/test_atlas.cpp
+    unit/library/test_ptm_metadata_validate.cpp
+    unit/library/test_tune_annotation.cpp
+    unit/library/test_tune_index.cpp
+    unit/library/test_filename_classifier.cpp
     unit/ecu/test_extended_did_datalog.cpp
     unit/ecu/test_ssm.cpp
     unit/ecu/test_ssm_properties.cpp
@@ -120,6 +130,7 @@ add_executable(st_unit_tests
     unit/audit/test_apply_op_audit_contract.cpp
     unit/cli/test_cli_integration.cpp
     unit/cli/test_ptm_cli.cpp
+    unit/cli/test_tuner_atlas_cli.cpp
     unit/cli/test_ap3_decrypt_img_cli.cpp
     unit/profile/test_profile.cpp
     unit/ai/test_drift.cpp
@@ -175,6 +186,14 @@ endif()
 if(ST_ENABLE_COBB_AP_PTM_REWRITE)
     target_compile_definitions(st_unit_tests PRIVATE ST_ETS_HAVE_PTM_REWRITE=1)
 endif()
+# Mirror the AP workflow umbrella so tests that exercise the wire path
+# of write_file / remove_file (path-encoding regressions, etc.) compile
+# their assertions only when the workflow surface is actually built.
+# Without this mirror, the OFF-mode tests would observe PolicyDenied
+# instead of the wire bytes they're checking.
+if(ST_ENABLE_COBB_AP_WORKFLOW)
+    target_compile_definitions(st_unit_tests PRIVATE ST_HAVE_AP_WORKFLOW=1)
+endif()
 # Mirror the Subaru-direct-flash gate to the test binary so
 # test_subaru_sh_can_flash.cpp's #if branches select the right path.
 if(ST_ENABLE_SUBARU_ECU_FLASH)
@@ -210,6 +229,11 @@ target_compile_definitions(st_unit_tests PRIVATE
 # required_table). Same pattern as ST_FIXTURE_DEMO_STUNE.
 target_compile_definitions(st_unit_tests PRIVATE
     ST_DEFINITIONS_DIR="${CMAKE_SOURCE_DIR}/definitions")
+# Exposes the source-tree root so test_atlas can locate
+# fixtures/tuner_atlas/tuner_atlas.toml (shipped at the source-tree
+# level rather than via the demo-pack fixture).
+target_compile_definitions(st_unit_tests PRIVATE
+    ST_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 
 # Tests that pin specific encoder bit patterns (e.g. test_rh850.cpp)
 # need direct access to the backend's private impl headers. Exposing

@@ -17,6 +17,48 @@ option(ST_ENABLE_BULK_REFLASH_CIPHER
     "Compile the optional 0xB6 Subaru bulk-transfer cipher (write-path capability). \
 Off by default; see docs/26-bulk-reflash-cipher.md for the two-step arming model and rationale."
     OFF)
+# Umbrella flag for the AP file-vault workflow surface (browser panel,
+# Push / Pull / Save-and-Push UI, mutating wire commands, libusb device
+# enumeration). Default OFF. When ON, force-enables the three lower-
+# level gates that the workflow depends on so the local dev build is a
+# single -D flip rather than four.
+#
+# - Distribution default (OFF): no AP browser panel, no push/pull buttons,
+#   AP-mutating cmds (0x05 / 0x22 / 0x25 / 0x1a / 0x2a) return
+#   PolicyDenied at the codec layer, libusb is not pulled into the build
+#   so the binary never opens a USB device.
+# - Local default (Cornelio): pass -DST_ENABLE_COBB_AP_WORKFLOW=ON. The
+#   cipher (read), rewrite (write), and libusb gates flip ON
+#   automatically.
+#
+# Rationale per HANDOFF-from-analyst-2026-06-14-edit-export-push-ptm.md
+# §CRITICAL: reverse-engineered cipher keys are in .rodata when the
+# workflow is built, and there are AP-state writes that can put the
+# device into a brick-on-power-cycle state if the cmd 0x05 barrier is
+# skipped. Public distribution doesn't ship that risk surface.
+option(ST_ENABLE_COBB_AP_WORKFLOW
+    "Build the full AP file-vault workflow surface — AP browser panel, \
+Push / Pull / Save-and-Push UI, mutating wire commands, libusb device \
+enumeration. OFF by default. When ON, force-enables \
+ST_ENABLE_COBB_AP_CIPHER, ST_ENABLE_COBB_AP_PTM_REWRITE, and \
+ST_ENABLE_AP3 so a single flag arms the whole capability."
+    OFF)
+if(ST_ENABLE_COBB_AP_WORKFLOW)
+    # Force-enable the three lower-level gates. set(... FORCE) wins over
+    # any cached OFF the user might have on a partial reconfigure.
+    set(ST_ENABLE_COBB_AP_CIPHER ON CACHE BOOL
+        "Auto-enabled by ST_ENABLE_COBB_AP_WORKFLOW" FORCE)
+    set(ST_ENABLE_COBB_AP_PTM_REWRITE ON CACHE BOOL
+        "Auto-enabled by ST_ENABLE_COBB_AP_WORKFLOW" FORCE)
+    set(ST_ENABLE_AP3 ON CACHE BOOL
+        "Auto-enabled by ST_ENABLE_COBB_AP_WORKFLOW" FORCE)
+    # Global compile def so every TU (UI panels, CLI dispatch, client
+    # write_file / remove_file / remount) can `#ifdef ST_HAVE_AP_WORKFLOW`
+    # to expose the workflow surface. Subtargets ALSO read
+    # ST_ENABLE_COBB_AP_WORKFLOW directly for source-list decisions
+    # (panel CMake gates, modal compile units).
+    add_compile_definitions(ST_HAVE_AP_WORKFLOW=1)
+endif()
 set(ST_SANITIZE "" CACHE STRING
     "Semicolon-separated sanitizers to enable (e.g. address;undefined). Linux/Mac only.")
 
@@ -188,6 +230,9 @@ message(STATUS "  Warnings as errors    : ${ST_WARNINGS_AS_ERRORS}")
 message(STATUS "  Sanitizers            : ${ST_SANITIZE}")
 message(STATUS "  Install archives      : ${ST_INSTALL_ARCHIVES}")
 message(STATUS "  Install bin dir       : ${ST_INSTALL_BIN_DIR}")
+message(STATUS "  COBB-AP workflow      : ${ST_ENABLE_COBB_AP_WORKFLOW}")
+message(STATUS "  COBB-AP cipher (read) : ${ST_ENABLE_COBB_AP_CIPHER}")
+message(STATUS "  COBB-AP rewrite (wr)  : ${ST_ENABLE_COBB_AP_PTM_REWRITE}")
 message(STATUS "")
 
 # ---------------------------------------------------------------------------

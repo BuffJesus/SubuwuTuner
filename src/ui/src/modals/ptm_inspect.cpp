@@ -11,6 +11,7 @@
 // `subuwutuner-cli ptm inspect`.
 
 #include "modals/modals.hpp"
+#include "panels/panels.hpp"
 
 #include "app_state.hpp"
 #include "widgets/widgets.hpp"
@@ -18,6 +19,7 @@
 #include "st/defs.hpp"
 #include "st/devices/ets/architectural_classifier.hpp"
 #include "st/devices/ets/ptm_cipher.hpp"
+#include "st/library/interpret.hpp"
 #include "st/library/patch_decoder.hpp"
 #include "st/library/table_mapping.hpp"
 
@@ -25,6 +27,7 @@
 #include <nfd.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -77,7 +80,30 @@ void clear_preview(AppState &s) {
     s.ptm_inspect_total_bytes = 0;
     s.ptm_inspect_layers.clear();
     s.ptm_inspect_top_tables.clear();
+    s.ptm_inspect_interpretation.clear();
     s.ptm_inspect_error.clear();
+    s.ptm_inspect_vehicle_match = AppState::PtmMatch::Unknown;
+    s.ptm_inspect_rom_sum_match = AppState::PtmMatch::Unknown;
+    s.ptm_inspect_ap_vehicle_id.clear();
+    s.ptm_inspect_ap_backupcksum.clear();
+}
+
+// Case-insensitive equality. MD5 strings from `backupcksum` arrive
+// lowercase (per RE), but .ptm metadata sometimes encodes them
+// uppercase depending on the vendor. Vehicle IDs are uppercase by
+// convention but a defensive ignoring of case avoids surprise
+// mismatches if a vendor diverges.
+[[nodiscard]] bool iequal(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(a[i])) !=
+            std::tolower(static_cast<unsigned char>(b[i]))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void run_decode(AppState &s) {
@@ -131,11 +157,12 @@ void run_decode(AppState &s) {
     }
 
     // Optional table mapping.
+    std::vector<st::library::TableHit> hits;
     if (s.ptm_inspect_def_path[0] != '\0') {
         auto def = st::Definition::from_file(std::filesystem::path{s.ptm_inspect_def_path});
         if (def.has_value()) {
             auto const ranges = st::library::compute_table_ranges(*def);
-            auto const hits = st::library::aggregate_table_hits(*decoded, ranges);
+            hits = st::library::aggregate_table_hits(*decoded, ranges);
             std::size_t const show = std::min<std::size_t>(hits.size(), 15);
             for (std::size_t i = 0; i < show; ++i) {
                 s.ptm_inspect_top_tables.push_back(
@@ -143,7 +170,50 @@ void run_decode(AppState &s) {
             }
         }
     }
+    s.ptm_inspect_interpretation =
+        st::library::interpret_inspect(*decoded, hits);
+
+    // F1 — compare against the connected AP's marriage + backup MD5.
+    // Snapshot is nullopt when no AP is connected; in that case both
+    // match fields stay Unknown and the modal renders the existing
+    // identity bullets without the comparison chips.
+    if (auto const snap = ets_status_snapshot(); snap.has_value()) {
+        if (!snap->vehicle_id.empty() && !s.ptm_inspect_vehicle.empty()) {
+            s.ptm_inspect_ap_vehicle_id = snap->vehicle_id;
+            s.ptm_inspect_vehicle_match =
+                iequal(snap->vehicle_id, s.ptm_inspect_vehicle)
+                    ? AppState::PtmMatch::Match
+                    : AppState::PtmMatch::Mismatch;
+        }
+        if (snap->device_backupcksum.has_value() &&
+            !snap->device_backupcksum->empty() &&
+            !s.ptm_inspect_rom_sum.empty()) {
+            s.ptm_inspect_ap_backupcksum = *snap->device_backupcksum;
+            s.ptm_inspect_rom_sum_match =
+                iequal(*snap->device_backupcksum, s.ptm_inspect_rom_sum)
+                    ? AppState::PtmMatch::Match
+                    : AppState::PtmMatch::Mismatch;
+        }
+    }
     s.ptm_inspect_have_preview = true;
+}
+
+void render_match_chip(AppState::PtmMatch m, char const *ap_value) {
+    switch (m) {
+    case AppState::PtmMatch::Match:
+        ImGui::SameLine();
+        chip("matches AP", chip_fg_ok(), chip_bg_ok());
+        break;
+    case AppState::PtmMatch::Mismatch:
+        ImGui::SameLine();
+        chip("AP mismatch", chip_fg_caution(), chip_bg_caution());
+        if (ImGui::IsItemHovered() && ap_value != nullptr) {
+            ImGui::SetTooltip("AP reports: %s", ap_value);
+        }
+        break;
+    case AppState::PtmMatch::Unknown:
+        break;
+    }
 }
 
 } // namespace
@@ -206,8 +276,16 @@ void render_ptm_inspect_modal(AppState &state) {
         ImGui::TextUnformatted("Identity");
         ImGui::BulletText("Vendor:    %s", state.ptm_inspect_vendor.c_str());
         ImGui::BulletText("Vehicle:   %s", state.ptm_inspect_vehicle.c_str());
+        render_match_chip(state.ptm_inspect_vehicle_match,
+                          state.ptm_inspect_ap_vehicle_id.empty()
+                              ? nullptr
+                              : state.ptm_inspect_ap_vehicle_id.c_str());
         ImGui::BulletText("Lock mask: %u", state.ptm_inspect_lock_mask);
         ImGui::BulletText("ROM sum:   %s", state.ptm_inspect_rom_sum.c_str());
+        render_match_chip(state.ptm_inspect_rom_sum_match,
+                          state.ptm_inspect_ap_backupcksum.empty()
+                              ? nullptr
+                              : state.ptm_inspect_ap_backupcksum.c_str());
         ImGui::BulletText("Patches:   %u  (%llu bytes total)",
                           state.ptm_inspect_patches,
                           static_cast<unsigned long long>(state.ptm_inspect_total_bytes));
@@ -237,13 +315,23 @@ void render_ptm_inspect_modal(AppState &state) {
         if (!state.ptm_inspect_top_tables.empty()) {
             ImGui::Spacing();
             ImGui::TextUnformatted("Top tables modified");
-            if (ImGui::BeginTable("##tables", 3,
+            // Find the max byte count so the bar width scales relative
+            // to the heaviest row, giving the user an at-a-glance sense
+            // of how dominant the top entries are.
+            std::uint64_t max_bytes = 0;
+            for (auto const &row : state.ptm_inspect_top_tables) {
+                if (row.second.second > max_bytes) {
+                    max_bytes = row.second.second;
+                }
+            }
+            if (ImGui::BeginTable("##tables", 4,
                                   ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                                       ImGuiTableFlags_ScrollY,
-                                  ImVec2(0.0f, 200.0f))) {
+                                  ImVec2(0.0f, 220.0f))) {
                 ImGui::TableSetupColumn("Table", ImGuiTableColumnFlags_WidthStretch);
                 ImGui::TableSetupColumn("Patches", ImGuiTableColumnFlags_WidthFixed, 70.0f);
                 ImGui::TableSetupColumn("Bytes", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+                ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 160.0f);
                 ImGui::TableHeadersRow();
                 for (auto const &row : state.ptm_inspect_top_tables) {
                     ImGui::TableNextRow();
@@ -252,7 +340,16 @@ void render_ptm_inspect_modal(AppState &state) {
                     ImGui::TableSetColumnIndex(1);
                     ImGui::Text("%u", row.second.first);
                     ImGui::TableSetColumnIndex(2);
-                    ImGui::Text("%llu", static_cast<unsigned long long>(row.second.second));
+                    ImGui::Text("%llu",
+                                static_cast<unsigned long long>(row.second.second));
+                    ImGui::TableSetColumnIndex(3);
+                    float const frac =
+                        max_bytes == 0
+                            ? 0.0f
+                            : static_cast<float>(
+                                  static_cast<double>(row.second.second) /
+                                  static_cast<double>(max_bytes));
+                    ImGui::ProgressBar(frac, ImVec2(-1.0f, 0.0f), "");
                 }
                 ImGui::EndTable();
             }
@@ -260,6 +357,15 @@ void render_ptm_inspect_modal(AppState &state) {
             ImGui::Spacing();
             ImGui::TextColored(chip_fg_muted(),
                                "Pick a definition pack to see per-table breakdown.");
+        }
+
+        if (!state.ptm_inspect_interpretation.empty()) {
+            ImGui::Spacing();
+            ImGui::TextUnformatted("Interpretation");
+            for (auto const &line : state.ptm_inspect_interpretation) {
+                ImGui::Bullet();
+                ImGui::TextWrapped("%s", line.c_str());
+            }
         }
     }
 

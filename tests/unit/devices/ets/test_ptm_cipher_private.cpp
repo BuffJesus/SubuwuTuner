@@ -32,6 +32,8 @@
 #include <string>
 #include <vector>
 
+#if defined(ST_ETS_HAVE_CIPHER)
+
 namespace {
 
 std::vector<std::uint8_t> read_all(std::filesystem::path const &p) {
@@ -55,8 +57,6 @@ std::filesystem::path private_ptm_path() {
 }
 
 } // namespace
-
-#if defined(ST_ETS_HAVE_CIPHER)
 
 TEST_CASE("ap3 cipher private: real COBB Stage1 .ptm decrypts and decodes",
           "[.private][devices][ap3][cipher]") {

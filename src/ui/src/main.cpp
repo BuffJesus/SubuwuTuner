@@ -328,6 +328,34 @@ int main(int argc, char *argv[]) {
                 case HC::SettingsModal:
                     topic_id = "25-config-system";
                     break;
+                case HC::AccessPortBrowser:
+                    topic_id = "34-cobb-ap-as-tune-vault";
+                    break;
+                case HC::History:
+                    topic_id = "21-stune-format";
+                    break;
+                case HC::Stats:
+                    // Stats summarizes table-level numeric properties;
+                    // the definition-format doc covers what those
+                    // properties mean (units, scaling, axis types).
+                    topic_id = "11-definition-format";
+                    break;
+                case HC::Dtcs:
+                    // DTCs panel sits at the emissions/jurisdiction
+                    // intersection — disable-DTC routes through the
+                    // policy gate before any edit lands.
+                    topic_id = "06-legal-ethics";
+                    break;
+                case HC::GaugeCluster:
+                    topic_id = "32-live-datalogger";
+                    break;
+                case HC::Library:
+                    // Library panel covers the user's local .ptm
+                    // collection + currently-flashed cross-reference;
+                    // docs/34 (AP file vault) is the closest match
+                    // until a dedicated library doc lands.
+                    topic_id = "34-cobb-ap-as-tune-vault";
+                    break;
                 case HC::FirstRunWizard:
                 case HC::Welcome:
                     topic_id = "00-overview";
@@ -372,6 +400,7 @@ int main(int argc, char *argv[]) {
         render_ebcs_panel(state);
         render_gauge_cluster_panel(state);
         render_ap3_browser_panel(state);
+        render_library_panel(state);
         render_compare_panel(state);
         render_audit_panel(state);
         render_features_designer(state);
@@ -386,6 +415,7 @@ int main(int argc, char *argv[]) {
         render_ptm_import_modal(state);
         render_ptm_inspect_modal(state);
         render_ptm_export_modal(state);
+        render_ptm_save_and_push_modal(state);
         render_ptm_diff_modal(state);
         render_new_project_modal(state);
         render_maf_autotune_modal(state);
@@ -399,6 +429,7 @@ int main(int argc, char *argv[]) {
         render_tgv_egr_delete_modal(state);
         render_shortcuts_modal(state);
         render_about_modal(state);
+        render_doctor_modal(state);
         render_help_modal(state);
         // Command palette rendered last so it stacks above every other
         // modal — Ctrl+K is meant as a global escape hatch.

@@ -74,6 +74,8 @@ enum class PaletteCommandKind : std::uint8_t {
     ToggleGaugeCluster,
     ToggleCompare,
     ToggleAudit,
+    ToggleAp3Browser,
+    ToggleLibrary,
     ResetLayout,
     ThemeDark,
     ThemeLight,
@@ -234,6 +236,14 @@ std::vector<PaletteCommand> build_palette_commands(AppState const &state) {
     push(PaletteCommandKind::ToggleAudit,
          toggle_label(state.show_audit_panel, "Audit log").c_str(),
          "Project", "View");
+#ifdef ST_HAVE_AP_WORKFLOW
+    push(PaletteCommandKind::ToggleAp3Browser,
+         toggle_label(state.show_ap3_browser_panel, "AccessPort Browser").c_str(),
+         "Hardware", "View");
+#endif
+    push(PaletteCommandKind::ToggleLibrary,
+         toggle_label(state.show_library_panel, "Tune Library").c_str(),
+         "Library", "View");
     push(PaletteCommandKind::ResetLayout, "Reset window layout",
          "Rebuild the default dock arrangement", "View");
     // Theme — show the inactive one. No point listing "Theme: Dark" when
@@ -420,6 +430,12 @@ void dispatch_palette_command(AppState &state, PaletteCommand const &cmd) {
         break;
     case PaletteCommandKind::ToggleAudit:
         state.show_audit_panel = !state.show_audit_panel;
+        break;
+    case PaletteCommandKind::ToggleAp3Browser:
+        state.show_ap3_browser_panel = !state.show_ap3_browser_panel;
+        break;
+    case PaletteCommandKind::ToggleLibrary:
+        state.show_library_panel = !state.show_library_panel;
         break;
     case PaletteCommandKind::ResetLayout:
         request_layout_reset();

@@ -122,6 +122,8 @@ add_executable(subuwutuner-gui
     src/panels/welcome.cpp
     src/panels/workspace.cpp
     src/panels/ets_browser.cpp
+    src/panels/library.cpp
+    src/panels/atlas_access.cpp
     src/actions.cpp
     src/app_state.cpp
     src/persistence.cpp
@@ -134,6 +136,7 @@ add_executable(subuwutuner-gui
     src/modals/autotune_maf.cpp
     src/modals/csv_import.cpp
     src/modals/def_registry.cpp
+    src/modals/doctor.cpp
     src/modals/fa24_swap.cpp
     src/modals/tgv_egr_delete.cpp
     src/modals/first_run.cpp
@@ -144,6 +147,8 @@ add_executable(subuwutuner-gui
     src/modals/ptm_export.cpp
     src/modals/ptm_import.cpp
     src/modals/ptm_inspect.cpp
+    src/modals/ptm_pipeline.cpp
+    src/modals/ptm_save_and_push.cpp
     src/modals/read_rom.cpp
     src/modals/settings.cpp
     src/modals/shortcuts.cpp

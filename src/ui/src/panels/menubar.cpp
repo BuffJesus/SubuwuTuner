@@ -93,6 +93,20 @@ void render_menubar(AppState &state) {
                 disabled_tip("Open a project first. The export modal needs a project\n"
                              "with [ptm_metadata] + ptm_patches.toml (from `ptm import`).");
             }
+#ifdef ST_HAVE_AP_WORKFLOW
+            // T31: "Save & Push to AP" wizard. Builds the .ptm and
+            // streams it to the connected AP's /maps/ folder in one
+            // shot. Gated on the workflow flag; the entry is omitted
+            // entirely in the default-OFF distribution build.
+            if (ImGui::MenuItem("\xEE\xA2\x8C  Save & Push to AP\xE2\x80\xA6",
+                                nullptr, false, has_project)) {
+                state.show_ptm_save_and_push_modal = true;
+            }
+            if (!has_project) {
+                disabled_tip("Open a project first. Save & Push needs a project\n"
+                             "with [ptm_metadata] + ptm_patches.toml.");
+            }
+#endif
             if (ImGui::MenuItem("\xEE\xA0\x84  Diff Two .ptm Files\xE2\x80\xA6")) {
                 state.show_ptm_diff_modal = true;
             }
@@ -290,6 +304,17 @@ void render_menubar(AppState &state) {
                     "to running `subuwutuner-cli config set` from a\n"
                     "shell. See docs/25 for precedence rules.");
             }
+            if (ImGui::MenuItem("\xEE\xA2\xB0  Run Diagnostics\xE2\x80\xA6")) {
+                state.show_doctor_modal = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Install-health triage: build identity, cipher state,\n"
+                    "config-file load, definitions root + pack count,\n"
+                    "AccessPort detection. Same checks as the CLI's\n"
+                    "`subuwutuner-cli doctor`, surfaced visually.\n"
+                    "The 'start here' modal when something isn't working.");
+            }
             // Common-workflows submenu — discovery-and-action surface
             // for opinionated multi-table recipes. Each entry routes to
             // a dedicated modal; the enabled-state gates on the loaded
@@ -426,6 +451,16 @@ void render_menubar(AppState &state) {
             // may want hidden when working in the table grid full-screen.
             ImGui::MenuItem("Stats Panel", nullptr, &state.show_stats_panel);
             ImGui::MenuItem("DTCs Panel", nullptr, &state.show_dtcs_panel);
+            ImGui::MenuItem("Tune Library", nullptr, &state.show_library_panel);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Browse the user's local .ptm tune library. Reads\n"
+                    "library_index.toml — produced by\n"
+                    "tools/library_inventory/inventory.py. Vendor / stage /\n"
+                    "variant facets; future cross-references against the\n"
+                    "AccessPort's /backupcksum.");
+            }
+#ifdef ST_HAVE_AP_WORKFLOW
             ImGui::MenuItem("AccessPort Browser", nullptr, &state.show_ap3_browser_panel);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(
@@ -433,6 +468,7 @@ void render_menubar(AppState &state) {
                     "over USB. Capability A (file vault) only — the .ptm patch\n"
                     "introspection tier ships off by default. See docs/34.");
             }
+#endif
             ImGui::MenuItem("History Panel", nullptr, &state.show_history_panel);
             ImGui::MenuItem("Knock Dashboard", nullptr,
                             &state.show_knock_dashboard_panel);

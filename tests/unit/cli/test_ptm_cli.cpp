@@ -489,6 +489,36 @@ TEST_CASE("ptm import -> Project::open-compatible (5-file skeleton, project-vali
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_text.find("Project::open succeeds") != std::string::npos);
     REQUIRE(r.stdout_text.find("0 of") != std::string::npos);
+
+    // edits.toml must be populated — one [[edit]] per imported patch,
+    // tagged "ptm_import", in ByteEdit form (byte_changes array). The
+    // synthetic source.ptm above contains exactly one 5-byte patch.
+    {
+        std::ifstream f{imp_dir / "edits.toml", std::ios::binary | std::ios::ate};
+        REQUIRE(f);
+        auto const len = static_cast<std::size_t>(f.tellg());
+        f.seekg(0);
+        std::string content(len, '\0');
+        f.read(content.data(), static_cast<std::streamsize>(len));
+        // Cursor must equal the number of applied patches (1 here) so
+        // working.bin matches the head of history.
+        REQUIRE(content.find("cursor = 1") != std::string::npos);
+        REQUIRE(content.find("schema_version = 2") != std::string::npos);
+        REQUIRE(content.find("[[edit]]") != std::string::npos);
+        REQUIRE(content.find("tag         = \"ptm_import\"") != std::string::npos);
+        REQUIRE(content.find("[[edit.byte_changes]]") != std::string::npos);
+        // 5-byte patch ⇒ 5 byte_changes entries.
+        std::size_t count = 0;
+        for (std::size_t pos = 0;
+             (pos = content.find("[[edit.byte_changes]]", pos)) != std::string::npos;
+             ++pos) {
+            ++count;
+        }
+        REQUIRE(count == 5);
+    }
+    // project-validate's edits.toml check should report the loaded record count.
+    REQUIRE(r.stdout_text.find("edits.toml loads") != std::string::npos);
+    REQUIRE(r.stdout_text.find("1 records") != std::string::npos);
 #endif
 }
 #endif
@@ -535,6 +565,9 @@ TEST_CASE("ptm export refuses when every patch entry is malformed",
 
 TEST_CASE("ptm import refuses when every patch overflows the base ROM",
           "[cli][ptm][integration][cipher][rewrite]") {
+#ifndef ST_ETS_HAVE_PTM_REWRITE
+    SKIP("Rewrite gating off — ptm export can't produce the fixture");
+#else
     // Real failure mode from the field: user passes the wrong base ROM
     // (e.g. dumped from a different ECU revision, or the .ptm targets
     // VB but the base is VA). Pre-fix: import silently exited 0 and
@@ -593,6 +626,7 @@ TEST_CASE("ptm import refuses when every patch overflows the base ROM",
     // (silent exit 0 + zero-patches-applied) would have written the
     // full 5-file skeleton with an unmodified working.bin.
     REQUIRE_FALSE(fs::exists(imp_dir / "working.bin"));
+#endif
 }
 
 TEST_CASE("ptm verify refuses without --enable-cobb-ap-cipher",

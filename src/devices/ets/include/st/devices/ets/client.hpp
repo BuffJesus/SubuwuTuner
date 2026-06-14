@@ -26,12 +26,20 @@
 #include "st/transport/byte_channel.hpp"
 
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <functional>
+#include <future>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace st::devices::ets {
@@ -76,6 +84,11 @@ struct DeviceState {
     std::optional<std::string> ap_serial;
     std::optional<std::string> firmware_version;
     std::optional<std::string> vehicle_descriptor;
+    // Machine-readable vehicle code (e.g. "SUBA_US_WRXM_CF_17_F"),
+    // parsed from cmd 0x28 UserInfo body field[5]. Used by the
+    // agreement chip to compare against the project's
+    // [ptm_metadata].vehicle_id without descriptor parsing.
+    std::optional<std::string> vehicle_id;
     // Parsed ASCII payloads from the three RE8b status cmds. Same
     // treatment as `firmware_version` (printable-ASCII span trim).
     std::optional<std::string> hardware_type;
@@ -125,30 +138,67 @@ struct ApCapabilities {
 
 class Client {
 public:
-    Client(st::transport::IByteChannel &channel, ClientConfig cfg = {}) noexcept
-        : channel_{&channel}, cfg_{cfg} {}
+    // Single dedicated worker thread spins up here. All public verbs
+    // that touch the IByteChannel go through the worker's queue —
+    // i.MX28 USB transport is single-stream (one bulk OUT, one bulk
+    // IN), so serializing protocol ops at the queue level matches
+    // physical reality and removes any risk of overlapping packets
+    // from concurrent callers. See `HANDOFF-from-analyst-2026-06-13-ap-browser-decisions.md`
+    // §C2 for the threading-model rationale.
+    //
+    // Sync verbs (the existing `ls` / `read_file` / `write_file` /
+    // `remove_file` signatures) stay blocking — they enqueue + call
+    // `future::get()` internally so existing single-threaded callers
+    // (CLI, current tests) need zero refactor. Async variants
+    // (`*_async`) return a `std::future` so GUI consumers can poll
+    // for completion + render progress without freezing the frame.
+    Client(st::transport::IByteChannel &channel, ClientConfig cfg = {});
+    ~Client();
+    Client(Client const &) = delete;
+    Client &operator=(Client const &) = delete;
+    Client(Client &&) = delete;
+    Client &operator=(Client &&) = delete;
 
     // cmd 0x28 + 0x04 + 0x03 — gather serial, firmware, settings.
     [[nodiscard]] Result<DeviceState> query_state();
 
     // cmd 0x26 — list a subdirectory under /user/ap-user/, e.g.
     // "/maps/", "/datalog/", "/presets/", "/images/".
+    //
+    // Sync form (`ls`) blocks on the worker. Async form (`ls_async`)
+    // returns a `std::future` the caller polls — every status query
+    // from the GUI's status-bar tick goes through this so the
+    // file-vault worker queue doesn't ever block the periodic poll.
     [[nodiscard]] Result<std::vector<FileInfo>> ls(std::string_view subdir);
+    [[nodiscard]] std::future<Result<std::vector<FileInfo>>>
+        ls_async(std::string_view subdir, std::stop_token token = {});
 
     // cmd 0x20 setup + 0x21 data — read a file by its absolute path
     // under /user/ap-user/. e.g. "/maps/tune.ptm". Returns the
-    // file's raw bytes.
+    // file's raw bytes. Both forms route through the worker queue;
+    // the async form lets the GUI keep its frame loop responsive
+    // during a 50 KB pull (~1 s on a working AP).
     [[nodiscard]] Result<std::vector<std::uint8_t>> read_file(std::string_view path);
+    [[nodiscard]] std::future<Result<std::vector<std::uint8_t>>>
+        read_file_async(std::string_view path, std::stop_token token = {});
 
     // cmd 0x22 setup + 0x23 data — write a file to the AP. `path` is
     // absolute under /user/ap-user/. `mtime_unix_secs` is the
-    // intended mtime the AP should record; defaults to 0.
+    // intended mtime the AP should record; defaults to 0. Async form
+    // unblocks the Library panel's "Push to AP" verb.
     [[nodiscard]] Status write_file(std::string_view path,
                                     std::span<std::uint8_t const> data,
                                     std::uint64_t mtime_unix_secs = 0);
+    [[nodiscard]] std::future<Status>
+        write_file_async(std::string_view path,
+                         std::vector<std::uint8_t> data,
+                         std::uint64_t mtime_unix_secs = 0,
+                         std::stop_token token = {});
 
     // cmd 0x25 — remove a file by absolute path.
     [[nodiscard]] Status remove_file(std::string_view path);
+    [[nodiscard]] std::future<Status>
+        remove_file_async(std::string_view path, std::stop_token token = {});
 
     // Diagnostic cmds — env-var gated, off by default.
     // ST_ETS_ENABLE_DIAGNOSTIC_CMDS=1 unlocks both methods; without it
@@ -171,6 +221,17 @@ public:
     // u32 is useful today as a firmware-version fingerprint.
     [[nodiscard]] Status remount_user_filesystem();
     [[nodiscard]] Result<ApCapabilities> get_capabilities();
+
+    // T14 — fire cmd 0x05 as a NAND barrier with no env-var gate, no
+    // session warmup, and a "best-effort" posture (errors are swallowed
+    // by the caller via the discarded Status). Intended for the
+    // disconnect path so the AP's UBIFS journal commits before the
+    // next mount, mirroring APManager's behavior.
+    //
+    // Workflow-gated: returns PolicyDenied when ST_HAVE_AP_WORKFLOW is
+    // not defined, so the OFF distribution build never touches the
+    // wire from disconnect.
+    [[nodiscard]] Status nand_barrier_best_effort();
 
 private:
     [[nodiscard]] Status send_packet(std::uint8_t type, std::span<std::uint8_t const> body);
@@ -196,9 +257,63 @@ private:
     // dispatcher-default-likely-stale-in.md hypothesis #2.
     [[nodiscard]] Status ensure_session_warmup();
 
+    // The actual ls work — runs on the worker thread only. The public
+    // `ls` enqueues this + waits; `ls_async` enqueues + returns the
+    // future. Splitting the impl out keeps the worker-touchable
+    // call sites obvious for future migrations.
+    //
+    // stop_token is checked at entry (fast-fail for already-stopped
+    // tokens) and, for the long-running impls (read_file / write_file),
+    // between protocol chunks. An empty default-constructed
+    // std::stop_token signals "uncancellable" — `stop_requested()`
+    // returns false unconditionally, no overhead.
+    [[nodiscard]] Result<std::vector<FileInfo>>
+        ls_impl(std::string_view subdir, std::stop_token const &token);
+    [[nodiscard]] Result<std::vector<std::uint8_t>>
+        read_file_impl(std::string_view path, std::stop_token const &token);
+    [[nodiscard]] Status write_file_impl(std::string_view path,
+                                          std::span<std::uint8_t const> data,
+                                          std::uint64_t mtime_unix_secs,
+                                          std::stop_token const &token);
+    [[nodiscard]] Status remove_file_impl(std::string_view path,
+                                           std::stop_token const &token);
+
+    // Enqueue a callable on the worker thread. Returns a future for
+    // the callable's return value. The callable runs synchronously
+    // on the worker; the future is signaled when it completes.
+    // Defined inline because it's a template.
+    template <typename F>
+    auto enqueue(F func) -> std::future<decltype(func())> {
+        using R = decltype(func());
+        auto task = std::make_shared<std::packaged_task<R()>>(std::move(func));
+        auto fut = task->get_future();
+        {
+            std::lock_guard<std::mutex> lock{queue_mu_};
+            queue_.emplace_back([task]() { (*task)(); });
+        }
+        queue_cv_.notify_one();
+        return fut;
+    }
+
+    // Worker thread main loop. Pulls callables off the queue and
+    // runs them on this thread (i.e. with exclusive access to the
+    // channel). Exits when stop_worker_ is set.
+    void worker_loop();
+
     st::transport::IByteChannel *channel_;
     ClientConfig cfg_;
     bool session_warmed_up_ = false;
+
+    // Worker thread + queue. The worker is the only thread that
+    // touches `channel_` once construction returns; every sync /
+    // async verb routes work to it. Queue is FIFO — ops complete
+    // in submission order, which matches the firmware-level
+    // request/response pairing.
+    std::thread worker_;
+    std::mutex queue_mu_;
+    std::condition_variable queue_cv_;
+    std::deque<std::function<void()>> queue_;
+    bool stop_worker_{false}; // protected by queue_mu_
 };
 
 // Helper: split an absolute "/dir/.../file" path into the
@@ -220,6 +335,17 @@ struct UserInfoFields {
     std::optional<bool> vehicle_paired;
     std::optional<std::string> vehicle;
 };
+
+// Extract the machine-readable vehicle code (e.g. "SUBA_US_WRXM_CF_17_F"
+// — the same format the .ptm PrivateData XML's <vehicleID> element
+// carries) from the cmd 0x03 DeviceSettings body. The code is
+// embedded as a u32 LE length prefix + N-byte uppercase-ASCII run.
+// Heuristic match — scans for the first plausible length-prefixed
+// run that contains a market marker (_US_ / _JP_ / _EU_ / _AU_).
+// Returns nullopt on no plausible match (e.g. unmarried AP, or a
+// firmware revision with a different settings shape).
+[[nodiscard]] std::optional<std::string>
+parse_vehicle_id_from_device_settings(std::span<std::uint8_t const> body);
 
 // Decode the cmd 0x28 (UserInfo) response body. Returns a partially-
 // populated struct on best-effort parse failure (e.g. truncated /

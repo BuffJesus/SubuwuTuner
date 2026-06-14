@@ -172,6 +172,7 @@ struct AppState {
     bool show_imgui_demo{false};
     bool show_shortcuts_modal{false};
     bool show_about_modal{false};
+    bool show_doctor_modal{false};
 
     // ISO 8601 UTC timestamp of the most recent save_project() success in
     // this session. Drives the "Saved 3 minutes ago" status-bar reading;
@@ -451,6 +452,23 @@ struct AppState {
     // turns true on first successful read so the panel can distinguish
     // "fresh open, nothing read yet" from "read but log is empty".
     bool show_audit_panel{false};
+    // Tune Library panel — primary surface for the user's .ptm
+    // collection. Per analyst-side B2 decision (2026-06-13). Renders
+    // entries from library_index.toml (produced by tools/
+    // library_inventory/inventory.py). Panel state lives file-static
+    // inside library.cpp; this bool is just visibility.
+    bool show_library_panel{false};
+    // Two-step "Diff against…" flow inside the library panel.
+    // First right-click → "Set as diff source" sets left_path + flips
+    // picking_right = true. Subsequent right-click on a DIFFERENT row
+    // shows "Diff against <basename>" — clicking opens the ptm_diff
+    // modal with both paths pre-filled. Either way (after the second
+    // click OR after the modal opens) picking_right resets to false.
+    std::string library_diff_left_path;
+    bool library_diff_picking_right{false};
+    // Most-recent row the context menu targets. Set when the popup
+    // opens; read by handler dispatch. Cleared on menu close.
+    std::string library_action_target;
     std::vector<st::audit::Entry> audit_entries;
     std::string audit_error_msg;
     bool audit_loaded{false};
@@ -556,6 +574,12 @@ struct AppState {
         ReadRomModal,
         SettingsModal,
         FirstRunWizard,
+        AccessPortBrowser,
+        History,
+        Stats,
+        Dtcs,
+        GaugeCluster,
+        Library,
     };
     HelpContext help_context{HelpContext::Unknown};
     // Modal-open keyboard focus one-shot flags. Each modal sets its
@@ -721,6 +745,9 @@ struct AppState {
     };
     std::vector<PtmDiffRow> ptm_diff_by_layer;
     std::vector<PtmDiffRow> ptm_diff_by_table;
+    // Heuristic prose sentences (st::library::interpret_diff) — one
+    // bullet per line in the modal's "What changed" section.
+    std::vector<std::string> ptm_diff_interpretation;
 
     // ptm export modal — reverse of import. Reads the loaded project's
     // [ptm_metadata] + ptm_patches.toml, rebuilds the inner PrivateData
@@ -731,6 +758,16 @@ struct AppState {
     char ptm_export_seed_hex[32] = "0x12345678";
     std::string ptm_export_error;
     std::string ptm_export_success;
+
+    // ptm "Save & Push to AP" modal (T31). Same build pipeline as
+    // ptm_export, plus a cmd 0x22 push to the connected AP's /maps/
+    // followed by an in-memory round-trip decrypt verification.
+    // Gated on ST_HAVE_AP_WORKFLOW; the menu entry is omitted in the
+    // default-OFF distribution build but the AppState field stays so
+    // every TU compiles either way.
+    bool show_ptm_save_and_push_modal{false};
+    char ptm_sap_tune_name[128]{};
+    char ptm_sap_seed_hex[32] = "0x12345678";
 
     // ptm inspect modal — read-only viewer. Pick a .ptm, decode it
     // inline, render identity + architectural breakdown + top tables.
@@ -749,7 +786,24 @@ struct AppState {
         ptm_inspect_layers; // (label, (count, bytes))
     std::vector<std::pair<std::string, std::pair<std::uint32_t, std::uint64_t>>>
         ptm_inspect_top_tables; // (name, (count, bytes))
+    // Heuristic prose sentences (st::library::interpret_inspect) —
+    // one bullet per line in the modal's "Interpretation" section.
+    std::vector<std::string> ptm_inspect_interpretation;
     std::string ptm_inspect_error;
+
+    // F1 Decoded Tune Inspector — match indicators against the
+    // currently-connected AccessPort. Computed at decode time by
+    // comparing the .ptm's metadata against ets_status_snapshot().
+    // Three-state per field: Unknown (no AP / no data) renders as a
+    // neutral chip; Match renders green; Mismatch renders amber with
+    // the AP's expected value as a tooltip. The base-ROM compare is
+    // an MD5 (rom_sum vs /backupcksum); the vehicle compare is the
+    // machine-readable vehicle_id (SUBA_US_WRXM_CF_17_F-style).
+    enum class PtmMatch : std::uint8_t { Unknown, Match, Mismatch };
+    PtmMatch ptm_inspect_vehicle_match{PtmMatch::Unknown};
+    PtmMatch ptm_inspect_rom_sum_match{PtmMatch::Unknown};
+    std::string ptm_inspect_ap_vehicle_id;   // AP's marriage vehicle for tooltip
+    std::string ptm_inspect_ap_backupcksum;  // AP's stock-ROM MD5 for tooltip
 
     // CSV import preview modal.
     bool show_csv_import_modal{false};

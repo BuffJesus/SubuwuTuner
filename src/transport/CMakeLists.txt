@@ -57,11 +57,17 @@ target_link_libraries(st_transport
 # COBB AccessPort V3 (USB byte-channel for the AP3 file-vault).
 # ---------------------------------------------------------------------------
 #
-# When ST_ENABLE_AP3=ON (default), FetchContent pulls the libusb-cmake
-# wrapper around libusb-1.0 and the AP3 channel uses bulk OUT/IN on
-# endpoints 0x03 / 0x82. When OFF, the channel TU compiles its
+# When ST_ENABLE_AP3=ON, FetchContent pulls the libusb-cmake wrapper
+# around libusb-1.0 and the AP3 channel uses bulk OUT/IN on endpoints
+# 0x03 / 0x82. When OFF (default), the channel TU compiles its
 # NotImplemented fallback so the CLI's `ap3` subcommand still links
-# and fails cleanly at runtime.
+# and fails cleanly at runtime, and the binary never opens a USB
+# device.
+#
+# Default flipped to OFF per HANDOFF-from-analyst-2026-06-14-edit-export-
+# push-ptm.md: distribution must not pull libusb. Cornelio's local
+# build sets -DST_ENABLE_COBB_AP_WORKFLOW=ON which auto-flips this back
+# to ON via the top-level umbrella.
 #
 # Linux CI runners typically need `libudev-dev` (or distro equivalent)
 # on PATH for libusb-cmake to build. Windows requires Zadig to rebind
@@ -70,11 +76,11 @@ target_link_libraries(st_transport
 # Spec: D:\Subuwu\specs\references\cobb-ap3-usb-protocol.md §3
 # Gating doc: docs/34-cobb-ap-as-tune-vault.md
 option(ST_ENABLE_AP3
-    "Build the libusb-backed AP3 file-vault channel. When ON (default), \
-FetchContent pulls libusb-1.0 via the libusb-cmake wrapper. When OFF, \
-the AP3 transport links a NotImplemented stub and the file-vault CLI \
-subcommand fails at runtime."
-    ON)
+    "Build the libusb-backed AP3 file-vault channel. When ON, FetchContent \
+pulls libusb-1.0 via the libusb-cmake wrapper. OFF by default — the AP3 \
+transport links a NotImplemented stub and the file-vault CLI subcommand \
+fails at runtime. Auto-enabled by ST_ENABLE_COBB_AP_WORKFLOW."
+    OFF)
 
 if(ST_ENABLE_AP3)
     include(FetchContent)

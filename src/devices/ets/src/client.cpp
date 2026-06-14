@@ -78,6 +78,37 @@ bool ap3_diagnostic_cmds_enabled() noexcept {
     return v != nullptr && std::string{v} == "1";
 }
 
+// Build + ship a packet bypassing the codec-level block list. Only
+// callable from within Client and only after the surrounding caller
+// has cleared the appropriate gate (diagnostic env-var for cmd 0x05
+// stand-alone calls, or the ST_HAVE_AP_WORKFLOW build flag for the
+// NAND-barrier path inside write_file_impl / remove_file_impl).
+// Mirrors `st::transport::ets::encode_packet` minus the
+// `is_blocked_command` check.
+inline Status send_packet_bypassing_block_list(
+    st::transport::IByteChannel &channel, std::uint8_t type,
+    std::span<std::uint8_t const> body) {
+    using namespace st::transport::ets;
+    std::uint32_t const wire_len =
+        static_cast<std::uint32_t>(body.size() + kCrcSize);
+    std::vector<std::uint8_t> out;
+    out.reserve(kHeaderSize + body.size() + kCrcSize);
+    out.push_back(kSyncByte0);
+    out.push_back(kSyncByte1);
+    out.push_back(static_cast<std::uint8_t>((wire_len >> 16) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((wire_len >> 8) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>(wire_len & 0xFFU));
+    out.push_back(0x00U); // reserved
+    out.push_back(type);
+    out.insert(out.end(), body.begin(), body.end());
+    std::uint32_t const crc = packet_crc(out);
+    out.push_back(static_cast<std::uint8_t>((crc >> 24) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((crc >> 16) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((crc >> 8) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>(crc & 0xFFU));
+    return channel.write_bytes(out);
+}
+
 } // namespace
 
 // Per spec §6.13 (revised 2026-06-11 PM): cmd 0x28 (UserInfo) response
@@ -150,6 +181,59 @@ UserInfoFields parse_user_info_body(std::span<std::uint8_t const> body) {
     return out;
 }
 
+// Heuristic extractor for the machine-readable vehicle code embedded
+// in the cmd 0x03 DeviceSettings body (Boost-archived binary struct
+// with multiple typed fields). Empirically the code appears as a
+// u32 LE length prefix followed by N bytes of uppercase-ASCII
+// matching the .ptm PrivateData XML `<vehicleID>` format
+// ("SUBA_US_WRXM_CF_17_F", "SUBA_JP_..." etc.). Scans the body for
+// the first plausible length-prefixed ASCII run of 8..40 chars,
+// uppercase/digits/underscore only, that contains "_US_" / "_JP_" /
+// "_EU_" / "_AU_". Returns nullopt on no plausible match.
+std::optional<std::string>
+parse_vehicle_id_from_device_settings(std::span<std::uint8_t const> body) {
+    auto const is_market_marker = [](std::string_view s) {
+        return s.find("_US_") != std::string_view::npos ||
+               s.find("_JP_") != std::string_view::npos ||
+               s.find("_EU_") != std::string_view::npos ||
+               s.find("_AU_") != std::string_view::npos;
+    };
+    auto const is_id_char = [](unsigned char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+    };
+    if (body.size() < 8) {
+        return std::nullopt;
+    }
+    for (std::size_t i = 0; i + 4 < body.size(); ++i) {
+        std::uint32_t const len = static_cast<std::uint32_t>(body[i]) |
+                                  (static_cast<std::uint32_t>(body[i + 1]) << 8) |
+                                  (static_cast<std::uint32_t>(body[i + 2]) << 16) |
+                                  (static_cast<std::uint32_t>(body[i + 3]) << 24);
+        if (len < 8 || len > 40) {
+            continue;
+        }
+        if (i + 4 + len > body.size()) {
+            continue;
+        }
+        bool all_id_chars = true;
+        for (std::size_t j = 0; j < len; ++j) {
+            if (!is_id_char(body[i + 4 + j])) {
+                all_id_chars = false;
+                break;
+            }
+        }
+        if (!all_id_chars) {
+            continue;
+        }
+        std::string_view const candidate{
+            reinterpret_cast<char const *>(body.data() + i + 4), len};
+        if (is_market_marker(candidate)) {
+            return std::string{candidate};
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<bool>
 parse_marriage_from_device_settings(std::span<std::uint8_t const> body) {
     // Per RE2 (findings/re-2026-06-12-pm/): the AP stores persistent
@@ -179,6 +263,52 @@ SplitPath split_ap_path(std::string_view absolute_path) {
     }
     out.name = std::string{absolute_path.substr(slash + 1)};
     return out;
+}
+
+Client::Client(st::transport::IByteChannel &channel, ClientConfig cfg)
+    : channel_{&channel}, cfg_{cfg} {
+    // Spin the worker thread immediately. Every public verb routes
+    // work to it via the queue; the constructor must complete
+    // before any verb call so the queue + cv + flag are all
+    // initialized when the worker starts pulling.
+    worker_ = std::thread{[this]() { worker_loop(); }};
+}
+
+Client::~Client() {
+    // Signal stop + wake the worker so it can drain. Join under
+    // RAII semantics — if the worker is wedged on a USB read the
+    // join will block, but the channel destructor (which runs after
+    // this) is what cancels in-flight I/O. For the existing tests
+    // (LoopbackByteChannel) the worker exits promptly because all
+    // ops are queue-poll/run/repeat.
+    {
+        std::lock_guard<std::mutex> lock{queue_mu_};
+        stop_worker_ = true;
+    }
+    queue_cv_.notify_all();
+    if (worker_.joinable()) {
+        worker_.join();
+    }
+}
+
+void Client::worker_loop() {
+    for (;;) {
+        std::function<void()> task;
+        {
+            std::unique_lock<std::mutex> lock{queue_mu_};
+            queue_cv_.wait(lock, [this]() {
+                return stop_worker_ || !queue_.empty();
+            });
+            if (stop_worker_ && queue_.empty()) {
+                return;
+            }
+            task = std::move(queue_.front());
+            queue_.pop_front();
+        }
+        // Task body runs without the lock held — channel I/O is
+        // potentially seconds-long and would block submitters.
+        task();
+    }
 }
 
 Status Client::send_packet(std::uint8_t type, std::span<std::uint8_t const> body) {
@@ -427,7 +557,6 @@ Result<DeviceState> Client::query_state() {
         state.vehicle_descriptor = fields.vehicle;
         state.vehicle_paired = fields.vehicle_paired;
     }
-
     // cmd 0x04 firmware version — body-less request. The response is a
     // plain ASCII string (no archive header per §6.14). Populated as a
     // backup if the cmd 0x28 parse failed (e.g. response shape drift).
@@ -478,6 +607,11 @@ Result<DeviceState> Client::query_state() {
         if (!state.vehicle_paired.has_value() && dev_marriage.has_value()) {
             state.vehicle_paired = dev_marriage;
         }
+        // Extract the machine vehicle_id from the same body. Embedded
+        // as a u32 LE length prefix + uppercase-ASCII run; heuristic
+        // match against market markers (_US_ / _JP_ / _EU_ / _AU_).
+        state.vehicle_id =
+            parse_vehicle_id_from_device_settings(state.device_settings_body);
     }
 
     // Three additional status probes per RE8b CORRECTED dispatch
@@ -489,8 +623,24 @@ Result<DeviceState> Client::query_state() {
     // any non-printable-ASCII response as nullopt so query_state
     // still succeeds on older builds. Run AFTER the warmup trio so
     // session_warmed_up_ already covers the file-vault prereq.
-    auto probe_ascii = [&](std::uint8_t cmd, std::vector<std::uint8_t> &out_body,
-                           std::optional<std::string> &out_parsed) -> Status {
+    // Boost binary archive prefix on these read-only status responses:
+    //
+    //   bytes 0..3   : u32 LE  = 22 (length of "serialization::archive")
+    //   bytes 4..25  : ASCII   = "serialization::archive"
+    //   bytes 26..34 : 9 bytes : archive version + flags (03 04 04 04 08 01 00 00 00 observed)
+    //
+    // Past that 35-byte prefix the payload is either:
+    //   - a length-prefixed ASCII string: u32 LE length + N chars (cmd 0x30,
+    //     cmd 0x31 — VehicleManufacturer / ApManufacturer)
+    //   - a bare u32 LE value (cmd 0x2e — HardwareType enum)
+    //
+    // Confirmed on firmware v1.7.6.0-28785 against SUB0484551 (2026-06-13).
+    // Older firmware may emit a default-handler error packet instead; we
+    // degrade to nullopt rather than failing query_state.
+    static constexpr std::size_t kBoostArchivePrefixLen = 35;
+    auto probe_ascii_string = [&](std::uint8_t cmd,
+                                   std::vector<std::uint8_t> &out_body,
+                                   std::optional<std::string> &out_parsed) -> Status {
         if (auto s = send_packet(cmd, std::span<std::uint8_t const>{}); !s.has_value()) {
             return st::failure(std::move(s).error());
         }
@@ -499,31 +649,66 @@ Result<DeviceState> Client::query_state() {
             return st::failure(std::move(body).error());
         }
         out_body = std::move(*body);
-        std::string s(reinterpret_cast<char const *>(out_body.data()),
-                      out_body.size());
-        while (!s.empty() && (static_cast<unsigned char>(s.back()) < 0x20 ||
-                              static_cast<unsigned char>(s.back()) >= 0x7F)) {
-            s.pop_back();
+        // Past prefix: u32 LE length + N ASCII chars.
+        if (out_body.size() < kBoostArchivePrefixLen + 4) {
+            return st::ok(); // degraded — leave nullopt
         }
-        if (!s.empty() &&
-            std::all_of(s.begin(), s.end(),
+        std::size_t off = kBoostArchivePrefixLen;
+        auto const len =
+            static_cast<std::uint32_t>(out_body[off]) |
+            (static_cast<std::uint32_t>(out_body[off + 1]) << 8) |
+            (static_cast<std::uint32_t>(out_body[off + 2]) << 16) |
+            (static_cast<std::uint32_t>(out_body[off + 3]) << 24);
+        off += 4;
+        if (len == 0 || len > 1024 ||
+            off + static_cast<std::size_t>(len) > out_body.size()) {
+            return st::ok(); // implausible — leave nullopt
+        }
+        std::string s(reinterpret_cast<char const *>(out_body.data() + off), len);
+        if (std::all_of(s.begin(), s.end(),
                         [](unsigned char c) { return c >= 0x20 && c < 0x7F; })) {
             out_parsed = std::move(s);
         }
         return st::ok();
     };
-    if (auto s = probe_ascii(0x2eU, state.hardware_type_body,
-                             state.hardware_type);
+    auto probe_u32 = [&](std::uint8_t cmd,
+                          std::vector<std::uint8_t> &out_body,
+                          std::optional<std::string> &out_parsed) -> Status {
+        if (auto s = send_packet(cmd, std::span<std::uint8_t const>{}); !s.has_value()) {
+            return st::failure(std::move(s).error());
+        }
+        auto body = receive_packet_body();
+        if (!body.has_value()) {
+            return st::failure(std::move(body).error());
+        }
+        out_body = std::move(*body);
+        if (out_body.size() < kBoostArchivePrefixLen + 4) {
+            return st::ok();
+        }
+        std::size_t off = kBoostArchivePrefixLen;
+        auto const val =
+            static_cast<std::uint32_t>(out_body[off]) |
+            (static_cast<std::uint32_t>(out_body[off + 1]) << 8) |
+            (static_cast<std::uint32_t>(out_body[off + 2]) << 16) |
+            (static_cast<std::uint32_t>(out_body[off + 3]) << 24);
+        // Render as decimal — the enum semantics need Frida confirmation
+        // (RE wave-6 hardware-type vs e_CpuTypes; see project memory),
+        // so we surface the raw value rather than a guessed label.
+        out_parsed = std::to_string(val);
+        return st::ok();
+    };
+    if (auto s = probe_u32(0x2eU, state.hardware_type_body,
+                            state.hardware_type);
         !s.has_value()) {
         return st::failure(std::move(s).error());
     }
-    if (auto s = probe_ascii(0x30U, state.vehicle_manufacturer_body,
-                             state.vehicle_manufacturer);
+    if (auto s = probe_ascii_string(0x30U, state.vehicle_manufacturer_body,
+                                     state.vehicle_manufacturer);
         !s.has_value()) {
         return st::failure(std::move(s).error());
     }
-    if (auto s = probe_ascii(0x31U, state.ap_manufacturer_body,
-                             state.ap_manufacturer);
+    if (auto s = probe_ascii_string(0x31U, state.ap_manufacturer_body,
+                                     state.ap_manufacturer);
         !s.has_value()) {
         return st::failure(std::move(s).error());
     }
@@ -535,7 +720,12 @@ Result<DeviceState> Client::query_state() {
     return state;
 }
 
-Result<std::vector<FileInfo>> Client::ls(std::string_view subdir) {
+Result<std::vector<FileInfo>> Client::ls_impl(std::string_view subdir,
+                                                std::stop_token const &token) {
+    if (token.stop_requested()) {
+        return st::failure(ErrorCode::Cancelled,
+                            "ap3::ls: cancelled before send");
+    }
     if (auto s = ensure_session_warmup(); !s.has_value()) {
         return st::failure(std::move(s).error());
     }
@@ -565,7 +755,40 @@ Result<std::vector<FileInfo>> Client::ls(std::string_view subdir) {
     return decode_file_info_list(*resp);
 }
 
+Result<std::vector<FileInfo>> Client::ls(std::string_view subdir) {
+    return ls_async(subdir).get();
+}
+
+std::future<Result<std::vector<FileInfo>>>
+Client::ls_async(std::string_view subdir, std::stop_token token) {
+    // Capture by value — std::string_view doesn't own its bytes, and
+    // by the time the worker runs the caller's stack frame may be gone.
+    std::string subdir_owned{subdir};
+    return enqueue([this, dir = std::move(subdir_owned),
+                    tok = std::move(token)]() {
+        return ls_impl(dir, tok);
+    });
+}
+
 Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
+    return read_file_async(path).get();
+}
+
+std::future<Result<std::vector<std::uint8_t>>>
+Client::read_file_async(std::string_view path, std::stop_token token) {
+    std::string path_owned{path};
+    return enqueue([this, p = std::move(path_owned),
+                    tok = std::move(token)]() {
+        return read_file_impl(p, tok);
+    });
+}
+
+Result<std::vector<std::uint8_t>>
+Client::read_file_impl(std::string_view path, std::stop_token const &token) {
+    if (token.stop_requested()) {
+        return st::failure(ErrorCode::Cancelled,
+                            "ap3::read_file: cancelled before send");
+    }
     if (auto s = ensure_session_warmup(); !s.has_value()) {
         return st::failure(std::move(s).error());
     }
@@ -680,8 +903,52 @@ Result<std::vector<std::uint8_t>> Client::read_file(std::string_view path) {
     return std::move(*file_resp);
 }
 
-Status Client::write_file(std::string_view path, std::span<std::uint8_t const> data,
-                          std::uint64_t mtime_unix_secs) {
+Status Client::write_file(std::string_view path,
+                           std::span<std::uint8_t const> data,
+                           std::uint64_t mtime_unix_secs) {
+    // Copy data into the future-owned vector so the worker can outlive
+    // the caller's data span. The async path takes ownership directly.
+    std::vector<std::uint8_t> owned{data.begin(), data.end()};
+    return write_file_async(path, std::move(owned), mtime_unix_secs).get();
+}
+
+std::future<Status>
+Client::write_file_async(std::string_view path,
+                          std::vector<std::uint8_t> data,
+                          std::uint64_t mtime_unix_secs,
+                          std::stop_token token) {
+    std::string path_owned{path};
+    return enqueue(
+        [this, p = std::move(path_owned), bytes = std::move(data),
+         mtime_unix_secs, tok = std::move(token)]() {
+            return write_file_impl(p, bytes, mtime_unix_secs, tok);
+        });
+}
+
+Status Client::write_file_impl(std::string_view path,
+                                std::span<std::uint8_t const> data,
+                                std::uint64_t mtime_unix_secs,
+                                std::stop_token const &token) {
+    // Cancellation contract takes precedence over the workflow gate —
+    // a stopped token always returns Cancelled, never PolicyDenied,
+    // so callers (and tests) can rely on the same shutdown semantics
+    // in both build modes.
+    if (token.stop_requested()) {
+        return st::failure(ErrorCode::Cancelled,
+                            "ap3::write_file: cancelled before send");
+    }
+#ifndef ST_HAVE_AP_WORKFLOW
+    (void)path;
+    (void)data;
+    (void)mtime_unix_secs;
+    // Workflow gate: write surface is OFF in the default distribution
+    // build. PutFile (cmd 0x22) is a mutating wire command per
+    // HANDOFF-from-analyst-2026-06-14-edit-export-push-ptm.md §CRITICAL.
+    return st::failure(
+        ErrorCode::PolicyDenied,
+        "ap3::write_file: AP workflow surface is off in this build. "
+        "Reconfigure with -DST_ENABLE_COBB_AP_WORKFLOW=ON to enable.");
+#else
     if (auto s = ensure_session_warmup(); !s.has_value()) {
         return s;
     }
@@ -718,10 +985,53 @@ Status Client::write_file(std::string_view path, std::span<std::uint8_t const> d
     if (!commit_ack.has_value()) {
         return st::failure(std::move(commit_ack).error());
     }
+
+    // Step 3: cmd 0x05 NAND barrier. Per
+    // findings/re-2026-06-14/cmd_05_remountuser.md + T30 step 9:
+    // remountUser commits the UBIFS journal so the just-written file
+    // survives a power-cycle. Skipping it risks the write disappearing
+    // on next mount. Bypasses the codec-level block list because cmd
+    // 0x05 IS on the defense-in-depth list — the unguarded helper is
+    // intentional here, the workflow flag is the outer gate.
+    if (auto s = send_packet_bypassing_block_list(
+            *channel_, 0x05U, std::span<std::uint8_t const>{});
+        !s.has_value()) {
+        return s;
+    }
+    auto barrier_ack = receive_packet_body();
+    if (!barrier_ack.has_value()) {
+        return st::failure(std::move(barrier_ack).error());
+    }
     return st::ok();
+#endif
 }
 
 Status Client::remove_file(std::string_view path) {
+    return remove_file_async(path).get();
+}
+
+std::future<Status>
+Client::remove_file_async(std::string_view path, std::stop_token token) {
+    std::string path_owned{path};
+    return enqueue([this, p = std::move(path_owned),
+                    tok = std::move(token)]() {
+        return remove_file_impl(p, tok);
+    });
+}
+
+Status Client::remove_file_impl(std::string_view path,
+                                  std::stop_token const &token) {
+    if (token.stop_requested()) {
+        return st::failure(ErrorCode::Cancelled,
+                            "ap3::remove_file: cancelled before send");
+    }
+#ifndef ST_HAVE_AP_WORKFLOW
+    (void)path;
+    return st::failure(
+        ErrorCode::PolicyDenied,
+        "ap3::remove_file: AP workflow surface is off in this build. "
+        "Reconfigure with -DST_ENABLE_COBB_AP_WORKFLOW=ON to enable.");
+#else
     if (auto s = ensure_session_warmup(); !s.has_value()) {
         return s;
     }
@@ -743,40 +1053,45 @@ Status Client::remove_file(std::string_view path) {
     if (!ack.has_value()) {
         return st::failure(std::move(ack).error());
     }
+    // NAND barrier — same rationale as write_file_impl. A delete that
+    // doesn't survive a power-cycle is worse than no delete (the file
+    // ghosts back).
+    if (auto s = send_packet_bypassing_block_list(
+            *channel_, 0x05U, std::span<std::uint8_t const>{});
+        !s.has_value()) {
+        return s;
+    }
+    auto barrier_ack = receive_packet_body();
+    if (!barrier_ack.has_value()) {
+        return st::failure(std::move(barrier_ack).error());
+    }
     return st::ok();
+#endif
 }
 
-namespace {
-
-// Build + ship a packet bypassing the codec-level block list. Only
-// callable from within Client and only after the diagnostic-cmd env-
-// var has been validated. Mirrors `st::transport::ets::encode_packet`
-// minus the `is_blocked_command` check.
-Status send_packet_bypassing_block_list(
-    st::transport::IByteChannel &channel, std::uint8_t type,
-    std::span<std::uint8_t const> body) {
-    using namespace st::transport::ets;
-    std::uint32_t const wire_len =
-        static_cast<std::uint32_t>(body.size() + kCrcSize);
-    std::vector<std::uint8_t> out;
-    out.reserve(kHeaderSize + body.size() + kCrcSize);
-    out.push_back(kSyncByte0);
-    out.push_back(kSyncByte1);
-    out.push_back(static_cast<std::uint8_t>((wire_len >> 16) & 0xFFU));
-    out.push_back(static_cast<std::uint8_t>((wire_len >> 8) & 0xFFU));
-    out.push_back(static_cast<std::uint8_t>(wire_len & 0xFFU));
-    out.push_back(0x00U); // reserved
-    out.push_back(type);
-    out.insert(out.end(), body.begin(), body.end());
-    std::uint32_t const crc = packet_crc(out);
-    out.push_back(static_cast<std::uint8_t>((crc >> 24) & 0xFFU));
-    out.push_back(static_cast<std::uint8_t>((crc >> 16) & 0xFFU));
-    out.push_back(static_cast<std::uint8_t>((crc >> 8) & 0xFFU));
-    out.push_back(static_cast<std::uint8_t>(crc & 0xFFU));
-    return channel.write_bytes(out);
+Status Client::nand_barrier_best_effort() {
+#ifndef ST_HAVE_AP_WORKFLOW
+    return st::failure(
+        ErrorCode::PolicyDenied,
+        "ap3::nand_barrier_best_effort: AP workflow off; not touching wire.");
+#else
+    // No warmup, no env-var gate. The caller knows this is the
+    // disconnect path so we send cmd 0x05 unconditionally and let any
+    // error propagate. Bypasses the codec-level block list because
+    // cmd 0x05 IS on the defense-in-depth list — the workflow flag is
+    // the outer gate.
+    if (auto s = send_packet_bypassing_block_list(
+            *channel_, 0x05U, std::span<std::uint8_t const>{});
+        !s.has_value()) {
+        return s;
+    }
+    auto ack = receive_packet_body();
+    if (!ack.has_value()) {
+        return st::failure(std::move(ack).error());
+    }
+    return st::ok();
+#endif
 }
-
-} // namespace
 
 Status Client::remount_user_filesystem() {
     if (!ap3_diagnostic_cmds_enabled()) {

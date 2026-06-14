@@ -12,25 +12,18 @@
 // message inline.
 
 #include "modals/modals.hpp"
+#include "modals/ptm_pipeline.hpp"
 
 #include "app_state.hpp"
 #include "widgets/widgets.hpp"
-
-#include "st/devices/ets/ptm_cipher.hpp"
-#include "st/library/ptm_xml_builder.hpp"
-
-#include <toml++/toml.hpp>
 
 #include <imgui.h>
 #include <nfd.hpp>
 
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
-#include <span>
 #include <string>
-#include <tuple>
 #include <vector>
 
 namespace st::ui {
@@ -77,10 +70,6 @@ void clear_state(AppState &s) {
 
 void run_export(AppState &s) {
     clear_state(s);
-    if (!s.project.has_value()) {
-        s.ptm_export_error = "No project open.";
-        return;
-    }
     if (s.ptm_export_out_path[0] == '\0') {
         s.ptm_export_error = "Pick an output .ptm path.";
         return;
@@ -90,98 +79,21 @@ void run_export(AppState &s) {
         s.ptm_export_error = "Bad --seed value (expected hex or decimal u32).";
         return;
     }
-
-    auto const proj_dir = s.project->dir();
-    auto const proj_toml = proj_dir / "project.toml";
-    auto const patches_toml = proj_dir / "ptm_patches.toml";
-
-    if (!std::filesystem::exists(patches_toml)) {
-        s.ptm_export_error = "ptm_patches.toml missing — only projects from `ptm import` "
-                              "(CLI or GUI wizard) can be exported back to a .ptm.";
+    std::string err;
+    auto bytes = build_ptm_bytes(s, seed, err);
+    if (!bytes.has_value()) {
+        s.ptm_export_error = std::move(err);
         return;
     }
-
-    toml::table proj;
-    try {
-        proj = toml::parse_file(proj_toml.string());
-    } catch (toml::parse_error const &e) {
-        s.ptm_export_error = std::string{"project.toml parse: "} + e.description().data();
-        return;
-    }
-    auto const *meta = proj["ptm_metadata"].as_table();
-    if (meta == nullptr) {
-        s.ptm_export_error = "project.toml is missing [ptm_metadata].";
-        return;
-    }
-    std::string const vendor_id  = (*meta)["vendor_id"].value_or<std::string>("");
-    std::string const vehicle_id = (*meta)["vehicle_id"].value_or<std::string>("");
-    std::uint32_t const lock_mask = (*meta)["lock_mask"].value_or<std::uint32_t>(0);
-    std::string const rom_sum    = (*meta)["rom_sum"].value_or<std::string>("");
-    std::string const save_date  = (*meta)["save_date_time"].value_or<std::string>("");
-
-    toml::table pat;
-    try {
-        pat = toml::parse_file(patches_toml.string());
-    } catch (toml::parse_error const &e) {
-        s.ptm_export_error = std::string{"ptm_patches.toml parse: "} + e.description().data();
-        return;
-    }
-    auto const *arr = pat["patch"].as_array();
-    if (arr == nullptr) {
-        s.ptm_export_error = "ptm_patches.toml has no [[patch]] entries.";
-        return;
-    }
-    std::vector<st::library::PtmExportPatch> patches;
-    patches.reserve(arr->size());
-    for (auto const &node : *arr) {
-        auto const *p = node.as_table();
-        if (p == nullptr) {
-            continue;
-        }
-        auto const rom_off = (*p)["rom_offset"].value_or<std::int64_t>(-1);
-        auto const ram_off = (*p)["ram_offset"].value_or<std::int64_t>(0);
-        auto const length  = (*p)["length"].value_or<std::int64_t>(-1);
-        auto const b64     = (*p)["bytes_b64"].value_or<std::string>("");
-        if (rom_off < 0 || length < 0 || b64.empty()) {
-            continue;
-        }
-        patches.push_back({static_cast<std::uint32_t>(rom_off),
-                           static_cast<std::int32_t>(ram_off),
-                           static_cast<std::uint32_t>(length),
-                           b64});
-    }
-    // Mirror of the CLI's 16a32b7 refuse: every [[patch]] entry was
-    // malformed and dropped. Continuing would emit a syntactically
-    // valid .ptm with zero patches — a do-nothing tune the user could
-    // accidentally push to their AP.
-    if (patches.empty()) {
-        s.ptm_export_error =
-            "Every [[patch]] entry in ptm_patches.toml was malformed and "
-            "dropped. The project file may have been hand-edited or "
-            "corrupted; re-import the source .ptm.";
-        return;
-    }
-
-    auto const inner = st::library::build_ptm_inner_xml(
-        vendor_id, vehicle_id, lock_mask, rom_sum, save_date, patches);
-    auto const outer = st::library::build_ptm_outer_xml(
-        vendor_id, vehicle_id, lock_mask, rom_sum, save_date);
-
-    auto encrypted = st::devices::ets::cipher::encrypt_ptm(inner, outer, seed);
-    if (!encrypted.has_value()) {
-        s.ptm_export_error = "encrypt_ptm: " + encrypted.error().to_string();
-        return;
-    }
-
     std::ofstream out{s.ptm_export_out_path, std::ios::binary};
     if (!out) {
         s.ptm_export_error = std::string{"Cannot open "} + s.ptm_export_out_path;
         return;
     }
-    out.write(reinterpret_cast<char const *>(encrypted->data()),
-              static_cast<std::streamsize>(encrypted->size()));
+    out.write(reinterpret_cast<char const *>(bytes->data()),
+              static_cast<std::streamsize>(bytes->size()));
     s.ptm_export_success = std::string{"Wrote "} +
-                           std::to_string(encrypted->size()) + " bytes to " +
+                           std::to_string(bytes->size()) + " bytes to " +
                            s.ptm_export_out_path;
 }
 

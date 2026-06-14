@@ -24,6 +24,8 @@
 #include <span>
 #include <vector>
 
+#ifdef ST_HAVE_AP_WORKFLOW
+
 namespace {
 
 std::vector<std::uint8_t> make_packet(std::uint8_t type,
@@ -98,9 +100,14 @@ decode_body(std::span<std::uint8_t const> packet) {
 
 } // namespace
 
+#endif // ST_HAVE_AP_WORKFLOW
+
 TEST_CASE("ap3 write_file cmd 0x22 setup encodes path as full relative "
           "(maps/X.ptm), NOT directory (/maps/)",
           "[devices][ap3][regression][cmd22-path]") {
+#ifndef ST_HAVE_AP_WORKFLOW
+    SKIP("AP workflow off — write_file returns PolicyDenied before the wire");
+#else
     st::test::transport::LoopbackByteChannel channel;
     prime_warmup(channel, /*extra=*/2); // cmd 0x22 setup + cmd 0x23 data
     st::devices::ets::ClientConfig cfg{};
@@ -120,11 +127,15 @@ TEST_CASE("ap3 write_file cmd 0x22 setup encodes path as full relative "
     CHECK(info.name == "MyTune.ptm");
     CHECK(info.path == "maps/MyTune.ptm");
     CHECK(info.path != "/maps/");
+#endif
 }
 
 TEST_CASE("ap3 remove_file cmd 0x25 encodes path as full relative "
           "(maps/X.ptm), NOT directory (/maps/)",
           "[devices][ap3][regression][cmd25-path]") {
+#ifndef ST_HAVE_AP_WORKFLOW
+    SKIP("AP workflow off — remove_file returns PolicyDenied before the wire");
+#else
     st::test::transport::LoopbackByteChannel channel;
     prime_warmup(channel, /*extra=*/1); // cmd 0x25 ack
     st::devices::ets::ClientConfig cfg{};
@@ -142,10 +153,14 @@ TEST_CASE("ap3 remove_file cmd 0x25 encodes path as full relative "
     CHECK(info.name == "DoomedTune.ptm");
     CHECK(info.path == "maps/DoomedTune.ptm");
     CHECK(info.path != "/maps/");
+#endif
 }
 
 TEST_CASE("ap3 write_file root-level path uses bare-token",
           "[devices][ap3][regression][cmd22-path]") {
+#ifndef ST_HAVE_AP_WORKFLOW
+    SKIP("AP workflow off — write_file returns PolicyDenied before the wire");
+#else
     // Root-level writes (rare but valid for some AP scratch files):
     // path = "scratch.bin", not "/scratch.bin".
     st::test::transport::LoopbackByteChannel channel;
@@ -166,4 +181,5 @@ TEST_CASE("ap3 write_file root-level path uses bare-token",
     auto const info = decode_body(cmd22);
     CHECK(info.name == "scratch.bin");
     CHECK(info.path == "scratch.bin");
+#endif
 }
