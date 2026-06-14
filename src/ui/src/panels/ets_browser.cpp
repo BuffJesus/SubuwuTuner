@@ -874,7 +874,17 @@ audit_log_tail(PanelState const &p, std::size_t max_rows) {
 // completion per-frame. The worker queue serializes the actual reads
 // at the protocol level (one bulk-pipe pair), but the GUI loop stays
 // frame-responsive throughout — cancel + status updates remain live.
-void start_mirror_to_library(PanelState &p) {
+// S2 — parameterized mirror so the task-shaped buttons (Save tunes,
+// Save datalogs, Save settings snapshot) can share one queue and one
+// per-frame tick without duplicating the cmd 0x26 ls + cmd 0x21
+// read_file_async plumbing. `subdirs` is a span of "/maps/"-style
+// strings to walk; `singletons` is a span of bare names (no leading
+// slash) for the filesystem singletons. Pass empty spans to skip
+// either side.
+void start_mirror_subset(PanelState &p,
+                          std::span<char const *const> subdirs,
+                          std::span<char const *const> singletons,
+                          std::string_view label) {
     if (p.channel == nullptr || p.mirror.in_progress) {
         return;
     }
@@ -900,10 +910,7 @@ void start_mirror_to_library(PanelState &p) {
     st::devices::ets::Client client{*p.channel};
     auto stop_tok = p.mirror.stop_src->get_token();
 
-    // Enumerate subdirs synchronously — each ls is <100 ms and we
-    // need the file list to know what to enqueue. Worker queue
-    // serializes the lse against any later async reads.
-    for (auto sub : kSubdirs) {
+    for (auto sub : subdirs) {
         auto records = client.ls(sub);
         if (!records.has_value()) {
             ++p.mirror.errors;
@@ -924,8 +931,7 @@ void start_mirror_to_library(PanelState &p) {
             });
         }
     }
-    // /settings + /backupcksum singletons.
-    for (auto const *singleton : {"settings", "backupcksum"}) {
+    for (auto const *singleton : singletons) {
         std::string ap_path = std::string{"/"} + singleton;
         p.mirror.pending.push_back(PanelState::MirrorOp{
             client.read_file_async(ap_path, stop_tok),
@@ -934,9 +940,42 @@ void start_mirror_to_library(PanelState &p) {
         });
     }
     p.mirror.total_files = p.mirror.pending.size();
-    set_status(p, StatusSeverity::Ok,
-               "Mirroring " + std::to_string(p.mirror.total_files) +
-                   " files → " + root.string() + " …");
+    std::string msg{label};
+    msg += ": ";
+    msg += std::to_string(p.mirror.total_files);
+    msg += " files \xE2\x86\x92 ";
+    msg += root.string();
+    msg += " \xE2\x80\xA6";
+    set_status(p, StatusSeverity::Ok, std::move(msg));
+}
+
+void start_mirror_to_library(PanelState &p) {
+    constexpr std::array<char const *, 2> kSingletons{"settings",
+                                                       "backupcksum"};
+    start_mirror_subset(p,
+                         std::span<char const *const>{kSubdirs},
+                         std::span<char const *const>{kSingletons},
+                         "Mirror everything");
+}
+
+void start_pull_tunes_only(PanelState &p) {
+    constexpr std::array<char const *, 1> kSub{"/maps/"};
+    start_mirror_subset(p, std::span<char const *const>{kSub}, {},
+                         "Save tunes");
+}
+
+void start_pull_datalogs_only(PanelState &p) {
+    constexpr std::array<char const *, 1> kSub{"/datalog/"};
+    start_mirror_subset(p, std::span<char const *const>{kSub}, {},
+                         "Save datalogs");
+}
+
+void start_pull_settings_snapshot(PanelState &p) {
+    constexpr std::array<char const *, 2> kSingletons{"settings",
+                                                       "backupcksum"};
+    start_mirror_subset(p, {},
+                         std::span<char const *const>{kSingletons},
+                         "Save settings snapshot");
 }
 
 // A5 — frame-tick drain. For each pending op that's ready, write its
@@ -2101,6 +2140,52 @@ void render_toolbar(PanelState &p) {
                           "library inventory tool afterwards to index the\n"
                           "new .ptm files.",
                           dest.string().c_str());
+    }
+    // S2 — task-shaped pull-with-purpose buttons. Each one fires the
+    // parameterized mirror with a narrower subset so the user gets a
+    // one-click path to common goals without flipping tabs + manually
+    // selecting files. Disabled while any mirror op is in flight (one
+    // queue per panel).
+    ImGui::SameLine();
+    if (p.mirror.in_progress) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Save tunes\xE2\x80\xA6##ap3_pull_tunes")) {
+        start_pull_tunes_only(p);
+    }
+    if (p.mirror.in_progress) {
+        ImGui::EndDisabled();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Pull only the .ptm files under /maps/.");
+    }
+    ImGui::SameLine();
+    if (p.mirror.in_progress) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Save datalogs\xE2\x80\xA6##ap3_pull_logs")) {
+        start_pull_datalogs_only(p);
+    }
+    if (p.mirror.in_progress) {
+        ImGui::EndDisabled();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Pull only the .csv files under /datalog/.");
+    }
+    ImGui::SameLine();
+    if (p.mirror.in_progress) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Save settings##ap3_pull_settings")) {
+        start_pull_settings_snapshot(p);
+    }
+    if (p.mirror.in_progress) {
+        ImGui::EndDisabled();
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip(
+            "Pull /settings + /backupcksum only — the AP's runtime\n"
+            "configuration + stock-ROM MD5 fingerprint.");
     }
     ImGui::SameLine();
     if (ImGui::Button("Refresh##ap3_refresh_list")) {
