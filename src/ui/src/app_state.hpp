@@ -781,6 +781,12 @@ struct AppState {
     bool show_datalog_channels_modal{false};
     char datalog_channels_filter[128]{};
 
+    // F6 — datalog viewer modal. Source path, parsed columns, per-
+    // channel stats, plot-selection cursor all live file-static in
+    // src/ui/src/modals/datalog_viewer.cpp; AppState only carries
+    // the open-modal toggle.
+    bool show_datalog_viewer_modal{false};
+
     // ptm inspect modal — read-only viewer. Pick a .ptm, decode it
     // inline, render identity + architectural breakdown + top tables.
     // No project mutation; useful for "what's in this tune?".

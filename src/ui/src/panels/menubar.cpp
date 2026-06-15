@@ -308,6 +308,16 @@ void render_menubar(AppState &state) {
                     "definition pack. Filterable search; flags the\n"
                     "default-log channels.");
             }
+            if (ImGui::MenuItem(
+                    "\xEE\xA0\x84  Datalog Viewer\xE2\x80\xA6")) {
+                state.show_datalog_viewer_modal = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Open a CSV datalog (decompress .csv.gz first) and\n"
+                    "inspect per-channel min / max / mean / count plus a\n"
+                    "line plot for any selected channel.");
+            }
             if (ImGui::MenuItem("\xEE\x9C\x93  Settings\xE2\x80\xA6")) {
                 state.show_settings_modal = true;
             }
