@@ -33,6 +33,7 @@
 #include "st/core/result.hpp"
 #include "st/devices/ets/client.hpp"
 #include "st/devices/ets/file_info.hpp"
+#include "st/devices/ets/rgb565.hpp"
 #include "st/library/filename_classifier.hpp"
 #include "st/library/tune_index.hpp"
 #include "st/transport/byte_channel.hpp"
@@ -2391,6 +2392,52 @@ std::optional<EtsStatusSnapshot> ets_status_snapshot() {
 
 bool ets_panel_has_channel() {
     return panel().channel != nullptr;
+}
+
+std::string
+ets_panel_push_boot_screen(std::vector<std::uint8_t> bytes,
+                            std::string &err) {
+    err.clear();
+#ifndef ST_HAVE_AP_WORKFLOW
+    (void)bytes;
+    err =
+        "AP workflow surface is off in this build. Reconfigure with "
+        "-DST_ENABLE_COBB_AP_WORKFLOW=ON to enable push.";
+    return {};
+#else
+    auto &p = panel();
+    if (p.channel == nullptr) {
+        err =
+            "No AccessPort channel open. Connect via the AccessPort "
+            "Browser panel first.";
+        return {};
+    }
+    // Pin the expected size to the canonical 240x320 RGB565 LE
+    // buffer. A wrong-size push could either truncate the splash
+    // (smaller) or trash adjacent flash regions (larger). Refuse
+    // anything off-spec rather than letting the firmware sort it
+    // out.
+    constexpr std::size_t kBootScreenBytes =
+        st::devices::ets::rgb565::kApFullScreenBytes;
+    if (bytes.size() != kBootScreenBytes) {
+        err = "Boot screen must be exactly " +
+                std::to_string(kBootScreenBytes) +
+                " bytes (RGB565 LE, 240x320). Got " +
+                std::to_string(bytes.size()) + " bytes.";
+        return {};
+    }
+    std::string const ap_path = "/images/startup_screen.fb";
+    st::devices::ets::Client client{*p.channel};
+    auto status = client.write_file(
+        ap_path, bytes, static_cast<std::uint64_t>(std::time(nullptr)));
+    if (!status.has_value()) {
+        note_possible_daze(p, status.error());
+        err = status.error().to_string();
+        return {};
+    }
+    audit_log_append(p, "push", ap_path, bytes.size());
+    return ap_path;
+#endif
 }
 
 std::vector<std::uint8_t>

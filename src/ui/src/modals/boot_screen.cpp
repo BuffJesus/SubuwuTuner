@@ -25,6 +25,9 @@
 #include "st/devices/ets/rgb565.hpp"
 
 #include <imgui.h>
+#include <nfd.hpp>
+
+#include <fstream>
 
 // GL 1.1 core (glGenTextures et al.) is available via the platform's
 // system GL header. The texture-upload path runs from inside ImGui's
@@ -62,6 +65,9 @@ struct State {
     std::string error;
     std::string source_path; // for the user-visible "Pulled from <path>" line
     bool fetched{false};
+    // Push side: status string for the most recent push attempt.
+    std::string push_status;
+    bool push_ok{false};
 };
 
 State &state() {
@@ -83,6 +89,47 @@ void reset_state(State &s) {
     s.error.clear();
     s.source_path.clear();
     s.fetched = false;
+    s.push_status.clear();
+    s.push_ok = false;
+}
+
+void start_push(State &s) {
+    s.push_status.clear();
+    s.push_ok = false;
+    nfdu8filteritem_t const filters[] = {
+        {"AP boot screen (.fb)", "fb"},
+        {"Any file", "*"},
+    };
+    NFD::UniquePathU8 in;
+    nfdresult_t const r = NFD::OpenDialog(in, filters, 2);
+    if (r == NFD_CANCEL) {
+        return;
+    }
+    if (r != NFD_OKAY || in == nullptr) {
+        s.push_status = std::string{"File dialog: "} + NFD::GetError();
+        return;
+    }
+    std::ifstream f{in.get(), std::ios::binary | std::ios::ate};
+    if (!f) {
+        s.push_status =
+            std::string{"Couldn't open "} + in.get() + " for read.";
+        return;
+    }
+    auto const size = f.tellg();
+    f.seekg(0);
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+    f.read(reinterpret_cast<char *>(bytes.data()), size);
+    f.close();
+    std::string err;
+    auto const ap_path = ets_panel_push_boot_screen(std::move(bytes), err);
+    if (!err.empty()) {
+        s.push_status = "Push failed: " + err;
+        return;
+    }
+    s.push_status =
+        "Pushed boot screen to AP " + ap_path +
+        ". Reboot the AP to see the new splash.";
+    s.push_ok = true;
 }
 
 #ifdef ST_HAVE_AP_WORKFLOW
@@ -225,9 +272,26 @@ void render_boot_screen_modal(AppState &app_state) {
         start_pull(s);
     }
     ImGui::SameLine();
+    if (ImGui::Button("Push from .fb\xE2\x80\xA6##bs_push")) {
+        start_push(s);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Upload a raw 240x320 RGB565 LE framebuffer (.fb file,\n"
+            "exactly 153,600 bytes) to /images/startup_screen.fb.\n"
+            "The new splash takes effect on AP reboot. Convert\n"
+            "PNG / JPG via external tools (ImageMagick, Python +\n"
+            "Pillow) before uploading.");
+    }
+    ImGui::SameLine();
     if (ImGui::Button("Close##bs_close")) {
         reset_state(s);
         ImGui::CloseCurrentPopup();
+    }
+    if (!s.push_status.empty()) {
+        ImGui::Spacing();
+        ImGui::TextColored(s.push_ok ? chip_fg_ok() : chip_fg_danger(),
+                            "%s", s.push_status.c_str());
     }
 
     ImGui::Spacing();

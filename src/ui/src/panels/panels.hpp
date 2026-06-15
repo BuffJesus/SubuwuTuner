@@ -131,6 +131,19 @@ struct EtsPushResult {
 [[nodiscard]] std::vector<std::uint8_t>
 ets_panel_read_file_sync(std::string_view ap_path, std::string &err);
 
+// Push a boot-screen framebuffer (RGB565 LE, 240x320, exactly
+// 153,600 bytes) to /images/startup_screen.fb on the connected AP.
+// The user-supplied boot screen replaces the current splash until
+// the next AP firmware update or manual re-push. Workflow-gated.
+//
+// Returns the absolute on-AP path ("/images/startup_screen.fb") on
+// success; populates `err` and returns empty on failure. Same
+// channel-single-stream caveat as the other panel helpers — call
+// only when no other AP op is in flight.
+[[nodiscard]] std::string
+ets_panel_push_boot_screen(std::vector<std::uint8_t> bytes,
+                            std::string &err);
+
 // Library-panel snapshot for the status bar. Mirrors the AP status
 // snapshot pattern: file-static inside library.cpp; returns nullopt
 // when no index has been loaded so the status bar can degrade
