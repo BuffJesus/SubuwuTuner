@@ -55,8 +55,14 @@ struct State {
     // iteration (stats, plot) than row-major.
     std::vector<std::vector<float>> data;
     std::vector<ChannelStats> stats;
+    // Per-channel "show in plot" flag. ImPlot can cycle colors
+    // through several overlaid series without trouble, so multi-
+    // channel overlay falls out naturally — checkboxes in the stats
+    // table swap channels in/out of the plot. Use std::vector<char>
+    // rather than std::vector<bool> so the per-row bind in the
+    // Checkbox call works without the bool-bitfield workaround.
+    std::vector<char> plot_visible;
     std::size_t row_count{0};
-    int selected_channel{-1};
     std::string error;
     bool loaded{false};
 };
@@ -71,8 +77,8 @@ void reset_state(State &s) {
     s.headers.clear();
     s.data.clear();
     s.stats.clear();
+    s.plot_visible.clear();
     s.row_count = 0;
-    s.selected_channel = -1;
     s.error.clear();
     s.loaded = false;
 }
@@ -208,7 +214,15 @@ void load_csv(State &s, std::string const &path) {
         s.row_count = s.data[0].size();
     }
     compute_stats(s);
-    s.selected_channel = s.headers.empty() ? -1 : 0;
+    // Default-plot the first non-empty channel so the user sees
+    // something immediately. Multi-select via the checkboxes below.
+    s.plot_visible.assign(s.headers.size(), char{0});
+    for (std::size_t i = 0; i < s.stats.size(); ++i) {
+        if (s.stats[i].sample_count > 0) {
+            s.plot_visible[i] = char{1};
+            break;
+        }
+    }
     s.loaded = true;
 }
 
@@ -282,11 +296,29 @@ void render_datalog_viewer_modal(AppState &app_state) {
     // table is the selection surface — clicking a row swaps the
     // plotted channel.
     if (ImGui::BeginChild("##dl_split_left",
-                           ImVec2(360.0f, 380.0f), true)) {
-        if (ImGui::BeginTable("##dl_stats", 4,
+                           ImVec2(420.0f, 380.0f), true)) {
+        // Quick "select all / none" affordances so users with a
+        // dense log don't have to click every row.
+        if (ImGui::SmallButton("All##dl_all")) {
+            for (std::size_t i = 0; i < s.plot_visible.size(); ++i) {
+                if (s.stats[i].sample_count > 0) {
+                    s.plot_visible[i] = char{1};
+                }
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("None##dl_none")) {
+            std::fill(s.plot_visible.begin(), s.plot_visible.end(),
+                       char{0});
+        }
+        ImGui::Spacing();
+        if (ImGui::BeginTable("##dl_stats", 5,
                                ImGuiTableFlags_Borders |
                                    ImGuiTableFlags_RowBg |
                                    ImGuiTableFlags_ScrollY)) {
+            ImGui::TableSetupColumn("Plot",
+                                     ImGuiTableColumnFlags_WidthFixed,
+                                     35.0f);
             ImGui::TableSetupColumn("Channel",
                                      ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn("Min",
@@ -301,32 +333,34 @@ void render_datalog_viewer_modal(AppState &app_state) {
             ImGui::TableHeadersRow();
             for (std::size_t i = 0; i < s.headers.size(); ++i) {
                 ImGui::TableNextRow();
+                ImGui::PushID(static_cast<int>(i));
                 ImGui::TableSetColumnIndex(0);
-                bool const selected =
-                    s.selected_channel == static_cast<int>(i);
-                if (ImGui::Selectable(s.headers[i].c_str(), selected,
-                                       ImGuiSelectableFlags_SpanAllColumns)) {
-                    s.selected_channel = static_cast<int>(i);
+                bool checked = s.plot_visible[i] != 0;
+                if (ImGui::Checkbox("##show", &checked)) {
+                    s.plot_visible[i] = checked ? char{1} : char{0};
                 }
-                auto const &st_row = s.stats[i];
                 ImGui::TableSetColumnIndex(1);
+                ImGui::TextUnformatted(s.headers[i].c_str());
+                auto const &st_row = s.stats[i];
+                ImGui::TableSetColumnIndex(2);
                 if (st_row.sample_count > 0) {
                     ImGui::Text("%.2f", st_row.min);
                 } else {
                     ImGui::TextDisabled("\xE2\x80\x94");
                 }
-                ImGui::TableSetColumnIndex(2);
+                ImGui::TableSetColumnIndex(3);
                 if (st_row.sample_count > 0) {
                     ImGui::Text("%.2f", st_row.max);
                 } else {
                     ImGui::TextDisabled("\xE2\x80\x94");
                 }
-                ImGui::TableSetColumnIndex(3);
+                ImGui::TableSetColumnIndex(4);
                 if (st_row.sample_count > 0) {
                     ImGui::Text("%.2f", st_row.mean);
                 } else {
                     ImGui::TextDisabled("\xE2\x80\x94");
                 }
+                ImGui::PopID();
             }
             ImGui::EndTable();
         }
@@ -335,30 +369,41 @@ void render_datalog_viewer_modal(AppState &app_state) {
     ImGui::SameLine();
     if (ImGui::BeginChild("##dl_split_right",
                            ImVec2(0.0f, 380.0f), false)) {
-        if (s.selected_channel >= 0 &&
-            static_cast<std::size_t>(s.selected_channel) < s.data.size()) {
-            auto const &col = s.data[static_cast<std::size_t>(
-                s.selected_channel)];
-            std::string const plot_title =
-                s.headers[static_cast<std::size_t>(s.selected_channel)];
-            std::string const plot_id = "##dl_plot_" + plot_title;
-            if (ImPlot::BeginPlot(plot_id.c_str(),
-                                    ImVec2(-1.0f, -1.0f))) {
-                ImPlot::SetupAxis(ImAxis_X1, "row");
-                ImPlot::SetupAxis(ImAxis_Y1, plot_title.c_str());
-                // Build an x axis of row indices.
-                std::vector<float> xs;
-                xs.reserve(col.size());
-                for (std::size_t i = 0; i < col.size(); ++i) {
-                    xs.push_back(static_cast<float>(i));
-                }
-                ImPlot::PlotLine("##series", xs.data(), col.data(),
-                                  static_cast<int>(col.size()));
-                ImPlot::EndPlot();
+        // Count visible channels first — if none, render the empty-
+        // state hint instead of an empty ImPlot frame.
+        std::size_t visible_count = 0;
+        for (char c : s.plot_visible) {
+            if (c != 0) {
+                ++visible_count;
             }
-        } else {
+        }
+        if (visible_count == 0) {
             ImGui::TextDisabled(
-                "Select a channel on the left to plot it here.");
+                "Tick the Plot column on the left to overlay channels.");
+        } else if (ImPlot::BeginPlot("##dl_plot",
+                                       ImVec2(-1.0f, -1.0f))) {
+            ImPlot::SetupAxis(ImAxis_X1, "row");
+            ImPlot::SetupAxis(ImAxis_Y1, "value");
+            // Build an x axis of row indices once; reuse for every
+            // overlaid channel.
+            std::vector<float> xs;
+            xs.reserve(s.row_count);
+            for (std::size_t i = 0; i < s.row_count; ++i) {
+                xs.push_back(static_cast<float>(i));
+            }
+            for (std::size_t i = 0; i < s.plot_visible.size(); ++i) {
+                if (s.plot_visible[i] == 0) {
+                    continue;
+                }
+                if (s.stats[i].sample_count == 0) {
+                    continue;
+                }
+                auto const &col = s.data[i];
+                ImPlot::PlotLine(s.headers[i].c_str(), xs.data(),
+                                  col.data(),
+                                  static_cast<int>(col.size()));
+            }
+            ImPlot::EndPlot();
         }
     }
     ImGui::EndChild();
