@@ -318,6 +318,18 @@ void render_menubar(AppState &state) {
                     "inspect per-channel min / max / mean / count plus a\n"
                     "line plot for any selected channel.");
             }
+#ifdef ST_HAVE_AP_WORKFLOW
+            if (ImGui::MenuItem(
+                    "\xEE\xA0\x84  Pull File from AP\xE2\x80\xA6")) {
+                state.show_pull_file_modal = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "One-off file pull from the connected AccessPort —\n"
+                    "for paths outside the canonical /maps + /datalog +\n"
+                    "/presets + /images surface.");
+            }
+#endif
             if (ImGui::MenuItem("\xEE\x9C\x93  Settings\xE2\x80\xA6")) {
                 state.show_settings_modal = true;
             }

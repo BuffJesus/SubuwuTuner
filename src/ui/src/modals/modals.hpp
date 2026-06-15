@@ -22,6 +22,7 @@ void render_ptm_save_and_push_modal(AppState &state);
 void render_boot_screen_modal(AppState &state);
 void render_datalog_channels_modal(AppState &state);
 void render_datalog_viewer_modal(AppState &state);
+void render_pull_file_modal(AppState &state);
 void render_ptm_diff_modal(AppState &state);
 void render_maf_autotune_modal(AppState &state);
 void render_kp_autotune_modal(AppState &state);

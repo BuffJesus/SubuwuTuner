@@ -787,6 +787,12 @@ struct AppState {
     // the open-modal toggle.
     bool show_datalog_viewer_modal{false};
 
+    // Generic "Pull single file..." dialog. Takes an arbitrary AP
+    // path, routes through ets_panel_read_file_sync, saves to a
+    // user-selected destination. Status renders inline in the modal.
+    bool show_pull_file_modal{false};
+    char pull_file_ap_path[1024]{};
+
     // ptm inspect modal — read-only viewer. Pick a .ptm, decode it
     // inline, render identity + architectural breakdown + top tables.
     // No project mutation; useful for "what's in this tune?".
