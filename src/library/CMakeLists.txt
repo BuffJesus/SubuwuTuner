@@ -8,6 +8,7 @@ add_library(st_library STATIC
     src/tune_index.cpp
     src/tune_annotation.cpp
     src/filename_classifier.cpp
+    src/datalog_csv.cpp
 )
 
 target_include_directories(st_library
