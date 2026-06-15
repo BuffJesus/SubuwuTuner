@@ -85,8 +85,12 @@ void reset_state(State &s) {
     s.fetched = false;
 }
 
+#ifdef ST_HAVE_AP_WORKFLOW
 // Best-effort: write `pixels` into a fresh GL_RGB GL texture. Returns
 // 0 on failure (the modal renders a placeholder in that case).
+// Defined only when the workflow surface is on — without it,
+// start_pull short-circuits before the texture path runs and gcc
+// would flag the helper as unused.
 GLuint upload_pixels_as_texture(
     std::vector<st::devices::ets::rgb565::Rgb888> const &pixels,
     std::uint32_t width, std::uint32_t height) {
@@ -121,6 +125,7 @@ GLuint upload_pixels_as_texture(
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
     return tex;
 }
+#endif // ST_HAVE_AP_WORKFLOW
 
 void start_pull(State &s) {
     reset_state(s);
