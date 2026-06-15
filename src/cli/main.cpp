@@ -16685,6 +16685,125 @@ int run_decrypt_img(int argc, char **argv, CommonOpts const &opts) {
     return 0;
 }
 
+// T22 — `ap3 show-cur`. Issues cmd 0x1a OnRunTask(vector<string>{
+// "show_cur no_comms"}), drains chunks until [RUNTASK_FINISH], parses
+// the `reflash=` line. Output is the absolute on-AP path (the .ptm
+// the AP last flashed). Useful for scripted "what's on my car right
+// now" checks.
+int run_show_cur(int argc, char **argv, CommonOpts const &opts) {
+    auto const fmt = consume_format_flag(argc, argv);
+    auto channel = open_channel(opts);
+    if (!channel.has_value()) {
+        std::fprintf(stderr, "ap3 show-cur: %s\n",
+                      channel.error().to_string().c_str());
+        return 1;
+    }
+    st::devices::ets::Client client{**channel};
+    auto state = client.query_state();
+    if (!state.has_value()) {
+        std::fprintf(stderr, "ap3 show-cur: query_state: %s\n",
+                      state.error().to_string().c_str());
+        return 1;
+    }
+    auto flashed = client.query_currently_flashed();
+    if (!flashed.has_value()) {
+        std::fprintf(stderr, "ap3 show-cur: %s\n",
+                      flashed.error().to_string().c_str());
+        return flashed.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
+    }
+    auto const &path = *flashed;
+    auto const slash = path.find_last_of('/');
+    std::string const basename =
+        (slash == std::string::npos) ? path : path.substr(slash + 1);
+    if (fmt == "json") {
+        std::printf("{\n");
+        std::printf("  \"reflash_path\": \"%s\",\n", path.c_str());
+        std::printf("  \"basename\": \"%s\"\n", basename.c_str());
+        std::printf("}\n");
+    } else if (fmt == "toml") {
+        std::printf("reflash_path = \"%s\"\n", path.c_str());
+        std::printf("basename     = \"%s\"\n", basename.c_str());
+    } else {
+        std::printf("Currently flashed: %s\n", basename.c_str());
+        std::printf("Full path on AP:   %s\n", path.c_str());
+    }
+    return 0;
+}
+
+// T18 — `ap3 pull-backup`. Runs the 3-step /dump dance (cmd 0x26 ls
+// → cmd 0x1a expose_user → cmd 0x20/0x21 read), saves the resulting
+// encrypted `<calid>_enc.rom` to the user-supplied path. Decrypt is
+// offline (analyst-lane; see findings/keystreams/ks_*.bin).
+int run_pull_backup(int argc, char **argv, CommonOpts const &opts) {
+    auto const fmt = consume_format_flag(argc, argv);
+    std::filesystem::path out_path;
+    for (int i = 0; i + 1 < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--out" || a == "-o") {
+            out_path = std::filesystem::path{argv[i + 1]};
+            ++i;
+        }
+    }
+    if (out_path.empty()) {
+        std::fputs(
+            "ap3 pull-backup: --out <path> is required (where to save\n"
+            "                 the encrypted _enc.rom bytes).\n",
+            stderr);
+        return 2;
+    }
+    auto channel = open_channel(opts);
+    if (!channel.has_value()) {
+        std::fprintf(stderr, "ap3 pull-backup: %s\n",
+                      channel.error().to_string().c_str());
+        return 1;
+    }
+    st::devices::ets::Client client{**channel};
+    auto state = client.query_state();
+    if (!state.has_value()) {
+        std::fprintf(stderr, "ap3 pull-backup: query_state: %s\n",
+                      state.error().to_string().c_str());
+        return 1;
+    }
+    auto bytes = client.pull_marriage_backup();
+    if (!bytes.has_value()) {
+        std::fprintf(stderr, "ap3 pull-backup: %s\n",
+                      bytes.error().to_string().c_str());
+        return bytes.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(out_path.parent_path(), ec);
+    std::ofstream out{out_path, std::ios::binary};
+    if (!out) {
+        std::fprintf(stderr,
+                      "ap3 pull-backup: cannot open output %s\n",
+                      out_path.string().c_str());
+        return 1;
+    }
+    out.write(reinterpret_cast<char const *>(bytes->data()),
+                static_cast<std::streamsize>(bytes->size()));
+    if (fmt == "json") {
+        std::printf("{\n");
+        std::printf("  \"output_path\": \"%s\",\n",
+                     out_path.string().c_str());
+        std::printf("  \"bytes\": %zu,\n", bytes->size());
+        std::printf("  \"encrypted\": true,\n");
+        std::printf("  \"decrypt_note\": \"_enc.rom needs analyst-lane keystream "
+                     "(ks_E.bin / ks_F.bin) for offline decrypt\"\n");
+        std::printf("}\n");
+    } else if (fmt == "toml") {
+        std::printf("output_path  = \"%s\"\n", out_path.string().c_str());
+        std::printf("bytes        = %zu\n", bytes->size());
+        std::printf("encrypted    = true\n");
+    } else {
+        std::printf("Pulled %zu bytes (encrypted _enc.rom) -> %s\n",
+                     bytes->size(), out_path.string().c_str());
+        std::printf("Decrypt is offline: needs the analyst-lane keystream\n"
+                     "(ks_E.bin / ks_F.bin) — see CLAUDE.md memory\n"
+                     "[_enc.rom cipher breakthrough 2026-06-09].\n");
+    }
+    return 0;
+}
+
 } // namespace ets_cli
 
 int cmd_ap3(int argc, char *argv[]) {
@@ -16708,6 +16827,13 @@ int cmd_ap3(int argc, char *argv[]) {
                    "  backup [--into <dir>] [--format text|json|toml]\n"
                    "                     Pull /maps + /datalog + /presets + /images +\n"
                    "                     /settings + /backupcksum into <dir>\n"
+                   "  show-cur [--format text|json|toml]\n"
+                   "                     Ask the AP via cmd 0x1a show_cur which .ptm\n"
+                   "                     was last flashed (T22). Prints the path.\n"
+                   "  pull-backup --out <path> [--format text|json|toml]\n"
+                   "                     Pull the AP's marriage backup ROM via the\n"
+                   "                     /dump endpoint dance (T18). Saves the\n"
+                   "                     encrypted _enc.rom; decrypt is offline.\n"
                    "  decrypt-img <input.img> [-o <output>]\n"
                    "                     Decrypt a COBB AP firmware .img file. Standalone\n"
                    "                     (no device needed). Requires --enable-cobb-ap-cipher.\n"
@@ -16750,6 +16876,15 @@ int cmd_ap3(int argc, char *argv[]) {
     }
     if (sub == "raw") {
         return ets_cli::run_raw(sub_argc, sub_argv, opts);
+    }
+    if (sub == "capabilities") {
+        return ets_cli::run_capabilities(sub_argc, sub_argv, opts);
+    }
+    if (sub == "show-cur") {
+        return ets_cli::run_show_cur(sub_argc, sub_argv, opts);
+    }
+    if (sub == "pull-backup") {
+        return ets_cli::run_pull_backup(sub_argc, sub_argv, opts);
     }
     if (sub == "decrypt-img") {
         return ets_cli::run_decrypt_img(sub_argc, sub_argv, opts);
