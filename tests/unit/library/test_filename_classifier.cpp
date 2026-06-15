@@ -111,3 +111,48 @@ TEST_CASE("classify_ptm_filename: case-insensitive matching",
     CHECK(c.stage == "Stage1");
     CHECK(c.fuel_grade == "91");
 }
+
+TEST_CASE("classify_ptm_filename: ethanol blend fuel grades",
+          "[library][classifier]") {
+    auto const e30 = classify_ptm_filename("Stage2 E30 v401.ptm");
+    CHECK(e30.fuel_grade == "E30");
+    auto const e50 = classify_ptm_filename("Stage2 E50 v401.ptm");
+    CHECK(e50.fuel_grade == "E50");
+    auto const race = classify_ptm_filename("Stage3 Race v401.ptm");
+    CHECK(race.fuel_grade == "Race");
+}
+
+TEST_CASE("classify_ptm_filename: 94 octane (Canadian fuel)",
+          "[library][classifier]") {
+    auto const c = classify_ptm_filename("Stage1 94 v401.ptm");
+    CHECK(c.fuel_grade == "94");
+}
+
+TEST_CASE("classify_ptm_filename: COBB token without bare Stage",
+          "[library][classifier]") {
+    // Some COBB OTS .ptm files include the COBB token explicitly but
+    // not a bare Stage<N> (e.g. accessory configs, anti-theft).
+    auto const c = classify_ptm_filename("COBB Accessory Config v2.ptm");
+    CHECK(c.vendor == "COBB");
+    CHECK(c.stage.empty());
+}
+
+TEST_CASE("classify_ptm_filename: multi-variant Stage1+SF+BigSF chain",
+          "[library][classifier]") {
+    auto const c = classify_ptm_filename("Stage1+SF+BigSF 93 v401.ptm");
+    CHECK(c.stage == "Stage1");
+    CHECK(c.fuel_grade == "93");
+    // BigSF should match before bare SF in the variant string since
+    // BigSF appears earlier in the literal table and string position
+    // — but both should appear since the literal scan covers both.
+    CHECK(c.variant.find("SF") != std::string::npos);
+    CHECK(c.variant.find("BigSF") != std::string::npos);
+    CHECK(c.variant.find("v401") != std::string::npos);
+}
+
+TEST_CASE("classify_ptm_filename: WRK lineage with high WRK number",
+          "[library][classifier]") {
+    auto const c = classify_ptm_filename("Fehr_WRK12.ptm");
+    CHECK(c.vendor == "Fehr");
+    CHECK(c.variant.find("WRK12") != std::string::npos);
+}

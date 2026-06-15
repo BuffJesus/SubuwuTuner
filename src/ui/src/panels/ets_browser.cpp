@@ -1571,6 +1571,48 @@ void render_device_header(PanelState &p, AppState &state) {
                 "Open %s in the file manager.",
                 audit_log_path_for(p).string().c_str());
         }
+        ImGui::SameLine();
+        // Clear-log button + confirm popup. The log file is the only
+        // place these per-AP action records live, so a stray click
+        // would lose them — gate behind a "Yes, clear it" confirm to
+        // avoid the cheap-button-misclick footgun.
+        if (ImGui::SmallButton("Clear log\xE2\x80\xA6##ap3_audit_clear")) {
+            ImGui::OpenPopup("##ap3_audit_clear_confirm");
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Delete every row of this AP's audit log (no undo).");
+        }
+        if (ImGui::BeginPopupModal("##ap3_audit_clear_confirm",
+                                     nullptr,
+                                     ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextWrapped(
+                "Clear the entire audit log for this AccessPort? "
+                "The file at\n  %s\nwill be truncated to zero bytes. "
+                "Push / remove / backup-pull rows from this session "
+                "(and any prior session) will be lost.",
+                audit_log_path_for(p).string().c_str());
+            ImGui::Spacing();
+            if (ImGui::Button("Yes, clear it##ap3_audit_clear_yes")) {
+                auto const path = audit_log_path_for(p);
+                std::error_code ec;
+                std::filesystem::remove(path, ec);
+                if (ec) {
+                    set_status(p, StatusSeverity::Error,
+                                "Couldn't clear audit log: " +
+                                    ec.message());
+                } else {
+                    set_status(p, StatusSeverity::Ok,
+                                "Cleared audit log for this AP.");
+                }
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel##ap3_audit_clear_no")) {
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
     }
 }
 
