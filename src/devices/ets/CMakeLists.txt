@@ -54,6 +54,11 @@ add_library(st_devices_ets STATIC
     # independent; the Blowfish primitive is gated alongside the
     # other cipher work via ST_ETS_HAVE_CIPHER.
     src/ota_cipher.cpp
+    # RGB565 LE image codec — splash / boot-logo support for the
+    # AP browser. Format mechanics only; no COBB-trademarked content
+    # bundled (see findings/tuning-knowledge-2026-06-13/boot-logo-re/
+    # for the IP boundary rationale).
+    src/rgb565.cpp
 )
 
 # Blowfish primitive compiles only when the cipher tier is ON. The
