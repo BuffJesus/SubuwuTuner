@@ -4,6 +4,7 @@
 #include "st/ai/backend.hpp"
 
 #include "st/core/json_util.hpp"
+#include "st/core/shell_safe.hpp"
 
 #include <chrono>
 #include <cstdio>
@@ -421,6 +422,19 @@ public:
         if (api_key_.empty())
             return failure(ErrorCode::InvalidArgument,
                            "AnthropicBackend: empty API key");
+        // Defensive: API key gets concatenated into the
+        // `-H "x-api-key: …"` argument of the `curl` command line we
+        // pass to popen. A shell metacharacter inside the key would
+        // break out of the surrounding double-quotes (see
+        // ai/src/backend.cpp `http_post_via_curl`). Anthropic keys are
+        // always `sk-ant-…` — alphanumeric plus `-`/`_`. Reject
+        // anything else with a clean InvalidArgument so the failure
+        // mode is "the modal shows an error" rather than "curl runs an
+        // attacker-controlled command".
+        if (auto const v = st::validate_api_key("anthropic", api_key_);
+            !v.has_value()) {
+            return failure(v.error());
+        }
         auto const body =
             build_anthropic_request_body(model_, system_prompt, user_prompt);
         std::vector<std::string> headers{
@@ -459,6 +473,14 @@ public:
         if (api_key_.empty())
             return failure(ErrorCode::InvalidArgument,
                            "OpenAiBackend: empty API key");
+        // Same defensive validation as the Anthropic path — the OpenAI
+        // key is also embedded into a curl `-H` argument. OpenAI keys
+        // are `sk-…` (older) or `sk-proj-…` (newer); both stay inside
+        // the `A-Za-z0-9_.-` set the validator allows.
+        if (auto const v = st::validate_api_key("openai", api_key_);
+            !v.has_value()) {
+            return failure(v.error());
+        }
         auto const body =
             build_openai_request_body(model_, system_prompt, user_prompt);
         std::vector<std::string> headers{
