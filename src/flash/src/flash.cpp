@@ -674,6 +674,41 @@ std::vector<Sector> Flasher::compute_delta(std::span<std::uint8_t const> current
     return out;
 }
 
+DeltaSummary Flasher::compute_delta_layout(std::span<std::uint8_t const> current,
+                                           std::span<std::uint8_t const> target,
+                                           std::span<Sector const> layout) {
+    DeltaSummary out;
+    auto const n = std::min(current.size(), target.size());
+
+    // Pass 1: for every byte that differs, decide whether it falls inside
+    // a layout sector. If yes, mark that sector. If no, increment the gap
+    // counter. A linear scan in lockstep with a layout-sector cursor would
+    // be faster on huge layouts, but the FA-DIT 2 MB map has 25 entries
+    // and full-ROM diffs are 2 MB — O(n) byte scan dominates.
+    std::vector<bool> sector_hit(layout.size(), false);
+    for (std::size_t i = 0; i < n; ++i) {
+        if (current[i] == target[i])
+            continue;
+        bool in_any = false;
+        for (std::size_t s = 0; s < layout.size(); ++s) {
+            auto const &sec = layout[s];
+            if (i >= sec.address && i < std::size_t{sec.address} + sec.length) {
+                sector_hit[s] = true;
+                in_any = true;
+                break;
+            }
+        }
+        if (!in_any)
+            ++out.gap_bytes_changed;
+    }
+    // Pass 2: emit hit sectors in layout order.
+    for (std::size_t s = 0; s < layout.size(); ++s) {
+        if (sector_hit[s])
+            out.sectors.push_back(layout[s]);
+    }
+    return out;
+}
+
 // ---------------------------------------------------------------------
 // execute — full flash orchestration
 // ---------------------------------------------------------------------

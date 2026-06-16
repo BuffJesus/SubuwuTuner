@@ -494,6 +494,90 @@ TEST_CASE("Flasher::compute_delta handles a final short sector", "[flash][delta]
     REQUIRE(sectors[0].length == 0x800);
 }
 
+TEST_CASE("layouts::kFaDitSh2a2Mb covers the FA-DIT app region without overlap",
+          "[flash][delta][layout]") {
+    auto const &layout = flash::layouts::kFaDitSh2a2Mb;
+    REQUIRE(layout.size() == 25);
+    // First sector starts at 0x6000 — bootloader 0x0..0x6000 is FCU-locked
+    // and intentionally absent from the layout.
+    REQUIRE(layout.front().address == 0x6000);
+    // Final sector ends at 0x200000 (2 MB).
+    auto const &back = layout.back();
+    REQUIRE(back.address + back.length == 0x200000);
+    // Each sector is contiguous with its predecessor — no gaps, no overlap.
+    for (std::size_t i = 1; i < layout.size(); ++i) {
+        REQUIRE(layout[i].address == layout[i - 1].address + layout[i - 1].length);
+    }
+    // The mix is 5 × 8 KB + 9 × 64 KB + 11 × 128 KB.
+    std::size_t count_8k = 0, count_64k = 0, count_128k = 0;
+    for (auto const &s : layout) {
+        if (s.length == 0x2000)
+            ++count_8k;
+        else if (s.length == 0x10000)
+            ++count_64k;
+        else if (s.length == 0x20000)
+            ++count_128k;
+    }
+    REQUIRE(count_8k == 5);
+    REQUIRE(count_64k == 9);
+    REQUIRE(count_128k == 11);
+}
+
+TEST_CASE("Flasher::compute_delta_layout picks the right sector per region",
+          "[flash][delta][layout]") {
+    // 2 MB buffer mirrors the FA-DIT image size.
+    std::vector<std::uint8_t> current(0x200000, 0x00);
+    std::vector<std::uint8_t> target = current;
+    // Bump one byte in the 8 KB boot-patch region (sector at 0x008000 length 0x2000).
+    target[0x008500] = 0x55;
+    // Bump one byte in the 64 KB cal region (sector at 0x030000 length 0x10000).
+    target[0x0305CE] = 0x55;
+    // Bump one byte in the 128 KB upper region (sector at 0x140000 length 0x20000).
+    target[0x150000] = 0x55;
+
+    auto const summary = flash::Flasher::compute_delta_layout(
+        current, target,
+        std::span<flash::Sector const>{flash::layouts::kFaDitSh2a2Mb.data(),
+                                       flash::layouts::kFaDitSh2a2Mb.size()});
+    REQUIRE(summary.gap_bytes_changed == 0);
+    REQUIRE(summary.sectors.size() == 3);
+    REQUIRE(summary.sectors[0] == flash::Sector{0x008000, 0x002000});
+    REQUIRE(summary.sectors[1] == flash::Sector{0x030000, 0x010000});
+    REQUIRE(summary.sectors[2] == flash::Sector{0x140000, 0x020000});
+}
+
+TEST_CASE("Flasher::compute_delta_layout counts gap diffs (e.g. bootloader region)",
+          "[flash][delta][layout]") {
+    std::vector<std::uint8_t> current(0x200000, 0x00);
+    std::vector<std::uint8_t> target = current;
+    // Three bytes in the FCU-locked bootloader region 0x0000..0x6000 —
+    // outside every layout sector.
+    target[0x0100] = 0x11;
+    target[0x0500] = 0x22;
+    target[0x5FFF] = 0x33;
+    // One byte in a real cal sector.
+    target[0x040000] = 0x44;
+
+    auto const summary = flash::Flasher::compute_delta_layout(
+        current, target,
+        std::span<flash::Sector const>{flash::layouts::kFaDitSh2a2Mb.data(),
+                                       flash::layouts::kFaDitSh2a2Mb.size()});
+    REQUIRE(summary.gap_bytes_changed == 3);
+    REQUIRE(summary.sectors.size() == 1);
+    REQUIRE(summary.sectors[0] == flash::Sector{0x040000, 0x010000});
+}
+
+TEST_CASE("Flasher::compute_delta_layout returns empty for identical buffers",
+          "[flash][delta][layout]") {
+    std::vector<std::uint8_t> a(0x200000, 0xFF);
+    auto const summary = flash::Flasher::compute_delta_layout(
+        a, a,
+        std::span<flash::Sector const>{flash::layouts::kFaDitSh2a2Mb.data(),
+                                       flash::layouts::kFaDitSh2a2Mb.size()});
+    REQUIRE(summary.sectors.empty());
+    REQUIRE(summary.gap_bytes_changed == 0);
+}
+
 // ---------------------------------------------------------------------
 // execute -- validation
 // ---------------------------------------------------------------------

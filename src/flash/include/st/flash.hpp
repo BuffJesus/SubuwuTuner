@@ -17,6 +17,7 @@ namespace st::audit {
 class AuditLog;
 } // namespace st::audit
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -61,6 +62,57 @@ struct Sector {
 struct SectorWrite {
     Sector sector{};
     std::vector<std::uint8_t> data;
+};
+
+// Per-platform physical sector geometries. The on-ECU flash controller
+// only accepts erase requests aligned to its real sector boundaries.
+// `compute_delta_layout` consumes one of these to emit plans whose
+// erase set matches the FCU's allow-list — the safety alternative to
+// guessing a uniform `--sector-size` and hoping it lines up.
+//
+// New layouts go here as `constexpr std::array<Sector, N>`. The CLI
+// `--layout <name>` flag dispatches by name (see flash-delta).
+namespace layouts {
+
+// SH-2A 2 MB FA-DIT application region (Subaru VA + VB WRX, FA20DIT /
+// FA24DIT — the same physical SH72546R die behind both calibrations).
+//
+// Three contiguous regions with different sector sizes:
+//   - 5 × 8 KB boot patches     0x006000..0x010000
+//   - 9 × 64 KB cal sectors     0x010000..0x0A0000
+//   - 11 × 128 KB cal blocks    0x0A0000..0x200000
+//
+// The first 24 KB (0x000000..0x006000) is the FCU-locked bootloader
+// header; it is intentionally absent from this layout so any host that
+// proposes an erase there gets an empty plan instead of an unsafe one.
+//
+// Source of truth: cross-referenced against the
+// PerInstallBlockCrc32Repair install-block layout in
+// src/flash/src/checksum.cpp (which now consumes this constant via
+// `as_install_blocks()`).
+inline constexpr std::array<Sector, 25> kFaDitSh2a2Mb{{
+    {0x006000, 0x002000}, {0x008000, 0x002000}, {0x00A000, 0x002000},
+    {0x00C000, 0x002000}, {0x00E000, 0x002000},
+    {0x010000, 0x010000}, {0x020000, 0x010000}, {0x030000, 0x010000},
+    {0x040000, 0x010000}, {0x050000, 0x010000}, {0x060000, 0x010000},
+    {0x070000, 0x010000}, {0x080000, 0x010000}, {0x090000, 0x010000},
+    {0x0A0000, 0x020000}, {0x0C0000, 0x020000}, {0x0E0000, 0x020000},
+    {0x100000, 0x020000}, {0x120000, 0x020000}, {0x140000, 0x020000},
+    {0x160000, 0x020000}, {0x180000, 0x020000}, {0x1A0000, 0x020000},
+    {0x1C0000, 0x020000}, {0x1E0000, 0x020000},
+}};
+
+} // namespace layouts
+
+// Layout-aware delta result. `sectors` is the set of in-layout sectors
+// whose bytes differ — feed straight into a FlashPlan. `gap_bytes_changed`
+// counts bytes that differ but fall OUTSIDE every layout sector
+// (e.g. the bootloader region for kFaDitSh2a2Mb). A non-zero gap count
+// is a signal that the caller has changes the platform won't accept —
+// the CLI surfaces it as a warning; library callers can refuse outright.
+struct DeltaSummary {
+    std::vector<Sector> sectors;
+    std::size_t gap_bytes_changed{0};
 };
 
 // A flash plan: enter programming session, erase + reprogram each
@@ -461,6 +513,20 @@ public:
                                                            std::span<std::uint8_t const> target,
                                                            std::uint32_t sector_size = 0x1000,
                                                            std::uint32_t base_address = 0);
+
+    // Layout-aware variant. For each sector in `layout`, emits the
+    // sector if any byte within it differs between current and target.
+    // Bytes that fall outside every layout sector are counted as
+    // gap_bytes_changed (typically: bootloader region, FCU-locked
+    // territory). Pure function; no transport calls.
+    //
+    // Use this when the target platform has a non-uniform sector
+    // geometry — e.g. SH-2A 2 MB FA-DIT (kFaDitSh2a2Mb) which mixes
+    // 8 KB / 64 KB / 128 KB sectors across three regions.
+    [[nodiscard]] static DeltaSummary compute_delta_layout(
+        std::span<std::uint8_t const> current,
+        std::span<std::uint8_t const> target,
+        std::span<Sector const> layout);
 
     // Execute a plan. Always returns an `ExecuteOutcome` whose `report`
     // reflects in-progress state up to wherever the sequence stopped;

@@ -6,6 +6,7 @@
 #include "st/core/crc32.hpp"
 #include "st/core/error.hpp"
 #include "st/defs.hpp"
+#include "st/flash.hpp"
 
 #include <array>
 #include <memory>
@@ -217,33 +218,20 @@ private:
 // but noisy in a diff.
 class PerInstallBlockCrc32Repair final : public IChecksumRepair {
 public:
-    // The 25 install-block ranges, in install order. First 5 are
-    // the 8 KB bootloader patches; next 9 are 64 KB cal sectors;
-    // last 11 are 128 KB cal blocks.
-    struct Block {
-        std::uint32_t start;
-        std::uint32_t end_exclusive;
-    };
-
+    // The 25 install-block ranges (5 × 8 KB boot patches, 9 × 64 KB
+    // cal sectors, 11 × 128 KB cal blocks) come from the canonical
+    // SH-2A 2 MB FA-DIT layout in `st::flash::layouts::kFaDitSh2a2Mb`.
+    // Keeping a single source of truth avoids drift between the
+    // checksum-repair iterator and the flash-plan generator that
+    // erases these same regions on the wire.
     static constexpr std::uint32_t kTableBase = 0x1FFF3Cu;
-    static constexpr std::size_t kBlockCount = 25;
+    static constexpr std::size_t kBlockCount = layouts::kFaDitSh2a2Mb.size();
     static constexpr std::size_t kRepairedBlockCount = 24; // slot 24 untouched
     static constexpr std::uint32_t kRomSizeRequired = 0x200000u;
 
-    static constexpr std::array<Block, kBlockCount> kBlocks{{
-        // 5 × 8 KB bootloader patches
-        {0x006000, 0x008000}, {0x008000, 0x00A000}, {0x00A000, 0x00C000},
-        {0x00C000, 0x00E000}, {0x00E000, 0x010000},
-        // 9 × 64 KB cal sectors
-        {0x010000, 0x020000}, {0x020000, 0x030000}, {0x030000, 0x040000},
-        {0x040000, 0x050000}, {0x050000, 0x060000}, {0x060000, 0x070000},
-        {0x070000, 0x080000}, {0x080000, 0x090000}, {0x090000, 0x0A0000},
-        // 11 × 128 KB cal blocks
-        {0x0A0000, 0x0C0000}, {0x0C0000, 0x0E0000}, {0x0E0000, 0x100000},
-        {0x100000, 0x120000}, {0x120000, 0x140000}, {0x140000, 0x160000},
-        {0x160000, 0x180000}, {0x180000, 0x1A0000}, {0x1A0000, 0x1C0000},
-        {0x1C0000, 0x1E0000}, {0x1E0000, 0x200000},
-    }};
+    static_assert(kBlockCount == 25,
+                  "PerInstallBlockCrc32Repair assumes 25 install blocks (5+9+11). "
+                  "If kFaDitSh2a2Mb has grown, re-derive the CRC slot count.");
 
     [[nodiscard]] st::Status
     repair(std::span<std::uint8_t> rom) noexcept override {
@@ -255,9 +243,8 @@ public:
         // Compute and write CRCs for the first 24 blocks. Slot 24
         // stays as-is — its decode is still pending.
         for (std::size_t i = 0; i < kRepairedBlockCount; ++i) {
-            auto const &b = kBlocks[i];
-            std::span<std::uint8_t const> block_view{rom.data() + b.start,
-                                                      b.end_exclusive - b.start};
+            auto const &b = layouts::kFaDitSh2a2Mb[i];
+            std::span<std::uint8_t const> block_view{rom.data() + b.address, b.length};
             std::uint32_t const crc = st::crc32(block_view);
             std::uint32_t const slot_off = kTableBase + static_cast<std::uint32_t>(i) * 4u;
             rom[slot_off + 0] = static_cast<std::uint8_t>((crc >> 24) & 0xFFu);
