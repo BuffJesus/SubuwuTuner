@@ -107,6 +107,76 @@ Per ζ1 (`findings/re-2026-06-12-pm/RE_wave6_findings.md`):
   assumes per-platform sector tables — the boundary list lives in
   the def pack at runtime.
 
+### ζ1 reconciliation (2026-06-16 evening) — re-reading the disasm
+
+Bench-rig probe (Tier-B `SubaruShCanFlash::enable_flash_mode` +
+`subaru-ssm-cmd` diagnostic verb, both shipped this same day) sent
+SSM byte `0xA5` against a COBB-tuned LF79002P donor and got **no
+response** (transport timeout). SSM `0xA8` (ReadByAddress, the
+established SSM service) got **NRC 0x13** (format error). Yet:
+
+- UDS RMBA (`0x23`) reads on the same donor work cleanly — the bench
+  speaks UDS-on-CAN.
+- The captured COBB install flow (`findings/communication-protocols/
+  cobb-install-flow.md` §1) shows wire bytes **`0x7E0 02 10 02`** for
+  session entry — i.e. standard UDS `DiagnosticSessionControl
+  programmingSession`, not SSM `0xA5`.
+
+These two facts together rule out the "`0xA5` is the wire byte" reading
+of the ζ1 disasm. The reconciled reading:
+
+- `vmethod(this, 0xA5, 5)` in `SH_CAN_Flash::EnableFlashMode` calls
+  `vtable[2]` of the embedded `ECUFuncsBase` (the comm abstraction).
+- `ECUFuncsBase` has subclass variants per transport — `libCommsSubaru.so`'s
+  `SubaruComms` exposes a `ReadCANMonitors` / `ReadKLINEMonitors` split
+  (per `findings/re-2026-06-12-pm/RE_wave7_findings.md` §F), confirming
+  the K-Line / CAN duality lives at this layer.
+- `0xA5` is therefore the **operation code** passed to `vmethod[2]` —
+  a Subaru-internal identifier for "EnableFlashMode" — and the vmethod
+  body translates the op-code to whatever wire bytes the active
+  transport requires:
+  - **K-Line transport** (pre-2008 EJ): emit SSM byte `0xA5` verbatim
+    on the K-Line bus. This matches the analyst's initial reading; the
+    behavior is correct for that ECU class.
+  - **CAN transport** (every 2008+ Subaru FA20DIT / FA24DIT / FB25):
+    emit UDS `DiagnosticSessionControl 0x10 0x02`. This matches the
+    captured COBB install flow and is consistent with the bench-rig
+    behavior (`0xA5` literally is not recognized).
+
+The previous "ζ1 reframe" was correct about `0xA5` appearing in the
+disasm but incorrect about its role on the wire for modern CAN ECUs.
+For SubuwuTuner's `SubaruShCanFlash`:
+
+- Tier-B `enable_flash_mode` shipped today as `SsmClient::send_byte_command(0xA5, …)`
+  works for K-Line-era ECUs (untested but byte-correct per ζ1).
+- For CAN-era ECUs, the right wire bytes are standard UDS
+  `client.diagnostic_session_control(kDscProgramming)` — which is what
+  `Flasher::execute` already does at step 1 (and which still fails on
+  the bench with NRC 0x22, the **real** Phase C blocker).
+
+### What this means for the actual Phase C blocker
+
+The bench's NRC 0x22 on UDS DSC `0x10 0x02` is **conditionsNotCorrect**,
+NOT "wrong protocol." The wire format is right; some other precondition
+the ECU wants isn't being met. Per the same COBB install capture, the
+COBB AP gets a positive response (`02 50 02`) to the very same byte
+sequence we send — so the gating condition is something the AP satisfies
+before sending DSC 0x02, that we don't.
+
+Candidates not yet eliminated:
+
+1. **L1 SA escalation order**: COBB capture does L3 first, then L1 in the
+   same session, then DSC 0x02. Our L1-after-L3 fails NRC 0x7F on this
+   donor (firmware-revision difference?). We have not tried **L1 first,
+   then L3** as the SA chain.
+2. **Vehicle-harness signal**: bench may be missing an IGN-sense / brake /
+   clutch / park-lock assertion that the ECU treats as a precondition.
+3. **Mode-22 DID precursor**: COBB AP may issue a `ReadDataByIdentifier`
+   to a programming-state DID before DSC 0x02. The capture as docs show
+   it doesn't include such a frame, but the capture may have been
+   filtered to "interesting" services.
+4. **TesterPresent cadence**: extended session may lapse without 0x3E.
+
 ### What this means for the `Flasher::ecu_*` primitives
 
 The five primitives shipped in commits `1fa521c` / `a00cdb1` /
