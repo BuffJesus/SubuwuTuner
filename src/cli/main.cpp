@@ -12310,6 +12310,19 @@ int cmd_flash_apply(int argc, char *argv[]) {
     std::optional<std::uint8_t> data_format_override;
     std::optional<std::uint32_t> integrity_check_offset_override;
 
+    // Real-hardware path. When `--transport` is supplied instead of
+    // `--trace`, the flash runs against a live ECU through the factory.
+    // The SA / DSC prelude defaults ON for this path (read_full_rom-
+    // style behavior). --confirm is REQUIRED for the real-hardware path
+    // since it actually writes to flash.
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::optional<std::string> sa_variant;
+    std::uint8_t security_level = 0x01;
+    std::optional<bool> authenticate_flag;
+    std::optional<bool> enter_dsc_flag;
+
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
         auto const require_arg = [&](char const *name) -> char const * {
@@ -12354,6 +12367,52 @@ int cmd_flash_apply(int argc, char *argv[]) {
                 profile_arg = std::string{v};
             else
                 return 2;
+        } else if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--sa-variant") {
+            if (auto const *v = require_arg("--sa-variant"); v)
+                sa_variant = std::string{v};
+            else
+                return 2;
+        } else if (a == "--security-level") {
+            auto const *v = require_arg("--security-level");
+            if (v == nullptr)
+                return 2;
+            std::string_view sv{v};
+            int base = 10;
+            if (sv.starts_with("0x") || sv.starts_with("0X")) {
+                sv.remove_prefix(2);
+                base = 16;
+            }
+            char *end = nullptr;
+            auto const val = std::strtoull(sv.data(), &end, base);
+            if (end == sv.data() || *end != '\0' || val == 0 || val > 0xFFULL) {
+                std::fprintf(stderr, "flash-apply: --security-level must be a "
+                                     "positive 8-bit hex (0x..) or decimal integer\n");
+                return 2;
+            }
+            security_level = static_cast<std::uint8_t>(val);
+        } else if (a == "--authenticate") {
+            authenticate_flag = true;
+        } else if (a == "--no-authenticate") {
+            authenticate_flag = false;
+        } else if (a == "--enter-dsc") {
+            enter_dsc_flag = true;
+        } else if (a == "--no-enter-dsc") {
+            enter_dsc_flag = false;
         } else if (a == "--confirm") {
             confirm = true;
         } else if (a == "--reason") {
@@ -12424,19 +12483,38 @@ int cmd_flash_apply(int argc, char *argv[]) {
             return 2;
         }
     }
-    if (!plan_path.has_value() || !trace_path.has_value()) {
+    bool const have_trace = trace_path.has_value();
+    bool const have_transport = transport_kind.has_value();
+    if (!plan_path.has_value() || (have_trace == have_transport)) {
         std::fputs("flash-apply: missing required arguments:", stderr);
         if (!plan_path.has_value())
             std::fputs(" --plan", stderr);
-        if (!trace_path.has_value())
-            std::fputs(" --trace", stderr);
-        std::fputs("\nUsage: subuwutuner-cli flash-apply --plan <FILE.toml> "
-                   "--trace <FILE.uds>\n"
+        if (have_trace == have_transport) {
+            if (have_trace) {
+                std::fputs(" (--trace AND --transport are mutually exclusive)", stderr);
+            } else {
+                std::fputs(" --trace OR --transport", stderr);
+            }
+        }
+        std::fputs("\nUsage: subuwutuner-cli flash-apply --plan <FILE.toml>\n"
+                   "       (--trace <FILE.uds> | --transport <kind>\n"
+                   "                             [--dll <path>] [--device <path>])\n"
+                   "       [--sa-variant <name>] [--security-level <hex>]\n"
+                   "       [--authenticate|--no-authenticate] [--enter-dsc|--no-enter-dsc]\n"
                    "       [--journal <FILE.toml>] [--manifest <FILE.toml>]\n"
                    "       [--data-format <hex>] [--integrity-check-offset <hex>]\n"
                    "       [--profile <P> --def <pack.toml> --source <rom.bin>]\n"
                    "       [--confirm] [--reason \"…\"]\n"
                    "\n"
+                   "  --trace                  MockTransport replay path (hardware-free).\n"
+                   "  --transport              Real adapter via the factory. <kind> ∈\n"
+                   "                           j2534|obdx|native. obdx + native need\n"
+                   "                           --device <COM port> (e.g. COM4); j2534\n"
+                   "                           needs --dll. Real-hardware path REQUIRES\n"
+                   "                           --confirm.\n"
+                   "  --sa-variant             SecurityAccess variant (same set as rom-pull).\n"
+                   "                           Defaults: factory (--trace), required by\n"
+                   "                           sa-prelude (--transport) when --authenticate.\n"
                    "  --data-format            Override plan.data_format. 0x04 selects\n"
                    "                           Subaru bulk-transfer (0xB6) over standard\n"
                    "                           0x36 TransferData.\n"
@@ -12444,6 +12522,15 @@ int cmd_flash_apply(int argc, char *argv[]) {
                    "                           Sector containing this offset is written\n"
                    "                           LAST (brick-safe ordering). Typical:\n"
                    "                           0x1FFFFE for SH-2A WRX calibration checksum.\n",
+                   stderr);
+        return 2;
+    }
+    // Safety gate: real-hardware path REQUIRES --confirm. The operator
+    // must explicitly acknowledge that this writes bytes to a live ECU.
+    if (have_transport && !confirm) {
+        std::fputs("flash-apply: --transport (real hardware) requires --confirm.\n"
+                   "  This command writes bytes to a live ECU. Re-run with --confirm to\n"
+                   "  acknowledge. Use --reason \"…\" to record an audit-log justification.\n",
                    stderr);
         return 2;
     }
@@ -12496,28 +12583,149 @@ int cmd_flash_apply(int argc, char *argv[]) {
         }
     }
 
-    std::vector<UdsTracePair> pairs;
-    std::string err;
-    if (!parse_uds_trace(*trace_path, pairs, err)) {
-        std::fputs(err.c_str(), stderr);
-        std::fputc('\n', stderr);
-        return 1;
+    // Resolve --sa-variant to a key function. Same variant set as rom-pull;
+    // see docs/23-security-access.md for the full catalog. Inline rather
+    // than factored out to avoid churn on the load-bearing rom-pull path.
+    st::ecu::SecurityKeyFn sa_variant_fn;
+    if (sa_variant.has_value()) {
+        if (*sa_variant == "default" || *sa_variant == "factory") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_key_stub;
+        } else if (*sa_variant == "aftermarket" ||
+                   *sa_variant == "aftermarket-l1") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket;
+        } else if (*sa_variant == "aftermarket-l3") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l3_aftermarket;
+        } else if (*sa_variant == "aftermarket-v1-flash") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket_v1_flash;
+        } else if (*sa_variant == "aftermarket-v1-maf-sd") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket_v1_maf_sd;
+        } else if (*sa_variant == "ssmv-factory") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_ssmv_factory;
+        } else if (*sa_variant == "ecutek" || *sa_variant == "ecutek-l1") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_ecutek;
+        } else if (*sa_variant == "ecutek-l3" || *sa_variant == "ecutek-l35") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l35_ecutek;
+        } else {
+            std::fprintf(stderr,
+                         "flash-apply: --sa-variant '%s' not recognized "
+                         "(expected one of: default, aftermarket, "
+                         "aftermarket-l1, aftermarket-l3, aftermarket-v1-flash, "
+                         "aftermarket-v1-maf-sd, ssmv-factory, ecutek[-l1], "
+                         "ecutek-l3).\n",
+                         sa_variant->c_str());
+            return 2;
+        }
     }
 
+    // Defaults: --transport (real hardware) needs DSC + SA preludes; --trace
+    // (replay) expects the captured exchange to drive the wire byte-for-byte,
+    // so both default OFF there. Explicit flags override.
+    bool const authenticate = authenticate_flag.value_or(have_transport);
+    bool const enter_dsc = enter_dsc_flag.value_or(have_transport);
+
+    // Set up the transport. Mock for --trace, factory-open for --transport.
+    // Lifetimes: MockTransport is in-place; the factory-built transport
+    // is heap-owned via the unique_ptr so it can outlive the open() call.
     st::transport::MockTransport mock;
-    if (auto s = mock.open({}); !s.has_value()) {
-        std::fprintf(stderr, "flash-apply: mock open failed: %s\n", s.error().to_string().c_str());
-        return 1;
-    }
-    for (auto &p : pairs) {
-        mock.expect_send_recv(std::move(p.request), std::move(p.response));
+    std::unique_ptr<st::transport::ITransport> owned;
+    st::transport::ITransport *chosen = nullptr;
+    std::vector<UdsTracePair> pairs;
+
+    if (have_trace) {
+        std::string err;
+        if (!parse_uds_trace(*trace_path, pairs, err)) {
+            std::fputs(err.c_str(), stderr);
+            std::fputc('\n', stderr);
+            return 1;
+        }
+        if (auto s = mock.open({}); !s.has_value()) {
+            std::fprintf(stderr, "flash-apply: mock open failed: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        for (auto &p : pairs) {
+            mock.expect_send_recv(std::move(p.request), std::move(p.response));
+        }
+        chosen = &mock;
+    } else {
+        auto const kind = st::transport::parse_kind(*transport_kind);
+        if (!kind.has_value()) {
+            std::fprintf(stderr,
+                         "flash-apply: --transport '%s' not recognized "
+                         "(expected one of: j2534, obdx, native).\n",
+                         transport_kind->c_str());
+            return 2;
+        }
+        st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+        auto t = st::transport::open_transport(spec);
+        if (!t.has_value()) {
+            std::fprintf(stderr, "flash-apply: %s\n", t.error().to_string().c_str());
+            return 1;
+        }
+        st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765, 500000,
+                                              0x000007E0, 0x000007E8};
+        if (auto s = (*t)->open(link); !s.has_value()) {
+            std::fprintf(stderr, "flash-apply: transport open failed: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        owned = std::move(*t);
+        chosen = owned.get();
     }
 
-    st::flash::Flasher flasher{mock};
+    st::flash::Flasher flasher{*chosen};
+    if (sa_variant_fn) {
+        flasher.set_security_key_fn(sa_variant_fn);
+        if (have_transport) {
+            std::fprintf(stderr, "flash-apply: SA variant: %s\n", sa_variant->c_str());
+        }
+    }
+
+    // SA / DSC prelude — only the real-hardware path runs this. The trace
+    // replay expects the captured DSC + SA pair to drive the wire so we
+    // skip the prelude there. Flasher::execute() also enters DSC per
+    // plan.session at step 1, but that's idempotent — if the prelude
+    // already escalated, step 1 stays in that session.
+    if (have_transport) {
+        if (enter_dsc) {
+            if (auto s = flasher.client().diagnostic_session_control(
+                    st::ecu::uds::kDscExtendedDiagnostic, std::chrono::milliseconds{1000});
+                !s.has_value()) {
+                std::fprintf(stderr, "flash-apply: DSC entry failed: %s\n",
+                             s.error().to_string().c_str());
+                return 1;
+            }
+        }
+        if (authenticate) {
+            auto seed = flasher.client().security_access_request_seed(
+                security_level, std::chrono::milliseconds{1000});
+            if (!seed.has_value()) {
+                std::fprintf(stderr, "flash-apply: SA requestSeed failed: %s\n",
+                             seed.error().to_string().c_str());
+                return 1;
+            }
+            auto key = sa_variant_fn ? sa_variant_fn(*seed)
+                                     : st::ecu::subaru::ssmcan1_key_stub(*seed);
+            if (!key.has_value()) {
+                std::fprintf(stderr, "flash-apply: SA key derivation failed: %s\n",
+                             key.error().to_string().c_str());
+                return 1;
+            }
+            auto const send_sub = static_cast<std::uint8_t>(security_level + 1U);
+            if (auto s = flasher.client().security_access_send_key(
+                    send_sub, *key, std::chrono::milliseconds{1000});
+                !s.has_value()) {
+                std::fprintf(stderr, "flash-apply: SA sendKey failed: %s\n",
+                             s.error().to_string().c_str());
+                return 1;
+            }
+        }
+    }
+
     auto const outcome = flasher.execute(*plan);
     print_flash_report("flash-apply", outcome);
     auto const &report = outcome.report;
-    if (!mock.exhausted()) {
+    if (have_trace && !mock.exhausted()) {
         std::fprintf(stderr, "flash-apply: warning: %zu trace entries unused\n", mock.remaining());
     }
 
