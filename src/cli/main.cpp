@@ -12759,15 +12759,27 @@ int cmd_flash_apply(int argc, char *argv[]) {
                 std::array<std::uint8_t, 8> payload;
                 std::uint16_t interval_ms;
             };
-            // Per round-2 spec §4.1 minimum frame set + round-3 spec §4.1
-            // worked-example payloads / intervals.
-            std::array<HeartbeatFrame, 8> const frames{{
+            // Per round-4 spec §3.1: drop 0x140 / 0x141 / 0x152 / 0x156
+            // from the round-3 set — those are the ECM's OWN outbound
+            // broadcasts. Re-injecting them at the ECM creates a CAN
+            // loopback condition (the ECM sees its own outbound IDs on
+            // the inbound bus stream), which trips the ECM's
+            // bus-coherence precondition check inside the DSC handler
+            // and causes DSC 0x10 0x01 (Default) — and likely 0x10 0x02
+            // (Programming) — to return NRC 0x22.
+            //
+            // Keep only the four external-module-sourced IDs:
+            //   0x002 — VDC / ABS wheel-speed sync (rolling counter)
+            //   0x144 — TCU torque request (constant)
+            //   0x280 — TCU shift state     (rolling counter)
+            //   0x371 — BCM / dash status   (constant)
+            //
+            // Source: round-4 spec §2 timing analysis (W1/W2/W3 windows)
+            // + Subaru's CAN ID block convention (0x140-0x16F is the
+            // engine ECM's emission block on FA20DIT).
+            std::array<HeartbeatFrame, 4> const frames{{
                 {0x002, {0xFF, 0xA7, 0x70, 0x05, 0x1B, 0x00, 0x00, 0x00}, 20},
-                {0x140, {0x00, 0x06, 0x00, 0x40, 0x00, 0x00, 0x14, 0x00}, 20},
-                {0x141, {0x50, 0x26, 0x6B, 0x27, 0x00, 0x80, 0x3F, 0x00}, 20},
                 {0x144, {0xC0, 0x00, 0x05, 0x00, 0x00, 0x24, 0xA0, 0x00}, 40},
-                {0x152, {0xF1, 0x44, 0x00, 0x00, 0x00, 0x00, 0x08, 0x80}, 40},
-                {0x156, {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16}, 40},
                 {0x280, {0x00, 0x01, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00}, 40},
                 {0x371, {0xFF, 0xFF, 0x00, 0x00, 0x80, 0x9F, 0x02, 0x00}, 40},
             }};
@@ -12827,35 +12839,26 @@ int cmd_flash_apply(int argc, char *argv[]) {
                     std::uint32_t can_id;
                     std::array<std::uint8_t, 8> payload;
                     std::uint8_t counter_pos;
-                    std::uint8_t counter_mask;
                 };
-                std::array<CounterSlot, 4> counter_slots{{
-                    // Slot 0: 0x002, counter at pos[3] (8-bit)
-                    {0, 0x002, {0xFF, 0xA7, 0x70, 0x05, 0x1B, 0x00, 0x00, 0x00}, 3, 0xFF},
-                    // Slot 1: 0x140, counter at pos[1] (4-bit low nibble cycling)
-                    {1, 0x140, {0x00, 0x06, 0x00, 0x40, 0x00, 0x00, 0x14, 0x00}, 1, 0x0F},
-                    // Slot 4: 0x152, counter at pos[1] (4-bit high nibble)
-                    {4, 0x152, {0xF1, 0x44, 0x00, 0x00, 0x00, 0x00, 0x08, 0x80}, 1, 0xF0},
-                    // Slot 6: 0x280, counter at pos[1] (8-bit)
-                    {6, 0x280, {0x00, 0x01, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00}, 1, 0xFF},
+                // Per round-4 spec §3.1 + §4 Q2: only two of the four
+                // kept IDs have counters. Both are 8-bit at the
+                // documented byte positions. 4-bit nibble masking
+                // dropped (only relevant to the dropped ECM-sourced IDs).
+                //
+                // Slot indices reference the `frames` array configured
+                // above. With 4 slots total, mapping is:
+                //   frames[0] = 0x002 → counter at pos[3]
+                //   frames[1] = 0x144 → constant (no entry here)
+                //   frames[2] = 0x280 → counter at pos[1]
+                //   frames[3] = 0x371 → constant (no entry here)
+                std::array<CounterSlot, 2> counter_slots{{
+                    {0, 0x002, {0xFF, 0xA7, 0x70, 0x05, 0x1B, 0x00, 0x00, 0x00}, 3},
+                    {2, 0x280, {0x00, 0x01, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00}, 1},
                 }};
                 std::uint8_t tick = 0;
                 while (!counter_worker_stop.load(std::memory_order_acquire)) {
                     for (auto &cs : counter_slots) {
-                        // Advance the counter byte. For 4-bit fields use
-                        // the mask to keep the non-counter nibble intact.
-                        if (cs.counter_mask == 0xFF) {
-                            cs.payload[cs.counter_pos] = tick;
-                        } else if (cs.counter_mask == 0x0F) {
-                            cs.payload[cs.counter_pos] =
-                                static_cast<std::uint8_t>(
-                                    (cs.payload[cs.counter_pos] & 0xF0) | (tick & 0x0F));
-                        } else if (cs.counter_mask == 0xF0) {
-                            cs.payload[cs.counter_pos] =
-                                static_cast<std::uint8_t>(
-                                    (cs.payload[cs.counter_pos] & 0x0F) |
-                                    static_cast<std::uint8_t>((tick & 0x0F) << 4U));
-                        }
+                        cs.payload[cs.counter_pos] = tick;
                         (void)chosen->update_periodic_slot_data(
                             cs.slot_index, cs.can_id,
                             std::span<std::uint8_t const>{cs.payload.data(),
@@ -12939,17 +12942,22 @@ int cmd_flash_apply(int argc, char *argv[]) {
                     return 1;
                 }
                 // [1.5] Force SA-grant clear via DefaultSession transition.
-                // Per round-2 spec §Q2 option 1
-                // (SubuwuTuner-specs/specs/dsc-prog-precondition-firmware-detail.md):
-                // the captured firmware's "functional DSC re-entry clears
-                // SA" doesn't hold on this donor — confirmed on bench.
-                // ISO 14229-1 §10.3 only mandates clearing on session
-                // CHANGE (different sub-function), so re-entering the same
-                // Extended session is a no-op. Force an actual change by
-                // going through DefaultSession (0x10 0x01) then back to
-                // Extended (0x10 0x03). This clears the L3 latch at
-                // mem8[0xFFF9B854] so subsequent L1 RequestSeed isn't
-                // blocked with NRC 0x7F.
+                // Per round-2 spec §Q2 option 1: the captured firmware's
+                // "functional DSC re-entry clears SA" doesn't hold on this
+                // donor — confirmed on bench. ISO 14229-1 §10.3 only
+                // mandates clearing on session CHANGE (different
+                // sub-function). Going through DefaultSession (0x10 0x01)
+                // then back to Extended forces an actual change.
+                //
+                // Per round-2 spec §Q2 option 1 + round-4 §3.3 fallback:
+                // run DSC Default → Extended transition unconditionally.
+                // With the round-4 4-frame heartbeat set (external IDs
+                // only), the bus-coherence violation that broke DSC 0x01
+                // in round-3 no longer applies, so this is safe. The
+                // transition forces an ISO 14229-1 §10.3-compliant SA
+                // grant clear, making the subsequent L1 RequestSeed
+                // valid regardless of whether vehicle-presence is
+                // actually being detected.
                 if (auto s = flasher.client().diagnostic_session_control(
                         st::ecu::uds::kDscDefault, std::chrono::milliseconds{1000});
                     !s.has_value()) {
