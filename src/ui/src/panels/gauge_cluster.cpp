@@ -318,6 +318,7 @@ void render_gauge_cluster_panel(AppState &state) {
         ImGui::End();
         return;
     }
+    track_help_context(state, AppState::HelpContext::GaugeCluster);
 
     preview_pill();
     ImGui::SameLine();

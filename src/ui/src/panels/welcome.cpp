@@ -112,6 +112,11 @@ void load_whats_new(AppState &state) {
 } // namespace
 
 void render_welcome_panel(AppState &state) {
+    // F1 on the Welcome panel should land on docs/00-overview — the
+    // sidebar's first entry, and the right starting point for someone
+    // who's never opened the tool before. The HelpContext value
+    // already exists in the enum; just hadn't been wired.
+    track_help_context(state, AppState::HelpContext::Welcome);
     ImVec2 const avail = ImGui::GetContentRegionAvail();
     // Balance content vertically. On short panels (default window) the
     // welcome cluster sits in the upper third — first-run feel,
@@ -480,7 +485,16 @@ void render_welcome_panel(AppState &state) {
             state.recents_selected_idx < static_cast<int>(visible.size()) &&
             !ImGui::GetIO().WantTextInput &&
             ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
-            clicked_idx = visible[static_cast<std::size_t>(state.recents_selected_idx)];
+            auto const sel = visible[static_cast<std::size_t>(state.recents_selected_idx)];
+            // Gate kb-Enter on path existence — firing try_open_project on
+            // a moved/deleted project's path is at best a quick toast and
+            // at worst a long filesystem stall (UNC / disconnected drive).
+            // Mouse clicks hit the same gate via BeginDisabled(!exists)
+            // below; the row's per-frame exists() result drives both.
+            std::error_code kb_ec;
+            if (std::filesystem::exists(state.recents[sel].path, kb_ec)) {
+                clicked_idx = sel;
+            }
         }
         std::size_t shown = 0;
         // Walk the precomputed `visible` index permutation rather than
@@ -493,6 +507,10 @@ void render_welcome_panel(AppState &state) {
         // here for post-loop dispatch (project open + save_pack_lint
         // would invalidate the iteration if applied mid-loop).
         std::optional<std::size_t> revalidate_idx;
+        // Click on the ✕ next to a missing recent → drop it from the
+        // list. Captured here for post-loop dispatch so recents.erase
+        // can't invalidate the visible-index walk.
+        std::optional<std::size_t> remove_idx;
         for (std::size_t vidx = 0; vidx < visible.size(); ++vidx) {
             std::size_t const i = visible[vidx];
             auto const &e = state.recents[i];
@@ -520,7 +538,13 @@ void render_welcome_panel(AppState &state) {
             // budget so the layout stays one-line.
             float const button_left_x = ImGui::GetCursorPosX();
             constexpr float kPinW = 28.0f;
-            float const body_w = kRowW - kPinW - 4.0f;
+            constexpr float kRemoveW = 28.0f;
+            // When the recent's path is missing, the row reserves room
+            // for a trailing ✕ "remove from recents" button so the user
+            // has a one-click escape from a dead entry. Without this the
+            // entry is uncloseable except by editing recents.toml by hand.
+            float const body_w = exists ? (kRowW - kPinW - 4.0f)
+                                        : (kRowW - kPinW - kRemoveW - 8.0f);
             ImGui::BeginDisabled(!exists);
             // Decorate the visible label with a ★ glyph for pinned
             // entries so the user spots them at a glance. The button
@@ -571,6 +595,20 @@ void render_welcome_panel(AppState &state) {
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip(e.pinned ? "Unpin: this entry will roll off when\nolder than 8 unpinned recents."
                                            : "Pin: keep this entry at the top of\nthe recents list across sessions.");
+            }
+            // ✕ "remove from recents" affordance for dead entries. Only
+            // rendered when the path is missing — for live entries the
+            // user opens the project to interact with it, and a remove
+            // button next to live rows is one click away from accidental
+            // recents-list churn.
+            if (!exists) {
+                ImGui::SameLine(0.0f, 4.0f);
+                if (ImGui::Button("\xE2\x9C\x95", ImVec2(kRemoveW, 0.0f))) {
+                    remove_idx = i;
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Remove from recents.\nThe project files (if any) stay on disk —\nthis only clears the entry from this list.");
+                }
             }
             // Subtitle: dimmed full path + relative time, aligned under
             // the row. Center inside the button's kRowW span so the
@@ -668,7 +706,43 @@ void render_welcome_panel(AppState &state) {
         if (clicked_idx.has_value()) {
             // Capture by value: try_open_project mutates recents.
             auto const path = state.recents[*clicked_idx].path;
-            request_action(state, ConfirmAction::OpenRecent, path);
+            // Belt-and-suspenders: re-check existence at dispatch time
+            // even though BeginDisabled gated the per-row click and the
+            // kb-Enter handler gated itself. ImGui disabled-button
+            // semantics have wobbled across versions for keyboard
+            // activation; a stale "exists" snapshot also vanishes
+            // between exists() and dispatch on rare race timing. Either
+            // way we never want to call try_open_project on a path that
+            // demonstrably isn't there — Project::open's failure path
+            // emits a toast but a long-stalling fs call (UNC,
+            // disconnected drive) would freeze the UI in the meantime.
+            std::error_code dispatch_ec;
+            if (std::filesystem::exists(path, dispatch_ec)) {
+                request_action(state, ConfirmAction::OpenRecent, path);
+            } else {
+                enqueue_toast(state, ToastKind::Warn,
+                              std::string{"Project moved or deleted: "} +
+                                  path.string() +
+                                  "\nUse the ✕ button to remove it from recents.");
+            }
+        }
+        if (remove_idx.has_value() && *remove_idx < state.recents.size()) {
+            // Erase the dead entry and persist immediately. The pack-lint
+            // parallel cache resizes itself on the next frame via the
+            // recents_pack_lint.size() != state.recents.size() guard
+            // higher up in this function, so we don't have to keep them
+            // in sync here.
+            auto const removed_basename = state.recents[*remove_idx].path.filename().string();
+            state.recents.erase(state.recents.begin() +
+                                static_cast<std::ptrdiff_t>(*remove_idx));
+            save_recents(state.recents);
+            // Keep keyboard nav from pointing at a now-out-of-range row
+            // after the erase — easiest correct behavior is to reset
+            // the cursor, which the next Down/Up key press snaps back
+            // to the new index 0.
+            state.recents_selected_idx = -1;
+            enqueue_toast(state, ToastKind::Success,
+                          std::string{"Removed '"} + removed_basename + "' from recents.");
         }
         if (revalidate_idx.has_value() && *revalidate_idx < state.recents.size()) {
             // Welcome-chip click → re-validate the project's pack

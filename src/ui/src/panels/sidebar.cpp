@@ -8,7 +8,9 @@
 #include "panels/panels.hpp"
 
 #include "app_state.hpp"
+#include "panels/atlas_access.hpp"
 #include "persistence.hpp" // save_sidebar_category_order
+#include "theme.hpp"       // chip_fg_accent for the atlas common-core mark
 #include "widgets/widgets.hpp"
 
 #include "st/defs.hpp"
@@ -438,10 +440,35 @@ void render_sidebar(AppState &state) {
         // otherwise scope the tooltip to just the tiny S/E letters
         // instead of the whole row.
         bool const row_hovered = ImGui::IsItemHovered();
+        // Atlas lookup — surfaces purple ★ next to common-core tables
+        // and feeds the hover tooltip. Lazy-loaded shared singleton;
+        // nullptr-degrade when no atlas file is on disk. Lookup is by
+        // def-pack table id; mismatch with the atlas's id namespace is
+        // a graceful nullptr (no spurious badges).
+        st::library::AtlasTable const *atlas_entry = nullptr;
+        if (auto const *atlas = shared_atlas(); atlas != nullptr) {
+            atlas_entry = atlas->find_table(t.id);
+        }
         // Right-aligned policy badges: S (engine-safety-critical, warm
         // amber) and E (emissions-relevant, muted yellow). Drawn AFTER
         // the Selectable so AllowOverlap is needed; reads "tagged" at a
         // glance while browsing.
+        if (atlas_entry != nullptr && atlas_entry->common_core) {
+            // Common-core glyph — purple ★ accents the "every tuner
+            // touches this" signal. Placed just before the S/E badges
+            // so the right-edge group reads as a small status cluster.
+            constexpr float kStarW = 10.0f; // calibrated against the
+                                            // CalcTextSize of "★" at
+                                            // default font scale
+            (void)kStarW;
+            float const sx = ImGui::GetWindowContentRegionMax().x -
+                             ImGui::CalcTextSize("\xE2\x98\x85").x -
+                             ImGui::CalcTextSize("SE").x -
+                             ImGui::GetStyle().FramePadding.x - 4.0f;
+            ImGui::SameLine();
+            ImGui::SetCursorPosX(sx);
+            ImGui::TextColored(chip_fg_accent(), "\xE2\x98\x85");
+        }
         if (t.engine_safety_critical || t.emissions_relevant) {
             char buf[4]{};
             std::size_t bi = 0;
@@ -480,6 +507,35 @@ void render_sidebar(AppState &state) {
                 ImGui::TextColored(chip_fg_warn(), "engine safety critical");
             } else if (t.emissions_relevant) {
                 ImGui::TextColored(chip_fg_caution(), "emissions-relevant");
+            }
+            // Atlas roll-up in the tooltip — purpose + FA24 + a
+            // compact cluster list. Lets the user preview the
+            // "what is this and who tunes it" answer without
+            // selecting the row + walking to the table editor.
+            if (atlas_entry != nullptr) {
+                ImGui::Separator();
+                ImGui::TextColored(chip_fg_accent(), "Atlas");
+                if (!atlas_entry->purpose.empty()) {
+                    ImGui::TextWrapped("%s", atlas_entry->purpose.c_str());
+                }
+                if (atlas_entry->common_core) {
+                    text_subtle("\xE2\x98\x85 common-core");
+                }
+                if (!atlas_entry->fa24_portability.empty()) {
+                    text_subtle("FA24: %s",
+                                atlas_entry->fa24_portability.c_str());
+                }
+                if (!atlas_entry->clusters.empty()) {
+                    std::string joined;
+                    for (std::size_t i = 0; i < atlas_entry->clusters.size();
+                         ++i) {
+                        if (i > 0) {
+                            joined += ", ";
+                        }
+                        joined += atlas_entry->clusters[i];
+                    }
+                    text_subtle("tuners: %s", joined.c_str());
+                }
             }
             ImGui::EndTooltip();
         }

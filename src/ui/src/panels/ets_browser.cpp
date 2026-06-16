@@ -1340,7 +1340,7 @@ void render_device_header(PanelState &p, AppState &state) {
     // we don't carry runtime state for a build-time decision.
     ImGui::TextDisabled("Build flags");
     ImGui::SameLine(140.0f);
-#ifdef ST_AP3_HAVE_CIPHER
+#ifdef ST_ETS_HAVE_CIPHER
     chip("Cipher: ON", chip_fg_ok(), chip_bg_ok());
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Built with -DST_ENABLE_COBB_AP_CIPHER=ON.\n"
@@ -1356,7 +1356,7 @@ void render_device_header(PanelState &p, AppState &state) {
     }
 #endif
     ImGui::SameLine();
-#ifdef ST_AP3_HAVE_PTM_REWRITE
+#ifdef ST_ETS_HAVE_PTM_REWRITE
     chip("PTM rewrite: ON", chip_fg_ok(), chip_bg_ok());
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Built with -DST_ENABLE_COBB_AP_PTM_REWRITE=ON.\n"

@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace st::ui {
@@ -40,6 +41,10 @@ void render_history_panel(AppState &state) {
         ImGui::End();
         return;
     }
+    // F1 on the History panel routes to docs/21-stune-format — the
+    // edits.toml schema documentation is the most useful starting
+    // point for understanding what the history table is showing.
+    track_help_context(state, AppState::HelpContext::History);
     if (!state.project.has_value()) {
         render_empty_state(
             "No project",
@@ -192,6 +197,64 @@ void render_history_panel(AppState &state) {
     std::size_t jump_target = 0;
     bool has_jump = false;
 
+    // Tag-run grouping. Runs of consecutive edits carrying the same
+    // non-empty `tag` field (e.g. all the [[edit]] entries a `ptm
+    // import` writes with `tag = "ptm_import"`, or every cell-write a
+    // workflow modal records under `tag = "fa24_swap"`) collapse to a
+    // single chevron row by default once they exceed kCollapseAtN.
+    // Expanded runs are tracked by the first record index so two
+    // adjacent imports of the same tag stay independently
+    // expandable. The set is panel-static so it survives panel
+    // re-render but resets on session restart — a state-on-disk
+    // version is a nice-to-have but not load-bearing.
+    static std::unordered_set<std::size_t> s_expanded_runs;
+    constexpr std::size_t kCollapseAtN = 10;
+    struct TagRun {
+        std::size_t start;
+        std::size_t end; // one-past-last
+        std::string tag;
+        [[nodiscard]] std::size_t count() const noexcept { return end - start; }
+    };
+    std::vector<TagRun> tag_runs;
+    for (std::size_t i = 0; i < records.size();) {
+        auto const &r = records[i];
+        if (r.tag.empty()) {
+            ++i;
+            continue;
+        }
+        std::size_t j = i + 1;
+        while (j < records.size() && records[j].tag == r.tag) {
+            ++j;
+        }
+        if (j - i >= kCollapseAtN) {
+            tag_runs.push_back({i, j, r.tag});
+        }
+        i = j;
+    }
+    // Helpers to map a record index to its containing tag-run and
+    // whether that run is rendering collapsed this frame. Runs whose
+    // filter-substring matches the tag string are force-expanded so
+    // filter narrows correctly (otherwise a filter like "ptm_import"
+    // would land on a collapsed header that hides the matched rows).
+    auto const find_run = [&](std::size_t row_idx) -> TagRun const * {
+        for (auto const &run : tag_runs) {
+            if (row_idx >= run.start && row_idx < run.end) {
+                return &run;
+            }
+        }
+        return nullptr;
+    };
+    auto const is_collapsed = [&](TagRun const &run) {
+        if (s_expanded_runs.contains(run.start)) {
+            return false;
+        }
+        // Force-expand when the active filter matches the tag itself.
+        if (!filter.empty() && icontains(run.tag, filter)) {
+            return false;
+        }
+        return true;
+    };
+
     if (ImGui::BeginTable("##history_tbl", 5,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                               ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY)) {
@@ -205,6 +268,121 @@ void render_history_panel(AppState &state) {
 
         std::size_t matched = 0;
         for (std::size_t i = 0; i < records.size(); ++i) {
+            // If this index is the start of a collapsed tag-run,
+            // render a single header row that summarizes the whole
+            // run, then skip to the row past the end. Mid-run indices
+            // (i > run->start) inside a collapsed run are skipped
+            // outright — they're folded under the header.
+            if (auto const *run = find_run(i); run != nullptr && is_collapsed(*run)) {
+                if (i == run->start) {
+                    bool const run_cursor_inside = (cursor > run->start && cursor <= run->end);
+                    bool const run_undone = (cursor <= run->start);
+                    ImGui::TableNextRow();
+                    // Index col: chevron + count, or cursor marker if
+                    // cursor lands at the end of the run.
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::PushID(static_cast<int>(run->start) + 0x200000);
+                    char chev_buf[16];
+                    std::snprintf(chev_buf, sizeof chev_buf, "\xE2\x96\xB6 %zu",
+                                  run->count());
+                    if (ImGui::SmallButton(chev_buf)) {
+                        s_expanded_runs.insert(run->start);
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Expand this transaction (%zu edits, tag '%s').\n"
+                                          "Click to show every individual edit.",
+                                          run->count(), run->tag.c_str());
+                    }
+                    ImGui::PopID();
+                    // Table col: tag name in accent color so it reads
+                    // as a group, not as a regular table id.
+                    ImGui::TableSetColumnIndex(1);
+                    auto const acc = accent_for(current_theme());
+                    ImGui::TextColored(acc.base, "[%s]", run->tag.c_str());
+                    // Op col: short summary using the first row's
+                    // description as representative, plus the bulk count.
+                    ImGui::TableSetColumnIndex(2);
+                    char opbuf[160];
+                    auto const &head_desc = records[run->start].description;
+                    std::snprintf(opbuf, sizeof opbuf, "%zu edits — first: %s",
+                                  run->count(),
+                                  head_desc.empty() ? "(no description)"
+                                                    : head_desc.c_str());
+                    if (run_undone) {
+                        ImGui::TextDisabled("%s", opbuf);
+                    } else {
+                        ImGui::TextUnformatted(opbuf);
+                    }
+                    // Flags col: aggregate across the run. If any
+                    // member touches an engine-safety / emissions
+                    // table, surface the flag on the header.
+                    ImGui::TableSetColumnIndex(3);
+                    bool any_safety = false;
+                    bool any_emissions = false;
+                    for (std::size_t k = run->start; k < run->end; ++k) {
+                        auto const *kte = records[k].as_table();
+                        if (kte == nullptr) {
+                            continue;
+                        }
+                        auto const *table = state.project->definition().find_table(kte->table_id);
+                        if (table != nullptr) {
+                            any_safety = any_safety || table->engine_safety_critical;
+                            any_emissions = any_emissions || table->emissions_relevant;
+                        }
+                    }
+                    bool had_flag = false;
+                    if (any_safety) {
+                        ImGui::TextColored(chip_fg_warn(), "S");
+                        had_flag = true;
+                    }
+                    if (any_emissions) {
+                        if (had_flag) {
+                            ImGui::SameLine();
+                        }
+                        ImGui::TextColored(chip_fg_caution(), "E");
+                        had_flag = true;
+                    }
+                    if (!had_flag) {
+                        ImGui::TextDisabled("-");
+                    }
+                    // Action col: Jump to end-of-run. Lets the user
+                    // walk the cursor across the entire transaction
+                    // in one click — the underlying semantics match a
+                    // batch revert of the workflow.
+                    ImGui::TableSetColumnIndex(4);
+                    ImGui::PushID(static_cast<int>(run->start) + 0x300000);
+                    bool const at_end = (cursor == run->end);
+                    if (at_end) {
+                        ImGui::BeginDisabled();
+                    }
+                    if (ImGui::SmallButton("Jump")) {
+                        jump_target = run->end;
+                        has_jump = true;
+                    }
+                    if (at_end) {
+                        ImGui::EndDisabled();
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip(
+                            "Walk the cursor to the end of this transaction.\n"
+                            "Use Ctrl+Z to step back across individual edits.");
+                    }
+                    ImGui::PopID();
+                    if (run_cursor_inside) {
+                        // The cursor is partway through the run.
+                        // Tooltip-only signal lives on the chevron; a
+                        // subtle "[partial]" suffix in the op column
+                        // would be nicer but renders late — defer.
+                        (void)run_cursor_inside;
+                    }
+                    ++matched;
+                }
+                // Either we just rendered the header, or we're at a
+                // mid-run index; either way skip this iteration. The
+                // for-loop will ++i to the next index, which will be
+                // skipped again until we land past run->end.
+                continue;
+            }
             auto const &e = records[i];
             auto const *te = e.as_table();
             auto const *be = e.as_byte();
@@ -341,6 +519,27 @@ void render_history_panel(AppState &state) {
     }
 
     ImGui::Spacing();
+    // If any tag-runs are currently expanded, offer a one-click
+    // re-collapse so the user doesn't have to scroll to find each
+    // group. Two-buttons-when-applicable beats a hidden affordance.
+    bool any_run_expanded = false;
+    for (auto const &run : tag_runs) {
+        if (s_expanded_runs.contains(run.start)) {
+            any_run_expanded = true;
+            break;
+        }
+    }
+    if (any_run_expanded) {
+        if (ImGui::SmallButton("Collapse expanded groups")) {
+            for (auto const &run : tag_runs) {
+                s_expanded_runs.erase(run.start);
+            }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Re-fold every currently-expanded transaction group.");
+        }
+        ImGui::SameLine();
+    }
     ImGui::TextDisabled("Flags: S=engine-safety, E=emissions, -=neither.");
 
     // Apply pending cursor moves AFTER the table is closed. Each step

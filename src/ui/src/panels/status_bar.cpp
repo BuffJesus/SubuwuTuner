@@ -175,7 +175,8 @@ void render_status_bar(AppState &state) {
         // project.toml carries a [ptm_metadata] block — i.e. it was
         // produced by `ptm import` (CLI or GUI wizard). Purple accent
         // for the imported-tune affordance; tooltip shows vendor +
-        // vehicle so the user can confirm at a glance.
+        // vehicle + the ptm_import tag's edit-count so the user can
+        // confirm at a glance.
         if (state.ptm_imported_vendor.has_value()) {
             ImGui::SameLine();
             auto const chip_label = "\xEE\x86\x97  " + *state.ptm_imported_vendor;
@@ -186,8 +187,64 @@ void render_status_bar(AppState &state) {
                 if (state.ptm_imported_vehicle.has_value()) {
                     tip += "Vehicle: " + *state.ptm_imported_vehicle + "\n";
                 }
+                // Count edits carrying the ptm_import tag — gives the
+                // user a sense of tune "size" (Stage 0 ~ 2500, Stage 2
+                // ~ 5000, Fehr WRK3 ~ 6000). Walks history once on
+                // hover; cheap because tooltips fire only when shown.
+                if (state.project.has_value()) {
+                    std::size_t ptm_edits = 0;
+                    for (auto const &r : state.project->active_history().records()) {
+                        if (r.tag == "ptm_import") {
+                            ++ptm_edits;
+                        }
+                    }
+                    if (ptm_edits > 0) {
+                        char nbuf[64];
+                        std::snprintf(nbuf, sizeof nbuf, "Patches: %zu (tag=ptm_import)\n",
+                                      ptm_edits);
+                        tip += nbuf;
+                    }
+                }
                 tip += "Source:  project.toml [ptm_metadata] block\n";
                 tip += "Round-trip back to .ptm via `ptm export`.";
+                ImGui::SetTooltip("%s", tip.c_str());
+            }
+        }
+
+        // Library chip — surfaces the loaded TuneIndex count and (when
+        // the Phase-2 cross-ref is populated) which library entry the
+        // AP's /backupcksum matches. Mirrors the AP-chip pattern; only
+        // renders when the Tune Library panel has loaded an index this
+        // session.
+        if (auto const lib = library_status_snapshot(); lib.has_value()) {
+            ImGui::SameLine();
+            char lib_label[80];
+            std::snprintf(lib_label, sizeof lib_label,
+                          "\xEE\x83\x97  Library: %zu", lib->ptm_count);
+            // Currently-flashed match upgrades the chip color to ok-
+            // green — gives the user a glanceable "yes, the AP's
+            // current tune is one I know about" signal.
+            bool const cross_ref_hit = !lib->currently_flashed_md5.empty();
+            if (cross_ref_hit) {
+                chip(lib_label, chip_fg_ok(), chip_bg_ok());
+            } else {
+                chip(lib_label, chip_fg_muted(), chip_bg_muted());
+            }
+            if (ImGui::IsItemHovered()) {
+                std::string tip = "Tune Library\n";
+                char buf[80];
+                std::snprintf(buf, sizeof buf,
+                              ".ptm files:    %zu\n.stune projects: %zu\n",
+                              lib->ptm_count, lib->stune_count);
+                tip += buf;
+                if (cross_ref_hit) {
+                    tip += "Currently flashed: matches a library entry\n";
+                    tip += "MD5: " + lib->currently_flashed_md5 + "\n";
+                } else {
+                    tip += "Currently-flashed cross-reference: ";
+                    tip += "(no AP /backupcksum match or AP not connected)\n";
+                }
+                tip += "View \xE2\x86\x92 Tune Library to browse.";
                 ImGui::SetTooltip("%s", tip.c_str());
             }
         }

@@ -51,7 +51,7 @@ struct TopicSource {
     char const *filename;
     char const *fallback_title;
 };
-constexpr std::array<TopicSource, 14> kTopicSources = {{
+constexpr std::array<TopicSource, 18> kTopicSources = {{
     {"00-overview.md", "Overview"},
     {"04-roadmap.md", "Roadmap"},
     {"05-improvements.md", "What makes us different"},
@@ -60,12 +60,16 @@ constexpr std::array<TopicSource, 14> kTopicSources = {{
     {"10-glossary.md", "Glossary"},
     {"11-definition-format.md", "Definition packs"},
     {"16-custom-features.md", "Custom features"},
+    {"17-data-distribution-policy.md", "Definition pack distribution (why none ship)"},
     {"20-ai-integration.md", "AI advisory"},
     {"21-stune-format.md", ".stune format"},
     {"23-security-access.md", "SecurityAccess"},
     {"25-config-system.md", "Config system"},
     {"31-brick-protection-by-isa.md", "Brick protection"},
     {"32-live-datalogger.md", "Live datalogger"},
+    {"34-cobb-ap-as-tune-vault.md", "AccessPort file vault"},
+    {"35-tuner-overlay-architecture.md", "Tuner overlay model"},
+    {"36-tune-as-patch-set.md", "Tunes as patch sets"},
 }};
 
 std::string read_file_to_string(std::filesystem::path const &p) {

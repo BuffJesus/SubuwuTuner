@@ -123,6 +123,12 @@ void render_about_modal(AppState &state) {
     ImGui::BulletText("nativefiledialog-extended — btzy + Frogtoss Games (zlib)");
     ImGui::BulletText("tomlplusplus — Mark Gillard (MIT)");
     ImGui::BulletText("Catch2 — Catch Org + contributors (BSL-1.0)");
+    ImGui::BulletText("tl::expected — Sy Brand (CC0-1.0; Result<T> fallback)");
+    ImGui::BulletText("libusb-1.0 — libusb contributors (LGPL-2.1 + linking exception)");
+#ifdef ST_ETS_HAVE_CIPHER
+    ImGui::BulletText("tiny-AES-c — kokke (public domain; .ptm cipher)");
+    ImGui::BulletText("bzip2 1.0.8 — Julian Seward (BSD-style; .ptm cipher layer 4)");
+#endif
     ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
     text_subtle("Full text of each license: THIRD_PARTY_NOTICES.md");
 

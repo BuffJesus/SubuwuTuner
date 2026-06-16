@@ -40,6 +40,7 @@ void render_dtcs_panel(AppState &state) {
         ImGui::End();
         return;
     }
+    track_help_context(state, AppState::HelpContext::Dtcs);
     if (!state.project.has_value()) {
         render_empty_state(
             "No project",

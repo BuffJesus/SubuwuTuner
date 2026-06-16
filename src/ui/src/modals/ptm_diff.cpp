@@ -16,6 +16,7 @@
 #include "st/defs.hpp"
 #include "st/devices/ets/architectural_classifier.hpp"
 #include "st/devices/ets/ptm_cipher.hpp"
+#include "st/library/interpret.hpp"
 #include "st/library/patch_decoder.hpp"
 #include "st/library/table_mapping.hpp"
 #include "st/library/tune_diff.hpp"
@@ -71,6 +72,7 @@ void clear_result(AppState &s) {
     s.ptm_diff_error.clear();
     s.ptm_diff_by_layer.clear();
     s.ptm_diff_by_table.clear();
+    s.ptm_diff_interpretation.clear();
 }
 
 bool decode_one(char const *path, st::library::DecodedPtm &out, std::string &err) {
@@ -143,6 +145,7 @@ void run_diff(AppState &s) {
         row.changed_bytes = td.changed_bytes;
         s.ptm_diff_by_table.push_back(std::move(row));
     }
+    s.ptm_diff_interpretation = st::library::interpret_diff(a, b, result);
     s.ptm_diff_have_result = true;
 }
 
@@ -265,6 +268,15 @@ void render_ptm_diff_modal(AppState &state) {
             ImGui::Spacing();
             ImGui::TextColored(chip_fg_muted(),
                                "Pick a definition pack to enable the by-table view.");
+        }
+
+        if (!state.ptm_diff_interpretation.empty()) {
+            ImGui::Spacing();
+            ImGui::TextUnformatted("What changed");
+            for (auto const &line : state.ptm_diff_interpretation) {
+                ImGui::Bullet();
+                ImGui::TextWrapped("%s", line.c_str());
+            }
         }
     }
 

@@ -27,6 +27,7 @@
 
 #include "actions.hpp" // jump_to_table
 #include "st/audit.hpp"
+#include "st/core/shell_safe.hpp"
 
 #include <imgui.h>
 #include <implot.h>
@@ -320,15 +321,40 @@ void render_audit_panel(AppState &state) {
         auto const reveal_path = audit_source_path(state);
         ImGui::BeginDisabled(reveal_path.empty());
         if (ImGui::Button("Open log location##audit_reveal")) {
-            std::string cmd;
-#if defined(_WIN32)
-            cmd = "explorer /select,\"" + reveal_path.string() + "\"";
-#elif defined(__APPLE__)
-            cmd = "open -R \"" + reveal_path.string() + "\"";
+            // Defensive: the reveal path is interpolated into a
+            // double-quoted argument of a `std::system()` command line.
+            // The path itself comes from a user-chosen project dir or a
+            // CID-derived per-CID log path, so a maliciously-named
+            // project folder could in principle land shell metachars in
+            // here. Refuse to shell out if the path isn't shell-safe;
+            // surface a tooltip + audit entry instead. See
+            // `findings/tuning-knowledge-2026-06-13/cmd22-path-re/shell_injection_sinks.md`
+            // for the architectural rationale.
+#if defined(__linux__) || (defined(__unix__) && !defined(__APPLE__))
+            auto const reveal_str = reveal_path.parent_path().string();
 #else
-            cmd = "xdg-open \"" + reveal_path.parent_path().string() + "\"";
+            auto const reveal_str = reveal_path.string();
 #endif
-            (void)std::system(cmd.c_str());
+            if (auto const v = st::validate_shell_safe_path(
+                    "audit reveal path", reveal_str);
+                !v.has_value()) {
+                // Silently no-op the reveal — the failure mode here is
+                // "refuse to spawn rather than spawn an attacker-
+                // controlled command". An analyst with a maliciously-
+                // named project folder will see the button not respond;
+                // they can rename and retry.
+                (void)v;
+            } else {
+                std::string cmd;
+#if defined(_WIN32)
+                cmd = "explorer /select,\"" + reveal_str + "\"";
+#elif defined(__APPLE__)
+                cmd = "open -R \"" + reveal_str + "\"";
+#else
+                cmd = "xdg-open \"" + reveal_str + "\"";
+#endif
+                (void)std::system(cmd.c_str());
+            }
         }
         ImGui::EndDisabled();
     }

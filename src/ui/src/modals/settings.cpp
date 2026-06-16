@@ -15,6 +15,7 @@
 #include "widgets/widgets.hpp"
 
 #include "st/config.hpp"
+#include "st/core/shell_safe.hpp"
 #include "st/profile.hpp"
 
 #include <imgui.h>
@@ -110,15 +111,39 @@ void render_settings_modal(AppState &state) {
     bool const cfg_exists = std::filesystem::exists(st::config::default_config_path());
     ImGui::BeginDisabled(!cfg_exists);
     if (ImGui::SmallButton("Reveal##cfg_reveal")) {
-        std::string cmd;
-#if defined(_WIN32)
-        cmd = "explorer /select,\"" + cfg_path + "\"";
-#elif defined(__APPLE__)
-        cmd = "open -R \"" + cfg_path + "\"";
+        // Defensive: cfg_path is interpolated into a double-quoted
+        // argument of a `std::system()` command line. The path is
+        // derived from $APPDATA / $XDG_CONFIG_HOME / $HOME, all of
+        // which are attacker-controlled in the threat model where a
+        // user logs in under a shell-meta-laced account name. Cost of
+        // the check is one strchr; cost of getting this wrong is RCE
+        // on the analyst's workstation. See
+        // `findings/tuning-knowledge-2026-06-13/cmd22-path-re/shell_injection_sinks.md`.
+#if defined(__linux__) || (defined(__unix__) && !defined(__APPLE__))
+        auto const reveal_str =
+            st::config::default_config_path().parent_path().string();
 #else
-        cmd = "xdg-open \"" + st::config::default_config_path().parent_path().string() + "\"";
+        auto const &reveal_str = cfg_path;
 #endif
-        (void)std::system(cmd.c_str());
+        if (auto const v =
+                st::validate_shell_safe_path("config reveal path", reveal_str);
+            !v.has_value()) {
+            // Refuse to spawn — user can copy the path from the
+            // input field manually. The failure mode is "button
+            // appears to do nothing"; the alternative (spawning an
+            // attacker-controlled command) is worse.
+            (void)v;
+        } else {
+            std::string cmd;
+#if defined(_WIN32)
+            cmd = "explorer /select,\"" + reveal_str + "\"";
+#elif defined(__APPLE__)
+            cmd = "open -R \"" + reveal_str + "\"";
+#else
+            cmd = "xdg-open \"" + reveal_str + "\"";
+#endif
+            (void)std::system(cmd.c_str());
+        }
     }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -664,6 +689,128 @@ void render_settings_modal(AppState &state) {
             if (!state.settings.ai_narration_enabled) {
                 ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
                 text_subtle("Enable the toggle above to edit provider config.");
+            }
+            ImGui::EndTabItem();
+        }
+        // Environment tab — read-only diagnostic surface for the
+        // env-var-driven and build-flag-driven features the user
+        // might otherwise not know about. Pure documentation +
+        // current-state readout; no edit affordances (the env-var
+        // values come from the process environment which Settings
+        // can't write back without restarting the process).
+        if (ImGui::BeginTabItem("Environment")) {
+            ImGui::Dummy(ImVec2(0.0f, kSpaceS));
+            text_subtle("Read-only. Environment overrides and build flags that");
+            text_subtle("affect SubuwuTuner's behavior — surfaced here for");
+            text_subtle("discoverability. Edit env vars in your shell and restart.");
+            ImGui::Dummy(ImVec2(0.0f, kSpaceM));
+
+            // Helper: render one env-var row with current value, desc.
+            auto env_row = [](char const *name, char const *desc) {
+                char const *raw = std::getenv(name);
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(name);
+                ImGui::TableSetColumnIndex(1);
+                if (raw != nullptr && raw[0] != '\0') {
+                    ImGui::TextColored(chip_fg_ok(), "set");
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Current value:\n%s", raw);
+                    }
+                } else {
+                    ImGui::TextDisabled("unset");
+                }
+                ImGui::TableSetColumnIndex(2);
+                ImGui::TextUnformatted(desc);
+            };
+
+            if (ImGui::CollapsingHeader("Environment variables",
+                                        ImGuiTreeNodeFlags_DefaultOpen)) {
+                if (ImGui::BeginTable("##settings_env_vars", 3,
+                                      ImGuiTableFlags_RowBg |
+                                          ImGuiTableFlags_BordersInnerH |
+                                          ImGuiTableFlags_SizingStretchProp)) {
+                    ImGui::TableSetupColumn("Name",
+                                            ImGuiTableColumnFlags_WidthFixed,
+                                            260.0f);
+                    ImGui::TableSetupColumn("State",
+                                            ImGuiTableColumnFlags_WidthFixed,
+                                            70.0f);
+                    ImGui::TableSetupColumn("Purpose",
+                                            ImGuiTableColumnFlags_WidthStretch);
+                    ImGui::TableHeadersRow();
+                    env_row("ST_PTM_BASE_ROM_DIR",
+                            "Auto-discover base ROM for `ptm import` by "
+                            "looking up <vehicle_id>.bin in this dir.");
+                    env_row("ST_AP3_TRACE_USB",
+                            "Hexdump every AP USB OUT/IN payload to stderr "
+                            "for protocol debugging.");
+                    env_row("ST_AP3_READFILE_DRAIN_MODE",
+                            "Workaround for cmd 0x21 large-file truncation "
+                            "(reads 512-byte chunks until idle).");
+                    env_row("STT_AP3_LIVE_TEST",
+                            "Gate the [.live][ap3] Catch2 smoke tests "
+                            "against a real plugged-in AP.");
+                    env_row("MSYS_NO_PATHCONV",
+                            "(Windows Git Bash) suppress /maps/-path auto-"
+                            "conversion. Use when running CLI ap3 verbs.");
+                    ImGui::EndTable();
+                }
+                ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+                text_subtle("docs/install.md → \"Troubleshooting `ap3` "
+                            "connections\" has full setup notes.");
+            }
+
+            ImGui::Dummy(ImVec2(0.0f, kSpaceM));
+
+            if (ImGui::CollapsingHeader("Build-time feature flags",
+                                        ImGuiTreeNodeFlags_DefaultOpen)) {
+                auto flag_row = [](char const *name, bool on, char const *desc) {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::TextUnformatted(name);
+                    ImGui::TableSetColumnIndex(1);
+                    if (on) {
+                        ImGui::TextColored(chip_fg_ok(), "ON");
+                    } else {
+                        ImGui::TextDisabled("OFF");
+                    }
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::TextUnformatted(desc);
+                };
+                if (ImGui::BeginTable("##settings_build_flags", 3,
+                                      ImGuiTableFlags_RowBg |
+                                          ImGuiTableFlags_BordersInnerH |
+                                          ImGuiTableFlags_SizingStretchProp)) {
+                    ImGui::TableSetupColumn("Name",
+                                            ImGuiTableColumnFlags_WidthFixed,
+                                            260.0f);
+                    ImGui::TableSetupColumn("State",
+                                            ImGuiTableColumnFlags_WidthFixed,
+                                            70.0f);
+                    ImGui::TableSetupColumn("Purpose",
+                                            ImGuiTableColumnFlags_WidthStretch);
+                    ImGui::TableHeadersRow();
+#ifdef ST_ETS_HAVE_CIPHER
+                    constexpr bool cipher_on = true;
+#else
+                    constexpr bool cipher_on = false;
+#endif
+#ifdef ST_ETS_HAVE_PTM_REWRITE
+                    constexpr bool rewrite_on = true;
+#else
+                    constexpr bool rewrite_on = false;
+#endif
+                    flag_row("ST_ETS_HAVE_CIPHER", cipher_on,
+                             "`.ptm` cipher chain (XTEA + AES + bzip2). "
+                             "Required for ptm inspect/diff/import.");
+                    flag_row("ST_ETS_HAVE_PTM_REWRITE", rewrite_on,
+                             "`.ptm` encrypt path. Required for ptm export "
+                             "(write back to AP).");
+                    ImGui::EndTable();
+                }
+                ImGui::Dummy(ImVec2(0.0f, kSpaceXS));
+                text_subtle("Rebuild with -D<flag>=ON to enable. See docs/34.");
             }
             ImGui::EndTabItem();
         }

@@ -12,6 +12,7 @@
 
 #include "actions.hpp"
 #include "app_state.hpp"
+#include "panels/atlas_access.hpp"
 #include "project_io.hpp"
 #include "theme.hpp"
 #include "widgets/widgets.hpp"
@@ -1237,6 +1238,155 @@ void render_table_view(AppState &state, Fonts const &fonts) {
         render_table_heatmap(td_view, tbl, scal, stats);
     } else {
         render_table_grid(td_view, scal, stats, state.selection, fonts, state, edited_mask);
+    }
+
+    // Atlas context — corpus-derived "what does tuning this table
+    // actually mean" surface. Lazy-loaded once per process via
+    // shared_atlas(); nullptr-degrade when no atlas file is on disk.
+    // Lookup is by selected_table_id, which is the def-pack id;
+    // atlas alignment with def packs is the analyst's curation
+    // responsibility — when the atlas knows about this table, we
+    // render; when it doesn't, we render nothing (no warning, no
+    // "missing" message — atlas coverage is an "in addition to"
+    // signal, not a required field).
+    if (auto const *atlas = shared_atlas(); atlas != nullptr) {
+        auto const *at = atlas->find_table(state.selected_table_id);
+        if (at != nullptr) {
+            ImGui::Separator();
+            if (ImGui::CollapsingHeader("Atlas context",
+                                        ImGuiTreeNodeFlags_DefaultOpen)) {
+                // Two-column key/value layout. Mirrors the device-tab
+                // shape in ets_browser.cpp.
+                auto field = [](char const *label, char const *value,
+                                ImVec4 const *fg = nullptr) {
+                    if (value == nullptr || value[0] == '\0') {
+                        return;
+                    }
+                    ImGui::TextDisabled("%s", label);
+                    ImGui::SameLine(160.0f);
+                    if (fg != nullptr) {
+                        ImGui::PushStyleColor(ImGuiCol_Text, *fg);
+                        ImGui::TextUnformatted(value);
+                        ImGui::PopStyleColor();
+                    } else {
+                        ImGui::TextWrapped("%s", value);
+                    }
+                };
+                field("Purpose", at->purpose.c_str());
+                field("Units", at->units.c_str());
+                // Flag chips inline — most-relevant binary signals.
+                if (at->common_core || at->high_variance ||
+                    at->needs_def_promotion) {
+                    ImGui::TextDisabled("Flags");
+                    ImGui::SameLine(160.0f);
+                    bool drew_one = false;
+                    if (at->common_core) {
+                        chip("common-core", chip_fg_ok(), chip_bg_ok());
+                        drew_one = true;
+                        if (ImGui::IsItemHovered()) {
+                            ImGui::SetTooltip(
+                                "Every tuner cluster in the corpus touches\n"
+                                "this table. Editing here is universal.");
+                        }
+                    }
+                    if (at->high_variance) {
+                        if (drew_one) {
+                            ImGui::SameLine();
+                        }
+                        chip("high-variance", chip_fg_caution(),
+                             chip_bg_caution());
+                        drew_one = true;
+                        if (ImGui::IsItemHovered()) {
+                            ImGui::SetTooltip(
+                                "Wide value spread across the corpus.\n"
+                                "Different tuners pick different numbers.");
+                        }
+                    }
+                    if (at->needs_def_promotion) {
+                        if (drew_one) {
+                            ImGui::SameLine();
+                        }
+                        chip("needs def promotion", chip_fg_muted(),
+                             chip_bg_muted());
+                        if (ImGui::IsItemHovered()) {
+                            ImGui::SetTooltip(
+                                "Atlas knows this table but it's missing from\n"
+                                "or thin in the public def pack — analyst-\n"
+                                "tracked as a candidate for promotion.");
+                        }
+                    }
+                }
+                // FA24 portability — directly answers "does this edit
+                // carry over on a swap." Color-codes by category so
+                // the user can eyeball it.
+                if (!at->fa24_portability.empty()) {
+                    ImGui::TextDisabled("FA24 swap");
+                    ImGui::SameLine(160.0f);
+                    ImVec4 const fa_color =
+                        at->fa24_portability == "portable"
+                            ? chip_fg_ok()
+                        : at->fa24_portability == "needs_retune"
+                            ? chip_fg_caution()
+                        : at->fa24_portability == "fa20_specific"
+                            ? chip_fg_danger()
+                            : chip_fg_muted();
+                    ImVec4 const fa_bg =
+                        at->fa24_portability == "portable"
+                            ? chip_bg_ok()
+                        : at->fa24_portability == "needs_retune"
+                            ? chip_bg_caution()
+                        : at->fa24_portability == "fa20_specific"
+                            ? chip_bg_danger()
+                            : chip_bg_muted();
+                    chip(at->fa24_portability.c_str(), fa_color, fa_bg);
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip(
+                            "FA24-swap portability classification from the\n"
+                            "WRK3→FA24 corpus analysis. portable = carries\n"
+                            "over; needs_retune = re-derive on new engine;\n"
+                            "fa20_specific = actively wrong on FA24.");
+                    }
+                }
+                // Co-edits — most useful signal in the editor context.
+                // Tells the user "if you change this, you usually want
+                // to change these others too." Surfaced inline so the
+                // user can see the relationship without leaving the
+                // grid.
+                if (!at->co_edits.empty()) {
+                    ImGui::TextDisabled("Co-edits with");
+                    ImGui::SameLine(160.0f);
+                    std::string joined;
+                    for (std::size_t i = 0; i < at->co_edits.size(); ++i) {
+                        if (i > 0) {
+                            joined += ", ";
+                        }
+                        joined += at->co_edits[i];
+                    }
+                    ImGui::TextWrapped("%s", joined.c_str());
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip(
+                            "Corpus pattern: when tuners edit this table\n"
+                            "they typically also edit these. Not a hard\n"
+                            "rule — see Atlas safety pairs for those.");
+                    }
+                }
+                // Tuner-cluster history — who tunes this. Lets the
+                // user see "this is COBB territory" vs "Fehr-style"
+                // before deciding what value to pick.
+                if (!at->clusters.empty()) {
+                    ImGui::TextDisabled("Tuners touch");
+                    ImGui::SameLine(160.0f);
+                    std::string joined;
+                    for (std::size_t i = 0; i < at->clusters.size(); ++i) {
+                        if (i > 0) {
+                            joined += ", ";
+                        }
+                        joined += at->clusters[i];
+                    }
+                    ImGui::TextWrapped("%s", joined.c_str());
+                }
+            }
+        }
     }
 
     // Escape clears the current selection when the Table panel has focus.

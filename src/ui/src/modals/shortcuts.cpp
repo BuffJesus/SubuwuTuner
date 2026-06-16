@@ -34,7 +34,7 @@ std::vector<ShortcutGroup> const &shortcuts_reference() {
         {"Global",
          {
              {"Ctrl+K", "Open command palette (search every action + table)"},
-             {"F1", "Open in-app help (topics + glossary)"},
+             {"F1", "Open in-app help — context-aware: lands on the topic relevant to the focused panel (e.g. AccessPort Browser → file vault doc; Flash modal → brick protection)"},
              {"Ctrl+O", "Open project…"},
              {"Ctrl+S", "Save project"},
              {"Ctrl+Q", "Quit (with unsaved-changes guard)"},

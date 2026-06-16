@@ -9,14 +9,18 @@
 #include "panels/panels.hpp"
 
 #include "app_state.hpp"
+#include "panels/atlas_access.hpp"
+#include "theme.hpp"
 #include "widgets/widgets.hpp"
 
 #include <imgui.h>
 #include <implot.h>
 
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -36,6 +40,7 @@ void render_stats_panel(AppState &state) {
         ImGui::End();
         return;
     }
+    track_help_context(state, AppState::HelpContext::Stats);
     if (!state.project.has_value()) {
         render_empty_state(
             "No project",
@@ -253,6 +258,77 @@ void render_stats_panel(AppState &state) {
         ImGui::SetTooltip("Markdown: paste into a forum post / PR\n"
                           "description / Slack message — renders\n"
                           "as a proper table.");
+    }
+
+    // Atlas roll-up — purpose / FA24 portability / cluster + co-edit
+    // context for the selected table. Sits between the numeric stats
+    // and the histogram so the user sees "what is this" alongside
+    // "what's the distribution." Lazy-loaded shared singleton; the
+    // entire block is suppressed when no atlas is on disk or the
+    // selected table id isn't in the atlas (graceful degrade).
+    if (auto const *atlas = shared_atlas(); atlas != nullptr) {
+        if (auto const *ae = atlas->find_table(table->id); ae != nullptr) {
+            ImGui::Separator();
+            ImGui::TextColored(chip_fg_accent(), "Atlas");
+            if (!ae->purpose.empty()) {
+                ImGui::TextWrapped("%s", ae->purpose.c_str());
+            }
+            if (!ae->fa24_portability.empty()) {
+                ImVec4 color = chip_fg_muted();
+                if (ae->fa24_portability == "portable") {
+                    color = chip_fg_ok();
+                } else if (ae->fa24_portability == "needs_retune") {
+                    color = chip_fg_caution();
+                } else if (ae->fa24_portability == "fa20_specific") {
+                    color = chip_fg_danger();
+                }
+                ImGui::TextColored(color, "FA24: %s",
+                                   ae->fa24_portability.c_str());
+            }
+            // Three badges (common-core / high-variance / needs-def-
+            // promotion) on a single line — same vocabulary as the
+            // table-editor Atlas-context section so the user pattern-
+            // matches across surfaces.
+            bool any_badge = false;
+            auto badge_inline = [&](char const *label, ImVec4 const &col) {
+                if (any_badge) {
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted(" ");
+                    ImGui::SameLine();
+                }
+                ImGui::TextColored(col, "%s", label);
+                any_badge = true;
+            };
+            if (ae->common_core) {
+                badge_inline("\xE2\x98\x85 common-core", chip_fg_accent());
+            }
+            if (ae->high_variance) {
+                badge_inline("high-variance", chip_fg_caution());
+            }
+            if (ae->needs_def_promotion) {
+                badge_inline("needs-def-promotion", chip_fg_warn());
+            }
+            if (!ae->clusters.empty()) {
+                std::string joined;
+                for (std::size_t i = 0; i < ae->clusters.size(); ++i) {
+                    if (i > 0) {
+                        joined += ", ";
+                    }
+                    joined += ae->clusters[i];
+                }
+                text_subtle("tuners: %s", joined.c_str());
+            }
+            if (!ae->co_edits.empty()) {
+                std::string joined;
+                for (std::size_t i = 0; i < ae->co_edits.size(); ++i) {
+                    if (i > 0) {
+                        joined += ", ";
+                    }
+                    joined += ae->co_edits[i];
+                }
+                text_subtle("co-edits: %s", joined.c_str());
+            }
+        }
     }
 
     ImGui::Separator();
