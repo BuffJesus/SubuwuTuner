@@ -14,6 +14,8 @@
 #ifndef ST_LIBRARY_PTM_XML_BUILDER_HPP
 #define ST_LIBRARY_PTM_XML_BUILDER_HPP
 
+#include "st/core/result.hpp"
+
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -21,6 +23,26 @@
 #include <vector>
 
 namespace st::library {
+
+// Defensive validator for `.ptm` metadata fields (vendorId / vehicleId /
+// romSum / saveDateTime). XML-escaping in `build_ptm_*_xml` keeps the
+// output valid as XML, but the consuming AP firmware's BusyBox shell
+// scripts extract these fields via `sed` + `eval` (see analyst writeup
+// at `findings/tuning-knowledge-2026-06-13/cmd22-path-re/shell_injection_sinks.md`)
+// — XML safety is necessary but not sufficient. We additionally
+// restrict the character set to alphanumeric + a small safe-punctuation
+// set so accidental shell metachars in user-supplied metadata can't
+// chain through to the AP's parser.
+//
+// Restricted character set: ASCII [A-Z a-z 0-9 . _ - space]. Length
+// capped at 128 chars. Anything else returns InvalidArgument with a
+// description naming the bad character.
+//
+// This is defense-in-depth — the COBB firmware should sanitize its own
+// inputs too, and we'd report the underlying issue to COBB through a
+// responsible-disclosure path. Belt + suspenders.
+[[nodiscard]] Status validate_ptm_metadata_field(std::string_view field_name,
+                                                  std::string_view value);
 
 // One patch as it appears in the inner XML. bytes_b64 is the base64-
 // encoded replacement-bytes string from the project's ptm_patches.toml
