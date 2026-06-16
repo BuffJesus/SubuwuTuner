@@ -781,6 +781,7 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
 Result<Frame> Transport::send_recv_to(std::uint32_t can_id_request_override,
                                        std::span<std::uint8_t const> payload,
                                        std::chrono::milliseconds timeout) {
+    std::lock_guard const lk{dvi_mu_};
     if (!open_) {
         return failure(ErrorCode::TransportUnavailable,
                        "obdx::Transport::send_recv: transport not open");
@@ -968,14 +969,19 @@ std::vector<std::uint8_t> periodic_interval_payload(std::uint8_t slot, std::uint
 
 std::vector<std::uint8_t> periodic_data_payload(std::uint8_t slot, std::uint32_t can_id,
                                                   std::span<std::uint8_t const> data) {
+    // assign+insert pattern (not reserve+push_back) to sidestep GCC 15's
+    // false-positive -Wfree-nonheap-object on the reserve+push_back form.
+    // Same workaround used in send_recv's CAN-ID-prefix dance further up.
+    std::uint8_t const head[6] = {
+        kSubPeriodicData,
+        slot,
+        static_cast<std::uint8_t>((can_id >> 24U) & 0xFFU),
+        static_cast<std::uint8_t>((can_id >> 16U) & 0xFFU),
+        static_cast<std::uint8_t>((can_id >> 8U) & 0xFFU),
+        static_cast<std::uint8_t>(can_id & 0xFFU),
+    };
     std::vector<std::uint8_t> out;
-    out.reserve(1 + 1 + 4 + data.size());
-    out.push_back(kSubPeriodicData);
-    out.push_back(slot);
-    out.push_back(static_cast<std::uint8_t>((can_id >> 24U) & 0xFFU));
-    out.push_back(static_cast<std::uint8_t>((can_id >> 16U) & 0xFFU));
-    out.push_back(static_cast<std::uint8_t>((can_id >> 8U) & 0xFFU));
-    out.push_back(static_cast<std::uint8_t>(can_id & 0xFFU));
+    out.assign(std::begin(head), std::end(head));
     out.insert(out.end(), data.begin(), data.end());
     return out;
 }
@@ -987,6 +993,7 @@ std::vector<std::uint8_t> periodic_enable_payload(std::uint8_t slot, bool on) {
 } // namespace
 
 st::Status Transport::set_periodic_slot(PeriodicSlot const &slot) {
+    std::lock_guard const lk{dvi_mu_};
     if (!open_) {
         return failure(ErrorCode::TransportUnavailable,
                        "obdx::set_periodic_slot: transport not open");
@@ -1024,7 +1031,36 @@ st::Status Transport::set_periodic_slot(PeriodicSlot const &slot) {
     return ok();
 }
 
+st::Status Transport::update_periodic_slot_data(std::uint8_t index, std::uint32_t can_id,
+                                                  std::span<std::uint8_t const> data) {
+    std::lock_guard const lk{dvi_mu_};
+    if (!open_) {
+        return failure(ErrorCode::TransportUnavailable,
+                       "obdx::update_periodic_slot_data: transport not open");
+    }
+    if (channel_ == nullptr) {
+        return failure(ErrorCode::TransportUnavailable,
+                       "obdx::update_periodic_slot_data: no byte channel");
+    }
+    if (index > kMaxPeriodicSlot) {
+        return failure(ErrorCode::InvalidArgument,
+                       "obdx::update_periodic_slot_data: index out of range");
+    }
+    if (data.size() == 0 || data.size() > kMaxPeriodicDataBytes) {
+        return failure(ErrorCode::InvalidArgument,
+                       "obdx::update_periodic_slot_data: data size must be 1..8");
+    }
+    auto const payload = periodic_data_payload(index, can_id, data);
+    if (auto r = dvi_exchange(*channel_, dvi::Opcode::CanProtocolSettings, payload,
+                               kCanFilterTimeout);
+        !r.has_value()) {
+        return failure(r.error());
+    }
+    return ok();
+}
+
 st::Status Transport::enable_periodic_slot(std::uint8_t index, bool on) {
+    std::lock_guard const lk{dvi_mu_};
     if (!open_) {
         return failure(ErrorCode::TransportUnavailable,
                        "obdx::enable_periodic_slot: transport not open");
@@ -1062,6 +1098,7 @@ st::Status Transport::clear_all_periodic_slots() {
 
 st::Status Transport::send_to(std::uint32_t can_id_request_override,
                                std::span<std::uint8_t const> payload) {
+    std::lock_guard const lk{dvi_mu_};
     if (!open_) {
         return failure(ErrorCode::TransportUnavailable,
                        "obdx::Transport::send: transport not open");

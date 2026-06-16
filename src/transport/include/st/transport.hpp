@@ -182,6 +182,25 @@ public:
                        "transport does not support periodic-frame TX scheduling");
     }
 
+    // Update a slot's data (CAN ID + payload) WITHOUT reconfiguring its
+    // interval. One DVI exchange (sub-op 0x1B only), so ~5-10 ms per
+    // call versus ~10-20 ms for set_periodic_slot. Use this from a
+    // host-side worker thread that advances rolling-counter bytes
+    // (per SubuwuTuner-specs/specs/obdx-vx-raw-can-injection-capability.md
+    // §7 second unresolvable + the round-2 capture's counter positions
+    // at 0x002[3], 0x140[1], 0x152[1], 0x280[1]).
+    //
+    // The slot must already be configured via set_periodic_slot AND
+    // enabled via enable_periodic_slot. Calling this on an unconfigured
+    // slot is undefined; OBDX silently accepts but the adapter has no
+    // interval to TX with.
+    [[nodiscard]] virtual Status
+    update_periodic_slot_data(std::uint8_t /*index*/, std::uint32_t /*can_id*/,
+                              std::span<std::uint8_t const> /*data*/) {
+        return failure(ErrorCode::NotImplemented,
+                       "transport does not support periodic-frame TX scheduling");
+    }
+
     // Disable + reset every periodic slot. Best-effort: callers invoke
     // this at flash-apply teardown so the next session starts clean.
     [[nodiscard]] virtual Status clear_all_periodic_slots() {

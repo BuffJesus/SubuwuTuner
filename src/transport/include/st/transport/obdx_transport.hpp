@@ -111,6 +111,10 @@ public:
     [[nodiscard]] st::Status
     enable_periodic_slot(std::uint8_t index, bool on) override;
 
+    [[nodiscard]] st::Status
+    update_periodic_slot_data(std::uint8_t index, std::uint32_t can_id,
+                              std::span<std::uint8_t const> data) override;
+
     [[nodiscard]] st::Status clear_all_periodic_slots() override;
 
     [[nodiscard]] bool supports_periodic_slots() const noexcept override {
@@ -155,6 +159,11 @@ private:
     std::thread streaming_thread_;
     std::atomic<bool> streaming_stop_{false};
     FrameCallback streaming_callback_;
+    // Serializes DVI exchanges across threads. Without it, concurrent
+    // calls from foreground UDS + background periodic-slot updater
+    // interleave bytes and corrupt the CRC. ITransport's "safe to call
+    // from any thread, serialized internally" contract requires this.
+    mutable std::mutex dvi_mu_;
 };
 
 } // namespace st::transport::obdx

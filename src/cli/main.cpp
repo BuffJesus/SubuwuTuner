@@ -85,6 +85,7 @@
 #include <optional>
 #include <set>
 #include <span>
+#include <thread>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -12708,8 +12709,33 @@ int cmd_flash_apply(int argc, char *argv[]) {
         // §4). Adapter TXes the 8 heartbeat frames autonomously in the
         // background; UDS continues on 0x7E0/0x7E8 undisturbed.
         //
+        // Counter-update worker thread for the periodic-frame slots
+        // (see worker setup further down inside the
+        // with_vehicle_presence_injection block). Declared at outer
+        // scope so the worker lives through the entire flash-apply
+        // sequence; CounterWorkerGuard destructor joins it on every
+        // return path.
+        std::atomic<bool> counter_worker_stop{false};
+        std::thread counter_worker;
+        struct CounterWorkerGuard {
+            std::atomic<bool> *stop_flag{nullptr};
+            std::thread *worker{nullptr};
+            ~CounterWorkerGuard() {
+                if (stop_flag != nullptr) {
+                    stop_flag->store(true, std::memory_order_release);
+                }
+                if (worker != nullptr && worker->joinable()) {
+                    worker->join();
+                }
+            }
+        } counter_guard{&counter_worker_stop, &counter_worker};
+
         // Scope-guard the teardown: every flash-apply return path must
         // clear the slots so they don't keep TX-ing on the next session.
+        // NOTE: declared AFTER counter_guard so counter_guard's destructor
+        // (which joins the worker) runs FIRST. Reverse declaration order
+        // would join the worker AFTER clearing slots, racing the worker's
+        // last update_periodic_slot_data calls.
         struct PeriodicSlotsCleanup {
             st::transport::ITransport *transport{nullptr};
             bool armed{false};
@@ -12772,6 +12798,76 @@ int cmd_flash_apply(int argc, char *argv[]) {
                        "(8 slots, ~20-40 ms cadence)\n",
                        stderr);
             periodic_cleanup.armed = true;
+            // Brief wait so the ECM sees several cycles of heartbeats
+            // before the UDS prelude starts. At ~20 ms minimum cadence
+            // and 200 ms wait, the fastest IDs (0x002 / 0x140 / 0x141)
+            // get ~10 frames each delivered before DSC entry. If the
+            // ECM's vehicle-presence check is "N frames in last M ms"
+            // this should comfortably satisfy any reasonable threshold.
+            std::this_thread::sleep_for(std::chrono::milliseconds{200});
+
+            // Host-driven counter update worker. Per round-3 spec §7
+            // second unresolvable: the captured heartbeat IDs have
+            // rolling counters at known byte positions:
+            //   0x002[3]   counter byte (sample 0x05)
+            //   0x140[1]   4-bit counter cycling 0..F
+            //   0x152[1]   high-nibble counter
+            //   0x280[1]   counter byte
+            // The periodic-frame scheduler TXes static data each cycle;
+            // the ECM probably validates the rolling counters and
+            // rejects stuck data as "not real telemetry." This worker
+            // advances the counter bytes from the host every 50 ms by
+            // calling update_periodic_slot_data, so the ECM observes
+            // a slowly-evolving counter pattern across the active
+            // slots. Stops on atomic flag flipped at exit.
+            //
+            counter_worker = std::thread([&counter_worker_stop, chosen]() {
+                struct CounterSlot {
+                    std::uint8_t slot_index;
+                    std::uint32_t can_id;
+                    std::array<std::uint8_t, 8> payload;
+                    std::uint8_t counter_pos;
+                    std::uint8_t counter_mask;
+                };
+                std::array<CounterSlot, 4> counter_slots{{
+                    // Slot 0: 0x002, counter at pos[3] (8-bit)
+                    {0, 0x002, {0xFF, 0xA7, 0x70, 0x05, 0x1B, 0x00, 0x00, 0x00}, 3, 0xFF},
+                    // Slot 1: 0x140, counter at pos[1] (4-bit low nibble cycling)
+                    {1, 0x140, {0x00, 0x06, 0x00, 0x40, 0x00, 0x00, 0x14, 0x00}, 1, 0x0F},
+                    // Slot 4: 0x152, counter at pos[1] (4-bit high nibble)
+                    {4, 0x152, {0xF1, 0x44, 0x00, 0x00, 0x00, 0x00, 0x08, 0x80}, 1, 0xF0},
+                    // Slot 6: 0x280, counter at pos[1] (8-bit)
+                    {6, 0x280, {0x00, 0x01, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00}, 1, 0xFF},
+                }};
+                std::uint8_t tick = 0;
+                while (!counter_worker_stop.load(std::memory_order_acquire)) {
+                    for (auto &cs : counter_slots) {
+                        // Advance the counter byte. For 4-bit fields use
+                        // the mask to keep the non-counter nibble intact.
+                        if (cs.counter_mask == 0xFF) {
+                            cs.payload[cs.counter_pos] = tick;
+                        } else if (cs.counter_mask == 0x0F) {
+                            cs.payload[cs.counter_pos] =
+                                static_cast<std::uint8_t>(
+                                    (cs.payload[cs.counter_pos] & 0xF0) | (tick & 0x0F));
+                        } else if (cs.counter_mask == 0xF0) {
+                            cs.payload[cs.counter_pos] =
+                                static_cast<std::uint8_t>(
+                                    (cs.payload[cs.counter_pos] & 0x0F) |
+                                    static_cast<std::uint8_t>((tick & 0x0F) << 4U));
+                        }
+                        (void)chosen->update_periodic_slot_data(
+                            cs.slot_index, cs.can_id,
+                            std::span<std::uint8_t const>{cs.payload.data(),
+                                                           cs.payload.size()});
+                    }
+                    ++tick;
+                    std::this_thread::sleep_for(std::chrono::milliseconds{50});
+                }
+            });
+            std::fputs("flash-apply: counter-update worker started "
+                       "(50 ms cadence advancing rolling counters)\n",
+                       stderr);
         }
         if (enter_dsc) {
             if (auto s = flasher.client().diagnostic_session_control(
