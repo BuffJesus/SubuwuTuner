@@ -12322,6 +12322,10 @@ int cmd_flash_apply(int argc, char *argv[]) {
     std::uint8_t security_level = 0x01;
     std::optional<bool> authenticate_flag;
     std::optional<bool> enter_dsc_flag;
+    // Default: do the L1 follow-up when security_level > 0x01 (COBB-tuned
+    // ECUs need it per cobb-install-flow.md §2). --no-sa-l1-followup
+    // disables for ECUs that reject the secondary L1 unlock with NRC 0x7F.
+    bool sa_l1_followup_disabled = false;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -12413,6 +12417,8 @@ int cmd_flash_apply(int argc, char *argv[]) {
             enter_dsc_flag = true;
         } else if (a == "--no-enter-dsc") {
             enter_dsc_flag = false;
+        } else if (a == "--no-sa-l1-followup") {
+            sa_l1_followup_disabled = true;
         } else if (a == "--confirm") {
             confirm = true;
         } else if (a == "--reason") {
@@ -12718,6 +12724,58 @@ int cmd_flash_apply(int argc, char *argv[]) {
                 std::fprintf(stderr, "flash-apply: SA sendKey failed: %s\n",
                              s.error().to_string().c_str());
                 return 1;
+            }
+            // COBB-tuned Subaru ECUs require a second L1 SA in the same
+            // session AFTER the primary (typically L3) succeeds — DSC
+            // ProgrammingSession otherwise rejects with NRC 0x22 even
+            // though L3 alone unlocked SA. The L1 sendKey that follows
+            // is lazy-verified once L3 set its latch (key bytes can be
+            // arbitrary per the captured install sniffs), but the wire
+            // exchange must occur. Fires only when the primary SA was
+            // above L1 — for L1-only flows the primary IS the L1 SA.
+            //
+            // Between the L3 and L1 SA exchanges the COBB AP issues an
+            // RMBA at the CRC-slot region (`0x001FFF30..0x001FFFA0`); the
+            // ECU appears to require non-SA traffic in the session
+            // before another requestSeed is accepted (post-SA tracking
+            // anti-replay). Without it, L1 requestSeed returns NRC 0x7F
+            // (subFunctionNotSupportedInActiveSession). The RMBA bytes
+            // are discarded — the call is purely a state-transition
+            // trigger.
+            if (security_level > 0x01U && !sa_l1_followup_disabled) {
+                if (auto rmba = flasher.client().read_memory_by_address(
+                        0x001FFF30U, 0x70U, std::chrono::milliseconds{1000});
+                    !rmba.has_value()) {
+                    std::fprintf(stderr,
+                                 "flash-apply: post-L3 RMBA at 0x1FFF30 failed: %s\n",
+                                 rmba.error().to_string().c_str());
+                    return 1;
+                }
+                auto seed_l1 = flasher.client().security_access_request_seed(
+                    0x01, std::chrono::milliseconds{1000});
+                if (!seed_l1.has_value()) {
+                    std::fprintf(stderr,
+                                 "flash-apply: SA L1 follow-up requestSeed failed: %s\n",
+                                 seed_l1.error().to_string().c_str());
+                    return 1;
+                }
+                auto key_l1 = st::ecu::subaru::ssmcan1_l1_aftermarket(*seed_l1);
+                if (!key_l1.has_value()) {
+                    std::fprintf(stderr,
+                                 "flash-apply: SA L1 follow-up key derivation failed: %s\n",
+                                 key_l1.error().to_string().c_str());
+                    return 1;
+                }
+                if (auto s = flasher.client().security_access_send_key(
+                        0x02, *key_l1, std::chrono::milliseconds{1000});
+                    !s.has_value()) {
+                    std::fprintf(stderr,
+                                 "flash-apply: SA L1 follow-up sendKey failed: %s\n",
+                                 s.error().to_string().c_str());
+                    return 1;
+                }
+                std::fputs("flash-apply: SA L1 follow-up completed (lazy-verify)\n",
+                           stderr);
             }
         }
     }

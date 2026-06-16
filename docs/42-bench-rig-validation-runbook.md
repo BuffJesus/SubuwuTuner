@@ -1,4 +1,4 @@
-# 41 — Bench-rig validation runbook
+# 42 — Bench-rig validation runbook
 
 > Picks up where `docs/28-bench-rig-build.md` ends. Assumes the rig is **assembled, powered, and has produced a first ROM read.** Sequences the hardware-side validation that retires the open hardware gates (`docs/04` ship-blockers + `docs/31` / `docs/40` brick-protection items + `docs/16` patch-insertion).
 
