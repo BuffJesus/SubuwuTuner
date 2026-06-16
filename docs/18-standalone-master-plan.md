@@ -474,7 +474,7 @@ a personal tuner-on-FA24 v3 — patch breakdown
 [Back] [Flash this]
 ```
 
-This is the architectural-classifier (`src/devices/ap3/src/architectural_classifier.cpp`, shipped today) output, rendered on the handheld's LVGL screen. The cross-compiled classifier is byte-identical to the desktop's, so the same tune displays identically on both surfaces.
+This is the architectural-classifier (`src/devices/ets/src/architectural_classifier.cpp`, shipped today) output, rendered on the handheld's LVGL screen. The cross-compiled classifier is byte-identical to the desktop's, so the same tune displays identically on both surfaces.
 
 ### Safety constraints specific to library + compose
 
@@ -520,7 +520,7 @@ this v6 of the handheld plan in several specific ways.
 - **Cipher chain understanding** lets us implement `.ptm` import/export in `docs/34` Capability A.1 — without ever distributing keys (the implementation is gated behind `ST_ENABLE_COBB_AP_CIPHER`). The handheld inherits this via cross-compiled code.
 - **Patch-format spec** (`specs/private-data-xml-to-stune-mapping.md`) gives us the schema for serializing patch sets on SD.
 - **Composition algebra spec** (`specs/patch-composition-algebra.md`) gives us the formal model for §5 + §12.5.2.
-- **Per-CID layer maps** (`src/devices/ap3/src/architectural_classifier.cpp`, shipped) give us the §12.5.3 inspect rendering.
+- **Per-CID layer maps** (`src/devices/ets/src/architectural_classifier.cpp`, shipped) give us the §12.5.3 inspect rendering.
 - **Live-USB protocol experience** (the AP3 USB byte-channel + dispatcher pattern) informs the handheld's USB-bridge mode (§6.7 + §8.5) — we know what works, what dazes the firmware, and what threat model to plan for.
 
 ### What the AP3 RE did NOT change

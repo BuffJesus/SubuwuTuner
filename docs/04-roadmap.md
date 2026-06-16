@@ -54,7 +54,7 @@ Architecture, protocol catalog, and datalogger pipeline are complete end-to-end 
 - 🟡 Streaming on concrete Transports — OBDX shipped (sniff-mode + live-streaming wired 2026-05-23). j2534 still `NotImplemented` (platform DLL dynload pending); native still `NotImplemented` (doc-18 handheld lower priority).
 - 🟡 Live gauge cluster (4–8 gauges) + CSV log export — design landed at `docs/32-live-datalogger.md` (LiveBuffer SPSC ring + LogSession multi-sink fan-out + ImPlot mini-lines + record-while-gauging); implementation queued in 5 hardware-free steps. CsvSink + LogSession + OBDX streaming all ship today.
 - 🟡 Sustained 50 Hz logging across 20 PIDs — pipeline supports it (per `docs/32` §Sustained 100 Hz target); hardware validation gated on `docs/32` impl + bench/car run
-- ✅ COBB AccessPort V3 file-vault integration (libusb-backed `st::transport::ap3` + `st::devices::ap3::Client`; CLI `ap3 {state,ls,pull,push,rm,backup}` + GUI `AccessPort Browser` panel — Connect/Disconnect, subdir tabs, per-row Pull/Remove with inline confirm popup, Push / Backup-all / Refresh toolbar, marriage chip, welcome-panel hint when an AP is detected on USB). Capability A on by default; `.ptm` cipher introspection (Capability A.1) gated behind `ST_ENABLE_COBB_AP_CIPHER` + `--enable-cobb-ap-cipher`, deferred to a follow-up tier. See `docs/34-cobb-ap-as-tune-vault.md`.
+- ✅ COBB AccessPort V3 file-vault integration (libusb-backed `st::transport::ets` + `st::devices::ets::Client`; CLI `ap3 {state,ls,pull,push,rm,backup,raw}` + GUI `AccessPort Browser` panel — Connect/Disconnect, subdir tabs, per-row Pull/Remove with inline confirm popup, Push / Backup-all / Refresh toolbar, marriage chip, welcome-panel hint when an AP is detected on USB). Capability A on by default. `.ptm` cipher introspection + the full `ptm {list-patches, inspect, diff, import, export}` family gated behind `ST_ENABLE_COBB_AP_CIPHER` + `--enable-cobb-ap-cipher` (write path additionally needs `ST_ENABLE_COBB_AP_PTM_REWRITE=ON`). End-to-end `.ptm` cycle live-validated 2026-06-12 — 4244/4244 patches byte-identical through import → export → AP push → AP pull → verify. See `docs/34-cobb-ap-as-tune-vault.md`.
 
 **Gate:** 🟡 hardware-actionable. Code paths are real + unit-tested. **Hardware now in hand:** OBDX Pro VX (2026-05-24, the OBD path), COBB AccessPort V3 (2026-06-10, the file-vault path). First ROM dump via OBDX is the open task on the OBD path; the AP3 file vault is shipped end-to-end against the spec's live-verified protocol. The bench rig (Phase 2 boot validated 2026-06-07) covers the hardware-in-the-loop side.
 
@@ -72,7 +72,7 @@ Orchestrator + Manifest + journal + policy gate + checksum-type field all exist 
 - ✅ **Optional gated 0xB6 bulk-transfer write path** — compile-flagged + runtime-flagged. See `docs/26-bulk-reflash-cipher.md`.
 - ⬜ Checksum-repair implementations (subaru_std, subaru_alt, subaru_alt2) — seam ready; algorithms still need byte-validation against a known stock dump
 - 🔒 Brick protection bootstrap + recovery shim — bench rig prerequisite
-- 🔒 Delta-only flashing + dry-run mode — same
+- 🟡 Delta-only flashing + dry-run mode — host-side six-state recovery spec landed at `docs/40-delta-flash-brick-protection.md` (additive to `docs/31`); orchestrator impl + bench-rig validation still hardware-blocked
 - ⬜ Patch insertion layer (`src/feature_patch/`) — for Phase 5 features; needs real ECU vector tables
 
 **Gate:** 🔒 100 successful flash cycles on a junkyard ECU bench rig — zero bricks, zero corrupted images. **No customer ever flashes a car until this gate is met.** Hardware-blocked.
@@ -143,9 +143,9 @@ The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0
 |---|---|---|
 | **v1.1** | VA + VB WRX **AT** | Small. Same ECU, additional transmission map set + AT-specific definitions |
 | **v1.1** | **MAF auto-tune + knock-based ignition pull** (see `docs/12-auto-tuning.md`) ✅ shipped (kernels + lint + CLI + GUI modals) | Medium. Pure-domain function, no hardware deps |
-| **v1.1** | **`.ptm` import / export** as first-class tune format (per `docs/36-tune-as-patch-set.md` + `specs/private-data-xml-to-stune-mapping.md`) — gated behind `ST_ENABLE_COBB_AP_CIPHER` per `docs/34` | Medium. Builds on T3 cipher work landing in v1.0; uses architectural classifier already shipped. |
-| **v1.1** | **Architectural-layer-aware patch display** (Layer 1 OEM-tables, Layer 2 tuner-additions, Layer 3 code-patches per `docs/35`) | Small. Wire shipped classifier into GUI patch list. |
-| **v1.1** | **Tune-vs-tune structured diff** (CLI + GUI) — replace hex-byte diff with table-cell-level semantic diff | Medium. Composition of patch decoder + definition pack table mapping. |
+| **v1.1** | **`.ptm` import / export** as first-class tune format ✅ shipped 2026-06-12 — CLI `ptm {list-patches, inspect, diff, import, export}` + GUI `File → Import / Inspect / Export / Diff .ptm` modals; end-to-end byte-identical cycle live-validated through user's AP. Gated behind `ST_ENABLE_COBB_AP_CIPHER` per `docs/34`. | Medium → done. |
+| **v1.1** | **Architectural-layer-aware patch display** ✅ shipped — `st::devices::ets::classify_patches` wired into the ptm inspect modal's per-layer breakdown (`docs/35`). | Small → done. |
+| **v1.1** | **Tune-vs-tune structured diff** ✅ shipped 2026-06-13 — CLI `ptm diff` + GUI ptm-diff modal, with table-cell-level semantic delta + interpretation prose via `st::library::interpret_diff`. | Medium → done. |
 | **v1.1** | **Pre-flash safety preview** — show structured delta against currently-flashed, not just abstract "this tune is 87 KB" | Small. Adds backupcksum identity matching + delta visualization to the existing flash modal. |
 | **v1.1** | **AP-side ROM attestation** at AccessPort connect — identify the currently-installed tune from the AP's `/backupcksum` against local library | Small. Read + hash existing local tunes; match against backupcksum string. |
 | **v1.2** | **VA STI (EJ257)** + older STI 2008+ | Medium. Different engine family but shares much of the protocol surface |
@@ -154,11 +154,44 @@ The architecture (see `02-architecture.md`) is multi-platform from day one. v1.0
 | **v1.3** | **Older EJ-powered cars** (early WRX/STI, Forester XT, Legacy GT, Outback XT, EJ20/EJ25) | Medium. Oldest ECU tech but very well covered by the community-XML catalog — mostly definitions work |
 | **v1.4** | **BRZ / Toyota 86 (FA20D NA)** | Large. Toyota-partnership ECU, different vendor, biggest single-platform engineering ask |
 | **v1.5** | **Live tuning** — RAM-shadow override + UDS WriteDataByIdentifier for on-dyno cell editing (see `docs/19-live-tuning.md`) | Large. New `st::live_tune` module + per-CID RAM-shadow address tables + per-write safety linting; gated on Phase 4 hardware validation |
-| **v1.5** | **Differential flash** — flash only the bytes that differ from currently-flashed (per `docs/36` + `findings/SUBUWUTUNER_STRATEGIC_APPLICATIONS_2026_06_11.md` #5). Minutes → seconds for typical tune-to-tune transitions. | Medium. Requires `docs/31` brick-protection extension for partial-overlay corner cases. |
+| **v1.5** | **Differential flash** — flash only the bytes that differ from currently-flashed (per `docs/36` + `findings/SUBUWUTUNER_STRATEGIC_APPLICATIONS_2026_06_11.md` #5). Minutes → seconds for typical tune-to-tune transitions. Host-side brick-protection extension landed at `docs/40-delta-flash-brick-protection.md` (six-state SH-2A recovery + journal extensions); orchestrator impl + bench-rig validation remain. | Medium. |
 | **v1.5** | **Composable patch sets** — `compose` CLI command per `specs/patch-composition-algebra.md`. Stack COBB + a personal tuner + a community swap-basemap vendor + user tweaks; layer-aware conflict detection. | Large. New `st::compose` module + conflict resolution UX + multi-layer journal. CLI ships first, GUI follows. |
 | **v1.5** | **Tune library 3-way sync** — AP ↔ local cache ↔ project, with content-hash identity tracking. | Medium. Builds on Capability A file vault + import/export. |
 | **v2.0** | **AI advisory surface (Tier 2+)** — rules-based drift classifier (`st::ai::drift`) already shipped 2026-05-31 with CLI + inline panel surfacing; v2.0 adds the optional local-LLM explanation layer on top + "explain this log" assistant (see `docs/20-ai-integration.md`). Advisory only; no path into the write surface. | Medium. `st::ai` module already in tree; v2.0 adds the Backend abstraction (Ollama / OpenAI / Anthropic) over the existing classifier output. Compile-time-optional. |
 | **v2.0** | **Crosstrek / Forester (current FB-powered)**, regional variants | Definitions work plus light protocol additions |
+
+## Sequencing the open v1.1 items (post-2026-06-13)
+
+After the 2026-06-13 push, the v1.1 list above has 5 items still open:
+
+1. **VA + VB WRX AT** (additional platform-coverage; orthogonal to everything else).
+2. **Pre-flash safety preview** (structured delta vs currently-flashed).
+3. **AP-side ROM attestation** (identify currently-flashed tune from `/backupcksum` vs local library).
+4. **VB Linux/M-series J2534 parity** (cross-cutting; platform).
+5. **ELM327 write path** (gated on safety analysis; likely never ships).
+
+Items 2 + 3 share the same blocker: **the tune-library posture decision** (Strategic Question A in `findings/handoffs/HANDOFF-to-analyst-2026-06-13-library-posture.md`). Both features want a way to ask "is hash X in the user's library, and if so what's its name?" Phase 0 of the answer is shipped already as the standalone `tools/library_inventory/inventory.py`; Phase 1 (C++ side: `library_root` config + `LibraryIndex::lookup_by_md5`) is ~1 afternoon once the posture is decided.
+
+Item 1 (AT WRX) is small and independent — adds a definition pack + AT-specific table set; doesn't need code changes.
+
+### Order of operations the implementer suggests
+
+1. **Land the library-posture answer** (analyst) → implementer ships Phase 1 (~half-day) → both pre-flash safety preview AND AP-side ROM attestation become small features (~1 day each).
+2. **Land the threading-model answer** (Strategic Question C in `findings/handoffs/HANDOFF-to-analyst-2026-06-13-ap-browser-threading.md`) → implementer refactors AP browser (~3-4 days) → unblocks bulk ops + library sync (v1.5 territory but earlier than expected).
+3. **AT WRX pack** (parallel work) — definition-pack effort, doesn't block anything else.
+
+### v1.5 items still gated
+
+| v1.5 item | Gate |
+|---|---|
+| Differential flash | `docs/40-delta-flash-brick-protection.md` shipped 2026-06-13 (host side); orchestrator impl + bench-rig validation remain |
+| Composable patch sets (`compose` CLI) | Library posture answer; then `st::compose` module |
+| Tune library 3-way sync (AP ↔ local ↔ project) | Library posture answer; then async threading answer; then build the sync workflow |
+| Live tuning (RAM-shadow over UDS) | Bench rig + Phase 4 hardware validation gate |
+
+### Bench-rig path
+
+When the rig comes up (sensitivities tracked in `docs/28-bench-rig-build.md`), the validation runbook in `docs/41-bench-rig-validation-runbook.md` sequences what gets exercised first: read-back validation → SecurityAccess against the rig's real ECU → first deliberate write → power-loss inject → delta-flash recovery (`docs/40`). The rig is the single biggest unlock for v1.0 ship-blocker #1 (brick protection per ISA).
 
 ## Cross-cutting v1.x improvements
 

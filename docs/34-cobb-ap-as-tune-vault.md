@@ -79,7 +79,7 @@ subuwutuner-cli --enable-cobb-ap-cipher ptm export <project.stune> --as <out.ptm
 export ST_PTM_BASE_ROM_DIR=~/subuwutuner/base-roms
 ```
 
-`ptm import` writes a `Project::open`-compatible 5-file skeleton (`project.toml` with `[ptm_metadata]` + `source.bin` + `working.bin` (patches applied) + `edits.toml` + `ptm_patches.toml`). The output project loads in the GUI immediately.
+`ptm import` writes a `Project::open`-compatible 5-file skeleton (`project.toml` with `[ptm_metadata]` + `source.bin` + `working.bin` (patches applied) + `edits.toml` + `ptm_patches.toml`). The output project loads in the GUI immediately. `edits.toml` carries one `[[edit]]` (ByteEdit form) per imported patch, all tagged `"ptm_import"` — the imported tune appears as N undo-able entries in the history panel, and `History::undo_while_tag("ptm_import")` reverts the whole import as a single transaction. `ptm_patches.toml` is kept alongside as the round-trip-authoritative source for `ptm export`.
 
 `ptm export` is the reverse — reads `[ptm_metadata]` + `ptm_patches.toml` from a project and rebuilds the .ptm via `encrypt_ptm`. Round-trip is byte-identical at the PrivateData XML level.
 
@@ -91,6 +91,15 @@ The GUI exposes the same operations through:
 - **File → Export as .ptm…** — mirroring `ptm export`. Visible only when a project is loaded; gated on the same build flags as the CLI.
 - **Status bar PTM-imported badge** — purple-accent chip showing the loaded project's vendor (from `[ptm_metadata].vendor_id`) when the project was created via `ptm import`.
 - **Welcome panel cards** — surface the Import / Inspect entry points for first-run discoverability.
+
+## Boot logo customization
+
+The AccessPort displays two distinct splashes at power-on:
+
+- **Layer 1 (~milliseconds)** — the "ACCESSPORT" wordmark, drawn by the kernel's `LINUX_LOGO` (`logo_linux_clut224.ppm` compiled into `.init.rodata`). The kernel + U-Boot live inside the i.MX28 SB v1 encrypted `bootstream.bin`. **Not replaceable.** The SB v1 master key is OTP-fused in the i.MX283 `HW_OCOTP_CRYPTO[0..3]` eFuses (silicon-side, never present in any host artifact), and the kernel source is closed. i.MX283 USB SDP recovery boot uses the same OTP key, so it only accepts COBB-signed bootstreams — no bypass. SubuwuTuner does not attempt this and does not surface UI for it. Analyst-side RE writeup at `findings/tuning-knowledge-2026-06-13/sb-bootlogo-re/`.
+- **Layer 2 (held until GUI ready)** — vehicle splash drawn by `/ap-app/init`'s fallback ladder ending at `/ap-app/splash/AP-SUBARU_lg.fb`. The ladder's top priority is `/user/ap-user/images/startup_screen.fb` (RGB565 LE, 240×320 portrait, exactly 153,600 bytes) — a user-writable file in the `/user/` partition. **This is the replaceable slot.** Push via `cmd 0x22` (existing `ap3 push --as /images/startup_screen.fb`). The `st::devices::ets::rgb565` namespace (`pack`/`unpack`/`encode_rgb565_le`/`decode_rgb565_le`/`fit_letterbox`/`encode_ap_full_screen`) carries the format codec; GUI/CLI affordances compose on top.
+
+**Clean-room posture.** SubuwuTuner ships the codec mechanics and the conversion recipe; users supply their own image. Restore-to-default works only against a user-saved backup (pull current `startup_screen.fb` to disk before replacing) — we do not bundle COBB/Subaru splash bytes for "restore default" because those are trademarked content. Deleting `/user/ap-user/images/startup_screen.fb` falls back to whichever firmware-baked `/ap-app/splash/*.fb` matches the AP's vehicle binding (which is also COBB-shipped trademarked content, but it's already on the device — we don't ship it, we just stop overriding it).
 
 ## Marriage-state caveat
 
