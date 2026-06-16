@@ -49,13 +49,15 @@ TEST_CASE("SubaruShCanFlash: every public method returns the same gated error",
 
 #if defined(ST_SUBARU_ECU_FLASH_ENABLED)
     constexpr auto kExpected = st::ErrorCode::NotImplemented;
+    // enable_flash_mode IS implemented under the enabled build — tested
+    // separately below. Skip it here so this gating-suite stays focused
+    // on the still-NotImplemented surface.
 #else
     constexpr auto kExpected = st::ErrorCode::PolicyDenied;
-#endif
-
     auto const a = f.enable_flash_mode();
     REQUIRE_FALSE(a.has_value());
     REQUIRE(a.error().code() == kExpected);
+#endif
 
     auto const b = f.erase_block(0);
     REQUIRE_FALSE(b.has_value());
@@ -192,6 +194,57 @@ TEST_CASE("SubaruChallengeMode + SubaruFmatsMode enums are wire-typed",
     REQUIRE(static_cast<std::uint8_t>(SubaruChallengeMode::Direct) == 1);
     REQUIRE(static_cast<std::uint8_t>(SubaruFmatsMode::Unknown) == 0xFF);
 }
+
+#if defined(ST_SUBARU_ECU_FLASH_ENABLED)
+
+TEST_CASE("SubaruShCanFlash: enable_flash_mode sends SSM 0xA5 on the wire",
+          "[flash][subaru_sh_can_flash][enable_flash_mode]") {
+    // ζ1: EnableFlashMode dispatches via SSM cmd byte 0xA5, NOT UDS DSC
+    // 0x10 0x02 (the implementer's prior assumption). On ISO-TP framing
+    // the wire shape is bare `A5` request → bare `E5` ack response
+    // (0xA5 | 0x40 per SSM convention).
+    st::transport::MockTransport mock;
+    REQUIRE(mock.open({}).has_value());
+    // Request = single byte A5. Response = single byte E5 (positive ack,
+    // no payload — body bytes for EnableFlashMode are empty).
+    mock.expect_send_recv({0xA5}, {0xE5});
+
+    st::flash::SubaruEcuFlashParams params;
+    params.family = st::flash::SubaruEcuFamily::SH2A;
+    params.variant = st::flash::SubaruInitVariant::CobbFlash;
+    st::flash::SubaruShCanFlash f{mock, params};
+
+    auto const r = f.enable_flash_mode();
+    REQUIRE(r.has_value());
+    REQUIRE(mock.exhausted());
+}
+
+TEST_CASE("SubaruShCanFlash: enable_flash_mode surfaces ECU NRC",
+          "[flash][subaru_sh_can_flash][enable_flash_mode][error]") {
+    // Negative-response shape per the SSM IsoTp envelope (and the same
+    // as UDS NRC framing): `7F <cmd> <NRC>`. The SsmClient's response
+    // parser rejects this as `ProtocolError` because it expects the
+    // positive ACK byte; surface that as a failure either way.
+    st::transport::MockTransport mock;
+    REQUIRE(mock.open({}).has_value());
+    // 0x22 = conditionsNotCorrect (the NRC we saw on the bench rig's
+    // DSC 0x10 0x02 attempts — included here as a likely real-ECU
+    // failure mode that callers should be prepared to surface).
+    mock.expect_send_recv({0xA5}, {0x7F, 0xA5, 0x22});
+
+    st::flash::SubaruEcuFlashParams params;
+    params.family = st::flash::SubaruEcuFamily::SH2A;
+    params.variant = st::flash::SubaruInitVariant::CobbFlash;
+    st::flash::SubaruShCanFlash f{mock, params};
+
+    auto const r = f.enable_flash_mode();
+    REQUIRE_FALSE(r.has_value());
+    // Error code may be ProtocolError (response not ACK) or EcuRejected
+    // depending on SsmClient's parsing — the load-bearing assertion is
+    // that the failure surfaces at all, not the specific code.
+}
+
+#endif // ST_SUBARU_ECU_FLASH_ENABLED
 
 TEST_CASE("SubaruShCanFlash: flash_full_rom is parseable + gated",
           "[flash][subaru_sh_can_flash][gating]") {
