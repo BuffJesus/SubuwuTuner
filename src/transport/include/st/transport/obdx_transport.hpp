@@ -105,6 +105,18 @@ public:
     [[nodiscard]] st::Status
     send_to(std::uint32_t can_id, std::span<std::uint8_t const> payload) override;
 
+    [[nodiscard]] st::Status
+    set_periodic_slot(PeriodicSlot const &slot) override;
+
+    [[nodiscard]] st::Status
+    enable_periodic_slot(std::uint8_t index, bool on) override;
+
+    [[nodiscard]] st::Status clear_all_periodic_slots() override;
+
+    [[nodiscard]] bool supports_periodic_slots() const noexcept override {
+        return true;
+    }
+
     [[nodiscard]] st::Status start_streaming(FrameCallback callback) override;
     [[nodiscard]] st::Status stop_streaming() override;
 

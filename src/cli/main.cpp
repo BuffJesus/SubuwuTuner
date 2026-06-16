@@ -12326,32 +12326,12 @@ int cmd_flash_apply(int argc, char *argv[]) {
     // ECUs need it per cobb-install-flow.md §2). --no-sa-l1-followup
     // disables for ECUs that reject the secondary L1 unlock with NRC 0x7F.
     bool sa_l1_followup_disabled = false;
-    // Burst-inject vehicle-presence heartbeat frames before the SA
-    // prelude. Per round-2 spec §3 hypothesis, the ECM's vehicle-
-    // presence flag is timer-decay: it gets set on any rx of a heartbeat
-    // ID, then decays after N ms of no-rx. If we burst the 8-frame set
-    // (per spec §4.1) N rounds before the prelude, we may catch the
-    // window for DSC 0x02 to succeed before the flag decays.
-    //
-    // ⚠ EXPERIMENTAL — does NOT work via the OBDX Pro VX in its default
-    // ISO-15765 mode (AutoFrameProcessing ON; mixing raw-CAN TX with
-    // ISO-TP RX confuses the adapter's state machine — the next UDS
-    // exchange times out, confirmed on bench 2026-06-16). For working
-    // heartbeat injection see the proper hardware path (Arduino + MCP2515
-    // running the sketch in docs/41-bench-rig-validation-runbook.md
-    // §"Vehicle-presence injector") and the --with-vehicle-presence-
-    // injection flag below.
-    //
-    // Kept for adapters that DO support mixed raw-CAN + ISO-TP traffic
-    // (J2534 PassThru with separate filters, etc.). 0 = disabled
-    // (default).
-    int inject_presence_burst = 0;
-    // Declarative flag — operator asserts an external CAN-frame injector
-    // is active on the bench bus. flash-apply doesn't actively probe
-    // (the existing OBDX RX filter wouldn't see arbitrary heartbeat IDs
-    // anyway) — the flag just informs the failure-path hint logic. When
-    // NOT set and DSC 0x02 fails NRC 0x22, the error message points at
-    // the runbook for wiring up the proper injector.
+    // Vehicle-presence heartbeat injection via the OBDX periodic-frame
+    // scheduler (DVI 0x34 sub-ops 0x1A/0x1B/0x1C, per
+    // SubuwuTuner-specs/specs/obdx-vx-raw-can-injection-capability.md §2).
+    // When set, configures 8 slots before the SA prelude with the
+    // round-2 spec's vehicle-presence frame set, leaves them TX-ing
+    // throughout flash-apply, clears them on exit via scope guard.
     bool with_vehicle_presence_injection = false;
 
     for (int i = 0; i < argc; ++i) {
@@ -12446,20 +12426,6 @@ int cmd_flash_apply(int argc, char *argv[]) {
             enter_dsc_flag = false;
         } else if (a == "--no-sa-l1-followup") {
             sa_l1_followup_disabled = true;
-        } else if (a == "--inject-presence-burst") {
-            auto const *v = require_arg("--inject-presence-burst");
-            if (v == nullptr)
-                return 2;
-            char *end = nullptr;
-            auto const val = std::strtoul(v, &end, 10);
-            if (end == v || *end != '\0' || val == 0 || val > 100) {
-                std::fputs("flash-apply: --inject-presence-burst must be a "
-                           "decimal 1..100 (number of heartbeat-set rounds to "
-                           "burst before the SA prelude)\n",
-                           stderr);
-                return 2;
-            }
-            inject_presence_burst = static_cast<int>(val);
         } else if (a == "--with-vehicle-presence-injection") {
             with_vehicle_presence_injection = true;
         } else if (a == "--confirm") {
@@ -12736,47 +12702,76 @@ int cmd_flash_apply(int argc, char *argv[]) {
     // plan.session at step 1, but that's idempotent — if the prelude
     // already escalated, step 1 stays in that session.
     if (have_transport) {
-        // Burst-inject vehicle-presence heartbeats via the existing OBDX TX
-        // path. Per round-2 spec §3 / §4.1: the ECM checks for periodic
-        // CAN frames from other modules (TCU/VDC/BCM) before granting DSC
-        // ProgrammingSession. The bench rig has no other modules; this
-        // burst is the no-extra-hardware experiment to see if a timer-
-        // decay-based presence flag can be caught by short-window burst
-        // injection. Frame contents are factual data from raw COBB install
-        // captures (spec §2.2). Fires before any UDS exchange so the bus
-        // state is "seen" before the ECM starts gating.
-        if (inject_presence_burst > 0) {
+        // Vehicle-presence injection via the OBDX periodic-frame scheduler
+        // (DVI 0x34 sub-ops 0x1A/0x1B/0x1C per
+        // SubuwuTuner-specs/specs/obdx-vx-raw-can-injection-capability.md
+        // §4). Adapter TXes the 8 heartbeat frames autonomously in the
+        // background; UDS continues on 0x7E0/0x7E8 undisturbed.
+        //
+        // Scope-guard the teardown: every flash-apply return path must
+        // clear the slots so they don't keep TX-ing on the next session.
+        struct PeriodicSlotsCleanup {
+            st::transport::ITransport *transport{nullptr};
+            bool armed{false};
+            ~PeriodicSlotsCleanup() {
+                if (armed && transport != nullptr) {
+                    (void)transport->clear_all_periodic_slots();
+                }
+            }
+        } periodic_cleanup{chosen, false};
+        if (with_vehicle_presence_injection) {
+            if (!chosen->supports_periodic_slots()) {
+                std::fputs("flash-apply: --with-vehicle-presence-injection "
+                           "requires a transport with periodic-frame support "
+                           "(OBDX VX). Current transport does not. Use a "
+                           "companion device or switch transports.\n",
+                           stderr);
+                return 1;
+            }
             struct HeartbeatFrame {
                 std::uint32_t can_id;
                 std::array<std::uint8_t, 8> payload;
+                std::uint16_t interval_ms;
             };
-            // Per spec §4.1 minimum frame set.
+            // Per round-2 spec §4.1 minimum frame set + round-3 spec §4.1
+            // worked-example payloads / intervals.
             std::array<HeartbeatFrame, 8> const frames{{
-                {0x002, {0xFF, 0xA7, 0x70, 0x00, 0x16, 0x00, 0x00, 0x00}},
-                {0x140, {0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x14, 0x00}},
-                {0x141, {0x50, 0x26, 0x6B, 0x27, 0x00, 0x80, 0x3F, 0x00}},
-                {0x144, {0xC0, 0x00, 0x05, 0x00, 0x00, 0x24, 0xA0, 0x00}},
-                {0x152, {0xF1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x80}},
-                {0x156, {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16}},
-                {0x280, {0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00}},
-                {0x371, {0xFF, 0xFF, 0x00, 0x00, 0x80, 0x9F, 0x02, 0x00}},
+                {0x002, {0xFF, 0xA7, 0x70, 0x05, 0x1B, 0x00, 0x00, 0x00}, 20},
+                {0x140, {0x00, 0x06, 0x00, 0x40, 0x00, 0x00, 0x14, 0x00}, 20},
+                {0x141, {0x50, 0x26, 0x6B, 0x27, 0x00, 0x80, 0x3F, 0x00}, 20},
+                {0x144, {0xC0, 0x00, 0x05, 0x00, 0x00, 0x24, 0xA0, 0x00}, 40},
+                {0x152, {0xF1, 0x44, 0x00, 0x00, 0x00, 0x00, 0x08, 0x80}, 40},
+                {0x156, {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16}, 40},
+                {0x280, {0x00, 0x01, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00}, 40},
+                {0x371, {0xFF, 0xFF, 0x00, 0x00, 0x80, 0x9F, 0x02, 0x00}, 40},
             }};
-            std::fprintf(stderr,
-                         "flash-apply: burst-injecting %d round(s) of "
-                         "vehicle-presence heartbeats (8 frames per round)...\n",
-                         inject_presence_burst);
-            // Fire-and-forget via send_to — no RX wait, no adapter state
-            // confusion from queued ACK phases. Each TX takes ~2-5 ms
-            // through the DVI exchange so 8 × N rounds completes in ~20 ms
-            // to a few hundred ms depending on N. Keep N small (5..10) so
-            // the burst stays within any presence-flag decay window.
-            for (int round = 0; round < inject_presence_burst; ++round) {
-                for (auto const &f : frames) {
-                    (void)chosen->send_to(f.can_id,
-                                          std::span<std::uint8_t const>{f.payload.data(),
-                                                                         f.payload.size()});
+            std::fputs("flash-apply: enabling 8-slot vehicle-presence injection "
+                       "via OBDX periodic-frame scheduler...\n",
+                       stderr);
+            for (std::uint8_t slot = 0; slot < frames.size(); ++slot) {
+                st::transport::ITransport::PeriodicSlot ps;
+                ps.index = slot;
+                ps.can_id = frames[slot].can_id;
+                ps.data = std::span<std::uint8_t const>{frames[slot].payload.data(),
+                                                         frames[slot].payload.size()};
+                ps.interval_ms = frames[slot].interval_ms;
+                if (auto s = chosen->set_periodic_slot(ps); !s.has_value()) {
+                    std::fprintf(stderr,
+                                 "flash-apply: set_periodic_slot(%u) failed: %s\n",
+                                 slot, s.error().to_string().c_str());
+                    return 1;
+                }
+                if (auto s = chosen->enable_periodic_slot(slot, true); !s.has_value()) {
+                    std::fprintf(stderr,
+                                 "flash-apply: enable_periodic_slot(%u, on) failed: %s\n",
+                                 slot, s.error().to_string().c_str());
+                    return 1;
                 }
             }
+            std::fputs("flash-apply: vehicle-presence frames active "
+                       "(8 slots, ~20-40 ms cadence)\n",
+                       stderr);
+            periodic_cleanup.armed = true;
         }
         if (enter_dsc) {
             if (auto s = flasher.client().diagnostic_session_control(

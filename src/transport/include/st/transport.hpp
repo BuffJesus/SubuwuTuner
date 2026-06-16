@@ -144,6 +144,58 @@ public:
         return send(payload);
     }
 
+    // ---- Periodic frame TX (autonomous heartbeat scheduler) ---------
+    //
+    // For adapters that expose hardware-side periodic-frame TX, these
+    // primitives let the caller program autonomous heartbeat frames that
+    // the adapter transmits in the background at the configured cadence
+    // — without interfering with the foreground UDS-on-ISO-TP channel.
+    //
+    // Used for vehicle-presence simulation per
+    // SubuwuTuner-specs/specs/obdx-vx-raw-can-injection-capability.md §4:
+    // OBDX Pro VX exposes 8 slots via DVI 0x34 sub-ops 0x1A/0x1B/0x1C
+    // (set-interval / set-data / enable). J2534 wraps these as
+    // PassThruStartPeriodicMsg under the hood.
+    //
+    // Transports that don't support periodic TX (J2534 stub, K-Line)
+    // return NotImplemented from the base; callers should treat that
+    // as "use a separate companion node" rather than failure.
+    struct PeriodicSlot {
+        std::uint8_t index{0};         // adapter-specific; OBDX VX has 0..7
+        std::uint32_t can_id{0};       // 11-bit CAN ID
+        std::span<std::uint8_t const> data{}; // max 8 bytes per slot
+        std::uint16_t interval_ms{0};  // TX cadence
+    };
+
+    // Configure one slot's CAN ID + payload + interval. Does NOT enable
+    // it — call enable_periodic_slot separately. Lets the caller stage
+    // multiple slot configurations before turning them on as a batch.
+    [[nodiscard]] virtual Status
+    set_periodic_slot(PeriodicSlot const & /*slot*/) {
+        return failure(ErrorCode::NotImplemented,
+                       "transport does not support periodic-frame TX scheduling");
+    }
+
+    [[nodiscard]] virtual Status
+    enable_periodic_slot(std::uint8_t /*index*/, bool /*on*/) {
+        return failure(ErrorCode::NotImplemented,
+                       "transport does not support periodic-frame TX scheduling");
+    }
+
+    // Disable + reset every periodic slot. Best-effort: callers invoke
+    // this at flash-apply teardown so the next session starts clean.
+    [[nodiscard]] virtual Status clear_all_periodic_slots() {
+        return failure(ErrorCode::NotImplemented,
+                       "transport does not support periodic-frame TX scheduling");
+    }
+
+    // True if this transport implements the periodic-slot primitives.
+    // Callers check this before configuring slots so they can pivot to
+    // a different injection path if the answer is no.
+    [[nodiscard]] virtual bool supports_periodic_slots() const noexcept {
+        return false;
+    }
+
     [[nodiscard]] virtual Status start_streaming(FrameCallback callback) = 0;
     [[nodiscard]] virtual Status stop_streaming() = 0;
 

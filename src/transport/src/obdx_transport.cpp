@@ -949,6 +949,117 @@ st::Status Transport::send(std::span<std::uint8_t const> payload) {
     return send_to(can_id_request_, payload);
 }
 
+namespace {
+
+// DVI 0x34 sub-ops 0x1A/0x1B/0x1C for periodic-frame slots, per
+// SubuwuTuner-specs/specs/obdx-vx-raw-can-injection-capability.md §2.
+constexpr std::uint8_t kSubPeriodicInterval = 0x1A;
+constexpr std::uint8_t kSubPeriodicData     = 0x1B;
+constexpr std::uint8_t kSubPeriodicEnable   = 0x1C;
+
+constexpr std::uint8_t kMaxPeriodicSlot = 7; // OBDX VX exposes 8 slots (0..7).
+constexpr std::size_t kMaxPeriodicDataBytes = 8;
+
+std::vector<std::uint8_t> periodic_interval_payload(std::uint8_t slot, std::uint16_t interval_ms) {
+    return {kSubPeriodicInterval, slot,
+            static_cast<std::uint8_t>((interval_ms >> 8U) & 0xFFU),
+            static_cast<std::uint8_t>(interval_ms & 0xFFU)};
+}
+
+std::vector<std::uint8_t> periodic_data_payload(std::uint8_t slot, std::uint32_t can_id,
+                                                  std::span<std::uint8_t const> data) {
+    std::vector<std::uint8_t> out;
+    out.reserve(1 + 1 + 4 + data.size());
+    out.push_back(kSubPeriodicData);
+    out.push_back(slot);
+    out.push_back(static_cast<std::uint8_t>((can_id >> 24U) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((can_id >> 16U) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((can_id >> 8U) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>(can_id & 0xFFU));
+    out.insert(out.end(), data.begin(), data.end());
+    return out;
+}
+
+std::vector<std::uint8_t> periodic_enable_payload(std::uint8_t slot, bool on) {
+    return {kSubPeriodicEnable, slot, static_cast<std::uint8_t>(on ? 0x01U : 0x00U)};
+}
+
+} // namespace
+
+st::Status Transport::set_periodic_slot(PeriodicSlot const &slot) {
+    if (!open_) {
+        return failure(ErrorCode::TransportUnavailable,
+                       "obdx::set_periodic_slot: transport not open");
+    }
+    if (channel_ == nullptr) {
+        return failure(ErrorCode::TransportUnavailable,
+                       "obdx::set_periodic_slot: no byte channel");
+    }
+    if (slot.index > kMaxPeriodicSlot) {
+        return failure(ErrorCode::InvalidArgument,
+                       "obdx::set_periodic_slot: index out of range (OBDX VX exposes 0..7)");
+    }
+    if (slot.data.size() == 0 || slot.data.size() > kMaxPeriodicDataBytes) {
+        return failure(ErrorCode::InvalidArgument,
+                       "obdx::set_periodic_slot: data size must be 1..8 (single-CAN-frame only)");
+    }
+    if (slot.interval_ms == 0) {
+        return failure(ErrorCode::InvalidArgument,
+                       "obdx::set_periodic_slot: interval_ms must be > 0");
+    }
+    // Set data first, then interval. Order isn't load-bearing per the manual
+    // but matches the recipe in obdx-vx-raw-can-injection-capability.md §4.1.
+    auto const data_payload = periodic_data_payload(slot.index, slot.can_id, slot.data);
+    if (auto r = dvi_exchange(*channel_, dvi::Opcode::CanProtocolSettings, data_payload,
+                               kCanFilterTimeout);
+        !r.has_value()) {
+        return failure(r.error());
+    }
+    auto const int_payload = periodic_interval_payload(slot.index, slot.interval_ms);
+    if (auto r = dvi_exchange(*channel_, dvi::Opcode::CanProtocolSettings, int_payload,
+                               kCanFilterTimeout);
+        !r.has_value()) {
+        return failure(r.error());
+    }
+    return ok();
+}
+
+st::Status Transport::enable_periodic_slot(std::uint8_t index, bool on) {
+    if (!open_) {
+        return failure(ErrorCode::TransportUnavailable,
+                       "obdx::enable_periodic_slot: transport not open");
+    }
+    if (channel_ == nullptr) {
+        return failure(ErrorCode::TransportUnavailable,
+                       "obdx::enable_periodic_slot: no byte channel");
+    }
+    if (index > kMaxPeriodicSlot) {
+        return failure(ErrorCode::InvalidArgument,
+                       "obdx::enable_periodic_slot: index out of range (OBDX VX exposes 0..7)");
+    }
+    auto const payload = periodic_enable_payload(index, on);
+    if (auto r = dvi_exchange(*channel_, dvi::Opcode::CanProtocolSettings, payload,
+                               kCanFilterTimeout);
+        !r.has_value()) {
+        return failure(r.error());
+    }
+    return ok();
+}
+
+st::Status Transport::clear_all_periodic_slots() {
+    if (!open_) {
+        return failure(ErrorCode::TransportUnavailable,
+                       "obdx::clear_all_periodic_slots: transport not open");
+    }
+    // Best-effort: disable every slot. We don't surface per-slot failures
+    // because the teardown path runs at flash-apply exit; a failed disable
+    // on close just leaves that slot enabled until next power cycle.
+    for (std::uint8_t i = 0; i <= kMaxPeriodicSlot; ++i) {
+        (void)enable_periodic_slot(i, false);
+    }
+    return ok();
+}
+
 st::Status Transport::send_to(std::uint32_t can_id_request_override,
                                std::span<std::uint8_t const> payload) {
     if (!open_) {
