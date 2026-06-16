@@ -114,30 +114,72 @@ TEST_CASE("ap3 query_state sends cmd 0x2e / 0x30 / 0x31 with empty bodies",
     expect_empty_body(0x31U);
 }
 
-TEST_CASE("ap3 query_state parses ASCII payloads from cmd 0x2e / 0x30 / 0x31",
+// Build a Boost-binary-archive-prefixed status response body for tests.
+// Matches what AP firmware v1.7.6.0-28785 actually emits on cmd 0x2e /
+// 0x30 / 0x31 (verified live against SUB0484551 2026-06-13):
+//   bytes 0..3  : u32 LE = 22 (length of "serialization::archive")
+//   bytes 4..25 : "serialization::archive"
+//   bytes 26..34: archive metadata 03 04 04 04 08 01 00 00 00
+//   past offset 35: caller-supplied payload
+static std::vector<std::uint8_t> boost_archive_wrap(std::vector<std::uint8_t> payload) {
+    std::vector<std::uint8_t> out;
+    out.reserve(35 + payload.size());
+    char const *magic = "serialization::archive";
+    auto const len = static_cast<std::uint32_t>(std::strlen(magic));
+    out.push_back(static_cast<std::uint8_t>(len & 0xFF));
+    out.push_back(static_cast<std::uint8_t>((len >> 8) & 0xFF));
+    out.push_back(static_cast<std::uint8_t>((len >> 16) & 0xFF));
+    out.push_back(static_cast<std::uint8_t>((len >> 24) & 0xFF));
+    for (std::uint32_t i = 0; i < len; ++i) {
+        out.push_back(static_cast<std::uint8_t>(magic[i]));
+    }
+    out.insert(out.end(), {0x03U, 0x04U, 0x04U, 0x04U, 0x08U,
+                            0x01U, 0x00U, 0x00U, 0x00U});
+    out.insert(out.end(), payload.begin(), payload.end());
+    return out;
+}
+
+static std::vector<std::uint8_t> wrap_u32(std::uint32_t v) {
+    return boost_archive_wrap({
+        static_cast<std::uint8_t>(v & 0xFF),
+        static_cast<std::uint8_t>((v >> 8) & 0xFF),
+        static_cast<std::uint8_t>((v >> 16) & 0xFF),
+        static_cast<std::uint8_t>((v >> 24) & 0xFF),
+    });
+}
+
+static std::vector<std::uint8_t> wrap_string(std::string_view s) {
+    std::vector<std::uint8_t> payload;
+    auto const len = static_cast<std::uint32_t>(s.size());
+    payload.push_back(static_cast<std::uint8_t>(len & 0xFF));
+    payload.push_back(static_cast<std::uint8_t>((len >> 8) & 0xFF));
+    payload.push_back(static_cast<std::uint8_t>((len >> 16) & 0xFF));
+    payload.push_back(static_cast<std::uint8_t>((len >> 24) & 0xFF));
+    payload.insert(payload.end(), s.begin(), s.end());
+    return boost_archive_wrap(std::move(payload));
+}
+
+TEST_CASE("ap3 query_state parses Boost-archive payloads from cmd 0x2e / 0x30 / 0x31",
           "[devices][ap3][status_probes]") {
+    // Real firmware (v1.7.6.0-28785) wraps responses in a Boost binary
+    // archive prefix. cmd 0x2e returns a u32 (hardware-type enum); the
+    // other two return length-prefixed strings.
     st::test::transport::LoopbackByteChannel channel;
     auto const info_type =
         static_cast<std::uint8_t>(st::transport::ets::ResponseType::Info);
-    // First three replies (cmd 0x28, 0x04, 0x03) — junk bodies, parsers
-    // degrade. The three new cmds get realistic ASCII payloads.
     std::array<std::uint8_t, 1> tiny{0xAAU};
     channel.queue_read(make_packet(info_type, tiny));
     channel.queue_read(make_packet(info_type, tiny));
     channel.queue_read(make_packet(info_type, tiny));
-    auto queue_ascii = [&](std::string const &s) {
-        std::vector<std::uint8_t> body{s.begin(), s.end()};
-        channel.queue_read(make_packet(info_type, body));
-    };
-    queue_ascii("AP-V3");
-    queue_ascii("Subaru");
-    queue_ascii("COBB Tuning");
+    channel.queue_read(make_packet(info_type, wrap_u32(2U)));
+    channel.queue_read(make_packet(info_type, wrap_string("Subaru")));
+    channel.queue_read(make_packet(info_type, wrap_string("COBB Tuning")));
 
     st::devices::ets::Client client{channel};
     auto const state = client.query_state();
     REQUIRE(state.has_value());
     REQUIRE(state->hardware_type.has_value());
-    CHECK(*state->hardware_type == "AP-V3");
+    CHECK(*state->hardware_type == "2");
     REQUIRE(state->vehicle_manufacturer.has_value());
     CHECK(*state->vehicle_manufacturer == "Subaru");
     REQUIRE(state->ap_manufacturer.has_value());

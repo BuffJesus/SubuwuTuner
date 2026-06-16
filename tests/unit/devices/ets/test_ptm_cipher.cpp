@@ -196,7 +196,10 @@ TEST_CASE("ap3 cipher fixtures: XTEA-CBC layer 1 byte-identical against canonica
     auto decrypted = st::devices::ets::cipher::xtea_cbc_decrypt(*encrypted);
     REQUIRE(decrypted.has_value());
     REQUIRE(*decrypted == plaintext);
-    // The byte-identity check below is the !shouldfail trigger.
+    // Byte-identity against the canonical fixture. Earlier versions of
+    // this test were tagged `[!shouldfail]` while the walkthrough vs
+    // fixture-generator divergence was open; the discrepancy has since
+    // been reconciled and the tag retired — the test is now a hard pin.
     REQUIRE(encrypted->size() == expected.size());
     for (std::size_t i = 0; i < expected.size(); ++i) {
         REQUIRE((*encrypted)[i] == expected[i]);
