@@ -946,6 +946,11 @@ Result<Frame> Transport::send_recv_to(std::uint32_t can_id_request_override,
 }
 
 st::Status Transport::send(std::span<std::uint8_t const> payload) {
+    return send_to(can_id_request_, payload);
+}
+
+st::Status Transport::send_to(std::uint32_t can_id_request_override,
+                               std::span<std::uint8_t const> payload) {
     if (!open_) {
         return failure(ErrorCode::TransportUnavailable,
                        "obdx::Transport::send: transport not open");
@@ -970,10 +975,10 @@ st::Status Transport::send(std::span<std::uint8_t const> payload) {
                            "needs DVI TxLarge — not yet wired");
         }
         std::uint8_t const prefix[4] = {
-            static_cast<std::uint8_t>((can_id_request_ >> 24U) & 0xFFU),
-            static_cast<std::uint8_t>((can_id_request_ >> 16U) & 0xFFU),
-            static_cast<std::uint8_t>((can_id_request_ >> 8U) & 0xFFU),
-            static_cast<std::uint8_t>(can_id_request_ & 0xFFU),
+            static_cast<std::uint8_t>((can_id_request_override >> 24U) & 0xFFU),
+            static_cast<std::uint8_t>((can_id_request_override >> 16U) & 0xFFU),
+            static_cast<std::uint8_t>((can_id_request_override >> 8U) & 0xFFU),
+            static_cast<std::uint8_t>(can_id_request_override & 0xFFU),
         };
         tx_payload.assign(std::begin(prefix), std::end(prefix));
         tx_payload.insert(tx_payload.end(), payload.begin(), payload.end());

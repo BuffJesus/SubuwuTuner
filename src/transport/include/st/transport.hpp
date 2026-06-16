@@ -130,6 +130,20 @@ public:
 
     [[nodiscard]] virtual Status send(std::span<std::uint8_t const> payload) = 0;
 
+    // Fire-and-forget send to a non-default CAN ID. Pairs with
+    // send_recv_to(). Same default-forwarding behavior as send_recv_to:
+    // transports that don't model per-call CAN-ID selection fall through
+    // to plain send(), which uses the configured tester ID.
+    //
+    // Use case: vehicle-presence heartbeat injection on the bench rig
+    // (per SubuwuTuner-specs/specs/dsc-prog-precondition-firmware-detail.md
+    // §4.1). The injector TXes frames at IDs the ECM expects to see from
+    // other modules; no response is expected.
+    [[nodiscard]] virtual Status
+    send_to(std::uint32_t /*can_id*/, std::span<std::uint8_t const> payload) {
+        return send(payload);
+    }
+
     [[nodiscard]] virtual Status start_streaming(FrameCallback callback) = 0;
     [[nodiscard]] virtual Status stop_streaming() = 0;
 
