@@ -32,6 +32,7 @@ namespace {
 struct Overrides {
     std::optional<std::filesystem::path> definitions_root;
     std::optional<std::filesystem::path> rom_dump_root;
+    std::optional<std::filesystem::path> library_root;
 };
 
 Overrides &overrides_state() {
@@ -217,6 +218,8 @@ std::optional<Config> &cached_state() {
                 out.definitions_root = *value;
             } else if (key == "rom_dump_root") {
                 out.rom_dump_root = *value;
+            } else if (key == "library_root") {
+                out.library_root = *value;
             }
             // Unknown key under [paths] silently ignored — forward-compat.
         }
@@ -234,6 +237,7 @@ std::optional<Config> &cached_state() {
     os << "[paths]\n";
     os << "definitions_root = " << toml_quote(p.definitions_root.string()) << "\n";
     os << "rom_dump_root    = " << toml_quote(p.rom_dump_root.string()) << "\n";
+    os << "library_root     = " << toml_quote(p.library_root.string()) << "\n";
     return os.str();
 }
 
@@ -274,10 +278,26 @@ std::filesystem::path default_rom_dump_root() {
 #endif
 }
 
+std::filesystem::path default_library_root() {
+    // Mirrors the rom_dump_root shape — same per-platform convention,
+    // sibling directory under SubuwuTuner. Analyst's A2 decision picks
+    // this as the default; user-configurable via Settings or
+    // `subuwutuner-cli config set paths.library_root <path>`.
+#ifdef _WIN32
+    return user_home() / "Documents" / "SubuwuTuner" / "library";
+#else
+    if (auto p = env_var("XDG_DATA_HOME")) {
+        return std::filesystem::path{*p} / "SubuwuTuner" / "library";
+    }
+    return user_home() / ".local" / "share" / "SubuwuTuner" / "library";
+#endif
+}
+
 Config Config::defaults() {
     Config c;
     c.paths_.definitions_root = default_definitions_root();
     c.paths_.rom_dump_root = default_rom_dump_root();
+    c.paths_.library_root = default_library_root();
     c.source_path_ = default_config_path();
     return c;
 }
@@ -317,6 +337,9 @@ Result<Config> Config::load_from(std::filesystem::path const &path) {
     }
     if (!parsed->rom_dump_root.empty()) {
         c.paths_.rom_dump_root = parsed->rom_dump_root;
+    }
+    if (!parsed->library_root.empty()) {
+        c.paths_.library_root = parsed->library_root;
     }
     c.source_path_ = path;
     return c;
@@ -382,6 +405,10 @@ void override_rom_dump_root(std::filesystem::path p) {
     overrides_state().rom_dump_root = std::move(p);
 }
 
+void override_library_root(std::filesystem::path p) {
+    overrides_state().library_root = std::move(p);
+}
+
 std::filesystem::path definitions_root() {
     if (auto const &o = overrides_state().definitions_root; o.has_value()) {
         return *o;
@@ -400,6 +427,17 @@ std::filesystem::path rom_dump_root() {
         return std::filesystem::path{*e};
     }
     return current().paths().rom_dump_root;
+}
+
+std::filesystem::path library_root() {
+    if (auto const &o = overrides_state().library_root; o.has_value()) {
+        return *o;
+    }
+    if (auto e = env_var("ST_LIBRARY_ROOT"); e.has_value()) {
+        return std::filesystem::path{*e};
+    }
+    auto const &cfg = current().paths().library_root;
+    return cfg.empty() ? default_library_root() : cfg;
 }
 
 void reset_for_testing() {

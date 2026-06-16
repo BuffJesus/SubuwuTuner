@@ -36,6 +36,13 @@ namespace st::config {
 struct Paths {
     std::filesystem::path definitions_root;
     std::filesystem::path rom_dump_root;
+    // User's tune-library directory (the analyst's 2026-06-13 Strategic
+    // Q A → A2 decision). Default: `<user-docs>/SubuwuTuner/library/`.
+    // The library inventory script writes `library_index.toml` here;
+    // `st::library::TuneIndex::default_index_path` consults this field
+    // after the ST_LIBRARY_INDEX env override. Empty path means
+    // "use the built-in default" (default_library_root() below).
+    std::filesystem::path library_root;
 };
 
 class Config {
@@ -92,10 +99,12 @@ private:
 
 void override_definitions_root(std::filesystem::path);
 void override_rom_dump_root(std::filesystem::path);
+void override_library_root(std::filesystem::path);
 
 // Per-key resolved lookups. Applies override > env > config > default.
 [[nodiscard]] std::filesystem::path definitions_root();
 [[nodiscard]] std::filesystem::path rom_dump_root();
+[[nodiscard]] std::filesystem::path library_root();
 
 // ----------------------------------------------------------------------------
 // Path computation
@@ -112,6 +121,11 @@ void override_rom_dump_root(std::filesystem::path);
 
 // User's typical writable docs/data location for captured ROMs.
 [[nodiscard]] std::filesystem::path default_rom_dump_root();
+
+// User's tune-library directory. `<user-docs>/SubuwuTuner/library/`.
+// Inventory.py + the C++ TuneIndex loader both default to this when
+// no env override / no config value is set.
+[[nodiscard]] std::filesystem::path default_library_root();
 
 // ----------------------------------------------------------------------------
 // Testing helpers (not for production callers)
