@@ -34,6 +34,16 @@ What gets swapped:
 - `[[identification]].cid_match` → new CID (uppercase)
 - `[[identification]].ecu_part` → cleared (must be set by the validator
                                    from the target ROM's ecuid byte range)
+- `[[identification]].cid_address` → dropped, `cid_scan = true` substituted
+                                   The base's address was computed against
+                                   the base CID's ROM layout (or carried
+                                   defgen's old wrong `0x00000000` default).
+                                   Either way it does not necessarily match
+                                   the NEW CID's offset, so we scan for the
+                                   CID string instead. `rom-info` will catch
+                                   any case where scan can't find it.
+- `[[identification]].cid_length` → dropped (loader infers from
+                                   `len(cid_match)` under scan mode)
 
 What stays:
 - Every table address, scaling, axis. These are the cousin assumption —
@@ -167,6 +177,58 @@ def _clear_field(text: str, key: str, *,
     return _swap_field(text, key, "", section=section)
 
 
+def _force_cid_scan(text: str, *, section: str) -> tuple[str, bool]:
+    """Switch the named section to `cid_scan = true`, dropping any
+    `cid_address` / `cid_length` lines.
+
+    Cousin-seeded packs cannot trust the base's `cid_address` — the offset
+    where the CID string lands in flash is firmware-revision-specific, and
+    the base's value (or defgen's old `0x00000000` default) is meaningless
+    for the new CID. Scan mode delegates the lookup to the loader, which
+    walks the ROM for `cid_match`.
+
+    Idempotent: if `cid_scan = true` already exists in the section, no-op.
+    Returns (new_text, changed).
+    """
+    slc = _section_slice(text, section)
+    if slc is None:
+        return text, False
+    start, end = slc
+    before, body, after = text[:start], text[start:end], text[end:]
+
+    if re.search(r'^\s*cid_scan\s*=\s*true\s*$', body, re.MULTILINE):
+        return text, False
+
+    # Replace cid_address line with cid_scan line; if no cid_address
+    # was present, insert cid_scan above cid_match. Pad the field name
+    # to match defgen's 12-char alignment.
+    new_body, addr_n = re.subn(
+        r'^(\s*)cid_address\s*=\s*0x[0-9A-Fa-f]+\s*\n',
+        r"\1cid_scan     = true\n",
+        body,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if addr_n == 0:
+        new_body = re.sub(
+            r'^(\s*)cid_match\s*=',
+            r"\1cid_scan     = true\n\1cid_match   =",
+            body,
+            count=1,
+            flags=re.MULTILINE,
+        )
+
+    # Drop cid_length entirely (loader derives it from len(cid_match)).
+    new_body = re.sub(
+        r'^\s*cid_length\s*=\s*\d+\s*\n',
+        "",
+        new_body,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    return (before + new_body + after), True
+
+
 def seed_pack(base_text: str,
               new_cid: str,
               *,
@@ -215,6 +277,11 @@ def seed_pack(base_text: str,
     # ecu_part absence is fine — the validator will populate it from
     # the target ROM's ecuid bytes anyway.
     body, _ = _clear_field(body, "ecu_part", section="[[identification]]")
+
+    # Force scan mode: the base's cid_address was computed for the BASE
+    # CID's offset (or carried defgen's old wrong 0x00000000 default).
+    # Either way it does not necessarily match the NEW CID's location.
+    body, _ = _force_cid_scan(body, section="[[identification]]")
 
     # Strip the base's per-CID ecuparams from the includes list — those
     # encode SSM extended-PID addresses specific to the base CID, and

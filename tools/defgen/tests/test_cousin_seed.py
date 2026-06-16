@@ -145,6 +145,35 @@ class CousinSeedSwapTest(unittest.TestCase):
         self.assertIn('id        = "boost_target_bar"', scaling_section)
         self.assertNotIn('id        = "a2tb100z"', scaling_section)
 
+    def test_forces_scan_mode_dropping_base_cid_address(self):
+        # The base pack carries cid_address = 0x00002000 + cid_length = 8
+        # for A2TB100K. The seeded pack for A2TB100Z must NOT carry that
+        # address — A2TB100Z's CID string lives at a different (unknown)
+        # offset. Cousin-seed must emit cid_scan = true and drop both
+        # cid_address and cid_length so the loader scans the target ROM.
+        seeded = cousin_seed.seed_pack(
+            _BASE_PACK, "A2TB100Z",
+            base_rel="definitions/legacy/a2tb100k.toml")
+        ident = seeded.split("[[identification]]", 1)[1].split("[[", 1)[0]
+        self.assertIn("cid_scan     = true", ident)
+        self.assertNotIn("cid_address", ident)
+        self.assertNotIn("cid_length", ident)
+
+    def test_scan_mode_idempotent_when_base_already_scans(self):
+        # If the base pack is already in cid_scan = true mode, the seed
+        # should still come out in scan mode (and not add a duplicate
+        # cid_scan line).
+        scan_base = _BASE_PACK.replace(
+            "cid_address = 0x00002000\n    cid_length  = 8\n",
+            "cid_scan    = true\n",
+        )
+        seeded = cousin_seed.seed_pack(
+            scan_base, "A2TB100Z",
+            base_rel="definitions/legacy/a2tb100k.toml")
+        ident = seeded.split("[[identification]]", 1)[1].split("[[", 1)[0]
+        self.assertEqual(ident.count("cid_scan"), 1)
+        self.assertIn("true", ident)
+
     def test_missing_required_field_raises(self):
         # Each of the four CID-bearing field swaps must abort if the
         # base pack lacks the source line — silently skipping any one
