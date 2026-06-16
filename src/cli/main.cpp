@@ -40,10 +40,14 @@
 #include "st/devices/ets/file_info.hpp"
 #include "st/devices/ets/ota_cipher.hpp"
 #include "st/devices/ets/ptm_cipher.hpp"
+#include "st/library/atlas.hpp"
+#include "st/library/interpret.hpp"
 #include "st/library/patch_decoder.hpp"
 #include "st/library/ptm_xml_builder.hpp"
 #include "st/library/table_mapping.hpp"
+#include "st/library/tune_annotation.hpp"
 #include "st/library/tune_diff.hpp"
+#include "st/library/tune_index.hpp"
 
 #include <toml++/toml.hpp>
 #include "st/transport/ets_channel.hpp"
@@ -58,6 +62,7 @@
 #include <regex>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <cerrno>
 #include <charconv>
 #include <chrono>
@@ -460,11 +465,14 @@ constexpr std::string_view kUsage =
     "                            Pretty-print a flash manifest: schema, timestamps,\n"
     "                            CRCs, policy fields, per-sector status.\n"
     "    flash-delta <SOURCE.bin> <TARGET.bin> [--sector-size <N>]\n"
-    "                [--base-address <addr>] [--output <plan.toml>]\n"
+    "                [--base-address <addr>] [--layout <name>] [--output <plan.toml>]\n"
     "                            Diff two ROMs of equal size; for every sector-aligned\n"
     "                            region that differs, emit a flash plan whose [[write]]\n"
     "                            entries cover those sectors with TARGET's bytes. The\n"
-    "                            plan is hand-editable before execution.\n"
+    "                            plan is hand-editable before execution. --layout\n"
+    "                            selects a known per-platform sector geometry instead of\n"
+    "                            a uniform --sector-size (e.g. fa-dit-sh2a-2mb for the\n"
+    "                            VA/VB WRX 2 MB FA-DIT mixed 8K/64K/128K map).\n"
     "    flash-resume <ORIGINAL.plan.toml> <JOURNAL.manifest.toml>\n"
     "                [--output <resumed.plan.toml>]\n"
     "                            Given the plan from a partial-flash attempt and the\n"
@@ -11723,6 +11731,7 @@ int cmd_flash_delta(int argc, char *argv[]) {
     std::optional<std::filesystem::path> output_path;
     std::uint32_t sector_size = 0x1000;
     std::uint32_t base_address = 0;
+    std::optional<std::string> layout_name;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -11767,6 +11776,12 @@ int cmd_flash_delta(int argc, char *argv[]) {
                 return 2;
             }
             base_address = val;
+        } else if (a == "--layout") {
+            if (auto const *v = require_arg("--layout"); v) {
+                layout_name = std::string{v};
+            } else {
+                return 2;
+            }
         } else if (a == "--output" || a == "-o") {
             if (auto const *v = require_arg("--output"); v) {
                 output_path = std::filesystem::path{v};
@@ -11792,9 +11807,30 @@ int cmd_flash_delta(int argc, char *argv[]) {
         if (!target_path.has_value())
             std::fputs(" <TARGET.bin>", stderr);
         std::fputs("\nUsage: subuwutuner-cli flash-delta <SOURCE.bin> <TARGET.bin>\n"
-                   "       [--sector-size <N>] [--base-address <addr>] [--output <plan.toml>]\n",
+                   "       [--sector-size <N>] [--base-address <addr>] [--output <plan.toml>]\n"
+                   "       [--layout fa-dit-sh2a-2mb]\n",
                    stderr);
         return 2;
+    }
+    // --layout and --sector-size are mutually exclusive at the semantic
+    // level. Layout-aware mode emits per-region sector sizes; uniform
+    // mode uses one. Reject the contradictory combo rather than silently
+    // ignoring one of them.
+    std::span<st::flash::Sector const> layout_span;
+    if (layout_name.has_value()) {
+        if (*layout_name == "fa-dit-sh2a-2mb") {
+            layout_span = std::span<st::flash::Sector const>{
+                st::flash::layouts::kFaDitSh2a2Mb.data(),
+                st::flash::layouts::kFaDitSh2a2Mb.size()};
+        } else {
+            std::fprintf(stderr, "flash-delta: unknown --layout '%s'. Known: fa-dit-sh2a-2mb\n",
+                         layout_name->c_str());
+            return 2;
+        }
+        if (base_address != 0) {
+            std::fputs("flash-delta: --layout uses absolute addresses; --base-address is ignored\n",
+                       stderr);
+        }
     }
     auto const src = st::Rom::from_file(*source_path);
     if (!src.has_value()) {
@@ -11811,18 +11847,37 @@ int cmd_flash_delta(int argc, char *argv[]) {
                      tgt->size());
         return 1;
     }
-    auto const sectors =
-        st::flash::Flasher::compute_delta(src->data(), tgt->data(), sector_size, base_address);
+    std::vector<st::flash::Sector> sectors;
+    std::size_t gap_bytes_changed = 0;
+    if (layout_name.has_value()) {
+        auto const summary = st::flash::Flasher::compute_delta_layout(src->data(), tgt->data(),
+                                                                       layout_span);
+        sectors = summary.sectors;
+        gap_bytes_changed = summary.gap_bytes_changed;
+    } else {
+        sectors = st::flash::Flasher::compute_delta(src->data(), tgt->data(), sector_size,
+                                                    base_address);
+    }
 
     st::flash::FlashPlan plan;
     plan.writes.reserve(sectors.size());
     for (auto const &s : sectors) {
         st::flash::SectorWrite sw;
         sw.sector = s;
-        std::size_t const off = static_cast<std::size_t>(s.address - base_address);
+        // In layout mode, sector addresses are absolute (base_address is
+        // ignored); in uniform mode, the iterator started at base_address.
+        std::uint32_t const eff_base = layout_name.has_value() ? 0u : base_address;
+        std::size_t const off = static_cast<std::size_t>(s.address - eff_base);
         sw.data.assign(tgt->data().begin() + static_cast<std::ptrdiff_t>(off),
                        tgt->data().begin() + static_cast<std::ptrdiff_t>(off + s.length));
         plan.writes.push_back(std::move(sw));
+    }
+    if (gap_bytes_changed > 0) {
+        std::fprintf(stderr,
+                     "flash-delta: WARNING: %zu byte(s) differ in regions outside the '%s' "
+                     "layout — these will NOT be flashed. Check for unintended edits in "
+                     "FCU-locked or undeclared regions.\n",
+                     gap_bytes_changed, layout_name->c_str());
     }
 
     if (output_path.has_value()) {
@@ -15922,6 +15977,7 @@ int run_state(int argc, char **argv, CommonOpts const &opts) {
     auto const serial   = state->ap_serial.value_or(std::string{"(unparsed)"});
     auto const firmware = state->firmware_version.value_or(std::string{"(unparsed)"});
     auto const vehicle  = state->vehicle_descriptor.value_or(std::string{"(unparsed)"});
+    auto const veh_id   = state->vehicle_id.value_or(std::string{"(unparsed)"});
     auto const hw_type  = state->hardware_type.value_or(std::string{"(unparsed)"});
     auto const veh_mfr  = state->vehicle_manufacturer.value_or(std::string{"(unparsed)"});
     auto const ap_mfr   = state->ap_manufacturer.value_or(std::string{"(unparsed)"});
@@ -15934,6 +15990,7 @@ int run_state(int argc, char **argv, CommonOpts const &opts) {
         std::printf("  \"serial\": \"%s\",\n", serial.c_str());
         std::printf("  \"firmware\": \"%s\",\n", firmware.c_str());
         std::printf("  \"vehicle\": \"%s\",\n", vehicle.c_str());
+        std::printf("  \"vehicle_id\": \"%s\",\n", veh_id.c_str());
         std::printf("  \"hardware_type\": \"%s\",\n", hw_type.c_str());
         std::printf("  \"vehicle_manufacturer\": \"%s\",\n", veh_mfr.c_str());
         std::printf("  \"ap_manufacturer\": \"%s\",\n", ap_mfr.c_str());
@@ -15954,6 +16011,9 @@ int run_state(int argc, char **argv, CommonOpts const &opts) {
         std::printf("serial                   = \"%s\"\n", serial.c_str());
         std::printf("firmware                 = \"%s\"\n", firmware.c_str());
         std::printf("vehicle                  = \"%s\"\n", vehicle.c_str());
+        if (state->vehicle_id.has_value()) {
+            std::printf("vehicle_id               = \"%s\"\n", veh_id.c_str());
+        }
         if (state->hardware_type.has_value()) {
             std::printf("hardware_type            = \"%s\"\n", hw_type.c_str());
         }
@@ -15979,6 +16039,9 @@ int run_state(int argc, char **argv, CommonOpts const &opts) {
         std::printf("Serial                     : %s\n", serial.c_str());
         std::printf("Firmware                   : %s\n", firmware.c_str());
         std::printf("Vehicle                    : %s\n", vehicle.c_str());
+        if (state->vehicle_id.has_value()) {
+            std::printf("Vehicle ID                 : %s\n", veh_id.c_str());
+        }
         std::printf("Hardware type              : %s\n", hw_type.c_str());
         std::printf("Vehicle manufacturer       : %s\n", veh_mfr.c_str());
         std::printf("AP manufacturer            : %s\n", ap_mfr.c_str());
@@ -16450,6 +16513,78 @@ std::optional<std::vector<std::uint8_t>> decode_hex(std::string_view in) {
 // layer still handles sync/wire_len/CRC framing — this just lets the
 // caller pick the cmd type + body without having to write a one-off
 // Python script. Useful for protocol investigation.
+// `ap3 capabilities` — cmd 0x1f OnCapabilities. Returns a u32 capability
+// flags word. Per RE wave-6 (ζ5) the v1.7.6.0-28785 firmware emits 0x1BB
+// (7 bits set: 0, 1, 3, 4, 5, 7, 8). Per-bit semantics are TBD pending
+// Frida probe of APManager; surface the raw value for now.
+//
+// Gated behind ST_ETS_ENABLE_DIAGNOSTIC_CMDS=1 — cmd 0x1f is in the safe
+// range (no state change) but the env-var gate keeps diagnostic verbs
+// off by default to avoid surprise.
+int run_capabilities(int argc, char **argv, CommonOpts const &opts) {
+    auto const fmt = consume_format_flag(argc, argv);
+    (void)argc;
+    (void)argv;
+    auto channel = open_channel(opts);
+    if (!channel.has_value()) {
+        std::fprintf(stderr, "ap3 capabilities: %s\n",
+                     channel.error().to_string().c_str());
+        return 1;
+    }
+    st::devices::ets::Client client{**channel};
+    auto caps = client.get_capabilities();
+    if (!caps.has_value()) {
+        std::fprintf(stderr, "ap3 capabilities: %s\n",
+                     caps.error().to_string().c_str());
+        return caps.error().code() == st::ErrorCode::PolicyDenied ? 2 : 1;
+    }
+    if (fmt == "json") {
+        std::printf("{\n");
+        std::printf("  \"flags\": %u,\n", caps->flags);
+        std::printf("  \"flags_hex\": \"0x%08X\",\n", caps->flags);
+        std::printf("  \"bits_set\": [");
+        bool first = true;
+        for (int b = 0; b < 32; ++b) {
+            if ((caps->flags >> b) & 1U) {
+                std::printf("%s%d", first ? "" : ", ", b);
+                first = false;
+            }
+        }
+        std::printf("],\n");
+        std::printf("  \"raw_body_bytes\": %zu\n", caps->raw_body.size());
+        std::printf("}\n");
+    } else if (fmt == "toml") {
+        std::printf("flags     = %u\n", caps->flags);
+        std::printf("flags_hex = \"0x%08X\"\n", caps->flags);
+        std::printf("bits_set  = [");
+        bool first = true;
+        for (int b = 0; b < 32; ++b) {
+            if ((caps->flags >> b) & 1U) {
+                std::printf("%s%d", first ? "" : ", ", b);
+                first = false;
+            }
+        }
+        std::printf("]\n");
+        std::printf("raw_body_bytes = %zu\n", caps->raw_body.size());
+    } else {
+        std::printf("Capabilities (cmd 0x1f)\n");
+        std::printf("  flags     : %u\n", caps->flags);
+        std::printf("  flags_hex : 0x%08X\n", caps->flags);
+        std::printf("  bits set  : ");
+        bool first = true;
+        for (int b = 0; b < 32; ++b) {
+            if ((caps->flags >> b) & 1U) {
+                std::printf("%s%d", first ? "" : ", ", b);
+                first = false;
+            }
+        }
+        std::printf("\n  raw bytes : %zu\n", caps->raw_body.size());
+        std::printf("\nNote: per-bit semantics are TBD pending Frida probe of "
+                    "APManager;\nthis value is a firmware-version fingerprint.\n");
+    }
+    return 0;
+}
+
 int run_raw(int argc, char **argv, CommonOpts const &opts) {
     auto const fmt = consume_format_flag(argc, argv);
     std::string cmd_hex;
@@ -17134,7 +17269,8 @@ void render_inspect_text(std::string const &path,
                          std::size_t file_size,
                          st::library::DecodedPtm const &decoded,
                          std::vector<st::devices::ets::LayerSummary> const &summary,
-                         std::vector<TableHit> const &top_tables) {
+                         std::vector<TableHit> const &top_tables,
+                         std::vector<std::string> const &interpretation) {
     std::uint64_t total_bytes = 0;
     for (auto const &p : decoded.patches) {
         total_bytes += p.length;
@@ -17189,6 +17325,14 @@ void render_inspect_text(std::string const &path,
         std::printf("\n");
     }
 
+    if (!interpretation.empty()) {
+        std::printf("Interpretation\n");
+        for (auto const &line : interpretation) {
+            std::printf("  %s\n", line.c_str());
+        }
+        std::printf("\n");
+    }
+
     std::printf("Cross-references\n");
     std::printf("  List every patch:                ptm list-patches %s\n", basename.c_str());
     // Diff / import lines deliberately omitted until those subcommands
@@ -17199,7 +17343,8 @@ void render_inspect_json(std::string const &path,
                          std::size_t file_size,
                          st::library::DecodedPtm const &decoded,
                          std::vector<st::devices::ets::LayerSummary> const &summary,
-                         std::vector<TableHit> const &top_tables) {
+                         std::vector<TableHit> const &top_tables,
+                         std::vector<std::string> const &interpretation) {
     (void)path;
     std::uint64_t total_bytes = 0;
     for (auto const &p : decoded.patches) {
@@ -17237,7 +17382,16 @@ void render_inspect_json(std::string const &path,
                     static_cast<unsigned long long>(h.total_bytes),
                     i + 1 < top_tables.size() ? "," : "");
     }
-    std::printf("  ]\n");
+    std::printf("  ],\n");
+    std::printf("  \"interpretation\": [");
+    for (std::size_t i = 0; i < interpretation.size(); ++i) {
+        std::string buf;
+        json_escape(buf, interpretation[i]);
+        std::printf("%s\"%s\"%s",
+                    i == 0 ? "" : " ", buf.c_str(),
+                    i + 1 < interpretation.size() ? "," : "");
+    }
+    std::printf("]\n");
     std::printf("}\n");
 }
 
@@ -17245,7 +17399,8 @@ void render_inspect_toml(std::string const &path,
                          std::size_t file_size,
                          st::library::DecodedPtm const &decoded,
                          std::vector<st::devices::ets::LayerSummary> const &summary,
-                         std::vector<TableHit> const &top_tables) {
+                         std::vector<TableHit> const &top_tables,
+                         std::vector<std::string> const &interpretation) {
     (void)path;
     std::uint64_t total_bytes = 0;
     for (auto const &p : decoded.patches) {
@@ -17275,6 +17430,16 @@ void render_inspect_toml(std::string const &path,
         std::printf("name = \"%s\"\n", h.table_name.c_str());
         std::printf("patches = %u\n", h.patch_count);
         std::printf("bytes = %llu\n", static_cast<unsigned long long>(h.total_bytes));
+    }
+    if (!interpretation.empty()) {
+        std::printf("\ninterpretation = [\n");
+        for (std::size_t i = 0; i < interpretation.size(); ++i) {
+            std::string buf;
+            json_escape(buf, interpretation[i]);
+            std::printf("  \"%s\"%s\n", buf.c_str(),
+                        i + 1 < interpretation.size() ? "," : "");
+        }
+        std::printf("]\n");
     }
 }
 
@@ -17361,7 +17526,8 @@ DiffResult compute_diff(st::library::DecodedPtm const &a, st::library::DecodedPt
 
 
 void render_diff_text(std::string const &a_path, std::string const &b_path,
-                      DiffResult const &r, DiffGroup group) {
+                      DiffResult const &r, DiffGroup group,
+                      std::vector<std::string> const &interpretation) {
     auto basename = [](std::string const &p) {
         auto s = p.find_last_of("/\\");
         return s == std::string::npos ? p : p.substr(s + 1);
@@ -17426,13 +17592,22 @@ void render_diff_text(std::string const &a_path, std::string const &b_path,
         std::printf("\n");
     }
 
+    if (!interpretation.empty()) {
+        std::printf("What changed\n");
+        for (auto const &line : interpretation) {
+            std::printf("  %s\n", line.c_str());
+        }
+        std::printf("\n");
+    }
+
     std::printf("Cross-references\n");
     std::printf("  Per-row patch listing:           ptm list-patches <file>\n");
     std::printf("  Identity + summary per file:     ptm inspect <file>\n");
 }
 
 void render_diff_json(std::string const &a_path, std::string const &b_path,
-                      DiffResult const &r) {
+                      DiffResult const &r,
+                      std::vector<std::string> const &interpretation) {
     (void)a_path;
     (void)b_path;
     std::printf("{\n");
@@ -17483,12 +17658,22 @@ void render_diff_json(std::string const &a_path, std::string const &b_path,
                     static_cast<unsigned long long>(td.changed_bytes),
                     i + 1 < r.by_table.size() ? "," : "");
     }
-    std::printf("  ]\n");
+    std::printf("  ],\n");
+    std::printf("  \"interpretation\": [");
+    for (std::size_t i = 0; i < interpretation.size(); ++i) {
+        std::string buf;
+        json_escape(buf, interpretation[i]);
+        std::printf("%s\"%s\"%s",
+                    i == 0 ? "" : " ", buf.c_str(),
+                    i + 1 < interpretation.size() ? "," : "");
+    }
+    std::printf("]\n");
     std::printf("}\n");
 }
 
 void render_diff_toml(std::string const &a_path, std::string const &b_path,
-                      DiffResult const &r) {
+                      DiffResult const &r,
+                      std::vector<std::string> const &interpretation) {
     (void)a_path;
     (void)b_path;
     std::printf("[envelope]\n");
@@ -17525,6 +17710,16 @@ void render_diff_toml(std::string const &a_path, std::string const &b_path,
         std::printf("a_only_bytes = %llu\n", static_cast<unsigned long long>(td.a_only_bytes));
         std::printf("b_only_bytes = %llu\n", static_cast<unsigned long long>(td.b_only_bytes));
         std::printf("changed_bytes = %llu\n", static_cast<unsigned long long>(td.changed_bytes));
+    }
+    if (!interpretation.empty()) {
+        std::printf("\ninterpretation = [\n");
+        for (std::size_t i = 0; i < interpretation.size(); ++i) {
+            std::string buf;
+            json_escape(buf, interpretation[i]);
+            std::printf("  \"%s\"%s\n", buf.c_str(),
+                        i + 1 < interpretation.size() ? "," : "");
+        }
+        std::printf("]\n");
     }
 }
 
@@ -17583,16 +17778,19 @@ int run_diff(int argc, char **argv) {
     }
 
     auto const result = compute_diff(a->decoded, b->decoded, ranges);
+    auto const interpretation =
+        st::library::interpret_diff(a->decoded, b->decoded, result);
 
     switch (opts.format) {
     case Format::Text:
-        render_diff_text(opts.a_path, opts.b_path, result, opts.group);
+        render_diff_text(opts.a_path, opts.b_path, result, opts.group,
+                         interpretation);
         break;
     case Format::Json:
-        render_diff_json(opts.a_path, opts.b_path, result);
+        render_diff_json(opts.a_path, opts.b_path, result, interpretation);
         break;
     case Format::Toml:
-        render_diff_toml(opts.a_path, opts.b_path, result);
+        render_diff_toml(opts.a_path, opts.b_path, result, interpretation);
         break;
     }
     return 0;
@@ -18078,18 +18276,82 @@ int run_import(int argc, char **argv) {
         out << "imported_from  = \"" << toml_escape(opts.ptm_path) << "\"\n";
     }
 
-    // Write an empty edits.toml so Project::open's history loader has
-    // something to chew on. The patches themselves are recorded in
-    // ptm_patches.toml (round-trip preserving raw form); edits.toml is
-    // the user's local-edit history layered on top.
+    // Write edits.toml — one [[edit]] per applied patch, encoded as a
+    // ByteEdit so Project::open's history loader produces undo-able
+    // entries the user can step through individually or revert in bulk
+    // via History::undo_while_tag("ptm_import"). cursor == N puts the
+    // history head at "all imported patches applied", matching the
+    // state of working.bin written above.
+    //
+    // ptm_patches.toml (raw round-trip form) is still written below.
+    // It carries layer metadata and is the authoritative source for
+    // `ptm export`; edits.toml is the canonical Project history layer
+    // sitting on top of source.bin.
     {
         std::ofstream out{out_dir / "edits.toml"};
         if (!out) {
             std::fprintf(stderr, "ptm import: write edits.toml failed\n");
             return 1;
         }
+        out << "# Edit history for this SubuwuTuner project. Generated by\n";
+        out << "# `subuwutuner-cli ptm import` — one [[edit]] per .ptm patch,\n";
+        out << "# tagged \"ptm_import\" so the whole import can be reverted as a\n";
+        out << "# single transaction via History::undo_while_tag.\n";
         out << "schema_version = 2\n";
-        out << "cursor = 0\n";
+        out << "cursor = " << patches_applied << "\n";
+
+        // Re-simulate sequential patch application so each edit's
+        // `before` reflects the running state immediately prior to that
+        // patch (matters when later patches overwrite earlier ones at
+        // the same offset — overlap is rare but legal).
+        auto running = *rom_bytes;
+        for (std::size_t pi = 0; pi < decoded.patches.size(); ++pi) {
+            auto const &p = decoded.patches[pi];
+            if (p.bytes.empty()) {
+                continue;
+            }
+            if (p.rom_offset >= running.size() ||
+                p.rom_offset + p.bytes.size() > running.size()) {
+                continue;
+            }
+            std::string table_name_str;
+            if (!ranges.empty()) {
+                if (auto const *t = find_table_for(ranges, p.rom_offset); t != nullptr) {
+                    table_name_str = t->name;
+                }
+            }
+            auto const layer_text = pi < classifications.size()
+                                        ? st::devices::ets::layer_label(classifications[pi].layer)
+                                        : std::string_view{"?"};
+            char addr_buf[24];
+            (void)std::snprintf(addr_buf, sizeof(addr_buf), "0x%08X", p.rom_offset);
+            std::string description = "ptm import: ";
+            if (!table_name_str.empty()) {
+                description += table_name_str;
+                description += ' ';
+            }
+            description += '@';
+            description += addr_buf;
+            description += " (";
+            description.append(layer_text);
+            description += ", ";
+            description += std::to_string(p.length);
+            description += "B)";
+
+            out << "\n[[edit]]\n";
+            out << "  description = \"" << toml_escape(description) << "\"\n";
+            out << "  tag         = \"ptm_import\"\n";
+            for (std::size_t i = 0; i < p.bytes.size(); ++i) {
+                auto const addr = static_cast<std::size_t>(p.rom_offset) + i;
+                auto const before = running[addr];
+                auto const after = p.bytes[i];
+                out << "  [[edit.byte_changes]]\n";
+                out << "    address = " << addr << "\n";
+                out << "    before  = " << static_cast<unsigned>(before) << "\n";
+                out << "    after   = " << static_cast<unsigned>(after) << "\n";
+            }
+            std::memcpy(running.data() + p.rom_offset, p.bytes.data(), p.bytes.size());
+        }
     }
 
     // Write ptm_patches.toml — one [[patch]] per decoded patch. Kept
@@ -18304,6 +18566,23 @@ int run_export(int argc, char **argv) {
         return 1;
     }
 
+    // Defensive metadata validation — reject shell metachars + non-
+    // ASCII in fields that downstream parsers (incl. the COBB AP shell
+    // scripts' sed+eval pattern) will execute as code. See analyst
+    // writeup at findings/tuning-knowledge-2026-06-13/cmd22-path-re/.
+    for (auto const &[name, val] : {
+             std::pair<char const *, std::string_view>{"vendorId", vendor_id},
+             std::pair<char const *, std::string_view>{"vehicleId", vehicle_id},
+             std::pair<char const *, std::string_view>{"romSum", rom_sum},
+             std::pair<char const *, std::string_view>{"saveDateTime", save_date},
+         }) {
+        if (auto const v = st::library::validate_ptm_metadata_field(name, val);
+            !v.has_value()) {
+            std::fprintf(stderr, "ptm export: %s\n", v.error().to_string().c_str());
+            return 1;
+        }
+    }
+
     auto const inner = st::library::build_ptm_inner_xml(
         vendor_id, vehicle_id, lock_mask, rom_sum, save_date, patches);
     auto const outer = st::library::build_ptm_outer_xml(
@@ -18391,15 +18670,21 @@ int run_inspect(int argc, char **argv) {
         }
     }
 
+    auto const interpretation =
+        st::library::interpret_inspect(*decoded, top_tables);
+
     switch (opts.format) {
     case Format::Text:
-        render_inspect_text(opts.ptm_path, file_size, *decoded, summary, top_tables);
+        render_inspect_text(opts.ptm_path, file_size, *decoded, summary,
+                            top_tables, interpretation);
         break;
     case Format::Json:
-        render_inspect_json(opts.ptm_path, file_size, *decoded, summary, top_tables);
+        render_inspect_json(opts.ptm_path, file_size, *decoded, summary,
+                            top_tables, interpretation);
         break;
     case Format::Toml:
-        render_inspect_toml(opts.ptm_path, file_size, *decoded, summary, top_tables);
+        render_inspect_toml(opts.ptm_path, file_size, *decoded, summary,
+                            top_tables, interpretation);
         break;
     }
     return 0;
@@ -18470,6 +18755,1330 @@ int run_list_patches(int argc, char **argv) {
 }
 
 } // namespace ptm_cli
+
+// ===========================================================================
+// `tuner-atlas` — browse the consolidated tuning knowledge atlas.
+//
+// The atlas TOML lives at fixtures/tuner_atlas/tuner_atlas.toml and is
+// loaded via st::library::Atlas. Resolution order for the default
+// fixture path:
+//   1. `--atlas <path>` if given
+//   2. `ST_TUNER_ATLAS` env var if set
+//   3. <cwd>/fixtures/tuner_atlas/tuner_atlas.toml, then walk parents
+//      up to 6 levels (handles both project-root and build-dir cwds).
+//
+// All subcommands honour `--format text|json|toml` with text as the
+// default. JSON output is one-line and tagged with the schema
+// `subuwutuner.tuner-atlas.v1`. TOML output round-trips the matching
+// substruct.
+// ===========================================================================
+namespace tuner_atlas_cli {
+
+enum class Format { Text, Json, Toml };
+
+struct CommonOpts {
+    std::string atlas_path;
+    Format format{Format::Text};
+};
+
+// Pull `--atlas <path>` and `--format <text|json|toml>` out of argv,
+// compacting in place. Returns false on malformed flag (with a stderr
+// message already emitted), true otherwise — including when neither
+// flag is present (the defaults kick in).
+[[nodiscard]] bool consume_common_flags(int &argc, char **argv, CommonOpts &opts) {
+    int write = 0;
+    for (int read = 0; read < argc; ++read) {
+        std::string_view const a{argv[read]};
+        if (a == "--atlas") {
+            if (read + 1 >= argc) {
+                std::fputs("tuner-atlas: --atlas requires a path\n", stderr);
+                return false;
+            }
+            opts.atlas_path.assign(argv[read + 1]);
+            ++read;
+            continue;
+        }
+        if (a == "--format") {
+            if (read + 1 >= argc) {
+                std::fputs("tuner-atlas: --format requires text|json|toml\n", stderr);
+                return false;
+            }
+            std::string_view const v{argv[read + 1]};
+            if (v == "text") {
+                opts.format = Format::Text;
+            } else if (v == "json") {
+                opts.format = Format::Json;
+            } else if (v == "toml") {
+                opts.format = Format::Toml;
+            } else {
+                std::fprintf(stderr,
+                             "tuner-atlas: --format must be text|json|toml (got '%.*s')\n",
+                             static_cast<int>(v.size()), v.data());
+                return false;
+            }
+            ++read;
+            continue;
+        }
+        argv[write++] = argv[read];
+    }
+    argc = write;
+    return true;
+}
+
+// Walk parents of cwd looking for fixtures/tuner_atlas/tuner_atlas.toml.
+// Returns empty path on miss. Bounded depth so a stray invocation from
+// the filesystem root can't burn cycles climbing forever.
+[[nodiscard]] std::filesystem::path discover_atlas_path() {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path cur = fs::current_path(ec);
+    if (ec) {
+        return {};
+    }
+    constexpr std::string_view kRelative = "fixtures/tuner_atlas/tuner_atlas.toml";
+    for (int i = 0; i < 6; ++i) {
+        auto const candidate = cur / kRelative;
+        if (fs::exists(candidate, ec) && !ec) {
+            return candidate;
+        }
+        auto parent = cur.parent_path();
+        if (parent == cur) {
+            break;
+        }
+        cur = parent;
+    }
+    return {};
+}
+
+[[nodiscard]] std::filesystem::path resolve_atlas_path(CommonOpts const &opts) {
+    if (!opts.atlas_path.empty()) {
+        return std::filesystem::path{opts.atlas_path};
+    }
+    if (char const *env = std::getenv("ST_TUNER_ATLAS"); env != nullptr && *env != '\0') {
+        return std::filesystem::path{env};
+    }
+    return discover_atlas_path();
+}
+
+// Load the atlas with the standard error reporting + exit-code mapping.
+// On miss returns nullopt; the caller already printed the diagnostic.
+[[nodiscard]] std::optional<st::library::Atlas> load_atlas(CommonOpts const &opts) {
+    auto const path = resolve_atlas_path(opts);
+    if (path.empty()) {
+        std::fputs(
+            "tuner-atlas: atlas not found; pass --atlas <path>, set ST_TUNER_ATLAS,\n"
+            "  or invoke from a directory whose tree contains fixtures/tuner_atlas/\n"
+            "  tuner_atlas.toml.\n",
+            stderr);
+        return std::nullopt;
+    }
+    auto r = st::library::Atlas::load_from_file(path);
+    if (!r.has_value()) {
+        std::fprintf(stderr, "tuner-atlas: %s\n", r.error().to_string().c_str());
+        return std::nullopt;
+    }
+    return std::move(*r);
+}
+
+// Append a JSON array of strings. Used by table/tuner emitters for the
+// clusters / co_edits / signature_tables / etc. lists.
+void emit_json_string_array(std::string &out, std::vector<std::string> const &xs) {
+    out.append("[");
+    for (std::size_t i = 0; i < xs.size(); ++i) {
+        if (i != 0) {
+            out.append(",");
+        }
+        json_escape(out, xs[i]);
+    }
+    out.append("]");
+}
+
+void emit_json_table(std::string &out, st::library::AtlasTable const &t) {
+    out.append("{\"id\":");
+    json_escape(out, t.id);
+    out.append(",\"display_name\":");
+    json_escape(out, t.display_name);
+    out.append(",\"address\":");
+    out.append(std::to_string(t.address));
+    out.append(",\"size_bytes\":");
+    out.append(std::to_string(t.size_bytes));
+    out.append(",\"dimension\":");
+    json_escape(out, t.dimension);
+    out.append(",\"storage\":");
+    json_escape(out, t.storage);
+    out.append(",\"units\":");
+    json_escape(out, t.units);
+    out.append(",\"purpose\":");
+    json_escape(out, t.purpose);
+    out.append(",\"fa24_portability\":");
+    json_escape(out, t.fa24_portability);
+    out.append(",\"needs_def_promotion\":");
+    out.append(t.needs_def_promotion ? "true" : "false");
+    out.append(",\"common_core\":");
+    out.append(t.common_core ? "true" : "false");
+    out.append(",\"high_variance\":");
+    out.append(t.high_variance ? "true" : "false");
+    out.append(",\"clusters\":");
+    emit_json_string_array(out, t.clusters);
+    out.append(",\"co_edits\":");
+    emit_json_string_array(out, t.co_edits);
+    out.append("}");
+}
+
+void emit_json_tuner(std::string &out, st::library::AtlasTuner const &t) {
+    out.append("{\"id\":");
+    json_escape(out, t.id);
+    out.append(",\"display_name\":");
+    json_escape(out, t.display_name);
+    out.append(",\"patches_typical\":");
+    out.append(std::to_string(t.patches_typical));
+    out.append(",\"mean_tables_touched\":");
+    out.append(std::to_string(t.mean_tables_touched));
+    out.append(",\"philosophy\":");
+    json_escape(out, t.philosophy);
+    out.append(",\"signature_tables\":");
+    emit_json_string_array(out, t.signature_tables);
+    out.append(",\"skipped_tables\":");
+    emit_json_string_array(out, t.skipped_tables);
+    out.append("}");
+}
+
+void emit_json_safety(std::string &out, st::library::AtlasSafetyPair const &s) {
+    out.append("{\"id\":");
+    json_escape(out, s.id);
+    out.append(",\"title\":");
+    json_escape(out, s.title);
+    out.append(",\"severity\":");
+    json_escape(out, s.severity);
+    out.append(",\"lhs_patterns\":");
+    emit_json_string_array(out, s.lhs_patterns);
+    out.append(",\"rhs_patterns\":");
+    emit_json_string_array(out, s.rhs_patterns);
+    out.append(",\"rationale\":");
+    json_escape(out, s.rationale);
+    out.append("}");
+}
+
+void emit_json_anchor(std::string &out, st::library::AtlasAnchor const &a) {
+    out.append("{\"id\":");
+    json_escape(out, a.id);
+    out.append(",\"display_name\":");
+    json_escape(out, a.display_name);
+    out.append(",\"rom_offset_start\":");
+    out.append(std::to_string(a.rom_offset_start));
+    out.append(",\"rom_offset_end\":");
+    out.append(std::to_string(a.rom_offset_end));
+    out.append(",\"length\":");
+    out.append(std::to_string(a.length));
+    out.append(",\"prose\":");
+    json_escape(out, a.prose);
+    out.append("}");
+}
+
+// Escape a string for a TOML basic-string literal. Mirrors the
+// toml_escape helper that lives in the ptm-cli block but kept local so
+// this namespace stays self-contained.
+std::string toml_str_escape(std::string_view s) {
+    std::string out;
+    out.reserve(s.size() + 2);
+    for (char c : s) {
+        switch (c) {
+        case '"':  out.append("\\\""); break;
+        case '\\': out.append("\\\\"); break;
+        case '\n': out.append("\\n"); break;
+        case '\r': out.append("\\r"); break;
+        case '\t': out.append("\\t"); break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20) {
+                char buf[8];
+                (void)std::snprintf(buf, sizeof(buf), "\\u%04X", static_cast<int>(c));
+                out.append(buf);
+            } else {
+                out.push_back(c);
+            }
+        }
+    }
+    return out;
+}
+
+void emit_toml_string_array(std::string &out, std::vector<std::string> const &xs) {
+    out.append("[");
+    for (std::size_t i = 0; i < xs.size(); ++i) {
+        if (i != 0) {
+            out.append(", ");
+        }
+        out.append("\"");
+        out.append(toml_str_escape(xs[i]));
+        out.append("\"");
+    }
+    out.append("]");
+}
+
+void emit_toml_table(std::string &out, st::library::AtlasTable const &t) {
+    out.append("[[table]]\n");
+    out.append("id = \""); out.append(toml_str_escape(t.id)); out.append("\"\n");
+    out.append("display_name = \""); out.append(toml_str_escape(t.display_name)); out.append("\"\n");
+    out.append("address = "); out.append(std::to_string(t.address)); out.append("\n");
+    out.append("size_bytes = "); out.append(std::to_string(t.size_bytes)); out.append("\n");
+    out.append("dimension = \""); out.append(toml_str_escape(t.dimension)); out.append("\"\n");
+    out.append("storage = \""); out.append(toml_str_escape(t.storage)); out.append("\"\n");
+    out.append("units = \""); out.append(toml_str_escape(t.units)); out.append("\"\n");
+    out.append("purpose = \""); out.append(toml_str_escape(t.purpose)); out.append("\"\n");
+    out.append("fa24_portability = \""); out.append(toml_str_escape(t.fa24_portability)); out.append("\"\n");
+    out.append("needs_def_promotion = "); out.append(t.needs_def_promotion ? "true" : "false"); out.append("\n");
+    out.append("common_core = "); out.append(t.common_core ? "true" : "false"); out.append("\n");
+    out.append("high_variance = "); out.append(t.high_variance ? "true" : "false"); out.append("\n");
+    out.append("clusters = "); emit_toml_string_array(out, t.clusters); out.append("\n");
+    out.append("co_edits = "); emit_toml_string_array(out, t.co_edits); out.append("\n");
+}
+
+void emit_toml_tuner(std::string &out, st::library::AtlasTuner const &t) {
+    out.append("[[tuner]]\n");
+    out.append("id = \""); out.append(toml_str_escape(t.id)); out.append("\"\n");
+    out.append("display_name = \""); out.append(toml_str_escape(t.display_name)); out.append("\"\n");
+    out.append("patches_typical = "); out.append(std::to_string(t.patches_typical)); out.append("\n");
+    out.append("mean_tables_touched = "); out.append(std::to_string(t.mean_tables_touched)); out.append("\n");
+    out.append("philosophy = \""); out.append(toml_str_escape(t.philosophy)); out.append("\"\n");
+    out.append("signature_tables = "); emit_toml_string_array(out, t.signature_tables); out.append("\n");
+    out.append("skipped_tables = "); emit_toml_string_array(out, t.skipped_tables); out.append("\n");
+}
+
+void emit_toml_safety(std::string &out, st::library::AtlasSafetyPair const &s) {
+    out.append("[[safety_pair]]\n");
+    out.append("id = \""); out.append(toml_str_escape(s.id)); out.append("\"\n");
+    out.append("title = \""); out.append(toml_str_escape(s.title)); out.append("\"\n");
+    out.append("severity = \""); out.append(toml_str_escape(s.severity)); out.append("\"\n");
+    out.append("lhs_patterns = "); emit_toml_string_array(out, s.lhs_patterns); out.append("\n");
+    out.append("rhs_patterns = "); emit_toml_string_array(out, s.rhs_patterns); out.append("\n");
+    out.append("rationale = \""); out.append(toml_str_escape(s.rationale)); out.append("\"\n");
+}
+
+void emit_toml_anchor(std::string &out, st::library::AtlasAnchor const &a) {
+    out.append("[[anchor]]\n");
+    out.append("id = \""); out.append(toml_str_escape(a.id)); out.append("\"\n");
+    out.append("display_name = \""); out.append(toml_str_escape(a.display_name)); out.append("\"\n");
+    out.append("rom_offset_start = "); out.append(std::to_string(a.rom_offset_start)); out.append("\n");
+    out.append("rom_offset_end = "); out.append(std::to_string(a.rom_offset_end)); out.append("\n");
+    out.append("length = "); out.append(std::to_string(a.length)); out.append("\n");
+    out.append("prose = \""); out.append(toml_str_escape(a.prose)); out.append("\"\n");
+}
+
+// `stats` — headline counts and provenance.
+int run_stats(int argc, char **argv, CommonOpts const &opts) {
+    if (argc > 0) {
+        std::fprintf(stderr, "tuner-atlas stats: unexpected argument: %s\n", argv[0]);
+        return 2;
+    }
+    auto atlas = load_atlas(opts);
+    if (!atlas.has_value()) {
+        return 1;
+    }
+    switch (opts.format) {
+    case Format::Json: {
+        std::string out;
+        out.append("{\"schema\":\"subuwutuner.tuner-atlas.v1\",\"kind\":\"stats\"");
+        out.append(",\"schema_version\":");
+        out.append(std::to_string(atlas->schema_version()));
+        out.append(",\"generated\":");
+        json_escape(out, atlas->generated());
+        out.append(",\"platform\":");
+        json_escape(out, atlas->platform());
+        out.append(",\"primary_cid\":");
+        json_escape(out, atlas->primary_cid());
+        out.append(",\"table_count\":");
+        out.append(std::to_string(atlas->tables().size()));
+        out.append(",\"tuner_count\":");
+        out.append(std::to_string(atlas->tuners().size()));
+        out.append(",\"safety_pair_count\":");
+        out.append(std::to_string(atlas->safety_pairs().size()));
+        out.append(",\"anchor_count\":");
+        out.append(std::to_string(atlas->anchors().size()));
+        out.append("}\n");
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Toml: {
+        std::string out;
+        out.append("[atlas]\n");
+        out.append("schema_version = "); out.append(std::to_string(atlas->schema_version())); out.append("\n");
+        out.append("generated      = \""); out.append(toml_str_escape(atlas->generated())); out.append("\"\n");
+        out.append("platform       = \""); out.append(toml_str_escape(atlas->platform())); out.append("\"\n");
+        out.append("primary_cid    = \""); out.append(toml_str_escape(atlas->primary_cid())); out.append("\"\n");
+        out.append("table_count    = "); out.append(std::to_string(atlas->tables().size())); out.append("\n");
+        out.append("tuner_count    = "); out.append(std::to_string(atlas->tuners().size())); out.append("\n");
+        out.append("safety_pair_count = "); out.append(std::to_string(atlas->safety_pairs().size())); out.append("\n");
+        out.append("anchor_count   = "); out.append(std::to_string(atlas->anchors().size())); out.append("\n");
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Text:
+    default:
+        std::printf("Tuner Atlas\n");
+        std::printf("  schema_version:    %d\n", atlas->schema_version());
+        std::printf("  generated:         %s\n", atlas->generated().c_str());
+        std::printf("  platform:          %s\n", atlas->platform().c_str());
+        std::printf("  primary_cid:       %s\n", atlas->primary_cid().c_str());
+        std::printf("  tables:            %zu\n", atlas->tables().size());
+        std::printf("  tuners:            %zu\n", atlas->tuners().size());
+        std::printf("  safety_pairs:      %zu\n", atlas->safety_pairs().size());
+        std::printf("  anchors:           %zu\n", atlas->anchors().size());
+        break;
+    }
+    return 0;
+}
+
+// `list-tables [--cluster <id>] [--needs-promotion] [--common-core]`
+int run_list_tables(int argc, char **argv, CommonOpts const &opts) {
+    std::optional<std::string> cluster_filter;
+    bool needs_promotion = false;
+    bool common_core = false;
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        if (a == "--cluster") {
+            if (i + 1 >= argc) {
+                std::fputs("tuner-atlas list-tables: --cluster requires a value\n", stderr);
+                return 2;
+            }
+            cluster_filter = std::string{argv[i + 1]};
+            ++i;
+        } else if (a == "--needs-promotion") {
+            needs_promotion = true;
+        } else if (a == "--common-core") {
+            common_core = true;
+        } else {
+            std::fprintf(stderr, "tuner-atlas list-tables: unknown option: %.*s\n",
+                         static_cast<int>(a.size()), a.data());
+            return 2;
+        }
+    }
+    auto atlas = load_atlas(opts);
+    if (!atlas.has_value()) {
+        return 1;
+    }
+    std::vector<st::library::AtlasTable const *> selected;
+    selected.reserve(atlas->tables().size());
+    for (auto const &t : atlas->tables()) {
+        if (needs_promotion && !t.needs_def_promotion) continue;
+        if (common_core && !t.common_core) continue;
+        if (cluster_filter.has_value()) {
+            bool hit = false;
+            for (auto const &c : t.clusters) {
+                if (c == *cluster_filter) { hit = true; break; }
+            }
+            if (!hit) continue;
+        }
+        selected.push_back(&t);
+    }
+
+    switch (opts.format) {
+    case Format::Json: {
+        std::string out;
+        out.append("{\"schema\":\"subuwutuner.tuner-atlas.v1\",\"kind\":\"list-tables\",\"count\":");
+        out.append(std::to_string(selected.size()));
+        out.append(",\"tables\":[");
+        for (std::size_t i = 0; i < selected.size(); ++i) {
+            if (i != 0) out.append(",");
+            emit_json_table(out, *selected[i]);
+        }
+        out.append("]}\n");
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Toml: {
+        std::string out;
+        for (auto const *t : selected) {
+            emit_toml_table(out, *t);
+            out.append("\n");
+        }
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Text:
+    default:
+        for (auto const *t : selected) {
+            std::printf("%s  %s  (%u B)\n", t->id.c_str(), t->display_name.c_str(),
+                        t->size_bytes);
+        }
+        std::printf("(%zu table%s)\n", selected.size(),
+                    selected.size() == 1 ? "" : "s");
+        break;
+    }
+    return 0;
+}
+
+// `list-tuners`
+int run_list_tuners(int argc, char **argv, CommonOpts const &opts) {
+    if (argc > 0) {
+        std::fprintf(stderr, "tuner-atlas list-tuners: unexpected argument: %s\n", argv[0]);
+        return 2;
+    }
+    auto atlas = load_atlas(opts);
+    if (!atlas.has_value()) {
+        return 1;
+    }
+    auto const &tuners = atlas->tuners();
+    switch (opts.format) {
+    case Format::Json: {
+        std::string out;
+        out.append("{\"schema\":\"subuwutuner.tuner-atlas.v1\",\"kind\":\"list-tuners\",\"count\":");
+        out.append(std::to_string(tuners.size()));
+        out.append(",\"tuners\":[");
+        for (std::size_t i = 0; i < tuners.size(); ++i) {
+            if (i != 0) out.append(",");
+            emit_json_tuner(out, tuners[i]);
+        }
+        out.append("]}\n");
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Toml: {
+        std::string out;
+        for (auto const &t : tuners) {
+            emit_toml_tuner(out, t);
+            out.append("\n");
+        }
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Text:
+    default:
+        for (auto const &t : tuners) {
+            std::printf("%s  %s  (%u patches typical)\n", t.id.c_str(),
+                        t.display_name.c_str(), t.patches_typical);
+        }
+        std::printf("(%zu tuner%s)\n", tuners.size(), tuners.size() == 1 ? "" : "s");
+        break;
+    }
+    return 0;
+}
+
+// `list-safety-pairs`
+int run_list_safety_pairs(int argc, char **argv, CommonOpts const &opts) {
+    if (argc > 0) {
+        std::fprintf(stderr, "tuner-atlas list-safety-pairs: unexpected argument: %s\n", argv[0]);
+        return 2;
+    }
+    auto atlas = load_atlas(opts);
+    if (!atlas.has_value()) {
+        return 1;
+    }
+    auto const &pairs = atlas->safety_pairs();
+    switch (opts.format) {
+    case Format::Json: {
+        std::string out;
+        out.append("{\"schema\":\"subuwutuner.tuner-atlas.v1\",\"kind\":\"list-safety-pairs\",\"count\":");
+        out.append(std::to_string(pairs.size()));
+        out.append(",\"safety_pairs\":[");
+        for (std::size_t i = 0; i < pairs.size(); ++i) {
+            if (i != 0) out.append(",");
+            emit_json_safety(out, pairs[i]);
+        }
+        out.append("]}\n");
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Toml: {
+        std::string out;
+        for (auto const &s : pairs) {
+            emit_toml_safety(out, s);
+            out.append("\n");
+        }
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Text:
+    default:
+        for (auto const &s : pairs) {
+            std::printf("[%s] %s  %s\n", s.severity.c_str(), s.id.c_str(),
+                        s.title.c_str());
+        }
+        std::printf("(%zu safety pair%s)\n", pairs.size(), pairs.size() == 1 ? "" : "s");
+        break;
+    }
+    return 0;
+}
+
+// `show-table <id>`
+int run_show_table(int argc, char **argv, CommonOpts const &opts) {
+    if (argc < 1) {
+        std::fputs("tuner-atlas show-table: missing <id>\n", stderr);
+        return 2;
+    }
+    std::string_view const id{argv[0]};
+    auto atlas = load_atlas(opts);
+    if (!atlas.has_value()) {
+        return 1;
+    }
+    auto const *t = atlas->find_table(id);
+    if (t == nullptr) {
+        std::fprintf(stderr, "tuner-atlas show-table: no such table id: %.*s\n",
+                     static_cast<int>(id.size()), id.data());
+        return 1;
+    }
+    switch (opts.format) {
+    case Format::Json: {
+        std::string out;
+        out.append("{\"schema\":\"subuwutuner.tuner-atlas.v1\",\"kind\":\"table\",\"table\":");
+        emit_json_table(out, *t);
+        out.append("}\n");
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Toml: {
+        std::string out;
+        emit_toml_table(out, *t);
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Text:
+    default:
+        std::printf("Table:             %s\n", t->id.c_str());
+        std::printf("Display name:      %s\n", t->display_name.c_str());
+        std::printf("Address:           0x%X (%u)\n", t->address, t->address);
+        std::printf("Size:              %u bytes\n", t->size_bytes);
+        if (!t->dimension.empty()) std::printf("Dimension:         %s\n", t->dimension.c_str());
+        if (!t->storage.empty())   std::printf("Storage:           %s\n", t->storage.c_str());
+        if (!t->units.empty())     std::printf("Units:             %s\n", t->units.c_str());
+        std::printf("FA24 portability:  %s\n", t->fa24_portability.c_str());
+        std::printf("Needs def promo:   %s\n", t->needs_def_promotion ? "yes" : "no");
+        std::printf("Common core:       %s\n", t->common_core ? "yes" : "no");
+        std::printf("High variance:     %s\n", t->high_variance ? "yes" : "no");
+        if (!t->purpose.empty()) std::printf("Purpose:           %s\n", t->purpose.c_str());
+        if (!t->clusters.empty()) {
+            std::printf("Clusters (%zu):\n", t->clusters.size());
+            for (auto const &c : t->clusters) std::printf("  - %s\n", c.c_str());
+        }
+        if (!t->co_edits.empty()) {
+            std::printf("Co-edits (%zu):\n", t->co_edits.size());
+            for (auto const &c : t->co_edits) std::printf("  - %s\n", c.c_str());
+        }
+        break;
+    }
+    return 0;
+}
+
+// `show-tuner <id>`
+int run_show_tuner(int argc, char **argv, CommonOpts const &opts) {
+    if (argc < 1) {
+        std::fputs("tuner-atlas show-tuner: missing <id>\n", stderr);
+        return 2;
+    }
+    std::string_view const id{argv[0]};
+    auto atlas = load_atlas(opts);
+    if (!atlas.has_value()) {
+        return 1;
+    }
+    auto const *t = atlas->find_tuner(id);
+    if (t == nullptr) {
+        std::fprintf(stderr, "tuner-atlas show-tuner: no such tuner id: %.*s\n",
+                     static_cast<int>(id.size()), id.data());
+        return 1;
+    }
+    switch (opts.format) {
+    case Format::Json: {
+        std::string out;
+        out.append("{\"schema\":\"subuwutuner.tuner-atlas.v1\",\"kind\":\"tuner\",\"tuner\":");
+        emit_json_tuner(out, *t);
+        out.append("}\n");
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Toml: {
+        std::string out;
+        emit_toml_tuner(out, *t);
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Text:
+    default:
+        std::printf("Tuner:             %s\n", t->id.c_str());
+        std::printf("Display name:      %s\n", t->display_name.c_str());
+        std::printf("Patches typical:   %u\n", t->patches_typical);
+        std::printf("Tables touched:    %u\n", t->mean_tables_touched);
+        if (!t->philosophy.empty()) std::printf("Philosophy:        %s\n", t->philosophy.c_str());
+        if (!t->signature_tables.empty()) {
+            std::printf("Signature tables (%zu):\n", t->signature_tables.size());
+            for (auto const &s : t->signature_tables) std::printf("  - %s\n", s.c_str());
+        }
+        if (!t->skipped_tables.empty()) {
+            std::printf("Skipped tables (%zu):\n", t->skipped_tables.size());
+            for (auto const &s : t->skipped_tables) std::printf("  - %s\n", s.c_str());
+        }
+        break;
+    }
+    return 0;
+}
+
+// `show-safety-pair <id>`
+int run_show_safety_pair(int argc, char **argv, CommonOpts const &opts) {
+    if (argc < 1) {
+        std::fputs("tuner-atlas show-safety-pair: missing <id>\n", stderr);
+        return 2;
+    }
+    std::string_view const id{argv[0]};
+    auto atlas = load_atlas(opts);
+    if (!atlas.has_value()) {
+        return 1;
+    }
+    auto const *s = atlas->find_safety_pair(id);
+    if (s == nullptr) {
+        std::fprintf(stderr, "tuner-atlas show-safety-pair: no such id: %.*s\n",
+                     static_cast<int>(id.size()), id.data());
+        return 1;
+    }
+    switch (opts.format) {
+    case Format::Json: {
+        std::string out;
+        out.append("{\"schema\":\"subuwutuner.tuner-atlas.v1\",\"kind\":\"safety_pair\",\"safety_pair\":");
+        emit_json_safety(out, *s);
+        out.append("}\n");
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Toml: {
+        std::string out;
+        emit_toml_safety(out, *s);
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Text:
+    default:
+        std::printf("Safety pair:       %s\n", s->id.c_str());
+        std::printf("Severity:          %s\n", s->severity.c_str());
+        std::printf("Title:             %s\n", s->title.c_str());
+        if (!s->lhs_patterns.empty()) {
+            std::printf("LHS patterns (%zu):\n", s->lhs_patterns.size());
+            for (auto const &p : s->lhs_patterns) std::printf("  - %s\n", p.c_str());
+        }
+        if (!s->rhs_patterns.empty()) {
+            std::printf("RHS patterns (%zu):\n", s->rhs_patterns.size());
+            for (auto const &p : s->rhs_patterns) std::printf("  - %s\n", p.c_str());
+        }
+        if (!s->rationale.empty()) std::printf("Rationale:         %s\n", s->rationale.c_str());
+        break;
+    }
+    return 0;
+}
+
+// `anchor-for <rom-offset>` — covers hex (0x...) or decimal.
+int run_anchor_for(int argc, char **argv, CommonOpts const &opts) {
+    if (argc < 1) {
+        std::fputs("tuner-atlas anchor-for: missing <rom-offset>\n", stderr);
+        return 2;
+    }
+    std::string_view const raw{argv[0]};
+    std::uint32_t offset = 0;
+    auto parse_uint32 = [](std::string_view sv, std::uint32_t &out_v) -> bool {
+        if (sv.empty()) return false;
+        int base = 10;
+        std::size_t off = 0;
+        if (sv.size() > 2 && sv[0] == '0' && (sv[1] == 'x' || sv[1] == 'X')) {
+            base = 16;
+            off = 2;
+        }
+        std::uint64_t acc = 0;
+        for (std::size_t i = off; i < sv.size(); ++i) {
+            char c = sv[i];
+            int d = -1;
+            if (c >= '0' && c <= '9') d = c - '0';
+            else if (base == 16 && c >= 'a' && c <= 'f') d = 10 + (c - 'a');
+            else if (base == 16 && c >= 'A' && c <= 'F') d = 10 + (c - 'A');
+            if (d < 0 || d >= base) return false;
+            acc = acc * static_cast<std::uint64_t>(base) + static_cast<std::uint64_t>(d);
+            if (acc > 0xFFFFFFFFu) return false;
+        }
+        out_v = static_cast<std::uint32_t>(acc);
+        return true;
+    };
+    if (!parse_uint32(raw, offset)) {
+        std::fprintf(stderr, "tuner-atlas anchor-for: not a valid rom offset: %.*s\n",
+                     static_cast<int>(raw.size()), raw.data());
+        return 2;
+    }
+    auto atlas = load_atlas(opts);
+    if (!atlas.has_value()) {
+        return 1;
+    }
+    auto const *a = atlas->anchor_for_offset(offset);
+    switch (opts.format) {
+    case Format::Json: {
+        std::string out;
+        out.append("{\"schema\":\"subuwutuner.tuner-atlas.v1\",\"kind\":\"anchor-for\",\"rom_offset\":");
+        out.append(std::to_string(offset));
+        if (a == nullptr) {
+            out.append(",\"anchor\":null}\n");
+        } else {
+            out.append(",\"anchor\":");
+            emit_json_anchor(out, *a);
+            out.append("}\n");
+        }
+        std::fputs(out.c_str(), stdout);
+        break;
+    }
+    case Format::Toml: {
+        if (a == nullptr) {
+            std::printf("# no anchor covers rom 0x%X\n", offset);
+        } else {
+            std::string out;
+            emit_toml_anchor(out, *a);
+            std::fputs(out.c_str(), stdout);
+        }
+        break;
+    }
+    case Format::Text:
+    default:
+        if (a == nullptr) {
+            std::printf("No anchor covers rom 0x%X (%u).\n", offset, offset);
+            return 0;
+        }
+        std::printf("Anchor:            %s\n", a->id.c_str());
+        std::printf("Display name:      %s\n", a->display_name.c_str());
+        std::printf("Range:             0x%X..0x%X (length %u)\n",
+                    a->rom_offset_start, a->rom_offset_end, a->length);
+        if (!a->prose.empty()) std::printf("Prose:             %s\n", a->prose.c_str());
+        break;
+    }
+    return 0;
+}
+
+void print_usage_text() {
+    std::fputs(
+        "Usage: subuwutuner-cli tuner-atlas [--atlas <path>] [--format text|json|toml] <COMMAND>\n"
+        "\n"
+        "Commands:\n"
+        "  list-tables [--cluster <id>] [--needs-promotion] [--common-core]\n"
+        "                     List atlas tables; filters narrow the result.\n"
+        "  list-tuners\n"
+        "                     List tuner clusters.\n"
+        "  list-safety-pairs\n"
+        "                     List corpus-derived safety pairs.\n"
+        "  show-table <id>\n"
+        "                     Full per-table page: purpose, clusters, co-edits,\n"
+        "                     FA24 portability, etc.\n"
+        "  show-tuner <id>\n"
+        "                     Cluster details: philosophy + signature/skipped tables.\n"
+        "  show-safety-pair <id>\n"
+        "                     Severity + members + rationale for a safety pair.\n"
+        "  anchor-for <rom-offset>\n"
+        "                     Covering anchor (hex or decimal); 'no anchor' when miss.\n"
+        "  stats\n"
+        "                     Headline counts + provenance.\n"
+        "\n"
+        "Atlas path resolution: --atlas, then ST_TUNER_ATLAS env var, then a walk\n"
+        "of cwd parents looking for fixtures/tuner_atlas/tuner_atlas.toml.\n",
+        stderr);
+}
+
+} // namespace tuner_atlas_cli
+
+// U1 — library subcommand. Browse the inventory.py-produced
+// library_index.toml without booting the GUI. Mirrors the Tune Library
+// panel's value prop (list / lookup-by-md5 / show / inspect-with-atlas)
+// at the terminal, with the same `--format text|json|toml` shape as
+// `tuner-atlas`. Hardware-free, cipher-free, lane-neutral.
+namespace library_cli {
+
+enum class Format { Text, Json, Toml };
+
+struct CommonOpts {
+    std::string index_path; // empty → fall back to default_index_path()
+    Format format{Format::Text};
+};
+
+[[nodiscard]] bool consume_common_flags(int &argc, char **argv, CommonOpts &opts) {
+    int write = 0;
+    for (int read = 0; read < argc; ++read) {
+        std::string_view const a{argv[read]};
+        if (a == "--index") {
+            if (read + 1 >= argc) {
+                std::fputs("library: --index requires a path\n", stderr);
+                return false;
+            }
+            opts.index_path.assign(argv[read + 1]);
+            ++read;
+            continue;
+        }
+        if (a == "--format") {
+            if (read + 1 >= argc) {
+                std::fputs("library: --format requires text|json|toml\n", stderr);
+                return false;
+            }
+            std::string_view const v{argv[read + 1]};
+            if (v == "text") {
+                opts.format = Format::Text;
+            } else if (v == "json") {
+                opts.format = Format::Json;
+            } else if (v == "toml") {
+                opts.format = Format::Toml;
+            } else {
+                std::fprintf(stderr,
+                             "library: --format must be text|json|toml (got '%.*s')\n",
+                             static_cast<int>(v.size()), v.data());
+                return false;
+            }
+            ++read;
+            continue;
+        }
+        argv[write++] = argv[read];
+    }
+    argc = write;
+    return true;
+}
+
+// Resolve --index, then ST_LIBRARY_INDEX env, then default discovery.
+// Returns nullopt + prints a diagnostic when no index can be found.
+[[nodiscard]] std::optional<std::filesystem::path>
+resolve_index_path(CommonOpts const &opts) {
+    if (!opts.index_path.empty()) {
+        return std::filesystem::path{opts.index_path};
+    }
+    return st::library::default_index_path();
+}
+
+[[nodiscard]] std::optional<st::library::TuneIndex>
+load_index(CommonOpts const &opts) {
+    auto const path = resolve_index_path(opts);
+    if (!path.has_value()) {
+        std::fputs("library: no library_index.toml found.\n"
+                   "  Try: subuwutuner-cli library --index <path-to-toml> ...\n"
+                   "  Or set ST_LIBRARY_INDEX, or run "
+                   "`python tools/library_inventory/inventory.py`.\n",
+                   stderr);
+        return std::nullopt;
+    }
+    auto loaded = st::library::TuneIndex::load_from_file(*path);
+    if (!loaded.has_value()) {
+        std::fprintf(stderr, "library: load failed (%s): %s\n",
+                     path->string().c_str(),
+                     loaded.error().to_string().c_str());
+        return std::nullopt;
+    }
+    return std::move(*loaded);
+}
+
+// TOML-string escape — only `"` and `\\` need handling at the basic
+// string layer. Newlines aren't expected in any inventory.py field.
+[[nodiscard]] std::string toml_escape(std::string_view s) {
+    std::string out;
+    out.reserve(s.size() + 2);
+    for (char c : s) {
+        if (c == '"' || c == '\\') {
+            out.push_back('\\');
+        }
+        out.push_back(c);
+    }
+    return out;
+}
+
+// JSON-string escape — same plus control-char run.
+[[nodiscard]] std::string json_escape(std::string_view s) {
+    std::string out;
+    out.reserve(s.size() + 2);
+    for (char c : s) {
+        switch (c) {
+        case '"':  out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\n': out += "\\n";  break;
+        case '\r': out += "\\r";  break;
+        case '\t': out += "\\t";  break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20) {
+                char buf[8];
+                std::snprintf(buf, sizeof buf, "\\u%04x",
+                              static_cast<unsigned>(c) & 0xFF);
+                out += buf;
+            } else {
+                out.push_back(c);
+            }
+        }
+    }
+    return out;
+}
+
+// Render one entry in the requested format. `kv_indent` is the leading
+// pad for json/toml multi-line forms — caller decides if the entry is
+// standalone or nested in a list.
+void print_entry_text(st::library::TuneIndexEntry const &e) {
+    std::printf("path        : %s\n", e.path.c_str());
+    std::printf("md5         : %s\n", e.md5.c_str());
+    std::printf("size        : %llu bytes\n",
+                static_cast<unsigned long long>(e.size));
+    std::printf("mtime       : %llu (unix)\n",
+                static_cast<unsigned long long>(e.mtime));
+    if (!e.vendor.empty()) {
+        std::printf("vendor      : %s\n", e.vendor.c_str());
+    }
+    if (!e.stage.empty()) {
+        std::printf("stage       : %s\n", e.stage.c_str());
+    }
+    if (!e.fuel_grade.empty()) {
+        std::printf("fuel_grade  : %s\n", e.fuel_grade.c_str());
+    }
+    if (!e.variant.empty()) {
+        std::printf("variant     : %s\n", e.variant.c_str());
+    }
+    if (!e.unlocked_sibling.empty()) {
+        std::printf("unlocked    : %s\n", e.unlocked_sibling.c_str());
+    }
+}
+
+void print_entry_json(st::library::TuneIndexEntry const &e,
+                       char const *indent = "  ") {
+    std::printf("{\n");
+    std::printf("%s\"path\": \"%s\",\n", indent, json_escape(e.path).c_str());
+    std::printf("%s\"md5\": \"%s\",\n", indent, e.md5.c_str());
+    std::printf("%s\"size\": %llu,\n", indent,
+                static_cast<unsigned long long>(e.size));
+    std::printf("%s\"mtime\": %llu,\n", indent,
+                static_cast<unsigned long long>(e.mtime));
+    std::printf("%s\"vendor\": \"%s\",\n", indent,
+                json_escape(e.vendor).c_str());
+    std::printf("%s\"stage\": \"%s\",\n", indent,
+                json_escape(e.stage).c_str());
+    std::printf("%s\"fuel_grade\": \"%s\",\n", indent,
+                json_escape(e.fuel_grade).c_str());
+    std::printf("%s\"variant\": \"%s\",\n", indent,
+                json_escape(e.variant).c_str());
+    std::printf("%s\"unlocked_sibling\": \"%s\"\n", indent,
+                json_escape(e.unlocked_sibling).c_str());
+    std::printf("}");
+}
+
+void print_entry_toml(st::library::TuneIndexEntry const &e) {
+    std::printf("[[entry]]\n");
+    std::printf("path = \"%s\"\n", toml_escape(e.path).c_str());
+    std::printf("md5 = \"%s\"\n", e.md5.c_str());
+    std::printf("size = %llu\n", static_cast<unsigned long long>(e.size));
+    std::printf("mtime = %llu\n", static_cast<unsigned long long>(e.mtime));
+    std::printf("vendor = \"%s\"\n", toml_escape(e.vendor).c_str());
+    std::printf("stage = \"%s\"\n", toml_escape(e.stage).c_str());
+    std::printf("fuel_grade = \"%s\"\n", toml_escape(e.fuel_grade).c_str());
+    std::printf("variant = \"%s\"\n", toml_escape(e.variant).c_str());
+    std::printf("unlocked_sibling = \"%s\"\n",
+                toml_escape(e.unlocked_sibling).c_str());
+}
+
+// Lookup helper used by `show` and `inspect-with-atlas`. Accepts
+// either a 32-char hex MD5 or a path substring. Hex match wins —
+// avoids accidental substring hit when the user typed an MD5.
+[[nodiscard]] st::library::TuneIndexEntry const *
+find_entry(st::library::TuneIndex const &idx, std::string_view needle) {
+    if (needle.size() == 32) {
+        bool is_hex = true;
+        for (char c : needle) {
+            if (!(std::isxdigit(static_cast<unsigned char>(c)))) {
+                is_hex = false;
+                break;
+            }
+        }
+        if (is_hex) {
+            if (auto const *e = idx.lookup_by_md5(needle); e != nullptr) {
+                return e;
+            }
+        }
+    }
+    // Path substring fallback. Case-insensitive on Windows-style paths
+    // would be nicer; this v1 is exact substring.
+    for (auto const &e : idx.ptm_entries()) {
+        if (e.path.find(needle) != std::string::npos) {
+            return &e;
+        }
+    }
+    return nullptr;
+}
+
+int run_list(int argc, char **argv, CommonOpts const &opts) {
+    (void)argc;
+    (void)argv;
+    auto idx = load_index(opts);
+    if (!idx.has_value()) {
+        return 1;
+    }
+    auto const &entries = idx->ptm_entries();
+    switch (opts.format) {
+    case Format::Text: {
+        if (entries.empty()) {
+            std::fputs("library: no .ptm entries.\n", stderr);
+            return 0;
+        }
+        // Compact one-row-per-tune layout. Columns chosen to fit a
+        // typical 100-col terminal without truncating the path.
+        std::printf("%-9s %-7s %-5s %-12s %-32s  %s\n", "vendor",
+                    "stage", "fuel", "variant", "md5", "path");
+        for (auto const &e : entries) {
+            std::printf("%-9s %-7s %-5s %-12s %-32s  %s\n",
+                        e.vendor.empty() ? "-" : e.vendor.c_str(),
+                        e.stage.empty() ? "-" : e.stage.c_str(),
+                        e.fuel_grade.empty() ? "-" : e.fuel_grade.c_str(),
+                        e.variant.empty() ? "-" : e.variant.c_str(),
+                        e.md5.empty() ? "-" : e.md5.c_str(),
+                        e.path.c_str());
+        }
+        std::printf("(%zu entries)\n", entries.size());
+        return 0;
+    }
+    case Format::Json: {
+        std::printf("[\n");
+        for (std::size_t i = 0; i < entries.size(); ++i) {
+            print_entry_json(entries[i], "    ");
+            if (i + 1 < entries.size()) {
+                std::printf(",");
+            }
+            std::printf("\n");
+        }
+        std::printf("]\n");
+        return 0;
+    }
+    case Format::Toml: {
+        std::printf("# schema = %s\n", idx->schema().c_str());
+        std::printf("# source = %s\n", idx->source_path().string().c_str());
+        for (auto const &e : entries) {
+            std::printf("\n");
+            print_entry_toml(e);
+        }
+        return 0;
+    }
+    }
+    return 0;
+}
+
+int run_lookup_md5(int argc, char **argv, CommonOpts const &opts) {
+    if (argc < 1) {
+        std::fputs("Usage: library lookup-md5 <md5-hex>\n", stderr);
+        return 2;
+    }
+    auto idx = load_index(opts);
+    if (!idx.has_value()) {
+        return 1;
+    }
+    auto const *e = idx->lookup_by_md5(argv[0]);
+    if (e == nullptr) {
+        std::fprintf(stderr, "library: no entry with md5 = %s\n", argv[0]);
+        return 1;
+    }
+    switch (opts.format) {
+    case Format::Text:
+        print_entry_text(*e);
+        break;
+    case Format::Json:
+        print_entry_json(*e, "  ");
+        std::printf("\n");
+        break;
+    case Format::Toml:
+        print_entry_toml(*e);
+        break;
+    }
+    return 0;
+}
+
+int run_show(int argc, char **argv, CommonOpts const &opts) {
+    if (argc < 1) {
+        std::fputs("Usage: library show <md5-or-path-substring>\n", stderr);
+        return 2;
+    }
+    auto idx = load_index(opts);
+    if (!idx.has_value()) {
+        return 1;
+    }
+    auto const *e = find_entry(*idx, argv[0]);
+    if (e == nullptr) {
+        std::fprintf(stderr, "library: no entry matches '%s'\n", argv[0]);
+        return 1;
+    }
+    switch (opts.format) {
+    case Format::Text:
+        print_entry_text(*e);
+        break;
+    case Format::Json:
+        print_entry_json(*e, "  ");
+        std::printf("\n");
+        break;
+    case Format::Toml:
+        print_entry_toml(*e);
+        break;
+    }
+    return 0;
+}
+
+int run_inspect_with_atlas(int argc, char **argv, CommonOpts const &opts) {
+    if (argc < 1) {
+        std::fputs("Usage: library inspect-with-atlas <md5-or-path-substring>\n",
+                   stderr);
+        return 2;
+    }
+    auto idx = load_index(opts);
+    if (!idx.has_value()) {
+        return 1;
+    }
+    auto const *entry = find_entry(*idx, argv[0]);
+    if (entry == nullptr) {
+        std::fprintf(stderr, "library: no entry matches '%s'\n", argv[0]);
+        return 1;
+    }
+    // Atlas is best-effort — without it, the annotation collapses to
+    // empty badges but the entry itself still prints. Use the same
+    // resolution chain as tuner_atlas_cli.
+    auto const atlas_path = tuner_atlas_cli::discover_atlas_path();
+    std::optional<st::library::Atlas> atlas;
+    if (!atlas_path.empty()) {
+        auto r = st::library::Atlas::load_from_file(atlas_path);
+        if (r.has_value()) {
+            atlas = std::move(*r);
+        }
+    }
+    st::library::TuneAnnotation ann;
+    if (atlas.has_value()) {
+        ann = st::library::annotate_tune(*entry, *atlas);
+    }
+    switch (opts.format) {
+    case Format::Text: {
+        print_entry_text(*entry);
+        std::printf("\nannotation:\n");
+        std::printf("  tuner_family    : %s\n",
+                    ann.tuner_family.empty() ? "-" : ann.tuner_family.c_str());
+        std::printf("  fehr_family     : %s\n", ann.fehr_family ? "yes" : "no");
+        std::printf("  cobb_nexgen     : %s\n", ann.cobb_nexgen ? "yes" : "no");
+        std::printf("  ntm_swap_basemap: %s\n",
+                    ann.ntm_swap_basemap ? "yes" : "no");
+        if (!atlas.has_value()) {
+            std::fputs("\n(atlas not loaded — annotation is empty)\n", stderr);
+        }
+        break;
+    }
+    case Format::Json: {
+        std::printf("{\n  \"entry\": ");
+        print_entry_json(*entry, "    ");
+        std::printf(",\n  \"annotation\": {\n");
+        std::printf("    \"tuner_family\": \"%s\",\n",
+                    json_escape(ann.tuner_family).c_str());
+        std::printf("    \"fehr_family\": %s,\n",
+                    ann.fehr_family ? "true" : "false");
+        std::printf("    \"cobb_nexgen\": %s,\n",
+                    ann.cobb_nexgen ? "true" : "false");
+        std::printf("    \"ntm_swap_basemap\": %s\n",
+                    ann.ntm_swap_basemap ? "true" : "false");
+        std::printf("  }\n}\n");
+        break;
+    }
+    case Format::Toml: {
+        print_entry_toml(*entry);
+        std::printf("\n[annotation]\n");
+        std::printf("tuner_family = \"%s\"\n",
+                    toml_escape(ann.tuner_family).c_str());
+        std::printf("fehr_family = %s\n", ann.fehr_family ? "true" : "false");
+        std::printf("cobb_nexgen = %s\n", ann.cobb_nexgen ? "true" : "false");
+        std::printf("ntm_swap_basemap = %s\n",
+                    ann.ntm_swap_basemap ? "true" : "false");
+        break;
+    }
+    }
+    return 0;
+}
+
+void print_usage_text() {
+    std::fputs(
+        "Usage: subuwutuner-cli library [--index <path>] [--format text|json|toml] <subcommand> [args]\n"
+        "\n"
+        "Subcommands:\n"
+        "  list                       Every .ptm entry from the library index.\n"
+        "  lookup-md5 <hex>           Print the entry whose content MD5 matches.\n"
+        "  show <md5-or-path>         Same as lookup-md5 but also accepts a path\n"
+        "                             substring as a convenience.\n"
+        "  inspect-with-atlas <key>   Print entry + cross-corpus annotation badges\n"
+        "                             (tuner_family / fehr / cobb_nexgen / ntm).\n"
+        "\n"
+        "Index path resolution: --index, then ST_LIBRARY_INDEX env var, then a\n"
+        "discovery walk (see st::library::default_index_path).\n",
+        stderr);
+}
+
+} // namespace library_cli
+
+int cmd_library(int argc, char *argv[]) {
+    if (argc < 1) {
+        library_cli::print_usage_text();
+        return 2;
+    }
+    library_cli::CommonOpts opts;
+    int sub_argc = argc;
+    char **sub_argv = argv;
+    if (!library_cli::consume_common_flags(sub_argc, sub_argv, opts)) {
+        return 2;
+    }
+    if (sub_argc < 1) {
+        library_cli::print_usage_text();
+        return 2;
+    }
+    std::string_view const sub{sub_argv[0]};
+    int const rest_argc = sub_argc - 1;
+    char **rest_argv = sub_argv + 1;
+    if (sub == "list") {
+        return library_cli::run_list(rest_argc, rest_argv, opts);
+    }
+    if (sub == "lookup-md5") {
+        return library_cli::run_lookup_md5(rest_argc, rest_argv, opts);
+    }
+    if (sub == "show") {
+        return library_cli::run_show(rest_argc, rest_argv, opts);
+    }
+    if (sub == "inspect-with-atlas") {
+        return library_cli::run_inspect_with_atlas(rest_argc, rest_argv, opts);
+    }
+    std::fprintf(stderr,
+                 "library: unknown subcommand: %.*s\n"
+                 "Run `subuwutuner-cli library` for the list.\n",
+                 static_cast<int>(sub.size()), sub.data());
+    return 2;
+}
+
+int cmd_tuner_atlas(int argc, char *argv[]) {
+    if (argc < 1) {
+        tuner_atlas_cli::print_usage_text();
+        return 2;
+    }
+    tuner_atlas_cli::CommonOpts opts;
+    int sub_argc = argc;
+    char **sub_argv = argv;
+    if (!tuner_atlas_cli::consume_common_flags(sub_argc, sub_argv, opts)) {
+        return 2;
+    }
+    if (sub_argc < 1) {
+        tuner_atlas_cli::print_usage_text();
+        return 2;
+    }
+    std::string_view const sub{sub_argv[0]};
+    int const rest_argc = sub_argc - 1;
+    char **rest_argv = sub_argv + 1;
+    if (sub == "stats") {
+        return tuner_atlas_cli::run_stats(rest_argc, rest_argv, opts);
+    }
+    if (sub == "list-tables") {
+        return tuner_atlas_cli::run_list_tables(rest_argc, rest_argv, opts);
+    }
+    if (sub == "list-tuners") {
+        return tuner_atlas_cli::run_list_tuners(rest_argc, rest_argv, opts);
+    }
+    if (sub == "list-safety-pairs") {
+        return tuner_atlas_cli::run_list_safety_pairs(rest_argc, rest_argv, opts);
+    }
+    if (sub == "show-table") {
+        return tuner_atlas_cli::run_show_table(rest_argc, rest_argv, opts);
+    }
+    if (sub == "show-tuner") {
+        return tuner_atlas_cli::run_show_tuner(rest_argc, rest_argv, opts);
+    }
+    if (sub == "show-safety-pair") {
+        return tuner_atlas_cli::run_show_safety_pair(rest_argc, rest_argv, opts);
+    }
+    if (sub == "anchor-for") {
+        return tuner_atlas_cli::run_anchor_for(rest_argc, rest_argv, opts);
+    }
+    std::fprintf(stderr,
+                 "tuner-atlas: unknown subcommand: %.*s\n"
+                 "Run `subuwutuner-cli tuner-atlas` for the list.\n",
+                 static_cast<int>(sub.size()), sub.data());
+    return 2;
+}
 
 int cmd_ptm(int argc, char *argv[]) {
     if (argc < 1) {
@@ -19493,6 +21102,12 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "ptm") {
         return cmd_ptm(argc - 2, argv + 2);
+    }
+    if (cmd == "tuner-atlas") {
+        return cmd_tuner_atlas(argc - 2, argv + 2);
+    }
+    if (cmd == "library") {
+        return cmd_library(argc - 2, argv + 2);
     }
     if (cmd == "autotune") {
         // Match the `config` subcommand-help shape: list all known
