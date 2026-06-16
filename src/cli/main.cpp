@@ -15221,6 +15221,8 @@ int cmd_subaru_ssm_cmd(int argc, char *argv[]) {
                 sa_escalate_variant = std::string{v};
             else
                 return 2;
+        } else if (a == "--verbose" || a == "-v") {
+            st::transport::obdx::set_trace_enabled(true);
         } else if (a == "--timeout-ms") {
             auto const *v = require_arg("--timeout-ms");
             if (v == nullptr)
