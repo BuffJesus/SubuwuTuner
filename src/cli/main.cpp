@@ -14632,6 +14632,341 @@ int cmd_rdbi(int argc, char *argv[]) {
 }
 
 // OBD-II Mode 09 vehicle-info query. Most useful Subaru-side for
+// cmd_subaru_ssm_cmd — send one SSM command byte + optional payload over
+// CAN ISO-TP, print the response body. Per ζ1 (docs/37 §"Wire protocol"):
+// Subaru's flash-mode handshake dispatches via SSM byte 0xA5, not UDS
+// DSC. This verb is the surgical proof-of-life: send the byte that
+// SubaruShCanFlash::enable_flash_mode emits, with the same DSC+SA
+// prelude that flash-apply uses, see whether the ECU accepts it.
+//
+// Reusable for future Tier-B RE — erase / checksum / etc. each have
+// their own SSM byte that we'll need to validate on the bench rig.
+int cmd_subaru_ssm_cmd(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::optional<std::uint32_t> cmd_byte;
+    std::vector<std::uint8_t> payload;
+    std::optional<std::string> sa_variant;
+    std::uint8_t security_level = 0x01;
+    std::optional<bool> authenticate_flag;
+    std::optional<bool> enter_dsc_flag;
+    bool sa_l1_followup_disabled = false;
+    std::chrono::milliseconds timeout{2000};
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-ssm-cmd: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--cmd") {
+            auto const *v = require_arg("--cmd");
+            if (v == nullptr)
+                return 2;
+            std::string_view sv{v};
+            int base = 10;
+            if (sv.starts_with("0x") || sv.starts_with("0X")) {
+                sv.remove_prefix(2);
+                base = 16;
+            }
+            char *end = nullptr;
+            auto const val = std::strtoull(sv.data(), &end, base);
+            if (end == sv.data() || *end != '\0' || val > 0xFFULL) {
+                std::fputs("subaru-ssm-cmd: --cmd must be a 0-255 hex (0x..) "
+                           "or decimal value\n",
+                           stderr);
+                return 2;
+            }
+            cmd_byte = static_cast<std::uint32_t>(val);
+        } else if (a == "--payload") {
+            auto const *v = require_arg("--payload");
+            if (v == nullptr)
+                return 2;
+            // Hex pairs, optional whitespace between (e.g. "01 02 03" or
+            // "010203"). Reject odd nibble counts and non-hex chars.
+            std::string_view sv{v};
+            payload.clear();
+            std::uint8_t nibble = 0;
+            int nibble_count = 0;
+            for (char c : sv) {
+                if (c == ' ' || c == '\t')
+                    continue;
+                std::uint8_t n;
+                if (c >= '0' && c <= '9')
+                    n = static_cast<std::uint8_t>(c - '0');
+                else if (c >= 'a' && c <= 'f')
+                    n = static_cast<std::uint8_t>(c - 'a' + 10);
+                else if (c >= 'A' && c <= 'F')
+                    n = static_cast<std::uint8_t>(c - 'A' + 10);
+                else {
+                    std::fprintf(stderr, "subaru-ssm-cmd: --payload non-hex char '%c'\n", c);
+                    return 2;
+                }
+                nibble = static_cast<std::uint8_t>(nibble << 4 | n);
+                if (++nibble_count == 2) {
+                    payload.push_back(nibble);
+                    nibble = 0;
+                    nibble_count = 0;
+                }
+            }
+            if (nibble_count != 0) {
+                std::fputs("subaru-ssm-cmd: --payload must be full hex bytes "
+                           "(odd nibble count)\n",
+                           stderr);
+                return 2;
+            }
+        } else if (a == "--sa-variant") {
+            if (auto const *v = require_arg("--sa-variant"); v)
+                sa_variant = std::string{v};
+            else
+                return 2;
+        } else if (a == "--security-level") {
+            auto const *v = require_arg("--security-level");
+            if (v == nullptr)
+                return 2;
+            std::string_view sv{v};
+            int base = 10;
+            if (sv.starts_with("0x") || sv.starts_with("0X")) {
+                sv.remove_prefix(2);
+                base = 16;
+            }
+            char *end = nullptr;
+            auto const val = std::strtoull(sv.data(), &end, base);
+            if (end == sv.data() || *end != '\0' || val == 0 || val > 0xFFULL) {
+                std::fputs("subaru-ssm-cmd: --security-level must be a positive "
+                           "8-bit hex (0x..) or decimal integer\n",
+                           stderr);
+                return 2;
+            }
+            security_level = static_cast<std::uint8_t>(val);
+        } else if (a == "--authenticate") {
+            authenticate_flag = true;
+        } else if (a == "--no-authenticate") {
+            authenticate_flag = false;
+        } else if (a == "--enter-dsc") {
+            enter_dsc_flag = true;
+        } else if (a == "--no-enter-dsc") {
+            enter_dsc_flag = false;
+        } else if (a == "--no-sa-l1-followup") {
+            sa_l1_followup_disabled = true;
+        } else if (a == "--timeout-ms") {
+            auto const *v = require_arg("--timeout-ms");
+            if (v == nullptr)
+                return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 10);
+            if (end == v || *end != '\0' || val == 0 || val > 60000ULL) {
+                std::fputs("subaru-ssm-cmd: --timeout-ms must be a decimal "
+                           "1..60000\n",
+                           stderr);
+                return 2;
+            }
+            timeout = std::chrono::milliseconds{static_cast<long long>(val)};
+        } else if (a.starts_with("--")) {
+            std::fprintf(stderr, "subaru-ssm-cmd: unknown option: %s\n", argv[i]);
+            return 2;
+        } else {
+            std::fprintf(stderr, "subaru-ssm-cmd: extra positional argument: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value() || !cmd_byte.has_value()) {
+        std::fputs(
+            "subaru-ssm-cmd: missing --transport / --cmd\n"
+            "Usage: subuwutuner-cli subaru-ssm-cmd --transport <kind> --cmd <byte>\n"
+            "       [--device <path>] [--dll <path>] [--payload <hex>]\n"
+            "       [--sa-variant <name>] [--security-level <hex>]\n"
+            "       [--authenticate|--no-authenticate] [--enter-dsc|--no-enter-dsc]\n"
+            "       [--no-sa-l1-followup] [--timeout-ms N]\n"
+            "\n"
+            "Send one SSM command byte (+ optional payload) over CAN ISO-TP and\n"
+            "print the response body. Per docs/37 §\"Wire protocol — ζ1 reframe\":\n"
+            "Subaru's flash-mode dispatch is SSM byte 0xA5, NOT UDS DSC 0x10 0x02.\n"
+            "This verb is the surgical proof-of-life that SubaruShCanFlash::\n"
+            "enable_flash_mode emits the right wire bytes.\n"
+            "\n"
+            "Defaults mirror flash-apply: DSC ExtendedDiagnostic + SA at\n"
+            "--security-level, then a post-L3 RMBA + L1 SA follow-up when\n"
+            "level > 0x01 (COBB-tuned ECU dance per cobb-install-flow.md §2).\n"
+            "Disable individual steps with --no-enter-dsc / --no-authenticate /\n"
+            "--no-sa-l1-followup.\n"
+            "\n"
+            "Examples:\n"
+            "  # Send 0xA5 (EnableFlashMode) with L3 SA prelude:\n"
+            "  subuwutuner-cli subaru-ssm-cmd --transport obdx --device COM4 \\\n"
+            "      --cmd 0xA5 --sa-variant aftermarket-l3 --security-level 0x03\n"
+            "\n"
+            "  # No prelude, just send the byte (Default session probe):\n"
+            "  subuwutuner-cli subaru-ssm-cmd --transport obdx --device COM4 \\\n"
+            "      --cmd 0xA5 --no-enter-dsc --no-authenticate\n",
+            stderr);
+        return 2;
+    }
+
+    // Resolve --sa-variant to a key function. Same set as flash-apply.
+    st::ecu::SecurityKeyFn sa_variant_fn;
+    if (sa_variant.has_value()) {
+        if (*sa_variant == "default" || *sa_variant == "factory") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_key_stub;
+        } else if (*sa_variant == "aftermarket" || *sa_variant == "aftermarket-l1") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket;
+        } else if (*sa_variant == "aftermarket-l3") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l3_aftermarket;
+        } else if (*sa_variant == "aftermarket-v1-flash") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket_v1_flash;
+        } else if (*sa_variant == "aftermarket-v1-maf-sd") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket_v1_maf_sd;
+        } else if (*sa_variant == "ssmv-factory") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_ssmv_factory;
+        } else if (*sa_variant == "ecutek" || *sa_variant == "ecutek-l1") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l1_ecutek;
+        } else if (*sa_variant == "ecutek-l3" || *sa_variant == "ecutek-l35") {
+            sa_variant_fn = &st::ecu::subaru::ssmcan1_l35_ecutek;
+        } else {
+            std::fprintf(stderr, "subaru-ssm-cmd: --sa-variant '%s' not recognized\n",
+                         sa_variant->c_str());
+            return 2;
+        }
+    }
+
+    bool const authenticate = authenticate_flag.value_or(true);
+    bool const enter_dsc = enter_dsc_flag.value_or(true);
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr, "subaru-ssm-cmd: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-ssm-cmd: %s\n", t.error().to_string().c_str());
+        return 1;
+    }
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765, 500000,
+                                          0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-ssm-cmd: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+
+    st::ecu::uds::UdsClient uds{**t};
+
+    if (enter_dsc) {
+        if (auto s = uds.diagnostic_session_control(
+                st::ecu::uds::kDscExtendedDiagnostic, std::chrono::milliseconds{1000});
+            !s.has_value()) {
+            std::fprintf(stderr, "subaru-ssm-cmd: DSC entry failed: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+    }
+    if (authenticate) {
+        if (!sa_variant_fn) {
+            std::fputs("subaru-ssm-cmd: --authenticate requires --sa-variant\n", stderr);
+            return 1;
+        }
+        auto seed = uds.security_access_request_seed(security_level,
+                                                      std::chrono::milliseconds{1000});
+        if (!seed.has_value()) {
+            std::fprintf(stderr, "subaru-ssm-cmd: SA requestSeed failed: %s\n",
+                         seed.error().to_string().c_str());
+            return 1;
+        }
+        auto key = sa_variant_fn(*seed);
+        if (!key.has_value()) {
+            std::fprintf(stderr, "subaru-ssm-cmd: SA key derivation failed: %s\n",
+                         key.error().to_string().c_str());
+            return 1;
+        }
+        auto const send_sub = static_cast<std::uint8_t>(security_level + 1U);
+        if (auto s = uds.security_access_send_key(send_sub, *key,
+                                                    std::chrono::milliseconds{1000});
+            !s.has_value()) {
+            std::fprintf(stderr, "subaru-ssm-cmd: SA sendKey failed: %s\n",
+                         s.error().to_string().c_str());
+            return 1;
+        }
+        std::fprintf(stderr, "subaru-ssm-cmd: SA variant=%s level=0x%02X granted\n",
+                     sa_variant->c_str(), security_level);
+        // Dual-SA dance: post-L3 RMBA + L1 follow-up. Same as flash-apply.
+        if (security_level > 0x01U && !sa_l1_followup_disabled) {
+            if (auto rmba = uds.read_memory_by_address(
+                    0x001FFF30U, 0x70U, std::chrono::milliseconds{1000});
+                !rmba.has_value()) {
+                std::fprintf(stderr,
+                             "subaru-ssm-cmd: post-L3 RMBA at 0x1FFF30 failed: %s\n",
+                             rmba.error().to_string().c_str());
+                return 1;
+            }
+            auto seed_l1 = uds.security_access_request_seed(
+                0x01, std::chrono::milliseconds{1000});
+            if (!seed_l1.has_value()) {
+                std::fprintf(stderr, "subaru-ssm-cmd: L1 follow-up RequestSeed "
+                                     "failed: %s\n",
+                             seed_l1.error().to_string().c_str());
+                std::fputs("subaru-ssm-cmd: hint: --no-sa-l1-followup may help\n",
+                           stderr);
+                return 1;
+            }
+            auto key_l1 = st::ecu::subaru::ssmcan1_l1_aftermarket(*seed_l1);
+            if (!key_l1.has_value()) {
+                std::fprintf(stderr, "subaru-ssm-cmd: L1 follow-up key derivation "
+                                     "failed: %s\n",
+                             key_l1.error().to_string().c_str());
+                return 1;
+            }
+            if (auto s = uds.security_access_send_key(
+                    0x02, *key_l1, std::chrono::milliseconds{1000});
+                !s.has_value()) {
+                std::fprintf(stderr, "subaru-ssm-cmd: L1 follow-up SendKey failed: %s\n",
+                             s.error().to_string().c_str());
+                return 1;
+            }
+            std::fputs("subaru-ssm-cmd: SA L1 follow-up completed\n", stderr);
+        }
+    }
+
+    // The actual SSM command send.
+    st::ecu::ssm::SsmClient ssm{**t, st::ecu::ssm::Framing::IsoTp};
+    std::fprintf(stderr, "subaru-ssm-cmd: sending SSM cmd 0x%02X (payload %zu bytes)...\n",
+                 *cmd_byte, payload.size());
+    auto const r = ssm.send_byte_command(static_cast<std::uint8_t>(*cmd_byte),
+                                          std::span<std::uint8_t const>{payload}, timeout);
+    if (!r.has_value()) {
+        std::fprintf(stderr, "subaru-ssm-cmd: FAILED: %s\n", r.error().to_string().c_str());
+        return 1;
+    }
+    std::fprintf(stderr, "subaru-ssm-cmd: POSITIVE response (ACK 0x%02X), body=%zu bytes\n",
+                 *cmd_byte | 0x40U, r->size());
+    for (std::size_t i = 0; i < r->size(); ++i) {
+        std::fprintf(stdout, "%02X%s", (*r)[i], (i + 1 == r->size()) ? "\n" : " ");
+    }
+    return 0;
+}
+
 // fetching the calibration ID (CAL ID), which lets the user identify
 // which tune is currently active on the ECU without dumping the full
 // ROM. Mode 09 is in the default session and SA-free, so the command
@@ -20690,6 +21025,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "obd-info") {
         return cmd_obd_info(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-ssm-cmd") {
+        return cmd_subaru_ssm_cmd(argc - 2, argv + 2);
     }
     if (cmd == "config") {
         return cmd_config(argc - 2, argv + 2);
