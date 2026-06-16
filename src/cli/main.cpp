@@ -12762,6 +12762,39 @@ int cmd_flash_apply(int argc, char *argv[]) {
                                  rmba.error().to_string().c_str());
                     return 1;
                 }
+                // [1.5] Force SA-grant clear via DefaultSession transition.
+                // Per round-2 spec §Q2 option 1
+                // (SubuwuTuner-specs/specs/dsc-prog-precondition-firmware-detail.md):
+                // the captured firmware's "functional DSC re-entry clears
+                // SA" doesn't hold on this donor — confirmed on bench.
+                // ISO 14229-1 §10.3 only mandates clearing on session
+                // CHANGE (different sub-function), so re-entering the same
+                // Extended session is a no-op. Force an actual change by
+                // going through DefaultSession (0x10 0x01) then back to
+                // Extended (0x10 0x03). This clears the L3 latch at
+                // mem8[0xFFF9B854] so subsequent L1 RequestSeed isn't
+                // blocked with NRC 0x7F.
+                if (auto s = flasher.client().diagnostic_session_control(
+                        st::ecu::uds::kDscDefault, std::chrono::milliseconds{1000});
+                    !s.has_value()) {
+                    std::fprintf(stderr,
+                                 "flash-apply: DSC DefaultSession (SA-clear step) failed: %s\n",
+                                 s.error().to_string().c_str());
+                    return 1;
+                }
+                if (auto s = flasher.client().diagnostic_session_control(
+                        st::ecu::uds::kDscExtendedDiagnostic,
+                        std::chrono::milliseconds{1000});
+                    !s.has_value()) {
+                    std::fprintf(stderr,
+                                 "flash-apply: DSC Extended re-entry (post-SA-clear) "
+                                 "failed: %s\n",
+                                 s.error().to_string().c_str());
+                    return 1;
+                }
+                std::fputs("flash-apply: DefaultSession transition completed "
+                           "(L3 grant cleared per ISO 14229-1 §10.3)\n",
+                           stderr);
                 // [2] Functional DSC Extended re-entry — clears L3 grant
                 if (auto s = flasher.client().diagnostic_session_control_functional(
                         st::ecu::uds::kFunctionalRequestCanId,
