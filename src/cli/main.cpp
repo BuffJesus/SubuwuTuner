@@ -12759,19 +12759,71 @@ int cmd_flash_apply(int argc, char *argv[]) {
             bool armed{false};
             ~BusStateRestore() {
                 if (!armed || client == nullptr) return;
+                std::fputs("flash-apply: bus-state restore running (DTC ON, "
+                           "CommControl normal)...\n",
+                           stderr);
+                // ControlDTCSetting and CommunicationControl both require an
+                // active Extended session. After a failed DSC 0x10 0x02
+                // attempt the ECM rolls back to Default; re-enter Extended
+                // here so the restore commands are accepted. Best-effort:
+                // if DSC Extended itself fails the rest of the restore
+                // also fails, but we've done what we can short of a
+                // power-cycle.
+                if (auto s = client->diagnostic_session_control(
+                        st::ecu::uds::kDscExtendedDiagnostic,
+                        std::chrono::milliseconds{500});
+                    !s.has_value()) {
+                    std::fprintf(stderr,
+                                 "flash-apply: bus-state restore: DSC Extended "
+                                 "re-entry failed (%s) — restore may be incomplete; "
+                                 "next session may need power-cycle\n",
+                                 s.error().to_string().c_str());
+                }
                 // Restore DTC logging ON via functional broadcast.
-                (void)client->control_dtc_setting_functional(
+                auto dtc = client->control_dtc_setting_functional(
                     st::ecu::uds::kFunctionalRequestCanId,
                     st::ecu::uds::kDtcSettingOn,
                     std::chrono::milliseconds{500});
+                if (!dtc.has_value()) {
+                    std::fprintf(stderr,
+                                 "flash-apply: bus-state restore DTC ON failed: %s\n",
+                                 dtc.error().to_string().c_str());
+                }
                 // Restore normal Tx+Rx on other modules.
-                (void)client->communication_control_functional(
+                auto cc = client->communication_control_functional(
                     st::ecu::uds::kFunctionalRequestCanId,
                     st::ecu::uds::kCcEnableRxAndTx,
                     st::ecu::uds::kCtNormalCommunication,
                     std::chrono::milliseconds{500});
+                if (!cc.has_value()) {
+                    std::fprintf(stderr,
+                                 "flash-apply: bus-state restore CommControl failed: %s\n",
+                                 cc.error().to_string().c_str());
+                }
             }
         } bus_restore{&flasher.client(), false};
+
+        // Best-effort proactive bus-state cleanup at flash-apply start.
+        // Previous attempts may have left the ECM in DTC-off + CommControl-
+        // disabled state (the exit-time restore guard could have failed
+        // silently — lost SA grant, session rollback, etc.). Issue both
+        // restores proactively before any other UDS so this run starts
+        // from a known-clean state. Failures here are expected for ECMs
+        // already in clean state — the actual restore is the wire effect,
+        // not the response code.
+        std::fputs("flash-apply: proactive bus-state cleanup (clearing any "
+                   "sticky state from prior attempts)...\n",
+                   stderr);
+        (void)flasher.client().control_dtc_setting_functional(
+            st::ecu::uds::kFunctionalRequestCanId,
+            st::ecu::uds::kDtcSettingOn,
+            std::chrono::milliseconds{500});
+        (void)flasher.client().communication_control_functional(
+            st::ecu::uds::kFunctionalRequestCanId,
+            st::ecu::uds::kCcEnableRxAndTx,
+            st::ecu::uds::kCtNormalCommunication,
+            std::chrono::milliseconds{500});
+
         if (with_vehicle_presence_injection) {
             if (!chosen->supports_periodic_slots()) {
                 std::fputs("flash-apply: --with-vehicle-presence-injection "
@@ -12795,7 +12847,8 @@ int cmd_flash_apply(int argc, char *argv[]) {
             // and causes DSC 0x10 0x01 (Default) — and likely 0x10 0x02
             // (Programming) — to return NRC 0x22.
             //
-            // Keep only the four external-module-sourced IDs:
+            // Keep only the four external-module-sourced IDs in the
+            // spec's frame set:
             //   0x002 — VDC / ABS wheel-speed sync (rolling counter)
             //   0x144 — TCU torque request (constant)
             //   0x280 — TCU shift state     (rolling counter)
@@ -12804,6 +12857,8 @@ int cmd_flash_apply(int argc, char *argv[]) {
             // Source: round-4 spec §2 timing analysis (W1/W2/W3 windows)
             // + Subaru's CAN ID block convention (0x140-0x16F is the
             // engine ECM's emission block on FA20DIT).
+            //
+            // 4-frame external-only set per round-4 spec §3.1.
             std::array<HeartbeatFrame, 4> const frames{{
                 {0x002, {0xFF, 0xA7, 0x70, 0x05, 0x1B, 0x00, 0x00, 0x00}, 20},
                 {0x144, {0xC0, 0x00, 0x05, 0x00, 0x00, 0x24, 0xA0, 0x00}, 40},
@@ -12878,6 +12933,9 @@ int cmd_flash_apply(int argc, char *argv[]) {
                 //   frames[1] = 0x144 → constant (no entry here)
                 //   frames[2] = 0x280 → counter at pos[1]
                 //   frames[3] = 0x371 → constant (no entry here)
+                // With the 4-frame external-only set, two slots have
+                // rolling counters: slot 0 (0x002 pos[3]) and slot 2
+                // (0x280 pos[1]). 0x144 and 0x371 are constant.
                 std::array<CounterSlot, 2> counter_slots{{
                     {0, 0x002, {0xFF, 0xA7, 0x70, 0x05, 0x1B, 0x00, 0x00, 0x00}, 3},
                     {2, 0x280, {0x00, 0x01, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00}, 1},
