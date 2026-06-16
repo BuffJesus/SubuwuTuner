@@ -12745,6 +12745,33 @@ int cmd_flash_apply(int argc, char *argv[]) {
                 }
             }
         } periodic_cleanup{chosen, false};
+
+        // Scope-guard the bus-quieting state. After the prelude sends
+        // ControlDTCSetting OFF + CommunicationControl disableRxAndTx
+        // on functional 0x7DF, those states persist across UDS sessions
+        // until explicitly restored. Without this cleanup, any flash-
+        // apply that fails between bus-quieting and write completion
+        // leaves the ECM in a state where DSC 0x10 0x01 (Default) on the
+        // NEXT attempt returns NRC 0x22 — observed on bench. Restore on
+        // every exit path.
+        struct BusStateRestore {
+            st::ecu::uds::UdsClient *client{nullptr};
+            bool armed{false};
+            ~BusStateRestore() {
+                if (!armed || client == nullptr) return;
+                // Restore DTC logging ON via functional broadcast.
+                (void)client->control_dtc_setting_functional(
+                    st::ecu::uds::kFunctionalRequestCanId,
+                    st::ecu::uds::kDtcSettingOn,
+                    std::chrono::milliseconds{500});
+                // Restore normal Tx+Rx on other modules.
+                (void)client->communication_control_functional(
+                    st::ecu::uds::kFunctionalRequestCanId,
+                    st::ecu::uds::kCcEnableRxAndTx,
+                    st::ecu::uds::kCtNormalCommunication,
+                    std::chrono::milliseconds{500});
+            }
+        } bus_restore{&flasher.client(), false};
         if (with_vehicle_presence_injection) {
             if (!chosen->supports_periodic_slots()) {
                 std::fputs("flash-apply: --with-vehicle-presence-injection "
@@ -13021,6 +13048,10 @@ int cmd_flash_apply(int argc, char *argv[]) {
                 std::fputs("flash-apply: bus-quieting prelude completed "
                            "(functional DSC + DTC off + CommCtrl)\n",
                            stderr);
+                // Arm the bus-state restore guard. Now any return from
+                // cmd_flash_apply (success OR failure) will undo the
+                // DTC-off + CommControl-disable on its way out.
+                bus_restore.armed = true;
             }
             // [5] L1 SA — opt-out via --no-sa-l1-followup for ECUs whose
             // firmware doesn't accept L1 after L3 even with the spec's
@@ -13053,6 +13084,39 @@ int cmd_flash_apply(int argc, char *argv[]) {
                 std::fputs("flash-apply: SA L1 follow-up completed (lazy-verify)\n",
                            stderr);
             }
+        }
+        // Disable heartbeat injection BEFORE flasher.execute fires DSC
+        // 0x10 0x02. After the bus-quieting CommControl told external
+        // modules to silence themselves, the ECM expects those modules
+        // to stop TXing. Our continued heartbeats look like CommControl
+        // violation and the ECM refuses the programming session entry.
+        // By this point in the flow:
+        //   - vehicle_present_flag has been set (proven by L1 SA
+        //     succeeding via short-circuit)
+        //   - The flag may or may not persist for the brief window
+        //     between here and DSC 0x10 0x02, but the COBB capture
+        //     shows the install proceeding without continued heartbeats
+        //     once programming session is requested.
+        // Per round-4 spec §5.1: "Once programmingSession is entered,
+        // the ECM stops checking vehicle-presence (it's in flash mode;
+        // engine code is suspended). Continuing to inject heartbeats
+        // during the bulk-transfer phase has no benefit and may cause
+        // CAN bus contention."
+        if (with_vehicle_presence_injection) {
+            // Stop the counter worker first so it doesn't keep updating
+            // slots we're about to disable. The CounterWorkerGuard
+            // destructor re-triggers (benign: idempotent flag + join).
+            counter_worker_stop.store(true, std::memory_order_release);
+            if (counter_worker.joinable()) {
+                counter_worker.join();
+            }
+            (void)chosen->clear_all_periodic_slots();
+            // Brief settle window so the ECM observes the silence
+            // before we ask for DSC 0x10 0x02.
+            std::this_thread::sleep_for(std::chrono::milliseconds{100});
+            std::fputs("flash-apply: heartbeats stopped pre-programming "
+                       "(matches CommControl-silenced state expected by ECM)\n",
+                       stderr);
         }
     }
 
