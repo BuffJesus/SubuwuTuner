@@ -25,18 +25,47 @@ namespace st::ecu::subaru_atlas {
 //
 // 0xAA with empty payload returns ACK 0xEA + a 104-byte structured body.
 // Non-empty payloads return NRC 0x13 — the handler is single-purpose.
-// The body's exact field semantics are not yet decoded (round-7 analyst
-// work pending: WSL-side Atlas re-decompile + LF79103P firmware-side
-// disassembly of the SID dispatch handler at ROM offset 0x66000).
 //
-// Provisional state: this header captures the **structural** layout
-// observed on the bench so future code can refer to named fields, and
-// exposes the raw 104-byte body so the parser is cheap to refine once
-// the analyst returns the canonical field meanings.
+// Per round-7 firmware analysis (analyst spec
+// `SubuwuTuner-specs/specs/atlas-sids-firmware-dispatch.md` §2):
+//   - First 8 bytes of every response are a fixed **device-ID prefix**
+//     emitted from ROM 0x00061896 on LF79002P firmware:
+//         A3 10 0F B0 29 B0 40 07
+//   - A second template at ROM 0x00022E00 starts with the alternate
+//     prefix `A2 10 14 41 80 80` and is selected by SA grant state.
+//   - The remaining 96 bytes are sourced from RAM addresses via a
+//     per-byte mapping table at ROM 0x001EC6F0 — these are **opaque
+//     vendor capability flags**, NOT a packed flash-partition struct.
+//
+// The field names in `AtlasFlashInformationResponse` below are
+// provisional — they correspond to non-zero byte positions in the
+// LF79002P capture, and serve as named offsets only. Don't infer
+// flash partitions or addresses from them.
 
 inline constexpr std::uint8_t kSidAtlasProprietary = 0xAAU;
 inline constexpr std::uint8_t kAckAtlasProprietary = 0xEAU; // 0xAA | 0x40
 inline constexpr std::size_t kFlashInformationBodyBytes = 104U;
+
+// Device-ID prefix length — first N bytes of any FlashInformation
+// response identify the firmware class. Used for prefix-match checks.
+inline constexpr std::size_t kDeviceIdPrefixBytes = 8U;
+
+// Primary template prefix observed on LF79002P firmware. Emitted from
+// ROM 0x00061896 when the SA grant gate selects the primary template.
+inline constexpr std::array<std::uint8_t, kDeviceIdPrefixBytes>
+    kDeviceIdPrefixLf79002pPrimary = {
+        0xA3, 0x10, 0x0F, 0xB0, 0x29, 0xB0, 0x40, 0x07,
+};
+
+// Secondary template prefix per round-7 analyst §2.3. Emitted from
+// ROM 0x00022E00. Only 6 bytes are documented; the remaining 2 are
+// unknown until a bench session catches the firmware in the alternate
+// state (likely requires an Atlas-style SA grant). Stored as 6 bytes;
+// match length must be specified by the caller.
+inline constexpr std::array<std::uint8_t, 6U>
+    kDeviceIdPrefixLf79002pSecondary = {
+        0xA2, 0x10, 0x14, 0x41, 0x80, 0x80,
+};
 
 // Captured response from LF79002P bench donor 2026-06-16. Stored as a
 // public reference so callers (tests, diagnostics) can baseline-compare
@@ -108,6 +137,18 @@ struct AtlasFlashInformationResponse {
     // different body should investigate firmware-version-specific
     // variation.
     [[nodiscard]] bool matches_reference_lf79002p() const noexcept;
+
+    // Returns the 8-byte device-ID prefix of this response. Per
+    // round-7 analyst §2.2 this byte range identifies the firmware
+    // class regardless of which RAM-source template was selected for
+    // the trailing 96 bytes.
+    [[nodiscard]] std::array<std::uint8_t, kDeviceIdPrefixBytes>
+    device_id_prefix() const noexcept;
+
+    // Returns true if the device-ID prefix matches the LF79002P
+    // primary template. Sessions on other firmware classes (LF79101P,
+    // LF79103P) should see a different prefix.
+    [[nodiscard]] bool has_lf79002p_primary_prefix() const noexcept;
 };
 
 // Parse the body of a successful 0xAA response. The caller is expected

@@ -129,3 +129,63 @@ TEST_CASE("matches_reference returns false for tampered raw",
     r.value().raw[0] = 0x42;
     REQUIRE_FALSE(r.value().matches_reference_lf79002p());
 }
+
+TEST_CASE("device_id_prefix returns first 8 bytes per round-7 spec §2.2",
+          "[subaru_atlas][device_id]") {
+    auto const body = atlas::reference_flash_information_body_lf79002p();
+    auto const r = atlas::parse_flash_information_body(body);
+    REQUIRE(r.has_value());
+
+    auto const prefix = r.value().device_id_prefix();
+    REQUIRE(prefix.size() == atlas::kDeviceIdPrefixBytes);
+
+    // Round-7 spec §2.2 — LF79002P primary template prefix emitted from
+    // ROM 0x00061896. Pin the byte sequence exactly.
+    REQUIRE(prefix == atlas::kDeviceIdPrefixLf79002pPrimary);
+}
+
+TEST_CASE("has_lf79002p_primary_prefix matches bench capture",
+          "[subaru_atlas][device_id]") {
+    auto const body = atlas::reference_flash_information_body_lf79002p();
+    auto const r = atlas::parse_flash_information_body(body);
+    REQUIRE(r.has_value());
+    REQUIRE(r.value().has_lf79002p_primary_prefix());
+}
+
+TEST_CASE("has_lf79002p_primary_prefix rejects secondary-template prefix",
+          "[subaru_atlas][device_id]") {
+    // Synthesize a body starting with the secondary-template prefix
+    // (round-7 spec §2.3). Should not match the primary prefix.
+    std::vector<std::uint8_t> alt(atlas::kFlashInformationBodyBytes, 0);
+    for (std::size_t i = 0; i < atlas::kDeviceIdPrefixLf79002pSecondary.size(); ++i) {
+        alt[i] = atlas::kDeviceIdPrefixLf79002pSecondary[i];
+    }
+    auto const r = atlas::parse_flash_information_body(alt);
+    REQUIRE(r.has_value());
+    REQUIRE_FALSE(r.value().has_lf79002p_primary_prefix());
+}
+
+// Round-7 spec §6 item 5 — round-trip Catch2 fixture: pin AA request
+// bytes; assert response parses cleanly; assert 8-byte device-ID prefix.
+TEST_CASE("FlashInformation request/response round-trip pins the wire format",
+          "[subaru_atlas][round_trip]") {
+    // The request is the literal single byte 0xAA. No payload.
+    std::vector<std::uint8_t> const request_bytes{atlas::kSidAtlasProprietary};
+    REQUIRE(request_bytes.size() == 1U);
+    REQUIRE(request_bytes[0] == 0xAAU);
+
+    // The response on the bench is ACK + 104-byte body. Reconstruct it
+    // from the reference body so the fixture stays self-contained.
+    std::vector<std::uint8_t> response_bytes;
+    response_bytes.reserve(105U);
+    response_bytes.push_back(atlas::kAckAtlasProprietary);
+    auto const body = atlas::reference_flash_information_body_lf79002p();
+    response_bytes.insert(response_bytes.end(), body.begin(), body.end());
+    REQUIRE(response_bytes.size() == 105U);
+    REQUIRE(response_bytes[0] == 0xEAU);
+
+    auto const parsed = atlas::parse_flash_information_frame(response_bytes);
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed.value().has_lf79002p_primary_prefix());
+    REQUIRE(parsed.value().raw.size() == atlas::kFlashInformationBodyBytes);
+}

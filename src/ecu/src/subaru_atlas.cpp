@@ -6,6 +6,7 @@
 #include "st/core/error.hpp"
 #include "st/core/result.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 
@@ -58,6 +59,28 @@ bool AtlasFlashInformationResponse::matches_reference_lf79002p() const noexcept 
     }
     for (std::size_t i = 0; i < raw.size(); ++i) {
         if (raw[i] != kReferenceBodyLf79002p[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::array<std::uint8_t, kDeviceIdPrefixBytes>
+AtlasFlashInformationResponse::device_id_prefix() const noexcept {
+    std::array<std::uint8_t, kDeviceIdPrefixBytes> out{};
+    std::size_t const n = std::min(raw.size(), kDeviceIdPrefixBytes);
+    for (std::size_t i = 0; i < n; ++i) {
+        out[i] = raw[i];
+    }
+    return out;
+}
+
+bool AtlasFlashInformationResponse::has_lf79002p_primary_prefix() const noexcept {
+    if (raw.size() < kDeviceIdPrefixBytes) {
+        return false;
+    }
+    for (std::size_t i = 0; i < kDeviceIdPrefixBytes; ++i) {
+        if (raw[i] != kDeviceIdPrefixLf79002pPrimary[i]) {
             return false;
         }
     }
