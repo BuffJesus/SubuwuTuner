@@ -8,9 +8,9 @@ SubuwuTuner is pre-1.0. Only the latest commit on `main` is supported for securi
 
 In scope:
 
-- **Code-execution and memory-safety bugs** in the C++ engine (`src/core/`, `src/rom/`, `src/defs/`, `src/edit/`, `src/project/`, `src/transport/`, `src/ecu/`, `src/log/`, `src/can/`, `src/dbc/`, `src/discover/`, `src/flash/`, `src/autotune/`, `src/policy/`, `src/feature/`, `src/feature_codegen/`, `src/feature_patch/`, `src/cli/`, `src/ui/`).
-- **Input-handling bugs** in any parser: TOML packs, DBC, ROM formats (`.bin`, `.hex`, `.srec`, `.mot`), `.stune`, `.stcompare` (when shipped), log CSV.
-- **Cryptographic correctness** in `st::ecu::subaru` SecurityAccess implementations and any signature-verification path.
+- **Code-execution and memory-safety bugs** in the C++ engine (`src/core/`, `src/rom/`, `src/defs/`, `src/edit/`, `src/project/`, `src/transport/`, `src/ecu/`, `src/log/`, `src/can/`, `src/dbc/`, `src/discover/`, `src/flash/`, `src/autotune/`, `src/policy/`, `src/feature/`, `src/feature_codegen/`, `src/feature_patch/`, `src/devices/ets/`, `src/library/`, `src/audit/`, `src/profile/`, `src/diff/`, `src/cli/`, `src/ui/`).
+- **Input-handling bugs** in any parser: TOML packs, DBC, ROM formats (`.bin`, `.hex`, `.srec`, `.mot`), `.stune`, `.stcompare` (when shipped), log CSV, `.ptm` (AP tune envelope — XTEA / base64 / AES / bzip2 chain), `.img` (AP OTA envelope — Blowfish), `.stmod` (custom-feature graph).
+- **Cryptographic correctness** in `st::ecu::subaru` SecurityAccess implementations, the `.ptm` / `.img` cipher chains under `src/devices/ets/`, and any signature-verification path.
 - **Privacy regressions** — anything that exfiltrates ROM bytes, VIN, ECU-ID, paths, or user identifiers off-machine without explicit user opt-in.
 - **Safety-gate bypass** — paths that allow the flash orchestrator to write without the documented pre-flight validators, without a verified backup, or without a known checksum strategy.
 - **Build/CI supply-chain issues** — anything that could let a CI lane execute attacker-controlled code on a maintainer's machine.
@@ -20,7 +20,7 @@ Out of scope:
 - **Reports requesting help bypassing OEM ECU protections** (e.g. "how do I extract Subaru's SecurityAccess key for ECU X"). The project does not ship that capability and does not accept those as security reports.
 - **Reports asking for tuning support** for unsupported ECUs. Use the public issue tracker.
 - **Emissions or regulatory-compliance disagreements.** `docs/06-legal-ethics.md` describes the project's stance; complaints about the stance are not security issues.
-- **Issues in third-party libraries** (Catch2, GLFW, ImGui, ImPlot, tomlplusplus, tl::expected, nativefiledialog-extended). Report upstream; we'll patch dependents as upstream releases land.
+- **Issues in third-party libraries** (Catch2, GLFW, ImGui, ImPlot, tomlplusplus, tl::expected, nativefiledialog-extended, libusb-1.0, tiny-AES-c, bzip2). Report upstream; we'll patch dependents as upstream releases land.
 - **Issues in the user's own ECU firmware or hardware**.
 
 ## Reporting a vulnerability
