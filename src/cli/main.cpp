@@ -14653,6 +14653,12 @@ int cmd_subaru_ssm_cmd(int argc, char *argv[]) {
     std::optional<bool> enter_dsc_flag;
     bool sa_l1_followup_disabled = false;
     std::chrono::milliseconds timeout{2000};
+    // SA escalation: after the primary SA succeeds, do a second SA at a
+    // different level with a different variant. Distinct from the L1
+    // follow-up which is a fixed-L1 dance for COBB-tuned ECUs; this is
+    // for testing arbitrary escalation orders (L1->L3, L3->L1, etc).
+    std::optional<std::uint8_t> sa_escalate_level;
+    std::optional<std::string> sa_escalate_variant;
 
     for (int i = 0; i < argc; ++i) {
         std::string_view const a{argv[i]};
@@ -14768,6 +14774,30 @@ int cmd_subaru_ssm_cmd(int argc, char *argv[]) {
             enter_dsc_flag = false;
         } else if (a == "--no-sa-l1-followup") {
             sa_l1_followup_disabled = true;
+        } else if (a == "--sa-escalate-level") {
+            auto const *v = require_arg("--sa-escalate-level");
+            if (v == nullptr)
+                return 2;
+            std::string_view sv{v};
+            int base = 10;
+            if (sv.starts_with("0x") || sv.starts_with("0X")) {
+                sv.remove_prefix(2);
+                base = 16;
+            }
+            char *end = nullptr;
+            auto const val = std::strtoull(sv.data(), &end, base);
+            if (end == sv.data() || *end != '\0' || val == 0 || val > 0xFFULL) {
+                std::fputs("subaru-ssm-cmd: --sa-escalate-level must be a "
+                           "positive 8-bit hex (0x..) or decimal integer\n",
+                           stderr);
+                return 2;
+            }
+            sa_escalate_level = static_cast<std::uint8_t>(val);
+        } else if (a == "--sa-escalate-variant") {
+            if (auto const *v = require_arg("--sa-escalate-variant"); v)
+                sa_escalate_variant = std::string{v};
+            else
+                return 2;
         } else if (a == "--timeout-ms") {
             auto const *v = require_arg("--timeout-ms");
             if (v == nullptr)
@@ -14911,6 +14941,66 @@ int cmd_subaru_ssm_cmd(int argc, char *argv[]) {
         }
         std::fprintf(stderr, "subaru-ssm-cmd: SA variant=%s level=0x%02X granted\n",
                      sa_variant->c_str(), security_level);
+
+        // Optional SA escalation: a second SA at a different level using a
+        // different variant. Used to probe firmware-revision-specific SA
+        // chain requirements (e.g. some COBB-tuned ECUs accept L1→L3 but
+        // not L3→L1 escalation). Fires before the L1 follow-up dance so
+        // both can be combined when testing.
+        if (sa_escalate_level.has_value()) {
+            if (!sa_escalate_variant.has_value()) {
+                std::fputs("subaru-ssm-cmd: --sa-escalate-level requires "
+                           "--sa-escalate-variant\n",
+                           stderr);
+                return 1;
+            }
+            st::ecu::SecurityKeyFn esc_fn;
+            std::string const &esc_name = *sa_escalate_variant;
+            if (esc_name == "default" || esc_name == "factory") {
+                esc_fn = &st::ecu::subaru::ssmcan1_key_stub;
+            } else if (esc_name == "aftermarket" || esc_name == "aftermarket-l1") {
+                esc_fn = &st::ecu::subaru::ssmcan1_l1_aftermarket;
+            } else if (esc_name == "aftermarket-l3") {
+                esc_fn = &st::ecu::subaru::ssmcan1_l3_aftermarket;
+            } else {
+                std::fprintf(stderr,
+                             "subaru-ssm-cmd: --sa-escalate-variant '%s' not "
+                             "recognized\n",
+                             esc_name.c_str());
+                return 1;
+            }
+            auto esc_seed = uds.security_access_request_seed(
+                *sa_escalate_level, std::chrono::milliseconds{1000});
+            if (!esc_seed.has_value()) {
+                std::fprintf(stderr,
+                             "subaru-ssm-cmd: SA escalate RequestSeed at "
+                             "level 0x%02X failed: %s\n",
+                             *sa_escalate_level, esc_seed.error().to_string().c_str());
+                return 1;
+            }
+            auto esc_key = esc_fn(*esc_seed);
+            if (!esc_key.has_value()) {
+                std::fprintf(stderr,
+                             "subaru-ssm-cmd: SA escalate key derivation failed: %s\n",
+                             esc_key.error().to_string().c_str());
+                return 1;
+            }
+            auto const esc_send_sub =
+                static_cast<std::uint8_t>(*sa_escalate_level + 1U);
+            if (auto s = uds.security_access_send_key(
+                    esc_send_sub, *esc_key, std::chrono::milliseconds{1000});
+                !s.has_value()) {
+                std::fprintf(stderr,
+                             "subaru-ssm-cmd: SA escalate SendKey at "
+                             "level 0x%02X failed: %s\n",
+                             *sa_escalate_level, s.error().to_string().c_str());
+                return 1;
+            }
+            std::fprintf(stderr,
+                         "subaru-ssm-cmd: SA escalate variant=%s level=0x%02X granted\n",
+                         esc_name.c_str(), *sa_escalate_level);
+        }
+
         // Dual-SA dance: post-L3 RMBA + L1 follow-up. Same as flash-apply.
         if (security_level > 0x01U && !sa_l1_followup_disabled) {
             if (auto rmba = uds.read_memory_by_address(
