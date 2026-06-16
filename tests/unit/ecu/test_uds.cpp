@@ -867,3 +867,124 @@ TEST_CASE("Realistic flash flow with erase + check-deps via RoutineControl",
     REQUIRE(client.ecu_reset(uds::kEcuResetHard).has_value());
     REQUIRE(t.exhausted());
 }
+
+// ---- Functional addressing (bus-quieting prelude per
+//      SubuwuTuner-specs/specs/cobb-ap-dsc-prog-precondition.md §2.4) ----
+
+TEST_CASE("UdsClient::diagnostic_session_control_functional emits on 0x7DF",
+          "[uds][client][functional][prelude]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+
+    // Pin the wire bytes AND the can_id. Mock will fail if the SUT
+    // sends to physical 0x7E0 instead of functional 0x7DF.
+    t.expect_send_recv_to(uds::kFunctionalRequestCanId, {0x10, 0x03}, {0x50, 0x03});
+
+    uds::UdsClient client{t};
+    auto const r = client.diagnostic_session_control_functional(
+        uds::kFunctionalRequestCanId, uds::kDscExtendedDiagnostic);
+    REQUIRE(r.has_value());
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("UdsClient::control_dtc_setting_functional accepts positive C5",
+          "[uds][client][functional][prelude]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    t.expect_send_recv_to(uds::kFunctionalRequestCanId, {0x85, 0x02}, {0xC5, 0x02});
+
+    uds::UdsClient client{t};
+    auto const r = client.control_dtc_setting_functional(
+        uds::kFunctionalRequestCanId, uds::kDtcSettingOff);
+    REQUIRE(r.has_value());
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("UdsClient::control_dtc_setting_functional surfaces unexpected NRC",
+          "[uds][client][functional][prelude][error]") {
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    // ECM rejects with NRC 0x33 (security access denied). NOT one of the
+    // expected/ignored NRCs — should surface.
+    t.expect_send_recv_to(uds::kFunctionalRequestCanId, {0x85, 0x02}, {0x7F, 0x85, 0x33});
+
+    uds::UdsClient client{t};
+    auto const r = client.control_dtc_setting_functional(
+        uds::kFunctionalRequestCanId, uds::kDtcSettingOff);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error().code() == st::ErrorCode::EcuRejected);
+}
+
+TEST_CASE("UdsClient::communication_control_functional treats ECM NRC 0x22 as ok",
+          "[uds][client][functional][prelude]") {
+    // Per spec §2.4 step [7]: the ECM responds NRC 0x22 to CommControl on
+    // itself because it can't disable its own diagnostic Tx. The COBB AP
+    // ignores this NRC and continues — our wrapper does the same.
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    t.expect_send_recv_to(uds::kFunctionalRequestCanId,
+                           {0x28, 0x03, 0x01},
+                           {0x7F, 0x28, 0x22});
+
+    uds::UdsClient client{t};
+    auto const r = client.communication_control_functional(
+        uds::kFunctionalRequestCanId,
+        uds::kCcDisableRxAndTx,
+        uds::kCtNormalCommunication);
+    REQUIRE(r.has_value());
+    REQUIRE(t.exhausted());
+}
+
+TEST_CASE("UdsClient::communication_control_functional accepts positive 68",
+          "[uds][client][functional][prelude]") {
+    // Some modules (not the ECM, but the broadcast target set includes
+    // others) DO respond positive. Pin that we don't silently mis-handle.
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    t.expect_send_recv_to(uds::kFunctionalRequestCanId,
+                           {0x28, 0x03, 0x01},
+                           {0x68, 0x03});
+
+    uds::UdsClient client{t};
+    auto const r = client.communication_control_functional(
+        uds::kFunctionalRequestCanId,
+        uds::kCcDisableRxAndTx,
+        uds::kCtNormalCommunication);
+    REQUIRE(r.has_value());
+}
+
+TEST_CASE("UdsClient::communication_control_functional surfaces non-22 NRC",
+          "[uds][client][functional][prelude][error]") {
+    // NRC 0x33 (security denied) is NOT the spec-expected NRC — surface.
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    t.expect_send_recv_to(uds::kFunctionalRequestCanId,
+                           {0x28, 0x03, 0x01},
+                           {0x7F, 0x28, 0x33});
+
+    uds::UdsClient client{t};
+    auto const r = client.communication_control_functional(
+        uds::kFunctionalRequestCanId,
+        uds::kCcDisableRxAndTx,
+        uds::kCtNormalCommunication);
+    REQUIRE_FALSE(r.has_value());
+}
+
+TEST_CASE("functional API rejects when caller uses plain send_recv "
+          "(MockTransport fail-fast)",
+          "[uds][client][functional][prelude][regression]") {
+    // Regression guard: if a future refactor accidentally drops the
+    // _functional variants back onto plain send_recv, the prelude won't
+    // actually broadcast on 0x7DF — it'll send to the configured tester
+    // CAN ID, hitting only the ECM. MockTransport's expect_send_recv_to
+    // catches this by failing the match.
+    st::transport::MockTransport t;
+    REQUIRE(t.open({}).has_value());
+    t.expect_send_recv_to(uds::kFunctionalRequestCanId, {0x10, 0x03}, {0x50, 0x03});
+
+    uds::UdsClient client{t};
+    // Plain (non-functional) DSC — should NOT match the queued
+    // expect_send_recv_to entry.
+    auto const r = client.diagnostic_session_control(uds::kDscExtendedDiagnostic);
+    REQUIRE_FALSE(r.has_value());
+}

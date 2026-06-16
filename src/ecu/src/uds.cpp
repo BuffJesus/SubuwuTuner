@@ -847,4 +847,73 @@ Status UdsClient::communication_control(std::uint8_t control_type, std::uint8_t 
     return parse_communication_control_response(resp->data, control_type);
 }
 
+// ---- Functional-addressing variants -------------------------------------
+//
+// Each `*_functional` method sends to the given CAN ID (typically 0x7DF
+// = kFunctionalRequestCanId) instead of the configured tester ID. The
+// ECM responds on its physical response ID (the transport filter still
+// accepts it). Other modules' responses on their own rx-ids are filtered
+// out by the adapter and don't reach us.
+
+Status UdsClient::diagnostic_session_control_functional(std::uint32_t can_id,
+                                                         std::uint8_t session,
+                                                         std::chrono::milliseconds timeout) {
+    auto const req = build_dsc_request(session);
+    auto const resp = transport_->send_recv_to(can_id, req, timeout);
+    if (!resp.has_value())
+        return failure(resp.error());
+    return parse_dsc_response(resp->data, session);
+}
+
+Status UdsClient::control_dtc_setting_functional(std::uint32_t can_id,
+                                                  std::uint8_t sub_function,
+                                                  std::chrono::milliseconds timeout) {
+    // ISO 14229-1 §10.7: SID 0x85 + 1-byte sub_function. Positive response
+    // is `C5 <sub_function>`. We hand-build the request here rather than
+    // promoting a build_control_dtc_setting helper because there are
+    // currently no other call sites for this service.
+    std::vector<std::uint8_t> const req{kSidControlDtcSetting, sub_function};
+    auto const resp = transport_->send_recv_to(can_id, req, timeout);
+    if (!resp.has_value())
+        return failure(resp.error());
+    auto const &r = resp->data;
+    if (r.size() >= 3 && r[0] == kNegativeResponse && r[1] == kSidControlDtcSetting) {
+        return failure(ErrorCode::EcuRejected,
+                       "UDS ControlDTCSetting NRC=" + hex_byte(r[2]));
+    }
+    if (r.size() < 2 || r[0] != kSidControlDtcSetting + kPositiveResponseOffset) {
+        return failure(ErrorCode::ParseError,
+                       "UDS ControlDTCSetting response malformed or unexpected SID");
+    }
+    if (r[1] != sub_function) {
+        return failure(ErrorCode::ParseError,
+                       "UDS ControlDTCSetting sub-function mismatch");
+    }
+    return ok();
+}
+
+Status UdsClient::communication_control_functional(std::uint32_t can_id,
+                                                    std::uint8_t control_type,
+                                                    std::uint8_t communication_type,
+                                                    std::chrono::milliseconds timeout) {
+    auto const req = build_communication_control(control_type, communication_type);
+    auto const resp = transport_->send_recv_to(can_id, req, timeout);
+    if (!resp.has_value())
+        return failure(resp.error());
+    auto const &r = resp->data;
+    // Per cobb-ap-dsc-prog-precondition.md §2.4 step [7]: the ECM
+    // responds NRC 0x22 to CommunicationControl on itself because it
+    // can't disable its own diagnostic Tx. That's EXPECTED and ignored
+    // — the broadcast's purpose is to silence the OTHER modules whose
+    // telemetry traffic would compete with programming-session ISO-TP.
+    if (r.size() >= 3 && r[0] == kNegativeResponse &&
+        r[1] == kSidCommunicationControl &&
+        r[2] == kNrcConditionsNotCorrect) {
+        return ok();
+    }
+    // Other NRCs from the ECM are still legitimate failures (e.g. SA
+    // denied) — surface them.
+    return parse_communication_control_response(r, control_type);
+}
+
 } // namespace st::ecu::uds

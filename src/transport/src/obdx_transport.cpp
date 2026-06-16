@@ -775,6 +775,12 @@ st::Status Transport::close() {
 
 Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
                                    std::chrono::milliseconds timeout) {
+    return send_recv_to(can_id_request_, payload, timeout);
+}
+
+Result<Frame> Transport::send_recv_to(std::uint32_t can_id_request_override,
+                                       std::span<std::uint8_t const> payload,
+                                       std::chrono::milliseconds timeout) {
     if (!open_) {
         return failure(ErrorCode::TransportUnavailable,
                        "obdx::Transport::send_recv: transport not open");
@@ -836,10 +842,10 @@ Result<Frame> Transport::send_recv(std::span<std::uint8_t const> payload,
         // assign+insert shape sidesteps it without losing the single
         // allocation.
         std::uint8_t const prefix[4] = {
-            static_cast<std::uint8_t>((can_id_request_ >> 24U) & 0xFFU),
-            static_cast<std::uint8_t>((can_id_request_ >> 16U) & 0xFFU),
-            static_cast<std::uint8_t>((can_id_request_ >> 8U) & 0xFFU),
-            static_cast<std::uint8_t>(can_id_request_ & 0xFFU),
+            static_cast<std::uint8_t>((can_id_request_override >> 24U) & 0xFFU),
+            static_cast<std::uint8_t>((can_id_request_override >> 16U) & 0xFFU),
+            static_cast<std::uint8_t>((can_id_request_override >> 8U) & 0xFFU),
+            static_cast<std::uint8_t>(can_id_request_override & 0xFFU),
         };
         tx_payload.assign(std::begin(prefix), std::end(prefix));
         tx_payload.insert(tx_payload.end(), payload.begin(), payload.end());

@@ -55,6 +55,16 @@ inline constexpr std::uint8_t kSidRequestTransferExit = 0x37;
 inline constexpr std::uint8_t kSidSubaruBulkTransfer = 0xB6;
 inline constexpr std::uint8_t kSidTesterPresent = 0x3E;
 inline constexpr std::uint8_t kSidWriteMemoryByAddress = 0x3D;
+inline constexpr std::uint8_t kSidControlDtcSetting = 0x85;
+
+// ControlDTCSetting sub-functions (ISO 14229-1 §10.7).
+inline constexpr std::uint8_t kDtcSettingOn  = 0x01;
+inline constexpr std::uint8_t kDtcSettingOff = 0x02;
+
+// UDS standard functional broadcast CAN ID per ISO 15765-4 / OBD-II.
+// Used by tools that want to address every UDS module on the powertrain
+// bus simultaneously (e.g. bus-quieting prelude before flash).
+inline constexpr std::uint32_t kFunctionalRequestCanId = 0x000007DF;
 
 inline constexpr std::uint8_t kPositiveResponseOffset = 0x40;
 inline constexpr std::uint8_t kNegativeResponse = 0x7F;
@@ -368,6 +378,46 @@ public:
     [[nodiscard]] Status
     communication_control(std::uint8_t control_type, std::uint8_t communication_type,
                           std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
+
+    // ---- Functional-addressing variants -----------------------------
+    //
+    // Each `_functional` variant sends the request to the given CAN ID
+    // (typically `kFunctionalRequestCanId` = 0x7DF) instead of the
+    // transport's configured tester ID. The ECM responds on its
+    // physical response ID, which the transport filter already accepts;
+    // other modules' responses on their own rx-ids are filtered out at
+    // the adapter and don't reach us.
+    //
+    // Required for the bus-quieting prelude before DSC ProgrammingSession
+    // entry on Subaru CAN ECUs — see
+    // `SubuwuTuner-specs/specs/cobb-ap-dsc-prog-precondition.md` §2.4.
+
+    [[nodiscard]] Status
+    diagnostic_session_control_functional(
+        std::uint32_t can_id, std::uint8_t session,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
+
+    // ControlDTCSetting (SID 0x85). sub_function is typically
+    // `kDtcSettingOn` (0x01) or `kDtcSettingOff` (0x02). On a successful
+    // functional broadcast the ECM responds with `C5 <sub_function>`.
+    [[nodiscard]] Status
+    control_dtc_setting_functional(
+        std::uint32_t can_id, std::uint8_t sub_function,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
+
+    // CommunicationControl over functional broadcast. The ECM itself
+    // typically responds NRC 0x22 to this (the engine ECU rejects
+    // disabling its own diagnostic communication), which is EXPECTED
+    // and surfaced as ok() — the broadcast's purpose is to silence the
+    // OTHER modules whose telemetry traffic would compete with the
+    // programming-session ISO-TP exchanges. Per
+    // SubuwuTuner-specs/specs/cobb-ap-dsc-prog-precondition.md §2.4
+    // step [7]: "The COBB AP ignores the ECM's NRC 0x22 here and
+    // continues."
+    [[nodiscard]] Status
+    communication_control_functional(
+        std::uint32_t can_id, std::uint8_t control_type, std::uint8_t communication_type,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds{500});
 
     // OBD-II Mode 09: vehicle information. Returns one or more
     // fixed-width messages depending on the PID. Engine ECUs typically

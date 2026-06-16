@@ -105,6 +105,29 @@ public:
     [[nodiscard]] virtual Result<Frame> send_recv(std::span<std::uint8_t const> payload,
                                                   std::chrono::milliseconds timeout) = 0;
 
+    // Send to a non-default CAN ID (functional addressing). Defaults to the
+    // configured tester CAN ID — overrides for UDS functional broadcasts
+    // (e.g. `0x7DF` for the powertrain-bus quieting prelude per
+    // `SubuwuTuner-specs/specs/cobb-ap-dsc-prog-precondition.md`).
+    //
+    // The base implementation forwards to send_recv (ignoring the
+    // override) so transports that don't model per-call CAN-ID selection
+    // stay compatible — they'll send to their configured CAN ID. Real
+    // CAN transports (OBDX / J2534 / native) and MockTransport should
+    // override to honor the can_id argument so functional broadcasts go
+    // to the right destination.
+    //
+    // The response is still received on the transport's configured
+    // response filter (ECMs respond on their physical response ID
+    // regardless of whether the request was physical or functional —
+    // ISO 14229-1 §6.3.3). Other modules' responses on their own rx-ids
+    // are filtered out by the adapter and don't reach the caller.
+    [[nodiscard]] virtual Result<Frame>
+    send_recv_to(std::uint32_t /*can_id*/, std::span<std::uint8_t const> payload,
+                 std::chrono::milliseconds timeout) {
+        return send_recv(payload, timeout);
+    }
+
     [[nodiscard]] virtual Status send(std::span<std::uint8_t const> payload) = 0;
 
     [[nodiscard]] virtual Status start_streaming(FrameCallback callback) = 0;

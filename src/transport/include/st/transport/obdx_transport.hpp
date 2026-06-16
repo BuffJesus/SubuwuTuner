@@ -96,6 +96,10 @@ public:
     [[nodiscard]] Result<Frame> send_recv(std::span<std::uint8_t const> payload,
                                           std::chrono::milliseconds timeout) override;
 
+    [[nodiscard]] Result<Frame>
+    send_recv_to(std::uint32_t can_id, std::span<std::uint8_t const> payload,
+                 std::chrono::milliseconds timeout) override;
+
     [[nodiscard]] st::Status send(std::span<std::uint8_t const> payload) override;
 
     [[nodiscard]] st::Status start_streaming(FrameCallback callback) override;

@@ -12725,24 +12725,35 @@ int cmd_flash_apply(int argc, char *argv[]) {
                              s.error().to_string().c_str());
                 return 1;
             }
-            // COBB-tuned Subaru ECUs require a second L1 SA in the same
-            // session AFTER the primary (typically L3) succeeds — DSC
-            // ProgrammingSession otherwise rejects with NRC 0x22 even
-            // though L3 alone unlocked SA. The L1 sendKey that follows
-            // is lazy-verified once L3 set its latch (key bytes can be
-            // arbitrary per the captured install sniffs), but the wire
-            // exchange must occur. Fires only when the primary SA was
-            // above L1 — for L1-only flows the primary IS the L1 SA.
+            // Bus-quieting prelude + L1 SA follow-up. Required by the ECM
+            // before it accepts DSC ProgrammingSession. Per
+            // SubuwuTuner-specs/specs/cobb-ap-dsc-prog-precondition.md §2.4:
             //
-            // Between the L3 and L1 SA exchanges the COBB AP issues an
-            // RMBA at the CRC-slot region (`0x001FFF30..0x001FFFA0`); the
-            // ECU appears to require non-SA traffic in the session
-            // before another requestSeed is accepted (post-SA tracking
-            // anti-replay). Without it, L1 requestSeed returns NRC 0x7F
-            // (subFunctionNotSupportedInActiveSession). The RMBA bytes
-            // are discarded — the call is purely a state-transition
-            // trigger.
-            if (security_level > 0x01U && !sa_l1_followup_disabled) {
+            //   1. RMBA at 0x001FFF30 (optional probe — analyst confirmed
+            //      this is not load-bearing for DSC 0x02 entry; the COBB
+            //      AP uses it to inspect cal state).
+            //   2. DSC ExtendedDiagnostic on functional 0x7DF — re-enters
+            //      Extended and CLEARS the active SA grant per ISO
+            //      14229-1 §10.3. This is what unblocks the subsequent
+            //      L1 RequestSeed (otherwise NRC 0x7F).
+            //   3. ControlDTCSetting OFF on functional 0x7DF — disables
+            //      ECM DTC creation during the programming sequence.
+            //   4. CommunicationControl disableRxAndTx on functional
+            //      0x7DF — silences other powertrain modules so their
+            //      telemetry doesn't compete with ISO-TP exchanges. ECM
+            //      returns NRC 0x22 here (it can't disable its own diag
+            //      Tx); EXPECTED, surfaced as ok() per spec.
+            //   5. SA L1 (now valid — no active grant blocking).
+            //
+            // Fires only when the primary SA was above L1 — for L1-only
+            // flows the primary IS the L1 SA and no second exchange is
+            // needed.
+            // Bus-quieting prelude runs unconditionally when the primary
+            // SA was above L1. --no-sa-l1-followup only skips the L1
+            // SA exchange itself; the prelude still fires because it's
+            // also the DSC 0x02 precondition (bus must be quiet + DTC
+            // off regardless of whether the L1 follow-up runs).
+            if (security_level > 0x01U) {
                 if (auto rmba = flasher.client().read_memory_by_address(
                         0x001FFF30U, 0x70U, std::chrono::milliseconds{1000});
                     !rmba.has_value()) {
@@ -12751,6 +12762,54 @@ int cmd_flash_apply(int argc, char *argv[]) {
                                  rmba.error().to_string().c_str());
                     return 1;
                 }
+                // [2] Functional DSC Extended re-entry — clears L3 grant
+                if (auto s = flasher.client().diagnostic_session_control_functional(
+                        st::ecu::uds::kFunctionalRequestCanId,
+                        st::ecu::uds::kDscExtendedDiagnostic,
+                        std::chrono::milliseconds{1000});
+                    !s.has_value()) {
+                    std::fprintf(stderr,
+                                 "flash-apply: functional DSC Extended (bus prelude [2]) "
+                                 "failed: %s\n",
+                                 s.error().to_string().c_str());
+                    return 1;
+                }
+                // [3] Functional ControlDTCSetting OFF
+                if (auto s = flasher.client().control_dtc_setting_functional(
+                        st::ecu::uds::kFunctionalRequestCanId,
+                        st::ecu::uds::kDtcSettingOff,
+                        std::chrono::milliseconds{1000});
+                    !s.has_value()) {
+                    std::fprintf(stderr,
+                                 "flash-apply: functional ControlDTCSetting OFF (bus prelude "
+                                 "[3]) failed: %s\n",
+                                 s.error().to_string().c_str());
+                    return 1;
+                }
+                // [4] Functional CommunicationControl disableRxAndTx. ECM
+                // NRC 0x22 is expected and surfaced as ok() — the broadcast
+                // silences other modules, the ECM doesn't silence itself.
+                if (auto s = flasher.client().communication_control_functional(
+                        st::ecu::uds::kFunctionalRequestCanId,
+                        st::ecu::uds::kCcDisableRxAndTx,
+                        st::ecu::uds::kCtNormalCommunication,
+                        std::chrono::milliseconds{1000});
+                    !s.has_value()) {
+                    std::fprintf(stderr,
+                                 "flash-apply: functional CommunicationControl (bus prelude "
+                                 "[4]) failed: %s\n",
+                                 s.error().to_string().c_str());
+                    return 1;
+                }
+                std::fputs("flash-apply: bus-quieting prelude completed "
+                           "(functional DSC + DTC off + CommCtrl)\n",
+                           stderr);
+            }
+            // [5] L1 SA — opt-out via --no-sa-l1-followup for ECUs whose
+            // firmware doesn't accept L1 after L3 even with the spec's
+            // prelude (LF79002P CVT JDM observed 2026-06-16; still
+            // tracking firmware-rev-specific behavior).
+            if (security_level > 0x01U && !sa_l1_followup_disabled) {
                 auto seed_l1 = flasher.client().security_access_request_seed(
                     0x01, std::chrono::milliseconds{1000});
                 if (!seed_l1.has_value()) {

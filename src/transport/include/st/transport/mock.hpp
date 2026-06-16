@@ -36,6 +36,15 @@ public:
     // send_recv with a matching payload, the response frame is returned.
     void expect_send_recv(std::vector<std::uint8_t> request, std::vector<std::uint8_t> response);
 
+    // Queue a (can_id, request, response) triple. Like expect_send_recv but
+    // additionally asserts the SUT calls send_recv_to(can_id, ...). Used to
+    // pin functional-addressing flows (e.g. broadcasts on 0x7DF). A queued
+    // expect_send_recv_to entry will FAIL to match if the SUT calls plain
+    // send_recv() — surface the wrong-API-used bug rather than silently
+    // accepting it.
+    void expect_send_recv_to(std::uint32_t can_id, std::vector<std::uint8_t> request,
+                              std::vector<std::uint8_t> response);
+
     // True if every queued exchange has been consumed.
     [[nodiscard]] bool exhausted() const;
     [[nodiscard]] std::size_t remaining() const;
@@ -56,6 +65,10 @@ public:
 
     [[nodiscard]] Result<Frame> send_recv(std::span<std::uint8_t const> payload,
                                           std::chrono::milliseconds timeout) override;
+
+    [[nodiscard]] Result<Frame>
+    send_recv_to(std::uint32_t can_id, std::span<std::uint8_t const> payload,
+                 std::chrono::milliseconds timeout) override;
 
     [[nodiscard]] Status send(std::span<std::uint8_t const> payload) override;
 
@@ -80,12 +93,18 @@ public:
         return send_log_;
     }
 
-private:
+    // Exposed so internal helpers in mock.cpp can match against queued
+    // exchanges without violating encapsulation. Not part of the public
+    // test API — callers should use expect_send_recv / expect_send_recv_to.
     struct Exchange {
         std::vector<std::uint8_t> request;
         std::vector<std::uint8_t> response;
+        // When set, only matches send_recv_to() with this can_id. When
+        // unset, matches a plain send_recv() (no functional addressing).
+        std::optional<std::uint32_t> can_id;
     };
 
+private:
     struct InjectedError {
         ErrorCode code;
         std::string message;
