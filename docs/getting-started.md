@@ -24,7 +24,7 @@ cmake --preset win-mingw       # adapt to your platform
 cmake --build --preset win-mingw
 ```
 
-First build downloads ~12 deps (Catch2, GLFW, ImGui, ImPlot, libusb, etc.) and takes a few minutes. Subsequent builds are incremental.
+First build downloads ~12 deps (Catch2, GLFW, ImGui, ImPlot, etc.) and takes a few minutes. Subsequent builds are incremental.
 
 Verify the binaries:
 
@@ -49,48 +49,13 @@ In the GUI:
 
 This is **the entire editing loop**, just with synthetic data. Everything you'll do on a real ROM works the same way.
 
-## Step 3 — Connect your AccessPort (if you have one)
-
-SubuwuTuner can read/write/list/backup files on a COBB AccessPort V3 over USB.
-
-**One-time Windows setup:** rebind the AP to WinUSB via Zadig. See [`install.md`](install.md) → "USB hardware setup" for the 5-step Zadig procedure. (Linux: udev rule; macOS: works out of the box.)
-
-Then in the GUI: **View → AccessPort Browser**. Click **Connect**.
-
-The panel shows your AP's serial, firmware, vehicle descriptor, and marriage state. The tab bar lets you browse `/maps/`, `/datalog/`, `/presets/`, `/images/`. The **Device** tab shows the AP's `/settings` (parsed INI) + `/backupcksum` (MD5 of the currently-flashed ROM).
-
-Per-row **Pull** saves any file to disk. **Push file…** (toolbar) uploads a file to the current subdir. **Backup all** dumps everything to a folder you pick.
-
-## Step 4 — Import a .ptm tune (if you have one)
-
-`.ptm` files are COBB's tune format. SubuwuTuner can decrypt them, decode the patches, and import them as a `.stune` project — making the entire tune editable.
-
-This requires building with the cipher flag turned on:
-
-```bash
-cmake --preset win-mingw -DST_ENABLE_COBB_AP_CIPHER=ON
-cmake --build --preset win-mingw
-```
-
-Then in the GUI: **File → Import .ptm File…**. The wizard asks for:
-- The `.ptm` file (or pull one from `/maps/` in the AccessPort browser first)
-- The base ROM that tune was authored against (your stock ROM dump — see [`docs/34-cobb-ap-as-tune-vault.md`](34-cobb-ap-as-tune-vault.md) for context)
-- A definition pack (optional but recommended — without it, patches appear as raw byte offsets)
-- An output directory
-
-Click **Decode preview** to confirm vendor/vehicle, then **Import**. The project drops in and is immediately editable like any other.
-
-`File → Inspect .ptm File…` reads a `.ptm` without importing — useful for evaluating a tune before deciding to use it.
-
-`File → Diff Two .ptm Files…` shows what's different between two tunes, with per-table semantic breakdown.
-
-## Step 5 — Read your ROM (eventually)
+## Step 3 — Read your ROM (eventually)
 
 The OBDX Pro VX path (`--transport obdx --device COM5`) lets you dump your ECU's current calibration via `subuwutuner-cli rom-pull`. This is the "where do I get a ROM" answer.
 
-> **Status (2026-06-13):** the host-side code is shipped + tested. The live-ECU validation gate is the bench rig (see `docs/28-bench-rig-build.md`). For now, ROM dumps come from other sources (APManager dumps, forum-sourced dumps, or a pulled `/backupcksum`-matching `.ptm` import).
+> **Status (2026-06-13):** the host-side code is shipped + tested. The live-ECU validation gate is the bench rig (see `docs/28-bench-rig-build.md`). For now, ROM dumps come from other sources (your own prior dumps, public dumps for your CID, or a stock-from-disk image).
 
-## Step 6 — Where to go from here
+## Step 4 — Where to go from here
 
 By workflow:
 
@@ -98,9 +63,8 @@ By workflow:
 |---|---|
 | Understand the design | [`docs/00-overview.md`](00-overview.md) → [`docs/02-architecture.md`](02-architecture.md) |
 | Tune safely | [`docs/05-improvements.md`](05-improvements.md) §4 brick protection, [`docs/06-legal-ethics.md`](06-legal-ethics.md), [DISCLAIMER.md](../DISCLAIMER.md) |
-| Use the AccessPort | [`docs/34-cobb-ap-as-tune-vault.md`](34-cobb-ap-as-tune-vault.md) |
 | Author definition packs | [`docs/11-definition-format.md`](11-definition-format.md) + `tools/defgen/` |
-| Run an FA20→FA24 swap | Tools → Common Workflows → FA24 swap |
+| Run an FA20 → FA24 swap | Tools → Common Workflows → FA24 swap |
 | Auto-tune from datalogs | [`docs/12-auto-tuning.md`](12-auto-tuning.md) |
 | Author a custom feature (clutch-kill, flat-foot, etc.) | [`docs/16-custom-features.md`](16-custom-features.md) |
 | Reverse-engineer CAN traffic | [`docs/14-can-reverse-engineering.md`](14-can-reverse-engineering.md) |
@@ -112,7 +76,7 @@ By GUI surface:
 - **F1** on any panel → context-aware help (lands on the topic most relevant to where you are).
 - **Ctrl+K** → command palette. Search every action + table + recent file in one input.
 - **Ctrl+1 / Ctrl+2 / Ctrl+3** → switch between Tune / Datalog / Features workspaces.
-- The **status bar** (bottom) shows current AP, project save state, jurisdiction profile, and the active workspace.
+- The **status bar** (bottom) shows project save state, jurisdiction profile, and the active workspace.
 
 By CLI surface:
 
@@ -121,7 +85,6 @@ subuwutuner-cli --help               # full subcommand list
 subuwutuner-cli doctor               # install health check
 subuwutuner-cli pack-info <DEF>      # what's in a definition pack
 subuwutuner-cli project-info <DIR>   # what's in a .stune project
-subuwutuner-cli ap3 state            # AP connect probe (requires AP plugged in)
 ```
 
 ## What's NOT in scope yet
@@ -134,14 +97,8 @@ subuwutuner-cli ap3 state            # AP connect probe (requires AP plugged in)
 
 **"Why doesn't the GUI show any tables?"** No definition pack loaded for the current project. Demo pack ships in the repo at `fixtures/demo-pack/`. For real ROMs, point a project at a TOML pack via `project-new --def <path>`. See [`install.md`](install.md).
 
-**"Why does the AP browser say 'No AccessPort enumerated'?"** Either the AP isn't plugged in, or it's still bound to APManager's driver. Run Zadig and rebind to WinUSB (Windows only; Linux/macOS need no setup). Full instructions in [`install.md`](install.md) → "USB hardware setup".
-
-**"What's `--enable-cobb-ap-cipher`?"** It arms the `.ptm` tune-format codec. Off by default for a thoughtful reason ([`docs/34`](34-cobb-ap-as-tune-vault.md)). Pass it when you actually need to read/write `.ptm` files.
-
 **"Where do my recent projects + settings live?"** Per-platform user-data dir. Windows: `%APPDATA%\SubuwuTuner\`. Linux: `~/.config/subuwutuner/`. macOS: `~/Library/Application Support/SubuwuTuner/`. Settings are TOML and human-readable; edit by hand if you must.
 
-**"How do I undo everything I just did?"** Ctrl+Z in the GUI walks the history back one step at a time. The History panel (View → History Panel) shows the full sequence and lets you jump to any prior state. Workflow batches (FA24 swap, ptm import) collapse into single "Revert all" actions via tag groups.
+**"How do I undo everything I just did?"** Ctrl+Z in the GUI walks the history back one step at a time. The History panel (View → History Panel) shows the full sequence and lets you jump to any prior state. Workflow batches (e.g. FA24 swap) collapse into single "Revert all" actions via tag groups.
 
-**"My AP got dazed and stopped responding."** Known AP firmware behavior on certain malformed inputs (not SubuwuTuner's doing — see [`docs/34`](34-cobb-ap-as-tune-vault.md) §4.2). Unplug and replug the USB cable; the AP browser surfaces a recovery card with a one-click reset-connection button. `libusb_clear_halt` / `libusb_reset_device` don't help; physical replug is the only fix.
-
-**"What's the deal with definition packs not shipping?"** Distribution choice, not technical limitation. See [`docs/17-data-distribution-policy.md`](17-data-distribution-policy.md). Generate your own from public RomRaider XML via `tools/defgen/`, or use the bundled demo pack to learn the tool.
+**"What's the deal with definition packs not shipping?"** Distribution choice, not technical limitation. See [`docs/17-data-distribution-policy.md`](17-data-distribution-policy.md). Generate your own from public ECU definition XML via `tools/defgen/`, or use the bundled demo pack to learn the tool.

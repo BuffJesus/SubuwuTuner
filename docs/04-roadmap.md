@@ -191,7 +191,7 @@ Item 1 (AT WRX) is small and independent — adds a definition pack + AT-specifi
 
 ### Bench-rig path
 
-When the rig comes up (sensitivities tracked in `docs/28-bench-rig-build.md`), the validation runbook in `docs/41-bench-rig-validation-runbook.md` sequences what gets exercised first: read-back validation → SecurityAccess against the rig's real ECU → first deliberate write → power-loss inject → delta-flash recovery (`docs/40`). The rig is the single biggest unlock for v1.0 ship-blocker #1 (brick protection per ISA).
+When the rig comes up (sensitivities tracked in `docs/28-bench-rig-build.md`), the validation runbook in `docs/42-bench-rig-validation-runbook.md` sequences what gets exercised first: read-back validation → SecurityAccess against the rig's real ECU → first deliberate write → power-loss inject → delta-flash recovery (`docs/40`). The rig is the single biggest unlock for v1.0 ship-blocker #1 (brick protection per ISA).
 
 ## Cross-cutting v1.x improvements
 
