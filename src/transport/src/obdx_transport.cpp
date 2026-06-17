@@ -819,23 +819,14 @@ Result<Frame> Transport::send_recv_to(std::uint32_t can_id_request_override,
         trace_dump("[trace][obdx-tx]", payload);
     }
 
-    // Phase 1: TX the ECU payload onto the bus via DVI TxSmall.
-    // CAN-ISO15765 TxSmall payload is `[4B BE CAN ID][user bytes]` per
-    // Developers Reference Manual v3.00 §3.6.3. Without the CAN ID
-    // prefix the adapter has no destination — bytes go nowhere and the
-    // ECU never sees the request. Total wire payload is +4 vs the
-    // user payload, so the 255 B limit needs the same +4 accounting.
+    // Phase 1: TX the ECU payload onto the bus via DVI TxSmall (or
+    // TxLarge for payloads > 251 B per the round-26 0xB6 wire size
+    // requirement). CAN-ISO15765 payload is `[4B BE CAN ID][user bytes]`
+    // per Developers Reference Manual v3.00 §3.6.3. Total wire payload
+    // is +4 vs the user payload when CAN, so the 251 B threshold needs
+    // the same +4 accounting.
     std::vector<std::uint8_t> tx_payload;
     if (kind_ == LinkKind::CanIso15765) {
-        if (payload.size() + 4 > 255) {
-            // TODO(transport_obdx): TxLarge (opcode 0x11, 2-byte length)
-            // for payloads > 251 B. Not relevant for ITransport's normal
-            // request shape (SSM/UDS payloads are well under 100 B) but
-            // worth surfacing as a clean error until implemented.
-            return failure(ErrorCode::InvalidArgument,
-                           "obdx::Transport::send_recv: payload > 251 B (+ 4B CAN ID prefix > "
-                           "255) needs DVI TxLarge — not yet wired");
-        }
         // Build the prefix in a fixed-size array first, then assign +
         // insert. GCC 15 raises a false-positive `-Werror=free-nonheap-
         // object` on the reserve-then-push_back pattern with small
@@ -851,14 +842,22 @@ Result<Frame> Transport::send_recv_to(std::uint32_t can_id_request_override,
         tx_payload.assign(std::begin(prefix), std::end(prefix));
         tx_payload.insert(tx_payload.end(), payload.begin(), payload.end());
     } else {
-        if (payload.size() > 255) {
-            return failure(ErrorCode::InvalidArgument,
-                           "obdx::Transport::send_recv: payload > 255 B needs DVI TxLarge — "
-                           "not yet wired");
-        }
         tx_payload.assign(payload.begin(), payload.end());
     }
-    auto tx = dvi_exchange(*channel_, dvi::Opcode::TxSmall, tx_payload, tx_budget);
+    // Pick opcode based on wire payload size. TxSmall's 1-byte length
+    // field caps at 255 wire bytes total; for >251 user bytes on CAN
+    // (or >255 elsewhere) switch to TxLarge (2-byte length, 12000 B
+    // cap). Round-26 §6 evidence: 0xB6 needs a 260-byte wire payload.
+    dvi::Opcode const tx_op = (tx_payload.size() > dvi::max_payload_for(
+                                                       dvi::Opcode::TxSmall))
+                                  ? dvi::Opcode::TxLarge
+                                  : dvi::Opcode::TxSmall;
+    if (tx_payload.size() > dvi::max_payload_for(tx_op)) {
+        return failure(ErrorCode::InvalidArgument,
+                       "obdx::Transport::send_recv: payload exceeds DVI "
+                       "TxLarge maximum (12000 B)");
+    }
+    auto tx = dvi_exchange(*channel_, tx_op, tx_payload, tx_budget);
     if (!tx.has_value()) {
         if (trace) {
             std::fprintf(stderr, "[trace][obdx-err] TX phase: %s\n",
@@ -919,27 +918,85 @@ Result<Frame> Transport::send_recv_to(std::uint32_t can_id_request_override,
     // per Developers Reference Manual v3.00 §3.4.3. Strip both prefixes so
     // the caller (SSM / UDS client) sees only application-layer bytes,
     // exactly as the existing test fixtures and protocol parsers expect.
+    //
+    // Per ISO 14229 §7.5, the server may send one or more NRC 0x78
+    // (responsePending) frames before the final response. The caller
+    // expects only the final response; swallow intermediate 0x78s.
+    // Each 0x78 effectively resets the deadline (P2*_Server_max);
+    // total wait capped at 30 s to avoid an infinite loop on a stuck
+    // ECU.
     Frame f;
-    f.arrived = steady_clock::now();
-    if (kind_ == LinkKind::CanIso15765) {
-        std::uint32_t rx_can_id = 0;
-        auto stripped = strip_can_id(rf->payload, rx_can_id);
-        if (!stripped.has_value()) {
-            return failure(stripped.error());
+    auto const swallow_deadline = steady_clock::now() + milliseconds{30000};
+    auto extract_app_bytes = [&](dvi::ResponseFrame *frame) -> Result<std::vector<std::uint8_t>> {
+        if (kind_ == LinkKind::CanIso15765) {
+            std::uint32_t rx_can_id = 0;
+            auto stripped = strip_can_id(frame->payload, rx_can_id);
+            if (!stripped.has_value())
+                return failure(stripped.error());
+            if (rx_can_id != can_id_response_) {
+                char buf[128];
+                std::snprintf(buf, sizeof buf,
+                              "obdx::send_recv: ECU response arrived on CAN "
+                              "ID 0x%X but expected 0x%X — wrong module or "
+                              "stray bus traffic",
+                              rx_can_id, can_id_response_);
+                return failure(ErrorCode::TransportNack, std::string{buf});
+            }
+            auto const app = strip_iso_tp(*stripped);
+            return std::vector<std::uint8_t>{app.begin(), app.end()};
         }
-        if (rx_can_id != can_id_response_) {
-            char buf[128];
+        return std::move(frame->payload);
+    };
+    auto app_bytes = extract_app_bytes(const_cast<dvi::ResponseFrame *>(rf));
+    if (!app_bytes.has_value())
+        return failure(app_bytes.error());
+    while (app_bytes->size() >= 3 && (*app_bytes)[0] == 0x7FU &&
+           (*app_bytes)[2] == 0x78U) {
+        if (trace) {
+            std::fputs("[trace][obdx-rx] swallowing NRC 0x78 "
+                       "(responsePending); awaiting final response...\n",
+                       stderr);
+        }
+        if (steady_clock::now() >= swallow_deadline) {
+            return failure(ErrorCode::TransportTimeout,
+                           "obdx::send_recv: NRC 0x78 (responsePending) loop "
+                           "exceeded 30 s — ECU stuck");
+        }
+        auto const sub_remaining = std::chrono::duration_cast<milliseconds>(
+            swallow_deadline - steady_clock::now());
+        auto next = read_dvi_frame(*channel_, sub_remaining);
+        if (!next.has_value())
+            return failure(next.error());
+        if (auto const *ef2 = std::get_if<dvi::ErrorFrame>(&*next)) {
+            char buf[96];
             std::snprintf(buf, sizeof buf,
-                          "obdx::send_recv: ECU response arrived on CAN ID 0x%X but expected "
-                          "0x%X — wrong module or stray bus traffic",
-                          rx_can_id, can_id_response_);
+                          "obdx::send_recv: device returned error 0x%02X "
+                          "for opcode 0x%02X while awaiting final response",
+                          static_cast<unsigned>(ef2->error_code),
+                          static_cast<unsigned>(ef2->request_opcode));
             return failure(ErrorCode::TransportNack, std::string{buf});
         }
-        auto const app = strip_iso_tp(*stripped);
-        f.data.assign(app.begin(), app.end());
-    } else {
-        f.data = std::move(rf->payload);
+        auto const *rf2 = std::get_if<dvi::ResponseFrame>(&*next);
+        if (rf2 == nullptr) {
+            return failure(ErrorCode::Unknown,
+                           "obdx::send_recv: 0x78 loop decoded frame matched "
+                           "no known variant");
+        }
+        if (rf2->response_opcode != expected_rx &&
+            rf2->response_opcode != expected_rx_large) {
+            char buf[96];
+            std::snprintf(buf, sizeof buf,
+                          "obdx::send_recv: 0x78 loop expected RxSmall/Large "
+                          "(0x08/0x09); got opcode 0x%02X",
+                          static_cast<unsigned>(rf2->response_opcode));
+            return failure(ErrorCode::TransportNack, std::string{buf});
+        }
+        app_bytes = extract_app_bytes(const_cast<dvi::ResponseFrame *>(rf2));
+        if (!app_bytes.has_value())
+            return failure(app_bytes.error());
     }
+    f.arrived = steady_clock::now();
+    f.data = std::move(*app_bytes);
     if (trace) {
         trace_dump("[trace][obdx-rx]", f.data);
     }
@@ -1114,14 +1171,10 @@ st::Status Transport::send_to(std::uint32_t can_id_request_override,
     }
     // Same +4B CAN ID prefix dance as send_recv: the wire format isn't
     // protocol-aware, so fire-and-forget sends still need the destination
-    // ID prepended on CAN.
+    // ID prepended on CAN. Opcode selection mirrors send_recv (TxLarge
+    // for payloads beyond TxSmall's 255 B wire cap, per round-26).
     std::vector<std::uint8_t> tx_payload;
     if (kind_ == LinkKind::CanIso15765) {
-        if (payload.size() + 4 > 255) {
-            return failure(ErrorCode::InvalidArgument,
-                           "obdx::Transport::send: payload > 251 B (+ 4B CAN ID prefix > 255) "
-                           "needs DVI TxLarge — not yet wired");
-        }
         std::uint8_t const prefix[4] = {
             static_cast<std::uint8_t>((can_id_request_override >> 24U) & 0xFFU),
             static_cast<std::uint8_t>((can_id_request_override >> 16U) & 0xFFU),
@@ -1131,13 +1184,18 @@ st::Status Transport::send_to(std::uint32_t can_id_request_override,
         tx_payload.assign(std::begin(prefix), std::end(prefix));
         tx_payload.insert(tx_payload.end(), payload.begin(), payload.end());
     } else {
-        if (payload.size() > 255) {
-            return failure(ErrorCode::InvalidArgument, "obdx::Transport::send: payload > 255 B "
-                                                       "needs DVI TxLarge — not yet wired");
-        }
         tx_payload.assign(payload.begin(), payload.end());
     }
-    auto tx = dvi_exchange(*channel_, dvi::Opcode::TxSmall, tx_payload, milliseconds{100});
+    dvi::Opcode const tx_op = (tx_payload.size() > dvi::max_payload_for(
+                                                       dvi::Opcode::TxSmall))
+                                  ? dvi::Opcode::TxLarge
+                                  : dvi::Opcode::TxSmall;
+    if (tx_payload.size() > dvi::max_payload_for(tx_op)) {
+        return failure(ErrorCode::InvalidArgument,
+                       "obdx::Transport::send: payload exceeds DVI "
+                       "TxLarge maximum (12000 B)");
+    }
+    auto tx = dvi_exchange(*channel_, tx_op, tx_payload, milliseconds{100});
     if (!tx.has_value())
         return failure(tx.error());
     return ok();
