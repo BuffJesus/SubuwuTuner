@@ -1,7 +1,7 @@
 set(ST_ECU_SOURCES
     src/extended_did_datalog.cpp
     src/ssm.cpp
-    src/subaru_atlas.cpp
+    src/subaru_dit.cpp
     src/uds.cpp
     src/subaru_security.cpp
 )
