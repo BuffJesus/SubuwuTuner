@@ -15808,6 +15808,267 @@ int cmd_subaru_can_id_sweep(int argc, char *argv[]) {
     return 0;
 }
 
+// cmd_subaru_presence_test — round-13 hypothesis test for the
+// vehicle-presence injection set.
+//
+// Enables all 4 round-3..4 known-good heartbeat slots simultaneously
+// (the same set cmd_flash_apply --with-vehicle-presence-injection
+// uses) and polls the 21-byte DSC precondition bitmap every
+// --interval-ms milliseconds for --duration-s seconds. Logs any
+// per-byte change.
+//
+// Diagnostic purpose: round-12 §5.1 brute-force sweep ran with ONE
+// slot active broadcasting at varied IDs — zero bitmap hits across
+// 2017 standard 11-bit IDs at two distinct payloads. This verb tests
+// hypothesis "the firmware needs multiple specific (ID, payload) pairs
+// simultaneously to populate the bitmap" — distinct from "any one ID
+// + payload alone".
+int cmd_subaru_presence_test(int argc, char *argv[]) {
+    std::optional<std::string> transport_kind;
+    std::string dll_path;
+    std::string device_path;
+    std::chrono::seconds duration{5};
+    std::chrono::milliseconds interval{500};
+    bool verbose = false;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string_view const a{argv[i]};
+        auto const require_arg = [&](char const *name) -> char const * {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "subaru-presence-test: %s requires a value\n", name);
+                return nullptr;
+            }
+            return argv[++i];
+        };
+        if (a == "--transport") {
+            if (auto const *v = require_arg("--transport"); v)
+                transport_kind = std::string{v};
+            else
+                return 2;
+        } else if (a == "--device") {
+            if (auto const *v = require_arg("--device"); v)
+                device_path = v;
+            else
+                return 2;
+        } else if (a == "--dll") {
+            if (auto const *v = require_arg("--dll"); v)
+                dll_path = v;
+            else
+                return 2;
+        } else if (a == "--duration-s") {
+            auto const *v = require_arg("--duration-s");
+            if (v == nullptr)
+                return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 10);
+            if (end == v || *end != '\0' || val == 0 || val > 300ULL) {
+                std::fputs("subaru-presence-test: --duration-s must be 1..300\n", stderr);
+                return 2;
+            }
+            duration = std::chrono::seconds{static_cast<std::int64_t>(val)};
+        } else if (a == "--interval-ms") {
+            auto const *v = require_arg("--interval-ms");
+            if (v == nullptr)
+                return 2;
+            char *end = nullptr;
+            auto const val = std::strtoull(v, &end, 10);
+            if (end == v || *end != '\0' || val < 100ULL || val > 5000ULL) {
+                std::fputs("subaru-presence-test: --interval-ms must be 100..5000\n", stderr);
+                return 2;
+            }
+            interval = std::chrono::milliseconds{static_cast<std::int64_t>(val)};
+        } else if (a == "--verbose") {
+            verbose = true;
+        } else {
+            std::fprintf(stderr, "subaru-presence-test: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+
+    if (!transport_kind.has_value()) {
+        std::fputs(
+            "subaru-presence-test — round-13 hypothesis check.\n"
+            "\n"
+            "Enables the 4 round-3..4 known-good vehicle-presence heartbeats\n"
+            "(0x002, 0x144, 0x280, 0x371 with canonical payloads) simultaneously\n"
+            "and polls the 21-byte DSC precondition bitmap. Logs per-byte\n"
+            "changes for --duration-s seconds at --interval-ms cadence.\n"
+            "\n"
+            "Usage:\n"
+            "  subuwutuner-cli subaru-presence-test --transport obdx --device COM4 \\\n"
+            "      [--duration-s 5] [--interval-ms 500] [--verbose]\n",
+            stderr);
+        return 2;
+    }
+
+    auto const kind = st::transport::parse_kind(*transport_kind);
+    if (!kind.has_value()) {
+        std::fprintf(stderr, "subaru-presence-test: --transport '%s' not recognized\n",
+                     transport_kind->c_str());
+        return 2;
+    }
+    st::transport::TransportSpec const spec{*kind, dll_path, device_path};
+    auto t = st::transport::open_transport(spec);
+    if (!t.has_value()) {
+        std::fprintf(stderr, "subaru-presence-test: %s\n", t.error().to_string().c_str());
+        return 1;
+    }
+    if (verbose)
+        st::transport::obdx::set_trace_enabled(true);
+    st::transport::LinkConfig const link{st::transport::LinkKind::CanIso15765, 500000,
+                                         0x000007E0, 0x000007E8};
+    if (auto s = (*t)->open(link); !s.has_value()) {
+        std::fprintf(stderr, "subaru-presence-test: transport open failed: %s\n",
+                     s.error().to_string().c_str());
+        return 1;
+    }
+    if (!(*t)->supports_periodic_slots()) {
+        std::fputs("subaru-presence-test: transport does not support periodic slots\n",
+                   stderr);
+        return 1;
+    }
+
+    // Round-13 corrected heartbeat set. The round-3..4 set used
+    // 0x002 + 0x371 which are NOT in the firmware's CAN-RX filter
+    // table at ROM 0x001F72E0 — silently dropped at the MSCAN level.
+    // Round-13 spec §4.3 priority list: 0x144, 0x280 retained;
+    // chassis-CAN cluster 0x0D0/0x0D1/0x0D3/0x282 added;
+    // 0x0D2 (DLC=4) + 0x0D4 (DLC=7) skipped here because the OBDX
+    // slot uses a single DLC field per the canonical 8-byte path
+    // (mixing DLCs across slots needs round-14 spec clarity).
+    // ECM-sourced IDs (0x140/0x141/0x152/0x161/0x162/0x188/0x368)
+    // per round-13 §4.2 are EXCLUDED — injecting them self-conflicts.
+    //
+    // Payloads are placeholders (round-3..4 captured constants for the
+    // 2 known IDs; all-0x00 for the new ones). Round-14 spec needs to
+    // close per-descriptor payload pattern decode before we can claim
+    // these are "correct" payloads.
+    struct HeartbeatFrame {
+        std::uint32_t can_id;
+        std::array<std::uint8_t, 8> data;
+        std::uint16_t interval_ms;
+    };
+    std::array<HeartbeatFrame, 8> const frames{{
+        {0x144, {0xC0, 0x00, 0x05, 0x00, 0x00, 0x24, 0xA0, 0x00}, 40},  // TCU torque
+        {0x280, {0x00, 0x01, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00}, 40},  // TCU shift
+        {0x0D0, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 20},  // chassis
+        {0x0D1, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 20},  // chassis
+        {0x0D3, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 20},  // chassis
+        {0x282, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 40},  // TCU/BCM
+        {0x360, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 40},  // mid-block
+        {0x451, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 40},  // higher-block
+    }};
+
+    std::fputs("subaru-presence-test: enabling 8-slot heartbeat injection "
+               "(round-13 corrected set)...\n", stderr);
+    for (std::uint8_t slot = 0; slot < frames.size(); ++slot) {
+        st::transport::ITransport::PeriodicSlot ps{};
+        ps.index = slot;
+        ps.can_id = frames[slot].can_id;
+        ps.data = std::span<std::uint8_t const>{frames[slot].data};
+        ps.interval_ms = frames[slot].interval_ms;
+        if (auto s = (*t)->set_periodic_slot(ps); !s.has_value()) {
+            std::fprintf(stderr, "subaru-presence-test: set_periodic_slot[%u] failed: %s\n",
+                         slot, s.error().to_string().c_str());
+            return 1;
+        }
+        if (auto s = (*t)->enable_periodic_slot(slot, true); !s.has_value()) {
+            std::fprintf(stderr, "subaru-presence-test: enable_periodic_slot[%u] failed: %s\n",
+                         slot, s.error().to_string().c_str());
+            return 1;
+        }
+    }
+    std::fputs("subaru-presence-test: 8 slots enabled (0x144/0x280/0x0D0/0x0D1/"
+               "0x0D3/0x282/0x360/0x451)\n", stderr);
+
+    // Brief settle before first probe — let the adapter start transmitting.
+    std::this_thread::sleep_for(std::chrono::milliseconds{200});
+
+    st::ecu::ssm::SsmClient ssm{**t, st::ecu::ssm::Framing::IsoTp};
+    std::vector<std::uint32_t> bitmap_addrs;
+    bitmap_addrs.reserve(29U);
+    for (std::uint32_t off = 0xCE; off <= 0xEA; ++off) {
+        bitmap_addrs.push_back(0x00F8A600U | off);
+    }
+
+    auto read_bitmap = [&]() -> std::optional<std::vector<std::uint8_t>> {
+        auto r = ssm.read(bitmap_addrs, std::chrono::milliseconds{2000});
+        if (!r.has_value()) {
+            std::fprintf(stderr,
+                         "subaru-presence-test: bitmap read failed: %s\n",
+                         r.error().to_string().c_str());
+            return std::nullopt;
+        }
+        return std::move(*r);
+    };
+
+    auto t_start = std::chrono::steady_clock::now();
+    auto baseline = read_bitmap();
+    if (!baseline.has_value()) {
+        (void)(*t)->clear_all_periodic_slots();
+        return 1;
+    }
+    std::uint32_t set_count = 0;
+    for (auto b : *baseline)
+        if (b == 0x01)
+            ++set_count;
+    std::fprintf(stdout, "[t=0ms] %u / %zu bytes 0x01\n", set_count, baseline->size());
+
+    auto prev = *baseline;
+    while (true) {
+        auto t_now = std::chrono::steady_clock::now();
+        if (t_now - t_start >= duration)
+            break;
+        std::this_thread::sleep_for(interval);
+
+        auto cur = read_bitmap();
+        if (!cur.has_value())
+            break;
+
+        auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_now - t_start)
+                              .count();
+
+        std::vector<std::size_t> flipped;
+        for (std::size_t i = 0; i < cur->size(); ++i) {
+            if ((*cur)[i] != prev[i]) {
+                flipped.push_back(i);
+            }
+        }
+
+        set_count = 0;
+        for (auto b : *cur)
+            if (b == 0x01)
+                ++set_count;
+
+        if (flipped.empty()) {
+            std::fprintf(stdout, "[t=%lldms] %u / %zu bytes 0x01 (no change)\n",
+                         static_cast<long long>(elapsed_ms),
+                         set_count, cur->size());
+        } else {
+            std::fprintf(stdout, "[t=%lldms] %u / %zu bytes 0x01  FLIPPED:",
+                         static_cast<long long>(elapsed_ms),
+                         set_count, cur->size());
+            for (auto i : flipped) {
+                std::uint32_t addr = 0xFFF8A6CEU + static_cast<std::uint32_t>(i);
+                std::fprintf(stdout, " 0x%08X(%02X->%02X)",
+                             addr, prev[i], (*cur)[i]);
+            }
+            std::fputc('\n', stdout);
+        }
+        prev = std::move(*cur);
+        std::fflush(stdout);
+    }
+
+    std::fputs("subaru-presence-test: disabling heartbeats...\n", stderr);
+    (void)(*t)->clear_all_periodic_slots();
+    set_count = 0;
+    for (auto b : prev)
+        if (b == 0x01)
+            ++set_count;
+    std::fprintf(stdout, "\nFinal: %u / %zu bytes 0x01\n", set_count, prev.size());
+    return 0;
+}
+
 // fetching the calibration ID (CAL ID), which lets the user identify
 // which tune is currently active on the ECU without dumping the full
 // ROM. Mode 09 is in the default session and SA-free, so the command
@@ -21872,6 +22133,9 @@ int main(int argc, char *argv[]) {
     }
     if (cmd == "subaru-can-id-sweep") {
         return cmd_subaru_can_id_sweep(argc - 2, argv + 2);
+    }
+    if (cmd == "subaru-presence-test") {
+        return cmd_subaru_presence_test(argc - 2, argv + 2);
     }
     if (cmd == "config") {
         return cmd_config(argc - 2, argv + 2);
